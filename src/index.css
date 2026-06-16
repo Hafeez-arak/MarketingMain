@@ -1,0 +1,80 @@
+@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600;9..40,700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html, body, #root { height: 100%; }
+  body {
+    @apply bg-surface-muted text-text font-sans antialiased text-sm;
+    background-image: theme('backgroundImage.hero-warm');
+  }
+  * { box-sizing: border-box; }
+  ::selection { background: rgba(245,162,0,0.2); color: #1a1410; }
+}
+
+@layer components {
+  .btn-amber {
+    background: theme('backgroundImage.amber-gradient');
+    @apply text-white font-semibold shadow-amber;
+  }
+  .btn-amber:hover { filter: brightness(1.05); }
+  .btn-clay {
+    background: theme('backgroundImage.clay-gradient');
+    @apply text-white font-semibold shadow-clay;
+  }
+
+  .card-base {
+    @apply bg-surface-card rounded-2xl border border-border shadow-card;
+  }
+
+  .tag-amber {
+    @apply bg-amber-100 text-amber-700 text-[11px] font-semibold px-2 py-0.5 rounded-full;
+  }
+  .tag-clay {
+    @apply bg-clay-100 text-clay-700 text-[11px] font-semibold px-2 py-0.5 rounded-full;
+  }
+  .tag-sage {
+    @apply bg-sage-100 text-sage-700 text-[11px] font-semibold px-2 py-0.5 rounded-full;
+  }
+}
+
+@layer utilities {
+  .no-scrollbar::-webkit-scrollbar { display: none; }
+  .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+  .scrollbar-thin::-webkit-scrollbar { width: 3px; }
+  .scrollbar-thin::-webkit-scrollbar-track { background: transparent; }
+  .scrollbar-thin::-webkit-scrollbar-thumb { @apply bg-stone-300 rounded-full; }
+
+  .text-gradient-amber {
+    background: theme('backgroundImage.amber-gradient');
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  .text-gradient-clay {
+    background: theme('backgroundImage.clay-gradient');
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .glass-warm {
+    background: rgba(255,255,255,0.75);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+  }
+
+  .divider { @apply h-px bg-border w-full; }
+}
+
+/* Page transition */
+.page-enter { animation: slideUp 0.4s cubic-bezier(0.16,1,0.3,1) both; }
+
+/* Active nav */
+.nav-active {
+  background: linear-gradient(135deg, rgba(245,162,0,0.12) 0%, rgba(212,133,10,0.06) 100%);
+  @apply text-amber-700 font-semibold;
+  border-left: 2.5px solid theme('colors.amber.500');
+}
