@@ -16,7 +16,7 @@ export function EmailFlows() {
   }
 
   return (
-    <div className="max-w-5xl space-y-5">
+    <div className="max-w-7xl space-y-5">
       {state.emailFlows.length === 0 ? (
         <Card>
           <Empty
@@ -110,7 +110,7 @@ export function NewEmailFlow() {
   }
 
   return (
-    <div className="max-w-2xl space-y-5">
+    <div className="max-w-3xl space-y-5">
       <Card className="p-6 space-y-5">
         <Input label="Flow name *" placeholder="e.g. Welcome series" value={form.name} onChange={e => set('name', e.target.value)} error={errors.name} />
 
@@ -129,7 +129,7 @@ export function NewEmailFlow() {
             <div className="space-y-2 mb-3">
               {steps.map((step, i) => (
                 <div key={step.id} className="flex items-center gap-2">
-                  <div className="w-5 h-5 rounded-full bg-brand-100 text-brand-600 text-[10px] font-bold flex items-center justify-center flex-shrink-0">{i+1}</div>
+                  <div className="w-5 h-5 rounded-full bg-amber-100 text-amber-600 text-[10px] font-bold flex items-center justify-center flex-shrink-0">{i+1}</div>
                   <div className="flex-1 flex items-center gap-2 px-3 py-2 bg-surface-subtle border border-border rounded-xl text-xs text-text">
                     <span className="capitalize text-text-secondary">{step.type}</span>
                     <span className="text-border-strong">·</span>

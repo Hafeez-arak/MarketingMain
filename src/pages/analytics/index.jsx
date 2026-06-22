@@ -12,7 +12,7 @@ export function Analytics() {
   const connectedAny = Object.values(state.connectedAccounts).some(Boolean)
 
   return (
-    <div className="max-w-5xl space-y-5">
+    <div className="max-w-7xl space-y-5">
       {/* Overview cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {[
@@ -67,7 +67,7 @@ export function Analytics() {
       {!connectedAny && (
         <Card className="p-6 border-dashed bg-surface-muted">
           <div className="flex items-start gap-4">
-            <div className="w-10 h-10 rounded-xl bg-brand-50 flex items-center justify-center text-brand-600 flex-shrink-0">
+            <div className="w-10 h-10 rounded-xl bg-amber-50 flex items-center justify-center text-amber-600 flex-shrink-0">
               <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><path d="m15 7-8.5 8.5a2.12 2.12 0 0 0 3 3L18 10a4.24 4.24 0 0 0-6-6l-8.5 8.5a6.36 6.36 0 0 0 9 9L21 13"/></svg>
             </div>
             <div className="flex-1">

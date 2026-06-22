@@ -22,7 +22,7 @@ const initialState = {
       connectedAccounts: { instagram: false, facebook: false, linkedin: false, tiktok: false, x: false },
       instagramInstructions: '', instagramSchedule: {},
       linkedinInstructions: '', linkedinSchedule: {},
-      webhooks: { instagram: '', linkedin: '', instagramSchedule: '', instagramScheduleRegen: '', linkedinSchedule: '', linkedinScheduleRegen: '', instagramReels: '' },
+      webhooks: { instagram: '', linkedin: '', instagramSchedule: '', instagramScheduleRegen: '', linkedinSchedule: '', linkedinScheduleRegen: '', instagramReels: '', campaignPlanner: '' },
       supabase: { url: '', anonKey: '' },
     }
   },
@@ -31,8 +31,16 @@ const initialState = {
   instagramSchedule: {},
   linkedinInstructions: '',
   linkedinSchedule: {},   // { 'YYYY-MM-DD': { topic, tone, postType, includeImage, style, aspectRatio, contentRoute, notes } }
-  webhooks: { instagram: '', linkedin: '', instagramSchedule: '', instagramScheduleRegen: '', linkedinSchedule: '', linkedinScheduleRegen: '', instagramReels: '' },
+  webhooks: { instagram: '', linkedin: '', instagramSchedule: '', instagramScheduleRegen: '', linkedinSchedule: '', linkedinScheduleRegen: '', instagramReels: '', campaignPlanner: '' },
   supabase: { url: '', anonKey: '' },
+  // Canonical brand profile, fetched from Supabase (not persisted to
+  // localStorage — Supabase is the source of truth so n8n workflows and the
+  // browser are always reading the same data).
+  brandProfile: null,
+  // In-progress Campaign Automation plan — lifted out of the page's local
+  // state so it survives navigating to a dedicated per-post edit page and
+  // back. Cleared on cancel/confirm. null when no plan is in progress.
+  campaignPlanDraft: null,
 }
 
 const PERSIST_KEYS = [
@@ -45,6 +53,7 @@ const PERSIST_KEYS = [
   'linkedinSchedule',
   'webhooks',
   'supabase',
+  'campaignPlanDraft',
 ]
 
 function loadState() {
@@ -91,6 +100,8 @@ function reducer(state, action) {
     case 'SET_LINKEDIN_SCHEDULE':      return { ...state, linkedinSchedule: action.payload }
     case 'SET_WEBHOOK': return { ...state, webhooks: { ...state.webhooks, [action.payload.platform]: action.payload.url } }
     case 'UPDATE_SUPABASE': return { ...state, supabase: { ...state.supabase, ...action.payload } }
+    case 'SET_BRAND_PROFILE': return { ...state, brandProfile: action.payload }
+    case 'SET_CAMPAIGN_PLAN_DRAFT': return { ...state, campaignPlanDraft: action.payload }
 
     case 'CREATE_WORKSPACE': {
       const ws = action.payload
@@ -99,7 +110,7 @@ function reducer(state, action) {
         connectedAccounts: { instagram: false, facebook: false, linkedin: false, tiktok: false, x: false },
         instagramInstructions: '', instagramSchedule: {},
         linkedinInstructions: '', linkedinSchedule: {},
-        webhooks: { instagram: '', linkedin: '', instagramSchedule: '', instagramScheduleRegen: '', linkedinSchedule: '', linkedinScheduleRegen: '', instagramReels: '' },
+        webhooks: { instagram: '', linkedin: '', instagramSchedule: '', instagramScheduleRegen: '', linkedinSchedule: '', linkedinScheduleRegen: '', instagramReels: '', campaignPlanner: '' },
         supabase: { url: '', anonKey: '' },
       }
       return {
@@ -223,6 +234,8 @@ export const actions = {
   addTeamMember:      p  => ({ type: 'ADD_TEAM_MEMBER',      payload: p }),
   removeTeamMember:   id => ({ type: 'REMOVE_TEAM_MEMBER',   payload: id }),
   setWebhook:         (platform, url) => ({ type: 'SET_WEBHOOK', payload: { platform, url } }),
+  setBrandProfile:    p  => ({ type: 'SET_BRAND_PROFILE',     payload: p }),
+  setCampaignPlanDraft: p => ({ type: 'SET_CAMPAIGN_PLAN_DRAFT', payload: p }),
   createWorkspace:    p  => ({ type: 'CREATE_WORKSPACE',  payload: p }),
   switchWorkspace:    id => ({ type: 'SWITCH_WORKSPACE',  payload: id }),
   renameWorkspace:    p  => ({ type: 'RENAME_WORKSPACE',  payload: p }),

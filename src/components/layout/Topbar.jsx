@@ -1,25 +1,46 @@
 import { useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useApp } from '../../store/appStore'
+import { useAuth } from '../../store/AuthContext'
 import { Button } from '../ui/index'
 import { timeAgo } from '../../lib/utils'
 
 const titles = {
-  '/': 'Dashboard', '/campaigns': 'Campaigns', '/campaigns/new': 'New Campaign',
+  '/': 'Dashboard', '/brand-brain': 'Brand Brain', '/campaigns': 'Campaigns', '/campaigns/plan': 'Plan Campaign', '/campaigns/new': 'New Campaign',
   '/schedule': 'Content Calendar', '/email': 'Email Flows', '/email/new': 'New Email Flow',
   '/analytics': 'Analytics', '/media': 'Media Library', '/social': 'Social Media',
   '/social/instagram': 'Instagram', '/social/facebook': 'Facebook',
   '/social/linkedin': 'LinkedIn', '/social/tiktok': 'TikTok', '/social/x': 'X / Twitter',
+  '/social/instagram/new': 'New Instagram Post', '/social/facebook/new': 'New Facebook Post',
+  '/social/linkedin/new': 'New LinkedIn Post', '/social/tiktok/new': 'New TikTok Post', '/social/x/new': 'New X Post',
   '/approvals': 'Approvals', '/settings': 'Settings', '/integrations': 'Integrations', '/team': 'Team',
+}
+
+// Sub-pages reached via a flow (not a direct sidebar link) get a back button
+// pointed at their logical parent — more reliable than browser history,
+// which breaks if the page was opened directly or refreshed mid-flow.
+const BACK_TARGETS = {
+  '/campaigns/new':        '/campaigns',
+  '/campaigns/plan':       '/campaigns',
+  '/email/new':            '/email',
+  '/social/instagram/new': '/social/instagram',
+  '/social/facebook/new':  '/social/facebook',
+  '/social/linkedin/new':  '/social/linkedin',
+  '/social/tiktok/new':    '/social/tiktok',
+  '/social/x/new':         '/social/x',
 }
 
 export function Topbar() {
   const location = useLocation()
   const navigate  = useNavigate()
   const { state, dispatch } = useApp()
+  const { activeWorkspace, signOut } = useAuth()
   const [showNotifs, setShowNotifs] = useState(false)
+  const [showAccount, setShowAccount] = useState(false)
 
-  const title  = titles[location.pathname] || 'Arak Content Studio'
+  const isPostEditor = location.pathname.startsWith('/campaigns/plan/post/')
+  const title      = isPostEditor ? 'Edit Post' : (titles[location.pathname] || 'Arak Content Studio')
+  const backTarget = isPostEditor ? '/campaigns/plan' : BACK_TARGETS[location.pathname]
   const unread = state.notifications.filter(n => !n.read).length
 
   function getCta() {
@@ -32,8 +53,14 @@ export function Topbar() {
 
   return (
     <header className="h-14 bg-white border-b border-border flex items-center px-6 gap-4 flex-shrink-0">
-      <div className="flex-1 min-w-0">
-        <h1 className="font-display font-semibold text-text text-lg leading-none">{title}</h1>
+      <div className="flex-1 min-w-0 flex items-center gap-3">
+        {backTarget && (
+          <button onClick={() => navigate(backTarget)}
+            className="w-8 h-8 rounded-xl flex items-center justify-center text-text-secondary hover:bg-surface-subtle hover:text-text border border-border transition-colors flex-shrink-0">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
+          </button>
+        )}
+        <h1 className="font-display font-semibold text-text text-lg leading-none truncate">{title}</h1>
       </div>
       <div className="flex items-center gap-2 flex-shrink-0">
         {getCta()}
@@ -57,7 +84,7 @@ export function Topbar() {
           </button>
 
           {showNotifs && (
-            <div className="absolute right-0 top-full mt-2 w-76 bg-white rounded-2xl border border-border shadow-dropdown z-50 animate-fade-scale">
+            <div className="absolute right-0 top-full mt-2 w-80 bg-white rounded-2xl border border-border shadow-dropdown z-50 animate-fade-scale">
               <div className="flex items-center justify-between px-5 py-3.5 border-b border-border">
                 <p className="font-semibold text-sm text-text">Notifications</p>
                 {state.notifications.length > 0 && (
@@ -81,6 +108,31 @@ export function Topbar() {
                   ))}
                 </ul>
               )}
+            </div>
+          )}
+        </div>
+
+        {/* Workspace + sign out */}
+        <div className="relative">
+          <button onClick={() => setShowAccount(v => !v)}
+            className="flex items-center gap-2 pl-1 pr-3 py-1 rounded-xl border border-border hover:bg-surface-subtle transition-colors">
+            <div className="w-6 h-6 rounded-lg flex items-center justify-center text-[10px] font-bold text-white flex-shrink-0"
+              style={{ background: 'linear-gradient(135deg,#7D98A1,#5E6572)' }}>
+              {(activeWorkspace?.name || '?').slice(0, 1).toUpperCase()}
+            </div>
+            <span className="text-xs font-semibold text-text max-w-[120px] truncate">{activeWorkspace?.name || 'Workspace'}</span>
+          </button>
+          {showAccount && (
+            <div className="absolute right-0 top-full mt-2 w-48 bg-white rounded-2xl border border-border shadow-dropdown z-50 animate-fade-scale py-1.5">
+              <div className="px-4 py-2 border-b border-border mb-1">
+                <p className="text-[10px] uppercase tracking-wider text-text-tertiary font-semibold">Workspace</p>
+                <p className="text-sm font-semibold text-text truncate">{activeWorkspace?.name}</p>
+                <p className="text-[11px] text-text-tertiary capitalize">{activeWorkspace?.role} · {activeWorkspace?.plan} plan</p>
+              </div>
+              <button onClick={signOut}
+                className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors">
+                Sign out
+              </button>
             </div>
           )}
         </div>

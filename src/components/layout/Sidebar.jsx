@@ -1,10 +1,14 @@
-import { NavLink, useNavigate } from 'react-router-dom'
-import { useApp, actions } from '../../store/appStore'
+import { NavLink } from 'react-router-dom'
+import { useApp } from '../../store/appStore'
+import { useAuth } from '../../store/AuthContext'
 import { useState } from 'react'
 
 const nav = [
   { section: 'Overview', items: [
     { to: '/', label: 'Dashboard', exact: true, icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg> },
+  ]},
+  { section: 'Brand', items: [
+    { to: '/brand-brain', label: 'Brand Brain', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><path d="M9.5 2A3.5 3.5 0 0 0 6 5.5v.5a3 3 0 0 0-2 2.83V10a3 3 0 0 0 1 2.24V14a3 3 0 0 0 2.5 2.96V18a3 3 0 0 0 3 3h3a3 3 0 0 0 3-3v-1.04A3 3 0 0 0 19 14v-1.76A3 3 0 0 0 20 10V8.83a3 3 0 0 0-2-2.83v-.5A3.5 3.5 0 0 0 14.5 2 3.5 3.5 0 0 0 12 3.17 3.5 3.5 0 0 0 9.5 2z"/></svg> },
   ]},
   { section: 'Marketing', items: [
     { to: '/campaigns',  label: 'Campaigns',   icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg> },
@@ -12,12 +16,7 @@ const nav = [
     { to: '/email',      label: 'Email Flows', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg> },
   ]},
   { section: 'Social', items: [
-    { to: '/social',           label: 'Overview',   icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg> },
-    { to: '/social/instagram', label: 'Instagram', sub: true, dot: '#E1306C', icon: <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><rect x="2" y="2" width="20" height="20" rx="5"/><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/><line x1="17.5" y1="6.5" x2="17.51" y2="6.5"/></svg> },
-    { to: '/social/facebook',  label: 'Facebook',  sub: true, dot: '#1877F2', icon: <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24"><path d="M18 2h-3a5 5 0 0 0-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 0 1 1-1h3z"/></svg> },
-    { to: '/social/linkedin',  label: 'LinkedIn',  sub: true, dot: '#0A66C2', icon: <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24"><path d="M16 8a6 6 0 0 1 6 6v7h-4v-7a2 2 0 0 0-2-2 2 2 0 0 0-2 2v7h-4v-7a6 6 0 0 1 6-6zM2 9h4v12H2z"/><circle cx="4" cy="4" r="2"/></svg> },
-    { to: '/social/tiktok',    label: 'TikTok',    sub: true, dot: '#555', icon: <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24"><path d="M19.59 6.69a4.83 4.83 0 0 1-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 0 1-2.88 2.5 2.89 2.89 0 0 1-2.89-2.89 2.89 2.89 0 0 1 2.89-2.89c.28 0 .54.04.79.1V9.01a6.27 6.27 0 0 0-.79-.05 6.34 6.34 0 0 0-6.34 6.34 6.34 6.34 0 0 0 6.34 6.34 6.34 6.34 0 0 0 6.33-6.34V8.69a8.18 8.18 0 0 0 4.79 1.52V6.76a4.85 4.85 0 0 1-1.02-.07z"/></svg> },
-    { to: '/social/x',         label: 'X / Twitter', sub: true, dot: '#333', icon: <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg> },
+    { to: '/social',           label: 'Social Media',   icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg> },
   ]},
   { section: 'Insights', items: [
     { to: '/analytics', label: 'Analytics', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg> },
@@ -34,22 +33,20 @@ const nav = [
 ]
 
 export function Sidebar() {
-  const { state, dispatch } = useApp()
-  const navigate = useNavigate()
+  const { state } = useApp()
+  const { user, workspaces, activeWorkspace, activeWorkspaceId, switchWorkspace, signOut } = useAuth()
   const [showWsPicker, setShowWsPicker] = useState(false)
   const pendingApprovals = state.approvals.filter(a => a.status === 'pending').length
-  const workspaces = state.workspaces || []
-  const activeId   = state.activeWorkspaceId
 
   return (
-    <aside className="w-58 flex-shrink-0 flex flex-col h-full overflow-hidden bg-white border-r border-border">
+    <aside className="w-52 flex-shrink-0 flex flex-col h-full overflow-hidden bg-white border-r border-border">
 
       {/* Logo */}
       <div className="px-5 py-5 border-b border-border">
         <div className="flex items-center gap-3">
           <div className="w-9 h-9 rounded-xl flex items-center justify-center shadow-sm flex-shrink-0"
             style={{ background: 'linear-gradient(135deg, #ffbc38 0%, #d4850a 100%)' }}>
-            <svg className="w-4.5 h-4.5 text-white" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+            <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
               <path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 17l-6.2 4.3 2.4-7.4L2 9.4h7.6z"/>
             </svg>
           </div>
@@ -67,11 +64,11 @@ export function Sidebar() {
           className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl bg-surface-subtle hover:bg-stone-100 transition-colors group">
           <div className="w-5 h-5 rounded-md flex items-center justify-center text-[9px] font-bold text-white flex-shrink-0"
             style={{ background: 'linear-gradient(135deg, #f5a200, #d4850a)' }}>
-            {state.workspace.name.charAt(0).toUpperCase()}
+            {(activeWorkspace?.name || '?').charAt(0).toUpperCase()}
           </div>
           <div className="min-w-0 flex-1 text-left">
-            <p className="text-xs font-semibold text-text truncate">{state.workspace.name}</p>
-            <p className="text-[10px] text-text-tertiary">Content Studio</p>
+            <p className="text-xs font-semibold text-text truncate">{activeWorkspace?.name || 'Workspace'}</p>
+            <p className="text-[10px] text-text-tertiary capitalize">{activeWorkspace?.plan || ''} plan</p>
           </div>
           <svg className={`w-3 h-3 text-text-tertiary transition-transform flex-shrink-0 ${showWsPicker ? 'rotate-180' : ''}`}
             fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
@@ -79,40 +76,45 @@ export function Sidebar() {
           </svg>
         </button>
 
-        {/* Workspace picker dropdown */}
+        {/* Workspace picker dropdown — only shows a "switch" list when the
+            signed-in user actually belongs to more than one workspace. */}
         {showWsPicker && (
           <div className="absolute left-4 right-4 top-full mt-1 bg-white rounded-xl border border-border shadow-dropdown z-50 animate-fade-scale overflow-hidden">
-            <div className="px-3 py-2 border-b border-border/50">
-              <p className="text-[10px] font-bold uppercase tracking-wider text-text-disabled">Switch Workspace</p>
-            </div>
-            <ul className="py-1 max-h-48 overflow-y-auto scrollbar-thin">
-              {workspaces.map(ws => (
-                <li key={ws.id}>
-                  <button
-                    onClick={() => {
-                      if (ws.id !== activeId) dispatch(actions.switchWorkspace(ws.id))
-                      setShowWsPicker(false)
-                    }}
-                    className={`w-full flex items-center gap-2.5 px-3 py-2 text-left transition-colors hover:bg-surface-subtle
-                      ${ws.id === activeId ? 'bg-amber-50/60' : ''}`}>
-                    <div className="w-5 h-5 rounded-md flex items-center justify-center text-[9px] font-bold text-white flex-shrink-0"
-                      style={{ background: ws.id === activeId ? 'linear-gradient(135deg,#ffbc38,#d4850a)' : 'linear-gradient(135deg,#c4b090,#8a7050)' }}>
-                      {ws.name.charAt(0).toUpperCase()}
-                    </div>
-                    <span className="flex-1 text-xs text-text truncate">{ws.name}</span>
-                    {ws.id === activeId && (
-                      <svg className="w-3 h-3 text-amber-500 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg>
-                    )}
-                  </button>
-                </li>
-              ))}
-            </ul>
-            <div className="border-t border-border/50 p-2">
+            {workspaces.length > 1 && (
+              <>
+                <div className="px-3 py-2 border-b border-border/50">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-text-disabled">Switch Workspace</p>
+                </div>
+                <ul className="py-1 max-h-48 overflow-y-auto scrollbar-thin">
+                  {workspaces.map(ws => (
+                    <li key={ws.id}>
+                      <button
+                        onClick={() => {
+                          if (ws.id !== activeWorkspaceId) switchWorkspace(ws.id)
+                          setShowWsPicker(false)
+                        }}
+                        className={`w-full flex items-center gap-2.5 px-3 py-2 text-left transition-colors hover:bg-surface-subtle
+                          ${ws.id === activeWorkspaceId ? 'bg-amber-50/60' : ''}`}>
+                        <div className="w-5 h-5 rounded-md flex items-center justify-center text-[9px] font-bold text-white flex-shrink-0"
+                          style={{ background: ws.id === activeWorkspaceId ? 'linear-gradient(135deg,#ffbc38,#d4850a)' : 'linear-gradient(135deg,#c4b090,#8a7050)' }}>
+                          {ws.name.charAt(0).toUpperCase()}
+                        </div>
+                        <span className="flex-1 text-xs text-text truncate">{ws.name}</span>
+                        {ws.id === activeWorkspaceId && (
+                          <svg className="w-3 h-3 text-amber-500 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg>
+                        )}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+            <div className={workspaces.length > 1 ? 'border-t border-border/50 p-2' : 'p-2'}>
               <button
-                onClick={() => { setShowWsPicker(false); navigate('/settings') }}
-                className="w-full flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs text-text-secondary hover:bg-surface-subtle hover:text-text transition-colors">
-                <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
-                New workspace
+                onClick={() => { setShowWsPicker(false); signOut() }}
+                className="w-full flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs text-red-600 hover:bg-red-50 transition-colors">
+                <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+                Sign out
               </button>
             </div>
           </div>
@@ -145,12 +147,14 @@ export function Sidebar() {
 
       {/* User */}
       <div className="px-3 py-3 border-t border-border">
-        <div className="flex items-center gap-2.5 px-2.5 py-2 rounded-xl hover:bg-surface-subtle cursor-pointer transition-colors">
+        <div className="flex items-center gap-2.5 px-2.5 py-2 rounded-xl">
           <div className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white flex-shrink-0"
-            style={{ background: 'linear-gradient(135deg, #f5a200, #d4850a)' }}>A</div>
+            style={{ background: 'linear-gradient(135deg, #f5a200, #d4850a)' }}>
+            {(user?.email || '?').charAt(0).toUpperCase()}
+          </div>
           <div className="flex-1 min-w-0">
-            <p className="text-xs font-semibold text-text truncate">Admin</p>
-            <p className="text-[10px] text-text-tertiary">Free plan</p>
+            <p className="text-xs font-semibold text-text truncate">{user?.email || 'Signed out'}</p>
+            <p className="text-[10px] text-text-tertiary capitalize">{activeWorkspace?.role || ''}</p>
           </div>
         </div>
       </div>

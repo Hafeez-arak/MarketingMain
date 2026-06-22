@@ -1,6 +1,7 @@
 import { useRef, useState, useEffect, useCallback } from 'react'
 import { createPortal } from 'react-dom'
-import { useApp, actions } from '../../store/appStore'
+import { useAuth } from '../../store/AuthContext'
+import { SUPABASE_URL, SUPABASE_ANON_KEY } from '../../lib/supabaseClient'
 import { Card, Button, Empty, ConfirmDialog } from '../../components/ui/index'
 import { uid } from '../../lib/utils'
 
@@ -25,9 +26,8 @@ function displayName(name) {
 }
 
 export function MediaLibrary() {
-  const { state } = useApp()
-  const supabaseUrl = state.supabase?.url   || state.webhooks?.supabaseUrl || ''
-  const anonKey     = state.supabase?.anonKey || state.webhooks?.supabaseKey || ''
+  const { activeWorkspaceId, accessToken } = useAuth()
+  const supabaseUrl = SUPABASE_URL
 
   const [assets,      setAssets]      = useState([])
   const [loading,     setLoading]     = useState(false)
@@ -37,12 +37,14 @@ export function MediaLibrary() {
   const [filter,      setFilter]      = useState('all')
   const inputRef = useRef(null)
 
-  const headers = { 'apikey': anonKey, 'Authorization': `Bearer ${anonKey}` }
+  const headers = { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${accessToken || SUPABASE_ANON_KEY}` }
 
   const fetchAssets = useCallback(async () => {
-    if (!supabaseUrl || !anonKey) return
+    if (!activeWorkspaceId) return
     setLoading(true)
     try {
+      // No explicit workspace_id filter needed — RLS already scopes this
+      // to rows the signed-in user's workspace owns.
       const res = await fetch(
         `${supabaseUrl}/rest/v1/media_library?select=*&order=created_at.desc&limit=200`,
         { headers }
@@ -50,16 +52,17 @@ export function MediaLibrary() {
       if (res.ok) setAssets(await res.json())
     } catch(e) { /* silent */ }
     finally { setLoading(false) }
-  }, [supabaseUrl, anonKey])
+  }, [activeWorkspaceId, accessToken])
 
   useEffect(() => { fetchAssets() }, [fetchAssets])
 
   async function saveToSupabase(item) {
-    if (!supabaseUrl || !anonKey) return null
+    if (!activeWorkspaceId) return null
     const res = await fetch(`${supabaseUrl}/rest/v1/media_library`, {
       method: 'POST',
       headers: { ...headers, 'Content-Type': 'application/json', 'Prefer': 'return=representation' },
       body: JSON.stringify({
+        workspace_id: activeWorkspaceId,
         name:       item.name,
         url:        item.url,
         platform:   item.platform  || null,
@@ -78,7 +81,7 @@ export function MediaLibrary() {
   }
 
   async function deleteAsset(id) {
-    if (!supabaseUrl || !anonKey) return
+    if (!activeWorkspaceId) return
     await fetch(`${supabaseUrl}/rest/v1/media_library?id=eq.${id}`, {
       method: 'DELETE',
       headers,
@@ -114,7 +117,7 @@ export function MediaLibrary() {
   })
 
   return (
-    <div className="max-w-5xl space-y-5">
+    <div className="max-w-7xl space-y-5">
       {/* Toolbar */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div className="flex gap-1 bg-stone-200 border border-stone-300 rounded-xl p-1 shadow-sm">
@@ -130,10 +133,10 @@ export function MediaLibrary() {
           ))}
         </div>
         <div className="flex items-center gap-2">
-          <button onClick={() => setView('grid')} className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${view==='grid'?'bg-brand-50 text-brand-600':'text-text-secondary hover:bg-surface-subtle'}`}>
+          <button onClick={() => setView('grid')} className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${view==='grid'?'bg-amber-50 text-amber-600':'text-text-secondary hover:bg-surface-subtle'}`}>
             <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
           </button>
-          <button onClick={() => setView('list')} className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${view==='list'?'bg-brand-50 text-brand-600':'text-text-secondary hover:bg-surface-subtle'}`}>
+          <button onClick={() => setView('list')} className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${view==='list'?'bg-amber-50 text-amber-600':'text-text-secondary hover:bg-surface-subtle'}`}>
             <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
           </button>
           <button onClick={fetchAssets} disabled={loading} className="w-8 h-8 rounded-lg flex items-center justify-center text-text-secondary hover:bg-surface-subtle transition-colors disabled:opacity-40">
@@ -147,19 +150,19 @@ export function MediaLibrary() {
         </div>
       </div>
 
-      {!supabaseUrl && (
+      {!activeWorkspaceId && (
         <div className="rounded-xl bg-amber-50 border border-amber-200 px-4 py-3 text-xs text-amber-700">
-          Configure Supabase in <strong>Settings → Integrations</strong> to enable media library sync.
+          No active workspace — try signing out and back in.
         </div>
       )}
 
       {/* Drop zone */}
       <div onDrop={onDrop} onDragOver={e => e.preventDefault()}
-        className="border-2 border-dashed border-border hover:border-brand-400 rounded-2xl p-6 text-center transition-colors cursor-pointer bg-white"
+        className="border-2 border-dashed border-border hover:border-amber-400 rounded-2xl p-6 text-center transition-colors cursor-pointer bg-white"
         onClick={() => inputRef.current?.click()}>
         <div className="flex flex-col items-center gap-2 text-text-secondary">
           <svg className="w-8 h-8 text-text-tertiary" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-          <p className="text-sm font-medium">Drop files here or <span className="text-brand-600">browse</span></p>
+          <p className="text-sm font-medium">Drop files here or <span className="text-amber-600">browse</span></p>
           <p className="text-xs text-text-tertiary">Images, videos, PDFs and documents</p>
         </div>
       </div>
@@ -276,12 +279,17 @@ export function MediaLibrary() {
 }
 
 // Export saveToMediaLibrary for use from other components
-export async function saveToMediaLibrary({ supabaseUrl, anonKey, name, url, platform, topic, source, mimeType, size }) {
-  if (!supabaseUrl || !anonKey) return null
-  const headers = { 'apikey': anonKey, 'Authorization': `Bearer ${anonKey}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' }
-  await fetch(`${supabaseUrl}/rest/v1/media_library`, {
+export async function saveToMediaLibrary({ workspaceId, accessToken, name, url, platform, topic, source, mimeType, size }) {
+  if (!workspaceId) return null
+  const headers = {
+    apikey: SUPABASE_ANON_KEY,
+    Authorization: `Bearer ${accessToken || SUPABASE_ANON_KEY}`,
+    'Content-Type': 'application/json',
+    Prefer: 'return=minimal',
+  }
+  await fetch(`${SUPABASE_URL}/rest/v1/media_library`, {
     method: 'POST',
     headers,
-    body: JSON.stringify({ name, url, platform: platform||null, topic: topic||null, source: source||'generated', mime_type: mimeType||'image/webp', size_bytes: size||0 }),
+    body: JSON.stringify({ workspace_id: workspaceId, name, url, platform: platform||null, topic: topic||null, source: source||'generated', mime_type: mimeType||'image/webp', size_bytes: size||0 }),
   })
 }

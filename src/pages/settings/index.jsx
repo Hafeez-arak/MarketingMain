@@ -1,23 +1,18 @@
 import { useState } from 'react'
 import { useApp, actions } from '../../store/appStore'
+import { useAuth } from '../../store/AuthContext'
 import { Card, WarmCard, Button, Input, Select, Toggle, Avatar, Modal, ConfirmDialog } from '../../components/ui/index'
 import { uid, PLATFORM_META } from '../../lib/utils'
 
-// ─── Supabase Config ──────────────────────────────────────────────────────
+// ─── Workspace / Supabase status ────────────────────────────────────────────
+// Phase 0 replaced manually-pasted Supabase credentials with real auth —
+// this is now a read-only status card, not a form. Nothing here is
+// editable because there's nothing left for a user to configure: the
+// project URL/anon key are fixed in the app's build, and which workspace's
+// data you see is determined by who you're signed in as.
 function SupabaseConfig() {
-  const { state, dispatch } = useApp()
-  const [url,     setUrl]     = useState(state.supabase?.url     || '')
-  const [anonKey, setAnonKey] = useState(state.supabase?.anonKey || '')
-  const [showKey, setShowKey] = useState(false)
-  const [saved,   setSaved]   = useState(false)
-
-  const isConfigured = !!(state.supabase?.url && state.supabase?.anonKey)
-
-  function handleSave() {
-    dispatch({ type: 'UPDATE_SUPABASE', payload: { url: url.trim(), anonKey: anonKey.trim() } })
-    dispatch(actions.addNotification({ id: uid(), message: 'Supabase credentials saved.', createdAt: new Date().toISOString() }))
-    setSaved(true); setTimeout(() => setSaved(false), 2000)
-  }
+  const { activeWorkspace } = useAuth()
+  const isConfigured = !!activeWorkspace
 
   return (
     <Card className="overflow-hidden">
@@ -30,64 +25,18 @@ function SupabaseConfig() {
           </div>
           <div className="flex-1">
             <div className="flex items-center gap-2">
-              <p className="font-medium text-text text-sm">Supabase</p>
+              <p className="font-medium text-text text-sm">Workspace data store</p>
               {isConfigured
-                ? <span className="text-[10px] bg-sage-100 text-sage-700 px-2 py-0.5 rounded-full font-semibold">● Configured</span>
-                : <span className="text-[10px] bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-semibold">Not set</span>}
+                ? <span className="text-[10px] bg-sage-100 text-sage-700 px-2 py-0.5 rounded-full font-semibold">● Connected</span>
+                : <span className="text-[10px] bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-semibold">No active workspace</span>}
             </div>
-            <p className="text-xs text-text-tertiary mt-0.5">Required for automatic monthly schedule generation. Stores your content calendar so n8n can read it daily.</p>
+            <p className="text-xs text-text-tertiary mt-0.5">
+              {isConfigured
+                ? `Signed in to "${activeWorkspace.name}". Your data is isolated to this workspace — nothing to configure.`
+                : 'Try signing out and back in.'}
+            </p>
           </div>
         </div>
-      </div>
-
-      <div className="p-6 space-y-4">
-        {/* Info box */}
-        <div className="rounded-xl bg-stone-50 border border-border px-4 py-3 text-xs text-text-secondary space-y-1">
-          <p className="font-semibold text-text">Where to find these values</p>
-          <p>Supabase Dashboard → Your Project → Project Settings → API</p>
-          <p><span className="font-medium">Project URL</span> — the https://xxx.supabase.co URL</p>
-          <p><span className="font-medium">Anon / public key</span> — the long JWT starting with eyJ…</p>
-          <p className="text-amber-600 font-medium mt-1">⚠ Only paste the anon key here, never the service_role key. The service_role key goes into your n8n Supabase credentials only.</p>
-        </div>
-
-        {/* Project URL */}
-        <div>
-          <label className="block text-xs font-medium text-text-secondary mb-1.5">Project URL</label>
-          <input
-            type="url"
-            placeholder="https://xxxxxxxxxxxxxxxxxxxx.supabase.co"
-            value={url}
-            onChange={e => setUrl(e.target.value)}
-            className="w-full rounded-xl border border-border bg-surface-subtle text-text text-xs px-3.5 py-2.5 font-mono placeholder:font-sans placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-amber-400 transition-all"
-          />
-        </div>
-
-        {/* Anon key */}
-        <div>
-          <label className="block text-xs font-medium text-text-secondary mb-1.5">Anon / Public Key</label>
-          <div className="relative">
-            <input
-              type={showKey ? 'text' : 'password'}
-              placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
-              value={anonKey}
-              onChange={e => setAnonKey(e.target.value)}
-              className="w-full rounded-xl border border-border bg-surface-subtle text-text text-xs px-3.5 py-2.5 pr-10 font-mono placeholder:font-sans placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-amber-400 transition-all"
-            />
-            <button onClick={() => setShowKey(v => !v)}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-text-tertiary hover:text-text transition-colors">
-              {showKey
-                ? <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
-                : <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>}
-            </button>
-          </div>
-        </div>
-
-        <button
-          onClick={handleSave}
-          disabled={!url.trim() || !anonKey.trim()}
-          className={`w-full py-2.5 rounded-xl text-sm font-semibold transition-all disabled:opacity-50 ${saved ? 'bg-green-500 text-white' : 'btn-amber'}`}>
-          {saved ? '✓ Saved' : 'Save Supabase Config'}
-        </button>
       </div>
     </Card>
   )
@@ -188,6 +137,19 @@ const WORKFLOW_CONFIGS = [
       <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 bg-[#0A66C2]">
         <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24">
           <polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-.27-4.93"/>
+        </svg>
+      </div>
+    ),
+  },
+  {
+    platform: 'campaignPlanner',
+    label: 'Campaign Planner Workflow',
+    placeholder: 'https://your-instance.app.n8n.cloud/webhook/arak-campaign-planner',
+    description: 'Decomposes a stated goal into a dated set of post ideas across platforms. Returns a plan — never writes to Supabase itself.',
+    icon: (
+      <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: 'linear-gradient(135deg,#7c3aed,#a78bfa)' }}>
+        <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24">
+          <path d="M12 3v3m0 12v3m9-9h-3M6 12H3m15.36-6.36l-2.12 2.12M8.76 15.24l-2.12 2.12m12.72 0l-2.12-2.12M8.76 8.76L6.64 6.64"/>
         </svg>
       </div>
     ),
@@ -324,7 +286,7 @@ export function Settings() {
   }
 
   return (
-    <div className="max-w-2xl space-y-5">
+    <div className="max-w-3xl space-y-5">
       <Card className="overflow-hidden">
         <div className="px-6 py-5 border-b border-border flex items-center justify-between">
           <div>
@@ -475,7 +437,7 @@ export function Integrations() {
   const platforms = Object.entries(PLATFORM_META)
 
   return (
-    <div className="max-w-3xl space-y-6">
+    <div className="max-w-4xl space-y-6">
       {/* Supabase — needed for schedule auto-generation */}
       <SupabaseConfig />
 
@@ -549,11 +511,11 @@ export function Team() {
   }
 
   return (
-    <div className="max-w-3xl space-y-5">
+    <div className="max-w-4xl space-y-5">
       <div className="flex items-center justify-between">
         <div>
           <h2 className="font-display font-semibold text-text text-xl">Team</h2>
-          <p className="text-sm text-text-secondary mt-0.5">{state.team.length} member{state.team.length !== 1 ? 's' : ''}</p>
+          <p className="text-sm text-text-secondary mt-0.5">{state.team.length + 1} member{state.team.length + 1 !== 1 ? 's' : ''}</p>
         </div>
         <Button onClick={() => setShowModal(true)}>
           <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>

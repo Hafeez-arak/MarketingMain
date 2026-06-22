@@ -14,7 +14,7 @@ export function Approvals() {
   const completed = state.approvals.filter(a => a.status !== 'pending')
 
   return (
-    <div className="max-w-3xl space-y-5">
+    <div className="max-w-7xl space-y-5">
       {/* Stats */}
       <div className="grid grid-cols-3 gap-3">
         <Card className="p-4 text-center"><p className="text-2xl font-bold text-text">{pending.length}</p><p className="text-xs text-text-secondary mt-0.5">Pending</p></Card>

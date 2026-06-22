@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useLocation } from 'react-router-dom'
 import { useApp, actions } from '../../store/appStore'
 import { Card, Button, Badge, PlatformPill, Input, Textarea, Select, Empty, PostImage } from '../../components/ui/index'
 import { uid, PLATFORM_META, formatDateTime } from '../../lib/utils'
@@ -12,14 +12,15 @@ export function SocialOverview() {
   const platforms = Object.entries(PLATFORM_META)
 
   return (
-    <div className="max-w-5xl space-y-5">
+    <div className="max-w-7xl space-y-5">
       {/* Connected accounts */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         {platforms.map(([key, meta]) => {
           const connected = state.connectedAccounts[key]
           const posts     = state.posts.filter(p => p.platform === key)
           return (
-            <Card key={key} className="overflow-hidden">
+            <Card key={key} className="overflow-hidden cursor-pointer hover:shadow-md hover:-translate-y-0.5 transition-all"
+              onClick={() => navigate(`/social/${key}`)}>
               <div className="h-1" style={{ background: meta.color }} />
               <div className="p-5">
                 <div className="flex items-center justify-between mb-3">
@@ -35,14 +36,12 @@ export function SocialOverview() {
                   {posts.length === 0 ? 'No posts created yet.' : `${posts.length} post${posts.length===1?'':'s'} created`}
                 </p>
                 <div className="flex gap-2">
+                  <Button variant="secondary" size="sm" className="flex-1 justify-center" onClick={e => { e.stopPropagation(); navigate(`/social/${key}`) }}>Open</Button>
                   {connected ? (
-                    <>
-                      <Button variant="secondary" size="sm" className="flex-1 justify-center" onClick={() => navigate(`/social/${key}`)}>View</Button>
-                      <Button size="sm" className="flex-1 justify-center" onClick={() => navigate(`/social/${key}/new`)}>New post</Button>
-                    </>
+                    <Button size="sm" className="flex-1 justify-center" onClick={e => { e.stopPropagation(); navigate(`/social/${key}/new`) }}>New post</Button>
                   ) : (
-                    <Button variant="outline" size="sm" className="flex-1 justify-center" onClick={() => { dispatch(actions.connectAccount(key)); dispatch(actions.addNotification({ id: uid(), message: `${meta.label} account connected.`, createdAt: new Date().toISOString() })) }}>
-                      Connect {meta.label}
+                    <Button variant="outline" size="sm" className="flex-1 justify-center" onClick={e => { e.stopPropagation(); dispatch(actions.connectAccount(key)); dispatch(actions.addNotification({ id: uid(), message: `${meta.label} account connected.`, createdAt: new Date().toISOString() })) }}>
+                      Connect
                     </Button>
                   )}
                 </div>
@@ -57,7 +56,8 @@ export function SocialOverview() {
 
 // ─── Single Platform Page ─────────────────────────────────────────────────
 export function SocialPlatform() {
-  const { platform } = useParams()
+  const { pathname } = useLocation()
+  const platform = pathname.split('/')[2] // /social/facebook -> 'facebook'
   const { state, dispatch } = useApp()
   const navigate = useNavigate()
   const meta = PLATFORM_META[platform]
@@ -70,7 +70,7 @@ export function SocialPlatform() {
   const filtered = filter === 'all' ? posts : posts.filter(p => p.status === filter)
 
   return (
-    <div className="max-w-4xl space-y-5">
+    <div className="max-w-7xl space-y-5">
       {/* Header card */}
       <Card className="overflow-hidden">
         <div className="h-1" style={{ background: meta.color }} />
@@ -108,7 +108,7 @@ export function SocialPlatform() {
       <div className="flex gap-1 bg-white border border-border rounded-xl p-1 w-fit">
         {['all','scheduled','published','draft'].map(f => (
           <button key={f} onClick={() => setFilter(f)}
-            className={`px-3 py-1.5 rounded-lg text-sm font-medium capitalize transition-colors ${filter===f?'bg-brand-600 text-white':'text-text-secondary hover:text-text hover:bg-surface-subtle'}`}>
+            className={`px-3 py-1.5 rounded-lg text-sm font-medium capitalize transition-colors ${filter===f?'bg-amber-600 text-white':'text-text-secondary hover:text-text hover:bg-surface-subtle'}`}>
             {f}
           </button>
         ))}
@@ -133,11 +133,11 @@ export function SocialPlatform() {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-2 flex-wrap">
                       <Badge status={p.status} />
-                      {campaign && <span className="text-xs bg-brand-50 text-brand-600 px-2 py-0.5 rounded-full">{campaign.name}</span>}
+                      {campaign && <span className="text-xs bg-amber-50 text-amber-600 px-2 py-0.5 rounded-full">{campaign.name}</span>}
                       {p.scheduledAt && <span className="text-xs text-text-tertiary">{formatDateTime(p.scheduledAt)}</span>}
                     </div>
                     <p className="text-sm text-text whitespace-pre-line line-clamp-3">{p.copy || 'No caption'}</p>
-                    {p.hashtags && <p className="text-xs text-brand-500 mt-1">{p.hashtags}</p>}
+                    {p.hashtags && <p className="text-xs text-amber-500 mt-1">{p.hashtags}</p>}
                     {p.mediaUrls?.length > 0 && (
                       <div className="flex gap-2 mt-3">
                         {p.mediaUrls.map((url,i) => <PostImage key={i} src={url} alt="" className="w-16 h-16 rounded-xl object-cover border border-border"/>)}
@@ -161,7 +161,8 @@ export function SocialPlatform() {
 
 // ─── New Post Composer ────────────────────────────────────────────────────
 export function NewPost() {
-  const { platform } = useParams()
+  const { pathname } = useLocation()
+  const platform = pathname.split('/')[2] // /social/facebook/new -> 'facebook'
   const { state, dispatch } = useApp()
   const navigate = useNavigate()
   const meta = PLATFORM_META[platform]
@@ -218,7 +219,7 @@ export function NewPost() {
   if (!meta) return <p className="text-text-secondary">Unknown platform.</p>
 
   return (
-    <div className="max-w-xl space-y-4">
+    <div className="max-w-2xl space-y-4">
       <Card className="overflow-hidden">
         <div className="h-1" style={{ background: meta.color }} />
         <div className="flex items-center gap-3 px-5 py-4 border-b border-border">
@@ -259,7 +260,7 @@ export function NewPost() {
               </div>
             )}
             <button onClick={() => fileRef.current?.click()}
-              className="w-full border-2 border-dashed border-border hover:border-brand-400 rounded-xl py-3 text-xs text-text-secondary hover:text-brand-600 transition-colors flex items-center justify-center gap-2">
+              className="w-full border-2 border-dashed border-border hover:border-amber-400 rounded-xl py-3 text-xs text-text-secondary hover:text-amber-600 transition-colors flex items-center justify-center gap-2">
               <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
               Add image
             </button>

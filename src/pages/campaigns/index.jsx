@@ -17,21 +17,27 @@ export function Campaigns() {
   const filtered = filter === 'all' ? state.campaigns : state.campaigns.filter(c => c.status === filter)
 
   return (
-    <div className="max-w-5xl space-y-5">
+    <div className="max-w-7xl space-y-5">
       {/* Toolbar */}
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div className="flex gap-1 bg-white border border-border rounded-xl p-1">
           {['all','live','draft','paused','completed'].map(f => (
             <button key={f} onClick={() => setFilter(f)}
-              className={`px-3 py-1.5 rounded-lg text-sm font-medium capitalize transition-colors ${filter === f ? 'bg-brand-600 text-white' : 'text-text-secondary hover:text-text hover:bg-surface-subtle'}`}>
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium capitalize transition-colors ${filter === f ? 'bg-amber-600 text-white' : 'text-text-secondary hover:text-text hover:bg-surface-subtle'}`}>
               {f === 'all' ? `All (${state.campaigns.length})` : f}
             </button>
           ))}
         </div>
-        <Button onClick={() => navigate('/campaigns/new')}>
-          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
-          New campaign
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="secondary" onClick={() => navigate('/campaigns/plan')}>
+            <svg className="w-3.5 h-3.5 text-purple-600" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M12 3v3m0 12v3m9-9h-3M6 12H3m15.36-6.36l-2.12 2.12M8.76 15.24l-2.12 2.12m12.72 0l-2.12-2.12M8.76 8.76L6.64 6.64"/></svg>
+            Plan with AI
+          </Button>
+          <Button onClick={() => navigate('/campaigns/new')}>
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+            New campaign
+          </Button>
+        </div>
       </div>
 
       {filtered.length === 0 ? (
@@ -40,7 +46,12 @@ export function Campaigns() {
             icon={<svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>}
             title={filter === 'all' ? 'No campaigns yet' : `No ${filter} campaigns`}
             description="Create your first campaign to organise your content across platforms."
-            action={<Button onClick={() => navigate('/campaigns/new')}>Create campaign</Button>}
+            action={
+              <div className="flex items-center gap-2">
+                <Button variant="secondary" onClick={() => navigate('/campaigns/plan')}>Plan with AI</Button>
+                <Button onClick={() => navigate('/campaigns/new')}>Create campaign</Button>
+              </div>
+            }
           />
         </Card>
       ) : (
@@ -106,7 +117,7 @@ export function NewCampaign() {
   }
 
   return (
-    <div className="max-w-2xl space-y-5">
+    <div className="max-w-3xl space-y-5">
       <Card className="p-6 space-y-5">
         <Input label="Campaign name *" placeholder="e.g. Summer 2025 Launch" value={form.name} onChange={e => set('name', e.target.value)} error={errors.name} />
 
@@ -125,7 +136,7 @@ export function NewCampaign() {
           <div className="flex flex-wrap gap-2">
             {PLATFORMS.map(p => (
               <button key={p} onClick={() => togglePlatform(p)}
-                className={`px-3 py-1.5 rounded-xl border text-sm font-medium capitalize transition-all ${form.platforms.includes(p) ? 'bg-brand-600 text-white border-brand-600' : 'bg-white border-border text-text-secondary hover:border-brand-400'}`}>
+                className={`px-3 py-1.5 rounded-xl border text-sm font-medium capitalize transition-all ${form.platforms.includes(p) ? 'bg-amber-600 text-white border-amber-600' : 'bg-white border-border text-text-secondary hover:border-amber-400'}`}>
                 {p === 'x' ? 'X / Twitter' : p}
               </button>
             ))}

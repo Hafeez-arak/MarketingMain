@@ -67,6 +67,42 @@
   }
 
   .divider { @apply h-px bg-border w-full; }
+
+  /* Every animate-* class below is referenced throughout the app (empty
+     states, dashboard cards, dropdowns, the notification dot) but had no
+     matching keyframes or utility definition anywhere in this codebase —
+     they were rendering as static, motion-less elements. Defined here as
+     plain CSS rather than relying on tailwind.config.js, so they work
+     regardless of what that file does or doesn't already have. */
+  .animate-fade-scale { animation: fadeScale 0.18s cubic-bezier(0.16,1,0.3,1) both; }
+  .animate-float      { animation: floatY 3s ease-in-out infinite; }
+  .animate-pulse-dot  { animation: pulseDot 1.6s ease-in-out infinite; }
+  .animate-slide-up   { animation: slideUp 0.4s cubic-bezier(0.16,1,0.3,1) both; }
+  .animate-stagger-1  { animation: fadeUp 0.45s cubic-bezier(0.16,1,0.3,1) both; animation-delay: 0.05s; }
+  .animate-stagger-2  { animation: fadeUp 0.45s cubic-bezier(0.16,1,0.3,1) both; animation-delay: 0.12s; }
+  .animate-stagger-3  { animation: fadeUp 0.45s cubic-bezier(0.16,1,0.3,1) both; animation-delay: 0.19s; }
+  .animate-stagger-4  { animation: fadeUp 0.45s cubic-bezier(0.16,1,0.3,1) both; animation-delay: 0.26s; }
+}
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(14px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes fadeScale {
+  from { opacity: 0; transform: scale(0.96); }
+  to   { opacity: 1; transform: scale(1); }
+}
+@keyframes floatY {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-6px); }
+}
+@keyframes pulseDot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%      { opacity: 0.4; transform: scale(0.85); }
 }
 
 /* Page transition */
@@ -74,7 +110,7 @@
 
 /* Active nav */
 .nav-active {
-  background: linear-gradient(135deg, rgba(245,162,0,0.12) 0%, rgba(212,133,10,0.06) 100%);
-  @apply text-amber-700 font-semibold;
-  border-left: 2.5px solid theme('colors.amber.500');
+  background-color: theme('colors.amber.100');
+  @apply text-amber-800 font-semibold shadow-sm;
+  border-left: 3px solid theme('colors.amber.500');
 }

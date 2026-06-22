@@ -1,8 +1,12 @@
 import { useState, useRef, useCallback, useMemo, useEffect } from 'react'
 import { createPortal } from 'react-dom'
+import { useNavigate } from 'react-router-dom'
 import { useApp, actions } from '../../store/appStore'
+import { useAuth } from '../../store/AuthContext'
+import { SUPABASE_URL, SUPABASE_ANON_KEY } from '../../lib/supabaseClient'
 import { Card, Button, Badge, Textarea, Spinner, PostImage } from '../../components/ui/index'
 import { uid, formatDateTime } from '../../lib/utils'
+import { buildInstructionsString, isBrandProfileEmpty, useBrandProfileSync, logEditFeedback } from '../../lib/brandBrain'
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 const POST_TYPES = [
@@ -122,9 +126,9 @@ function AspectRatioSelector({ value, onChange }) {
 }
 
 // ─── Supabase hooks ──────────────────────────────────────────────────────────
-function useSupabaseLinkedInSchedule(supabaseUrl, anonKey) {
+function useSupabaseLinkedInSchedule(supabaseUrl, anonKey, workspaceId) {
   const headers = {
-    'apikey': anonKey,
+    'apikey': SUPABASE_ANON_KEY,
     'Authorization': `Bearer ${anonKey}`,
     'Content-Type': 'application/json',
     'Prefer': 'return=representation',
@@ -133,6 +137,7 @@ function useSupabaseLinkedInSchedule(supabaseUrl, anonKey) {
   async function upsertEntry(dateKey, entry) {
     if (!supabaseUrl || !anonKey) return { error: 'Supabase not configured.' }
     const body = {
+      workspace_id:         workspaceId,
       scheduled_date:       dateKey,
       topic:                entry.topic              || '',
       tone:                 entry.tone               || 'thought_leader',
@@ -203,7 +208,7 @@ function useSupabaseLinkedInSchedule(supabaseUrl, anonKey) {
     const path = `linkedin/${dateKey}/${Date.now()}_${index}.${ext}`
     const res  = await fetch(`${supabaseUrl}/storage/v1/object/schedule-uploads/${path}`, {
       method:  'POST',
-      headers: { 'apikey': anonKey, 'Authorization': `Bearer ${anonKey}`, 'Content-Type': file.type },
+      headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${anonKey}`, 'Content-Type': file.type },
       body:    file,
     })
     if (!res.ok) { const err = await res.text(); return { error: err } }
@@ -219,7 +224,7 @@ function useSupabaseLinkedInPosts(supabaseUrl, anonKey) {
   const [loadingPosts,  setLoadingPosts]  = useState(false)
   const [lastFetchedAt, setLastFetchedAt] = useState('')
 
-  const headers = { 'apikey': anonKey, 'Authorization': `Bearer ${anonKey}` }
+  const headers = { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${anonKey}` }
 
   const fetchRemotePosts = useCallback(async () => {
     if (!supabaseUrl || !anonKey) return
@@ -283,11 +288,13 @@ function useSupabaseLinkedInPosts(supabaseUrl, anonKey) {
 // ─── Main Page ───────────────────────────────────────────────────────────────
 export function LinkedInPage() {
   const { state, dispatch } = useApp()
+  const { activeWorkspaceId, accessToken } = useAuth()
+  useBrandProfileSync(state, dispatch)
   const localPosts  = state.posts.filter(p => p.platform === 'linkedin')
   const webhookUrl      = state.webhooks?.linkedin || ''
   const regenWebhookUrl = state.webhooks?.linkedinScheduleRegen || ''
-  const supabaseUrl = state.supabase?.url  || ''
-  const anonKey     = state.supabase?.anonKey || ''
+  const supabaseUrl = SUPABASE_URL
+  const anonKey     = accessToken || ''
 
   const { remotePosts, loadingPosts, lastFetchedAt, fetchRemotePosts, updatePostStatus } =
     useSupabaseLinkedInPosts(supabaseUrl, anonKey)
@@ -338,7 +345,7 @@ export function LinkedInPage() {
     if (supabaseUrl && anonKey && approval.supabase_id) {
       await fetch(`${supabaseUrl}/rest/v1/linkedin_manual_posts?id=eq.${approval.supabase_id}`, {
         method: 'PATCH',
-        headers: { 'apikey': anonKey, 'Authorization': `Bearer ${anonKey}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+        headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${anonKey}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
         body: JSON.stringify({ status: 'approved', updated_at: new Date().toISOString() }),
       })
     }
@@ -350,7 +357,7 @@ export function LinkedInPage() {
     if (supabaseUrl && anonKey && approval?.supabase_id) {
       await fetch(`${supabaseUrl}/rest/v1/linkedin_manual_posts?id=eq.${approval.supabase_id}`, {
         method: 'DELETE',
-        headers: { 'apikey': anonKey, 'Authorization': `Bearer ${anonKey}` },
+        headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${anonKey}` },
       })
     }
     setApproval(null); setScreen('create')
@@ -359,7 +366,7 @@ export function LinkedInPage() {
   const totalPosts = mergedPosts.length
 
   return (
-    <div className="max-w-4xl space-y-5">
+    <div className="max-w-7xl space-y-5">
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div className="flex items-center gap-3">
@@ -422,7 +429,7 @@ export function LinkedInPage() {
       {screen === 'posts'    && <PostsList posts={mergedPosts} dispatch={dispatch} state={state} onCreateClick={() => setScreen('create')} updatePostStatus={updatePostStatus} webhookUrl={webhookUrl} regenWebhookUrl={regenWebhookUrl} />}
       {screen === 'create'   && <CreatePanel state={state} webhookUrl={webhookUrl} onGenerated={handleGenerated} />}
       {screen === 'video'    && <LinkedInVideoPanel state={state} dispatch={dispatch} />}
-      {screen === 'schedule' && <MonthlySchedule state={state} dispatch={dispatch} instructions={state.linkedinInstructions || ''} />}
+      {screen === 'schedule' && <MonthlySchedule state={state} dispatch={dispatch} instructions={buildInstructionsString(state.brandProfile, state.linkedinInstructions)} />}
       {screen === 'approval' && approval && (
         <ApprovalScreen data={approval} state={state} webhookUrl={webhookUrl}
           onUpdate={setApproval} onApprove={handleApprove} onDiscard={handleDiscard}
@@ -430,8 +437,8 @@ export function LinkedInPage() {
             if (supabaseUrl && anonKey) {
               await fetch(`${supabaseUrl}/rest/v1/media_library`, {
                 method: 'POST',
-                headers: { 'apikey': anonKey, 'Authorization': `Bearer ${anonKey}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
-                body: JSON.stringify({ name, url, platform: 'linkedin', topic, source: 'generated', mime_type: 'image/webp', size_bytes: 0 }),
+                headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${anonKey}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+                body: JSON.stringify({ workspace_id: activeWorkspaceId, name, url, platform: 'linkedin', topic, source: 'generated', mime_type: 'image/webp', size_bytes: 0 }),
               })
             }
             dispatch(actions.addNotification({ id: Date.now().toString(36), message: `"${name}" saved to Media Library.`, createdAt: new Date().toISOString() }))
@@ -444,6 +451,7 @@ export function LinkedInPage() {
 
 // ─── Create Panel ────────────────────────────────────────────────────────────
 function CreatePanel({ state, webhookUrl, onGenerated }) {
+  const navigate = useNavigate()
   const savedInstructions = state.linkedinInstructions || ''
   const [contentRoute, setContentRoute] = useState('instructions')
   const [topic,        setTopic]        = useState('')
@@ -460,6 +468,7 @@ function CreatePanel({ state, webhookUrl, onGenerated }) {
     if (!webhookUrl) { setError('No webhook URL configured. Go to Settings → Integrations.'); return }
     setError(''); setLoading(true)
     try {
+      const combinedInstructions = buildInstructionsString(state.brandProfile, savedInstructions)
       const res = await fetch(webhookUrl, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -471,7 +480,7 @@ function CreatePanel({ state, webhookUrl, onGenerated }) {
           style: includeImage ? style : null,
           aspect_ratio: includeImage ? aspectRatio : null,
           campaignId: campaignId || null,
-          instructions: contentRoute === 'instructions' ? savedInstructions : null,
+          instructions: contentRoute === 'instructions' ? combinedInstructions : null,
         }),
       })
       const data = await res.json()
@@ -491,7 +500,7 @@ function CreatePanel({ state, webhookUrl, onGenerated }) {
   }
 
   return (
-    <div className="space-y-4 max-w-2xl">
+    <div className="space-y-4 max-w-3xl">
       {!webhookUrl && (
         <div className="rounded-xl bg-amber-50 border border-amber-200 px-4 py-3 flex items-start gap-3">
           <svg className="w-4 h-4 text-amber-500 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
@@ -629,13 +638,20 @@ function CreatePanel({ state, webhookUrl, onGenerated }) {
           )}
 
           {contentRoute === 'instructions' && (
-            <div className={`rounded-xl px-4 py-3 border ${savedInstructions ? 'bg-purple-50 border-purple-100' : 'bg-amber-50 border-amber-100'}`}>
-              {savedInstructions
-                ? <><p className="text-xs font-medium text-purple-700 mb-1 flex items-center gap-1.5">
-                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
-                    Brand instructions will be included</p>
-                  <p className="text-xs text-purple-600 line-clamp-2">{savedInstructions}</p></>
-                : <p className="text-xs text-amber-700"><span className="font-medium">No brand instructions saved.</span> Add your LinkedIn guidelines below.</p>
+            <div className={`rounded-xl px-4 py-3 border ${state.brandProfile && !isBrandProfileEmpty(state.brandProfile) ? 'bg-purple-50 border-purple-100' : 'bg-amber-50 border-amber-100'}`}>
+              {state.brandProfile && !isBrandProfileEmpty(state.brandProfile)
+                ? <>
+                    <p className="text-xs font-medium text-purple-700 mb-1 flex items-center gap-1.5">
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
+                      Brand Brain profile will be included
+                    </p>
+                    {savedInstructions && <p className="text-xs text-purple-600 line-clamp-2">Plus platform notes: {savedInstructions}</p>}
+                  </>
+                : <p className="text-xs text-amber-700">
+                    <span className="font-medium">No Brand Brain profile set.</span> Set it once in{' '}
+                    <button type="button" onClick={() => navigate('/brand-brain')} className="underline font-medium hover:text-amber-800">Brand Brain</button>{' '}
+                    so every platform shares the same voice.
+                  </p>
               }
             </div>
           )}
@@ -679,7 +695,7 @@ function ApprovalScreen({ data, state, webhookUrl, onUpdate, onApprove, onDiscar
         body: JSON.stringify({
           route_type: 'post_only', content_route: data.content_route,
           topic: data.topic, tone: data.tone || 'thought_leader',
-          instructions: state.linkedinInstructions || null,
+          instructions: buildInstructionsString(state.brandProfile, state.linkedinInstructions) || null,
           current_post: `${data.hook}\n\n${data.body}`,
         }),
       })
@@ -928,9 +944,10 @@ function ApprovalScreen({ data, state, webhookUrl, onUpdate, onApprove, onDiscar
 
 // ─── Monthly Schedule ────────────────────────────────────────────────────────
 function MonthlySchedule({ state, dispatch, instructions }) {
-  const supabaseUrl = state.supabase?.url     || ''
-  const anonKey     = state.supabase?.anonKey || ''
-  const { upsertEntry, deleteEntry, fetchMonth, uploadToStorage } = useSupabaseLinkedInSchedule(supabaseUrl, anonKey)
+  const { activeWorkspaceId, accessToken } = useAuth()
+  const supabaseUrl = SUPABASE_URL
+  const anonKey     = accessToken || ''
+  const { upsertEntry, deleteEntry, fetchMonth, uploadToStorage } = useSupabaseLinkedInSchedule(supabaseUrl, anonKey, activeWorkspaceId)
 
   const today    = new Date()
   const [viewDate,       setViewDate]       = useState(new Date(today.getFullYear(), today.getMonth(), 1))
@@ -1055,7 +1072,7 @@ function MonthlySchedule({ state, dispatch, instructions }) {
 
       {!isConfigured && (
         <div className="rounded-xl bg-amber-50 border border-amber-200 px-4 py-3 text-xs text-amber-700">
-          <span className="font-semibold">Supabase not configured.</span> Go to Settings → Integrations to add your Supabase URL and anon key.
+          <span className="font-semibold">Supabase not configured.</span> Go to <strong>Settings → Integrations → Supabase</strong> and enter your Project URL and anon key.
         </div>
       )}
 
@@ -1589,7 +1606,7 @@ function DayEditor({ dateKey, entry, campaigns, supabaseUrl, anonKey, uploadToSt
                 <label className="flex flex-col items-center justify-center gap-2 w-full rounded-2xl border-2 border-dashed border-stone-300 hover:border-blue-400 bg-stone-50 hover:bg-blue-50/30 transition-all cursor-pointer py-6 px-4">
                   <input type="file" accept="image/*" multiple className="hidden" onChange={handleFileChange} />
                   <div className="w-9 h-9 rounded-xl bg-blue-100 flex items-center justify-center">
-                    <svg className="w-4.5 h-4.5 text-blue-600" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                    <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
                   </div>
                   <p className="text-sm font-medium text-text-secondary text-center">Click to select images<br/><span className="text-xs text-text-tertiary font-normal">JPG, PNG, WebP · max 10</span></p>
                 </label>
@@ -1775,8 +1792,9 @@ function PostsList({ posts, dispatch, state, onCreateClick, updatePostStatus, we
   const [filter,       setFilter]       = useState('all')
   const [selectedPost, setSelectedPost] = useState(null)
 
-  const supabaseUrl = state.supabase?.url     || ''
-  const anonKey     = state.supabase?.anonKey || ''
+  const { activeWorkspaceId, accessToken } = useAuth()
+  const supabaseUrl = SUPABASE_URL
+  const anonKey     = accessToken || ''
 
   const filtered = filter === 'all' ? posts : posts.filter(p =>
     filter === 'pending_publish' ? p.status === 'pending_publish' :
@@ -1795,7 +1813,7 @@ function PostsList({ posts, dispatch, state, onCreateClick, updatePostStatus, we
       const table = post._table || 'linkedin_generated_posts'
       await fetch(`${supabaseUrl}/rest/v1/${table}?id=eq.${post.id}`, {
         method: 'DELETE',
-        headers: { 'apikey': anonKey, 'Authorization': `Bearer ${anonKey}` },
+        headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${anonKey}` },
       })
     }
     dispatch(actions.deletePost(post.id))
@@ -1862,7 +1880,7 @@ function PostsList({ posts, dispatch, state, onCreateClick, updatePostStatus, we
                         {p._fromSupabase && <span className="text-[10px] bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full font-medium">📅 Scheduled</span>}
                         {typeMeta && <span className="text-[10px] bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full">{typeMeta.icon} {typeMeta.label}</span>}
                         {!imgSrc && <span className="text-[10px] bg-stone-100 text-stone-500 px-2 py-0.5 rounded-full">📝 Text only</span>}
-                        {campaign && <span className="text-[10px] bg-brand-50 text-brand-600 px-2 py-0.5 rounded-full font-medium">{campaign.name}</span>}
+                        {campaign && <span className="text-[10px] bg-amber-50 text-amber-600 px-2 py-0.5 rounded-full font-medium">{campaign.name}</span>}
                       </div>
                       <button onClick={e => { e.stopPropagation(); handleDelete(p) }} className="text-text-tertiary hover:text-red-500 transition-colors flex-shrink-0 p-1 -m-1">
                         <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/></svg>
@@ -1894,8 +1912,6 @@ function PostsList({ posts, dispatch, state, onCreateClick, updatePostStatus, we
             dispatch({ type: 'UPDATE_POST', payload: { id: postId, imageUrl: newUrl, mediaUrls: [newUrl] } })
             setSelectedPost(prev => prev?.id === postId ? { ...prev, imageUrl: newUrl, mediaUrls: [newUrl] } : prev)
           }}
-          supabaseUrl={supabaseUrl}
-          anonKey={anonKey}
           onPostUpdated={(updatedPost) => {
             dispatch({ type: 'UPDATE_POST', payload: updatedPost })
             setSelectedPost(prev => ({ ...prev, ...updatedPost }))
@@ -1910,8 +1926,9 @@ function PostsList({ posts, dispatch, state, onCreateClick, updatePostStatus, we
 }
 
 // ─── Post Detail Modal ───────────────────────────────────────────────────────
-function PostDetail({ post, state, webhookUrl, regenWebhookUrl, onClose, onStatusChange, onDelete, onPostUpdated, supabaseUrl, anonKey }) {
+function PostDetail({ post, state, webhookUrl, regenWebhookUrl, onClose, onStatusChange, onDelete, onPostUpdated, onImageUpdated, supabaseUrl, anonKey }) {
   const { dispatch } = useApp()
+  const { activeWorkspaceId } = useAuth()
   const [regenLoading, setRegenLoading] = useState(false)
   const [regenError,   setRegenError]   = useState('')
   const [currentImage, setCurrentImage] = useState(post.imageUrl || post.mediaUrls?.[0] || '')
@@ -1960,13 +1977,20 @@ function PostDetail({ post, state, webhookUrl, regenWebhookUrl, onClose, onStatu
     }
     // Update local store
     if (onPostUpdated) onPostUpdated(updated)
+    // Feedback signal for Brand Brain — same idea as Instagram's caption
+    // diff logging, captures what humans changed before approving.
+    logEditFeedback(activeWorkspaceId, anonKey, {
+      platform: 'linkedin', postId: post.id, field: 'hook_body',
+      original: `${post.hook || ''}\n\n${post.body || ''}`,
+      edited:   `${editHook}\n\n${editBody}`,
+    })
     // Sync to Supabase if it's a remote post
     if (post._fromSupabase && supabaseUrl && anonKey) {
       try {
         const res = await fetch(`${supabaseUrl}/rest/v1/linkedin_generated_posts?id=eq.${post.id}`, {
           method: 'PATCH',
           headers: {
-            'apikey': anonKey,
+            'apikey': SUPABASE_ANON_KEY,
             'Authorization': `Bearer ${anonKey}`,
             'Content-Type': 'application/json',
             'Prefer': 'return=representation',
@@ -1999,7 +2023,7 @@ function PostDetail({ post, state, webhookUrl, regenWebhookUrl, onClose, onStatu
       const table = post._table || 'linkedin_generated_posts'
       await fetch(`${supabaseUrl}/rest/v1/${table}?id=eq.${post.id}`, {
         method: 'PATCH',
-        headers: { 'apikey': anonKey, 'Authorization': `Bearer ${anonKey}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+        headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${anonKey}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
         body: JSON.stringify({ image_url: stagedImage, updated_at: new Date().toISOString() }),
       })
     }
@@ -2409,7 +2433,7 @@ function LinkedInVideoPanel({ state, dispatch }) {
   const selectedType = LI_VIDEO_TYPES.find(t => t.value === videoType)
 
   return (
-    <div className="space-y-4 max-w-3xl">
+    <div className="space-y-4 max-w-6xl">
       {/* Header strip */}
       <div className="rounded-2xl overflow-hidden border border-[#0A66C2]/30"
         style={{ background: 'linear-gradient(135deg,#004182 0%,#0A66C2 60%,#1d8fe0 100%)' }}>
@@ -2633,6 +2657,7 @@ function LinkedInVideoPanel({ state, dispatch }) {
 // ─── Instructions Accordion ──────────────────────────────────────────────────
 function InstructionsAccordion({ state }) {
   const { dispatch } = useApp()
+  const navigate = useNavigate()
   const [open,         setOpen]         = useState(false)
   const [instructions, setInstructions] = useState(state.linkedinInstructions || '')
   const [saved,        setSaved]        = useState(false)
@@ -2650,20 +2675,25 @@ function InstructionsAccordion({ state }) {
             <svg className="w-3.5 h-3.5 text-blue-600" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
           </div>
           <div>
-            <p className="text-sm font-medium text-text">Brand Instructions</p>
-            <p className="text-xs text-text-secondary">{state.linkedinInstructions ? '✓ Instructions saved' : 'Optional — add LinkedIn-specific guidelines'}</p>
+            <p className="text-sm font-medium text-text">LinkedIn-Specific Notes</p>
+            <p className="text-xs text-text-secondary">{state.linkedinInstructions ? '✓ Notes saved' : 'Optional — layers on top of your Brand Brain profile'}</p>
           </div>
         </div>
         <svg className={`w-4 h-4 text-text-tertiary transition-transform ${open ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>
       </button>
       {open && (
         <div className="px-5 pb-5 border-t border-border pt-4 space-y-3">
+          <p className="text-xs text-text-tertiary">
+            Your core brand voice, dos/don'ts, and audience now live in one place —{' '}
+            <button type="button" onClick={() => navigate('/brand-brain')} className="text-blue-600 hover:text-blue-700 underline font-medium">Brand Brain</button>.
+            Use this field only for things specific to LinkedIn, e.g. hashtag limits or hook style that wouldn't apply elsewhere.
+          </p>
           <Textarea
-            placeholder={"Examples:\n• Target: architects, developers, C-suite in GCC and Saudi Arabia\n• Voice: authoritative but approachable — think senior partner, not press release\n• Always reference relevant projects (King Fahad Airport, Ritz Carlton, etc.) when appropriate\n• Every post should end with a genuine industry question to drive comments\n• Never use phrases like 'We are excited to announce' or 'In today's world'\n• Hashtag limit: 4-5 max. Always include #ArakLighting"}
-            value={instructions} onChange={e => setInstructions(e.target.value)} rows={7}
+            placeholder={"Examples:\n• Hashtag limit: 4-5 max. Always include #ArakLighting\n• Hooks should work as a standalone line before \"see more\" truncates\n• Native video posts can run longer-form than the IG equivalent"}
+            value={instructions} onChange={e => setInstructions(e.target.value)} rows={5}
           />
           <Button onClick={handleSave} variant={saved ? 'secondary' : 'primary'} className="w-full justify-center">
-            {saved ? '✓ Saved' : 'Save Instructions'}
+            {saved ? '✓ Saved' : 'Save LinkedIn Notes'}
           </Button>
         </div>
       )}

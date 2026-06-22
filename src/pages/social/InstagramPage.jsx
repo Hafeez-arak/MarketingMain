@@ -1,8 +1,12 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { createPortal } from 'react-dom'
+import { useNavigate } from 'react-router-dom'
 import { useApp, actions } from '../../store/appStore'
+import { useAuth } from '../../store/AuthContext'
+import { SUPABASE_URL, SUPABASE_ANON_KEY } from '../../lib/supabaseClient'
 import { Card, Button, Badge, Textarea, Spinner, PostImage } from '../../components/ui/index'
 import { uid, formatDateTime } from '../../lib/utils'
+import { buildInstructionsString, isBrandProfileEmpty, useBrandProfileSync, logEditFeedback } from '../../lib/brandBrain'
 
 // ─── Constants ─────────────────────────────────────────────────────────────
 const LIGHTING_STYLES = [
@@ -458,7 +462,7 @@ function useSupabasePosts(supabaseUrl, anonKey) {
     if (!supabaseUrl || !anonKey) return
     setLoadingPosts(true)
     try {
-      const headers = { 'apikey': anonKey, 'Authorization': `Bearer ${anonKey}` }
+      const headers = { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${anonKey}` }
       const [schedRes, manualRes] = await Promise.all([
         fetch(`${supabaseUrl}/rest/v1/instagram_generated_posts?select=*&order=created_at.desc&limit=100`, { headers }),
         fetch(`${supabaseUrl}/rest/v1/instagram_manual_posts?select=*&order=created_at.desc&limit=100`, { headers }),
@@ -507,7 +511,7 @@ function useSupabasePosts(supabaseUrl, anonKey) {
       {
         method: 'PATCH',
         headers: {
-          'apikey': anonKey, 'Authorization': `Bearer ${anonKey}`,
+          'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${anonKey}`,
           'Content-Type': 'application/json', 'Prefer': 'return=minimal',
         },
         body: JSON.stringify({ status, updated_at: new Date().toISOString() }),
@@ -520,10 +524,12 @@ function useSupabasePosts(supabaseUrl, anonKey) {
 
 export function InstagramPage() {
   const { state, dispatch } = useApp()
+  const { activeWorkspaceId, accessToken } = useAuth()
+  useBrandProfileSync(state, dispatch)
   const localPosts  = state.posts.filter(p => p.platform === 'instagram')
   const webhookUrl  = state.webhooks?.instagram || ''
-  const supabaseUrl = state.supabase?.url     || ''
-  const anonKey     = state.supabase?.anonKey || ''
+  const supabaseUrl = SUPABASE_URL
+  const anonKey     = accessToken || ''
 
   const { remotePosts, loadingPosts, lastFetchedAt, fetchRemotePosts, updatePostStatus } =
     useSupabasePosts(supabaseUrl, anonKey)
@@ -568,7 +574,7 @@ export function InstagramPage() {
     if (supabaseUrl && anonKey && approval.supabase_id) {
       await fetch(`${supabaseUrl}/rest/v1/instagram_manual_posts?id=eq.${approval.supabase_id}`, {
         method: 'PATCH',
-        headers: { 'apikey': anonKey, 'Authorization': `Bearer ${anonKey}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+        headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${anonKey}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
         body: JSON.stringify({ status: 'approved', updated_at: new Date().toISOString() }),
       })
     }
@@ -580,14 +586,14 @@ export function InstagramPage() {
     if (supabaseUrl && anonKey && approval?.supabase_id) {
       await fetch(`${supabaseUrl}/rest/v1/instagram_manual_posts?id=eq.${approval.supabase_id}`, {
         method: 'DELETE',
-        headers: { 'apikey': anonKey, 'Authorization': `Bearer ${anonKey}` },
+        headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${anonKey}` },
       })
     }
     setApproval(null); setScreen('create')
   }
 
   return (
-    <div className="max-w-4xl space-y-5">
+    <div className="max-w-7xl space-y-5">
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div className="flex items-center gap-3">
@@ -655,7 +661,7 @@ export function InstagramPage() {
       {screen === 'posts'    && <PostsList posts={mergedPosts} dispatch={dispatch} state={state} onCreateClick={() => setScreen('create')} updatePostStatus={updatePostStatus} webhookUrl={webhookUrl} regenWebhookUrl={state.webhooks?.instagramScheduleRegen || ''} />}
       {screen === 'create'   && <CreatePanel state={state} webhookUrl={webhookUrl} onGenerated={handleGenerated} />}
       {screen === 'reels'    && <ReelsPanel state={state} dispatch={dispatch} />}
-      {screen === 'schedule' && <MonthlySchedule state={state} dispatch={dispatch} instructions={state.instagramInstructions || ''} />}
+      {screen === 'schedule' && <MonthlySchedule state={state} dispatch={dispatch} instructions={buildInstructionsString(state.brandProfile, state.instagramInstructions)} />}
       {screen === 'approval' && approval && (
         <ApprovalScreen data={approval} state={state} webhookUrl={webhookUrl}
           onUpdate={setApproval} onApprove={handleApprove} onDiscard={handleDiscard}
@@ -663,8 +669,8 @@ export function InstagramPage() {
             if (supabaseUrl && anonKey) {
               await fetch(`${supabaseUrl}/rest/v1/media_library`, {
                 method: 'POST',
-                headers: { 'apikey': anonKey, 'Authorization': `Bearer ${anonKey}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
-                body: JSON.stringify({ name, url, platform: 'instagram', topic, source: 'generated', mime_type: 'image/webp', size_bytes: 0 }),
+                headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${anonKey}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+                body: JSON.stringify({ workspace_id: activeWorkspaceId, name, url, platform: 'instagram', topic, source: 'generated', mime_type: 'image/webp', size_bytes: 0 }),
               })
             }
             dispatch(actions.addNotification({ id: Date.now().toString(36), message: `"${name}" saved to Media Library.`, createdAt: new Date().toISOString() }))
@@ -677,6 +683,7 @@ export function InstagramPage() {
 
 // ─── Create Panel ──────────────────────────────────────────────────────────
 function CreatePanel({ state, webhookUrl, onGenerated }) {
+  const navigate = useNavigate()
   const savedInstructions = state.instagramInstructions || ''
   const [topic,        setTopic]        = useState('')
   const [tone,         setTone]         = useState('professional')
@@ -693,6 +700,7 @@ function CreatePanel({ state, webhookUrl, onGenerated }) {
     if (!webhookUrl) { setError('No webhook URL configured. Go to Settings → Integrations → Workflow Webhooks.'); return }
     setError(''); setLoading(true)
     try {
+      const combinedInstructions = buildInstructionsString(state.brandProfile, savedInstructions)
       const res = await fetch(webhookUrl, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -704,7 +712,7 @@ function CreatePanel({ state, webhookUrl, onGenerated }) {
           custom_type: visualMode === 'custom' ? customType : null,
           aspect_ratio: aspectRatio,
           campaignId: campaignId || null,
-          instructions: savedInstructions || null,
+          instructions: combinedInstructions || null,
         }),
       })
       const data = await res.json()
@@ -723,7 +731,7 @@ function CreatePanel({ state, webhookUrl, onGenerated }) {
   }
 
   return (
-    <div className="space-y-4 max-w-2xl">
+    <div className="space-y-4 max-w-3xl">
       {!webhookUrl && (
         <div className="rounded-xl bg-amber-50 border border-amber-200 px-4 py-3 flex items-start gap-3">
           <svg className="w-4 h-4 text-amber-500 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
@@ -838,14 +846,21 @@ function CreatePanel({ state, webhookUrl, onGenerated }) {
             <AspectRatioSelector value={aspectRatio} onChange={setAspectRatio} />
           </div>
 
-          <div className={`rounded-xl px-4 py-3 border ${savedInstructions ? 'bg-purple-50 border-purple-100' : 'bg-amber-50 border-amber-100'}`}>
-            {savedInstructions ? (
-              <><p className="text-xs font-medium text-purple-700 mb-1 flex items-center gap-1.5">
-                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
-                Brand instructions will be included</p>
-                <p className="text-xs text-purple-600 line-clamp-2">{savedInstructions}</p></>
+          <div className={`rounded-xl px-4 py-3 border ${state.brandProfile && !isBrandProfileEmpty(state.brandProfile) ? 'bg-purple-50 border-purple-100' : 'bg-amber-50 border-amber-100'}`}>
+            {state.brandProfile && !isBrandProfileEmpty(state.brandProfile) ? (
+              <>
+                <p className="text-xs font-medium text-purple-700 mb-1 flex items-center gap-1.5">
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
+                  Brand Brain profile will be included
+                </p>
+                {savedInstructions && <p className="text-xs text-purple-600 line-clamp-2">Plus platform notes: {savedInstructions}</p>}
+              </>
             ) : (
-              <p className="text-xs text-amber-700"><span className="font-medium">No brand instructions saved.</span> Add your guidelines below to give the AI your brand voice.</p>
+              <p className="text-xs text-amber-700">
+                <span className="font-medium">No Brand Brain profile set.</span> Set it once in{' '}
+                <button type="button" onClick={() => navigate('/brand-brain')} className="underline font-medium hover:text-amber-800">Brand Brain</button>{' '}
+                so every platform shares the same voice.
+              </p>
             )}
           </div>
 
@@ -943,7 +958,7 @@ function ApprovalScreen({ data, state, webhookUrl, onUpdate, onApprove, onDiscar
           content_route: data.content_route,
           topic: data.topic,
           tone: data.tone || 'professional',
-          instructions: state.instagramInstructions || null,
+          instructions: buildInstructionsString(state.brandProfile, state.instagramInstructions) || null,
           current_caption: data.caption,
         }),
       })
@@ -992,7 +1007,7 @@ function ApprovalScreen({ data, state, webhookUrl, onUpdate, onApprove, onDiscar
           visual_mode: 'lighting',
           style: newStyle,
           custom_type: null,
-          instructions: state.instagramInstructions || null,
+          instructions: buildInstructionsString(state.brandProfile, state.instagramInstructions) || null,
         }),
       })
       const result = await res.json()
@@ -1270,10 +1285,10 @@ function ApprovalScreen({ data, state, webhookUrl, onUpdate, onApprove, onDiscar
 }
 
 // ─── Supabase helpers ──────────────────────────────────────────────────────
-function useSupabaseSchedule(supabaseUrl, anonKey) {
+function useSupabaseSchedule(supabaseUrl, anonKey, workspaceId) {
   const headers = {
     'Content-Type':  'application/json',
-    'apikey':        anonKey,
+    'apikey':        SUPABASE_ANON_KEY,
     'Authorization': `Bearer ${anonKey}`,
     'Prefer':        'resolution=merge-duplicates',
   }
@@ -1281,6 +1296,7 @@ function useSupabaseSchedule(supabaseUrl, anonKey) {
   async function upsertEntry(dateKey, entry) {
     if (!supabaseUrl || !anonKey) return { error: 'Supabase not configured. Go to Settings → Integrations.' }
     const body = {
+      workspace_id:         workspaceId,
       webapp_id:            entry._id || null,
       scheduled_date:       dateKey,
       topic:                entry.topic,
@@ -1317,7 +1333,7 @@ function useSupabaseSchedule(supabaseUrl, anonKey) {
     const path = `instagram/${dateKey}/${Date.now()}_${index}.${ext}`
     const res  = await fetch(`${supabaseUrl}/storage/v1/object/schedule-uploads/${path}`, {
       method:  'POST',
-      headers: { 'apikey': anonKey, 'Authorization': `Bearer ${anonKey}`, 'Content-Type': file.type },
+      headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${anonKey}`, 'Content-Type': file.type },
       body:    file,
     })
     if (!res.ok) { const err = await res.text(); return { error: err } }
@@ -1378,16 +1394,17 @@ function useSupabaseSchedule(supabaseUrl, anonKey) {
 const DAYS_OF_WEEK = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
 function MonthlySchedule({ state, dispatch, instructions }) {
-  const supabaseUrl = state.supabase?.url     || ''
-  const anonKey     = state.supabase?.anonKey || ''
-  const { upsertEntry, deleteEntry, fetchMonth, uploadToStorage } = useSupabaseSchedule(supabaseUrl, anonKey)
+  const { activeWorkspaceId, accessToken } = useAuth()
+  const supabaseUrl = SUPABASE_URL
+  const anonKey     = accessToken || ''
+  const { upsertEntry, deleteEntry, fetchMonth, uploadToStorage } = useSupabaseSchedule(supabaseUrl, anonKey, activeWorkspaceId)
   async function saveImageToMediaLibrary(url, topic, platform) {
     const name = `${(topic||'post').replace(/[^a-z0-9]/gi,'_').toLowerCase()}_${Date.now()}.webp`
     if (supabaseUrl && anonKey) {
       await fetch(`${supabaseUrl}/rest/v1/media_library`, {
         method: 'POST',
-        headers: { 'apikey': anonKey, 'Authorization': `Bearer ${anonKey}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
-        body: JSON.stringify({ name, url, platform, topic, source: 'generated', mime_type: 'image/webp', size_bytes: 0 }),
+        headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${anonKey}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+        body: JSON.stringify({ workspace_id: activeWorkspaceId, name, url, platform, topic, source: 'generated', mime_type: 'image/webp', size_bytes: 0 }),
       })
     }
     return name
@@ -2289,6 +2306,7 @@ function DayEditor({ dateKey, entry, campaigns, supabaseUrl, anonKey, uploadToSt
 // ─── Post Detail Modal ─────────────────────────────────────────────────────
 function PostDetail({ post, state, webhookUrl, regenWebhookUrl, supabaseUrl, anonKey, onClose, onStatusChange, onImageUpdated, onCaptionUpdated, onDelete }) {
   const { dispatch } = useApp()
+  const { activeWorkspaceId } = useAuth()
   const [regenLoading,   setRegenLoading]   = useState(false)
   const [regenError,     setRegenError]     = useState('')
   // currentImage = the saved/committed image shown in the card list
@@ -2314,8 +2332,8 @@ function PostDetail({ post, state, webhookUrl, regenWebhookUrl, supabaseUrl, ano
     if (supabaseUrl && anonKey) {
       await fetch(`${supabaseUrl}/rest/v1/media_library`, {
         method: 'POST',
-        headers: { 'apikey': anonKey, 'Authorization': `Bearer ${anonKey}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
-        body: JSON.stringify({ name: fileName, url: imageToSave, platform: 'instagram', topic: post.topic, source: 'generated', mime_type: 'image/webp', size_bytes: 0 }),
+        headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${anonKey}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+        body: JSON.stringify({ workspace_id: activeWorkspaceId, name: fileName, url: imageToSave, platform: 'instagram', topic: post.topic, source: 'generated', mime_type: 'image/webp', size_bytes: 0 }),
       })
     }
     setSavedToMedia(true)
@@ -2377,7 +2395,7 @@ function PostDetail({ post, state, webhookUrl, regenWebhookUrl, supabaseUrl, ano
       const table = post._table || 'instagram_generated_posts'
       await fetch(`${supabaseUrl}/rest/v1/${table}?id=eq.${post.id}`, {
         method: 'PATCH',
-        headers: { 'apikey': anonKey, 'Authorization': `Bearer ${anonKey}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+        headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${anonKey}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
         body: JSON.stringify({ image_url: newUrl, updated_at: new Date().toISOString() }),
       })
     }
@@ -2389,7 +2407,7 @@ function PostDetail({ post, state, webhookUrl, regenWebhookUrl, supabaseUrl, ano
   }
 
   function handleSaveCaption() {
-    onCaptionUpdated(post.id, captionDraft)
+    onCaptionUpdated(post.id, captionDraft, post.copy)
     setEditingCaption(false)
   }
 
@@ -2736,8 +2754,9 @@ function PostsList({ posts, dispatch, state, onCreateClick, updatePostStatus, we
   const [filter,       setFilter]       = useState('all')
   const [selectedPost, setSelectedPost] = useState(null)
 
-  const supabaseUrl = state.supabase?.url     || ''
-  const anonKey     = state.supabase?.anonKey || ''
+  const { activeWorkspaceId, accessToken } = useAuth()
+  const supabaseUrl = SUPABASE_URL
+  const anonKey     = accessToken || ''
 
   const filtered = filter === 'all' ? posts : posts.filter(p =>
     filter === 'pending_publish' ? p.status === 'pending_publish' :
@@ -2763,11 +2782,14 @@ function PostsList({ posts, dispatch, state, onCreateClick, updatePostStatus, we
     }
   }
 
-  async function handleCaptionUpdated(postId, newCopy) {
+  async function handleCaptionUpdated(postId, newCopy, originalCopy) {
     dispatch({ type: 'UPDATE_POST', payload: { id: postId, copy: newCopy } })
     if (selectedPost?.id === postId) {
       setSelectedPost(prev => ({ ...prev, copy: newCopy }))
     }
+    // Feedback signal for Brand Brain — captures what humans changed before
+    // approving, so future prompt refinement has real data to learn from.
+    logEditFeedback(activeWorkspaceId, accessToken, { platform: 'instagram', postId, field: 'caption', original: originalCopy, edited: newCopy })
     // Persist to Supabase for scheduled posts
     if (supabaseUrl && anonKey) {
       const post = [...(state.posts || []), ...(selectedPost ? [selectedPost] : [])].find(p => p.id === postId)
@@ -2779,7 +2801,7 @@ function PostsList({ posts, dispatch, state, onCreateClick, updatePostStatus, we
           {
             method: 'PATCH',
             headers: {
-              'apikey': anonKey, 'Authorization': `Bearer ${anonKey}`,
+              'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${anonKey}`,
               'Content-Type': 'application/json', 'Prefer': 'return=minimal',
             },
             body: JSON.stringify({ [field]: newCopy, updated_at: new Date().toISOString() }),
@@ -2795,7 +2817,7 @@ function PostsList({ posts, dispatch, state, onCreateClick, updatePostStatus, we
         const table = post._table || 'instagram_generated_posts'
         await fetch(`${supabaseUrl}/rest/v1/${table}?id=eq.${post.id}`, {
           method: 'DELETE',
-          headers: { 'apikey': anonKey, 'Authorization': `Bearer ${anonKey}` },
+          headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${anonKey}` },
         })
       }
     }
@@ -2963,6 +2985,7 @@ const STATUS_COLORS_REEL = {
 }
 
 function ReelsPanel({ state, dispatch }) {
+  const { activeWorkspaceId, accessToken } = useAuth()
   const webhookUrl = state.webhooks?.instagramReels || ''
   const [subView,    setSubView]    = useState('planner')
   const [format,     setFormat]     = useState('product_reel')
@@ -2986,10 +3009,10 @@ function ReelsPanel({ state, dispatch }) {
     if (!brief.trim()) { setError('Please enter a content brief.'); return }
     if (!webhookUrl)   { setError('No Reels Webhook configured. Go to Settings → Integrations → Instagram Reels Webhook.'); return }
 
-    const supabaseUrl  = state.supabase?.url  || ''
-    const supabaseKey  = state.supabase?.anonKey || ''
-    if (!supabaseUrl || !supabaseKey) {
-      setError('Supabase not configured. Go to Settings → Integrations.')
+    const supabaseUrl  = SUPABASE_URL
+    const supabaseKey  = accessToken || SUPABASE_ANON_KEY
+    if (!activeWorkspaceId) {
+      setError('No active workspace. Try signing out and back in.')
       return
     }
 
@@ -3004,6 +3027,10 @@ function ReelsPanel({ state, dispatch }) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          workspace_id: activeWorkspaceId, // NOTE: n8n's workflow still needs
+          // updating to read this and stamp it on the row it inserts — until
+          // then, every reel lands in the legacy Arak workspace regardless of
+          // who triggered it, since n8n authenticates with the shared anon key.
           reelFormat:   format,
           reelDuration: duration,
           reelBrief:    brief.trim(),
@@ -3011,7 +3038,7 @@ function ReelsPanel({ state, dispatch }) {
           reelMusic:    musicNote.trim(),
           reelCta:      cta.trim(),
           tone,
-          instructions: state.instagramInstructions || '',
+          instructions: buildInstructionsString(state.brandProfile, state.instagramInstructions) || '',
         }),
       }).catch(() => {}) // swallow network errors — we poll instead
     } catch (_) {}
@@ -3026,7 +3053,7 @@ function ReelsPanel({ state, dispatch }) {
       try {
         const r = await fetch(
           `${supabaseUrl}/rest/v1/instagram_reels?select=*&order=created_at.desc&limit=1`,
-          { headers: { apikey: supabaseKey, Authorization: `Bearer ${supabaseKey}` } }
+          { headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${supabaseKey}` } }
         )
         const rows = await r.json()
         const row  = rows?.[0]
@@ -3131,7 +3158,7 @@ function ReelsPanel({ state, dispatch }) {
   }
 
   return (
-    <div className="space-y-4 max-w-3xl">
+    <div className="space-y-4 max-w-6xl">
 
       {/* Header strip */}
       <div className="rounded-2xl overflow-hidden border border-border"
@@ -3299,10 +3326,10 @@ function ReelsPanel({ state, dispatch }) {
             </div>
 
             {/* Brand instructions indicator */}
-            <div className={`rounded-xl px-4 py-3 border ${state.instagramInstructions ? 'bg-purple-50 border-purple-100' : 'bg-stone-50 border-stone-200'}`}>
-              {state.instagramInstructions
-                ? <p className="text-xs text-purple-700"><span className="font-semibold">✓ Brand instructions included</span> — Claude will use your saved guidelines.</p>
-                : <p className="text-xs text-text-tertiary">No brand instructions saved. Add them in the Brand Instructions accordion below.</p>}
+            <div className={`rounded-xl px-4 py-3 border ${state.brandProfile && !isBrandProfileEmpty(state.brandProfile) ? 'bg-purple-50 border-purple-100' : 'bg-stone-50 border-stone-200'}`}>
+              {state.brandProfile && !isBrandProfileEmpty(state.brandProfile)
+                ? <p className="text-xs text-purple-700"><span className="font-semibold">✓ Brand Brain profile included</span> — Claude will use your saved voice and guidelines.</p>
+                : <p className="text-xs text-text-tertiary">No Brand Brain profile set yet. Set it once in Brand Brain to give every platform — including Reels — your brand voice.</p>}
             </div>
 
             {/* Error */}
@@ -3502,7 +3529,7 @@ function ReelApprovalScreen({ data, onApprove, onDiscard }) {
   const fmtLabel = REEL_FORMATS.find(f => f.value === data.format)
 
   return (
-    <div className="space-y-5 max-w-5xl">
+    <div className="space-y-5 max-w-7xl">
 
       {/* ── Page header ── */}
       <div className="flex items-start justify-between gap-4 flex-wrap">
@@ -3723,6 +3750,7 @@ function ReelApprovalScreen({ data, onApprove, onDiscard }) {
 // ─── Instructions Accordion ────────────────────────────────────────────────
 function InstructionsAccordion({ state }) {
   const { dispatch } = useApp()
+  const navigate = useNavigate()
   const [open,         setOpen]         = useState(false)
   const [instructions, setInstructions] = useState(state.instagramInstructions || '')
   const [saved,        setSaved]        = useState(false)
@@ -3741,19 +3769,24 @@ function InstructionsAccordion({ state }) {
             </svg>
           </div>
           <div>
-            <p className="text-sm font-medium text-text">Brand Instructions</p>
-            <p className="text-xs text-text-secondary">{state.instagramInstructions ? '✓ Instructions saved' : 'Optional — add your brand guidelines'}</p>
+            <p className="text-sm font-medium text-text">Instagram-Specific Notes</p>
+            <p className="text-xs text-text-secondary">{state.instagramInstructions ? '✓ Notes saved' : 'Optional — layers on top of your Brand Brain profile'}</p>
           </div>
         </div>
         <svg className={`w-4 h-4 text-text-tertiary transition-transform ${open ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>
       </button>
       {open && (
         <div className="px-5 pb-5 border-t border-border pt-4 space-y-3 fade-up">
+          <p className="text-xs text-text-tertiary">
+            Your core brand voice, dos/don'ts, and audience now live in one place —{' '}
+            <button type="button" onClick={() => navigate('/brand-brain')} className="text-purple-600 hover:text-purple-700 underline font-medium">Brand Brain</button>.
+            Use this field only for things specific to Instagram, e.g. Reels-style hooks or emoji usage that wouldn't apply on LinkedIn.
+          </p>
           <Textarea
-            placeholder={"Examples:\n• Brand voice: premium, authoritative, never salesy\n• Always end with a question to boost engagement\n• Mention our 45+ years legacy when relevant\n• Target: architects, interior designers, developers in KSA"}
-            value={instructions} onChange={e => setInstructions(e.target.value)} rows={6} />
+            placeholder={"Examples:\n• Lean into emoji more here than on LinkedIn\n• Reels hooks should be punchy, under 6 words\n• Carousel posts: keep each slide to one idea"}
+            value={instructions} onChange={e => setInstructions(e.target.value)} rows={5} />
           <Button onClick={handleSave} variant={saved ? 'secondary' : 'primary'} className="w-full justify-center">
-            {saved ? '✓ Saved' : 'Save Instructions'}
+            {saved ? '✓ Saved' : 'Save Instagram Notes'}
           </Button>
         </div>
       )}
