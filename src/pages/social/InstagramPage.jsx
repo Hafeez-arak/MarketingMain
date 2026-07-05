@@ -7,6 +7,7 @@ import { SUPABASE_URL, SUPABASE_ANON_KEY } from '../../lib/supabaseClient'
 import { Card, Button, Badge, Textarea, Spinner, PostImage } from '../../components/ui/index'
 import { uid, formatDateTime } from '../../lib/utils'
 import { buildInstructionsString, isBrandProfileEmpty, useBrandProfileSync, logEditFeedback } from '../../lib/brandBrain'
+import { ReferencePicker } from '../../components/ReferencePicker'
 
 // ─── Constants ─────────────────────────────────────────────────────────────
 const LIGHTING_STYLES = [
@@ -1310,6 +1311,7 @@ function useSupabaseSchedule(supabaseUrl, anonKey, workspaceId) {
       campaign_id:          entry.campaignId        || null,
       upload_type:          entry.uploadType        || 'generate',
       uploaded_image_urls:  entry.uploadedImageUrls || null,
+      reference_image_urls: entry.referenceImageUrls || [],
       publish_time:         entry.publishTime       || null,
       status:               'pending',
     }
@@ -1379,6 +1381,7 @@ function useSupabaseSchedule(supabaseUrl, anonKey, workspaceId) {
         status:             r.status,
         uploadType:         r.upload_type         || 'generate',
         uploadedImageUrls:  r.uploaded_image_urls || null,
+        referenceImageUrls: r.reference_image_urls || [],
         publishTime:        r.publish_time        || null,
       }
       if (!map[r.scheduled_date]) map[r.scheduled_date] = []
@@ -1806,6 +1809,8 @@ function DayEditor({ dateKey, entry, campaigns, supabaseUrl, anonKey, uploadToSt
   const [aspectRatio, setAspectRatio] = useState(entry?.aspectRatio || '1:1')
   const [campaignId,  setCampaignId]  = useState(entry?.campaignId || '')
   const [notes,       setNotes]       = useState(entry?.notes || '')
+  const [references,  setReferences]  = useState(entry?.referenceImageUrls || []) // image-to-image guides
+  const [pickingRefs, setPickingRefs] = useState(false)
 
   // Upload tab state
   const [uploadTopic,    setUploadTopic]    = useState(entry?.uploadType === 'upload' ? (entry?.topic || '') : '')
@@ -1825,7 +1830,7 @@ function DayEditor({ dateKey, entry, campaigns, supabaseUrl, anonKey, uploadToSt
   // ── Generate save ──────────────────────────────────────────────────────────
   function handleSaveGenerate() {
     if (!topic.trim()) return
-    onSave({ topic: topic.trim(), tone, visualMode, style, customType, aspectRatio, campaignId, notes: notes.trim(), uploadType: 'generate', uploadedImageUrls: null, publishTime, updatedAt: new Date().toISOString() })
+    onSave({ topic: topic.trim(), tone, visualMode, style, customType, aspectRatio, campaignId, notes: notes.trim(), uploadType: 'generate', uploadedImageUrls: null, referenceImageUrls: references, publishTime, updatedAt: new Date().toISOString() })
   }
 
   // ── Upload save ────────────────────────────────────────────────────────────
@@ -1928,7 +1933,7 @@ function DayEditor({ dateKey, entry, campaigns, supabaseUrl, anonKey, uploadToSt
           <button onClick={() => setTab('upload')}
             className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all ${tab === 'upload'
               ? 'text-white' : 'text-text-secondary bg-surface-subtle hover:bg-stone-100'}`}
-            style={tab === 'upload' ? { background: 'linear-gradient(135deg,#ffbc38 0%,#f5a200 50%,#d4850a 100%)' } : {}}>
+            style={tab === 'upload' ? { background: 'linear-gradient(135deg,#96acb2 0%,#7d98a1 50%,#4c5e61 100%)' } : {}}>
             <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
             Upload Images
           </button>
@@ -2020,6 +2025,26 @@ function DayEditor({ dateKey, entry, campaigns, supabaseUrl, anonKey, uploadToSt
               <Textarea placeholder="Hashtag ideas, references, things to avoid, specific products to mention..." value={notes} onChange={e => setNotes(e.target.value)} rows={2} />
             </div>
 
+            {/* Reference images — guide the AI image generation (image-to-image) */}
+            <div>
+              <p className="block text-xs font-bold text-text-secondary uppercase tracking-wider mb-2">Reference Images <span className="normal-case font-normal text-text-tertiary">(optional — guides the generated visual)</span></p>
+              <div className="flex items-center gap-2 flex-wrap">
+                {references.map(url => (
+                  <div key={url} className="relative w-14 h-14 rounded-lg overflow-hidden border border-border group">
+                    <PostImage src={url} alt="Reference" className="w-full h-full object-cover" />
+                    <button onClick={() => setReferences(refs => refs.filter(u => u !== url))}
+                      className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-black/60 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity" title="Remove">
+                      <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>
+                    </button>
+                  </div>
+                ))}
+                <button onClick={() => setPickingRefs(true)}
+                  className="w-14 h-14 rounded-lg border-2 border-dashed border-border hover:border-amber-400 hover:bg-surface-subtle flex items-center justify-center text-text-tertiary transition-colors" title="Add references">
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+                </button>
+              </div>
+            </div>
+
             <div className="rounded-2xl bg-stone-50 border border-stone-200 px-5 py-4">
               <p className="text-[11px] font-bold text-text-secondary uppercase tracking-wider mb-3">Sent to workflow on this date</p>
               <div className="space-y-1.5">
@@ -2030,6 +2055,7 @@ function DayEditor({ dateKey, entry, campaigns, supabaseUrl, anonKey, uploadToSt
                   { label: 'visual_mode',    value: visualMode ?? 'auto' },
                   { label: 'aspect_ratio',   value: aspectRatio },
                   { label: 'upload_type',    value: 'generate' },
+                  { label: 'reference_images', value: references.length ? `${references.length} attached` : '—' },
                   { label: 'notes',          value: notes.trim() || '—' },
                 ].map(row => (
                   <div key={row.label} className="flex items-center gap-3 text-xs">
@@ -2285,7 +2311,7 @@ function DayEditor({ dateKey, entry, campaigns, supabaseUrl, anonKey, uploadToSt
           {tab === 'upload' && (
             <button onClick={handleSaveUpload} disabled={!uploadTopic.trim() || totalImages === 0 || uploading}
               className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white disabled:opacity-50 transition-all active:scale-95 flex items-center justify-center gap-2"
-              style={{ background: (!uploadTopic.trim() || totalImages === 0 || uploading) ? '#9ca3af' : 'linear-gradient(135deg,#ffbc38 0%,#f5a200 50%,#d4850a 100%)', boxShadow: (!uploadTopic.trim() || totalImages === 0) ? 'none' : '0 4px 16px rgba(245,162,0,0.35)' }}>
+              style={{ background: (!uploadTopic.trim() || totalImages === 0 || uploading) ? '#9ca3af' : 'linear-gradient(135deg,#96acb2 0%,#7d98a1 50%,#4c5e61 100%)', boxShadow: (!uploadTopic.trim() || totalImages === 0) ? 'none' : '0 4px 16px rgba(125,152,161,0.35)' }}>
               {uploading ? <><svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>Uploading…</> : 'Save & Upload Images'}
             </button>
           )}
@@ -2299,6 +2325,12 @@ function DayEditor({ dateKey, entry, campaigns, supabaseUrl, anonKey, uploadToSt
           )}
         </div>
       </div>
+
+      {pickingRefs && (
+        <ReferencePicker value={references}
+          onSave={urls => { setReferences(urls); setPickingRefs(false) }}
+          onClose={() => setPickingRefs(false)} />
+      )}
     </div>
   )
 }
@@ -2453,8 +2485,8 @@ function PostDetail({ post, state, webhookUrl, regenWebhookUrl, supabaseUrl, ano
         <div className="flex flex-1 overflow-hidden" style={{ minHeight: 0 }}>
 
           {/* Left — Image column */}
-          <div className="flex-shrink-0 flex flex-col overflow-y-auto" style={{ background: 'linear-gradient(160deg, #fdf2f5 0%, #fce8f0 60%, #f9e0ef 100%)' }}
-            style={{ width: isPortrait ? '420px' : isSquare ? '500px' : '560px' }}>
+          <div className="flex-shrink-0 flex flex-col overflow-y-auto"
+            style={{ background: 'linear-gradient(160deg, #fdf2f5 0%, #fce8f0 60%, #f9e0ef 100%)', width: isPortrait ? '420px' : isSquare ? '500px' : '560px' }}>
 
             {/* Image */}
             <div className="flex-1 flex items-center justify-center p-6">
@@ -2470,7 +2502,7 @@ function PostDetail({ post, state, webhookUrl, regenWebhookUrl, supabaseUrl, ano
 
                   {/* Staged preview badge */}
                   {stagedImage && (
-                    <div style={{ position: 'absolute', top: 10, left: 10, background: 'rgba(245,162,0,0.92)', backdropFilter: 'blur(6px)', borderRadius: 8, padding: '4px 10px' }}>
+                    <div style={{ position: 'absolute', top: 10, left: 10, background: 'rgba(125,152,161,0.92)', backdropFilter: 'blur(6px)', borderRadius: 8, padding: '4px 10px' }}>
                       <span style={{ color: '#fff', fontSize: 11, fontWeight: 700, letterSpacing: '0.04em' }}>PREVIEW</span>
                     </div>
                   )}
@@ -2748,6 +2780,10 @@ function PostDetail({ post, state, webhookUrl, regenWebhookUrl, supabaseUrl, ano
     document.body
   )
 }
+
+// Exported so the cross-platform Approvals page can reuse this exact review
+// UI (regen/crop/tone-switch/approve) instead of duplicating it.
+export { PostDetail as InstagramPostDetail }
 
 // ─── Posts List ────────────────────────────────────────────────────────────
 function PostsList({ posts, dispatch, state, onCreateClick, updatePostStatus, webhookUrl, regenWebhookUrl }) {

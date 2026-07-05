@@ -11,6 +11,7 @@ import { Onboarding } from './pages/auth/Onboarding'
 import Dashboard from './pages/Dashboard'
 import { Campaigns, NewCampaign }  from './pages/campaigns/index'
 import { CampaignPlanner, CampaignPostEditor } from './pages/campaigns/CampaignPlanner'
+import { ContentPlans } from './pages/campaigns/ContentPlans'
 import { Schedule }                from './pages/schedule/index'
 import { EmailFlows, NewEmailFlow }from './pages/email/index'
 import { Analytics }               from './pages/analytics/index'
@@ -18,6 +19,7 @@ import { MediaLibrary }            from './pages/media/index'
 import { SocialOverview, SocialPlatform, NewPost } from './pages/social/index'
 import { InstagramPage } from './pages/social/InstagramPage'
 import { LinkedInPage }  from './pages/social/LinkedInPage'
+import { Approvals as PostApprovals } from './pages/social/Approvals'
 import { Approvals }               from './pages/approvals/index'
 import { Settings, Integrations, Team } from './pages/settings/index'
 import { BrandBrain } from './pages/settings/BrandBrain'
@@ -34,6 +36,7 @@ function ProtectedApp() {
             <Route path="/"                      element={<Dashboard />} />
             <Route path="/brand-brain"           element={<BrandBrain />} />
             <Route path="/campaigns"             element={<Campaigns />} />
+            <Route path="/campaigns/plans"       element={<ContentPlans />} />
             <Route path="/campaigns/plan"        element={<CampaignPlanner />} />
             <Route path="/campaigns/plan/post/:rowId" element={<CampaignPostEditor />} />
             <Route path="/campaigns/new"         element={<NewCampaign />} />
@@ -43,6 +46,7 @@ function ProtectedApp() {
             <Route path="/analytics"             element={<Analytics />} />
             <Route path="/media"                 element={<MediaLibrary />} />
             <Route path="/social"                element={<SocialOverview />} />
+            <Route path="/social/approvals"      element={<PostApprovals />} />
             <Route path="/social/instagram"      element={<InstagramPage />} />
             <Route path="/social/facebook"       element={<SocialPlatform />} />
             <Route path="/social/linkedin"       element={<LinkedInPage />} />

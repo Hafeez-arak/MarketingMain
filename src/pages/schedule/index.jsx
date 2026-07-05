@@ -798,7 +798,7 @@ function ScheduledItemDetail({ item, onClose, onSave }) {
                 <div className="flex items-center gap-3 flex-wrap">
                   <input type="time" value={publishTime} onChange={e => setPublishTime(e.target.value)}
                     className="text-sm font-semibold border-2 rounded-xl px-3 py-2 bg-white text-text focus:outline-none focus:ring-2 cursor-pointer"
-                    style={{ borderColor: isIG ? '#f5a200' : '#0A66C2' }} />
+                    style={{ borderColor: isIG ? '#7d98a1' : '#0A66C2' }} />
                   <div className="flex gap-1.5 flex-wrap">
                     {TIME_SLOTS.map(slot => {
                       const [h] = slot.split(':'); const hr = parseInt(h); const label = `${hr > 12 ? hr-12 : hr || 12}${hr >= 12 ? 'pm' : 'am'}`

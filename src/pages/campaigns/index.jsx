@@ -1,94 +1,56 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useApp, actions } from '../../store/appStore'
-import { Card, Button, Badge, PlatformPill, Input, Textarea, Select, Modal, Empty, ConfirmDialog } from '../../components/ui/index'
-import { uid, formatDate } from '../../lib/utils'
+import { Card, Button, Input, Textarea, Select } from '../../components/ui/index'
+import { uid } from '../../lib/utils'
 
 const PLATFORMS = ['instagram','facebook','linkedin','tiktok','x']
 const STATUSES  = ['draft','live','paused','completed']
 const GOALS     = ['Brand awareness','Lead generation','Product launch','Community engagement','Event promotion','Sales & offers']
 
 export function Campaigns() {
-  const { state, dispatch } = useApp()
+  const { dispatch } = useApp()
   const navigate = useNavigate()
-  const [filter, setFilter] = useState('all')
-  const [deleteId, setDeleteId] = useState(null)
-
-  const filtered = filter === 'all' ? state.campaigns : state.campaigns.filter(c => c.status === filter)
 
   return (
-    <div className="max-w-7xl space-y-5">
-      {/* Toolbar */}
-      <div className="flex items-center justify-between gap-4 flex-wrap">
-        <div className="flex gap-1 bg-white border border-border rounded-xl p-1">
-          {['all','live','draft','paused','completed'].map(f => (
-            <button key={f} onClick={() => setFilter(f)}
-              className={`px-3 py-1.5 rounded-lg text-sm font-medium capitalize transition-colors ${filter === f ? 'bg-amber-600 text-white' : 'text-text-secondary hover:text-text hover:bg-surface-subtle'}`}>
-              {f === 'all' ? `All (${state.campaigns.length})` : f}
-            </button>
-          ))}
+    <div className="max-w-5xl space-y-6">
+      {/* Hero — AI planning is the primary way to work now */}
+      {/* "Plan with AI" always starts a fresh plan — clear any leftover draft
+          first, otherwise CampaignPlanner's useDraft() picks up wherever a
+          previous plan left off (mid-review, or already finalized) instead
+          of showing the setup screen. */}
+      <button onClick={() => { dispatch(actions.setCampaignPlanDraft(null)); navigate('/campaigns/plan') }}
+        className="group relative w-full text-left rounded-3xl overflow-hidden border border-purple-200/70 p-7 transition-all hover:shadow-dropdown focus:outline-none focus-visible:ring-2 focus-visible:ring-purple-400"
+        style={{ background: 'linear-gradient(135deg,#faf5ff 0%,#f5f3ff 55%,#fdf4ff 100%)' }}>
+        <div className="flex items-start gap-5">
+          <div className="w-12 h-12 rounded-2xl flex items-center justify-center flex-shrink-0 shadow-sm"
+            style={{ background: 'linear-gradient(180deg,#7c3aed,#a78bfa)' }}>
+            <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M12 3v3m0 12v3m9-9h-3M6 12H3m15.36-6.36l-2.12 2.12M8.76 15.24l-2.12 2.12m12.72 0l-2.12-2.12M8.76 8.76L6.64 6.64"/></svg>
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-[11px] font-semibold text-purple-700 tracking-[0.12em] uppercase mb-1">Monthly Planning</p>
+            <h1 className="font-display text-2xl font-bold text-stone-900 mb-1.5">Plan with AI</h1>
+            <p className="text-sm text-text-secondary leading-relaxed max-w-lg">
+              Pick a month and we'll propose a full slate of on-brand post ideas — pulling from your Brand Brain
+              and the seasonal moments in range. You approve the ones worth making.
+            </p>
+          </div>
+          <svg className="w-5 h-5 text-purple-400 flex-shrink-0 mt-1 transition-transform group-hover:translate-x-1" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
         </div>
-        <div className="flex items-center gap-2">
-          <Button variant="secondary" onClick={() => navigate('/campaigns/plan')}>
-            <svg className="w-3.5 h-3.5 text-purple-600" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M12 3v3m0 12v3m9-9h-3M6 12H3m15.36-6.36l-2.12 2.12M8.76 15.24l-2.12 2.12m12.72 0l-2.12-2.12M8.76 8.76L6.64 6.64"/></svg>
-            Plan with AI
-          </Button>
-          <Button onClick={() => navigate('/campaigns/new')}>
-            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
-            New campaign
-          </Button>
-        </div>
-      </div>
+      </button>
 
-      {filtered.length === 0 ? (
-        <Card>
-          <Empty
-            icon={<svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>}
-            title={filter === 'all' ? 'No campaigns yet' : `No ${filter} campaigns`}
-            description="Create your first campaign to organise your content across platforms."
-            action={
-              <div className="flex items-center gap-2">
-                <Button variant="secondary" onClick={() => navigate('/campaigns/plan')}>Plan with AI</Button>
-                <Button onClick={() => navigate('/campaigns/new')}>Create campaign</Button>
-              </div>
-            }
-          />
-        </Card>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {filtered.map(c => (
-            <Card key={c.id} className="overflow-hidden">
-              <div className="p-5">
-                <div className="flex items-start justify-between mb-2">
-                  <h3 className="font-semibold text-text">{c.name}</h3>
-                  <Badge status={c.status} />
-                </div>
-                {c.goal && <p className="text-xs text-text-secondary mb-3">{c.goal}</p>}
-                <div className="flex flex-wrap gap-1 mb-4">
-                  {(c.platforms || []).map(p => <PlatformPill key={p} platform={p} />)}
-                </div>
-                {c.description && <p className="text-xs text-text-tertiary line-clamp-2 mb-3">{c.description}</p>}
-                <div className="flex items-center gap-3 pt-3 border-t border-border">
-                  <p className="text-xs text-text-tertiary flex-1">{formatDate(c.createdAt)}</p>
-                  <Button variant="ghost" size="xs" onClick={() => setDeleteId(c.id)}>
-                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/></svg>
-                  </Button>
-                  <Button variant="secondary" size="xs" onClick={() => navigate('/campaigns/new')}>Edit</Button>
-                </div>
-              </div>
-            </Card>
-          ))}
+      {/* Saved plans entry */}
+      <button onClick={() => navigate('/campaigns/plans')}
+        className="group w-full text-left rounded-2xl border border-border bg-white p-5 flex items-center gap-4 transition-all hover:border-stone-300 hover:shadow-card focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400">
+        <div className="w-10 h-10 rounded-xl bg-amber-50 flex items-center justify-center flex-shrink-0 text-amber-600">
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
         </div>
-      )}
-
-      <ConfirmDialog
-        open={!!deleteId}
-        onClose={() => setDeleteId(null)}
-        onConfirm={() => dispatch(actions.deleteCampaign(deleteId))}
-        title="Delete campaign"
-        message="This will permanently delete this campaign. This cannot be undone."
-        danger
-      />
+        <div className="flex-1 min-w-0">
+          <h2 className="font-semibold text-text">Content Plans</h2>
+          <p className="text-xs text-text-secondary mt-0.5">View and reopen your saved monthly plans and their approved ideas.</p>
+        </div>
+        <svg className="w-4 h-4 text-text-tertiary flex-shrink-0 transition-transform group-hover:translate-x-1" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+      </button>
     </div>
   )
 }

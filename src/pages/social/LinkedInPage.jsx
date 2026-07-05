@@ -7,6 +7,7 @@ import { SUPABASE_URL, SUPABASE_ANON_KEY } from '../../lib/supabaseClient'
 import { Card, Button, Badge, Textarea, Spinner, PostImage } from '../../components/ui/index'
 import { uid, formatDateTime } from '../../lib/utils'
 import { buildInstructionsString, isBrandProfileEmpty, useBrandProfileSync, logEditFeedback } from '../../lib/brandBrain'
+import { ReferencePicker } from '../../components/ReferencePicker'
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 const POST_TYPES = [
@@ -151,6 +152,7 @@ function useSupabaseLinkedInSchedule(supabaseUrl, anonKey, workspaceId) {
       campaign_id:          entry.campaignId         || null,
       upload_type:          entry.uploadType         || 'generate',
       uploaded_image_urls:  entry.uploadedImageUrls  || null,
+      reference_image_urls: entry.referenceImageUrls || [],
       status:               'pending',
     }
     const res = await fetch(`${supabaseUrl}/rest/v1/linkedin_schedule`, {
@@ -197,6 +199,7 @@ function useSupabaseLinkedInSchedule(supabaseUrl, anonKey, workspaceId) {
         status:             r.status,
         uploadType:         r.upload_type         || 'generate',
         uploadedImageUrls:  r.uploaded_image_urls || null,
+        referenceImageUrls: r.reference_image_urls || [],
       }
     })
     return { data: map, error: null }
@@ -258,6 +261,7 @@ function useSupabaseLinkedInPosts(supabaseUrl, anonKey) {
         contentRoute:        r.content_route || src,
         campaignId:          r.campaign_id,
         status:              r.status,
+        source:              r.source || src,
         scheduledAt:         r.scheduled_date || null,
         createdAt:           r.created_at,
         generatedByWorkflow: true,
@@ -1298,6 +1302,8 @@ function DayEditor({ dateKey, entry, campaigns, supabaseUrl, anonKey, uploadToSt
   const [aspectRatio,  setAspectRatio]  = useState(entry?.aspectRatio || '1.91:1')
   const [notes,        setNotes]        = useState(entry?.uploadType !== 'upload' ? (entry?.notes || '') : '')
   const [campaignId,   setCampaign]     = useState(entry?.campaignId || '')
+  const [references,   setReferences]   = useState(entry?.referenceImageUrls || []) // image-to-image guides
+  const [pickingRefs,  setPickingRefs]  = useState(false)
 
   // Upload tab
   const [uploadTopic,    setUploadTopic]    = useState(entry?.uploadType === 'upload' ? (entry?.topic || '') : '')
@@ -1317,7 +1323,7 @@ function DayEditor({ dateKey, entry, campaigns, supabaseUrl, anonKey, uploadToSt
   // ── Generate save ──────────────────────────────────────────────────────────
   function handleSaveGenerate() {
     if (!topic.trim()) return
-    onSave(dateKey, { topic, tone, postType, contentRoute: 'instructions', includeImage, style, aspectRatio, notes, campaignId, uploadType: 'generate', uploadedImageUrls: null, publishTime })
+    onSave(dateKey, { topic, tone, postType, contentRoute: 'instructions', includeImage, style, aspectRatio, notes, campaignId, uploadType: 'generate', uploadedImageUrls: null, referenceImageUrls: references, publishTime })
   }
 
   // ── Upload save ────────────────────────────────────────────────────────────
@@ -1534,6 +1540,28 @@ function DayEditor({ dateKey, entry, campaigns, supabaseUrl, anonKey, uploadToSt
               </div>
             </div>
 
+            {/* Reference images — guide the AI image generation (image-to-image) */}
+            {includeImage && (
+              <div>
+                <label className="block text-xs font-medium text-text-secondary mb-1.5">Reference Images <span className="text-text-tertiary">(optional — guides the generated visual)</span></label>
+                <div className="flex items-center gap-2 flex-wrap">
+                  {references.map(url => (
+                    <div key={url} className="relative w-14 h-14 rounded-lg overflow-hidden border border-border group">
+                      <PostImage src={url} alt="Reference" className="w-full h-full object-cover" />
+                      <button onClick={() => setReferences(refs => refs.filter(u => u !== url))}
+                        className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-black/60 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity" title="Remove">
+                        <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>
+                      </button>
+                    </div>
+                  ))}
+                  <button onClick={() => setPickingRefs(true)}
+                    className="w-14 h-14 rounded-lg border-2 border-dashed border-border hover:border-blue-400 hover:bg-surface-subtle flex items-center justify-center text-text-tertiary transition-colors" title="Add references">
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+                  </button>
+                </div>
+              </div>
+            )}
+
             {topic && (
               <div className="rounded-xl bg-stone-50 border border-border p-3 space-y-1.5">
                 <p className="text-[10px] font-bold text-text-tertiary uppercase tracking-wider">Sent to workflow on this date</p>
@@ -1545,6 +1573,7 @@ function DayEditor({ dateKey, entry, campaigns, supabaseUrl, anonKey, uploadToSt
                   { k: 'include_image',  v: String(includeImage) },
                   { k: 'upload_type',    v: 'generate' },
                   ...(includeImage ? [{ k: 'style', v: style }] : []),
+                  ...(includeImage && references.length ? [{ k: 'reference_images', v: `${references.length} attached` }] : []),
                 ].map(row => (
                   <div key={row.k} className="flex items-start gap-3 text-[11px]">
                     <span className="text-text-tertiary font-mono w-28 flex-shrink-0">{row.k}</span>
@@ -1781,6 +1810,12 @@ function DayEditor({ dateKey, entry, campaigns, supabaseUrl, anonKey, uploadToSt
           )}
         </div>
       </div>
+
+      {pickingRefs && (
+        <ReferencePicker value={references}
+          onSave={urls => { setReferences(urls); setPickingRefs(false) }}
+          onClose={() => setPickingRefs(false)} />
+      )}
     </div>
   )
 
@@ -2056,7 +2091,7 @@ function PostDetail({ post, state, webhookUrl, regenWebhookUrl, onClose, onStatu
 ${post.body || ''}` : (post.body || post.copy || '')
   const preview    = post.hook || fullText.slice(0, 180)
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-[9999] flex items-center justify-center"
       style={{ background: 'rgba(0,0,0,0.82)', backdropFilter: 'blur(8px)', padding: '24px' }}
       onClick={e => { if (e.target === e.currentTarget) onClose() }}>
@@ -2084,8 +2119,8 @@ ${post.body || ''}` : (post.body || post.copy || '')
 
           {/* Left — image panel (only when image exists) */}
           {hasImage && (
-            <div className="flex-shrink-0 flex flex-col overflow-y-auto" style={{ background: 'linear-gradient(160deg, #eef4fb 0%, #ddeaf7 60%, #cfe0f5 100%)' }}
-              style={{ width: isPortrait ? '360px' : '460px' }}>
+            <div className="flex-shrink-0 flex flex-col overflow-y-auto"
+              style={{ background: 'linear-gradient(160deg, #eef4fb 0%, #ddeaf7 60%, #cfe0f5 100%)', width: isPortrait ? '360px' : '460px' }}>
               <div className="flex-1 flex items-center justify-center p-5">
                 <div style={{ width: '100%', position: 'relative' }}>
                   <div style={{ width: '100%', aspectRatio: arCss, borderRadius: '14px', overflow: 'hidden', boxShadow: '0 8px 32px rgba(10,102,194,0.18), 0 2px 8px rgba(0,0,0,0.07)', position: 'relative' }}>
@@ -2350,9 +2385,14 @@ ${post.body || ''}` : (post.body || post.copy || '')
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }
+
+// Exported so the cross-platform Approvals page can reuse this exact review
+// UI (regen/crop/tone-switch/approve) instead of duplicating it.
+export { PostDetail as LinkedInPostDetail }
 
 // ─── LinkedIn Video Panel ─────────────────────────────────────────────────
 const LI_VIDEO_TYPES = [

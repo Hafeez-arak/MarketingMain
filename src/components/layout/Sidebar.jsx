@@ -17,6 +17,7 @@ const nav = [
   ]},
   { section: 'Social', items: [
     { to: '/social',           label: 'Social Media',   icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg> },
+    { to: '/social/approvals', label: 'Post Approvals', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg> },
   ]},
   { section: 'Insights', items: [
     { to: '/analytics', label: 'Analytics', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg> },
@@ -45,7 +46,7 @@ export function Sidebar() {
       <div className="px-5 py-5 border-b border-border">
         <div className="flex items-center gap-3">
           <div className="w-9 h-9 rounded-xl flex items-center justify-center shadow-sm flex-shrink-0"
-            style={{ background: 'linear-gradient(135deg, #ffbc38 0%, #d4850a 100%)' }}>
+            style={{ background: 'linear-gradient(135deg, #96acb2 0%, #4c5e61 100%)' }}>
             <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
               <path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 17l-6.2 4.3 2.4-7.4L2 9.4h7.6z"/>
             </svg>
@@ -63,7 +64,7 @@ export function Sidebar() {
           onClick={() => setShowWsPicker(v => !v)}
           className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl bg-surface-subtle hover:bg-stone-100 transition-colors group">
           <div className="w-5 h-5 rounded-md flex items-center justify-center text-[9px] font-bold text-white flex-shrink-0"
-            style={{ background: 'linear-gradient(135deg, #f5a200, #d4850a)' }}>
+            style={{ background: 'linear-gradient(135deg, #7d98a1, #4c5e61)' }}>
             {(activeWorkspace?.name || '?').charAt(0).toUpperCase()}
           </div>
           <div className="min-w-0 flex-1 text-left">
@@ -96,7 +97,7 @@ export function Sidebar() {
                         className={`w-full flex items-center gap-2.5 px-3 py-2 text-left transition-colors hover:bg-surface-subtle
                           ${ws.id === activeWorkspaceId ? 'bg-amber-50/60' : ''}`}>
                         <div className="w-5 h-5 rounded-md flex items-center justify-center text-[9px] font-bold text-white flex-shrink-0"
-                          style={{ background: ws.id === activeWorkspaceId ? 'linear-gradient(135deg,#ffbc38,#d4850a)' : 'linear-gradient(135deg,#c4b090,#8a7050)' }}>
+                          style={{ background: ws.id === activeWorkspaceId ? 'linear-gradient(135deg,#96acb2,#4c5e61)' : 'linear-gradient(135deg,#929ca7,#4b5357)' }}>
                           {ws.name.charAt(0).toUpperCase()}
                         </div>
                         <span className="flex-1 text-xs text-text truncate">{ws.name}</span>
@@ -149,7 +150,7 @@ export function Sidebar() {
       <div className="px-3 py-3 border-t border-border">
         <div className="flex items-center gap-2.5 px-2.5 py-2 rounded-xl">
           <div className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white flex-shrink-0"
-            style={{ background: 'linear-gradient(135deg, #f5a200, #d4850a)' }}>
+            style={{ background: 'linear-gradient(135deg, #7d98a1, #4c5e61)' }}>
             {(user?.email || '?').charAt(0).toUpperCase()}
           </div>
           <div className="flex-1 min-w-0">

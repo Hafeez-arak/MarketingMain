@@ -16,25 +16,60 @@ import { SUPABASE_URL, SUPABASE_ANON_KEY } from './supabaseClient'
 // scopes it to workspaces they're actually a member of.
 
 export const DEFAULT_BRAND_PROFILE = {
+  // Identity & voice
+  mission:           '',
+  positioning:       '',
+  valueProposition:  '',
+  brandStory:        '',
+  companyFacts:      '',
   voiceDescriptors:  '',
+  // Guardrails
   toneDos:           '',
   toneDonts:         '',
+  // Audience
   targetPersonas:    '',
-  keyProjects:       '',
+  // Visual
+  visualIdentity:    '',
   visualStyleNotes:  '',
+  brandColors:       '',
+  // Market & references
+  marketContext:     '',
+  keyProjects:       '',
+  // Products (managed via uploads, not free-text — see brand_assets / sheet)
+  productSheetPath:  '',
+  productIndex:      '',
+  // Knowledge centre — powers WhatsApp + email too
+  contactInfo:       '',
+  languages:         '',
+  complianceNotes:   '',
+  offersCtas:        '',
   updatedAt:         null,
 }
 
 function rowToProfile(row) {
   if (!row) return null
   return {
-    voiceDescriptors: row.voice_descriptors || '',
-    toneDos:          row.tone_dos          || '',
-    toneDonts:        row.tone_donts        || '',
-    targetPersonas:   row.target_personas   || '',
-    keyProjects:       row.key_projects      || '',
-    visualStyleNotes: row.visual_style_notes || '',
-    updatedAt:        row.updated_at        || null,
+    mission:          row.mission             || '',
+    positioning:      row.positioning         || '',
+    valueProposition: row.value_proposition   || '',
+    brandStory:       row.brand_story         || '',
+    companyFacts:     row.company_facts        || '',
+    voiceDescriptors: row.voice_descriptors   || '',
+    toneDos:          row.tone_dos            || '',
+    toneDonts:        row.tone_donts          || '',
+    targetPersonas:   row.target_personas     || '',
+    visualIdentity:   row.visual_identity     || '',
+    visualStyleNotes: row.visual_style_notes  || '',
+    brandColors:      row.brand_colors        || '',
+    marketContext:    row.market_context      || '',
+    keyProjects:      row.key_projects        || '',
+    productSheetPath: row.product_sheet_path  || '',
+    productIndex:     row.product_index       || '',
+    contactInfo:      row.contact_info        || '',
+    languages:        row.languages           || '',
+    complianceNotes:  row.compliance_notes    || '',
+    offersCtas:       row.offers_ctas         || '',
+    updatedAt:        row.updated_at          || null,
   }
 }
 
@@ -60,12 +95,24 @@ export async function saveBrandProfile(workspaceId, accessToken, profile) {
   if (!workspaceId) return { error: 'No active workspace. Try signing out and back in.' }
   const body = {
     workspace_id:        workspaceId,
-    voice_descriptors:   profile.voiceDescriptors || '',
-    tone_dos:            profile.toneDos          || '',
-    tone_donts:          profile.toneDonts        || '',
-    target_personas:     profile.targetPersonas   || '',
-    key_projects:        profile.keyProjects      || '',
-    visual_style_notes:  profile.visualStyleNotes || '',
+    mission:             profile.mission           || '',
+    positioning:         profile.positioning       || '',
+    value_proposition:   profile.valueProposition  || '',
+    brand_story:         profile.brandStory        || '',
+    company_facts:       profile.companyFacts      || '',
+    voice_descriptors:   profile.voiceDescriptors  || '',
+    tone_dos:            profile.toneDos           || '',
+    tone_donts:          profile.toneDonts         || '',
+    target_personas:     profile.targetPersonas    || '',
+    visual_identity:     profile.visualIdentity    || '',
+    visual_style_notes:  profile.visualStyleNotes  || '',
+    brand_colors:        profile.brandColors       || '',
+    market_context:      profile.marketContext     || '',
+    key_projects:        profile.keyProjects       || '',
+    contact_info:        profile.contactInfo       || '',
+    languages:           profile.languages         || '',
+    compliance_notes:    profile.complianceNotes   || '',
+    offers_ctas:         profile.offersCtas        || '',
     updated_at:          new Date().toISOString(),
   }
   try {
@@ -81,8 +128,13 @@ export async function saveBrandProfile(workspaceId, accessToken, profile) {
       body: JSON.stringify(body),
     })
     if (!res.ok) { const err = await res.text(); return { error: err } }
-    const [row] = await res.json()
-    return { ok: true, profile: rowToProfile(row) }
+    // Some setups accept the write but return no representation (e.g. a missing
+    // SELECT RLS policy, or Prefer stripped by a proxy). Fall back to the body
+    // we just saved — it's already snake_case with updated_at — so a successful
+    // save never reports back a null profile that would blank the app's state.
+    let row = null
+    try { const rows = await res.json(); row = Array.isArray(rows) ? rows[0] : rows } catch { /* empty body */ }
+    return { ok: true, profile: rowToProfile(row || body) }
   } catch (err) {
     return { error: err.message }
   }
@@ -95,21 +147,118 @@ export async function saveBrandProfile(workspaceId, accessToken, profile) {
 export function buildInstructionsString(profile, platformNotes) {
   if (!profile) profile = DEFAULT_BRAND_PROFILE
   const sections = [
+    // Identity first — this is the company persona the AI writes *as*.
+    profile.mission          && `Mission: ${profile.mission}`,
+    profile.positioning      && `Market positioning: ${profile.positioning}`,
+    profile.valueProposition && `Value proposition: ${profile.valueProposition}`,
+    profile.brandStory       && `Brand story:\n${profile.brandStory}`,
+    profile.companyFacts     && `Facts the brand can state:\n${profile.companyFacts}`,
     profile.voiceDescriptors && `Brand voice: ${profile.voiceDescriptors}`,
     profile.toneDos          && `Always do:\n${profile.toneDos}`,
     profile.toneDonts        && `Never do:\n${profile.toneDonts}`,
     profile.targetPersonas   && `Target audience:\n${profile.targetPersonas}`,
+    profile.marketContext    && `Market context:\n${profile.marketContext}`,
     profile.keyProjects      && `Reference when relevant:\n${profile.keyProjects}`,
+    profile.productIndex     && `Product range (ask for the full sheet for specifics):\n${profile.productIndex}`,
+    profile.visualIdentity   && `Visual identity:\n${profile.visualIdentity}`,
+    profile.brandColors      && `Brand colours:\n${profile.brandColors}`,
     profile.visualStyleNotes && `Visual style defaults:\n${profile.visualStyleNotes}`,
+    profile.languages        && `Languages:\n${profile.languages}`,
+    profile.contactInfo      && `Contact & conversion details:\n${profile.contactInfo}`,
+    profile.offersCtas       && `Offers & calls-to-action to push:\n${profile.offersCtas}`,
+    profile.complianceNotes  && `Compliance rules (esp. WhatsApp/email):\n${profile.complianceNotes}`,
     platformNotes?.trim()    && `Platform-specific notes:\n${platformNotes.trim()}`,
   ].filter(Boolean)
   return sections.join('\n\n')
 }
 
+// ─── Selectable Brand Brain sections for plan generation ──────────────────
+// CampaignPlanner lets the user pick which of these feed the plan prompt.
+// "voice" is the existing brand_profile block (buildInstructionsString);
+// the rest are directory tables that were never wired into plan generation.
+export const BRAND_BRAIN_SECTIONS = [
+  { value: 'voice',       label: 'Brand Voice & Identity' },
+  { value: 'assets',      label: 'Asset Library' },
+  { value: 'suppliers',   label: 'Suppliers' },
+  { value: 'competitors', label: 'Competitor Watch' },
+  { value: 'products',    label: 'Products' },
+]
+export const DEFAULT_BRAND_BRAIN_SECTIONS = ['voice', 'assets']
+
+const LIST_CAP = 30
+
+function fmtSuppliers(rows) {
+  const list = (rows || []).slice(0, LIST_CAP)
+  if (!list.length) return ''
+  const lines = list.map(s => {
+    const bits = [s.category && `Category: ${s.category}`, s.brand_lines && `Brand lines: ${s.brand_lines}`, s.notes && `Notes: ${s.notes}`].filter(Boolean)
+    return `- ${s.name}${bits.length ? ` — ${bits.join(' — ')}` : ''}`
+  })
+  return `Suppliers we work with:\n${lines.join('\n')}`
+}
+
+function fmtCompetitors(rows) {
+  const list = (rows || []).slice(0, LIST_CAP)
+  if (!list.length) return ''
+  const lines = list.map(c => {
+    const bits = [c.positioning && `Positioning: ${c.positioning}`, c.strengths && `Their strengths: ${c.strengths}`, c.how_we_differ && `How we differ: ${c.how_we_differ}`].filter(Boolean)
+    return `- ${c.name}${bits.length ? ` — ${bits.join(' — ')}` : ''}`
+  })
+  return `Competitor watch (avoid copying their angles; differentiate instead):\n${lines.join('\n')}`
+}
+
+function fmtProducts(rows) {
+  const list = (rows || []).slice(0, LIST_CAP)
+  if (!list.length) return ''
+  const lines = list.map(p => {
+    const bits = [p.category && `Category: ${p.category}`, p.description && p.description, p.specs && `Specs: ${p.specs}`].filter(Boolean)
+    return `- ${p.name}${bits.length ? ` — ${bits.join(' — ')}` : ''}`
+  })
+  return `Product range available to feature:\n${lines.join('\n')}`
+}
+
+function fmtAssets(rows) {
+  const projectPhotos = (rows || []).filter(a => a.kind === 'project_photo')
+  const groups = {}
+  const individual = []
+  for (const a of projectPhotos) {
+    if (a.project) (groups[a.project] ||= []).push(a)
+    else individual.push(a)
+  }
+  const groupLines = Object.entries(groups).slice(0, LIST_CAP).map(([name, photos]) => {
+    const tags = [...new Set(photos.flatMap(p => p.tags || []))].slice(0, 6)
+    return `- "${name}" — ${photos.length} photo${photos.length === 1 ? '' : 's'}${tags.length ? ` — tags: ${tags.join(', ')}` : ''}`
+  })
+  const hasLogo = (rows || []).some(a => a.kind === 'logo')
+  const lines = [...groupLines]
+  if (individual.length) lines.push(`- ${individual.length} individual project photo${individual.length === 1 ? '' : 's'} not grouped to a named project`)
+  if (hasLogo) lines.push(`- Brand logo asset available`)
+  if (!lines.length) return ''
+  return `Visual assets on hand (reference these when suggesting shots/formats, exact photo files are picked separately):\n${lines.join('\n')}`
+}
+
+// Builds one formatted text block per selectable section (see
+// BRAND_BRAIN_SECTIONS). CampaignPlanner joins only the sections the user
+// selected before sending them as the `instructions` payload.
+export function buildSectionBlocks(profile, directory) {
+  const { suppliers, competitors, products, assets } = directory || {}
+  return {
+    voice:       buildInstructionsString(profile, ''),
+    suppliers:   fmtSuppliers(suppliers),
+    competitors: fmtCompetitors(competitors),
+    products:    fmtProducts(products),
+    assets:      fmtAssets(assets),
+  }
+}
+
 export function isBrandProfileEmpty(profile) {
   if (!profile) return true
-  return !profile.voiceDescriptors && !profile.toneDos && !profile.toneDonts &&
-    !profile.targetPersonas && !profile.keyProjects && !profile.visualStyleNotes
+  return !profile.mission && !profile.positioning && !profile.valueProposition &&
+    !profile.brandStory && !profile.companyFacts && !profile.voiceDescriptors &&
+    !profile.toneDos && !profile.toneDonts && !profile.targetPersonas &&
+    !profile.marketContext && !profile.keyProjects && !profile.visualIdentity &&
+    !profile.visualStyleNotes && !profile.brandColors && !profile.contactInfo &&
+    !profile.languages && !profile.complianceNotes && !profile.offersCtas
 }
 
 // ─── Edit feedback ─────────────────────────────────────────────────────────

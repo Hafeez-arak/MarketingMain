@@ -154,6 +154,28 @@ const WORKFLOW_CONFIGS = [
       </div>
     ),
   },
+  {
+    platform: 'instagramPlanGen',
+    label: 'Instagram Plan Generation',
+    placeholder: 'https://your-instance.app.n8n.cloud/webhook/arak-ig-plan-generation',
+    description: 'When a plan is approved, generates each approved Instagram idea (caption + image) into pending_review, ready to review before scheduling.',
+    icon: (
+      <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: 'linear-gradient(135deg,#f09433,#bc1888)' }}>
+        <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><rect x="2" y="2" width="20" height="20" rx="5"/><circle cx="12" cy="12" r="4"/><circle cx="17.5" cy="6.5" r="1"/></svg>
+      </div>
+    ),
+  },
+  {
+    platform: 'linkedinPlanGen',
+    label: 'LinkedIn Plan Generation',
+    placeholder: 'https://your-instance.app.n8n.cloud/webhook/arak-li-plan-generation',
+    description: 'When a plan is approved, generates each approved LinkedIn idea (hook/body + image) into pending_review, ready to review before scheduling.',
+    icon: (
+      <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: '#0A66C2' }}>
+        <svg className="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 24 24"><path d="M4.98 3.5a2.5 2.5 0 100 5 2.5 2.5 0 000-5zM3 9h4v12H3zM10 9h3.8v1.7h.05c.53-1 1.83-2.05 3.77-2.05 4.03 0 4.78 2.65 4.78 6.1V21h-4v-5.3c0-1.26-.02-2.9-1.77-2.9s-2.03 1.38-2.03 2.8V21h-4z"/></svg>
+      </div>
+    ),
+  },
 ]
 
 function WorkflowWebhooks() {
@@ -167,8 +189,12 @@ function WorkflowWebhooks() {
   const [visible, setVisible] = useState({})
 
   function handleSave(platform) {
-    dispatch(actions.setWebhook(platform, drafts[platform].trim()))
-    dispatch(actions.addNotification({ id: uid(), message: `${platform} webhook saved.`, createdAt: new Date().toISOString() }))
+    const url = drafts[platform].trim()
+    dispatch(actions.setWebhook(platform, url))
+    // Normalise the draft to the trimmed value so isDirty resolves to false
+    // right after saving (otherwise a trailing space keeps the button "dirty").
+    setDrafts(d => ({ ...d, [platform]: url }))
+    dispatch(actions.addNotification({ id: uid(), message: url ? `${platform} webhook saved.` : `${platform} webhook cleared.`, createdAt: new Date().toISOString() }))
     setSaved(s => ({ ...s, [platform]: true }))
     setTimeout(() => setSaved(s => ({ ...s, [platform]: false })), 2000)
   }
@@ -207,9 +233,20 @@ function WorkflowWebhooks() {
                 <div className="flex-1 relative">
                   <input
                     type={show ? 'text' : 'password'}
+                    name={`webhook-${cfg.platform}`}
                     placeholder={cfg.placeholder}
                     value={drafts[cfg.platform]}
                     onChange={e => setDrafts(d => ({ ...d, [cfg.platform]: e.target.value }))}
+                    // A webhook URL is not a login password — stop password managers
+                    // (1Password / LastPass / Chrome) from auto-refilling the masked
+                    // field, which silently reverts edits and blocks replacing the URL.
+                    autoComplete="off"
+                    autoCorrect="off"
+                    autoCapitalize="off"
+                    spellCheck={false}
+                    data-1p-ignore
+                    data-lpignore="true"
+                    data-form-type="other"
                     className="w-full rounded-xl border border-border bg-surface-subtle text-text text-xs px-3.5 py-2.5 pr-10 focus:outline-none focus:ring-2 focus:ring-amber-400 font-mono placeholder:font-sans placeholder:text-text-tertiary transition-all"
                   />
                   <button onClick={() => setVisible(v => ({ ...v, [cfg.platform]: !v[cfg.platform] }))}
@@ -222,15 +259,17 @@ function WorkflowWebhooks() {
                 </div>
                 <button
                   onClick={() => handleSave(cfg.platform)}
-                  disabled={!drafts[cfg.platform].trim() || !isDirty}
+                  disabled={!isDirty}
                   className={`px-4 py-2.5 rounded-xl text-xs font-semibold transition-all flex-shrink-0 ${
                     saved[cfg.platform]
                       ? 'bg-sage-100 text-sage-700 border border-sage-200'
-                      : isDirty && drafts[cfg.platform].trim()
+                      : isDirty
                         ? 'btn-amber'
                         : 'bg-surface-subtle text-text-tertiary border border-border cursor-not-allowed'
                   }`}>
-                  {saved[cfg.platform] ? '✓ Saved' : 'Save'}
+                  {saved[cfg.platform]
+                    ? '✓ Saved'
+                    : (isDirty && !drafts[cfg.platform].trim() ? 'Clear' : 'Save')}
                 </button>
               </div>
 
@@ -328,7 +367,7 @@ export function Settings() {
                 className={`flex items-center gap-3 px-6 py-3.5 transition-colors ${isActive ? 'bg-amber-50/40' : 'hover:bg-surface-muted'}`}>
                 {/* Avatar */}
                 <div className="w-8 h-8 rounded-xl flex items-center justify-center text-[11px] font-bold text-white flex-shrink-0"
-                  style={{ background: isActive ? 'linear-gradient(135deg,#ffbc38,#d4850a)' : 'linear-gradient(135deg,#c4b090,#8a7050)' }}>
+                  style={{ background: isActive ? 'linear-gradient(135deg,#96acb2,#4c5e61)' : 'linear-gradient(135deg,#929ca7,#4b5357)' }}>
                   {ws.name.charAt(0).toUpperCase()}
                 </div>
 

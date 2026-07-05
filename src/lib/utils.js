@@ -28,6 +28,7 @@ export const STATUS_META = {
   completed:       { label:'Completed', classes:'bg-amber-100 text-amber-800' },
   pending:         { label:'Pending',   classes:'bg-amber-100 text-amber-700 ring-1 ring-amber-300' },
   pending_publish: { label:'Pending',   classes:'bg-amber-100 text-amber-700 ring-1 ring-amber-300' },
+  pending_review:  { label:'Pending review', classes:'bg-purple-50 text-purple-700 ring-1 ring-purple-200' },
   approved:        { label:'Approved',  classes:'bg-sage-100 text-sage-700' },
   rejected:        { label:'Rejected',  classes:'bg-red-50 text-red-600' },
 }

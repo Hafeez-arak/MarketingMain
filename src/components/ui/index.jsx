@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { STATUS_META, PLATFORM_META } from '../../lib/utils'
 
 export function Button({ variant='primary', size='md', children, onClick, disabled, type='button', className='' }) {
@@ -121,7 +122,10 @@ export function Modal({ open, onClose, title, children, width='max-w-lg' }) {
     return () => document.removeEventListener('keydown', fn)
   }, [open, onClose])
   if (!open) return null
-  return (
+  // Rendered through a portal to <body> so the fixed overlay is positioned
+  // against the viewport — never trapped/offset by an ancestor that has a
+  // transform, filter, or backdrop-filter (e.g. the sticky action bar / cards).
+  return createPortal(
     <div ref={ref} onClick={e => e.target === ref.current && onClose()}
       className="fixed inset-0 z-50 flex items-center justify-center p-4"
       style={{ background: 'rgba(26,20,16,0.35)', backdropFilter: 'blur(6px)' }}>
@@ -134,7 +138,8 @@ export function Modal({ open, onClose, title, children, width='max-w-lg' }) {
         </div>
         <div className="overflow-y-auto flex-1 scrollbar-thin">{children}</div>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }
 
@@ -167,8 +172,7 @@ export function Toggle({ checked, onChange, label }) {
     <label className="flex items-center gap-3 cursor-pointer group">
       <div className="relative flex-shrink-0">
         <input type="checkbox" checked={checked} onChange={onChange} className="sr-only" />
-        <div className={`w-10 h-5 rounded-full transition-all duration-300 ${checked ? 'bg-amber-gradient shadow-amber' : 'bg-stone-200'}`}
-          style={checked ? { background: 'linear-gradient(135deg,#ffbc38,#d4850a)' } : {}} />
+        <div className={`w-10 h-5 rounded-full transition-all duration-300 ${checked ? 'bg-amber-gradient shadow-amber' : 'bg-stone-200'}`} />
         <div className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow-sm transition-transform duration-300 ${checked ? 'translate-x-5' : ''}`} />
       </div>
       {label && <span className="text-sm text-text-secondary group-hover:text-text transition-colors">{label}</span>}
@@ -195,8 +199,8 @@ export function StatCard({ label, value, sub, icon, onClick, accent=false }) {
     <div onClick={onClick}
       className={`relative rounded-2xl border overflow-hidden transition-all duration-200 cursor-pointer group
         ${accent ? 'border-amber-300 shadow-amber' : 'border-border bg-white shadow-card hover:shadow-card-hover hover:border-stone-300'}`}
-      style={accent ? { background: 'linear-gradient(135deg,#fffbf0,#fff4d6 80%)' } : {}}>
-      {accent && <div className="absolute top-0 left-0 right-0 h-0.5" style={{ background: 'linear-gradient(90deg,#ffbc38,#d4850a)' }} />}
+      style={accent ? { background: 'linear-gradient(135deg,#f4f6f5,#e1e7e6 80%)' } : {}}>
+      {accent && <div className="absolute top-0 left-0 right-0 h-0.5" style={{ background: 'linear-gradient(90deg,#96acb2,#4c5e61)' }} />}
       <div className="p-5">
         <div className="flex items-start justify-between mb-4">
           <div className={`w-10 h-10 rounded-2xl flex items-center justify-center transition-colors

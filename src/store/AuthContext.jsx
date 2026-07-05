@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, useCallback } from 'react'
+import { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react'
 import { supabase } from '../lib/supabaseClient'
 
 const AuthContext = createContext(null)
@@ -14,6 +14,9 @@ export function AuthProvider({ children }) {
   const [activeWorkspaceId, setActiveWorkspaceId] = useState(null)
   const [loadingWorkspaces, setLoadingWorkspaces] = useState(false)
   const [authError, setAuthError] = useState('')
+  // Tracks the currently-loaded user id so we can ignore the auth events
+  // Supabase re-fires on tab focus / token refresh (same user) — see effect below.
+  const lastUserIdRef = useRef(undefined)
 
   const loadWorkspaces = useCallback(async (userId) => {
     if (!userId) { setWorkspaces([]); setActiveWorkspaceId(null); return }
@@ -33,12 +36,23 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
+      lastUserIdRef.current = data.session?.user?.id ?? null
       setSession(data.session ?? null)
       loadWorkspaces(data.session?.user?.id)
     })
     const { data: sub } = supabase.auth.onAuthStateChange((_event, newSession) => {
+      const newUserId = newSession?.user?.id ?? null
+      // Always keep the freshest session/token so API calls stay authenticated.
       setSession(newSession)
-      loadWorkspaces(newSession?.user?.id)
+      // But Supabase re-fires auth events (TOKEN_REFRESHED, SIGNED_IN) every time
+      // the tab regains focus, with the SAME user. Calling loadWorkspaces() there
+      // flips `loading`, which makes RequireAuth unmount the entire app subtree and
+      // wipe in-progress form state (e.g. a half-written prompt). Only reload the
+      // workspace list when the signed-in user actually changes (real sign-in/out).
+      if (newUserId !== lastUserIdRef.current) {
+        lastUserIdRef.current = newUserId
+        loadWorkspaces(newUserId)
+      }
     })
     return () => sub.subscription.unsubscribe()
   }, [loadWorkspaces])

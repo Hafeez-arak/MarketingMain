@@ -34,9 +34,18 @@ export async function requestCampaignPlan(webhookUrl, payload) {
       _rowId:   `plan_${i}_${Date.now()}`,
       platform: p.platform === 'linkedin' ? 'linkedin' : 'instagram',
       date:     p.date    || '',
+      title:    p.title   || p.topic || '',
       topic:    p.topic   || '',
       angle:    p.angle   || '',
       tone:     p.tone    || (p.platform === 'linkedin' ? LINKEDIN_TONE_FALLBACK : INSTAGRAM_TONE_FALLBACK),
+      // Planning metadata — surfaced in the review/approval UI so each idea can
+      // be judged on WHAT it is (occasion, pillar) and WHY (rationale) before
+      // it's approved for generation. All optional; blank if the workflow
+      // doesn't return them.
+      occasion:   p.occasion       || '',
+      pillar:     p.content_pillar || p.pillar || '',
+      rationale:  p.rationale      || '',
+      format:     p.suggested_format || p.format || 'post',
       // Design suggestion from the planning workflow itself — it had the
       // full topic/angle/brand context when it made this call, so it's
       // preferred over the local heuristic fallback used for manually
@@ -44,11 +53,72 @@ export async function requestCampaignPlan(webhookUrl, payload) {
       suggestedStyle:       p.suggested_style       || '',
       suggestedAspectRatio: p.suggested_aspect_ratio || '',
       designTip:            p.design_tip            || '',
+      // The human's own creative direction for the visual ("what I'm
+      // imagining"). The planner may pre-fill it from a seed post; otherwise
+      // it's added on the editable board (Stage 3) before generation.
+      imageIdea:            p.image_idea            || '',
     }))
     return { ok: true, posts: normalized, suggestedName: raw?.campaignName || '' }
   } catch (err) {
     return { error: err.message }
   }
+}
+
+// Fire the approved plan's ideas at the per-platform Plan Generation
+// webhooks. Each webhook responds immediately ("accepted") and then generates
+// every idea in the background (caption + image) into the *_generated_posts
+// tables with status 'pending_review' — so the browser never waits on a long
+// batch, and posts appear in the review list as they finish. Ideas are split
+// by platform because Instagram and LinkedIn are separate workflows/tables.
+export async function requestPlanContentGeneration({ webhooks, planId, instructions, ideas }) {
+  const byPlatform = { instagram: [], linkedin: [] }
+  for (const idea of ideas) {
+    const platform = idea.platform === 'linkedin' ? 'linkedin' : 'instagram'
+    byPlatform[platform].push({
+      plan_idea_id:         idea.id,
+      title:                idea.title || idea.topic || '',
+      topic:                idea.angle ? `${idea.topic} — ${idea.angle}` : idea.topic,
+      angle:                idea.angle || '',
+      tone:                 idea.tone || '',
+      style:                idea.suggestedStyle || idea.style || 'photorealistic',
+      aspect_ratio:         idea.suggestedAspectRatio || idea.aspectRatio || (platform === 'linkedin' ? '1.91:1' : '1:1'),
+      design_tip:           idea.designTip || '',
+      // Freeform human direction for the visual — passed straight to the
+      // image step so it overrides/augments the generic design_tip.
+      image_idea:           idea.imageIdea || '',
+      // 'generate' → AI makes the image (references guide it, image-to-image);
+      // 'use_reference' → skip AI, reference_image_urls ARE the post image(s).
+      image_mode:           idea.imageMode || 'generate',
+      occasion:             idea.occasion || '',
+      content_pillar:       idea.pillar || '',
+      scheduled_date:       idea.date || null,
+      publish_time:         idea.publishTime || '10:00',
+      reference_image_urls: idea.references || [],
+    })
+  }
+
+  const targets = [
+    { platform: 'instagram', url: webhooks?.instagramPlanGen, ideas: byPlatform.instagram },
+    { platform: 'linkedin',  url: webhooks?.linkedinPlanGen,  ideas: byPlatform.linkedin },
+  ].filter(t => t.ideas.length > 0)
+
+  if (targets.length === 0) return { error: 'No approved ideas to generate.' }
+
+  const results = []
+  for (const t of targets) {
+    if (!t.url) { results.push({ platform: t.platform, ok: false, error: `No ${t.platform} Plan Generation webhook configured (Settings → Integrations).` }); continue }
+    try {
+      const res = await fetch(t.url, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ plan_id: planId, instructions: instructions || '', ideas: t.ideas }),
+      })
+      results.push({ platform: t.platform, count: t.ideas.length, ok: res.ok, error: res.ok ? null : `Webhook returned ${res.status}` })
+    } catch (err) {
+      results.push({ platform: t.platform, ok: false, error: err.message })
+    }
+  }
+  const failed = results.filter(r => !r.ok)
+  return { ok: failed.length === 0, results, failedCount: failed.length }
 }
 
 // Write the (human-reviewed) plan into Supabase, one row per post, tagged
@@ -79,6 +149,7 @@ export async function writeCampaignPosts(workspaceId, accessToken, campaignId, p
         instructions:   instructions || '',
         campaign_id:    campaignId,
         upload_type:    'generate',
+        reference_image_urls: post.references || [],
         status:         'pending',
       }
       const res = await fetch(`${SUPABASE_URL}/rest/v1/linkedin_schedule`, {
@@ -99,6 +170,7 @@ export async function writeCampaignPosts(workspaceId, accessToken, campaignId, p
         instructions:   instructions || null,
         campaign_id:    campaignId,
         upload_type:    'generate',
+        reference_image_urls: post.references || [],
         status:         'pending',
       }
       const res = await fetch(`${SUPABASE_URL}/rest/v1/instagram_schedule`, {

@@ -22,7 +22,7 @@ const initialState = {
       connectedAccounts: { instagram: false, facebook: false, linkedin: false, tiktok: false, x: false },
       instagramInstructions: '', instagramSchedule: {},
       linkedinInstructions: '', linkedinSchedule: {},
-      webhooks: { instagram: '', linkedin: '', instagramSchedule: '', instagramScheduleRegen: '', linkedinSchedule: '', linkedinScheduleRegen: '', instagramReels: '', campaignPlanner: '' },
+      webhooks: { instagram: '', linkedin: '', instagramSchedule: '', instagramScheduleRegen: '', linkedinSchedule: '', linkedinScheduleRegen: '', instagramReels: '', campaignPlanner: '', instagramPlanGen: '', linkedinPlanGen: '' },
       supabase: { url: '', anonKey: '' },
     }
   },
@@ -31,7 +31,7 @@ const initialState = {
   instagramSchedule: {},
   linkedinInstructions: '',
   linkedinSchedule: {},   // { 'YYYY-MM-DD': { topic, tone, postType, includeImage, style, aspectRatio, contentRoute, notes } }
-  webhooks: { instagram: '', linkedin: '', instagramSchedule: '', instagramScheduleRegen: '', linkedinSchedule: '', linkedinScheduleRegen: '', instagramReels: '', campaignPlanner: '' },
+  webhooks: { instagram: '', linkedin: '', instagramSchedule: '', instagramScheduleRegen: '', linkedinSchedule: '', linkedinScheduleRegen: '', instagramReels: '', campaignPlanner: '', instagramPlanGen: '', linkedinPlanGen: '' },
   supabase: { url: '', anonKey: '' },
   // Canonical brand profile, fetched from Supabase (not persisted to
   // localStorage — Supabase is the source of truth so n8n workflows and the
@@ -110,7 +110,7 @@ function reducer(state, action) {
         connectedAccounts: { instagram: false, facebook: false, linkedin: false, tiktok: false, x: false },
         instagramInstructions: '', instagramSchedule: {},
         linkedinInstructions: '', linkedinSchedule: {},
-        webhooks: { instagram: '', linkedin: '', instagramSchedule: '', instagramScheduleRegen: '', linkedinSchedule: '', linkedinScheduleRegen: '', instagramReels: '', campaignPlanner: '' },
+        webhooks: { instagram: '', linkedin: '', instagramSchedule: '', instagramScheduleRegen: '', linkedinSchedule: '', linkedinScheduleRegen: '', instagramReels: '', campaignPlanner: '', instagramPlanGen: '', linkedinPlanGen: '' },
         supabase: { url: '', anonKey: '' },
       }
       return {
