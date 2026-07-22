@@ -34,6 +34,7 @@ export async function requestCampaignPlan(webhookUrl, payload) {
       _rowId:   `plan_${i}_${Date.now()}`,
       platform: p.platform === 'linkedin' ? 'linkedin' : 'instagram',
       date:     p.date    || '',
+      time:     p.time    || '',
       title:    p.title   || p.topic || '',
       topic:    p.topic   || '',
       angle:    p.angle   || '',
@@ -45,6 +46,10 @@ export async function requestCampaignPlan(webhookUrl, payload) {
       occasion:   p.occasion       || '',
       pillar:     p.content_pillar || p.pillar || '',
       rationale:  p.rationale      || '',
+      // What this post is FOR (objective) and its specific call-to-action —
+      // lets the reviewer judge purpose, not just topic.
+      objective:  p.objective || '',
+      cta:        p.cta       || '',
       format:     p.suggested_format || p.format || 'post',
       // Design suggestion from the planning workflow itself — it had the
       // full topic/angle/brand context when it made this call, so it's
@@ -91,8 +96,10 @@ export async function requestPlanContentGeneration({ webhooks, planId, instructi
       image_mode:           idea.imageMode || 'generate',
       occasion:             idea.occasion || '',
       content_pillar:       idea.pillar || '',
+      objective:            idea.objective || '',
+      cta:                  idea.cta || '',
       scheduled_date:       idea.date || null,
-      publish_time:         idea.publishTime || '10:00',
+      publish_time:         idea.time || idea.publishTime || '10:00',
       reference_image_urls: idea.references || [],
     })
   }

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useApp, actions } from '../../store/appStore'
 import { useAuth } from '../../store/AuthContext'
+import { supabase } from '../../lib/supabaseClient'
 import { Card, WarmCard, Button, Input, Select, Toggle, Avatar, Modal, ConfirmDialog } from '../../components/ui/index'
 import { uid, PLATFORM_META } from '../../lib/utils'
 
@@ -292,36 +293,57 @@ function WorkflowWebhooks() {
 }
 
 // ─── Settings ──────────────────────────────────────────────────────────────
+// A "company" == a Supabase workspace. This section reads/writes the REAL
+// workspaces + workspace_members tables (via useAuth), not the legacy
+// localStorage appStore — so creating a company here makes a real, isolated
+// tenant that shows up in the sidebar switcher and gets its own brain/plans.
 export function Settings() {
-  const { state, dispatch } = useApp()
+  const { user, workspaces, activeWorkspaceId, switchWorkspace, refreshWorkspaces } = useAuth()
   const [showCreate, setShowCreate] = useState(false)
   const [newWsName, setNewWsName]   = useState('')
   const [editingId, setEditingId]   = useState(null)
   const [editName, setEditName]     = useState('')
   const [confirmDelete, setConfirmDelete] = useState(null)
+  const [busy, setBusy]   = useState(false)
+  const [error, setError] = useState('')
 
-  const workspaces = state.workspaces || []
-  const activeId   = state.activeWorkspaceId
+  const activeId = activeWorkspaceId
 
-  function handleCreate() {
+  async function handleCreate() {
     const name = newWsName.trim()
-    if (!name) return
-    const id = 'ws_' + Date.now().toString(36)
-    dispatch(actions.createWorkspace({ id, name, createdAt: new Date().toISOString() }))
-    setNewWsName('')
-    setShowCreate(false)
+    if (!name || !user) return
+    setBusy(true); setError('')
+    // create_company() (SECURITY DEFINER) atomically makes the company + the
+    // caller's owner membership, then we refresh and drop into the new one.
+    const { data: newId, error: rpcError } = await supabase
+      .rpc('create_company', { company_name: name })
+    if (rpcError) { setError(rpcError.message); setBusy(false); return }
+    await refreshWorkspaces()
+    if (newId) switchWorkspace(newId)
+    setNewWsName(''); setShowCreate(false); setBusy(false)
   }
 
-  function handleRename(id) {
+  async function handleRename(id) {
     const name = editName.trim()
     if (!name) return
-    dispatch(actions.renameWorkspace({ id, name }))
-    setEditingId(null)
+    setBusy(true); setError('')
+    const { error: e } = await supabase.from('workspaces').update({ name }).eq('id', id)
+    if (e) { setError(e.message); setBusy(false); return }
+    await refreshWorkspaces()
+    setEditingId(null); setBusy(false)
   }
 
-  function handleDelete(id) {
-    dispatch(actions.deleteWorkspace(id))
-    setConfirmDelete(null)
+  async function handleDelete(id) {
+    setBusy(true); setError('')
+    // FK on delete cascade wipes members + all workspace-scoped data.
+    const { error: e } = await supabase.from('workspaces').delete().eq('id', id)
+    if (e) { setError(e.message); setBusy(false); setConfirmDelete(null); return }
+    if (id === activeId) {
+      const next = workspaces.find(w => w.id !== id)
+      if (next) switchWorkspace(next.id)
+    }
+    await refreshWorkspaces()
+    setConfirmDelete(null); setBusy(false)
   }
 
   return (
@@ -329,19 +351,25 @@ export function Settings() {
       <Card className="overflow-hidden">
         <div className="px-6 py-5 border-b border-border flex items-center justify-between">
           <div>
-            <h3 className="font-display font-semibold text-text text-lg">Workspaces</h3>
-            <p className="text-xs text-text-tertiary mt-0.5">Each workspace is isolated — separate content, posts, and settings.</p>
+            <h3 className="font-display font-semibold text-text text-lg">Companies</h3>
+            <p className="text-xs text-text-tertiary mt-0.5">Each company is fully isolated — its own brand brain, content, plans, and posts. Switch between them from the sidebar.</p>
           </div>
-          <Button size="sm" onClick={() => { setShowCreate(true); setNewWsName('') }}>
+          <Button size="sm" onClick={() => { setShowCreate(true); setNewWsName(''); setError('') }}>
             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
-            New Workspace
+            Add company
           </Button>
         </div>
+
+        {error && (
+          <div className="px-6 py-3 border-b border-border bg-red-50/60">
+            <p className="text-xs text-red-600">{error}</p>
+          </div>
+        )}
 
         {/* Create inline form */}
         {showCreate && (
           <div className="px-6 py-4 border-b border-border bg-amber-50/40">
-            <p className="text-xs font-semibold text-text-secondary mb-2">Workspace name</p>
+            <p className="text-xs font-semibold text-text-secondary mb-2">Company name</p>
             <div className="flex gap-2">
               <input
                 autoFocus
@@ -351,13 +379,13 @@ export function Settings() {
                 placeholder="e.g. Nour Interiors"
                 className="flex-1 rounded-xl border border-border bg-white text-text text-sm px-3.5 py-2 focus:outline-none focus:ring-2 focus:ring-amber-400 transition-all"
               />
-              <Button size="sm" onClick={handleCreate} disabled={!newWsName.trim()}>Create</Button>
+              <Button size="sm" onClick={handleCreate} disabled={!newWsName.trim() || busy}>{busy ? 'Creating…' : 'Create'}</Button>
               <Button size="sm" variant="secondary" onClick={() => setShowCreate(false)}>Cancel</Button>
             </div>
           </div>
         )}
 
-        {/* Workspace list */}
+        {/* Company list */}
         <ul className="divide-y divide-border">
           {workspaces.map(ws => {
             const isActive  = ws.id === activeId
@@ -391,14 +419,14 @@ export function Settings() {
                 <div className="flex items-center gap-1.5 flex-shrink-0">
                   {isEditing ? (
                     <>
-                      <Button size="xs" onClick={() => handleRename(ws.id)} disabled={!editName.trim()}>Save</Button>
+                      <Button size="xs" onClick={() => handleRename(ws.id)} disabled={!editName.trim() || busy}>Save</Button>
                       <Button size="xs" variant="secondary" onClick={() => setEditingId(null)}>Cancel</Button>
                     </>
                   ) : (
                     <>
                       {!isActive && (
                         <Button size="xs" variant="outline"
-                          onClick={() => dispatch(actions.switchWorkspace(ws.id))}>
+                          onClick={() => switchWorkspace(ws.id)}>
                           Switch
                         </Button>
                       )}
@@ -428,14 +456,14 @@ export function Settings() {
       {/* Danger Zone */}
       <Card className="p-6 border-red-200">
         <h3 className="font-semibold text-red-600 mb-2">Danger Zone</h3>
-        <p className="text-xs text-text-secondary mb-4">Delete the active workspace. This is permanent and cannot be undone.</p>
+        <p className="text-xs text-text-secondary mb-4">Delete the active company. This permanently removes its brand brain, content, plans, and posts.</p>
         <Button variant="danger" size="sm"
           disabled={workspaces.length <= 1}
           onClick={() => setConfirmDelete(workspaces.find(w => w.id === activeId))}>
-          Delete workspace
+          Delete company
         </Button>
         {workspaces.length <= 1 && (
-          <p className="text-[11px] text-text-tertiary mt-2">Create a second workspace before you can delete this one.</p>
+          <p className="text-[11px] text-text-tertiary mt-2">Create a second company before you can delete this one.</p>
         )}
       </Card>
 
@@ -446,11 +474,11 @@ export function Settings() {
           <div className="bg-white rounded-2xl shadow-dropdown w-full max-w-sm border border-border animate-fade-scale p-6 space-y-4">
             <h3 className="font-display font-semibold text-text text-lg">Delete "{confirmDelete.name}"?</h3>
             <p className="text-sm text-text-secondary leading-relaxed">
-              All content, posts, campaigns, and settings for this workspace will be permanently removed.
+              All content, posts, campaigns, brand brain, and settings for this company will be permanently removed.
             </p>
             <div className="flex gap-3 pt-1">
               <Button variant="secondary" className="flex-1 justify-center" onClick={() => setConfirmDelete(null)}>Cancel</Button>
-              <Button variant="danger" className="flex-1 justify-center" onClick={() => handleDelete(confirmDelete.id)}>Delete</Button>
+              <Button variant="danger" className="flex-1 justify-center" onClick={() => handleDelete(confirmDelete.id)} disabled={busy}>{busy ? 'Deleting…' : 'Delete'}</Button>
             </div>
           </div>
         </div>

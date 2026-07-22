@@ -38,6 +38,17 @@ const toneLabel = p => (p.platform === 'linkedin' ? LI_TONES : IG_TONES).find(t 
 
 const FORMATS = ['post', 'carousel', 'reel']
 
+// What a post is FOR — lets the reviewer judge purpose, not just topic.
+const OBJECTIVES = ['Awareness', 'Engagement', 'Sales/Leads', 'Trust/Credibility', 'Community']
+
+// Saudi week (Sunday-first); Fri/Sat flagged as the weekend, not disabled —
+// plenty of brands post through the weekend, this is just a hint.
+const WEEKDAYS = [
+  { value: 'sun', label: 'Sun' }, { value: 'mon', label: 'Mon' }, { value: 'tue', label: 'Tue' },
+  { value: 'wed', label: 'Wed' }, { value: 'thu', label: 'Thu' },
+  { value: 'fri', label: 'Fri', weekend: true }, { value: 'sat', label: 'Sat', weekend: true },
+]
+
 // Visual styles the generation pipeline understands, per platform. Shown as an
 // editable chip on each idea (Stage 3) so the human can override the AI's pick.
 const IG_STYLES = [
@@ -86,6 +97,14 @@ function startOfWeek(d) {
   return x
 }
 const fmtDay = d => `${MONTH_ABBR[d.getMonth()]} ${d.getDate()}`
+// '19:30' -> '7:30 PM'
+function formatTime(hhmm) {
+  const [h, m] = (hhmm || '').split(':').map(Number)
+  if (Number.isNaN(h) || Number.isNaN(m)) return ''
+  const period = h >= 12 ? 'PM' : 'AM'
+  const h12 = h % 12 === 0 ? 12 : h % 12
+  return `${h12}:${String(m).padStart(2, '0')} ${period}`
+}
 function groupByWeek(ideas) {
   const groups = new Map()
   const undated = []
@@ -127,6 +146,7 @@ export function dbIdeaToDraft(row) {
     _rowId: row.id,
     platform: row.platform || 'instagram',
     date: row.scheduled_date || '',
+    time: row.publish_time || '',
     title: row.title || '',
     topic: row.topic || '',
     angle: row.angle || '',
@@ -134,6 +154,8 @@ export function dbIdeaToDraft(row) {
     occasion: row.occasion || '',
     pillar: row.content_pillar || '',
     rationale: row.rationale || '',
+    objective: row.objective || '',
+    cta: row.cta || '',
     format: row.suggested_format || 'post',
     suggestedStyle: row.suggested_style || '',
     suggestedAspectRatio: row.suggested_aspect_ratio || '',
@@ -149,6 +171,14 @@ const DEFAULT_DRAFT = {
   step: 'setup', // 'setup' | 'review' | 'done'
   month: '', goal: '', goalCategory: '', platforms: ['instagram', 'linkedin'],
   startDate: '', endDate: '', approxCount: '', includeHolidays: true,
+  // Cadence: which weekdays this brand actually posts on (empty = AI decides
+  // freely, today's behavior) and the default publish time for Instagram —
+  // LinkedIn is biased to business hours by the planner regardless.
+  postingDays: [], defaultTime: '19:00',
+  // Individually curated posts (below) are the PRIMARY planning surface.
+  // AI-proposed filler is an explicit, off-by-default add-on — when false,
+  // the AI planner webhook is never even called.
+  aiAssist: false,
   brandBrainSections: DEFAULT_BRAND_BRAIN_SECTIONS,
   // Stage-1 brief inputs — all optional. Give the planner real material to
   // work with instead of just a count + a general idea.
@@ -218,8 +248,10 @@ function IdeaCard({ idea, index, accessToken, onChange, onRemove, onCreate, auto
     }
     const dbPatch = {
       topic: patch.topic, angle: patch.angle, tone: patch.tone,
-      scheduled_date: patch.date || null, suggested_format: patch.format,
+      scheduled_date: patch.date || null, publish_time: patch.time || '',
+      suggested_format: patch.format,
       suggested_style: patch.suggestedStyle || '', image_idea: patch.imageIdea || '',
+      objective: patch.objective || '', cta: patch.cta || '',
     }
     const result = await updateIdea(accessToken, idea.id, dbPatch)
     setSaving(false)
@@ -242,7 +274,8 @@ function IdeaCard({ idea, index, accessToken, onChange, onRemove, onCreate, auto
               </span>
               {idea.occasion && <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${OCCASION_STYLE}`}>★ {idea.occasion}</span>}
               {idea.pillar && <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full border ${PILLAR_STYLE}`}>{idea.pillar}</span>}
-              <span className="text-[10px] text-text-tertiary">{idea.date ? formatDate(idea.date) : 'No date'}</span>
+              {idea.objective && <span className="text-[10px] font-medium px-2 py-0.5 rounded-full border bg-sky-50 text-sky-700 border-sky-100">{idea.objective}</span>}
+              <span className="text-[10px] text-text-tertiary">{idea.date ? formatDate(idea.date) : 'No date'}{idea.time ? ` · ${formatTime(idea.time)}` : ''}</span>
               <span className="text-[10px] text-text-tertiary capitalize">· {idea.format}</span>
               {idea.imageIdea && !usingImage && <span className="text-[10px] font-semibold text-purple-600" title={idea.imageIdea}>· 🎨 your vision</span>}
               {usingImage
@@ -254,6 +287,9 @@ function IdeaCard({ idea, index, accessToken, onChange, onRemove, onCreate, auto
             {idea.topic && idea.topic !== idea.title && <p className="text-xs text-text-secondary mt-0.5 leading-relaxed">{idea.topic}</p>}
             {idea.rationale && (
               <p className="text-[11px] text-text-tertiary mt-1.5 leading-relaxed"><span className="font-semibold text-text-secondary">Why:</span> {idea.rationale}</p>
+            )}
+            {idea.cta && (
+              <p className="text-[11px] text-sky-700 mt-1 leading-relaxed"><span className="font-semibold">CTA:</span> {idea.cta}</p>
             )}
           </div>
           <span className={`text-[10px] font-semibold px-2 py-1 rounded-full flex-shrink-0 ${st.cls}`}>{st.label}</span>
@@ -299,9 +335,12 @@ function IdeaEditModal({ idea, tones, saving, saveError, onClose, onSave }) {
   const [angle,     setAngle]     = useState(idea.angle || '')
   const [tone,      setTone]      = useState(idea.tone || tones[0].value)
   const [date,      setDate]      = useState(idea.date || '')
+  const [time,      setTime]      = useState(idea.time || '')
   const [format,    setFormat]    = useState(idea.format || 'post')
   const [style,     setStyle]     = useState(idea.suggestedStyle || '')
   const [imageIdea, setImageIdea] = useState(idea.imageIdea || '')
+  const [objective, setObjective] = useState(idea.objective || '')
+  const [cta,       setCta]       = useState(idea.cta || '')
   const styles = idea.platform === 'linkedin' ? LI_STYLES : IG_STYLES
 
   return (
@@ -321,6 +360,7 @@ function IdeaEditModal({ idea, tones, saving, saveError, onClose, onSave }) {
 
         <div className="grid grid-cols-2 gap-3">
           <Input label="Date" type="date" value={date} onChange={e => setDate(e.target.value)} />
+          <Input label="Time" type="time" value={time} onChange={e => setTime(e.target.value)} />
           <Select label="Format" value={format} onChange={e => setFormat(e.target.value)}>
             {FORMATS.map(f => <option key={f} value={f} className="capitalize">{f}</option>)}
           </Select>
@@ -331,11 +371,22 @@ function IdeaEditModal({ idea, tones, saving, saveError, onClose, onSave }) {
             <option value="">AI decides</option>
             {styles.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
           </Select>
+          <Select label="Objective" value={objective} onChange={e => setObjective(e.target.value)}>
+            <option value="">Not set</option>
+            {OBJECTIVES.map(o => <option key={o} value={o}>{o}</option>)}
+          </Select>
         </div>
+
+        <Input
+          label="Call-to-action (optional)"
+          placeholder="e.g. DM us for a quote"
+          value={cta} onChange={e => setCta(e.target.value)}
+        />
+
         {saveError && <p className="text-xs text-red-600">{saveError}</p>}
         <div className="flex justify-end gap-3 pt-1">
           <Button variant="secondary" onClick={onClose}>{idea.isNew ? 'Discard' : 'Cancel'}</Button>
-          <Button onClick={() => onSave({ topic, angle, tone, date, format, suggestedStyle: style, imageIdea })} disabled={saving || (idea.isNew && !topic.trim())}>
+          <Button onClick={() => onSave({ topic, angle, tone, date, time, format, suggestedStyle: style, imageIdea, objective, cta })} disabled={saving || (idea.isNew && !topic.trim())}>
             {saving ? <><Spinner size="sm" /> Saving…</> : 'Save'}
           </Button>
         </div>
@@ -378,6 +429,77 @@ function GenerateMoreModal({ defaultCount, loading, error, onClose, onGenerate }
   )
 }
 
+// ─── Month calendar overview ────────────────────────────────────────────────
+// A navigation aid, not a second approve/reject surface: clicking a day just
+// filters the existing card list to that day (see dayFilter in the main
+// component) so all approve/edit/delete logic stays in one place (IdeaCard).
+function buildCalendarCells(startDate, endDate) {
+  if (!startDate || !endDate) return []
+  const start = parseYMD(startDate)
+  const end = parseYMD(endDate)
+  const gridStart = new Date(start); gridStart.setDate(gridStart.getDate() - gridStart.getDay())
+  const gridEnd = new Date(end); gridEnd.setDate(gridEnd.getDate() + (6 - gridEnd.getDay()))
+  const cells = []
+  const cur = new Date(gridStart)
+  while (cur <= gridEnd) {
+    const y = cur.getFullYear(), m = cur.getMonth(), d = cur.getDate()
+    const key = `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`
+    cells.push({ key, date: new Date(cur), inRange: key >= startDate && key <= endDate })
+    cur.setDate(cur.getDate() + 1)
+  }
+  return cells
+}
+
+function CalendarView({ ideas, startDate, endDate, selectedDay, onDayClick }) {
+  const cells = buildCalendarCells(startDate, endDate)
+  const byDate = new Map()
+  ideas.forEach(i => {
+    if (!i.date) return
+    if (!byDate.has(i.date)) byDate.set(i.date, [])
+    byDate.get(i.date).push(i)
+  })
+  const weeks = []
+  for (let i = 0; i < cells.length; i += 7) weeks.push(cells.slice(i, i + 7))
+
+  return (
+    <div className="rounded-2xl border border-border bg-white overflow-hidden">
+      <div className="grid grid-cols-7 border-b border-border bg-surface-subtle">
+        {WEEKDAYS.map(d => (
+          <div key={d.value} className={`px-2 py-2 text-[10px] font-bold text-center uppercase tracking-wide ${d.weekend ? 'text-amber-700' : 'text-text-tertiary'}`}>{d.label}</div>
+        ))}
+      </div>
+      <div>
+        {weeks.map((week, wi) => (
+          <div key={wi} className="grid grid-cols-7 divide-x divide-border border-b border-border last:border-b-0">
+            {week.map(cell => {
+              const dayIdeas = byDate.get(cell.key) || []
+              const isSelected = cell.key === selectedDay
+              return (
+                <button key={cell.key} onClick={() => dayIdeas.length && onDayClick(cell.key)}
+                  disabled={!dayIdeas.length}
+                  className={`min-h-[84px] p-1.5 text-left align-top transition-colors ${cell.inRange ? 'bg-white' : 'bg-stone-50/60'} ${isSelected ? 'ring-2 ring-inset ring-amber-400' : ''} ${dayIdeas.length ? 'hover:bg-amber-50/40 cursor-pointer' : 'cursor-default'}`}>
+                  <div className="flex items-center justify-between">
+                    <span className={`text-[11px] font-semibold ${cell.inRange ? 'text-text' : 'text-text-disabled'}`}>{cell.date.getDate()}</span>
+                    {dayIdeas.some(i => i.occasion) && <span className="text-[10px]">★</span>}
+                  </div>
+                  <div className="mt-1 space-y-0.5">
+                    {dayIdeas.slice(0, 3).map(i => (
+                      <div key={i.id} className={`text-[9px] px-1 py-0.5 rounded truncate border-l-2 ${i.status === 'approved' ? 'border-sage-400 bg-sage-50 text-sage-700' : i.status === 'rejected' ? 'border-red-300 bg-red-50 text-red-500 line-through' : 'border-stone-300 bg-stone-50 text-text-secondary'}`}>
+                        {i.platform === 'linkedin' ? '💼' : '📷'} {i.title || i.topic || 'Untitled'}
+                      </div>
+                    ))}
+                    {dayIdeas.length > 3 && <div className="text-[9px] text-text-tertiary px-1">+{dayIdeas.length - 3} more</div>}
+                  </div>
+                </button>
+              )
+            })}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 // ─── Main planner ───────────────────────────────────────────────────────────
 export function CampaignPlanner() {
   const { draft, update, clear, state, dispatch } = useDraft()
@@ -410,6 +532,9 @@ export function CampaignPlanner() {
   const [seasonalOnly,   setSeasonalOnly]   = useState(false)
   const [platformFilter, setPlatformFilter] = useState('all')
   const [autoEditId,     setAutoEditId]     = useState(null)     // idea to auto-open in the edit modal
+  const [viewMode,       setViewMode]       = useState('list')   // 'list' | 'calendar'
+  const [dayFilter,      setDayFilter]      = useState(null)     // 'YYYY-MM-DD' — set by clicking a calendar day
+  function pickCalendarDay(dateKey) { setDayFilter(dateKey); setViewMode('list') }
 
   // Per-seed-post image picker (Stage-1 brief) — which seed row is being
   // edited, and the in-progress mode choice for that row's picker (mirrors
@@ -422,15 +547,16 @@ export function CampaignPlanner() {
   const [moreLoading,   setMoreLoading]   = useState(false)
   const [moreError,     setMoreError]     = useState('')
 
-  const { step, month, goal, goalCategory, platforms, startDate, endDate, approxCount, includeHolidays, brandBrainSections, featuredProductIds, seedPosts, name, ideas, planId, pushResult } = draft
+  const { step, month, goal, goalCategory, platforms, startDate, endDate, approxCount, includeHolidays, brandBrainSections, featuredProductIds, seedPosts, name, ideas, planId, pushResult, postingDays, defaultTime, aiAssist } = draft
   const months = monthOptions()
 
   const togglePlatform = p => update({ platforms: platforms.includes(p) ? platforms.filter(x => x !== p) : [...platforms, p] })
   const toggleSection  = s => update({ brandBrainSections: brandBrainSections.includes(s) ? brandBrainSections.filter(x => x !== s) : [...brandBrainSections, s] })
   const toggleProduct  = id => update({ featuredProductIds: featuredProductIds.includes(id) ? featuredProductIds.filter(x => x !== id) : [...featuredProductIds, id] })
+  const toggleDay      = d  => update({ postingDays: postingDays.includes(d) ? postingDays.filter(x => x !== d) : [...postingDays, d] })
 
   // ── Seed posts (specific posts the user already wants, optionally with images) ──
-  const addSeed    = ()          => update({ seedPosts: [...seedPosts, { text: '', platform: platforms[0] || 'instagram', format: 'post', references: [], imageMode: 'generate' }] })
+  const addSeed    = ()          => update({ seedPosts: [...seedPosts, { text: '', platform: platforms[0] || 'instagram', format: 'post', date: '', references: [], imageMode: 'generate' }] })
   const updateSeed = (i, patch)  => update({ seedPosts: seedPosts.map((s, idx) => idx === i ? { ...s, ...patch } : s) })
   const removeSeed = i           => update({ seedPosts: seedPosts.filter((_, idx) => idx !== i) })
   function openSeedImagePicker(i) { setSeedPickerMode(seedPosts[i].imageMode || 'generate'); setPickingSeedIdx(i) }
@@ -449,47 +575,66 @@ export function CampaignPlanner() {
   function validateSetup() {
     if (!month) return 'Pick which month this plan is for.'
     if (platforms.length === 0) return 'Select at least one platform.'
+    const hasSeeds = seedPosts.some(s => s.text.trim())
+    if (!aiAssist && !hasSeeds) return 'Add at least one post, or turn on "Also let AI propose additional posts."'
     return ''
   }
 
   async function handleGeneratePlan() {
     const v = validateSetup()
     if (v) { setError(v); return }
-    if (!webhookUrl) { setError('Campaign Planner webhook not configured (Settings → Integrations).'); return }
+    // The AI planner webhook is only needed when AI-assist is actually on —
+    // a fully manual, curated-posts-only plan never calls it.
+    if (aiAssist && !webhookUrl) { setError('Campaign Planner webhook not configured (Settings → Integrations).'); return }
     setError(''); setLoading(true)
 
-    const blocks = buildSectionBlocks(state.brandProfile, directory)
-    const instructions = brandBrainSections.map(s => blocks[s]).filter(Boolean).join('\n\n')
-    const effectiveGoal = goal.trim() ||
-      'A well-rounded month of brand content for Arak Lighting — a mix of project showcases, product highlights, educational lighting content, and the seasonal/cultural moments falling in this month.'
-
-    // Stage-1 brief material: the products to feature (full context, not just
-    // ids) and the seed posts, so the planner can build a coherent month around
-    // them instead of guessing.
-    const featuredProducts = directory.products
-      .filter(p => featuredProductIds.includes(p.id))
-      .map(p => ({ name: p.name, category: p.category || '', specs: p.specs || '', description: p.description || '' }))
+    // Individually curated posts — the primary planning surface. These are
+    // inserted directly as real ideas, no AI involved.
     const cleanSeeds = seedPosts
       .filter(s => s.text.trim())
       .map(s => ({
-        text: s.text.trim(), platform: s.platform, format: s.format,
+        text: s.text.trim(), platform: s.platform, format: s.format, date: s.date || null,
         image_mode: s.imageMode || 'generate', reference_image_urls: s.references || [],
       }))
+    const seedIdeas = cleanSeeds.map(s => ({
+      platform: s.platform, date: s.date, title: s.text, topic: s.text, format: s.format,
+      tone: s.platform === 'linkedin' ? 'thought_leader' : 'professional',
+      rationale: 'You added this as a specific post you wanted.',
+      imageMode: s.image_mode, references: s.reference_image_urls,
+    }))
 
-    const result = await requestCampaignPlan(webhookUrl, {
-      goal: effectiveGoal,
-      goal_category: goalCategory || null,
-      platforms,
-      start_date: startDate,
-      end_date: endDate,
-      approx_post_count: approxCount ? Number(approxCount) : null,
-      include_holidays: includeHolidays,
-      brand_brain_sections: brandBrainSections,
-      instructions: instructions || null,
-      featured_products: featuredProducts,
-      seed_posts: cleanSeeds,
-    })
-    if (result.error) { setLoading(false); setError(result.error); return }
+    let aiPosts = []
+    let featuredProducts = []
+    let effectiveGoal = ''
+    if (aiAssist) {
+      const blocks = buildSectionBlocks(state.brandProfile, directory)
+      const instructions = brandBrainSections.map(s => blocks[s]).filter(Boolean).join('\n\n')
+      effectiveGoal = goal.trim() ||
+        'A well-rounded month of brand content for Arak Lighting — a mix of project showcases, product highlights, educational lighting content, and the seasonal/cultural moments falling in this month.'
+      // Stage-1 brief material: the products to feature (full context, not
+      // just ids), so the planner can build a coherent month around them.
+      featuredProducts = directory.products
+        .filter(p => featuredProductIds.includes(p.id))
+        .map(p => ({ name: p.name, category: p.category || '', specs: p.specs || '', description: p.description || '' }))
+
+      const result = await requestCampaignPlan(webhookUrl, {
+        goal: effectiveGoal,
+        goal_category: goalCategory || null,
+        platforms,
+        start_date: startDate,
+        end_date: endDate,
+        approx_post_count: approxCount ? Number(approxCount) : null,
+        include_holidays: includeHolidays,
+        brand_brain_sections: brandBrainSections,
+        instructions: instructions || null,
+        featured_products: featuredProducts,
+        seed_posts: cleanSeeds,
+        posting_days: postingDays,
+        posting_time: defaultTime,
+      })
+      if (result.error) { setLoading(false); setError(result.error); return }
+      aiPosts = result.posts
+    }
 
     // Persist the plan + its ideas so approval state is real, not ephemeral.
     const planRes = await createPlan(activeWorkspaceId, accessToken, {
@@ -497,19 +642,13 @@ export function CampaignPlanner() {
       month, start_date: startDate, end_date: endDate,
       goal: effectiveGoal, goal_category: goalCategory || '', platforms, status: 'draft',
       featured_products: featuredProducts.map(p => p.name),
+      posting_days: postingDays, default_time: defaultTime,
     })
-    if (planRes.error) { setLoading(false); setError(`Plan generated but couldn't be saved: ${planRes.error}`); return }
+    if (planRes.error) { setLoading(false); setError(`Plan couldn't be saved: ${planRes.error}`); return }
 
-    // Seed posts become real ideas up front so they're on the board immediately,
-    // editable like any other, images already attached if the user set them.
-    // The AI-proposed ideas follow after them.
-    const seedIdeas = cleanSeeds.map(s => ({
-      platform: s.platform, date: null, title: s.text, topic: s.text, format: s.format,
-      tone: s.platform === 'linkedin' ? 'thought_leader' : 'professional',
-      rationale: 'You added this as a specific post you wanted.',
-      imageMode: s.image_mode, references: s.reference_image_urls,
-    }))
-    const allIdeas = [...seedIdeas, ...result.posts]
+    // Your curated posts come first on the board; any AI-proposed posts
+    // (only present if AI-assist was on) follow after them.
+    const allIdeas = [...seedIdeas, ...aiPosts]
 
     const ideasRes = await insertIdeas(activeWorkspaceId, accessToken, planRes.plan.id, allIdeas)
     setLoading(false)
@@ -549,6 +688,8 @@ export function CampaignPlanner() {
       brand_brain_sections: brandBrainSections,
       instructions: instructions || null,
       existing_ideas: existingIdeas,
+      posting_days: postingDays,
+      posting_time: defaultTime,
     })
     if (result.error) { setMoreLoading(false); setMoreError(result.error); return }
 
@@ -576,9 +717,10 @@ export function CampaignPlanner() {
   async function onIdeaCreate(tempIdea, patch) {
     const merged = { ...tempIdea, ...patch }
     const res = await insertIdeas(activeWorkspaceId, accessToken, planId, [{
-      platform: merged.platform, date: merged.date, title: merged.topic || 'New idea',
+      platform: merged.platform, date: merged.date, time: merged.time, title: merged.topic || 'New idea',
       topic: merged.topic, angle: merged.angle, tone: merged.tone, format: merged.format,
       suggestedStyle: merged.suggestedStyle, imageIdea: merged.imageIdea,
+      objective: merged.objective, cta: merged.cta,
     }], ideas.length)
     if (res.error || !res.rows?.[0]) return { error: res.error || 'Could not save idea.' }
     const created = dbIdeaToDraft(res.rows[0])
@@ -643,6 +785,7 @@ export function CampaignPlanner() {
     if (statusFilter !== 'all' && i.status !== want) return false
     if (seasonalOnly && !i.occasion) return false
     if (platformFilter !== 'all' && i.platform !== platformFilter) return false
+    if (dayFilter && i.date !== dayFilter) return false
     return true
   })
   const weekGroups = groupByWeek(filteredIdeas)
@@ -706,33 +849,6 @@ export function CampaignPlanner() {
               <option value="">Select month…</option>
               {months.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
             </Select>
-            <Input
-              label={
-                <span className="inline-flex items-center gap-1.5">
-                  Roughly how many AI posts? (optional)
-                  <span className="relative inline-flex group/info">
-                    <span className="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-stone-300 text-white text-[9px] font-bold leading-none select-none">i</span>
-                    <span className="pointer-events-none absolute left-1/2 -translate-x-1/2 bottom-full mb-2 w-60 rounded-lg bg-stone-800 text-white text-[11px] leading-relaxed px-3 py-2 opacity-0 invisible group-hover/info:opacity-100 group-hover/info:visible transition-opacity z-20 normal-case font-normal">
-                      This is how many ideas the AI proposes on its own — separate from, and not including, the specific posts you add below. E.g. 5 here + 3 specific posts = 8 total.
-                    </span>
-                  </span>
-                </span>
-              }
-              type="number" min="1" placeholder="Let AI decide"
-              value={approxCount} onChange={e => update({ approxCount: e.target.value })} />
-          </div>
-
-          <Textarea
-            label="Focus for the month (optional)"
-            placeholder="Leave blank for a well-rounded month, or steer it — e.g. 'Push our facade & landscape lighting for hospitality developers ahead of Q2 projects.'"
-            value={goal} onChange={e => update({ goal: e.target.value })} rows={3}
-          />
-
-          <div className="grid grid-cols-2 gap-4">
-            <Select label="Focus category (optional)" value={goalCategory} onChange={e => update({ goalCategory: e.target.value })}>
-              <option value="">General</option>
-              {GOALS.map(g => <option key={g} value={g}>{g}</option>)}
-            </Select>
             <div>
               <p className="text-xs font-medium text-text-secondary mb-2">Platforms *</p>
               <div className="flex gap-2">
@@ -746,6 +862,44 @@ export function CampaignPlanner() {
             </div>
           </div>
 
+          {/* ── Cadence: shared by manual + AI posts alike ── */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <p className="text-xs font-medium text-text-secondary mb-2">Which days do you post? (optional)</p>
+              <div className="flex gap-1.5">
+                {WEEKDAYS.map(d => (
+                  <button key={d.value} onClick={() => toggleDay(d.value)} title={d.weekend ? 'Saudi weekend' : ''}
+                    className={`w-9 h-9 rounded-xl border text-[11px] font-semibold transition-all ${postingDays.includes(d.value) ? 'bg-amber-600 text-white border-amber-600' : d.weekend ? 'bg-stone-50 border-border text-text-tertiary hover:border-amber-400' : 'bg-white border-border text-text-secondary hover:border-amber-400'}`}>
+                    {d.label}
+                  </button>
+                ))}
+              </div>
+              <p className="text-[11px] text-text-tertiary mt-1.5">Leave all unselected to let the AI choose freely.</p>
+            </div>
+            <Input label="Default posting time (Instagram)" type="time" value={defaultTime} onChange={e => update({ defaultTime: e.target.value })} />
+          </div>
+          <p className="text-[11px] text-text-tertiary -mt-3">LinkedIn posts are timed for business hours automatically, regardless of the time above — B2B engagement peaks during the work day.</p>
+
+          <Toggle checked={includeHolidays} onChange={e => update({ includeHolidays: e.target.checked })}
+            label="Flag Saudi seasonal & cultural moments in range (Ramadan, Eid al-Fitr, Eid al-Adha, Founding Day, National Day)" />
+
+          {month && setupMoments.length > 0 && (
+            <div className="flex items-center gap-1.5 flex-wrap rounded-xl bg-amber-50/60 border border-amber-100 px-3.5 py-2.5">
+              <span className="text-[11px] font-semibold text-amber-800">Falls in this month:</span>
+              {setupMoments.map((m, i) => (
+                <span key={i} className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200">★ {m.name}</span>
+              ))}
+              <span className="text-[11px] text-amber-700/80">— worth a post yourself, or let AI cover it below.</span>
+            </div>
+          )}
+          {month && includeHolidays && setupMoments.length === 0 && (
+            <p className="text-[11px] text-text-tertiary px-1">No major Saudi moments fall in this month.</p>
+          )}
+
+          {/* ── Brand Brain: universal, not AI-only. This context feeds every
+              post's actual content generation (caption + image) at approval
+              time — your own curated posts included, not just AI-proposed
+              ones — so it belongs here, shared, not behind the AI toggle. ── */}
           <div>
             <p className="text-xs font-medium text-text-secondary mb-2">Pull from Brand Brain</p>
             <div className="flex gap-2 flex-wrap">
@@ -760,98 +914,116 @@ export function CampaignPlanner() {
                 )
               })}
             </div>
-            <p className="text-[11px] text-text-tertiary mt-1.5">Which parts of your Brand Brain the AI should read before proposing ideas.</p>
+            <p className="text-[11px] text-text-tertiary mt-1.5">Feeds every post's content generation — your own posts and any AI-proposed ones alike.</p>
           </div>
 
-          {/* ── Optional enrichment: give the planner real material to work with ── */}
-          <div className="flex items-center gap-2 pt-1">
-            <div className="h-px bg-border flex-1" />
-            <span className="text-[10px] font-bold text-text-tertiary uppercase tracking-wider">Give the planner more to work with — optional</span>
-            <div className="h-px bg-border flex-1" />
-          </div>
+          <div className="h-px bg-border" />
 
-          {/* ── Feature focus: which products to emphasize this month ── */}
-          {directory.products.length > 0 && (
-            <div>
-              <p className="text-xs font-medium text-text-secondary mb-2">Feature these products this month (optional)</p>
-              <div className="flex gap-2 flex-wrap">
-                {directory.products.map(p => {
-                  const active = featuredProductIds.includes(p.id)
-                  return (
-                    <button key={p.id} onClick={() => toggleProduct(p.id)}
-                      className={`px-3 py-1.5 rounded-xl border text-sm font-medium transition-all ${active ? 'bg-amber-600 text-white border-amber-600' : 'bg-white border-border text-text-secondary hover:border-amber-400'}`}>
-                      {p.name}{p.category && <span className={active ? 'opacity-75 ml-1' : 'text-text-tertiary ml-1'}>· {p.category}</span>}
-                    </button>
-                  )
-                })}
-              </div>
-              <p className="text-[11px] text-text-tertiary mt-1.5">The plan will spread coverage across these instead of picking whatever's easiest to write.</p>
-            </div>
-          )}
-
-          {/* ── Seed posts: specific posts the user already knows they want,
-              each optionally carrying its own image(s) right now ── */}
+          {/* ── PRIMARY: individually curated posts. This is the main planning
+              surface — every other section on this page is secondary to it. ── */}
           <div>
-            <p className="text-xs font-medium text-text-secondary mb-2">Add extra specific posts (optional)</p>
+            <div className="flex items-center justify-between mb-1">
+              <p className="text-sm font-bold text-text">Your posts</p>
+              {seedPosts.some(s => s.text.trim()) && (
+                <span className="text-[11px] text-text-tertiary">{seedPosts.filter(s => s.text.trim()).length} added</span>
+              )}
+            </div>
+            <p className="text-[11px] text-text-tertiary mb-2.5">The exact posts you want this month — each one goes straight onto the plan for you to refine, no AI guessing. Add as many as you like.</p>
+
             {seedPosts.length > 0 && (
-              <div className="space-y-2 mb-2">
+              <div className="space-y-2.5 mb-2.5">
                 {seedPosts.map((s, i) => {
                   const refCount = (s.references || []).length
                   const usingImage = s.imageMode === 'use_reference'
                   return (
-                    <div key={i} className="flex items-start gap-2">
-                      <input
-                        className="flex-1 rounded-xl border border-border px-3 py-2 text-sm focus:outline-none focus:border-amber-400"
+                    <div key={i} className="rounded-xl border border-border p-3 space-y-2 bg-white">
+                      <textarea
+                        className="w-full rounded-lg border border-border px-3 py-2 text-sm focus:outline-none focus:border-amber-400 resize-none"
+                        rows={2}
                         placeholder="e.g. Announce the new Riyadh showroom opening"
                         value={s.text} onChange={e => updateSeed(i, { text: e.target.value })}
                       />
-                      <select value={s.platform} onChange={e => updateSeed(i, { platform: e.target.value })}
-                        className="rounded-xl border border-border px-2 py-2 text-sm bg-white capitalize focus:outline-none focus:border-amber-400">
-                        {PLATFORMS.map(p => <option key={p} value={p}>{p}</option>)}
-                      </select>
-                      <select value={s.format} onChange={e => updateSeed(i, { format: e.target.value })}
-                        className="rounded-xl border border-border px-2 py-2 text-sm bg-white capitalize focus:outline-none focus:border-amber-400">
-                        {FORMATS.map(f => <option key={f} value={f}>{f}</option>)}
-                      </select>
-                      <button onClick={() => openSeedImagePicker(i)}
-                        className={`px-2.5 py-2 rounded-xl text-[11px] font-medium whitespace-nowrap transition-colors ${usingImage ? 'text-sage-700 bg-sage-50 hover:bg-sage-100' : refCount > 0 ? 'text-amber-700 bg-amber-50 hover:bg-amber-100' : 'text-text-tertiary hover:text-text hover:bg-surface-subtle border border-border'}`}>
-                        {usingImage ? '🖼 Set' : refCount > 0 ? `📎 ${refCount}` : '🖼 Image'}
-                      </button>
-                      <button onClick={() => removeSeed(i)} className="px-2 py-2 text-text-tertiary hover:text-red-500" title="Remove">✕</button>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <select value={s.platform} onChange={e => updateSeed(i, { platform: e.target.value })}
+                          className="rounded-lg border border-border px-2 py-1.5 text-xs bg-white capitalize focus:outline-none focus:border-amber-400">
+                          {PLATFORMS.map(p => <option key={p} value={p}>{p}</option>)}
+                        </select>
+                        <select value={s.format} onChange={e => updateSeed(i, { format: e.target.value })}
+                          className="rounded-lg border border-border px-2 py-1.5 text-xs bg-white capitalize focus:outline-none focus:border-amber-400">
+                          {FORMATS.map(f => <option key={f} value={f}>{f}</option>)}
+                        </select>
+                        <input type="date" value={s.date || ''} min={startDate || undefined} max={endDate || undefined}
+                          onChange={e => updateSeed(i, { date: e.target.value })}
+                          className="rounded-lg border border-border px-2 py-1.5 text-xs bg-white focus:outline-none focus:border-amber-400" />
+                        <button onClick={() => openSeedImagePicker(i)}
+                          className={`px-2.5 py-1.5 rounded-lg text-[11px] font-medium whitespace-nowrap transition-colors ${usingImage ? 'text-sage-700 bg-sage-50 hover:bg-sage-100' : refCount > 0 ? 'text-amber-700 bg-amber-50 hover:bg-amber-100' : 'text-text-tertiary hover:text-text hover:bg-surface-subtle border border-border'}`}>
+                          {usingImage ? '🖼 Set' : refCount > 0 ? `📎 ${refCount}` : '🖼 Image'}
+                        </button>
+                        <button onClick={() => removeSeed(i)} className="ml-auto text-[11px] px-2 py-1.5 text-text-tertiary hover:text-red-500" title="Remove">✕ Remove</button>
+                      </div>
                     </div>
                   )
                 })}
               </div>
             )}
             <button onClick={addSeed}
-              className="text-[11px] font-semibold text-amber-700 hover:text-amber-800 px-2 py-1 rounded-lg hover:bg-amber-50">
-              + Add an extra specific post
+              className="w-full text-center text-sm font-semibold text-amber-700 hover:text-amber-800 px-3 py-2.5 rounded-xl border-2 border-dashed border-amber-200 hover:border-amber-300 hover:bg-amber-50/50 transition-colors">
+              + Add a post
             </button>
-            <p className="text-[11px] text-text-tertiary mt-1.5">These are added on top of the AI post count above, not counted within it — the AI fills the rest of the month around them. Attach images now if you have them, or add them after the plan is generated.</p>
           </div>
 
-          <Toggle checked={includeHolidays} onChange={e => update({ includeHolidays: e.target.checked })}
-            label="Include Saudi seasonal & cultural moments in range (Ramadan, Eid al-Fitr, Eid al-Adha, Founding Day, National Day)" />
+          {/* ── SECONDARY: AI-assist is an explicit, off-by-default add-on ── */}
+          <div className="rounded-2xl border border-border bg-surface-subtle/40 p-4 space-y-4">
+            <Toggle checked={aiAssist} onChange={e => update({ aiAssist: e.target.checked })}
+              label="Also let AI propose additional posts this month" />
+            <p className="text-[11px] text-text-tertiary -mt-2.5">Fills out the rest of the month around your posts above. Leave this off for a plan that's exactly what you added.</p>
 
-          {month && setupMoments.length > 0 && (
-            <div className="flex items-center gap-1.5 flex-wrap rounded-xl bg-amber-50/60 border border-amber-100 px-3.5 py-2.5">
-              <span className="text-[11px] font-semibold text-amber-800">Falls in this month:</span>
-              {setupMoments.map((m, i) => (
-                <span key={i} className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200">★ {m.name}</span>
-              ))}
-              <span className="text-[11px] text-amber-700/80">— we'll build dedicated posts for these.</span>
-            </div>
-          )}
-          {month && includeHolidays && setupMoments.length === 0 && (
-            <p className="text-[11px] text-text-tertiary px-1">No major Saudi moments fall in this month — the plan will run normally.</p>
-          )}
+            {aiAssist && (
+              <div className="space-y-4 pt-3 border-t border-border/70">
+                <div className="grid grid-cols-2 gap-4">
+                  <Input
+                    label="Roughly how many AI posts? (optional)"
+                    type="number" min="1" placeholder="Let AI decide"
+                    value={approxCount} onChange={e => update({ approxCount: e.target.value })} />
+                  <Select label="Focus category (optional)" value={goalCategory} onChange={e => update({ goalCategory: e.target.value })}>
+                    <option value="">General</option>
+                    {GOALS.map(g => <option key={g} value={g}>{g}</option>)}
+                  </Select>
+                </div>
+
+                <Textarea
+                  label="Focus for the month (optional)"
+                  placeholder="Leave blank for a well-rounded month, or steer it — e.g. 'Push our facade & landscape lighting for hospitality developers ahead of Q2 projects.'"
+                  value={goal} onChange={e => update({ goal: e.target.value })} rows={3}
+                />
+
+                {directory.products.length > 0 && (
+                  <div>
+                    <p className="text-xs font-medium text-text-secondary mb-2">Feature these products this month (optional)</p>
+                    <div className="flex gap-2 flex-wrap">
+                      {directory.products.map(p => {
+                        const active = featuredProductIds.includes(p.id)
+                        return (
+                          <button key={p.id} onClick={() => toggleProduct(p.id)}
+                            className={`px-3 py-1.5 rounded-xl border text-sm font-medium transition-all ${active ? 'bg-amber-600 text-white border-amber-600' : 'bg-white border-border text-text-secondary hover:border-amber-400'}`}>
+                            {p.name}{p.category && <span className={active ? 'opacity-75 ml-1' : 'text-text-tertiary ml-1'}>· {p.category}</span>}
+                          </button>
+                        )
+                      })}
+                    </div>
+                    <p className="text-[11px] text-text-tertiary mt-1.5">The plan will spread coverage across these instead of picking whatever's easiest to write.</p>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
 
           {error && <div className="rounded-xl bg-red-50 border border-red-100 px-4 py-3 text-xs text-red-600">{error}</div>}
 
           <div className="flex gap-3 pt-1">
             <Button variant="secondary" onClick={() => { clear(); navigate('/campaigns') }}>Cancel</Button>
             <Button onClick={handleGeneratePlan} disabled={loading}>
-              {loading ? <><Spinner size="sm" /> Planning the month…</> : 'Generate Monthly Plan'}
+              {loading ? <><Spinner size="sm" /> Building the plan…</> : aiAssist ? 'Generate Monthly Plan' : 'Create Plan'}
             </Button>
           </div>
         </Card>
@@ -889,16 +1061,34 @@ export function CampaignPlanner() {
                   ★ Seasonal
                 </button>
               )}
-              {platforms.length > 1 && (
-                <div className="flex items-center gap-1 ml-auto">
-                  {['all', ...platforms].map(p => (
-                    <button key={p} onClick={() => setPlatformFilter(p)}
-                      className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold capitalize transition-colors ${platformFilter === p ? 'bg-stone-800 text-white' : 'bg-white border border-border text-text-secondary hover:border-stone-300'}`}>
-                      {p === 'all' ? 'Both' : p}
-                    </button>
-                  ))}
-                </div>
+              {dayFilter && (
+                <button onClick={() => setDayFilter(null)}
+                  className="px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-amber-600 text-white flex items-center gap-1">
+                  {formatDate(dayFilter)} ✕
+                </button>
               )}
+              <div className="flex items-center gap-1 ml-auto">
+                {platforms.length > 1 && (
+                  <div className="flex items-center gap-1 mr-2">
+                    {['all', ...platforms].map(p => (
+                      <button key={p} onClick={() => setPlatformFilter(p)}
+                        className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold capitalize transition-colors ${platformFilter === p ? 'bg-stone-800 text-white' : 'bg-white border border-border text-text-secondary hover:border-stone-300'}`}>
+                        {p === 'all' ? 'Both' : p}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <div className="flex items-center rounded-lg border border-border overflow-hidden">
+                  <button onClick={() => setViewMode('list')}
+                    className={`px-2.5 py-1 text-[11px] font-semibold transition-colors ${viewMode === 'list' ? 'bg-stone-800 text-white' : 'bg-white text-text-secondary hover:bg-surface-subtle'}`}>
+                    ☰ List
+                  </button>
+                  <button onClick={() => setViewMode('calendar')}
+                    className={`px-2.5 py-1 text-[11px] font-semibold transition-colors ${viewMode === 'calendar' ? 'bg-stone-800 text-white' : 'bg-white text-text-secondary hover:bg-surface-subtle'}`}>
+                    📅 Calendar
+                  </button>
+                </div>
+              </div>
             </div>
 
             {/* Bulk actions */}
@@ -917,8 +1107,13 @@ export function CampaignPlanner() {
               onClose={() => { setShowMoreModal(false); setMoreError('') }} onGenerate={handleGenerateMore} />
           )}
 
+          {/* Month overview — clicking a day filters the list below to it */}
+          {viewMode === 'calendar' && ideas.length > 0 && (
+            <CalendarView ideas={ideas} startDate={startDate} endDate={endDate} selectedDay={dayFilter} onDayClick={pickCalendarDay} />
+          )}
+
           {/* Grouped, filtered idea list */}
-          {ideas.length === 0 ? (
+          {viewMode === 'calendar' ? null : ideas.length === 0 ? (
             <Card className="p-6"><p className="text-xs text-text-tertiary text-center">No ideas left — go back and regenerate.</p></Card>
           ) : filteredIdeas.length === 0 ? (
             <Card className="p-6"><p className="text-xs text-text-tertiary text-center">No ideas match this filter.</p></Card>

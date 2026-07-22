@@ -1,6 +1,6 @@
 import { Routes, Route } from 'react-router-dom'
 import { AppProvider } from './store/appStore'
-import { AuthProvider } from './store/AuthContext'
+import { AuthProvider, useAuth } from './store/AuthContext'
 import { RequireAuth } from './components/auth/RequireAuth'
 import { AppLayout } from './components/layout/AppLayout'
 
@@ -28,9 +28,13 @@ import { BrandBrain } from './pages/settings/BrandBrain'
 // it as one element (rather than gating each <Route> individually) means
 // adding a new page later never risks forgetting the auth check.
 function ProtectedApp() {
+  const { activeWorkspaceId } = useAuth()
   return (
     <RequireAuth>
-      <AppProvider>
+      {/* Key the whole data subtree on the active company: switching companies
+          remounts it, so every page re-runs its Supabase fetches and the
+          cached brand profile / in-progress draft reset — no manual refresh. */}
+      <AppProvider key={activeWorkspaceId || 'none'}>
         <AppLayout>
           <Routes>
             <Route path="/"                      element={<Dashboard />} />
