@@ -63,6 +63,16 @@ const FORMATS = ['post', 'carousel', 'reel']
 // What a post is FOR — lets the reviewer judge purpose, not just topic.
 const OBJECTIVES = ['Awareness', 'Engagement', 'Sales/Leads', 'Trust/Credibility', 'Community']
 
+// One-tap reject reasons — doubles as training signal for a future learning
+// loop, instead of a bare status flip that throws the "why" away.
+const REJECT_REASONS = [
+  { value: 'off_brand',     label: 'Off-brand' },
+  { value: 'repetitive',    label: 'Repetitive' },
+  { value: 'wrong_product', label: 'Wrong product' },
+  { value: 'weak_idea',     label: 'Weak idea' },
+]
+const rejectReasonLabel = v => REJECT_REASONS.find(r => r.value === v)?.label || v
+
 // What KIND of content each idea becomes — decided at plan time, drives the
 // whole generation flow (caption? image? how many? text baked in?).
 const POST_KINDS = [
@@ -189,6 +199,7 @@ export function dbIdeaToDraft(row) {
     rationale: row.rationale || '',
     objective: row.objective || '',
     cta: row.cta || '',
+    rejectReason: row.reject_reason || '',
     format: row.suggested_format || 'post',
     suggestedStyle: row.suggested_style || '',
     suggestedAspectRatio: row.suggested_aspect_ratio || '',
@@ -250,6 +261,7 @@ function IdeaCard({ idea, index, accessToken, onChange, onRemove, onCreate, onDu
   const [saving,  setSaving]  = useState(false)
   const [saveError, setSaveError] = useState('')
   const [duplicating, setDuplicating] = useState(false)
+  const [showRejectReasons, setShowRejectReasons] = useState(false)
   const [pickingRefs, setPickingRefs] = useState(false)
   const [imgMode, setImgMode] = useState(idea.imageMode || 'generate')
   const tones = idea.platform === 'linkedin' ? LI_TONES : IG_TONES
@@ -271,11 +283,13 @@ function IdeaCard({ idea, index, accessToken, onChange, onRemove, onCreate, onDu
     setDuplicating(false)
   }
 
-  async function setStatus(status) {
+  async function setStatus(status, rejectReason = '') {
     setSaving(true)
-    const result = await updateIdea(accessToken, idea.id, { status })
+    // Approving (or re-approving after a rejection) clears any old reason —
+    // it shouldn't linger once the idea is no longer rejected.
+    const result = await updateIdea(accessToken, idea.id, { status, reject_reason: rejectReason })
     setSaving(false)
-    if (result.ok) onChange({ ...idea, status })
+    if (result.ok) onChange({ ...idea, status, rejectReason })
   }
 
   async function saveEdits(patch) {
@@ -337,17 +351,32 @@ function IdeaCard({ idea, index, accessToken, onChange, onRemove, onCreate, onDu
             {idea.cta && (
               <p className="text-[11px] text-sky-700 mt-1 leading-relaxed"><span className="font-semibold">CTA:</span> {idea.cta}</p>
             )}
+            {rejected && idea.rejectReason && (
+              <p className="text-[11px] text-red-500 mt-1 leading-relaxed"><span className="font-semibold">Rejected:</span> {rejectReasonLabel(idea.rejectReason)}</p>
+            )}
           </div>
           <span className={`text-[10px] font-semibold px-2 py-1 rounded-full flex-shrink-0 ${st.cls}`}>{st.label}</span>
         </div>
 
-        {/* Actions */}
+        {/* Actions — Reject reveals one-tap reason chips instead of rejecting blind */}
+        {showRejectReasons ? (
+          <div className="flex items-center gap-1.5 mt-3 pl-8 flex-wrap">
+            <span className="text-[11px] text-text-tertiary mr-1">Why?</span>
+            {REJECT_REASONS.map(r => (
+              <button key={r.value} onClick={() => { setShowRejectReasons(false); setStatus('rejected', r.value) }}
+                className="text-[11px] font-medium px-2.5 py-1 rounded-lg border border-border text-text-secondary hover:border-red-300 hover:text-red-600 hover:bg-red-50 transition-colors">
+                {r.label}
+              </button>
+            ))}
+            <button onClick={() => setShowRejectReasons(false)} className="text-[11px] text-text-tertiary hover:text-text ml-1">Cancel</button>
+          </div>
+        ) : (
         <div className="flex items-center gap-2 mt-3 pl-8">
           <button onClick={() => setStatus('approved')} disabled={saving || idea.isNew || idea.status === 'approved'}
             className={`text-[11px] font-semibold px-2.5 py-1 rounded-lg border transition-colors ${idea.status === 'approved' ? 'bg-sage-100 text-sage-700 border-sage-200' : 'border-border text-text-secondary hover:border-sage-300 hover:text-sage-700 hover:bg-sage-50'}`}>
             ✓ Approve
           </button>
-          <button onClick={() => setStatus('rejected')} disabled={saving || idea.isNew || idea.status === 'rejected'}
+          <button onClick={() => setShowRejectReasons(true)} disabled={saving || idea.isNew || idea.status === 'rejected'}
             className={`text-[11px] font-semibold px-2.5 py-1 rounded-lg border transition-colors ${idea.status === 'rejected' ? 'bg-red-50 text-red-500 border-red-200' : 'border-border text-text-secondary hover:border-red-200 hover:text-red-500 hover:bg-red-50'}`}>
             ✕ Reject
           </button>
@@ -369,6 +398,7 @@ function IdeaCard({ idea, index, accessToken, onChange, onRemove, onCreate, onDu
             {idea.isNew ? 'Discard' : 'Delete'}
           </button>
         </div>
+        )}
       </div>
 
       {editing && (
