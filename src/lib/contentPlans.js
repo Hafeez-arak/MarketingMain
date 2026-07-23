@@ -35,6 +35,26 @@ export async function fetchPlanWithIdeas(accessToken, planId) {
   } catch { return { plan: null, ideas: [] } }
 }
 
+// Cross-month anti-repetition memory: past ideas from OTHER plans in this
+// workspace, most recent first. Sent to the Campaign Planner as history so a
+// new month doesn't repeat last month's angle — deliberate recurring series
+// (idea.series set) are called out separately as "continue this," not
+// "avoid repeating this." All statuses included (even rejected — the AI
+// shouldn't independently re-propose something that was already turned down
+// either), capped to keep the prompt lean.
+export async function fetchPastIdeas(workspaceId, accessToken, excludePlanId, limit = 60) {
+  if (!workspaceId) return []
+  try {
+    const res = await fetch(
+      `${SUPABASE_URL}/rest/v1/plan_ideas?workspace_id=eq.${workspaceId}&plan_id=neq.${excludePlanId || '00000000-0000-0000-0000-000000000000'}` +
+      `&select=platform,topic,angle,content_pillar,occasion,series,created_at&order=created_at.desc&limit=${limit}`,
+      { headers: authHeaders(accessToken) }
+    )
+    if (!res.ok) return []
+    return await res.json()
+  } catch { return [] }
+}
+
 export async function createPlan(workspaceId, accessToken, plan) {
   if (!workspaceId) return { error: 'No active workspace. Try signing out and back in.' }
   try {
@@ -95,6 +115,7 @@ export async function insertIdeas(workspaceId, accessToken, planId, ideas, start
     cta:              idea.cta || '',
     hashtags:         idea.hashtags || '',
     first_comment:    idea.firstComment || '',
+    series:           idea.series || '',
     suggested_format: idea.format || 'post',
     suggested_style:  idea.suggestedStyle || '',
     suggested_aspect_ratio: idea.suggestedAspectRatio || '',

@@ -15,6 +15,7 @@ import { suggestDesign } from '../../lib/designSuggestion'
 import { ReferencePicker } from '../../components/ReferencePicker'
 import {
   createPlan, insertIdeas, updateIdea, setAllIdeaStatus, deleteIdea, updatePlan, markIdeasProcessing,
+  fetchPastIdeas,
 } from '../../lib/contentPlans'
 
 const GOALS = ['Brand awareness','Lead generation','Product launch','Community engagement','Event promotion','Sales & offers']
@@ -201,6 +202,7 @@ export function dbIdeaToDraft(row) {
     cta: row.cta || '',
     hashtags: row.hashtags || '',
     firstComment: row.first_comment || '',
+    series: row.series || '',
     rejectReason: row.reject_reason || '',
     format: row.suggested_format || 'post',
     suggestedStyle: row.suggested_style || '',
@@ -318,6 +320,7 @@ function IdeaCard({ idea, index, accessToken, onChange, onRemove, onCreate, onDu
       suggested_style: patch.suggestedStyle || '', image_idea: patch.imageIdea || '',
       objective: patch.objective || '', cta: patch.cta || '',
       hashtags: patch.hashtags || '', first_comment: patch.firstComment || '',
+      series: patch.series || '',
       post_kind: patch.postKind || 'caption_image',
       slide_count: patch.slideCount || 1,
       image_text: patch.imageText || '',
@@ -343,6 +346,7 @@ function IdeaCard({ idea, index, accessToken, onChange, onRemove, onCreate, onDu
               </span>
               {idea.occasion && <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${OCCASION_STYLE}`}>★ {idea.occasion}</span>}
               {idea.pillar && <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full border ${PILLAR_STYLE}`}>{idea.pillar}</span>}
+              {idea.series && <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full border bg-violet-50 text-violet-700 border-violet-100" title="Deliberate recurring series — not flagged as repetition across months">🔁 {idea.series}</span>}
               {idea.objective && <span className="text-[10px] font-medium px-2 py-0.5 rounded-full border bg-sky-50 text-sky-700 border-sky-100">{idea.objective}</span>}
               <span className="text-[10px] font-medium px-2 py-0.5 rounded-full border bg-indigo-50 text-indigo-700 border-indigo-100">{postKindLabel(idea.postKind)}{idea.postKind === 'carousel' && idea.slideCount > 1 ? ` ·${idea.slideCount}` : ''}</span>
               <span className="text-[10px] text-text-tertiary">{idea.date ? formatDate(idea.date) : 'No date'}{idea.time ? ` · ${formatTime(idea.time)}` : ''}</span>
@@ -435,6 +439,7 @@ function IdeaEditModal({ idea, tones, saving, saveError, onClose, onSave }) {
   const [cta,       setCta]       = useState(idea.cta || '')
   const [hashtags,  setHashtags]  = useState(idea.hashtags || '')
   const [firstComment, setFirstComment] = useState(idea.firstComment || '')
+  const [series, setSeries] = useState(idea.series || '')
   // "Post type" (caption/image/carousel/text) and "image source" (AI-generated
   // vs your own upload, set via the 🖼 Image button) are two separate
   // decisions. text_image means "bake words into the image" — meaningless
@@ -524,11 +529,16 @@ function IdeaEditModal({ idea, tones, saving, saveError, onClose, onSave }) {
           placeholder="e.g. Tag a friend planning their villa lighting 💡"
           value={firstComment} onChange={e => setFirstComment(e.target.value)}
         />
+        <Input
+          label="Recurring series (optional)"
+          placeholder="e.g. Tip Tuesday — marks this as a deliberate repeat format, not a duplicate"
+          value={series} onChange={e => setSeries(e.target.value)}
+        />
 
         {saveError && <p className="text-xs text-red-600">{saveError}</p>}
         <div className="flex justify-end gap-3 pt-1">
           <Button variant="secondary" onClick={onClose}>{idea.isNew ? 'Discard' : 'Cancel'}</Button>
-          <Button onClick={() => onSave({ topic, angle, tone, date, time, format, suggestedStyle: style, imageIdea, objective, cta, hashtags, firstComment, postKind, slideCount, imageText })} disabled={saving || (idea.isNew && !topic.trim())}>
+          <Button onClick={() => onSave({ topic, angle, tone, date, time, format, suggestedStyle: style, imageIdea, objective, cta, hashtags, firstComment, series, postKind, slideCount, imageText })} disabled={saving || (idea.isNew && !topic.trim())}>
             {saving ? <><Spinner size="sm" /> Saving…</> : 'Save'}
           </Button>
         </div>
@@ -759,6 +769,10 @@ export function CampaignPlanner() {
         .filter(p => featuredProductIds.includes(p.id))
         .map(p => ({ name: p.name, category: p.category || '', specs: p.specs || '', description: p.description || '' }))
 
+      // Cross-month anti-repetition: this is a BRAND NEW plan (no planId yet),
+      // so "past" here means every idea from every OTHER plan in the workspace.
+      const pastIdeas = await fetchPastIdeas(activeWorkspaceId, accessToken, null)
+
       const result = await requestCampaignPlan(webhookUrl, {
         goal: effectiveGoal,
         goal_category: goalCategory || null,
@@ -772,6 +786,7 @@ export function CampaignPlanner() {
         featured_products: featuredProducts,
         seed_posts: cleanSeeds,
         content_mix_target: contentMixTarget || null,
+        past_ideas: pastIdeas,
         posting_days: postingDays,
         posting_time: defaultTime,
       })
@@ -820,6 +835,8 @@ export function CampaignPlanner() {
     const existingIdeas = ideas.slice(-60).map(i => ({
       platform: i.platform, date: i.date, topic: i.topic || i.title, pillar: i.pillar,
     }))
+    // Cross-month history — OTHER plans, this one is already covered by existingIdeas above.
+    const pastIdeas = await fetchPastIdeas(activeWorkspaceId, accessToken, planId)
 
     const result = await requestCampaignPlan(webhookUrl, {
       goal: effectiveGoal,
@@ -832,6 +849,7 @@ export function CampaignPlanner() {
       brand_brain_sections: brandBrainSections,
       instructions: instructions || null,
       existing_ideas: existingIdeas,
+      past_ideas: pastIdeas,
       posting_days: postingDays,
       posting_time: defaultTime,
     })
@@ -877,7 +895,7 @@ export function CampaignPlanner() {
       // Hashtag conventions differ by platform (Instagram: dense; LinkedIn:
       // few/none) — reset rather than carry over verbatim. First comment
       // isn't platform-specific, so it copies over fine.
-      firstComment: idea.firstComment,
+      firstComment: idea.firstComment, series: idea.series,
       postKind: idea.postKind, slideCount: idea.slideCount, imageText: idea.imageText,
     }], ideas.length)
     if (res.error || !res.rows?.[0]) { setError(res.error || 'Could not duplicate idea.'); return }
@@ -896,7 +914,7 @@ export function CampaignPlanner() {
       topic: merged.topic, angle: merged.angle, tone: merged.tone, format: merged.format,
       suggestedStyle: merged.suggestedStyle, imageIdea: merged.imageIdea,
       objective: merged.objective, cta: merged.cta,
-      hashtags: merged.hashtags, firstComment: merged.firstComment,
+      hashtags: merged.hashtags, firstComment: merged.firstComment, series: merged.series,
       postKind: merged.postKind, slideCount: merged.slideCount, imageText: merged.imageText,
     }], ideas.length)
     if (res.error || !res.rows?.[0]) return { error: res.error || 'Could not save idea.' }

@@ -62,6 +62,9 @@ export async function requestCampaignPlan(webhookUrl, payload) {
       // imagining"). The planner may pre-fill it from a seed post; otherwise
       // it's added on the editable board (Stage 3) before generation.
       imageIdea:            p.image_idea            || '',
+      // Recurring-series marker ("Tip Tuesday") — lets cross-month history
+      // tell "deliberate repeat format" apart from "already covered angle."
+      series:               p.series                || '',
     }))
     return { ok: true, posts: normalized, suggestedName: raw?.campaignName || '' }
   } catch (err) {
