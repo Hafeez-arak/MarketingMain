@@ -232,6 +232,12 @@ const DEFAULT_DRAFT = {
   // Stage-1 brief inputs — all optional. Give the planner real material to
   // work with instead of just a count + a general idea.
   featuredProductIds: [],   // brand_products ids to emphasize this month
+  // Freeform target content-mix ratio (e.g. "40% product, 20% educational,
+  // 20% trust/testimonials, 20% engagement") — sent as a planner instruction;
+  // the board's mix bar shows the ACTUAL breakdown (by content_pillar) next
+  // to it so imbalance is visible at a glance, not something you'd only
+  // notice by reading every card.
+  contentMixTarget: '',
   // Specific posts the user already knows they want, each optionally carrying
   // its own images + generate-vs-use-image choice — set now or refined later
   // on the board (same field, same picker, just a different moment).
@@ -683,7 +689,7 @@ export function CampaignPlanner() {
   const [moreLoading,   setMoreLoading]   = useState(false)
   const [moreError,     setMoreError]     = useState('')
 
-  const { step, month, goal, goalCategory, platforms, startDate, endDate, approxCount, includeHolidays, brandBrainSections, featuredProductIds, seedPosts, name, ideas, planId, pushResult, postingDays, defaultTime, aiAssist } = draft
+  const { step, month, goal, goalCategory, platforms, startDate, endDate, approxCount, includeHolidays, brandBrainSections, featuredProductIds, seedPosts, name, ideas, planId, pushResult, postingDays, defaultTime, aiAssist, contentMixTarget } = draft
   const months = monthOptions()
 
   const togglePlatform = p => update({ platforms: platforms.includes(p) ? platforms.filter(x => x !== p) : [...platforms, p] })
@@ -765,6 +771,7 @@ export function CampaignPlanner() {
         instructions: instructions || null,
         featured_products: featuredProducts,
         seed_posts: cleanSeeds,
+        content_mix_target: contentMixTarget || null,
         posting_days: postingDays,
         posting_time: defaultTime,
       })
@@ -779,6 +786,7 @@ export function CampaignPlanner() {
       goal: effectiveGoal, goal_category: goalCategory || '', platforms, status: 'draft',
       featured_products: featuredProducts.map(p => p.name),
       posting_days: postingDays, default_time: defaultTime,
+      content_mix_target: contentMixTarget || null,
     })
     if (planRes.error) { setLoading(false); setError(`Plan couldn't be saved: ${planRes.error}`); return }
 
@@ -991,6 +999,22 @@ export function CampaignPlanner() {
   const rejectedCount = ideas.filter(i => i.status === 'rejected').length
   const seasonalCount = ideas.filter(i => i.occasion).length
   const reviewedCount = approvedCount + rejectedCount
+
+  // Content-mix breakdown — tallies content_pillar across everything still in
+  // play (rejected ideas don't count, they won't get made). Marketers think
+  // in ratios ("40% product / 20% educational…"); without this, imbalance
+  // (7 product posts, 1 tip) only shows up by reading every card.
+  const pillarBreakdown = (() => {
+    const counts = {}
+    let unlabeled = 0
+    for (const i of ideas) {
+      if (i.status === 'rejected') continue
+      const p = (i.pillar || '').trim()
+      if (!p) { unlabeled++; continue }
+      counts[p] = (counts[p] || 0) + 1
+    }
+    return { sorted: Object.entries(counts).sort((a, b) => b[1] - a[1]), unlabeled }
+  })()
 
   const filteredIdeas = ideas.filter(i => {
     const want = statusFilter === 'undecided' ? 'proposed' : statusFilter
@@ -1209,6 +1233,13 @@ export function CampaignPlanner() {
                   value={goal} onChange={e => update({ goal: e.target.value })} rows={3}
                 />
 
+                <Input
+                  label="Target content mix (optional)"
+                  placeholder="e.g. 40% product, 20% educational, 20% trust/testimonials, 20% engagement"
+                  value={contentMixTarget} onChange={e => update({ contentMixTarget: e.target.value })}
+                />
+                <p className="text-[11px] text-text-tertiary -mt-2.5">The planner will aim for this ratio. Once ideas are proposed, the board shows the actual breakdown next to it.</p>
+
                 {directory.products.length > 0 && (
                   <div>
                     <p className="text-xs font-medium text-text-secondary mb-2">Feature these products this month (optional)</p>
@@ -1258,6 +1289,29 @@ export function CampaignPlanner() {
                 <div className="h-full bg-red-300 transition-all duration-300" style={{ width: `${ideas.length ? (rejectedCount / ideas.length) * 100 : 0}%` }} />
               </div>
             </div>
+
+            {/* Content mix — makes imbalance (7 product, 1 tip) visible at a
+                glance instead of something you'd only notice reading every card. */}
+            {(pillarBreakdown.sorted.length > 0 || contentMixTarget) && (
+              <div className="rounded-xl bg-surface-subtle/60 border border-border/70 px-3 py-2.5">
+                <div className="flex items-center gap-1.5 flex-wrap text-[11px]">
+                  <span className="font-semibold text-text-secondary">Mix:</span>
+                  {pillarBreakdown.sorted.map(([pillar, n]) => (
+                    <span key={pillar} className="px-2 py-0.5 rounded-full border bg-white border-border text-text-secondary">
+                      {n} {pillar}
+                    </span>
+                  ))}
+                  {pillarBreakdown.unlabeled > 0 && (
+                    <span className="px-2 py-0.5 rounded-full border bg-white border-border text-text-tertiary">
+                      {pillarBreakdown.unlabeled} unlabeled
+                    </span>
+                  )}
+                </div>
+                {contentMixTarget && (
+                  <p className="text-[11px] text-text-tertiary mt-1.5"><span className="font-medium">Target:</span> {contentMixTarget}</p>
+                )}
+              </div>
+            )}
 
             {/* Status filters */}
             <div className="flex items-center gap-1.5 flex-wrap">

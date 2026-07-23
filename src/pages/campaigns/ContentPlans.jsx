@@ -43,6 +43,7 @@ export function ContentPlans() {
       platforms: plan.platforms || ['instagram', 'linkedin'],
       startDate: plan.start_date || '', endDate: plan.end_date || '',
       approxCount: '', includeHolidays: true,
+      contentMixTarget: plan.content_mix_target || '',
       name: plan.name || '', ideas: ideas.map(dbIdeaToDraft), planId: plan.id,
     }))
     navigate('/campaigns/plan')
