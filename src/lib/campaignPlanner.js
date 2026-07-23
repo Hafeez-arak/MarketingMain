@@ -126,6 +126,10 @@ export async function requestPlanContentGeneration({ webhooks, planId, instructi
       content_pillar:       idea.pillar || '',
       objective:            idea.objective || '',
       cta:                  idea.cta || '',
+      // Human-set at plan time — overrides the AI's own hashtag/first-comment
+      // choice at generation time when present (empty string means "AI decides").
+      hashtags:             idea.hashtags || '',
+      first_comment:        idea.firstComment || '',
       scheduled_date:       idea.date || null,
       publish_time:         idea.time || idea.publishTime || '10:00',
       reference_image_urls: idea.references || [],

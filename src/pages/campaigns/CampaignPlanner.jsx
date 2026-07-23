@@ -199,6 +199,8 @@ export function dbIdeaToDraft(row) {
     rationale: row.rationale || '',
     objective: row.objective || '',
     cta: row.cta || '',
+    hashtags: row.hashtags || '',
+    firstComment: row.first_comment || '',
     rejectReason: row.reject_reason || '',
     format: row.suggested_format || 'post',
     suggestedStyle: row.suggested_style || '',
@@ -309,6 +311,7 @@ function IdeaCard({ idea, index, accessToken, onChange, onRemove, onCreate, onDu
       suggested_format: patch.format,
       suggested_style: patch.suggestedStyle || '', image_idea: patch.imageIdea || '',
       objective: patch.objective || '', cta: patch.cta || '',
+      hashtags: patch.hashtags || '', first_comment: patch.firstComment || '',
       post_kind: patch.postKind || 'caption_image',
       slide_count: patch.slideCount || 1,
       image_text: patch.imageText || '',
@@ -424,6 +427,8 @@ function IdeaEditModal({ idea, tones, saving, saveError, onClose, onSave }) {
   const [imageIdea, setImageIdea] = useState(idea.imageIdea || '')
   const [objective, setObjective] = useState(idea.objective || '')
   const [cta,       setCta]       = useState(idea.cta || '')
+  const [hashtags,  setHashtags]  = useState(idea.hashtags || '')
+  const [firstComment, setFirstComment] = useState(idea.firstComment || '')
   // "Post type" (caption/image/carousel/text) and "image source" (AI-generated
   // vs your own upload, set via the 🖼 Image button) are two separate
   // decisions. text_image means "bake words into the image" — meaningless
@@ -503,10 +508,21 @@ function IdeaEditModal({ idea, tones, saving, saveError, onClose, onSave }) {
           value={cta} onChange={e => setCta(e.target.value)}
         />
 
+        <Input
+          label="Hashtags (optional)"
+          placeholder="e.g. #ArakLighting #تصميم_اضاءة #LightingDesign — leave blank to let AI choose"
+          value={hashtags} onChange={e => setHashtags(e.target.value)}
+        />
+        <Input
+          label="First comment (optional)"
+          placeholder="e.g. Tag a friend planning their villa lighting 💡"
+          value={firstComment} onChange={e => setFirstComment(e.target.value)}
+        />
+
         {saveError && <p className="text-xs text-red-600">{saveError}</p>}
         <div className="flex justify-end gap-3 pt-1">
           <Button variant="secondary" onClick={onClose}>{idea.isNew ? 'Discard' : 'Cancel'}</Button>
-          <Button onClick={() => onSave({ topic, angle, tone, date, time, format, suggestedStyle: style, imageIdea, objective, cta, postKind, slideCount, imageText })} disabled={saving || (idea.isNew && !topic.trim())}>
+          <Button onClick={() => onSave({ topic, angle, tone, date, time, format, suggestedStyle: style, imageIdea, objective, cta, hashtags, firstComment, postKind, slideCount, imageText })} disabled={saving || (idea.isNew && !topic.trim())}>
             {saving ? <><Spinner size="sm" /> Saving…</> : 'Save'}
           </Button>
         </div>
@@ -850,6 +866,10 @@ export function CampaignPlanner() {
       objective: idea.objective, cta: idea.cta, format: idea.format,
       suggestedStyle: crosswalkStyle(idea.suggestedStyle, idea.platform, targetPlatform),
       imageIdea: idea.imageIdea,
+      // Hashtag conventions differ by platform (Instagram: dense; LinkedIn:
+      // few/none) — reset rather than carry over verbatim. First comment
+      // isn't platform-specific, so it copies over fine.
+      firstComment: idea.firstComment,
       postKind: idea.postKind, slideCount: idea.slideCount, imageText: idea.imageText,
     }], ideas.length)
     if (res.error || !res.rows?.[0]) { setError(res.error || 'Could not duplicate idea.'); return }
@@ -868,6 +888,7 @@ export function CampaignPlanner() {
       topic: merged.topic, angle: merged.angle, tone: merged.tone, format: merged.format,
       suggestedStyle: merged.suggestedStyle, imageIdea: merged.imageIdea,
       objective: merged.objective, cta: merged.cta,
+      hashtags: merged.hashtags, firstComment: merged.firstComment,
       postKind: merged.postKind, slideCount: merged.slideCount, imageText: merged.imageText,
     }], ideas.length)
     if (res.error || !res.rows?.[0]) return { error: res.error || 'Could not save idea.' }
@@ -896,6 +917,7 @@ export function CampaignPlanner() {
           image_idea: elongated.image_idea || created.imageIdea || '',
           occasion: elongated.occasion || '',
           content_pillar: elongated.content_pillar || '',
+          hashtags: elongated.hashtags || created.hashtags || '',
         }
         const patchRes = await updateIdea(accessToken, created.id, dbPatch)
         if (patchRes.ok && patchRes.idea) created = dbIdeaToDraft(patchRes.idea)

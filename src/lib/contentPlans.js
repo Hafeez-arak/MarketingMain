@@ -93,6 +93,8 @@ export async function insertIdeas(workspaceId, accessToken, planId, ideas, start
     rationale:        idea.rationale || '',
     objective:        idea.objective || '',
     cta:              idea.cta || '',
+    hashtags:         idea.hashtags || '',
+    first_comment:    idea.firstComment || '',
     suggested_format: idea.format || 'post',
     suggested_style:  idea.suggestedStyle || '',
     suggested_aspect_ratio: idea.suggestedAspectRatio || '',
