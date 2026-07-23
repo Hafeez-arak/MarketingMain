@@ -69,13 +69,36 @@ export async function requestCampaignPlan(webhookUrl, payload) {
   }
 }
 
+// A manually-typed idea only ever has a thin topic/tone — this asks the same
+// AI persona used for full-month planning to flesh out ONE idea into a real
+// brief (angle, objective, cta, image direction) before the user approves it.
+// Synchronous (one Sonnet call, no image generation) — the caller can just
+// await it inline instead of polling like the generation webhooks.
+export async function elongateIdea(webhookUrl, payload) {
+  if (!webhookUrl) return { error: 'No Idea Elongation webhook configured. Go to Settings → Integrations → Workflow Webhooks.' }
+  try {
+    const res = await fetch(webhookUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+    if (!res.ok) { const err = await res.text(); return { error: err || `Webhook returned ${res.status}` } }
+    const data = await res.json()
+    const raw  = Array.isArray(data) ? data[0] : data
+    if (!raw || raw.ok === false) return { error: raw?.error || 'Elongation failed.' }
+    return { ok: true, ...raw }
+  } catch (err) {
+    return { error: err.message }
+  }
+}
+
 // Fire the approved plan's ideas at the per-platform Plan Generation
 // webhooks. Each webhook responds immediately ("accepted") and then generates
 // every idea in the background (caption + image) into the *_generated_posts
 // tables with status 'pending_review' — so the browser never waits on a long
 // batch, and posts appear in the review list as they finish. Ideas are split
 // by platform because Instagram and LinkedIn are separate workflows/tables.
-export async function requestPlanContentGeneration({ webhooks, planId, instructions, ideas }) {
+export async function requestPlanContentGeneration({ webhooks, planId, instructions, ideas, workspaceId, captionLanguage }) {
   const byPlatform = { instagram: [], linkedin: [] }
   for (const idea of ideas) {
     const platform = idea.platform === 'linkedin' ? 'linkedin' : 'instagram'
@@ -91,6 +114,11 @@ export async function requestPlanContentGeneration({ webhooks, planId, instructi
       // Freeform human direction for the visual — passed straight to the
       // image step so it overrides/augments the generic design_tip.
       image_idea:           idea.imageIdea || '',
+      // What KIND of post to make: caption_only / image_only / caption_image /
+      // carousel / text_image — decided at plan time, drives the whole flow.
+      post_kind:            idea.postKind || 'caption_image',
+      slide_count:          idea.slideCount || 1,       // carousel: how many slides
+      image_text:           idea.imageText || '',        // text_image: words to feature
       // 'generate' → AI makes the image (references guide it, image-to-image);
       // 'use_reference' → skip AI, reference_image_urls ARE the post image(s).
       image_mode:           idea.imageMode || 'generate',
@@ -117,7 +145,12 @@ export async function requestPlanContentGeneration({ webhooks, planId, instructi
     try {
       const res = await fetch(t.url, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ plan_id: planId, instructions: instructions || '', ideas: t.ideas }),
+        body: JSON.stringify({
+          plan_id: planId, instructions: instructions || '',
+          workspace_id: workspaceId || null,
+          caption_language: captionLanguage || 'both',
+          ideas: t.ideas,
+        }),
       })
       results.push({ platform: t.platform, count: t.ideas.length, ok: res.ok, error: res.ok ? null : `Webhook returned ${res.status}` })
     } catch (err) {

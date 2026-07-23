@@ -10,11 +10,11 @@ import {
 } from '../../lib/brandBrain'
 import { suppliersApi, competitorsApi, productsApi } from '../../lib/brandDirectory'
 import { fetchBrandAssets } from '../../lib/brandAssets'
-import { requestCampaignPlan, requestPlanContentGeneration } from '../../lib/campaignPlanner'
+import { requestCampaignPlan, requestPlanContentGeneration, elongateIdea } from '../../lib/campaignPlanner'
 import { suggestDesign } from '../../lib/designSuggestion'
 import { ReferencePicker } from '../../components/ReferencePicker'
 import {
-  createPlan, insertIdeas, updateIdea, setAllIdeaStatus, deleteIdea, updatePlan,
+  createPlan, insertIdeas, updateIdea, setAllIdeaStatus, deleteIdea, updatePlan, markIdeasProcessing,
 } from '../../lib/contentPlans'
 
 const GOALS = ['Brand awareness','Lead generation','Product launch','Community engagement','Event promotion','Sales & offers']
@@ -36,10 +36,43 @@ const LI_TONES = [
 ]
 const toneLabel = p => (p.platform === 'linkedin' ? LI_TONES : IG_TONES).find(t => t.value === p.tone)?.label || p.tone
 
+// IG and LinkedIn tones don't share a vocabulary — used when duplicating an
+// idea across platforms so the copy lands on a sensible equivalent instead
+// of an invalid value the other platform's dropdown won't recognize.
+const TONE_CROSSWALK = {
+  instagram_to_linkedin: { professional: 'thought_leader', inspirational: 'thought_leader', educational: 'technical_expert', casual: 'warm_human', promotional: 'promotional' },
+  linkedin_to_instagram: { thought_leader: 'professional', executive: 'professional', technical_expert: 'educational', warm_human: 'casual', promotional: 'promotional' },
+}
+function crosswalkTone(tone, fromPlatform, toPlatform) {
+  if (fromPlatform === toPlatform) return tone
+  const map = TONE_CROSSWALK[`${fromPlatform}_to_${toPlatform}`]
+  return map?.[tone] || (toPlatform === 'linkedin' ? 'thought_leader' : 'professional')
+}
+// Most visual styles are shared between platforms — only the "warm" variant
+// has different names (warm_residential vs warm_interior) for what's really
+// the same look.
+function crosswalkStyle(style, fromPlatform, toPlatform) {
+  if (fromPlatform === toPlatform || !style) return style
+  if (style === 'warm_residential' && toPlatform === 'linkedin') return 'warm_interior'
+  if (style === 'warm_interior' && toPlatform === 'instagram') return 'warm_residential'
+  return style
+}
+
 const FORMATS = ['post', 'carousel', 'reel']
 
 // What a post is FOR — lets the reviewer judge purpose, not just topic.
 const OBJECTIVES = ['Awareness', 'Engagement', 'Sales/Leads', 'Trust/Credibility', 'Community']
+
+// What KIND of content each idea becomes — decided at plan time, drives the
+// whole generation flow (caption? image? how many? text baked in?).
+const POST_KINDS = [
+  { value: 'caption_image', label: 'Caption + image',  hint: 'A caption and one image (the default).' },
+  { value: 'caption_only',  label: 'Caption only',     hint: 'Just a caption, no image.' },
+  { value: 'image_only',    label: 'Image only',       hint: 'Just an image, no caption.' },
+  { value: 'carousel',      label: 'Carousel',         hint: 'A caption and multiple image slides.' },
+  { value: 'text_image',    label: 'Text image',       hint: 'An image built around words/typography.' },
+]
+const postKindLabel = v => POST_KINDS.find(k => k.value === v)?.label || 'Caption + image'
 
 // Saudi week (Sunday-first); Fri/Sat flagged as the weekend, not disabled —
 // plenty of brands post through the weekend, this is just a hint.
@@ -160,6 +193,9 @@ export function dbIdeaToDraft(row) {
     suggestedStyle: row.suggested_style || '',
     suggestedAspectRatio: row.suggested_aspect_ratio || '',
     imageIdea: row.image_idea || '',
+    postKind: row.post_kind || (row.suggested_format === 'carousel' ? 'carousel' : 'caption_image'),
+    slideCount: row.slide_count || 1,
+    imageText: row.image_text || '',
     imageMode: row.image_mode || 'generate',
     references: row.reference_image_urls || [],
     status: row.status || 'proposed',
@@ -209,10 +245,11 @@ const STATUS_META = {
 }
 
 // ─── One idea in the review list, with inline approve/reject + edit ─────────
-function IdeaCard({ idea, index, accessToken, onChange, onRemove, onCreate, autoEdit = false }) {
+function IdeaCard({ idea, index, accessToken, onChange, onRemove, onCreate, onDuplicate, autoEdit = false }) {
   const [editing, setEditing] = useState(autoEdit)
   const [saving,  setSaving]  = useState(false)
   const [saveError, setSaveError] = useState('')
+  const [duplicating, setDuplicating] = useState(false)
   const [pickingRefs, setPickingRefs] = useState(false)
   const [imgMode, setImgMode] = useState(idea.imageMode || 'generate')
   const tones = idea.platform === 'linkedin' ? LI_TONES : IG_TONES
@@ -227,6 +264,12 @@ function IdeaCard({ idea, index, accessToken, onChange, onRemove, onCreate, auto
     return { error: result.error || 'Could not save.' }
   }
   function openImagePicker() { setImgMode(idea.imageMode || 'generate'); setPickingRefs(true) }
+
+  async function duplicateToOtherPlatform() {
+    setDuplicating(true)
+    await onDuplicate(idea)
+    setDuplicating(false)
+  }
 
   async function setStatus(status) {
     setSaving(true)
@@ -252,6 +295,9 @@ function IdeaCard({ idea, index, accessToken, onChange, onRemove, onCreate, auto
       suggested_format: patch.format,
       suggested_style: patch.suggestedStyle || '', image_idea: patch.imageIdea || '',
       objective: patch.objective || '', cta: patch.cta || '',
+      post_kind: patch.postKind || 'caption_image',
+      slide_count: patch.slideCount || 1,
+      image_text: patch.imageText || '',
     }
     const result = await updateIdea(accessToken, idea.id, dbPatch)
     setSaving(false)
@@ -275,8 +321,8 @@ function IdeaCard({ idea, index, accessToken, onChange, onRemove, onCreate, auto
               {idea.occasion && <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${OCCASION_STYLE}`}>★ {idea.occasion}</span>}
               {idea.pillar && <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full border ${PILLAR_STYLE}`}>{idea.pillar}</span>}
               {idea.objective && <span className="text-[10px] font-medium px-2 py-0.5 rounded-full border bg-sky-50 text-sky-700 border-sky-100">{idea.objective}</span>}
+              <span className="text-[10px] font-medium px-2 py-0.5 rounded-full border bg-indigo-50 text-indigo-700 border-indigo-100">{postKindLabel(idea.postKind)}{idea.postKind === 'carousel' && idea.slideCount > 1 ? ` ·${idea.slideCount}` : ''}</span>
               <span className="text-[10px] text-text-tertiary">{idea.date ? formatDate(idea.date) : 'No date'}{idea.time ? ` · ${formatTime(idea.time)}` : ''}</span>
-              <span className="text-[10px] text-text-tertiary capitalize">· {idea.format}</span>
               {idea.imageIdea && !usingImage && <span className="text-[10px] font-semibold text-purple-600" title={idea.imageIdea}>· 🎨 your vision</span>}
               {usingImage
                 ? <span className="text-[10px] font-semibold text-sage-700">· 🖼 using {refCount || 'no'} image{refCount !== 1 ? 's' : ''}</span>
@@ -312,6 +358,13 @@ function IdeaCard({ idea, index, accessToken, onChange, onRemove, onCreate, auto
               {usingImage ? '🖼 Image set' : refCount > 0 ? `📎 Image (${refCount})` : '🖼 Image'}
             </button>
           )}
+          {!idea.isNew && (
+            <button onClick={duplicateToOtherPlatform} disabled={duplicating}
+              title={`Copy this idea to ${idea.platform === 'linkedin' ? 'Instagram' : 'LinkedIn'} — tone adapts automatically, images are not carried over`}
+              className="text-[11px] font-medium px-2.5 py-1 rounded-lg text-text-tertiary hover:text-text hover:bg-surface-subtle transition-colors disabled:opacity-50">
+              {duplicating ? <><Spinner size="sm" /> Copying…</> : `⧉ Also ${idea.platform === 'linkedin' ? 'Instagram' : 'LinkedIn'}`}
+            </button>
+          )}
           <button onClick={() => onRemove(idea)} className="text-[11px] font-medium px-2.5 py-1 rounded-lg text-text-tertiary hover:text-red-500 transition-colors ml-auto">
             {idea.isNew ? 'Discard' : 'Delete'}
           </button>
@@ -324,7 +377,7 @@ function IdeaCard({ idea, index, accessToken, onChange, onRemove, onCreate, auto
       )}
       {pickingRefs && (
         <ReferencePicker value={idea.references || []} onSave={saveReferences} onClose={() => setPickingRefs(false)}
-          mode={imgMode} onModeChange={setImgMode} format={idea.format} />
+          mode={imgMode} onModeChange={setImgMode} format={idea.postKind === 'carousel' ? 'carousel' : idea.format} />
       )}
     </div>
   )
@@ -341,7 +394,21 @@ function IdeaEditModal({ idea, tones, saving, saveError, onClose, onSave }) {
   const [imageIdea, setImageIdea] = useState(idea.imageIdea || '')
   const [objective, setObjective] = useState(idea.objective || '')
   const [cta,       setCta]       = useState(idea.cta || '')
+  // "Post type" (caption/image/carousel/text) and "image source" (AI-generated
+  // vs your own upload, set via the 🖼 Image button) are two separate
+  // decisions. text_image means "bake words into the image" — meaningless
+  // once the image is already your own fixed photo, so hide it in that case.
+  const usingOwnImage = idea.imageMode === 'use_reference' && (idea.references || []).length > 0
+  const availableKinds = usingOwnImage ? POST_KINDS.filter(k => k.value !== 'text_image') : POST_KINDS
+  const [postKind,  setPostKind]  = useState(() => {
+    const saved = idea.postKind || 'caption_image'
+    return availableKinds.some(k => k.value === saved) ? saved : 'caption_image'
+  })
+  const [slideCount,setSlideCount]= useState(idea.slideCount || 3)
+  const [imageText, setImageText] = useState(idea.imageText || '')
   const styles = idea.platform === 'linkedin' ? LI_STYLES : IG_STYLES
+  const kindHint = POST_KINDS.find(k => k.value === postKind)?.hint || ''
+  const showsImageFields = postKind !== 'caption_only'
 
   return (
     <Modal open onClose={onClose} title={idea.isNew ? 'Add idea' : 'Edit idea'} width="max-w-xl">
@@ -349,32 +416,55 @@ function IdeaEditModal({ idea, tones, saving, saveError, onClose, onSave }) {
         <Input label="Topic / what the post is about" value={topic} onChange={e => setTopic(e.target.value)} />
         <Textarea label="Angle (optional)" rows={2} value={angle} onChange={e => setAngle(e.target.value)} />
 
-        {/* The human's own creative direction for the visual — one freeform box.
-            Overrides the generic design tip when this idea is generated. */}
-        <Textarea
-          label="Your vision for the image (optional)"
-          rows={2}
-          placeholder="Describe what you're imagining — e.g. 'warm evening shot of a linear pendant over a majlis seating area, shot low, cozy glow.' Leave blank to let AI decide."
-          value={imageIdea} onChange={e => setImageIdea(e.target.value)}
-        />
+        {/* Post type drives the whole flow — caption? image? how many? */}
+        <div>
+          <Select label="Post type" value={postKind} onChange={e => setPostKind(e.target.value)}>
+            {availableKinds.map(k => <option key={k.value} value={k.value}>{k.label}</option>)}
+          </Select>
+          <p className="text-[11px] text-text-tertiary mt-1">{kindHint}</p>
+          {usingOwnImage && showsImageFields && (
+            <p className="text-[11px] text-sage-700 mt-1">
+              📎 You've attached your own image for this post — no AI image generation will happen. "Image" here just means the post includes it; this setting only decides whether a caption is written to go with it.
+            </p>
+          )}
+        </div>
+
+        {postKind === 'carousel' && (
+          <Input label="How many slides?" type="number" min="2" max="10"
+            value={slideCount} onChange={e => setSlideCount(Number(e.target.value) || 3)} />
+        )}
+        {postKind === 'text_image' && (
+          <Input label="Text to feature in the image"
+            placeholder="e.g. رمضان كريم  ·  or  ·  40% OFF this week"
+            value={imageText} onChange={e => setImageText(e.target.value)} />
+        )}
+
+        {/* Image direction — hidden for caption-only posts. */}
+        {showsImageFields && (
+          <Textarea
+            label="Your vision for the image (optional)"
+            rows={2}
+            placeholder="Describe what you're imagining — e.g. 'warm evening shot of a linear pendant over a majlis seating area, shot low, cozy glow.' Leave blank to let AI decide."
+            value={imageIdea} onChange={e => setImageIdea(e.target.value)}
+          />
+        )}
 
         <div className="grid grid-cols-2 gap-3">
           <Input label="Date" type="date" value={date} onChange={e => setDate(e.target.value)} />
           <Input label="Time" type="time" value={time} onChange={e => setTime(e.target.value)} />
-          <Select label="Format" value={format} onChange={e => setFormat(e.target.value)}>
-            {FORMATS.map(f => <option key={f} value={f} className="capitalize">{f}</option>)}
-          </Select>
           <Select label="Tone" value={tone} onChange={e => setTone(e.target.value)}>
             {tones.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
-          </Select>
-          <Select label="Visual style" value={style} onChange={e => setStyle(e.target.value)}>
-            <option value="">AI decides</option>
-            {styles.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
           </Select>
           <Select label="Objective" value={objective} onChange={e => setObjective(e.target.value)}>
             <option value="">Not set</option>
             {OBJECTIVES.map(o => <option key={o} value={o}>{o}</option>)}
           </Select>
+          {showsImageFields && (
+            <Select label="Visual style" value={style} onChange={e => setStyle(e.target.value)}>
+              <option value="">AI decides</option>
+              {styles.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+            </Select>
+          )}
         </div>
 
         <Input
@@ -386,7 +476,7 @@ function IdeaEditModal({ idea, tones, saving, saveError, onClose, onSave }) {
         {saveError && <p className="text-xs text-red-600">{saveError}</p>}
         <div className="flex justify-end gap-3 pt-1">
           <Button variant="secondary" onClick={onClose}>{idea.isNew ? 'Discard' : 'Cancel'}</Button>
-          <Button onClick={() => onSave({ topic, angle, tone, date, time, format, suggestedStyle: style, imageIdea, objective, cta })} disabled={saving || (idea.isNew && !topic.trim())}>
+          <Button onClick={() => onSave({ topic, angle, tone, date, time, format, suggestedStyle: style, imageIdea, objective, cta, postKind, slideCount, imageText })} disabled={saving || (idea.isNew && !topic.trim())}>
             {saving ? <><Spinner size="sm" /> Saving…</> : 'Save'}
           </Button>
         </div>
@@ -712,6 +802,33 @@ export function CampaignPlanner() {
     if (!idea.isNew) await deleteIdea(accessToken, idea.id)
   }
 
+  // Copies a fully-briefed idea onto the OTHER platform — same topic/angle/
+  // objective/cta/image direction, with tone and style remapped to that
+  // platform's own vocabulary (see crosswalkTone/crosswalkStyle). Deliberately
+  // does NOT copy reference images: they were picked/cropped for the
+  // original platform's aspect ratio, which the other platform doesn't share.
+  // Not auto-elongated — this idea already has a full brief, unlike a bare
+  // "+ Add idea" draft.
+  async function onIdeaDuplicate(idea) {
+    if (idea.isNew) return
+    const targetPlatform = idea.platform === 'linkedin' ? 'instagram' : 'linkedin'
+    const res = await insertIdeas(activeWorkspaceId, accessToken, planId, [{
+      platform: targetPlatform, date: idea.date, time: idea.time,
+      title: idea.title || idea.topic, topic: idea.topic, angle: idea.angle,
+      tone: crosswalkTone(idea.tone, idea.platform, targetPlatform),
+      occasion: idea.occasion, pillar: idea.pillar,
+      objective: idea.objective, cta: idea.cta, format: idea.format,
+      suggestedStyle: crosswalkStyle(idea.suggestedStyle, idea.platform, targetPlatform),
+      imageIdea: idea.imageIdea,
+      postKind: idea.postKind, slideCount: idea.slideCount, imageText: idea.imageText,
+    }], ideas.length)
+    if (res.error || !res.rows?.[0]) { setError(res.error || 'Could not duplicate idea.'); return }
+    const created = dbIdeaToDraft(res.rows[0])
+    update({ ideas: [...ideas, created] })
+    setAutoEditId(created.id)
+    setTimeout(() => setAutoEditId(null), 400)
+  }
+
   // Called once the "+ Add idea" editor's Save is clicked — this is the
   // only point a manually-added idea actually gets written to the database.
   async function onIdeaCreate(tempIdea, patch) {
@@ -721,10 +838,46 @@ export function CampaignPlanner() {
       topic: merged.topic, angle: merged.angle, tone: merged.tone, format: merged.format,
       suggestedStyle: merged.suggestedStyle, imageIdea: merged.imageIdea,
       objective: merged.objective, cta: merged.cta,
+      postKind: merged.postKind, slideCount: merged.slideCount, imageText: merged.imageText,
     }], ideas.length)
     if (res.error || !res.rows?.[0]) return { error: res.error || 'Could not save idea.' }
-    const created = dbIdeaToDraft(res.rows[0])
+    let created = dbIdeaToDraft(res.rows[0])
+
+    // A manually-typed idea only has a thin topic/tone — ask AI to flesh it
+    // out into a real brief (angle/objective/cta/design direction), the same
+    // fields an AI-suggested idea already gets, BEFORE the user approves it.
+    // Best-effort: if this fails or isn't configured, the idea just stays as
+    // typed — never blocks the save itself.
+    const elongateUrl = state.webhooks?.elongateIdea
+    if (elongateUrl) {
+      const blocks = buildSectionBlocks(state.brandProfile, directory)
+      const instructions = brandBrainSections.map(s => blocks[s]).filter(Boolean).join('\n\n')
+      const elongated = await elongateIdea(elongateUrl, {
+        instructions,
+        idea: { platform: created.platform, topic: created.topic, tone: created.tone, date: created.date },
+      })
+      if (elongated.ok) {
+        const dbPatch = {
+          topic: elongated.topic || created.topic,
+          angle: elongated.angle || '',
+          tone: elongated.tone || created.tone,
+          objective: elongated.objective || '',
+          cta: elongated.cta || '',
+          image_idea: elongated.image_idea || created.imageIdea || '',
+          occasion: elongated.occasion || '',
+          content_pillar: elongated.content_pillar || '',
+        }
+        const patchRes = await updateIdea(accessToken, created.id, dbPatch)
+        if (patchRes.ok && patchRes.idea) created = dbIdeaToDraft(patchRes.idea)
+      }
+    }
+
     update({ ideas: ideas.map(i => i.id === tempIdea.id ? created : i) })
+    // Re-open the editor on the now-enriched idea (the card remounts under its
+    // real id the instant `ideas` updates, since IdeaCard is keyed by id) so
+    // the user sees the elongated brief and can adjust it before approving.
+    setAutoEditId(created.id)
+    setTimeout(() => setAutoEditId(null), 400)
     return { ok: true, idea: created }
   }
 
@@ -763,8 +916,15 @@ export function CampaignPlanner() {
     // generates the real caption + image into *_generated_posts as
     // 'pending_review'. The user then reviews the actual content (Instagram /
     // LinkedIn → Posts, "Pending review") before it's cleared to schedule.
+    // Mark every approved idea 'processing' BEFORE firing the webhook — durable
+    // and instant, so Post Approvals shows real state even on reload, not just
+    // while this tab stays open waiting for n8n's background generation.
+    await markIdeasProcessing(accessToken, planId)
+
     const pushResult = await requestPlanContentGeneration({
       webhooks: state.webhooks, planId, instructions, ideas: approved,
+      workspaceId: activeWorkspaceId,
+      captionLanguage: state.brandProfile?.captionLanguage || 'both',
     })
     if (pushResult.error) { setBusy(false); setError(pushResult.error); return }
     await updatePlan(accessToken, planId, { status: 'generating' })
@@ -1129,7 +1289,7 @@ export function CampaignPlanner() {
                   {group.ideas.map(idea => (
                     <IdeaCard key={idea.id} idea={idea} index={ideas.indexOf(idea)} accessToken={accessToken}
                       autoEdit={idea.id === autoEditId}
-                      onChange={onIdeaChange} onRemove={onIdeaRemove} onCreate={onIdeaCreate} />
+                      onChange={onIdeaChange} onRemove={onIdeaRemove} onCreate={onIdeaCreate} onDuplicate={onIdeaDuplicate} />
                   ))}
                 </div>
               ))}

@@ -97,6 +97,9 @@ export async function insertIdeas(workspaceId, accessToken, planId, ideas, start
     suggested_style:  idea.suggestedStyle || '',
     suggested_aspect_ratio: idea.suggestedAspectRatio || '',
     image_idea:       idea.imageIdea || '',
+    post_kind:        idea.postKind || (idea.format === 'carousel' ? 'carousel' : 'caption_image'),
+    slide_count:      idea.slideCount || (idea.format === 'carousel' ? 3 : 1),
+    image_text:       idea.imageText || '',
     image_mode:       idea.imageMode || 'generate',
     reference_image_urls: idea.references || [],
     status:           'proposed',
@@ -137,6 +140,50 @@ export async function setAllIdeaStatus(accessToken, planId, status) {
     if (!res.ok) return { error: await res.text() }
     return { ok: true, rows: await res.json() }
   } catch (err) { return { error: err.message } }
+}
+
+// ── Generation status tracking ──────────────────────────────────────────
+// Durable per-idea state: not_started -> processing -> completed/failed.
+// Marked 'processing' the instant a plan is finalized (or a retry fires) —
+// before n8n even responds — so Post Approvals shows real state on reload,
+// not just while the browser tab that fired it stays open.
+export async function markIdeasProcessing(accessToken, planId) {
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/plan_ideas?plan_id=eq.${planId}&status=eq.approved`, {
+      method: 'PATCH',
+      headers: { ...authHeaders(accessToken), 'Content-Type': 'application/json', Prefer: 'return=minimal' },
+      body: JSON.stringify({ generation_status: 'processing', generation_error: '' }),
+    })
+    return { ok: res.ok }
+  } catch (err) { return { error: err.message } }
+}
+
+export async function markIdeaProcessing(accessToken, ideaId) {
+  try {
+    await fetch(`${SUPABASE_URL}/rest/v1/plan_ideas?id=eq.${ideaId}`, {
+      method: 'PATCH',
+      headers: { ...authHeaders(accessToken), 'Content-Type': 'application/json', Prefer: 'return=minimal' },
+      body: JSON.stringify({ generation_status: 'processing', generation_error: '' }),
+    })
+    return { ok: true }
+  } catch (err) { return { error: err.message } }
+}
+
+// ── Everything Post Approvals needs to render the grouped-by-plan view:
+// every plan (for section headers) + every approved idea across all plans
+// (for processing/failed/completed state), workspace-scoped. ──
+export async function fetchApprovalsData(workspaceId, accessToken) {
+  if (!workspaceId) return { plans: [], ideas: [] }
+  try {
+    const headers = authHeaders(accessToken)
+    const [plansRes, ideasRes] = await Promise.all([
+      fetch(`${SUPABASE_URL}/rest/v1/content_plans?workspace_id=eq.${workspaceId}&select=*&order=created_at.desc`, { headers }),
+      fetch(`${SUPABASE_URL}/rest/v1/plan_ideas?workspace_id=eq.${workspaceId}&status=eq.approved&select=*&order=created_at.desc`, { headers }),
+    ])
+    const plans = plansRes.ok ? await plansRes.json() : []
+    const ideas = ideasRes.ok ? await ideasRes.json() : []
+    return { plans, ideas }
+  } catch { return { plans: [], ideas: [] } }
 }
 
 export async function deleteIdea(accessToken, ideaId) {

@@ -43,6 +43,7 @@ export const DEFAULT_BRAND_PROFILE = {
   languages:         '',
   complianceNotes:   '',
   offersCtas:        '',
+  captionLanguage:   'both',   // ar | en | both — which language(s) captions are written in
   updatedAt:         null,
 }
 
@@ -69,6 +70,7 @@ function rowToProfile(row) {
     languages:        row.languages           || '',
     complianceNotes:  row.compliance_notes    || '',
     offersCtas:       row.offers_ctas         || '',
+    captionLanguage:  row.caption_language    || 'both',
     updatedAt:        row.updated_at          || null,
   }
 }
@@ -113,6 +115,7 @@ export async function saveBrandProfile(workspaceId, accessToken, profile) {
     languages:           profile.languages         || '',
     compliance_notes:    profile.complianceNotes   || '',
     offers_ctas:         profile.offersCtas        || '',
+    caption_language:    profile.captionLanguage   || 'both',
     updated_at:          new Date().toISOString(),
   }
   try {

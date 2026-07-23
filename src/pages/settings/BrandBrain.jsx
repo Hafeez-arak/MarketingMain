@@ -1082,6 +1082,18 @@ export function BrandBrain() {
               variant={dirty || !profile.updatedAt ? 'primary' : 'secondary'}>
               {saving ? 'Saving…' : dirty ? 'Save Brand Brain' : profile.updatedAt ? '✓ Saved' : 'Save Brand Brain'}
             </Button>
+            {/* Caption language — which language(s) generated captions are written in. */}
+            <label className="flex items-center gap-2 text-xs text-text-secondary">
+              <span className="font-medium whitespace-nowrap">Caption language</span>
+              <select
+                value={profile.captionLanguage || 'both'}
+                onChange={e => set('captionLanguage', e.target.value)}
+                className="rounded-lg border border-border bg-white text-text text-xs px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-amber-400">
+                <option value="both">Arabic + English</option>
+                <option value="ar">Arabic only (Saudi)</option>
+                <option value="en">English only</option>
+              </select>
+            </label>
             {dirty && !saving && <span className="text-xs text-amber-600 font-medium">Unsaved changes</span>}
             {error && <p className="text-xs text-red-600 flex-1">{error}</p>}
             {!error && profile.updatedAt && (
