@@ -8,6 +8,7 @@ import { Card, Button, Badge, Textarea, Spinner, PostImage } from '../../compone
 import { uid, formatDateTime } from '../../lib/utils'
 import { buildInstructionsString, isBrandProfileEmpty, useBrandProfileSync, logEditFeedback } from '../../lib/brandBrain'
 import { ReferencePicker } from '../../components/ReferencePicker'
+import { CaptionStudio } from '../../components/CaptionStudio'
 
 // ─── Constants ─────────────────────────────────────────────────────────────
 const LIGHTING_STYLES = [
@@ -2374,6 +2375,16 @@ function PostDetail({ post, state, webhookUrl, regenWebhookUrl, supabaseUrl, ano
   // Caption editing
   const [editingCaption, setEditingCaption] = useState(false)
   const [captionDraft,   setCaptionDraft]   = useState(post.copy || '')
+  const [studioOpen,     setStudioOpen]     = useState(false)
+
+  // Apply a Caption Studio result into the existing editable caption box —
+  // reviewer then hits the normal Save (handleSaveCaption) to persist. IG
+  // captions carry their hashtags inline, so we fold them into the caption.
+  function applyStudio({ caption, hashtags }) {
+    const combined = hashtags ? `${caption}\n\n${hashtags}` : caption
+    setCaptionDraft(combined)
+    setEditingCaption(true)
+  }
 
   // Keep captionDraft in sync when the parent updates post.copy after a save
   useEffect(() => {
@@ -2677,11 +2688,17 @@ function PostDetail({ post, state, webhookUrl, regenWebhookUrl, supabaseUrl, ano
                   <div className="flex items-center justify-between mb-2">
                     <p className="text-[11px] font-bold text-text-tertiary uppercase tracking-widest">Caption</p>
                     {!editingCaption ? (
-                      <button onClick={() => { setCaptionDraft(post.copy || ''); setEditingCaption(true) }}
-                        className="flex items-center gap-1 text-xs text-amber-600 hover:text-amber-700 font-semibold px-2.5 py-1 rounded-lg hover:bg-amber-50 transition-colors">
-                        <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-                        Edit
-                      </button>
+                      <div className="flex gap-1.5">
+                        <button onClick={() => setStudioOpen(true)}
+                          className="flex items-center gap-1 text-xs text-violet-600 hover:text-violet-700 font-semibold px-2.5 py-1 rounded-lg hover:bg-violet-50 transition-colors">
+                          ✨ Rewrite
+                        </button>
+                        <button onClick={() => { setCaptionDraft(post.copy || ''); setEditingCaption(true) }}
+                          className="flex items-center gap-1 text-xs text-amber-600 hover:text-amber-700 font-semibold px-2.5 py-1 rounded-lg hover:bg-amber-50 transition-colors">
+                          <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                          Edit
+                        </button>
+                      </div>
                     ) : (
                       <div className="flex gap-1.5">
                         <button onClick={handleCancelCaption} className="text-xs text-text-tertiary hover:text-text px-2.5 py-1 rounded-lg hover:bg-surface-subtle transition-colors">Cancel</button>
@@ -2776,6 +2793,18 @@ function PostDetail({ post, state, webhookUrl, regenWebhookUrl, supabaseUrl, ano
           </div>
         </div>
       </div>
+      {studioOpen && (
+        <CaptionStudio
+          open={studioOpen}
+          onClose={() => setStudioOpen(false)}
+          webhookUrl={state.webhooks?.captionStudio || ''}
+          platform="instagram"
+          language={state.brandProfile?.captionLanguage || 'both'}
+          context={{ topic: post.topic || '', angle: post.angle || '', tone: post.tone || '', objective: post.objective || '', cta: post.cta || '', instructions: buildInstructionsString(state.brandProfile) || '' }}
+          current={{ caption: post.copy || '', hashtags: post.hashtags || '' }}
+          onApply={applyStudio}
+        />
+      )}
     </div>,
     document.body
   )

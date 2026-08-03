@@ -8,6 +8,7 @@ import { Card, Button, Badge, Textarea, Spinner, PostImage } from '../../compone
 import { uid, formatDateTime } from '../../lib/utils'
 import { buildInstructionsString, isBrandProfileEmpty, useBrandProfileSync, logEditFeedback } from '../../lib/brandBrain'
 import { ReferencePicker } from '../../components/ReferencePicker'
+import { CaptionStudio } from '../../components/CaptionStudio'
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 const POST_TYPES = [
@@ -2000,6 +2001,16 @@ function PostDetail({ post, state, webhookUrl, regenWebhookUrl, onClose, onStatu
   const [saveLoading,  setSaveLoading]  = useState(false)
   const [saveError,    setSaveError]    = useState('')
   const [saveSuccess,  setSaveSuccess]  = useState(false)
+  const [studioOpen,   setStudioOpen]   = useState(false)
+
+  // Apply a Caption Studio result into the existing hook/body/hashtags edit
+  // fields — reviewer then hits the normal Save Changes to persist.
+  function applyStudio({ hook, body, hashtags }) {
+    setEditHook(hook || '')
+    setEditBody(body || '')
+    setEditHashtags(hashtags || '')
+    setEditing(true)
+  }
 
   async function handleSaveEdit() {
     setSaveLoading(true); setSaveError(''); setSaveSuccess(false)
@@ -2344,6 +2355,12 @@ ${post.body || ''}` : (post.body || post.copy || '')
                 </button>
               )}
               {!editing && (
+                <button onClick={() => setStudioOpen(true)}
+                  className="px-5 py-3 rounded-2xl text-sm font-semibold border-2 border-violet-200 bg-violet-50 text-violet-700 hover:bg-violet-100 transition-colors flex items-center gap-1.5">
+                  ✨ Rewrite
+                </button>
+              )}
+              {!editing && (
                 <button onClick={() => { setEditHook(post.hook || ''); setEditBody(post.body || post.copy?.replace((post.hook||'')+'\n\n','') || ''); setEditHashtags(post.hashtags || ''); setEditing(true) }}
                   className="px-5 py-3 rounded-2xl text-sm font-semibold border-2 border-stone-300 bg-white text-stone-600 hover:bg-stone-50 transition-colors flex items-center gap-1.5">
                   <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
@@ -2385,6 +2402,18 @@ ${post.body || ''}` : (post.body || post.copy || '')
           </div>
         </div>
       </div>
+      {studioOpen && (
+        <CaptionStudio
+          open={studioOpen}
+          onClose={() => setStudioOpen(false)}
+          webhookUrl={state.webhooks?.captionStudio || ''}
+          platform="linkedin"
+          language={state.brandProfile?.captionLanguage || 'both'}
+          context={{ topic: post.topic || '', angle: post.angle || post.trending_angle || '', tone: post.tone || '', objective: post.objective || '', cta: post.cta || '', instructions: buildInstructionsString(state.brandProfile) || '' }}
+          current={{ hook: post.hook || '', body: post.body || '', hashtags: post.hashtags || '' }}
+          onApply={applyStudio}
+        />
+      )}
     </div>,
     document.body
   )

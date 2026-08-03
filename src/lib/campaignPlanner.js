@@ -95,6 +95,29 @@ export async function elongateIdea(webhookUrl, payload) {
   }
 }
 
+// Caption Studio — on-demand caption rewriting from the review screen.
+// mode='variants' returns 3 alternatives; mode='piece' regenerates one piece
+// (caption/hook/body/hashtags) keeping the rest. Synchronous (one Sonnet
+// call), so the caller awaits it inline. Only fires when the reviewer asks,
+// so it never adds cost to normal generation.
+export async function requestCaptionStudio(webhookUrl, payload) {
+  if (!webhookUrl) return { error: 'Caption Studio webhook not configured. Go to Settings → Integrations → Workflow Webhooks.' }
+  try {
+    const res = await fetch(webhookUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+    if (!res.ok) { const err = await res.text(); return { error: err || `Webhook returned ${res.status}` } }
+    const data = await res.json()
+    const raw  = Array.isArray(data) ? data[0] : data
+    if (!raw || raw.ok === false) return { error: raw?.error || 'Caption rewrite failed.' }
+    return { ok: true, ...raw }
+  } catch (err) {
+    return { error: err.message }
+  }
+}
+
 // Fire the approved plan's ideas at the per-platform Plan Generation
 // webhooks. Each webhook responds immediately ("accepted") and then generates
 // every idea in the background (caption + image) into the *_generated_posts

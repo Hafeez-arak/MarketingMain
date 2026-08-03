@@ -190,6 +190,19 @@ const WORKFLOW_CONFIGS = [
       </div>
     ),
   },
+  {
+    platform: 'captionStudio',
+    label: 'Caption Studio Workflow',
+    placeholder: 'https://your-instance.app.n8n.cloud/webhook/arak-caption-studio',
+    description: 'Powers the ✨ Rewrite panel on the post review screen — 3 caption variants side by side, regenerate just the hook or hashtags, with length / hook-style / emoji / hashtag-count controls. On-demand only, so it never adds cost to normal generation.',
+    icon: (
+      <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: 'linear-gradient(135deg,#7c3aed,#c084fc)' }}>
+        <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24">
+          <path d="M5 3v4M3 5h4M6 17v4m-2-2h4M13 3l2.5 6.5L22 12l-6.5 2.5L13 21l-2.5-6.5L4 12l6.5-2.5L13 3z"/>
+        </svg>
+      </div>
+    ),
+  },
 ]
 
 function WorkflowWebhooks() {
