@@ -45,7 +45,16 @@ export function Topbar() {
     const p = location.pathname
     if (p === '/campaigns') return <Button size="sm" onClick={() => navigate('/campaigns/new')}><Plus/>New Campaign</Button>
     if (p === '/email')     return <Button size="sm" onClick={() => navigate('/email/new')}><Plus/>New Flow</Button>
-    if (p.startsWith('/social/') && p !== '/social') return <Button size="sm" onClick={() => navigate('/social/instagram')}><Plus/>New Post</Button>
+    // Instagram and LinkedIn have their own "Create Post" flow built into
+    // the page now (real generation, not a placeholder) — this global
+    // shortcut duplicated it, and worse, always routed to /social/instagram
+    // regardless of which platform page you were actually on. Other social
+    // pages (no real create flow yet) still get a shortcut, fixed to route
+    // to THEIR OWN /new page instead of the hardcoded Instagram one.
+    const platformMatch = p.match(/^\/social\/([a-z]+)$/)
+    if (platformMatch && !['instagram', 'linkedin'].includes(platformMatch[1])) {
+      return <Button size="sm" onClick={() => navigate(`/social/${platformMatch[1]}/new`)}><Plus/>New Post</Button>
+    }
     return null
   }
 

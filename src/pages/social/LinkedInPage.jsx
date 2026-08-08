@@ -6,9 +6,10 @@ import { useAuth } from '../../store/AuthContext'
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from '../../lib/supabaseClient'
 import { Card, Button, Badge, Textarea, Spinner, PostImage } from '../../components/ui/index'
 import { uid, formatDateTime } from '../../lib/utils'
-import { buildInstructionsString, isBrandProfileEmpty, useBrandProfileSync, logEditFeedback } from '../../lib/brandBrain'
+import { buildInstructionsString, useBrandProfileSync, logEditFeedback } from '../../lib/brandBrain'
 import { ReferencePicker } from '../../components/ReferencePicker'
 import { CaptionStudio } from '../../components/CaptionStudio'
+import { QuickCreatePanel } from '../../components/QuickCreatePanel'
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 const POST_TYPES = [
@@ -320,7 +321,6 @@ export function LinkedInPage() {
     fetchRemotePosts()
   }
 
-  function handleGenerated(result) { setApproval(result); setScreen('approval') }
 
   async function handleApprove() {
     dispatch(actions.addPost({
@@ -432,7 +432,15 @@ export function LinkedInPage() {
       )}
 
       {screen === 'posts'    && <PostsList posts={mergedPosts} dispatch={dispatch} state={state} onCreateClick={() => setScreen('create')} updatePostStatus={updatePostStatus} webhookUrl={webhookUrl} regenWebhookUrl={regenWebhookUrl} />}
-      {screen === 'create'   && <CreatePanel state={state} webhookUrl={webhookUrl} onGenerated={handleGenerated} />}
+      {screen === 'create'   && (
+        <div className="space-y-4 max-w-2xl">
+          <QuickCreatePanel platform="linkedin" tones={TONES} workspaceId={activeWorkspaceId} accessToken={accessToken}
+            webhooks={state.webhooks} instructions={buildInstructionsString(state.brandProfile, state.linkedinInstructions)}
+            captionLanguage={state.brandProfile?.captionLanguage || 'both'}
+            onDone={() => { setScreen('posts'); fetchRemotePosts() }} />
+          <InstructionsAccordion state={state} />
+        </div>
+      )}
       {screen === 'video'    && <LinkedInVideoPanel state={state} dispatch={dispatch} />}
       {screen === 'schedule' && <MonthlySchedule state={state} dispatch={dispatch} instructions={buildInstructionsString(state.brandProfile, state.linkedinInstructions)} />}
       {screen === 'approval' && approval && (
@@ -450,232 +458,6 @@ export function LinkedInPage() {
           }}
         />
       )}
-    </div>
-  )
-}
-
-// ─── Create Panel ────────────────────────────────────────────────────────────
-function CreatePanel({ state, webhookUrl, onGenerated }) {
-  const navigate = useNavigate()
-  const savedInstructions = state.linkedinInstructions || ''
-  const [contentRoute, setContentRoute] = useState('instructions')
-  const [topic,        setTopic]        = useState('')
-  const [tone,         setTone]         = useState('thought_leader')
-  const [postType,     setPostType]     = useState('thought_leadership')
-  const [includeImage, setIncludeImage] = useState(true)
-  const [style,        setStyle]        = useState('photorealistic')
-  const [aspectRatio,  setAspectRatio]  = useState('1.91:1')
-  const [campaignId,   setCampaign]     = useState('')
-  const [loading,      setLoading]      = useState(false)
-  const [error,        setError]        = useState('')
-
-  async function handleGenerate() {
-    if (!webhookUrl) { setError('No webhook URL configured. Go to Settings → Integrations.'); return }
-    setError(''); setLoading(true)
-    try {
-      const combinedInstructions = buildInstructionsString(state.brandProfile, savedInstructions)
-      const res = await fetch(webhookUrl, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          route_type: 'full',
-          content_route: contentRoute,
-          topic: contentRoute === 'trend' ? null : topic.trim(),
-          tone, post_type: postType,
-          include_image: includeImage,
-          style: includeImage ? style : null,
-          aspect_ratio: includeImage ? aspectRatio : null,
-          campaignId: campaignId || null,
-          instructions: contentRoute === 'instructions' ? combinedInstructions : null,
-        }),
-      })
-      const data = await res.json()
-      if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`)
-      onGenerated({
-        ...data,
-        topic: contentRoute === 'trend' ? (data.topic || 'Trending') : topic.trim(),
-        tone, post_type: postType,
-        style: includeImage ? style : null,
-        aspect_ratio: includeImage ? aspectRatio : null,
-        include_image: includeImage,
-        content_route: contentRoute,
-        campaignId,
-      })
-    } catch (err) { setError(`Workflow error: ${err.message}`) }
-    finally { setLoading(false) }
-  }
-
-  return (
-    <div className="space-y-4 max-w-3xl">
-      {!webhookUrl && (
-        <div className="rounded-xl bg-amber-50 border border-amber-200 px-4 py-3 flex items-start gap-3">
-          <svg className="w-4 h-4 text-amber-500 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
-          </svg>
-          <div>
-            <p className="text-xs font-semibold text-amber-700">Webhook not configured</p>
-            <p className="text-xs text-amber-600 mt-0.5">Go to <strong>Settings → Integrations</strong> and paste your LinkedIn n8n webhook URL.</p>
-          </div>
-        </div>
-      )}
-
-      {/* Content route */}
-      <div className="grid grid-cols-2 gap-3">
-        {[
-          { key: 'trend',        icon: '📈', label: 'Trend-Based',  desc: 'Tavily scans industry news, Claude picks the best angle — fully autonomous' },
-          { key: 'instructions', icon: '✍️', label: 'From Brief',    desc: 'Provide a topic and AI follows your brand voice & saved guidelines' },
-        ].map(r => (
-          <button key={r.key} onClick={() => { setContentRoute(r.key); setError('') }}
-            className={`text-left p-4 rounded-2xl border-2 transition-all ${contentRoute === r.key ? 'border-blue-400 bg-blue-50 shadow-sm' : 'border-border bg-white hover:border-stone-300'}`}>
-            <div className="flex items-center gap-2 mb-1.5">
-              <span className="text-xl">{r.icon}</span>
-              <span className={`font-semibold text-sm ${contentRoute === r.key ? 'text-blue-700' : 'text-text'}`}>{r.label}</span>
-            </div>
-            <p className="text-xs text-text-secondary leading-relaxed">{r.desc}</p>
-          </button>
-        ))}
-      </div>
-
-      <Card className="overflow-hidden">
-        <div className="h-1 bg-[#0A66C2]" />
-        <div className="p-5 space-y-5">
-
-          {contentRoute === 'trend' && (
-            <div className="rounded-xl bg-blue-50 border border-blue-100 px-4 py-3 flex items-start gap-2.5">
-              <span className="text-base flex-shrink-0 mt-0.5">📈</span>
-              <p className="text-xs text-blue-600 leading-relaxed">
-                Tavily searches for the latest architectural lighting & Saudi Vision 2030 industry news, then Claude crafts a LinkedIn-optimised post and optionally generates a professional visual.
-              </p>
-            </div>
-          )}
-
-          {contentRoute === 'instructions' && (
-            <div>
-              <label className="block text-xs font-medium text-text-secondary mb-1.5">
-                Topic / Brief <span className="text-text-tertiary">(optional)</span>
-              </label>
-              <Textarea
-                placeholder="e.g. We just completed lighting design for a new 5-star hotel in NEOM — share the project story and key design challenges we solved..."
-                value={topic} onChange={e => { setTopic(e.target.value); setError('') }} rows={3}
-              />
-            </div>
-          )}
-
-          {/* Post type */}
-          <div>
-            <label className="block text-xs font-medium text-text-secondary mb-2">Post Type</label>
-            <div className="grid grid-cols-2 gap-2">
-              {POST_TYPES.map(t => (
-                <button key={t.value} onClick={() => setPostType(t.value)}
-                  className={`text-left rounded-xl border px-3 py-2.5 transition-all ${postType === t.value ? 'border-blue-500 bg-blue-50 shadow-sm' : 'border-border bg-white hover:border-border-strong hover:bg-surface-subtle'}`}>
-                  <div className="flex items-center gap-1.5 mb-0.5">
-                    <span className="text-base leading-none">{t.icon}</span>
-                    <span className={`text-xs font-semibold ${postType === t.value ? 'text-blue-700' : 'text-text'}`}>{t.label}</span>
-                  </div>
-                  <p className="text-[11px] text-text-tertiary leading-tight">{t.desc}</p>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Tone */}
-          <div>
-            <label className="block text-xs font-medium text-text-secondary mb-2">Tone / Voice</label>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-              {TONES.map(t => (
-                <button key={t.value} onClick={() => setTone(t.value)}
-                  className={`text-left rounded-xl border px-3 py-2 transition-all ${tone === t.value ? 'border-blue-500 bg-blue-50 shadow-sm' : 'border-border bg-white hover:border-border-strong hover:bg-surface-subtle'}`}>
-                  <p className={`text-xs font-semibold ${tone === t.value ? 'text-blue-700' : 'text-text'}`}>{t.label}</p>
-                  <p className="text-[11px] text-text-tertiary">{t.desc}</p>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Campaign + Image toggle */}
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-medium text-text-secondary mb-1.5">Campaign (optional)</label>
-              <select value={campaignId} onChange={e => setCampaign(e.target.value)}
-                className="w-full rounded-xl border border-border bg-white text-text text-sm px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-400 cursor-pointer">
-                <option value="">No campaign</option>
-                {(state.campaigns || []).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-text-secondary mb-1.5">Include Image</label>
-              <button onClick={() => setIncludeImage(v => !v)}
-                className={`w-full flex items-center justify-between px-3 py-2 rounded-xl border text-sm font-medium transition-all ${includeImage ? 'border-blue-400 bg-blue-50 text-blue-700' : 'border-border bg-white text-text-secondary hover:bg-surface-subtle'}`}>
-                <span>{includeImage ? '🖼️ Image On' : '📝 Text Only'}</span>
-                <span className={`w-8 h-4 rounded-full relative transition-colors ${includeImage ? 'bg-blue-500' : 'bg-stone-300'}`}>
-                  <span className={`absolute top-0.5 w-3 h-3 bg-white rounded-full shadow transition-all ${includeImage ? 'left-4' : 'left-0.5'}`} />
-                </span>
-              </button>
-            </div>
-          </div>
-
-          {includeImage && (
-            <div className="space-y-4 rounded-xl border border-blue-100 bg-blue-50/30 p-4">
-              <div>
-                <label className="block text-xs font-medium text-text-secondary mb-2">Image Style</label>
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                  {IMAGE_STYLES.map(s => (
-                    <button key={s.value} onClick={() => setStyle(s.value)}
-                      className={`text-left rounded-xl border px-3 py-2.5 transition-all ${style === s.value ? 'border-blue-500 bg-white shadow-sm' : 'border-stone-200 bg-white hover:border-stone-300'}`}>
-                      <div className="flex items-center gap-1.5 mb-0.5">
-                        <span className="text-base leading-none">{s.icon}</span>
-                        <span className={`text-xs font-semibold ${style === s.value ? 'text-blue-700' : 'text-text'}`}>{s.label}</span>
-                      </div>
-                      <p className="text-[11px] text-text-tertiary leading-tight">{s.desc}</p>
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <label className="block text-xs font-medium text-text-secondary">Format</label>
-                  <span className="text-[11px] text-text-tertiary font-medium">
-                    {ASPECT_RATIOS.find(r => r.value === aspectRatio)?.dims}
-                  </span>
-                </div>
-                <AspectRatioSelector value={aspectRatio} onChange={setAspectRatio} />
-              </div>
-            </div>
-          )}
-
-          {contentRoute === 'instructions' && (
-            <div className={`rounded-xl px-4 py-3 border ${state.brandProfile && !isBrandProfileEmpty(state.brandProfile) ? 'bg-purple-50 border-purple-100' : 'bg-amber-50 border-amber-100'}`}>
-              {state.brandProfile && !isBrandProfileEmpty(state.brandProfile)
-                ? <>
-                    <p className="text-xs font-medium text-purple-700 mb-1 flex items-center gap-1.5">
-                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
-                      Brand Brain profile will be included
-                    </p>
-                    {savedInstructions && <p className="text-xs text-purple-600 line-clamp-2">Plus platform notes: {savedInstructions}</p>}
-                  </>
-                : <p className="text-xs text-amber-700">
-                    <span className="font-medium">No Brand Brain profile set.</span> Set it once in{' '}
-                    <button type="button" onClick={() => navigate('/brand-brain')} className="underline font-medium hover:text-amber-800">Brand Brain</button>{' '}
-                    so every platform shares the same voice.
-                  </p>
-              }
-            </div>
-          )}
-
-          {error && (
-            <div className="rounded-xl bg-red-50 border border-red-100 px-4 py-3 text-xs text-red-600">{error}</div>
-          )}
-
-          <button onClick={handleGenerate}
-            disabled={loading}
-            className="w-full py-3 rounded-xl font-semibold text-sm text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 bg-[#0A66C2] hover:bg-[#004182]">
-            {loading
-              ? <><Spinner size="sm" /> Generating post…</>
-              : <><svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg> Generate LinkedIn Post</>
-            }
-          </button>
-        </div>
-      </Card>
-      <InstructionsAccordion state={state} />
     </div>
   )
 }
