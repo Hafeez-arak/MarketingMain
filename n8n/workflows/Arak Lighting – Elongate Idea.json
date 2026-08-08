@@ -1,0 +1,68 @@
+{
+  "name": "Arak Lighting – Elongate Idea",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Arak – Elongate Idea\n\n**Zero secrets in this file.** Only needs `ANTHROPIC_API_KEY`.\n\nSynchronous: one Sonnet 5 call, no image generation, no Supabase writes (the browser already holds the user's own access token and applies the DB patch itself via updateIdea() — same as any other manual edit).\n\nTurns a manually-typed idea's thin topic/tone into a full brief (angle, objective, cta, design direction) before the user approves it — triggered automatically the moment a manual idea is saved (CampaignPlanner.jsx → onIdeaCreate).",
+        "height": 260,
+        "width": 380
+      },
+      "id": "64834a23-8294-4035-9e5e-53393f95544b",
+      "name": "Note: Overview",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        -80
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "arak-elongate-idea",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "22e776d2-282e-4e59-8c29-56cc0049c91d",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        200
+      ],
+      "webhookId": "arak-elongate-idea"
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst http = this.helpers.httpRequest;\nconst ANTHROPIC = $env.ANTHROPIC_API_KEY;\n\nasync function req(opts){\n  try { return await http(opts); }\n  catch (e) {\n    const detail = (e && (e.error || (e.response && e.response.data) || e.description)) || null;\n    const real = detail\n      ? (typeof detail === 'string' ? detail\n        : Buffer.isBuffer(detail) ? detail.toString('utf8', 0, 300)\n        : (detail.error && detail.error.message) || JSON.stringify(detail).slice(0, 400))\n      : (e && e.message) || String(e);\n    throw new Error(real);\n  }\n}\n\nfunction safeJson(t){\n  const c = String(t||'').replace(/```json|```/g,'').trim();\n  try { return JSON.parse(c); } catch(e){\n    const m = c.match(/\\{[\\s\\S]*\\}/);\n    if(m){ try { return JSON.parse(m[0]); } catch(_){} }\n    return {};\n  }\n}\n\nconst body = ($input.first().json.body) || {};\nconst idea = body.idea || {};\nconst instructions = body.instructions || '';\nconst platformName = idea.platform === 'linkedin' ? 'LinkedIn' : 'Instagram';\n\nconst cachedPrefix = `You are a senior social media strategist for Arak Lighting, Saudi Arabia's leading architectural lighting company (45+ years; projects incl. Solitaire Mall, King Fahad Airport, Ritz Carlton Riyadh).\n\nA team member has a rough idea for a ${platformName} post and wants you to turn it into a proper creative brief — the same quality of brief your AI planner already writes for auto-suggested posts. Keep their original intent; elaborate, don't replace it.\n\nBRAND CONTEXT:\n${instructions || 'No brand profile set — keep it premium and on-brand for a luxury lighting company.'}`;\n\nconst variableSuffix = `ROUGH IDEA (their own words):\n\"${idea.topic || ''}\"\n${idea.tone ? `Their stated tone: ${idea.tone}` : ''}\n${idea.date ? `Scheduled date: ${idea.date}` : ''}\n\nTurn this into a proper post brief. Return ONLY valid JSON, no markdown fences:\n{\"topic\":\"1-2 sentence expanded description of what the post is about, keeping their intent\",\n \"angle\":\"the specific creative angle/hook for this post, one sentence\",\n \"tone\":\"one of: professional, inspirational, educational, casual, promotional, thought_leader\",\n \"objective\":\"one of: Awareness, Engagement, Sales/Leads, Trust/Credibility, Community\",\n \"cta\":\"a specific call-to-action, or empty string if none fits\",\n \"design_tip\":\"one sentence of art direction for whoever generates the image\",\n \"image_idea\":\"a vivid 1-2 sentence description of the image itself, ready to hand to an image generator\",\n \"occasion\":\"a specific occasion/holiday this ties to, or empty string if none\",\n \"content_pillar\":\"a short content-pillar label, 2-4 words, or empty string\",\n \"hashtags\":\"6-8 relevant hashtags mixing Arabic and English, e.g. #ArakLighting #تصميم_اضاءة #LightingDesign\"}`;\n\ntry {\n  const resp = await req({ method:'POST', url:'https://api.anthropic.com/v1/messages',\n    headers:{ 'x-api-key':ANTHROPIC, 'anthropic-version':'2023-06-01', 'content-type':'application/json' },\n    body:{ model:'claude-sonnet-5', max_tokens:1200, messages:[{ role:'user', content:[\n      { type:'text', text: cachedPrefix, cache_control:{ type:'ephemeral' } },\n      { type:'text', text: variableSuffix },\n    ] }] },\n    json:true });\n  if (!resp || resp.type === 'error' || !Array.isArray(resp.content)) {\n    throw new Error('Claude elongation call failed: ' + (resp && resp.error && resp.error.message ? resp.error.message : JSON.stringify(resp).slice(0, 300)));\n  }\n  const parsed = safeJson(resp.content[0] && resp.content[0].text);\n  return [{ json: {\n    ok: true,\n    topic: parsed.topic || idea.topic || '', angle: parsed.angle || '',\n    tone: parsed.tone || idea.tone || '', objective: parsed.objective || '',\n    cta: parsed.cta || '', design_tip: parsed.design_tip || '',\n    image_idea: parsed.image_idea || '', occasion: parsed.occasion || '',\n    content_pillar: parsed.content_pillar || '', hashtags: parsed.hashtags || '',\n  } }];\n} catch (err) {\n  return [{ json: { ok: false, error: (err && err.message) ? err.message : String(err) } }];\n}\n"
+      },
+      "id": "0ebf1d38-a304-465f-909c-34a89d02f4b9",
+      "name": "Elongate Idea",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        200
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Elongate Idea",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": []
+}
