@@ -48,61 +48,6 @@ const ASPECT_RATIOS = [
 const DAYS_OF_WEEK = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']
 const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December']
 
-// ─── Small helpers ───────────────────────────────────────────────────────────
-function CharCounter({ text, max = 3000 }) {
-  const len  = (text || '').length
-  const pct  = Math.min(len / max, 1)
-  const over = len > max
-  const warn = len > max * 0.85
-  return (
-    <div className="flex items-center gap-2">
-      <div className="flex-1 h-1 bg-stone-100 rounded-full overflow-hidden">
-        <div className={`h-full rounded-full transition-all duration-300 ${over ? 'bg-red-400' : warn ? 'bg-amber-400' : 'bg-blue-500'}`}
-          style={{ width: `${pct * 100}%` }} />
-      </div>
-      <span className={`text-[11px] font-medium tabular-nums ${over ? 'text-red-500' : warn ? 'text-amber-600' : 'text-text-tertiary'}`}>
-        {len}/{max}
-      </span>
-    </div>
-  )
-}
-
-function HookPreview({ hook, body }) {
-  const [expanded, setExpanded] = useState(false)
-  const fullText = hook ? `${hook}\n\n${body || ''}` : (body || '')
-  const preview  = hook || body?.slice(0, 120) || ''
-  return (
-    <div className="rounded-2xl border border-stone-200 bg-white overflow-hidden">
-      <div className="px-4 pt-4 pb-2 flex items-center gap-3">
-        <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-600 to-blue-800 flex items-center justify-center flex-shrink-0">
-          <span className="text-white text-xs font-bold">AL</span>
-        </div>
-        <div>
-          <p className="text-sm font-semibold text-stone-800 leading-tight">Arak Lighting</p>
-          <p className="text-[11px] text-stone-400 leading-tight">Saudi Arabia's Leading Lighting Company · Now</p>
-        </div>
-      </div>
-      <div className="px-4 pb-3">
-        <p className="text-sm text-stone-700 leading-relaxed whitespace-pre-line">
-          {expanded ? fullText : preview}
-          {!expanded && fullText.length > preview.length && (
-            <button onClick={() => setExpanded(true)} className="text-blue-600 font-medium ml-1 hover:underline">…see more</button>
-          )}
-          {expanded && (
-            <button onClick={() => setExpanded(false)} className="text-blue-600 font-medium ml-2 hover:underline text-xs">show less</button>
-          )}
-        </p>
-      </div>
-      <div className="px-4 py-2 border-t border-stone-100 flex items-center gap-4">
-        {['👍','💡','❤️'].map(e => (
-          <span key={e} className="text-xs text-stone-400 flex items-center gap-1 cursor-pointer hover:text-stone-600 transition-colors"><span>{e}</span></span>
-        ))}
-        <span className="text-[11px] text-stone-400 ml-auto">LinkedIn Preview</span>
-      </div>
-    </div>
-  )
-}
-
 function AspectRatioSelector({ value, onChange }) {
   return (
     <div className="flex gap-2 flex-wrap">
@@ -312,60 +257,12 @@ export function LinkedInPage() {
   ], [localPosts, remotePosts])
 
   const [screen,   setScreen]   = useState('posts')
-  const [approval, setApproval] = useState(null)
 
   // auto-fetch on mount
   const [fetched, setFetched] = useState(false)
   if (supabaseUrl && anonKey && !fetched && !loadingPosts) {
     setFetched(true)
     fetchRemotePosts()
-  }
-
-
-  async function handleApprove() {
-    dispatch(actions.addPost({
-      id: uid(), platform: 'linkedin',
-      hook: approval.hook,
-      copy: `${approval.hook}\n\n${approval.body}`,
-      body: approval.body,
-      hashtags: approval.hashtags,
-      imageUrl: approval.image_url || null,
-      imagePrompt: approval.image_prompt,
-      style: approval.style,
-      topic: approval.topic,
-      aspectRatio: approval.aspect_ratio,
-      postType: approval.post_type,
-      includeImage: approval.include_image === true,
-      contentRoute: approval.content_route,
-      scheduledAt: null,
-      campaignId: approval.campaignId || null,
-      mediaUrls: approval.image_url ? [approval.image_url] : [],
-      status: 'pending_publish',
-      generatedByWorkflow: true,
-      trendingAngle: approval.trending_angle,
-      postStrategy: approval.post_strategy,
-      supabaseId: approval.supabase_id || null,
-      createdAt: new Date().toISOString(),
-    }))
-    if (supabaseUrl && anonKey && approval.supabase_id) {
-      await fetch(`${supabaseUrl}/rest/v1/linkedin_manual_posts?id=eq.${approval.supabase_id}`, {
-        method: 'PATCH',
-        headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${anonKey}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
-        body: JSON.stringify({ status: 'approved', updated_at: new Date().toISOString() }),
-      })
-    }
-    dispatch(actions.addNotification({ id: uid(), message: 'LinkedIn post approved and saved.', createdAt: new Date().toISOString() }))
-    setApproval(null); setScreen('posts')
-  }
-
-  async function handleDiscard() {
-    if (supabaseUrl && anonKey && approval?.supabase_id) {
-      await fetch(`${supabaseUrl}/rest/v1/linkedin_manual_posts?id=eq.${approval.supabase_id}`, {
-        method: 'DELETE',
-        headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${anonKey}` },
-      })
-    }
-    setApproval(null); setScreen('create')
   }
 
   const totalPosts = mergedPosts.length
@@ -386,50 +283,44 @@ export function LinkedInPage() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          {supabaseUrl && anonKey && screen !== 'approval' && (
+          {supabaseUrl && anonKey && (
             <button onClick={fetchRemotePosts} disabled={loadingPosts}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-border bg-white text-xs text-text-secondary hover:text-text hover:bg-surface-subtle transition-colors disabled:opacity-50">
               <svg className={`w-3.5 h-3.5 ${loadingPosts ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-.27-4.93"/></svg>
               {lastFetchedAt ? `Synced ${lastFetchedAt}` : 'Sync Posts'}
             </button>
           )}
-          {screen !== 'approval' && (
-            <Button onClick={() => setScreen('create')} className="!bg-[#0A66C2] !hover:bg-[#004182] text-white">
-              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
-              Create Post
-            </Button>
-          )}
+          <Button onClick={() => setScreen('create')} className="!bg-[#0A66C2] !hover:bg-[#004182] text-white">
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+            Create Post
+          </Button>
         </div>
       </div>
 
       {/* Stats */}
-      {screen !== 'approval' && (
-        <div className="grid grid-cols-4 gap-3">
-          {[
-            { label: 'Total',     value: totalPosts },
-            { label: 'Pending',   value: mergedPosts.filter(p => p.status === 'pending_publish').length },
-            { label: 'Scheduled', value: mergedPosts.filter(p => p.status === 'scheduled').length },
-            { label: 'Published', value: mergedPosts.filter(p => p.status === 'published').length },
-          ].map(s => (
-            <Card key={s.label} className="p-4 text-center">
-              <p className="text-2xl font-bold text-text">{s.value}</p>
-              <p className="text-xs text-text-secondary mt-0.5">{s.label}</p>
-            </Card>
-          ))}
-        </div>
-      )}
+      <div className="grid grid-cols-4 gap-3">
+        {[
+          { label: 'Total',     value: totalPosts },
+          { label: 'Pending',   value: mergedPosts.filter(p => p.status === 'pending_publish').length },
+          { label: 'Scheduled', value: mergedPosts.filter(p => p.status === 'scheduled').length },
+          { label: 'Published', value: mergedPosts.filter(p => p.status === 'published').length },
+        ].map(s => (
+          <Card key={s.label} className="p-4 text-center">
+            <p className="text-2xl font-bold text-text">{s.value}</p>
+            <p className="text-xs text-text-secondary mt-0.5">{s.label}</p>
+          </Card>
+        ))}
+      </div>
 
       {/* Tab bar */}
-      {screen !== 'approval' && (
-        <div className="flex gap-1 bg-surface-subtle border border-border rounded-xl p-1 w-fit">
-          {[{ key: 'posts', label: 'Posts' }, { key: 'create', label: 'Create Post' }, { key: 'video', label: '🎬 Video' }, { key: 'schedule', label: '📅 Monthly Schedule' }].map(t => (
-            <button key={t.key} onClick={() => setScreen(t.key)}
-              className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all ${screen === t.key ? 'bg-white text-text shadow-sm border border-border' : 'text-text-secondary hover:text-text hover:bg-white/60'}`}>
-              {t.label}
-            </button>
-          ))}
-        </div>
-      )}
+      <div className="flex gap-1 bg-surface-subtle border border-border rounded-xl p-1 w-fit">
+        {[{ key: 'posts', label: 'Posts' }, { key: 'create', label: 'Create Post' }, { key: 'video', label: '🎬 Video' }, { key: 'schedule', label: '📅 Monthly Schedule' }].map(t => (
+          <button key={t.key} onClick={() => setScreen(t.key)}
+            className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all ${screen === t.key ? 'bg-white text-text shadow-sm border border-border' : 'text-text-secondary hover:text-text hover:bg-white/60'}`}>
+            {t.label}
+          </button>
+        ))}
+      </div>
 
       {screen === 'posts'    && <PostsList posts={mergedPosts} dispatch={dispatch} state={state} onCreateClick={() => setScreen('create')} updatePostStatus={updatePostStatus} webhookUrl={webhookUrl} regenWebhookUrl={regenWebhookUrl} />}
       {screen === 'create'   && (
@@ -443,288 +334,6 @@ export function LinkedInPage() {
       )}
       {screen === 'video'    && <LinkedInVideoPanel state={state} dispatch={dispatch} />}
       {screen === 'schedule' && <MonthlySchedule state={state} dispatch={dispatch} instructions={buildInstructionsString(state.brandProfile, state.linkedinInstructions)} />}
-      {screen === 'approval' && approval && (
-        <ApprovalScreen data={approval} state={state} webhookUrl={webhookUrl}
-          onUpdate={setApproval} onApprove={handleApprove} onDiscard={handleDiscard}
-          onSaveToLibrary={async ({ url, name, topic }) => {
-            if (supabaseUrl && anonKey) {
-              await fetch(`${supabaseUrl}/rest/v1/media_library`, {
-                method: 'POST',
-                headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${anonKey}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
-                body: JSON.stringify({ workspace_id: activeWorkspaceId, name, url, platform: 'linkedin', topic, source: 'generated', mime_type: 'image/webp', size_bytes: 0 }),
-              })
-            }
-            dispatch(actions.addNotification({ id: Date.now().toString(36), message: `"${name}" saved to Media Library.`, createdAt: new Date().toISOString() }))
-          }}
-        />
-      )}
-    </div>
-  )
-}
-
-// ─── Approval Screen ─────────────────────────────────────────────────────────
-function ApprovalScreen({ data, state, webhookUrl, onUpdate, onApprove, onDiscard, onSaveToLibrary }) {
-  const [libSaved, setLibSaved] = useState(false)
-  const [regenPostLoading,  setRegenPostLoading]  = useState(false)
-  const [regenImageLoading, setRegenImageLoading] = useState(false)
-  const [toneSyncLoading,   setToneSyncLoading]   = useState(false)
-  const [editingPost,       setEditingPost]       = useState(false)
-  const [hookDraft,         setHookDraft]         = useState(data.hook || '')
-  const [bodyDraft,         setBodyDraft]         = useState(data.body || '')
-  const [error,             setError]             = useState('')
-  const anyLoading = regenPostLoading || regenImageLoading || toneSyncLoading
-
-  async function regenPost() {
-    setRegenPostLoading(true); setError('')
-    try {
-      const res = await fetch(webhookUrl, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          route_type: 'post_only', content_route: data.content_route,
-          topic: data.topic, tone: data.tone || 'thought_leader',
-          instructions: buildInstructionsString(state.brandProfile, state.linkedinInstructions) || null,
-          current_post: `${data.hook}\n\n${data.body}`,
-        }),
-      })
-      const result = await res.json()
-      if (!res.ok || result.error) throw new Error(result.error || `HTTP ${res.status}`)
-      onUpdate({ ...data, hook: result.hook, body: result.body, hashtags: result.hashtags })
-      setHookDraft(result.hook); setBodyDraft(result.body)
-    } catch (err) { setError(`Post regen failed: ${err.message}`) }
-    finally { setRegenPostLoading(false) }
-  }
-
-  async function regenImage() {
-    setRegenImageLoading(true); setError('')
-    try {
-      const res = await fetch(webhookUrl, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ route_type: 'image_only', image_prompt: data.image_prompt, topic: data.topic, style: data.style, aspect_ratio: data.aspect_ratio }),
-      })
-      const result = await res.json()
-      if (!res.ok || result.error) throw new Error(result.error || `HTTP ${res.status}`)
-      onUpdate({ ...data, image_url: result.image_url })
-    } catch (err) { setError(`Image regen failed: ${err.message}`) }
-    finally { setRegenImageLoading(false) }
-  }
-
-  async function handleToneChange(newTone) {
-    setToneSyncLoading(true); setError('')
-    onUpdate({ ...data, tone: newTone })
-    try {
-      const res = await fetch(webhookUrl, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ route_type: 'tone_sync', topic: data.topic, tone: newTone, current_hook: data.hook, current_body: data.body }),
-      })
-      const result = await res.json()
-      if (!res.ok || result.error) throw new Error(result.error || `HTTP ${res.status}`)
-      onUpdate({ ...data, tone: newTone, hook: result.hook, body: result.body, hashtags: result.hashtags })
-      setHookDraft(result.hook); setBodyDraft(result.body)
-    } catch (err) { setError(`Tone sync failed: ${err.message}`) }
-    finally { setToneSyncLoading(false) }
-  }
-
-  function savePost() { onUpdate({ ...data, hook: hookDraft, body: bodyDraft }); setEditingPost(false) }
-  const fullPostText = `${data.hook || ''}\n\n${data.body || ''}`
-
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-xl bg-blue-100 flex items-center justify-center">
-            <svg className="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-          </div>
-          <div>
-            <p className="font-semibold text-text text-sm">Review & Approve</p>
-            <p className="text-xs text-text-secondary">
-              {data.content_route === 'trend' ? '📈 Trend-based' : '✍️ Brief-based'} · {data.topic}
-              {data.include_image === false && <span className="ml-2 bg-stone-100 text-stone-600 px-2 py-0.5 rounded-full text-[10px] font-medium">📝 Text only</span>}
-            </p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          {data.image_url && (
-            <button onClick={async () => {
-              const fileName = `${(data.topic||'post').replace(/[^a-z0-9]/gi,'_').toLowerCase()}_${Date.now()}.webp`
-              await onSaveToLibrary({ url: data.image_url, name: fileName, topic: data.topic })
-              setLibSaved(true); setTimeout(() => setLibSaved(false), 3000)
-            }}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white transition-all"
-              style={{ background: libSaved ? '#16a34a' : 'linear-gradient(135deg,#0A66C2,#004182)' }}>
-              {libSaved
-                ? <><svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg> Saved!</>
-                : <><svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg> Save to Library</>}
-            </button>
-          )}
-          <button onClick={onDiscard}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all text-red-500 border-red-200 hover:bg-red-50">
-            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>
-            Discard
-          </button>
-        </div>
-      </div>
-
-      {error && <div className="rounded-xl bg-red-50 border border-red-100 px-4 py-3 text-xs text-red-600">{error}</div>}
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {/* Left: image + preview + tone */}
-        <div className="space-y-3">
-          {data.include_image !== false && (
-            <Card className="overflow-hidden">
-              <div className="relative bg-gray-900 rounded-t-2xl overflow-hidden"
-                style={{ aspectRatio: (data.aspect_ratio || '1.91:1').replace(':', '/'), maxHeight: '60vh' }}>
-                {regenImageLoading ? (
-                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-gray-900">
-                    <div className="w-8 h-8 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                    <p className="text-white text-xs opacity-60">Generating image…</p>
-                  </div>
-                ) : data.image_url ? (
-                  <PostImage src={data.image_url} alt="Generated visual" className="w-full h-full object-cover" />
-                ) : (
-                  <div className="absolute inset-0 flex items-center justify-center">
-                    <p className="text-white/30 text-sm">No image yet</p>
-                  </div>
-                )}
-                <div className="absolute top-3 left-3 flex gap-1.5">
-                  <span className="bg-black/50 text-white text-[11px] font-medium px-2.5 py-1 rounded-full backdrop-blur-sm">
-                    {IMAGE_STYLES.find(s => s.value === data.style)?.icon} {IMAGE_STYLES.find(s => s.value === data.style)?.label}
-                  </span>
-                  {data.aspect_ratio && (
-                    <span className="bg-black/50 text-white text-[11px] font-medium px-2.5 py-1 rounded-full backdrop-blur-sm">
-                      {ASPECT_RATIOS.find(r => r.value === data.aspect_ratio)?.label}
-                    </span>
-                  )}
-                </div>
-              </div>
-              <div className="p-3 border-t border-border">
-                <button onClick={regenImage} disabled={regenImageLoading}
-                  className="w-full flex items-center justify-center gap-2 py-2 rounded-xl border border-border text-sm font-medium text-text-secondary hover:text-text hover:bg-surface-subtle transition-all disabled:opacity-50">
-                  {regenImageLoading ? <Spinner size="sm" /> : <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>}
-                  Regenerate Image
-                </button>
-              </div>
-            </Card>
-          )}
-
-          <HookPreview hook={data.hook} body={data.body} />
-
-          <Card className="p-4">
-            <div className="flex items-center justify-between mb-3">
-              <p className="text-xs font-semibold text-text-secondary uppercase tracking-wide">Switch Tone</p>
-              {toneSyncLoading && <div className="flex items-center gap-1.5 text-xs text-blue-600 font-medium"><Spinner size="sm" /> Rewriting…</div>}
-            </div>
-            <div className={`grid grid-cols-1 gap-1.5 ${toneSyncLoading ? 'opacity-50 pointer-events-none' : ''}`}>
-              {TONES.map(t => (
-                <button key={t.value} onClick={() => handleToneChange(t.value)}
-                  className={`flex items-center justify-between px-3 py-2 rounded-xl border text-xs transition-all ${data.tone === t.value ? 'border-blue-500 bg-blue-50 text-blue-700 font-semibold' : 'border-border text-text-secondary hover:border-border-strong hover:bg-surface-subtle'}`}>
-                  <span className="font-medium">{t.label}</span>
-                  <span className="opacity-60">{t.desc}</span>
-                </button>
-              ))}
-            </div>
-            {!toneSyncLoading && <p className="text-[11px] text-text-tertiary mt-2 text-center">Rewrites post in new tone, keeps core message</p>}
-          </Card>
-        </div>
-
-        {/* Right: post editor */}
-        <div className="space-y-3">
-          <Card className="overflow-hidden flex flex-col">
-            <div className="border-b border-border">
-              <div className="flex items-center justify-between px-4 py-3">
-                <div>
-                  <span className="text-xs font-semibold text-text">Hook</span>
-                  <span className="text-[11px] text-text-tertiary ml-2">First line · shows before "see more"</span>
-                </div>
-                {!editingPost && (
-                  <button onClick={() => { setHookDraft(data.hook); setBodyDraft(data.body); setEditingPost(true) }}
-                    className="text-xs text-text-secondary hover:text-text px-2.5 py-1 rounded-lg hover:bg-surface-subtle transition-colors flex items-center gap-1">
-                    <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                      <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
-                      <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
-                    </svg>
-                    Edit
-                  </button>
-                )}
-              </div>
-              <div className="px-4 pb-3">
-                {editingPost
-                  ? <input value={hookDraft} onChange={e => setHookDraft(e.target.value)} autoFocus
-                      className="w-full text-sm font-semibold text-text border border-blue-300 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-400 bg-blue-50/30" />
-                  : <p className="text-sm font-semibold text-text leading-relaxed">{data.hook || '—'}</p>
-                }
-              </div>
-            </div>
-
-            <div className="flex-1">
-              <div className="px-4 py-2.5 border-b border-border bg-surface-subtle">
-                <span className="text-xs font-semibold text-text-secondary">Body</span>
-              </div>
-              <div className="p-4">
-                {editingPost
-                  ? <>
-                      <textarea value={bodyDraft} onChange={e => setBodyDraft(e.target.value)} rows={10}
-                        className="w-full text-sm text-text leading-relaxed resize-none focus:outline-none bg-transparent" />
-                      <CharCounter text={`${hookDraft}\n\n${bodyDraft}`} max={3000} />
-                    </>
-                  : <>
-                      <p className="text-sm text-text leading-relaxed whitespace-pre-line">{data.body}</p>
-                      <div className="mt-3"><CharCounter text={fullPostText} max={3000} /></div>
-                    </>
-                }
-              </div>
-              {data.hashtags && !editingPost && (
-                <div className="px-4 pb-3">
-                  <p className="text-xs text-blue-500 leading-relaxed">{data.hashtags}</p>
-                </div>
-              )}
-            </div>
-
-            {editingPost ? (
-              <div className="px-4 pb-4 pt-2 border-t border-border flex gap-2">
-                <button onClick={() => setEditingPost(false)} className="flex-1 py-2 rounded-xl border border-border text-xs font-medium text-text-secondary hover:bg-surface-subtle transition-colors">Cancel</button>
-                <button onClick={savePost} className="flex-1 py-2 rounded-xl text-xs font-semibold text-white bg-[#0A66C2] hover:bg-[#004182] transition-colors">Save Changes</button>
-              </div>
-            ) : (
-              <div className="px-4 pb-4 pt-2 border-t border-border">
-                <button onClick={regenPost} disabled={regenPostLoading || editingPost}
-                  className="w-full flex items-center justify-center gap-2 py-2 rounded-xl border border-border text-sm font-medium text-text-secondary hover:text-text hover:bg-surface-subtle transition-all disabled:opacity-50">
-                  {regenPostLoading ? <Spinner size="sm" /> : <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>}
-                  Regenerate Post
-                </button>
-              </div>
-            )}
-          </Card>
-
-          <Card className="p-4 space-y-2.5">
-            {[
-              { label: 'Route',     value: data.content_route === 'trend' ? '📈 Trend-based' : '✍️ Brief-based' },
-              { label: 'Post Type', value: POST_TYPES.find(t => t.value === data.post_type)?.label || data.post_type },
-              { label: 'Tone',      value: TONES.find(t => t.value === data.tone)?.label || data.tone },
-              { label: 'Image',     value: data.include_image === false ? 'Text only' : (IMAGE_STYLES.find(s => s.value === data.style)?.label || 'Auto') },
-            ].map(item => (
-              <div key={item.label} className="flex justify-between text-xs">
-                <span className="text-text-secondary">{item.label}</span>
-                <span className="font-medium text-text">{item.value}</span>
-              </div>
-            ))}
-            {(data.trending_angle || data.post_strategy) && (
-              <div className="pt-2 border-t border-border">
-                <p className="text-xs text-text-secondary mb-0.5">{data.trending_angle ? 'Trend angle' : 'Strategy'}</p>
-                <p className="text-xs text-text">{data.trending_angle || data.post_strategy}</p>
-              </div>
-            )}
-          </Card>
-        </div>
-      </div>
-
-      <div className="space-y-1">
-        <button onClick={onApprove} disabled={anyLoading}
-          className="w-full py-3.5 rounded-2xl font-semibold text-sm text-white flex items-center justify-center gap-2 transition-all disabled:opacity-50 bg-[#0A66C2] hover:bg-[#004182]">
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
-          Approve & Save Post
-        </button>
-        <p className="text-xs text-text-tertiary text-center">Saved as pending · publish via LinkedIn's native scheduler</p>
-      </div>
     </div>
   )
 }
