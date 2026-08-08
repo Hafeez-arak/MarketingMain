@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Button, Spinner } from './ui/index'
 import { updateIdea } from '../lib/contentPlans'
 import { requestMediaOptions } from '../lib/campaignPlanner'
+import { saveToMediaLibrary } from '../lib/mediaLibrary'
 
 // Lives directly on the plan-board card (not hidden behind Edit) — the
 // caption + media prompt need to be visible and editable at review time,
@@ -10,7 +11,7 @@ import { requestMediaOptions } from '../lib/campaignPlanner'
 //   ready, no selection yet -> pick from 3 caption + 3 media-prompt options
 //   selected  -> the picked (or hand-edited) text, editable, with a
 //                "generate image options" action once a media prompt exists
-export function IdeaDraftPanel({ idea, accessToken, mediaOptionsUrl, onIdeaChange, onRedraft, redrafting }) {
+export function IdeaDraftPanel({ idea, accessToken, workspaceId, mediaOptionsUrl, onIdeaChange, onRedraft, redrafting }) {
   const [savingField, setSavingField] = useState('')     // which field is mid-save, for a subtle spinner
   const [genLoading, setGenLoading] = useState(false)
   const [genError, setGenError] = useState('')
@@ -51,6 +52,13 @@ export function IdeaDraftPanel({ idea, accessToken, mediaOptionsUrl, onIdeaChang
   function pickImage(url) {
     setPickingImage(false); setImageCandidates([])
     save({ preview_image_url: url }, { previewImageUrl: url })
+    // Best-effort, fire-and-forget — a picked candidate is worth keeping a
+    // record of even if the idea never gets finalized. Never blocks the
+    // actual selection on this succeeding.
+    saveToMediaLibrary(workspaceId, accessToken, {
+      name: idea.title || idea.topic || 'Generated image', url, platform: idea.platform, topic: idea.topic,
+      tags: ['generated', idea.platform, idea.groupId ? `group:${idea.groupId}` : `idea:${idea.id}`].filter(Boolean),
+    })
   }
 
   const wantsCaption = idea.wantsCaption !== false
@@ -163,7 +171,13 @@ export function IdeaDraftPanel({ idea, accessToken, mediaOptionsUrl, onIdeaChang
               {genLoading ? <><Spinner size="sm" /> Generating…</> : idea.previewImageUrl ? '🖼 New image options' : `🖼 Generate ${idea.mediaType === 'video' ? 'cover ' : ''}image options`}
             </Button>
             {idea.previewImageUrl && !pickingImage && (
-              <img src={idea.previewImageUrl} alt="" className="w-10 h-10 rounded-lg object-cover border border-border" />
+              <>
+                <img src={idea.previewImageUrl} alt="" className="w-10 h-10 rounded-lg object-cover border border-border" />
+                <a href={idea.previewImageUrl} target="_blank" rel="noopener noreferrer"
+                  className="text-[11px] font-medium text-amber-700 hover:text-amber-800" title="Opens the original file — save from there for the untouched, full-quality image">
+                  ⬇ Download
+                </a>
+              </>
             )}
           </div>
           {genError && <p className="text-[11px] text-red-600">{genError}</p>}

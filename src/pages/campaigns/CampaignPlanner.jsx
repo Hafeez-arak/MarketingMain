@@ -257,7 +257,7 @@ const STATUS_META = {
 }
 
 // ─── One idea in the review list, with inline approve/reject + edit ─────────
-function IdeaCard({ idea, index, accessToken, onChange, onRemove, onCreate, onDuplicate, onRedraft, mediaOptionsUrl, autoEdit = false }) {
+function IdeaCard({ idea, index, accessToken, workspaceId, onChange, onRemove, onCreate, onDuplicate, onRedraft, mediaOptionsUrl, autoEdit = false }) {
   const [redrafting, setRedrafting] = useState(false)
   const [editing, setEditing] = useState(autoEdit)
   const [saving,  setSaving]  = useState(false)
@@ -372,7 +372,7 @@ function IdeaCard({ idea, index, accessToken, onChange, onRemove, onCreate, onDu
           <span className={`text-[10px] font-semibold px-2 py-1 rounded-full flex-shrink-0 ${st.cls}`}>{st.label}</span>
         </div>
 
-        <IdeaDraftPanel idea={idea} accessToken={accessToken} mediaOptionsUrl={mediaOptionsUrl}
+        <IdeaDraftPanel idea={idea} accessToken={accessToken} workspaceId={workspaceId} mediaOptionsUrl={mediaOptionsUrl}
           onIdeaChange={onChange} redrafting={redrafting}
           onRedraft={async () => { setRedrafting(true); await onRedraft(idea); setRedrafting(false) }} />
 
@@ -1622,7 +1622,7 @@ export function CampaignPlanner() {
                     <div className="h-px bg-border flex-1" />
                   </div>
                   {group.ideas.map(idea => (
-                    <IdeaCard key={idea.id} idea={idea} index={ideas.indexOf(idea)} accessToken={accessToken}
+                    <IdeaCard key={idea.id} idea={idea} index={ideas.indexOf(idea)} accessToken={accessToken} workspaceId={activeWorkspaceId}
                       autoEdit={idea.id === autoEditId} mediaOptionsUrl={state.webhooks?.mediaOptions}
                       onChange={onIdeaChange} onRemove={onIdeaRemove} onCreate={onIdeaCreate} onDuplicate={fanOutIdea}
                       onRedraft={target => draftIdeas(ideas, [target.id])} />
