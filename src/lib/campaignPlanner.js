@@ -178,7 +178,10 @@ export async function requestPlanContentGeneration({ webhooks, planId, instructi
       angle:                idea.angle || '',
       tone:                 idea.tone || '',
       style:                idea.suggestedStyle || idea.style || 'photorealistic',
-      aspect_ratio:         idea.suggestedAspectRatio || idea.aspectRatio || (platform === 'linkedin' ? '1.91:1' : '1:1'),
+      // aspectRatio is the human-editable, authoritative field (postFormats
+      // system) — suggestedAspectRatio is AI telemetry only and must not
+      // win over it.
+      aspect_ratio:         idea.aspectRatio || idea.suggestedAspectRatio || (platform === 'linkedin' ? '1.91:1' : '1:1'),
       design_tip:           idea.designTip || '',
       // Freeform human direction for the visual — passed straight to the
       // image step so it overrides/augments the generic design_tip.
@@ -202,6 +205,15 @@ export async function requestPlanContentGeneration({ webhooks, planId, instructi
       scheduled_date:       idea.date || null,
       publish_time:         idea.time || idea.publishTime || '10:00',
       reference_image_urls: idea.references || [],
+      // Already picked (or hand-edited) during review, if this idea went
+      // through Draft Copy / Media Options — Generate Post commits these
+      // instead of generating fresh ones. Empty for ideas approved without
+      // that review flow, so the engine's existing full-generation path is
+      // unaffected for those.
+      caption_ar:           idea.captionAr || '',
+      caption_en:           idea.captionEn || '',
+      media_prompt:         idea.mediaPrompt || '',
+      preview_image_url:    idea.previewImageUrl || '',
     })
   }
 

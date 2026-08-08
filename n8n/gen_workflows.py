@@ -85,6 +85,14 @@ return ideas.map((idea, i) => ({
     image_mode:     idea.image_mode || 'generate',
     reference_image_urls: Array.isArray(idea.reference_image_urls) ? idea.reference_image_urls : [],
     sibling_titles: ideas.filter((_, j) => j !== i).map(x => x.title || x.topic).filter(Boolean).slice(0, 40).join('; '),
+    // Already chosen at review time (Draft Copy + Media Options) — when
+    // present, Generate Post commits these instead of generating fresh
+    // ones. Absent for ideas approved without going through that flow, so
+    // the existing full-generation behavior is unchanged for those.
+    caption_ar:        idea.caption_ar || '',
+    caption_en:        idea.caption_en || '',
+    media_prompt:      idea.media_prompt || '',
+    preview_image_url: idea.preview_image_url || '',
   }
 }));
 """
@@ -145,6 +153,12 @@ const needsImage   = kind !== 'caption_only';
 const refs = Array.isArray(idea.reference_image_urls) ? idea.reference_image_urls : [];
 const useReference = idea.image_mode === 'use_reference' && refs.length > 0;
 const slideCount = kind === 'carousel' ? Math.max(2, Math.min(10, Number(idea.slide_count) || 3)) : 1;
+// Already chosen at review time (Draft Copy + Media Options) — commit these
+// instead of generating fresh ones. Ideas approved without going through
+// that review flow simply won't have these set, so the full-generation
+// path below is completely unchanged for them.
+const hasSelectedCaption = !!(idea.caption_ar || idea.caption_en);
+const hasSelectedImage   = !!idea.preview_image_url;
 
 // Durable per-idea status on plan_ideas — lets Post Approvals show real
 // processing/failed/completed state instead of the idea silently vanishing
@@ -378,8 +392,18 @@ let caption_ar='', caption_en='', hook_ar='', hook_en='', body_ar='', body_en=''
     // proposes (or the hardcoded fallback) — applies regardless of post_kind,
     // including image_only where no caption call happens at all.
     hashtags = idea.hashtags || '#ArakLighting #LightingDesign',
-    post_strategy='', image_prompt = idea.topic || '', slide_prompts = [];
-if (needsCaption){
+    post_strategy='', image_prompt = idea.media_prompt || idea.topic || '', slide_prompts = [];
+if (needsCaption && hasSelectedCaption){
+  // Picked (or hand-edited) during review — commit it as-is, no Claude call.
+  // LinkedIn note: Draft Copy proposes one flowing caption, not a separate
+  // hook/body split — the whole thing lands in body_*, hook_* stays empty.
+  // The reviewer can still split it in Approvals afterward; this only
+  // affects ideas that went through the new review flow with a LinkedIn
+  // caption already selected.
+  caption_ar = idea.caption_ar || '';
+  caption_en = idea.caption_en || '';
+  if (PLATFORM === 'linkedin') { body_ar = caption_ar; body_en = caption_en; }
+} else if (needsCaption){
   // Sonnet 5, not Opus: per-post caption writing is well within Sonnet's
   // strength and ~40% cheaper. Opus is reserved for the monthly Campaign
   // Planner call, which genuinely needs the extra reasoning (holidays,
@@ -432,6 +456,14 @@ const pending_uploads = [];
 if (needsImage){
   if (useReference){
     image_urls = refs.slice(0, kind === 'carousel' ? 10 : 1);   // provided images ARE the post
+  } else if (hasSelectedImage){
+    // Already picked a real candidate during review (Media Options) — fal.ai's
+    // own URL isn't guaranteed to last, so just make THIS one permanent
+    // (same download-and-upload path a freshly-generated image goes
+    // through) instead of generating anything new.
+    const filename = `${Date.now()}-0-${Math.random().toString(36).slice(2,8)}.webp`;
+    binary.image_0 = await downloadAndPrepare(idea.preview_image_url, filename);
+    pending_uploads.push({ binaryKey: 'image_0', slideIndex: 0, filename, bucket: BUCKET });
   } else {
     let prompts;
     if (kind === 'carousel'){

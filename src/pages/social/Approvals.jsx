@@ -127,7 +127,7 @@ function ProcessingCard({ idea }) {
   )
 }
 
-function FailedCard({ idea, onRetry, retrying }) {
+function FailedCard({ idea, post, onRetry, retrying }) {
   const platformMeta = idea.platform === 'linkedin'
     ? { label: 'LinkedIn', color: 'bg-[#0A66C2]/10 text-[#0A66C2]' }
     : { label: 'Instagram', color: 'bg-pink-50 text-pink-600' }
@@ -144,7 +144,7 @@ function FailedCard({ idea, onRetry, retrying }) {
           </div>
           <p className="text-sm text-text leading-relaxed">{idea.title || idea.topic || 'Untitled idea'}</p>
           <p className="text-[11px] text-red-600 mt-1 leading-relaxed">{idea.generation_error || 'Unknown error.'}</p>
-          <Button size="xs" className="mt-2" onClick={() => onRetry(idea)} disabled={retrying}>
+          <Button size="xs" className="mt-2" onClick={() => onRetry(idea, post)} disabled={retrying}>
             {retrying ? <><Spinner size="sm" /> Retrying…</> : '↻ Retry'}
           </Button>
         </div>
@@ -296,14 +296,28 @@ export function Approvals() {
   async function handleApprove(post) { await updateStatus(post, 'pending_publish') }
   async function handleReject(post)  { await updateStatus(post, 'rejected') }
 
-  async function handleRetry(idea) {
+  async function handleRetry(idea, post) {
     setRetryingId(idea.id)
     setIdeas(prev => prev.map(i => i.id === idea.id ? { ...i, generation_status: 'processing', generation_error: '' } : i))
     await markIdeaProcessing(accessToken, idea.id)
     const profile = await fetchBrandProfile(activeWorkspaceId, accessToken)
     const instructions = buildInstructionsString(profile)
+    // If this idea already produced a post (an earlier attempt succeeded
+    // and the reviewer may have edited its caption/image in Approvals
+    // since), that post is the freshest truth. Sending the plan_ideas
+    // draft instead would silently REVERT whatever they edited — the
+    // engine now commits caption_ar/caption_en/preview_image_url as-is
+    // when present (see Generate Post's hasSelectedCaption/hasSelectedImage),
+    // so this has to be the real, current value, not the stale plan-time one.
+    const draft = dbIdeaToDraft(idea)
+    const ideaForRetry = post
+      ? { ...draft,
+          captionAr: post.captionAr || draft.captionAr,
+          captionEn: post.captionEn || draft.captionEn,
+          previewImageUrl: post.imageUrl || draft.previewImageUrl }
+      : draft
     const result = await requestPlanContentGeneration({
-      webhooks: state.webhooks, planId: idea.plan_id, instructions, ideas: [dbIdeaToDraft(idea)],
+      webhooks: state.webhooks, planId: idea.plan_id, instructions, ideas: [ideaForRetry],
       workspaceId: activeWorkspaceId, captionLanguage: profile?.captionLanguage || 'both',
     })
     setRetryingId(null)
@@ -401,7 +415,7 @@ export function Approvals() {
                   <div className="grid grid-cols-1 gap-3 p-4 pt-0">
                     {group.items.map(item => {
                       if (item.type === 'idea' && item.effectiveStatus === 'processing') return <ProcessingCard key={item.key} idea={item.idea} />
-                      if (item.type === 'idea' && item.effectiveStatus === 'failed') return <FailedCard key={item.key} idea={item.idea} onRetry={handleRetry} retrying={retryingId === item.idea.id} />
+                      if (item.type === 'idea' && item.effectiveStatus === 'failed') return <FailedCard key={item.key} idea={item.idea} post={item.post} onRetry={handleRetry} retrying={retryingId === item.idea.id} />
                       return <PostCard key={item.key} post={item.post} onOpen={setSelectedPost} onApprove={handleApprove} onReject={handleReject} />
                     })}
                   </div>

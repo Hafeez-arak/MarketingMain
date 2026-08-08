@@ -7,7 +7,7 @@
         "height": 260,
         "width": 380
       },
-      "id": "c35bd859-1648-4d8e-ac1d-84fee4d910e0",
+      "id": "0049371b-f900-47bf-9bc6-7036f4193d7b",
       "name": "Note: Overview",
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
@@ -23,7 +23,7 @@
         "responseMode": "lastNode",
         "options": {}
       },
-      "id": "1c9da791-73d4-4367-ac14-d23c30600ed4",
+      "id": "7d2c03eb-5978-475c-b3ba-6db80eaff6f2",
       "name": "Webhook",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
@@ -37,7 +37,7 @@
       "parameters": {
         "jsCode": "\nconst http = this.helpers.httpRequest;\nconst ANTHROPIC = $env.ANTHROPIC_API_KEY;\n\nasync function req(opts){\n  try { return await http(opts); }\n  catch (e) {\n    const detail = (e && (e.error || (e.response && e.response.data) || e.description)) || null;\n    const real = detail\n      ? (typeof detail === 'string' ? detail\n        : Buffer.isBuffer(detail) ? detail.toString('utf8', 0, 300)\n        : (detail.error && detail.error.message) || JSON.stringify(detail).slice(0, 400))\n      : (e && e.message) || String(e);\n    throw new Error(real);\n  }\n}\n\nfunction safeJson(t){\n  const c = String(t||'').replace(/```json|```/g,'').trim();\n  try { return JSON.parse(c); } catch(e){\n    const m = c.match(/\\{[\\s\\S]*\\}/);\n    if(m){ try { return JSON.parse(m[0]); } catch(_){} }\n    return {};\n  }\n}\n\nconst body = ($input.first().json.body) || {};\nconst idea = body.idea || {};\nconst instructions = body.instructions || '';\nconst platformName = idea.platform === 'linkedin' ? 'LinkedIn' : 'Instagram';\n\nconst cachedPrefix = `You are a senior social media strategist for Arak Lighting, Saudi Arabia's leading architectural lighting company (45+ years; projects incl. Solitaire Mall, King Fahad Airport, Ritz Carlton Riyadh).\n\nA team member has a rough idea for a ${platformName} post and wants you to turn it into a proper creative brief — the same quality of brief your AI planner already writes for auto-suggested posts. Keep their original intent; elaborate, don't replace it.\n\nBRAND CONTEXT:\n${instructions || 'No brand profile set — keep it premium and on-brand for a luxury lighting company.'}`;\n\nconst variableSuffix = `ROUGH IDEA (their own words):\n\"${idea.topic || ''}\"\n${idea.tone ? `Their stated tone: ${idea.tone}` : ''}\n${idea.date ? `Scheduled date: ${idea.date}` : ''}\n\nTurn this into a proper post brief. Return ONLY valid JSON, no markdown fences:\n{\"topic\":\"1-2 sentence expanded description of what the post is about, keeping their intent\",\n \"angle\":\"the specific creative angle/hook for this post, one sentence\",\n \"tone\":\"one of: professional, inspirational, educational, casual, promotional, thought_leader\",\n \"objective\":\"one of: Awareness, Engagement, Sales/Leads, Trust/Credibility, Community\",\n \"cta\":\"a specific call-to-action, or empty string if none fits\",\n \"design_tip\":\"one sentence of art direction for whoever generates the image\",\n \"image_idea\":\"a vivid 1-2 sentence description of the image itself, ready to hand to an image generator\",\n \"occasion\":\"a specific occasion/holiday this ties to, or empty string if none\",\n \"content_pillar\":\"a short content-pillar label, 2-4 words, or empty string\",\n \"hashtags\":\"6-8 relevant hashtags mixing Arabic and English, e.g. #ArakLighting #تصميم_اضاءة #LightingDesign\"}`;\n\ntry {\n  const resp = await req({ method:'POST', url:'https://api.anthropic.com/v1/messages',\n    headers:{ 'x-api-key':ANTHROPIC, 'anthropic-version':'2023-06-01', 'content-type':'application/json' },\n    body:{ model:'claude-sonnet-5', max_tokens:1200, messages:[{ role:'user', content:[\n      { type:'text', text: cachedPrefix, cache_control:{ type:'ephemeral' } },\n      { type:'text', text: variableSuffix },\n    ] }] },\n    json:true });\n  if (!resp || resp.type === 'error' || !Array.isArray(resp.content)) {\n    throw new Error('Claude elongation call failed: ' + (resp && resp.error && resp.error.message ? resp.error.message : JSON.stringify(resp).slice(0, 300)));\n  }\n  const parsed = safeJson(resp.content[0] && resp.content[0].text);\n  return [{ json: {\n    ok: true,\n    topic: parsed.topic || idea.topic || '', angle: parsed.angle || '',\n    tone: parsed.tone || idea.tone || '', objective: parsed.objective || '',\n    cta: parsed.cta || '', design_tip: parsed.design_tip || '',\n    image_idea: parsed.image_idea || '', occasion: parsed.occasion || '',\n    content_pillar: parsed.content_pillar || '', hashtags: parsed.hashtags || '',\n  } }];\n} catch (err) {\n  return [{ json: { ok: false, error: (err && err.message) ? err.message : String(err) } }];\n}\n"
       },
-      "id": "23b7f686-a15f-4eb9-b0da-4de68cde47f8",
+      "id": "c3a50ffe-62c7-4905-8100-83aaef0995f9",
       "name": "Elongate Idea",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
