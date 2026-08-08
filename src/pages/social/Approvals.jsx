@@ -27,6 +27,40 @@ const TABLES = {
   linkedin:  'linkedin_generated_posts',
 }
 
+// image_urls (carousel) preferred; fall back to the single image_url.
+const mediaOf = r => (Array.isArray(r.image_urls) && r.image_urls.length ? r.image_urls : [r.image_url].filter(Boolean))
+
+// Instagram and LinkedIn rows map onto the same UI post shape. Instagram
+// carries a single caption; LinkedIn splits hook/body (copy is derived from
+// them) and carries a few LinkedIn-only fields (postStrategy/postType/
+// includeImage) that are simply absent on Instagram posts — nothing reads
+// them there. contentRoute's default differs on purpose: Instagram always
+// hardcodes 'scheduled', LinkedIn falls back to it from content_route.
+function normalizePost(row, platform) {
+  const base = {
+    id: row.id, platform, _table: TABLES[platform],
+    captionAr: row.caption_ar || '', captionEn: row.caption_en || '',
+    postKind: row.post_kind || 'caption_image',
+    hashtags: row.hashtags, imageUrl: row.image_url, imagePrompt: row.image_prompt,
+    style: row.style, topic: row.topic, aspectRatio: row.aspect_ratio,
+    scheduledAt: row.scheduled_date || null, campaignId: row.campaign_id,
+    mediaUrls: mediaOf(row), status: row.status, source: row.source,
+    planIdeaId: row.plan_idea_id || null,
+    generatedByWorkflow: true, createdAt: row.created_at,
+    _fromSupabase: true,
+  }
+  if (platform === 'linkedin') {
+    return {
+      ...base,
+      hook: row.hook, copy: row.hook ? `${row.hook}\n\n${row.body || ''}` : (row.body || ''), body: row.body,
+      postStrategy: row.post_strategy, postType: row.post_type,
+      includeImage: row.include_image !== false,
+      contentRoute: row.content_route || 'scheduled',
+    }
+  }
+  return { ...base, copy: row.caption, contentRoute: 'scheduled' }
+}
+
 function useApprovalPosts(accessToken, workspaceId) {
   const [posts,   setPosts]   = useState([])
   const [ideas,   setIdeas]   = useState([])
@@ -39,8 +73,6 @@ function useApprovalPosts(accessToken, workspaceId) {
     const headers = { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${accessToken}` }
     // Scope to the active company so one company never sees another's posts.
     const wsFilter = workspaceId ? `&workspace_id=eq.${workspaceId}` : ''
-    // image_urls (carousel) preferred; fall back to the single image_url.
-    const mediaOf = r => (Array.isArray(r.image_urls) && r.image_urls.length ? r.image_urls : [r.image_url].filter(Boolean))
     try {
       const [igRes, liRes, approvalsData] = await Promise.all([
         fetch(`${SUPABASE_URL}/rest/v1/${TABLES.instagram}?select=*${wsFilter}&order=created_at.desc&limit=200`, { headers }),
@@ -50,32 +82,8 @@ function useApprovalPosts(accessToken, workspaceId) {
       const igRows = igRes.ok ? await igRes.json() : []
       const liRows = liRes.ok ? await liRes.json() : []
 
-      const igPosts = igRows.map(r => ({
-        id: r.id, platform: 'instagram', _table: TABLES.instagram,
-        copy: r.caption, captionAr: r.caption_ar || '', captionEn: r.caption_en || '',
-        postKind: r.post_kind || 'caption_image',
-        hashtags: r.hashtags, imageUrl: r.image_url, imagePrompt: r.image_prompt,
-        style: r.style, topic: r.topic, aspectRatio: r.aspect_ratio,
-        scheduledAt: r.scheduled_date || null, campaignId: r.campaign_id,
-        mediaUrls: mediaOf(r), status: r.status, source: r.source,
-        planIdeaId: r.plan_idea_id || null,
-        generatedByWorkflow: true, contentRoute: 'scheduled', createdAt: r.created_at,
-        _fromSupabase: true,
-      }))
-      const liPosts = liRows.map(r => ({
-        id: r.id, platform: 'linkedin', _table: TABLES.linkedin,
-        hook: r.hook, copy: r.hook ? `${r.hook}\n\n${r.body || ''}` : (r.body || ''), body: r.body,
-        captionAr: r.caption_ar || '', captionEn: r.caption_en || '',
-        postKind: r.post_kind || 'caption_image',
-        hashtags: r.hashtags, imageUrl: r.image_url, mediaUrls: mediaOf(r),
-        imagePrompt: r.image_prompt, postStrategy: r.post_strategy, topic: r.topic,
-        postType: r.post_type, style: r.style, aspectRatio: r.aspect_ratio,
-        includeImage: r.include_image !== false, contentRoute: r.content_route || 'scheduled',
-        campaignId: r.campaign_id, status: r.status, source: r.source,
-        planIdeaId: r.plan_idea_id || null,
-        scheduledAt: r.scheduled_date || null, createdAt: r.created_at,
-        generatedByWorkflow: true, _fromSupabase: true,
-      }))
+      const igPosts = igRows.map(r => normalizePost(r, 'instagram'))
+      const liPosts = liRows.map(r => normalizePost(r, 'linkedin'))
 
       setPosts([...igPosts, ...liPosts].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)))
       setIdeas(approvalsData.ideas || [])
