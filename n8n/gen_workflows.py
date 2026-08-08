@@ -93,6 +93,9 @@ return ideas.map((idea, i) => ({
     caption_en:        idea.caption_en || '',
     media_prompt:      idea.media_prompt || '',
     preview_image_url: idea.preview_image_url || '',
+    // Routing signal only, never persisted to the DB row — see Aggregate
+    // Uploaded Images.
+    media_type:        idea.media_type || 'image',
   }
 }));
 """
@@ -505,9 +508,11 @@ const row = {
   post_kind: kind, caption_ar, caption_en, workspace_id: idea.workspace_id || null,
 };
 if (!needsUpload){
-  // Already final — useReference or no image at all.
-  row.image_url = image_url;
-  row.image_urls = image_urls;
+  // Already final — useReference or no image at all. For a video idea
+  // using a reference photo, that photo is the COVER, not the post image
+  // (same distinction as the uploaded-candidate path below).
+  if (idea.media_type === 'video') row.cover_image_url = image_url;
+  else { row.image_url = image_url; row.image_urls = image_urls; }
 }
 if (PLATFORM === 'instagram'){
   row.caption = displayCaption;
@@ -525,6 +530,11 @@ if (PLATFORM === 'instagram'){
 
 return {
   json: { db_row: row, _failed: false, needsUpload, pending_uploads, plan_idea_id: idea.plan_idea_id || null,
+          // Routing signal for Aggregate Uploaded Images — NOT part of
+          // db_row, never persisted. Decides whether the uploaded image
+          // lands in image_url/image_urls (default) or cover_image_url
+          // (video ideas — the actual clip is a separate, later step).
+          _media_type: idea.media_type || 'image',
           _summary: { kind, lang, images: needsUpload ? pending_uploads.length : image_urls.length } },
   binary,
 };
@@ -583,7 +593,13 @@ for (const pid of Object.keys(byIdea)) {
   const urls = byIdea[pid].sort((a, b) => a.slideIndex - b.slideIndex).map(x => x.url);
   const genItem = genItems.find(g => String(g.json.plan_idea_id) === String(pid));
   if (!genItem) continue;
-  const row = { ...genItem.json.db_row, image_urls: urls, image_url: urls[0] || '' };
+  // Video ideas: the uploaded image is a COVER, not the post's image — the
+  // actual clip renders in a separate later step (arak-video-render) using
+  // this cover + the idea's motion_prompt. Everything else: normal image/
+  // carousel upload, as before.
+  const row = genItem.json._media_type === 'video'
+    ? { ...genItem.json.db_row, cover_image_url: urls[0] || '' }
+    : { ...genItem.json.db_row, image_urls: urls, image_url: urls[0] || '' };
   out.push({ json: { db_row: row } });
 }
 return out;
@@ -1096,6 +1112,104 @@ try {
 }
 """
 
+VIDEO_RENDER_STICKY = r"""## Arak – Video Render
+
+**Zero secrets in this file.** Needs `FAL_KEY`, `SUPABASE_URL`, `SUPABASE_KEY`.
+
+Batch: Finalize fires this once per approved video-format idea, all at once ("Generate" pulls together every outstanding video render in one action) — one item per idea, `run_once_for_each_item`, so one slow/failed render never blocks the others.
+
+Uses each idea's already-picked cover_image_url (chosen via Media Options during review) + motion_prompt (from Draft Copy / hand-edited) — no new creative decisions happen here, this step only renders the clip. Model: fal.ai `fal-ai/ltx-2/image-to-video/fast` via the queue API (submit → poll status → fetch result), matching the image pipeline's existing poll-don't-block-on-Prefer-wait pattern.
+
+**Known limitation, not silently papered over:** on failure, this workflow does NOT write any status back — there's no video-specific status column yet (unlike drafting/generation, which both have one). A failed render just means the post's video_url stays empty; retry is "click Generate video again" without a stuck-spinner/failed-badge affordance yet. Flagged as a real follow-up, not treated as done."""
+
+# ============================================================
+# Code-node JavaScript body (Video Render)
+# ============================================================
+VIDEO_RENDER_JS = r"""
+const http = this.helpers.httpRequest;
+const prepareBinaryData = this.helpers.prepareBinaryData;
+const FAL = $env.FAL_KEY;
+const MODEL = 'fal-ai/ltx-2/image-to-video/fast';
+
+async function req(opts){
+  try { return await http(opts); }
+  catch (e) {
+    const detail = (e && (e.error || (e.response && e.response.data) || e.description)) || null;
+    const real = detail
+      ? (typeof detail === 'string' ? detail
+        : Buffer.isBuffer(detail) ? detail.toString('utf8', 0, 300)
+        : (detail.error && detail.error.message) || JSON.stringify(detail).slice(0, 400))
+      : (e && e.message) || String(e);
+    throw new Error(real);
+  }
+}
+
+// MP4's magic bytes are an 'ftyp' box at offset 4, not at the start (unlike
+// image formats) — a truncated/wrong download otherwise looks byte-plausible
+// and silently corrupts the post the same way a bad image buffer once did.
+function looksLikeVideo(buf){
+  if (!buf || buf.length < 12) return false;
+  return buf.toString('ascii', 4, 8) === 'ftyp';
+}
+
+async function downloadAndPrepareVideo(url, filename){
+  const buf = await req({ method:'GET', url, encoding:'arraybuffer' });
+  if (!looksLikeVideo(buf)) {
+    throw new Error(`Downloaded file from ${url} isn't a real video (${buf.length} bytes, starts with "${buf.toString('ascii', 0, 16)}")`);
+  }
+  return await prepareBinaryData(buf, filename, 'video/mp4');
+}
+
+// One webhook call per video idea (same convention as Draft Copy/Media
+// Options) — the raw webhook item is {headers, params, query, body}, so
+// the actual payload is nested under .body, unlike Generate Post's `idea`
+// (which comes from a Split Ideas step that already unwraps it).
+const idea = ($input.item.json && $input.item.json.body) || {};
+
+try {
+  if (!idea.cover_image_url) throw new Error('No cover image to animate.');
+  if (!idea.motion_prompt) throw new Error('No motion direction to animate with.');
+
+  const submit = await req({ method:'POST', url:`https://queue.fal.run/${MODEL}`,
+    headers:{ Authorization:`Key ${FAL}`, 'Content-Type':'application/json' },
+    body:{ image_url: idea.cover_image_url, prompt: idea.motion_prompt, duration:'6', resolution:'1080p' },
+    json:true });
+  const requestId = submit.request_id;
+  if (!requestId) throw new Error('fal did not return a request_id: ' + JSON.stringify(submit).slice(0, 250));
+
+  const statusUrl = `https://queue.fal.run/${MODEL}/requests/${requestId}/status`;
+  const resultUrl = `https://queue.fal.run/${MODEL}/requests/${requestId}`;
+
+  // Poll rather than block on a long synchronous wait — video generation
+  // routinely runs past what a single HTTP call should hold open. Up to
+  // ~7.5 minutes, generous like the existing Replicate image poll.
+  let status = submit.status || 'IN_QUEUE';
+  let tries = 0;
+  while ((status === 'IN_QUEUE' || status === 'IN_PROGRESS') && tries < 150) {
+    await new Promise(r => setTimeout(r, 3000));
+    const s = await req({ method:'GET', url: statusUrl, headers:{ Authorization:`Key ${FAL}` }, json:true });
+    status = s.status; tries++;
+  }
+  if (status !== 'COMPLETED') {
+    throw new Error(status === 'IN_QUEUE' || status === 'IN_PROGRESS'
+      ? `fal video generation timed out after ~${tries * 3}s (request ${requestId})`
+      : `fal video generation ${status} (request ${requestId})`);
+  }
+
+  const result = await req({ method:'GET', url: resultUrl, headers:{ Authorization:`Key ${FAL}` }, json:true });
+  const videoUrl = result.video && result.video.url;
+  if (!videoUrl) throw new Error('fal returned no video URL: ' + JSON.stringify(result).slice(0, 250));
+
+  const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.mp4`;
+  const bucket = idea.platform === 'linkedin' ? 'linkedin-posts' : 'instagram-posts';
+  const binary = { data: await downloadAndPrepareVideo(videoUrl, filename) };
+
+  return { json: { _ok: true, plan_idea_id: idea.plan_idea_id || null, platform: idea.platform || 'instagram', filename, bucket }, binary };
+} catch (err) {
+  return { json: { _ok: false, plan_idea_id: idea.plan_idea_id || null, platform: idea.platform || 'instagram', error: (err && err.message) ? err.message : String(err) } };
+}
+"""
+
 # ============================================================
 # Node-graph builders
 # ============================================================
@@ -1247,6 +1361,70 @@ def _http_mark_completed(x: int, y: int) -> dict:
         },
         "id": nid(),
         "name": "Mark Completed",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [x, y],
+    }
+
+
+def _http_video_storage_upload(x: int, y: int) -> dict:
+    return {
+        "parameters": {
+            "method": "POST",
+            "url": "={{ String($env.SUPABASE_URL).replace(/\\/+$/, '') }}/storage/v1/object/{{ $json.bucket }}/{{ $json.filename }}",
+            "sendHeaders": True,
+            "headerParameters": {
+                "parameters": [
+                    {"name": "apikey", "value": "={{ $env.SUPABASE_KEY }}"},
+                    {"name": "Authorization", "value": "=Bearer {{ $env.SUPABASE_KEY }}"},
+                    {"name": "Content-Type", "value": "video/mp4"},
+                    {"name": "x-upsert", "value": "true"},
+                ]
+            },
+            "sendBody": True,
+            "contentType": "binaryData",
+            "inputDataFieldName": "data",
+            "options": {},
+        },
+        "id": nid(),
+        "name": "Upload Video to Supabase Storage",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [x, y],
+    }
+
+
+def _http_save_video_url(x: int, y: int) -> dict:
+    """PATCH the right platform's *_generated_posts row (matched by
+    plan_idea_id) with the now-permanent video_url. References the
+    Video Render node directly (not this node's own input) — same reason
+    Aggregate Uploaded Images reads Split Pending Uploads directly: an
+    HTTP node's own passthrough of upstream $json isn't reliable to lean on."""
+    table_expr = "( $('Video: Render').item.json.platform === 'linkedin' ? 'linkedin_generated_posts' : 'instagram_generated_posts' )"
+    return {
+        "parameters": {
+            "method": "PATCH",
+            "url": f"={{{{ String($env.SUPABASE_URL).replace(/\\/+$/, '') }}}}/rest/v1/{{{{ {table_expr} }}}}?plan_idea_id=eq.{{{{ $('Video: Render').item.json.plan_idea_id }}}}",
+            "sendHeaders": True,
+            "headerParameters": {
+                "parameters": [
+                    {"name": "apikey", "value": "={{ $env.SUPABASE_KEY }}"},
+                    {"name": "Authorization", "value": "=Bearer {{ $env.SUPABASE_KEY }}"},
+                    {"name": "Content-Type", "value": "application/json"},
+                    {"name": "Prefer", "value": "return=minimal"},
+                ]
+            },
+            "sendBody": True,
+            "specifyBody": "json",
+            "jsonBody": (
+                "={{ JSON.stringify({ video_url: String($env.SUPABASE_URL).replace(/\\/+$/, '') "
+                "+ '/storage/v1/object/public/' + $('Video: Render').item.json.bucket + '/' "
+                "+ $('Video: Render').item.json.filename }) }}"
+            ),
+            "options": {},
+        },
+        "id": nid(),
+        "name": "Supabase: Save Video URL",
         "type": "n8n-nodes-base.httpRequest",
         "typeVersion": 4.2,
         "position": [x, y],
@@ -1494,6 +1672,50 @@ def build_media_options() -> dict:
     }
 
 
+def build_video_render() -> dict:
+    """
+    Webhook (responseNode) -> Respond: Accepted -> Video: Render (Code
+    node, one idea per item, run_once_for_each_item) -> Rendered OK? ->
+    (yes) Upload Video to Supabase Storage -> Supabase: Save Video URL
+                                        (no) dead end — see sticky note
+    on the known no-status-on-failure limitation.
+    """
+    nodes = [
+        _sticky(VIDEO_RENDER_STICKY, height=340, width=460, x=0, y=-160),
+        _webhook("arak-video-render", "responseNode", x=0, y=300),
+        _respond_json(
+            "Respond: Accepted",
+            "={{ JSON.stringify({ status: 'accepted' }) }}",
+            x=220,
+            y=300,
+        ),
+        _code("Video: Render", VIDEO_RENDER_JS, x=440, y=300, run_once_for_each_item=True),
+        _if_bool_equals("Rendered OK?", "video-gate-1", "={{ $json._ok === true }}", x=660, y=300),
+        _http_video_storage_upload(x=880, y=220),
+        _http_save_video_url(x=1100, y=220),
+    ]
+    connections = {
+        "Webhook": {"main": [[{"node": "Respond: Accepted", "type": "main", "index": 0}]]},
+        "Respond: Accepted": {"main": [[{"node": "Video: Render", "type": "main", "index": 0}]]},
+        "Video: Render": {"main": [[{"node": "Rendered OK?", "type": "main", "index": 0}]]},
+        "Rendered OK?": {
+            "main": [
+                [{"node": "Upload Video to Supabase Storage", "type": "main", "index": 0}],
+                [],
+            ]
+        },
+        "Upload Video to Supabase Storage": {"main": [[{"node": "Supabase: Save Video URL", "type": "main", "index": 0}]]},
+    }
+    return {
+        "name": "Arak Lighting – Video Render",
+        "nodes": nodes,
+        "connections": connections,
+        "active": False,
+        "settings": {"executionOrder": "v1"},
+        "tags": [],
+    }
+
+
 if __name__ == "__main__":
     out_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "workflows")
     os.makedirs(out_dir, exist_ok=True)
@@ -1505,6 +1727,7 @@ if __name__ == "__main__":
         build_elongate_idea(),
         build_draft_copy(),
         build_media_options(),
+        build_video_render(),
     ]
 
     for wf in workflows:

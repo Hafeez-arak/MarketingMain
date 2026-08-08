@@ -161,6 +161,59 @@ export async function requestMediaOptions(webhookUrl, payload) {
   }
 }
 
+// Video Render — fire-and-forget, one call per video idea (batched by the
+// caller firing several at once, not by one call carrying an array).
+export async function requestVideoRender(webhookUrl, payload) {
+  if (!webhookUrl) return { error: 'Video Render webhook not configured. Go to Settings → Integrations → Workflow Webhooks.' }
+  try {
+    const res = await fetch(webhookUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+    return { ok: res.ok, error: res.ok ? null : `Webhook returned ${res.status}` }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+}
+
+// Batch-trigger every approved video-format idea's render, all at once —
+// "Finalize" pulls together every outstanding video render in a single
+// action. Real sequencing constraint: Generate Post uploads each idea's
+// cover image ASYNCHRONOUSLY (the initial requestPlanContentGeneration
+// call only means "accepted", not "done") — firing video-render
+// immediately after would race an empty cover_image_url. Each idea polls
+// its OWN post row (up to ~2 min) until a cover appears, then fires.
+// Never awaited by the caller — this runs in the background; the UI
+// doesn't block on video rendering to consider Finalize done.
+export async function triggerVideoRenders({ webhooks, videoIdeas, accessToken }) {
+  const videoRenderUrl = webhooks?.videoRender
+  if (!videoRenderUrl || !videoIdeas?.length) return
+  const TABLES = { instagram: 'instagram_generated_posts', linkedin: 'linkedin_generated_posts' }
+  const headers = { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${accessToken || SUPABASE_ANON_KEY}` }
+
+  async function waitForCoverThenRender(idea) {
+    const table = TABLES[idea.platform] || TABLES.instagram
+    const deadline = Date.now() + 2 * 60 * 1000
+    let coverUrl = ''
+    while (Date.now() < deadline && !coverUrl) {
+      await new Promise(r => setTimeout(r, 5000))
+      try {
+        const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?plan_idea_id=eq.${idea.id}&select=cover_image_url&limit=1`, { headers })
+        const rows = res.ok ? await res.json() : []
+        coverUrl = rows[0]?.cover_image_url || ''
+      } catch { /* keep polling */ }
+    }
+    if (!coverUrl) return // cover never showed up (generation failed/still running) — no render possible
+    requestVideoRender(videoRenderUrl, {
+      plan_idea_id: idea.id, platform: idea.platform,
+      cover_image_url: coverUrl, motion_prompt: idea.motionPrompt || '',
+    })
+  }
+
+  Promise.allSettled(videoIdeas.map(waitForCoverThenRender))
+}
+
 // Fire the approved plan's ideas at the per-platform Plan Generation
 // webhooks. Each webhook responds immediately ("accepted") and then generates
 // every idea in the background (caption + image) into the *_generated_posts
@@ -214,6 +267,11 @@ export async function requestPlanContentGeneration({ webhooks, planId, instructi
       caption_en:           idea.captionEn || '',
       media_prompt:         idea.mediaPrompt || '',
       preview_image_url:    idea.previewImageUrl || '',
+      // Routing signal only, never persisted to the DB row — which field
+      // the uploaded preview image lands in (cover_image_url for video,
+      // image_url/image_urls for everything else). See Aggregate Uploaded
+      // Images in gen_workflows.py.
+      media_type:           idea.mediaType || 'image',
     })
   }
 

@@ -10,7 +10,7 @@ import {
 } from '../../lib/brandBrain'
 import { suppliersApi, competitorsApi, productsApi } from '../../lib/brandDirectory'
 import { fetchBrandAssets } from '../../lib/brandAssets'
-import { requestCampaignPlan, requestPlanContentGeneration, elongateIdea, requestDraftCopy } from '../../lib/campaignPlanner'
+import { requestCampaignPlan, requestPlanContentGeneration, elongateIdea, requestDraftCopy, triggerVideoRenders } from '../../lib/campaignPlanner'
 import {
   formatsFor, defaultFormat, aspectRatiosFor, defaultAspectRatio, slideRange, aspectLabel,
   stylesFor, crosswalkTone, crosswalkStyle, crosswalkFormat, derivePostKind,
@@ -1196,6 +1196,13 @@ export function CampaignPlanner() {
     })
     if (pushResult.error) { setBusy(false); setError(pushResult.error); return }
     await updatePlan(accessToken, planId, { status: 'generating' })
+
+    // Batch-render every approved video-format idea at once — runs in the
+    // background (never awaited here), each polling for its own cover
+    // image to finish uploading before firing. See triggerVideoRenders.
+    triggerVideoRenders({
+      webhooks: state.webhooks, videoIdeas: approved.filter(i => i.mediaType === 'video'), accessToken,
+    })
 
     setBusy(false)
     update({ step: 'done', pushResult })

@@ -229,6 +229,19 @@ const WORKFLOW_CONFIGS = [
       </div>
     ),
   },
+  {
+    platform: 'videoRender',
+    label: 'Video Render Workflow',
+    placeholder: 'https://your-instance.app.n8n.cloud/webhook/arak-video-render',
+    description: 'Renders the actual video clip for a reel/video-format idea once approved — Finalize fires this for every approved video post at once, using the cover image + motion direction already chosen during review. Real spend (fal.ai).',
+    icon: (
+      <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: 'linear-gradient(135deg,#ef4444,#f87171)' }}>
+        <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24">
+          <polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/>
+        </svg>
+      </div>
+    ),
+  },
 ]
 
 function WorkflowWebhooks() {

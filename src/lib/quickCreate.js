@@ -1,5 +1,5 @@
 import { createPlan, insertIdeas, markIdeasDrafting, markIdeasProcessing } from './contentPlans'
-import { requestDraftCopy, requestPlanContentGeneration } from './campaignPlanner'
+import { requestDraftCopy, requestPlanContentGeneration, triggerVideoRenders } from './campaignPlanner'
 import { dbIdeaToDraft } from '../pages/campaigns/CampaignPlanner'
 import { derivePostKind, slideRange } from './postFormats'
 
@@ -64,7 +64,11 @@ export async function createQuickPost({
 // just for one idea instead of a batch of approved ones.
 export async function finalizeQuickPost({ webhooks, planId, idea, instructions, workspaceId, captionLanguage, accessToken }) {
   await markIdeasProcessing(accessToken, planId)
-  return requestPlanContentGeneration({
+  const result = await requestPlanContentGeneration({
     webhooks, planId, instructions, ideas: [idea], workspaceId, captionLanguage,
   })
+  if (!result.error && idea.mediaType === 'video') {
+    triggerVideoRenders({ webhooks, videoIdeas: [idea], accessToken })
+  }
+  return result
 }
