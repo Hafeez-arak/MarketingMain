@@ -960,6 +960,110 @@ try {
 
 
 
+MEDIA_OPTIONS_STICKY = r"""## Arak – Media Options
+
+**Zero secrets in this file.** Needs `FAL_KEY`, `SUPABASE_URL`, `SUPABASE_KEY` (storage upload is NOT done here — see note below).
+
+On-demand, synchronous: the reviewer clicks "🖼 Generate image options" on ONE plan-board card and waits a few seconds for 2-3 REAL candidate images (not just prompts) to choose from. Same button covers a video idea's COVER image — the actual video clip only renders at Finalize, so this stays fast and cheap even for a month with several reels.
+
+Real spend (fal.ai), so this is always an explicit per-card click, never automatic for a whole board.
+
+Returns fal.ai's own (temporary) URLs directly — no Supabase Storage upload happens here, since most of the 2-3 candidates get discarded the moment the reviewer picks one. Finalize re-fetches and permanently uploads only the CHOSEN url (see `preview_image_url` on `plan_ideas`)."""
+
+# ============================================================
+# Code-node JavaScript body (Media Options)
+# ============================================================
+MEDIA_OPTIONS_JS = r"""
+const http = this.helpers.httpRequest;
+const FAL = $env.FAL_KEY;
+
+async function req(opts){
+  try { return await http(opts); }
+  catch (e) {
+    const detail = (e && (e.error || (e.response && e.response.data) || e.description)) || null;
+    const real = detail
+      ? (typeof detail === 'string' ? detail
+        : Buffer.isBuffer(detail) ? detail.toString('utf8', 0, 300)
+        : (detail.error && detail.error.message) || JSON.stringify(detail).slice(0, 400))
+      : (e && e.message) || String(e);
+    throw new Error(real);
+  }
+}
+
+const body = ($input.first().json.body) || {};
+const planIdeaId = body.plan_idea_id || '';
+const platform = body.platform === 'linkedin' ? 'linkedin' : 'instagram';
+const prompt = body.media_prompt || '';
+const aspectRatio = body.aspect_ratio || '';
+const style = body.style || 'photorealistic';
+const refs = Array.isArray(body.reference_image_urls) ? body.reference_image_urls : [];
+const useI2I = refs.length > 0;
+const count = Math.max(2, Math.min(4, Number(body.count) || 3));
+
+if (!prompt.trim()) {
+  return [{ json: { ok: false, plan_idea_id: planIdeaId, error: 'No media prompt to generate from.' } }];
+}
+
+const STYLE_MAP = {
+  photorealistic:  'architectural photography, natural lighting, hyper-detailed, 4K',
+  dramatic:        'cinematic lighting, deep shadows, god rays, high contrast, noir atmosphere',
+  minimalist:      'clean lines, soft diffused light, Scandinavian aesthetic, generous white space',
+  warm_residential:'warm amber tones, cozy luxury interior, golden hour, 2700K warm light',
+  warm_interior:   'warm amber tones, cozy luxury interior, golden hour, 2700K warm light',
+  cool_commercial: 'cool white 5000K, modern commercial space, crisp corporate luxury',
+  facade_exterior: 'architectural exterior night photography, facade illumination, dramatic night sky',
+};
+const basePrompt = `${prompt}, ${STYLE_MAP[style] || STYLE_MAP.photorealistic}, Arak Lighting Saudi Arabia, luxury architectural lighting, ultra high detail`;
+
+// fal.ai's aspect_ratio-style image_size buckets — closest match per the
+// idea's chosen orientation, not just a platform default.
+function imageSizeFor(ar){
+  if (ar === '9:16') return 'portrait_16_9';
+  if (ar === '4:5' || ar === '3:4') return 'portrait_4_3';
+  if (ar === '1.91:1' || ar === '16:9') return 'landscape_16_9';
+  return 'square_hd';
+}
+
+// Small, genuinely-different variations per candidate rather than N
+// identical calls — different framing/mood angle each time, so the
+// reviewer has a real choice instead of three near-duplicates.
+const VARIATIONS = [
+  '',
+  ', alternate camera angle, different composition',
+  ', different time of day and mood',
+  ', wider establishing shot',
+];
+
+async function genOne(variation){
+  const finalPrompt = basePrompt + variation;
+  const endpoint = useI2I ? 'fal-ai/flux-2/pro/image-to-image' : 'fal-ai/flux-2/pro';
+  const reqBody = { prompt: finalPrompt, image_size: imageSizeFor(aspectRatio) };
+  if (useI2I) { reqBody.image_url = refs[0]; reqBody.strength = 0.72; }
+  const r = await req({ method:'POST', url:`https://fal.run/${endpoint}`,
+    headers:{ Authorization:`Key ${FAL}`, 'Content-Type':'application/json' }, body: reqBody, json:true });
+  const url = (r.images && r.images[0] && r.images[0].url) || (r.image && r.image.url);
+  if (!url) throw new Error('fal returned no image');
+  return url;
+}
+
+try {
+  const jobs = [];
+  for (let i = 0; i < count; i++) jobs.push(genOne(VARIATIONS[i] || ''));
+  // allSettled, not all — one candidate failing (rate limit, transient
+  // error) shouldn't discard the others; only fail outright if EVERY
+  // candidate fails.
+  const settled = await Promise.allSettled(jobs);
+  const images = settled.filter(s => s.status === 'fulfilled').map(s => s.value);
+  if (!images.length) {
+    const firstError = settled.find(s => s.status === 'rejected');
+    throw new Error((firstError && firstError.reason && firstError.reason.message) || 'All image candidates failed.');
+  }
+  return [{ json: { ok: true, plan_idea_id: planIdeaId, images } }];
+} catch (err) {
+  return [{ json: { ok: false, plan_idea_id: planIdeaId, error: (err && err.message) ? err.message : String(err) } }];
+}
+"""
+
 # ============================================================
 # Node-graph builders
 # ============================================================
@@ -1335,6 +1439,29 @@ def build_draft_copy() -> dict:
     }
 
 
+def build_media_options() -> dict:
+    """
+    Webhook (responseMode=lastNode) -> Media Options (single Code node, its
+    return value IS the HTTP response). Synchronous on purpose — the
+    reviewer clicked a button and is watching a loading state for it, unlike
+    Draft Copy's fire-and-forget-then-poll pattern.
+    """
+    nodes = [
+        _sticky(MEDIA_OPTIONS_STICKY, height=300, width=420, x=0, y=-120),
+        _webhook("arak-media-options", "lastNode", x=0, y=200),
+        _code("Media Options", MEDIA_OPTIONS_JS, x=220, y=200),
+    ]
+    connections = {"Webhook": {"main": [[{"node": "Media Options", "type": "main", "index": 0}]]}}
+    return {
+        "name": "Arak Lighting – Media Options",
+        "nodes": nodes,
+        "connections": connections,
+        "active": False,
+        "settings": {"executionOrder": "v1"},
+        "tags": [],
+    }
+
+
 if __name__ == "__main__":
     out_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "workflows")
     os.makedirs(out_dir, exist_ok=True)
@@ -1345,6 +1472,7 @@ if __name__ == "__main__":
         build_caption_studio(),
         build_elongate_idea(),
         build_draft_copy(),
+        build_media_options(),
     ]
 
     for wf in workflows:
