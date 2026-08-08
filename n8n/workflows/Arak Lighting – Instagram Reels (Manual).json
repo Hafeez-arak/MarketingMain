@@ -1,0 +1,1006 @@
+{
+  "name": "Arak Lighting – Instagram Reels (Manual)",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Arak Lighting – Instagram Reels (Manual)\n\n**Zero secrets in this file.** Needs `ANTHROPIC_API_KEY`, `REPLICATE_API_TOKEN`, `SUPABASE_URL`, `SUPABASE_KEY`.\n\nManual reel creation from the Reels Studio tab: Claude writes the caption + motion prompt, FLUX (Replicate) generates the cover image / first frame, then an image-to-video model animates the cover into the actual clip (node names still say \"Wan:\" — the model itself was swapped to LTX-Video after the Wan 2.5 endpoint started failing; renaming the nodes was left alone in this pass to avoid touching a proven multi-node polling structure for a cosmetic fix). Saves to `instagram_reels`, returns `video_url` + caption.\n\nKept its original Wait/IF polling structure (not a Code-node internal loop like this session's newer workflows) — it's already proven in production; ported as a straight secret-substitution, not a rewrite. Two real bugs fixed while porting, not just secrets: the Supabase-URL regex lost its escaping backslash in an earlier draft of this substitution (`/\\/+$/` — would have been a JS syntax error, since `//` at that position is a comment, not a regex), and the Claude model was pinned to a stale `claude-opus-4-5` (predates the current model family) — now `claude-sonnet-5`, matching every other per-item creative-writing call in this codebase.",
+        "height": 340,
+        "width": 480
+      },
+      "id": "note-overview-reels",
+      "name": "Note: Overview",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        -380
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "arak-instagram-reels",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "e57e3ef9-a43e-46e7-b6dd-d386f9c7b785",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        11872,
+        12048
+      ],
+      "webhookId": "0d81fc8a-7e10-4e66-b292-7f1c915435de"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "ri-1",
+              "name": "reel_format",
+              "type": "string",
+              "value": "={{ $json.body.reelFormat || $json.body.reel_format || 'product_reel' }}"
+            },
+            {
+              "id": "ri-2",
+              "name": "reel_duration",
+              "type": "string",
+              "value": "={{ $json.body.reelDuration || $json.body.reel_duration || '30s' }}"
+            },
+            {
+              "id": "ri-3",
+              "name": "reel_hook",
+              "type": "string",
+              "value": "={{ ($json.body.reelHook || $json.body.reel_hook || '').replace(/[\\n\\r\\t]/g,' ').replace(/\"/g,\"'\").trim() }}"
+            },
+            {
+              "id": "ri-4",
+              "name": "reel_brief",
+              "type": "string",
+              "value": "={{ ($json.body.reelBrief || $json.body.reel_brief || $json.body.topic || '').replace(/[\\n\\r\\t]/g,' ').replace(/\"/g,\"'\").trim() }}"
+            },
+            {
+              "id": "ri-5",
+              "name": "reel_music",
+              "type": "string",
+              "value": "={{ ($json.body.reelMusic || $json.body.reel_music || '').replace(/[\\n\\r\\t]/g,' ').trim() }}"
+            },
+            {
+              "id": "ri-6",
+              "name": "reel_cta",
+              "type": "string",
+              "value": "={{ ($json.body.reelCta || $json.body.reel_cta || '').replace(/[\\n\\r\\t]/g,' ').trim() }}"
+            },
+            {
+              "id": "ri-7",
+              "name": "publish_time",
+              "type": "string",
+              "value": "={{ $json.body.publishTime || $json.body.publish_time || '10:00' }}"
+            },
+            {
+              "id": "ri-8",
+              "name": "tone",
+              "type": "string",
+              "value": "={{ $json.body.tone || 'professional' }}"
+            },
+            {
+              "id": "ri-9",
+              "name": "instructions",
+              "type": "string",
+              "value": "={{ ($json.body.instructions || '').replace(/[\\n\\r\\t]/g,' ').replace(/\"/g,\"'\").trim() }}"
+            },
+            {
+              "id": "ri-10",
+              "name": "wan_duration",
+              "type": "number",
+              "value": "={{ ($json.body.reelDuration || $json.body.reel_duration || '5s') === '10s' ? 10 : 5 }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "0a34a99b-6aa1-4236-b94e-8a72589baca4",
+      "name": "Sanitize Inputs",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        12112,
+        12048
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "={{ $env.ANTHROPIC_API_KEY }}"
+            },
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"claude-sonnet-5\",\n  \"max_tokens\": 1200,\n  \"messages\": [{\n    \"role\": \"user\",\n    \"content\": \"You are a social media video expert for Arak Lighting, Saudi Arabia's leading architectural lighting company with 45+ years of experience. Notable projects: Solitaire Mall, King Fahad Airport, Ritz Carlton Riyadh.\\n\\nCreate content for an Instagram Reel:\\n\\nREEL FORMAT: {{ $('Sanitize Inputs').item.json.reel_format }}\\nDURATION: {{ $('Sanitize Inputs').item.json.reel_duration }}\\nBRIEF: {{ $('Sanitize Inputs').item.json.reel_brief }}\\nOPENING HOOK: {{ $('Sanitize Inputs').item.json.reel_hook }}\\nMUSIC STYLE: {{ $('Sanitize Inputs').item.json.reel_music }}\\nCALL TO ACTION: {{ $('Sanitize Inputs').item.json.reel_cta }}\\nTONE: {{ $('Sanitize Inputs').item.json.tone }}\\n\\nBRAND INSTRUCTIONS:\\n{{ $('Sanitize Inputs').item.json.instructions }}\\n\\nReturn ONLY valid JSON, no markdown:\\n{\\n  \\\"caption\\\": \\\"reel caption with hook line first, emojis, line breaks, no hashtags\\\",\\n  \\\"hashtags\\\": \\\"#ArakLighting #Reels #LightingDesign [7 more relevant tags]\\\",\\n  \\\"cover_image_prompt\\\": \\\"detailed FLUX prompt for the reel cover/first frame — architectural lighting scene, photorealistic, cinematic, max 80 words\\\",\\n  \\\"motion_prompt\\\": \\\"Wan I2V animation prompt — describe camera movement and motion only, e.g. slow cinematic pan left, soft light flicker, gentle dolly zoom — max 40 words\\\",\\n  \\\"reel_strategy\\\": \\\"one sentence why this reel will perform well\\\"\\n}\"\n  }]\n}",
+        "options": {}
+      },
+      "id": "dfdfb8b1-7d8c-44e5-8523-9ba28fe802eb",
+      "name": "Claude: Reel Script",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        12352,
+        12048
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json.content?.[0]?.text || '';\nconst clean = raw.replace(/```json|```/g,'').trim();\nlet parsed;\ntry { parsed = JSON.parse(clean); }\ncatch(e) {\n  const match = clean.match(/\\{[\\s\\S]*\\}/);\n  if (match) { try { parsed = JSON.parse(match[0]); } catch(e2) { throw new Error('Cannot parse: ' + clean.slice(0,200)); } }\n  else throw new Error('No JSON found: ' + clean.slice(0,200));\n}\nreturn [{\n  json: {\n    caption:            parsed.caption            || '',\n    hashtags:           parsed.hashtags           || '#ArakLighting #Reels',\n    cover_image_prompt: parsed.cover_image_prompt || '',\n    motion_prompt:      parsed.motion_prompt      || 'slow cinematic pan, warm light ambiance',\n    reel_strategy:      parsed.reel_strategy      || '',\n  }\n}];"
+      },
+      "id": "5baa4e55-7bc4-488b-a36c-bdcf1e6af8e9",
+      "name": "Parse Script",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        12592,
+        12048
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.replicate.com/v1/models/black-forest-labs/flux-schnell/predictions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.REPLICATE_API_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "wait"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"input\": {\n    \"prompt\": \"{{ $('Parse Script').item.json.cover_image_prompt }} -- Arak Lighting, architectural photography, luxury interior, Saudi Arabia, hyper-detailed, 4K, cinematic\",\n    \"aspect_ratio\": \"9:16\",\n    \"output_format\": \"png\"\n  }\n}",
+        "options": {}
+      },
+      "id": "698879b9-f314-442f-8284-367484114d3a",
+      "name": "FLUX: Start Cover",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        12832,
+        12048
+      ]
+    },
+    {
+      "parameters": {
+        "amount": 8
+      },
+      "id": "326595d1-a87d-4fdf-a9aa-9b5431fd1035",
+      "name": "Wait 8s",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        13072,
+        12048
+      ],
+      "webhookId": "a58ea503-67e8-426c-95cc-b3e9c7cfdce8"
+    },
+    {
+      "parameters": {
+        "url": "=https://api.replicate.com/v1/predictions/{{ $('FLUX: Start Cover').item.json.id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.REPLICATE_API_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "e363ffcd-5fc8-4b9e-b02a-3aff905cd2f5",
+      "name": "FLUX: Poll Status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        13312,
+        12048
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.status }}",
+              "rightValue": "succeeded",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "3d685db8-c700-417c-a5cf-5187df9459e6",
+      "name": "Cover Ready?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        13552,
+        12048
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $('FLUX: Poll Status').item.json.output?.[0] }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "id": "04c4f161-6d2a-4b5d-98cc-328945924fef",
+      "name": "Download Cover",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        13792,
+        12048
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ String($env.SUPABASE_URL).replace(/\\/+$/, '') }}/storage/v1/object/instagram-reels/cover_{{ $now.toMillis() }}.png",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SUPABASE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "image/png"
+            },
+            {
+              "name": "x-upsert",
+              "value": "true"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "binaryData",
+        "inputDataFieldName": "data",
+        "options": {}
+      },
+      "id": "64396977-6dc9-4cca-9428-91a93de9d21b",
+      "name": "Upload Cover",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        14032,
+        12048
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "scu-1",
+              "name": "cover_image_url",
+              "type": "string",
+              "value": "={{ String($env.SUPABASE_URL).replace(/\\/+$/, '') }}/storage/v1/object/public/instagram-reels/{{ $('Upload Cover').item.json.Key.split('/').pop() }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "658c50e8-04cb-4d73-9b73-4aeba9a0921b",
+      "name": "Set Cover URL",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        14272,
+        12048
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.replicate.com/v1/predictions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.REPLICATE_API_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"version\": \"8c47da666861d081eeb4d1261853087de23923a268a69b63febdf5dc1dee08e4\",\n  \"input\": {\n    \"image\": \"{{ $('Set Cover URL').item.json.cover_image_url }}\",\n    \"prompt\": \"{{ $('Parse Script').item.json.motion_prompt }}\",\n    \"aspect_ratio\": \"9:16\",\n    \"length\": 97,\n    \"negative_prompt\": \"blurry, distorted, low quality, watermark, warped architecture, text artifacts\"\n  }\n}",
+        "options": {}
+      },
+      "id": "0b76fa3e-f6a7-4e28-9477-72a4f3112cc0",
+      "name": "Wan: Start Reel",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        14512,
+        12048
+      ]
+    },
+    {
+      "parameters": {
+        "amount": 10
+      },
+      "id": "de4d7a82-99fc-4bcf-b741-eaafd64aadf2",
+      "name": "Wait 30s",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        14752,
+        12048
+      ],
+      "webhookId": "7e62f374-753c-4243-8468-526179f9c66f"
+    },
+    {
+      "parameters": {
+        "url": "=https://api.replicate.com/v1/predictions/{{ $('Wan: Start Reel').item.json.id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.REPLICATE_API_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "6ccc67a9-669c-43cb-bf5a-73e3cc78e80a",
+      "name": "Wan: Poll Status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        14992,
+        12048
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.status }}",
+              "rightValue": "succeeded",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "5bad619e-62a1-4d94-9680-656f376e728b",
+      "name": "Reel Ready?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        15232,
+        12048
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.status }}",
+              "rightValue": "failed",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            },
+            {
+              "leftValue": "={{ $json.status }}",
+              "rightValue": "canceled",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "or"
+        },
+        "options": {}
+      },
+      "id": "bf8f1088-0e69-4519-bc22-c997faa1f878",
+      "name": "Reel Failed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        15232,
+        12240
+      ]
+    },
+    {
+      "parameters": {
+        "amount": 10
+      },
+      "id": "f12aadfe-cef9-481b-9c95-824c65a349cb",
+      "name": "Wait 20s More",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        14992,
+        12240
+      ],
+      "webhookId": "976f4bd9-acae-4e66-8185-a6f65332ea74"
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Wan: Poll Status').item.json.output[0] }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "id": "abf00afe-c002-462f-a162-fb2863b91fef",
+      "name": "Download Video",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        15472,
+        12048
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ String($env.SUPABASE_URL).replace(/\\/+$/, '') }}/storage/v1/object/instagram-reels/reel_{{ $now.toMillis() }}.mp4",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SUPABASE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "video/mp4"
+            },
+            {
+              "name": "x-upsert",
+              "value": "true"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "binaryData",
+        "inputDataFieldName": "data",
+        "options": {}
+      },
+      "id": "c7ef2e64-24cf-40ca-9b4b-49f309de0163",
+      "name": "Upload Video",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        15712,
+        12048
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "svu-1",
+              "name": "video_url",
+              "type": "string",
+              "value": "={{ String($env.SUPABASE_URL).replace(/\\/+$/, '') }}/storage/v1/object/public/instagram-reels/{{ $('Upload Video').item.json.Key.split('/').pop() }}"
+            },
+            {
+              "id": "svu-2",
+              "name": "cover_url",
+              "type": "string",
+              "value": "={{ $('Set Cover URL').item.json.cover_image_url }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "3315e55a-3fa5-4036-919b-db60c3032171",
+      "name": "Set Video URL",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        15952,
+        12048
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ String($env.SUPABASE_URL).replace(/\\/+$/, '') }}/rest/v1/instagram_reels",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SUPABASE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"reel_format\":    \"{{ $('Sanitize Inputs').item.json.reel_format }}\",\n  \"reel_duration\":  \"{{ $('Sanitize Inputs').item.json.reel_duration }}\",\n  \"hook\":           {{ JSON.stringify($('Sanitize Inputs').item.json.reel_hook) }},\n  \"brief\":          {{ JSON.stringify($('Sanitize Inputs').item.json.reel_brief) }},\n  \"music_note\":     {{ JSON.stringify($('Sanitize Inputs').item.json.reel_music) }},\n  \"cta\":            {{ JSON.stringify($('Sanitize Inputs').item.json.reel_cta) }},\n  \"caption\":        {{ JSON.stringify($('Parse Script').item.json.caption) }},\n  \"hashtags\":       {{ JSON.stringify($('Parse Script').item.json.hashtags) }},\n  \"motion_prompt\":  {{ JSON.stringify($('Parse Script').item.json.motion_prompt) }},\n  \"cover_image_url\":{{ JSON.stringify($('Set Video URL').item.json.cover_url) }},\n  \"video_url\":      {{ JSON.stringify($('Set Video URL').item.json.video_url) }},\n  \"publish_time\":   \"{{ $('Sanitize Inputs').item.json.publish_time }}\",\n  \"tone\":           \"{{ $('Sanitize Inputs').item.json.tone }}\",\n  \"status\":         \"ready\",\n  \"source\":         \"manual\"\n}",
+        "options": {}
+      },
+      "id": "1d1a622b-57d0-4e88-8848-4d7304c07dbe",
+      "name": "Supabase: Save Reel",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        16192,
+        12048
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"success\": true,\n  \"video_url\": \"{{ $('Set Video URL').item.json.video_url }}\",\n  \"cover_image_url\": \"{{ $('Set Video URL').item.json.cover_url }}\",\n  \"caption\": {{ JSON.stringify($('Parse Script').item.json.caption) }},\n  \"hashtags\": {{ JSON.stringify($('Parse Script').item.json.hashtags) }},\n  \"motion_prompt\": {{ JSON.stringify($('Parse Script').item.json.motion_prompt) }},\n  \"reel_strategy\": {{ JSON.stringify($('Parse Script').item.json.reel_strategy) }},\n  \"status\": \"ready\"\n}",
+        "options": {}
+      },
+      "id": "3c7e4f95-76c7-46da-8bf4-36ffbd0ea965",
+      "name": "Respond: Success",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        16432,
+        12048
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\"success\":false,\"error\":\"Reel generation failed\",\"status\":\"{{ $json.status }}\",\"error_detail\":\"{{ $json.error }}\"}",
+        "options": {}
+      },
+      "id": "bf36e598-5fc3-4447-ad23-ef52cd09c808",
+      "name": "Respond: Error",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        15472,
+        12336
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{\"success\":false,\"error\":\"Missing reel brief. Send reelBrief in request body.\"}",
+        "options": {}
+      },
+      "id": "89f7b738-5348-4b9c-8024-02efb1c5d19b",
+      "name": "Respond: Bad Request",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        12352,
+        12336
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $runIndex }}",
+              "rightValue": 40,
+              "operator": {
+                "type": "number",
+                "operation": "gte"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a1b2c3d4-reel-timeout-0001",
+      "name": "Reel Timeout?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        15232,
+        12432
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\"success\":false,\"error\":\"Reel generation timed out after polling limit\",\"status\":\"{{ $json.status }}\",\"prediction_id\":\"{{ $('Wan: Start Reel').item.json.id }}\"}",
+        "options": {}
+      },
+      "id": "b2c3d4e5-respond-timeout-001",
+      "name": "Respond: Timeout",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        15712,
+        12432
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Sanitize Inputs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sanitize Inputs": {
+      "main": [
+        [
+          {
+            "node": "Claude: Reel Script",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claude: Reel Script": {
+      "main": [
+        [
+          {
+            "node": "Parse Script",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Script": {
+      "main": [
+        [
+          {
+            "node": "FLUX: Start Cover",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "FLUX: Start Cover": {
+      "main": [
+        [
+          {
+            "node": "Wait 8s",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 8s": {
+      "main": [
+        [
+          {
+            "node": "FLUX: Poll Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "FLUX: Poll Status": {
+      "main": [
+        [
+          {
+            "node": "Cover Ready?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cover Ready?": {
+      "main": [
+        [
+          {
+            "node": "Download Cover",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Wait 8s",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download Cover": {
+      "main": [
+        [
+          {
+            "node": "Upload Cover",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload Cover": {
+      "main": [
+        [
+          {
+            "node": "Set Cover URL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Cover URL": {
+      "main": [
+        [
+          {
+            "node": "Wan: Start Reel",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wan: Start Reel": {
+      "main": [
+        [
+          {
+            "node": "Wait 30s",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 30s": {
+      "main": [
+        [
+          {
+            "node": "Wan: Poll Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wan: Poll Status": {
+      "main": [
+        [
+          {
+            "node": "Reel Ready?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reel Ready?": {
+      "main": [
+        [
+          {
+            "node": "Download Video",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reel Failed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 20s More": {
+      "main": [
+        [
+          {
+            "node": "Wan: Poll Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reel Failed?": {
+      "main": [
+        [
+          {
+            "node": "Respond: Error",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reel Timeout?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reel Timeout?": {
+      "main": [
+        [
+          {
+            "node": "Respond: Timeout",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Wait 20s More",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download Video": {
+      "main": [
+        [
+          {
+            "node": "Upload Video",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload Video": {
+      "main": [
+        [
+          {
+            "node": "Set Video URL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Video URL": {
+      "main": [
+        [
+          {
+            "node": "Supabase: Save Reel",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Supabase: Save Reel": {
+      "main": [
+        [
+          {
+            "node": "Respond: Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": []
+}

@@ -12,11 +12,19 @@ rebuilding this one never touches that one or anything else running).
 cd n8n/docker
 cp .env.example .env
 # fill in real values in .env: ANTHROPIC_API_KEY, REPLICATE_API_TOKEN,
-# SUPABASE_KEY (service role, not anon), FAL_KEY
+# SUPABASE_KEY (service role, not anon), FAL_KEY, TAVILY_API_KEY
 docker compose up -d
 ```
 
 n8n is now at http://localhost:5680.
+
+**`N8N_BLOCK_ENV_ACCESS_IN_NODE=false` is required** (already set in
+`docker-compose.yml`) — this n8n version blocks `$env` access from inside
+Code nodes by default ("access to env vars denied" in `docker logs`), and
+nearly every workflow here reads `$env.SUPABASE_URL` / `$env.SUPABASE_KEY`
+etc. from a Code node, not just from HTTP-node header/body expressions
+(which use a separate, always-allowed `$env` proxy). Don't remove this
+env var when editing the compose file.
 
 ## Importing workflows
 

@@ -1,0 +1,167 @@
+{
+  "name": "Arak Campaign Planner",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Arak Campaign Planner\n\n**Zero secrets in this file.** Only needs `ANTHROPIC_API_KEY`.\n\nTurns a stated goal + date range into a full slate of dated, platform-specific post ideas — Ramadan/Eid/National Day awareness, posting-day/time cadence enforcement, cross-month anti-repetition (recurring series vs one-off history), target content-mix steering, featured-product coverage. Returns ideas only — never writes to Supabase itself; the app inserts them into plan_ideas after this responds.\n\nModel: Opus 4.8 with adaptive thinking — this is the one call in the whole pipeline that genuinely needs the extra reasoning (whole-month coherence, holiday judgment), unlike per-post Sonnet calls.",
+        "height": 300,
+        "width": 440
+      },
+      "id": "1a1f959a-afc1-4cb9-94ae-3dbf57dc8a1f",
+      "name": "Note: Overview",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        -140
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "arak-campaign-planner",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "16561bf8-5a0e-4ec5-b0db-26c5ebad4842",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        200
+      ],
+      "webhookId": "arak-campaign-planner"
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json.body;\n\nconst goal         = input.goal || '';\nconst goalCategory = input.goal_category || '';\nconst platforms    = input.platforms || ['instagram', 'linkedin'];\nconst startDate    = input.start_date || '';\nconst endDate      = input.end_date || '';\nconst approxCount  = input.approx_post_count || null;\nconst instructions = input.instructions || '';\nconst includeHolidays = input.include_holidays !== false;\nconst featuredProducts = Array.isArray(input.featured_products) ? input.featured_products : [];\nconst seedPosts     = Array.isArray(input.seed_posts) ? input.seed_posts : [];\nconst existingIdeas = Array.isArray(input.existing_ideas) ? input.existing_ideas : [];\nconst pastIdeas     = Array.isArray(input.past_ideas) ? input.past_ideas : [];\nconst postingDays   = Array.isArray(input.posting_days) ? input.posting_days : [];\nconst contentMixTarget = input.content_mix_target || '';\nconst defaultTime   = input.posting_time || '19:00';\n\nconst countLine = approxCount\n  ? `Plan for approximately ${approxCount} posts total across the date range.`\n  : `No specific post count was given — decide a sensible number yourself. A reasonable default is 2-4 posts per week per platform across the date range.`;\n\nconst DAY_NAMES = { sun: 'Sunday', mon: 'Monday', tue: 'Tuesday', wed: 'Wednesday', thu: 'Thursday', fri: 'Friday', sat: 'Saturday' };\nconst cadenceSection = postingDays.length\n  ? `\\nPOSTING DAYS: This brand only posts on: ${postingDays.map(d => DAY_NAMES[d] || d).join(', ')}. EVERY post's \"date\" MUST fall on one of these weekdays — no exceptions.\\n`\n  : `\\nPOSTING DAYS: No fixed posting days were given — spread posts sensibly across the week yourself.\\n`;\n\nconst timeSection = `\\nPOSTING TIME: For Instagram posts, use \"${defaultTime}\" (KSA time, 24h HH:MM) as the default \"time\" unless a specific post genuinely calls for something else. For LinkedIn posts, IGNORE that default and instead pick a business-hours slot (between 09:00-11:00 or 13:00-15:00 KSA time) regardless of what the Instagram default is — LinkedIn is a B2B platform and engagement is highest during the work day, not the evening. Every post needs its own \"time\" value (HH:MM, 24h).\\n`;\n\nconst KSA_HOLIDAYS = [\n  { name: 'Saudi Founding Day', start: '2026-02-22', end: '2026-02-22', tentative: false },\n  { name: 'Ramadan',           start: '2026-02-18', end: '2026-03-18', tentative: true },\n  { name: 'Eid al-Fitr',        start: '2026-03-19', end: '2026-03-23', tentative: true },\n  { name: 'Day of Arafat',      start: '2026-05-26', end: '2026-05-26', tentative: true },\n  { name: 'Eid al-Adha',        start: '2026-05-27', end: '2026-05-30', tentative: true },\n  { name: 'Saudi National Day', start: '2026-09-23', end: '2026-09-23', tentative: false },\n  { name: 'Saudi Founding Day', start: '2027-02-22', end: '2027-02-22', tentative: false },\n  { name: 'Ramadan',           start: '2027-02-07', end: '2027-03-06', tentative: true },\n  { name: 'Eid al-Fitr',        start: '2027-03-07', end: '2027-03-11', tentative: true },\n  { name: 'Saudi National Day', start: '2027-09-23', end: '2027-09-23', tentative: false },\n];\n\nfunction overlaps(hStart, hEnd, rangeStart, rangeEnd) {\n  if (!rangeStart || !rangeEnd) return false;\n  return hStart <= rangeEnd && hEnd >= rangeStart;\n}\n\nconst relevantHolidays = includeHolidays\n  ? KSA_HOLIDAYS.filter(h => overlaps(h.start, h.end, startDate, endDate))\n  : [];\n\n// Ramadan needs its own timing note (not just the generic holiday-relevance\n// advice below) -- engagement patterns flip during the fasting month, and a\n// month-long occasion needs different guidance than a single-day holiday.\nconst ramadanInRange = relevantHolidays.some(h => h.name === 'Ramadan');\nconst ramadanTimeNote = ramadanInRange\n  ? `\\nRAMADAN NOTE: Part of this date range falls during Ramadan. Shift Instagram posting times to post-iftar evening (21:00-23:00 KSA time) for posts landing in that window instead of the usual default -- engagement peaks after iftar, not in the afternoon. Favor warmer, more reflective, community-oriented content during Ramadan itself; ease off hard sales pushes until Eid.\\n`\n  : '';\n\nconst holidaySection = !includeHolidays\n  ? ''\n  : relevantHolidays.length\n    ? `\\nPUBLIC HOLIDAYS IN THIS DATE RANGE (Saudi Arabia):\\n${relevantHolidays.map(h => `- ${h.name}: ${h.start === h.end ? h.start : `${h.start} to ${h.end}`}${h.tentative ? ' (tentative — exact date depends on moon sighting, treat as approximate)' : ''}`).join('\\n')}\\nFor any post landing on or right next to one of these, either make it genuinely relevant to the occasion (a greeting, a culturally appropriate angle) or deliberately schedule something lighter than a hard sales push that day — use judgment, don't force a holiday tie-in that feels forced. For the tentative Islamic-calendar dates, treat the date as approximate by a day or two.\\n`\n    : `\\nNo Saudi Arabia public holidays fall within this date range — plan normally.\\n`;\n\n// ── Featured products: emphasize these, spread coverage across them ──\nconst featuredProductsSection = featuredProducts.length\n  ? `\\nFEATURE THESE PRODUCTS THIS MONTH:\\n${featuredProducts.map(p => `- ${p.name}${p.category ? ` (${p.category})` : ''}${p.specs ? ` — ${p.specs}` : ''}${p.description ? `: ${p.description}` : ''}`).join('\\n')}\\nSpread coverage across ALL of these instead of only picking whichever is easiest to write about — give each one at least one dedicated post if the post count allows it. You may still cover other products/topics too; this list is a required minimum, not the whole plan.\\n`\n  : '';\n\n// ── Seed posts: specific posts the user already locked in — build around\n// them, do NOT propose new ideas that duplicate them. ──\nconst seedPostsSection = seedPosts.length\n  ? `\\nPOSTS ALREADY PLANNED BY THE USER (do NOT propose these again — they already exist and will be added to the plan separately; build the rest of the month coherently around them, complementing their timing/topic rather than colliding with it):\\n${seedPosts.map(s => `- [${s.platform}, ${s.format}] ${s.text}`).join('\\n')}\\n`\n  : '';\n\n// ── Existing ideas already in the plan (top-up / \"generate more\" flow) —\n// avoid proposing topic+angle combinations that repeat these. ──\nconst existingIdeasSection = existingIdeas.length\n  ? `\\nIDEAS ALREADY IN THIS PLAN (do not repeat these topics/angles — propose genuinely different ones):\\n${existingIdeas.map(e => `- [${e.platform}${e.date ? ', ' + e.date : ''}] ${e.topic}${e.pillar ? ` (${e.pillar})` : ''}`).join('\\n')}\\n`\n  : '';\n\n// ── Cross-month anti-repetition memory: ideas from OTHER plans (previous\n// months), same workspace. Split into ongoing recurring series (continue\n// these -- a deliberate weekly/monthly repeat format is good, not a\n// repetition problem) vs one-off ideas (avoid repeating their angle). --\nconst pastSeriesNames = [...new Set(pastIdeas.filter(p => p.series).map(p => p.series))];\nconst pastOneOffs = pastIdeas.filter(p => !p.series).slice(0, 60);\nconst pastIdeasSection = (pastSeriesNames.length || pastOneOffs.length)\n  ? `\\nPREVIOUS MONTHS' CONTENT (this company's history -- read before proposing new ideas):\\n` +\n    (pastSeriesNames.length ? `- Ongoing recurring series already running: ${pastSeriesNames.join(', ')}. If one fits naturally this month too, continue it on its usual cadence and set \"series\" to its name -- a deliberate repeat format is good, not a repetition problem.\\n` : '') +\n    (pastOneOffs.length ? `- One-off ideas already covered in past months (do NOT repeat these angles/content -- propose genuinely new angles even if the topic area is similar):\\n${pastOneOffs.map(p => `  - [${p.platform}] ${p.topic}${p.angle ? ' — ' + p.angle : ''}${p.content_pillar ? ` (${p.content_pillar})` : ''}`).join('\\n')}\\n` : '')\n  : '';\n\n// -- Target content mix: a freeform ratio the human wants (e.g. \"40% product,\n// 20% educational, 20% trust, 20% engagement\") -- a soft aim, not a hard rule,\n// since content_pillar is freeform text and can't be numerically enforced. --\nconst contentMixSection = contentMixTarget\n  ? `\\nTARGET CONTENT MIX: The user wants roughly this content-pillar ratio across the month: \"${contentMixTarget}\". Aim for it when choosing each post's content_pillar and spacing them through the month -- don't force it at the expense of a genuinely good idea, but treat it as the intended shape of the plan, not a suggestion to ignore.\\n`\n  : '';\n\n// ── CACHED prefix: brand context + the full static rulebook. Identical on\n// every call for this company regardless of which specific plan/goal/date\n// range is being requested — so a \"Generate more\" a few minutes after the\n// original \"Generate\" (same company) reads this block at ~10% of its normal\n// cost instead of resending it fresh. ──\nconst promptCached = `You are a social media campaign planner for Arak Lighting, a KSA-based architectural lighting manufacturer.\n\n${instructions ? `BRAND CONTEXT:\\n${instructions}` : 'No brand profile has been set yet — keep the plan professional and generic.'}\n\nYou will be given a specific goal, date range, platform list, and any constraints for ONE planning request. Decompose it into a list of individual post ideas, spread across the date range and platforms — do not put everything on day one, and vary the topic/angle so the campaign doesn't feel repetitive.\n\nIMPORTANT: For each Saudi seasonal/cultural moment that falls in the given date range, create at least one dedicated post tied to it and set its \"occasion\" accordingly. Vary the \"content_pillar\" across the month so it isn't all product pushes — mix project showcases, educational lighting content, brand story, and the seasonal moments.\n\nEach post needs:\n- \"platform\": exactly \"instagram\" or \"linkedin\"\n- \"date\": a date in YYYY-MM-DD format, within the given date range inclusive, and matching the posting-days constraint if one was given\n- \"time\": a time in HH:MM 24h format (KSA time), per the posting-time guidance given\n- \"topic\": a specific, concrete topic for that post\n- \"angle\": an optional specific angle or hook for the topic\n- \"title\": a short, punchy 3-7 word title for the idea (shown in the plan list)\n- \"occasion\": if this post ties to a seasonal/cultural moment in range (Ramadan, Eid al-Fitr, Eid al-Adha, Saudi Founding Day, Saudi National Day), name it (e.g. \"Ramadan\", \"National Day\"); otherwise \"\"\n- \"content_pillar\": the theme it serves — pick ONE: \"Project showcase\", \"Product highlight\", \"Educational\", \"Seasonal\", \"Brand story\", \"Behind the scenes\", \"Industry insight\"\n- \"rationale\": one short sentence on WHY this idea is worth posting, so the reviewer can approve or reject it on merit\n- \"objective\": what this specific post is FOR — pick ONE: \"Awareness\", \"Engagement\", \"Sales/Leads\", \"Trust/Credibility\", \"Community\"\n- \"cta\": a short, specific call-to-action matching the objective and platform — e.g. \"DM us for a quote\", \"Save this for your next project\", \"Tag someone planning a renovation\", \"Visit our showroom this weekend\", \"Share your thoughts in the comments\". Never generic filler like \"Learn more\" — make it concrete to this post.\n- \"suggested_format\": pick ONE — \"post\", \"carousel\", or \"reel\" (step-by-step/list -> carousel; motion/showcase -> reel; single strong visual -> post)\n- \"tone\": pick ONE value from the correct list for that platform —\n  Instagram tones: professional, inspirational, educational, casual, promotional\n  LinkedIn tones: thought_leader, executive, technical_expert, warm_human, promotional\n- \"suggested_style\": how this specific post should actually look — pick ONE value from the correct list for that platform —\n  Instagram styles: photorealistic, dramatic, minimalist, warm_residential, cool_commercial, facade_exterior\n  LinkedIn styles: photorealistic, dramatic, minimalist, warm_interior, cool_commercial, facade_exterior\n  Base this on the topic and angle, not just the tone — e.g. a comparison/breakdown topic should usually be minimalist, a before/after topic should usually be dramatic, an exterior/landscape topic should usually be facade_exterior.\n- \"suggested_aspect_ratio\": pick ONE value from the correct list for that platform —\n  Instagram: 1:1, 4:5, 1.91:1\n  LinkedIn: 1.91:1, 1:1, 4:5\n- \"series\": a short recurring-series name if this post is a deliberate weekly/monthly repeat format (e.g. \"Tip Tuesday\"), or \"\" if it's a one-off. Check the previous-months history below before inventing a new series name -- continue an existing one if it fits.\n- \"design_tip\": a real creative-direction note (2-4 full sentences) on how to actually design this post's visual — written the way you'd genuinely brief a photographer or designer, not a generic platitude. Cover the mood/lighting, the framing or composition, and what should be in or out of frame. This is the ONLY place visual guidance shows up to the user, so it needs to stand on its own without a separate style label next to it.\n\nRespond with ONLY valid JSON, no markdown fences, no commentary, in exactly this shape:\n{\n  \"campaignName\": \"short descriptive campaign name\",\n  \"posts\": [\n    { \"platform\": \"instagram\", \"date\": \"YYYY-MM-DD\", \"time\": \"HH:MM\", \"title\": \"...\", \"topic\": \"...\", \"angle\": \"...\", \"occasion\": \"\", \"content_pillar\": \"...\", \"rationale\": \"...\", \"objective\": \"...\", \"cta\": \"...\", \"suggested_format\": \"post\", \"tone\": \"...\", \"suggested_style\": \"...\", \"suggested_aspect_ratio\": \"...\", \"design_tip\": \"...\", \"series\": \"\" }\n  ]\n}`;\n\n// ── UNCACHED suffix: this specific request's parameters. ──\nconst promptVariable = `GOAL: ${goal}\n${goalCategory ? `GOAL CATEGORY: ${goalCategory}` : ''}\nPLATFORMS: ${platforms.join(', ')}\nDATE RANGE: ${startDate} to ${endDate}\n${countLine}\n${cadenceSection}${timeSection}${ramadanTimeNote}${holidaySection}\n${featuredProductsSection}${seedPostsSection}${existingIdeasSection}${contentMixSection}${pastIdeasSection}\nNow produce the plan for the request above, following all the rules already given.`;\n\nreturn [{\n  json: {\n    prompt_cached: promptCached,\n    prompt_variable: promptVariable,\n    _start_date: startDate,\n    _end_date: endDate,\n    _platforms: platforms,\n    _posting_days: postingDays,\n    _default_time: defaultTime,\n  }\n}];"
+      },
+      "id": "1d6f970b-bd3a-48e8-9c55-cccd8871f581",
+      "name": "Build Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "={{ $env.ANTHROPIC_API_KEY }}"
+            },
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: \"claude-opus-4-8\", max_tokens: 16000, thinking: { type: \"adaptive\" }, messages: [{ role: \"user\", content: [ { type: \"text\", text: $json.prompt_cached, cache_control: { type: \"ephemeral\" } }, { type: \"text\", text: $json.prompt_variable } ] }] }) }}",
+        "options": {}
+      },
+      "id": "d83bc91f-e342-418e-8f69-dc3d40ccae9e",
+      "name": "Call Claude",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        440,
+        200
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $input.first().json;\nconst bounds   = $('Build Prompt').first().json;\n\nlet text = '';\nif (response.content && Array.isArray(response.content)) {\n  const textBlock = response.content.find(b => b.type === 'text');\n  text = textBlock ? textBlock.text : '';\n} else {\n  text = response.completion || response.text || '';\n}\n\ntext = text.trim().replace(/^```json\\s*/i, '').replace(/^```\\s*/, '').replace(/```\\s*$/, '');\n\nlet parsed;\ntry {\n  parsed = JSON.parse(text);\n} catch (e) {\n  throw new Error('Could not parse plan JSON from Claude response: ' + text.slice(0, 300));\n}\n\nconst startDate = bounds._start_date;\nconst endDate   = bounds._end_date;\nconst allowedPlatforms = bounds._platforms || ['instagram', 'linkedin'];\nconst postingDays = bounds._posting_days || []; // e.g. ['sun','tue','thu'] — [] means no constraint\nconst defaultTime = bounds._default_time || '19:00';\n\nconst igTones = ['professional', 'inspirational', 'educational', 'casual', 'promotional'];\nconst liTones = ['thought_leader', 'executive', 'technical_expert', 'warm_human', 'promotional'];\n\nconst igStyles = ['photorealistic', 'dramatic', 'minimalist', 'warm_residential', 'cool_commercial', 'facade_exterior'];\nconst liStyles = ['photorealistic', 'dramatic', 'minimalist', 'warm_interior', 'cool_commercial', 'facade_exterior'];\n\nconst igAspects = ['1:1', '4:5', '1.91:1'];\nconst liAspects = ['1.91:1', '1:1', '4:5'];\n\nconst OBJECTIVES = ['Awareness', 'Engagement', 'Sales/Leads', 'Trust/Credibility', 'Community'];\n\nconst DAY_KEYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat']; // JS getDay() order\nfunction dayKeyOf(dateStr) {\n  const [y, m, d] = dateStr.split('-').map(Number);\n  return DAY_KEYS[new Date(y, m - 1, d).getDay()];\n}\nfunction addDays(dateStr, n) {\n  const [y, m, d] = dateStr.split('-').map(Number);\n  const dt = new Date(y, m - 1, d);\n  dt.setDate(dt.getDate() + n);\n  return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;\n}\n// If posting_days was constrained, snap any date the model got wrong onto the\n// nearest allowed weekday — a hard guarantee, not just a prompt instruction.\nfunction enforcePostingDay(dateStr) {\n  if (!postingDays.length || !dateStr) return dateStr;\n  if (postingDays.includes(dayKeyOf(dateStr))) return dateStr;\n  for (let step = 1; step <= 7; step++) {\n    const fwd = addDays(dateStr, step);\n    if (fwd <= endDate && postingDays.includes(dayKeyOf(fwd))) return fwd;\n    const back = addDays(dateStr, -step);\n    if (back >= startDate && postingDays.includes(dayKeyOf(back))) return back;\n  }\n  return dateStr; // no allowed day exists in range — leave as-is rather than lose the post\n}\n\nconst TIME_RE = /^([01]\\d|2[0-3]):([0-5]\\d)$/;\nfunction validTime(t, fallback) {\n  return typeof t === 'string' && TIME_RE.test(t) ? t : fallback;\n}\n\nconst posts = (parsed.posts || [])\n  .filter(p => p && p.platform && p.date && p.topic)\n  .filter(p => allowedPlatforms.includes(p.platform))\n  .map(p => {\n    const platform = p.platform === 'linkedin' ? 'linkedin' : 'instagram';\n    let date = p.date;\n    if (date < startDate) date = startDate;\n    if (date > endDate) date = endDate;\n    date = enforcePostingDay(date);\n\n    const fallbackTime = platform === 'linkedin' ? '10:00' : defaultTime;\n    const time = validTime(p.time, fallbackTime);\n\n    const validTones = platform === 'linkedin' ? liTones : igTones;\n    const tone = validTones.includes(p.tone) ? p.tone : (platform === 'linkedin' ? 'thought_leader' : 'professional');\n\n    const validStyles = platform === 'linkedin' ? liStyles : igStyles;\n    const suggestedStyle = validStyles.includes(p.suggested_style) ? p.suggested_style : 'photorealistic';\n\n    const validAspects = platform === 'linkedin' ? liAspects : igAspects;\n    const defaultAspect = platform === 'linkedin' ? '1.91:1' : '1:1';\n    const suggestedAspectRatio = validAspects.includes(p.suggested_aspect_ratio) ? p.suggested_aspect_ratio : defaultAspect;\n\n    const objective = OBJECTIVES.includes(p.objective) ? p.objective : 'Awareness';\n\n    return {\n      platform,\n      date,\n      time,\n      topic: String(p.topic).slice(0, 300),\n      angle: p.angle ? String(p.angle).slice(0, 300) : '',\n      tone,\n      suggested_style: suggestedStyle,\n      suggested_aspect_ratio: suggestedAspectRatio,\n      design_tip: p.design_tip ? String(p.design_tip).slice(0, 500) : '',\n      title: p.title ? String(p.title).slice(0, 120) : String(p.topic).slice(0, 120),\n      occasion: p.occasion ? String(p.occasion).slice(0, 60) : '',\n      content_pillar: p.content_pillar ? String(p.content_pillar).slice(0, 60) : '',\n      rationale: p.rationale ? String(p.rationale).slice(0, 300) : '',\n      objective,\n      cta: p.cta ? String(p.cta).slice(0, 140) : '',\n      suggested_format: ['post','carousel','reel'].includes(p.suggested_format) ? p.suggested_format : 'post',\n      series: p.series ? String(p.series).slice(0, 60) : '',\n    };\n  });\n\nreturn [{\n  json: {\n    campaignName: parsed.campaignName || '',\n    posts,\n  }\n}];"
+      },
+      "id": "68f10975-697f-48fd-8bf1-a8f7a32d2431",
+      "name": "Parse & Validate Plan",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "f0d7fc46-e4cf-4da1-a673-90d015576a70",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        880,
+        200
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Build Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Prompt": {
+      "main": [
+        [
+          {
+            "node": "Call Claude",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call Claude": {
+      "main": [
+        [
+          {
+            "node": "Parse & Validate Plan",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse & Validate Plan": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": []
+}

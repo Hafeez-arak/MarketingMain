@@ -1,0 +1,1051 @@
+{
+  "name": "Arak Lighting – Instagram Manual Generation",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Arak Lighting – Instagram Manual Generation\n\n**Zero secrets in this file.** Needs `ANTHROPIC_API_KEY`, `REPLICATE_API_TOKEN`, `SUPABASE_URL`, `SUPABASE_KEY`.\n\nHandles all real-time requests from the Instagram Studio tab, routed by `route_type`:\n- `full` — topic + brief -> Claude caption -> FLUX image\n- `caption_only` — regenerate caption only (keep image)\n- `image_only` — regenerate image only (keep caption)\n- `style_sync` — rewrite caption tone for a new style\n\nWebhook path: `/arak-instagram`.\n\nPorted via secret-substitution, structure untouched (same reasoning as Instagram Reels — a proven multi-route Switch/If graph, not worth an untested rewrite). One real fix beyond secrets: two Claude nodes (\"Claude: Instructions Caption\", \"Claude: Caption Regen\" — both full caption-writing calls) were pinned to a stale `claude-opus-4-5` (predates the current model family), now `claude-sonnet-5` to match this codebase's per-post caption convention. The other two Claude nodes (\"Claude: Rewrite Image Prompt\", \"Claude: Style Sync Caption\" — lighter, mechanical rewrite tasks) were already on the correct current Haiku tier, left as-is.",
+        "height": 420,
+        "width": 480
+      },
+      "id": "sticky-ig-manual-gen",
+      "name": "Note: Overview",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        18144,
+        17920
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "arak-instagram",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "7a85952e-17f0-4af1-a001-e09c759527a1",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        18144,
+        18992
+      ],
+      "webhookId": "6a667fa9-9df6-4082-bde9-bb1ebb887944"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "si-1",
+              "name": "safe_topic",
+              "type": "string",
+              "value": "={{ ($json.body.topic || '').replace(/[\\n\\r\\t]/g, ' ').replace(/\"/g, \"'\").trim() }}"
+            },
+            {
+              "id": "si-2",
+              "name": "safe_instructions",
+              "type": "string",
+              "value": "={{ ($json.body.instructions || '').replace(/[\\n\\r\\t]/g, ' ').replace(/\"/g, \"'\").trim() }}"
+            },
+            {
+              "id": "si-3",
+              "name": "safe_current_caption",
+              "type": "string",
+              "value": "={{ ($json.body.current_caption || '').replace(/[\\n\\r\\t]/g, ' ').replace(/\"/g, \"'\").slice(0, 500) }}"
+            },
+            {
+              "id": "si-4",
+              "name": "tone",
+              "type": "string",
+              "value": "={{ $json.body.tone || 'professional' }}"
+            },
+            {
+              "id": "si-5",
+              "name": "route_type",
+              "type": "string",
+              "value": "={{ $json.body.route_type }}"
+            },
+            {
+              "id": "si-6",
+              "name": "content_route",
+              "type": "string",
+              "value": "={{ $json.body.content_route || 'instructions' }}"
+            },
+            {
+              "id": "si-7",
+              "name": "style",
+              "type": "string",
+              "value": "={{ $json.body.style || 'photorealistic' }}"
+            },
+            {
+              "id": "si-8",
+              "name": "visual_mode",
+              "type": "string",
+              "value": "={{ $json.body.visual_mode || 'auto' }}"
+            },
+            {
+              "id": "si-9",
+              "name": "custom_type",
+              "type": "string",
+              "value": "={{ $json.body.custom_type || '' }}"
+            },
+            {
+              "id": "si-10",
+              "name": "image_prompt",
+              "type": "string",
+              "value": "={{ ($json.body.image_prompt || '').replace(/[\\n\\r\\t]/g, ' ').replace(/\"/g, \"'\") }}"
+            },
+            {
+              "id": "si-11",
+              "name": "aspect_ratio",
+              "type": "string",
+              "value": "={{ $json.body.aspect_ratio || '1:1' }}"
+            },
+            {
+              "id": "si-12",
+              "name": "campaign_id",
+              "type": "string",
+              "value": "={{ $json.body.campaignId || '' }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "38443973-3566-4a89-b0d1-d8230f0a72a0",
+      "name": "Sanitize Inputs",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        18352,
+        18992
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $('Sanitize Inputs').item.json.route_type }}",
+                    "rightValue": "full",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "full"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $('Sanitize Inputs').item.json.route_type }}",
+                    "rightValue": "caption_only",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "caption_only"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $('Sanitize Inputs').item.json.route_type }}",
+                    "rightValue": "image_only",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "image_only"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $('Sanitize Inputs').item.json.route_type }}",
+                    "rightValue": "style_sync",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "style_sync"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "id": "6a4fa6fd-436f-4430-878a-95283c4dc79d",
+      "name": "Route Type?",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [
+        18560,
+        18944
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "={{ $env.ANTHROPIC_API_KEY }}"
+            },
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"claude-sonnet-5\",\n  \"max_tokens\": 1024,\n  \"messages\": [{\n    \"role\": \"user\",\n    \"content\": \"You are a social media expert for Arak Lighting, Saudi Arabia's leading lighting company with 45+ years of experience. Notable projects: Solitaire Mall, King Fahad Airport, Ritz Carlton Riyadh.\\n\\nTOPIC: {{ $('Sanitize Inputs').item.json.safe_topic }}\\nTONE: {{ $('Sanitize Inputs').item.json.tone }}\\nVISUAL MODE: {{ $('Sanitize Inputs').item.json.visual_mode }}\\nCUSTOM POST TYPE: {{ $('Sanitize Inputs').item.json.custom_type }}\\n\\nBRAND INSTRUCTIONS:\\n{{ $('Sanitize Inputs').item.json.safe_instructions }}\\n\\nWrite an Instagram post. Return ONLY valid JSON, no markdown:\\n{\\\"caption\\\": \\\"full caption with emojis and line breaks, no hashtags\\\", \\\"hashtags\\\": \\\"#ArakLighting #LightingDesign [8 more]\\\", \\\"image_prompt\\\": \\\"detailed image generation prompt max 80 words\\\", \\\"post_strategy\\\": \\\"one sentence why this works\\\"}\"\n  }]\n}",
+        "options": {}
+      },
+      "id": "7edc7deb-0514-407d-8b6d-a321eb75a1d6",
+      "name": "Claude: Instructions Caption",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        18960,
+        18704
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json.content?.[0]?.text || '';\nconst clean = raw.replace(/```json|```/g,'').trim();\nlet parsed;\ntry { parsed = JSON.parse(clean); }\ncatch(e) {\n  const match = clean.match(/\\{[\\s\\S]*\\}/);\n  if (match) { try { parsed = JSON.parse(match[0]); } catch(e2) { throw new Error('Cannot parse: ' + clean.slice(0,200)); } }\n  else throw new Error('No JSON found: ' + clean.slice(0,200));\n}\nconst si = $('Sanitize Inputs').first().json;\nreturn [{json: {\n  caption:       parsed.caption || '',\n  hashtags:      parsed.hashtags || '#ArakLighting #LightingDesign',\n  image_prompt:  parsed.image_prompt || '',\n  post_strategy: parsed.post_strategy || '',\n  topic:         si.safe_topic,\n  tone:          si.tone,\n  style:         si.style,\n  content_route: si.content_route,\n}}];"
+      },
+      "id": "2b8937af-be42-442b-b8fd-732bd5942594",
+      "name": "Parse Caption",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        19168,
+        18704
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const styleMap = {\n  \"photorealistic\":   \"architectural photography, Canon EOS R5, natural lighting, hyper-detailed, 4K\",\n  \"dramatic\":         \"cinematic lighting, deep shadows, god rays, high contrast, noir atmosphere\",\n  \"minimalist\":       \"clean lines, soft diffused light, Scandinavian aesthetic, white space, elegant\",\n  \"warm_residential\": \"warm amber tones, cozy luxury interior, golden hour, warm white light 2700K\",\n  \"cool_commercial\":  \"cool white 5000K, modern commercial space, crisp, corporate luxury\",\n  \"facade_exterior\":  \"architectural exterior night photography, facade illumination, dramatic night sky\"\n};\nconst customMap = {\n  \"event_poster\":      \"professional event poster design, bold promotional graphic with text overlay space, dramatic stage lighting, gold and dark luxury color scheme, Saudi Arabia\",\n  \"hiring_poster\":     \"modern recruitment poster, professional corporate layout, inspiring office background Saudi Arabia\",\n  \"product_showcase\":  \"studio product photography, lighting fixture on pure black background, dramatic spotlight\",\n  \"project_highlight\": \"architectural interior photography, completed luxury project, golden hour, Saudi Arabia\",\n  \"quote_card\":        \"elegant minimal quote card, dark background with warm accent lighting bokeh, luxury brand\",\n  \"suppliers_collab\":  \"corporate partnership announcement, premium product display, luxury lighting showroom Saudi Arabia\",\n  \"behind_scenes\":     \"documentary photography, lighting installation on-site, team working, Saudi Arabia\",\n  \"ai_decides\":        \"\"\n};\nconst si = $('Sanitize Inputs').first().json;\nconst routeType  = si.route_type;\nconst topic      = si.safe_topic || '';\nconst visualMode = si.visual_mode;\nconst customType = si.custom_type;\nconst style      = si.style;\nlet imagePrompt, finalPrompt;\nif (routeType === 'image_only') {\n  const rewritten = $('Claude: Rewrite Image Prompt').first().json.content?.[0]?.text || si.image_prompt;\n  imagePrompt = rewritten.trim();\n  finalPrompt = imagePrompt + ', Arak Lighting Saudi Arabia, ultra high detail';\n} else if (visualMode === 'custom' && customType) {\n  const base = $('Parse Caption').first().json.image_prompt || topic;\n  const mod  = customMap[customType] || '';\n  finalPrompt = mod ? (topic + ' — ' + base + ', ' + mod + ', Arak Lighting Saudi Arabia, ultra high detail') : (base + ', Arak Lighting Saudi Arabia, award-winning photography');\n  imagePrompt = base;\n} else if (visualMode === 'lighting' && style) {\n  const base = $('Parse Caption').first().json.image_prompt || topic;\n  const mod  = styleMap[style] || styleMap['photorealistic'];\n  finalPrompt = base + ', ' + mod + ', Arak Lighting Saudi Arabia, luxury architectural lighting';\n  imagePrompt = base;\n} else {\n  const base = $('Parse Caption').first().json.image_prompt || topic;\n  finalPrompt = base + ', Arak Lighting Saudi Arabia, luxury architectural lighting, ultra high detail';\n  imagePrompt = base;\n}\nreturn [{json: { final_prompt: finalPrompt, style: style || 'auto', image_prompt: imagePrompt, visual_mode: visualMode, custom_type: customType }}];"
+      },
+      "id": "f412011f-fac1-4fa4-99b8-e3e8f1deee92",
+      "name": "Build Image Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        19424,
+        18704
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.replicate.com/v1/models/black-forest-labs/flux-schnell/predictions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.REPLICATE_API_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "wait"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"input\": {\n    \"prompt\": \"{{ $json.final_prompt }}\",\n    \"aspect_ratio\": \"{{ $('Sanitize Inputs').item.json.aspect_ratio === '1.91:1' ? '3:2' : $('Sanitize Inputs').item.json.aspect_ratio || '1:1' }}\",\n    \"output_format\": \"webp\",\n    \"output_quality\": 90,\n    \"num_outputs\": 1\n  }\n}",
+        "options": {}
+      },
+      "id": "7923bcca-4b2d-4baa-b14d-d0b69445c5b0",
+      "name": "FLUX: Start Prediction",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        19616,
+        18704
+      ]
+    },
+    {
+      "parameters": {
+        "amount": 8
+      },
+      "id": "00de6ceb-23e5-4f51-9640-1dc30b376d73",
+      "name": "Wait 8s",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        19792,
+        18704
+      ],
+      "webhookId": "50e0f57f-17e2-4ecd-a927-fb6fcf31c469"
+    },
+    {
+      "parameters": {
+        "url": "=https://api.replicate.com/v1/predictions/{{ $('FLUX: Start Prediction').item.json.id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.REPLICATE_API_TOKEN }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "871bbf16-0945-4e5b-81f3-627daa0a7628",
+      "name": "FLUX: Poll Status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        19968,
+        18704
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "ir-1",
+              "leftValue": "={{ $json.status }}",
+              "rightValue": "succeeded",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "8675481a-1a63-4438-b078-498039cdef43",
+      "name": "Image Ready?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.1,
+      "position": [
+        20128,
+        18704
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "fir-1",
+              "leftValue": "={{ $('Sanitize Inputs').item.json.route_type }}",
+              "rightValue": "full",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "f9a23d4d-249c-444e-b890-3e778fa084df",
+      "name": "Full or Image Route?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.1,
+      "position": [
+        20992,
+        18544
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "={{ $env.ANTHROPIC_API_KEY }}"
+            },
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"claude-sonnet-5\",\n  \"max_tokens\": 1024,\n  \"messages\": [{\n    \"role\": \"user\",\n    \"content\": \"You are a social media expert for Arak Lighting, Saudi Arabia's leading lighting company.\\n\\nTOPIC: {{ $('Sanitize Inputs').item.json.safe_topic }}\\nTONE: {{ $('Sanitize Inputs').item.json.tone }}\\nINSTRUCTIONS: {{ $('Sanitize Inputs').item.json.safe_instructions }}\\n\\nCURRENT CAPTION (write something COMPLETELY DIFFERENT):\\n{{ $('Sanitize Inputs').item.json.safe_current_caption }}\\n\\nWrite a fresh Instagram caption with a different opening, angle, and structure. Strong CTA.\\n\\nReturn ONLY JSON, no markdown: {\\\"caption\\\": \\\"new caption with emojis\\\", \\\"hashtags\\\": \\\"#ArakLighting [9 tags]\\\"}\"\n  }]\n}",
+        "options": {}
+      },
+      "id": "81d3c6db-aa3e-4110-8da7-40422a09a381",
+      "name": "Claude: Caption Regen",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        18864,
+        18960
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json.content?.[0]?.text || '';\nconst clean = raw.replace(/```json|```/g,'').trim();\nlet parsed;\ntry { parsed = JSON.parse(clean); }\ncatch(e) {\n  const match = clean.match(/\\{[\\s\\S]*\\}/);\n  parsed = match ? JSON.parse(match[0]) : {caption: clean, hashtags: '#ArakLighting'};\n}\nreturn [{json: { caption: parsed.caption, hashtags: parsed.hashtags }}];"
+      },
+      "id": "fdcdc4d1-3876-432b-8dcd-9b308f7a3551",
+      "name": "Parse Caption Regen",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        19088,
+        18960
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "={{ $env.ANTHROPIC_API_KEY }}"
+            },
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"claude-haiku-4-5-20251001\",\n  \"max_tokens\": 300,\n  \"messages\": [{\n    \"role\": \"user\",\n    \"content\": \"You are an expert at writing image generation prompts for architectural lighting photography.\\n\\nTOPIC/BRIEF: {{ $('Sanitize Inputs').item.json.safe_topic || 'architectural lighting' }}\\nORIGINAL PROMPT: {{ $('Sanitize Inputs').item.json.image_prompt }}\\nTARGET STYLE: {{ $('Sanitize Inputs').item.json.style }}\\nASPECT RATIO: {{ $('Sanitize Inputs').item.json.aspect_ratio }}\\n\\nSTYLE DEFINITIONS:\\n- photorealistic: Canon EOS R5 architectural photography, natural lighting, hyper-detailed\\n- dramatic: cinematic deep shadows, god rays, high contrast, noir atmosphere\\n- minimalist: clean lines, soft diffused light, Scandinavian aesthetic\\n- warm_residential: warm amber 2700K tones, cozy luxury interior, golden hour\\n- cool_commercial: cool white 5000K, modern commercial space, crisp corporate luxury\\n- facade_exterior: architectural exterior night photography, facade illumination\\n\\nRewrite the image prompt for the target style. Consider aspect ratio for composition (9:16=portrait focus, 16:9=wide/landscape, 1:1=balanced, 4:5=portrait).\\n\\nReturn ONLY the prompt text, nothing else. Max 100 words.\"\n  }]\n}",
+        "options": {}
+      },
+      "id": "7a7fcc13-97c1-4f4c-8f6e-12adb1548f8b",
+      "name": "Claude: Rewrite Image Prompt",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        19040,
+        19200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "={{ $env.ANTHROPIC_API_KEY }}"
+            },
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"model\": \"claude-haiku-4-5-20251001\", \"max_tokens\": 600, \"messages\": [{\"role\": \"user\", \"content\": \"You are a social media expert for Arak Lighting, Saudi Arabia's leading lighting company.\\\\n\\\\nTOPIC: {{ $('Webhook').item.json.body.topic }}\\\\nNEW STYLE: {{ $('Webhook').item.json.body.style }}\\\\nCURRENT CAPTION:\\\\n{{ $('Webhook').item.json.body.current_caption }}\\\\n\\\\nRewrite the caption tone to match the new style. Style guide: photorealistic=clean and professional, dramatic=bold and powerful, minimalist=sparse and refined, warm_residential=warm and inviting, cool_commercial=sharp and corporate, facade_exterior=grand and architectural. Keep the core message and hashtags identical.\\\\n\\\\nReturn ONLY valid JSON, no markdown: {\\\\\\\"caption\\\\\\\": \\\\\\\"rewritten caption\\\\\\\", \\\\\\\"hashtags\\\\\\\": \\\\\\\"same hashtags\\\\\\\"}\"}]}",
+        "options": {}
+      },
+      "id": "6917b28f-8dbc-4aa3-8cd1-b54e88425d8d",
+      "name": "Claude: Style Sync Caption",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        18896,
+        19376
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json.content?.[0]?.text || '';\nconst clean = raw.replace(/```json|```/g,'').trim();\nlet parsed;\ntry { parsed = JSON.parse(clean); }\ncatch(e) {\n  const match = clean.match(/\\{[\\s\\S]*\\}/);\n  parsed = match ? JSON.parse(match[0]) : {caption: clean, hashtags: '#ArakLighting'};\n}\nreturn [{json: { caption: parsed.caption, hashtags: parsed.hashtags }}];"
+      },
+      "id": "12be54c9-1cb3-4824-89d6-d6654962bd86",
+      "name": "Parse Style Sync",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        19200,
+        19376
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\"success\":true,\"route_type\":\"full\",\"content_route\":\"instructions\",\"caption\":{{ JSON.stringify($(\"Parse Caption\").item.json.caption) }},\"hashtags\":{{ JSON.stringify($(\"Parse Caption\").item.json.hashtags) }},\"image_url\":\"{{ $(\"Set Permanent Image URL\").item.json.permanent_image_url }}\",\"image_prompt\":{{ JSON.stringify($(\"Parse Caption\").item.json.image_prompt) }},\"post_strategy\":{{ JSON.stringify($(\"Parse Caption\").item.json.post_strategy) }},\"supabase_id\":\"{{ $(\"Supabase: Save Manual Post\").item.json[0]?.id || $(\"Supabase: Save Manual Post\").item.json?.id || \"\" }}\"}",
+        "options": {}
+      },
+      "id": "8e61b0a9-64c8-4ae6-8475-6ebbe1c45bab",
+      "name": "Respond: Full Success",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        21488,
+        18528
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\"success\":true,\"route_type\":\"image_only\",\"image_url\":\"{{ $(\"Set Permanent Image URL\").item.json.permanent_image_url }}\"}",
+        "options": {}
+      },
+      "id": "635ab766-6687-43ac-8911-b33854342459",
+      "name": "Respond: Image Success",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        21056,
+        18848
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{\"success\":false,\"error\":\"Image generation timed out. Please try again.\"}",
+        "options": {
+          "responseCode": 202
+        }
+      },
+      "id": "977906fd-adba-4bf7-8848-683d0c5fd76c",
+      "name": "Respond: Image Error",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        20352,
+        18864
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\"success\":true,\"route_type\":\"caption_only\",\"caption\":{{ JSON.stringify($(\"Parse Caption Regen\").item.json.caption) }},\"hashtags\":{{ JSON.stringify($(\"Parse Caption Regen\").item.json.hashtags) }}}",
+        "options": {}
+      },
+      "id": "a7603814-4c82-47d6-82f4-93d9ca2b4062",
+      "name": "Respond: Caption Success",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        19664,
+        18960
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\"success\":true,\"route_type\":\"style_sync\",\"caption\":{{ JSON.stringify($(\"Parse Style Sync\").item.json.caption) }},\"hashtags\":{{ JSON.stringify($(\"Parse Style Sync\").item.json.hashtags) }}}",
+        "options": {}
+      },
+      "id": "e9710fca-a016-4590-b237-b6b1d130368f",
+      "name": "Respond: Style Sync",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        19440,
+        19376
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{\"success\":false,\"error\":\"Invalid route_type. Use: full, caption_only, image_only, or style_sync\"}",
+        "options": {
+          "responseCode": 400
+        }
+      },
+      "id": "db11fcf1-21b5-4d37-9703-f95a45fba76d",
+      "name": "Respond: Bad Route",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        18752,
+        19584
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $('FLUX: Poll Status').item.json.output?.[0] }}",
+        "options": {}
+      },
+      "id": "d0baa860-3094-48e7-8704-368fa15a41bc",
+      "name": "Download from Replicate",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        20368,
+        18544
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ String($env.SUPABASE_URL).replace(/\\/+$/, '') }}/storage/v1/object/instagram-posts/{{ $now.toMillis() }}-.webp",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SUPABASE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "image/webp"
+            },
+            {
+              "name": "x-upsert",
+              "value": "true"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "binaryData",
+        "inputDataFieldName": "data",
+        "options": {}
+      },
+      "id": "7685d912-7a19-407c-aa50-470b703ed743",
+      "name": "Upload to Supabase Storage",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        20576,
+        18544
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "spu-ig-1",
+              "name": "permanent_image_url",
+              "type": "string",
+              "value": "={{ String($env.SUPABASE_URL).replace(/\\/+$/, '') }}/storage/v1/object/public/instagram-posts/{{ $('Upload to Supabase Storage').item.json.Key.split('/').pop() }}"
+            },
+            {
+              "id": "spu-ig-2",
+              "name": "replicate_url",
+              "type": "string",
+              "value": "={{ $('FLUX: Poll Status').item.json.output?.[0] }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "38588509-edac-495b-ae6d-dc0fd708d797",
+      "name": "Set Permanent Image URL",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        20784,
+        18544
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ String($env.SUPABASE_URL).replace(/\\/+$/, '') }}/rest/v1/instagram_manual_posts",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SUPABASE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={ \"topic\": {{ JSON.stringify($(\"Parse Caption\").item.json.topic || $(\"Sanitize Inputs\").item.json.safe_topic) }}, \"caption\": {{ JSON.stringify($(\"Parse Caption\").item.json.caption) }}, \"hashtags\": {{ JSON.stringify($(\"Parse Caption\").item.json.hashtags) }}, \"image_url\": {{ JSON.stringify($(\"Set Permanent Image URL\").item.json.permanent_image_url) }}, \"image_prompt\": {{ JSON.stringify($(\"Parse Caption\").item.json.image_prompt) }}, \"post_strategy\": {{ JSON.stringify($(\"Parse Caption\").item.json.post_strategy) }}, \"tone\": {{ JSON.stringify($(\"Sanitize Inputs\").item.json.tone) }}, \"style\": {{ JSON.stringify($(\"Sanitize Inputs\").item.json.style) }}, \"aspect_ratio\": {{ JSON.stringify($(\"Sanitize Inputs\").item.json.aspect_ratio) }}, \"content_route\": \"instructions\", \"status\": \"pending_review\", \"source\": \"manual\" }",
+        "options": {}
+      },
+      "id": "7c65f6b9-72d9-4e3c-9465-3f267e0371db",
+      "name": "Supabase: Save Manual Post",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        21248,
+        18528
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Sanitize Inputs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sanitize Inputs": {
+      "main": [
+        [
+          {
+            "node": "Route Type?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route Type?": {
+      "main": [
+        [
+          {
+            "node": "Claude: Instructions Caption",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Claude: Caption Regen",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Claude: Rewrite Image Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Claude: Style Sync Caption",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond: Bad Route",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claude: Instructions Caption": {
+      "main": [
+        [
+          {
+            "node": "Parse Caption",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Caption": {
+      "main": [
+        [
+          {
+            "node": "Build Image Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Image Prompt": {
+      "main": [
+        [
+          {
+            "node": "FLUX: Start Prediction",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claude: Rewrite Image Prompt": {
+      "main": [
+        [
+          {
+            "node": "Build Image Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "FLUX: Start Prediction": {
+      "main": [
+        [
+          {
+            "node": "Wait 8s",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 8s": {
+      "main": [
+        [
+          {
+            "node": "FLUX: Poll Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "FLUX: Poll Status": {
+      "main": [
+        [
+          {
+            "node": "Image Ready?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Image Ready?": {
+      "main": [
+        [
+          {
+            "node": "Download from Replicate",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond: Image Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Full or Image Route?": {
+      "main": [
+        [
+          {
+            "node": "Supabase: Save Manual Post",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond: Image Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claude: Caption Regen": {
+      "main": [
+        [
+          {
+            "node": "Parse Caption Regen",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Caption Regen": {
+      "main": [
+        [
+          {
+            "node": "Respond: Caption Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claude: Style Sync Caption": {
+      "main": [
+        [
+          {
+            "node": "Parse Style Sync",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Style Sync": {
+      "main": [
+        [
+          {
+            "node": "Respond: Style Sync",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download from Replicate": {
+      "main": [
+        [
+          {
+            "node": "Upload to Supabase Storage",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload to Supabase Storage": {
+      "main": [
+        [
+          {
+            "node": "Set Permanent Image URL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Permanent Image URL": {
+      "main": [
+        [
+          {
+            "node": "Full or Image Route?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Supabase: Save Manual Post": {
+      "main": [
+        [
+          {
+            "node": "Respond: Full Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": []
+}
