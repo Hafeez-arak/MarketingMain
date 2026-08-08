@@ -37,6 +37,32 @@ docker exec arak-marketing-n8n n8n publish:workflow --id=<id>   # repeat per wor
 docker compose restart n8n
 ```
 
+**Gotcha — re-importing does NOT update in place.** `gen_workflows.py`
+mints fresh random node/workflow IDs on every run (`nid()`), so a second
+`import:workflow` creates a whole SECOND set of workflows with the same
+names rather than replacing the first — both end up published, both
+listening on the same webhook paths, with no defined winner. This CLI
+version of n8n has no `delete:workflow` command either, so there's no
+clean way to remove just the stale set.
+
+The reliable fix, since nothing valuable lives in this instance except
+imported workflow definitions (no real secrets should be typed into the
+n8n UI itself — they live in `.env` — and no execution history matters
+long-term): wipe and reimport clean.
+
+```bash
+docker compose down -v      # removes the container AND its volume
+docker compose up -d
+docker exec arak-marketing-n8n n8n import:workflow --separate --input=/workflows
+docker exec arak-marketing-n8n n8n list:workflow            # get the fresh ids
+docker exec arak-marketing-n8n n8n publish:workflow --id=<id>   # repeat per workflow
+docker compose restart n8n
+```
+
+If this instance ever DOES hold something worth keeping (saved
+credentials, execution history you care about), export it first —
+`n8n export:workflow` / `n8n export:credentials` — before wiping.
+
 ## Pointing the app at it
 
 In the app's Settings → Integrations, each webhook URL is
