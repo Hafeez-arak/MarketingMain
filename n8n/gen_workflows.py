@@ -837,6 +837,127 @@ try {
 }
 """
 
+DRAFT_COPY_STICKY = r"""## Arak – Draft Copy
+
+**Zero secrets in this file.** Needs `ANTHROPIC_API_KEY`, `SUPABASE_URL`, `SUPABASE_KEY`.
+
+Fires ONCE PER IDEA the moment a plan is created (or whenever the reviewer asks for a fresh set of options on one card) — deliberately NOT batched across multiple ideas in one call, so a slow/failed draft never blocks the rest of the board and the "don't repeat this sibling" framing stays about OTHER ideas, not itself.
+
+Async like the Content Generation workflows (Respond: Accepted immediately, work happens after) so the board can show a spinner per card and poll `plan_ideas.draft_status` — never synchronous, so a browser tab closing mid-draft doesn't lose the request.
+
+Returns 3 caption options (bilingual per the brand's caption_language) and 3 format/orientation-aware media_prompt options — plus a motion_prompt per option when the idea's format is video. This is the "what should this post actually say and look like" step that happens BEFORE any image/video is rendered — Caption Studio's 3-variant UI already proved this pattern for post-review rewrites; this is the same idea moved earlier, to plan time.
+
+Writes straight to `plan_ideas` (caption_options, media_prompt_options, draft_status, draft_error) — the reviewer picks or edits from there; nothing here is a final, generation-ready value yet."""
+
+# ============================================================
+# Code-node JavaScript body (Draft Copy)
+# ============================================================
+DRAFT_COPY_JS = r"""
+const http = this.helpers.httpRequest;
+const ANTHROPIC = $env.ANTHROPIC_API_KEY;
+
+async function req(opts){
+  try { return await http(opts); }
+  catch (e) {
+    const detail = (e && (e.error || (e.response && e.response.data) || e.description)) || null;
+    const real = detail
+      ? (typeof detail === 'string' ? detail
+        : Buffer.isBuffer(detail) ? detail.toString('utf8', 0, 300)
+        : (detail.error && detail.error.message) || JSON.stringify(detail).slice(0, 400))
+      : (e && e.message) || String(e);
+    throw new Error(real);
+  }
+}
+
+function safeJson(t){
+  const c = String(t||'').replace(/```json|```/g,'').trim();
+  try { return JSON.parse(c); } catch(e){
+    const m = c.match(/\{[\s\S]*\}/);
+    if(m){ try { return JSON.parse(m[0]); } catch(_){} }
+    return {};
+  }
+}
+
+const body     = ($input.first().json.body) || {};
+const planIdeaId = body.plan_idea_id || '';
+const platform = body.platform === 'linkedin' ? 'linkedin' : 'instagram';
+const platformName = platform === 'linkedin' ? 'LinkedIn' : 'Instagram';
+const lang     = body.caption_language || 'both';   // ar | en | both
+const format   = body.format || 'feed_image';
+const aspectRatio = body.aspect_ratio || '';
+const mediaType = body.media_type || 'image';       // image | video | none
+const wantsCaption = body.wants_caption !== false;
+const instructions = body.instructions || '';
+
+const langRule = lang === 'ar'
+  ? 'Write in SAUDI ARABIC (Gulf/Najdi dialect — natural, modern, warm; NOT stiff MSA). Fill the *_ar field; set *_en to "".'
+  : lang === 'en'
+  ? 'Write in ENGLISH. Fill the *_en field; set *_ar to "".'
+  : 'Write BOTH a SAUDI ARABIC version (Gulf/Najdi dialect, not stiff MSA) AND an ENGLISH version, matched in meaning, not word-for-word.';
+
+// CACHED prefix (persona + brand context + language rule) is identical
+// across every idea drafted in the same plan, so the 2nd+ call in a
+// "create plan" burst reads it at ~10% cost.
+const cachedPrefix = `You are a senior social media strategist and copywriter for Arak Lighting, Saudi Arabia's leading architectural lighting company (45+ years; landmark projects incl. Solitaire Mall, King Fahad Airport, Ritz Carlton Riyadh).
+
+You are drafting options for ONE ${platformName} post BEFORE it gets generated — the marketer will pick or edit from what you write here, so give them real, distinct choices rather than three near-identical rewrites.
+
+BRAND CONTEXT:
+${instructions || 'No brand profile set — keep it premium and on-brand for a luxury lighting company.'}
+
+LANGUAGE: ${langRule}`;
+
+const postFacts = `POST TOPIC: ${body.topic || ''}
+ANGLE: ${body.angle || ''}
+TONE: ${body.tone || ''}
+OBJECTIVE: ${body.objective || ''}
+CALL TO ACTION: ${body.cta || ''}
+OCCASION: ${body.occasion || '(none)'}
+CONTENT PILLAR: ${body.content_pillar || '(none)'}
+FORMAT: ${format} (${mediaType === 'video' ? 'video' : mediaType === 'none' ? 'text only, no media' : 'image'}${aspectRatio ? `, ${aspectRatio} orientation` : ''})
+${body.image_idea ? `MARKETER'S OWN VISION FOR THE MEDIA: ${body.image_idea}` : ''}`;
+
+const wantsMedia = mediaType !== 'none';
+const wantsMotion = mediaType === 'video';
+
+const captionSchema = wantsCaption
+  ? `"caption_options":[{"caption_ar":"","caption_en":""}, {…}, {…}]  // exactly 3 genuinely different options — vary the hook/structure, not just wording`
+  : `"caption_options":[]  // this post has no caption — leave empty`;
+const mediaSchema = wantsMedia
+  ? `"media_prompt_options":[{"media_prompt":"a vivid, detailed prompt ready to hand to an image${wantsMotion ? '/video cover' : ''} generator — describe the actual scene, lighting, composition, mood"${wantsMotion ? ', "motion_prompt":"how the still should animate into video — camera move, light behavior, pacing"' : ''}}, {…}, {…}]  // exactly 3 genuinely different directions`
+  : `"media_prompt_options":[]  // text-only post, no media — leave empty`;
+
+const variableSuffix = `${postFacts}
+
+Write:
+${wantsCaption ? '- 3 distinct caption options for this post.' : "- This post has NO caption — return an empty caption_options array."}
+${wantsMedia ? `- 3 distinct ${wantsMotion ? 'video' : 'image'} direction options for this post's media.` : '- This post has no image or video — return an empty media_prompt_options array.'}
+
+Return ONLY valid JSON, no markdown fences, EXACTLY this shape:
+{${captionSchema}, ${mediaSchema}}`;
+
+try {
+  const resp = await req({ method:'POST', url:'https://api.anthropic.com/v1/messages',
+    headers:{ 'x-api-key':ANTHROPIC, 'anthropic-version':'2023-06-01', 'content-type':'application/json' },
+    body:{ model:'claude-sonnet-5', max_tokens:3000, messages:[{ role:'user', content:[
+      { type:'text', text: cachedPrefix, cache_control:{ type:'ephemeral' } },
+      { type:'text', text: variableSuffix },
+    ] }] },
+    json:true });
+  if (!resp || resp.type === 'error' || !Array.isArray(resp.content)) {
+    throw new Error('Claude draft-copy call failed: ' + (resp && resp.error && resp.error.message ? resp.error.message : JSON.stringify(resp).slice(0, 300)));
+  }
+  const parsed = safeJson(resp.content[0] && resp.content[0].text);
+  const captionOptions = wantsCaption && Array.isArray(parsed.caption_options) ? parsed.caption_options.slice(0, 3) : [];
+  const mediaPromptOptions = wantsMedia && Array.isArray(parsed.media_prompt_options) ? parsed.media_prompt_options.slice(0, 3) : [];
+  if (wantsCaption && !captionOptions.length) throw new Error('No caption options returned by the model.');
+  if (wantsMedia && !mediaPromptOptions.length) throw new Error('No media prompt options returned by the model.');
+  return { json: { _ok: true, plan_idea_id: planIdeaId, caption_options: captionOptions, media_prompt_options: mediaPromptOptions } };
+} catch (err) {
+  return { json: { _ok: false, plan_idea_id: planIdeaId, error: (err && err.message) ? err.message : String(err) } };
+}
+"""
+
 
 
 # ============================================================
@@ -996,6 +1117,43 @@ def _http_mark_completed(x: int, y: int) -> dict:
     }
 
 
+def _http_save_draft(x: int, y: int) -> dict:
+    """PATCH plan_ideas with the drafted options on success, or draft_status
+    'failed' + draft_error on failure — one node, branching on _ok so a
+    failed draft still lands a real, visible status instead of leaving the
+    board's spinner stuck forever."""
+    body_expr = (
+        "={{ JSON.stringify($json._ok "
+        "? { draft_status: 'ready', draft_error: '', "
+        "caption_options: $json.caption_options, media_prompt_options: $json.media_prompt_options } "
+        ": { draft_status: 'failed', draft_error: $json.error }) }}"
+    )
+    return {
+        "parameters": {
+            "method": "PATCH",
+            "url": "={{ String($env.SUPABASE_URL).replace(/\\/+$/, '') }}/rest/v1/plan_ideas?id=eq.{{ $json.plan_idea_id }}",
+            "sendHeaders": True,
+            "headerParameters": {
+                "parameters": [
+                    {"name": "apikey", "value": "={{ $env.SUPABASE_KEY }}"},
+                    {"name": "Authorization", "value": "=Bearer {{ $env.SUPABASE_KEY }}"},
+                    {"name": "Content-Type", "value": "application/json"},
+                    {"name": "Prefer", "value": "return=minimal"},
+                ]
+            },
+            "sendBody": True,
+            "specifyBody": "json",
+            "jsonBody": body_expr,
+            "options": {},
+        },
+        "id": nid(),
+        "name": "Supabase: Save Draft",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [x, y],
+    }
+
+
 def _split_pending_uploads(x: int, y: int) -> dict:
     return _code("Split Pending Uploads", SPLIT_PENDING_UPLOADS_JS, x, y)
 
@@ -1143,6 +1301,40 @@ def build_elongate_idea() -> dict:
     }
 
 
+def build_draft_copy() -> dict:
+    """
+    Webhook (responseNode) -> Respond: Accepted -> Draft Copy (Code node,
+    one idea per call) -> Supabase: Save Draft (HTTP PATCH, branches on
+    _ok). Async on purpose (see DRAFT_COPY_STICKY) — the browser polls
+    plan_ideas.draft_status rather than waiting on this request.
+    """
+    nodes = [
+        _sticky(DRAFT_COPY_STICKY, height=320, width=440, x=0, y=-140),
+        _webhook("arak-draft-copy", "responseNode", x=0, y=260),
+        _respond_json(
+            "Respond: Accepted",
+            "={{ JSON.stringify({ status: 'accepted', plan_idea_id: $json.body.plan_idea_id }) }}",
+            x=220,
+            y=260,
+        ),
+        _code("Draft Copy", DRAFT_COPY_JS, x=440, y=260, run_once_for_each_item=True),
+        _http_save_draft(x=660, y=260),
+    ]
+    connections = {
+        "Webhook": {"main": [[{"node": "Respond: Accepted", "type": "main", "index": 0}]]},
+        "Respond: Accepted": {"main": [[{"node": "Draft Copy", "type": "main", "index": 0}]]},
+        "Draft Copy": {"main": [[{"node": "Supabase: Save Draft", "type": "main", "index": 0}]]},
+    }
+    return {
+        "name": "Arak Lighting – Draft Copy",
+        "nodes": nodes,
+        "connections": connections,
+        "active": False,
+        "settings": {"executionOrder": "v1"},
+        "tags": [],
+    }
+
+
 if __name__ == "__main__":
     out_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "workflows")
     os.makedirs(out_dir, exist_ok=True)
@@ -1152,6 +1344,7 @@ if __name__ == "__main__":
         build_linkedin(),
         build_caption_studio(),
         build_elongate_idea(),
+        build_draft_copy(),
     ]
 
     for wf in workflows:
