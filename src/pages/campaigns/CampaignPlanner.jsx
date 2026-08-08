@@ -11,7 +11,10 @@ import {
 import { suppliersApi, competitorsApi, productsApi } from '../../lib/brandDirectory'
 import { fetchBrandAssets } from '../../lib/brandAssets'
 import { requestCampaignPlan, requestPlanContentGeneration, elongateIdea } from '../../lib/campaignPlanner'
-import { suggestDesign } from '../../lib/designSuggestion'
+import {
+  formatsFor, defaultFormat, aspectRatiosFor, defaultAspectRatio, slideRange, aspectLabel,
+  stylesFor, crosswalkTone, crosswalkStyle, crosswalkFormat, derivePostKind,
+} from '../../lib/postFormats'
 import { ReferencePicker } from '../../components/ReferencePicker'
 import {
   createPlan, insertIdeas, updateIdea, setAllIdeaStatus, deleteIdea, updatePlan, markIdeasProcessing,
@@ -37,30 +40,6 @@ const LI_TONES = [
 ]
 const toneLabel = p => (p.platform === 'linkedin' ? LI_TONES : IG_TONES).find(t => t.value === p.tone)?.label || p.tone
 
-// IG and LinkedIn tones don't share a vocabulary — used when duplicating an
-// idea across platforms so the copy lands on a sensible equivalent instead
-// of an invalid value the other platform's dropdown won't recognize.
-const TONE_CROSSWALK = {
-  instagram_to_linkedin: { professional: 'thought_leader', inspirational: 'thought_leader', educational: 'technical_expert', casual: 'warm_human', promotional: 'promotional' },
-  linkedin_to_instagram: { thought_leader: 'professional', executive: 'professional', technical_expert: 'educational', warm_human: 'casual', promotional: 'promotional' },
-}
-function crosswalkTone(tone, fromPlatform, toPlatform) {
-  if (fromPlatform === toPlatform) return tone
-  const map = TONE_CROSSWALK[`${fromPlatform}_to_${toPlatform}`]
-  return map?.[tone] || (toPlatform === 'linkedin' ? 'thought_leader' : 'professional')
-}
-// Most visual styles are shared between platforms — only the "warm" variant
-// has different names (warm_residential vs warm_interior) for what's really
-// the same look.
-function crosswalkStyle(style, fromPlatform, toPlatform) {
-  if (fromPlatform === toPlatform || !style) return style
-  if (style === 'warm_residential' && toPlatform === 'linkedin') return 'warm_interior'
-  if (style === 'warm_interior' && toPlatform === 'instagram') return 'warm_residential'
-  return style
-}
-
-const FORMATS = ['post', 'carousel', 'reel']
-
 // What a post is FOR — lets the reviewer judge purpose, not just topic.
 const OBJECTIVES = ['Awareness', 'Engagement', 'Sales/Leads', 'Trust/Credibility', 'Community']
 
@@ -74,16 +53,6 @@ const REJECT_REASONS = [
 ]
 const rejectReasonLabel = v => REJECT_REASONS.find(r => r.value === v)?.label || v
 
-// What KIND of content each idea becomes — decided at plan time, drives the
-// whole generation flow (caption? image? how many? text baked in?).
-const POST_KINDS = [
-  { value: 'caption_image', label: 'Caption + image',  hint: 'A caption and one image (the default).' },
-  { value: 'caption_only',  label: 'Caption only',     hint: 'Just a caption, no image.' },
-  { value: 'image_only',    label: 'Image only',       hint: 'Just an image, no caption.' },
-  { value: 'carousel',      label: 'Carousel',         hint: 'A caption and multiple image slides.' },
-  { value: 'text_image',    label: 'Text image',       hint: 'An image built around words/typography.' },
-]
-const postKindLabel = v => POST_KINDS.find(k => k.value === v)?.label || 'Caption + image'
 
 // Saudi week (Sunday-first); Fri/Sat flagged as the weekend, not disabled —
 // plenty of brands post through the weekend, this is just a hint.
@@ -93,24 +62,6 @@ const WEEKDAYS = [
   { value: 'fri', label: 'Fri', weekend: true }, { value: 'sat', label: 'Sat', weekend: true },
 ]
 
-// Visual styles the generation pipeline understands, per platform. Shown as an
-// editable chip on each idea (Stage 3) so the human can override the AI's pick.
-const IG_STYLES = [
-  { value: 'photorealistic',   label: 'Photorealistic' },
-  { value: 'dramatic',         label: 'Dramatic' },
-  { value: 'minimalist',       label: 'Minimalist' },
-  { value: 'warm_residential', label: 'Warm residential' },
-  { value: 'cool_commercial',  label: 'Cool commercial' },
-  { value: 'facade_exterior',  label: 'Facade / exterior' },
-]
-const LI_STYLES = [
-  { value: 'photorealistic',  label: 'Photorealistic' },
-  { value: 'dramatic',        label: 'Dramatic' },
-  { value: 'minimalist',      label: 'Minimalist' },
-  { value: 'warm_interior',   label: 'Warm interior' },
-  { value: 'cool_commercial', label: 'Cool commercial' },
-  { value: 'facade_exterior', label: 'Facade / exterior' },
-]
 const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December']
 const MONTH_ABBR  = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
 
@@ -213,8 +164,35 @@ export function dbIdeaToDraft(row) {
     imageText: row.image_text || '',
     imageMode: row.image_mode || 'generate',
     references: row.reference_image_urls || [],
+    // Format & orientation system — the fields generation actually reads.
+    // Fall back to the catalog default when a row predates this migration
+    // (empty format/aspect_ratio) so old ideas don't render blank controls.
+    postFormat: row.format || defaultFormat(row.platform || 'instagram'),
+    aspectRatio: row.aspect_ratio || defaultAspectRatio(row.platform || 'instagram', row.format || defaultFormat(row.platform || 'instagram')),
+    mediaType: row.media_type || 'image',
+    groupId: row.group_id || '',
+    wantsCaption: row.wants_caption !== false,
     status: row.status || 'proposed',
     position: row.position ?? 0,
+  }
+}
+
+// AI-planner-produced ideas only carry the legacy `format`/`suggestedAspectRatio`
+// (see requestCampaignPlan's normalizer in campaignPlanner.js) — translate
+// those into the new format/aspectRatio/mediaType/postKind fields before
+// they're ever saved, the same way a human-entered seed post already does.
+function normalizeAiIdea(p) {
+  const legacyFormat = p.format || 'post'
+  const postFormat = legacyFormat === 'carousel' ? 'carousel'
+    : (legacyFormat === 'reel' && p.platform === 'instagram') ? 'reel'
+    : defaultFormat(p.platform)
+  const mediaType = formatsFor(p.platform).find(f => f.id === postFormat)?.media || 'image'
+  const validRatios = aspectRatiosFor(p.platform, postFormat)
+  const aspectRatio = validRatios.includes(p.suggestedAspectRatio) ? p.suggestedAspectRatio : defaultAspectRatio(p.platform, postFormat)
+  const slideCount = postFormat === 'carousel' ? (slideRange(p.platform, postFormat)?.default || 3) : 1
+  return {
+    ...p, postFormat, aspectRatio, mediaType, slideCount, wantsCaption: true,
+    postKind: derivePostKind({ platform: p.platform, format: postFormat, wantsCaption: true, slideCount }),
   }
 }
 
@@ -316,11 +294,15 @@ function IdeaCard({ idea, index, accessToken, onChange, onRemove, onCreate, onDu
     const dbPatch = {
       topic: patch.topic, angle: patch.angle, tone: patch.tone,
       scheduled_date: patch.date || null, publish_time: patch.time || '',
-      suggested_format: patch.format,
       suggested_style: patch.suggestedStyle || '', image_idea: patch.imageIdea || '',
       objective: patch.objective || '', cta: patch.cta || '',
       hashtags: patch.hashtags || '', first_comment: patch.firstComment || '',
       series: patch.series || '',
+      // Format & orientation — the human-editable fields; post_kind stays
+      // derived (see postFormats.js#derivePostKind) so it can never drift
+      // from format/wants_caption/image_text into a nonsensical combination.
+      format: patch.postFormat, aspect_ratio: patch.aspectRatio, media_type: patch.mediaType,
+      wants_caption: patch.wantsCaption !== false,
       post_kind: patch.postKind || 'caption_image',
       slide_count: patch.slideCount || 1,
       image_text: patch.imageText || '',
@@ -348,7 +330,12 @@ function IdeaCard({ idea, index, accessToken, onChange, onRemove, onCreate, onDu
               {idea.pillar && <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full border ${PILLAR_STYLE}`}>{idea.pillar}</span>}
               {idea.series && <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full border bg-violet-50 text-violet-700 border-violet-100" title="Deliberate recurring series — not flagged as repetition across months">🔁 {idea.series}</span>}
               {idea.objective && <span className="text-[10px] font-medium px-2 py-0.5 rounded-full border bg-sky-50 text-sky-700 border-sky-100">{idea.objective}</span>}
-              <span className="text-[10px] font-medium px-2 py-0.5 rounded-full border bg-indigo-50 text-indigo-700 border-indigo-100">{postKindLabel(idea.postKind)}{idea.postKind === 'carousel' && idea.slideCount > 1 ? ` ·${idea.slideCount}` : ''}</span>
+              <span className="text-[10px] font-medium px-2 py-0.5 rounded-full border bg-indigo-50 text-indigo-700 border-indigo-100">
+                {formatsFor(idea.platform).find(f => f.id === idea.postFormat)?.label || 'Feed image'}
+                {idea.aspectRatio ? ` · ${aspectLabel(idea.aspectRatio)}` : ''}
+                {(idea.postFormat === 'carousel' || idea.postFormat === 'photo_carousel') && idea.slideCount > 1 ? ` ·${idea.slideCount}` : ''}
+                {idea.wantsCaption === false ? ' · no caption' : ''}
+              </span>
               <span className="text-[10px] text-text-tertiary">{idea.date ? formatDate(idea.date) : 'No date'}{idea.time ? ` · ${formatTime(idea.time)}` : ''}</span>
               {idea.imageIdea && !usingImage && <span className="text-[10px] font-semibold text-purple-600" title={idea.imageIdea}>· 🎨 your vision</span>}
               {usingImage
@@ -420,7 +407,7 @@ function IdeaCard({ idea, index, accessToken, onChange, onRemove, onCreate, onDu
       )}
       {pickingRefs && (
         <ReferencePicker value={idea.references || []} onSave={saveReferences} onClose={() => setPickingRefs(false)}
-          mode={imgMode} onModeChange={setImgMode} format={idea.postKind === 'carousel' ? 'carousel' : idea.format} />
+          mode={imgMode} onModeChange={setImgMode} format={idea.postFormat} />
       )}
     </div>
   )
@@ -432,7 +419,6 @@ function IdeaEditModal({ idea, tones, saving, saveError, onClose, onSave }) {
   const [tone,      setTone]      = useState(idea.tone || tones[0].value)
   const [date,      setDate]      = useState(idea.date || '')
   const [time,      setTime]      = useState(idea.time || '')
-  const [format,    setFormat]    = useState(idea.format || 'post')
   const [style,     setStyle]     = useState(idea.suggestedStyle || '')
   const [imageIdea, setImageIdea] = useState(idea.imageIdea || '')
   const [objective, setObjective] = useState(idea.objective || '')
@@ -440,21 +426,46 @@ function IdeaEditModal({ idea, tones, saving, saveError, onClose, onSave }) {
   const [hashtags,  setHashtags]  = useState(idea.hashtags || '')
   const [firstComment, setFirstComment] = useState(idea.firstComment || '')
   const [series, setSeries] = useState(idea.series || '')
-  // "Post type" (caption/image/carousel/text) and "image source" (AI-generated
-  // vs your own upload, set via the 🖼 Image button) are two separate
-  // decisions. text_image means "bake words into the image" — meaningless
-  // once the image is already your own fixed photo, so hide it in that case.
-  const usingOwnImage = idea.imageMode === 'use_reference' && (idea.references || []).length > 0
-  const availableKinds = usingOwnImage ? POST_KINDS.filter(k => k.value !== 'text_image') : POST_KINDS
-  const [postKind,  setPostKind]  = useState(() => {
-    const saved = idea.postKind || 'caption_image'
-    return availableKinds.some(k => k.value === saved) ? saved : 'caption_image'
-  })
-  const [slideCount,setSlideCount]= useState(idea.slideCount || 3)
+
+  // Format drives orientation and slide count from the catalog — pick a
+  // format, only the orientations/slide range it actually supports show up.
+  const [postFormat, setPostFormat] = useState(idea.postFormat || defaultFormat(idea.platform))
+  const [aspectRatio, setAspectRatio] = useState(idea.aspectRatio || defaultAspectRatio(idea.platform, postFormat))
+  const [slideCount, setSlideCount] = useState(idea.slideCount || slideRange(idea.platform, postFormat)?.default || 3)
+  // Caption inclusion and "bake text into the image" are separate decisions
+  // from format — a reel can be captionless, a feed image can be caption+text.
+  const [wantsCaption, setWantsCaption] = useState(idea.wantsCaption !== false)
   const [imageText, setImageText] = useState(idea.imageText || '')
-  const styles = idea.platform === 'linkedin' ? LI_STYLES : IG_STYLES
-  const kindHint = POST_KINDS.find(k => k.value === postKind)?.hint || ''
-  const showsImageFields = postKind !== 'caption_only'
+
+  const formats = formatsFor(idea.platform)
+  const currentFormat = formats.find(f => f.id === postFormat) || formats[0]
+  const isImage = currentFormat?.media === 'image'
+  const isVideo = currentFormat?.media === 'video'
+  const showsMediaFields = currentFormat?.media !== 'none'
+  const ratios = aspectRatiosFor(idea.platform, postFormat)
+  const slides = slideRange(idea.platform, postFormat)
+  const styles = stylesFor(idea.platform)
+
+  // "Post type" and "image source" (AI-generated vs your own upload, set via
+  // the 🖼 Image button) are two separate decisions. Baking text into the
+  // image is meaningless once the image is already your own fixed photo.
+  const usingOwnImage = idea.imageMode === 'use_reference' && (idea.references || []).length > 0
+
+  function onFormatChange(fmt) {
+    setPostFormat(fmt)
+    setAspectRatio(defaultAspectRatio(idea.platform, fmt))
+    const s = slideRange(idea.platform, fmt)
+    if (s) setSlideCount(s.default)
+  }
+
+  const derivedKind = derivePostKind({ platform: idea.platform, format: postFormat, wantsCaption, imageText, slideCount })
+  const kindHint = !showsMediaFields
+    ? 'Text only — no image or video.'
+    : currentFormat.id === 'carousel' || currentFormat.id === 'photo_carousel'
+      ? `A caption${wantsCaption ? '' : '-free'} carousel of ${slideCount} slides.`
+      : isVideo
+        ? `A ${wantsCaption ? 'captioned' : 'caption-free'} video post.`
+        : `A ${wantsCaption ? 'captioned' : 'caption-free'} single image post.`
 
   return (
     <Modal open onClose={onClose} title={idea.isNew ? 'Add idea' : 'Edit idea'} width="max-w-xl">
@@ -462,33 +473,50 @@ function IdeaEditModal({ idea, tones, saving, saveError, onClose, onSave }) {
         <Input label="Topic / what the post is about" value={topic} onChange={e => setTopic(e.target.value)} />
         <Textarea label="Angle (optional)" rows={2} value={angle} onChange={e => setAngle(e.target.value)} />
 
-        {/* Post type drives the whole flow — caption? image? how many? */}
-        <div>
-          <Select label="Post type" value={postKind} onChange={e => setPostKind(e.target.value)}>
-            {availableKinds.map(k => <option key={k.value} value={k.value}>{k.label}</option>)}
+        {/* Format + orientation drive the whole flow — media type, slide
+            count, and (via derivePostKind) what the generation engine does. */}
+        <div className="grid grid-cols-2 gap-3">
+          <Select label="Format" value={postFormat} onChange={e => onFormatChange(e.target.value)}>
+            {formats.map(f => <option key={f.id} value={f.id}>{f.label}</option>)}
           </Select>
-          <p className="text-[11px] text-text-tertiary mt-1">{kindHint}</p>
-          {usingOwnImage && showsImageFields && (
-            <p className="text-[11px] text-sage-700 mt-1">
-              📎 You've attached your own image for this post — no AI image generation will happen. "Image" here just means the post includes it; this setting only decides whether a caption is written to go with it.
-            </p>
-          )}
+          {ratios.length > 1 ? (
+            <Select label="Orientation" value={aspectRatio} onChange={e => setAspectRatio(e.target.value)}>
+              {ratios.map(r => <option key={r} value={r}>{aspectLabel(r)} ({r})</option>)}
+            </Select>
+          ) : ratios.length === 1 ? (
+            <div>
+              <p className="text-xs font-medium text-text-secondary mb-1.5">Orientation</p>
+              <p className="text-sm text-text-tertiary px-3 py-2 rounded-lg bg-surface-subtle/60 border border-border">{aspectLabel(ratios[0])} ({ratios[0]})</p>
+            </div>
+          ) : null}
         </div>
-
-        {postKind === 'carousel' && (
-          <Input label="How many slides?" type="number" min="2" max="10"
-            value={slideCount} onChange={e => setSlideCount(Number(e.target.value) || 3)} />
+        <p className="text-[11px] text-text-tertiary -mt-2">{kindHint}</p>
+        {usingOwnImage && showsMediaFields && (
+          <p className="text-[11px] text-sage-700">
+            📎 You've attached your own image for this post — no AI image generation will happen.
+          </p>
         )}
-        {postKind === 'text_image' && (
-          <Input label="Text to feature in the image"
+
+        {slides && (
+          <Input label="How many slides?" type="number" min={slides.min} max={slides.max}
+            value={slideCount} onChange={e => setSlideCount(Number(e.target.value) || slides.default)} />
+        )}
+
+        {showsMediaFields && (
+          <Toggle checked={wantsCaption} onChange={e => setWantsCaption(e.target.checked)}
+            label="Include a caption with this post" />
+        )}
+
+        {isImage && !usingOwnImage && (
+          <Input label="Text to feature in the image (optional)"
             placeholder="e.g. رمضان كريم  ·  or  ·  40% OFF this week"
             value={imageText} onChange={e => setImageText(e.target.value)} />
         )}
 
-        {/* Image direction — hidden for caption-only posts. */}
-        {showsImageFields && (
+        {/* Media direction — hidden for text-only posts. */}
+        {showsMediaFields && (
           <Textarea
-            label="Your vision for the image (optional)"
+            label={isVideo ? 'Your vision for the video (optional)' : 'Your vision for the image (optional)'}
             rows={2}
             placeholder="Describe what you're imagining — e.g. 'warm evening shot of a linear pendant over a majlis seating area, shot low, cozy glow.' Leave blank to let AI decide."
             value={imageIdea} onChange={e => setImageIdea(e.target.value)}
@@ -505,7 +533,7 @@ function IdeaEditModal({ idea, tones, saving, saveError, onClose, onSave }) {
             <option value="">Not set</option>
             {OBJECTIVES.map(o => <option key={o} value={o}>{o}</option>)}
           </Select>
-          {showsImageFields && (
+          {showsMediaFields && (
             <Select label="Visual style" value={style} onChange={e => setStyle(e.target.value)}>
               <option value="">AI decides</option>
               {styles.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
@@ -538,7 +566,11 @@ function IdeaEditModal({ idea, tones, saving, saveError, onClose, onSave }) {
         {saveError && <p className="text-xs text-red-600">{saveError}</p>}
         <div className="flex justify-end gap-3 pt-1">
           <Button variant="secondary" onClick={onClose}>{idea.isNew ? 'Discard' : 'Cancel'}</Button>
-          <Button onClick={() => onSave({ topic, angle, tone, date, time, format, suggestedStyle: style, imageIdea, objective, cta, hashtags, firstComment, series, postKind, slideCount, imageText })} disabled={saving || (idea.isNew && !topic.trim())}>
+          <Button onClick={() => onSave({
+            topic, angle, tone, date, time, suggestedStyle: style, imageIdea, objective, cta, hashtags, firstComment, series,
+            postFormat, aspectRatio, mediaType: currentFormat?.media || 'image', wantsCaption, imageText, slideCount,
+            postKind: derivedKind,
+          })} disabled={saving || (idea.isNew && !topic.trim())}>
             {saving ? <><Spinner size="sm" /> Saving…</> : 'Save'}
           </Button>
         </div>
@@ -730,7 +762,14 @@ export function CampaignPlanner() {
   const toggleDay      = d  => update({ postingDays: postingDays.includes(d) ? postingDays.filter(x => x !== d) : [...postingDays, d] })
 
   // ── Seed posts (specific posts the user already wants, optionally with images) ──
-  const addSeed    = ()          => update({ seedPosts: [...seedPosts, { text: '', platform: platforms[0] || 'instagram', format: 'post', date: '', references: [], imageMode: 'generate' }] })
+  const addSeed = () => {
+    const p = platforms[0] || 'instagram'
+    const fmt = defaultFormat(p)
+    update({ seedPosts: [...seedPosts, {
+      text: '', platform: p, date: '', references: [], imageMode: 'generate',
+      postFormat: fmt, aspectRatio: defaultAspectRatio(p, fmt), slideCount: slideRange(p, fmt)?.default || 1,
+    }] })
+  }
   const updateSeed = (i, patch)  => update({ seedPosts: seedPosts.map((s, idx) => idx === i ? { ...s, ...patch } : s) })
   const removeSeed = i           => update({ seedPosts: seedPosts.filter((_, idx) => idx !== i) })
   function openSeedImagePicker(i) { setSeedPickerMode(seedPosts[i].imageMode || 'generate'); setPickingSeedIdx(i) }
@@ -767,15 +806,23 @@ export function CampaignPlanner() {
     const cleanSeeds = seedPosts
       .filter(s => s.text.trim())
       .map(s => ({
-        text: s.text.trim(), platform: s.platform, format: s.format, date: s.date || null,
+        text: s.text.trim(), platform: s.platform, format: s.postFormat || defaultFormat(s.platform), date: s.date || null,
         image_mode: s.imageMode || 'generate', reference_image_urls: s.references || [],
       }))
-    const seedIdeas = cleanSeeds.map(s => ({
-      platform: s.platform, date: s.date, title: s.text, topic: s.text, format: s.format,
-      tone: s.platform === 'linkedin' ? 'thought_leader' : 'professional',
-      rationale: 'You added this as a specific post you wanted.',
-      imageMode: s.image_mode, references: s.reference_image_urls,
-    }))
+    const seedIdeas = seedPosts.filter(s => s.text.trim()).map(s => {
+      const postFormat = s.postFormat || defaultFormat(s.platform)
+      const mediaType = formatsFor(s.platform).find(f => f.id === postFormat)?.media || 'image'
+      return {
+        platform: s.platform, date: s.date, title: s.text, topic: s.text,
+        tone: s.platform === 'linkedin' ? 'thought_leader' : 'professional',
+        rationale: 'You added this as a specific post you wanted.',
+        imageMode: s.imageMode, references: s.references,
+        postFormat, aspectRatio: s.aspectRatio || defaultAspectRatio(s.platform, postFormat), mediaType,
+        slideCount: s.slideCount || slideRange(s.platform, postFormat)?.default || 1,
+        wantsCaption: true,
+        postKind: derivePostKind({ platform: s.platform, format: postFormat, wantsCaption: true, slideCount: s.slideCount }),
+      }
+    })
 
     let aiPosts = []
     let featuredProducts = []
@@ -813,7 +860,7 @@ export function CampaignPlanner() {
         posting_time: defaultTime,
       })
       if (result.error) { setLoading(false); setError(result.error); return }
-      aiPosts = result.posts
+      aiPosts = result.posts.map(normalizeAiIdea)
     }
 
     // Persist the plan + its ideas so approval state is real, not ephemeral.
@@ -877,7 +924,7 @@ export function CampaignPlanner() {
     })
     if (result.error) { setMoreLoading(false); setMoreError(result.error); return }
 
-    const ideasRes = await insertIdeas(activeWorkspaceId, accessToken, planId, result.posts, ideas.length)
+    const ideasRes = await insertIdeas(activeWorkspaceId, accessToken, planId, result.posts.map(normalizeAiIdea), ideas.length)
     setMoreLoading(false)
     if (ideasRes.error) { setMoreError(`Generated but couldn't be saved: ${ideasRes.error}`); return }
 
@@ -897,28 +944,46 @@ export function CampaignPlanner() {
   }
 
   // Copies a fully-briefed idea onto the OTHER platform — same topic/angle/
-  // objective/cta/image direction, with tone and style remapped to that
-  // platform's own vocabulary (see crosswalkTone/crosswalkStyle). Deliberately
-  // does NOT copy reference images: they were picked/cropped for the
-  // original platform's aspect ratio, which the other platform doesn't share.
-  // Not auto-elongated — this idea already has a full brief, unlike a bare
-  // "+ Add idea" draft.
-  async function onIdeaDuplicate(idea) {
+  // objective/cta/image direction, with tone/style/format remapped to that
+  // platform's own vocabulary (see postFormats.js crosswalk* helpers).
+  // Deliberately does NOT copy reference images: they were picked/cropped
+  // for the original platform's aspect ratio, which the other platform
+  // doesn't share. Not auto-elongated — this idea already has a full brief,
+  // unlike a bare "+ Add idea" draft.
+  //
+  // Both ideas end up sharing a group_id — the original is patched with a
+  // fresh one if it didn't already have one — so cross-platform siblings can
+  // be told apart from genuine repeats (anti-repetition history, Step 5's
+  // collapsed multi-platform card) without being conflated.
+  async function fanOutIdea(idea) {
     if (idea.isNew) return
     const targetPlatform = idea.platform === 'linkedin' ? 'instagram' : 'linkedin'
+    const groupId = idea.groupId || crypto.randomUUID()
+    if (!idea.groupId) {
+      const patchRes = await updateIdea(accessToken, idea.id, { group_id: groupId })
+      if (patchRes.ok) onIdeaChange({ ...idea, groupId })
+    }
+
+    const newFormat = crosswalkFormat(idea.postFormat, idea.platform, targetPlatform)
+    const newAspectRatio = defaultAspectRatio(targetPlatform, newFormat)
+    const newMediaType = formatsFor(targetPlatform).find(f => f.id === newFormat)?.media || 'image'
+    const newPostKind = derivePostKind({ platform: targetPlatform, format: newFormat, wantsCaption: idea.wantsCaption, imageText: idea.imageText, slideCount: idea.slideCount })
+
     const res = await insertIdeas(activeWorkspaceId, accessToken, planId, [{
       platform: targetPlatform, date: idea.date, time: idea.time,
       title: idea.title || idea.topic, topic: idea.topic, angle: idea.angle,
       tone: crosswalkTone(idea.tone, idea.platform, targetPlatform),
       occasion: idea.occasion, pillar: idea.pillar,
-      objective: idea.objective, cta: idea.cta, format: idea.format,
+      objective: idea.objective, cta: idea.cta,
       suggestedStyle: crosswalkStyle(idea.suggestedStyle, idea.platform, targetPlatform),
       imageIdea: idea.imageIdea,
       // Hashtag conventions differ by platform (Instagram: dense; LinkedIn:
       // few/none) — reset rather than carry over verbatim. First comment
       // isn't platform-specific, so it copies over fine.
       firstComment: idea.firstComment, series: idea.series,
-      postKind: idea.postKind, slideCount: idea.slideCount, imageText: idea.imageText,
+      postFormat: newFormat, aspectRatio: newAspectRatio, mediaType: newMediaType,
+      wantsCaption: idea.wantsCaption, groupId,
+      postKind: newPostKind, slideCount: idea.slideCount, imageText: idea.imageText,
     }], ideas.length)
     if (res.error || !res.rows?.[0]) { setError(res.error || 'Could not duplicate idea.'); return }
     const created = dbIdeaToDraft(res.rows[0])
@@ -933,10 +998,12 @@ export function CampaignPlanner() {
     const merged = { ...tempIdea, ...patch }
     const res = await insertIdeas(activeWorkspaceId, accessToken, planId, [{
       platform: merged.platform, date: merged.date, time: merged.time, title: merged.topic || 'New idea',
-      topic: merged.topic, angle: merged.angle, tone: merged.tone, format: merged.format,
+      topic: merged.topic, angle: merged.angle, tone: merged.tone,
       suggestedStyle: merged.suggestedStyle, imageIdea: merged.imageIdea,
       objective: merged.objective, cta: merged.cta,
       hashtags: merged.hashtags, firstComment: merged.firstComment, series: merged.series,
+      postFormat: merged.postFormat, aspectRatio: merged.aspectRatio, mediaType: merged.mediaType,
+      wantsCaption: merged.wantsCaption,
       postKind: merged.postKind, slideCount: merged.slideCount, imageText: merged.imageText,
     }], ideas.length)
     if (res.error || !res.rows?.[0]) return { error: res.error || 'Could not save idea.' }
@@ -984,17 +1051,26 @@ export function CampaignPlanner() {
   async function bulkStatus(status) {
     setBusy(true)
     await setAllIdeaStatus(accessToken, planId, status)
-    update({ ideas: ideas.map(i => ({ ...i, status })) })
+    // Mirror the same scoping as setAllIdeaStatus's DB write: "Reset" really
+    // does touch everything, but Approve all / Reject all only affect ideas
+    // still 'proposed' — otherwise the local board would claim a change the
+    // DB didn't actually make (a previously-rejected idea showing "approved"
+    // in this tab while the row itself never moved).
+    update({ ideas: ideas.map(i => (status === 'proposed' || i.status === 'proposed') ? { ...i, status } : i) })
     setBusy(false)
   }
 
   // Add a blank, unsaved idea card and open its editor — nothing is written
   // to the database until the user clicks Save (see onIdeaCreate).
   function addIdea() {
+    const p = platformFilter !== 'all' ? platformFilter : (platforms[0] || 'instagram')
+    const fmt = defaultFormat(p)
     const draftIdea = {
       id: `new_${uid()}`, isNew: true, status: 'proposed',
-      platform: platformFilter !== 'all' ? platformFilter : (platforms[0] || 'instagram'),
-      date: startDate, title: '', topic: '', angle: '', format: 'post',
+      platform: p,
+      date: startDate, title: '', topic: '', angle: '',
+      postFormat: fmt, aspectRatio: defaultAspectRatio(p, fmt), mediaType: formatsFor(p).find(f => f.id === fmt)?.media || 'image',
+      wantsCaption: true, slideCount: slideRange(p, fmt)?.default || 1,
       tone: (platformFilter === 'linkedin' || platforms[0] === 'linkedin') ? 'thought_leader' : 'professional',
     }
     setStatusFilter('all'); setSeasonalOnly(false); setPlatformFilter('all')
@@ -1211,6 +1287,16 @@ export function CampaignPlanner() {
                 {seedPosts.map((s, i) => {
                   const refCount = (s.references || []).length
                   const usingImage = s.imageMode === 'use_reference'
+                  const sFormat = s.postFormat || defaultFormat(s.platform)
+                  const sRatios = aspectRatiosFor(s.platform, sFormat)
+                  const sSlides = slideRange(s.platform, sFormat)
+                  function onPlatformChange(p) {
+                    const fmt = defaultFormat(p)
+                    updateSeed(i, { platform: p, postFormat: fmt, aspectRatio: defaultAspectRatio(p, fmt), slideCount: slideRange(p, fmt)?.default || 1 })
+                  }
+                  function onFormatChange(fmt) {
+                    updateSeed(i, { postFormat: fmt, aspectRatio: defaultAspectRatio(s.platform, fmt), slideCount: slideRange(s.platform, fmt)?.default || 1 })
+                  }
                   return (
                     <div key={i} className="rounded-xl border border-border p-3 space-y-2 bg-white">
                       <textarea
@@ -1220,14 +1306,25 @@ export function CampaignPlanner() {
                         value={s.text} onChange={e => updateSeed(i, { text: e.target.value })}
                       />
                       <div className="flex items-center gap-2 flex-wrap">
-                        <select value={s.platform} onChange={e => updateSeed(i, { platform: e.target.value })}
+                        <select value={s.platform} onChange={e => onPlatformChange(e.target.value)}
                           className="rounded-lg border border-border px-2 py-1.5 text-xs bg-white capitalize focus:outline-none focus:border-amber-400">
                           {PLATFORMS.map(p => <option key={p} value={p}>{p}</option>)}
                         </select>
-                        <select value={s.format} onChange={e => updateSeed(i, { format: e.target.value })}
-                          className="rounded-lg border border-border px-2 py-1.5 text-xs bg-white capitalize focus:outline-none focus:border-amber-400">
-                          {FORMATS.map(f => <option key={f} value={f}>{f}</option>)}
+                        <select value={sFormat} onChange={e => onFormatChange(e.target.value)}
+                          className="rounded-lg border border-border px-2 py-1.5 text-xs bg-white focus:outline-none focus:border-amber-400">
+                          {formatsFor(s.platform).map(f => <option key={f.id} value={f.id}>{f.label}</option>)}
                         </select>
+                        {sRatios.length > 1 && (
+                          <select value={s.aspectRatio || defaultAspectRatio(s.platform, sFormat)} onChange={e => updateSeed(i, { aspectRatio: e.target.value })}
+                            className="rounded-lg border border-border px-2 py-1.5 text-xs bg-white focus:outline-none focus:border-amber-400">
+                            {sRatios.map(r => <option key={r} value={r}>{aspectLabel(r)} ({r})</option>)}
+                          </select>
+                        )}
+                        {sSlides && (
+                          <input type="number" min={sSlides.min} max={sSlides.max} value={s.slideCount || sSlides.default}
+                            onChange={e => updateSeed(i, { slideCount: Number(e.target.value) || sSlides.default })}
+                            title="Number of slides" className="w-14 rounded-lg border border-border px-2 py-1.5 text-xs bg-white focus:outline-none focus:border-amber-400" />
+                        )}
                         <input type="date" value={s.date || ''} min={startDate || undefined} max={endDate || undefined}
                           onChange={e => updateSeed(i, { date: e.target.value })}
                           className="rounded-lg border border-border px-2 py-1.5 text-xs bg-white focus:outline-none focus:border-amber-400" />
@@ -1435,7 +1532,7 @@ export function CampaignPlanner() {
                   {group.ideas.map(idea => (
                     <IdeaCard key={idea.id} idea={idea} index={ideas.indexOf(idea)} accessToken={accessToken}
                       autoEdit={idea.id === autoEditId}
-                      onChange={onIdeaChange} onRemove={onIdeaRemove} onCreate={onIdeaCreate} onDuplicate={onIdeaDuplicate} />
+                      onChange={onIdeaChange} onRemove={onIdeaRemove} onCreate={onIdeaCreate} onDuplicate={fanOutIdea} />
                   ))}
                 </div>
               ))}
@@ -1489,7 +1586,7 @@ export function CampaignPlanner() {
           onSave={saveSeedImages}
           onClose={() => setPickingSeedIdx(null)}
           mode={seedPickerMode} onModeChange={setSeedPickerMode}
-          format={seedPosts[pickingSeedIdx]?.format}
+          format={seedPosts[pickingSeedIdx]?.postFormat}
         />
       )}
     </div>

@@ -125,6 +125,15 @@ export async function insertIdeas(workspaceId, accessToken, planId, ideas, start
     image_text:       idea.imageText || '',
     image_mode:       idea.imageMode || 'generate',
     reference_image_urls: idea.references || [],
+    // Format & orientation system — the human-editable fields generation
+    // actually reads now; suggested_format/suggested_aspect_ratio above stay
+    // as AI telemetry only. post_kind is still sent for the current engine,
+    // but it's derived (see postFormats.js#derivePostKind), never independent.
+    format:           idea.postFormat || '',
+    aspect_ratio:     idea.aspectRatio || '',
+    media_type:       idea.mediaType || 'image',
+    group_id:         idea.groupId || null,
+    wants_caption:    idea.wantsCaption !== false,
     status:           'proposed',
     position:         startPosition + i,
   }))
@@ -153,9 +162,14 @@ export async function updateIdea(accessToken, ideaId, patch) {
 }
 
 // Approve or reject every still-'proposed' idea in one call (bulk action).
+// "Reset" (status === 'proposed') really does mean touch everything; Approve
+// all / Reject all must NOT — without the status=eq.proposed scope, clicking
+// "Approve all" would also flip already-rejected ideas back to approved
+// (and vice versa), silently overturning decisions the user already made.
 export async function setAllIdeaStatus(accessToken, planId, status) {
   try {
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/plan_ideas?plan_id=eq.${planId}`, {
+    const scope = status === 'proposed' ? '' : '&status=eq.proposed'
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/plan_ideas?plan_id=eq.${planId}${scope}`, {
       method: 'PATCH',
       headers: { ...authHeaders(accessToken), 'Content-Type': 'application/json', Prefer: 'return=representation' },
       body: JSON.stringify({ status }),
