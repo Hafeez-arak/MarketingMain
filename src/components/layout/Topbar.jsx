@@ -9,11 +9,11 @@ const titles = {
   '/': 'Dashboard', '/brand-brain': 'Brand Brain', '/campaigns': 'Campaigns', '/campaigns/plan': 'Plan Campaign', '/campaigns/new': 'New Campaign',
   '/schedule': 'Content Calendar', '/email': 'Email Flows', '/email/new': 'New Email Flow',
   '/analytics': 'Analytics', '/media': 'Media Library', '/social': 'Social Media',
-  '/social/instagram': 'Instagram', '/social/facebook': 'Facebook',
-  '/social/linkedin': 'LinkedIn', '/social/tiktok': 'TikTok', '/social/x': 'X / Twitter',
-  '/social/instagram/new': 'New Instagram Post', '/social/facebook/new': 'New Facebook Post',
-  '/social/linkedin/new': 'New LinkedIn Post', '/social/tiktok/new': 'New TikTok Post', '/social/x/new': 'New X Post',
-  '/approvals': 'Approvals', '/settings': 'Settings', '/integrations': 'Integrations', '/team': 'Team',
+  '/social/instagram': 'Instagram',
+  '/social/linkedin': 'LinkedIn', '/social/tiktok': 'TikTok',
+  '/social/instagram/new': 'New Instagram Post',
+  '/social/linkedin/new': 'New LinkedIn Post', '/social/tiktok/new': 'New TikTok Post',
+  '/settings': 'Settings', '/integrations': 'Integrations', '/team': 'Team',
 }
 
 // Sub-pages reached via a flow (not a direct sidebar link) get a back button
@@ -24,10 +24,8 @@ const BACK_TARGETS = {
   '/campaigns/plan':       '/campaigns',
   '/email/new':            '/email',
   '/social/instagram/new': '/social/instagram',
-  '/social/facebook/new':  '/social/facebook',
   '/social/linkedin/new':  '/social/linkedin',
   '/social/tiktok/new':    '/social/tiktok',
-  '/social/x/new':         '/social/x',
 }
 
 export function Topbar() {

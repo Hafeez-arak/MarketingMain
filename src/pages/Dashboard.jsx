@@ -78,7 +78,7 @@ export default function Dashboard() {
           onClick={() => navigate('/email')}
           icon={<svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>} />
         <StatCard label="Pending Approvals" value={pending || '0'} sub="Need review" accent={pending > 0}
-          onClick={() => navigate('/approvals')}
+          onClick={() => navigate('/social/approvals')}
           icon={<svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>} />
         <StatCard label="Total Posts" value={totalPosts || '0'} sub="All time"
           onClick={() => navigate('/schedule')}
@@ -184,7 +184,7 @@ export default function Dashboard() {
               </ul>
             )}
             <div className="px-5 py-3" style={{ borderTop: '1px solid rgba(232,217,190,0.3)' }}>
-              <Button variant="ghost" size="sm" className="w-full justify-center" onClick={() => navigate('/approvals')}>
+              <Button variant="ghost" size="sm" className="w-full justify-center" onClick={() => navigate('/social/approvals')}>
                 View all approvals
               </Button>
             </div>

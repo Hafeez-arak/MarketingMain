@@ -20,7 +20,6 @@ import { SocialOverview, SocialPlatform, NewPost } from './pages/social/index'
 import { InstagramPage } from './pages/social/InstagramPage'
 import { LinkedInPage }  from './pages/social/LinkedInPage'
 import { Approvals as PostApprovals } from './pages/social/Approvals'
-import { Approvals }               from './pages/approvals/index'
 import { Settings, Integrations, Team } from './pages/settings/index'
 import { BrandBrain } from './pages/settings/BrandBrain'
 
@@ -52,16 +51,11 @@ function ProtectedApp() {
             <Route path="/social"                element={<SocialOverview />} />
             <Route path="/social/approvals"      element={<PostApprovals />} />
             <Route path="/social/instagram"      element={<InstagramPage />} />
-            <Route path="/social/facebook"       element={<SocialPlatform />} />
             <Route path="/social/linkedin"       element={<LinkedInPage />} />
             <Route path="/social/tiktok"         element={<SocialPlatform />} />
-            <Route path="/social/x"              element={<SocialPlatform />} />
             <Route path="/social/instagram/new"  element={<NewPost />} />
-            <Route path="/social/facebook/new"   element={<NewPost />} />
             <Route path="/social/linkedin/new"   element={<NewPost />} />
             <Route path="/social/tiktok/new"     element={<NewPost />} />
-            <Route path="/social/x/new"          element={<NewPost />} />
-            <Route path="/approvals"             element={<Approvals />} />
             <Route path="/settings"             element={<Settings />} />
             <Route path="/integrations"          element={<Integrations />} />
             <Route path="/team"                  element={<Team />} />

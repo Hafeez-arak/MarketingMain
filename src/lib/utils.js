@@ -12,10 +12,8 @@ export function timeAgo(iso) {
 }
 export const PLATFORM_META = {
   instagram:{ label:'Instagram', abbr:'IG', color:'#E1306C', bg:'bg-pink-50',  text:'text-pink-600',  border:'border-pink-200',  maxChars:2200 },
-  facebook: { label:'Facebook',  abbr:'FB', color:'#1877F2', bg:'bg-blue-50',  text:'text-blue-600',  border:'border-blue-200',  maxChars:63206 },
   linkedin: { label:'LinkedIn',  abbr:'LI', color:'#0A66C2', bg:'bg-sky-50',   text:'text-sky-700',   border:'border-sky-200',   maxChars:3000 },
   tiktok:   { label:'TikTok',    abbr:'TT', color:'#010101', bg:'bg-stone-100',text:'text-stone-700', border:'border-stone-300', maxChars:2200 },
-  x:        { label:'X',         abbr:'X',  color:'#000000', bg:'bg-stone-100',text:'text-stone-700', border:'border-stone-300', maxChars:280  },
 }
 export const STATUS_META = {
   draft:           { label:'Draft',     classes:'bg-stone-100 text-stone-600' },
