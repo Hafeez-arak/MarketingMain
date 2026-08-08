@@ -10,7 +10,7 @@ import {
 } from '../../lib/brandBrain'
 import { suppliersApi, competitorsApi, productsApi } from '../../lib/brandDirectory'
 import { fetchBrandAssets } from '../../lib/brandAssets'
-import { requestCampaignPlan, requestPlanContentGeneration, elongateIdea } from '../../lib/campaignPlanner'
+import { requestCampaignPlan, requestPlanContentGeneration, elongateIdea, requestDraftCopy } from '../../lib/campaignPlanner'
 import {
   formatsFor, defaultFormat, aspectRatiosFor, defaultAspectRatio, slideRange, aspectLabel,
   stylesFor, crosswalkTone, crosswalkStyle, crosswalkFormat, derivePostKind,
@@ -18,8 +18,9 @@ import {
 import { ReferencePicker } from '../../components/ReferencePicker'
 import {
   createPlan, insertIdeas, updateIdea, setAllIdeaStatus, deleteIdea, updatePlan, markIdeasProcessing,
-  fetchPastIdeas, fetchPlanWithIdeas,
+  fetchPastIdeas, fetchPlanWithIdeas, markIdeasDrafting, fetchIdeaDrafts,
 } from '../../lib/contentPlans'
+import { IdeaDraftPanel } from '../../components/IdeaDraftPanel'
 
 const GOALS = ['Brand awareness','Lead generation','Product launch','Community engagement','Event promotion','Sales & offers']
 const PLATFORMS = ['instagram', 'linkedin'] // only platforms with a generation pipeline today
@@ -172,6 +173,18 @@ export function dbIdeaToDraft(row) {
     mediaType: row.media_type || 'image',
     groupId: row.group_id || '',
     wantsCaption: row.wants_caption !== false,
+    // Draft copy — options proposed at plan time, and whichever one (or
+    // hand-edit) the reviewer picked. See IdeaDraftPanel.
+    captionOptions: row.caption_options || [],
+    mediaPromptOptions: row.media_prompt_options || [],
+    captionAr: row.caption_ar || '',
+    captionEn: row.caption_en || '',
+    mediaPrompt: row.media_prompt || '',
+    motionPrompt: row.motion_prompt || '',
+    draftStatus: row.draft_status || 'not_started',
+    draftError: row.draft_error || '',
+    draftedAt: row.drafted_at || '',
+    previewImageUrl: row.preview_image_url || '',
     status: row.status || 'proposed',
     position: row.position ?? 0,
   }
@@ -244,7 +257,8 @@ const STATUS_META = {
 }
 
 // ─── One idea in the review list, with inline approve/reject + edit ─────────
-function IdeaCard({ idea, index, accessToken, onChange, onRemove, onCreate, onDuplicate, autoEdit = false }) {
+function IdeaCard({ idea, index, accessToken, onChange, onRemove, onCreate, onDuplicate, onRedraft, mediaOptionsUrl, autoEdit = false }) {
+  const [redrafting, setRedrafting] = useState(false)
   const [editing, setEditing] = useState(autoEdit)
   const [saving,  setSaving]  = useState(false)
   const [saveError, setSaveError] = useState('')
@@ -357,6 +371,10 @@ function IdeaCard({ idea, index, accessToken, onChange, onRemove, onCreate, onDu
           </div>
           <span className={`text-[10px] font-semibold px-2 py-1 rounded-full flex-shrink-0 ${st.cls}`}>{st.label}</span>
         </div>
+
+        <IdeaDraftPanel idea={idea} accessToken={accessToken} mediaOptionsUrl={mediaOptionsUrl}
+          onIdeaChange={onChange} redrafting={redrafting}
+          onRedraft={async () => { setRedrafting(true); await onRedraft(idea); setRedrafting(false) }} />
 
         {/* Actions — Reject reveals one-tap reason chips instead of rejecting blind */}
         {showRejectReasons ? (
@@ -756,6 +774,66 @@ export function CampaignPlanner() {
     })
   }, [planId, accessToken])
 
+  // Fire arak-draft-copy for a batch of freshly-created ideas — ONE call per
+  // idea (no cross-idea batching), so a slow/failed draft never blocks the
+  // rest of the board. `allIdeas` is the full, just-computed ideas array
+  // (not the `ideas` closure — avoids the stale-state problem of firing
+  // multiple update() calls in a loop right after another update()).
+  // Best-effort: if the webhook isn't configured, ideas simply stay
+  // 'not_started' rather than getting stuck marked 'drafting' forever.
+  async function draftIdeas(allIdeas, newIds) {
+    const draftCopyUrl = state.webhooks?.draftCopy
+    if (!newIds.length || !draftCopyUrl) return
+    const nowIso = new Date().toISOString()
+    update({ ideas: allIdeas.map(i => newIds.includes(i.id) ? { ...i, draftStatus: 'drafting', draftedAt: nowIso, draftError: '' } : i) })
+    await markIdeasDrafting(accessToken, newIds)
+    const blocks = buildSectionBlocks(state.brandProfile, directory)
+    const instructions = brandBrainSections.map(s => blocks[s]).filter(Boolean).join('\n\n')
+    const captionLanguage = state.brandProfile?.captionLanguage || 'both'
+    const targets = allIdeas.filter(i => newIds.includes(i.id))
+    Promise.allSettled(targets.map(idea => requestDraftCopy(draftCopyUrl, {
+      plan_idea_id: idea.id, platform: idea.platform, topic: idea.topic, angle: idea.angle, tone: idea.tone,
+      objective: idea.objective, cta: idea.cta, occasion: idea.occasion, content_pillar: idea.pillar,
+      format: idea.postFormat, aspect_ratio: idea.aspectRatio, media_type: idea.mediaType,
+      wants_caption: idea.wantsCaption, image_idea: idea.imageIdea,
+      caption_language: captionLanguage, instructions,
+    })))
+  }
+
+  // Poll plan_ideas for cards currently 'drafting' — 4s while any are in
+  // flight, stopped otherwise. Merge rule: a poll result only overwrites a
+  // card's option/selection fields while that card is STILL locally
+  // 'drafting' — once the reviewer has picked or edited something, a
+  // late-arriving poll must never clobber it.
+  useEffect(() => {
+    const draftingIds = ideas.filter(i => i.draftStatus === 'drafting').map(i => i.id)
+    if (!draftingIds.length) return
+    const timer = setInterval(async () => {
+      const rows = await fetchIdeaDrafts(accessToken, draftingIds)
+      if (!rows.length) return
+      const now = Date.now()
+      update({
+        ideas: ideas.map(i => {
+          if (i.draftStatus !== 'drafting') return i
+          const row = rows.find(r => r.id === i.id)
+          if (!row) return i
+          const staleMs = i.draftedAt ? now - new Date(i.draftedAt).getTime() : 0
+          if (row.draft_status === 'drafting' && staleMs > 5 * 60 * 1000) {
+            return { ...i, draftStatus: 'failed', draftError: 'Drafting timed out — try again.' }
+          }
+          if (row.draft_status === 'ready' || row.draft_status === 'failed') {
+            return {
+              ...i, draftStatus: row.draft_status, draftError: row.draft_error || '',
+              captionOptions: row.caption_options || [], mediaPromptOptions: row.media_prompt_options || [],
+            }
+          }
+          return i
+        }),
+      })
+    }, 4000)
+    return () => clearInterval(timer)
+  }, [ideas, accessToken])
+
   const togglePlatform = p => update({ platforms: platforms.includes(p) ? platforms.filter(x => x !== p) : [...platforms, p] })
   const toggleSection  = s => update({ brandBrainSections: brandBrainSections.includes(s) ? brandBrainSections.filter(x => x !== s) : [...brandBrainSections, s] })
   const toggleProduct  = id => update({ featuredProductIds: featuredProductIds.includes(id) ? featuredProductIds.filter(x => x !== id) : [...featuredProductIds, id] })
@@ -882,12 +960,19 @@ export function CampaignPlanner() {
     setLoading(false)
     if (ideasRes.error) { setError(`Ideas generated but couldn't be saved: ${ideasRes.error}`); return }
 
+    const createdIdeas = ideasRes.rows.map(dbIdeaToDraft)
+    // This plan was just created in this tab — the ideas array above is
+    // already fresh, no need for the mount-sync effect to re-fetch it (and
+    // if it did, it would race draftIdeas' own optimistic 'drafting' update
+    // below with a stale DB read from before that PATCH lands).
+    syncedPlanIdRef.current = planRes.plan.id
     update({
       planId: planRes.plan.id,
-      ideas: ideasRes.rows.map(dbIdeaToDraft),
+      ideas: createdIdeas,
       name: planRes.plan.name,
       step: 'review',
     })
+    draftIdeas(createdIdeas, createdIdeas.map(i => i.id))
   }
 
   // Top up the existing plan with more AI ideas — same webhook, but with the
@@ -928,8 +1013,11 @@ export function CampaignPlanner() {
     setMoreLoading(false)
     if (ideasRes.error) { setMoreError(`Generated but couldn't be saved: ${ideasRes.error}`); return }
 
-    update({ ideas: [...ideas, ...ideasRes.rows.map(dbIdeaToDraft)] })
+    const createdIdeas = ideasRes.rows.map(dbIdeaToDraft)
+    const nextIdeas = [...ideas, ...createdIdeas]
+    update({ ideas: nextIdeas })
     setShowMoreModal(false)
+    draftIdeas(nextIdeas, createdIdeas.map(i => i.id))
   }
 
   function onIdeaChange(updated) {
@@ -987,9 +1075,11 @@ export function CampaignPlanner() {
     }], ideas.length)
     if (res.error || !res.rows?.[0]) { setError(res.error || 'Could not duplicate idea.'); return }
     const created = dbIdeaToDraft(res.rows[0])
-    update({ ideas: [...ideas, created] })
+    const nextIdeas = [...ideas, created]
+    update({ ideas: nextIdeas })
     setAutoEditId(created.id)
     setTimeout(() => setAutoEditId(null), 400)
+    draftIdeas(nextIdeas, [created.id])
   }
 
   // Called once the "+ Add idea" editor's Save is clicked — this is the
@@ -1039,12 +1129,14 @@ export function CampaignPlanner() {
       }
     }
 
-    update({ ideas: ideas.map(i => i.id === tempIdea.id ? created : i) })
+    const nextIdeas = ideas.map(i => i.id === tempIdea.id ? created : i)
+    update({ ideas: nextIdeas })
     // Re-open the editor on the now-enriched idea (the card remounts under its
     // real id the instant `ideas` updates, since IdeaCard is keyed by id) so
     // the user sees the elongated brief and can adjust it before approving.
     setAutoEditId(created.id)
     setTimeout(() => setAutoEditId(null), 400)
+    draftIdeas(nextIdeas, [created.id])
     return { ok: true, idea: created }
   }
 
@@ -1531,8 +1623,9 @@ export function CampaignPlanner() {
                   </div>
                   {group.ideas.map(idea => (
                     <IdeaCard key={idea.id} idea={idea} index={ideas.indexOf(idea)} accessToken={accessToken}
-                      autoEdit={idea.id === autoEditId}
-                      onChange={onIdeaChange} onRemove={onIdeaRemove} onCreate={onIdeaCreate} onDuplicate={fanOutIdea} />
+                      autoEdit={idea.id === autoEditId} mediaOptionsUrl={state.webhooks?.mediaOptions}
+                      onChange={onIdeaChange} onRemove={onIdeaRemove} onCreate={onIdeaCreate} onDuplicate={fanOutIdea}
+                      onRedraft={target => draftIdeas(ideas, [target.id])} />
                   ))}
                 </div>
               ))}

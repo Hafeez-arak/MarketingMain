@@ -203,6 +203,32 @@ const WORKFLOW_CONFIGS = [
       </div>
     ),
   },
+  {
+    platform: 'draftCopy',
+    label: 'Draft Copy Workflow',
+    placeholder: 'https://your-instance.app.n8n.cloud/webhook/arak-draft-copy',
+    description: 'Fires once per idea the moment a plan is created — writes 3 caption options and 3 media-prompt options onto the plan board before anything renders, so you review real proposals instead of blind topics. Async: fires and the board polls for the result.',
+    icon: (
+      <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: 'linear-gradient(135deg,#0ea5e9,#38bdf8)' }}>
+        <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24">
+          <path d="M12 20h9M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/>
+        </svg>
+      </div>
+    ),
+  },
+  {
+    platform: 'mediaOptions',
+    label: 'Media Options Workflow',
+    placeholder: 'https://your-instance.app.n8n.cloud/webhook/arak-media-options',
+    description: 'Powers "🖼 Generate image options" on the plan board — real spend (fal.ai), so it only fires when you click it. Returns 2-3 actual candidate images (or a video cover) to pick from before Finalize, not just more prompts.',
+    icon: (
+      <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: 'linear-gradient(135deg,#f59e0b,#fbbf24)' }}>
+        <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24">
+          <rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>
+        </svg>
+      </div>
+    ),
+  },
 ]
 
 function WorkflowWebhooks() {

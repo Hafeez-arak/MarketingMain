@@ -118,6 +118,49 @@ export async function requestCaptionStudio(webhookUrl, payload) {
   }
 }
 
+// Draft Copy — one call per idea, fired the moment a plan's ideas exist (or
+// whenever the reviewer asks for a fresh set on one card). Async: the
+// webhook responds "accepted" immediately and writes caption_options /
+// media_prompt_options onto the plan_ideas row in the background; the
+// caller doesn't await the actual draft, it polls plan_ideas for it
+// (see startDraftPoll below). Best-effort — a rejected/unconfigured call
+// just means that one card's draft_status never leaves 'drafting' until a
+// retry, it never blocks the rest of the board.
+export async function requestDraftCopy(webhookUrl, payload) {
+  if (!webhookUrl) return { error: 'Draft Copy webhook not configured. Go to Settings → Integrations → Workflow Webhooks.' }
+  try {
+    const res = await fetch(webhookUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+    return { ok: res.ok, error: res.ok ? null : `Webhook returned ${res.status}` }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+}
+
+// Media Options — on-demand, synchronous. The reviewer clicked "Generate
+// image options" and is watching a loading state, so this awaits the real
+// 2-3 candidate image URLs (fal.ai) rather than firing and polling.
+export async function requestMediaOptions(webhookUrl, payload) {
+  if (!webhookUrl) return { error: 'Media Options webhook not configured. Go to Settings → Integrations → Workflow Webhooks.' }
+  try {
+    const res = await fetch(webhookUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+    if (!res.ok) { const err = await res.text(); return { error: err || `Webhook returned ${res.status}` } }
+    const data = await res.json()
+    const raw  = Array.isArray(data) ? data[0] : data
+    if (!raw || raw.ok === false) return { error: raw?.error || 'Image generation failed.' }
+    return { ok: true, images: raw.images || [] }
+  } catch (err) {
+    return { error: err.message }
+  }
+}
+
 // Fire the approved plan's ideas at the per-platform Plan Generation
 // webhooks. Each webhook responds immediately ("accepted") and then generates
 // every idea in the background (caption + image) into the *_generated_posts

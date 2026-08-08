@@ -179,6 +179,39 @@ export async function setAllIdeaStatus(accessToken, planId, status) {
   } catch (err) { return { error: err.message } }
 }
 
+// ── Draft copy tracking ──────────────────────────────────────────────────
+// Durable per-idea state: not_started -> drafting -> ready/failed. Marked
+// 'drafting' the instant ideas are created (before the draft-copy webhook
+// even responds — it's async) so the board shows real state on reload, not
+// just while the tab that created them stays open.
+export async function markIdeasDrafting(accessToken, ideaIds) {
+  if (!ideaIds?.length) return { ok: true }
+  try {
+    const idList = ideaIds.join(',')
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/plan_ideas?id=in.(${idList})`, {
+      method: 'PATCH',
+      headers: { ...authHeaders(accessToken), 'Content-Type': 'application/json', Prefer: 'return=minimal' },
+      body: JSON.stringify({ draft_status: 'drafting', draft_error: '', drafted_at: new Date().toISOString() }),
+    })
+    return { ok: res.ok }
+  } catch (err) { return { error: err.message } }
+}
+
+// Poll target for the plan board — just the fields that change while a
+// draft is in flight, for just the ideas currently 'drafting'.
+export async function fetchIdeaDrafts(accessToken, ideaIds) {
+  if (!ideaIds?.length) return []
+  try {
+    const idList = ideaIds.join(',')
+    const res = await fetch(
+      `${SUPABASE_URL}/rest/v1/plan_ideas?id=in.(${idList})&select=id,caption_options,media_prompt_options,draft_status,draft_error,drafted_at`,
+      { headers: authHeaders(accessToken) }
+    )
+    if (!res.ok) return []
+    return await res.json()
+  } catch { return [] }
+}
+
 // ── Generation status tracking ──────────────────────────────────────────
 // Durable per-idea state: not_started -> processing -> completed/failed.
 // Marked 'processing' the instant a plan is finalized (or a retry fires) —
