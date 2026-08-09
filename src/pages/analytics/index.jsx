@@ -62,6 +62,27 @@ function weekOf(dateStr) {
 }
 const shortDate = iso => new Date(`${iso}T00:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })
 
+// Every Monday from fromDate's week through toDate's week, inclusive — the
+// full x-axis scaffold. Without this, a chart with data on only one real
+// week has nothing to build up FROM: Zernio's own charts owe their "flat,
+// then rises" shape entirely to zero-filled weeks earlier in the range: a
+// chart that only plots weeks with data literally can't draw that curve,
+// no matter how the line itself is styled.
+function weeksInRange(fromDate, toDate) {
+  if (!fromDate || !toDate) return []
+  const weeks = []
+  let cur = weekOf(fromDate)
+  const end = weekOf(toDate)
+  let guard = 0
+  while (cur <= end && guard++ < 60) {
+    weeks.push(cur)
+    const d = new Date(`${cur}T00:00:00Z`)
+    d.setUTCDate(d.getUTCDate() + 7)
+    cur = d.toISOString().slice(0, 10)
+  }
+  return weeks
+}
+
 function timeAgo(iso) {
   if (!iso) return null
   const ms = Date.now() - new Date(iso).getTime()
@@ -210,21 +231,23 @@ export function Analytics() {
     return [...m.entries()].map(([platform, count]) => ({ platform, count }))
   }, [posts])
 
+  const rangeWeeks = useMemo(() => weeksInRange(dash?.fromDate, dash?.toDate), [dash?.fromDate, dash?.toDate])
+
   const postsOverTime = useMemo(() => {
-    const m = new Map()
+    const m = new Map(rangeWeeks.map(wk => [wk, 0]))
     for (const p of posts) {
       const wk = weekOf((p.publishedAt || '').slice(0, 10))
       m.set(wk, (m.get(wk) || 0) + 1)
     }
     return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([wk, count]) => ({ week: shortDate(wk), count }))
-  }, [posts])
+  }, [posts, rangeWeeks])
 
   const metricPerPlatform = useMemo(() =>
     platformBreakdownRaw.map(r => ({ platform: r.platform, value: r[barMetric] || 0 }))
   , [platformBreakdownRaw, barMetric])
 
   const weeklyBuckets = useMemo(() => {
-    const m = new Map()
+    const m = new Map(rangeWeeks.map(wk => [wk, { week: wk, ...ZERO_METRICS }]))
     for (const r of dailyRows) {
       const wk = weekOf(r.date)
       if (!m.has(wk)) m.set(wk, { week: wk, ...ZERO_METRICS })
@@ -232,7 +255,7 @@ export function Analytics() {
       for (const k of Object.keys(ZERO_METRICS)) e[k] += (r.metrics && r.metrics[k]) || 0
     }
     return [...m.values()].sort((a, b) => a.week.localeCompare(b.week)).map(e => ({ ...e, weekLabel: shortDate(e.week) }))
-  }, [dailyRows])
+  }, [dailyRows, rangeWeeks])
 
   const metricOverTime = useMemo(() =>
     weeklyBuckets.map(w => ({ week: w.weekLabel, value: w[barMetric] || 0 }))
@@ -468,7 +491,7 @@ export function Analytics() {
                             <YAxis tick={axisTick} tickLine={false} axisLine={false} allowDecimals={false} width={28} />
                             <Tooltip />
                             {METRIC_OPTIONS.filter(m => lineMetrics.has(m.key)).map(m => (
-                              <Line key={m.key} type="natural" dataKey={m.key} name={m.label} stroke={LINE_COLORS[m.key]}
+                              <Line key={m.key} type="monotone" dataKey={m.key} name={m.label} stroke={LINE_COLORS[m.key]}
                                 strokeWidth={2.5} dot={false} activeDot={{ r: 4 }} />
                             ))}
                           </LineChart>
