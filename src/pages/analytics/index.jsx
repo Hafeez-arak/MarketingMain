@@ -8,7 +8,7 @@ import { useApp } from '../../store/appStore'
 import { useAuth } from '../../store/AuthContext'
 import { Card, Button, PlatformPill, Empty, Spinner, PostImage } from '../../components/ui/index'
 import { fetchSocialAccounts, syncZernio, fetchZernioDashboard } from '../../lib/zernio'
-import { BestTimeHeatmap, IconBadge, PillSelect, Icon } from './charts'
+import { BestTimeHeatmap, IconBadge, PillSelect, Icon, MetricToggle } from './charts'
 
 // ─── Analytics ───────────────────────────────────────────────────────────
 // Live proxy of Zernio's own analytics — the browser never talks to Zernio
@@ -447,40 +447,48 @@ export function Analytics() {
                     </ChartCard>
                   </div>
 
-                  {/* Engagement over time — multi-metric */}
+                  {/* Engagement over time — multi-metric, legend doubles as
+                      the metric toggle (Zernio's layout: chart left, a
+                      grid of icon+value cells right, rather than a plain
+                      checkbox row stacked above the chart). */}
                   <Card className="p-5 shadow-none border-border/80">
-                    <div className="flex items-start justify-between gap-4 flex-wrap mb-4">
-                      <div className="flex items-start gap-2.5">
-                        <IconBadge>{Icon.trending}</IconBadge>
-                        <div>
-                          <h3 className="font-semibold text-text text-sm leading-tight">Engagement over time</h3>
-                          <p className="text-xs text-text-tertiary mt-0.5">Per week</p>
-                        </div>
-                      </div>
-                      <div className="flex flex-wrap gap-x-4 gap-y-1.5">
-                        {METRIC_OPTIONS.map(m => (
-                          <label key={m.key} className="flex items-center gap-1.5 text-xs cursor-pointer select-none">
-                            <input type="checkbox" checked={lineMetrics.has(m.key)} onChange={() => toggleLineMetric(m.key)}
-                              className="rounded border-border accent-amber-600" />
-                            <span style={{ color: lineMetrics.has(m.key) ? LINE_COLORS[m.key] : undefined }} className={lineMetrics.has(m.key) ? 'font-semibold' : 'text-text-tertiary'}>
-                              {m.label}
-                            </span>
-                            <span className="text-text-tertiary">{fmt(totals[m.key])}</span>
-                          </label>
-                        ))}
+                    <div className="flex items-start gap-2.5 mb-5">
+                      <IconBadge>{Icon.trending}</IconBadge>
+                      <div>
+                        <h3 className="font-semibold text-text text-sm leading-tight">Engagement over time</h3>
+                        <p className="text-xs text-text-tertiary mt-0.5">Per week · last {days} days</p>
                       </div>
                     </div>
-                    <ResponsiveContainer width="100%" height={260}>
-                      <LineChart data={weeklyBuckets}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#e0e5e6" vertical={false} />
-                        <XAxis dataKey="weekLabel" tick={axisTick} tickLine={false} axisLine={{ stroke: '#e0e5e6' }} />
-                        <YAxis tick={axisTick} tickLine={false} axisLine={false} allowDecimals={false} />
-                        <Tooltip />
-                        {METRIC_OPTIONS.filter(m => lineMetrics.has(m.key)).map(m => (
-                          <Line key={m.key} type="monotone" dataKey={m.key} name={m.label} stroke={LINE_COLORS[m.key]} strokeWidth={2} dot={false} />
+                    <div className="flex flex-col lg:flex-row gap-6">
+                      <div className="flex-1 min-w-0">
+                        <ResponsiveContainer width="100%" height={280}>
+                          <LineChart data={weeklyBuckets} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#eef1ef" vertical={false} />
+                            <XAxis dataKey="weekLabel" tick={axisTick} tickLine={false} axisLine={{ stroke: '#e0e5e6' }} />
+                            <YAxis tick={axisTick} tickLine={false} axisLine={false} allowDecimals={false} width={28} />
+                            <Tooltip />
+                            {METRIC_OPTIONS.filter(m => lineMetrics.has(m.key)).map(m => (
+                              <Line key={m.key} type="natural" dataKey={m.key} name={m.label} stroke={LINE_COLORS[m.key]}
+                                strokeWidth={2.5} dot={false} activeDot={{ r: 4 }} />
+                            ))}
+                          </LineChart>
+                        </ResponsiveContainer>
+                      </div>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-2 gap-x-6 gap-y-5 lg:w-56 lg:flex-shrink-0 lg:border-l lg:border-border lg:pl-6">
+                        {METRIC_OPTIONS.map(m => (
+                          <MetricToggle key={m.key} active={lineMetrics.has(m.key)} color={LINE_COLORS[m.key]}
+                            icon={metricIcon(m.key)} label={m.label} value={fmt(totals[m.key])}
+                            onClick={() => toggleLineMetric(m.key)} />
                         ))}
-                      </LineChart>
-                    </ResponsiveContainer>
+                        <div className="text-left">
+                          <p className="text-xs text-text-tertiary">Eng. rate</p>
+                          <span className="flex items-center gap-1.5 mt-1 pl-0.5">
+                            <span className="text-sage-600 flex-shrink-0">{Icon.trending}</span>
+                            <span className="text-xl font-bold leading-none text-text">{overallEngagementRate.toFixed(0)}%</span>
+                          </span>
+                        </div>
+                      </div>
+                    </div>
                   </Card>
 
                   {/* Best time to post / Follower history */}

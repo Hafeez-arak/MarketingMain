@@ -21,6 +21,29 @@ export function IconBadge({ children, tone = 'steel' }) {
   )
 }
 
+// A metric toggle cell for the "Engagement over time" legend — a colored
+// checkbox + label on top, icon + the metric's total below. Replaces a
+// plain native checkbox row: grouping label and value into one clickable
+// cell is what made Zernio's version read as a real legend instead of a
+// row of form controls bolted onto a chart.
+export function MetricToggle({ active, color, icon, label, value, onClick }) {
+  return (
+    <button type="button" onClick={onClick} className="text-left">
+      <span className="flex items-center gap-1.5">
+        <span aria-hidden className="w-3.5 h-3.5 rounded flex items-center justify-center border flex-shrink-0 transition-colors"
+          style={{ background: active ? color : '#fff', borderColor: active ? color : '#c5ccd4' }}>
+          {active && <svg className="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" strokeWidth="3.5" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg>}
+        </span>
+        <span className={`text-xs ${active ? 'font-semibold text-text' : 'text-text-tertiary'}`}>{label}</span>
+      </span>
+      <span className="flex items-center gap-1.5 mt-1 pl-0.5">
+        <span style={{ color: active ? color : '#c5ccd4' }} className="flex-shrink-0">{icon}</span>
+        <span className={`text-xl font-bold leading-none ${active ? 'text-text' : 'text-text-disabled'}`}>{value}</span>
+      </span>
+    </button>
+  )
+}
+
 // Compact pill dropdown — a native <select> for real accessibility/keyboard
 // behavior, styled to read as a small filter chip (Zernio's "Likes ▾" /
 // "Last 30 days ▾" controls) instead of a full-height form field.
@@ -51,6 +74,9 @@ export const Icon = {
   activity:   <svg className={p} fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>,
   eye:        <svg className={p} fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8Z"/><circle cx="12" cy="12" r="3"/></svg>,
   users:      <svg className={p} fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>,
+  share:      <svg className={p} fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.6" y1="10.5" x2="15.4" y2="6.5"/><line x1="8.6" y1="13.5" x2="15.4" y2="17.5"/></svg>,
+  bookmark:   <svg className={p} fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><path d="M19 21 12 16l-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>,
+  cursor:     <svg className={p} fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51z"/></svg>,
 }
 
 const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
