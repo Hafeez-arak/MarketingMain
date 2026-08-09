@@ -46,6 +46,10 @@ export function Analytics() {
   const [loading,  setLoading]  = useState(true)
   const [syncing,  setSyncing]  = useState(false)
   const [note,     setNote]     = useState('')
+  // '' = every account. One organisation can have several accounts on the
+  // SAME platform, so this filters by account id, not by platform name —
+  // filtering by platform would merge two Instagram brands into one number.
+  const [selectedAccount, setSelectedAccount] = useState('')
 
   const load = useCallback(async () => {
     if (!activeWorkspaceId) return null
@@ -85,38 +89,59 @@ export function Analytics() {
     refresh()
   }
 
+  // Everything below reads `scoped`, not `metrics`, so picking an account
+  // filters the whole page (totals, breakdown and top posts) coherently
+  // rather than only one section.
+  const scoped = useMemo(() =>
+    selectedAccount ? metrics.filter(r => r.zernio_account_id === selectedAccount) : metrics
+  , [metrics, selectedAccount])
+
   // Totals across every post's latest row. Summed per metric only over rows
   // that actually reported it (metrics_present) — otherwise a platform that
   // doesn't measure saves would drag the total down as if it measured zero.
   const totals = useMemo(() => {
     const acc = {}
     for (const { key } of METRIC_CARDS) {
-      const reporting = metrics.filter(r => (r.metrics_present || []).includes(key))
+      const reporting = scoped.filter(r => (r.metrics_present || []).includes(key))
       acc[key] = { value: reporting.reduce((s, r) => s + (r[key] || 0), 0), posts: reporting.length }
     }
     return acc
-  }, [metrics])
+  }, [scoped])
 
-  const byPlatform = useMemo(() => {
+  // Per ACCOUNT, not per platform — two Instagram accounts must stay two
+  // rows. Keyed by account id with the platform carried along for the pill.
+  const byAccount = useMemo(() => {
     const map = new Map()
-    for (const r of metrics) {
-      const p = r.platform || 'unknown'
-      if (!map.has(p)) map.set(p, { platform: p, posts: 0, impressions: 0, reach: 0, likes: 0, comments: 0, shares: 0, saves: 0 })
-      const e = map.get(p)
+    for (const r of scoped) {
+      const key = r.zernio_account_id || `__${r.platform || 'unknown'}`
+      if (!map.has(key)) map.set(key, { accountId: r.zernio_account_id || '', platform: r.platform || 'unknown', posts: 0, impressions: 0, reach: 0, likes: 0, comments: 0, shares: 0, saves: 0 })
+      const e = map.get(key)
       e.posts++
       for (const k of ['impressions', 'reach', 'likes', 'comments', 'shares', 'saves']) e[k] += r[k] || 0
     }
     return [...map.values()].sort((a, b) => b.impressions - a.impressions)
-  }, [metrics])
+  }, [scoped])
+
+  const accountById = useMemo(
+    () => new Map(accounts.map(a => [a.zernio_account_id, a])),
+    [accounts],
+  )
+  const labelFor = id => {
+    const a = accountById.get(id)
+    return a ? (a.username ? `@${a.username}` : a.display_name || a.platform) : 'Unattributed'
+  }
 
   const topPosts = useMemo(() =>
-    [...metrics]
+    [...scoped]
       .map(r => ({ ...r, _er: engagementRate(r) }))
       .sort((a, b) => (b._er ?? -1) - (a._er ?? -1))
       .slice(0, 8)
-  , [metrics])
+  , [scoped])
 
-  const totalFollowers = accounts.reduce((s, a) => s + (a.followers_count || 0), 0)
+  const visibleAccounts = selectedAccount
+    ? accounts.filter(a => a.zernio_account_id === selectedAccount)
+    : accounts
+  const totalFollowers = visibleAccounts.reduce((s, a) => s + (a.followers_count || 0), 0)
 
   if (loading) {
     return <div className="max-w-7xl"><Card className="p-12 flex items-center justify-center"><Spinner /></Card></div>
@@ -157,6 +182,26 @@ export function Analytics() {
         </Card>
       ) : (
         <>
+          {/* Account selector — the whole page scopes to this. Only shown
+              when there's more than one account; with a single account it
+              would be a control with nothing to choose. */}
+          {accounts.length > 1 && (
+            <div className="flex gap-2 flex-wrap items-center">
+              <span className="text-xs text-text-secondary mr-1">Showing:</span>
+              <button onClick={() => setSelectedAccount('')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all ${!selectedAccount ? 'bg-amber-600 text-white shadow-sm' : 'bg-white border border-border text-text-secondary hover:border-amber-300'}`}>
+                All accounts
+              </button>
+              {accounts.map(a => (
+                <button key={a.id} onClick={() => setSelectedAccount(a.zernio_account_id)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 ${selectedAccount === a.zernio_account_id ? 'bg-amber-600 text-white shadow-sm' : 'bg-white border border-border text-text-secondary hover:border-amber-300'}`}>
+                  <span className="capitalize opacity-70">{a.platform}</span>
+                  <span>{a.username ? `@${a.username}` : a.display_name}</span>
+                </button>
+              ))}
+            </div>
+          )}
+
           {/* Overview */}
           <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
             {METRIC_CARDS.map(m => (
@@ -171,7 +216,7 @@ export function Analytics() {
             <Card className="p-5 text-center">
               <p className="text-3xl font-bold text-text mb-1">{fmt(totalFollowers)}</p>
               <p className="text-xs text-text-secondary">Followers</p>
-              <p className="text-[10px] text-text-tertiary mt-0.5">{accounts.length} account{accounts.length !== 1 ? 's' : ''}</p>
+              <p className="text-[10px] text-text-tertiary mt-0.5">{visibleAccounts.length} account{visibleAccounts.length !== 1 ? 's' : ''}</p>
             </Card>
           </div>
 
@@ -182,23 +227,32 @@ export function Analytics() {
               <p className="text-xs text-text-secondary mt-0.5">Managed in Zernio — reconnect there if a token expires</p>
             </div>
             <div className="divide-y divide-border">
-              {accounts.map(a => (
-                <div key={a.id} className="flex items-center gap-4 px-5 py-3">
-                  <PlatformPill platform={a.platform} />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-text truncate">{a.display_name || a.username || a.platform}</p>
-                    {a.username && <p className="text-xs text-text-tertiary truncate">@{a.username}</p>}
+              {accounts.map(a => {
+                const active = selectedAccount === a.zernio_account_id
+                return (
+                  // Clicking an account drills the page into it — the same
+                  // thing the chips above do, since this list is where the
+                  // eye naturally lands first.
+                  <div key={a.id}
+                    onClick={() => setSelectedAccount(active ? '' : a.zernio_account_id)}
+                    className={`flex items-center gap-4 px-5 py-3 cursor-pointer transition-colors ${active ? 'bg-amber-50/60' : 'hover:bg-surface-subtle'}`}>
+                    <PlatformPill platform={a.platform} />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-text truncate">{a.display_name || a.username || a.platform}</p>
+                      {a.username && <p className="text-xs text-text-tertiary truncate">@{a.username}</p>}
+                    </div>
+                    <div className="text-sm text-text-secondary">{fmt(a.followers_count || 0)} followers</div>
+                    {a.needs_reconnection
+                      ? <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-red-50 text-red-600">Reconnect needed</span>
+                      : <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-sage-50 text-sage-700">Connected</span>}
+                    {active && <span className="text-[10px] font-semibold text-amber-700">Viewing</span>}
+                    {a.profile_url && (
+                      <a href={a.profile_url} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()}
+                        className="text-[11px] font-semibold text-amber-700 hover:underline">Open ↗</a>
+                    )}
                   </div>
-                  <div className="text-sm text-text-secondary">{fmt(a.followers_count || 0)} followers</div>
-                  {a.needs_reconnection
-                    ? <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-red-50 text-red-600">Reconnect needed</span>
-                    : <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-sage-50 text-sage-700">Connected</span>}
-                  {a.profile_url && (
-                    <a href={a.profile_url} target="_blank" rel="noreferrer"
-                      className="text-[11px] font-semibold text-amber-700 hover:underline">Open ↗</a>
-                  )}
-                </div>
-              ))}
+                )
+              })}
             </div>
           </Card>
 
@@ -214,15 +268,21 @@ export function Analytics() {
             </Card>
           ) : (
             <>
-              {/* Per platform */}
+              {/* Per account — not per platform, so two accounts on the
+                  same platform stay two rows instead of being averaged
+                  together into a number that describes neither. */}
               <Card className="overflow-hidden">
                 <div className="px-5 py-4 border-b border-border">
-                  <h3 className="font-semibold text-text">By platform</h3>
+                  <h3 className="font-semibold text-text">By account</h3>
+                  <p className="text-xs text-text-secondary mt-0.5">Each connected account measured on its own</p>
                 </div>
                 <div className="divide-y divide-border">
-                  {byPlatform.map(p => (
-                    <div key={p.platform} className="flex items-center gap-4 px-5 py-4">
+                  {byAccount.map(p => (
+                    <div key={p.accountId || p.platform}
+                      onClick={() => p.accountId && setSelectedAccount(selectedAccount === p.accountId ? '' : p.accountId)}
+                      className={`flex items-center gap-4 px-5 py-4 ${p.accountId ? 'cursor-pointer hover:bg-surface-subtle' : ''} transition-colors`}>
                       <PlatformPill platform={p.platform} />
+                      <span className="text-xs text-text-secondary min-w-[110px] truncate">{labelFor(p.accountId)}</span>
                       <div className="flex-1 grid grid-cols-2 sm:grid-cols-5 gap-3 text-sm">
                         <div><span className="text-text font-medium">{p.posts}</span><span className="text-text-tertiary text-xs ml-1">posts</span></div>
                         <div><span className="text-text font-medium">{fmt(p.impressions)}</span><span className="text-text-tertiary text-xs ml-1">impr.</span></div>
@@ -246,6 +306,7 @@ export function Analytics() {
                     <thead>
                       <tr className="border-b border-border bg-surface-muted">
                         <th className="text-left px-5 py-3 text-xs font-medium text-text-secondary">Platform</th>
+                        <th className="text-left px-5 py-3 text-xs font-medium text-text-secondary">Account</th>
                         <th className="text-left px-5 py-3 text-xs font-medium text-text-secondary">Date</th>
                         <th className="text-right px-5 py-3 text-xs font-medium text-text-secondary">Impressions</th>
                         <th className="text-right px-5 py-3 text-xs font-medium text-text-secondary">Reach</th>
@@ -258,6 +319,7 @@ export function Analytics() {
                       {topPosts.map(r => (
                         <tr key={r.id} className="hover:bg-surface-muted transition-colors">
                           <td className="px-5 py-3"><PlatformPill platform={r.platform} /></td>
+                          <td className="px-5 py-3 text-text-secondary text-xs">{labelFor(r.zernio_account_id)}</td>
                           <td className="px-5 py-3 text-text-secondary">{r.metric_date}</td>
                           <td className="px-5 py-3 text-right text-text">{fmt(r.impressions)}</td>
                           <td className="px-5 py-3 text-right text-text">{fmt(r.reach)}</td>

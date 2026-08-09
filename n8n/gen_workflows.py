@@ -1389,6 +1389,12 @@ try {
 
   const fields = {
     zernio_post_id: zernioPostId,
+    // Which connected account we actually posted as. Stored HERE because
+    // Zernio's per-day analytics timeline reports platform + platformPostId
+    // but NOT accountId — so with several accounts on one platform there'd
+    // be no way to attribute metrics back to the right one at sync time.
+    // Publish time is the only moment this is unambiguously known.
+    zernio_account_id: accountId,
     publish_status: publishStatus,
     publish_error: '',
     platform_post_url: post.platformPostUrl || '',
@@ -1505,7 +1511,7 @@ try {
   for (const table of POST_TABLES){
     try {
       const rows = await req({ method:'GET',
-        url:`${SUPA_URL}/rest/v1/${table}?select=id,workspace_id,zernio_post_id,publish_status&zernio_post_id=neq.&publish_status=in.(published,scheduled,publishing)${wsFilter}&limit=500`,
+        url:`${SUPA_URL}/rest/v1/${table}?select=id,workspace_id,zernio_post_id,zernio_account_id,publish_status&zernio_post_id=neq.&publish_status=in.(published,scheduled,publishing)${wsFilter}&limit=500`,
         headers:sHeaders, json:true });
       for (const r of (rows || [])){
         if (r.zernio_post_id) targets.push({ ...r, post_table: table });
@@ -1531,6 +1537,10 @@ try {
             body:{ workspace_id: t.workspace_id, zernio_post_id: t.zernio_post_id,
                    platform: day.platform || '', platform_post_id: day.platformPostId || '',
                    post_table: t.post_table, post_id: t.id,
+                   // Carried from the post row — the timeline payload has no
+                   // accountId, so this is the only way to attribute metrics
+                   // when several accounts share a platform.
+                   zernio_account_id: t.zernio_account_id || '',
                    metric_date: String(day.date || '').slice(0, 10) || today(),
                    impressions: day.impressions || 0, reach: day.reach || 0, likes: day.likes || 0,
                    comments: day.comments || 0, shares: day.shares || 0, saves: day.saves || 0,
@@ -1549,9 +1559,12 @@ try {
         const perPlatform = (single && single.platformAnalytics) || [];
         // Prefer the per-platform breakdown; fall back to the roll-up when
         // Zernio hasn't split it out yet.
+        // Unlike the timeline, the single-post response DOES carry accountId
+        // per platform — prefer it, and fall back to the one recorded at
+        // publish time.
         const entries = perPlatform.length
-          ? perPlatform.map(p => ({ platform: p.platform, platformPostId: p.platformPostId, a: p.analytics || {} }))
-          : [{ platform: single.platform || '', platformPostId: '', a: (single && single.analytics) || {} }];
+          ? perPlatform.map(p => ({ platform: p.platform, platformPostId: p.platformPostId, accountId: p.accountId, a: p.analytics || {} }))
+          : [{ platform: single.platform || '', platformPostId: '', accountId: '', a: (single && single.analytics) || {} }];
         for (const e of entries){
           if (!e.a || !Object.keys(e.a).length) continue;
           const present = METRIC_KEYS.filter(k => e.a[k] !== undefined && e.a[k] !== null);
@@ -1559,7 +1572,9 @@ try {
             headers:{ ...sHeaders, Prefer:'resolution=merge-duplicates,return=minimal' },
             body:{ workspace_id: t.workspace_id, zernio_post_id: t.zernio_post_id,
                    platform: e.platform || '', platform_post_id: e.platformPostId || '',
-                   post_table: t.post_table, post_id: t.id, metric_date: today(),
+                   post_table: t.post_table, post_id: t.id,
+                   zernio_account_id: e.accountId || t.zernio_account_id || '',
+                   metric_date: today(),
                    impressions: e.a.impressions || 0, reach: e.a.reach || 0, likes: e.a.likes || 0,
                    comments: e.a.comments || 0, shares: e.a.shares || 0, saves: e.a.saves || 0,
                    clicks: e.a.clicks || 0, views: e.a.views || 0,
