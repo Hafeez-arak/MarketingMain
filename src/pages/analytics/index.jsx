@@ -6,9 +6,9 @@ import {
 } from 'recharts'
 import { useApp } from '../../store/appStore'
 import { useAuth } from '../../store/AuthContext'
-import { Card, Button, PlatformPill, Empty, Spinner, Select, PostImage } from '../../components/ui/index'
+import { Card, Button, PlatformPill, Empty, Spinner, PostImage } from '../../components/ui/index'
 import { fetchSocialAccounts, syncZernio, fetchZernioDashboard } from '../../lib/zernio'
-import { BestTimeHeatmap } from './charts'
+import { BestTimeHeatmap, IconBadge, PillSelect, Icon } from './charts'
 
 // ─── Analytics ───────────────────────────────────────────────────────────
 // Live proxy of Zernio's own analytics — the browser never talks to Zernio
@@ -37,6 +37,11 @@ const METRIC_OPTIONS = [
 ]
 const LINE_COLORS = { likes: '#e0687a', comments: '#657b81', shares: '#a3bf97', saves: '#c9a35e', views: '#7d98a1', impressions: '#4c5e61', reach: '#325130', clicks: '#9ea3aa' }
 const DEFAULT_LINE_METRICS = ['likes', 'comments', 'views', 'impressions']
+const METRIC_TONE = { likes: 'rose', comments: 'steel', shares: 'sage', saves: 'steel', views: 'steel', impressions: 'steel', reach: 'sage', clicks: 'steel' }
+const metricIcon = key => ({
+  likes: Icon.heart, comments: Icon.message, shares: Icon.trending, saves: Icon.document,
+  views: Icon.eye, impressions: Icon.activity, reach: Icon.users, clicks: Icon.trending,
+}[key] || Icon.activity)
 
 // Interactions ÷ people reached (falls back to impressions when a platform
 // doesn't report reach) — same definition used everywhere else in this app.
@@ -70,13 +75,16 @@ function timeAgo(iso) {
 
 const ZERO_METRICS = { impressions: 0, reach: 0, likes: 0, comments: 0, shares: 0, saves: 0, clicks: 0, views: 0 }
 
-function ChartCard({ title, subtitle, total, right, children }) {
+function ChartCard({ title, subtitle, total, right, icon, tone, children }) {
   return (
-    <Card className="p-5">
+    <Card className="p-5 shadow-none border-border/80">
       <div className="flex items-start justify-between gap-3 mb-4">
-        <div>
-          <h3 className="font-semibold text-text text-sm">{title}</h3>
-          {subtitle && <p className="text-xs text-text-tertiary mt-0.5">{subtitle}</p>}
+        <div className="flex items-start gap-2.5">
+          {icon && <IconBadge tone={tone}>{icon}</IconBadge>}
+          <div>
+            <h3 className="font-semibold text-text text-sm leading-tight">{title}</h3>
+            {subtitle && <p className="text-xs text-text-tertiary mt-0.5">{subtitle}</p>}
+          </div>
         </div>
         <div className="flex items-center gap-2">
           {right}
@@ -278,27 +286,27 @@ export function Analytics() {
       ) : (
         <>
           {/* Filter bar */}
-          <div className="flex flex-wrap items-center gap-3">
-            <Select value={platform} onChange={e => setPlatform(e.target.value)} className="w-40">
+          <div className="flex flex-wrap items-center gap-2">
+            <PillSelect value={platform} onChange={e => setPlatform(e.target.value)} className="w-32">
               <option value="">All platforms</option>
               <option value="instagram">Instagram</option>
               <option value="linkedin">LinkedIn</option>
-            </Select>
+            </PillSelect>
             {accounts.length > 1 && (
-              <Select value={selectedAccount} onChange={e => setSelectedAccount(e.target.value)} className="w-48">
+              <PillSelect value={selectedAccount} onChange={e => setSelectedAccount(e.target.value)} className="w-40">
                 <option value="">All profiles</option>
                 {accounts.map(a => (
                   <option key={a.id} value={a.zernio_account_id}>{a.username ? `@${a.username}` : a.display_name}</option>
                 ))}
-              </Select>
+              </PillSelect>
             )}
-            <Select value={String(days)} onChange={e => setDays(Number(e.target.value))} className="w-36">
+            <PillSelect value={String(days)} onChange={e => setDays(Number(e.target.value))} className="w-32">
               <option value="7">Last 7 days</option>
               <option value="30">Last 30 days</option>
               <option value="90">Last 90 days</option>
-            </Select>
+            </PillSelect>
             {dashLoading && <Spinner size="sm" />}
-            <div className="ml-auto text-[11px] text-text-tertiary text-right">
+            <div className="ml-auto text-[11px] text-text-tertiary text-right leading-tight">
               {overviewMeta.lastSync && <p>Last sync: {timeAgo(overviewMeta.lastSync)}</p>}
             </div>
           </div>
@@ -317,36 +325,49 @@ export function Analytics() {
             </Card>
           ) : (
             <>
-              {/* KPI row */}
-              <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
-                <Card className="p-5 text-center">
-                  <p className="text-3xl font-bold text-text mb-1">{overallEngagementRate.toFixed(1)}%</p>
-                  <p className="text-xs text-text-secondary">Engagement rate</p>
-                </Card>
-                <Card className="p-5 text-center">
-                  <p className="text-3xl font-bold text-text mb-1">{fmt(totals.reach)}</p>
-                  <p className="text-xs text-text-secondary">Total reach</p>
-                </Card>
-                <Card className="p-5 text-center">
-                  <p className="text-3xl font-bold text-text mb-1">{fmt(totalFollowers)}</p>
-                  <p className="text-xs text-text-secondary">Total followers</p>
-                </Card>
-                <Card className="p-5 text-center">
-                  <p className="text-3xl font-bold text-text mb-1">{overviewMeta.totalPosts ?? posts.length}</p>
-                  <p className="text-xs text-text-secondary">Posts this period</p>
-                </Card>
-                <Card className="p-4 flex flex-col items-center justify-center text-center">
-                  <p className="text-xs text-text-secondary mb-2">Best post</p>
-                  {bestPost ? (
-                    <div className="flex items-center gap-2">
-                      <PostImage src={bestPost.thumbnailUrl} className="w-9 h-9 rounded-lg object-cover flex-shrink-0" />
-                      {bestPost.platformPostUrl && (
-                        <a href={bestPost.platformPostUrl} target="_blank" rel="noreferrer" className="text-xs font-semibold text-amber-700 hover:underline">View ↗</a>
-                      )}
-                    </div>
-                  ) : <p className="text-xs text-text-tertiary">—</p>}
-                </Card>
-              </div>
+              {/* KPI strip — one flat row divided by rules, not five boxed
+                  cards. Reads as a single stat panel rather than a scatter
+                  of separate widgets. */}
+              <Card className="shadow-none border-border/80 overflow-hidden">
+                <div className="grid grid-cols-2 sm:grid-cols-5 divide-y sm:divide-y-0 divide-x-0 sm:divide-x divide-border">
+                  <div className="p-5">
+                    <p className="text-xs text-text-tertiary mb-1.5">Engagement rate</p>
+                    <p className="text-2xl font-bold text-text">{overallEngagementRate.toFixed(1)}%</p>
+                  </div>
+                  <div className="p-5">
+                    <p className="text-xs text-text-tertiary mb-1.5">Total reach</p>
+                    <p className="text-2xl font-bold text-text flex items-center gap-1.5">
+                      <span className="text-text-tertiary">{Icon.eye}</span>{fmt(totals.reach)}
+                    </p>
+                  </div>
+                  <div className="p-5">
+                    <p className="text-xs text-text-tertiary mb-1.5">Total followers</p>
+                    <p className="text-2xl font-bold text-text flex items-center gap-1.5">
+                      <span className="text-text-tertiary">{Icon.users}</span>{fmt(totalFollowers)}
+                    </p>
+                  </div>
+                  <div className="p-5">
+                    <p className="text-xs text-text-tertiary mb-1.5">Posts this period</p>
+                    <p className="text-2xl font-bold text-text flex items-center gap-1.5">
+                      <span className="text-text-tertiary">{Icon.document}</span>{overviewMeta.totalPosts ?? posts.length}
+                    </p>
+                  </div>
+                  <div className="p-5">
+                    <p className="text-xs text-text-tertiary mb-1.5">Best post</p>
+                    {bestPost ? (
+                      <div className="flex items-center gap-2">
+                        <PostImage src={bestPost.thumbnailUrl} className="w-8 h-8 rounded-lg object-cover flex-shrink-0" />
+                        <div className="min-w-0">
+                          <p className="text-sm font-bold text-text leading-tight">{bestPost._er >= 0 ? `${bestPost._er.toFixed(0)}%` : '—'}</p>
+                          {bestPost.platformPostUrl && (
+                            <a href={bestPost.platformPostUrl} target="_blank" rel="noreferrer" className="text-[11px] font-semibold text-amber-700 hover:underline">View ↗</a>
+                          )}
+                        </div>
+                      </div>
+                    ) : <p className="text-2xl font-bold text-text-tertiary">—</p>}
+                  </div>
+                </div>
+              </Card>
 
               {overviewError ? (
                 <Card>
@@ -370,25 +391,25 @@ export function Analytics() {
                 <>
                   {/* Posts per platform / Posts over time */}
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                    <ChartCard title="Posts per platform" subtitle="Top platforms by post count in this window" total={posts.length}>
+                    <ChartCard title="Posts per platform" subtitle="Top platforms by post count in this window" total={posts.length} icon={Icon.document}>
                       <ResponsiveContainer width="100%" height={220}>
                         <BarChart data={postsPerPlatform}>
                           <CartesianGrid strokeDasharray="3 3" stroke="#e0e5e6" vertical={false} />
                           <XAxis dataKey="platform" tick={axisTick} tickLine={false} axisLine={{ stroke: '#e0e5e6' }} className="capitalize" />
                           <YAxis tick={axisTick} tickLine={false} axisLine={false} allowDecimals={false} />
                           <Tooltip />
-                          <Bar dataKey="count" fill="#657b81" radius={[6, 6, 0, 0]} />
+                          <Bar dataKey="count" fill="#657b81" radius={[6, 6, 0, 0]} maxBarSize={56} />
                         </BarChart>
                       </ResponsiveContainer>
                     </ChartCard>
-                    <ChartCard title="Posts over time" subtitle="Posts per week" total={posts.length}>
+                    <ChartCard title="Posts over time" subtitle="Posts per week" total={posts.length} icon={Icon.trending}>
                       <ResponsiveContainer width="100%" height={220}>
                         <BarChart data={postsOverTime}>
                           <CartesianGrid strokeDasharray="3 3" stroke="#e0e5e6" vertical={false} />
                           <XAxis dataKey="week" tick={axisTick} tickLine={false} axisLine={{ stroke: '#e0e5e6' }} />
                           <YAxis tick={axisTick} tickLine={false} axisLine={false} allowDecimals={false} />
                           <Tooltip />
-                          <Bar dataKey="count" fill="#657b81" radius={[6, 6, 0, 0]} />
+                          <Bar dataKey="count" fill="#657b81" radius={[6, 6, 0, 0]} maxBarSize={56} />
                         </BarChart>
                       </ResponsiveContainer>
                     </ChartCard>
@@ -398,38 +419,43 @@ export function Analytics() {
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                     <ChartCard title={`${METRIC_OPTIONS.find(m => m.key === barMetric)?.label} per platform`}
                       total={fmt(metricPerPlatform.reduce((s, r) => s + r.value, 0))}
-                      right={<Select value={barMetric} onChange={e => setBarMetric(e.target.value)} className="w-32">
+                      icon={metricIcon(barMetric)} tone={METRIC_TONE[barMetric]}
+                      right={<PillSelect value={barMetric} onChange={e => setBarMetric(e.target.value)} className="w-28">
                         {METRIC_OPTIONS.map(m => <option key={m.key} value={m.key}>{m.label}</option>)}
-                      </Select>}>
+                      </PillSelect>}>
                       <ResponsiveContainer width="100%" height={200}>
                         <BarChart data={metricPerPlatform}>
                           <CartesianGrid strokeDasharray="3 3" stroke="#e0e5e6" vertical={false} />
                           <XAxis dataKey="platform" tick={axisTick} tickLine={false} axisLine={{ stroke: '#e0e5e6' }} />
                           <YAxis tick={axisTick} tickLine={false} axisLine={false} allowDecimals={false} />
                           <Tooltip />
-                          <Bar dataKey="value" fill={LINE_COLORS[barMetric] || '#657b81'} radius={[6, 6, 0, 0]} />
+                          <Bar dataKey="value" fill={LINE_COLORS[barMetric] || '#657b81'} radius={[6, 6, 0, 0]} maxBarSize={56} />
                         </BarChart>
                       </ResponsiveContainer>
                     </ChartCard>
-                    <ChartCard title={`${METRIC_OPTIONS.find(m => m.key === barMetric)?.label} over time`} subtitle="Per week">
+                    <ChartCard title={`${METRIC_OPTIONS.find(m => m.key === barMetric)?.label} over time`} subtitle="Per week"
+                      icon={metricIcon(barMetric)} tone={METRIC_TONE[barMetric]}>
                       <ResponsiveContainer width="100%" height={200}>
                         <BarChart data={metricOverTime}>
                           <CartesianGrid strokeDasharray="3 3" stroke="#e0e5e6" vertical={false} />
                           <XAxis dataKey="week" tick={axisTick} tickLine={false} axisLine={{ stroke: '#e0e5e6' }} />
                           <YAxis tick={axisTick} tickLine={false} axisLine={false} allowDecimals={false} />
                           <Tooltip />
-                          <Bar dataKey="value" fill={LINE_COLORS[barMetric] || '#657b81'} radius={[6, 6, 0, 0]} />
+                          <Bar dataKey="value" fill={LINE_COLORS[barMetric] || '#657b81'} radius={[6, 6, 0, 0]} maxBarSize={56} />
                         </BarChart>
                       </ResponsiveContainer>
                     </ChartCard>
                   </div>
 
                   {/* Engagement over time — multi-metric */}
-                  <Card className="p-5">
+                  <Card className="p-5 shadow-none border-border/80">
                     <div className="flex items-start justify-between gap-4 flex-wrap mb-4">
-                      <div>
-                        <h3 className="font-semibold text-text text-sm">Engagement over time</h3>
-                        <p className="text-xs text-text-tertiary mt-0.5">Per week</p>
+                      <div className="flex items-start gap-2.5">
+                        <IconBadge>{Icon.trending}</IconBadge>
+                        <div>
+                          <h3 className="font-semibold text-text text-sm leading-tight">Engagement over time</h3>
+                          <p className="text-xs text-text-tertiary mt-0.5">Per week</p>
+                        </div>
                       </div>
                       <div className="flex flex-wrap gap-x-4 gap-y-1.5">
                         {METRIC_OPTIONS.map(m => (
@@ -459,10 +485,10 @@ export function Analytics() {
 
                   {/* Best time to post / Follower history */}
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                    <ChartCard title="Best time to post">
+                    <ChartCard title="Best time to post" icon={Icon.clock}>
                       <BestTimeHeatmap slots={bestTimeSlots} />
                     </ChartCard>
-                    <ChartCard title="Follower history">
+                    <ChartCard title="Follower history" icon={Icon.users} tone="sage">
                       {followerRows.length === 0 ? (
                         <div className="h-[220px] flex flex-col items-center justify-center text-center gap-2">
                           <svg className="w-8 h-8 text-text-disabled" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>
@@ -484,29 +510,30 @@ export function Analytics() {
                   </div>
 
                   {/* Platform breakdown */}
-                  <Card className="overflow-hidden">
-                    <div className="px-5 py-4 border-b border-border">
+                  <Card className="overflow-hidden shadow-none border-border/80">
+                    <div className="px-5 py-4 border-b border-border flex items-center gap-2.5">
+                      <IconBadge>{Icon.grid}</IconBadge>
                       <h3 className="font-semibold text-text text-sm">Platform breakdown</h3>
                     </div>
                     <div className="overflow-x-auto">
                       <table className="w-full text-sm">
                         <thead>
-                          <tr className="border-b border-border bg-surface-muted">
-                            <th className="text-left px-5 py-3 text-xs font-medium text-text-secondary">Platform</th>
-                            <th className="text-right px-5 py-3 text-xs font-medium text-text-secondary">Posts</th>
-                            <th className="text-right px-5 py-3 text-xs font-medium text-text-secondary">Likes</th>
-                            <th className="text-right px-5 py-3 text-xs font-medium text-text-secondary">Comments</th>
-                            <th className="text-right px-5 py-3 text-xs font-medium text-text-secondary">Shares</th>
-                            <th className="text-right px-5 py-3 text-xs font-medium text-text-secondary">Saves</th>
-                            <th className="text-right px-5 py-3 text-xs font-medium text-text-secondary">Views</th>
-                            <th className="text-right px-5 py-3 text-xs font-medium text-text-secondary">Impr.</th>
-                            <th className="text-right px-5 py-3 text-xs font-medium text-text-secondary">Reach</th>
-                            <th className="text-right px-5 py-3 text-xs font-medium text-text-secondary">ER</th>
+                          <tr className="border-b border-border">
+                            <th className="text-left px-5 py-2.5 text-[11px] font-medium uppercase tracking-wide text-text-tertiary">Platform</th>
+                            <th className="text-right px-5 py-2.5 text-[11px] font-medium uppercase tracking-wide text-text-tertiary">Posts</th>
+                            <th className="text-right px-5 py-2.5 text-[11px] font-medium uppercase tracking-wide text-text-tertiary">Likes</th>
+                            <th className="text-right px-5 py-2.5 text-[11px] font-medium uppercase tracking-wide text-text-tertiary">Comments</th>
+                            <th className="text-right px-5 py-2.5 text-[11px] font-medium uppercase tracking-wide text-text-tertiary">Shares</th>
+                            <th className="text-right px-5 py-2.5 text-[11px] font-medium uppercase tracking-wide text-text-tertiary">Saves</th>
+                            <th className="text-right px-5 py-2.5 text-[11px] font-medium uppercase tracking-wide text-text-tertiary">Views</th>
+                            <th className="text-right px-5 py-2.5 text-[11px] font-medium uppercase tracking-wide text-text-tertiary">Impr.</th>
+                            <th className="text-right px-5 py-2.5 text-[11px] font-medium uppercase tracking-wide text-text-tertiary">Reach</th>
+                            <th className="text-right px-5 py-2.5 text-[11px] font-medium uppercase tracking-wide text-text-tertiary">ER</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-border">
                           {platformBreakdown.map(r => (
-                            <tr key={r.platform} className="hover:bg-surface-muted transition-colors">
+                            <tr key={r.platform} className="hover:bg-surface-muted/60 transition-colors">
                               <td className="px-5 py-3"><PlatformPill platform={r.platform} /></td>
                               <td className="px-5 py-3 text-right text-text">{r.postCount}</td>
                               <td className="px-5 py-3 text-right text-text">{fmt(r.likes)}</td>
@@ -529,26 +556,27 @@ export function Analytics() {
                   </Card>
 
                   {/* Top performing posts */}
-                  <Card className="overflow-hidden">
-                    <div className="px-5 py-4 border-b border-border">
+                  <Card className="overflow-hidden shadow-none border-border/80">
+                    <div className="px-5 py-4 border-b border-border flex items-center gap-2.5">
+                      <IconBadge tone="rose">{Icon.trophy}</IconBadge>
                       <h3 className="font-semibold text-text text-sm">Top performing posts</h3>
                     </div>
                     <div className="overflow-x-auto">
                       <table className="w-full text-sm">
                         <thead>
-                          <tr className="border-b border-border bg-surface-muted">
-                            <th className="text-left px-5 py-3 text-xs font-medium text-text-secondary">Post</th>
-                            <th className="text-right px-5 py-3 text-xs font-medium text-text-secondary">Likes</th>
-                            <th className="text-right px-5 py-3 text-xs font-medium text-text-secondary">Comments</th>
-                            <th className="text-right px-5 py-3 text-xs font-medium text-text-secondary">Views</th>
-                            <th className="text-right px-5 py-3 text-xs font-medium text-text-secondary">Impr.</th>
-                            <th className="text-right px-5 py-3 text-xs font-medium text-text-secondary">Reach</th>
-                            <th className="text-right px-5 py-3 text-xs font-medium text-text-secondary">ER</th>
+                          <tr className="border-b border-border">
+                            <th className="text-left px-5 py-2.5 text-[11px] font-medium uppercase tracking-wide text-text-tertiary">Post</th>
+                            <th className="text-right px-5 py-2.5 text-[11px] font-medium uppercase tracking-wide text-text-tertiary">Likes</th>
+                            <th className="text-right px-5 py-2.5 text-[11px] font-medium uppercase tracking-wide text-text-tertiary">Comments</th>
+                            <th className="text-right px-5 py-2.5 text-[11px] font-medium uppercase tracking-wide text-text-tertiary">Views</th>
+                            <th className="text-right px-5 py-2.5 text-[11px] font-medium uppercase tracking-wide text-text-tertiary">Impr.</th>
+                            <th className="text-right px-5 py-2.5 text-[11px] font-medium uppercase tracking-wide text-text-tertiary">Reach</th>
+                            <th className="text-right px-5 py-2.5 text-[11px] font-medium uppercase tracking-wide text-text-tertiary">ER</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-border">
                           {topPosts.map(p => (
-                            <tr key={p._id} className="hover:bg-surface-muted transition-colors">
+                            <tr key={p._id} className="hover:bg-surface-muted/60 transition-colors">
                               <td className="px-5 py-3">
                                 <div className="flex items-center gap-3 max-w-xs">
                                   <PostImage src={p.thumbnailUrl} className="w-9 h-9 rounded-lg object-cover flex-shrink-0" />
@@ -578,7 +606,7 @@ export function Analytics() {
 
                   {/* Posting frequency vs engagement / Engagement accumulation */}
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                    <ChartCard title="Posting frequency vs engagement" subtitle="Optimal cadence per platform">
+                    <ChartCard title="Posting frequency vs engagement" subtitle="Optimal cadence per platform" icon={Icon.activity} tone="sage">
                       {frequencyRows.length === 0 ? (
                         <p className="text-sm text-text-tertiary py-8 text-center">Not enough history yet.</p>
                       ) : (
@@ -602,7 +630,7 @@ export function Analytics() {
                         </>
                       )}
                     </ChartCard>
-                    <ChartCard title="Engagement accumulation" subtitle="How engagement builds up after publishing">
+                    <ChartCard title="Engagement accumulation" subtitle="How engagement builds up after publishing" icon={Icon.trending}>
                       {decayBuckets.length === 0 ? (
                         <p className="text-sm text-text-tertiary py-8 text-center">Not enough history yet.</p>
                       ) : (
@@ -633,10 +661,13 @@ export function Analytics() {
           )}
 
           {/* Connected accounts — always shown regardless of dashboard state */}
-          <Card className="overflow-hidden">
-            <div className="px-5 py-4 border-b border-border">
-              <h3 className="font-semibold text-text">Connected accounts</h3>
-              <p className="text-xs text-text-secondary mt-0.5">Managed in Zernio — reconnect there if a token expires</p>
+          <Card className="overflow-hidden shadow-none border-border/80">
+            <div className="px-5 py-4 border-b border-border flex items-center gap-2.5">
+              <IconBadge>{Icon.users}</IconBadge>
+              <div>
+                <h3 className="font-semibold text-text text-sm">Connected accounts</h3>
+                <p className="text-xs text-text-tertiary mt-0.5">Managed in Zernio — reconnect there if a token expires</p>
+              </div>
             </div>
             <div className="divide-y divide-border">
               {accounts.map(a => {
