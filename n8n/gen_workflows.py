@@ -1683,7 +1683,8 @@ const ZERNIO = $env.ZERNIO_API_KEY;
 const ZBASE  = 'https://zernio.com/api/v1';
 const zHeaders = { Authorization: `Bearer ${ZERNIO}`, 'Content-Type': 'application/json' };
 
-const platform = body.platform || '';
+const platform  = body.platform || '';
+const accountId = body.account_id || '';
 const days = Number(body.days) || 30;
 const toDate   = new Date().toISOString().slice(0, 10);
 const fromDate = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
@@ -1694,12 +1695,12 @@ try {
   const safe = p => p.catch(e => ({ _error: (e && e.message) ? e.message : String(e) }));
 
   const [overview, bestTime, frequency, decay, daily, followers] = await Promise.all([
-    safe(req({ method:'GET', url:`${ZBASE}/analytics${qs({ platform, fromDate, toDate, limit:100, source:'all' })}`, headers:zHeaders, json:true })),
-    safe(req({ method:'GET', url:`${ZBASE}/analytics/best-time${qs({ platform })}`, headers:zHeaders, json:true })),
-    safe(req({ method:'GET', url:`${ZBASE}/analytics/posting-frequency${qs({ platform })}`, headers:zHeaders, json:true })),
-    safe(req({ method:'GET', url:`${ZBASE}/analytics/content-decay${qs({ platform })}`, headers:zHeaders, json:true })),
-    safe(req({ method:'GET', url:`${ZBASE}/analytics/daily-metrics${qs({ platform, fromDate, toDate })}`, headers:zHeaders, json:true })),
-    safe(req({ method:'GET', url:`${ZBASE}/accounts/follower-stats${qs({ fromDate, toDate })}`, headers:zHeaders, json:true })),
+    safe(req({ method:'GET', url:`${ZBASE}/analytics${qs({ platform, accountId, fromDate, toDate, limit:100, source:'all' })}`, headers:zHeaders, json:true })),
+    safe(req({ method:'GET', url:`${ZBASE}/analytics/best-time${qs({ platform, accountId })}`, headers:zHeaders, json:true })),
+    safe(req({ method:'GET', url:`${ZBASE}/analytics/posting-frequency${qs({ platform, accountId })}`, headers:zHeaders, json:true })),
+    safe(req({ method:'GET', url:`${ZBASE}/analytics/content-decay${qs({ platform, accountId })}`, headers:zHeaders, json:true })),
+    safe(req({ method:'GET', url:`${ZBASE}/analytics/daily-metrics${qs({ platform, accountId, fromDate, toDate })}`, headers:zHeaders, json:true })),
+    safe(req({ method:'GET', url:`${ZBASE}/accounts/follower-stats${qs({ accountIds: accountId, fromDate, toDate })}`, headers:zHeaders, json:true })),
   ]);
 
   return [{ json: { ok: true, fromDate, toDate, platform, overview, bestTime, frequency, decay, daily, followers } }];

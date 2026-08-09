@@ -269,6 +269,19 @@ const WORKFLOW_CONFIGS = [
       </div>
     ),
   },
+  {
+    platform: 'zernioDashboard',
+    label: 'Zernio Dashboard (rich analytics)',
+    placeholder: 'https://your-instance.app.n8n.cloud/webhook/arak-zernio-dashboard',
+    description: 'Live, on-demand proxy for the fuller Zernio widgets — best time to post, posting frequency vs engagement, content decay, daily rollups, follower history. Nothing here is stored; the Analytics page fetches it fresh on load.',
+    icon: (
+      <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: 'linear-gradient(135deg,#f59e0b,#fbbf24)' }}>
+        <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24">
+          <line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/>
+        </svg>
+      </div>
+    ),
+  },
 ]
 
 function WorkflowWebhooks() {
