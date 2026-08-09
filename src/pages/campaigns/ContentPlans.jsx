@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useApp, actions } from '../../store/appStore'
 import { useAuth } from '../../store/AuthContext'
-import { Card, Button, Empty, Spinner, ConfirmDialog } from '../../components/ui/index'
+import { Card, Button, Empty, Spinner, ConfirmDialog, IconBadge, Icon } from '../../components/ui/index'
 import { formatDate } from '../../lib/utils'
 import { fetchPlans, fetchPlanWithIdeas, deletePlan } from '../../lib/contentPlans'
 import { dbIdeaToDraft, momentsInRange } from './CampaignPlanner'
@@ -71,7 +71,7 @@ export function ContentPlans() {
       {loading ? (
         <div className="flex items-center justify-center py-16 text-text-tertiary text-sm"><Spinner size="sm" /> <span className="ml-2">Loading plans…</span></div>
       ) : plans.length === 0 ? (
-        <Card>
+        <Card className="shadow-none border-border/80">
           <Empty
             icon={<svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>}
             title="No content plans yet"
@@ -84,30 +84,30 @@ export function ContentPlans() {
           {plans.map(plan => {
             const moments = momentsInRange(plan.start_date, plan.end_date)
             return (
-            <Card key={plan.id} className="p-5 flex flex-col">
-              <div className="flex items-start justify-between gap-2 mb-2.5">
-                <h3 className="font-semibold text-text leading-snug">{plan.name || 'Untitled plan'}</h3>
-                <span className={`text-[10px] font-semibold px-2 py-1 rounded-full capitalize flex-shrink-0 ${STATUS_STYLE[plan.status] || STATUS_STYLE.draft}`}>{plan.status}</span>
+            <Card key={plan.id} className="p-5 flex flex-col shadow-none border-border/80">
+              <div className="flex items-start gap-3 mb-3">
+                <IconBadge>{Icon.calendar}</IconBadge>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-start justify-between gap-2">
+                    <h3 className="font-semibold text-text text-sm leading-snug">{plan.name || 'Untitled plan'}</h3>
+                    <span className={`text-[10px] font-semibold px-2 py-1 rounded-full capitalize flex-shrink-0 ${STATUS_STYLE[plan.status] || STATUS_STYLE.draft}`}>{plan.status}</span>
+                  </div>
+                  {plan.start_date && <p className="text-[11px] text-text-tertiary mt-0.5">{formatDate(plan.start_date)} – {formatDate(plan.end_date)}</p>}
+                </div>
               </div>
 
               {plan.goal && <p className="text-xs text-text-secondary leading-relaxed line-clamp-2 mb-3">{plan.goal}</p>}
 
-              <div className="flex items-center gap-2 flex-wrap mb-3">
+              <div className="flex items-center gap-1.5 flex-wrap mb-3">
                 {(plan.platforms || []).map(p => (
-                  <span key={p} className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${p === 'linkedin' ? 'bg-[#0A66C2]/10 text-[#0A66C2]' : 'bg-pink-50 text-pink-600'}`}>
+                  <span key={p} className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-surface-muted text-text-secondary">
                     {p === 'linkedin' ? 'LinkedIn' : 'Instagram'}
                   </span>
                 ))}
-                {plan.start_date && <span className="text-[11px] text-text-tertiary">{formatDate(plan.start_date)} – {formatDate(plan.end_date)}</span>}
+                {moments.map((m, i) => (
+                  <span key={i} className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700">{m.name}</span>
+                ))}
               </div>
-
-              {moments.length > 0 && (
-                <div className="flex items-center gap-1.5 flex-wrap mb-4">
-                  {moments.map((m, i) => (
-                    <span key={i} className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200">★ {m.name}</span>
-                  ))}
-                </div>
-              )}
 
               <div className="flex items-center gap-2 pt-3 border-t border-border mt-auto">
                 <Button size="xs" onClick={() => openPlan(plan)} disabled={opening === plan.id}>
