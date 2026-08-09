@@ -1273,6 +1273,28 @@ function toPublishable(u){
   return `https://images.weserv.nl/?url=${encodeURIComponent(u)}&output=jpg`;
 }
 
+// Bilingual captions are stored as one string, Arabic block + "\n\n—\n\n" +
+// English block (see GENERATE_POST_JS_TEMPLATE). Because the string OPENS
+// with Arabic, a renderer that treats it as a single bidi paragraph (which
+// Instagram's does — it does not treat blank lines as paragraph breaks)
+// resolves the whole thing at RTL embedding level. Neutral characters in
+// the English half (the "." ending a sentence, the "+" in "45+") then
+// visually reorder to the wrong side of their line — that's the stray
+// leading "." users see in front of English lines. Wrapping each language
+// block in a Unicode directional isolate forces it to resolve independently
+// of what surrounds it, regardless of platform.
+const LRI = '⁦', RLI = '⁧', PDI = '⁩'; // LTR/RTL isolate, pop isolate
+const isArabicScript = s => /[؀-ۿݐ-ݿ]/.test(s);
+function isolateBilingual(text){
+  const SEP = '\n\n—\n\n';
+  const idx = text.indexOf(SEP);
+  if (idx === -1) return text; // monolingual — nothing to isolate
+  const first  = text.slice(0, idx);
+  const second = text.slice(idx + SEP.length);
+  const wrap = s => s ? (isArabicScript(s) ? RLI : LRI) + s + PDI : s;
+  return wrap(first) + SEP + wrap(second);
+}
+
 const body = ($input.first().json.body) || {};
 const ZERNIO   = $env.ZERNIO_API_KEY;
 const SUPA_URL = String($env.SUPABASE_URL || '').replace(/\/+$/, '');
@@ -1337,7 +1359,7 @@ try {
   // ---- 2) build the Zernio payload ----
   // Caption + hashtags are two columns for us but one text field for every
   // platform, so join them here rather than making the caller pre-format.
-  const caption  = String(body.caption || '').trim();
+  const caption  = isolateBilingual(String(body.caption || '').trim());
   const hashtags = String(body.hashtags || '').trim();
   const content  = [caption, hashtags].filter(Boolean).join('\n\n');
 
