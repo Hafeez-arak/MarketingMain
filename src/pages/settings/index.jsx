@@ -242,6 +242,33 @@ const WORKFLOW_CONFIGS = [
       </div>
     ),
   },
+  {
+    platform: 'publishPost',
+    label: 'Publish Post (Zernio)',
+    placeholder: 'https://your-instance.app.n8n.cloud/webhook/arak-publish-post',
+    description: 'Publishes or schedules an approved post to its platform through Zernio. The Zernio API key lives in n8n, never in this app — the browser only ever calls this webhook.',
+    icon: (
+      <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: 'linear-gradient(135deg,#8b5cf6,#a78bfa)' }}>
+        <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24">
+          <line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>
+        </svg>
+      </div>
+    ),
+  },
+  {
+    platform: 'zernioSync',
+    label: 'Zernio Sync (accounts + analytics)',
+    placeholder: 'https://your-instance.app.n8n.cloud/webhook/arak-zernio-sync',
+    description: 'Pulls state back from Zernio: which accounts are connected, and per-day metrics for everything published. Runs daily on its own; this URL is what the "Refresh" buttons hit for an on-demand sync.',
+    icon: (
+      <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: 'linear-gradient(135deg,#0d9488,#2dd4bf)' }}>
+        <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24">
+          <polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/>
+          <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+        </svg>
+      </div>
+    ),
+  },
 ]
 
 function WorkflowWebhooks() {

@@ -8,6 +8,7 @@ import { logEditFeedback } from '../../lib/brandBrain'
 import { fetchBrandProfile, buildInstructionsString } from '../../lib/brandBrain'
 import { fetchApprovalsData, markIdeaProcessing } from '../../lib/contentPlans'
 import { requestPlanContentGeneration } from '../../lib/campaignPlanner'
+import { publishPost, syncZernio } from '../../lib/zernio'
 import { dbIdeaToDraft } from '../campaigns/CampaignPlanner'
 import { InstagramPostDetail } from './InstagramPage'
 import { LinkedInPostDetail } from './LinkedInPage'
@@ -55,6 +56,15 @@ function normalizePost(row, platform) {
     mediaUrls: mediaOf(row), status: row.status, source: row.source,
     planIdeaId: row.plan_idea_id || null,
     generatedByWorkflow: true, createdAt: row.created_at,
+    // Zernio publish state — distinct from `status` (the review decision).
+    zernioPostId: row.zernio_post_id || '',
+    publishStatus: row.publish_status || 'not_published',
+    publishError: row.publish_error || '',
+    publishedAt: row.published_at || null,
+    scheduledPublishAt: row.scheduled_publish_at || null,
+    platformPostUrl: row.platform_post_url || '',
+    videoUrl: row.video_url || '',
+    coverImageUrl: row.cover_image_url || '',
     _fromSupabase: true,
   }
   if (platform === 'linkedin') {
@@ -169,7 +179,62 @@ function FailedCard({ idea, post, onRetry, retrying }) {
   )
 }
 
-function PostCard({ post, onOpen, onApprove, onReject }) {
+// Publish state shown on an already-approved post. Deliberately separate
+// from the review Badge: `status` is the human decision (approved), this is
+// what the platform actually did with it — a post can be approved and still
+// have failed to publish, and that's exactly what needs to be visible.
+const PUBLISH_META = {
+  scheduled:  { label: '🗓 Scheduled',  cls: 'bg-indigo-50 text-indigo-700' },
+  publishing: { label: '↗ Publishing…', cls: 'bg-amber-50 text-amber-700' },
+  published:  { label: '✓ Published',   cls: 'bg-sage-50 text-sage-700' },
+  failed:     { label: '✕ Publish failed', cls: 'bg-red-50 text-red-600' },
+}
+
+function PublishBar({ post, onPublish, busy }) {
+  const [when, setWhen] = useState('')
+  const status = post.publishStatus || 'not_published'
+  const meta = PUBLISH_META[status]
+
+  // Already live (or on its way) — show state + the real permalink, not
+  // controls that would double-post.
+  if (status === 'published' || status === 'scheduled' || status === 'publishing') {
+    return (
+      <div className="flex items-center gap-2 mt-2 flex-wrap" onClick={e => e.stopPropagation()}>
+        <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${meta.cls}`}>{meta.label}</span>
+        {post.scheduledPublishAt && status === 'scheduled' && (
+          <span className="text-[10px] text-text-tertiary">for {formatDateTime(post.scheduledPublishAt)}</span>
+        )}
+        {post.platformPostUrl && (
+          <a href={post.platformPostUrl} target="_blank" rel="noreferrer"
+            className="text-[10px] font-semibold text-amber-700 hover:underline">View on {post.platform} ↗</a>
+        )}
+      </div>
+    )
+  }
+
+  return (
+    <div className="mt-2 space-y-1.5" onClick={e => e.stopPropagation()}>
+      {status === 'failed' && (
+        <p className="text-[10px] text-red-600 leading-relaxed">{post.publishError || 'Publishing failed.'}</p>
+      )}
+      <div className="flex items-center gap-2 flex-wrap">
+        <button onClick={() => onPublish(post, '')} disabled={busy}
+          className="text-[11px] font-semibold px-2.5 py-1 rounded-lg border border-amber-300 text-amber-800 bg-amber-50 hover:bg-amber-100 transition-colors disabled:opacity-50">
+          {busy ? 'Working…' : status === 'failed' ? '↻ Retry publish' : '↗ Publish now'}
+        </button>
+        <span className="text-[10px] text-text-tertiary">or</span>
+        <input type="datetime-local" value={when} onChange={e => setWhen(e.target.value)}
+          className="text-[11px] border border-border rounded-lg px-2 py-1 bg-white" />
+        <button onClick={() => onPublish(post, when)} disabled={busy || !when}
+          className="text-[11px] font-semibold px-2.5 py-1 rounded-lg border border-border text-text-secondary hover:bg-surface-subtle transition-colors disabled:opacity-40">
+          🗓 Schedule
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function PostCard({ post, onOpen, onApprove, onReject, onPublish, publishing }) {
   const platformMeta = post.platform === 'linkedin'
     ? { label: 'LinkedIn', color: 'bg-[#0A66C2]/10 text-[#0A66C2]' }
     : { label: 'Instagram', color: 'bg-pink-50 text-pink-600' }
@@ -218,6 +283,10 @@ function PostCard({ post, onOpen, onApprove, onReject }) {
                 className="text-[11px] font-semibold px-2.5 py-1 rounded-lg border border-red-200 text-red-500 hover:bg-red-50 transition-colors">✕ Reject</button>
               <span className="text-[10px] text-text-tertiary ml-auto">Click card to edit / regenerate</span>
             </div>
+          ) : post.status === 'pending_publish' ? (
+            // Approved — publishing is the next step, so the controls for it
+            // live right here rather than behind opening the post.
+            <PublishBar post={post} onPublish={onPublish} busy={publishing} />
           ) : (
             <p className="text-[10px] text-text-tertiary mt-1 opacity-60">Click to open full view</p>
           )}
@@ -236,6 +305,10 @@ export function Approvals() {
   const [selectedPost,   setSelectedPost]   = useState(null)
   const [retryingId,     setRetryingId]     = useState(null)
   const [expandedKeys,   setExpandedKeys]   = useState({})
+  const [publishingId,   setPublishingId]   = useState(null)
+  const [publishError,   setPublishError]   = useState(null)
+  const [syncing,        setSyncing]        = useState(false)
+  const [syncNote,       setSyncNote]       = useState('')
 
   useEffect(() => { fetchAll() }, [fetchAll])
 
@@ -331,6 +404,36 @@ export function Approvals() {
   async function handleApprove(post) { await updateStatus(post, 'pending_publish') }
   async function handleReject(post)  { await updateStatus(post, 'rejected') }
 
+  // Publish or schedule through Zernio (via n8n — the API key never reaches
+  // the browser). `when` is a datetime-local string ('' = publish now).
+  async function handlePublish(post, when) {
+    setPublishingId(post.id)
+    const result = await publishPost(state.webhooks?.publishPost, {
+      postId: post.id, postTable: post._table, workspaceId: activeWorkspaceId,
+      platform: post.platform,
+      caption: post.captionAr && post.captionEn
+        ? [post.captionAr, post.captionEn].filter(Boolean).join('\n\n')
+        : (post.copy || post.captionEn || post.captionAr || ''),
+      hashtags: post.hashtags || '',
+      imageUrl: post.imageUrl || '',
+      imageUrls: (post.mediaUrls || []).length > 1 ? post.mediaUrls : undefined,
+      videoUrl: post.videoUrl || '',
+      coverImageUrl: post.coverImageUrl || '',
+      scheduledFor: when || undefined,
+      timezone: when ? Intl.DateTimeFormat().resolvedOptions().timeZone : undefined,
+    })
+    setPublishingId(null)
+    if (result.error) {
+      // The workflow already wrote publish_status='failed' + the reason to
+      // the row, so just refetch rather than duplicating the error into
+      // local state and risking the two disagreeing.
+      setPublishError({ id: post.id, message: result.error })
+    } else {
+      setPublishError(null)
+    }
+    fetchAll()
+  }
+
   async function handleRetry(idea, post) {
     setRetryingId(idea.id)
     setIdeas(prev => prev.map(i => i.id === idea.id ? { ...i, generation_status: 'processing', generation_error: '' } : i))
@@ -359,6 +462,20 @@ export function Approvals() {
     if (result.error) {
       setIdeas(prev => prev.map(i => i.id === idea.id ? { ...i, generation_status: 'failed', generation_error: result.error } : i))
     }
+  }
+
+  // Pull fresh publish state + metrics from Zernio on demand — the same
+  // workflow the daily schedule runs, so there's one sync path, not two.
+  async function handleSync() {
+    setSyncing(true); setSyncNote('')
+    const result = await syncZernio(state.webhooks?.zernioSync, activeWorkspaceId)
+    setSyncing(false)
+    setSyncNote(result.error
+      ? result.error
+      : result.analytics_skipped
+        ? result.analytics_skipped
+        : `Synced ${result.accounts_synced ?? 0} account(s), ${result.rows_written ?? 0} metric row(s).`)
+    fetchAll()
   }
 
   function handleStatusChange(post, newStatus) {
@@ -398,12 +515,28 @@ export function Approvals() {
 
   return (
     <div className="max-w-6xl space-y-5">
-      <div>
-        <h1 className="font-display text-2xl font-bold text-stone-900">Post Approvals</h1>
-        <p className="text-sm text-text-secondary mt-1">
-          Every post the Plan Generation workflows produce — grouped by the month they came from. Watch generation happen, review the real caption + image, approve or reject.
-        </p>
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div>
+          <h1 className="font-display text-2xl font-bold text-stone-900">Post Approvals</h1>
+          <p className="text-sm text-text-secondary mt-1">
+            Every post the Plan Generation workflows produce — grouped by the month they came from. Watch generation happen, review the real caption + image, approve, then publish or schedule.
+          </p>
+        </div>
+        <div className="text-right">
+          <Button size="xs" variant="ghost" onClick={handleSync} disabled={syncing}>
+            {syncing ? <><Spinner size="sm" /> Syncing…</> : '↻ Sync from Zernio'}
+          </Button>
+          {syncNote && <p className="text-[10px] text-text-tertiary mt-1 max-w-[240px]">{syncNote}</p>}
+        </div>
       </div>
+
+      {publishError && (
+        <Card className="p-3 border-red-200 bg-red-50/50">
+          <p className="text-xs text-red-600">
+            <span className="font-semibold">Publish failed.</span> {publishError.message}
+          </p>
+        </Card>
+      )}
 
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div className="flex gap-2 flex-wrap">
@@ -451,7 +584,9 @@ export function Approvals() {
                     {group.items.map(item => {
                       if (item.type === 'idea' && item.effectiveStatus === 'processing') return <ProcessingCard key={item.key} idea={item.idea} />
                       if (item.type === 'idea' && item.effectiveStatus === 'failed') return <FailedCard key={item.key} idea={item.idea} post={item.post} onRetry={handleRetry} retrying={retryingId === item.idea.id} />
-                      return <PostCard key={item.key} post={item.post} onOpen={setSelectedPost} onApprove={handleApprove} onReject={handleReject} />
+                      return <PostCard key={item.key} post={item.post} onOpen={setSelectedPost}
+                        onApprove={handleApprove} onReject={handleReject}
+                        onPublish={handlePublish} publishing={publishingId === item.post.id} />
                     })}
                   </div>
                 )}

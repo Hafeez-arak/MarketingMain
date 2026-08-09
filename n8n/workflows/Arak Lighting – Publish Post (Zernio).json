@@ -1,0 +1,68 @@
+{
+  "name": "Arak Lighting – Publish Post (Zernio)",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Arak – Publish Post (Zernio)\n\n**Zero secrets in this file.** Needs `ZERNIO_API_KEY`, `SUPABASE_URL`, `SUPABASE_KEY`.\n\nPublishes or schedules ONE approved post to its platform through Zernio's unified API (`POST /v1/posts`), then writes the Zernio post id + publish state back onto our own row.\n\n**Why a workflow and not a direct browser call:** the Zernio key is a server-side secret. Calling `zernio.com` from the frontend would ship the key to anyone who opens devtools — so the browser talks to this webhook and only n8n ever sees the key, exactly like every other provider in this project.\n\nSynchronous (`lastNode`): Zernio accepts-and-queues, so the call is fast and the reviewer gets a real result (or a real error) rather than a fire-and-forget spinner.\n\n**Account resolution:** pass `account_id` (Zernio's account `_id`) to target a specific connected account; omit it and this resolves the first active, non-reconnect-needing account for the platform via `GET /v1/accounts`. Resolved accounts are mirrored into `social_accounts` on the way through, so the UI can list them without holding the key.\n\n**Media** is passed by URL (`mediaItems[].url`) — our generated images/videos already live in public Supabase Storage, so nothing is re-uploaded.\n\nZernio is an ADAPTER here, deliberately: `zernio_post_id` sits next to our own row rather than replacing it, so switching providers later (Ayrshare's SDK is wire-compatible) means editing this one workflow, not the schema or the UI.",
+        "height": 420,
+        "width": 480
+      },
+      "id": "06f0de28-e3a2-4318-80e5-d7ec9204e4b9",
+      "name": "Note: Overview",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        -220
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "arak-publish-post",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "7569bb78-f235-4094-9b41-cd2b444ddf69",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        220
+      ],
+      "webhookId": "arak-publish-post"
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst http = this.helpers.httpRequest;\n\nasync function req(opts){\n  try { return await http(opts); }\n  catch (e) {\n    const detail = (e && (e.error || (e.response && e.response.data) || e.description)) || null;\n    const real = detail\n      ? (typeof detail === 'string' ? detail\n        : Buffer.isBuffer(detail) ? detail.toString('utf8', 0, 300)\n        : (detail.error && detail.error.message) || detail.message || JSON.stringify(detail).slice(0, 400))\n      : (e && e.message) || String(e);\n    throw new Error(real);\n  }\n}\n\nconst body = ($input.first().json.body) || {};\nconst ZERNIO   = $env.ZERNIO_API_KEY;\nconst SUPA_URL = String($env.SUPABASE_URL || '').replace(/\\/+$/, '');\nconst SUPA_KEY = $env.SUPABASE_KEY;\nconst ZBASE    = 'https://zernio.com/api/v1';\nconst zHeaders = { Authorization: `Bearer ${ZERNIO}`, 'Content-Type': 'application/json' };\n\n// Our row, so we can write the result back.\nconst postId      = body.post_id || '';\nconst postTable   = body.post_table || 'instagram_generated_posts';\nconst workspaceId = body.workspace_id || null;\nconst platform    = body.platform || 'instagram';\n\n// Only these three tables exist; anything else is a caller bug, and\n// interpolating an arbitrary string into the PATCH URL would be worse.\nconst ALLOWED_TABLES = ['instagram_generated_posts','linkedin_generated_posts','generated_posts'];\nif (!ALLOWED_TABLES.includes(postTable)) throw new Error('Unknown post_table: ' + postTable);\n\nasync function patchPost(fields){\n  if (!postId) return;\n  try {\n    await http({ method:'PATCH', url:`${SUPA_URL}/rest/v1/${postTable}?id=eq.${postId}`,\n      headers:{ apikey:SUPA_KEY, Authorization:`Bearer ${SUPA_KEY}`, 'Content-Type':'application/json', Prefer:'return=minimal' },\n      body: fields, json:true });\n  } catch (e) { /* never let status bookkeeping mask the real publish result */ }\n}\n\ntry {\n  if (!ZERNIO) throw new Error('ZERNIO_API_KEY is not set on this n8n instance.');\n\n  // ---- 1) resolve which connected account to post as ----\n  let accountId = body.account_id || '';\n  if (!accountId){\n    const list = await req({ method:'GET', url:`${ZBASE}/accounts`, headers:zHeaders, json:true });\n    const accounts = (list && list.accounts) || [];\n    const match = accounts.find(a =>\n      a.platform === platform && a.isActive !== false && a.needsReconnection !== true);\n    if (!match){\n      const connected = accounts.map(a => a.platform).join(', ') || 'none';\n      throw new Error(`No connected ${platform} account in Zernio (connected: ${connected}). Connect one in the Zernio dashboard first.`);\n    }\n    accountId = match._id;\n\n    // Mirror what we just learned into social_accounts so the UI can show\n    // connected accounts without ever touching the Zernio key. Upsert on\n    // (workspace_id, zernio_account_id) — see the migration's unique index.\n    if (workspaceId){\n      try {\n        await http({ method:'POST', url:`${SUPA_URL}/rest/v1/social_accounts?on_conflict=workspace_id,zernio_account_id`,\n          headers:{ apikey:SUPA_KEY, Authorization:`Bearer ${SUPA_KEY}`, 'Content-Type':'application/json', Prefer:'resolution=merge-duplicates,return=minimal' },\n          body:{ workspace_id: workspaceId, zernio_account_id: match._id, platform: match.platform,\n                 username: match.username || '', display_name: match.displayName || '',\n                 profile_picture: match.profilePicture || '', profile_url: match.profileUrl || '',\n                 is_active: match.isActive !== false, needs_reconnection: match.needsReconnection === true,\n                 followers_count: match.followersCount || 0, last_synced_at: new Date().toISOString(),\n                 updated_at: new Date().toISOString() },\n          json:true });\n      } catch (e) { /* caching is best-effort; publishing must not fail on it */ }\n    }\n  }\n\n  // ---- 2) build the Zernio payload ----\n  // Caption + hashtags are two columns for us but one text field for every\n  // platform, so join them here rather than making the caller pre-format.\n  const caption  = String(body.caption || '').trim();\n  const hashtags = String(body.hashtags || '').trim();\n  const content  = [caption, hashtags].filter(Boolean).join('\\n\\n');\n\n  const mediaItems = [];\n  const videoUrl = body.video_url || '';\n  const coverUrl = body.cover_image_url || '';\n  if (videoUrl){\n    const item = { type:'video', url: videoUrl };\n    // Zernio takes a cover for Reels under instagramThumbnail and for\n    // everything else under thumbnail — send both; each platform ignores\n    // the one it doesn't use.\n    if (coverUrl){ item.thumbnail = coverUrl; item.instagramThumbnail = coverUrl; }\n    mediaItems.push(item);\n  } else {\n    // image_urls (carousel) preferred, else the single image_url.\n    const urls = Array.isArray(body.image_urls) && body.image_urls.length\n      ? body.image_urls\n      : [body.image_url].filter(Boolean);\n    for (const u of urls){\n      if (!u) continue;\n      const item = { type:'image', url: u };\n      if (body.alt_text) item.altText = String(body.alt_text).slice(0, 1000);\n      mediaItems.push(item);\n    }\n  }\n\n  if (!content && !mediaItems.length){\n    throw new Error('Nothing to publish — the post has neither caption text nor media.');\n  }\n\n  const payload = { platforms: [{ platform, accountId }] };\n  if (content) payload.content = content;\n  if (mediaItems.length) payload.mediaItems = mediaItems;\n\n  // scheduledFor vs publishNow are mutually exclusive in intent; prefer an\n  // explicit schedule when one is given.\n  const scheduledFor = body.scheduled_for || '';\n  if (scheduledFor){\n    payload.scheduledFor = scheduledFor;\n    payload.timezone = body.timezone || 'Asia/Riyadh';\n  } else {\n    payload.publishNow = true;\n  }\n\n  await patchPost({ publish_status: 'publishing', publish_error: '' });\n\n  // ---- 3) publish ----\n  const resp = await req({ method:'POST', url:`${ZBASE}/posts`, headers:zHeaders, body:payload, json:true });\n  const post = (resp && (resp.post || resp)) || {};\n  const zernioPostId = post._id || post.id || '';\n  if (!zernioPostId){\n    throw new Error('Zernio accepted the request but returned no post id: ' + JSON.stringify(resp).slice(0, 300));\n  }\n\n  // Zernio's own status is the truth here ('scheduled' | 'publishing' |\n  // 'published'); map anything unexpected to our closest equivalent rather\n  // than inventing a state our CHECK constraint would reject.\n  const zStatus = String(post.status || '').toLowerCase();\n  const publishStatus =\n    zStatus === 'scheduled'  ? 'scheduled'\n  : zStatus === 'published'  ? 'published'\n  : scheduledFor             ? 'scheduled'\n  :                            'publishing';\n\n  const fields = {\n    zernio_post_id: zernioPostId,\n    publish_status: publishStatus,\n    publish_error: '',\n    platform_post_url: post.platformPostUrl || '',\n  };\n  if (publishStatus === 'scheduled') fields.scheduled_publish_at = scheduledFor || null;\n  if (publishStatus === 'published') fields.published_at = post.publishedAt || new Date().toISOString();\n  await patchPost(fields);\n\n  return [{ json: { ok: true, post_id: postId, zernio_post_id: zernioPostId,\n                    publish_status: publishStatus, platform, account_id: accountId,\n                    platform_post_url: fields.platform_post_url } }];\n} catch (err) {\n  const message = (err && err.message) ? err.message : String(err);\n  await patchPost({ publish_status: 'failed', publish_error: message });\n  return [{ json: { ok: false, post_id: postId, error: message } }];\n}\n"
+      },
+      "id": "9423bf51-bd5a-4ada-b1fc-ccceb887c6ad",
+      "name": "Publish to Zernio",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        220
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Publish to Zernio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": []
+}

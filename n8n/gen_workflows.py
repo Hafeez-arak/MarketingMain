@@ -1226,6 +1226,375 @@ try {
 }
 """
 
+ZERNIO_PUBLISH_STICKY = r"""## Arak – Publish Post (Zernio)
+
+**Zero secrets in this file.** Needs `ZERNIO_API_KEY`, `SUPABASE_URL`, `SUPABASE_KEY`.
+
+Publishes or schedules ONE approved post to its platform through Zernio's unified API (`POST /v1/posts`), then writes the Zernio post id + publish state back onto our own row.
+
+**Why a workflow and not a direct browser call:** the Zernio key is a server-side secret. Calling `zernio.com` from the frontend would ship the key to anyone who opens devtools — so the browser talks to this webhook and only n8n ever sees the key, exactly like every other provider in this project.
+
+Synchronous (`lastNode`): Zernio accepts-and-queues, so the call is fast and the reviewer gets a real result (or a real error) rather than a fire-and-forget spinner.
+
+**Account resolution:** pass `account_id` (Zernio's account `_id`) to target a specific connected account; omit it and this resolves the first active, non-reconnect-needing account for the platform via `GET /v1/accounts`. Resolved accounts are mirrored into `social_accounts` on the way through, so the UI can list them without holding the key.
+
+**Media** is passed by URL (`mediaItems[].url`) — our generated images/videos already live in public Supabase Storage, so nothing is re-uploaded.
+
+Zernio is an ADAPTER here, deliberately: `zernio_post_id` sits next to our own row rather than replacing it, so switching providers later (Ayrshare's SDK is wire-compatible) means editing this one workflow, not the schema or the UI."""
+
+ZERNIO_PUBLISH_JS = r"""
+const http = this.helpers.httpRequest;
+
+async function req(opts){
+  try { return await http(opts); }
+  catch (e) {
+    const detail = (e && (e.error || (e.response && e.response.data) || e.description)) || null;
+    const real = detail
+      ? (typeof detail === 'string' ? detail
+        : Buffer.isBuffer(detail) ? detail.toString('utf8', 0, 300)
+        : (detail.error && detail.error.message) || detail.message || JSON.stringify(detail).slice(0, 400))
+      : (e && e.message) || String(e);
+    throw new Error(real);
+  }
+}
+
+const body = ($input.first().json.body) || {};
+const ZERNIO   = $env.ZERNIO_API_KEY;
+const SUPA_URL = String($env.SUPABASE_URL || '').replace(/\/+$/, '');
+const SUPA_KEY = $env.SUPABASE_KEY;
+const ZBASE    = 'https://zernio.com/api/v1';
+const zHeaders = { Authorization: `Bearer ${ZERNIO}`, 'Content-Type': 'application/json' };
+
+// Our row, so we can write the result back.
+const postId      = body.post_id || '';
+const postTable   = body.post_table || 'instagram_generated_posts';
+const workspaceId = body.workspace_id || null;
+const platform    = body.platform || 'instagram';
+
+// Only these three tables exist; anything else is a caller bug, and
+// interpolating an arbitrary string into the PATCH URL would be worse.
+const ALLOWED_TABLES = ['instagram_generated_posts','linkedin_generated_posts','generated_posts'];
+if (!ALLOWED_TABLES.includes(postTable)) throw new Error('Unknown post_table: ' + postTable);
+
+async function patchPost(fields){
+  if (!postId) return;
+  try {
+    await http({ method:'PATCH', url:`${SUPA_URL}/rest/v1/${postTable}?id=eq.${postId}`,
+      headers:{ apikey:SUPA_KEY, Authorization:`Bearer ${SUPA_KEY}`, 'Content-Type':'application/json', Prefer:'return=minimal' },
+      body: fields, json:true });
+  } catch (e) { /* never let status bookkeeping mask the real publish result */ }
+}
+
+try {
+  if (!ZERNIO) throw new Error('ZERNIO_API_KEY is not set on this n8n instance.');
+
+  // ---- 1) resolve which connected account to post as ----
+  let accountId = body.account_id || '';
+  if (!accountId){
+    const list = await req({ method:'GET', url:`${ZBASE}/accounts`, headers:zHeaders, json:true });
+    const accounts = (list && list.accounts) || [];
+    const match = accounts.find(a =>
+      a.platform === platform && a.isActive !== false && a.needsReconnection !== true);
+    if (!match){
+      const connected = accounts.map(a => a.platform).join(', ') || 'none';
+      throw new Error(`No connected ${platform} account in Zernio (connected: ${connected}). Connect one in the Zernio dashboard first.`);
+    }
+    accountId = match._id;
+
+    // Mirror what we just learned into social_accounts so the UI can show
+    // connected accounts without ever touching the Zernio key. Upsert on
+    // (workspace_id, zernio_account_id) — see the migration's unique index.
+    if (workspaceId){
+      try {
+        await http({ method:'POST', url:`${SUPA_URL}/rest/v1/social_accounts?on_conflict=workspace_id,zernio_account_id`,
+          headers:{ apikey:SUPA_KEY, Authorization:`Bearer ${SUPA_KEY}`, 'Content-Type':'application/json', Prefer:'resolution=merge-duplicates,return=minimal' },
+          body:{ workspace_id: workspaceId, zernio_account_id: match._id, platform: match.platform,
+                 username: match.username || '', display_name: match.displayName || '',
+                 profile_picture: match.profilePicture || '', profile_url: match.profileUrl || '',
+                 is_active: match.isActive !== false, needs_reconnection: match.needsReconnection === true,
+                 followers_count: match.followersCount || 0, last_synced_at: new Date().toISOString(),
+                 updated_at: new Date().toISOString() },
+          json:true });
+      } catch (e) { /* caching is best-effort; publishing must not fail on it */ }
+    }
+  }
+
+  // ---- 2) build the Zernio payload ----
+  // Caption + hashtags are two columns for us but one text field for every
+  // platform, so join them here rather than making the caller pre-format.
+  const caption  = String(body.caption || '').trim();
+  const hashtags = String(body.hashtags || '').trim();
+  const content  = [caption, hashtags].filter(Boolean).join('\n\n');
+
+  const mediaItems = [];
+  const videoUrl = body.video_url || '';
+  const coverUrl = body.cover_image_url || '';
+  if (videoUrl){
+    const item = { type:'video', url: videoUrl };
+    // Zernio takes a cover for Reels under instagramThumbnail and for
+    // everything else under thumbnail — send both; each platform ignores
+    // the one it doesn't use.
+    if (coverUrl){ item.thumbnail = coverUrl; item.instagramThumbnail = coverUrl; }
+    mediaItems.push(item);
+  } else {
+    // image_urls (carousel) preferred, else the single image_url.
+    const urls = Array.isArray(body.image_urls) && body.image_urls.length
+      ? body.image_urls
+      : [body.image_url].filter(Boolean);
+    for (const u of urls){
+      if (!u) continue;
+      const item = { type:'image', url: u };
+      if (body.alt_text) item.altText = String(body.alt_text).slice(0, 1000);
+      mediaItems.push(item);
+    }
+  }
+
+  if (!content && !mediaItems.length){
+    throw new Error('Nothing to publish — the post has neither caption text nor media.');
+  }
+
+  const payload = { platforms: [{ platform, accountId }] };
+  if (content) payload.content = content;
+  if (mediaItems.length) payload.mediaItems = mediaItems;
+
+  // scheduledFor vs publishNow are mutually exclusive in intent; prefer an
+  // explicit schedule when one is given.
+  const scheduledFor = body.scheduled_for || '';
+  if (scheduledFor){
+    payload.scheduledFor = scheduledFor;
+    payload.timezone = body.timezone || 'Asia/Riyadh';
+  } else {
+    payload.publishNow = true;
+  }
+
+  await patchPost({ publish_status: 'publishing', publish_error: '' });
+
+  // ---- 3) publish ----
+  const resp = await req({ method:'POST', url:`${ZBASE}/posts`, headers:zHeaders, body:payload, json:true });
+  const post = (resp && (resp.post || resp)) || {};
+  const zernioPostId = post._id || post.id || '';
+  if (!zernioPostId){
+    throw new Error('Zernio accepted the request but returned no post id: ' + JSON.stringify(resp).slice(0, 300));
+  }
+
+  // Zernio's own status is the truth here ('scheduled' | 'publishing' |
+  // 'published'); map anything unexpected to our closest equivalent rather
+  // than inventing a state our CHECK constraint would reject.
+  const zStatus = String(post.status || '').toLowerCase();
+  const publishStatus =
+    zStatus === 'scheduled'  ? 'scheduled'
+  : zStatus === 'published'  ? 'published'
+  : scheduledFor             ? 'scheduled'
+  :                            'publishing';
+
+  const fields = {
+    zernio_post_id: zernioPostId,
+    publish_status: publishStatus,
+    publish_error: '',
+    platform_post_url: post.platformPostUrl || '',
+  };
+  if (publishStatus === 'scheduled') fields.scheduled_publish_at = scheduledFor || null;
+  if (publishStatus === 'published') fields.published_at = post.publishedAt || new Date().toISOString();
+  await patchPost(fields);
+
+  return [{ json: { ok: true, post_id: postId, zernio_post_id: zernioPostId,
+                    publish_status: publishStatus, platform, account_id: accountId,
+                    platform_post_url: fields.platform_post_url } }];
+} catch (err) {
+  const message = (err && err.message) ? err.message : String(err);
+  await patchPost({ publish_status: 'failed', publish_error: message });
+  return [{ json: { ok: false, post_id: postId, error: message } }];
+}
+"""
+
+ZERNIO_SYNC_STICKY = r"""## Arak – Zernio Sync (accounts + analytics)
+
+**Zero secrets in this file.** Needs `ZERNIO_API_KEY`, `SUPABASE_URL`, `SUPABASE_KEY`.
+
+Pulls state back FROM Zernio: refreshes `social_accounts` (what's connected, follower counts, dead tokens) and fills `post_analytics` with per-day metrics for every post we published through Zernio.
+
+Runs on a daily schedule AND on an on-demand webhook (`arak-zernio-sync`) so a "Refresh" button in the UI hits the same path — one workflow, not two that drift.
+
+**Why it queries per-post instead of the bulk list:** `GET /v1/analytics` (list mode) returns EXTERNAL post ids, not the Zernio ids we stored at publish time — the docs are explicit about this and suggest correlating on `platformPostUrl`, which is fragile (URLs get rewritten, and it breaks entirely for posts with no public URL yet). Single-post mode (`?postId=`) is documented to accept Zernio post ids directly, so this iterates our own published rows and asks about each one by id. N calls instead of 1, but correct correlation instead of clever correlation — and at this scale N is dozens per month.
+
+`/analytics/post-timeline` is the primary source (it returns exactly our per-day shape); the single-post totals are the fallback when a post is too new to have a timeline, written as one row dated today.
+
+**`metrics_present`** records which metrics the platform actually reported, so a real 0 stays distinguishable from "this platform doesn't measure saves" — without it, averaging `saves` across platforms silently counts every LinkedIn post as zero-saves."""
+
+ZERNIO_SYNC_JS = r"""
+const http = this.helpers.httpRequest;
+
+async function req(opts){
+  try { return await http(opts); }
+  catch (e) {
+    const detail = (e && (e.error || (e.response && e.response.data) || e.description)) || null;
+    const real = detail
+      ? (typeof detail === 'string' ? detail
+        : Buffer.isBuffer(detail) ? detail.toString('utf8', 0, 300)
+        : (detail.error && detail.error.message) || detail.message || JSON.stringify(detail).slice(0, 400))
+      : (e && e.message) || String(e);
+    throw new Error(real);
+  }
+}
+
+// Fired by EITHER a schedule trigger (no body) or the webhook (body with an
+// optional workspace_id). Both shapes have to be tolerated here.
+const raw  = ($input.first() && $input.first().json) || {};
+const body = raw.body || {};
+const ZERNIO   = $env.ZERNIO_API_KEY;
+const SUPA_URL = String($env.SUPABASE_URL || '').replace(/\/+$/, '');
+const SUPA_KEY = $env.SUPABASE_KEY;
+const ZBASE    = 'https://zernio.com/api/v1';
+const zHeaders = { Authorization: `Bearer ${ZERNIO}`, 'Content-Type': 'application/json' };
+const sHeaders = { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}`, 'Content-Type': 'application/json' };
+
+const POST_TABLES = ['instagram_generated_posts','linkedin_generated_posts','generated_posts'];
+const METRIC_KEYS = ['impressions','reach','likes','comments','shares','saves','clicks','views'];
+
+function today(){ return new Date().toISOString().slice(0, 10); }
+
+try {
+  if (!ZERNIO) throw new Error('ZERNIO_API_KEY is not set on this n8n instance.');
+  const wsFilter = body.workspace_id ? `&workspace_id=eq.${body.workspace_id}` : '';
+
+  // ══ 1) accounts ══════════════════════════════════════════════════════
+  const list = await req({ method:'GET', url:`${ZBASE}/accounts`, headers:zHeaders, json:true });
+  const accounts = (list && list.accounts) || [];
+  const hasAnalyticsAccess = !!(list && list.hasAnalyticsAccess);
+
+  // Zernio has no notion of our workspaces — one API key is one Zernio
+  // account. Mirror its accounts into whichever workspace asked (webhook)
+  // or every workspace that already has rows (schedule). Without a
+  // workspace we can't write anything RLS-scoped, so skip rather than
+  // guess.
+  let workspaceIds = [];
+  if (body.workspace_id){
+    workspaceIds = [body.workspace_id];
+  } else {
+    const existing = await req({ method:'GET', url:`${SUPA_URL}/rest/v1/social_accounts?select=workspace_id`, headers:sHeaders, json:true });
+    workspaceIds = [...new Set((existing || []).map(r => r.workspace_id).filter(Boolean))];
+  }
+
+  let accountsSynced = 0;
+  for (const wsId of workspaceIds){
+    for (const a of accounts){
+      try {
+        await req({ method:'POST', url:`${SUPA_URL}/rest/v1/social_accounts?on_conflict=workspace_id,zernio_account_id`,
+          headers:{ ...sHeaders, Prefer:'resolution=merge-duplicates,return=minimal' },
+          body:{ workspace_id: wsId, zernio_account_id: a._id, platform: a.platform,
+                 username: a.username || '', display_name: a.displayName || '',
+                 profile_picture: a.profilePicture || '', profile_url: a.profileUrl || '',
+                 is_active: a.isActive !== false, needs_reconnection: a.needsReconnection === true,
+                 followers_count: a.followersCount || 0, last_synced_at: new Date().toISOString(),
+                 updated_at: new Date().toISOString() },
+          json:true });
+        accountsSynced++;
+      } catch (e) { /* one bad account row must not abort the whole sync */ }
+    }
+  }
+
+  // ══ 2) analytics ═════════════════════════════════════════════════════
+  if (!hasAnalyticsAccess){
+    return [{ json: { ok: true, accounts: accounts.length, accounts_synced: accountsSynced,
+                      analytics_skipped: 'Zernio analytics add-on not enabled on this plan.',
+                      posts_checked: 0, rows_written: 0 } }];
+  }
+
+  // Every post we actually pushed through Zernio, across all three tables.
+  const targets = [];
+  for (const table of POST_TABLES){
+    try {
+      const rows = await req({ method:'GET',
+        url:`${SUPA_URL}/rest/v1/${table}?select=id,workspace_id,zernio_post_id,publish_status&zernio_post_id=neq.&publish_status=in.(published,scheduled,publishing)${wsFilter}&limit=500`,
+        headers:sHeaders, json:true });
+      for (const r of (rows || [])){
+        if (r.zernio_post_id) targets.push({ ...r, post_table: table });
+      }
+    } catch (e) { /* a missing table (generated_posts on older DBs) is fine */ }
+  }
+
+  let rowsWritten = 0;
+  const errors = [];
+
+  for (const t of targets){
+    try {
+      // Primary: the real per-day timeline.
+      let wrote = false;
+      try {
+        const tl = await req({ method:'GET',
+          url:`${ZBASE}/analytics/post-timeline?postId=${encodeURIComponent(t.zernio_post_id)}`,
+          headers:zHeaders, json:true });
+        for (const day of ((tl && tl.timeline) || [])){
+          const present = METRIC_KEYS.filter(k => day[k] !== undefined && day[k] !== null);
+          await req({ method:'POST', url:`${SUPA_URL}/rest/v1/post_analytics?on_conflict=zernio_post_id,platform,metric_date`,
+            headers:{ ...sHeaders, Prefer:'resolution=merge-duplicates,return=minimal' },
+            body:{ workspace_id: t.workspace_id, zernio_post_id: t.zernio_post_id,
+                   platform: day.platform || '', platform_post_id: day.platformPostId || '',
+                   post_table: t.post_table, post_id: t.id,
+                   metric_date: String(day.date || '').slice(0, 10) || today(),
+                   impressions: day.impressions || 0, reach: day.reach || 0, likes: day.likes || 0,
+                   comments: day.comments || 0, shares: day.shares || 0, saves: day.saves || 0,
+                   clicks: day.clicks || 0, views: day.views || 0,
+                   metrics_present: present, synced_at: new Date().toISOString() },
+            json:true });
+          rowsWritten++; wrote = true;
+        }
+      } catch (e) { /* fall through to totals */ }
+
+      // Fallback: too new for a timeline — store current totals as today.
+      if (!wrote){
+        const single = await req({ method:'GET',
+          url:`${ZBASE}/analytics?postId=${encodeURIComponent(t.zernio_post_id)}`,
+          headers:zHeaders, json:true });
+        const perPlatform = (single && single.platformAnalytics) || [];
+        // Prefer the per-platform breakdown; fall back to the roll-up when
+        // Zernio hasn't split it out yet.
+        const entries = perPlatform.length
+          ? perPlatform.map(p => ({ platform: p.platform, platformPostId: p.platformPostId, a: p.analytics || {} }))
+          : [{ platform: single.platform || '', platformPostId: '', a: (single && single.analytics) || {} }];
+        for (const e of entries){
+          if (!e.a || !Object.keys(e.a).length) continue;
+          const present = METRIC_KEYS.filter(k => e.a[k] !== undefined && e.a[k] !== null);
+          await req({ method:'POST', url:`${SUPA_URL}/rest/v1/post_analytics?on_conflict=zernio_post_id,platform,metric_date`,
+            headers:{ ...sHeaders, Prefer:'resolution=merge-duplicates,return=minimal' },
+            body:{ workspace_id: t.workspace_id, zernio_post_id: t.zernio_post_id,
+                   platform: e.platform || '', platform_post_id: e.platformPostId || '',
+                   post_table: t.post_table, post_id: t.id, metric_date: today(),
+                   impressions: e.a.impressions || 0, reach: e.a.reach || 0, likes: e.a.likes || 0,
+                   comments: e.a.comments || 0, shares: e.a.shares || 0, saves: e.a.saves || 0,
+                   clicks: e.a.clicks || 0, views: e.a.views || 0,
+                   metrics_present: present, synced_at: new Date().toISOString() },
+            json:true });
+          rowsWritten++;
+        }
+
+        // Zernio knows the real publish state; if a scheduled post has since
+        // gone live, reflect that on our row so the UI stops calling it
+        // "scheduled" forever.
+        const zStatus = String((single && single.status) || '').toLowerCase();
+        if (zStatus === 'published' && t.publish_status !== 'published'){
+          try {
+            await req({ method:'PATCH', url:`${SUPA_URL}/rest/v1/${t.post_table}?id=eq.${t.id}`,
+              headers:{ ...sHeaders, Prefer:'return=minimal' },
+              body:{ publish_status:'published',
+                     published_at: single.publishedAt || new Date().toISOString(),
+                     platform_post_url: single.platformPostUrl || '' }, json:true });
+          } catch (e) { /* non-fatal */ }
+        }
+      }
+    } catch (e) {
+      errors.push({ zernio_post_id: t.zernio_post_id, error: (e && e.message) || String(e) });
+    }
+  }
+
+  return [{ json: { ok: true, accounts: accounts.length, accounts_synced: accountsSynced,
+                    posts_checked: targets.length, rows_written: rowsWritten,
+                    errors: errors.slice(0, 10) } }];
+} catch (err) {
+  return [{ json: { ok: false, error: (err && err.message) ? err.message : String(err) } }];
+}
+"""
+
 CAMPAIGN_PLANNER_STICKY = r"""## Arak Campaign Planner
 
 **Zero secrets in this file.** Only needs `ANTHROPIC_API_KEY`.
@@ -2022,6 +2391,72 @@ def build_video_render() -> dict:
     }
     return {
         "name": "Arak Lighting – Video Render",
+        "nodes": nodes,
+        "connections": connections,
+        "active": False,
+        "settings": {"executionOrder": "v1"},
+        "tags": [],
+    }
+
+
+def build_zernio_publish() -> dict:
+    """
+    Webhook (responseMode=lastNode) -> Publish to Zernio (single Code node,
+    its return value IS the HTTP response). Synchronous on purpose: Zernio
+    accepts-and-queues so the call is fast, and the reviewer who clicked
+    "Publish" should get a real result or a real error, not a spinner.
+    """
+    nodes = [
+        _sticky(ZERNIO_PUBLISH_STICKY, height=420, width=480, x=0, y=-220),
+        _webhook("arak-publish-post", "lastNode", x=0, y=220),
+        _code("Publish to Zernio", ZERNIO_PUBLISH_JS, x=240, y=220),
+    ]
+    connections = {
+        "Webhook": {"main": [[{"node": "Publish to Zernio", "type": "main", "index": 0}]]},
+    }
+    return {
+        "name": "Arak Lighting – Publish Post (Zernio)",
+        "nodes": nodes,
+        "connections": connections,
+        "active": False,
+        "settings": {"executionOrder": "v1"},
+        "tags": [],
+    }
+
+
+def build_zernio_sync() -> dict:
+    """
+    TWO entry points into ONE Code node:
+      Schedule Trigger (daily 06:00) ─┐
+      Webhook (arak-zernio-sync) ─────┴─> Zernio: Sync -> Respond
+
+    Deliberately one workflow rather than a scheduled copy and a manual
+    copy — two copies of sync logic drift, and this one is stateful enough
+    (upserts, status reconciliation) that drift would be silent. The Code
+    node tolerates both input shapes; see its `raw.body || {}` handling.
+
+    The Respond node only matters on the webhook path; on the schedule path
+    it's a harmless no-op terminal node (nothing is waiting on a response).
+    """
+    nodes = [
+        _sticky(ZERNIO_SYNC_STICKY, height=440, width=500, x=0, y=-260),
+        {
+            "parameters": {"rule": {"interval": [{"triggerAtHour": 6}]}},
+            "id": nid(),
+            "name": "Daily 06:00",
+            "type": "n8n-nodes-base.scheduleTrigger",
+            "typeVersion": 1.2,
+            "position": [0, 140],
+        },
+        _webhook("arak-zernio-sync", "lastNode", x=0, y=320),
+        _code("Zernio: Sync", ZERNIO_SYNC_JS, x=260, y=230),
+    ]
+    connections = {
+        "Daily 06:00": {"main": [[{"node": "Zernio: Sync", "type": "main", "index": 0}]]},
+        "Webhook": {"main": [[{"node": "Zernio: Sync", "type": "main", "index": 0}]]},
+    }
+    return {
+        "name": "Arak Lighting – Zernio Sync",
         "nodes": nodes,
         "connections": connections,
         "active": False,
@@ -5830,6 +6265,8 @@ if __name__ == "__main__":
         build_instagram_reels(),
         build_instagram_manual_generation(),
         build_linkedin_manual_generation(),
+        build_zernio_publish(),
+        build_zernio_sync(),
     ]
 
     for wf in workflows:
