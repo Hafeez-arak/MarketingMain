@@ -1245,17 +1245,32 @@ Zernio is an ADAPTER here, deliberately: `zernio_post_id` sits next to our own r
 ZERNIO_PUBLISH_JS = r"""
 const http = this.helpers.httpRequest;
 
+// n8n's thrown-error shape for non-2xx responses varies by version (the
+// body ends up under different keys depending on how the client wraps
+// axios), which is why this used to surface a useless generic
+// "Request failed with status code 400". Sidestepping that entirely:
+// disable the throw, read the parsed JSON body ourselves.
 async function req(opts){
-  try { return await http(opts); }
-  catch (e) {
-    const detail = (e && (e.error || (e.response && e.response.data) || e.description)) || null;
-    const real = detail
-      ? (typeof detail === 'string' ? detail
-        : Buffer.isBuffer(detail) ? detail.toString('utf8', 0, 300)
-        : (detail.error && detail.error.message) || detail.message || JSON.stringify(detail).slice(0, 400))
-      : (e && e.message) || String(e);
-    throw new Error(real);
-  }
+  const res = await http({ ...opts, returnFullResponse: true, ignoreHttpStatusErrors: true });
+  const status = res.statusCode;
+  if (status >= 200 && status < 300) return res.body;
+  const b = res.body;
+  const msg = (b && typeof b === 'object') ? (b.error || b.message || JSON.stringify(b).slice(0, 400))
+            : (typeof b === 'string' && b) ? b.slice(0, 400)
+            : `HTTP ${status}`;
+  throw new Error(`Zernio ${status}: ${msg}`);
+}
+
+// Instagram's publish API only accepts JPG/PNG — it rejects WEBP outright,
+// which is what every image in this pipeline is generated/stored as (webp
+// is deliberately kept everywhere else for size). Rather than re-encoding
+// our storage pipeline (would bloat the app's own asset sizes for no
+// benefit), route just the outbound publish URL through a JPEG-converting
+// proxy. images.weserv.nl is a free, widely-used image CDN/proxy that
+// supports on-the-fly format conversion — no auth, no upload round-trip.
+function toPublishable(u){
+  if (!u || !/\.webp(\?|#|$)/i.test(u)) return u;
+  return `https://images.weserv.nl/?url=${encodeURIComponent(u)}&output=jpg`;
 }
 
 const body = ($input.first().json.body) || {};
@@ -1334,7 +1349,7 @@ try {
     // Zernio takes a cover for Reels under instagramThumbnail and for
     // everything else under thumbnail — send both; each platform ignores
     // the one it doesn't use.
-    if (coverUrl){ item.thumbnail = coverUrl; item.instagramThumbnail = coverUrl; }
+    if (coverUrl){ const c = toPublishable(coverUrl); item.thumbnail = c; item.instagramThumbnail = c; }
     mediaItems.push(item);
   } else {
     // image_urls (carousel) preferred, else the single image_url.
@@ -1343,7 +1358,7 @@ try {
       : [body.image_url].filter(Boolean);
     for (const u of urls){
       if (!u) continue;
-      const item = { type:'image', url: u };
+      const item = { type:'image', url: toPublishable(u) };
       if (body.alt_text) item.altText = String(body.alt_text).slice(0, 1000);
       mediaItems.push(item);
     }
@@ -1430,17 +1445,18 @@ Runs on a daily schedule AND on an on-demand webhook (`arak-zernio-sync`) so a "
 ZERNIO_SYNC_JS = r"""
 const http = this.helpers.httpRequest;
 
+// See the matching comment in the Publish workflow: n8n's thrown-error
+// shape for non-2xx responses is unreliable across versions, so read the
+// parsed JSON body ourselves instead of guessing at e.error/e.response.data.
 async function req(opts){
-  try { return await http(opts); }
-  catch (e) {
-    const detail = (e && (e.error || (e.response && e.response.data) || e.description)) || null;
-    const real = detail
-      ? (typeof detail === 'string' ? detail
-        : Buffer.isBuffer(detail) ? detail.toString('utf8', 0, 300)
-        : (detail.error && detail.error.message) || detail.message || JSON.stringify(detail).slice(0, 400))
-      : (e && e.message) || String(e);
-    throw new Error(real);
-  }
+  const res = await http({ ...opts, returnFullResponse: true, ignoreHttpStatusErrors: true });
+  const status = res.statusCode;
+  if (status >= 200 && status < 300) return res.body;
+  const b = res.body;
+  const msg = (b && typeof b === 'object') ? (b.error || b.message || JSON.stringify(b).slice(0, 400))
+            : (typeof b === 'string' && b) ? b.slice(0, 400)
+            : `HTTP ${status}`;
+  throw new Error(`Zernio ${status}: ${msg}`);
 }
 
 // Fired by EITHER a schedule trigger (no body) or the webhook (body with an
