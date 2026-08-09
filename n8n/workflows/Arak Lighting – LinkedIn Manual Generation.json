@@ -377,7 +377,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const raw = $input.first().json.content?.[0]?.text || '';\nconst clean = raw.replace(/```json|```/g,'').trim();\nlet parsed;\ntry { parsed = JSON.parse(clean); }\ncatch(e) {\n  const match = clean.match(/\\{[\\s\\S]*\\}/);\n  if (match) { try { parsed = JSON.parse(match[0]); } catch(e2) { throw new Error('Cannot parse: ' + clean.slice(0,200)); } }\n  else throw new Error('No JSON found: ' + clean.slice(0,200));\n}\nconst si = $('Sanitize Inputs').first().json;\nreturn [{json: {\n  hook:           parsed.hook || '',\n  body:           parsed.body || '',\n  hashtags:       parsed.hashtags || '#ArakLighting #ArchitecturalLighting',\n  image_prompt:   parsed.image_prompt || '',\n  trending_angle: parsed.trending_angle || '',\n  post_strategy:  parsed.post_strategy || '',\n  topic:          si.safe_topic,\n  tone:           si.tone,\n  post_type:      si.post_type,\n  style:          si.style,\n  content_route:  si.content_route,\n  include_image:  si.include_image,\n  aspect_ratio:   si.aspect_ratio,\n}}];"
+        "jsCode": "const raw = $input.first().json.content?.find(b=>b.type==='text')?.text || '';\nconst clean = raw.replace(/```json|```/g,'').trim();\nlet parsed;\ntry { parsed = JSON.parse(clean); }\ncatch(e) {\n  const match = clean.match(/\\{[\\s\\S]*\\}/);\n  if (match) { try { parsed = JSON.parse(match[0]); } catch(e2) { throw new Error('Cannot parse: ' + clean.slice(0,200)); } }\n  else throw new Error('No JSON found: ' + clean.slice(0,200));\n}\nconst si = $('Sanitize Inputs').first().json;\nreturn [{json: {\n  hook:           parsed.hook || '',\n  body:           parsed.body || '',\n  hashtags:       parsed.hashtags || '#ArakLighting #ArchitecturalLighting',\n  image_prompt:   parsed.image_prompt || '',\n  trending_angle: parsed.trending_angle || '',\n  post_strategy:  parsed.post_strategy || '',\n  topic:          si.safe_topic,\n  tone:           si.tone,\n  post_type:      si.post_type,\n  style:          si.style,\n  content_route:  si.content_route,\n  include_image:  si.include_image,\n  aspect_ratio:   si.aspect_ratio,\n}}];"
       },
       "id": "70920dd6-c5f7-42a1-a0d8-d7d5f761f17e",
       "name": "Parse Post",
@@ -718,7 +718,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const raw = $input.first().json.content?.[0]?.text || '';\nconst clean = raw.replace(/```json|```/g,'').trim();\nlet parsed;\ntry { parsed = JSON.parse(clean); }\ncatch(e) {\n  const match = clean.match(/\\{[\\s\\S]*\\}/);\n  parsed = match ? JSON.parse(match[0]) : {hook: '', body: clean, hashtags: '#ArakLighting'};\n}\nreturn [{json: { hook: parsed.hook || '', body: parsed.body || '', hashtags: parsed.hashtags || '#ArakLighting' }}];"
+        "jsCode": "const raw = $input.first().json.content?.find(b=>b.type==='text')?.text || '';\nconst clean = raw.replace(/```json|```/g,'').trim();\nlet parsed;\ntry { parsed = JSON.parse(clean); }\ncatch(e) {\n  const match = clean.match(/\\{[\\s\\S]*\\}/);\n  parsed = match ? JSON.parse(match[0]) : {hook: '', body: clean, hashtags: '#ArakLighting'};\n}\nreturn [{json: { hook: parsed.hook || '', body: parsed.body || '', hashtags: parsed.hashtags || '#ArakLighting' }}];"
       },
       "id": "c15f9973-62e4-4bb4-9544-77c930f52132",
       "name": "Parse Post Regen",
@@ -781,7 +781,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const rewritten = $input.first().json.content?.[0]?.text || '';\nconst si = $('Sanitize Inputs').first().json;\nconst base = rewritten.trim() || si.image_prompt || 'architectural lighting Saudi Arabia';\nconst finalPrompt = base + ', Arak Lighting Saudi Arabia, ultra high detail, professional LinkedIn visual, wide 16:9 composition';\nreturn [{json: { final_prompt: finalPrompt }}];"
+        "jsCode": "const rewritten = $input.first().json.content?.find(b=>b.type==='text')?.text || '';\nconst si = $('Sanitize Inputs').first().json;\nconst base = rewritten.trim() || si.image_prompt || 'architectural lighting Saudi Arabia';\nconst finalPrompt = base + ', Arak Lighting Saudi Arabia, ultra high detail, professional LinkedIn visual, wide 16:9 composition';\nreturn [{json: { final_prompt: finalPrompt }}];"
       },
       "id": "7f2c4a87-bc17-40c6-a320-dbe77249f717",
       "name": "Build Regen Image Prompt",
@@ -916,7 +916,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const raw = $input.first().json.content?.[0]?.text || '';\nconst clean = raw.replace(/```json|```/g,'').trim();\nlet parsed;\ntry { parsed = JSON.parse(clean); }\ncatch(e) {\n  const match = clean.match(/\\{[\\s\\S]*\\}/);\n  parsed = match ? JSON.parse(match[0]) : {hook: '', body: clean, hashtags: '#ArakLighting'};\n}\nreturn [{json: { hook: parsed.hook || '', body: parsed.body || '', hashtags: parsed.hashtags || '#ArakLighting' }}];"
+        "jsCode": "const raw = $input.first().json.content?.find(b=>b.type==='text')?.text || '';\nconst clean = raw.replace(/```json|```/g,'').trim();\nlet parsed;\ntry { parsed = JSON.parse(clean); }\ncatch(e) {\n  const match = clean.match(/\\{[\\s\\S]*\\}/);\n  parsed = match ? JSON.parse(match[0]) : {hook: '', body: clean, hashtags: '#ArakLighting'};\n}\nreturn [{json: { hook: parsed.hook || '', body: parsed.body || '', hashtags: parsed.hashtags || '#ArakLighting' }}];"
       },
       "id": "d36a53cc-0ddd-422b-bdea-7db993f6eb41",
       "name": "Parse Tone Sync",

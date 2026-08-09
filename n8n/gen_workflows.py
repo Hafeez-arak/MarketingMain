@@ -425,7 +425,11 @@ if (needsCaption && hasSelectedCaption){
   if (!resp || resp.type === 'error' || !Array.isArray(resp.content)) {
     throw new Error('Claude caption call failed: ' + (resp && resp.error && resp.error.message ? resp.error.message : JSON.stringify(resp).slice(0, 300)));
   }
-  const parsed = safeJson(resp.content[0] && resp.content[0].text);
+  // Claude 5-family models can return a leading `thinking` block even when
+  // thinking wasn't explicitly requested — content[0] is NOT reliably the
+  // text block, so find it by type instead of indexing.
+  const textBlock = resp.content.find(b => b.type === 'text');
+  const parsed = safeJson(textBlock && textBlock.text);
   if (PLATFORM === 'linkedin') {
     hook_ar = parsed.hook_ar || '';
     hook_en = parsed.hook_en || '';
@@ -789,7 +793,11 @@ try {
   if (!resp || resp.type === 'error' || !Array.isArray(resp.content)) {
     throw new Error('Claude caption call failed: ' + (resp && resp.error && resp.error.message ? resp.error.message : JSON.stringify(resp).slice(0, 300)));
   }
-  const parsed = safeJson(resp.content[0] && resp.content[0].text);
+  // Claude 5-family models can return a leading `thinking` block even when
+  // thinking wasn't explicitly requested — content[0] is NOT reliably the
+  // text block, so find it by type instead of indexing.
+  const textBlock = resp.content.find(b => b.type === 'text');
+  const parsed = safeJson(textBlock && textBlock.text);
   if (mode === 'variants') {
     const variants = Array.isArray(parsed.variants) ? parsed.variants.slice(0, 3) : [];
     if (!variants.length) throw new Error('No variants returned by the model.');
@@ -871,7 +879,11 @@ try {
   if (!resp || resp.type === 'error' || !Array.isArray(resp.content)) {
     throw new Error('Claude elongation call failed: ' + (resp && resp.error && resp.error.message ? resp.error.message : JSON.stringify(resp).slice(0, 300)));
   }
-  const parsed = safeJson(resp.content[0] && resp.content[0].text);
+  // Claude 5-family models can return a leading `thinking` block even when
+  // thinking wasn't explicitly requested — content[0] is NOT reliably the
+  // text block, so find it by type instead of indexing.
+  const textBlock = resp.content.find(b => b.type === 'text');
+  const parsed = safeJson(textBlock && textBlock.text);
   return [{ json: {
     ok: true,
     topic: parsed.topic || idea.topic || '', angle: parsed.angle || '',
@@ -995,7 +1007,11 @@ try {
   if (!resp || resp.type === 'error' || !Array.isArray(resp.content)) {
     throw new Error('Claude draft-copy call failed: ' + (resp && resp.error && resp.error.message ? resp.error.message : JSON.stringify(resp).slice(0, 300)));
   }
-  const parsed = safeJson(resp.content[0] && resp.content[0].text);
+  // Claude 5-family models can return a leading `thinking` block even when
+  // thinking wasn't explicitly requested — content[0] is NOT reliably the
+  // text block, so find it by type instead of indexing.
+  const textBlock = resp.content.find(b => b.type === 'text');
+  const parsed = safeJson(textBlock && textBlock.text);
   const captionOptions = wantsCaption && Array.isArray(parsed.caption_options) ? parsed.caption_options.slice(0, 3) : [];
   const mediaPromptOptions = wantsMedia && Array.isArray(parsed.media_prompt_options) ? parsed.media_prompt_options.slice(0, 3) : [];
   if (wantsCaption && !captionOptions.length) throw new Error('No caption options returned by the model.');
@@ -1929,7 +1945,7 @@ def build_draft_copy() -> dict:
             x=220,
             y=260,
         ),
-        _code("Draft Copy", DRAFT_COPY_JS, x=440, y=260, run_once_for_each_item=True),
+        _code("Draft Copy", DRAFT_COPY_JS, x=440, y=260),
         _http_save_draft(x=660, y=260),
     ]
     connections = {
@@ -2232,7 +2248,7 @@ def build_instagram_reels() -> dict:
     },
     {
       "parameters": {
-        "jsCode": "const raw = $input.first().json.content?.[0]?.text || '';\nconst clean = raw.replace(/```json|```/g,'').trim();\nlet parsed;\ntry { parsed = JSON.parse(clean); }\ncatch(e) {\n  const match = clean.match(/\\{[\\s\\S]*\\}/);\n  if (match) { try { parsed = JSON.parse(match[0]); } catch(e2) { throw new Error('Cannot parse: ' + clean.slice(0,200)); } }\n  else throw new Error('No JSON found: ' + clean.slice(0,200));\n}\nreturn [{\n  json: {\n    caption:            parsed.caption            || '',\n    hashtags:           parsed.hashtags           || '#ArakLighting #Reels',\n    cover_image_prompt: parsed.cover_image_prompt || '',\n    motion_prompt:      parsed.motion_prompt      || 'slow cinematic pan, warm light ambiance',\n    reel_strategy:      parsed.reel_strategy      || '',\n  }\n}];"
+        "jsCode": "const raw = $input.first().json.content?.find(b=>b.type==='text')?.text || '';\nconst clean = raw.replace(/```json|```/g,'').trim();\nlet parsed;\ntry { parsed = JSON.parse(clean); }\ncatch(e) {\n  const match = clean.match(/\\{[\\s\\S]*\\}/);\n  if (match) { try { parsed = JSON.parse(match[0]); } catch(e2) { throw new Error('Cannot parse: ' + clean.slice(0,200)); } }\n  else throw new Error('No JSON found: ' + clean.slice(0,200));\n}\nreturn [{\n  json: {\n    caption:            parsed.caption            || '',\n    hashtags:           parsed.hashtags           || '#ArakLighting #Reels',\n    cover_image_prompt: parsed.cover_image_prompt || '',\n    motion_prompt:      parsed.motion_prompt      || 'slow cinematic pan, warm light ambiance',\n    reel_strategy:      parsed.reel_strategy      || '',\n  }\n}];"
       },
       "id": "5baa4e55-7bc4-488b-a36c-bdcf1e6af8e9",
       "name": "Parse Script",
@@ -3370,7 +3386,7 @@ def build_instagram_manual_generation() -> dict:
     },
     {
       "parameters": {
-        "jsCode": "const raw = $input.first().json.content?.[0]?.text || '';\nconst clean = raw.replace(/```json|```/g,'').trim();\nlet parsed;\ntry { parsed = JSON.parse(clean); }\ncatch(e) {\n  const match = clean.match(/\\{[\\s\\S]*\\}/);\n  if (match) { try { parsed = JSON.parse(match[0]); } catch(e2) { throw new Error('Cannot parse: ' + clean.slice(0,200)); } }\n  else throw new Error('No JSON found: ' + clean.slice(0,200));\n}\nconst si = $('Sanitize Inputs').first().json;\nreturn [{json: {\n  caption:       parsed.caption || '',\n  hashtags:      parsed.hashtags || '#ArakLighting #LightingDesign',\n  image_prompt:  parsed.image_prompt || '',\n  post_strategy: parsed.post_strategy || '',\n  topic:         si.safe_topic,\n  tone:          si.tone,\n  style:         si.style,\n  content_route: si.content_route,\n}}];"
+        "jsCode": "const raw = $input.first().json.content?.find(b=>b.type==='text')?.text || '';\nconst clean = raw.replace(/```json|```/g,'').trim();\nlet parsed;\ntry { parsed = JSON.parse(clean); }\ncatch(e) {\n  const match = clean.match(/\\{[\\s\\S]*\\}/);\n  if (match) { try { parsed = JSON.parse(match[0]); } catch(e2) { throw new Error('Cannot parse: ' + clean.slice(0,200)); } }\n  else throw new Error('No JSON found: ' + clean.slice(0,200));\n}\nconst si = $('Sanitize Inputs').first().json;\nreturn [{json: {\n  caption:       parsed.caption || '',\n  hashtags:      parsed.hashtags || '#ArakLighting #LightingDesign',\n  image_prompt:  parsed.image_prompt || '',\n  post_strategy: parsed.post_strategy || '',\n  topic:         si.safe_topic,\n  tone:          si.tone,\n  style:         si.style,\n  content_route: si.content_route,\n}}];"
       },
       "id": "2b8937af-be42-442b-b8fd-732bd5942594",
       "name": "Parse Caption",
@@ -3383,7 +3399,7 @@ def build_instagram_manual_generation() -> dict:
     },
     {
       "parameters": {
-        "jsCode": "const styleMap = {\n  \"photorealistic\":   \"architectural photography, Canon EOS R5, natural lighting, hyper-detailed, 4K\",\n  \"dramatic\":         \"cinematic lighting, deep shadows, god rays, high contrast, noir atmosphere\",\n  \"minimalist\":       \"clean lines, soft diffused light, Scandinavian aesthetic, white space, elegant\",\n  \"warm_residential\": \"warm amber tones, cozy luxury interior, golden hour, warm white light 2700K\",\n  \"cool_commercial\":  \"cool white 5000K, modern commercial space, crisp, corporate luxury\",\n  \"facade_exterior\":  \"architectural exterior night photography, facade illumination, dramatic night sky\"\n};\nconst customMap = {\n  \"event_poster\":      \"professional event poster design, bold promotional graphic with text overlay space, dramatic stage lighting, gold and dark luxury color scheme, Saudi Arabia\",\n  \"hiring_poster\":     \"modern recruitment poster, professional corporate layout, inspiring office background Saudi Arabia\",\n  \"product_showcase\":  \"studio product photography, lighting fixture on pure black background, dramatic spotlight\",\n  \"project_highlight\": \"architectural interior photography, completed luxury project, golden hour, Saudi Arabia\",\n  \"quote_card\":        \"elegant minimal quote card, dark background with warm accent lighting bokeh, luxury brand\",\n  \"suppliers_collab\":  \"corporate partnership announcement, premium product display, luxury lighting showroom Saudi Arabia\",\n  \"behind_scenes\":     \"documentary photography, lighting installation on-site, team working, Saudi Arabia\",\n  \"ai_decides\":        \"\"\n};\nconst si = $('Sanitize Inputs').first().json;\nconst routeType  = si.route_type;\nconst topic      = si.safe_topic || '';\nconst visualMode = si.visual_mode;\nconst customType = si.custom_type;\nconst style      = si.style;\nlet imagePrompt, finalPrompt;\nif (routeType === 'image_only') {\n  const rewritten = $('Claude: Rewrite Image Prompt').first().json.content?.[0]?.text || si.image_prompt;\n  imagePrompt = rewritten.trim();\n  finalPrompt = imagePrompt + ', Arak Lighting Saudi Arabia, ultra high detail';\n} else if (visualMode === 'custom' && customType) {\n  const base = $('Parse Caption').first().json.image_prompt || topic;\n  const mod  = customMap[customType] || '';\n  finalPrompt = mod ? (topic + ' — ' + base + ', ' + mod + ', Arak Lighting Saudi Arabia, ultra high detail') : (base + ', Arak Lighting Saudi Arabia, award-winning photography');\n  imagePrompt = base;\n} else if (visualMode === 'lighting' && style) {\n  const base = $('Parse Caption').first().json.image_prompt || topic;\n  const mod  = styleMap[style] || styleMap['photorealistic'];\n  finalPrompt = base + ', ' + mod + ', Arak Lighting Saudi Arabia, luxury architectural lighting';\n  imagePrompt = base;\n} else {\n  const base = $('Parse Caption').first().json.image_prompt || topic;\n  finalPrompt = base + ', Arak Lighting Saudi Arabia, luxury architectural lighting, ultra high detail';\n  imagePrompt = base;\n}\nreturn [{json: { final_prompt: finalPrompt, style: style || 'auto', image_prompt: imagePrompt, visual_mode: visualMode, custom_type: customType }}];"
+        "jsCode": "const styleMap = {\n  \"photorealistic\":   \"architectural photography, Canon EOS R5, natural lighting, hyper-detailed, 4K\",\n  \"dramatic\":         \"cinematic lighting, deep shadows, god rays, high contrast, noir atmosphere\",\n  \"minimalist\":       \"clean lines, soft diffused light, Scandinavian aesthetic, white space, elegant\",\n  \"warm_residential\": \"warm amber tones, cozy luxury interior, golden hour, warm white light 2700K\",\n  \"cool_commercial\":  \"cool white 5000K, modern commercial space, crisp, corporate luxury\",\n  \"facade_exterior\":  \"architectural exterior night photography, facade illumination, dramatic night sky\"\n};\nconst customMap = {\n  \"event_poster\":      \"professional event poster design, bold promotional graphic with text overlay space, dramatic stage lighting, gold and dark luxury color scheme, Saudi Arabia\",\n  \"hiring_poster\":     \"modern recruitment poster, professional corporate layout, inspiring office background Saudi Arabia\",\n  \"product_showcase\":  \"studio product photography, lighting fixture on pure black background, dramatic spotlight\",\n  \"project_highlight\": \"architectural interior photography, completed luxury project, golden hour, Saudi Arabia\",\n  \"quote_card\":        \"elegant minimal quote card, dark background with warm accent lighting bokeh, luxury brand\",\n  \"suppliers_collab\":  \"corporate partnership announcement, premium product display, luxury lighting showroom Saudi Arabia\",\n  \"behind_scenes\":     \"documentary photography, lighting installation on-site, team working, Saudi Arabia\",\n  \"ai_decides\":        \"\"\n};\nconst si = $('Sanitize Inputs').first().json;\nconst routeType  = si.route_type;\nconst topic      = si.safe_topic || '';\nconst visualMode = si.visual_mode;\nconst customType = si.custom_type;\nconst style      = si.style;\nlet imagePrompt, finalPrompt;\nif (routeType === 'image_only') {\n  const rewritten = $('Claude: Rewrite Image Prompt').first().json.content?.find(b=>b.type==='text')?.text || si.image_prompt;\n  imagePrompt = rewritten.trim();\n  finalPrompt = imagePrompt + ', Arak Lighting Saudi Arabia, ultra high detail';\n} else if (visualMode === 'custom' && customType) {\n  const base = $('Parse Caption').first().json.image_prompt || topic;\n  const mod  = customMap[customType] || '';\n  finalPrompt = mod ? (topic + ' — ' + base + ', ' + mod + ', Arak Lighting Saudi Arabia, ultra high detail') : (base + ', Arak Lighting Saudi Arabia, award-winning photography');\n  imagePrompt = base;\n} else if (visualMode === 'lighting' && style) {\n  const base = $('Parse Caption').first().json.image_prompt || topic;\n  const mod  = styleMap[style] || styleMap['photorealistic'];\n  finalPrompt = base + ', ' + mod + ', Arak Lighting Saudi Arabia, luxury architectural lighting';\n  imagePrompt = base;\n} else {\n  const base = $('Parse Caption').first().json.image_prompt || topic;\n  finalPrompt = base + ', Arak Lighting Saudi Arabia, luxury architectural lighting, ultra high detail';\n  imagePrompt = base;\n}\nreturn [{json: { final_prompt: finalPrompt, style: style || 'auto', image_prompt: imagePrompt, visual_mode: visualMode, custom_type: customType }}];"
       },
       "id": "f412011f-fac1-4fa4-99b8-e3e8f1deee92",
       "name": "Build Image Prompt",
@@ -3569,7 +3585,7 @@ def build_instagram_manual_generation() -> dict:
     },
     {
       "parameters": {
-        "jsCode": "const raw = $input.first().json.content?.[0]?.text || '';\nconst clean = raw.replace(/```json|```/g,'').trim();\nlet parsed;\ntry { parsed = JSON.parse(clean); }\ncatch(e) {\n  const match = clean.match(/\\{[\\s\\S]*\\}/);\n  parsed = match ? JSON.parse(match[0]) : {caption: clean, hashtags: '#ArakLighting'};\n}\nreturn [{json: { caption: parsed.caption, hashtags: parsed.hashtags }}];"
+        "jsCode": "const raw = $input.first().json.content?.find(b=>b.type==='text')?.text || '';\nconst clean = raw.replace(/```json|```/g,'').trim();\nlet parsed;\ntry { parsed = JSON.parse(clean); }\ncatch(e) {\n  const match = clean.match(/\\{[\\s\\S]*\\}/);\n  parsed = match ? JSON.parse(match[0]) : {caption: clean, hashtags: '#ArakLighting'};\n}\nreturn [{json: { caption: parsed.caption, hashtags: parsed.hashtags }}];"
       },
       "id": "fdcdc4d1-3876-432b-8dcd-9b308f7a3551",
       "name": "Parse Caption Regen",
@@ -3652,7 +3668,7 @@ def build_instagram_manual_generation() -> dict:
     },
     {
       "parameters": {
-        "jsCode": "const raw = $input.first().json.content?.[0]?.text || '';\nconst clean = raw.replace(/```json|```/g,'').trim();\nlet parsed;\ntry { parsed = JSON.parse(clean); }\ncatch(e) {\n  const match = clean.match(/\\{[\\s\\S]*\\}/);\n  parsed = match ? JSON.parse(match[0]) : {caption: clean, hashtags: '#ArakLighting'};\n}\nreturn [{json: { caption: parsed.caption, hashtags: parsed.hashtags }}];"
+        "jsCode": "const raw = $input.first().json.content?.find(b=>b.type==='text')?.text || '';\nconst clean = raw.replace(/```json|```/g,'').trim();\nlet parsed;\ntry { parsed = JSON.parse(clean); }\ncatch(e) {\n  const match = clean.match(/\\{[\\s\\S]*\\}/);\n  parsed = match ? JSON.parse(match[0]) : {caption: clean, hashtags: '#ArakLighting'};\n}\nreturn [{json: { caption: parsed.caption, hashtags: parsed.hashtags }}];"
       },
       "id": "12be54c9-1cb3-4824-89d6-d6654962bd86",
       "name": "Parse Style Sync",
@@ -4540,7 +4556,7 @@ def build_linkedin_manual_generation() -> dict:
     },
     {
       "parameters": {
-        "jsCode": "const raw = $input.first().json.content?.[0]?.text || '';\nconst clean = raw.replace(/```json|```/g,'').trim();\nlet parsed;\ntry { parsed = JSON.parse(clean); }\ncatch(e) {\n  const match = clean.match(/\\{[\\s\\S]*\\}/);\n  if (match) { try { parsed = JSON.parse(match[0]); } catch(e2) { throw new Error('Cannot parse: ' + clean.slice(0,200)); } }\n  else throw new Error('No JSON found: ' + clean.slice(0,200));\n}\nconst si = $('Sanitize Inputs').first().json;\nreturn [{json: {\n  hook:           parsed.hook || '',\n  body:           parsed.body || '',\n  hashtags:       parsed.hashtags || '#ArakLighting #ArchitecturalLighting',\n  image_prompt:   parsed.image_prompt || '',\n  trending_angle: parsed.trending_angle || '',\n  post_strategy:  parsed.post_strategy || '',\n  topic:          si.safe_topic,\n  tone:           si.tone,\n  post_type:      si.post_type,\n  style:          si.style,\n  content_route:  si.content_route,\n  include_image:  si.include_image,\n  aspect_ratio:   si.aspect_ratio,\n}}];"
+        "jsCode": "const raw = $input.first().json.content?.find(b=>b.type==='text')?.text || '';\nconst clean = raw.replace(/```json|```/g,'').trim();\nlet parsed;\ntry { parsed = JSON.parse(clean); }\ncatch(e) {\n  const match = clean.match(/\\{[\\s\\S]*\\}/);\n  if (match) { try { parsed = JSON.parse(match[0]); } catch(e2) { throw new Error('Cannot parse: ' + clean.slice(0,200)); } }\n  else throw new Error('No JSON found: ' + clean.slice(0,200));\n}\nconst si = $('Sanitize Inputs').first().json;\nreturn [{json: {\n  hook:           parsed.hook || '',\n  body:           parsed.body || '',\n  hashtags:       parsed.hashtags || '#ArakLighting #ArchitecturalLighting',\n  image_prompt:   parsed.image_prompt || '',\n  trending_angle: parsed.trending_angle || '',\n  post_strategy:  parsed.post_strategy || '',\n  topic:          si.safe_topic,\n  tone:           si.tone,\n  post_type:      si.post_type,\n  style:          si.style,\n  content_route:  si.content_route,\n  include_image:  si.include_image,\n  aspect_ratio:   si.aspect_ratio,\n}}];"
       },
       "id": "70920dd6-c5f7-42a1-a0d8-d7d5f761f17e",
       "name": "Parse Post",
@@ -4881,7 +4897,7 @@ def build_linkedin_manual_generation() -> dict:
     },
     {
       "parameters": {
-        "jsCode": "const raw = $input.first().json.content?.[0]?.text || '';\nconst clean = raw.replace(/```json|```/g,'').trim();\nlet parsed;\ntry { parsed = JSON.parse(clean); }\ncatch(e) {\n  const match = clean.match(/\\{[\\s\\S]*\\}/);\n  parsed = match ? JSON.parse(match[0]) : {hook: '', body: clean, hashtags: '#ArakLighting'};\n}\nreturn [{json: { hook: parsed.hook || '', body: parsed.body || '', hashtags: parsed.hashtags || '#ArakLighting' }}];"
+        "jsCode": "const raw = $input.first().json.content?.find(b=>b.type==='text')?.text || '';\nconst clean = raw.replace(/```json|```/g,'').trim();\nlet parsed;\ntry { parsed = JSON.parse(clean); }\ncatch(e) {\n  const match = clean.match(/\\{[\\s\\S]*\\}/);\n  parsed = match ? JSON.parse(match[0]) : {hook: '', body: clean, hashtags: '#ArakLighting'};\n}\nreturn [{json: { hook: parsed.hook || '', body: parsed.body || '', hashtags: parsed.hashtags || '#ArakLighting' }}];"
       },
       "id": "c15f9973-62e4-4bb4-9544-77c930f52132",
       "name": "Parse Post Regen",
@@ -4944,7 +4960,7 @@ def build_linkedin_manual_generation() -> dict:
     },
     {
       "parameters": {
-        "jsCode": "const rewritten = $input.first().json.content?.[0]?.text || '';\nconst si = $('Sanitize Inputs').first().json;\nconst base = rewritten.trim() || si.image_prompt || 'architectural lighting Saudi Arabia';\nconst finalPrompt = base + ', Arak Lighting Saudi Arabia, ultra high detail, professional LinkedIn visual, wide 16:9 composition';\nreturn [{json: { final_prompt: finalPrompt }}];"
+        "jsCode": "const rewritten = $input.first().json.content?.find(b=>b.type==='text')?.text || '';\nconst si = $('Sanitize Inputs').first().json;\nconst base = rewritten.trim() || si.image_prompt || 'architectural lighting Saudi Arabia';\nconst finalPrompt = base + ', Arak Lighting Saudi Arabia, ultra high detail, professional LinkedIn visual, wide 16:9 composition';\nreturn [{json: { final_prompt: finalPrompt }}];"
       },
       "id": "7f2c4a87-bc17-40c6-a320-dbe77249f717",
       "name": "Build Regen Image Prompt",
@@ -5079,7 +5095,7 @@ def build_linkedin_manual_generation() -> dict:
     },
     {
       "parameters": {
-        "jsCode": "const raw = $input.first().json.content?.[0]?.text || '';\nconst clean = raw.replace(/```json|```/g,'').trim();\nlet parsed;\ntry { parsed = JSON.parse(clean); }\ncatch(e) {\n  const match = clean.match(/\\{[\\s\\S]*\\}/);\n  parsed = match ? JSON.parse(match[0]) : {hook: '', body: clean, hashtags: '#ArakLighting'};\n}\nreturn [{json: { hook: parsed.hook || '', body: parsed.body || '', hashtags: parsed.hashtags || '#ArakLighting' }}];"
+        "jsCode": "const raw = $input.first().json.content?.find(b=>b.type==='text')?.text || '';\nconst clean = raw.replace(/```json|```/g,'').trim();\nlet parsed;\ntry { parsed = JSON.parse(clean); }\ncatch(e) {\n  const match = clean.match(/\\{[\\s\\S]*\\}/);\n  parsed = match ? JSON.parse(match[0]) : {hook: '', body: clean, hashtags: '#ArakLighting'};\n}\nreturn [{json: { hook: parsed.hook || '', body: parsed.body || '', hashtags: parsed.hashtags || '#ArakLighting' }}];"
       },
       "id": "d36a53cc-0ddd-422b-bdea-7db993f6eb41",
       "name": "Parse Tone Sync",
