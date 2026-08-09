@@ -1648,6 +1648,66 @@ try {
 }
 """
 
+ZERNIO_DASHBOARD_STICKY = r"""## Arak – Zernio Dashboard (live proxy)
+
+**Zero secrets in this file.** Needs `ZERNIO_API_KEY`.
+
+On-demand only — no schedule, no writes to Supabase. Zernio already computes these aggregates server-side (best time to post, posting-frequency vs engagement, content-decay curve, daily rollups, follower history); re-deriving them from our own `post_analytics` rows would mean re-implementing Zernio's own stats engine for no benefit. So this just fans out to six of their endpoints in parallel and hands the combined JSON straight to the frontend for one page load — nothing here is meant to be stored, only displayed.
+
+A failure in any ONE branch (e.g. an add-on not enabled) is caught individually and reported as `{_error}` on that key rather than failing the whole response — the dashboard should render what it can, not go blank because one widget's source 402'd."""
+
+ZERNIO_DASHBOARD_JS = r"""
+const http = this.helpers.httpRequest;
+
+async function req(opts){
+  const res = await http({ ...opts, returnFullResponse: true, ignoreHttpStatusErrors: true });
+  const status = res.statusCode;
+  if (status >= 200 && status < 300) return res.body;
+  const b = res.body;
+  const msg = (b && typeof b === 'object') ? (b.error || b.message || JSON.stringify(b).slice(0, 400))
+            : (typeof b === 'string' && b) ? b.slice(0, 400)
+            : `HTTP ${status}`;
+  throw new Error(`Zernio ${status}: ${msg}`);
+}
+
+function qs(params){
+  const parts = [];
+  for (const [k, v] of Object.entries(params)) {
+    if (v !== undefined && v !== null && v !== '') parts.push(`${k}=${encodeURIComponent(v)}`);
+  }
+  return parts.length ? '?' + parts.join('&') : '';
+}
+
+const body = ($input.first().json.body) || {};
+const ZERNIO = $env.ZERNIO_API_KEY;
+const ZBASE  = 'https://zernio.com/api/v1';
+const zHeaders = { Authorization: `Bearer ${ZERNIO}`, 'Content-Type': 'application/json' };
+
+const platform = body.platform || '';
+const days = Number(body.days) || 30;
+const toDate   = new Date().toISOString().slice(0, 10);
+const fromDate = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
+
+try {
+  if (!ZERNIO) throw new Error('ZERNIO_API_KEY is not set on this n8n instance.');
+
+  const safe = p => p.catch(e => ({ _error: (e && e.message) ? e.message : String(e) }));
+
+  const [overview, bestTime, frequency, decay, daily, followers] = await Promise.all([
+    safe(req({ method:'GET', url:`${ZBASE}/analytics${qs({ platform, fromDate, toDate, limit:100, source:'all' })}`, headers:zHeaders, json:true })),
+    safe(req({ method:'GET', url:`${ZBASE}/analytics/best-time${qs({ platform })}`, headers:zHeaders, json:true })),
+    safe(req({ method:'GET', url:`${ZBASE}/analytics/posting-frequency${qs({ platform })}`, headers:zHeaders, json:true })),
+    safe(req({ method:'GET', url:`${ZBASE}/analytics/content-decay${qs({ platform })}`, headers:zHeaders, json:true })),
+    safe(req({ method:'GET', url:`${ZBASE}/analytics/daily-metrics${qs({ platform, fromDate, toDate })}`, headers:zHeaders, json:true })),
+    safe(req({ method:'GET', url:`${ZBASE}/accounts/follower-stats${qs({ fromDate, toDate })}`, headers:zHeaders, json:true })),
+  ]);
+
+  return [{ json: { ok: true, fromDate, toDate, platform, overview, bestTime, frequency, decay, daily, followers } }];
+} catch (err) {
+  return [{ json: { ok: false, error: (err && err.message) ? err.message : String(err) } }];
+}
+"""
+
 CAMPAIGN_PLANNER_STICKY = r"""## Arak Campaign Planner
 
 **Zero secrets in this file.** Only needs `ANTHROPIC_API_KEY`.
@@ -2510,6 +2570,31 @@ def build_zernio_sync() -> dict:
     }
     return {
         "name": "Arak Lighting – Zernio Sync",
+        "nodes": nodes,
+        "connections": connections,
+        "active": False,
+        "settings": {"executionOrder": "v1"},
+        "tags": [],
+    }
+
+
+def build_zernio_dashboard() -> dict:
+    """
+    Webhook (responseMode=lastNode) -> Zernio: Dashboard (single Code node,
+    its return value IS the HTTP response). Same synchronous shape as
+    Publish Post — the frontend is waiting on this for a page render, not
+    firing it and moving on.
+    """
+    nodes = [
+        _sticky(ZERNIO_DASHBOARD_STICKY, height=360, width=480, x=0, y=-200),
+        _webhook("arak-zernio-dashboard", "lastNode", x=0, y=220),
+        _code("Zernio: Dashboard", ZERNIO_DASHBOARD_JS, x=240, y=220),
+    ]
+    connections = {
+        "Webhook": {"main": [[{"node": "Zernio: Dashboard", "type": "main", "index": 0}]]},
+    }
+    return {
+        "name": "Arak Lighting – Zernio Dashboard",
         "nodes": nodes,
         "connections": connections,
         "active": False,
@@ -6320,6 +6405,7 @@ if __name__ == "__main__":
         build_linkedin_manual_generation(),
         build_zernio_publish(),
         build_zernio_sync(),
+        build_zernio_dashboard(),
     ]
 
     for wf in workflows:
