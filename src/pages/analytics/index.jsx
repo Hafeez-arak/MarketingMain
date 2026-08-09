@@ -6,9 +6,9 @@ import {
 } from 'recharts'
 import { useApp } from '../../store/appStore'
 import { useAuth } from '../../store/AuthContext'
-import { Card, Button, PlatformPill, Empty, Spinner, PostImage } from '../../components/ui/index'
+import { Card, Button, PlatformPill, Empty, Spinner, PostImage, IconBadge, PillSelect, Icon } from '../../components/ui/index'
 import { fetchSocialAccounts, syncZernio, fetchZernioDashboard } from '../../lib/zernio'
-import { BestTimeHeatmap, IconBadge, PillSelect, Icon, MetricToggle } from './charts'
+import { BestTimeHeatmap, MetricToggle } from './charts'
 
 // ─── Analytics ───────────────────────────────────────────────────────────
 // Live proxy of Zernio's own analytics — the browser never talks to Zernio
