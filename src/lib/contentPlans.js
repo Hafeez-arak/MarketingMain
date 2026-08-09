@@ -222,7 +222,7 @@ export async function markIdeasProcessing(accessToken, planId) {
     const res = await fetch(`${SUPABASE_URL}/rest/v1/plan_ideas?plan_id=eq.${planId}&status=eq.approved`, {
       method: 'PATCH',
       headers: { ...authHeaders(accessToken), 'Content-Type': 'application/json', Prefer: 'return=minimal' },
-      body: JSON.stringify({ generation_status: 'processing', generation_error: '' }),
+      body: JSON.stringify({ generation_status: 'processing', generation_error: '', generation_started_at: new Date().toISOString() }),
     })
     return { ok: res.ok }
   } catch (err) { return { error: err.message } }
@@ -233,7 +233,7 @@ export async function markIdeaProcessing(accessToken, ideaId) {
     await fetch(`${SUPABASE_URL}/rest/v1/plan_ideas?id=eq.${ideaId}`, {
       method: 'PATCH',
       headers: { ...authHeaders(accessToken), 'Content-Type': 'application/json', Prefer: 'return=minimal' },
-      body: JSON.stringify({ generation_status: 'processing', generation_error: '' }),
+      body: JSON.stringify({ generation_status: 'processing', generation_error: '', generation_started_at: new Date().toISOString() }),
     })
     return { ok: true }
   } catch (err) { return { error: err.message } }

@@ -27,6 +27,14 @@ const TABLES = {
   linkedin:  'linkedin_generated_posts',
 }
 
+// A "processing" idea has no guaranteed path back to 'failed' — n8n's own
+// try/catch only covers the Generate Post Code node itself; anything that
+// hangs or errors in a later node (upload, insert, or the webhook request
+// never reaching n8n at all) leaves generation_status stuck at 'processing'
+// forever, with no error and no Retry button. Treat it as stale once it's
+// run well past the "usually takes under a minute" copy in ProcessingCard.
+const STALE_PROCESSING_MS = 90 * 1000
+
 // image_urls (carousel) preferred; fall back to the single image_url.
 const mediaOf = r => (Array.isArray(r.image_urls) && r.image_urls.length ? r.image_urls : [r.image_url].filter(Boolean))
 
@@ -239,6 +247,17 @@ export function Approvals() {
     return () => clearInterval(interval)
   }, [fetchAll, ideas])
 
+  // `now` as state, ticked from an effect (React's purity rule forbids
+  // calling Date.now() during render) — only ticks while something is
+  // actually processing, so a stuck idea's staleness gets picked up within
+  // ~4s of crossing the threshold without an idle tab polling forever.
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    if (!ideas.some(i => i.generation_status === 'processing')) return
+    const interval = setInterval(() => setNow(Date.now()), 4000)
+    return () => clearInterval(interval)
+  }, [ideas])
+
   // One unified list: plan-linked ideas (processing/failed/completed) and
   // manual (non-plan) posts, so filtering/counting/grouping all work the
   // same way regardless of where an item came from.
@@ -248,15 +267,23 @@ export function Approvals() {
       .filter(i => i.generation_status && i.generation_status !== 'not_started')
       .map(i => {
         const post = byIdeaId.get(i.id) || null
-        const effectiveStatus = i.generation_status === 'completed' && post ? post.status : i.generation_status
-        return { key: `idea_${i.id}`, type: 'idea', idea: i, post, effectiveStatus, platform: i.platform, planId: i.plan_id }
+        let effectiveStatus = i.generation_status === 'completed' && post ? post.status : i.generation_status
+        let idea = i
+        if (effectiveStatus === 'processing' && i.generation_started_at) {
+          const staleMs = now - new Date(i.generation_started_at).getTime()
+          if (staleMs > STALE_PROCESSING_MS) {
+            effectiveStatus = 'failed'
+            idea = { ...i, generation_error: 'Taking longer than expected — the request may never have reached n8n, or a step failed silently downstream. Retry, or check the n8n workflow.' }
+          }
+        }
+        return { key: `idea_${i.id}`, type: 'idea', idea, post, effectiveStatus, platform: i.platform, planId: i.plan_id }
       })
       .filter(x => x.effectiveStatus) // drop the rare "completed but post vanished" case
     const manualItems = posts
       .filter(p => p.source !== 'plan')
       .map(p => ({ key: `manual_${p.platform}_${p.id}`, type: 'manual', post: p, effectiveStatus: p.status, platform: p.platform, planId: null }))
     return [...ideaItems, ...manualItems]
-  }, [ideas, posts])
+  }, [ideas, posts, now])
 
   const byPlatform = platformFilter === 'all' ? items : items.filter(x => x.platform === platformFilter)
   const filtered = byPlatform.filter(x => {
