@@ -307,10 +307,15 @@ async function generateImage(prompt){
 // signature instead.
 function looksLikeImage(buf){
   if (!buf || buf.length < 12) return false;
+  // PNG's signature leads with byte 0x89, which has its high bit set — ascii
+  // decoding masks that bit off every byte (Node truncates to 7 bits for
+  // 'ascii'), turning 0x89 into 0x09 and making a string compare against
+  // '\x89PNG' impossible to ever match a real PNG. Checked as raw bytes
+  // instead, the same way the JPEG check already correctly does it.
   const head = buf.toString('ascii', 0, 12);
   return head.startsWith('RIFF') && head.indexOf('WEBP') !== -1   // webp
       || (buf[0] === 0xFF && buf[1] === 0xD8)                      // jpeg
-      || head.startsWith('\x89PNG');                                // png
+      || (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4E && buf[3] === 0x47); // png
 }
 
 // THE REAL ROOT CAUSE (found by reading n8n's own source, @n8n/task-runner):
@@ -6491,6 +6496,25 @@ function bodyText(body, status){
 // indistinguishable on the card. Reading the body directly is the only way to
 // get the real reason out. errText stays as the fallback for older n8n builds
 // that ignore ignoreHttpStatusErrors and throw regardless.
+// returnFullResponse changes how a BINARY body comes back. Measured against
+// this n8n build, 2026-08-10, fetching the same JPEG both ways:
+//   encoding:'arraybuffer'                       -> real Buffer (isBuffer true)
+//   encoding:'arraybuffer' + returnFullResponse  -> {type:'Buffer', data:[...]}
+// i.e. the JSON-serialised form, whose .length is undefined. Since req() sets
+// returnFullResponse on every call to read error bodies, every image and video
+// download in these workflows was silently getting that object instead of
+// bytes — "Downloaded file is not a real image (undefined bytes)". It went
+// unnoticed because fal's balance was empty the whole time this code existed,
+// so the download line had never once been reached with a real response.
+function reviveBinary(b){
+  if (!b || typeof b !== 'object') return b;
+  if (typeof Buffer !== 'undefined' && Buffer.isBuffer(b)) return b;
+  if (b.type === 'Buffer' && Array.isArray(b.data)) return Buffer.from(b.data);
+  if (b instanceof ArrayBuffer) return Buffer.from(new Uint8Array(b));
+  if (ArrayBuffer.isView(b)) return Buffer.from(b.buffer, b.byteOffset, b.byteLength);
+  return b;
+}
+
 async function req(opts){
   let full;
   try {
@@ -6501,7 +6525,7 @@ async function req(opts){
   const status = (full && (full.statusCode || full.status)) || 200;
   const body = (full && full.body !== undefined) ? full.body : full;
   if (status >= 400) throw new Error(bodyText(body, status));
-  return body;
+  return reviveBinary(body);
 }
 
 // A byte-count threshold is not enough — a corrupted buffer can be LARGER
@@ -6510,8 +6534,11 @@ async function req(opts){
 // file signature instead.
 function looksLikeImage(buf){
   if (!buf || buf.length < 12) return false;
+  // Same fix as the other looksLikeImage in this file: PNG's 0x89 lead byte
+  // cannot survive an 'ascii' string compare (Node masks the high bit off
+  // every byte for that encoding), so this always failed a genuine PNG.
   const head = buf.toString('ascii', 0, 12);
-  return head.startsWith('\x89PNG')
+  return (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4E && buf[3] === 0x47)
       || (buf[0] === 0xFF && buf[1] === 0xD8)
       || (head.startsWith('RIFF') && head.indexOf('WEBP') !== -1);
 }
