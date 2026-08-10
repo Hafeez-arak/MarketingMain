@@ -152,6 +152,28 @@ function FrameSlot({ label, hint, value, onPick, onRemove }) {
   )
 }
 
+// Shown while a session's versions are being fetched. Shaped like the thread
+// that's about to replace it — opening prompt, then one or two lanes — so the
+// panel doesn't jump when the real rows land.
+function ThreadSkeleton() {
+  return (
+    <div className="space-y-3 animate-pulse" aria-busy="true" aria-label="Loading this session">
+      <div className="flex justify-end">
+        <div className="h-9 w-1/2 max-w-sm bg-surface-muted border border-border" />
+      </div>
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 items-start">
+        {[0, 1].map(i => (
+          <div key={i} className="border border-border bg-white p-3 space-y-2.5">
+            <div className="aspect-[4/5] w-full bg-surface-muted" />
+            <div className="h-2.5 w-2/3 bg-surface-muted" />
+            <div className="h-8 w-full bg-surface-muted" />
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 export function CreativeStudio() {
   const { state } = useApp()
   const { activeWorkspaceId, accessToken } = useAuth()
@@ -163,6 +185,12 @@ export function CreativeStudio() {
   // Derived, not set in an effect: with no workspace there is nothing to wait
   // for, so the list is already "loaded" (and empty) on first render.
   const [loading, setLoading] = useState(!!activeWorkspaceId)
+  // Which session's versions are still in flight. openSession clears the old
+  // thread before the new rows land, so without this the "Nothing here yet"
+  // empty state renders for the length of the fetch on every open — the thread
+  // looked briefly empty and then filled in. Holds the session id rather than a
+  // boolean so a fast second click doesn't have the first fetch clear its flag.
+  const [openingId, setOpeningId] = useState(null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState('')          // '' | 'generate' | '<action>:<branchId>'
 
@@ -270,7 +298,15 @@ export function CreativeStudio() {
   async function openSession(s) {
     setSession(s); setError(''); setVersions([]); setComposers({}); setFocusedBranch(null)
     setAspect(s.aspect_ratio || '4:5')
-    const rows = await refresh(s.id)
+    setOpeningId(s.id)
+    let rows
+    try {
+      rows = await refresh(s.id)
+    } finally {
+      // Only the newest open clears the flag — an earlier, slower fetch
+      // finishing after a second click must not unmask the empty state.
+      setOpeningId(prev => (prev === s.id ? null : prev))
+    }
     // Reopen where the work was left off: the last lane touched is the one
     // holding the selected version, and only if it has moved past round 0 —
     // landing in a lane you never edited would just hide the comparison.
@@ -281,7 +317,7 @@ export function CreativeStudio() {
   }
 
   function newSession() {
-    setSession(null); setVersions([]); setPrompt(''); setAttachments({})
+    setSession(null); setVersions([]); setOpeningId(null); setPrompt(''); setAttachments({})
     setPromptRaw(''); setPromptSource('raw')
     setMotionNote(''); setMotionPresetId(''); setMotionStrength('medium'); setLookId('none')
     // Back to the cheap default — an 8-image round should be asked for each
@@ -984,6 +1020,8 @@ export function CreativeStudio() {
                 {busy === 'generate' ? <><Spinner size="sm" /> Starting…</> : '✨ Generate'}
               </Button>
             </Card>
+          ) : openingId === session.id ? (
+            <ThreadSkeleton />
           ) : branches.length === 0 ? (
             <Empty title="Nothing here yet" description="This session has no versions." />
           ) : (
