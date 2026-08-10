@@ -44,12 +44,12 @@ export function MediaPicker({
   const accept = kind === 'video' ? 'video/*' : kind === 'all' ? 'image/*,video/*' : 'image/*'
 
   return (
-    <Modal open={open} onClose={onClose} title={title} width="max-w-3xl">
+    <Modal open={open} onClose={onClose} title={title} width="max-w-3xl" square>
       <div className="p-5 space-y-4">
-        <div className="flex gap-1 p-1 rounded-xl bg-surface-subtle w-fit">
+        <div className="flex gap-1 p-1 bg-surface-subtle w-fit">
           {[['library', 'Media Library'], ['upload', 'Upload new']].map(([id, label]) => (
             <button key={id} type="button" onClick={() => setTab(id)}
-              className={`text-xs px-3 py-1.5 rounded-lg transition-colors ${
+              className={`text-xs px-3 py-1.5 transition-colors ${
                 tab === id ? 'bg-white text-text font-semibold shadow-sm' : 'text-text-tertiary hover:text-text-secondary'
               }`}>
               {label}
@@ -58,7 +58,7 @@ export function MediaPicker({
         </div>
 
         {error && (
-          <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2">
+          <div className="border border-red-200 bg-red-50 px-3 py-2">
             <p className="text-xs text-red-700">{error}</p>
           </div>
         )}
@@ -76,7 +76,7 @@ export function MediaPicker({
               {assets.map(a => (
                 <button key={a.id} type="button"
                   onClick={() => { onPick({ url: a.url, name: a.name }); onClose() }}
-                  className="group text-left rounded-xl border border-border overflow-hidden hover:border-amber-400 transition-colors">
+                  className="group text-left border border-border overflow-hidden hover:border-amber-400 transition-colors">
                   <div className="aspect-square bg-surface-subtle overflow-hidden">
                     {(a.mime_type || '').startsWith('video/') ? (
                       <video src={a.url} className="w-full h-full object-cover" muted />
@@ -111,11 +111,11 @@ export function MediaPicker({
 export function AttachmentChip({ label, url, note, onNote, onRemove, notePlaceholder }) {
   const isVideo = /\.(mp4|mov|webm)(\?|$)/i.test(url || '')
   return (
-    <div className="rounded-xl border border-border bg-white p-2 space-y-2">
+    <div className="border border-border bg-white p-2 space-y-2">
       <div className="flex items-center gap-2">
         {isVideo
-          ? <video src={url} className="w-10 h-10 rounded-lg object-cover border border-border" muted />
-          : <img src={url} alt="" className="w-10 h-10 rounded-lg object-cover border border-border" />}
+          ? <video src={url} className="w-10 h-10 object-cover border border-border" muted />
+          : <img src={url} alt="" className="w-10 h-10 object-cover border border-border" />}
         <div className="flex-1 min-w-0">
           <p className="text-[11px] font-semibold text-text leading-tight">{label}</p>
           <p className="text-[10px] text-text-tertiary truncate">{url?.split('/').pop()}</p>
@@ -126,7 +126,7 @@ export function AttachmentChip({ label, url, note, onNote, onRemove, notePlaceho
       {onNote && (
         <input value={note || ''} onChange={e => onNote(e.target.value)}
           placeholder={notePlaceholder || 'What should it take from this? (optional)'}
-          className="w-full text-[11px] bg-surface-subtle/50 border border-border rounded-lg px-2 py-1.5 focus:outline-none focus:border-amber-400" />
+          className="w-full text-[11px] bg-surface-subtle/50 border border-border px-2 py-1.5 focus:outline-none focus:border-amber-400" />
       )}
     </div>
   )

@@ -3,8 +3,10 @@ import { useApp } from '../../store/appStore'
 import { useAuth } from '../../store/AuthContext'
 import { Button, Card, Modal, SectionHead, Select, Spinner, Textarea, Empty } from '../../components/ui/index'
 import { BranchChat, BranchPill } from '../../components/studio/BranchChat'
+import { SessionSidebar } from '../../components/studio/SessionSidebar'
+import { Lightbox } from '../../components/studio/Lightbox'
 import { PromptBubble } from '../../components/studio/VersionCard'
-import { PhotoEditor } from '../../components/studio/PhotoEditor'
+import { PhotoEditor } from '../../components/studio/editor/index'
 import { VideoPanel } from '../../components/studio/VideoPanel'
 import { MediaPicker, AttachmentChip } from '../../components/studio/MediaPicker'
 import { AudioToggle, CostLine, LookPicker, ModelPicker, MotionPicker, QualityRow } from '../../components/studio/VideoSettings'
@@ -14,8 +16,8 @@ import { aspectLabel } from '../../lib/postFormats'
 import { uploadReferenceImage } from '../../lib/referenceImages'
 import { buildInstructionsString } from '../../lib/brandBrain'
 import {
-  buildBranches, createSession, downloadVersion, fetchSessions, fetchVersions, finalizeVersion,
-  insertPendingVersions, requestEdit, requestEnhance, requestGenerate, requestVideo, selectVersion,
+  buildBranches, createSession, deleteSession, downloadVersion, fetchSessions, fetchVersions, finalizeVersion,
+  insertPendingVersions, renameSession, requestEdit, requestEnhance, requestGenerate, requestVideo, selectVersion,
   touchSession, updateVersion, uploadToStudio,
 } from '../../lib/creativeStudio'
 
@@ -92,18 +94,18 @@ function AttachMenu({ slots, taken, onChoose }) {
       <div className="relative">
         <button type="button" onClick={click} disabled={disabled}
           title={disabled ? 'Everything that can be attached already is' : 'Attach a style reference'}
-          className="inline-flex items-center justify-center w-7 h-7 rounded-lg border border-border hover:border-amber-400 hover:bg-amber-50 disabled:opacity-40 disabled:hover:border-border disabled:hover:bg-transparent">
+          className="inline-flex items-center justify-center w-7 h-7 border border-border hover:border-amber-400 hover:bg-amber-50 disabled:opacity-40 disabled:hover:border-border disabled:hover:bg-transparent">
           <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
         </button>
         {open && (
           <>
             {/* Click-away sits behind the menu, not over it. */}
             <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-            <div className="absolute z-20 mt-1 w-56 rounded-xl border border-border bg-white shadow-dropdown p-1">
+            <div className="absolute z-20 mt-1 w-56 border border-border bg-white shadow-dropdown p-1">
               {free.map(s => (
                 <button key={s.id} type="button"
                   onClick={() => { setOpen(false); onChoose(s) }}
-                  className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-surface-muted transition-colors">
+                  className="w-full text-left px-2.5 py-1.5 hover:bg-surface-muted transition-colors">
                   <p className="text-[11px] font-semibold text-text">{s.label}</p>
                   <p className="text-[10px] text-text-tertiary leading-snug">{s.hint}</p>
                 </button>
@@ -128,7 +130,7 @@ function FrameSlot({ label, hint, value, onPick, onRemove }) {
     <div className="flex flex-col items-center gap-0.5">
       <div className="relative">
         <button type="button" onClick={onPick} title={hint}
-          className={`w-7 h-7 rounded-lg overflow-hidden flex items-center justify-center transition-colors ${
+          className={`w-7 h-7 overflow-hidden flex items-center justify-center transition-colors ${
             value ? 'border border-border hover:border-amber-400 hover:bg-amber-50' : 'border border-dashed border-border hover:border-amber-400 hover:bg-amber-50'
           }`}>
           {value ? (
@@ -141,7 +143,7 @@ function FrameSlot({ label, hint, value, onPick, onRemove }) {
         </button>
         {value && (
           <button type="button" onClick={onRemove} title="Remove"
-            className="absolute -top-1.5 -right-1.5 w-3.5 h-3.5 rounded-full bg-white border border-border text-text-tertiary hover:text-red-500 text-[9px] leading-none flex items-center justify-center">×</button>
+            className="absolute -top-1.5 -right-1.5 w-3.5 h-3.5 bg-white border border-border text-text-tertiary hover:text-red-500 text-[9px] leading-none flex items-center justify-center">×</button>
         )}
       </div>
       <span className="text-[9px] text-text-tertiary leading-none whitespace-nowrap">{label}</span>
@@ -219,6 +221,22 @@ export function CreativeStudio() {
   const [videoPrefill, setVideoPrefill] = useState(null)
   const [editingOverlay, setEditingOverlay] = useState(null)
   const [savingOverlay, setSavingOverlay] = useState(false)
+  // Every finished still in this session, offered inside the editor as image
+  // layers you can drop onto another one — the "put the logo from round 1 on
+  // this background" move, without a round trip through Downloads.
+  const editorLibrary = useMemo(() => (
+    versions
+      .filter(v => v.status === 'ready' && v.media_type !== 'video' && v.image_url)
+      .map(v => ({ url: v.image_url, label: v.user_prompt || 'Earlier version' }))
+  ), [versions])
+  // Which lane's 📎 opened the picker — null when closed. Separate from
+  // `pickerSlot` above: that one fills a slot on the pre-generation form,
+  // this one fills a single lane's composer.attach once a session exists.
+  const [attachLane, setAttachLane] = useState(null)
+  // The full-screen viewer: { versions, startId }. One instance for the whole
+  // page rather than one per lane, so opening it from either side can page
+  // through that lane's own history with ← →.
+  const [zoomView, setZoomView] = useState(null)
 
   useEffect(() => {
     if (!activeWorkspaceId) return
@@ -270,6 +288,27 @@ export function CreativeStudio() {
     setVariants(1)
     setModelId('seedance-2'); setDuration('5'); setResolution('720p'); setAudio(false)
     setComposers({}); setFocusedBranch(null); setError('')
+  }
+
+  // Renamed in place in the list — no need to also touch the open thread's
+  // header, since the title only ever shows up in the sidebar.
+  async function handleRenameSession(target, title) {
+    setSessions(prev => prev.map(s => (s.id === target.id ? { ...s, title } : s)))
+    if (session?.id === target.id) setSession(prev => ({ ...prev, title }))
+    const res = await renameSession(accessToken, target.id, title)
+    if (res.error) setError(res.error)
+  }
+
+  // Cascades in the database (creative_versions.session_id is ON DELETE
+  // CASCADE), so one call removes the whole thread. If the deleted session
+  // was open, fall back to the new-session form rather than showing a chat
+  // with nothing behind it.
+  async function handleDeleteSession(target) {
+    if (!target) return
+    setSessions(prev => prev.filter(s => s.id !== target.id))
+    if (session?.id === target.id) newSession()
+    const res = await deleteSession(accessToken, target.id)
+    if (res.error) setError(res.error)
   }
 
   // ── Attachments ──
@@ -583,21 +622,50 @@ export function CreativeStudio() {
     })
   }
 
-  // The overlay editor hands back a flattened image AND the text alone on
-  // transparency. Both are stored: the flat one is the asset, the transparent
-  // one is what will later composite over a video, and overlay_state keeps the
-  // boxes editable so a typo six versions later isn't a redraw.
-  async function handleOverlaySave({ compositeBlob, textLayerBlob, state: overlayState }) {
+  // The overlay editor hands back THREE images: the flattened composite (the
+  // asset, shown everywhere), the text alone on transparency (for later video
+  // compositing), and a "clean plate" — photo + adjustments/crop, no text or
+  // shapes. All three are stored, but only the clean one is what the NEXT
+  // edit session opens against (see overlayState.baseImageUrl below and the
+  // PhotoEditor imageUrl prop where it's read back). Reopening against the
+  // FLATTENED image instead — which is what this used to do — bakes this
+  // round's text into pixels while overlay_state ALSO replays the same
+  // layers on top from scratch, so the original text becomes an
+  // unselectable, undeletable part of the photo and every further edit
+  // looks like it's duplicating on top of it. overlay_state itself still
+  // keeps the boxes editable so a typo six versions later isn't a redraw —
+  // it just now has a non-destructive image to redraw them onto.
+  async function handleOverlaySave({ compositeBlob, textLayerBlob, cleanBlob, state: overlayState }) {
     setSavingOverlay(true)
     const base = await uploadToStudio(activeWorkspaceId, accessToken, compositeBlob, 'overlay.png')
     if (base.error) { setSavingOverlay(false); return { error: base.error } }
     const layer = await uploadToStudio(activeWorkspaceId, accessToken, textLayerBlob, 'textlayer.png')
+    const clean = await uploadToStudio(activeWorkspaceId, accessToken, cleanBlob, 'base.png')
+    const newOverlayState = { ...overlayState, textLayerUrl: layer.url || '', baseImageUrl: clean.url || '' }
+
+    // The row being edited already IS a manual edit (kind 'overlay') — this
+    // isn't the first hand-edit since the last AI generation, it's a further
+    // tweak of one, so it overwrites in place rather than minting a new
+    // numbered version. Only the FIRST manual edit after an AI-generated (or
+    // freshly retried) row creates a new version; every edit after that on
+    // the same row replaces it, until AI generation produces a new row again.
+    if (editingOverlay.kind === 'overlay') {
+      const patch = {
+        image_url: base.url, overlay_state: newOverlayState, status: 'ready',
+      }
+      const upd = await updateVersion(accessToken, editingOverlay.id, patch)
+      setSavingOverlay(false)
+      if (upd.error) return { error: upd.error }
+      setEditingOverlay(null)
+      setVersions(prev => prev.map(v => (v.id === editingOverlay.id ? { ...v, ...patch } : v)))
+      return {}
+    }
 
     const ins = await insertPendingVersions(activeWorkspaceId, accessToken, session.id, [{
       round: nextRound, kind: 'overlay', provider: 'manual', mediaType: 'image',
       parentVersionId: editingOverlay.id, userPrompt: 'Edited image',
       aspectRatio: session.aspect_ratio, imageUrl: base.url,
-      overlayState: { ...overlayState, textLayerUrl: layer.url || '' },
+      overlayState: newOverlayState,
       status: 'ready',
     }])
     setSavingOverlay(false)
@@ -722,6 +790,13 @@ export function CreativeStudio() {
     onFinalize: v => handleFinalize(branch, v),
     onDownload: handleDownload,
     onRetry: handleRetry,
+    onAttach: () => setAttachLane(branch.rootId),
+    // Only this lane's versions, so ← → in the viewer walks one candidate's
+    // own history rather than interleaving the two models' results.
+    onZoom: v => setZoomView({
+      versions: branch.versions.filter(x => x.status === 'ready' && (x.image_url || x.video_url)),
+      startId: v.id,
+    }),
     pendingKey: busy,
   })
 
@@ -730,11 +805,10 @@ export function CreativeStudio() {
       <SectionHead
         title="Creative Studio"
         subtitle="Describe what you want, then keep talking to whichever option is going the right way."
-        action={session ? <Button variant="secondary" onClick={newSession}>+ New</Button> : null}
       />
 
       {missingWebhook && (
-        <div className="mb-4 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3">
+        <div className="mb-4 border border-amber-300 bg-amber-50 px-4 py-3">
           <p className="text-xs text-amber-900">
             The Studio's workflows aren't connected yet — add the three Creative Studio webhook
             URLs in <span className="font-semibold">Settings → Integrations</span> before generating.
@@ -742,47 +816,33 @@ export function CreativeStudio() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-[240px_1fr] gap-6">
-        {/* ── Sessions ── */}
-        <aside className="space-y-2">
-          <p className="text-[10px] font-bold uppercase tracking-wide text-text-tertiary px-1">Recent</p>
-          {loading ? (
-            <div className="py-6 flex justify-center"><Spinner /></div>
-          ) : sessions.length === 0 ? (
-            <p className="text-[11px] text-text-tertiary px-1">Nothing yet.</p>
-          ) : (
-            <div className="space-y-1 max-h-[70vh] overflow-y-auto pr-1">
-              {sessions.map(s => (
-                <button key={s.id} onClick={() => openSession(s)}
-                  className={`w-full text-left px-3 py-2 rounded-xl transition-colors ${
-                    session?.id === s.id ? 'bg-amber-50 border border-amber-300' : 'hover:bg-surface-subtle border border-transparent'
-                  }`}>
-                  <p className="text-xs font-medium text-text line-clamp-2 leading-snug">{s.title || 'Untitled'}</p>
-                  <p className="text-[10px] text-text-tertiary mt-0.5">
-                    {s.intent === 'video' ? 'Video' : s.intent === 'image_video' ? 'Image + video' : 'Image'} · {aspectLabel(s.aspect_ratio)}
-                  </p>
-                </button>
-              ))}
-            </div>
-          )}
-        </aside>
+      <div className="flex flex-col lg:flex-row gap-6">
+        <SessionSidebar
+          sessions={sessions}
+          session={session}
+          loading={loading}
+          onOpen={openSession}
+          onNew={newSession}
+          onRename={handleRenameSession}
+          onDelete={handleDeleteSession}
+        />
 
         {/* ── Thread / composer ── */}
-        <main className="space-y-4 min-w-0">
+        <main className="space-y-4 min-w-0 flex-1">
           {error && (
-            <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-2.5">
+            <div className="border border-red-200 bg-red-50 px-4 py-2.5">
               <p className="text-xs text-red-700">{error}</p>
             </div>
           )}
 
           {!session ? (
-            <Card className="p-5 space-y-4 max-w-2xl">
+            <Card square className="p-5 space-y-4 max-w-2xl">
               <div>
                 <p className="text-xs font-medium text-text-secondary mb-1.5">What are you making?</p>
                 <div className="grid grid-cols-2 gap-2">
                   {INTENTS.map(i => (
                     <button key={i.value} onClick={() => changeIntent(i.value)}
-                      className={`text-left rounded-xl border p-2.5 transition-all ${
+                      className={`text-left border p-2.5 transition-all ${
                         intent === i.value ? 'border-amber-500 bg-amber-50 ring-1 ring-amber-300' : 'border-border hover:border-amber-300'
                       }`}>
                       <p className="text-xs font-semibold text-text">{i.label}</p>
@@ -793,7 +853,7 @@ export function CreativeStudio() {
               </div>
 
               <div className="space-y-1.5">
-                <Textarea label="Describe it" rows={4} value={prompt}
+                <Textarea label="Describe it" rows={4} autoGrow square value={prompt}
                   onChange={e => {
                     setPrompt(e.target.value); setError('')
                     // Their edit makes it theirs again — auto-enhance won't
@@ -825,7 +885,7 @@ export function CreativeStudio() {
                       title={promptSource === 'raw'
                         ? 'Rewrite this into a fuller prompt — nothing generates yet'
                         : 'Rewrite again, replacing the current text'}
-                      className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1 text-[11px] font-medium hover:border-amber-400 hover:bg-amber-50 disabled:opacity-40 disabled:hover:border-border disabled:hover:bg-transparent">
+                      className="inline-flex items-center gap-1.5 border border-border px-2.5 py-1 text-[11px] font-medium hover:border-amber-400 hover:bg-amber-50 disabled:opacity-40 disabled:hover:border-border disabled:hover:bg-transparent">
                       {enhancing === 'prompt' ? <><Spinner size="sm" /> Enhancing…</> : '✨ Enhance prompt'}
                     </button>
                     {promptSource !== 'raw' && (
@@ -868,11 +928,11 @@ export function CreativeStudio() {
               </div>
 
               <div className={intent === 'video' ? '' : 'grid grid-cols-2 gap-3'}>
-                <Select label="Shape" value={aspect} onChange={e => setAspect(e.target.value)}>
+                <Select label="Shape" square value={aspect} onChange={e => setAspect(e.target.value)}>
                   {RATIOS.map(r => <option key={r} value={r}>{aspectLabel(r)} ({r})</option>)}
                 </Select>
                 {intent !== 'video' && (
-                  <Select label="Options per model" value={String(variants)}
+                  <Select label="Options per model" square value={String(variants)}
                     onChange={e => setVariants(Number(e.target.value))}>
                     <option value="1">1 each — 2 images</option>
                     <option value="2">2 each — 4 images</option>
@@ -887,7 +947,7 @@ export function CreativeStudio() {
                   move. Plus a look picker, which only makes sense here: with
                   no source still, nothing else decides how the clip looks. */}
               {intent === 'video' && (
-                <div className="rounded-xl border border-border bg-surface-subtle/40 p-3 space-y-3">
+                <div className="border border-border bg-surface-subtle/40 p-3 space-y-3">
                   <ModelPicker modelId={modelId} onPick={pickModel} />
 
                   <LookPicker lookId={lookId} onPick={setLookId} />
@@ -900,7 +960,7 @@ export function CreativeStudio() {
                     onStrength={setMotionStrength}
                   />
 
-                  <Textarea rows={2} value={motionNote}
+                  <Textarea rows={2} autoGrow square value={motionNote}
                     onChange={e => { setMotionNote(e.target.value); setMotionPresetId('') }}
                     placeholder="…or describe the movement yourself. Leave empty to let the model decide." />
 
@@ -919,7 +979,7 @@ export function CreativeStudio() {
                 </div>
               )}
 
-              <Button onClick={handleGenerate} disabled={busy === 'generate' || !prompt.trim()}>
+              <Button square onClick={handleGenerate} disabled={busy === 'generate' || !prompt.trim()}>
                 {busy === 'generate' ? <><Spinner size="sm" /> Starting…</> : '✨ Generate'}
               </Button>
             </Card>
@@ -950,8 +1010,8 @@ export function CreativeStudio() {
                   </div>
                   {branches.length > 1 && (
                     <p className="text-[11px] text-text-tertiary">
-                      Type in either box to work on that one — it opens full size and the other waits as a chip.
-                      Drag an image from one chat into the other to reuse it there.
+                      Click a picture to open it full size. Type in either box to work on that one — it fills the
+                      width and the other waits as a chip. Drag an image from one into the other to reuse it there.
                     </p>
                   )}
                 </>
@@ -961,9 +1021,19 @@ export function CreativeStudio() {
         </main>
       </div>
 
+      {/* ── Full-screen viewer ── */}
+      {zoomView && (
+        <Lightbox
+          versions={zoomView.versions}
+          startId={zoomView.startId}
+          onClose={() => setZoomView(null)}
+          onDownload={handleDownload}
+        />
+      )}
+
       {/* ── Animate ── */}
       <Modal open={!!videoTarget} onClose={() => { setVideoTarget(null); setVideoPrefill(null) }}
-        title="Animate this image" width="max-w-lg">
+        title="Animate this image" width="max-w-lg" square>
         <VideoPanel
           target={videoTarget}
           busy={busy.startsWith('video:')}
@@ -979,7 +1049,7 @@ export function CreativeStudio() {
         />
       </Modal>
 
-      {/* ── Attach a reference ── */}
+      {/* ── Attach a reference (pre-generation form) ── */}
       <MediaPicker
         open={!!pickerSlot}
         onClose={() => setPickerSlot(null)}
@@ -990,16 +1060,43 @@ export function CreativeStudio() {
         onPick={picked => setAttachment(pickerSlot.id, picked)}
       />
 
+      {/* ── Attach a reference (a lane's 📎, mid-conversation) ── */}
+      <MediaPicker
+        open={!!attachLane}
+        onClose={() => setAttachLane(null)}
+        title="Add a reference for this edit"
+        kind="image"
+        accessToken={accessToken}
+        onUpload={file => uploadReferenceImage(activeWorkspaceId, accessToken, file)}
+        onPick={picked => {
+          patchComposer(attachLane, { attach: { url: picked.url, label: picked.name || 'your upload', mode: 'reference' } })
+          setAttachLane(null)
+        }}
+      />
+
       {/* ── Image editor ── */}
-      <Modal open={!!editingOverlay} onClose={() => setEditingOverlay(null)} title="Edit image" width="max-w-[96vw]">
+      <Modal open={!!editingOverlay} onClose={() => setEditingOverlay(null)} title="Edit image" width="max-w-[96vw]" square>
         <div className="p-0">
           {editingOverlay && (
             <PhotoEditor
-              imageUrl={editingOverlay.image_url}
+              // A row edited before has a non-destructive "clean plate" (photo
+              // + adjustments/crop, no text/shapes) saved at overlay_state.
+              // baseImageUrl — reopen against THAT, not the flattened
+              // image_url, or previously-added text becomes baked-in pixels
+              // that overlay_state's replayed layers just duplicate on top of.
+              // A row with no overlay_state yet (never edited before) has no
+              // such field, so image_url — the plain original — is correct.
+              imageUrl={editingOverlay.overlay_state?.baseImageUrl || editingOverlay.image_url}
               initialState={editingOverlay.overlay_state}
               saving={savingOverlay}
               onSave={handleOverlaySave}
               onCancel={() => setEditingOverlay(null)}
+              // Image layers need somewhere permanent to live: an object URL
+              // would die with the tab and a data URL would bloat the JSONB
+              // overlay_state row, so an added image is uploaded to the
+              // studio bucket first and the layer stores that URL.
+              onUploadImage={file => uploadToStudio(activeWorkspaceId, accessToken, file, file.name || 'layer.png')}
+              imageLibrary={editorLibrary}
             />
           )}
         </div>

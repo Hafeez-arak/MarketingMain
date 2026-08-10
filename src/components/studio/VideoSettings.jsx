@@ -24,7 +24,7 @@ function PresetGrid({ presets, selectedId, onPick, cols = 'sm:grid-cols-3' }) {
         // Clicking the already-selected preset again clears it — onPick(null)
         // rather than re-picking the same one, so there's a way back to blank.
         <button key={p.id} type="button" onClick={() => onPick(selectedId === p.id ? null : p)}
-          className={`text-left rounded-xl border p-2 transition-all ${
+          className={`text-left border p-2 transition-all ${
             selectedId === p.id ? 'border-amber-500 bg-amber-50 ring-1 ring-amber-300' : 'border-border hover:border-amber-300'
           }`}>
           <p className="text-[11px] font-semibold text-text leading-tight">{p.label}</p>
@@ -59,7 +59,7 @@ export function MotionPicker({ presetId, onPickPreset, strength, onStrength, lab
             {MOTION_STRENGTHS.map(s => (
               <button key={s.id} type="button" onClick={() => onStrength(s.id)}
                 title={s.hint}
-                className={`text-[10px] px-2 py-1 rounded-lg border transition-colors ${
+                className={`text-[10px] px-2 py-1 border transition-colors ${
                   strength === s.id ? 'border-amber-500 bg-amber-50 text-amber-800 font-semibold' : 'border-border text-text-tertiary hover:border-amber-300'
                 }`}>
                 {s.label}
@@ -90,7 +90,7 @@ export function ModelPicker({ modelId, onPick }) {
     <div>
       <p className="text-xs font-medium text-text-secondary mb-1.5">Model</p>
       <select value={modelId} onChange={e => onPick(e.target.value)}
-        className="w-full text-sm bg-white border border-border rounded-xl px-3 py-2 focus:outline-none focus:border-amber-400">
+        className="w-full text-sm bg-white border border-border px-3 py-2 focus:outline-none focus:border-amber-400">
         {VIDEO_MODELS.map(m => <option key={m.id} value={m.id}>{m.label} — {m.hint}</option>)}
       </select>
     </div>
@@ -108,7 +108,7 @@ export function QualityRow({ model, duration, onDuration, resolution, onResoluti
       <div>
         <p className="text-xs font-medium text-text-secondary mb-1.5">Length</p>
         <select value={duration} onChange={e => onDuration(e.target.value)}
-          className="w-full text-sm bg-white border border-border rounded-xl px-3 py-2 focus:outline-none focus:border-amber-400">
+          className="w-full text-sm bg-white border border-border px-3 py-2 focus:outline-none focus:border-amber-400">
           {model.durations.map(d => <option key={d} value={d}>{d} seconds</option>)}
         </select>
       </div>
@@ -118,7 +118,7 @@ export function QualityRow({ model, duration, onDuration, resolution, onResoluti
           <div className="grid grid-cols-2 gap-2">
             {model.resolutions.map(q => (
               <button key={q.value} type="button" onClick={() => onResolution(q.value)}
-                className={`rounded-xl border px-2 py-1.5 text-left transition-all ${
+                className={`border px-2 py-1.5 text-left transition-all ${
                   resolution === q.value ? 'border-amber-500 bg-amber-50 ring-1 ring-amber-300' : 'border-border hover:border-amber-300'
                 }`}>
                 <p className="text-[11px] font-semibold text-text leading-tight">{q.label}</p>
@@ -129,7 +129,7 @@ export function QualityRow({ model, duration, onDuration, resolution, onResoluti
             ))}
           </div>
         ) : (
-          <div className="rounded-xl border border-border px-2 py-1.5 text-[11px] text-text-tertiary leading-tight">
+          <div className="border border-border px-2 py-1.5 text-[11px] text-text-tertiary leading-tight">
             One quality tier · ${estimateVideoCost(model.id, { duration, audio }).toFixed(2)}
           </div>
         )}

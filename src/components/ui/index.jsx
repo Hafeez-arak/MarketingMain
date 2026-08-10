@@ -2,8 +2,11 @@ import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { STATUS_META, PLATFORM_META } from '../../lib/utils'
 
-export function Button({ variant='primary', size='md', children, onClick, disabled, type='button', className='' }) {
-  const base = 'inline-flex items-center gap-2 font-medium rounded-xl transition-all duration-200 cursor-pointer disabled:opacity-50 disabled:pointer-events-none focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400'
+// square is opt-in (default off) — every existing caller keeps the rounded
+// corners the rest of the app uses; only Creative Studio passes it, for the
+// sharp-cornered look requested there specifically.
+export function Button({ variant='primary', size='md', children, onClick, disabled, type='button', className='', square=false }) {
+  const base = `inline-flex items-center gap-2 font-medium ${square ? 'rounded-none' : 'rounded-xl'} transition-all duration-200 cursor-pointer disabled:opacity-50 disabled:pointer-events-none focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400`
   const sizes = { xs:'px-2.5 py-1 text-xs', sm:'px-3.5 py-1.5 text-sm', md:'px-5 py-2.5 text-sm', lg:'px-6 py-3 text-base' }
   const variants = {
     primary:   'btn-amber active:scale-[.98]',
@@ -40,10 +43,10 @@ export function PlatformPill({ platform }) {
   )
 }
 
-export function Card({ children, className='', onClick, hover=false }) {
+export function Card({ children, className='', onClick, hover=false, square=false }) {
   return (
     <div onClick={onClick}
-      className={`bg-white rounded-2xl border border-border shadow-card
+      className={`bg-white ${square ? 'rounded-none' : 'rounded-2xl'} border border-border shadow-card
         ${hover ? 'cursor-pointer hover:shadow-card-hover hover:border-stone-300 transition-all duration-200' : ''}
         ${className}`}>
       {children}
@@ -77,35 +80,49 @@ export function SectionHead({ title, subtitle, action }) {
   )
 }
 
-const fieldBase = 'w-full rounded-xl border border-border bg-white text-text placeholder-text-tertiary focus:outline-none focus:ring-2 focus:ring-amber-400 focus:border-transparent transition-all duration-200 text-sm'
+const fieldBase = (square=false) => `w-full ${square ? 'rounded-none' : 'rounded-xl'} border border-border bg-white text-text placeholder-text-tertiary focus:outline-none focus:ring-2 focus:ring-amber-400 focus:border-transparent transition-all duration-200 text-sm`
 
-export function Input({ label, hint, error, className='', ...props }) {
+export function Input({ label, hint, error, className='', square=false, ...props }) {
   return (
     <div className={className}>
       {label && <label className="block text-xs font-semibold text-text-secondary mb-1.5">{label}</label>}
-      <input {...props} className={`${fieldBase} px-3.5 py-2.5 ${error ? 'border-red-300 focus:ring-red-300' : ''}`} />
+      <input {...props} className={`${fieldBase(square)} px-3.5 py-2.5 ${error ? 'border-red-300 focus:ring-red-300' : ''}`} />
       {hint && !error && <p className="text-xs text-text-tertiary mt-1">{hint}</p>}
       {error && <p className="text-xs text-red-500 mt-1">{error}</p>}
     </div>
   )
 }
 
-export function Textarea({ label, hint, error, className='', rows=4, ...props }) {
+// autoGrow is opt-in (default off) so every other form using this component
+// keeps its fixed height — only a chat-style prompt box wants the Claude/
+// ChatGPT behavior of expanding as you type instead of scrolling internally
+// right away. `rows` still sets the minimum height either way. `square` is
+// the same opt-in pattern as Button/Card/Modal below.
+export function Textarea({ label, hint, error, className='', rows=4, autoGrow=false, maxHeight=260, value, square=false, ...props }) {
+  const ref = useRef(null)
+  useEffect(() => {
+    if (!autoGrow || !ref.current) return
+    const el = ref.current
+    el.style.height = 'auto'
+    el.style.height = Math.min(el.scrollHeight, maxHeight) + 'px'
+  }, [autoGrow, value, maxHeight])
+
   return (
     <div className={className}>
       {label && <label className="block text-xs font-semibold text-text-secondary mb-1.5">{label}</label>}
-      <textarea {...props} rows={rows} className={`${fieldBase} px-3.5 py-2.5 resize-none ${error ? 'border-red-300' : ''}`} />
+      <textarea {...props} ref={ref} value={value} rows={rows}
+        className={`${fieldBase(square)} px-3.5 py-2.5 resize-none ${autoGrow ? 'overflow-y-auto' : ''} ${error ? 'border-red-300' : ''}`} />
       {hint && !error && <p className="text-xs text-text-tertiary mt-1">{hint}</p>}
       {error && <p className="text-xs text-red-500 mt-1">{error}</p>}
     </div>
   )
 }
 
-export function Select({ label, hint, error, className='', children, ...props }) {
+export function Select({ label, hint, error, className='', children, square=false, ...props }) {
   return (
     <div className={className}>
       {label && <label className="block text-xs font-semibold text-text-secondary mb-1.5">{label}</label>}
-      <select {...props} className={`${fieldBase} px-3.5 py-2.5 cursor-pointer ${error ? 'border-red-300' : ''}`}>
+      <select {...props} className={`${fieldBase(square)} px-3.5 py-2.5 cursor-pointer ${error ? 'border-red-300' : ''}`}>
         {children}
       </select>
       {hint && !error && <p className="text-xs text-text-tertiary mt-1">{hint}</p>}
@@ -114,7 +131,7 @@ export function Select({ label, hint, error, className='', children, ...props })
   )
 }
 
-export function Modal({ open, onClose, title, children, width='max-w-lg' }) {
+export function Modal({ open, onClose, title, children, width='max-w-lg', square=false }) {
   const ref = useRef(null)
   useEffect(() => {
     const fn = e => { if (e.key === 'Escape') onClose() }
@@ -129,10 +146,10 @@ export function Modal({ open, onClose, title, children, width='max-w-lg' }) {
     <div ref={ref} onClick={e => e.target === ref.current && onClose()}
       className="fixed inset-0 z-50 flex items-center justify-center p-4"
       style={{ background: 'rgba(26,20,16,0.35)', backdropFilter: 'blur(6px)' }}>
-      <div className={`bg-white rounded-2xl shadow-dropdown w-full ${width} max-h-[90vh] flex flex-col animate-fade-scale border border-border`}>
+      <div className={`bg-white ${square ? 'rounded-none' : 'rounded-2xl'} shadow-dropdown w-full ${width} max-h-[90vh] flex flex-col animate-fade-scale border border-border`}>
         <div className="flex items-center justify-between px-6 py-4 border-b border-border flex-shrink-0">
           <h2 className="font-display font-semibold text-text text-lg">{title}</h2>
-          <button onClick={onClose} className="w-7 h-7 rounded-xl flex items-center justify-center text-text-secondary hover:bg-surface-subtle transition-colors">
+          <button onClick={onClose} className={`w-7 h-7 ${square ? 'rounded-none' : 'rounded-xl'} flex items-center justify-center text-text-secondary hover:bg-surface-subtle transition-colors`}>
             <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>
           </button>
         </div>
@@ -180,14 +197,14 @@ export function Toggle({ checked, onChange, label }) {
   )
 }
 
-export function ConfirmDialog({ open, onClose, onConfirm, title, message, danger=false }) {
+export function ConfirmDialog({ open, onClose, onConfirm, title, message, danger=false, square=false }) {
   return (
-    <Modal open={open} onClose={onClose} title={title} width="max-w-sm">
+    <Modal open={open} onClose={onClose} title={title} width="max-w-sm" square={square}>
       <div className="p-6">
         <p className="text-sm text-text-secondary mb-5 leading-relaxed">{message}</p>
         <div className="flex gap-3 justify-end">
-          <Button variant="secondary" onClick={onClose}>Cancel</Button>
-          <Button variant={danger ? 'danger' : 'primary'} onClick={() => { onConfirm(); onClose() }}>Confirm</Button>
+          <Button variant="secondary" onClick={onClose} square={square}>Cancel</Button>
+          <Button variant={danger ? 'danger' : 'primary'} onClick={() => { onConfirm(); onClose() }} square={square}>Confirm</Button>
         </div>
       </div>
     </Modal>

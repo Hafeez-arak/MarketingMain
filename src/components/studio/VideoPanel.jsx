@@ -67,7 +67,7 @@ export function VideoPanel({
     <div className="p-6 space-y-4">
       {target?.image_url && (
         <div className="flex items-center gap-3">
-          <img src={target.image_url} alt="" className="w-16 h-20 object-cover rounded-xl border border-border" />
+          <img src={target.image_url} alt="" className="w-16 h-20 object-cover border border-border" />
           <div>
             <p className="text-xs font-semibold text-text">Animating this still</p>
             <p className="text-[11px] text-text-tertiary leading-snug">
@@ -90,6 +90,8 @@ export function VideoPanel({
         <Textarea
           label="Or describe it yourself"
           rows={3}
+          autoGrow
+          square
           value={prompt}
           onChange={e => { setPrompt(e.target.value); setPresetId('') }}
           placeholder="e.g. slow push in towards the entrance, the facade lights glow warmer"
@@ -101,7 +103,7 @@ export function VideoPanel({
               if (res) { setPrompt(res); setPresetId('') }
             }}
             disabled={!prompt.trim() || !!enhancing || busy}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1 text-[11px] font-medium hover:border-amber-400 hover:bg-amber-50 disabled:opacity-40 disabled:hover:border-border disabled:hover:bg-transparent">
+            className="inline-flex items-center gap-1.5 border border-border px-2.5 py-1 text-[11px] font-medium hover:border-amber-400 hover:bg-amber-50 disabled:opacity-40 disabled:hover:border-border disabled:hover:bg-transparent">
             {enhancing ? <><Spinner size="sm" /> Enhancing…</> : '✨ Enhance motion'}
           </button>
         )}
@@ -123,8 +125,8 @@ export function VideoPanel({
       <div className="flex items-center justify-between gap-2 pt-1">
         <CostLine model={model} resolution={resolution} duration={duration} audio={audio} />
         <div className="flex gap-2">
-          <Button variant="secondary" onClick={onCancel}>Cancel</Button>
-          <Button onClick={submit} disabled={busy || !prompt.trim()}>
+          <Button square variant="secondary" onClick={onCancel}>Cancel</Button>
+          <Button square onClick={submit} disabled={busy || !prompt.trim()}>
             {busy ? <><Spinner size="sm" /> Starting…</> : '🎬 Create video'}
           </Button>
         </div>

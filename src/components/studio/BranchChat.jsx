@@ -1,24 +1,71 @@
 import { useEffect, useRef, useState } from 'react'
 import { Button, Spinner } from '../ui/index'
-import { VersionCard } from './VersionCard'
 import { PROVIDER_LABEL, labelFor } from './labels'
 
-// ─── One candidate's own conversation ──────────────────────────────────────
-// The ChatGPT image and the Gemini image are not two options to choose between
-// once — they're two threads that stay alive side by side, each with its own
-// chat box, so the same brief can be pushed in two directions and compared at
-// every step instead of only at the first.
+// ─── One candidate's own workspace ─────────────────────────────────────────
+// The ChatGPT image and the Gemini image are not two options to choose
+// between once — they're two threads that stay alive side by side, each with
+// its own chat box, so the same brief can be pushed in two directions and
+// compared at every step instead of only at the first.
 //
-// The lane you type in becomes the big one; the other collapses to a pill you
-// can click to get the split back. That's the whole navigation model.
+// Rebuilt 2026-08-10 around a fixed frame instead of a scrolling transcript.
+// The old shape put an overflow-y-auto lane inside the page's own scroll:
+// three nested scroll areas, so the wheel did something different depending
+// on where the pointer happened to be, and reaching a lane's end chained the
+// scroll to the page underneath (the "bounce"). Worse, a 4:5 portrait at the
+// lane's width was taller than the box it lived in, so the picture could
+// never be seen whole — the one thing this screen exists to let you judge.
+//
+// Now: the frame is sized in vh so the image always fits inside it entirely,
+// every past version is a thumbnail on one strip below it, and clicking the
+// picture opens it full-screen to inspect properly. Nothing inside a lane
+// scrolls vertically any more.
 
 const DRAG_MIME = 'application/x-arak-version'
+
+// A past version, as one square on the strip. Deliberately uniform: the strip
+// is for navigating, and letting each thumb keep its own aspect ratio turns a
+// row of them into a ragged edge that's harder to scan.
+function Thumb({ version, step, active, onClick, onRetry, retrying }) {
+  const failed = version.status === 'failed'
+  const pending = version.status === 'pending'
+  return (
+    <button type="button" onClick={onClick} title={version.user_prompt || labelFor(version) || ''}
+      className={`relative w-11 h-11 flex-shrink-0 overflow-hidden border-2 transition-colors ${
+        active ? 'border-amber-500' : failed ? 'border-red-200' : 'border-border hover:border-amber-300'
+      }`}>
+      {/* The strip is the conversation's running order, so it's numbered.
+          Without this a row of near-identical edits gives no clue which came
+          first — the one thing the old transcript was genuinely good at. */}
+      <span className={`absolute top-0 left-0 z-10 px-1 text-[9px] font-bold leading-tight ${
+        active ? 'bg-amber-500 text-white' : 'bg-black/55 text-white'
+      }`}>{step}</span>
+      {pending ? (
+        <span className="w-full h-full flex items-center justify-center bg-surface-subtle text-text-tertiary"><Spinner size="sm" /></span>
+      ) : failed ? (
+        <span className="w-full h-full flex items-center justify-center bg-red-50 text-red-500 text-xs font-bold">!</span>
+      ) : version.media_type === 'video' ? (
+        <>
+          <video src={version.video_url} className="w-full h-full object-cover" muted />
+          <span className="absolute inset-0 flex items-center justify-center text-white text-[10px] bg-black/25">▶</span>
+        </>
+      ) : (
+        <img src={version.image_url} alt="" className="w-full h-full object-cover" />
+      )}
+      {failed && onRetry && (
+        <span onClick={e => { e.stopPropagation(); onRetry(version) }}
+          className="absolute inset-x-0 bottom-0 bg-red-600 text-white text-[8px] font-bold py-0.5">
+          {retrying ? '…' : 'RETRY'}
+        </span>
+      )}
+    </button>
+  )
+}
 
 export function BranchChat({
   branch,
   composer,                // { text, baseId, attach }
-  focused,                 // this lane is the big one
-  split,                   // both lanes visible
+  split,                   // both lanes visible — drives the frame height
   busy,                    // '' | 'edit' | 'video' | 'finalize' — lane-level
   // The raw busy key, for actions scoped to ONE version rather than the lane
   // (download, retry). laneBusy() strips these to a bare label and only
@@ -33,25 +80,56 @@ export function BranchChat({
   onFinalize,
   onDownload,              // downloads the file AND files it in the library if it isn't already
   onRetry,                 // re-run a failed version against the same prompt
+  onAttach,                // opens a picker (upload / Media Library) for this lane's composer
+  onZoom,                  // opens the full-screen viewer at this version
 }) {
   const [dragOver, setDragOver] = useState(false)
-  const threadRef = useRef(null)
-
-  // A chat shows you the newest turn, not the oldest. Without this, sending an
-  // instruction in the big lane leaves the reply below the fold.
-  useEffect(() => {
-    const el = threadRef.current
-    if (el) el.scrollTop = el.scrollHeight
-  }, [branch.versions.length])
+  // Which version's instruction is expanded, rather than a bare boolean:
+  // keying it to the id means moving along the strip collapses the previous
+  // one on its own, with no effect needed to reset it.
+  const [expandedId, setExpandedId] = useState(null)
+  const composerRef = useRef(null)
+  const stripRef = useRef(null)
 
   const { text = '', baseId = null, attach = null } = composer || {}
-  const base = branch.versions.find(v => v.id === baseId) || branch.latest
+
+  const ready = branch.versions.filter(v => v.status === 'ready')
+  const newest = ready[ready.length - 1] || null
+  const picked = branch.versions.find(v => v.id === baseId) || null
+  // The frame shows whatever was clicked on the strip, else the newest
+  // result — including a video, because a render that just finished is the
+  // thing you want to watch, not something to go hunting for.
+  const stage = picked || newest
+  // An instruction always acts on a STILL: you edit the image and re-animate,
+  // because no model edits a finished clip. So selecting a video to watch
+  // doesn't drag the conversation onto something it can't act on.
+  const base = picked && picked.media_type !== 'video' && picked.status === 'ready'
+    ? picked
+    : branch.latest
+
   const isOlderBase = !!base && !!branch.latest && base.id !== branch.latest.id
   const baseLabel = PROVIDER_LABEL[branch.provider] || labelFor(branch.root) || 'Option'
   // buildBranches numbers lanes only when one model produced several
   // candidates this round, so a plain 1-vs-1 round stays "ChatGPT", not "ChatGPT 1".
   const label = branch.variantIndex ? `${baseLabel} ${branch.variantIndex}` : baseLabel
   const canAct = !!base && base.status === 'ready'
+  const stageIsVideo = stage?.media_type === 'video' && !!stage?.video_url
+
+  // Claude/ChatGPT-style grow-with-content. Keyed on `text` (not just
+  // onChange) so it also shrinks back down when Send clears the composer.
+  useEffect(() => {
+    const el = composerRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = Math.min(el.scrollHeight, 140) + 'px'
+  }, [text])
+
+  // Keep the newest work in view on the strip — it grows rightwards, and the
+  // version you just made is the one you want to see land.
+  useEffect(() => {
+    const el = stripRef.current
+    if (el) el.scrollLeft = el.scrollWidth
+  }, [branch.versions.length])
 
   function handleDragStart(e, version) {
     const payload = JSON.stringify({
@@ -81,103 +159,187 @@ export function BranchChat({
     onActivate()
   }
 
+  // The LANE is the fixed thing, not the frame. Everything inside it comes
+  // and goes — a caption that only edits have, the earlier-version warning,
+  // a strip that appears at version two, action buttons that wrap at narrow
+  // widths — and when the lane sized itself to its contents, every one of
+  // those made the whole box jump and put the two lanes at different heights.
+  // Pinning the lane and letting the picture absorb the slack keeps the
+  // outside perfectly still while the inside changes.
+  const laneH = split ? 'h-[72vh] min-h-[520px]' : 'h-[78vh] min-h-[560px]'
+
   return (
-    <div className={`rounded-2xl border ${focused || !split ? 'border-border' : 'border-border'} bg-surface flex flex-col`}>
+    <div className={`border border-border bg-surface flex flex-col ${laneH}`}>
+      {/* ── Header ── */}
       <div className="flex items-center justify-between px-3 py-2 border-b border-border">
         <p className="text-[11px] font-bold uppercase tracking-wide text-text-secondary">{label}</p>
-        {branch.pending && <span className="text-[10px] text-text-tertiary flex items-center gap-1.5"><Spinner size="sm" /> working…</span>}
+        <div className="flex items-center gap-2">
+          {branch.pending && (
+            <span className="text-[10px] text-text-tertiary flex items-center gap-1.5"><Spinner size="sm" /> working…</span>
+          )}
+          {ready.length > 1 && stage && ready.indexOf(stage) >= 0 && (
+            <span className="text-[10px] text-text-tertiary tabular-nums">{ready.indexOf(stage) + 1}/{ready.length}</span>
+          )}
+        </div>
       </div>
 
-      {/* ── Thread ── */}
-      <div ref={threadRef} className={`px-3 py-3 space-y-3 overflow-y-auto ${split ? 'max-h-[52vh]' : 'max-h-[56vh]'}`}>
-        {branch.versions.map((v, i) => (
-          <div key={v.id} className="space-y-1.5">
-            {/* The opening prompt is the session's, shown once above both
-                lanes — repeating it here would just be the same sentence twice
-                on screen. Every later instruction belongs to this lane only. */}
-            {i > 0 && v.user_prompt && (
-              <div className="flex justify-end">
-                <div className="max-w-[85%] rounded-2xl rounded-br-sm bg-stone-800 text-white px-3 py-1.5">
-                  <p className="text-[12px] leading-relaxed whitespace-pre-wrap">{v.user_prompt}</p>
-                </div>
+      {/* ── Frame ── */}
+      {/* flex-1 + min-h-0: this is the part that gives, so anything appearing
+          below it shrinks the picture slightly instead of resizing the lane. */}
+      <div className="group relative flex-1 min-h-0 bg-stone-50 flex items-center justify-center overflow-hidden">
+        {!stage ? (
+          <div className="flex flex-col items-center gap-2 text-text-tertiary">
+            <Spinner />
+            <p className="text-[11px]">Working…</p>
+          </div>
+        ) : stage.status === 'failed' ? (
+          <div className="flex flex-col items-center gap-1.5 px-6 text-center">
+            <p className="text-[11px] font-semibold text-red-700">{labelFor(stage) || 'That step'} failed</p>
+            {/* The real provider message, not a generic apology — an exhausted
+                balance and a rejected prompt need very different responses. */}
+            <p className="text-[10px] text-red-600 leading-snug line-clamp-3 max-w-xs">{stage.error || 'No reason given.'}</p>
+            {onRetry && (
+              <button type="button" onClick={() => onRetry(stage)} disabled={pendingKey === `retry:${stage.id}`}
+                className="mt-1 inline-flex items-center gap-1.5 border border-red-300 bg-white px-2.5 py-1 text-[10px] font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50">
+                {pendingKey === `retry:${stage.id}` ? <><Spinner size="sm" /> Retrying…</> : '↻ Try again'}
+              </button>
+            )}
+          </div>
+        ) : stageIsVideo ? (
+          <video src={stage.video_url} controls playsInline className="max-h-full max-w-full" />
+        ) : (
+          // The element is the drag source rather than the <img>'s own
+          // default, so the browser doesn't hand over its URL payload and
+          // fight ours.
+          <img src={stage.image_url} alt="" draggable
+            onDragStart={e => handleDragStart(e, stage)}
+            onClick={() => onZoom?.(stage)}
+            className="max-h-full max-w-full object-contain cursor-zoom-in" />
+        )}
+
+        {stage?.status === 'ready' && (
+          <>
+            {/* Only worth saying which model made it, which is news exactly
+                once — on the original candidate. Stamping "Edit" over every
+                subsequent frame is a label for something the strip and the
+                caption underneath already make obvious. */}
+            {stage.kind === 'generate' && labelFor(stage) && (
+              <span className="absolute top-2 left-2 px-2 py-0.5 bg-black/60 backdrop-blur text-white text-[10px] font-semibold pointer-events-none">
+                {labelFor(stage)}
+              </span>
+            )}
+            {isOlderBase && base && stage.id === base.id && (
+              <span className="absolute top-2 right-2 px-2 py-0.5 bg-amber-500 text-white text-[10px] font-semibold pointer-events-none">
+                Editing this
+              </span>
+            )}
+            {!stageIsVideo && (
+              <div className="absolute bottom-2 right-2 flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                <button type="button" onClick={() => onZoom?.(stage)}
+                  className="px-2.5 py-1 bg-white/95 text-text text-[10px] font-semibold shadow-dropdown hover:bg-white">
+                  🔍 Zoom
+                </button>
+                <button type="button" onClick={() => onOpenEditor(stage)}
+                  className="px-2.5 py-1 bg-white/95 text-text text-[10px] font-semibold shadow-dropdown hover:bg-white">
+                  ✏️ Edit
+                </button>
               </div>
             )}
-            {i > 0 && v.reference_url && (
-              <div className="flex justify-end">
-                <img src={v.reference_url} alt="" className="w-12 h-12 object-cover rounded-lg border border-border" />
-              </div>
-            )}
-            {/* Capped rather than full-bleed: at full lane width a 4:5 image
-                is taller than the viewport, which pushes the chat box the
-                whole lane exists for off the bottom of the screen. */}
-            <div className="max-w-[420px]">
-            <VersionCard
-              version={v}
-              // Pointless on a lane with one image — it can only be "this
-              // one", and the badge reads as a state you chose.
-              isBase={branch.versions.length > 1 && !!base && v.id === base.id}
-              showLabel={i === 0 || v.kind !== 'edit'}
-              onClick={v.status === 'ready' ? () => onChange({ baseId: v.id }) : undefined}
-              onDragStart={handleDragStart}
+          </>
+        )}
+      </div>
+
+      {/* What produced what's on screen — the one thing a transcript gave for
+          free and a frame doesn't, so it's stated plainly rather than as grey
+          fine print. Long instructions clamp to two lines with a real way to
+          read the rest, because half a sentence is worse than none: it takes
+          the same room and answers nothing. */}
+      {/* Always rendered, at a reserved two-line height, even for the opening
+          candidate that has no instruction of its own. Showing it only for
+          edits meant stepping between versions on the strip added and removed
+          a band mid-lane, which moved everything under it.
+          Fixed height, not a floor: min-h let a prompt long enough to need
+          "Show more" sit taller than one that didn't, and since the picture
+          above is the flex-1 that absorbs whatever this band takes, that
+          difference showed up as the image itself changing size — one lane
+          smaller than its sibling, or a version shrinking the frame just by
+          being selected. The toggle is now always rendered, just invisible
+          when it has nothing to do, so this band is the same height for
+          every stage. It's only allowed to grow — deliberately, on THIS
+          version alone — when its own "Show more" is actually clicked. */}
+      <div className={`px-3 py-2 border-t border-border bg-amber-50/50 flex flex-col justify-center ${
+        expandedId === stage?.id ? 'min-h-[54px]' : 'h-[54px] overflow-hidden'
+      }`}>
+        {stage?.user_prompt && stage.kind !== 'generate' ? (
+          <p className={`text-[12px] text-text leading-relaxed ${expandedId === stage.id ? '' : 'line-clamp-2'}`}>
+            <span className="font-semibold text-amber-800">You asked: </span>
+            {stage.user_prompt}
+          </p>
+        ) : (
+          <p className="text-[12px] text-text-tertiary leading-relaxed line-clamp-2">
+            The first attempt, straight from your brief.
+          </p>
+        )}
+        {/* Roughly two lines at a lane's width — below that the clamp never
+            bites and the toggle would be a button that does nothing. Kept in
+            the layout either way (invisible, not absent) so its row never
+            silently comes and goes. */}
+        <button type="button"
+          onClick={() => stage && setExpandedId(expandedId === stage.id ? null : stage.id)}
+          className={`mt-1 self-start text-[10px] font-semibold text-amber-700 hover:underline ${
+            stage?.user_prompt && stage.kind !== 'generate' && stage.user_prompt.length > 90
+              ? '' : 'invisible pointer-events-none'
+          }`}>
+          {expandedId === stage?.id ? 'Show less' : 'Show more'}
+        </button>
+      </div>
+
+      {/* ── History ── */}
+      {branch.versions.length > 1 && (
+        <div ref={stripRef}
+          className="flex gap-1.5 px-2.5 py-2 border-t border-border bg-surface-subtle/40 overflow-x-auto overscroll-x-contain">
+          {branch.versions.map((v, i) => (
+            <Thumb key={v.id} version={v} step={i + 1}
+              active={stage?.id === v.id}
+              onClick={() => onChange({ baseId: v.id })}
               onRetry={onRetry}
               retrying={pendingKey === `retry:${v.id}`}
-              onEdit={onOpenEditor}
             />
-            {/* Every render is keepable, not just the current one. A motion
-                that didn't work on this still often works on the next, and a
-                clip that's already been paid for shouldn't need re-generating
-                to get a copy of it. */}
-            {v.status === 'ready' && (v.video_url || v.image_url) && (
-              <div className="flex items-center gap-2 mt-1 px-0.5">
-                <button onClick={() => onDownload(v)} disabled={pendingKey === `download:${v.id}`}
-                  title={v.is_final ? 'Download (already in the Media Library)' : 'Download — also files it in the Media Library'}
-                  className="text-[10px] font-medium text-text-tertiary hover:text-amber-700 disabled:opacity-50">
-                  {pendingKey === `download:${v.id}` ? 'Saving…' : '⬇ Download'}
-                </button>
-                {v.media_type === 'video' && onReRender && (
-                  <button onClick={() => onReRender(v)}
-                    className="text-[10px] font-medium text-text-tertiary hover:text-amber-700">
-                    🔄 Re-render with the current image
-                  </button>
-                )}
-              </div>
-            )}
-            </div>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
 
       {/* ── Composer ── */}
       <div
         onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; setDragOver(true) }}
         onDragLeave={() => setDragOver(false)}
         onDrop={handleDrop}
-        className={`mt-auto border-t p-3 space-y-2 rounded-b-2xl transition-colors ${
-          dragOver ? 'border-amber-400 bg-amber-50' : 'border-border bg-surface-subtle/30'
+        className={`mt-auto border-t p-2.5 space-y-2 transition-colors ${
+          dragOver ? 'border-amber-400 bg-amber-50' : 'border-border bg-surface'
         }`}
       >
         {isOlderBase && (
-          <div className="flex items-center gap-2 text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1">
-            <span>Continuing from an earlier version.</span>
+          <div className="flex items-center gap-2 text-[11px] text-amber-800 bg-amber-50 border border-amber-200 px-2 py-1">
+            <span>Editing an earlier version.</span>
             <button onClick={() => onChange({ baseId: null })} className="font-semibold underline">use the newest</button>
           </div>
         )}
 
         {attach && (
-          <div className="flex items-center gap-2 rounded-lg border border-border bg-white px-2 py-1.5">
-            <img src={attach.url} alt="" className="w-8 h-8 rounded object-cover border border-border" />
+          <div className="flex items-center gap-2 border border-border bg-white px-2 py-1.5">
+            <img src={attach.url} alt="" className="w-8 h-8 object-cover border border-border" />
             <div className="flex-1 min-w-0">
               <p className="text-[10px] text-text-tertiary leading-tight">From {attach.label}</p>
               {/* The gesture is ambiguous on purpose — "bring that image over
                   here" can mean copy its look or work on it directly — so the
                   drop asks rather than guessing. */}
               <div className="flex gap-1 mt-0.5">
-                {[['reference', 'as a reference'], ['base', 'edit this one instead']].map(([mode, text]) => (
+                {[['reference', 'as a reference'], ['base', 'edit this one instead']].map(([mode, t]) => (
                   <button key={mode} onClick={() => onChange({ attach: { ...attach, mode } })}
-                    className={`text-[10px] px-1.5 py-0.5 rounded-md border transition-colors ${
+                    className={`text-[10px] px-1.5 py-0.5 border transition-colors ${
                       attach.mode === mode ? 'border-amber-500 bg-amber-50 text-amber-800 font-semibold' : 'border-border text-text-tertiary hover:border-amber-300'
                     }`}>
-                    {text}
+                    {t}
                   </button>
                 ))}
               </div>
@@ -187,33 +349,53 @@ export function BranchChat({
           </div>
         )}
 
-        <div className="flex gap-2">
-          <input
+        <div className="flex gap-2 items-end">
+          {/* Dragging the sibling lane's image over is the only other way to
+              attach a reference — which leaves no way to show the AI a fresh
+              photo or a screenshot of the look you want. */}
+          {onAttach && (
+            <button type="button" onClick={onAttach} disabled={!canAct}
+              title="Attach a reference image or screenshot"
+              className="shrink-0 inline-flex items-center justify-center w-9 h-9 border border-border hover:border-amber-400 hover:bg-amber-50 disabled:opacity-40 disabled:hover:border-border disabled:hover:bg-transparent">
+              📎
+            </button>
+          )}
+          <textarea
+            ref={composerRef}
             value={text}
+            rows={1}
             onFocus={onActivate}
             onChange={e => onChange({ text: e.target.value })}
             onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); onSend() } }}
             placeholder={canAct ? 'Tell the AI what to change…' : 'Waiting for an image…'}
             disabled={!canAct}
-            className="flex-1 min-w-0 text-[13px] bg-white border border-border rounded-xl px-3 py-2 focus:outline-none focus:border-amber-400 disabled:bg-surface-subtle disabled:text-text-tertiary"
+            className="flex-1 min-w-0 text-[13px] leading-relaxed bg-white border border-border px-3 py-2 resize-none overflow-y-auto overscroll-contain focus:outline-none focus:border-amber-400 disabled:bg-surface-subtle disabled:text-text-tertiary"
           />
-          <Button size="sm" onClick={onSend} disabled={!canAct || busy === 'edit' || !text.trim()}>
+          <Button square size="sm" onClick={onSend} disabled={!canAct || busy === 'edit' || !text.trim()}>
             {busy === 'edit' ? <Spinner size="sm" /> : 'Send'}
           </Button>
         </div>
 
         <div className="flex flex-wrap gap-1.5">
-          <Button size="sm" variant="outline" disabled={!canAct} onClick={() => onOpenEditor(base)}>✏️ Open in editor</Button>
-          <Button size="sm" variant="outline" disabled={!canAct} onClick={() => onAnimate(base)}>🎬 Animate</Button>
-          <Button size="sm" variant="secondary" disabled={!canAct || busy === 'finalize' || base?.is_final}
+          <Button square size="sm" variant="outline" disabled={!canAct} onClick={() => onOpenEditor(base)}>✏️ Editor</Button>
+          <Button square size="sm" variant="outline" disabled={!canAct} onClick={() => onAnimate(base)}>🎬 Animate</Button>
+          <Button square size="sm" variant="secondary" disabled={!canAct || busy === 'finalize' || base?.is_final}
             onClick={() => onFinalize(base)}>
             {busy === 'finalize' ? <Spinner size="sm" /> : base?.is_final ? '✓ Saved' : '✅ Save'}
           </Button>
-          {canAct && (
-            <Button size="sm" variant="outline" disabled={pendingKey === `download:${base.id}`}
-              onClick={() => onDownload(base)}
-              title={base.is_final ? 'Download (already in the Media Library)' : 'Download — also files it in the Media Library'}>
-              {pendingKey === `download:${base.id}` ? <Spinner size="sm" /> : '⬇ Download'}
+          {/* Downloads whatever is actually on screen, so watching a clip and
+              pressing Download can't hand you the still instead. */}
+          {stage?.status === 'ready' && (
+            <Button square size="sm" variant="outline" disabled={pendingKey === `download:${stage.id}`}
+              onClick={() => onDownload(stage)}
+              title={stage.is_final ? 'Download (already in the Media Library)' : 'Download — also files it in the Media Library'}>
+              {pendingKey === `download:${stage.id}` ? <Spinner size="sm" /> : stageIsVideo ? '⬇ Clip' : '⬇ Download'}
+            </Button>
+          )}
+          {stageIsVideo && onReRender && (
+            <Button square size="sm" variant="outline" onClick={() => onReRender(stage)}
+              title="Same motion and settings, run against the lane's current still">
+              🔄 Re-render
             </Button>
           )}
         </div>
@@ -230,10 +412,10 @@ export function BranchPill({ branch, onClick }) {
   const thumb = branch.latest?.image_url
   return (
     <button onClick={onClick}
-      className="flex items-center gap-2 rounded-xl border border-border bg-surface hover:border-amber-400 pl-1.5 pr-3 py-1.5 transition-colors">
+      className="flex items-center gap-2 border border-border bg-surface hover:border-amber-400 pl-1.5 pr-3 py-1.5 transition-colors">
       {thumb
-        ? <img src={thumb} alt="" className="w-8 h-8 rounded-lg object-cover" />
-        : <span className="w-8 h-8 rounded-lg bg-surface-subtle flex items-center justify-center">{branch.pending ? <Spinner size="sm" /> : '·'}</span>}
+        ? <img src={thumb} alt="" className="w-8 h-8 object-cover" />
+        : <span className="w-8 h-8 bg-surface-subtle flex items-center justify-center">{branch.pending ? <Spinner size="sm" /> : '·'}</span>}
       <span className="text-left">
         <span className="block text-[11px] font-semibold text-text leading-tight">{label}</span>
         <span className="block text-[10px] text-text-tertiary leading-tight">show both</span>

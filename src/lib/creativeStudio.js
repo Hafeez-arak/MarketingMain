@@ -68,6 +68,32 @@ export async function touchSession(accessToken, sessionId) {
   } catch { /* ordering is cosmetic — never fail a real action over it */ }
 }
 
+export async function renameSession(accessToken, sessionId, title) {
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/creative_sessions?id=eq.${sessionId}`, {
+      method: 'PATCH',
+      headers: jsonHeaders(accessToken, 'return=minimal'),
+      body: JSON.stringify({ title: (title || 'Untitled').slice(0, 80), updated_at: new Date().toISOString() }),
+    })
+    if (!res.ok) return { error: await res.text() }
+    return { ok: true }
+  } catch (err) { return { error: err.message } }
+}
+
+// creative_versions has `on delete cascade` on session_id, so this alone
+// removes the whole thread — every generated candidate, edit and render —
+// with nothing left orphaned in the versions table.
+export async function deleteSession(accessToken, sessionId) {
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/creative_sessions?id=eq.${sessionId}`, {
+      method: 'DELETE',
+      headers: jsonHeaders(accessToken, 'return=minimal'),
+    })
+    if (!res.ok) return { error: await res.text() }
+    return { ok: true }
+  } catch (err) { return { error: err.message } }
+}
+
 // ── Versions ───────────────────────────────────────────────────────────────
 
 export async function fetchVersions(accessToken, sessionId) {
