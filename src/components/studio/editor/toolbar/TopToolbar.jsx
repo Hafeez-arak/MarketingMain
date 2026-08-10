@@ -33,7 +33,12 @@ export function TopToolbar({
     // people never found, and made every dropdown inside it a clipped sliver
     // (see the Popover note in controls.jsx). A second row costs ~40px of
     // canvas height and costs nothing in reachability.
-    <div className="flex flex-wrap items-center gap-1 rounded-xl border border-border bg-white px-1.5 py-1.5">
+    // h-full + content-start: the parent reserves a fixed band so the canvas
+    // below never moves when the selection changes what's in here (see the
+    // band in index.jsx). Filling that band means the card is one consistent
+    // panel rather than a short bar with dead space under it, and packing the
+    // wrapped rows to the top stops one row floating in the middle.
+    <div className="flex h-full flex-wrap content-start items-center gap-1 rounded-xl border border-border bg-white px-1.5 py-1.5">
       <ToolbarButton title="Undo (⌘Z)" onClick={onUndo} disabled={!canUndo}>↶</ToolbarButton>
       <ToolbarButton title="Redo (⇧⌘Z)" onClick={onRedo} disabled={!canRedo}>↷</ToolbarButton>
       <ToolbarDivider />
