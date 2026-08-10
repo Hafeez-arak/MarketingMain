@@ -37,10 +37,18 @@ const RATIOS = ['1:1', '4:5', '9:16', '16:9']
 // check constraint and openSession's label both still accept it); it just
 // can't be chosen for new work.
 const INTENTS = [
-  { value: 'image', label: 'An image', hint: 'A post, story or ad visual — animate it after if you want' },
+  { value: 'image', label: 'An image', hint: 'A post, story or ad visual' },
   { value: 'video', label: 'A video',  hint: 'A clip generated straight from a description' },
 ]
 const emptyComposer = { text: '', baseId: null, attach: null }
+
+// Animation is parked (2026-08-11), not deleted — the image side is what's
+// being finished first, and the video workflow still has the unwired
+// start/end-frame inputs noted below. This hides both entry points (a lane's
+// 🎬 Animate and the re-render on an existing clip); the modal, handleAnimate
+// and VideoPanel stay wired behind it, so turning animation back on is this
+// one line. Text-to-video (the "A video" intent) is untouched.
+const ANIMATE_ENABLED = false
 
 // What the ➕ can attach, per tab. `kind` filters the library grid; `notes`
 // says whether the chip offers a "what should it take from this?" box.
@@ -206,10 +214,6 @@ export function CreativeStudio() {
   const [autoEnhance, setAutoEnhance] = useState(false)
   const [enhancing, setEnhancing] = useState('')            // '' | 'prompt' | 'motion'
   const [aspect, setAspect] = useState('4:5')
-  // Images per model per round. Default 1 so a round costs exactly what it did
-  // before unless more is deliberately asked for — 4 means EIGHT images (four
-  // per model), which the picker says out loud rather than leaving to arithmetic.
-  const [variants, setVariants] = useState(1)
   // Keyed by slot id (see IMAGE_SLOTS / VIDEO_MENU_SLOTS / VIDEO_FRAME_SLOTS): { url, name, note }.
   const [attachments, setAttachments] = useState({})
   const [pickerSlot, setPickerSlot] = useState(null)
@@ -320,9 +324,6 @@ export function CreativeStudio() {
     setSession(null); setVersions([]); setOpeningId(null); setPrompt(''); setAttachments({})
     setPromptRaw(''); setPromptSource('raw')
     setMotionNote(''); setMotionPresetId(''); setMotionStrength('medium'); setLookId('none')
-    // Back to the cheap default — an 8-image round should be asked for each
-    // time, not inherited from whatever the last session happened to use.
-    setVariants(1)
     setModelId('seedance-2'); setDuration('5'); setResolution('720p'); setAudio(false)
     setComposers({}); setFocusedBranch(null); setError('')
   }
@@ -474,17 +475,15 @@ export function CreativeStudio() {
       ? [{ round: 0, kind: 'video', provider: 'seedance', mediaType: 'video',
            userPrompt: videoPrompt, originalPrompt, promptSource: source,
            aspectRatio: aspect, model: modelId, duration, resolution, generateAudio: audio }]
-      // N rows per provider rather than asking fal for num_images: N. Same
-      // image count and same cost (fal bills per image), but each variant gets
-      // its own row and lands the moment it's ready — the workflow already
-      // renders exactly one image per target, so this needed no change there.
-      : ['openai', 'gemini'].flatMap(provider =>
-          Array.from({ length: variants }, () => ({
-            round: 0, kind: 'generate', provider, mediaType: 'image',
-            userPrompt: finalPrompt, originalPrompt, promptSource: source,
-            aspectRatio: aspect,
-            referenceUrl: refUrl, referenceNotes: refNotes,
-          })))
+      // One row per provider — two candidates, which is what the split view
+      // compares. Each lands the moment it's ready; the workflow renders
+      // exactly one image per target.
+      : ['openai', 'gemini'].map(provider => ({
+          round: 0, kind: 'generate', provider, mediaType: 'image',
+          userPrompt: finalPrompt, originalPrompt, promptSource: source,
+          aspectRatio: aspect,
+          referenceUrl: refUrl, referenceNotes: refNotes,
+        }))
 
     const ins = await insertPendingVersions(activeWorkspaceId, accessToken, s.id, rows)
     if (ins.error) { setBusy(''); setError(ins.error); return }
@@ -817,10 +816,10 @@ export function CreativeStudio() {
     onChange: patch => patchComposer(branch.rootId, patch),
     onSend: () => handleSend(branch),
     onActivate: () => setFocusedBranch(branch.rootId),
-    onAnimate: v => { setVideoTarget(v); setVideoPrefill(null) },
+    onAnimate: ANIMATE_ENABLED ? v => { setVideoTarget(v); setVideoPrefill(null) } : undefined,
     // Only offered when the lane actually has a still to re-animate — a
     // video-only branch (no image round) has nothing for the button to do.
-    onReRender: branch.versions.some(v => v.media_type !== 'video' && v.status === 'ready')
+    onReRender: ANIMATE_ENABLED && branch.versions.some(v => v.media_type !== 'video' && v.status === 'ready')
       ? v => handleReRender(branch, v)
       : undefined,
     onOpenEditor: v => setEditingOverlay(v),
@@ -964,17 +963,18 @@ export function CreativeStudio() {
                 )}
               </div>
 
-              <div className={intent === 'video' ? '' : 'grid grid-cols-2 gap-3'}>
+              {/* One image per model, always — the 2-each and 4-each rounds
+                  are gone (2026-08-11). Two candidates is the comparison the
+                  split view is built around; four or eight was a bigger bill
+                  and a longer wait for lanes nobody read. */}
+              <div>
                 <Select label="Shape" square value={aspect} onChange={e => setAspect(e.target.value)}>
                   {RATIOS.map(r => <option key={r} value={r}>{aspectLabel(r)} ({r})</option>)}
                 </Select>
                 {intent !== 'video' && (
-                  <Select label="Options per model" square value={String(variants)}
-                    onChange={e => setVariants(Number(e.target.value))}>
-                    <option value="1">1 each — 2 images</option>
-                    <option value="2">2 each — 4 images</option>
-                    <option value="4">4 each — 8 images</option>
-                  </Select>
+                  <p className="text-[11px] text-text-tertiary mt-1.5">
+                    Two options — one from each model — so you can compare and keep going with whichever works.
+                  </p>
                 )}
               </div>
 

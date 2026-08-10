@@ -74,7 +74,7 @@ export function BranchChat({
   onChange,                // (patch) => void
   onSend,
   onActivate,              // typing in a lane focuses it
-  onAnimate,
+  onAnimate,               // optional: parked while animation is off (see ANIMATE_ENABLED)
   onReRender,              // optional: re-run a past render against the current base
   onOpenEditor,
   onFinalize,
@@ -94,11 +94,17 @@ export function BranchChat({
   const { text = '', baseId = null, attach = null } = composer || {}
 
   const ready = branch.versions.filter(v => v.status === 'ready')
-  const newest = ready[ready.length - 1] || null
+  const newest = branch.versions[branch.versions.length - 1] || null
   const picked = branch.versions.find(v => v.id === baseId) || null
   // The frame shows whatever was clicked on the strip, else the newest
   // result — including a video, because a render that just finished is the
   // thing you want to watch, not something to go hunting for.
+  //
+  // Newest of ALL versions, not just the ready ones. Filtering to ready meant
+  // a lane whose only render failed had no stage at all, so it fell through to
+  // the bare "Working…" spinner below and sat there forever — no error, no
+  // reason, no Retry, because both the failed branch and the pending branch's
+  // "this is taking too long" escape hatch need a stage to render against.
   const stage = picked || newest
   // An instruction always acts on a STILL: you edit the image and re-animate,
   // because no model edits a finished clip. So selecting a video to watch
@@ -115,8 +121,10 @@ export function BranchChat({
   const canAct = !!base && base.status === 'ready'
   const stageIsVideo = stage?.media_type === 'video' && !!stage?.video_url
   // Shown faintly behind a pending render so the lane isn't a blank rectangle
-  // while the next version is on its way.
-  const prevReady = newest
+  // while the next version is on its way — the last thing that actually
+  // rendered, which is not the same as the stage now that stage can be a
+  // pending or failed row.
+  const prevReady = ready[ready.length - 1] || null
 
   // Ticks only while this lane has something in flight. A render that dies
   // between fal and the database leaves the row 'pending' with nobody left to
@@ -425,7 +433,9 @@ export function BranchChat({
 
         <div className="flex flex-wrap gap-1.5">
           <Button square size="sm" variant="outline" disabled={!canAct} onClick={() => onOpenEditor(base)}>✏️ Editor</Button>
-          <Button square size="sm" variant="outline" disabled={!canAct} onClick={() => onAnimate(base)}>🎬 Animate</Button>
+          {onAnimate && (
+            <Button square size="sm" variant="outline" disabled={!canAct} onClick={() => onAnimate(base)}>🎬 Animate</Button>
+          )}
           <Button square size="sm" variant="secondary" disabled={!canAct || busy === 'finalize' || base?.is_final}
             onClick={() => onFinalize(base)}>
             {busy === 'finalize' ? <Spinner size="sm" /> : base?.is_final ? '✓ Saved' : '✅ Save'}
