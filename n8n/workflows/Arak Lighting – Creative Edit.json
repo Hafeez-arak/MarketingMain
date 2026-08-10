@@ -124,6 +124,7 @@
         "inputDataFieldName": "data",
         "options": {}
       },
+      "onError": "continueErrorOutput",
       "id": "7df3ac3c-98fe-55f8-a28e-bf19f5500503",
       "name": "Upload to Supabase Storage",
       "type": "n8n-nodes-base.httpRequest",
@@ -163,6 +164,7 @@
         "jsonBody": "={{ JSON.stringify({ status: 'ready', error: '', image_url: String($env.SUPABASE_URL).replace(/\\/+$/, '') + '/storage/v1/object/public/' + $('Edit Image').item.json.bucket + '/' + $('Edit Image').item.json.filename }) }}",
         "options": {}
       },
+      "onError": "continueErrorOutput",
       "id": "da8bc2cc-7c1b-5402-8d37-7a298a728f2f",
       "name": "Supabase: Save Version",
       "type": "n8n-nodes-base.httpRequest",
@@ -175,7 +177,7 @@
     {
       "parameters": {
         "method": "PATCH",
-        "url": "={{ String($env.SUPABASE_URL).replace(/\\/+$/, '') }}/rest/v1/creative_versions?id=eq.{{ $json.version_id }}",
+        "url": "={{ String($env.SUPABASE_URL).replace(/\\/+$/, '') }}/rest/v1/creative_versions?id=eq.{{ $json.version_id || $('Edit Image').item.json.version_id }}",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -199,7 +201,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ status: 'failed', error: String($json.error || 'Generation failed.') }) }}",
+        "jsonBody": "={{ JSON.stringify({ status: 'failed', error: String($json.error && $json.error.message ? $json.error.message : ($json.error || $('Edit Image').item.json.error || 'Generation failed.')).slice(0, 500) }) }}",
         "options": {}
       },
       "id": "c19f43db-2340-5772-843e-bdf14a776c75",
@@ -269,6 +271,25 @@
         [
           {
             "node": "Supabase: Save Version",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Supabase: Mark Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Supabase: Save Version": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Supabase: Mark Failed",
             "type": "main",
             "index": 0
           }

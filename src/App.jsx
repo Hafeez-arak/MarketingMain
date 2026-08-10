@@ -1,9 +1,10 @@
 import { useEffect } from 'react'
-import { Routes, Route } from 'react-router-dom'
+import { Routes, Route, useLocation } from 'react-router-dom'
 import { AppProvider, useApp, actions } from './store/appStore'
 import { AuthProvider, useAuth } from './store/AuthContext'
 import { RequireAuth } from './components/auth/RequireAuth'
 import { AppLayout } from './components/layout/AppLayout'
+import { ErrorBoundary } from './components/ErrorBoundary'
 import { fetchWorkspaceWebhooks } from './lib/workspaceWebhooks'
 
 import { Login } from './pages/auth/Login'
@@ -50,11 +51,31 @@ function WebhooksLoader() {
   return null
 }
 
+// The page you land on when a URL doesn't match anything. Previously the
+// inner <Routes> had no catch-all, so a mistyped or stale link rendered the
+// layout around an empty hole — indistinguishable from a crash.
+function NotFound() {
+  return (
+    <div className="p-8 max-w-xl">
+      <div className="border border-border bg-surface p-5">
+        <h2 className="text-sm font-semibold text-text">That page doesn't exist</h2>
+        <p className="text-xs text-text-secondary mt-1.5">
+          The link may be out of date. Everything is reachable from the sidebar.
+        </p>
+        <a href="/" className="inline-block mt-4 border border-border bg-white px-3 py-1.5 text-xs font-semibold text-text hover:bg-surface-subtle">
+          Back to dashboard
+        </a>
+      </div>
+    </div>
+  )
+}
+
 // Everything under here requires a signed-in user with a workspace. Wrapping
 // it as one element (rather than gating each <Route> individually) means
 // adding a new page later never risks forgetting the auth check.
 function ProtectedApp() {
   const { activeWorkspaceId } = useAuth()
+  const { pathname } = useLocation()
   return (
     <RequireAuth>
       {/* Key the whole data subtree on the active company: switching companies
@@ -63,6 +84,11 @@ function ProtectedApp() {
       <AppProvider key={activeWorkspaceId || 'none'}>
         <WebhooksLoader />
         <AppLayout>
+          {/* Inside AppLayout, so a crashed page keeps the sidebar and you can
+              navigate out of it. Keyed on the path because a boundary has no
+              way to know the route changed — without the key, one crash would
+              pin the error screen in place for every page after it. */}
+          <ErrorBoundary key={pathname}>
           <Routes>
             <Route path="/"                      element={<Dashboard />} />
             <Route path="/brand-brain"           element={<BrandBrain />} />
@@ -88,7 +114,9 @@ function ProtectedApp() {
             <Route path="/settings"             element={<Settings />} />
             <Route path="/integrations"          element={<Integrations />} />
             <Route path="/team"                  element={<Team />} />
+            <Route path="*"                      element={<NotFound />} />
           </Routes>
+          </ErrorBoundary>
         </AppLayout>
       </AppProvider>
     </RequireAuth>

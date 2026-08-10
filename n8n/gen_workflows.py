@@ -7072,6 +7072,13 @@ def _http_creative_upload(source_node: str, mime: str, name: str, x: int, y: int
             "inputDataFieldName": "data",
             "options": {},
         },
+        # A throw here used to kill the execution outright, and because the
+        # row is only ever written by the two nodes DOWNSTREAM of this one,
+        # it stayed 'pending' forever — a card spinning on a render that had
+        # already been generated and paid for. The error output routes to
+        # Mark Failed instead, so a storage hiccup surfaces as a failure the
+        # human can retry rather than an infinite spinner.
+        "onError": "continueErrorOutput",
         "id": nid(),
         "name": name,
         "type": "n8n-nodes-base.httpRequest",
@@ -7113,6 +7120,10 @@ def _http_creative_save(source_node: str, media_field: str, name: str, x: int, y
             "jsonBody": body_expr,
             "options": {},
         },
+        # Same reasoning as the upload node: this is the ONLY node that turns
+        # the row 'ready', so if it throws the row is left pending with the
+        # asset sitting in the bucket, unreachable.
+        "onError": "continueErrorOutput",
         "id": nid(),
         "name": name,
         "type": "n8n-nodes-base.httpRequest",
@@ -7121,18 +7132,31 @@ def _http_creative_save(source_node: str, media_field: str, name: str, x: int, y
     }
 
 
-def _http_creative_fail(name: str, x: int, y: int) -> dict:
+def _http_creative_fail(source_node: str, name: str, x: int, y: int) -> dict:
     """PATCH the version row to 'failed' with the real provider message.
 
     Without this branch a failed generation leaves the card spinning forever
     with nothing to explain it — which is exactly how an exhausted fal balance
     would present to the marketing team.
     """
+    # Three different branches feed this node now — the Code node's own
+    # "didn't work" output, plus the error outputs of the upload and save
+    # nodes — and only the first of those carries version_id in $json. The
+    # paired-item lookup on the Code node is what makes the other two work:
+    # it resolves to the row THIS item belongs to, which matters because
+    # Generate runs several candidates through the same nodes at once.
+    ref = f"$('{source_node}').item.json"
+    err_expr = (
+        "={{ JSON.stringify({ status: 'failed', error: String("
+        "$json.error && $json.error.message ? $json.error.message : "
+        f"($json.error || {ref}.error || 'Generation failed.')"
+        ").slice(0, 500) }) }}"
+    )
     return {
         "parameters": {
             "method": "PATCH",
             "url": "={{ String($env.SUPABASE_URL).replace(/\\/+$/, '') }}"
-                   "/rest/v1/creative_versions?id=eq.{{ $json.version_id }}",
+                   f"/rest/v1/creative_versions?id=eq.{{{{ $json.version_id || {ref}.version_id }}}}",
             "sendHeaders": True,
             "headerParameters": {
                 "parameters": [
@@ -7144,7 +7168,7 @@ def _http_creative_fail(name: str, x: int, y: int) -> dict:
             },
             "sendBody": True,
             "specifyBody": "json",
-            "jsonBody": "={{ JSON.stringify({ status: 'failed', error: String($json.error || 'Generation failed.') }) }}",
+            "jsonBody": err_expr,
             "options": {},
         },
         "id": nid(),
@@ -7230,6 +7254,13 @@ def _build_creative_workflow(name, webhook_path, sticky, js, code_node_name,
 
     Webhook -> Respond: Accepted -> <Code> -> OK? -> (yes) Upload -> Save
                                                   -> (no)  Mark Failed
+
+    Upload and Save both also route their ERROR output to Mark Failed. The
+    row is only ever written by those two nodes, so before that a throw in
+    either one ended the execution with the row still 'pending' — the card
+    span forever on an image fal had already produced and charged for, and
+    nothing anywhere said why. Every path out of the Code node now ends in a
+    row that is either ready or failed.
     """
     nodes = [
         _sticky(sticky, height=360, width=460, x=0, y=-180),
@@ -7239,8 +7270,9 @@ def _build_creative_workflow(name, webhook_path, sticky, js, code_node_name,
         _if_bool_equals("Generated OK?", "creative-gate-1", "={{ $json._ok === true }}", x=660, y=300),
         _http_creative_upload(code_node_name, mime, "Upload to Supabase Storage", x=880, y=200),
         _http_creative_save(code_node_name, media_field, "Supabase: Save Version", x=1100, y=200),
-        _http_creative_fail("Supabase: Mark Failed", x=880, y=400),
+        _http_creative_fail(code_node_name, "Supabase: Mark Failed", x=880, y=400),
     ]
+    fail = [{"node": "Supabase: Mark Failed", "type": "main", "index": 0}]
     connections = {
         "Webhook": {"main": [[{"node": "Respond: Accepted", "type": "main", "index": 0}]]},
         "Respond: Accepted": {"main": [[{"node": code_node_name, "type": "main", "index": 0}]]},
@@ -7248,10 +7280,15 @@ def _build_creative_workflow(name, webhook_path, sticky, js, code_node_name,
         "Generated OK?": {
             "main": [
                 [{"node": "Upload to Supabase Storage", "type": "main", "index": 0}],
-                [{"node": "Supabase: Mark Failed", "type": "main", "index": 0}],
+                fail,
             ]
         },
-        "Upload to Supabase Storage": {"main": [[{"node": "Supabase: Save Version", "type": "main", "index": 0}]]},
+        # Second output on each of these is the error branch that
+        # onError=continueErrorOutput adds.
+        "Upload to Supabase Storage": {
+            "main": [[{"node": "Supabase: Save Version", "type": "main", "index": 0}], fail]
+        },
+        "Supabase: Save Version": {"main": [[], fail]},
     }
     return {
         "name": name,

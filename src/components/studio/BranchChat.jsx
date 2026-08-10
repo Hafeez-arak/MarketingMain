@@ -114,6 +114,22 @@ export function BranchChat({
   const label = branch.variantIndex ? `${baseLabel} ${branch.variantIndex}` : baseLabel
   const canAct = !!base && base.status === 'ready'
   const stageIsVideo = stage?.media_type === 'video' && !!stage?.video_url
+  // Shown faintly behind a pending render so the lane isn't a blank rectangle
+  // while the next version is on its way.
+  const prevReady = newest
+
+  // Ticks only while this lane has something in flight. A render that dies
+  // between fal and the database leaves the row 'pending' with nobody left to
+  // change it, and without a clock the card has no way to ever notice.
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    if (!branch.pending) return
+    const t = setInterval(() => setNow(Date.now()), 15000)
+    return () => clearInterval(t)
+  }, [branch.pending])
+  const STALE_MS = 5 * 60 * 1000
+  const stale = stage?.status === 'pending' && !!stage.created_at &&
+    now - new Date(stage.created_at).getTime() > STALE_MS
 
   // Claude/ChatGPT-style grow-with-content. Keyed on `text` (not just
   // onChange) so it also shrinks back down when Send clears the composer.
@@ -192,6 +208,37 @@ export function BranchChat({
             <Spinner />
             <p className="text-[11px]">Working…</p>
           </div>
+        ) : stage.status === 'pending' ? (
+          // A pending row has no image_url yet. This used to fall through to
+          // the <img> below and render src="" — a blank grey frame with no
+          // spinner, which read as "broken" rather than "not finished". The
+          // version it came from stays on screen underneath so there's still
+          // something to look at while the new one renders.
+          <>
+            {prevReady?.image_url && (
+              <img src={prevReady.image_url} alt="" className="max-h-full max-w-full object-contain opacity-25" />
+            )}
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-text-secondary">
+              <Spinner />
+              <p className="text-[11px] font-medium">{stale ? 'Still working…' : 'Working on it…'}</p>
+              {/* Renders take a minute or two; past about five, something
+                  upstream has almost certainly died without saying so, and
+                  the honest thing is to offer a way out rather than spin. */}
+              {stale && (
+                <div className="flex flex-col items-center gap-1.5 px-6 text-center">
+                  <p className="text-[10px] text-text-tertiary leading-snug max-w-[15rem]">
+                    This is taking much longer than usual. It may have failed without reporting back.
+                  </p>
+                  {onRetry && (
+                    <button type="button" onClick={() => onRetry(stage)} disabled={pendingKey === `retry:${stage.id}`}
+                      className="border border-border bg-white px-2.5 py-1 text-[10px] font-semibold text-text hover:border-amber-400 hover:bg-amber-50 disabled:opacity-50">
+                      {pendingKey === `retry:${stage.id}` ? 'Retrying…' : '↻ Try this step again'}
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          </>
         ) : stage.status === 'failed' ? (
           <div className="flex flex-col items-center gap-1.5 px-6 text-center">
             <p className="text-[11px] font-semibold text-red-700">{labelFor(stage) || 'That step'} failed</p>
