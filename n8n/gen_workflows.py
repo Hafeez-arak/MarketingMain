@@ -6427,7 +6427,7 @@ def build_linkedin_manual_generation() -> dict:
 # rather than leaving a spinner running forever.
 #
 # Latest model generation, confirmed available on our FAL_KEY:
-#   gpt-image-2 / gpt-image-2/edit-image   ("ChatGPT" to the marketing team)   — 2026-08-09
+#   gpt-image-2 / gpt-image-2/edit   ("ChatGPT" to the marketing team)          — 2026-08-09
 #   nano-banana-2 / nano-banana-2/edit     ("Gemini")                          — 2026-08-09
 #   bytedance/seedance-2.0/{image,text}-to-video                              — 2026-08-10
 # ============================================================
@@ -6624,7 +6624,12 @@ async function genGemini(){
 
 async function genOpenAI(){
   const useEdit = !!referenceUrl;
-  const endpoint = useEdit ? 'fal-ai/gpt-image-2/edit-image' : 'fal-ai/gpt-image-2';
+  // The real edit endpoint is /edit, not /edit-image -- confirmed 2026-08-10 by
+  // reading the actual field-validation error off fal's queue API (missing
+  // 'prompt'/'image_urls' vs a routing 404), after /edit-image silently 404'd
+  // on every call that reached it (this path only fires when a reference image
+  // is attached at generate time).
+  const endpoint = useEdit ? 'fal-ai/gpt-image-2/edit' : 'fal-ai/gpt-image-2';
   // Exact dimensions where a bucket would distort the shape (4:5), the named
   // bucket everywhere else — the buckets are exact for those ratios and let
   // the model pick its own best resolution.
@@ -6737,7 +6742,7 @@ async function run(){
   const images = [sourceUrl].concat(refUrls);
   let tempUrl;
   if (provider === 'openai') {
-    const r = await req({ method:'POST', url:'https://fal.run/fal-ai/gpt-image-2/edit-image',
+    const r = await req({ method:'POST', url:'https://fal.run/fal-ai/gpt-image-2/edit',
       headers:{ Authorization:'Key ' + FAL, 'Content-Type':'application/json' },
       body:{ prompt: editPrompt(), image_urls: images, quality:'high', output_format:'png', num_images:1 }, json:true });
     tempUrl = (r.images && r.images[0] && r.images[0].url) || (r.image && r.image.url);
