@@ -28,7 +28,7 @@ export function PromptBubble({ text, note, referenceUrl }) {
   )
 }
 
-export function VersionCard({ version, isBase, onClick, onDragStart, showLabel = true }) {
+export function VersionCard({ version, isBase, onClick, onDragStart, onRetry, retrying, showLabel = true }) {
   const label = labelFor(version)
 
   if (version.status === 'pending') {
@@ -50,6 +50,15 @@ export function VersionCard({ version, isBase, onClick, onDragStart, showLabel =
         {/* The real provider message, not a generic apology — an exhausted
             balance and a rejected prompt need very different responses. */}
         <p className="text-[10px] text-red-600 leading-snug line-clamp-4">{version.error || 'No reason given.'}</p>
+        {/* Most failures here are transient (rate limit, a momentary provider
+            error) and the old answer was to abandon the session and retype the
+            whole brief. Re-runs this one candidate against the same prompt. */}
+        {onRetry && (
+          <button type="button" onClick={() => onRetry(version)} disabled={retrying}
+            className="mt-1 inline-flex items-center gap-1.5 rounded-lg border border-red-300 bg-white px-2.5 py-1 text-[10px] font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50">
+            {retrying ? <><Spinner size="sm" /> Retrying…</> : '↻ Try again'}
+          </button>
+        )}
       </div>
     )
   }

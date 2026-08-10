@@ -46,15 +46,20 @@ const IMAGE_SLOTS = [
   { id: 'reference', label: 'Reference image', hint: 'Take inspiration from it', kind: 'image', notes: true,
     notePlaceholder: 'e.g. same style, but a hotel lobby' },
 ]
-// Seedance 2.0 genuinely takes a start frame and an end frame (image_url /
+// Style reference is the ➕'s only slot on the video tab too — start/end
+// frame get their own small boxes beside it instead (VIDEO_FRAME_SLOTS
+// below), since they're core to what a video render actually is, not an
+// optional extra to bury in a dropdown.
+const VIDEO_MENU_SLOTS = [
+  { id: 'reference', label: 'Style reference', hint: 'An image or clip to echo', kind: 'all', notes: true,
+    notePlaceholder: 'e.g. match this pacing and grade' },
+]
+// Seedance genuinely takes a start frame and an end frame (image_url /
 // end_image_url) — the end frame is what makes clip-to-clip chaining look
-// deliberate rather than cut. The third slot is a look reference, which the
-// model has NO input for; see VIDEO_BACKEND_PENDING below.
-const VIDEO_SLOTS = [
+// deliberate rather than cut.
+const VIDEO_FRAME_SLOTS = [
   { id: 'startFrame', label: 'Start frame', hint: 'The clip opens on this image', kind: 'image', notes: false },
   { id: 'endFrame',   label: 'End frame',   hint: 'The clip lands on this image', kind: 'image', notes: false },
-  { id: 'reference',  label: 'Style reference', hint: 'An image or clip to echo', kind: 'all', notes: true,
-    notePlaceholder: 'e.g. match this pacing and grade' },
 ]
 
 // ⚠️ Frontend only, by decision (2026-08-10). These three attachments are
@@ -66,8 +71,11 @@ const VIDEO_SLOTS = [
 // Wire these up when the video backend pass happens.
 const VIDEO_BACKEND_PENDING = true
 
-// The ➕ itself. A menu only when there's a real choice to make — on the
-// image tab there's one slot, so a menu would be a click that asks nothing.
+// The ➕ itself. Icon only — the label crowded a row that already has
+// Enhance and the auto-enhance checkbox on it, and the icon alone reads
+// fine once it's not the only unlabelled thing in view. A menu only when
+// there's a real choice to make; both tabs currently have one slot
+// (style reference), so this always attaches directly rather than opening.
 function AttachMenu({ slots, taken, onChoose }) {
   const [open, setOpen] = useState(false)
   const free = slots.filter(s => !taken[s.id])
@@ -80,29 +88,63 @@ function AttachMenu({ slots, taken, onChoose }) {
   }
 
   return (
-    <div className="relative">
-      <button type="button" onClick={click} disabled={disabled}
-        title={disabled ? 'Everything that can be attached already is' : 'Attach a reference'}
-        className="inline-flex items-center gap-1 rounded-lg border border-border px-2.5 py-1 text-[11px] font-medium hover:border-amber-400 hover:bg-amber-50 disabled:opacity-40 disabled:hover:border-border disabled:hover:bg-transparent">
-        <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
-        Attach
-      </button>
-      {open && (
-        <>
-          {/* Click-away sits behind the menu, not over it. */}
-          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div className="absolute z-20 mt-1 w-56 rounded-xl border border-border bg-white shadow-dropdown p-1">
-            {free.map(s => (
-              <button key={s.id} type="button"
-                onClick={() => { setOpen(false); onChoose(s) }}
-                className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-surface-muted transition-colors">
-                <p className="text-[11px] font-semibold text-text">{s.label}</p>
-                <p className="text-[10px] text-text-tertiary leading-snug">{s.hint}</p>
-              </button>
-            ))}
-          </div>
-        </>
-      )}
+    <div className="flex flex-col items-center gap-0.5">
+      <div className="relative">
+        <button type="button" onClick={click} disabled={disabled}
+          title={disabled ? 'Everything that can be attached already is' : 'Attach a style reference'}
+          className="inline-flex items-center justify-center w-7 h-7 rounded-lg border border-border hover:border-amber-400 hover:bg-amber-50 disabled:opacity-40 disabled:hover:border-border disabled:hover:bg-transparent">
+          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+        </button>
+        {open && (
+          <>
+            {/* Click-away sits behind the menu, not over it. */}
+            <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+            <div className="absolute z-20 mt-1 w-56 rounded-xl border border-border bg-white shadow-dropdown p-1">
+              {free.map(s => (
+                <button key={s.id} type="button"
+                  onClick={() => { setOpen(false); onChoose(s) }}
+                  className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-surface-muted transition-colors">
+                  <p className="text-[11px] font-semibold text-text">{s.label}</p>
+                  <p className="text-[10px] text-text-tertiary leading-snug">{s.hint}</p>
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+      <span className="text-[9px] text-text-tertiary leading-none whitespace-nowrap">Attach ref:</span>
+    </div>
+  )
+}
+
+// Small, separate from the ➕ on purpose (see VIDEO_MENU_SLOTS above) — a
+// start or end frame is a fixed input on the video tab, not one option among
+// several, so it gets its own always-visible square rather than living a
+// click deep in a menu. Empty shows a plus; filled shows the thumbnail with
+// its own remove button.
+function FrameSlot({ label, hint, value, onPick, onRemove }) {
+  const isVideo = /\.(mp4|mov|webm)(\?|$)/i.test(value?.url || '')
+  return (
+    <div className="flex flex-col items-center gap-0.5">
+      <div className="relative">
+        <button type="button" onClick={onPick} title={hint}
+          className={`w-7 h-7 rounded-lg overflow-hidden flex items-center justify-center transition-colors ${
+            value ? 'border border-border hover:border-amber-400 hover:bg-amber-50' : 'border border-dashed border-border hover:border-amber-400 hover:bg-amber-50'
+          }`}>
+          {value ? (
+            isVideo
+              ? <video src={value.url} className="w-full h-full object-cover" muted />
+              : <img src={value.url} alt="" className="w-full h-full object-cover" />
+          ) : (
+            <svg className="w-3 h-3 text-text-tertiary" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+          )}
+        </button>
+        {value && (
+          <button type="button" onClick={onRemove} title="Remove"
+            className="absolute -top-1.5 -right-1.5 w-3.5 h-3.5 rounded-full bg-white border border-border text-text-tertiary hover:text-red-500 text-[9px] leading-none flex items-center justify-center">×</button>
+        )}
+      </div>
+      <span className="text-[9px] text-text-tertiary leading-none whitespace-nowrap">{label}</span>
     </div>
   )
 }
@@ -133,7 +175,11 @@ export function CreativeStudio() {
   const [autoEnhance, setAutoEnhance] = useState(false)
   const [enhancing, setEnhancing] = useState('')            // '' | 'prompt' | 'motion'
   const [aspect, setAspect] = useState('4:5')
-  // Keyed by slot id (see IMAGE_SLOTS / VIDEO_SLOTS): { url, name, note }.
+  // Images per model per round. Default 1 so a round costs exactly what it did
+  // before unless more is deliberately asked for — 4 means EIGHT images (four
+  // per model), which the picker says out loud rather than leaving to arithmetic.
+  const [variants, setVariants] = useState(1)
+  // Keyed by slot id (see IMAGE_SLOTS / VIDEO_MENU_SLOTS / VIDEO_FRAME_SLOTS): { url, name, note }.
   const [attachments, setAttachments] = useState({})
   const [pickerSlot, setPickerSlot] = useState(null)
 
@@ -219,12 +265,17 @@ export function CreativeStudio() {
     setSession(null); setVersions([]); setPrompt(''); setAttachments({})
     setPromptRaw(''); setPromptSource('raw')
     setMotionNote(''); setMotionPresetId(''); setMotionStrength('medium'); setLookId('none')
+    // Back to the cheap default — an 8-image round should be asked for each
+    // time, not inherited from whatever the last session happened to use.
+    setVariants(1)
     setModelId('seedance-2'); setDuration('5'); setResolution('720p'); setAudio(false)
     setComposers({}); setFocusedBranch(null); setError('')
   }
 
   // ── Attachments ──
-  const activeSlots = intent === 'video' ? VIDEO_SLOTS : IMAGE_SLOTS
+  // Only the ➕ menu's own slots — start/end frame render their own compact
+  // boxes and don't need a spot in the bigger note-bearing chip list below.
+  const activeSlots = intent === 'video' ? VIDEO_MENU_SLOTS : IMAGE_SLOTS
 
   function setAttachment(slotId, value) {
     setAttachments(prev => {
@@ -342,18 +393,22 @@ export function CreativeStudio() {
     // a second model.
     const rows = videoOnly
       // provider stays the generic 'seedance' DB tag (the check constraint
-      // only allows a fixed list) — the actual model choice isn't persisted
-      // yet, only sent in the webhook payload below. Give it its own column
-      // when the video backend pass happens (see VIDEO_BACKEND_PENDING).
+      // only allows a fixed list) — the actual model choice lives in its own
+      // `model` column (20260810_creative_studio_video_model.sql) instead.
       ? [{ round: 0, kind: 'video', provider: 'seedance', mediaType: 'video',
            userPrompt: videoPrompt, originalPrompt, promptSource: source,
-           aspectRatio: aspect, duration, resolution, generateAudio: audio }]
-      : ['openai', 'gemini'].map(provider => ({
-          round: 0, kind: 'generate', provider, mediaType: 'image',
-          userPrompt: finalPrompt, originalPrompt, promptSource: source,
-          aspectRatio: aspect,
-          referenceUrl: refUrl, referenceNotes: refNotes,
-        }))
+           aspectRatio: aspect, model: modelId, duration, resolution, generateAudio: audio }]
+      // N rows per provider rather than asking fal for num_images: N. Same
+      // image count and same cost (fal bills per image), but each variant gets
+      // its own row and lands the moment it's ready — the workflow already
+      // renders exactly one image per target, so this needed no change there.
+      : ['openai', 'gemini'].flatMap(provider =>
+          Array.from({ length: variants }, () => ({
+            round: 0, kind: 'generate', provider, mediaType: 'image',
+            userPrompt: finalPrompt, originalPrompt, promptSource: source,
+            aspectRatio: aspect,
+            referenceUrl: refUrl, referenceNotes: refNotes,
+          })))
 
     const ins = await insertPendingVersions(activeWorkspaceId, accessToken, s.id, rows)
     if (ins.error) { setBusy(''); setError(ins.error); return }
@@ -450,11 +505,20 @@ export function CreativeStudio() {
     const history = chain.filter(v => v.kind === 'edit' && v.user_prompt).map(v => v.user_prompt)
     const originalPrompt = chain[0]?.user_prompt || ''
 
+    // Edit with the model that MADE this lane, not always Gemini. This was
+    // hardcoded to 'gemini' and never sent in the payload, so the workflow's
+    // provider switch always fell through — editing the ChatGPT candidate
+    // silently handed it to Nano Banana and the look changed mid-conversation,
+    // which also quietly invalidated the side-by-side the screen exists for.
+    // Editing a dropped-in image is the one exception: it came from the other
+    // lane, so the model that made THAT image is the right one for it.
+    const editProvider = (editingDropped && attach?.provider) || branch.provider || 'gemini'
+
     setFocusedBranch(branch.rootId)
     const created = await runStep(branch, {
       label: 'edit',
       row: {
-        round: nextRound, kind: 'edit', provider: 'gemini', mediaType: 'image',
+        round: nextRound, kind: 'edit', provider: editProvider, mediaType: 'image',
         parentVersionId: base.id, userPrompt: instruction, aspectRatio: session.aspect_ratio,
         referenceUrl: attach?.url || '',
         referenceNotes: attach
@@ -465,6 +529,7 @@ export function CreativeStudio() {
         source_image_url: sourceUrl,
         reference_image_urls: attach && !editingDropped ? [attach.url] : [],
         instruction,
+        provider: editProvider,
         original_prompt: originalPrompt,
         history,
       },
@@ -489,7 +554,7 @@ export function CreativeStudio() {
       row: {
         round: nextRound, kind: 'video', provider: 'seedance', mediaType: 'video',
         parentVersionId: target.id, userPrompt: motionText.trim(), aspectRatio: session.aspect_ratio,
-        duration: dur, resolution, generateAudio,
+        model: animateModel, duration: dur, resolution, generateAudio,
       },
       payload: {
         image_url: target.image_url, prompt: motionText.trim(), model: animateModel,
@@ -511,6 +576,7 @@ export function CreativeStudio() {
     setVideoTarget(still)
     setVideoPrefill({
       prompt: video.user_prompt || '',
+      model: video.model || 'seedance-2',
       duration: video.duration || '5',
       resolution: video.resolution || '720p',
       generateAudio: !!video.generate_audio,
@@ -539,6 +605,71 @@ export function CreativeStudio() {
     setEditingOverlay(null)
     setVersions(prev => [...prev, ...ins.rows])
     return {}
+  }
+
+  // Re-run one failed candidate against the same brief. Most failures at this
+  // point are transient — a rate limit, a momentary provider error — and the
+  // only previous way out was abandoning the session and retyping everything.
+  //
+  // A new row rather than reviving the old one: the failure is a real event in
+  // the thread and overwriting it would hide that this took two attempts. The
+  // dead row is removed from view once the replacement exists, so the lane
+  // doesn't accumulate red cards.
+  async function handleRetry(version) {
+    if (!version || !session) return
+    setBusy(`retry:${version.id}`); setError('')
+
+    const isRound0 = !version.parent_version_id
+    const row = {
+      round: version.round, kind: version.kind, provider: version.provider,
+      mediaType: version.media_type, parentVersionId: version.parent_version_id || null,
+      userPrompt: version.user_prompt, originalPrompt: version.original_prompt || '',
+      promptSource: version.prompt_source || 'raw', aspectRatio: version.aspect_ratio,
+      referenceUrl: version.reference_url || '', referenceNotes: version.reference_notes || '',
+      duration: version.duration || '', resolution: version.resolution || '',
+      generateAudio: !!version.generate_audio, model: version.model || '',
+    }
+    const ins = await insertPendingVersions(activeWorkspaceId, accessToken, session.id, [row])
+    if (ins.error) { setBusy(''); setError(ins.error); return }
+    const fresh = ins.rows[0]
+
+    let fired
+    if (version.kind === 'video') {
+      fired = await requestVideo(webhooks.creativeVideo, {
+        session_id: session.id, version_id: fresh.id, prompt: version.user_prompt,
+        image_url: version.parent_version_id
+          ? versions.find(v => v.id === version.parent_version_id)?.image_url || ''
+          : '',
+        model: version.model || 'seedance-2', duration: version.duration || '5',
+        aspect_ratio: version.aspect_ratio, resolution: version.resolution || '720p',
+        generate_audio: !!version.generate_audio,
+      })
+    } else if (isRound0) {
+      fired = await requestGenerate(webhooks.creativeGenerate, {
+        session_id: session.id, prompt: version.user_prompt, aspect_ratio: version.aspect_ratio,
+        instructions: brandInstructions,
+        reference_url: version.reference_url || '', reference_notes: version.reference_notes || '',
+        targets: [{ version_id: fresh.id, provider: version.provider }],
+      })
+    } else {
+      const parent = versions.find(v => v.id === version.parent_version_id)
+      fired = await requestEdit(webhooks.creativeEdit, {
+        session_id: session.id, version_id: fresh.id,
+        source_image_url: parent?.image_url || '',
+        reference_image_urls: version.reference_url ? [version.reference_url] : [],
+        instruction: version.user_prompt, provider: version.provider,
+      })
+    }
+
+    setBusy('')
+    // Swap the failed card for the fresh pending one in a single update, so
+    // the lane never briefly shows both.
+    setVersions(prev => [...prev.filter(v => v.id !== version.id), fresh])
+    if (fired.error) {
+      setError(fired.error)
+      await updateVersion(accessToken, fresh.id, { status: 'failed', error: fired.error })
+      refresh(session.id)
+    }
   }
 
   // Save and Download are deliberately both here and do different things:
@@ -590,6 +721,8 @@ export function CreativeStudio() {
     onOpenEditor: v => setEditingOverlay(v),
     onFinalize: v => handleFinalize(branch, v),
     onDownload: handleDownload,
+    onRetry: handleRetry,
+    pendingKey: busy,
   })
 
   return (
@@ -676,10 +809,17 @@ export function CreativeStudio() {
                         form, past the settings, which read as a separate step
                         rather than part of what you're asking for. */}
                     <AttachMenu
-                      slots={intent === 'video' ? VIDEO_SLOTS : IMAGE_SLOTS}
+                      slots={intent === 'video' ? VIDEO_MENU_SLOTS : IMAGE_SLOTS}
                       taken={attachments}
                       onChoose={openPickerFor}
                     />
+                    {intent === 'video' && VIDEO_FRAME_SLOTS.map(s => (
+                      <FrameSlot key={s.id} label={s.label} hint={s.hint}
+                        value={attachments[s.id]}
+                        onPick={() => openPickerFor(s)}
+                        onRemove={() => setAttachment(s.id, null)}
+                      />
+                    ))}
                     <button type="button" onClick={enhancePrompt}
                       disabled={!prompt.trim() || !!enhancing || busy === 'generate'}
                       title={promptSource === 'raw'
@@ -727,9 +867,19 @@ export function CreativeStudio() {
                 )}
               </div>
 
-              <Select label="Shape" value={aspect} onChange={e => setAspect(e.target.value)}>
-                {RATIOS.map(r => <option key={r} value={r}>{aspectLabel(r)} ({r})</option>)}
-              </Select>
+              <div className={intent === 'video' ? '' : 'grid grid-cols-2 gap-3'}>
+                <Select label="Shape" value={aspect} onChange={e => setAspect(e.target.value)}>
+                  {RATIOS.map(r => <option key={r} value={r}>{aspectLabel(r)} ({r})</option>)}
+                </Select>
+                {intent !== 'video' && (
+                  <Select label="Options per model" value={String(variants)}
+                    onChange={e => setVariants(Number(e.target.value))}>
+                    <option value="1">1 each — 2 images</option>
+                    <option value="2">2 each — 4 images</option>
+                    <option value="4">4 each — 8 images</option>
+                  </Select>
+                )}
+              </div>
 
               {/* Text-to-video gets the same controls as the Animate modal —
                   they were only ever in the modal, which meant a video-only
@@ -822,6 +972,7 @@ export function CreativeStudio() {
           onEnhance={enhanceMotionPrompt}
           enhancing={enhancing === 'motion'}
           initialPrompt={videoPrefill?.prompt}
+          initialModel={videoPrefill?.model}
           initialDuration={videoPrefill?.duration}
           initialResolution={videoPrefill?.resolution}
           initialAudio={videoPrefill?.generateAudio}

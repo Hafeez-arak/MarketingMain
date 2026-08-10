@@ -9,8 +9,9 @@ const KIND_LABEL = { edit: 'Edit', overlay: 'Text', canva: 'Canva', video: 'Vide
 export function labelFor(version) {
   if (!version) return ''
   // A generated candidate is named by the model that made it — that IS the
-  // comparison. Everything after is named by what it did, since by then both
-  // lanes are being edited by the same engine.
+  // comparison. Later steps are named by what they did rather than by model:
+  // each lane is now edited by its OWN model, so repeating the provider on
+  // every edit card would just restate the lane header on every row.
   if (version.kind === 'generate') return PROVIDER_LABEL[version.provider] || ''
   return KIND_LABEL[version.kind] || PROVIDER_LABEL[version.provider] || ''
 }

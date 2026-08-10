@@ -6516,13 +6516,24 @@ function looksLikeImage(buf){
       || (head.startsWith('RIFF') && head.indexOf('WEBP') !== -1);
 }
 
-// gpt-image-2 takes named size buckets, not free ratios. 9:16 maps exactly
-// (portrait_16_9); 4:5 has no exact bucket, so it generates at 3:4 and the
-// prompt asks for a centre-safe composition that survives the crop to 4:5.
+// gpt-image-2's named buckets have no 4:5, which used to mean the GPT
+// candidate came back 3:4 while the Gemini one came back a true 4:5 — two
+// different shapes in a side-by-side that exists to compare models, and the
+// GPT one not post-ready. The prompt even claimed it would be "cropped to
+// 4:5" and no crop was ever performed anywhere in the pipeline.
+//
+// The endpoint also accepts explicit dimensions, which removes the problem at
+// the source rather than trimming after the fact: 1024x1280 is exactly 4:5,
+// both edges multiples of 16, and 1.31MP sits inside the documented
+// 655,360–8,294,400 pixel range. Every other ratio has an exact bucket
+// already, so only 4:5 needs this.
 const GPT_SIZE = {
-  '1:1': 'square_hd', '4:5': 'portrait_4_3', '3:4': 'portrait_4_3',
+  '1:1': 'square_hd', '3:4': 'portrait_4_3',
   '9:16': 'portrait_16_9', '16:9': 'landscape_16_9',
   '1.91:1': 'landscape_16_9', '4:3': 'landscape_4_3', '3:2': 'landscape_4_3',
+};
+const GPT_EXACT = {
+  '4:5': { width: 1024, height: 1280 },
 };
 """
 
@@ -6559,10 +6570,9 @@ function buildPrompt(provider){
       : '\n\nUse the supplied reference image as inspiration for style, mood and composition only — do not reproduce it literally.';
   }
   if (provider === 'openai') {
-    // gpt-image-2 has no exact 4:5 bucket, so it generates at 3:4 and is
-    // centre-cropped below — the subject has to survive losing top and bottom.
-    // Nano Banana hits 4:5 natively and needs no such warning.
-    if (aspect === '4:5') p += '\n\nCompose with the subject centred and clear of the top and bottom edges; this image will be cropped to a taller 4:5 frame.';
+    // No centre-safe warning here any more: 4:5 is now requested as explicit
+    // dimensions (GPT_EXACT), so nothing gets cropped and asking the model to
+    // leave dead space top and bottom would just waste the frame.
     // Measured 2026-08-09: gpt-image-2 invented an "ARAK LIGHTING / RIYADH
     // SAUDI ARABIA" wordmark on a wall that nothing in the prompt asked for.
     // nano-banana-2, same prompt, did not — so this is a GPT-only counter
@@ -6588,7 +6598,11 @@ async function genGemini(){
 async function genOpenAI(){
   const useEdit = !!referenceUrl;
   const endpoint = useEdit ? 'fal-ai/gpt-image-2/edit-image' : 'fal-ai/gpt-image-2';
-  const b = { prompt: buildPrompt('openai'), image_size: GPT_SIZE[aspect] || 'square_hd',
+  // Exact dimensions where a bucket would distort the shape (4:5), the named
+  // bucket everywhere else — the buckets are exact for those ratios and let
+  // the model pick its own best resolution.
+  const b = { prompt: buildPrompt('openai'),
+              image_size: GPT_EXACT[aspect] || GPT_SIZE[aspect] || 'square_hd',
               quality: 'high', output_format: 'png', num_images: 1 };
   if (useEdit) b.image_urls = [referenceUrl];
   const r = await req({ method:'POST', url:'https://fal.run/' + endpoint,

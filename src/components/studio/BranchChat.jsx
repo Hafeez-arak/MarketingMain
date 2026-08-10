@@ -19,7 +19,11 @@ export function BranchChat({
   composer,                // { text, baseId, attach }
   focused,                 // this lane is the big one
   split,                   // both lanes visible
-  busy,                    // '' | 'edit' | 'video' | 'finalize'
+  busy,                    // '' | 'edit' | 'video' | 'finalize' — lane-level
+  // The raw busy key, for actions scoped to ONE version rather than the lane
+  // (download, retry). laneBusy() strips these to a bare label and only
+  // matches on the branch root, so a per-version spinner can't read `busy`.
+  pendingKey = '',
   onChange,                // (patch) => void
   onSend,
   onActivate,              // typing in a lane focuses it
@@ -28,6 +32,7 @@ export function BranchChat({
   onOpenEditor,
   onFinalize,
   onDownload,              // downloads the file AND files it in the library if it isn't already
+  onRetry,                 // re-run a failed version against the same prompt
 }) {
   const [dragOver, setDragOver] = useState(false)
   const threadRef = useRef(null)
@@ -42,13 +47,20 @@ export function BranchChat({
   const { text = '', baseId = null, attach = null } = composer || {}
   const base = branch.versions.find(v => v.id === baseId) || branch.latest
   const isOlderBase = !!base && !!branch.latest && base.id !== branch.latest.id
-  const label = PROVIDER_LABEL[branch.provider] || labelFor(branch.root) || 'Option'
+  const baseLabel = PROVIDER_LABEL[branch.provider] || labelFor(branch.root) || 'Option'
+  // buildBranches numbers lanes only when one model produced several
+  // candidates this round, so a plain 1-vs-1 round stays "ChatGPT", not "ChatGPT 1".
+  const label = branch.variantIndex ? `${baseLabel} ${branch.variantIndex}` : baseLabel
   const canAct = !!base && base.status === 'ready'
 
   function handleDragStart(e, version) {
     const payload = JSON.stringify({
       versionId: version.id, url: version.image_url,
       branchId: branch.rootId, label: labelFor(version) || label,
+      // Carried so that choosing "edit this one instead" on a dropped image
+      // edits it with the model that actually made it, rather than this
+      // lane's model.
+      provider: version.provider || branch.provider || '',
     })
     e.dataTransfer.setData(DRAG_MIME, payload)
     e.dataTransfer.setData('text/plain', version.image_url)
@@ -107,6 +119,8 @@ export function BranchChat({
               showLabel={i === 0 || v.kind !== 'edit'}
               onClick={v.status === 'ready' ? () => onChange({ baseId: v.id }) : undefined}
               onDragStart={handleDragStart}
+              onRetry={onRetry}
+              retrying={pendingKey === `retry:${v.id}`}
             />
             {/* Every render is keepable, not just the current one. A motion
                 that didn't work on this still often works on the next, and a
@@ -114,10 +128,10 @@ export function BranchChat({
                 to get a copy of it. */}
             {v.status === 'ready' && (v.video_url || v.image_url) && (
               <div className="flex items-center gap-2 mt-1 px-0.5">
-                <button onClick={() => onDownload(v)} disabled={busy === `download:${v.id}`}
+                <button onClick={() => onDownload(v)} disabled={pendingKey === `download:${v.id}`}
                   title={v.is_final ? 'Download (already in the Media Library)' : 'Download — also files it in the Media Library'}
                   className="text-[10px] font-medium text-text-tertiary hover:text-amber-700 disabled:opacity-50">
-                  {busy === `download:${v.id}` ? 'Saving…' : '⬇ Download'}
+                  {pendingKey === `download:${v.id}` ? 'Saving…' : '⬇ Download'}
                 </button>
                 {v.media_type === 'video' && onReRender && (
                   <button onClick={() => onReRender(v)}
@@ -195,10 +209,10 @@ export function BranchChat({
             {busy === 'finalize' ? <Spinner size="sm" /> : base?.is_final ? '✓ Saved' : '✅ Save'}
           </Button>
           {canAct && (
-            <Button size="sm" variant="outline" disabled={busy === `download:${base.id}`}
+            <Button size="sm" variant="outline" disabled={pendingKey === `download:${base.id}`}
               onClick={() => onDownload(base)}
               title={base.is_final ? 'Download (already in the Media Library)' : 'Download — also files it in the Media Library'}>
-              {busy === `download:${base.id}` ? <Spinner size="sm" /> : '⬇ Download'}
+              {pendingKey === `download:${base.id}` ? <Spinner size="sm" /> : '⬇ Download'}
             </Button>
           )}
         </div>
@@ -210,7 +224,8 @@ export function BranchChat({
 // The collapsed form of the lane you aren't in: enough of the image to
 // recognise it, and one click back to seeing both.
 export function BranchPill({ branch, onClick }) {
-  const label = PROVIDER_LABEL[branch.provider] || 'Other option'
+  const base = PROVIDER_LABEL[branch.provider] || 'Other option'
+  const label = branch.variantIndex ? `${base} ${branch.variantIndex}` : base
   const thumb = branch.latest?.image_url
   return (
     <button onClick={onClick}

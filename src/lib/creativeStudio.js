@@ -113,6 +113,7 @@ export async function insertPendingVersions(workspaceId, accessToken, sessionId,
         // Recorded so a video render can be replayed verbatim later — the
         // 🔄 re-render action needs the exact settings that made it, not just
         // the prompt, and nothing else on this row captured them before.
+        model: r.model || 'seedance-2',
         duration: r.duration || '',
         resolution: r.resolution || '',
         generate_audio: !!r.generateAudio,
@@ -194,12 +195,27 @@ export function buildBranches(versions) {
     groups.get(root).push(v)
   }
 
+  // With variants > 1 a round produces several candidates from the SAME model,
+  // so "ChatGPT" alone no longer identifies a lane. Numbered per provider, and
+  // only when there's more than one of that provider — a plain 1-vs-1 round
+  // should not suddenly read "ChatGPT 1".
+  const perProvider = new Map()
+  for (const [, list] of groups) {
+    const p = list[0]?.provider || ''
+    perProvider.set(p, (perProvider.get(p) || 0) + 1)
+  }
+  const seen = new Map()
+
   return [...groups.entries()].map(([rootId, list]) => {
     const ready = list.filter(v => v.status === 'ready')
+    const provider = (byId.get(rootId) || list[0])?.provider || ''
+    const n = (seen.get(provider) || 0) + 1
+    seen.set(provider, n)
     return {
+      variantIndex: perProvider.get(provider) > 1 ? n : 0,
       rootId,
       root: byId.get(rootId) || list[0],
-      provider: (byId.get(rootId) || list[0])?.provider || '',
+      provider,
       versions: list,
       // What a new instruction acts on by default: the most recent thing that
       // actually exists. A still is preferred over a render — you edit the
