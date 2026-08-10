@@ -6421,10 +6421,10 @@ def build_linkedin_manual_generation() -> dict:
 # the model returns. A failure PATCHes status='failed' with the real message
 # rather than leaving a spinner running forever.
 #
-# Latest model generation, confirmed available on our FAL_KEY 2026-08-09:
-#   gpt-image-2 / gpt-image-2/edit-image   ("ChatGPT" to the marketing team)
-#   nano-banana-2 / nano-banana-2/edit     ("Gemini")
-#   bytedance/seedance/v1/pro/{image,text}-to-video
+# Latest model generation, confirmed available on our FAL_KEY:
+#   gpt-image-2 / gpt-image-2/edit-image   ("ChatGPT" to the marketing team)   — 2026-08-09
+#   nano-banana-2 / nano-banana-2/edit     ("Gemini")                          — 2026-08-09
+#   bytedance/seedance-2.0/{image,text}-to-video                              — 2026-08-10
 # ============================================================
 
 # Shared preamble: n8n's httpRequest helper throws its own generic "status
@@ -6702,10 +6702,12 @@ catch (err) {
 
 CREATIVE_VIDEO_JS = _CREATIVE_REQ_JS + r"""
 const BUCKET = 'creative-studio';
-// Seedance today; the endpoints are named here rather than inline so swapping
-// in Higgsfield later is a one-line change in this block.
-const MODEL_I2V = 'fal-ai/bytedance/seedance/v1/pro/image-to-video';
-const MODEL_T2V = 'fal-ai/bytedance/seedance/v1/pro/text-to-video';
+// Seedance 2.0 (was v1 Pro — see 2026-08-10 provider review in
+// CREATIVE-STUDIO.md: native audio, 4-15s vs ~12s, resolution up to 1080p).
+// Named here rather than inline so swapping providers later is a one-line
+// change in this block.
+const MODEL_I2V = 'bytedance/seedance-2.0/image-to-video';
+const MODEL_T2V = 'bytedance/seedance-2.0/text-to-video';
 
 // MP4's magic bytes are an 'ftyp' box at offset 4, not at the start the way
 // image formats are — a truncated download otherwise looks byte-plausible and
@@ -6715,14 +6717,24 @@ function looksLikeVideo(buf){
   return buf.toString('ascii', 4, 8) === 'ftyp';
 }
 
+// Seedance 2.0's aspect_ratio enum is auto/21:9/16:9/4:3/3:4/1:1/9:16 — no
+// 4:5 bucket, same gap gpt-image-2 has on the image side. 3:4 is the nearest
+// (slightly taller); everything else in the Studio's own RATIOS list maps
+// straight through.
+const ASPECT_MAP = { '4:5': '3:4' };
+function mapAspect(a) { return ASPECT_MAP[a] || a || 'auto'; }
+
 const body = ($input.first().json.body) || {};
 const sessionId = body.session_id || '';
 const versionId = body.version_id || '';
 const imageUrl  = body.image_url || '';       // absent => text-to-video
 const prompt    = String(body.prompt || '').trim();
 const duration  = String(body.duration || '5');
-const aspect    = body.aspect_ratio || '16:9';
-const resolution = body.resolution || '1080p';
+const aspect    = mapAspect(body.aspect_ratio);
+const resolution = body.resolution || '720p';
+// Off unless asked: a model inventing ambient sound under a brand asset is a
+// liability, not a bonus (CREATIVE-STUDIO.md, 2026-08-10 provider review).
+const generateAudio = body.generate_audio === true;
 
 async function run(){
   if (!prompt) throw new Error('No direction given for the video.');
@@ -6731,9 +6743,8 @@ async function run(){
   // OR video-only, and the team works both ways — an image is an optional
   // starting point, not a prerequisite.
   const model = imageUrl ? MODEL_I2V : MODEL_T2V;
-  const input = { prompt, duration, resolution };
-  if (imageUrl) { input.image_url = imageUrl; if (aspect) input.aspect_ratio = aspect; }
-  else input.aspect_ratio = aspect;
+  const input = { prompt, duration, resolution, generate_audio: generateAudio, aspect_ratio: aspect };
+  if (imageUrl) input.image_url = imageUrl;
 
   const submit = await req({ method:'POST', url:'https://queue.fal.run/' + model,
     headers:{ Authorization:'Key ' + FAL, 'Content-Type':'application/json' }, body: input, json:true });
@@ -7057,17 +7068,24 @@ where anything a model paints is baked pixels forever.
 
 Needs env: FAL_KEY, SUPABASE_URL, SUPABASE_KEY."""
 
-CREATIVE_VIDEO_STICKY = """## Creative Studio — Video (Seedance)
+CREATIVE_VIDEO_STICKY = """## Creative Studio — Video (Seedance 2.0)
 
 POST `arak-creative-video`
 ```
-{ session_id, version_id, prompt, image_url?, duration?, aspect_ratio?, resolution? }
+{ session_id, version_id, prompt, image_url?, duration?, aspect_ratio?,
+  resolution?, generate_audio? }
 ```
 
 `image_url` present → image-to-video; absent → text-to-video, because a
 session may be image-only, video-only, or image-then-video.
 
-Swap to Higgsfield later by changing MODEL_I2V / MODEL_T2V at the top of
+`resolution`: 720p (draft, $0.30/s) or 1080p (final, $0.68/s) — the panel
+shows both prices, since 1080p is 2.3x the cost. `generate_audio` defaults
+false: free on this model, but an invented soundtrack under a brand asset
+should be asked for, not arrive by surprise. `aspect_ratio` has no exact 4:5
+bucket (nearest is 3:4) — same gap as gpt-image-2 on the image side.
+
+Swap providers later by changing MODEL_I2V / MODEL_T2V at the top of
 the Code node — nothing else in the workflow is Seedance-specific.
 
 Needs env: FAL_KEY, SUPABASE_URL, SUPABASE_KEY."""

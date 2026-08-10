@@ -110,6 +110,12 @@ export async function insertPendingVersions(workspaceId, accessToken, sessionId,
         prompt_source: r.promptSource || 'raw',
         image_url: r.imageUrl || '',
         video_url: r.videoUrl || '',
+        // Recorded so a video render can be replayed verbatim later — the
+        // 🔄 re-render action needs the exact settings that made it, not just
+        // the prompt, and nothing else on this row captured them before.
+        duration: r.duration || '',
+        resolution: r.resolution || '',
+        generate_audio: !!r.generateAudio,
         overlay_state: r.overlayState || null,
         status: r.status || 'pending',
       }))),

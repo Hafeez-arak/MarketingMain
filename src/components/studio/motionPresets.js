@@ -94,3 +94,9 @@ export function estimateCost(resolution, seconds) {
   const rate = VIDEO_RATES[resolution] ?? VIDEO_RATES['720p']
   return rate * (Number(seconds) || 5)
 }
+
+// Seedance 2.0 accepts any integer 4-15s (the old model topped out at 3-12,
+// hence '3' used to be offered and no longer validates). Shared with the
+// round-0 "video only" composer in studio/index.jsx so both duration pickers
+// in the app stay in sync with what the model actually accepts.
+export const DURATIONS = ['4', '5', '6', '8', '10', '12', '15']

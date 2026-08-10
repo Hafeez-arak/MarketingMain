@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Button, Spinner, Textarea, Toggle } from '../ui/index'
-import { MOTION_PRESETS, estimateCost, paceForDuration } from './motionPresets'
+import { MOTION_PRESETS, DURATIONS, estimateCost, paceForDuration } from './motionPresets'
 
 // ─── Animate ───────────────────────────────────────────────────────────────
 // Replaces the placeholder "how should it move?" box. Two things it adds that
@@ -13,21 +13,24 @@ import { MOTION_PRESETS, estimateCost, paceForDuration } from './motionPresets'
 //    otherwise the natural habit (re-render until it's right) quietly runs at
 //    the expensive setting.
 
-// Seedance 2.0 accepts any integer 4–15s. Offering every value is a menu
-// nobody reads; these are the lengths a social clip actually gets cut to.
-const DURATIONS = ['4', '5', '6', '8', '10', '12', '15']
-
 const QUALITIES = [
   { value: '720p',  label: 'Draft',  hint: 'For checking the movement' },
   { value: '1080p', label: 'Final',  hint: 'For the post itself' },
 ]
 
-export function VideoPanel({ target, busy, onSubmit, onCancel }) {
-  const [prompt, setPrompt] = useState('')
+export function VideoPanel({
+  target, busy, onSubmit, onCancel, onEnhance, enhancing,
+  // Set when reopening from the 🔄 "re-render with the current image" action
+  // on a past render — same words, same settings, new base image. A fresh
+  // mount (the Modal that hosts this unmounts on close) means plain useState
+  // initializers are enough; there's no stale-prefill risk across opens.
+  initialPrompt = '', initialDuration = '5', initialResolution = '720p', initialAudio = false,
+}) {
+  const [prompt, setPrompt] = useState(initialPrompt)
   const [presetId, setPresetId] = useState('')
-  const [duration, setDuration] = useState('5')
-  const [resolution, setResolution] = useState('720p')
-  const [audio, setAudio] = useState(false)
+  const [duration, setDuration] = useState(initialDuration)
+  const [resolution, setResolution] = useState(initialResolution)
+  const [audio, setAudio] = useState(initialAudio)
 
   function pickPreset(preset) {
     // Replaces rather than appends: two stacked camera moves is the single
@@ -78,13 +81,26 @@ export function VideoPanel({ target, busy, onSubmit, onCancel }) {
         </div>
       </div>
 
-      <Textarea
-        label="Or describe it yourself"
-        rows={3}
-        value={prompt}
-        onChange={e => { setPrompt(e.target.value); setPresetId('') }}
-        placeholder="e.g. slow push in towards the entrance, the facade lights glow warmer"
-      />
+      <div className="space-y-1.5">
+        <Textarea
+          label="Or describe it yourself"
+          rows={3}
+          value={prompt}
+          onChange={e => { setPrompt(e.target.value); setPresetId('') }}
+          placeholder="e.g. slow push in towards the entrance, the facade lights glow warmer"
+        />
+        {onEnhance && (
+          <button type="button"
+            onClick={async () => {
+              const res = await onEnhance(prompt, duration)
+              if (res) { setPrompt(res); setPresetId('') }
+            }}
+            disabled={!prompt.trim() || !!enhancing || busy}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1 text-[11px] font-medium hover:border-amber-400 hover:bg-amber-50 disabled:opacity-40 disabled:hover:border-border disabled:hover:bg-transparent">
+            {enhancing ? <><Spinner size="sm" /> Enhancing…</> : '✨ Enhance motion'}
+          </button>
+        )}
+      </div>
 
       <div className="grid grid-cols-2 gap-3">
         <div>

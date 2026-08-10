@@ -5,6 +5,8 @@ import { Button, Card, Modal, SectionHead, Select, Spinner, Textarea, Empty } fr
 import { BranchChat, BranchPill } from '../../components/studio/BranchChat'
 import { PromptBubble } from '../../components/studio/VersionCard'
 import { OverlayEditor } from '../../components/studio/OverlayEditor'
+import { VideoPanel } from '../../components/studio/VideoPanel'
+import { DURATIONS } from '../../components/studio/motionPresets'
 import { aspectLabel } from '../../lib/postFormats'
 import { uploadReferenceImage } from '../../lib/referenceImages'
 import { buildInstructionsString } from '../../lib/brandBrain'
@@ -29,8 +31,6 @@ const INTENTS = [
   { value: 'video',       label: 'A video',         hint: 'A clip generated from a description' },
   { value: 'image_video', label: 'Image, then video', hint: 'Design the still, then bring it to life' },
 ]
-const DURATIONS = ['3', '5', '8', '10', '12']
-
 const emptyComposer = { text: '', baseId: null, attach: null }
 
 export function CreativeStudio() {
@@ -69,9 +69,13 @@ export function CreativeStudio() {
   const [composers, setComposers] = useState({})
   const [focusedBranch, setFocusedBranch] = useState(null)
 
-  const [motionPrompt, setMotionPrompt] = useState('')
   const [duration, setDuration] = useState('5')
   const [videoTarget, setVideoTarget] = useState(null)      // the still being animated
+  // Set only by the 🔄 re-render action: the exact prompt/duration/
+  // resolution/audio of a past render, so VideoPanel reopens pre-filled
+  // rather than asking the human to retype a motion note that already
+  // worked. Null for the normal ✨ Animate path — that one starts blank.
+  const [videoPrefill, setVideoPrefill] = useState(null)
   const [editingOverlay, setEditingOverlay] = useState(null)
   const [savingOverlay, setSavingOverlay] = useState(false)
 
@@ -170,19 +174,22 @@ export function CreativeStudio() {
     setPromptSource('raw')
   }
 
-  async function enhanceMotion() {
-    if (!motionPrompt.trim()) return
+  // Passed into VideoPanel as onEnhance — it owns the text box, this just
+  // does the webhook round-trip and hands the result back for the panel to
+  // put in its own state, same contract as enhancePrompt() above.
+  async function enhanceMotionPrompt(text, motionDuration) {
+    if (!text.trim()) return null
     setEnhancing('motion'); setError('')
     const res = await requestEnhance(webhooks.creativeEnhance, {
       mode: 'motion',
-      prompt: motionPrompt.trim(),
-      duration,
+      prompt: text.trim(),
+      duration: motionDuration,
       instructions: brandInstructions,
       source_prompt: videoTarget?.user_prompt || '',
     })
     setEnhancing('')
-    if (res.error) { setError(`Couldn't enhance: ${res.error}`); return }
-    setMotionPrompt(res.prompt)
+    if (res.error) { setError(`Couldn't enhance: ${res.error}`); return null }
+    return res.prompt
   }
 
   // ── Start a session ──
@@ -215,7 +222,7 @@ export function CreativeStudio() {
     const rows = videoOnly
       ? [{ round: 0, kind: 'video', provider: 'seedance', mediaType: 'video',
            userPrompt: finalPrompt, originalPrompt, promptSource: source,
-           aspectRatio: aspect }]
+           aspectRatio: aspect, duration, resolution: '1080p', generateAudio: false }]
       : ['openai', 'gemini'].map(provider => ({
           round: 0, kind: 'generate', provider, mediaType: 'image',
           userPrompt: finalPrompt, originalPrompt, promptSource: source,
@@ -229,7 +236,7 @@ export function CreativeStudio() {
     const fired = videoOnly
       ? await requestVideo(webhooks.creativeVideo, {
           session_id: s.id, version_id: ins.rows[0].id, prompt: finalPrompt,
-          duration, aspect_ratio: aspect, resolution: '1080p',
+          duration, aspect_ratio: aspect, resolution: '1080p', generate_audio: false,
         })
       : await requestGenerate(webhooks.creativeGenerate, {
           session_id: s.id, prompt: finalPrompt, aspect_ratio: aspect,
@@ -326,24 +333,44 @@ export function CreativeStudio() {
     }
   }
 
-  async function handleAnimate() {
+  // Fired by VideoPanel's submit — it owns the prompt/duration/resolution/
+  // audio choice, this just anchors the render to the right branch and lane.
+  async function handleAnimate({ prompt: motionText, duration: dur, resolution, generateAudio }) {
     const target = videoTarget
     const branch = branches.find(b => b.versions.some(v => v.id === target?.id))
-    if (!target || !branch || !motionPrompt.trim()) return
-    setVideoTarget(null)
+    if (!target || !branch || !motionText.trim()) return
+    setVideoTarget(null); setVideoPrefill(null)
     await runStep(branch, {
       label: 'video',
       row: {
         round: nextRound, kind: 'video', provider: 'seedance', mediaType: 'video',
-        parentVersionId: target.id, userPrompt: motionPrompt.trim(), aspectRatio: session.aspect_ratio,
+        parentVersionId: target.id, userPrompt: motionText.trim(), aspectRatio: session.aspect_ratio,
+        duration: dur, resolution, generateAudio,
       },
       payload: {
-        image_url: target.image_url, prompt: motionPrompt.trim(),
-        duration, aspect_ratio: session.aspect_ratio, resolution: '1080p',
+        image_url: target.image_url, prompt: motionText.trim(),
+        duration: dur, aspect_ratio: session.aspect_ratio, resolution, generate_audio: generateAudio,
       },
       send: p => requestVideo(webhooks.creativeVideo, p),
     })
-    setMotionPrompt('')
+  }
+
+  // The 🔄 action on a past render: same words and settings, but against the
+  // lane's CURRENT still — the whole point of never baking text into video
+  // (CREATIVE-STUDIO.md) is that "fix the image, re-animate" stays a loop
+  // rather than a from-scratch redo. Reopens the panel pre-filled rather than
+  // firing silently, since re-render is not free and the human should see
+  // what's about to run before it does.
+  function handleReRender(branch, video) {
+    const still = branch.latest
+    if (!still || still.media_type === 'video') return
+    setVideoTarget(still)
+    setVideoPrefill({
+      prompt: video.user_prompt || '',
+      duration: video.duration || '5',
+      resolution: video.resolution || '720p',
+      generateAudio: !!video.generate_audio,
+    })
   }
 
   // The overlay editor hands back a flattened image AND the text alone on
@@ -393,7 +420,12 @@ export function CreativeStudio() {
     onChange: patch => patchComposer(branch.rootId, patch),
     onSend: () => handleSend(branch),
     onActivate: () => setFocusedBranch(branch.rootId),
-    onAnimate: v => { setVideoTarget(v); setMotionPrompt('') },
+    onAnimate: v => { setVideoTarget(v); setVideoPrefill(null) },
+    // Only offered when the lane actually has a still to re-animate — a
+    // video-only branch (no image round) has nothing for the button to do.
+    onReRender: branch.versions.some(v => v.media_type !== 'video' && v.status === 'ready')
+      ? v => handleReRender(branch, v)
+      : undefined,
     onOpenEditor: v => setEditingOverlay(v),
     onFinalize: v => handleFinalize(branch, v),
   })
@@ -582,28 +614,20 @@ export function CreativeStudio() {
       </div>
 
       {/* ── Animate ── */}
-      <Modal open={!!videoTarget} onClose={() => setVideoTarget(null)} title="Animate this image" width="max-w-lg">
-        <div className="p-6 space-y-4">
-          <Textarea label="How should it move?" rows={3} value={motionPrompt}
-            onChange={e => setMotionPrompt(e.target.value)}
-            placeholder="e.g. slow push in towards the entrance, the facade lights glow warmer" />
-          <button type="button" onClick={enhanceMotion}
-            disabled={!motionPrompt.trim() || !!enhancing}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1 text-[11px] font-medium hover:border-amber-400 hover:bg-amber-50 disabled:opacity-40 disabled:hover:border-border disabled:hover:bg-transparent">
-            {enhancing === 'motion' ? <><Spinner size="sm" /> Enhancing…</> : '✨ Enhance motion'}
-          </button>
-          <Select label="Length" value={duration} onChange={e => setDuration(e.target.value)}>
-            {DURATIONS.map(d => <option key={d} value={d}>{d} seconds</option>)}
-          </Select>
-          <p className="text-[11px] text-text-tertiary leading-snug">
-            Takes a minute or two. The longest a single clip can be is 12 seconds — longer reels
-            have to be cut together from several.
-          </p>
-          <div className="flex justify-end gap-2">
-            <Button variant="secondary" onClick={() => setVideoTarget(null)}>Cancel</Button>
-            <Button onClick={handleAnimate} disabled={!motionPrompt.trim()}>🎬 Create video</Button>
-          </div>
-        </div>
+      <Modal open={!!videoTarget} onClose={() => { setVideoTarget(null); setVideoPrefill(null) }}
+        title="Animate this image" width="max-w-lg">
+        <VideoPanel
+          target={videoTarget}
+          busy={busy.startsWith('video:')}
+          onSubmit={handleAnimate}
+          onCancel={() => { setVideoTarget(null); setVideoPrefill(null) }}
+          onEnhance={enhanceMotionPrompt}
+          enhancing={enhancing === 'motion'}
+          initialPrompt={videoPrefill?.prompt}
+          initialDuration={videoPrefill?.duration}
+          initialResolution={videoPrefill?.resolution}
+          initialAudio={videoPrefill?.generateAudio}
+        />
       </Modal>
 
       {/* ── Text editor ── */}
