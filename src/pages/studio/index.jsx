@@ -4,7 +4,7 @@ import { useAuth } from '../../store/AuthContext'
 import { Button, Card, Modal, SectionHead, Select, Spinner, Textarea, Empty } from '../../components/ui/index'
 import { BranchChat, BranchPill } from '../../components/studio/BranchChat'
 import { PromptBubble } from '../../components/studio/VersionCard'
-import { OverlayEditor } from '../../components/studio/OverlayEditor'
+import { PhotoEditor } from '../../components/studio/PhotoEditor'
 import { VideoPanel } from '../../components/studio/VideoPanel'
 import { MediaPicker, AttachmentChip } from '../../components/studio/MediaPicker'
 import { AudioToggle, CostLine, LookPicker, ModelPicker, MotionPicker, QualityRow } from '../../components/studio/VideoSettings'
@@ -595,7 +595,7 @@ export function CreativeStudio() {
 
     const ins = await insertPendingVersions(activeWorkspaceId, accessToken, session.id, [{
       round: nextRound, kind: 'overlay', provider: 'manual', mediaType: 'image',
-      parentVersionId: editingOverlay.id, userPrompt: 'Added text',
+      parentVersionId: editingOverlay.id, userPrompt: 'Edited image',
       aspectRatio: session.aspect_ratio, imageUrl: base.url,
       overlayState: { ...overlayState, textLayerUrl: layer.url || '' },
       status: 'ready',
@@ -990,11 +990,11 @@ export function CreativeStudio() {
         onPick={picked => setAttachment(pickerSlot.id, picked)}
       />
 
-      {/* ── Text editor ── */}
-      <Modal open={!!editingOverlay} onClose={() => setEditingOverlay(null)} title="Add text" width="max-w-5xl">
-        <div className="p-6">
+      {/* ── Image editor ── */}
+      <Modal open={!!editingOverlay} onClose={() => setEditingOverlay(null)} title="Edit image" width="max-w-[96vw]">
+        <div className="p-0">
           {editingOverlay && (
-            <OverlayEditor
+            <PhotoEditor
               imageUrl={editingOverlay.image_url}
               initialState={editingOverlay.overlay_state}
               saving={savingOverlay}

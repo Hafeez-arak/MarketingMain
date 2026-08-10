@@ -121,6 +121,7 @@ export function BranchChat({
               onDragStart={handleDragStart}
               onRetry={onRetry}
               retrying={pendingKey === `retry:${v.id}`}
+              onEdit={onOpenEditor}
             />
             {/* Every render is keepable, not just the current one. A motion
                 that didn't work on this still often works on the next, and a

@@ -12,9 +12,11 @@
   "dependencies": {
     "@supabase/supabase-js": "^2.108.2",
     "clsx": "^2.1.1",
+    "konva": "^10.3.0",
     "lucide-react": "^1.14.0",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
+    "react-konva": "^19.2.5",
     "react-router-dom": "^7.15.0",
     "recharts": "^3.10.1"
   },

@@ -28,7 +28,7 @@ export function PromptBubble({ text, note, referenceUrl }) {
   )
 }
 
-export function VersionCard({ version, isBase, onClick, onDragStart, onRetry, retrying, showLabel = true }) {
+export function VersionCard({ version, isBase, onClick, onDragStart, onRetry, retrying, showLabel = true, onEdit }) {
   const label = labelFor(version)
 
   if (version.status === 'pending') {
@@ -94,6 +94,18 @@ export function VersionCard({ version, isBase, onClick, onDragStart, onRetry, re
         <span className="absolute top-2 right-2 px-2 py-0.5 rounded-lg bg-amber-500 text-white text-[10px] font-semibold">
           Editing this
         </span>
+      )}
+      {/* A corner, not a full overlay — the rest of the card still selects
+          this as the base on click, on hover exactly as before. Works on
+          every ready still, first pass or edited/re-rendered alike; only
+          excluded for video, which has its own Animate/re-render actions
+          instead of this image editor. */}
+      {onEdit && !isVideo && version.status === 'ready' && version.image_url && (
+        <button type="button" onClick={e => { e.stopPropagation(); onEdit(version) }}
+          title="Open in editor"
+          className="absolute bottom-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity px-2.5 py-1 rounded-lg bg-white/95 text-text text-[10px] font-semibold shadow-dropdown hover:bg-white">
+          ✏️ Edit
+        </button>
       )}
     </div>
   )

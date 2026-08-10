@@ -4,7 +4,7 @@
 // nano-banana-2 would make the comparison meaningless to the person choosing.
 export const PROVIDER_LABEL = { openai: 'ChatGPT', gemini: 'Gemini', seedance: 'Video', manual: 'Your edit' }
 
-const KIND_LABEL = { edit: 'Edit', overlay: 'Text', canva: 'Canva', video: 'Video' }
+const KIND_LABEL = { edit: 'Edit', overlay: 'Edited', video: 'Video' }
 
 export function labelFor(version) {
   if (!version) return ''

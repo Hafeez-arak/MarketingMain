@@ -1,4 +1,4 @@
-import { ensureFontsLoaded, STUDIO_FONTS } from './fonts'
+import { STUDIO_FONTS } from './fonts'
 
 // ─── Overlay text: the data model and the renderer ─────────────────────────
 // Kept out of the editor component on purpose. The editor is one consumer;
@@ -124,44 +124,9 @@ export function loadImage(url) {
   })
 }
 
-function canvasToBlob(canvas, type = 'image/png') {
-  return new Promise((resolve, reject) => {
-    try {
-      canvas.toBlob(b => (b ? resolve(b) : reject(new Error('Export produced no file.'))), type)
-    } catch {
-      reject(new Error("The image couldn't be exported because it's served without CORS headers."))
-    }
-  })
-}
-
-// Render `boxes` over `imageUrl` at the image's NATIVE resolution — never the
-// on-screen size, which would quietly downscale everything the team exports.
-//
-// Two files come out of the one pass: the flattened image to post, and the
-// text alone on transparency. The second is what makes editable text on video
-// possible — it composites over the finished clip, so changing a word is a
-// re-composite (seconds, identical footage) instead of a re-generation
-// (minutes, and a visibly different clip).
-export async function renderOverlay(imageUrl, boxes, { targetWidth, targetHeight } = {}) {
-  await ensureFontsLoaded(boxes)
-  const img = await loadImage(imageUrl)
-  const W = targetWidth || img.naturalWidth
-  const H = targetHeight || img.naturalHeight
-
-  const composite = document.createElement('canvas')
-  composite.width = W; composite.height = H
-  const cctx = composite.getContext('2d')
-  cctx.drawImage(img, 0, 0, W, H)
-  boxes.forEach(b => drawBox(cctx, b, W, H))
-
-  const textLayer = document.createElement('canvas')
-  textLayer.width = W; textLayer.height = H
-  const tctx = textLayer.getContext('2d')
-  boxes.forEach(b => drawBox(tctx, b, W, H))
-
-  const [compositeBlob, textLayerBlob] = await Promise.all([
-    canvasToBlob(composite),
-    canvasToBlob(textLayer),
-  ])
-  return { compositeBlob, textLayerBlob, width: W, height: H }
-}
+// The full render-and-export pass this used to do (composite + transparent
+// text layer, at native resolution) now lives in photoEditorModel.js's
+// renderDocument/exportDocument, which generalise it to shapes and crop too.
+// layoutBox/drawBox stay here — they're still the single implementation of
+// text layout, reused by both the live editor's per-layer bitmaps and by
+// that export pass.
