@@ -27,6 +27,7 @@ export function BranchChat({
   onReRender,              // optional: re-run a past render against the current base
   onOpenEditor,
   onFinalize,
+  onDownload,              // downloads the file AND files it in the library if it isn't already
 }) {
   const [dragOver, setDragOver] = useState(false)
   const threadRef = useRef(null)
@@ -113,8 +114,11 @@ export function BranchChat({
                 to get a copy of it. */}
             {v.status === 'ready' && (v.video_url || v.image_url) && (
               <div className="flex items-center gap-2 mt-1 px-0.5">
-                <a href={v.video_url || v.image_url} target="_blank" rel="noopener noreferrer"
-                  className="text-[10px] font-medium text-text-tertiary hover:text-amber-700">⬇ Download</a>
+                <button onClick={() => onDownload(v)} disabled={busy === `download:${v.id}`}
+                  title={v.is_final ? 'Download (already in the Media Library)' : 'Download — also files it in the Media Library'}
+                  className="text-[10px] font-medium text-text-tertiary hover:text-amber-700 disabled:opacity-50">
+                  {busy === `download:${v.id}` ? 'Saving…' : '⬇ Download'}
+                </button>
                 {v.media_type === 'video' && onReRender && (
                   <button onClick={() => onReRender(v)}
                     className="text-[10px] font-medium text-text-tertiary hover:text-amber-700">
@@ -191,8 +195,11 @@ export function BranchChat({
             {busy === 'finalize' ? <Spinner size="sm" /> : base?.is_final ? '✓ Saved' : '✅ Save'}
           </Button>
           {canAct && (
-            <a href={base.video_url || base.image_url} target="_blank" rel="noopener noreferrer"
-              className="self-center text-[11px] font-medium text-amber-700 hover:text-amber-800 px-1">⬇ Download</a>
+            <Button size="sm" variant="outline" disabled={busy === `download:${base.id}`}
+              onClick={() => onDownload(base)}
+              title={base.is_final ? 'Download (already in the Media Library)' : 'Download — also files it in the Media Library'}>
+              {busy === `download:${base.id}` ? <Spinner size="sm" /> : '⬇ Download'}
+            </Button>
           )}
         </div>
       </div>

@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { Button, Spinner, Textarea } from '../ui/index'
 import { applyStrength, paceForDuration } from './motionPresets'
-import { AudioToggle, CostLine, MotionPicker, QualityRow } from './VideoSettings'
+import { AudioToggle, CostLine, ModelPicker, MotionPicker, QualityRow } from './VideoSettings'
+import { getVideoModel } from './videoModels'
 
 // ─── Animate (image → video) ───────────────────────────────────────────────
 // The controls themselves live in VideoSettings.jsx, shared with the "A video"
@@ -16,20 +17,34 @@ export function VideoPanel({
   // on a past render — same words, same settings, new base image. A fresh
   // mount (the Modal that hosts this unmounts on close) means plain useState
   // initializers are enough; there's no stale-prefill risk across opens.
-  initialPrompt = '', initialDuration = '5', initialResolution = '720p', initialAudio = false,
+  initialPrompt = '', initialModel = 'seedance-2', initialDuration = '5', initialResolution = '720p', initialAudio = false,
 }) {
   const [prompt, setPrompt] = useState(initialPrompt)
   const [presetId, setPresetId] = useState('')
   const [strength, setStrength] = useState('medium')
+  const [modelId, setModelId] = useState(initialModel)
   const [duration, setDuration] = useState(initialDuration)
   const [resolution, setResolution] = useState(initialResolution)
   const [audio, setAudio] = useState(initialAudio)
+  const model = getVideoModel(modelId)
+
+  // Each model has its own allowed durations/resolutions (Kling and Hailuo
+  // have no resolution dial at all) — carrying over the previous model's
+  // values would silently send a setting the new one doesn't accept.
+  function pickModel(id) {
+    const next = getVideoModel(id)
+    setModelId(id)
+    setDuration(next.defaultDuration)
+    setResolution(next.defaultResolution)
+    if (next.audio === 'unsupported') setAudio(false)
+  }
 
   function pickPreset(preset) {
     // Replaces rather than appends: two stacked camera moves is the single
-    // most reliable way to get a drifting, unusable render.
-    setPresetId(preset.id)
-    setPrompt(preset.prompt)
+    // most reliable way to get a drifting, unusable render. null means the
+    // user clicked the already-selected preset again, clearing it to blank.
+    setPresetId(preset ? preset.id : '')
+    setPrompt(preset ? preset.prompt : '')
   }
 
   function submit() {
@@ -41,6 +56,7 @@ export function VideoPanel({
       // sentence that may already specify one, and contradicting yourself in
       // a prompt is worse than saying nothing.
       prompt: paceForDuration(presetId ? applyStrength(text, strength) : text, duration),
+      model: modelId,
       duration,
       resolution,
       generateAudio: audio,
@@ -60,6 +76,8 @@ export function VideoPanel({
           </div>
         </div>
       )}
+
+      <ModelPicker modelId={modelId} onPick={pickModel} />
 
       <MotionPicker
         presetId={presetId}
@@ -90,19 +108,20 @@ export function VideoPanel({
       </div>
 
       <QualityRow
+        model={model} audio={audio}
         duration={duration} onDuration={setDuration}
         resolution={resolution} onResolution={setResolution}
       />
 
-      <AudioToggle audio={audio} onAudio={setAudio} />
+      <AudioToggle model={model} audio={audio} onAudio={setAudio} />
 
       <p className="text-[11px] text-text-tertiary leading-snug">
-        Takes a minute or two. Longer reels are cut together from several clips — 15 seconds is
+        Takes a minute or two. Longer reels are cut together from several clips — {model.durations[model.durations.length - 1]} seconds is
         the most one render can produce. Need a change? Edit the still and re-render.
       </p>
 
       <div className="flex items-center justify-between gap-2 pt-1">
-        <CostLine resolution={resolution} duration={duration} />
+        <CostLine model={model} resolution={resolution} duration={duration} audio={audio} />
         <div className="flex gap-2">
           <Button variant="secondary" onClick={onCancel}>Cancel</Button>
           <Button onClick={submit} disabled={busy || !prompt.trim()}>

@@ -6645,18 +6645,48 @@ const refUrls = (Array.isArray(body.reference_image_urls) ? body.reference_image
 // of the frame untouched while changing exactly what was asked for.
 const provider    = body.provider === 'openai' ? 'openai' : 'gemini';
 
+// What this image has already been through. These models are stateless — one
+// image, one instruction, no memory — so without this a follow-up like "a bit
+// more" or "undo that last bit" refers to nothing and the model guesses.
+// Capped because the useful signal is the recent turns; a 30-edit history
+// crowds out the actual instruction.
+const history = (Array.isArray(body.history) ? body.history : [])
+  .filter(h => typeof h === 'string' && h.trim())
+  .slice(-6);
+const originalPrompt = String(body.original_prompt || '').trim();
+
 // Order carries meaning to both models — the first image is the one being
 // changed, the rest are only there to look at — but neither model is told
 // that by the schema, so the prompt says it outright. Without this the edit
 // routinely comes back as a blend of the two, which is not what "use that as
 // a reference" means.
 function editPrompt(){
-  if (!refUrls.length) return instruction;
-  return instruction
-    + '\n\nEdit the FIRST image only — that is the image to modify, and everything not mentioned above must stay exactly as it is. '
-    + (refUrls.length > 1 ? 'The following images are' : 'The second image is')
-    + ' supplied purely as visual reference for the change described. Do not merge, collage or copy '
-    + (refUrls.length > 1 ? 'them' : 'it') + ' into the result.';
+  const parts = [];
+
+  // Context first, clearly fenced off as background, with the instruction
+  // last so it's the thing the model acts on. Saying these are ALREADY
+  // APPLIED is the load-bearing part: listed without that, the model treats
+  // them as more work to do and the earlier changes land a second time.
+  if (originalPrompt || history.length) {
+    parts.push('CONTEXT — this is background only. Everything listed here has ALREADY been applied to the image you were given. Do NOT apply any of it again; it is here purely so that a follow-up instruction referring to earlier work makes sense.');
+    if (originalPrompt) parts.push('The image was originally created from: ' + originalPrompt);
+    if (history.length) {
+      parts.push('Edits already made, oldest first:\n'
+        + history.map((h, i) => (i + 1) + '. ' + h).join('\n'));
+    }
+    parts.push('END OF CONTEXT.');
+  }
+
+  parts.push((originalPrompt || history.length ? 'NOW DO THIS: ' : '') + instruction);
+
+  if (refUrls.length) {
+    parts.push('Edit the FIRST image only — that is the image to modify, and everything not mentioned above must stay exactly as it is. '
+      + (refUrls.length > 1 ? 'The following images are' : 'The second image is')
+      + ' supplied purely as visual reference for the change described. Do not merge, collage or copy '
+      + (refUrls.length > 1 ? 'them' : 'it') + ' into the result.');
+  }
+
+  return parts.join('\n\n');
 }
 
 async function run(){
@@ -6702,12 +6732,64 @@ catch (err) {
 
 CREATIVE_VIDEO_JS = _CREATIVE_REQ_JS + r"""
 const BUCKET = 'creative-studio';
-// Seedance 2.0 (was v1 Pro — see 2026-08-10 provider review in
-// CREATIVE-STUDIO.md: native audio, 4-15s vs ~12s, resolution up to 1080p).
-// Named here rather than inline so swapping providers later is a one-line
-// change in this block.
-const MODEL_I2V = 'bytedance/seedance-2.0/image-to-video';
-const MODEL_T2V = 'bytedance/seedance-2.0/text-to-video';
+// One config per model the Studio's picker can send (added 2026-08-10 —
+// see CREATIVE-STUDIO.md for the per-model fal pricing this was checked
+// against). Endpoints and their accepted inputs genuinely differ: Kling and
+// Hailuo take neither `resolution` nor `aspect_ratio`, and Veo's `duration`
+// needs an 's' suffix ("8s") where every Seedance model takes a bare number.
+// `build` is the one place that has to know that, so the caller below stays
+// oblivious to which model it's actually talking to.
+const MODEL_CONFIGS = {
+  'seedance-2': {
+    i2v: 'bytedance/seedance-2.0/image-to-video',
+    t2v: 'bytedance/seedance-2.0/text-to-video',
+    build(imageUrl) {
+      const input = { prompt, duration, resolution, generate_audio: generateAudio, aspect_ratio: aspect };
+      if (imageUrl) input.image_url = imageUrl;
+      return input;
+    },
+  },
+  'seedance-2.5': {
+    i2v: 'bytedance/seedance-2.5/image-to-video',
+    t2v: 'bytedance/seedance-2.5/text-to-video',
+    build(imageUrl) {
+      const input = { prompt, duration, resolution, generate_audio: generateAudio, aspect_ratio: aspect };
+      if (imageUrl) input.image_url = imageUrl;
+      return input;
+    },
+  },
+  'kling-2.5-turbo-pro': {
+    i2v: 'fal-ai/kling-video/v2.5-turbo/pro/image-to-video',
+    t2v: 'fal-ai/kling-video/v2.5-turbo/pro/text-to-video',
+    // No resolution/aspect_ratio input on this endpoint; duration is "5" or "10" only.
+    build(imageUrl) {
+      const input = { prompt, duration: duration === '10' ? '10' : '5' };
+      if (imageUrl) input.image_url = imageUrl;
+      return input;
+    },
+  },
+  'veo-3.1-fast': {
+    i2v: 'fal-ai/veo3.1/fast/image-to-video',
+    t2v: 'fal-ai/veo3.1/fast',
+    // Duration takes an 's' suffix ("8s") here, not a bare number.
+    build(imageUrl) {
+      const d = /s$/.test(duration) ? duration : duration + 's';
+      const input = { prompt, duration: d, resolution: resolution === '1080p' ? '1080p' : '720p', generate_audio: generateAudio };
+      if (imageUrl) input.image_url = imageUrl;
+      return input;
+    },
+  },
+  'hailuo-2.3': {
+    i2v: 'fal-ai/minimax/hailuo-2.3/standard/image-to-video',
+    t2v: 'fal-ai/minimax/hailuo-2.3/standard/text-to-video',
+    // No resolution input; duration is "6" or "10" only.
+    build(imageUrl) {
+      const input = { prompt, duration: duration === '10' ? '10' : '6' };
+      if (imageUrl) input.image_url = imageUrl;
+      return input;
+    },
+  },
+};
 
 // MP4's magic bytes are an 'ftyp' box at offset 4, not at the start the way
 // image formats are — a truncated download otherwise looks byte-plausible and
@@ -6735,6 +6817,9 @@ const resolution = body.resolution || '720p';
 // Off unless asked: a model inventing ambient sound under a brand asset is a
 // liability, not a bonus (CREATIVE-STUDIO.md, 2026-08-10 provider review).
 const generateAudio = body.generate_audio === true;
+// Falls back to Seedance 2.0 for any request that predates the model picker
+// (or names one this workflow doesn't recognise) rather than failing outright.
+const cfg = MODEL_CONFIGS[body.model] || MODEL_CONFIGS['seedance-2'];
 
 async function run(){
   if (!prompt) throw new Error('No direction given for the video.');
@@ -6742,9 +6827,8 @@ async function run(){
   // Both modes live in one workflow because a session may be image-then-video
   // OR video-only, and the team works both ways — an image is an optional
   // starting point, not a prerequisite.
-  const model = imageUrl ? MODEL_I2V : MODEL_T2V;
-  const input = { prompt, duration, resolution, generate_audio: generateAudio, aspect_ratio: aspect };
-  if (imageUrl) input.image_url = imageUrl;
+  const model = imageUrl ? cfg.i2v : cfg.t2v;
+  const input = cfg.build(imageUrl);
 
   const submit = await req({ method:'POST', url:'https://queue.fal.run/' + model,
     headers:{ Authorization:'Key ' + FAL, 'Content-Type':'application/json' }, body: input, json:true });
@@ -7068,25 +7152,28 @@ where anything a model paints is baked pixels forever.
 
 Needs env: FAL_KEY, SUPABASE_URL, SUPABASE_KEY."""
 
-CREATIVE_VIDEO_STICKY = """## Creative Studio — Video (Seedance 2.0)
+CREATIVE_VIDEO_STICKY = """## Creative Studio — Video (model picker, added 2026-08-10)
 
 POST `arak-creative-video`
 ```
-{ session_id, version_id, prompt, image_url?, duration?, aspect_ratio?,
+{ session_id, version_id, prompt, model?, image_url?, duration?, aspect_ratio?,
   resolution?, generate_audio? }
 ```
 
 `image_url` present → image-to-video; absent → text-to-video, because a
 session may be image-only, video-only, or image-then-video.
 
-`resolution`: 720p (draft, $0.30/s) or 1080p (final, $0.68/s) — the panel
-shows both prices, since 1080p is 2.3x the cost. `generate_audio` defaults
-false: free on this model, but an invented soundtrack under a brand asset
-should be asked for, not arrive by surprise. `aspect_ratio` has no exact 4:5
-bucket (nearest is 3:4) — same gap as gpt-image-2 on the image side.
+`model` selects the fal endpoint via MODEL_CONFIGS at the top of the Code
+node — unrecognised or missing values fall back to 'seedance-2'. Each
+model's `build()` there knows its own accepted inputs (Kling and Hailuo take
+neither `resolution` nor `aspect_ratio`; Veo's `duration` needs an 's' suffix),
+so the caller doesn't have to. `generate_audio` defaults false — free on
+Seedance, billed separately on Veo, absent on Kling/Hailuo. `aspect_ratio`
+has no exact 4:5 bucket (nearest is 3:4) — same gap as gpt-image-2 on the
+image side, and only applies to the models that take it at all.
 
-Swap providers later by changing MODEL_I2V / MODEL_T2V at the top of
-the Code node — nothing else in the workflow is Seedance-specific.
+Add a model by adding one entry to MODEL_CONFIGS — nothing else in the
+workflow is model-specific.
 
 Needs env: FAL_KEY, SUPABASE_URL, SUPABASE_KEY."""
 

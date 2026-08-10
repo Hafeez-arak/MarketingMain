@@ -6,15 +6,17 @@ import { BranchChat, BranchPill } from '../../components/studio/BranchChat'
 import { PromptBubble } from '../../components/studio/VersionCard'
 import { OverlayEditor } from '../../components/studio/OverlayEditor'
 import { VideoPanel } from '../../components/studio/VideoPanel'
-import { AudioToggle, CostLine, LookPicker, MotionPicker, QualityRow } from '../../components/studio/VideoSettings'
+import { MediaPicker, AttachmentChip } from '../../components/studio/MediaPicker'
+import { AudioToggle, CostLine, LookPicker, ModelPicker, MotionPicker, QualityRow } from '../../components/studio/VideoSettings'
 import { buildVideoPrompt } from '../../components/studio/motionPresets'
+import { getVideoModel } from '../../components/studio/videoModels'
 import { aspectLabel } from '../../lib/postFormats'
 import { uploadReferenceImage } from '../../lib/referenceImages'
 import { buildInstructionsString } from '../../lib/brandBrain'
 import {
-  buildBranches, createSession, fetchSessions, fetchVersions, finalizeVersion, insertPendingVersions,
-  requestEdit, requestEnhance, requestGenerate, requestVideo, selectVersion, touchSession, updateVersion,
-  uploadToStudio,
+  buildBranches, createSession, downloadVersion, fetchSessions, fetchVersions, finalizeVersion,
+  insertPendingVersions, requestEdit, requestEnhance, requestGenerate, requestVideo, selectVersion,
+  touchSession, updateVersion, uploadToStudio,
 } from '../../lib/creativeStudio'
 
 // ─── Creative Studio ───────────────────────────────────────────────────────
@@ -37,6 +39,73 @@ const INTENTS = [
   { value: 'video', label: 'A video',  hint: 'A clip generated straight from a description' },
 ]
 const emptyComposer = { text: '', baseId: null, attach: null }
+
+// What the ➕ can attach, per tab. `kind` filters the library grid; `notes`
+// says whether the chip offers a "what should it take from this?" box.
+const IMAGE_SLOTS = [
+  { id: 'reference', label: 'Reference image', hint: 'Take inspiration from it', kind: 'image', notes: true,
+    notePlaceholder: 'e.g. same style, but a hotel lobby' },
+]
+// Seedance 2.0 genuinely takes a start frame and an end frame (image_url /
+// end_image_url) — the end frame is what makes clip-to-clip chaining look
+// deliberate rather than cut. The third slot is a look reference, which the
+// model has NO input for; see VIDEO_BACKEND_PENDING below.
+const VIDEO_SLOTS = [
+  { id: 'startFrame', label: 'Start frame', hint: 'The clip opens on this image', kind: 'image', notes: false },
+  { id: 'endFrame',   label: 'End frame',   hint: 'The clip lands on this image', kind: 'image', notes: false },
+  { id: 'reference',  label: 'Style reference', hint: 'An image or clip to echo', kind: 'all', notes: true,
+    notePlaceholder: 'e.g. match this pacing and grade' },
+]
+
+// ⚠️ Frontend only, by decision (2026-08-10). These three attachments are
+// collected and shown, but nothing is sent to the video workflow yet:
+//   · startFrame → maps cleanly to Seedance's image_url (switches t2v → i2v)
+//   · endFrame   → maps cleanly to end_image_url
+//   · reference  → has NO model input; would need a separate describe-then-
+//     inject step, so it's the one that needs design rather than plumbing.
+// Wire these up when the video backend pass happens.
+const VIDEO_BACKEND_PENDING = true
+
+// The ➕ itself. A menu only when there's a real choice to make — on the
+// image tab there's one slot, so a menu would be a click that asks nothing.
+function AttachMenu({ slots, taken, onChoose }) {
+  const [open, setOpen] = useState(false)
+  const free = slots.filter(s => !taken[s.id])
+  const disabled = free.length === 0
+
+  function click() {
+    if (disabled) return
+    if (slots.length === 1) { onChoose(slots[0]); return }
+    setOpen(o => !o)
+  }
+
+  return (
+    <div className="relative">
+      <button type="button" onClick={click} disabled={disabled}
+        title={disabled ? 'Everything that can be attached already is' : 'Attach a reference'}
+        className="inline-flex items-center gap-1 rounded-lg border border-border px-2.5 py-1 text-[11px] font-medium hover:border-amber-400 hover:bg-amber-50 disabled:opacity-40 disabled:hover:border-border disabled:hover:bg-transparent">
+        <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+        Attach
+      </button>
+      {open && (
+        <>
+          {/* Click-away sits behind the menu, not over it. */}
+          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+          <div className="absolute z-20 mt-1 w-56 rounded-xl border border-border bg-white shadow-dropdown p-1">
+            {free.map(s => (
+              <button key={s.id} type="button"
+                onClick={() => { setOpen(false); onChoose(s) }}
+                className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-surface-muted transition-colors">
+                <p className="text-[11px] font-semibold text-text">{s.label}</p>
+                <p className="text-[10px] text-text-tertiary leading-snug">{s.hint}</p>
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
 
 export function CreativeStudio() {
   const { state } = useApp()
@@ -64,10 +133,9 @@ export function CreativeStudio() {
   const [autoEnhance, setAutoEnhance] = useState(false)
   const [enhancing, setEnhancing] = useState('')            // '' | 'prompt' | 'motion'
   const [aspect, setAspect] = useState('4:5')
-  const [refUrl, setRefUrl] = useState('')
-  const [refNotes, setRefNotes] = useState('')
-  const [uploadingRef, setUploadingRef] = useState(false)
-  const fileRef = useRef(null)
+  // Keyed by slot id (see IMAGE_SLOTS / VIDEO_SLOTS): { url, name, note }.
+  const [attachments, setAttachments] = useState({})
+  const [pickerSlot, setPickerSlot] = useState(null)
 
   // Per-lane state, keyed by branch id, so the two conversations never share
   // a draft, a base image or a dropped reference.
@@ -78,9 +146,21 @@ export function CreativeStudio() {
   // share VideoSettings.jsx), plus a look picker — with no source still, the
   // look has to come from somewhere, and writing one in prose is exactly the
   // job the preset library exists to remove.
+  const [modelId, setModelId] = useState('seedance-2')
   const [duration, setDuration] = useState('5')
   const [resolution, setResolution] = useState('720p')
   const [audio, setAudio] = useState(false)
+  const model = getVideoModel(modelId)
+  // Each model has its own allowed durations/resolutions (Kling and Hailuo
+  // have no resolution dial at all) — carrying over the previous model's
+  // values would silently send a setting the new one doesn't accept.
+  function pickModel(id) {
+    const next = getVideoModel(id)
+    setModelId(id)
+    setDuration(next.defaultDuration)
+    setResolution(next.defaultResolution)
+    if (next.audio === 'unsupported') setAudio(false)
+  }
   const [motionNote, setMotionNote] = useState('')
   const [motionPresetId, setMotionPresetId] = useState('')
   const [motionStrength, setMotionStrength] = useState('medium')
@@ -136,22 +216,38 @@ export function CreativeStudio() {
   }
 
   function newSession() {
-    setSession(null); setVersions([]); setPrompt(''); setRefUrl(''); setRefNotes('')
+    setSession(null); setVersions([]); setPrompt(''); setAttachments({})
     setPromptRaw(''); setPromptSource('raw')
     setMotionNote(''); setMotionPresetId(''); setMotionStrength('medium'); setLookId('none')
+    setModelId('seedance-2'); setDuration('5'); setResolution('720p'); setAudio(false)
     setComposers({}); setFocusedBranch(null); setError('')
   }
 
-  async function handleReferenceUpload(e) {
-    const file = e.target.files?.[0]
-    if (!file) return
-    setUploadingRef(true); setError('')
-    const res = await uploadReferenceImage(activeWorkspaceId, accessToken, file)
-    setUploadingRef(false)
-    if (fileRef.current) fileRef.current.value = ''
-    if (res.error) { setError(`Reference upload failed: ${res.error}`); return }
-    setRefUrl(res.url)
+  // ── Attachments ──
+  const activeSlots = intent === 'video' ? VIDEO_SLOTS : IMAGE_SLOTS
+
+  function setAttachment(slotId, value) {
+    setAttachments(prev => {
+      const next = { ...prev }
+      if (value) next[slotId] = value
+      else delete next[slotId]
+      return next
+    })
   }
+
+  function openPickerFor(slot) { setPickerSlot(slot) }
+
+  // Switching tabs must not carry an attachment into a slot the other tab
+  // doesn't have — a start frame left over on the image tab would be invisible
+  // and still get sent.
+  function changeIntent(next) {
+    if (next === intent) return
+    setIntent(next)
+    setAttachments({})
+  }
+
+  const refUrl   = attachments.reference?.url  || ''
+  const refNotes = attachments.reference?.note || ''
 
   // ── Enhance ──
   // The brand profile has always been read by the Creative workflows
@@ -245,6 +341,10 @@ export function CreativeStudio() {
     // than a two-way comparison — variations come from re-rendering, not from
     // a second model.
     const rows = videoOnly
+      // provider stays the generic 'seedance' DB tag (the check constraint
+      // only allows a fixed list) — the actual model choice isn't persisted
+      // yet, only sent in the webhook payload below. Give it its own column
+      // when the video backend pass happens (see VIDEO_BACKEND_PENDING).
       ? [{ round: 0, kind: 'video', provider: 'seedance', mediaType: 'video',
            userPrompt: videoPrompt, originalPrompt, promptSource: source,
            aspectRatio: aspect, duration, resolution, generateAudio: audio }]
@@ -261,7 +361,7 @@ export function CreativeStudio() {
     const fired = videoOnly
       ? await requestVideo(webhooks.creativeVideo, {
           session_id: s.id, version_id: ins.rows[0].id, prompt: videoPrompt,
-          duration, aspect_ratio: aspect, resolution, generate_audio: audio,
+          model: modelId, duration, aspect_ratio: aspect, resolution, generate_audio: audio,
         })
       : await requestGenerate(webhooks.creativeGenerate, {
           session_id: s.id, prompt: finalPrompt, aspect_ratio: aspect,
@@ -333,6 +433,23 @@ export function CreativeStudio() {
     const editingDropped = attach?.mode === 'base'
     const sourceUrl = editingDropped ? attach.url : base.image_url
 
+    // Walk root → base and collect what's already been asked for. Without
+    // this the model sees one image and one instruction, so a follow-up like
+    // "a bit more" or "actually go back a little" refers to nothing. Sent as
+    // context only — the workflow says plainly that these are already applied,
+    // or the model re-applies them and the change lands twice.
+    //
+    // The chain, not the whole lane: continuing from an earlier version means
+    // the edits made after it never happened as far as this image is concerned.
+    const chain = []
+    { let cur = base, guard = 0
+      while (cur && guard++ < 50) {
+        chain.unshift(cur)
+        cur = cur.parent_version_id ? branch.versions.find(v => v.id === cur.parent_version_id) : null
+      } }
+    const history = chain.filter(v => v.kind === 'edit' && v.user_prompt).map(v => v.user_prompt)
+    const originalPrompt = chain[0]?.user_prompt || ''
+
     setFocusedBranch(branch.rootId)
     const created = await runStep(branch, {
       label: 'edit',
@@ -348,6 +465,8 @@ export function CreativeStudio() {
         source_image_url: sourceUrl,
         reference_image_urls: attach && !editingDropped ? [attach.url] : [],
         instruction,
+        original_prompt: originalPrompt,
+        history,
       },
       send: p => requestEdit(webhooks.creativeEdit, p),
     })
@@ -360,7 +479,7 @@ export function CreativeStudio() {
 
   // Fired by VideoPanel's submit — it owns the prompt/duration/resolution/
   // audio choice, this just anchors the render to the right branch and lane.
-  async function handleAnimate({ prompt: motionText, duration: dur, resolution, generateAudio }) {
+  async function handleAnimate({ prompt: motionText, model: animateModel, duration: dur, resolution, generateAudio }) {
     const target = videoTarget
     const branch = branches.find(b => b.versions.some(v => v.id === target?.id))
     if (!target || !branch || !motionText.trim()) return
@@ -373,7 +492,7 @@ export function CreativeStudio() {
         duration: dur, resolution, generateAudio,
       },
       payload: {
-        image_url: target.image_url, prompt: motionText.trim(),
+        image_url: target.image_url, prompt: motionText.trim(), model: animateModel,
         duration: dur, aspect_ratio: session.aspect_ratio, resolution, generate_audio: generateAudio,
       },
       send: p => requestVideo(webhooks.creativeVideo, p),
@@ -422,6 +541,23 @@ export function CreativeStudio() {
     return {}
   }
 
+  // Save and Download are deliberately both here and do different things:
+  // Save files it in the Media Library and stops. Download puts the file on
+  // your disk — and files it too, if it wasn't already, because downloading
+  // something is a clearer statement of "I'm keeping this" than pressing Save
+  // is. The is_final flag is what keeps a second download from duplicating it.
+  async function handleDownload(version) {
+    if (!version) return
+    setBusy(`download:${version.id}`); setError('')
+    const res = await downloadVersion(activeWorkspaceId, accessToken, version, session?.title)
+    setBusy('')
+    if (res.error) { setError(res.error); return }
+    if (res.savedError) { setError(`Downloaded, but couldn't add it to the Media Library: ${res.savedError}`); return }
+    if (res.alsoSaved) {
+      setVersions(prev => prev.map(v => (v.id === version.id ? { ...v, is_final: true } : v)))
+    }
+  }
+
   async function handleFinalize(branch, version) {
     if (!version) return
     setBusy(`finalize:${branch.rootId}`)
@@ -453,6 +589,7 @@ export function CreativeStudio() {
       : undefined,
     onOpenEditor: v => setEditingOverlay(v),
     onFinalize: v => handleFinalize(branch, v),
+    onDownload: handleDownload,
   })
 
   return (
@@ -511,7 +648,7 @@ export function CreativeStudio() {
                 <p className="text-xs font-medium text-text-secondary mb-1.5">What are you making?</p>
                 <div className="grid grid-cols-2 gap-2">
                   {INTENTS.map(i => (
-                    <button key={i.value} onClick={() => setIntent(i.value)}
+                    <button key={i.value} onClick={() => changeIntent(i.value)}
                       className={`text-left rounded-xl border p-2.5 transition-all ${
                         intent === i.value ? 'border-amber-500 bg-amber-50 ring-1 ring-amber-300' : 'border-border hover:border-amber-300'
                       }`}>
@@ -534,6 +671,15 @@ export function CreativeStudio() {
 
                 <div className="flex items-center justify-between gap-2 flex-wrap">
                   <div className="flex items-center gap-2">
+                    {/* Attach sits with the prompt, the way every chat app puts
+                        it — the old reference box lived at the bottom of the
+                        form, past the settings, which read as a separate step
+                        rather than part of what you're asking for. */}
+                    <AttachMenu
+                      slots={intent === 'video' ? VIDEO_SLOTS : IMAGE_SLOTS}
+                      taken={attachments}
+                      onChoose={openPickerFor}
+                    />
                     <button type="button" onClick={enhancePrompt}
                       disabled={!prompt.trim() || !!enhancing || busy === 'generate'}
                       title={promptSource === 'raw'
@@ -564,6 +710,21 @@ export function CreativeStudio() {
                     result here before anything is generated.
                   </p>
                 )}
+
+                {activeSlots.some(s => attachments[s.id]) && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                    {activeSlots.filter(s => attachments[s.id]).map(s => (
+                      <AttachmentChip key={s.id}
+                        label={s.label}
+                        url={attachments[s.id].url}
+                        note={attachments[s.id].note}
+                        notePlaceholder={s.notePlaceholder}
+                        onNote={s.notes ? v => setAttachment(s.id, { ...attachments[s.id], note: v }) : undefined}
+                        onRemove={() => setAttachment(s.id, null)}
+                      />
+                    ))}
+                  </div>
+                )}
               </div>
 
               <Select label="Shape" value={aspect} onChange={e => setAspect(e.target.value)}>
@@ -577,12 +738,14 @@ export function CreativeStudio() {
                   no source still, nothing else decides how the clip looks. */}
               {intent === 'video' && (
                 <div className="rounded-xl border border-border bg-surface-subtle/40 p-3 space-y-3">
+                  <ModelPicker modelId={modelId} onPick={pickModel} />
+
                   <LookPicker lookId={lookId} onPick={setLookId} />
 
                   <MotionPicker
                     label="How should the camera move? (optional)"
                     presetId={motionPresetId}
-                    onPickPreset={p => { setMotionPresetId(p.id); setMotionNote(p.prompt) }}
+                    onPickPreset={p => { setMotionPresetId(p ? p.id : ''); setMotionNote(p ? p.prompt : '') }}
                     strength={motionStrength}
                     onStrength={setMotionStrength}
                   />
@@ -592,35 +755,17 @@ export function CreativeStudio() {
                     placeholder="…or describe the movement yourself. Leave empty to let the model decide." />
 
                   <QualityRow
+                    model={model} audio={audio}
                     duration={duration} onDuration={setDuration}
                     resolution={resolution} onResolution={setResolution}
                   />
 
-                  <AudioToggle audio={audio} onAudio={setAudio} />
+                  <AudioToggle model={model} audio={audio} onAudio={setAudio} />
 
                   <div className="flex items-center justify-between gap-2">
-                    <CostLine resolution={resolution} duration={duration} />
-                    <p className="text-[10px] text-text-tertiary">15s is the most one render can produce.</p>
+                    <CostLine model={model} resolution={resolution} duration={duration} audio={audio} />
+                    <p className="text-[10px] text-text-tertiary">{model.durations[model.durations.length - 1]}s is the most one render can produce.</p>
                   </div>
-                </div>
-              )}
-
-              {intent !== 'video' && (
-                <div className="rounded-xl border border-border bg-surface-subtle/40 p-3 space-y-2">
-                  <p className="text-[11px] font-semibold text-text-secondary">Reference image (optional)</p>
-                  <p className="text-[10px] text-text-tertiary leading-snug">
-                    The AI takes inspiration from it — it won't copy it. Say what you want kept or changed.
-                  </p>
-                  <div className="flex items-center gap-2">
-                    <input ref={fileRef} type="file" accept="image/*" onChange={handleReferenceUpload}
-                      className="text-[11px] file:mr-2 file:px-2 file:py-1 file:rounded-lg file:border file:border-border file:bg-white file:text-[11px]" />
-                    {uploadingRef && <Spinner size="sm" />}
-                    {refUrl && <img src={refUrl} alt="" className="w-10 h-10 rounded-lg object-cover border border-border" />}
-                  </div>
-                  {refUrl && (
-                    <Textarea rows={2} value={refNotes} onChange={e => setRefNotes(e.target.value)}
-                      placeholder="e.g. same style but change the background to a hotel lobby" />
-                  )}
                 </div>
               )}
 
@@ -682,6 +827,17 @@ export function CreativeStudio() {
           initialAudio={videoPrefill?.generateAudio}
         />
       </Modal>
+
+      {/* ── Attach a reference ── */}
+      <MediaPicker
+        open={!!pickerSlot}
+        onClose={() => setPickerSlot(null)}
+        title={pickerSlot ? `Add ${pickerSlot.label.toLowerCase()}` : ''}
+        kind={pickerSlot?.kind || 'image'}
+        accessToken={accessToken}
+        onUpload={file => uploadReferenceImage(activeWorkspaceId, accessToken, file)}
+        onPick={picked => setAttachment(pickerSlot.id, picked)}
+      />
 
       {/* ── Text editor ── */}
       <Modal open={!!editingOverlay} onClose={() => setEditingOverlay(null)} title="Add text" width="max-w-5xl">

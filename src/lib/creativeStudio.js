@@ -277,6 +277,58 @@ export async function requestEnhance(webhookUrl, payload) {
   } catch (err) { return { error: err.message } }
 }
 
+// ── Download ───────────────────────────────────────────────────────────────
+
+// The old "⬇ Download" was a plain <a target="_blank"> with no `download`
+// attribute, so it opened the image in a tab and left you to right-click it.
+// This fetches the bytes and saves them properly.
+//
+// "Highest quality" is the stored file itself, untouched: what's in the bucket
+// is the model's own PNG at full resolution, so there is nothing higher to
+// fetch and re-encoding it could only lose data. (An actual upscale beyond the
+// native size is a separate, paid step — deliberately not built yet.)
+function filenameFor(version, sessionTitle) {
+  const slug = String(sessionTitle || 'arak-studio')
+    .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'arak-studio'
+  const ext = version.video_url ? 'mp4' : 'png'
+  const who = version.provider && version.provider !== 'manual' ? `-${version.provider}` : ''
+  return `${slug}${who}-v${version.round ?? 0}.${ext}`
+}
+
+export async function downloadVersion(workspaceId, accessToken, version, sessionTitle) {
+  const url = version.video_url || version.image_url
+  if (!url) return { error: 'Nothing to download yet.' }
+
+  try {
+    const res = await fetch(url)
+    if (!res.ok) return { error: `Couldn't fetch the file (${res.status}).` }
+    const blob = await res.blob()
+    const objectUrl = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = objectUrl
+    a.download = filenameFor(version, sessionTitle)
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    // Revoked on a tick rather than immediately: Safari cancels an in-flight
+    // download if the object URL dies in the same frame as the click.
+    setTimeout(() => URL.revokeObjectURL(objectUrl), 10_000)
+  } catch (err) {
+    return { error: err.message }
+  }
+
+  // Downloading something means you want to keep it, so it should be in the
+  // library whether or not you remembered to press Save. is_final is the
+  // record of "already filed" — checking it is what stops a second download
+  // from creating a duplicate row.
+  if (!version.is_final) {
+    const saved = await finalizeVersion(workspaceId, accessToken, version, sessionTitle)
+    if (saved.error) return { ok: true, savedError: saved.error }
+    return { ok: true, alsoSaved: true }
+  }
+  return { ok: true }
+}
+
 // ── Finalize ───────────────────────────────────────────────────────────────
 
 // Marks the version as the session's finished asset and copies it into the

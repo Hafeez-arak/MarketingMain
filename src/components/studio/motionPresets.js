@@ -165,20 +165,6 @@ export function buildVideoPrompt({ scene, lookId, motion, strength, duration }) 
   return parts.filter(Boolean).join('\n\n')
 }
 
-// ── Cost ───────────────────────────────────────────────────────────────────
-// Seedance 2.0 bills per second of output, and the jump from 720p to 1080p is
-// more than double. Shown in the panel because a re-render loop that costs
-// $3.41 a go is a different habit from one that costs $1.51, and nobody should
-// discover that from an invoice.
-export const VIDEO_RATES = { '720p': 0.3024, '1080p': 0.682 }
-
-export function estimateCost(resolution, seconds) {
-  const rate = VIDEO_RATES[resolution] ?? VIDEO_RATES['720p']
-  return rate * (Number(seconds) || 5)
-}
-
-// Seedance 2.0 accepts any integer 4-15s (the old model topped out at 3-12,
-// hence '3' used to be offered and no longer validates). Shared with the
-// round-0 "video only" composer in studio/index.jsx so both duration pickers
-// in the app stay in sync with what the model actually accepts.
-export const DURATIONS = ['4', '5', '6', '8', '10', '12', '15']
+// Cost and duration/resolution options moved to videoModels.js — they're now
+// per-model (Seedance 2.0's own $/s rates, allowed durations, etc.) rather
+// than a single global table, now that the model picker offers more than one.
