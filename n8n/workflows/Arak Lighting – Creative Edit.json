@@ -1,0 +1,284 @@
+{
+  "name": "Arak Lighting – Creative Edit",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Creative Studio — Edit\n\nPOST `arak-creative-edit`\n```\n{ session_id, version_id, source_image_url, instruction,\n  reference_image_urls?: string[], provider?: 'gemini'|'openai', aspect_ratio? }\n```\n\n`source_image_url` is the image being changed; `reference_image_urls` (max 3)\nare only looked at. Both go to the model in ONE `image_urls` array, first\nposition first, and the prompt is extended to say which is which — the\nschema doesn't distinguish them, and without that sentence the edit comes\nback as a blend of the two. This is what the studio's drag-an-image-from-the-\nother-chat gesture sends.\n\nOne conversational edit → one new version row. Nano Banana by default:\ninstruction-following editing is its headline strength and it leaves the\nrest of the frame alone.\n\nNOTE: edits to TEXT on an image should normally go through the app's own\noverlay editor instead — real text is exact in Arabic and stays editable,\nwhere anything a model paints is baked pixels forever.\n\nNeeds env: FAL_KEY, SUPABASE_URL, SUPABASE_KEY.",
+        "height": 360,
+        "width": 460
+      },
+      "id": "1318b961-03ff-5433-85cf-d2ff5a2ab3a2",
+      "name": "Note: Overview",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        -180
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "arak-creative-edit",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "ad15a55b-c11d-56d2-9e0a-d99d733e6563",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        300
+      ],
+      "webhookId": "arak-creative-edit"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ status: 'accepted', version_id: $json.body.version_id }) }}",
+        "options": {}
+      },
+      "id": "f14b9309-f30d-503d-9e19-05587e870d45",
+      "name": "Respond: Accepted",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        220,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst http = this.helpers.httpRequest;\nconst prepareBinaryData = this.helpers.prepareBinaryData;\nconst FAL = $env.FAL_KEY;\n\n// Pull the provider's ACTUAL message out of whatever shape n8n wrapped it in.\n// Verified necessary 2026-08-09: an exhausted fal balance reached the card as\n// the useless \"Request failed with status code 403\", when fal had actually\n// replied {\"detail\":\"User is locked. Reason: Exhausted balance.\"}. Those two\n// strings lead to completely different actions, so this walks every container\n// the body might hide in — including `response.body` and `cause`, which the\n// older unwrapper (still used by the other workflows) misses — and only falls\n// back to n8n's generic text when nothing real is found.\nfunction errText(e){\n  const candidates = [\n    e && e.response && e.response.data,\n    e && e.response && e.response.body,\n    e && e.error,\n    e && e.cause && e.cause.response && e.cause.response.data,\n    e && e.cause && e.cause.error,\n    e && e.cause,\n    e && e.description,\n  ];\n  for (const c of candidates) {\n    if (!c) continue;\n    if (typeof c === 'string' && c.trim()) return c.slice(0, 400);\n    if (Buffer.isBuffer(c)) return c.toString('utf8', 0, 300);\n    if (typeof c === 'object') {\n      if (c.detail) return (typeof c.detail === 'string' ? c.detail : JSON.stringify(c.detail)).slice(0, 400);\n      if (c.error && c.error.message) return String(c.error.message).slice(0, 400);\n      if (c.message && c.message !== (e && e.message)) return String(c.message).slice(0, 400);\n      const s = JSON.stringify(c);\n      if (s && s !== '{}' && s !== 'null') return s.slice(0, 400);\n    }\n  }\n  return (e && e.message) || String(e);\n}\n\nfunction bodyText(body, status){\n  if (body == null) return 'HTTP ' + status;\n  if (Buffer.isBuffer(body)) return 'HTTP ' + status + ': ' + body.toString('utf8', 0, 300);\n  if (typeof body === 'string') return 'HTTP ' + status + ': ' + body.slice(0, 400);\n  if (typeof body === 'object') {\n    if (body.detail) return (typeof body.detail === 'string' ? body.detail : JSON.stringify(body.detail)).slice(0, 400);\n    if (body.error && body.error.message) return String(body.error.message).slice(0, 400);\n    if (body.message) return String(body.message).slice(0, 400);\n    return 'HTTP ' + status + ': ' + JSON.stringify(body).slice(0, 400);\n  }\n  return 'HTTP ' + status;\n}\n\n// Don't let n8n throw on a non-2xx at all — ask for the full response and\n// judge the status here. Measured 2026-08-09: when n8n raises the error\n// itself, the provider's body is NOT reachable from the thrown object by any\n// path (errText below was tried and still yielded \"Request failed with status\n// code 403\"), so an exhausted balance and a rejected prompt were\n// indistinguishable on the card. Reading the body directly is the only way to\n// get the real reason out. errText stays as the fallback for older n8n builds\n// that ignore ignoreHttpStatusErrors and throw regardless.\nasync function req(opts){\n  let full;\n  try {\n    full = await http(Object.assign({}, opts, { returnFullResponse: true, ignoreHttpStatusErrors: true }));\n  } catch (e) {\n    throw new Error(errText(e));\n  }\n  const status = (full && (full.statusCode || full.status)) || 200;\n  const body = (full && full.body !== undefined) ? full.body : full;\n  if (status >= 400) throw new Error(bodyText(body, status));\n  return body;\n}\n\n// A byte-count threshold is not enough — a corrupted buffer can be LARGER\n// than the real file (a JSON-stringified Buffer is ~7x bigger), which is how\n// a broken image once saved silently with no error anywhere. Check the actual\n// file signature instead.\nfunction looksLikeImage(buf){\n  if (!buf || buf.length < 12) return false;\n  const head = buf.toString('ascii', 0, 12);\n  return head.startsWith('\\x89PNG')\n      || (buf[0] === 0xFF && buf[1] === 0xD8)\n      || (head.startsWith('RIFF') && head.indexOf('WEBP') !== -1);\n}\n\n// gpt-image-2 takes named size buckets, not free ratios. 9:16 maps exactly\n// (portrait_16_9); 4:5 has no exact bucket, so it generates at 3:4 and the\n// prompt asks for a centre-safe composition that survives the crop to 4:5.\nconst GPT_SIZE = {\n  '1:1': 'square_hd', '4:5': 'portrait_4_3', '3:4': 'portrait_4_3',\n  '9:16': 'portrait_16_9', '16:9': 'landscape_16_9',\n  '1.91:1': 'landscape_16_9', '4:3': 'landscape_4_3', '3:2': 'landscape_4_3',\n};\n\nconst BUCKET = 'creative-studio';\nconst body = ($input.first().json.body) || {};\nconst sessionId   = body.session_id || '';\nconst versionId   = body.version_id || '';\nconst sourceUrl   = body.source_image_url || '';\nconst instruction = String(body.instruction || '').trim();\nconst aspect      = body.aspect_ratio || 'auto';\n// Extra images to look at while editing — in practice the OTHER candidate,\n// dragged across from its chat (\"give this one that one's lighting\"). Both\n// edit endpoints take an image_urls ARRAY, so this needs no second call and\n// no compositing: the model sees the base and the reference together.\nconst refUrls = (Array.isArray(body.reference_image_urls) ? body.reference_image_urls : [])\n  .filter(u => typeof u === 'string' && u && u !== sourceUrl)\n  .slice(0, 3);   // fal rejects long arrays, and past ~3 the instruction stops steering anything\n// Nano Banana is the default here: instruction-following image editing is its\n// headline capability, and it is the stronger of the two at leaving the rest\n// of the frame untouched while changing exactly what was asked for.\nconst provider    = body.provider === 'openai' ? 'openai' : 'gemini';\n\n// Order carries meaning to both models — the first image is the one being\n// changed, the rest are only there to look at — but neither model is told\n// that by the schema, so the prompt says it outright. Without this the edit\n// routinely comes back as a blend of the two, which is not what \"use that as\n// a reference\" means.\nfunction editPrompt(){\n  if (!refUrls.length) return instruction;\n  return instruction\n    + '\\n\\nEdit the FIRST image only — that is the image to modify, and everything not mentioned above must stay exactly as it is. '\n    + (refUrls.length > 1 ? 'The following images are' : 'The second image is')\n    + ' supplied purely as visual reference for the change described. Do not merge, collage or copy '\n    + (refUrls.length > 1 ? 'them' : 'it') + ' into the result.';\n}\n\nasync function run(){\n  if (!sourceUrl)   throw new Error('No source image to edit.');\n  if (!instruction) throw new Error('No edit instruction given.');\n\n  const images = [sourceUrl].concat(refUrls);\n  let tempUrl;\n  if (provider === 'openai') {\n    const r = await req({ method:'POST', url:'https://fal.run/fal-ai/gpt-image-2/edit-image',\n      headers:{ Authorization:'Key ' + FAL, 'Content-Type':'application/json' },\n      body:{ prompt: editPrompt(), image_urls: images, quality:'high', output_format:'png', num_images:1 }, json:true });\n    tempUrl = (r.images && r.images[0] && r.images[0].url) || (r.image && r.image.url);\n  } else {\n    const b = { prompt: editPrompt(), image_urls: images, resolution:'2K', output_format:'png', num_images:1 };\n    // 'auto' keeps the source's own shape, which is what an edit should do\n    // unless the caller deliberately asks for a different frame.\n    if (aspect && aspect !== 'auto') b.aspect_ratio = aspect;\n    const r = await req({ method:'POST', url:'https://fal.run/fal-ai/nano-banana-2/edit',\n      headers:{ Authorization:'Key ' + FAL, 'Content-Type':'application/json' }, body: b, json:true });\n    tempUrl = (r.images && r.images[0] && r.images[0].url) || (r.image && r.image.url);\n  }\n  if (!tempUrl) throw new Error('The edit returned no image.');\n\n  const buf = await req({ method:'GET', url: tempUrl, encoding:'arraybuffer' });\n  if (!looksLikeImage(buf)) {\n    throw new Error('Edited file is not a real image (' + buf.length + ' bytes, starts with \"' + buf.toString('ascii', 0, 16) + '\")');\n  }\n  const base = versionId + '-' + Date.now() + '.png';\n  const filename = (sessionId ? sessionId + '/' : '') + base;\n  return {\n    json: { _ok: true, version_id: versionId, provider, bucket: BUCKET, filename },\n    binary: { data: await prepareBinaryData(buf, base, 'image/png') },\n  };\n}\n\ntry { return await run(); }\ncatch (err) {\n  return { json: { _ok: false, version_id: versionId, provider,\n                   error: (err && err.message) ? err.message : String(err) } };\n}\n"
+      },
+      "id": "2df94ecd-b612-5bee-b1b8-ee9e5012e1d3",
+      "name": "Edit Image",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "creative-gate-1",
+              "leftValue": "={{ $json._ok === true }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "0df77d3d-d95d-5ce7-9d7a-bd266c1d4794",
+      "name": "Generated OK?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        660,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ String($env.SUPABASE_URL).replace(/\\/+$/, '') }}/storage/v1/object/{{ $json.bucket }}/{{ $json.filename }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SUPABASE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "image/png"
+            },
+            {
+              "name": "x-upsert",
+              "value": "true"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "binaryData",
+        "inputDataFieldName": "data",
+        "options": {}
+      },
+      "id": "7df3ac3c-98fe-55f8-a28e-bf19f5500503",
+      "name": "Upload to Supabase Storage",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        880,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ String($env.SUPABASE_URL).replace(/\\/+$/, '') }}/rest/v1/creative_versions?id=eq.{{ $('Edit Image').item.json.version_id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SUPABASE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ status: 'ready', error: '', image_url: String($env.SUPABASE_URL).replace(/\\/+$/, '') + '/storage/v1/object/public/' + $('Edit Image').item.json.bucket + '/' + $('Edit Image').item.json.filename }) }}",
+        "options": {}
+      },
+      "id": "da8bc2cc-7c1b-5402-8d37-7a298a728f2f",
+      "name": "Supabase: Save Version",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1100,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ String($env.SUPABASE_URL).replace(/\\/+$/, '') }}/rest/v1/creative_versions?id=eq.{{ $json.version_id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SUPABASE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ status: 'failed', error: String($json.error || 'Generation failed.') }) }}",
+        "options": {}
+      },
+      "id": "c19f43db-2340-5772-843e-bdf14a776c75",
+      "name": "Supabase: Mark Failed",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        880,
+        400
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Respond: Accepted",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respond: Accepted": {
+      "main": [
+        [
+          {
+            "node": "Edit Image",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Image": {
+      "main": [
+        [
+          {
+            "node": "Generated OK?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generated OK?": {
+      "main": [
+        [
+          {
+            "node": "Upload to Supabase Storage",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Supabase: Mark Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload to Supabase Storage": {
+      "main": [
+        [
+          {
+            "node": "Supabase: Save Version",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": []
+}

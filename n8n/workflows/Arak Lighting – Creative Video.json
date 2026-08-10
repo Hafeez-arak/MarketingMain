@@ -1,0 +1,284 @@
+{
+  "name": "Arak Lighting – Creative Video",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Creative Studio — Video (Seedance)\n\nPOST `arak-creative-video`\n```\n{ session_id, version_id, prompt, image_url?, duration?, aspect_ratio?, resolution? }\n```\n\n`image_url` present → image-to-video; absent → text-to-video, because a\nsession may be image-only, video-only, or image-then-video.\n\nSwap to Higgsfield later by changing MODEL_I2V / MODEL_T2V at the top of\nthe Code node — nothing else in the workflow is Seedance-specific.\n\nNeeds env: FAL_KEY, SUPABASE_URL, SUPABASE_KEY.",
+        "height": 360,
+        "width": 460
+      },
+      "id": "3ecff9f9-e65b-52fd-93e3-dd57826d0b8f",
+      "name": "Note: Overview",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        -180
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "arak-creative-video",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "684a724b-0b0c-5b3f-8a3d-6969abe88c05",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        300
+      ],
+      "webhookId": "arak-creative-video"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ status: 'accepted', version_id: $json.body.version_id }) }}",
+        "options": {}
+      },
+      "id": "0eda5619-a0d2-532e-a908-04242d153cb1",
+      "name": "Respond: Accepted",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        220,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst http = this.helpers.httpRequest;\nconst prepareBinaryData = this.helpers.prepareBinaryData;\nconst FAL = $env.FAL_KEY;\n\n// Pull the provider's ACTUAL message out of whatever shape n8n wrapped it in.\n// Verified necessary 2026-08-09: an exhausted fal balance reached the card as\n// the useless \"Request failed with status code 403\", when fal had actually\n// replied {\"detail\":\"User is locked. Reason: Exhausted balance.\"}. Those two\n// strings lead to completely different actions, so this walks every container\n// the body might hide in — including `response.body` and `cause`, which the\n// older unwrapper (still used by the other workflows) misses — and only falls\n// back to n8n's generic text when nothing real is found.\nfunction errText(e){\n  const candidates = [\n    e && e.response && e.response.data,\n    e && e.response && e.response.body,\n    e && e.error,\n    e && e.cause && e.cause.response && e.cause.response.data,\n    e && e.cause && e.cause.error,\n    e && e.cause,\n    e && e.description,\n  ];\n  for (const c of candidates) {\n    if (!c) continue;\n    if (typeof c === 'string' && c.trim()) return c.slice(0, 400);\n    if (Buffer.isBuffer(c)) return c.toString('utf8', 0, 300);\n    if (typeof c === 'object') {\n      if (c.detail) return (typeof c.detail === 'string' ? c.detail : JSON.stringify(c.detail)).slice(0, 400);\n      if (c.error && c.error.message) return String(c.error.message).slice(0, 400);\n      if (c.message && c.message !== (e && e.message)) return String(c.message).slice(0, 400);\n      const s = JSON.stringify(c);\n      if (s && s !== '{}' && s !== 'null') return s.slice(0, 400);\n    }\n  }\n  return (e && e.message) || String(e);\n}\n\nfunction bodyText(body, status){\n  if (body == null) return 'HTTP ' + status;\n  if (Buffer.isBuffer(body)) return 'HTTP ' + status + ': ' + body.toString('utf8', 0, 300);\n  if (typeof body === 'string') return 'HTTP ' + status + ': ' + body.slice(0, 400);\n  if (typeof body === 'object') {\n    if (body.detail) return (typeof body.detail === 'string' ? body.detail : JSON.stringify(body.detail)).slice(0, 400);\n    if (body.error && body.error.message) return String(body.error.message).slice(0, 400);\n    if (body.message) return String(body.message).slice(0, 400);\n    return 'HTTP ' + status + ': ' + JSON.stringify(body).slice(0, 400);\n  }\n  return 'HTTP ' + status;\n}\n\n// Don't let n8n throw on a non-2xx at all — ask for the full response and\n// judge the status here. Measured 2026-08-09: when n8n raises the error\n// itself, the provider's body is NOT reachable from the thrown object by any\n// path (errText below was tried and still yielded \"Request failed with status\n// code 403\"), so an exhausted balance and a rejected prompt were\n// indistinguishable on the card. Reading the body directly is the only way to\n// get the real reason out. errText stays as the fallback for older n8n builds\n// that ignore ignoreHttpStatusErrors and throw regardless.\nasync function req(opts){\n  let full;\n  try {\n    full = await http(Object.assign({}, opts, { returnFullResponse: true, ignoreHttpStatusErrors: true }));\n  } catch (e) {\n    throw new Error(errText(e));\n  }\n  const status = (full && (full.statusCode || full.status)) || 200;\n  const body = (full && full.body !== undefined) ? full.body : full;\n  if (status >= 400) throw new Error(bodyText(body, status));\n  return body;\n}\n\n// A byte-count threshold is not enough — a corrupted buffer can be LARGER\n// than the real file (a JSON-stringified Buffer is ~7x bigger), which is how\n// a broken image once saved silently with no error anywhere. Check the actual\n// file signature instead.\nfunction looksLikeImage(buf){\n  if (!buf || buf.length < 12) return false;\n  const head = buf.toString('ascii', 0, 12);\n  return head.startsWith('\\x89PNG')\n      || (buf[0] === 0xFF && buf[1] === 0xD8)\n      || (head.startsWith('RIFF') && head.indexOf('WEBP') !== -1);\n}\n\n// gpt-image-2 takes named size buckets, not free ratios. 9:16 maps exactly\n// (portrait_16_9); 4:5 has no exact bucket, so it generates at 3:4 and the\n// prompt asks for a centre-safe composition that survives the crop to 4:5.\nconst GPT_SIZE = {\n  '1:1': 'square_hd', '4:5': 'portrait_4_3', '3:4': 'portrait_4_3',\n  '9:16': 'portrait_16_9', '16:9': 'landscape_16_9',\n  '1.91:1': 'landscape_16_9', '4:3': 'landscape_4_3', '3:2': 'landscape_4_3',\n};\n\nconst BUCKET = 'creative-studio';\n// Seedance today; the endpoints are named here rather than inline so swapping\n// in Higgsfield later is a one-line change in this block.\nconst MODEL_I2V = 'fal-ai/bytedance/seedance/v1/pro/image-to-video';\nconst MODEL_T2V = 'fal-ai/bytedance/seedance/v1/pro/text-to-video';\n\n// MP4's magic bytes are an 'ftyp' box at offset 4, not at the start the way\n// image formats are — a truncated download otherwise looks byte-plausible and\n// corrupts the asset silently.\nfunction looksLikeVideo(buf){\n  if (!buf || buf.length < 12) return false;\n  return buf.toString('ascii', 4, 8) === 'ftyp';\n}\n\nconst body = ($input.first().json.body) || {};\nconst sessionId = body.session_id || '';\nconst versionId = body.version_id || '';\nconst imageUrl  = body.image_url || '';       // absent => text-to-video\nconst prompt    = String(body.prompt || '').trim();\nconst duration  = String(body.duration || '5');\nconst aspect    = body.aspect_ratio || '16:9';\nconst resolution = body.resolution || '1080p';\n\nasync function run(){\n  if (!prompt) throw new Error('No direction given for the video.');\n\n  // Both modes live in one workflow because a session may be image-then-video\n  // OR video-only, and the team works both ways — an image is an optional\n  // starting point, not a prerequisite.\n  const model = imageUrl ? MODEL_I2V : MODEL_T2V;\n  const input = { prompt, duration, resolution };\n  if (imageUrl) { input.image_url = imageUrl; if (aspect) input.aspect_ratio = aspect; }\n  else input.aspect_ratio = aspect;\n\n  const submit = await req({ method:'POST', url:'https://queue.fal.run/' + model,\n    headers:{ Authorization:'Key ' + FAL, 'Content-Type':'application/json' }, body: input, json:true });\n  const requestId = submit.request_id;\n  if (!requestId) throw new Error('fal did not return a request_id: ' + JSON.stringify(submit).slice(0, 250));\n\n  const statusUrl = 'https://queue.fal.run/' + model + '/requests/' + requestId + '/status';\n  const resultUrl = 'https://queue.fal.run/' + model + '/requests/' + requestId;\n\n  // Poll rather than hold a single HTTP call open — video generation\n  // routinely runs longer than any request should stay alive. ~7.5 minutes,\n  // matching the existing Video Render guard.\n  let status = submit.status || 'IN_QUEUE';\n  let tries = 0;\n  while ((status === 'IN_QUEUE' || status === 'IN_PROGRESS') && tries < 150) {\n    await new Promise(r => setTimeout(r, 3000));\n    const s = await req({ method:'GET', url: statusUrl, headers:{ Authorization:'Key ' + FAL }, json:true });\n    status = s.status; tries++;\n  }\n  if (status !== 'COMPLETED') {\n    throw new Error(status === 'IN_QUEUE' || status === 'IN_PROGRESS'\n      ? 'Video generation timed out after ~' + (tries * 3) + 's (request ' + requestId + ')'\n      : 'Video generation ' + status + ' (request ' + requestId + ')');\n  }\n\n  const result = await req({ method:'GET', url: resultUrl, headers:{ Authorization:'Key ' + FAL }, json:true });\n  const videoUrl = result.video && result.video.url;\n  if (!videoUrl) throw new Error('fal returned no video URL: ' + JSON.stringify(result).slice(0, 250));\n\n  const buf = await req({ method:'GET', url: videoUrl, encoding:'arraybuffer' });\n  if (!looksLikeVideo(buf)) {\n    throw new Error('Downloaded file is not a real video (' + buf.length + ' bytes)');\n  }\n  const base = versionId + '-' + Date.now() + '.mp4';\n  const filename = (sessionId ? sessionId + '/' : '') + base;\n  return {\n    json: { _ok: true, version_id: versionId, bucket: BUCKET, filename },\n    binary: { data: await prepareBinaryData(buf, base, 'video/mp4') },\n  };\n}\n\ntry { return await run(); }\ncatch (err) {\n  return { json: { _ok: false, version_id: versionId,\n                   error: (err && err.message) ? err.message : String(err) } };\n}\n"
+      },
+      "id": "15398283-2c7b-5091-a1d2-32f3872604d1",
+      "name": "Render Video",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "creative-gate-1",
+              "leftValue": "={{ $json._ok === true }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "fd7456e7-e7fa-5019-8a77-8ec93fa717db",
+      "name": "Generated OK?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        660,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ String($env.SUPABASE_URL).replace(/\\/+$/, '') }}/storage/v1/object/{{ $json.bucket }}/{{ $json.filename }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SUPABASE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "video/mp4"
+            },
+            {
+              "name": "x-upsert",
+              "value": "true"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "binaryData",
+        "inputDataFieldName": "data",
+        "options": {}
+      },
+      "id": "b8106655-eaf4-5347-b791-2a64a0f54316",
+      "name": "Upload to Supabase Storage",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        880,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ String($env.SUPABASE_URL).replace(/\\/+$/, '') }}/rest/v1/creative_versions?id=eq.{{ $('Render Video').item.json.version_id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SUPABASE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ status: 'ready', error: '', video_url: String($env.SUPABASE_URL).replace(/\\/+$/, '') + '/storage/v1/object/public/' + $('Render Video').item.json.bucket + '/' + $('Render Video').item.json.filename }) }}",
+        "options": {}
+      },
+      "id": "8b1e3302-aa75-5a83-851c-fa417ad5e835",
+      "name": "Supabase: Save Version",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1100,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ String($env.SUPABASE_URL).replace(/\\/+$/, '') }}/rest/v1/creative_versions?id=eq.{{ $json.version_id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SUPABASE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ status: 'failed', error: String($json.error || 'Generation failed.') }) }}",
+        "options": {}
+      },
+      "id": "d0d47c15-37c5-5cf5-ad79-31dfe67962e9",
+      "name": "Supabase: Mark Failed",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        880,
+        400
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Respond: Accepted",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respond: Accepted": {
+      "main": [
+        [
+          {
+            "node": "Render Video",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Render Video": {
+      "main": [
+        [
+          {
+            "node": "Generated OK?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generated OK?": {
+      "main": [
+        [
+          {
+            "node": "Upload to Supabase Storage",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Supabase: Mark Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload to Supabase Storage": {
+      "main": [
+        [
+          {
+            "node": "Supabase: Save Version",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": []
+}

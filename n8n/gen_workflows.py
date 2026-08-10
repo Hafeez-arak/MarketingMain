@@ -6408,6 +6408,775 @@ def build_linkedin_manual_generation() -> dict:
   "tags": []
 }""")
 
+# ============================================================
+# Creative Studio (2026-08-10) — the marketing team's standalone
+# generate → compare → edit → animate surface. Distinct from the plan
+# pipeline above: there is no post, no caption and no schedule here, only
+# the finished asset.
+#
+# Three workflows, all writing to `creative_versions` (see
+# supabase/migrations/20260810_creative_studio.sql). The browser inserts the
+# pending row(s) first and polls them, so every workflow here is
+# fire-and-forget: it answers "accepted" immediately and PATCHes the row when
+# the model returns. A failure PATCHes status='failed' with the real message
+# rather than leaving a spinner running forever.
+#
+# Latest model generation, confirmed available on our FAL_KEY 2026-08-09:
+#   gpt-image-2 / gpt-image-2/edit-image   ("ChatGPT" to the marketing team)
+#   nano-banana-2 / nano-banana-2/edit     ("Gemini")
+#   bytedance/seedance/v1/pro/{image,text}-to-video
+# ============================================================
+
+# Shared preamble: n8n's httpRequest helper throws its own generic "status
+# code 400" before our code can read the provider's actual error body, which
+# on a failed card is indistinguishable between a bad prompt, an expired key
+# and an exhausted balance — the last of which actually happened here. Dig the
+# real message out of every shape the error can take.
+_CREATIVE_REQ_JS = r"""
+const http = this.helpers.httpRequest;
+const prepareBinaryData = this.helpers.prepareBinaryData;
+const FAL = $env.FAL_KEY;
+
+// Pull the provider's ACTUAL message out of whatever shape n8n wrapped it in.
+// Verified necessary 2026-08-09: an exhausted fal balance reached the card as
+// the useless "Request failed with status code 403", when fal had actually
+// replied {"detail":"User is locked. Reason: Exhausted balance."}. Those two
+// strings lead to completely different actions, so this walks every container
+// the body might hide in — including `response.body` and `cause`, which the
+// older unwrapper (still used by the other workflows) misses — and only falls
+// back to n8n's generic text when nothing real is found.
+function errText(e){
+  const candidates = [
+    e && e.response && e.response.data,
+    e && e.response && e.response.body,
+    e && e.error,
+    e && e.cause && e.cause.response && e.cause.response.data,
+    e && e.cause && e.cause.error,
+    e && e.cause,
+    e && e.description,
+  ];
+  for (const c of candidates) {
+    if (!c) continue;
+    if (typeof c === 'string' && c.trim()) return c.slice(0, 400);
+    if (Buffer.isBuffer(c)) return c.toString('utf8', 0, 300);
+    if (typeof c === 'object') {
+      if (c.detail) return (typeof c.detail === 'string' ? c.detail : JSON.stringify(c.detail)).slice(0, 400);
+      if (c.error && c.error.message) return String(c.error.message).slice(0, 400);
+      if (c.message && c.message !== (e && e.message)) return String(c.message).slice(0, 400);
+      const s = JSON.stringify(c);
+      if (s && s !== '{}' && s !== 'null') return s.slice(0, 400);
+    }
+  }
+  return (e && e.message) || String(e);
+}
+
+function bodyText(body, status){
+  if (body == null) return 'HTTP ' + status;
+  if (Buffer.isBuffer(body)) return 'HTTP ' + status + ': ' + body.toString('utf8', 0, 300);
+  if (typeof body === 'string') return 'HTTP ' + status + ': ' + body.slice(0, 400);
+  if (typeof body === 'object') {
+    if (body.detail) return (typeof body.detail === 'string' ? body.detail : JSON.stringify(body.detail)).slice(0, 400);
+    if (body.error && body.error.message) return String(body.error.message).slice(0, 400);
+    if (body.message) return String(body.message).slice(0, 400);
+    return 'HTTP ' + status + ': ' + JSON.stringify(body).slice(0, 400);
+  }
+  return 'HTTP ' + status;
+}
+
+// Don't let n8n throw on a non-2xx at all — ask for the full response and
+// judge the status here. Measured 2026-08-09: when n8n raises the error
+// itself, the provider's body is NOT reachable from the thrown object by any
+// path (errText below was tried and still yielded "Request failed with status
+// code 403"), so an exhausted balance and a rejected prompt were
+// indistinguishable on the card. Reading the body directly is the only way to
+// get the real reason out. errText stays as the fallback for older n8n builds
+// that ignore ignoreHttpStatusErrors and throw regardless.
+async function req(opts){
+  let full;
+  try {
+    full = await http(Object.assign({}, opts, { returnFullResponse: true, ignoreHttpStatusErrors: true }));
+  } catch (e) {
+    throw new Error(errText(e));
+  }
+  const status = (full && (full.statusCode || full.status)) || 200;
+  const body = (full && full.body !== undefined) ? full.body : full;
+  if (status >= 400) throw new Error(bodyText(body, status));
+  return body;
+}
+
+// A byte-count threshold is not enough — a corrupted buffer can be LARGER
+// than the real file (a JSON-stringified Buffer is ~7x bigger), which is how
+// a broken image once saved silently with no error anywhere. Check the actual
+// file signature instead.
+function looksLikeImage(buf){
+  if (!buf || buf.length < 12) return false;
+  const head = buf.toString('ascii', 0, 12);
+  return head.startsWith('\x89PNG')
+      || (buf[0] === 0xFF && buf[1] === 0xD8)
+      || (head.startsWith('RIFF') && head.indexOf('WEBP') !== -1);
+}
+
+// gpt-image-2 takes named size buckets, not free ratios. 9:16 maps exactly
+// (portrait_16_9); 4:5 has no exact bucket, so it generates at 3:4 and the
+// prompt asks for a centre-safe composition that survives the crop to 4:5.
+const GPT_SIZE = {
+  '1:1': 'square_hd', '4:5': 'portrait_4_3', '3:4': 'portrait_4_3',
+  '9:16': 'portrait_16_9', '16:9': 'landscape_16_9',
+  '1.91:1': 'landscape_16_9', '4:3': 'landscape_4_3', '3:2': 'landscape_4_3',
+};
+"""
+
+CREATIVE_GENERATE_JS = _CREATIVE_REQ_JS + r"""
+const BUCKET = 'creative-studio';
+const body = ($input.first().json.body) || {};
+const sessionId   = body.session_id || '';
+const basePrompt  = String(body.prompt || '').trim();
+const aspect      = body.aspect_ratio || '1:1';
+const referenceUrl   = body.reference_url || '';
+const referenceNotes = String(body.reference_notes || '').trim();
+const instructions   = String(body.instructions || '').trim();
+// [{ version_id, provider }] — the browser already inserted these as pending
+// rows, so each candidate has somewhere to land the moment it finishes.
+const targets = Array.isArray(body.targets) ? body.targets : [];
+
+if (!basePrompt) return targets.map(t => ({ json: { _ok: false, version_id: t.version_id, error: 'No prompt to generate from.' } }));
+
+// Two layers. The creative brief — subject, lighting, composition, materials —
+// is IDENTICAL for both candidates, because that is the variable the whole
+// side-by-side screen exists to hold constant: we are comparing the models, not
+// two different prompts. Only the provider MECHANICS differ below, and each of
+// those has a measured reason rather than folklore about prompt styles.
+function buildPrompt(provider){
+  let p = basePrompt;
+  if (instructions) p += '\n\nBRAND CONTEXT:\n' + instructions;
+  if (referenceUrl) {
+    // The team's explicit ask: take inspiration from the reference, do not
+    // reproduce it. Their own note wins over the generic wording when both
+    // are present, because it is a specific instruction rather than a
+    // default.
+    p += referenceNotes
+      ? '\n\nThe supplied reference image is INSPIRATION, not a template. Follow this direction from the requester and prioritise it: ' + referenceNotes
+      : '\n\nUse the supplied reference image as inspiration for style, mood and composition only — do not reproduce it literally.';
+  }
+  if (provider === 'openai') {
+    // gpt-image-2 has no exact 4:5 bucket, so it generates at 3:4 and is
+    // centre-cropped below — the subject has to survive losing top and bottom.
+    // Nano Banana hits 4:5 natively and needs no such warning.
+    if (aspect === '4:5') p += '\n\nCompose with the subject centred and clear of the top and bottom edges; this image will be cropped to a taller 4:5 frame.';
+    // Measured 2026-08-09: gpt-image-2 invented an "ARAK LIGHTING / RIYADH
+    // SAUDI ARABIA" wordmark on a wall that nothing in the prompt asked for.
+    // nano-banana-2, same prompt, did not — so this is a GPT-only counter
+    // rather than a shared rule, which would otherwise suppress legitimate
+    // in-scene signage on the Gemini candidate for no reason.
+    p += '\n\nDo not add any logo, wordmark, watermark, signage or brand lockup that is not explicitly described above.';
+  }
+  return p;
+}
+
+async function genGemini(){
+  const useEdit = !!referenceUrl;
+  const endpoint = useEdit ? 'fal-ai/nano-banana-2/edit' : 'fal-ai/nano-banana-2';
+  const b = { prompt: buildPrompt('gemini'), aspect_ratio: aspect, resolution: '2K', output_format: 'png', num_images: 1 };
+  if (useEdit) b.image_urls = [referenceUrl];
+  const r = await req({ method:'POST', url:'https://fal.run/' + endpoint,
+    headers:{ Authorization:'Key ' + FAL, 'Content-Type':'application/json' }, body: b, json:true });
+  const url = (r.images && r.images[0] && r.images[0].url) || (r.image && r.image.url);
+  if (!url) throw new Error('nano-banana-2 returned no image');
+  return url;
+}
+
+async function genOpenAI(){
+  const useEdit = !!referenceUrl;
+  const endpoint = useEdit ? 'fal-ai/gpt-image-2/edit-image' : 'fal-ai/gpt-image-2';
+  const b = { prompt: buildPrompt('openai'), image_size: GPT_SIZE[aspect] || 'square_hd',
+              quality: 'high', output_format: 'png', num_images: 1 };
+  if (useEdit) b.image_urls = [referenceUrl];
+  const r = await req({ method:'POST', url:'https://fal.run/' + endpoint,
+    headers:{ Authorization:'Key ' + FAL, 'Content-Type':'application/json' }, body: b, json:true });
+  const url = (r.images && r.images[0] && r.images[0].url) || (r.image && r.image.url);
+  if (!url) throw new Error('gpt-image-2 returned no image');
+  return url;
+}
+
+// fal's own URLs are not guaranteed to persist, and every later step (edit,
+// animate, overlay) re-reads this image — so it is copied into our bucket now
+// rather than trusted to still be there in ten minutes.
+async function oneCandidate(target){
+  const tempUrl = target.provider === 'openai' ? await genOpenAI() : await genGemini();
+  const buf = await req({ method:'GET', url: tempUrl, encoding:'arraybuffer' });
+  if (!looksLikeImage(buf)) {
+    throw new Error('Downloaded file is not a real image (' + buf.length + ' bytes, starts with "' + buf.toString('ascii', 0, 16) + '")');
+  }
+  const base = target.version_id + '-' + Date.now() + '.png';
+  const filename = (sessionId ? sessionId + '/' : '') + base;
+  return {
+    json: { _ok: true, version_id: target.version_id, provider: target.provider, bucket: BUCKET, filename },
+    binary: { data: await prepareBinaryData(buf, base, 'image/png') },
+  };
+}
+
+// allSettled, not all — the whole point of this screen is a side-by-side
+// comparison, and one provider erroring should still leave the other one
+// standing rather than blanking the round.
+const settled = await Promise.allSettled(targets.map(oneCandidate));
+return settled.map((s, i) => s.status === 'fulfilled' ? s.value : ({
+  json: { _ok: false, version_id: targets[i].version_id, provider: targets[i].provider,
+          error: (s.reason && s.reason.message) ? s.reason.message : String(s.reason) },
+}));
+"""
+
+CREATIVE_EDIT_JS = _CREATIVE_REQ_JS + r"""
+const BUCKET = 'creative-studio';
+const body = ($input.first().json.body) || {};
+const sessionId   = body.session_id || '';
+const versionId   = body.version_id || '';
+const sourceUrl   = body.source_image_url || '';
+const instruction = String(body.instruction || '').trim();
+const aspect      = body.aspect_ratio || 'auto';
+// Extra images to look at while editing — in practice the OTHER candidate,
+// dragged across from its chat ("give this one that one's lighting"). Both
+// edit endpoints take an image_urls ARRAY, so this needs no second call and
+// no compositing: the model sees the base and the reference together.
+const refUrls = (Array.isArray(body.reference_image_urls) ? body.reference_image_urls : [])
+  .filter(u => typeof u === 'string' && u && u !== sourceUrl)
+  .slice(0, 3);   // fal rejects long arrays, and past ~3 the instruction stops steering anything
+// Nano Banana is the default here: instruction-following image editing is its
+// headline capability, and it is the stronger of the two at leaving the rest
+// of the frame untouched while changing exactly what was asked for.
+const provider    = body.provider === 'openai' ? 'openai' : 'gemini';
+
+// Order carries meaning to both models — the first image is the one being
+// changed, the rest are only there to look at — but neither model is told
+// that by the schema, so the prompt says it outright. Without this the edit
+// routinely comes back as a blend of the two, which is not what "use that as
+// a reference" means.
+function editPrompt(){
+  if (!refUrls.length) return instruction;
+  return instruction
+    + '\n\nEdit the FIRST image only — that is the image to modify, and everything not mentioned above must stay exactly as it is. '
+    + (refUrls.length > 1 ? 'The following images are' : 'The second image is')
+    + ' supplied purely as visual reference for the change described. Do not merge, collage or copy '
+    + (refUrls.length > 1 ? 'them' : 'it') + ' into the result.';
+}
+
+async function run(){
+  if (!sourceUrl)   throw new Error('No source image to edit.');
+  if (!instruction) throw new Error('No edit instruction given.');
+
+  const images = [sourceUrl].concat(refUrls);
+  let tempUrl;
+  if (provider === 'openai') {
+    const r = await req({ method:'POST', url:'https://fal.run/fal-ai/gpt-image-2/edit-image',
+      headers:{ Authorization:'Key ' + FAL, 'Content-Type':'application/json' },
+      body:{ prompt: editPrompt(), image_urls: images, quality:'high', output_format:'png', num_images:1 }, json:true });
+    tempUrl = (r.images && r.images[0] && r.images[0].url) || (r.image && r.image.url);
+  } else {
+    const b = { prompt: editPrompt(), image_urls: images, resolution:'2K', output_format:'png', num_images:1 };
+    // 'auto' keeps the source's own shape, which is what an edit should do
+    // unless the caller deliberately asks for a different frame.
+    if (aspect && aspect !== 'auto') b.aspect_ratio = aspect;
+    const r = await req({ method:'POST', url:'https://fal.run/fal-ai/nano-banana-2/edit',
+      headers:{ Authorization:'Key ' + FAL, 'Content-Type':'application/json' }, body: b, json:true });
+    tempUrl = (r.images && r.images[0] && r.images[0].url) || (r.image && r.image.url);
+  }
+  if (!tempUrl) throw new Error('The edit returned no image.');
+
+  const buf = await req({ method:'GET', url: tempUrl, encoding:'arraybuffer' });
+  if (!looksLikeImage(buf)) {
+    throw new Error('Edited file is not a real image (' + buf.length + ' bytes, starts with "' + buf.toString('ascii', 0, 16) + '")');
+  }
+  const base = versionId + '-' + Date.now() + '.png';
+  const filename = (sessionId ? sessionId + '/' : '') + base;
+  return {
+    json: { _ok: true, version_id: versionId, provider, bucket: BUCKET, filename },
+    binary: { data: await prepareBinaryData(buf, base, 'image/png') },
+  };
+}
+
+try { return await run(); }
+catch (err) {
+  return { json: { _ok: false, version_id: versionId, provider,
+                   error: (err && err.message) ? err.message : String(err) } };
+}
+"""
+
+CREATIVE_VIDEO_JS = _CREATIVE_REQ_JS + r"""
+const BUCKET = 'creative-studio';
+// Seedance today; the endpoints are named here rather than inline so swapping
+// in Higgsfield later is a one-line change in this block.
+const MODEL_I2V = 'fal-ai/bytedance/seedance/v1/pro/image-to-video';
+const MODEL_T2V = 'fal-ai/bytedance/seedance/v1/pro/text-to-video';
+
+// MP4's magic bytes are an 'ftyp' box at offset 4, not at the start the way
+// image formats are — a truncated download otherwise looks byte-plausible and
+// corrupts the asset silently.
+function looksLikeVideo(buf){
+  if (!buf || buf.length < 12) return false;
+  return buf.toString('ascii', 4, 8) === 'ftyp';
+}
+
+const body = ($input.first().json.body) || {};
+const sessionId = body.session_id || '';
+const versionId = body.version_id || '';
+const imageUrl  = body.image_url || '';       // absent => text-to-video
+const prompt    = String(body.prompt || '').trim();
+const duration  = String(body.duration || '5');
+const aspect    = body.aspect_ratio || '16:9';
+const resolution = body.resolution || '1080p';
+
+async function run(){
+  if (!prompt) throw new Error('No direction given for the video.');
+
+  // Both modes live in one workflow because a session may be image-then-video
+  // OR video-only, and the team works both ways — an image is an optional
+  // starting point, not a prerequisite.
+  const model = imageUrl ? MODEL_I2V : MODEL_T2V;
+  const input = { prompt, duration, resolution };
+  if (imageUrl) { input.image_url = imageUrl; if (aspect) input.aspect_ratio = aspect; }
+  else input.aspect_ratio = aspect;
+
+  const submit = await req({ method:'POST', url:'https://queue.fal.run/' + model,
+    headers:{ Authorization:'Key ' + FAL, 'Content-Type':'application/json' }, body: input, json:true });
+  const requestId = submit.request_id;
+  if (!requestId) throw new Error('fal did not return a request_id: ' + JSON.stringify(submit).slice(0, 250));
+
+  const statusUrl = 'https://queue.fal.run/' + model + '/requests/' + requestId + '/status';
+  const resultUrl = 'https://queue.fal.run/' + model + '/requests/' + requestId;
+
+  // Poll rather than hold a single HTTP call open — video generation
+  // routinely runs longer than any request should stay alive. ~7.5 minutes,
+  // matching the existing Video Render guard.
+  let status = submit.status || 'IN_QUEUE';
+  let tries = 0;
+  while ((status === 'IN_QUEUE' || status === 'IN_PROGRESS') && tries < 150) {
+    await new Promise(r => setTimeout(r, 3000));
+    const s = await req({ method:'GET', url: statusUrl, headers:{ Authorization:'Key ' + FAL }, json:true });
+    status = s.status; tries++;
+  }
+  if (status !== 'COMPLETED') {
+    throw new Error(status === 'IN_QUEUE' || status === 'IN_PROGRESS'
+      ? 'Video generation timed out after ~' + (tries * 3) + 's (request ' + requestId + ')'
+      : 'Video generation ' + status + ' (request ' + requestId + ')');
+  }
+
+  const result = await req({ method:'GET', url: resultUrl, headers:{ Authorization:'Key ' + FAL }, json:true });
+  const videoUrl = result.video && result.video.url;
+  if (!videoUrl) throw new Error('fal returned no video URL: ' + JSON.stringify(result).slice(0, 250));
+
+  const buf = await req({ method:'GET', url: videoUrl, encoding:'arraybuffer' });
+  if (!looksLikeVideo(buf)) {
+    throw new Error('Downloaded file is not a real video (' + buf.length + ' bytes)');
+  }
+  const base = versionId + '-' + Date.now() + '.mp4';
+  const filename = (sessionId ? sessionId + '/' : '') + base;
+  return {
+    json: { _ok: true, version_id: versionId, bucket: BUCKET, filename },
+    binary: { data: await prepareBinaryData(buf, base, 'video/mp4') },
+  };
+}
+
+try { return await run(); }
+catch (err) {
+  return { json: { _ok: false, version_id: versionId,
+                   error: (err && err.message) ? err.message : String(err) } };
+}
+"""
+
+
+CREATIVE_ENHANCE_STICKY = """## Creative Studio — Enhance Prompt
+
+POST `arak-creative-enhance`
+
+**Synchronous**, unlike the other three Creative workflows: this is a ~2s text
+call whose answer goes straight back into the composer's text box, so there is
+no pending row to insert and nothing to poll. Same shape as Elongate Idea.
+
+Turns a rough brief into a written prompt. Two modes:
+- `image` — fills in lighting, framing, materials, colour temperature. Never
+  changes the subject, and never adds text to the image (words go on later as
+  a real editable layer, so baked-in text would be unusable).
+- `motion` — camera movement and motion only, max 40 words. The still already
+  exists; restating the scene fights the source frame.
+
+Model is `claude-sonnet-5` with thinking **explicitly disabled** and low effort.
+Both matter: Sonnet 5 runs adaptive thinking when `thinking` is omitted, which
+triples the latency of a button the user is waiting on and shares `max_tokens`
+with the answer. Low effort also keeps it filling gaps instead of embellishing
+past the brief — the failure mode that makes a prompt enhancer useless.
+
+The result is ALWAYS shown in the composer before anything generates. This
+workflow never triggers a generation itself.
+"""
+
+CREATIVE_ENHANCE_JS = _CREATIVE_REQ_JS + r"""
+const ANTHROPIC = $env.ANTHROPIC_API_KEY;
+
+const body = ($input.first().json.body) || {};
+const mode         = body.mode === 'motion' ? 'motion' : 'image';
+const rawPrompt    = String(body.prompt || '').trim();
+const aspect       = body.aspect_ratio || '1:1';
+const duration     = String(body.duration || '5');
+const instructions = String(body.instructions || '').trim();
+const refNotes     = String(body.reference_notes || '').trim();
+const hasReference = !!body.has_reference;
+const sourcePrompt = String(body.source_prompt || '').trim();
+
+if (!rawPrompt) return [{ json: { ok: false, error: 'Nothing to enhance yet.' } }];
+
+// Cached prefix: identical on every click, so it carries the whole rule set
+// plus brand context. Sonnet 5 needs a 1024-token prefix to cache at all — if
+// usage.cache_read_input_tokens stays 0 across clicks, this is under the floor
+// and the breakpoint is only paying the write premium; drop it then.
+const IMAGE_RULES = `You rewrite rough image briefs into precise prompts for an AI image generator, for Arak Lighting — Saudi Arabia's leading architectural lighting company (45+ years; Solitaire Mall, King Fahad Airport, Ritz Carlton Riyadh).
+
+Rules, in priority order:
+
+1. NEVER change the subject. Elaborate what the requester actually asked for. Do not substitute a different idea, setting or mood, however much better it would be.
+2. Do NOT put text, lettering, captions or typography in the image unless the requester explicitly asked for it. Words are added afterwards as a real editable text layer, so an image generated with baked-in text is unusable. If they DID ask for text in the scene, quote their exact string verbatim (Arabic included, character for character) and add: render this text exactly — no other text anywhere in the image.
+3. Add the concrete lighting detail a photographer would need: colour temperature (2700K warm through 4000K neutral to 5000K cool), fixture type and technique (grazing, wall-wash, cove, linear, uplight, downlight, backlight), beam quality, time of day, and how the light reads across the specific materials in frame.
+4. Fill gaps only. Add lighting, framing, lens, materials and colour temperature. Leave subject, setting and mood exactly as stated. If a detail was not implied by the requester, do not invent it.
+5. 60–120 words. Do not pad to reach a length; a brief that needed little may come back short.
+6. Write flowing descriptive prose, not a keyword list.
+
+Output the prompt text only. No preamble, no quotes, no markdown, no explanation.`;
+
+const MOTION_RULES = `You rewrite rough animation notes into motion prompts for an AI image-to-video model (Seedance, 2–12 second clips), for Arak Lighting.
+
+The still image already exists. Rules:
+
+1. Describe CAMERA MOVEMENT AND MOTION ONLY. Do not re-describe the subject, the lighting or the setting — they are already in the frame, and restating them fights the source image.
+2. One movement, paced to the clip length. A 5-second clip gets one slow move, not three.
+3. House style: slow cinematic pan, gentle dolly in, subtle parallax, soft light bloom, drifting shadow.
+4. Never mention text, captions or titles. Text is composited onto the finished clip afterwards.
+5. Maximum 40 words.
+
+Output the prompt text only. No preamble, no quotes, no markdown.`;
+
+const cachedPrefix = (mode === 'motion' ? MOTION_RULES : IMAGE_RULES)
+  + (instructions ? '\n\nBRAND CONTEXT:\n' + instructions : '');
+
+let variable;
+if (mode === 'motion') {
+  variable = 'THE STILL IT ANIMATES:\n' + (sourcePrompt || '(not recorded)') + '\n\n'
+    + 'CLIP LENGTH: ' + duration + ' seconds\n\n'
+    + 'THEIR ANIMATION NOTE:\n"' + rawPrompt + '"';
+} else {
+  variable = 'FRAME SHAPE: ' + aspect + '\n'
+    + (hasReference
+        ? 'A REFERENCE IMAGE IS ATTACHED (inspiration only, never reproduced)'
+          + (refNotes ? '. Their note on it: ' + refNotes : '') + '\n'
+        : '')
+    + '\nTHEIR BRIEF:\n"' + rawPrompt + '"';
+}
+
+try {
+  const resp = await req({ method:'POST', url:'https://api.anthropic.com/v1/messages',
+    headers:{ 'x-api-key':ANTHROPIC, 'anthropic-version':'2023-06-01', 'content-type':'application/json' },
+    body:{
+      model:'claude-sonnet-5',
+      max_tokens: 800,
+      // Explicit, not omitted. Sonnet 5 runs adaptive thinking by default,
+      // which is 3-4x the latency for a bounded rewrite and shares max_tokens
+      // with the answer itself.
+      thinking: { type: 'disabled' },
+      output_config: { effort: mode === 'motion' ? 'medium' : 'low' },
+      messages:[{ role:'user', content:[
+        { type:'text', text: cachedPrefix, cache_control:{ type:'ephemeral' } },
+        { type:'text', text: variable },
+      ] }],
+    },
+    json:true });
+
+  if (!resp || resp.type === 'error' || !Array.isArray(resp.content)) {
+    throw new Error('Enhance call failed: ' + (resp && resp.error && resp.error.message ? resp.error.message : JSON.stringify(resp).slice(0, 300)));
+  }
+  // Find the text block by type rather than indexing content[0] — block order
+  // is not contractual even with thinking disabled.
+  const textBlock = resp.content.find(b => b.type === 'text');
+  const out = String((textBlock && textBlock.text) || '').trim().replace(/^["']|["']$/g, '');
+  if (!out) throw new Error('The model returned an empty prompt.');
+
+  return [{ json: { ok: true, prompt: out, mode } }];
+} catch (err) {
+  return [{ json: { ok: false, error: (err && err.message) ? err.message : String(err) } }];
+}
+"""
+
+
+def _http_creative_upload(source_node: str, mime: str, name: str, x: int, y: int) -> dict:
+    """Binary upload to the creative-studio bucket.
+
+    The bytes cannot be uploaded from inside the Code node: httpRequest is
+    proxied to n8n's main process as one JSON.stringify'd message, and a
+    Buffer nested inside the options object is never reconstructed — it
+    arrives as the literal text '{"type":"Buffer","data":[...]}'. Only
+    prepareBinaryData (a top-level RPC argument) survives, so the Code node
+    prepares and this real HTTP node, running in the main process, uploads.
+    """
+    return {
+        "parameters": {
+            "method": "POST",
+            "url": "={{ String($env.SUPABASE_URL).replace(/\\/+$/, '') }}/storage/v1/object/{{ $json.bucket }}/{{ $json.filename }}",
+            "sendHeaders": True,
+            "headerParameters": {
+                "parameters": [
+                    {"name": "apikey", "value": "={{ $env.SUPABASE_KEY }}"},
+                    {"name": "Authorization", "value": "=Bearer {{ $env.SUPABASE_KEY }}"},
+                    {"name": "Content-Type", "value": mime},
+                    {"name": "x-upsert", "value": "true"},
+                ]
+            },
+            "sendBody": True,
+            "contentType": "binaryData",
+            "inputDataFieldName": "data",
+            "options": {},
+        },
+        "id": nid(),
+        "name": name,
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [x, y],
+    }
+
+
+def _http_creative_save(source_node: str, media_field: str, name: str, x: int, y: int) -> dict:
+    """PATCH the version row to 'ready' with its now-permanent public URL.
+
+    Reads `source_node` rather than this node's own input for the same reason
+    Supabase: Save Video URL does — an HTTP node's json is the upload
+    response, not the upstream item, so bucket/filename/version_id have to
+    come from the Code node by paired-item lookup.
+    """
+    ref = f"$('{source_node}').item.json"
+    body_expr = (
+        "={{ JSON.stringify({ status: 'ready', error: '', " + media_field + ": "
+        "String($env.SUPABASE_URL).replace(/\\/+$/, '') + '/storage/v1/object/public/' "
+        f"+ {ref}.bucket + '/' + {ref}.filename" + " }) }}"
+    )
+    return {
+        "parameters": {
+            "method": "PATCH",
+            "url": "={{ String($env.SUPABASE_URL).replace(/\\/+$/, '') }}"
+                   f"/rest/v1/creative_versions?id=eq.{{{{ {ref}.version_id }}}}",
+            "sendHeaders": True,
+            "headerParameters": {
+                "parameters": [
+                    {"name": "apikey", "value": "={{ $env.SUPABASE_KEY }}"},
+                    {"name": "Authorization", "value": "=Bearer {{ $env.SUPABASE_KEY }}"},
+                    {"name": "Content-Type", "value": "application/json"},
+                    {"name": "Prefer", "value": "return=minimal"},
+                ]
+            },
+            "sendBody": True,
+            "specifyBody": "json",
+            "jsonBody": body_expr,
+            "options": {},
+        },
+        "id": nid(),
+        "name": name,
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [x, y],
+    }
+
+
+def _http_creative_fail(name: str, x: int, y: int) -> dict:
+    """PATCH the version row to 'failed' with the real provider message.
+
+    Without this branch a failed generation leaves the card spinning forever
+    with nothing to explain it — which is exactly how an exhausted fal balance
+    would present to the marketing team.
+    """
+    return {
+        "parameters": {
+            "method": "PATCH",
+            "url": "={{ String($env.SUPABASE_URL).replace(/\\/+$/, '') }}"
+                   "/rest/v1/creative_versions?id=eq.{{ $json.version_id }}",
+            "sendHeaders": True,
+            "headerParameters": {
+                "parameters": [
+                    {"name": "apikey", "value": "={{ $env.SUPABASE_KEY }}"},
+                    {"name": "Authorization", "value": "=Bearer {{ $env.SUPABASE_KEY }}"},
+                    {"name": "Content-Type", "value": "application/json"},
+                    {"name": "Prefer", "value": "return=minimal"},
+                ]
+            },
+            "sendBody": True,
+            "specifyBody": "json",
+            "jsonBody": "={{ JSON.stringify({ status: 'failed', error: String($json.error || 'Generation failed.') }) }}",
+            "options": {},
+        },
+        "id": nid(),
+        "name": name,
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [x, y],
+    }
+
+
+CREATIVE_GENERATE_STICKY = """## Creative Studio — Generate (2 candidates)
+
+POST `arak-creative-generate`
+```
+{ session_id, targets: [{version_id, provider:'openai'|'gemini'}],
+  prompt, aspect_ratio, reference_url?, reference_notes?, instructions? }
+```
+
+The browser inserts BOTH pending `creative_versions` rows first and polls
+them, so this answers 'accepted' at once and fills each row as its model
+returns. One provider failing still leaves the other candidate — the whole
+point of the screen is a side-by-side choice.
+
+Models: `gpt-image-2` + `nano-banana-2` (their `/edit` variants when a
+reference image is supplied — reference = inspiration, never a copy).
+
+Needs env: FAL_KEY, SUPABASE_URL, SUPABASE_KEY."""
+
+CREATIVE_EDIT_STICKY = """## Creative Studio — Edit
+
+POST `arak-creative-edit`
+```
+{ session_id, version_id, source_image_url, instruction,
+  reference_image_urls?: string[], provider?: 'gemini'|'openai', aspect_ratio? }
+```
+
+`source_image_url` is the image being changed; `reference_image_urls` (max 3)
+are only looked at. Both go to the model in ONE `image_urls` array, first
+position first, and the prompt is extended to say which is which — the
+schema doesn't distinguish them, and without that sentence the edit comes
+back as a blend of the two. This is what the studio's drag-an-image-from-the-
+other-chat gesture sends.
+
+One conversational edit → one new version row. Nano Banana by default:
+instruction-following editing is its headline strength and it leaves the
+rest of the frame alone.
+
+NOTE: edits to TEXT on an image should normally go through the app's own
+overlay editor instead — real text is exact in Arabic and stays editable,
+where anything a model paints is baked pixels forever.
+
+Needs env: FAL_KEY, SUPABASE_URL, SUPABASE_KEY."""
+
+CREATIVE_VIDEO_STICKY = """## Creative Studio — Video (Seedance)
+
+POST `arak-creative-video`
+```
+{ session_id, version_id, prompt, image_url?, duration?, aspect_ratio?, resolution? }
+```
+
+`image_url` present → image-to-video; absent → text-to-video, because a
+session may be image-only, video-only, or image-then-video.
+
+Swap to Higgsfield later by changing MODEL_I2V / MODEL_T2V at the top of
+the Code node — nothing else in the workflow is Seedance-specific.
+
+Needs env: FAL_KEY, SUPABASE_URL, SUPABASE_KEY."""
+
+
+def _build_creative_workflow(name, webhook_path, sticky, js, code_node_name,
+                             mime, media_field, accepted_expr) -> dict:
+    """The shape all three Creative Studio workflows share:
+
+    Webhook -> Respond: Accepted -> <Code> -> OK? -> (yes) Upload -> Save
+                                                  -> (no)  Mark Failed
+    """
+    nodes = [
+        _sticky(sticky, height=360, width=460, x=0, y=-180),
+        _webhook(webhook_path, "responseNode", x=0, y=300),
+        _respond_json("Respond: Accepted", accepted_expr, x=220, y=300),
+        _code(code_node_name, js, x=440, y=300),
+        _if_bool_equals("Generated OK?", "creative-gate-1", "={{ $json._ok === true }}", x=660, y=300),
+        _http_creative_upload(code_node_name, mime, "Upload to Supabase Storage", x=880, y=200),
+        _http_creative_save(code_node_name, media_field, "Supabase: Save Version", x=1100, y=200),
+        _http_creative_fail("Supabase: Mark Failed", x=880, y=400),
+    ]
+    connections = {
+        "Webhook": {"main": [[{"node": "Respond: Accepted", "type": "main", "index": 0}]]},
+        "Respond: Accepted": {"main": [[{"node": code_node_name, "type": "main", "index": 0}]]},
+        code_node_name: {"main": [[{"node": "Generated OK?", "type": "main", "index": 0}]]},
+        "Generated OK?": {
+            "main": [
+                [{"node": "Upload to Supabase Storage", "type": "main", "index": 0}],
+                [{"node": "Supabase: Mark Failed", "type": "main", "index": 0}],
+            ]
+        },
+        "Upload to Supabase Storage": {"main": [[{"node": "Supabase: Save Version", "type": "main", "index": 0}]]},
+    }
+    return {
+        "name": name,
+        "nodes": nodes,
+        "connections": connections,
+        "active": False,
+        "settings": {"executionOrder": "v1"},
+        "tags": [],
+    }
+
+
+def build_creative_generate() -> dict:
+    return _build_creative_workflow(
+        name="Arak Lighting – Creative Generate",
+        webhook_path="arak-creative-generate",
+        sticky=CREATIVE_GENERATE_STICKY,
+        js=CREATIVE_GENERATE_JS,
+        code_node_name="Generate Candidates",
+        mime="image/png",
+        media_field="image_url",
+        accepted_expr="={{ JSON.stringify({ status: 'accepted', session_id: $json.body.session_id }) }}",
+    )
+
+
+def build_creative_edit() -> dict:
+    return _build_creative_workflow(
+        name="Arak Lighting – Creative Edit",
+        webhook_path="arak-creative-edit",
+        sticky=CREATIVE_EDIT_STICKY,
+        js=CREATIVE_EDIT_JS,
+        code_node_name="Edit Image",
+        mime="image/png",
+        media_field="image_url",
+        accepted_expr="={{ JSON.stringify({ status: 'accepted', version_id: $json.body.version_id }) }}",
+    )
+
+
+def build_creative_video() -> dict:
+    return _build_creative_workflow(
+        name="Arak Lighting – Creative Video",
+        webhook_path="arak-creative-video",
+        sticky=CREATIVE_VIDEO_STICKY,
+        js=CREATIVE_VIDEO_JS,
+        code_node_name="Render Video",
+        mime="video/mp4",
+        media_field="video_url",
+        accepted_expr="={{ JSON.stringify({ status: 'accepted', version_id: $json.body.version_id }) }}",
+    )
+
+
+def build_creative_enhance() -> dict:
+    """
+    Webhook (responseMode=lastNode) -> Enhance Prompt (single Code node).
+
+    Synchronous, unlike its three siblings: the answer is a short string that
+    goes straight back into the browser's text box, so there is no pending
+    `creative_versions` row to fill in and nothing for the UI to poll. Same
+    graph as Elongate Idea, which is the existing precedent for a one-call
+    Claude workflow that answers in-band.
+    """
+    nodes = [
+        _sticky(CREATIVE_ENHANCE_STICKY, height=420, width=460, x=0, y=-220),
+        _webhook("arak-creative-enhance", "lastNode", x=0, y=200),
+        _code("Enhance Prompt", CREATIVE_ENHANCE_JS, x=240, y=200),
+    ]
+    connections = {"Webhook": {"main": [[{"node": "Enhance Prompt", "type": "main", "index": 0}]]}}
+    return {
+        "name": "Arak Lighting – Creative Enhance",
+        "nodes": nodes,
+        "connections": connections,
+        "active": False,
+        "settings": {"executionOrder": "v1"},
+        "tags": [],
+    }
+
+
 if __name__ == "__main__":
     out_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "workflows")
     os.makedirs(out_dir, exist_ok=True)
@@ -6427,6 +7196,10 @@ if __name__ == "__main__":
         build_zernio_publish(),
         build_zernio_sync(),
         build_zernio_dashboard(),
+        build_creative_generate(),
+        build_creative_edit(),
+        build_creative_video(),
+        build_creative_enhance(),
     ]
 
     for wf in workflows:

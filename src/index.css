@@ -1,5 +1,15 @@
 @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600;9..40,700&display=swap');
 
+/* Creative Studio overlay-editor typefaces. Loaded app-wide (not lazily)
+   because the editor draws to a <canvas>, and canvas silently falls back to a
+   default face for any font that hasn't finished loading — producing an
+   exported image that doesn't match the preview. See STUDIO_FONTS in
+   src/components/studio/fonts.js; keep the two lists in sync.
+   All five cover Arabic; the Latin pairings are chosen to sit alongside the
+   brand's DM Sans without clashing. Swap in Arak's licensed brand fonts via
+   @font-face once the team sends the files. */
+@import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;900&family=Tajawal:wght@400;500;700;900&family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&family=Amiri:ital,wght@0,400;0,700;1,400&family=Noto+Kufi+Arabic:wght@400;700;900&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;

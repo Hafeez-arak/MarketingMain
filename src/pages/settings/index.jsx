@@ -1,7 +1,8 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useApp, actions } from '../../store/appStore'
 import { useAuth } from '../../store/AuthContext'
 import { supabase } from '../../lib/supabaseClient'
+import { fetchWorkspaceWebhooks, saveWorkspaceWebhooks } from '../../lib/workspaceWebhooks'
 import { Card, WarmCard, Button, Input, Select, Toggle, Avatar, Modal, ConfirmDialog } from '../../components/ui/index'
 import { uid, PLATFORM_META } from '../../lib/utils'
 
@@ -243,6 +244,59 @@ const WORKFLOW_CONFIGS = [
     ),
   },
   {
+    platform: 'creativeGenerate',
+    label: 'Creative Studio — Generate',
+    placeholder: 'https://your-instance.app.n8n.cloud/webhook/arak-creative-generate',
+    description: 'The Creative Studio\'s two-option generator: one candidate from ChatGPT (gpt-image-2) and one from Gemini (nano-banana-2) for every prompt, so you compare and pick. Real spend (fal.ai) — fires when you hit Generate.',
+    icon: (
+      <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: 'linear-gradient(135deg,#8b5cf6,#ec4899)' }}>
+        <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24">
+          <rect x="2" y="4" width="9" height="16" rx="1.5"/><rect x="13" y="4" width="9" height="16" rx="1.5"/>
+        </svg>
+      </div>
+    ),
+  },
+  {
+    platform: 'creativeEdit',
+    label: 'Creative Studio — Edit',
+    placeholder: 'https://your-instance.app.n8n.cloud/webhook/arak-creative-edit',
+    description: 'Conversational edits on the image you picked — "make the background navy", "warmer lighting". Each edit becomes a new version you can revert to. Real spend (fal.ai) per edit. Note: for changing TEXT, the built-in text editor is better — real fonts, exact Arabic, and always re-editable.',
+    icon: (
+      <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: 'linear-gradient(135deg,#06b6d4,#22d3ee)' }}>
+        <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24">
+          <path d="M12 20h9M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/>
+        </svg>
+      </div>
+    ),
+  },
+  {
+    platform: 'creativeVideo',
+    label: 'Creative Studio — Video',
+    placeholder: 'https://your-instance.app.n8n.cloud/webhook/arak-creative-video',
+    description: 'Turns a finished image into a clip, or generates one straight from a prompt when there is no image (Seedance, 2–12s). Real spend (fal.ai) per render — the most expensive call in the app, so it only fires on request.',
+    icon: (
+      <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: 'linear-gradient(135deg,#f43f5e,#fb7185)' }}>
+        <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24">
+          <polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/>
+        </svg>
+      </div>
+    ),
+  },
+  {
+    platform: 'creativeEnhance',
+    label: 'Creative Studio — Enhance Prompt',
+    placeholder: 'https://your-instance.app.n8n.cloud/webhook/arak-creative-enhance',
+    description: 'The ✨ button next to the prompt box — rewrites a rough brief into a fuller one (lighting, framing, materials) before you generate. Text only, no image spend. Claude call, ~2 seconds, always shown to you before anything renders.',
+    icon: (
+      <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: 'linear-gradient(135deg,#f59e0b,#fbbf24)' }}>
+        <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24">
+          <path d="M12 3v3M12 18v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M3 12h3M18 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1" strokeLinecap="round"/>
+          <circle cx="12" cy="12" r="2.5"/>
+        </svg>
+      </div>
+    ),
+  },
+  {
     platform: 'publishPost',
     label: 'Publish Post (Zernio)',
     placeholder: 'https://your-instance.app.n8n.cloud/webhook/arak-publish-post',
@@ -286,6 +340,7 @@ const WORKFLOW_CONFIGS = [
 
 function WorkflowWebhooks() {
   const { state, dispatch } = useApp()
+  const { activeWorkspaceId, accessToken } = useAuth()
   const [drafts, setDrafts]   = useState(() => {
     const d = {}
     WORKFLOW_CONFIGS.forEach(c => { d[c.platform] = state.webhooks?.[c.platform] || '' })
@@ -293,23 +348,59 @@ function WorkflowWebhooks() {
   })
   const [saved,   setSaved]   = useState({})
   const [visible, setVisible] = useState({})
+  const [syncState, setSyncState] = useState('idle') // idle | synced | error
 
-  function handleSave(platform) {
+  // Webhooks used to live only in this browser's localStorage — sign in
+  // from another browser/device and every field was blank. Load the
+  // account's saved copy from Supabase (workspace_webhooks) and merge it
+  // into the store so it's the same everywhere the account signs in.
+  useEffect(() => {
+    if (!activeWorkspaceId) return
+    let cancelled = false
+    fetchWorkspaceWebhooks(activeWorkspaceId, accessToken).then(saved => {
+      if (cancelled) return
+      if (saved) {
+        Object.entries(saved).forEach(([platform, url]) => {
+          if (typeof url === 'string') dispatch(actions.setWebhook(platform, url))
+        })
+        setDrafts(d => ({ ...d, ...saved }))
+      }
+      setSyncState('synced')
+    })
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeWorkspaceId])
+
+  async function handleSave(platform) {
     const url = drafts[platform].trim()
     dispatch(actions.setWebhook(platform, url))
     // Normalise the draft to the trimmed value so isDirty resolves to false
     // right after saving (otherwise a trailing space keeps the button "dirty").
     setDrafts(d => ({ ...d, [platform]: url }))
-    dispatch(actions.addNotification({ id: uid(), message: url ? `${platform} webhook saved.` : `${platform} webhook cleared.`, createdAt: new Date().toISOString() }))
     setSaved(s => ({ ...s, [platform]: true }))
     setTimeout(() => setSaved(s => ({ ...s, [platform]: false })), 2000)
+
+    const merged = { ...state.webhooks, [platform]: url }
+    const result = await saveWorkspaceWebhooks(activeWorkspaceId, accessToken, merged)
+    dispatch(actions.addNotification({
+      id: uid(),
+      message: result.error
+        ? `${platform} webhook saved locally, but failed to sync to your account: ${result.error}`
+        : (url ? `${platform} webhook saved to your account.` : `${platform} webhook cleared.`),
+      createdAt: new Date().toISOString(),
+    }))
   }
 
   return (
     <Card>
       <div className="px-6 py-5 border-b border-border">
-        <h3 className="font-semibold text-text">Workflow Webhooks</h3>
-        <p className="text-xs text-text-tertiary mt-0.5">Paste your n8n webhook URLs — the webapp calls these to trigger content generation.</p>
+        <div className="flex items-center gap-2 flex-wrap">
+          <h3 className="font-semibold text-text">Workflow Webhooks</h3>
+          {syncState === 'synced' && (
+            <span className="text-[10px] bg-sage-100 text-sage-700 px-2 py-0.5 rounded-full font-semibold">● Synced to your account</span>
+          )}
+        </div>
+        <p className="text-xs text-text-tertiary mt-0.5">Paste your n8n webhook URLs — the webapp calls these to trigger content generation. Saved to your account, so they follow you to any browser or device you sign in on.</p>
       </div>
       <div className="divide-y divide-border">
         {WORKFLOW_CONFIGS.map(cfg => {

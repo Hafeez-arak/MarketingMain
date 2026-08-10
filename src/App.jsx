@@ -22,6 +22,7 @@ import { LinkedInPage }  from './pages/social/LinkedInPage'
 import { Approvals as PostApprovals } from './pages/social/Approvals'
 import { Settings, Integrations, Team } from './pages/settings/index'
 import { BrandBrain } from './pages/settings/BrandBrain'
+import { CreativeStudio } from './pages/studio/index'
 
 // Everything under here requires a signed-in user with a workspace. Wrapping
 // it as one element (rather than gating each <Route> individually) means
@@ -38,6 +39,7 @@ function ProtectedApp() {
           <Routes>
             <Route path="/"                      element={<Dashboard />} />
             <Route path="/brand-brain"           element={<BrandBrain />} />
+            <Route path="/studio"                element={<CreativeStudio />} />
             <Route path="/campaigns"             element={<Campaigns />} />
             <Route path="/campaigns/plans"       element={<ContentPlans />} />
             <Route path="/campaigns/plan"        element={<CampaignPlanner />} />
