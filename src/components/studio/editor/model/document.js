@@ -1,18 +1,74 @@
 import { newTextBox } from '../../overlayModel'
+import { DEFAULT_ADJUST } from './adjust'
 
 // ─── Editor document model ─────────────────────────────────────────────────
-// A document is { width, height, layers, adjust }:
-//  · width/height — the CURRENT native pixel size (changes on crop).
+// A document is { width, height, crop, layers, adjust }:
+//  · crop — {x, y, w, h} as FRACTIONS OF THE BASE IMAGE. This is the frame the
+//    document looks at the photo through; it is state, not a pixel operation,
+//    so it stays re-editable forever (see §Non-destructive crop below).
+//  · width/height — the current document size in pixels, DERIVED from the base
+//    image and the crop (see docSize). Never assigned independently: two
+//    sources of truth for the page size is how a crop and a reopen end up
+//    disagreeing.
 //  · layers — z-ordered bottom-to-top. Every layer has
 //    {id, type, visible, locked, opacity}; type is one of
-//    'text' | 'image' | 'rect' | 'ellipse' | 'line' | 'arrow'.
-//  · adjust — { brightness, contrast, saturation }, applied to the base photo
-//    only (see adjust.js for the source-verified Konva filter ranges).
+//    'text' | 'image' | 'rect' | 'ellipse' | 'polygon' | 'star' | 'line' |
+//    'arrow'.
+//  · adjust — the photo adjustments (see adjust.js), applied to the base photo
+//    only, and likewise stored rather than baked.
 //
 // EVERY geometric value is a FRACTION of the document (0–1), never a pixel —
 // see overlayModel.js's header. That is the invariant that lets a 900px
 // preview and a 4096px export agree by construction, and it applies to every
 // layer type added here, image layers included.
+//
+// ── Non-destructive crop ───────────────────────────────────────────────────
+// Crop used to rewrite the base canvas and remap every layer, which meant the
+// pixels outside the frame were gone: you could not widen a crop you'd made a
+// minute earlier, let alone one from a previous session. Now the base canvas
+// is never cut. `crop` is a window onto it, applied at draw time by both the
+// live Stage and the export, and re-editable at any point.
+//
+// The contract that makes it survive a save is in render.js: the "clean plate"
+// written back as the next session's base image is now the UNTOUCHED photo —
+// no crop and no adjustments baked in — because both of those live in
+// overlay_state and are replayed on reopen. (Baking them AND replaying them is
+// what used to apply every adjustment twice.)
+
+export const FULL_CROP = Object.freeze({ x: 0, y: 0, w: 1, h: 1 })
+
+export function normalizeCrop(crop) {
+  if (!crop) return { ...FULL_CROP }
+  const w = Math.min(1, Math.max(0.02, crop.w ?? 1))
+  const h = Math.min(1, Math.max(0.02, crop.h ?? 1))
+  return {
+    w, h,
+    x: Math.min(1 - w, Math.max(0, crop.x || 0)),
+    y: Math.min(1 - h, Math.max(0, crop.y || 0)),
+  }
+}
+
+// The document's pixel size: the base image seen through the crop. Rounded
+// once, here, so every consumer gets the same integers.
+export function docSize(baseW, baseH, crop) {
+  const c = normalizeCrop(crop)
+  return {
+    width: Math.max(1, Math.round(baseW * c.w)),
+    height: Math.max(1, Math.round(baseH * c.h)),
+  }
+}
+
+// The crop expressed in base-image PIXELS, which is what Konva's `crop`
+// attribute and drawImage's source rectangle both want.
+export function cropPx(baseW, baseH, crop) {
+  const c = normalizeCrop(crop)
+  return { x: c.x * baseW, y: c.y * baseH, width: c.w * baseW, height: c.h * baseH }
+}
+
+export function isFullFrame(crop) {
+  const c = normalizeCrop(crop)
+  return c.x === 0 && c.y === 0 && c.w === 1 && c.h === 1
+}
 
 export function newId(prefix = 'l') {
   return `${prefix}${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`
@@ -22,19 +78,79 @@ export function newTextLayer(overrides = {}) {
   return { ...newTextBox(), type: 'text', visible: true, locked: false, opacity: 1, ...overrides }
 }
 
+// Polygons and stars are drawn as a closed Konva.Line from points computed
+// inside the layer's box rather than as Konva's RegularPolygon/Star, which
+// only take a radius. A box keeps them consistent with every other shape: the
+// same x/y/w/h, the same Transformer, the same align and snap maths, and the
+// ability to squash a hexagon into a wide badge — none of which a
+// radius-based node can do.
 export function newShapeLayer(type, overrides = {}) {
   const base = {
     id: newId(type[0]), type, x: 0.3, y: 0.3, w: 0.3, h: 0.2,
     fill: type === 'line' || type === 'arrow' ? '' : '#d4af37',
     stroke: '#1a1410',
     strokeWidth: 0.006,          // a fraction of doc HEIGHT, like text size
+    dashStyle: 'solid',
     cornerRadius: 0, rotation: 0, opacity: 1, visible: true, locked: false,
   }
   if (type === 'line' || type === 'arrow') {
-    return { ...base, x1: 0.25, y1: 0.5, x2: 0.6, y2: 0.5, stroke: '#d4af37', strokeWidth: 0.01, ...overrides }
+    return {
+      ...base, x1: 0.25, y1: 0.5, x2: 0.6, y2: 0.5,
+      stroke: '#d4af37', strokeWidth: 0.01,
+      // Which ends carry a head. Canva offers both, and a double-headed arrow
+      // is the natural way to annotate a dimension on a product shot.
+      arrowStart: false, arrowEnd: type === 'arrow',
+      ...overrides,
+    }
   }
+  if (type === 'polygon') return { ...base, sides: 6, w: 0.24, h: 0.24, ...overrides }
+  if (type === 'triangle') return { ...base, type: 'polygon', sides: 3, w: 0.26, h: 0.24, ...overrides }
+  if (type === 'star') return { ...base, points: 5, innerRatio: 0.45, w: 0.24, h: 0.24, ...overrides }
   return { ...base, ...overrides }
 }
+
+// Points for a polygon or star, in pixels relative to the layer's own box
+// origin. Shared by the live node and the export so the two cannot draw a
+// different number of sides or a different star.
+export function shapePoints(layer, W, H) {
+  const w = layer.w * W, h = layer.h * H
+  const rx = w / 2, ry = h / 2
+  const out = []
+  if (layer.type === 'star') {
+    const n = Math.max(3, Math.min(20, layer.points || 5))
+    const inner = Math.max(0.05, Math.min(0.95, layer.innerRatio ?? 0.45))
+    for (let i = 0; i < n * 2; i++) {
+      // Starting at -90° so the first point sits at the top, which is the
+      // only orientation anybody means by "a star".
+      const angle = (Math.PI * i) / n - Math.PI / 2
+      const r = i % 2 === 0 ? 1 : inner
+      out.push(rx + Math.cos(angle) * rx * r, ry + Math.sin(angle) * ry * r)
+    }
+    return out
+  }
+  const n = Math.max(3, Math.min(20, layer.sides || 3))
+  for (let i = 0; i < n; i++) {
+    const angle = (Math.PI * 2 * i) / n - Math.PI / 2
+    out.push(rx + Math.cos(angle) * rx, ry + Math.sin(angle) * ry)
+  }
+  return out
+}
+
+// A dash pattern expressed in multiples of the stroke width, so it scales with
+// the document exactly the way the stroke itself does — a fixed pixel dash
+// would come apart between a 1080px preview and a 4096px export.
+export function dashFor(layer, strokeWidthPx) {
+  const sw = Math.max(0.5, strokeWidthPx)
+  if (layer.dashStyle === 'dashed') return [sw * 3, sw * 2]
+  if (layer.dashStyle === 'dotted') return [0.01, sw * 2]
+  return undefined
+}
+
+export const DASH_STYLES = [
+  { value: 'solid', label: 'Solid' },
+  { value: 'dashed', label: 'Dashed' },
+  { value: 'dotted', label: 'Dotted' },
+]
 
 // An image layer stores a URL, not pixels — it has to survive a round trip
 // through overlay_state (a JSONB column). The bytes are fetched and cached at
@@ -55,8 +171,15 @@ export function newImageLayer(url, { naturalRatio = 1, ...overrides } = {}) {
   }
 }
 
+export const SHAPE_TYPES = ['rect', 'ellipse', 'polygon', 'star']
+
 export function isShape(layer) {
-  return layer && (layer.type === 'rect' || layer.type === 'ellipse')
+  return !!layer && SHAPE_TYPES.includes(layer.type)
+}
+// Shapes drawn as a closed path from computed points, rather than by a Konva
+// primitive with its own geometry attributes.
+export function isPoly(layer) {
+  return !!layer && (layer.type === 'polygon' || layer.type === 'star')
 }
 export function isPath(layer) {
   return layer && (layer.type === 'line' || layer.type === 'arrow')
@@ -72,10 +195,11 @@ export function isBoxed(layer) {
 export function layerLabel(l) {
   if (l.type === 'text') return l.text?.trim().slice(0, 28) || 'Text'
   if (l.type === 'image') return 'Image'
+  if (l.type === 'polygon') return l.sides === 3 ? 'Triangle' : `${l.sides}-sided shape`
   return l.type.charAt(0).toUpperCase() + l.type.slice(1)
 }
 
-export const DEFAULT_ADJUST = { brightness: 0, contrast: 0, saturation: 0 }
+export { DEFAULT_ADJUST }
 
 // ── Copy style ─────────────────────────────────────────────────────────────
 // What Canva's paint roller carries: appearance, never geometry. Position,
@@ -91,10 +215,12 @@ export const STYLE_KEYS = {
     'underline', 'strike', 'uppercase', 'anchor', 'shadow', 'effect', 'effectColor',
     'effectIntensity', 'bgColor', 'opacity'],
   image: ['cornerRadius', 'opacity'],
-  rect: ['fill', 'stroke', 'strokeWidth', 'cornerRadius', 'opacity'],
-  ellipse: ['fill', 'stroke', 'strokeWidth', 'opacity'],
-  line: ['stroke', 'strokeWidth', 'opacity'],
-  arrow: ['stroke', 'strokeWidth', 'opacity'],
+  rect: ['fill', 'stroke', 'strokeWidth', 'dashStyle', 'cornerRadius', 'opacity'],
+  ellipse: ['fill', 'stroke', 'strokeWidth', 'dashStyle', 'opacity'],
+  polygon: ['fill', 'stroke', 'strokeWidth', 'dashStyle', 'opacity'],
+  star: ['fill', 'stroke', 'strokeWidth', 'dashStyle', 'opacity'],
+  line: ['stroke', 'strokeWidth', 'dashStyle', 'opacity'],
+  arrow: ['stroke', 'strokeWidth', 'dashStyle', 'arrowStart', 'arrowEnd', 'opacity'],
 }
 
 export function pickStyle(layer) {
@@ -115,22 +241,40 @@ export function styleFor(layer, style) {
 // height } (plain text boxes, no `type` field, no shapes). Reopening one of
 // those must not lose the text — each box becomes a layer with type:'text'.
 // Already-migrated documents pass straight through.
-export function migrateDocument(state, fallbackW, fallbackH) {
+//
+// `baseW`/`baseH` are the dimensions of the image actually loaded, and the
+// document size is DERIVED from them and the crop rather than read back out of
+// the saved state. Two reasons: a row saved before crop was state has no crop
+// (so it's a full frame over an already-cropped plate, which is exactly right),
+// and a stored width that disagreed with the image would otherwise put every
+// layer in the wrong place with no way to notice.
+// Bumped when the meaning of a saved field changes rather than its shape.
+// v2 is "the base image is the untouched original": adjustments and crop are
+// state that gets replayed, not pixels that were already applied.
+export const DOC_VERSION = 2
+
+export function migrateDocument(state, baseW, baseH) {
+  const crop = normalizeCrop(state?.crop)
+  const { width, height } = docSize(baseW, baseH, crop)
+
+  // A pre-v2 row's saved base image ALREADY has its adjustments burned into
+  // the pixels (that's what the old export wrote), and it also stored the
+  // slider values. Replaying them would apply everything twice — reopen a row
+  // saved at brightness +40 and the photo came back at +80 with the slider
+  // still reading +40. The values are dropped for those rows: the adjustment
+  // is in the image and can't be taken back out, so reporting zero is both
+  // what the photo actually shows and the only honest thing the sliders can
+  // say. Rows saved from here on carry the version and replay normally.
+  const baked = state && !state.v
+  const adjust = { ...DEFAULT_ADJUST, ...(baked ? null : state?.adjust) }
+
   if (state && Array.isArray(state.layers)) {
-    return {
-      width: state.width || fallbackW, height: state.height || fallbackH,
-      layers: state.layers.map(l => ({ ...l })),
-      adjust: { ...DEFAULT_ADJUST, ...(state.adjust || {}) },
-    }
+    return { width, height, crop, layers: state.layers.map(l => ({ ...l })), adjust }
   }
   if (state && Array.isArray(state.boxes)) {
-    return {
-      width: state.width || fallbackW, height: state.height || fallbackH,
-      layers: state.boxes.map(b => newTextLayer({ ...b })),
-      adjust: { ...DEFAULT_ADJUST },
-    }
+    return { width, height, crop, layers: state.boxes.map(b => newTextLayer({ ...b })), adjust }
   }
-  return { width: fallbackW, height: fallbackH, layers: [], adjust: { ...DEFAULT_ADJUST } }
+  return { width, height, crop, layers: [], adjust: { ...DEFAULT_ADJUST } }
 }
 
 // ── Layer-list operations, all pure ────────────────────────────────────────

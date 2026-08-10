@@ -2,6 +2,7 @@ import Konva from 'konva'
 import { buildTextBitmap } from './textBitmap'
 import { applyAdjustments, hasAdjustments } from './adjust'
 import { ensureLayerImages, getCachedImage } from './imageCache'
+import { cropPx, dashFor, docSize, isPoly, shapePoints } from './document'
 
 // ─── Headless render + export ──────────────────────────────────────────────
 // Renders the full document (base image + adjustments + every visible layer)
@@ -26,38 +27,57 @@ export function buildLayerNode(layer, W, H) {
       cornerRadius: (layer.cornerRadius || 0) * H,
     })
   }
+  const strokeWidth = (layer.strokeWidth || 0) * H
+  const dash = dashFor(layer, strokeWidth)
+  const paint = {
+    fill: layer.fill || undefined, stroke: layer.stroke || undefined,
+    strokeWidth, dash, lineCap: layer.dashStyle === 'dotted' ? 'round' : undefined,
+  }
+
   if (layer.type === 'rect') {
     return new Konva.Rect({
-      ...common, x: layer.x * W, y: layer.y * H, width: layer.w * W, height: layer.h * H,
-      fill: layer.fill || undefined, stroke: layer.stroke || undefined,
-      strokeWidth: (layer.strokeWidth || 0) * H, cornerRadius: (layer.cornerRadius || 0) * H,
+      ...common, ...paint, x: layer.x * W, y: layer.y * H,
+      width: layer.w * W, height: layer.h * H,
+      cornerRadius: (layer.cornerRadius || 0) * H,
     })
   }
   if (layer.type === 'ellipse') {
     return new Konva.Ellipse({
-      ...common, x: (layer.x + layer.w / 2) * W, y: (layer.y + layer.h / 2) * H,
+      ...common, ...paint, x: (layer.x + layer.w / 2) * W, y: (layer.y + layer.h / 2) * H,
       radiusX: (layer.w / 2) * W, radiusY: (layer.h / 2) * H,
-      fill: layer.fill || undefined, stroke: layer.stroke || undefined,
-      strokeWidth: (layer.strokeWidth || 0) * H,
     })
   }
+  if (isPoly(layer)) {
+    return new Konva.Line({
+      ...common, ...paint, x: layer.x * W, y: layer.y * H,
+      points: shapePoints(layer, W, H), closed: true, lineJoin: 'round',
+    })
+  }
+
   const points = [layer.x1 * W, layer.y1 * H, layer.x2 * W, layer.y2 * H]
   if (layer.type === 'arrow') {
+    const head = (layer.strokeWidth || 0.01) * H * 3
     return new Konva.Arrow({
-      ...common, points, stroke: layer.stroke || undefined, fill: layer.stroke || undefined,
-      strokeWidth: (layer.strokeWidth || 0) * H,
-      pointerLength: (layer.strokeWidth || 0.01) * H * 3,
-      pointerWidth: (layer.strokeWidth || 0.01) * H * 3,
+      ...common, ...paint, points, fill: layer.stroke || undefined,
+      pointerLength: head, pointerWidth: head,
+      // Old arrows carry no arrowStart/arrowEnd, so an absent value has to
+      // mean the shape they already had: a head on the end only.
+      pointerAtBeginning: !!layer.arrowStart,
+      pointerAtEnding: layer.arrowEnd !== false,
     })
   }
-  return new Konva.Line({ ...common, points, stroke: layer.stroke || undefined, strokeWidth: (layer.strokeWidth || 0) * H })
+  return new Konva.Line({ ...common, ...paint, points, fill: undefined })
 }
 
 // `textOnly` renders JUST the text layers on a transparent background,
 // preserving the output the video step composites over a finished clip
 // without a re-render.
 export async function renderDocument(baseCanvas, doc, { textOnly = false } = {}) {
-  const { width: W, height: H, layers, adjust } = doc
+  const { layers, adjust } = doc
+  // The page size comes from the base image seen through the crop, not from
+  // doc.width/height — the crop is state now (see document.js), and deriving
+  // it here is what guarantees the export frames exactly what the editor did.
+  const { width: W, height: H } = docSize(baseCanvas.width, baseCanvas.height, doc.crop)
   // Await the bytes before drawing anything: a slow upload must not silently
   // drop an image layer the user could plainly see in the editor.
   if (!textOnly) await ensureLayerImages(layers)
@@ -73,14 +93,20 @@ export async function renderDocument(baseCanvas, doc, { textOnly = false } = {})
     stage.add(layer)
 
     if (!textOnly) {
-      const img = new Konva.Image({ image: baseCanvas, x: 0, y: 0, width: W, height: H, listening: false })
+      const img = new Konva.Image({
+        image: baseCanvas, x: 0, y: 0, width: W, height: H, listening: false,
+        // The crop is a source rectangle on the untouched base image, so the
+        // export frames the photo the same way the editor did without ever
+        // having cut the pixels.
+        crop: cropPx(baseCanvas.width, baseCanvas.height, doc.crop),
+      })
       layer.add(img)
       if (hasAdjustments(adjust)) {
         // The export deliberately caches at NATIVE resolution — the live
         // Stage's downscaled preview (see adjust.js) exists only to keep the
         // sliders responsive and never reaches a shipped file.
         img.cache()
-        applyAdjustments(img, adjust)
+        applyAdjustments(img, adjust, { docHeight: H, cachePixelRatio: 1 })
       }
     }
 
@@ -114,27 +140,39 @@ function canvasToBlob(canvas, type = 'image/png') {
   })
 }
 
-// The one function the Save button calls. baseCanvas is the current working
-// image (already rotated/flipped/cropped, if any of those were used).
+// The one function the Save button calls.
 //
-// Three outputs, not two: `compositeBlob` (photo + adjustments + every layer,
-// flattened — "the asset" shown everywhere) and `textLayerBlob` (just the
-// text, transparent, for later video compositing) existed already.
-// `cleanBlob` — photo + adjustments + crop/rotate/flip, but NO text, shapes or
-// image layers — is what the NEXT edit session opens against. Without it,
-// reopening the editor had nowhere non-destructive to load: using
-// `compositeBlob` as next time's base image bakes this round's layers into
-// pixels while ALSO replaying the same layers on top from overlay_state, so
-// the "original" text becomes an unselectable, undeletable part of the photo
-// and every edit looks like it duplicates on top of it.
+// Three outputs. `compositeBlob` is the asset: photo, adjustments, crop and
+// every layer, flattened, at native resolution. `textLayerBlob` is just the
+// text on transparency, for the video step to composite over a finished clip.
+//
+// `cleanBlob` is what the NEXT edit session opens against, and what it should
+// contain changed with this pass. It used to be the photo WITH adjustments and
+// the crop baked in — while `overlay_state` also stored those same values and
+// replayed them on reopen. So every adjustment was applied twice: set
+// brightness +40, save, reopen, and the photo was at +80 with the slider still
+// reading +40. A crop was worse than double-applied — the pixels were gone, so
+// it could never be widened again.
+//
+// The clean plate is now the UNTOUCHED base image: no adjustments, no crop.
+// Everything that isn't pixels lives in overlay_state and is replayed exactly
+// once, which is what makes adjust and crop re-editable across sessions. (The
+// one thing still baked in is rotate/flip, deliberately — they're lossless
+// pixel moves rather than settings, and carrying an orientation through every
+// coordinate conversion in the editor would buy nothing.)
+//
+// What it must NOT become is `compositeBlob`: that bakes this round's layers
+// into the photo while overlay_state replays the same layers on top, so the
+// old text turns into an unselectable part of the image and every edit looks
+// like it duplicated itself.
 export async function exportDocument(baseCanvas, doc) {
-  const [composite, textLayer, clean] = await Promise.all([
+  const [composite, textLayer] = await Promise.all([
     renderDocument(baseCanvas, doc, { textOnly: false }),
     renderDocument(baseCanvas, doc, { textOnly: true }),
-    renderDocument(baseCanvas, { ...doc, layers: [] }, { textOnly: false }),
   ])
   const [compositeBlob, textLayerBlob, cleanBlob] = await Promise.all([
-    canvasToBlob(composite), canvasToBlob(textLayer), canvasToBlob(clean),
+    canvasToBlob(composite), canvasToBlob(textLayer), canvasToBlob(baseCanvas),
   ])
-  return { compositeBlob, textLayerBlob, cleanBlob, width: doc.width, height: doc.height }
+  const { width, height } = docSize(baseCanvas.width, baseCanvas.height, doc.crop)
+  return { compositeBlob, textLayerBlob, cleanBlob, width, height }
 }

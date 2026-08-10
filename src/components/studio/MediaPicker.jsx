@@ -16,18 +16,37 @@ export function MediaPicker({
   accessToken,
   onUpload,                  // async (file) => ({ url } | { error })
 }) {
+  return (
+    <Modal open={open} onClose={onClose} title={title} width="max-w-3xl" square>
+      {/* The body is mounted only while the picker is open, so every piece of
+          its state — the tab, the fetched rows, an error from last time — is
+          created fresh on open and torn down on close. It used to be reset by
+          an effect that fired on `open`, which is a cascading render and left
+          the previous session's error on screen for a frame. */}
+      {open && (
+        <MediaPickerBody kind={kind} accessToken={accessToken}
+          onPick={onPick} onClose={onClose} onUpload={onUpload} />
+      )}
+    </Modal>
+  )
+}
+
+function MediaPickerBody({ kind, accessToken, onPick, onClose, onUpload }) {
   const [tab, setTab] = useState('library')
   const [assets, setAssets] = useState([])
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(true)
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState('')
   const fileRef = useRef(null)
 
   useEffect(() => {
-    if (!open) return
-    setError(''); setTab('library'); setLoading(true)
-    fetchMediaLibrary(accessToken, { kind }).then(rows => { setAssets(rows); setLoading(false) })
-  }, [open, accessToken, kind])
+    let alive = true
+    fetchMediaLibrary(accessToken, { kind }).then(rows => {
+      if (!alive) return
+      setAssets(rows); setLoading(false)
+    })
+    return () => { alive = false }
+  }, [accessToken, kind])
 
   async function handleFile(e) {
     const file = e.target.files?.[0]
@@ -44,9 +63,8 @@ export function MediaPicker({
   const accept = kind === 'video' ? 'video/*' : kind === 'all' ? 'image/*,video/*' : 'image/*'
 
   return (
-    <Modal open={open} onClose={onClose} title={title} width="max-w-3xl" square>
-      <div className="p-5 space-y-4">
-        <div className="flex gap-1 p-1 bg-surface-subtle w-fit">
+    <div className="p-5 space-y-4">
+      <div className="flex gap-1 p-1 bg-surface-subtle w-fit">
           {[['library', 'Media Library'], ['upload', 'Upload new']].map(([id, label]) => (
             <button key={id} type="button" onClick={() => setTab(id)}
               className={`text-xs px-3 py-1.5 transition-colors ${
@@ -100,8 +118,7 @@ export function MediaPicker({
             </p>
           </div>
         )}
-      </div>
-    </Modal>
+    </div>
   )
 }
 

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useApp } from '../../store/appStore'
 import { useAuth } from '../../store/AuthContext'
 import { Button, Card, Modal, SectionHead, Select, Spinner, Textarea, Empty } from '../../components/ui/index'
@@ -70,8 +70,9 @@ const VIDEO_FRAME_SLOTS = [
 //   · endFrame   → maps cleanly to end_image_url
 //   · reference  → has NO model input; would need a separate describe-then-
 //     inject step, so it's the one that needs design rather than plumbing.
-// Wire these up when the video backend pass happens.
-const VIDEO_BACKEND_PENDING = true
+// Wire these up when the video backend pass happens. (The note is the whole
+// point here; there was a `VIDEO_BACKEND_PENDING = true` under it that nothing
+// ever read, which is a lint error pretending to be documentation.)
 
 // The ➕ itself. Icon only — the label crowded a row that already has
 // Enhance and the auto-enhance checkbox on it, and the icon alone reads
@@ -1097,6 +1098,10 @@ export function CreativeStudio() {
               // studio bucket first and the layer stores that URL.
               onUploadImage={file => uploadToStudio(activeWorkspaceId, accessToken, file, file.name || 'layer.png')}
               imageLibrary={editorLibrary}
+              // Brand Brain's "Brand Colours" field, so the account's own
+              // palette is a click away in every colour picker rather than
+              // something a marketer has to retype as a hex each time.
+              brandColorsText={state.brandProfile?.brandColors || ''}
             />
           )}
         </div>

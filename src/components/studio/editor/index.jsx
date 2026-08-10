@@ -5,15 +5,19 @@ import { ensureFontsLoaded } from '../fonts'
 import {
   migrateDocument, newTextLayer, newShapeLayer, newImageLayer,
   patchLayers, removeLayers, reorderLayers, sendToExtreme, duplicateLayer,
-  pickStyle, styleFor,
+  pickStyle, styleFor, cropPx, docSize, normalizeCrop, isFullFrame, FULL_CROP, DOC_VERSION,
 } from './model/document'
-import { loadBaseCanvas, cropCanvas, remapLayersAfterCrop, rotateCanvas90, flipCanvas } from './model/transform'
-import { makePreviewCanvas } from './model/adjust'
+import {
+  loadBaseCanvas, remapLayersForCrop, rotateCanvas90, flipCanvas,
+  rotateCrop, flipCrop, rotateLayers90,
+} from './model/transform'
+import { makePreviewCanvas, cacheRatioFor, autoAdjust, applyPreset, DEFAULT_ADJUST } from './model/adjust'
 import { exportDocument } from './model/render'
 import { ensureLayerImages, loadLayerImage } from './model/imageCache'
 import { clearTextBitmapCache } from './model/textBitmap'
 import { layerRect, unionRect, translatePatch } from './model/geometry'
 import { alignPatches, tidyUpPatches } from './model/align'
+import { documentColorsOf, parseBrandColors, samplePhotoColors } from './model/palette'
 
 import { useEditorHistory } from './useEditorHistory'
 import { useZoomPan } from './useZoomPan'
@@ -99,6 +103,9 @@ function textShortcut(e, key, layer, docH, apply) {
 export function PhotoEditor({
   imageUrl, initialState, onSave, onCancel, saving = false,
   onUploadImage, imageLibrary = [],
+  // Brand Brain's free-text "Brand Colours" field. Passed as written; the hex
+  // codes are pulled out of the prose in model/palette.js.
+  brandColorsText = '',
 }) {
   const history = useEditorHistory()
   const { doc, base } = history
@@ -124,9 +131,16 @@ export function PhotoEditor({
   // state between those two clicks.
   const [styleClip, setStyleClip] = useState(null)
   const [painting, setPainting] = useState(false)
+  // The Stage shows the PAGE normally and the WHOLE PHOTO while cropping (so
+  // the frame can be dragged back out over the hidden parts), so the zoom has
+  // to be framed against whichever of the two is on screen. Changing these
+  // re-frames the view, which is exactly what entering crop should do.
+  const cropping = tool === 'crop'
+  const stageW = (cropping ? base?.width : doc?.width) || 0
+  const stageH = (cropping ? base?.height : doc?.height) || 0
   // viewportRef is pulled out of the hook's return so it's an ordinary ref
   // binding at the point of use, rather than reached through an object.
-  const { viewportRef, ...zoom } = useZoomPan(doc?.width || 0, doc?.height || 0)
+  const { viewportRef, ...zoom } = useZoomPan(stageW, stageH)
 
   // ── Load ────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -151,6 +165,13 @@ export function PhotoEditor({
   // instead. See model/adjust.js for why that's safe, and why the export
   // still uses `base`.
   const previewCanvas = useMemo(() => makePreviewCanvas(base), [base])
+  const cacheRatio = useMemo(() => cacheRatioFor(previewCanvas, base), [previewCanvas, base])
+  // The base image's own dimensions plus where the committed crop sits on it,
+  // which is everything the Stage needs to draw either view.
+  const baseSize = useMemo(() => (base ? {
+    width: base.width, height: base.height,
+    crop: cropPx(base.width, base.height, doc?.crop),
+  } : { width: 0, height: 0, crop: { x: 0, y: 0, width: 0, height: 0 } }), [base, doc?.crop])
 
   const textLayers = useMemo(() => (doc ? doc.layers.filter(l => l.type === 'text') : []), [doc])
   const fontSignature = textLayers.map(l => `${l.family}:${l.weight}`).join('|')
@@ -322,15 +343,18 @@ export function PhotoEditor({
   }, [clipboard, commitDoc])
 
   // ── Crop ────────────────────────────────────────────────────────────────
+  // The crop rect lives in BASE-IMAGE pixels for the whole gesture, because
+  // that's the frame the crop UI works in (it shows the whole photo, including
+  // what the current crop hides). It only becomes fractions on apply.
   const startCrop = useCallback(() => {
-    if (!doc) return
+    if (!doc || !base) return
     setTool('crop'); setPanel('crop'); setSelectedIds([]); setCropRatio(null)
-    const margin = 0.08
-    setCropRect({
-      x: doc.width * margin, y: doc.height * margin,
-      w: doc.width * (1 - margin * 2), h: doc.height * (1 - margin * 2),
-    })
-  }, [doc])
+    // Opens on the CURRENT crop rather than an arbitrary inset, so entering
+    // crop a second time continues from where you left it instead of throwing
+    // the previous framing away.
+    const c = cropPx(base.width, base.height, doc.crop)
+    setCropRect({ x: c.x, y: c.y, w: c.width, h: c.height })
+  }, [doc, base])
 
   const cancelCrop = useCallback(() => { setTool('select'); setPanel('insert'); setCropRect(null) }, [])
 
@@ -339,48 +363,117 @@ export function PhotoEditor({
   // what "switch to 1:1" is asking for, rather than a reset to the middle.
   const applyCropRatio = useCallback(ratio => {
     setCropRatio(ratio)
-    if (!ratio || !doc || !cropRect) return
+    if (!ratio || !base || !cropRect) return
     const cx = cropRect.x + cropRect.w / 2, cy = cropRect.y + cropRect.h / 2
-    let w = Math.min(doc.width, cropRect.w)
+    let w = Math.min(base.width, cropRect.w)
     let h = w / ratio
-    if (h > doc.height) { h = doc.height; w = h * ratio }
+    if (h > base.height) { h = base.height; w = h * ratio }
     setCropRect({
       w, h,
-      x: Math.min(Math.max(0, cx - w / 2), doc.width - w),
-      y: Math.min(Math.max(0, cy - h / 2), doc.height - h),
+      x: Math.min(Math.max(0, cx - w / 2), base.width - w),
+      y: Math.min(Math.max(0, cy - h / 2), base.height - h),
     })
-  }, [doc, cropRect])
+  }, [base, cropRect])
+
+  // Non-destructive: the base canvas is untouched and only the window onto it
+  // moves, so a crop can be widened, narrowed or reset at any point — this
+  // session or a later one (see render.js on the clean plate).
+  const commitCrop = useCallback(nextCrop => {
+    if (!base) return
+    const to = normalizeCrop(nextCrop)
+    history.commit(s => {
+      const from = normalizeCrop(s.doc.crop)
+      return {
+        ...s,
+        doc: {
+          ...s.doc,
+          ...docSize(base.width, base.height, to),
+          crop: to,
+          layers: remapLayersForCrop(s.doc.layers, base.width, base.height, from, to),
+        },
+      }
+    })
+  }, [base, history])
 
   const applyCrop = useCallback(() => {
-    if (!doc || !base || !cropRect) return
-    const oldW = doc.width, oldH = doc.height
-    const crop = {
-      x: Math.max(0, cropRect.x), y: Math.max(0, cropRect.y),
-      w: Math.min(oldW - cropRect.x, cropRect.w), h: Math.min(oldH - cropRect.y, cropRect.h),
-    }
-    const nextCanvas = cropCanvas(base, crop)
-    history.commit(s => ({
-      base: nextCanvas,
-      doc: {
-        ...s.doc, width: nextCanvas.width, height: nextCanvas.height,
-        layers: remapLayersAfterCrop(s.doc.layers, oldW, oldH, crop, nextCanvas.width, nextCanvas.height),
-      },
-    }))
+    if (!base || !cropRect) return
+    commitCrop({
+      x: cropRect.x / base.width, y: cropRect.y / base.height,
+      w: cropRect.w / base.width, h: cropRect.h / base.height,
+    })
     setTool('select'); setPanel('insert'); setCropRect(null)
-  }, [doc, base, cropRect, history])
+  }, [base, cropRect, commitCrop])
+
+  const resetCrop = useCallback(() => {
+    if (!base) return
+    commitCrop(FULL_CROP)
+    setCropRect({ x: 0, y: 0, w: base.width, h: base.height })
+    setCropRatio(null)
+  }, [base, commitCrop])
 
   // ── Rotate / flip the photo ─────────────────────────────────────────────
-  const canRotate = !!doc && doc.layers.length === 0
+  // No longer gated to an empty document. A 90° turn moves the page under
+  // everything on it, so each layer's pivot is transformed and 90° is added to
+  // its own rotation — exact even for a layer that was already rotated (see
+  // transform.js). A flip is different in kind: it mirrors the PHOTO, and
+  // mirroring the text on top of it would be nonsense, so the layers are
+  // deliberately left where they are and only the crop window follows.
   const rotate = useCallback(clockwise => {
-    if (!canRotate || !base) return
-    const next = rotateCanvas90(base, clockwise)
-    history.commit(s => ({ base: next, doc: { ...s.doc, width: next.width, height: next.height } }))
-  }, [canRotate, base, history])
+    if (!base) return
+    const nextCanvas = rotateCanvas90(base, clockwise)
+    history.commit(s => {
+      const nextCrop = normalizeCrop(rotateCrop(s.doc.crop, clockwise))
+      const size = docSize(nextCanvas.width, nextCanvas.height, nextCrop)
+      return {
+        base: nextCanvas,
+        doc: {
+          ...s.doc, ...size, crop: nextCrop,
+          layers: rotateLayers90(s.doc.layers, s.doc.width, s.doc.height, clockwise),
+        },
+      }
+    })
+  }, [base, history])
 
   const flip = useCallback(axis => {
-    if (!canRotate || !base) return
-    history.commit(s => ({ ...s, base: flipCanvas(base, axis) }))
-  }, [canRotate, base, history])
+    if (!base) return
+    const nextCanvas = flipCanvas(base, axis)
+    history.commit(s => ({
+      base: nextCanvas,
+      doc: { ...s.doc, crop: normalizeCrop(flipCrop(s.doc.crop, axis)) },
+    }))
+  }, [base, history])
+
+  // ── Adjustments ─────────────────────────────────────────────────────────
+  const setAdjust = useCallback((key, value) => {
+    applyDoc(d => ({ ...d, adjust: { ...d.adjust, [key]: value } }))
+  }, [applyDoc])
+
+  const resetAdjust = useCallback(() => {
+    commitDoc(d => ({ ...d, adjust: { ...DEFAULT_ADJUST } }))
+  }, [commitDoc])
+
+  const setPreset = useCallback(id => {
+    commitDoc(d => ({ ...d, adjust: applyPreset(id) }))
+  }, [commitDoc])
+
+  // Auto reads the histogram of what's actually FRAMED, not of the whole
+  // photo — auto-adjusting a tight crop of a dark corner should balance that
+  // corner, not the bright scene it was cut out of.
+  const autoAdjustNow = useCallback(() => {
+    if (!base || !doc) return
+    const c = cropPx(base.width, base.height, doc.crop)
+    let source = base
+    if (!isFullFrame(doc.crop)) {
+      const cut = document.createElement('canvas')
+      cut.width = Math.max(1, Math.round(c.width))
+      cut.height = Math.max(1, Math.round(c.height))
+      cut.getContext('2d').drawImage(base, c.x, c.y, c.width, c.height, 0, 0, cut.width, cut.height)
+      source = cut
+    }
+    const next = autoAdjust(source)
+    if (!next) { setError('Auto-adjust could not read this image.'); return }
+    commitDoc(d => ({ ...d, adjust: { ...d.adjust, ...next } }))
+  }, [base, doc, commitDoc])
 
   // ── Keyboard ────────────────────────────────────────────────────────────
   // Canva's shortcut set, minus the features we don't have. Inert while any
@@ -469,7 +562,14 @@ export function PhotoEditor({
     setError('')
     try {
       const { compositeBlob, textLayerBlob, cleanBlob, width, height } = await exportDocument(base, doc)
-      const result = await onSave({ compositeBlob, textLayerBlob, cleanBlob, state: { ...doc, width, height } })
+      // `v` marks this state as one whose clean plate is the UNTOUCHED photo,
+      // so the adjustments and crop stored beside it are replayed rather than
+      // applied a second time on top of pixels that already have them. See
+      // migrateDocument.
+      const result = await onSave({
+        compositeBlob, textLayerBlob, cleanBlob,
+        state: { ...doc, width, height, v: DOC_VERSION },
+      })
       if (result?.error) setError(result.error)
     } catch (err) {
       setError(err.message || String(err))
@@ -482,19 +582,19 @@ export function PhotoEditor({
     return unionRect(selection.map(l => layerRect(l, doc.width, doc.height)))
   }, [doc, selection])
 
-  // Colours already used in the document, offered first in every picker —
-  // Canva's "Document colours", and the cheapest way to keep one design on
-  // one palette.
-  const documentColors = useMemo(() => {
-    if (!doc) return []
-    const seen = []
-    for (const l of doc.layers) {
-      for (const c of [l.color, l.fill, l.stroke]) {
-        if (c && !seen.includes(c)) seen.push(c)
-      }
-    }
-    return seen.slice(0, 10)
-  }, [doc])
+  // The colour panel's sourced groups — Canva's model, see model/palette.js.
+  // Split into three memos rather than one because they change on completely
+  // different clocks: the document group on every layer edit, the photo group
+  // only when the base image itself is replaced (a crop, a rotate), and the
+  // brand group essentially never.
+  const photoColors = useMemo(() => samplePhotoColors(base), [base])
+  const brandColors = useMemo(() => parseBrandColors(brandColorsText), [brandColorsText])
+  const palette = useMemo(() => ({
+    document: documentColorsOf(doc),
+    photo: photoColors,
+    brand: brandColors,
+    recent: [],   // read from the store by the field itself, so it stays live
+  }), [doc, photoColors, brandColors])
 
   const contextItems = useMemo(() => {
     if (!contextMenu) return []
@@ -543,11 +643,12 @@ export function PhotoEditor({
           )}
           {panel === 'adjust' && (
             <AdjustPanel adjust={doc.adjust} onBeginChange={begin}
-              onChange={(key, value) => applyDoc(d => ({ ...d, adjust: { ...d.adjust, [key]: value } }))}
-              onResetAll={() => commitDoc(d => ({ ...d, adjust: { brightness: 0, contrast: 0, saturation: 0 } }))} />
+              onChange={setAdjust} onResetAll={resetAdjust}
+              onPreset={setPreset} onAuto={autoAdjustNow} />
           )}
           {panel === 'crop' && (
-            <CropPanel doc={doc} cropRect={cropRect} onSetRatio={applyCropRatio} onApply={applyCrop} onCancel={cancelCrop} />
+            <CropPanel base={base} cropRect={cropRect} crop={doc.crop} ratio={cropRatio}
+              onSetRatio={applyCropRatio} onApply={applyCrop} onCancel={cancelCrop} onReset={resetCrop} />
           )}
           {panel === 'position' && (
             <PositionPanel doc={doc} selection={selection} selectedIds={selectedIds}
@@ -567,9 +668,9 @@ export function PhotoEditor({
           <TopToolbar doc={doc} selection={selection} tool={tool} panel={panel}
             canUndo={history.canUndo} canRedo={history.canRedo} onUndo={history.undo} onRedo={history.redo}
             onPatch={patchSelected} onBeginChange={begin} onOpenPanel={setPanel}
-            onRotate={rotate} onFlip={flip} onStartCrop={startCrop} canRotate={canRotate}
+            onRotate={rotate} onFlip={flip} onStartCrop={startCrop}
             onCopyStyle={copyStyle} painting={painting}
-            documentColors={documentColors} />
+            palette={palette} />
 
           <div ref={viewportRef}
             className="relative min-h-0 flex-1 overflow-hidden rounded-xl border border-border bg-[repeating-conic-gradient(#f4f4f5_0_25%,#fff_0_50%)] bg-[length:20px_20px]"
@@ -580,7 +681,8 @@ export function PhotoEditor({
 
             {zoom.viewport.w > 0 && (
               <EditorStage
-                doc={doc} previewCanvas={previewCanvas} zoom={zoom} epoch={fontEpoch}
+                doc={doc} previewCanvas={previewCanvas} cacheRatio={cacheRatio} baseSize={baseSize}
+                zoom={zoom} epoch={fontEpoch}
                 selectedIds={selectedIds} onSelectionChange={handleSelectionChange}
                 onBeginChange={begin} onApplyDoc={applyDoc} onCloneInPlace={cloneInPlace}
                 tool={tool} cropRect={cropRect} cropRatio={cropRatio} onCropRect={setCropRect}

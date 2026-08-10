@@ -173,9 +173,25 @@ export function effectPadding(box, fontPx) {
 
 export const HIGHLIGHT_PAD = 0.18   // of the font size, each side
 
+// Ceil, but tolerant of the last bit or two of floating-point noise.
+//
+// Plain Math.ceil costs a whole pixel whenever a value lands a hair ABOVE an
+// integer, and that happens routinely here: a font size is a fraction of the
+// document height, so any arithmetic that re-derives it — rotating the page,
+// re-cropping, a round trip through a saved state — can turn an exact 80 into
+// 80.00000000000001, and `Math.ceil(80.00000000000001 * 0.3)` is 25 where
+// `Math.ceil(24)` is 24. One pixel of padding is one pixel of offset, and
+// since the offset is what positions the node, that shifts the text. It was
+// measurable: four 90° turns moved a caption a whole pixel off where it
+// started. The epsilon is far smaller than any real sub-pixel measurement and
+// far larger than the noise.
+export function ceilPx(value) {
+  return Math.ceil(value - 1e-6)
+}
+
 export function textPadding(box, fontPx) {
   const highlight = box.bgColor ? fontPx * HIGHLIGHT_PAD : 0
-  return Math.ceil(fontPx * 0.3 + effectPadding(box, fontPx) + highlight) + 2
+  return ceilPx(fontPx * 0.3 + effectPadding(box, fontPx) + highlight) + 2
 }
 
 // ── Drawing ────────────────────────────────────────────────────────────────

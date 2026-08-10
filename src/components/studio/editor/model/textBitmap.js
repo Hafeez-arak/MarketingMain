@@ -1,4 +1,4 @@
-import { layoutBox, drawBox, textPadding } from '../../overlayModel'
+import { layoutBox, drawBox, textPadding, ceilPx } from '../../overlayModel'
 
 // ─── Text → bitmap, memoised ───────────────────────────────────────────────
 // A text layer draws through the SAME layoutBox/drawBox as the rest of the
@@ -55,8 +55,12 @@ export function buildTextBitmap(layer, W, H, epoch = 0) {
   // the highlight box, and the overhang of glyphs that draw beyond their own
   // advance width — so nothing is clipped by the edge of the local canvas.
   const pad = textPadding(layer, fontPx)
-  const width = Math.max(1, Math.ceil(boxW) + pad * 2)
-  const height = Math.max(1, Math.ceil(blockH) + pad * 2)
+  // ceilPx rather than Math.ceil for the reason given where it's defined: an
+  // exact 80 that arithmetic turned into 80.00000000000001 must not cost a
+  // whole extra pixel of bitmap, because the padding is also the offset that
+  // positions the node.
+  const width = Math.max(1, ceilPx(boxW) + pad * 2)
+  const height = Math.max(1, ceilPx(blockH) + pad * 2)
   const canvas = document.createElement('canvas')
   canvas.width = width; canvas.height = height
   drawBox(canvas.getContext('2d'), { ...layer, x: pad / W, y: pad / H }, W, H)

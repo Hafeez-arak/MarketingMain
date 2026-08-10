@@ -1,5 +1,6 @@
 import { WEIGHTS, fontsFor } from '../../fonts'
 import { EFFECTS, ANCHORS } from '../../overlayModel'
+import { DASH_STYLES, isPath, isShape } from '../model/document'
 import { ToolbarButton, ToolbarDivider, ToolbarMenu, MenuItem, NumberField, ColorField, SliderField } from '../controls'
 
 // ─── The contextual toolbar above the canvas ───────────────────────────────
@@ -19,31 +20,37 @@ export function TopToolbar({
   doc, selection, tool, panel,
   canUndo, canRedo, onUndo, onRedo,
   onPatch, onBeginChange, onOpenPanel,
-  onRotate, onFlip, onStartCrop, canRotate, onCopyStyle, painting, documentColors,
+  onRotate, onFlip, onStartCrop, onCopyStyle, painting, palette,
 }) {
   const H = doc.height
   const single = selection.length === 1 ? selection[0] : null
   const many = selection.length > 1
 
   return (
-    <div className="flex items-center gap-1 overflow-x-auto rounded-xl border border-border bg-white px-1.5 py-1.5">
+    // WRAPS rather than scrolls. It used to be `overflow-x-auto`, which on a
+    // text selection put a dozen controls — alignment, spacing, effects,
+    // anchor, direction, shadow, opacity — behind a horizontal scrollbar most
+    // people never found, and made every dropdown inside it a clipped sliver
+    // (see the Popover note in controls.jsx). A second row costs ~40px of
+    // canvas height and costs nothing in reachability.
+    <div className="flex flex-wrap items-center gap-1 rounded-xl border border-border bg-white px-1.5 py-1.5">
       <ToolbarButton title="Undo (⌘Z)" onClick={onUndo} disabled={!canUndo}>↶</ToolbarButton>
       <ToolbarButton title="Redo (⇧⌘Z)" onClick={onRedo} disabled={!canRedo}>↷</ToolbarButton>
       <ToolbarDivider />
 
       {!selection.length && (
-        <PhotoControls tool={tool} panel={panel} onOpenPanel={onOpenPanel} canRotate={canRotate}
+        <PhotoControls tool={tool} panel={panel} onOpenPanel={onOpenPanel}
           onRotate={onRotate} onFlip={onFlip} onStartCrop={onStartCrop} />
       )}
 
       {single?.type === 'text' && (
-        <TextControls layer={single} H={H} onPatch={onPatch} onBeginChange={onBeginChange} documentColors={documentColors} />
+        <TextControls layer={single} H={H} onPatch={onPatch} onBeginChange={onBeginChange} palette={palette} />
       )}
-      {(single?.type === 'rect' || single?.type === 'ellipse') && (
-        <ShapeControls layer={single} H={H} onPatch={onPatch} onBeginChange={onBeginChange} documentColors={documentColors} />
+      {isShape(single) && (
+        <ShapeControls layer={single} H={H} onPatch={onPatch} onBeginChange={onBeginChange} palette={palette} />
       )}
-      {(single?.type === 'line' || single?.type === 'arrow') && (
-        <PathControls layer={single} H={H} onPatch={onPatch} onBeginChange={onBeginChange} documentColors={documentColors} />
+      {isPath(single) && (
+        <PathControls layer={single} H={H} onPatch={onPatch} onBeginChange={onBeginChange} palette={palette} />
       )}
       {single?.type === 'image' && (
         <ImageControls layer={single} H={H} onPatch={onPatch} onBeginChange={onBeginChange} />
@@ -57,37 +64,38 @@ export function TopToolbar({
         </>
       )}
 
-      <span className="flex-1" />
-      {single && (
-        <ToolbarButton active={painting} onClick={onCopyStyle}
-          title={painting ? 'Now click the layer to paint this style onto (Esc to cancel)' : 'Copy this style, then click another layer to apply it'}>
-          🖌 {painting ? 'Pick a target' : 'Copy style'}
-        </ToolbarButton>
-      )}
-      <ToolbarButton title="Position, align and layers" active={panel === 'position'} onClick={() => onOpenPanel('position')}>Position</ToolbarButton>
+      {/* Pinned right. `ml-auto` rather than a flex-1 spacer, because in a
+          wrapping row a spacer would claim a whole line of its own. */}
+      <span className="ml-auto flex items-center gap-1">
+        {single && (
+          <ToolbarButton active={painting} onClick={onCopyStyle}
+            title={painting ? 'Now click the layer to paint this style onto (Esc to cancel)' : 'Copy this style, then click another layer to apply it'}>
+            🖌 {painting ? 'Pick a target' : 'Copy style'}
+          </ToolbarButton>
+        )}
+        <ToolbarButton title="Position, align and layers" active={panel === 'position'} onClick={() => onOpenPanel('position')}>Position</ToolbarButton>
+      </span>
     </div>
   )
 }
 
 // ── Nothing selected: the photo itself is the subject ──────────────────────
-function PhotoControls({ tool, panel, onOpenPanel, canRotate, onRotate, onFlip, onStartCrop }) {
-  // Rotate/flip transform the PHOTO, not the layers sitting on it, so they
-  // stay gated to a document with nothing on it yet — remapping a 90° turn
-  // across live text and shapes is real geometry (a text layer's stored
-  // origin sits inside its shadow padding, and its rotation pivots on a
-  // different corner than an ellipse's) and it is not in this pass. Crop,
-  // unlike rotate, stays available throughout: it's a pure translate+scale
-  // and every layer's fractional coordinates remap for it exactly.
-  const why = canRotate ? '' : ' — only available before any layer is added'
+function PhotoControls({ tool, panel, onOpenPanel, onRotate, onFlip, onStartCrop }) {
+  // Rotate and flip used to be disabled the moment a single layer existed,
+  // because turning the page under live text and shapes is real geometry. It
+  // is, and it's in transform.js now: a rotation moves every layer's pivot and
+  // adds 90° to its own rotation, and a flip mirrors the photo and the crop
+  // window while deliberately leaving the layers alone — mirrored text would
+  // be nonsense, not a feature.
   return (
     <>
-      <ToolbarButton title="Crop the photo" active={tool === 'crop'} onClick={onStartCrop}>⬚ Crop</ToolbarButton>
-      <ToolbarButton title="Brightness, contrast, saturation" active={panel === 'adjust'} onClick={() => onOpenPanel('adjust')}>🎚 Adjust</ToolbarButton>
+      <ToolbarButton title="Crop the photo — non-destructive, re-editable at any time" active={tool === 'crop'} onClick={onStartCrop}>⬚ Crop</ToolbarButton>
+      <ToolbarButton title="Filters, auto-adjust, light and colour" active={panel === 'adjust'} onClick={() => onOpenPanel('adjust')}>🎚 Adjust</ToolbarButton>
       <ToolbarDivider />
-      <ToolbarButton title={`Rotate 90° left${why}`} disabled={!canRotate} onClick={() => onRotate(false)}>⟲</ToolbarButton>
-      <ToolbarButton title={`Rotate 90° right${why}`} disabled={!canRotate} onClick={() => onRotate(true)}>⟳</ToolbarButton>
-      <ToolbarButton title={`Flip horizontally${why}`} disabled={!canRotate} onClick={() => onFlip('horizontal')}>⇋</ToolbarButton>
-      <ToolbarButton title={`Flip vertically${why}`} disabled={!canRotate} onClick={() => onFlip('vertical')}>⇅</ToolbarButton>
+      <ToolbarButton title="Rotate 90° left" onClick={() => onRotate(false)}>⟲</ToolbarButton>
+      <ToolbarButton title="Rotate 90° right" onClick={() => onRotate(true)}>⟳</ToolbarButton>
+      <ToolbarButton title="Flip the photo horizontally (layers stay put)" onClick={() => onFlip('horizontal')}>⇋</ToolbarButton>
+      <ToolbarButton title="Flip the photo vertically (layers stay put)" onClick={() => onFlip('vertical')}>⇅</ToolbarButton>
     </>
   )
 }
@@ -100,7 +108,7 @@ const ALIGNMENTS = [
   { value: 'justify', icon: '≡', title: 'Justify' },
 ]
 
-function TextControls({ layer, H, onPatch, onBeginChange, documentColors }) {
+function TextControls({ layer, H, onPatch, onBeginChange, palette }) {
   const fonts = fontsFor(layer.dir || 'ltr')
   const sizePx = Math.round(layer.size * H)
   const weightLabel = WEIGHTS.find(w => w.value === layer.weight)?.label || layer.weight
@@ -135,34 +143,40 @@ function TextControls({ layer, H, onPatch, onBeginChange, documentColors }) {
         <ToolbarButton title="Increase font size (⇧⌘.)" onClick={() => set({ size: (sizePx + 2) / H })}>+</ToolbarButton>
       </span>
 
-      <ColorField value={layer.color} title="Text colour" documentColors={documentColors}
+      <ColorField value={layer.color} title="Text colour" palette={palette}
         onCommitStart={onBeginChange} onChange={color => onPatch({ color })} />
 
       <ToolbarDivider />
-      {/* Bold is a jump between two weights rather than a separate flag: the
-          weight menu is the real control, and B is the shortcut people reach
-          for. Keeping one source of truth means they can't disagree. */}
-      <ToolbarButton title="Bold (⌘B)" active={layer.weight >= 700}
-        onClick={() => set({ weight: layer.weight >= 700 ? 400 : 700 })}>
-        <b>B</b>
-      </ToolbarButton>
-      <ToolbarButton title="Italic (⌘I)" active={!!layer.italic}
-        onClick={() => set({ italic: !layer.italic })}><i>I</i></ToolbarButton>
-      <ToolbarButton title="Underline (⌘U)" active={!!layer.underline}
-        onClick={() => set({ underline: !layer.underline })}><u>U</u></ToolbarButton>
-      <ToolbarButton title="Strikethrough (⇧⌘S)" active={!!layer.strike}
-        onClick={() => set({ strike: !layer.strike })}><s>S</s></ToolbarButton>
-      <ToolbarButton title="Uppercase (⇧⌘K)" active={!!layer.uppercase}
-        onClick={() => set({ uppercase: !layer.uppercase })}>aA</ToolbarButton>
+      {/* Grouped so a wrap breaks BETWEEN the style set and the alignment set
+          rather than through the middle of either. */}
+      <span className="flex items-center gap-0.5">
+        {/* Bold is a jump between two weights rather than a separate flag: the
+            weight menu is the real control, and B is the shortcut people reach
+            for. Keeping one source of truth means they can't disagree. */}
+        <ToolbarButton title="Bold (⌘B)" active={layer.weight >= 700}
+          onClick={() => set({ weight: layer.weight >= 700 ? 400 : 700 })}>
+          <b>B</b>
+        </ToolbarButton>
+        <ToolbarButton title="Italic (⌘I)" active={!!layer.italic}
+          onClick={() => set({ italic: !layer.italic })}><i>I</i></ToolbarButton>
+        <ToolbarButton title="Underline (⌘U)" active={!!layer.underline}
+          onClick={() => set({ underline: !layer.underline })}><u>U</u></ToolbarButton>
+        <ToolbarButton title="Strikethrough (⇧⌘S)" active={!!layer.strike}
+          onClick={() => set({ strike: !layer.strike })}><s>S</s></ToolbarButton>
+        <ToolbarButton title="Uppercase (⇧⌘K)" active={!!layer.uppercase}
+          onClick={() => set({ uppercase: !layer.uppercase })}>aA</ToolbarButton>
+      </span>
 
       <ToolbarDivider />
-      {ALIGNMENTS.map(a => (
-        <ToolbarButton key={a.value} title={a.title} active={layer.align === a.value}
-          onClick={() => set({ align: a.value })}>{a.icon}</ToolbarButton>
-      ))}
+      <span className="flex items-center gap-0.5">
+        {ALIGNMENTS.map(a => (
+          <ToolbarButton key={a.value} title={a.title} active={layer.align === a.value}
+            onClick={() => set({ align: a.value })}>{a.icon}</ToolbarButton>
+        ))}
+      </span>
 
       <SpacingMenu layer={layer} onPatch={onPatch} onBeginChange={onBeginChange} />
-      <EffectsMenu layer={layer} effect={effect} onPatch={onPatch} onBeginChange={onBeginChange} documentColors={documentColors} />
+      <EffectsMenu layer={layer} effect={effect} onPatch={onPatch} onBeginChange={onBeginChange} palette={palette} />
 
       <ToolbarMenu label={`Anchor: ${anchor}`} title="Which edge of the text block stays put as it re-wraps" width={210}>
         {ANCHORS.map(a => (
@@ -200,7 +214,7 @@ function SpacingMenu({ layer, onPatch, onBeginChange }) {
   )
 }
 
-function EffectsMenu({ layer, effect, onPatch, onBeginChange, documentColors }) {
+function EffectsMenu({ layer, effect, onPatch, onBeginChange, palette }) {
   const usesColor = EFFECTS.find(e => e.value === effect)?.usesColor
   const label = EFFECTS.find(e => e.value === effect)?.label || 'None'
   return (
@@ -225,7 +239,7 @@ function EffectsMenu({ layer, effect, onPatch, onBeginChange, documentColors }) 
             {usesColor && (
               <div className="flex items-center gap-2">
                 <span className="text-[11px] text-text-secondary">Effect colour</span>
-                <ColorField value={layer.effectColor || '#000000'} title="Effect colour" documentColors={documentColors}
+                <ColorField value={layer.effectColor || '#000000'} title="Effect colour" palette={palette}
                   onCommitStart={onBeginChange} onChange={effectColor => onPatch({ effectColor })} />
               </div>
             )}
@@ -233,7 +247,7 @@ function EffectsMenu({ layer, effect, onPatch, onBeginChange, documentColors }) 
         )}
         <div className="flex items-center gap-2 border-t border-border px-1 pt-2">
           <span className="text-[11px] text-text-secondary">Highlight</span>
-          <ColorField value={layer.bgColor} title="Highlight behind the text" allowNone documentColors={documentColors}
+          <ColorField value={layer.bgColor} title="Highlight behind the text" allowNone palette={palette}
             onCommitStart={onBeginChange} onChange={bgColor => onPatch({ bgColor })} />
         </div>
       </div>
@@ -241,32 +255,86 @@ function EffectsMenu({ layer, effect, onPatch, onBeginChange, documentColors }) 
   )
 }
 
-// ── Rect / ellipse ─────────────────────────────────────────────────────────
-function ShapeControls({ layer, H, onPatch, onBeginChange, documentColors }) {
+// A border style is only meaningful once there IS a border, so the menu is
+// disabled rather than hidden when the stroke is zero-width or transparent —
+// hidden would make the toolbar jump as you drag the width up from 0.
+function DashMenu({ layer, onPatch, onBeginChange, disabled }) {
+  const current = DASH_STYLES.find(d => d.value === (layer.dashStyle || 'solid'))
+  return (
+    <ToolbarMenu label={current?.label || 'Solid'} title="Border style" width={150} disabled={disabled}>
+      {DASH_STYLES.map(d => (
+        <MenuItem key={d.value} active={(layer.dashStyle || 'solid') === d.value}
+          onClick={() => { onBeginChange(); onPatch({ dashStyle: d.value }) }}>
+          {d.label}
+        </MenuItem>
+      ))}
+    </ToolbarMenu>
+  )
+}
+
+// ── Rect / ellipse / polygon / star ────────────────────────────────────────
+function ShapeControls({ layer, H, onPatch, onBeginChange, palette }) {
+  const hasBorder = !!layer.stroke && (layer.strokeWidth || 0) > 0
   return (
     <>
-      <ColorField value={layer.fill} title="Fill" allowNone documentColors={documentColors}
+      <ColorField value={layer.fill} title="Fill" allowNone palette={palette}
         onCommitStart={onBeginChange} onChange={fill => onPatch({ fill })} />
-      <ColorField value={layer.stroke} title="Border colour" allowNone documentColors={documentColors}
+      <ColorField value={layer.stroke} title="Border colour" allowNone palette={palette}
         onCommitStart={onBeginChange} onChange={stroke => onPatch({ stroke })} />
       <NumberField label="B" value={Math.round((layer.strokeWidth || 0) * H)} min={0} max={Math.round(H / 4)} suffix="px" className="w-[92px]"
         onCommitStart={onBeginChange} onChange={px => onPatch({ strokeWidth: px / H })} />
+      <DashMenu layer={layer} onPatch={onPatch} onBeginChange={onBeginChange} disabled={!hasBorder} />
       {layer.type === 'rect' && (
         <NumberField label="R" value={Math.round((layer.cornerRadius || 0) * H)} min={0} max={Math.round(H / 2)} suffix="px" className="w-[92px]"
           onCommitStart={onBeginChange} onChange={px => onPatch({ cornerRadius: px / H })} />
+      )}
+      {/* Sides and points are the shape's actual geometry, so they belong in
+          the toolbar next to its colours rather than behind Position — a
+          hexagon that can't become a pentagon isn't really a polygon tool. */}
+      {layer.type === 'polygon' && (
+        <NumberField label="◇" value={layer.sides || 3} min={3} max={20} className="w-[86px]"
+          onCommitStart={onBeginChange} onChange={sides => onPatch({ sides: Math.round(sides) })} />
+      )}
+      {layer.type === 'star' && (
+        <>
+          <NumberField label="★" value={layer.points || 5} min={3} max={20} className="w-[86px]"
+            onCommitStart={onBeginChange} onChange={points => onPatch({ points: Math.round(points) })} />
+          <ToolbarMenu label={`Depth ${Math.round((layer.innerRatio ?? 0.45) * 100)}`} title="How deep the star's notches cut" width={210} closeOnClick={false}>
+            <div className="p-2">
+              <SliderField label="Point depth" min={5} max={95} step={1}
+                value={Math.round((layer.innerRatio ?? 0.45) * 100)}
+                onCommitStart={onBeginChange}
+                onChange={v => onPatch({ innerRatio: v / 100 })} />
+            </div>
+          </ToolbarMenu>
+        </>
       )}
     </>
   )
 }
 
 // ── Line / arrow ───────────────────────────────────────────────────────────
-function PathControls({ layer, H, onPatch, onBeginChange, documentColors }) {
+function PathControls({ layer, H, onPatch, onBeginChange, palette }) {
+  const isArrow = layer.type === 'arrow'
+  // An arrow saved before this existed has neither flag, so `undefined` has to
+  // read as the shape it already had: a head on the end only.
+  const startOn = !!layer.arrowStart
+  const endOn = layer.arrowEnd !== false
   return (
     <>
-      <ColorField value={layer.stroke} title="Colour" documentColors={documentColors}
+      <ColorField value={layer.stroke} title="Colour" palette={palette}
         onCommitStart={onBeginChange} onChange={stroke => onPatch({ stroke })} />
       <NumberField label="W" value={Math.round((layer.strokeWidth || 0) * H)} min={1} max={Math.round(H / 4)} suffix="px" className="w-[92px]"
         onCommitStart={onBeginChange} onChange={px => onPatch({ strokeWidth: px / H })} />
+      <DashMenu layer={layer} onPatch={onPatch} onBeginChange={onBeginChange} />
+      {isArrow && (
+        <span className="flex items-center gap-0.5">
+          <ToolbarButton title="Head on the start" active={startOn}
+            onClick={() => { onBeginChange(); onPatch({ arrowStart: !startOn }) }}>←</ToolbarButton>
+          <ToolbarButton title="Head on the end" active={endOn}
+            onClick={() => { onBeginChange(); onPatch({ arrowEnd: !endOn }) }}>→</ToolbarButton>
+        </span>
+      )}
     </>
   )
 }

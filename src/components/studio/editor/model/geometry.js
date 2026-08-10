@@ -28,6 +28,9 @@ export function layerBoundsPx(layer, W, H) {
   if (layer.type === 'ellipse') {
     return { x: layer.x * W, y: layer.y * H, width: layer.w * W, height: layer.h * H, pivot: 'center' }
   }
+  // Polygons and stars are a closed path whose points are laid out from the
+  // box origin (see shapePoints), so their pivot is the top-left like a rect's
+  // — not the centre, even though the shape looks radial.
   return { x: layer.x * W, y: layer.y * H, width: layer.w * W, height: layer.h * H, pivot: 'top-left' }
 }
 

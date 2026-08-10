@@ -1,6 +1,10 @@
 import { useRef, useState } from 'react'
 import { Spinner } from '../../../ui/index'
-import { ADJUST_KEYS, ADJUST_RANGE } from '../model/adjust'
+import {
+  ADJUST_GROUPS, ADJUST_LABELS, ADJUST_RANGE,
+  FILTER_PRESETS, matchPreset, hasAdjustments,
+} from '../model/adjust'
+import { isFullFrame } from '../model/document'
 import { SliderField, PanelSection, ToolbarButton } from '../controls'
 import { PositionPanel } from './PositionPanel'
 
@@ -49,6 +53,9 @@ const TEXT_PRESETS = [
 const SHAPES = [
   { id: 'rect', icon: '▭', label: 'Rectangle' },
   { id: 'ellipse', icon: '◯', label: 'Ellipse' },
+  { id: 'triangle', icon: '△', label: 'Triangle' },
+  { id: 'polygon', icon: '⬡', label: 'Polygon' },
+  { id: 'star', icon: '★', label: 'Star' },
   { id: 'line', icon: '／', label: 'Line' },
   { id: 'arrow', icon: '→', label: 'Arrow' },
 ]
@@ -136,28 +143,61 @@ export function UploadsPanel({ onUploadImage, onAddImage, library = [] }) {
 }
 
 // ── Adjust ─────────────────────────────────────────────────────────────────
-export function AdjustPanel({ adjust, onChange, onBeginChange, onResetAll }) {
-  const dirty = ADJUST_KEYS.some(k => adjust[k])
+// Canva's order: the filter row first (one click to a whole look), Auto next
+// (one click to a corrected exposure), and the sliders under both — because a
+// preset is a starting point you then tune, not a replacement for tuning.
+export function AdjustPanel({ adjust, onChange, onBeginChange, onResetAll, onPreset, onAuto }) {
+  const dirty = hasAdjustments(adjust)
+  const active = matchPreset(adjust)
+
   return (
     <div className="space-y-4">
-      <PanelSection title="Adjust the photo" action={
-        dirty ? <button type="button" onClick={onResetAll} className="text-[10px] text-text-tertiary hover:text-amber-700">Reset all</button> : null
-      }>
-        <div className="space-y-3">
-          {ADJUST_KEYS.map(key => (
-            <SliderField key={key} label={key[0].toUpperCase() + key.slice(1)}
-              value={adjust[key] || 0}
-              min={ADJUST_RANGE[key][0]} max={ADJUST_RANGE[key][1]} step={1}
-              onCommitStart={onBeginChange}
-              onChange={v => onChange(key, v)}
-              onReset={adjust[key] ? () => { onBeginChange(); onChange(key, 0) } : null}
-            />
+      <PanelSection title="Filters">
+        <div className="grid grid-cols-4 gap-1">
+          {FILTER_PRESETS.map(p => (
+            <button key={p.id} type="button" onClick={() => onPreset(p.id)}
+              className={`rounded-lg border px-1 py-1.5 text-[10px] transition-colors ${
+                active === p.id
+                  ? 'border-amber-500 bg-amber-100 text-amber-900'
+                  : 'border-border text-text-secondary hover:border-amber-400 hover:bg-amber-50'
+              }`}>
+              {p.label}
+            </button>
           ))}
         </div>
       </PanelSection>
+
+      <div className="flex gap-2">
+        <ToolbarButton onClick={onAuto} className="flex-1 justify-center border border-border"
+          title="Read the photo's histogram and balance its exposure">
+          ✨ Auto adjust
+        </ToolbarButton>
+        <ToolbarButton onClick={onResetAll} disabled={!dirty}
+          className="flex-1 justify-center border border-border" title="Back to no adjustments">
+          Reset all
+        </ToolbarButton>
+      </div>
+
+      {ADJUST_GROUPS.map(group => (
+        <PanelSection key={group.title} title={group.title}>
+          <div className="space-y-3">
+            {group.keys.map(key => (
+              <SliderField key={key} label={ADJUST_LABELS[key]}
+                value={adjust[key] || 0}
+                min={ADJUST_RANGE[key][0]} max={ADJUST_RANGE[key][1]} step={1}
+                onCommitStart={onBeginChange}
+                onChange={v => onChange(key, v)}
+                onReset={adjust[key] ? () => { onBeginChange(); onChange(key, 0) } : null}
+              />
+            ))}
+          </div>
+        </PanelSection>
+      ))}
+
       <p className="text-[11px] leading-relaxed text-text-tertiary">
         Applies to the photo only — text, shapes and image layers are untouched.
-        The preview is filtered at screen resolution; the export is filtered at full resolution.
+        Nothing here is baked into the image: reopen this edit later and every
+        slider is still where you left it.
       </p>
     </div>
   )
@@ -174,32 +214,48 @@ const RATIOS = [
   { label: 'Landscape 3:2', value: 3 / 2 },
 ]
 
-export function CropPanel({ doc, cropRect, onSetRatio, onApply, onCancel }) {
+export function CropPanel({ base, crop, cropRect, ratio, onSetRatio, onApply, onCancel, onReset }) {
+  const cropped = !isFullFrame(crop)
   return (
     <div className="space-y-4">
-      <PanelSection title="Crop">
+      <PanelSection title="Aspect ratio">
         <div className="space-y-1">
           {RATIOS.map(r => (
             <button key={r.label} type="button" onClick={() => onSetRatio(r.value)}
-              className="w-full rounded-lg border border-border bg-white px-3 py-1.5 text-left text-[11px] text-text-secondary hover:border-amber-400 hover:bg-amber-50">
+              className={`w-full rounded-lg border px-3 py-1.5 text-left text-[11px] transition-colors ${
+                ratio === r.value
+                  ? 'border-amber-500 bg-amber-100 text-amber-900'
+                  : 'border-border bg-white text-text-secondary hover:border-amber-400 hover:bg-amber-50'
+              }`}>
               {r.label}
             </button>
           ))}
         </div>
       </PanelSection>
-      {cropRect && (
+
+      {cropRect && base && (
         <p className="text-[11px] text-text-tertiary">
           New size: {Math.round(cropRect.w)} × {Math.round(cropRect.h)} px
-          <span className="block">(was {doc.width} × {doc.height})</span>
+          <span className="block">(the photo is {base.width} × {base.height})</span>
         </p>
       )}
+
       <p className="text-[11px] leading-relaxed text-text-tertiary">
-        Everything on the layers stays where it is relative to the photo — the crop moves the frame around it.
+        The parts outside the frame are dimmed, not deleted — drag the frame
+        back out over them whenever you like, in this session or a later one.
+        Everything on the layers stays where it is relative to the photo.
       </p>
+
       <div className="flex gap-2">
         <ToolbarButton onClick={onCancel} className="flex-1 justify-center border border-border">Cancel</ToolbarButton>
         <ToolbarButton onClick={onApply} className="flex-1 justify-center border border-amber-500 bg-amber-100 text-amber-900">Apply crop</ToolbarButton>
       </div>
+      {cropped && (
+        <ToolbarButton onClick={onReset} className="w-full justify-center border border-border"
+          title="Show the whole photo again">
+          Reset to the full photo
+        </ToolbarButton>
+      )}
     </div>
   )
 }

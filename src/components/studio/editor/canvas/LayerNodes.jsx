@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Rect, Ellipse, Line, Arrow, Image as KonvaImage } from 'react-konva'
 import { buildTextBitmap } from '../model/textBitmap'
 import { getCachedImage, loadLayerImage } from '../model/imageCache'
+import { dashFor, isPoly, shapePoints } from '../model/document'
 
 // ─── The nodes on the canvas ───────────────────────────────────────────────
 // One component per layer type. They share a contract so the Stage can treat
@@ -42,41 +43,61 @@ export function ShapeNode({ layer, W, H, selectable, onSelect, onChange, registe
     listening: selectable,
   }
 
+  const strokeWidth = (layer.strokeWidth || 0) * H
+  const paint = {
+    fill: layer.fill || undefined,
+    stroke: layer.stroke || undefined,
+    strokeWidth,
+    dash: dashFor(layer, strokeWidth),
+    lineCap: layer.dashStyle === 'dotted' ? 'round' : undefined,
+  }
+
   function commitTransformEnd() {
     const node = ref.current
     if (!node) return
     const scaleX = node.scaleX(), scaleY = node.scaleY()
     node.scaleX(1); node.scaleY(1)
-    if (layer.type === 'rect') {
-      const w = Math.max(1, node.width() * scaleX), h = Math.max(1, node.height() * scaleY)
-      node.width(w); node.height(h)
-      onChange(layer.id, { x: node.x() / W, y: node.y() / H, w: w / W, h: h / H, rotation: node.rotation() })
-    } else {
+    if (layer.type === 'ellipse') {
       const rx = Math.max(1, node.radiusX() * scaleX), ry = Math.max(1, node.radiusY() * scaleY)
       node.radiusX(rx); node.radiusY(ry)
       onChange(layer.id, {
         x: (node.x() - rx) / W, y: (node.y() - ry) / H,
         w: (rx * 2) / W, h: (ry * 2) / H, rotation: node.rotation(),
       })
+      return
     }
+    // Rect and the closed-path shapes commit the same way. A polygon's points
+    // are DERIVED from w/h (see shapePoints), so there's nothing to write back
+    // but the box — the next render regenerates the geometry from it, which is
+    // what keeps a squashed hexagon a hexagon rather than a stretched bitmap.
+    const w = Math.max(1, (isPoly(layer) ? layer.w * W : node.width()) * scaleX)
+    const h = Math.max(1, (isPoly(layer) ? layer.h * H : node.height()) * scaleY)
+    if (!isPoly(layer)) { node.width(w); node.height(h) }
+    onChange(layer.id, { x: node.x() / W, y: node.y() / H, w: w / W, h: h / H, rotation: node.rotation() })
   }
 
   if (layer.type === 'rect') {
     return (
-      <Rect {...common}
+      <Rect {...common} {...paint}
         x={layer.x * W} y={layer.y * H} width={layer.w * W} height={layer.h * H}
-        fill={layer.fill || undefined} stroke={layer.stroke || undefined}
-        strokeWidth={(layer.strokeWidth || 0) * H} cornerRadius={(layer.cornerRadius || 0) * H}
+        cornerRadius={(layer.cornerRadius || 0) * H}
+        onTransformEnd={commitTransformEnd}
+      />
+    )
+  }
+  if (isPoly(layer)) {
+    return (
+      <Line {...common} {...paint}
+        x={layer.x * W} y={layer.y * H}
+        points={shapePoints(layer, W, H)} closed lineJoin="round"
         onTransformEnd={commitTransformEnd}
       />
     )
   }
   return (
-    <Ellipse {...common}
+    <Ellipse {...common} {...paint}
       x={(layer.x + layer.w / 2) * W} y={(layer.y + layer.h / 2) * H}
       radiusX={(layer.w / 2) * W} radiusY={(layer.h / 2) * H}
-      fill={layer.fill || undefined} stroke={layer.stroke || undefined}
-      strokeWidth={(layer.strokeWidth || 0) * H}
       onTransformEnd={commitTransformEnd}
     />
   )
@@ -93,8 +114,10 @@ export function PathNode({ layer, W, H, selectable, onSelect, registerRef, onDra
     return () => registerRef(layer.id, null)
   }, [registerRef, layer.id])
 
-  const Comp = layer.type === 'arrow' ? Arrow : Line
+  const isArrow = layer.type === 'arrow'
+  const Comp = isArrow ? Arrow : Line
   const stroke = (layer.strokeWidth || 0) * H
+  const head = (layer.strokeWidth || 0.01) * H * 3
   return (
     <Comp ref={ref} {...PERF}
       points={[layer.x1 * W, layer.y1 * H, layer.x2 * W, layer.y2 * H]}
@@ -104,13 +127,19 @@ export function PathNode({ layer, W, H, selectable, onSelect, registerRef, onDra
       listening={selectable}
       opacity={layer.opacity ?? 1}
       stroke={layer.stroke || undefined}
-      fill={layer.type === 'arrow' ? layer.stroke || undefined : undefined}
+      fill={isArrow ? layer.stroke || undefined : undefined}
       strokeWidth={stroke}
+      dash={dashFor(layer, stroke)}
+      lineCap={layer.dashStyle === 'dotted' ? 'round' : undefined}
       // A hairline is nearly impossible to grab; a fat invisible hit stroke
       // gives it a sane click target without changing what's drawn.
       hitStrokeWidth={Math.max(stroke, 12)}
-      pointerLength={layer.type === 'arrow' ? (layer.strokeWidth || 0.01) * H * 3 : undefined}
-      pointerWidth={layer.type === 'arrow' ? (layer.strokeWidth || 0.01) * H * 3 : undefined}
+      pointerLength={isArrow ? head : undefined}
+      pointerWidth={isArrow ? head : undefined}
+      // An arrow saved before the two-ended option existed has neither flag,
+      // so the fallback has to reproduce what it already looked like.
+      pointerAtBeginning={isArrow ? !!layer.arrowStart : undefined}
+      pointerAtEnding={isArrow ? layer.arrowEnd !== false : undefined}
     />
   )
 }

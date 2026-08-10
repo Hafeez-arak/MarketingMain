@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Stage, Layer, Rect, Circle, Line, Image as KonvaImage, Transformer } from 'react-konva'
+import { Stage, Layer, Group, Rect, Circle, Line, Image as KonvaImage, Transformer } from 'react-konva'
 import { ShapeNode, PathNode, ImageNode, TextNode } from './LayerNodes'
 import { applyAdjustments, hasAdjustments } from '../model/adjust'
 import { patchLayers, isPath } from '../model/document'
@@ -29,8 +29,15 @@ const SHAPE_ANCHORS = ['top-left', 'top-right', 'bottom-left', 'bottom-right', '
 const TEXT_ANCHORS = ['top-left', 'top-right', 'bottom-left', 'bottom-right', 'middle-left', 'middle-right']
 const ROTATION_SNAPS = Array.from({ length: 360 / ROTATION_STEP }, (_, i) => i * ROTATION_STEP)
 
+// ── Crop mode shows the WHOLE photo, not the page ──────────────────────────
+// The point of a non-destructive crop is that the hidden parts still exist, so
+// the crop UI has to let you see them and drag the frame back out over them.
+// While cropping, the Stage therefore works in BASE-image pixels: the photo is
+// drawn uncropped at full size, and the layers are drawn inside a Group parked
+// at the committed crop's origin, so they stay pinned to the part of the photo
+// they were placed on while the new frame moves around them.
 export function EditorStage({
-  doc, previewCanvas, zoom, epoch,
+  doc, previewCanvas, cacheRatio, baseSize, zoom, epoch,
   selectedIds, onSelectionChange,
   onBeginChange, onApplyDoc, onCloneInPlace,
   tool, cropRect, cropRatio, onCropRect,
@@ -38,7 +45,22 @@ export function EditorStage({
   onInteractingChange,
 }) {
   const { viewport, view, spaceDown, onWheel, setPan } = zoom
+  const cropping = tool === 'crop'
+  // The layers' own coordinate frame is always the PAGE, cropping or not.
   const W = doc.width, H = doc.height
+  // What the Stage is showing, and how the photo sits in it.
+  const stageW = cropping ? baseSize.width : W
+  const stageH = cropping ? baseSize.height : H
+  const committedCropPx = baseSize.crop
+  const contentX = cropping ? committedCropPx.x : 0
+  const contentY = cropping ? committedCropPx.y : 0
+  // The source rectangle on the preview bitmap. Its pixels are the base
+  // image's scaled by the preview ratio, so the crop has to scale with them.
+  const previewScale = previewCanvas && baseSize.width ? previewCanvas.width / baseSize.width : 1
+  const sourceCrop = cropping ? null : {
+    x: committedCropPx.x * previewScale, y: committedCropPx.y * previewScale,
+    width: committedCropPx.width * previewScale, height: committedCropPx.height * previewScale,
+  }
 
   const stageRef = useRef(null)
   const baseImgRef = useRef(null)
@@ -78,8 +100,13 @@ export function EditorStage({
     cancelAnimationFrame(adjustFrame.current)
     adjustFrame.current = requestAnimationFrame(() => {
       if (hasAdjustments(doc.adjust)) {
-        node.cache()
-        applyAdjustments(node, doc.adjust)
+        // pixelRatio is what actually makes the downscaled preview pay off:
+        // Konva sizes a cache from the NODE's width/height, which is the
+        // document size no matter how small the source bitmap is, so without
+        // this the filters ran over full-resolution pixels regardless and the
+        // downscale only ever saved memory. See adjust.js.
+        node.cache({ pixelRatio: cacheRatio })
+        applyAdjustments(node, doc.adjust, { docHeight: H, cachePixelRatio: cacheRatio })
       } else {
         node.filters([])
         node.clearCache()
@@ -87,7 +114,7 @@ export function EditorStage({
       node.getLayer()?.batchDraw()
     })
     return () => cancelAnimationFrame(adjustFrame.current)
-  }, [doc.adjust, previewCanvas])
+  }, [doc.adjust, previewCanvas, cacheRatio, H, cropping])
 
   // ── Transformer attachment ──────────────────────────────────────────────
   // Lines and arrows are deliberately excluded: they're edited by dragging
@@ -305,13 +332,23 @@ export function EditorStage({
       <Layer>
         {/* A white plate under the photo so a transparent PNG reads as a page
             rather than as the app's own background showing through. */}
-        <Rect x={0} y={0} width={W} height={H} fill="#ffffff" listening={false} />
-        <KonvaImage ref={baseImgRef} image={previewCanvas} x={0} y={0} width={W} height={H} listening={false} />
+        <Rect x={0} y={0} width={stageW} height={stageH} fill="#ffffff" listening={false} />
+        <KonvaImage ref={baseImgRef} image={previewCanvas}
+          x={0} y={0} width={stageW} height={stageH}
+          // Cropping shows the whole photo; otherwise the page is a window
+          // onto it and Konva takes the source rectangle directly.
+          crop={sourceCrop || undefined}
+          listening={false} />
 
+        <Group x={contentX} y={contentY}>
         {doc.layers.map(l => {
           if (l.visible === false) return null
+          // `key` is deliberately NOT in `shared`: React 19 warns when a key
+          // arrives through a spread, because it's a directive to the
+          // reconciler rather than a prop, and one passed that way is not
+          // guaranteed to be read. It's written explicitly on each node below.
           const shared = {
-            key: l.id, layer: l, W, H, selectable, registerRef,
+            layer: l, W, H, selectable, registerRef,
             onSelect: e => selectLayer(e, l),
             onDragStart: e => handleDragStart(e, l),
             onDragMove: handleDragMove,
@@ -319,13 +356,14 @@ export function EditorStage({
             onContextMenu: e => { e.evt.preventDefault(); e.cancelBubble = true; onContextMenu?.(e, l.id) },
           }
           if (l.type === 'text') {
-            return <TextNode {...shared} epoch={epoch} onChange={patchOne} hidden={editingId === l.id}
+            return <TextNode key={l.id} {...shared} epoch={epoch} onChange={patchOne} hidden={editingId === l.id}
               onEditStart={() => { if (!l.locked) onEditStart?.(l.id) }} />
           }
-          if (l.type === 'image') return <ImageNode {...shared} onChange={patchOne} />
-          if (isPath(l)) return <PathNode {...shared} />
-          return <ShapeNode {...shared} onChange={patchOne} />
+          if (l.type === 'image') return <ImageNode key={l.id} {...shared} onChange={patchOne} />
+          if (isPath(l)) return <PathNode key={l.id} {...shared} />
+          return <ShapeNode key={l.id} {...shared} onChange={patchOne} />
         })}
+        </Group>
       </Layer>
 
       {/* ── Selection UI, guides, crop ── */}
@@ -374,20 +412,35 @@ export function EditorStage({
             listening={false} perfectDrawEnabled={false} />
         )}
 
-        {tool === 'crop' && cropRect && (
+        {/* The crop frame and its dimmed surround, in BASE-image pixels —
+            which is the whole photo, including everything the current crop is
+            hiding. Dragging the frame out over the dimmed area is what makes
+            the crop re-editable rather than a one-way cut. */}
+        {cropping && cropRect && (
           <>
-            <Rect x={0} y={0} width={W} height={cropRect.y} fill="rgba(0,0,0,0.5)" listening={false} />
-            <Rect x={0} y={cropRect.y + cropRect.h} width={W} height={H - cropRect.y - cropRect.h} fill="rgba(0,0,0,0.5)" listening={false} />
-            <Rect x={0} y={cropRect.y} width={cropRect.x} height={cropRect.h} fill="rgba(0,0,0,0.5)" listening={false} />
-            <Rect x={cropRect.x + cropRect.w} y={cropRect.y} width={W - cropRect.x - cropRect.w} height={cropRect.h} fill="rgba(0,0,0,0.5)" listening={false} />
+            <Rect x={0} y={0} width={stageW} height={cropRect.y} fill="rgba(0,0,0,0.55)" listening={false} />
+            <Rect x={0} y={cropRect.y + cropRect.h} width={stageW} height={stageH - cropRect.y - cropRect.h} fill="rgba(0,0,0,0.55)" listening={false} />
+            <Rect x={0} y={cropRect.y} width={cropRect.x} height={cropRect.h} fill="rgba(0,0,0,0.55)" listening={false} />
+            <Rect x={cropRect.x + cropRect.w} y={cropRect.y} width={stageW - cropRect.x - cropRect.w} height={cropRect.h} fill="rgba(0,0,0,0.55)" listening={false} />
+
+            {/* Rule-of-thirds guides, as every crop tool has. */}
+            {[1, 2].map(i => (
+              <Line key={`ch${i}`} points={[cropRect.x, cropRect.y + (cropRect.h * i) / 3, cropRect.x + cropRect.w, cropRect.y + (cropRect.h * i) / 3]}
+                stroke="rgba(255,255,255,0.45)" strokeWidth={1 / view.scale} listening={false} perfectDrawEnabled={false} />
+            ))}
+            {[1, 2].map(i => (
+              <Line key={`cv${i}`} points={[cropRect.x + (cropRect.w * i) / 3, cropRect.y, cropRect.x + (cropRect.w * i) / 3, cropRect.y + cropRect.h]}
+                stroke="rgba(255,255,255,0.45)" strokeWidth={1 / view.scale} listening={false} perfectDrawEnabled={false} />
+            ))}
+
             <Rect ref={cropNodeRef} x={cropRect.x} y={cropRect.y} width={cropRect.w} height={cropRect.h}
               stroke={ACCENT} strokeWidth={2 / view.scale} draggable
               dragBoundFunc={pos => {
                 // dragBoundFunc works in ABSOLUTE (screen) coordinates, so the
                 // document-space clamp has to be pushed through the current
                 // view transform rather than applied to raw pixels.
-                const maxX = (W - cropRect.w) * view.scale + view.x
-                const maxY = (H - cropRect.h) * view.scale + view.y
+                const maxX = (stageW - cropRect.w) * view.scale + view.x
+                const maxY = (stageH - cropRect.h) * view.scale + view.y
                 return {
                   x: Math.min(Math.max(view.x, pos.x), maxX),
                   y: Math.min(Math.max(view.y, pos.y), maxY),
@@ -399,7 +452,12 @@ export function EditorStage({
                 const w = Math.max(20, node.width() * node.scaleX())
                 const h = Math.max(20, node.height() * node.scaleY())
                 node.scaleX(1); node.scaleY(1)
-                onCropRect({ x: node.x(), y: node.y(), w, h })
+                // Clamped to the photo: a handle dragged past the edge would
+                // otherwise ask for pixels that don't exist and produce a
+                // transparent margin in the export.
+                const x = Math.max(0, Math.min(node.x(), stageW - Math.min(w, stageW)))
+                const y = Math.max(0, Math.min(node.y(), stageH - Math.min(h, stageH)))
+                onCropRect({ x, y, w: Math.min(w, stageW - x), h: Math.min(h, stageH - y) })
               }}
             />
             <Transformer ref={cropTransformerRef} rotateEnabled={false} {...HANDLE_PROPS}
