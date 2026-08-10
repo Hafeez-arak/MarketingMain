@@ -1,8 +1,10 @@
+import { useEffect } from 'react'
 import { Routes, Route } from 'react-router-dom'
-import { AppProvider } from './store/appStore'
+import { AppProvider, useApp, actions } from './store/appStore'
 import { AuthProvider, useAuth } from './store/AuthContext'
 import { RequireAuth } from './components/auth/RequireAuth'
 import { AppLayout } from './components/layout/AppLayout'
+import { fetchWorkspaceWebhooks } from './lib/workspaceWebhooks'
 
 import { Login } from './pages/auth/Login'
 import { Signup } from './pages/auth/Signup'
@@ -24,6 +26,30 @@ import { Settings, Integrations, Team } from './pages/settings/index'
 import { BrandBrain } from './pages/settings/BrandBrain'
 import { CreativeStudio } from './pages/studio/index'
 
+// Loads the account's saved webhook URLs into state.webhooks on startup, so
+// they're there regardless of which page loads first. This used to happen
+// only inside the Settings → Integrations component's own effect — meaning
+// any page that fires a webhook (Studio, Instagram, etc.) BEFORE Settings
+// was ever visited in that browser session saw every webhook as "not
+// configured", even though the account's copy in workspace_webhooks was
+// correct all along. Hooks-only; renders nothing.
+function WebhooksLoader() {
+  const { dispatch } = useApp()
+  const { activeWorkspaceId, accessToken } = useAuth()
+  useEffect(() => {
+    if (!activeWorkspaceId) return
+    let cancelled = false
+    fetchWorkspaceWebhooks(activeWorkspaceId, accessToken).then(saved => {
+      if (cancelled || !saved) return
+      Object.entries(saved).forEach(([platform, url]) => {
+        if (typeof url === 'string') dispatch(actions.setWebhook(platform, url))
+      })
+    })
+    return () => { cancelled = true }
+  }, [activeWorkspaceId, accessToken, dispatch])
+  return null
+}
+
 // Everything under here requires a signed-in user with a workspace. Wrapping
 // it as one element (rather than gating each <Route> individually) means
 // adding a new page later never risks forgetting the auth check.
@@ -35,6 +61,7 @@ function ProtectedApp() {
           remounts it, so every page re-runs its Supabase fetches and the
           cached brand profile / in-progress draft reset — no manual refresh. */}
       <AppProvider key={activeWorkspaceId || 'none'}>
+        <WebhooksLoader />
         <AppLayout>
           <Routes>
             <Route path="/"                      element={<Dashboard />} />
