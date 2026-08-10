@@ -6,7 +6,8 @@ import { BranchChat, BranchPill } from '../../components/studio/BranchChat'
 import { PromptBubble } from '../../components/studio/VersionCard'
 import { OverlayEditor } from '../../components/studio/OverlayEditor'
 import { VideoPanel } from '../../components/studio/VideoPanel'
-import { DURATIONS } from '../../components/studio/motionPresets'
+import { AudioToggle, CostLine, LookPicker, MotionPicker, QualityRow } from '../../components/studio/VideoSettings'
+import { buildVideoPrompt } from '../../components/studio/motionPresets'
 import { aspectLabel } from '../../lib/postFormats'
 import { uploadReferenceImage } from '../../lib/referenceImages'
 import { buildInstructionsString } from '../../lib/brandBrain'
@@ -26,10 +27,14 @@ import {
 // waits as a pill you click to get the split view back.
 
 const RATIOS = ['1:1', '4:5', '9:16', '16:9']
+// 'image_video' was dropped from the picker — it was never a third mode, just
+// the image flow with a hint, and every image already animates from its own
+// lane's 🎬 button. Sessions created under it still open normally (the DB
+// check constraint and openSession's label both still accept it); it just
+// can't be chosen for new work.
 const INTENTS = [
-  { value: 'image',       label: 'An image',        hint: 'A post, story or ad visual' },
-  { value: 'video',       label: 'A video',         hint: 'A clip generated from a description' },
-  { value: 'image_video', label: 'Image, then video', hint: 'Design the still, then bring it to life' },
+  { value: 'image', label: 'An image', hint: 'A post, story or ad visual — animate it after if you want' },
+  { value: 'video', label: 'A video',  hint: 'A clip generated straight from a description' },
 ]
 const emptyComposer = { text: '', baseId: null, attach: null }
 
@@ -69,7 +74,17 @@ export function CreativeStudio() {
   const [composers, setComposers] = useState({})
   const [focusedBranch, setFocusedBranch] = useState(null)
 
+  // Round-0 text-to-video settings. Same controls as the Animate modal (they
+  // share VideoSettings.jsx), plus a look picker — with no source still, the
+  // look has to come from somewhere, and writing one in prose is exactly the
+  // job the preset library exists to remove.
   const [duration, setDuration] = useState('5')
+  const [resolution, setResolution] = useState('720p')
+  const [audio, setAudio] = useState(false)
+  const [motionNote, setMotionNote] = useState('')
+  const [motionPresetId, setMotionPresetId] = useState('')
+  const [motionStrength, setMotionStrength] = useState('medium')
+  const [lookId, setLookId] = useState('none')
   const [videoTarget, setVideoTarget] = useState(null)      // the still being animated
   // Set only by the 🔄 re-render action: the exact prompt/duration/
   // resolution/audio of a past render, so VideoPanel reopens pre-filled
@@ -123,6 +138,7 @@ export function CreativeStudio() {
   function newSession() {
     setSession(null); setVersions([]); setPrompt(''); setRefUrl(''); setRefNotes('')
     setPromptRaw(''); setPromptSource('raw')
+    setMotionNote(''); setMotionPresetId(''); setMotionStrength('medium'); setLookId('none')
     setComposers({}); setFocusedBranch(null); setError('')
   }
 
@@ -216,13 +232,22 @@ export function CreativeStudio() {
     const s = created.session
 
     const videoOnly = intent === 'video'
+    // Scene, then look, then movement — one assembled string, because the
+    // model takes a single prompt. The scene stays first and unmodified: it's
+    // what the human actually asked for, and these models weight the opening
+    // most heavily. What's stored on the row is the assembled text, since
+    // that's what genuinely produced the clip.
+    const videoPrompt = videoOnly
+      ? buildVideoPrompt({ scene: finalPrompt, lookId, motion: motionNote, strength: motionStrength, duration })
+      : finalPrompt
+
     // Video has one provider, so a video-only session gets one render rather
     // than a two-way comparison — variations come from re-rendering, not from
     // a second model.
     const rows = videoOnly
       ? [{ round: 0, kind: 'video', provider: 'seedance', mediaType: 'video',
-           userPrompt: finalPrompt, originalPrompt, promptSource: source,
-           aspectRatio: aspect, duration, resolution: '1080p', generateAudio: false }]
+           userPrompt: videoPrompt, originalPrompt, promptSource: source,
+           aspectRatio: aspect, duration, resolution, generateAudio: audio }]
       : ['openai', 'gemini'].map(provider => ({
           round: 0, kind: 'generate', provider, mediaType: 'image',
           userPrompt: finalPrompt, originalPrompt, promptSource: source,
@@ -235,8 +260,8 @@ export function CreativeStudio() {
 
     const fired = videoOnly
       ? await requestVideo(webhooks.creativeVideo, {
-          session_id: s.id, version_id: ins.rows[0].id, prompt: finalPrompt,
-          duration, aspect_ratio: aspect, resolution: '1080p', generate_audio: false,
+          session_id: s.id, version_id: ins.rows[0].id, prompt: videoPrompt,
+          duration, aspect_ratio: aspect, resolution, generate_audio: audio,
         })
       : await requestGenerate(webhooks.creativeGenerate, {
           session_id: s.id, prompt: finalPrompt, aspect_ratio: aspect,
@@ -484,7 +509,7 @@ export function CreativeStudio() {
             <Card className="p-5 space-y-4 max-w-2xl">
               <div>
                 <p className="text-xs font-medium text-text-secondary mb-1.5">What are you making?</p>
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-2 gap-2">
                   {INTENTS.map(i => (
                     <button key={i.value} onClick={() => setIntent(i.value)}
                       className={`text-left rounded-xl border p-2.5 transition-all ${
@@ -541,16 +566,44 @@ export function CreativeStudio() {
                 )}
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <Select label="Shape" value={aspect} onChange={e => setAspect(e.target.value)}>
-                  {RATIOS.map(r => <option key={r} value={r}>{aspectLabel(r)} ({r})</option>)}
-                </Select>
-                {intent === 'video' && (
-                  <Select label="Length" value={duration} onChange={e => setDuration(e.target.value)}>
-                    {DURATIONS.map(d => <option key={d} value={d}>{d} seconds</option>)}
-                  </Select>
-                )}
-              </div>
+              <Select label="Shape" value={aspect} onChange={e => setAspect(e.target.value)}>
+                {RATIOS.map(r => <option key={r} value={r}>{aspectLabel(r)} ({r})</option>)}
+              </Select>
+
+              {/* Text-to-video gets the same controls as the Animate modal —
+                  they were only ever in the modal, which meant a video-only
+                  session silently rendered at 1080p with no way to pick a
+                  move. Plus a look picker, which only makes sense here: with
+                  no source still, nothing else decides how the clip looks. */}
+              {intent === 'video' && (
+                <div className="rounded-xl border border-border bg-surface-subtle/40 p-3 space-y-3">
+                  <LookPicker lookId={lookId} onPick={setLookId} />
+
+                  <MotionPicker
+                    label="How should the camera move? (optional)"
+                    presetId={motionPresetId}
+                    onPickPreset={p => { setMotionPresetId(p.id); setMotionNote(p.prompt) }}
+                    strength={motionStrength}
+                    onStrength={setMotionStrength}
+                  />
+
+                  <Textarea rows={2} value={motionNote}
+                    onChange={e => { setMotionNote(e.target.value); setMotionPresetId('') }}
+                    placeholder="…or describe the movement yourself. Leave empty to let the model decide." />
+
+                  <QualityRow
+                    duration={duration} onDuration={setDuration}
+                    resolution={resolution} onResolution={setResolution}
+                  />
+
+                  <AudioToggle audio={audio} onAudio={setAudio} />
+
+                  <div className="flex items-center justify-between gap-2">
+                    <CostLine resolution={resolution} duration={duration} />
+                    <p className="text-[10px] text-text-tertiary">15s is the most one render can produce.</p>
+                  </div>
+                </div>
+              )}
 
               {intent !== 'video' && (
                 <div className="rounded-xl border border-border bg-surface-subtle/40 p-3 space-y-2">

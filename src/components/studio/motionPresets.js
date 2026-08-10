@@ -75,12 +75,94 @@ export const MOTION_PRESETS = [
   },
 ]
 
+// ── Motion strength ────────────────────────────────────────────────────────
+// Higgsfield's motion API takes `inputMotion(motionId, strength)` — you pick
+// the move AND how hard it lands. That second dial is the difference between
+// a move that reads as intentional and one that reads as a zoom, and it's the
+// thing people actually adjust between takes.
+//
+// Our models take prose, not a number, so strength is expressed the way these
+// models respond to: an explicit instruction about magnitude and pace. Medium
+// is the default because it's what the preset prose already implies on its own.
+export const MOTION_STRENGTHS = [
+  { id: 'subtle', label: 'Subtle', hint: 'Barely there',
+    suffix: 'Keep the movement very restrained and small in magnitude — it should be felt rather than noticed.' },
+  { id: 'medium', label: 'Medium', hint: 'Natural', suffix: '' },
+  { id: 'strong', label: 'Strong', hint: 'Bold, obvious',
+    suffix: 'Make the movement pronounced and clearly visible, covering real distance across the clip — still smooth and controlled, never fast or jerky.' },
+]
+
+export function applyStrength(prompt, strengthId) {
+  const s = MOTION_STRENGTHS.find(x => x.id === strengthId)
+  return s && s.suffix ? `${prompt} ${s.suffix}` : prompt
+}
+
 // Longer clips need the move paced across the extra seconds, or the model
 // finishes the gesture early and spends the remainder drifting aimlessly.
 export function paceForDuration(prompt, seconds) {
   const s = Number(seconds) || 5
   if (s <= 5) return prompt
   return `${prompt} Pace the movement evenly across the full ${s} seconds — one continuous gesture, not repeated.`
+}
+
+// ── Looks ──────────────────────────────────────────────────────────────────
+// The other half of what Higgsfield sells: Soul's style library, where you
+// pick a look instead of writing one. Same conclusion as the motion gallery —
+// it's a curated prompt library, not a model capability, so it lives here.
+//
+// Only offered for text-to-video. When you animate an existing still, the look
+// is already decided by that image, and asking the model for a grade on top is
+// an invitation to redraw the frame it should be leaving alone.
+export const LOOK_PRESETS = [
+  {
+    id: 'architectural',
+    label: 'Architectural film',
+    hint: 'Clean, wide, considered',
+    prompt: 'Shot like an architectural film: wide anamorphic framing, deep focus, level horizon lines, natural colour, restrained contrast. Every line in the frame deliberate.',
+  },
+  {
+    id: 'golden',
+    label: 'Golden hour',
+    hint: 'Warm, low sun',
+    prompt: 'Golden-hour cinematography: low warm sunlight raking across surfaces, long soft shadows, gentle lens bloom, rich amber and honey tones.',
+  },
+  {
+    id: 'nocturne',
+    label: 'Night / dusk',
+    hint: 'Where fixtures shine',
+    prompt: 'Nocturnal cinematography: deep blue ambient sky against warm installed lighting, pools of light on darker surfaces, high contrast with clean shadow detail and no crushed blacks.',
+  },
+  {
+    id: 'editorial',
+    label: 'Editorial product',
+    hint: 'Studio, close, precise',
+    prompt: 'Editorial product cinematography: shallow depth of field, controlled studio lighting, soft gradient backdrop, crisp specular highlights on metal and glass, minimal styling.',
+  },
+  {
+    id: 'documentary',
+    label: 'Documentary',
+    hint: 'Real spaces, real people',
+    prompt: 'Naturalistic documentary cinematography: available light, honest colour, mid-range depth of field, unstyled real-world detail.',
+  },
+  {
+    id: 'none',
+    label: 'No preset',
+    hint: 'Just my description',
+    prompt: '',
+  },
+]
+
+// Scene, then look, then movement — in that order, because these models weight
+// the opening of the prompt most heavily and the subject must win. Kept as one
+// assembly function so the composer and any future caller can't drift apart on
+// ordering, which measurably changes the render.
+export function buildVideoPrompt({ scene, lookId, motion, strength, duration }) {
+  const look = LOOK_PRESETS.find(l => l.id === lookId)
+  const parts = [String(scene || '').trim()]
+  if (look && look.prompt) parts.push(look.prompt)
+  const move = String(motion || '').trim()
+  if (move) parts.push(paceForDuration(applyStrength(move, strength), duration))
+  return parts.filter(Boolean).join('\n\n')
 }
 
 // ── Cost ───────────────────────────────────────────────────────────────────
