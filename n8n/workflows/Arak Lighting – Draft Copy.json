@@ -7,7 +7,7 @@
         "height": 320,
         "width": 440
       },
-      "id": "70321ba7-608c-49c5-bd65-89b62cb4ef69",
+      "id": "3a4a8200-9580-57c2-abf8-ee31b4478be8",
       "name": "Note: Overview",
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
@@ -23,7 +23,7 @@
         "responseMode": "responseNode",
         "options": {}
       },
-      "id": "63028791-c687-47f9-8995-5a6bd1b72642",
+      "id": "7f83ff66-1dc6-595a-a527-141088a0d004",
       "name": "Webhook",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
@@ -39,7 +39,7 @@
         "responseBody": "={{ JSON.stringify({ status: 'accepted', plan_idea_id: $json.body.plan_idea_id }) }}",
         "options": {}
       },
-      "id": "a5956801-03e7-47c9-81e4-fa490be4d239",
+      "id": "8e0325c2-4426-56b8-9a50-82c527ada706",
       "name": "Respond: Accepted",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1,
@@ -52,7 +52,7 @@
       "parameters": {
         "jsCode": "\nconst http = this.helpers.httpRequest;\nconst ANTHROPIC = $env.ANTHROPIC_API_KEY;\n\nasync function req(opts){\n  try { return await http(opts); }\n  catch (e) {\n    const detail = (e && (e.error || (e.response && e.response.data) || e.description)) || null;\n    const real = detail\n      ? (typeof detail === 'string' ? detail\n        : Buffer.isBuffer(detail) ? detail.toString('utf8', 0, 300)\n        : (detail.error && detail.error.message) || JSON.stringify(detail).slice(0, 400))\n      : (e && e.message) || String(e);\n    throw new Error(real);\n  }\n}\n\nfunction safeJson(t){\n  const c = String(t||'').replace(/```json|```/g,'').trim();\n  try { return JSON.parse(c); } catch(e){\n    const m = c.match(/\\{[\\s\\S]*\\}/);\n    if(m){ try { return JSON.parse(m[0]); } catch(_){} }\n    return {};\n  }\n}\n\nconst body     = ($input.first().json.body) || {};\nconst planIdeaId = body.plan_idea_id || '';\nconst platform = body.platform === 'linkedin' ? 'linkedin' : 'instagram';\nconst platformName = platform === 'linkedin' ? 'LinkedIn' : 'Instagram';\nconst lang     = body.caption_language || 'both';   // ar | en | both\nconst format   = body.format || 'feed_image';\nconst aspectRatio = body.aspect_ratio || '';\nconst mediaType = body.media_type || 'image';       // image | video | none\nconst wantsCaption = body.wants_caption !== false;\nconst instructions = body.instructions || '';\n\nconst langRule = lang === 'ar'\n  ? 'Write in SAUDI ARABIC (Gulf/Najdi dialect — natural, modern, warm; NOT stiff MSA). Fill the *_ar field; set *_en to \"\".'\n  : lang === 'en'\n  ? 'Write in ENGLISH. Fill the *_en field; set *_ar to \"\".'\n  : 'Write BOTH a SAUDI ARABIC version (Gulf/Najdi dialect, not stiff MSA) AND an ENGLISH version, matched in meaning, not word-for-word.';\n\n// CACHED prefix (persona + brand context + language rule) is identical\n// across every idea drafted in the same plan, so the 2nd+ call in a\n// \"create plan\" burst reads it at ~10% cost.\nconst cachedPrefix = `You are a senior social media strategist and copywriter for Arak Lighting, Saudi Arabia's leading architectural lighting company (45+ years; landmark projects incl. Solitaire Mall, King Fahad Airport, Ritz Carlton Riyadh).\n\nYou are drafting options for ONE ${platformName} post BEFORE it gets generated — the marketer will pick or edit from what you write here, so give them real, distinct choices rather than three near-identical rewrites.\n\nBRAND CONTEXT:\n${instructions || 'No brand profile set — keep it premium and on-brand for a luxury lighting company.'}\n\nLANGUAGE: ${langRule}`;\n\nconst postFacts = `POST TOPIC: ${body.topic || ''}\nANGLE: ${body.angle || ''}\nTONE: ${body.tone || ''}\nOBJECTIVE: ${body.objective || ''}\nCALL TO ACTION: ${body.cta || ''}\nOCCASION: ${body.occasion || '(none)'}\nCONTENT PILLAR: ${body.content_pillar || '(none)'}\nFORMAT: ${format} (${mediaType === 'video' ? 'video' : mediaType === 'none' ? 'text only, no media' : 'image'}${aspectRatio ? `, ${aspectRatio} orientation` : ''})\n${body.image_idea ? `MARKETER'S OWN VISION FOR THE MEDIA: ${body.image_idea}` : ''}`;\n\nconst wantsMedia = mediaType !== 'none';\nconst wantsMotion = mediaType === 'video';\n\nconst captionSchema = wantsCaption\n  ? `\"caption_options\":[{\"caption_ar\":\"\",\"caption_en\":\"\"}, {…}, {…}]  // exactly 3 genuinely different options — vary the hook/structure, not just wording`\n  : `\"caption_options\":[]  // this post has no caption — leave empty`;\nconst mediaSchema = wantsMedia\n  ? `\"media_prompt_options\":[{\"media_prompt\":\"a vivid, detailed prompt ready to hand to an image${wantsMotion ? '/video cover' : ''} generator — describe the actual scene, lighting, composition, mood\"${wantsMotion ? ', \"motion_prompt\":\"how the still should animate into video — camera move, light behavior, pacing\"' : ''}}, {…}, {…}]  // exactly 3 genuinely different directions`\n  : `\"media_prompt_options\":[]  // text-only post, no media — leave empty`;\n\nconst variableSuffix = `${postFacts}\n\nWrite:\n${wantsCaption ? '- 3 distinct caption options for this post.' : \"- This post has NO caption — return an empty caption_options array.\"}\n${wantsMedia ? `- 3 distinct ${wantsMotion ? 'video' : 'image'} direction options for this post's media.` : '- This post has no image or video — return an empty media_prompt_options array.'}\n\nReturn ONLY valid JSON, no markdown fences, EXACTLY this shape:\n{${captionSchema}, ${mediaSchema}}`;\n\ntry {\n  const resp = await req({ method:'POST', url:'https://api.anthropic.com/v1/messages',\n    headers:{ 'x-api-key':ANTHROPIC, 'anthropic-version':'2023-06-01', 'content-type':'application/json' },\n    body:{ model:'claude-sonnet-5', max_tokens:3000, messages:[{ role:'user', content:[\n      { type:'text', text: cachedPrefix, cache_control:{ type:'ephemeral' } },\n      { type:'text', text: variableSuffix },\n    ] }] },\n    json:true });\n  if (!resp || resp.type === 'error' || !Array.isArray(resp.content)) {\n    throw new Error('Claude draft-copy call failed: ' + (resp && resp.error && resp.error.message ? resp.error.message : JSON.stringify(resp).slice(0, 300)));\n  }\n  // Claude 5-family models can return a leading `thinking` block even when\n  // thinking wasn't explicitly requested — content[0] is NOT reliably the\n  // text block, so find it by type instead of indexing.\n  const textBlock = resp.content.find(b => b.type === 'text');\n  const parsed = safeJson(textBlock && textBlock.text);\n  const captionOptions = wantsCaption && Array.isArray(parsed.caption_options) ? parsed.caption_options.slice(0, 3) : [];\n  const mediaPromptOptions = wantsMedia && Array.isArray(parsed.media_prompt_options) ? parsed.media_prompt_options.slice(0, 3) : [];\n  if (wantsCaption && !captionOptions.length) throw new Error('No caption options returned by the model.');\n  if (wantsMedia && !mediaPromptOptions.length) throw new Error('No media prompt options returned by the model.');\n  return { json: { _ok: true, plan_idea_id: planIdeaId, caption_options: captionOptions, media_prompt_options: mediaPromptOptions } };\n} catch (err) {\n  return { json: { _ok: false, plan_idea_id: planIdeaId, error: (err && err.message) ? err.message : String(err) } };\n}\n"
       },
-      "id": "2fed1cee-3c96-458c-9850-cd5b5179b6d1",
+      "id": "64a08e7e-3792-5cac-b440-61f6ec9b05a3",
       "name": "Draft Copy",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -91,7 +91,7 @@
         "jsonBody": "={{ JSON.stringify($json._ok ? { draft_status: 'ready', draft_error: '', caption_options: $json.caption_options, media_prompt_options: $json.media_prompt_options } : { draft_status: 'failed', draft_error: $json.error }) }}",
         "options": {}
       },
-      "id": "1c4dd00a-5919-4791-88b4-8694f9c2ae69",
+      "id": "9ed12275-d600-5805-a8d6-904407931ed1",
       "name": "Supabase: Save Draft",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,

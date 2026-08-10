@@ -27,10 +27,30 @@ import json
 import os
 import uuid
 
+# Fixed namespace for deriving stable node ids (see _assign_deterministic_ids).
+_ID_NAMESPACE = uuid.uuid5(uuid.NAMESPACE_URL, "https://arak-sa.com/n8n/workflows")
+
 
 def nid() -> str:
-    """Fresh node id — n8n only needs these to be unique within a workflow."""
+    """Placeholder node id, overwritten by _assign_deterministic_ids() before
+    the workflow is written out. n8n only needs these to be unique within a
+    workflow; a random placeholder here is fine since it never reaches disk."""
     return str(uuid.uuid4())
+
+
+def _assign_deterministic_ids(wf: dict) -> None:
+    """Replace every node's placeholder id with one derived from
+    (workflow name, node name, occurrence index) so re-running the generator
+    doesn't touch ids that didn't actually change, keeping `git diff` limited
+    to real edits instead of full-file UUID churn. Connections reference
+    nodes by name, not id, so this is safe."""
+    seen: dict[str, int] = {}
+    for node in wf["nodes"]:
+        name = node.get("name", "")
+        occurrence = seen.get(name, 0)
+        seen[name] = occurrence + 1
+        seed = f"{wf['name']}::{name}::{occurrence}"
+        node["id"] = str(uuid.uuid5(_ID_NAMESPACE, seed))
 
 
 # ============================================================
@@ -6410,6 +6430,7 @@ if __name__ == "__main__":
     ]
 
     for wf in workflows:
+        _assign_deterministic_ids(wf)
         out_path = os.path.join(out_dir, f"{wf['name']}.json")
         with open(out_path, "w") as f:
             json.dump(wf, f, indent=2, ensure_ascii=False)

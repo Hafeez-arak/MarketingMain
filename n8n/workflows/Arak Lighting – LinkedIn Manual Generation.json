@@ -7,7 +7,7 @@
         "height": 460,
         "width": 520
       },
-      "id": "sticky-li-manual-gen",
+      "id": "def58aa1-d6e0-515e-80da-4e892dd83fe7",
       "name": "Note: Overview",
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
@@ -23,7 +23,7 @@
         "responseMode": "responseNode",
         "options": {}
       },
-      "id": "0d3348b4-5df6-4e6e-9e1a-d0a3be7006de",
+      "id": "381fea92-47f4-51a0-863b-e38e966aa3fe",
       "name": "Webhook",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
@@ -125,7 +125,7 @@
         },
         "options": {}
       },
-      "id": "93d9c09f-d0e2-465f-b8fd-06d04cb604a8",
+      "id": "710689d5-5479-5c23-80ad-ca2d5c89274f",
       "name": "Sanitize Inputs",
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
@@ -236,7 +236,7 @@
           "fallbackOutput": "extra"
         }
       },
-      "id": "08defdd1-49a0-4522-83c0-3a7385d7be4b",
+      "id": "cfbb87ce-110d-5858-b155-6f7668947ae9",
       "name": "Route Type?",
       "type": "n8n-nodes-base.switch",
       "typeVersion": 3,
@@ -269,7 +269,7 @@
         },
         "options": {}
       },
-      "id": "e86d2891-76ce-4bb6-98a4-64bdfa65ef67",
+      "id": "e2f64c9d-3727-5d05-b3e4-0bb25f8979fd",
       "name": "Content Route?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.1,
@@ -296,7 +296,7 @@
         "jsonBody": "={{ JSON.stringify({ api_key: $env.TAVILY_API_KEY, query: \"architectural lighting industry trends 2026 Saudi Arabia Vision 2030 LinkedIn B2B\", search_depth: \"basic\", max_results: 5, include_answer: true }) }}",
         "options": {}
       },
-      "id": "d80fa34b-ac95-4aa3-beeb-70efa564ddbf",
+      "id": "4a6f203f-9a98-5a6d-ba0f-d1a419120283",
       "name": "Tavily: Trend Search",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -331,7 +331,7 @@
         "jsonBody": "={\n  \"model\": \"claude-sonnet-5\",\n  \"max_tokens\": 1500,\n  \"messages\": [{\n    \"role\": \"user\",\n    \"content\": \"You are a LinkedIn content strategist for Arak Lighting — Saudi Arabia's leading architectural lighting company with 45+ years of experience. Notable projects: Solitaire Mall, King Fahad Airport, Ritz Carlton Riyadh, major Vision 2030 developments.\\n\\nAudience: architects, interior designers, real estate developers, hospitality directors, procurement managers, and C-suite executives across the GCC.\\n\\nCURRENT INDUSTRY TRENDS:\\n{{ $json.answer || '' }}\\n\\nTONE: {{ $('Sanitize Inputs').item.json.tone }}\\nPOST TYPE: {{ $('Sanitize Inputs').item.json.post_type }}\\n\\nTONE GUIDE:\\n- thought_leader: authoritative insights, industry expertise, forward-looking\\n- executive: formal, strategic, C-suite peers\\n- technical_expert: precise, data-driven, specs and performance\\n- warm_human: personal storytelling, behind-the-scenes authenticity\\n- promotional: achievement-focused, project showcases, milestones\\n\\nLINKEDIN POST RULES:\\n1. HOOK (first line, max 12 words): bold, surprising, or curiosity-provoking. Shows before 'see more'.\\n2. BODY: 150-250 words, line breaks every 2-3 sentences. Numbered lists or bullets sparingly.\\n3. CTA: end with a genuine question to spark comments.\\n4. HASHTAGS: exactly 4-5 — NOT in body, separate field.\\n5. No clichés: no 'In today's fast-paced world', no 'We are excited to announce'.\\n\\nWrite a LinkedIn post based on the trends. Return ONLY valid JSON, no markdown:\\n{\\\"hook\\\": \\\"first line only\\\", \\\"body\\\": \\\"post body after hook, line breaks as \\\\n\\\", \\\"hashtags\\\": \\\"#ArakLighting #ArchitecturalLighting [3 more]\\\", \\\"image_prompt\\\": \\\"detailed prompt for professional LinkedIn visual, max 80 words, wide 1.91:1\\\", \\\"trending_angle\\\": \\\"one sentence on what trend this taps\\\"}\"\n  }]\n}",
         "options": {}
       },
-      "id": "f395c8fa-24a3-4335-8e77-0d8c2d0ec6d2",
+      "id": "bbd5509d-dd0f-5012-a3cc-3d8e566ad15f",
       "name": "Claude: Trend Post",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -366,7 +366,7 @@
         "jsonBody": "={\n  \"model\": \"claude-sonnet-5\",\n  \"max_tokens\": 1500,\n  \"messages\": [{\n    \"role\": \"user\",\n    \"content\": \"You are a LinkedIn content strategist for Arak Lighting — Saudi Arabia's leading architectural lighting company with 45+ years of experience. Notable projects: Solitaire Mall, King Fahad Airport, Ritz Carlton Riyadh, Vision 2030.\\n\\nAudience: architects, interior designers, real estate developers, hospitality directors, procurement managers, C-suite across GCC.\\n\\nTOPIC: {{ $('Sanitize Inputs').item.json.safe_topic }}\\nTONE: {{ $('Sanitize Inputs').item.json.tone }}\\nPOST TYPE: {{ $('Sanitize Inputs').item.json.post_type }}\\n\\nBRAND INSTRUCTIONS:\\n{{ $('Sanitize Inputs').item.json.safe_instructions }}\\n\\nTONE GUIDE:\\n- thought_leader: authoritative insights, forward-looking perspective\\n- executive: formal, strategic, C-suite peers\\n- technical_expert: precise, data-driven\\n- warm_human: personal storytelling, authentic\\n- promotional: achievement-focused, milestones\\n\\nPOST TYPE GUIDE:\\n- thought_leadership: big idea, contrarian take, industry insight\\n- project_case_study: specific project, measurable impact\\n- team_spotlight: people, culture, behind the scenes\\n- industry_insight: data, research, market observation\\n- milestone_award: achievement, anniversary, recognition\\n- job_opening: recruitment, culture story\\n- product_launch: new product, innovation, technical feature\\n\\nLINKEDIN POST RULES:\\n1. HOOK (first line, max 12 words): bold, surprising, curiosity-provoking.\\n2. BODY: 150-250 words, line breaks every 2-3 sentences.\\n3. CTA: genuine question for comments.\\n4. HASHTAGS: exactly 4-5 — separate field.\\n5. No clichés.\\n\\nReturn ONLY valid JSON, no markdown:\\n{\\\"hook\\\": \\\"first line only\\\", \\\"body\\\": \\\"post body after hook, line breaks as \\\\n\\\", \\\"hashtags\\\": \\\"#ArakLighting #ArchitecturalLighting [3 more]\\\", \\\"image_prompt\\\": \\\"detailed prompt for professional LinkedIn visual, max 80 words\\\", \\\"post_strategy\\\": \\\"one sentence on why this format and angle works\\\"}\"\n  }]\n}",
         "options": {}
       },
-      "id": "27f228ef-2480-4584-88b4-d1ecead0ce54",
+      "id": "27c8ab08-21c8-52e3-b4cc-1381943128f7",
       "name": "Claude: Instructions Post",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -379,7 +379,7 @@
       "parameters": {
         "jsCode": "const raw = $input.first().json.content?.find(b=>b.type==='text')?.text || '';\nconst clean = raw.replace(/```json|```/g,'').trim();\nlet parsed;\ntry { parsed = JSON.parse(clean); }\ncatch(e) {\n  const match = clean.match(/\\{[\\s\\S]*\\}/);\n  if (match) { try { parsed = JSON.parse(match[0]); } catch(e2) { throw new Error('Cannot parse: ' + clean.slice(0,200)); } }\n  else throw new Error('No JSON found: ' + clean.slice(0,200));\n}\nconst si = $('Sanitize Inputs').first().json;\nreturn [{json: {\n  hook:           parsed.hook || '',\n  body:           parsed.body || '',\n  hashtags:       parsed.hashtags || '#ArakLighting #ArchitecturalLighting',\n  image_prompt:   parsed.image_prompt || '',\n  trending_angle: parsed.trending_angle || '',\n  post_strategy:  parsed.post_strategy || '',\n  topic:          si.safe_topic,\n  tone:           si.tone,\n  post_type:      si.post_type,\n  style:          si.style,\n  content_route:  si.content_route,\n  include_image:  si.include_image,\n  aspect_ratio:   si.aspect_ratio,\n}}];"
       },
-      "id": "70920dd6-c5f7-42a1-a0d8-d7d5f761f17e",
+      "id": "6cb9c503-9c5a-52b8-a73b-c3c8ba69494d",
       "name": "Parse Post",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -412,7 +412,7 @@
         },
         "options": {}
       },
-      "id": "bb4f6266-6f30-47c5-9312-1d7fb0dc4ca3",
+      "id": "da946dcb-fc9f-5ebe-8ea5-eca2005c69f7",
       "name": "Include Image?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.1,
@@ -425,7 +425,7 @@
       "parameters": {
         "jsCode": "const styleMap = {\n  \"photorealistic\":   \"architectural photography, Canon EOS R5, professional lighting, hyper-detailed, 4K, wide format\",\n  \"dramatic\":         \"cinematic lighting, deep shadows, high contrast, noir atmosphere, professional corporate\",\n  \"minimalist\":       \"clean lines, soft diffused light, Scandinavian aesthetic, white space, elegant\",\n  \"warm_interior\":    \"warm amber tones, luxury interior, golden hour, premium hospitality space\",\n  \"cool_commercial\":  \"cool white 5000K, modern commercial architecture, crisp, glass and steel, corporate luxury\",\n  \"facade_exterior\":  \"architectural exterior night photography, facade illumination, dramatic night sky\"\n};\nconst si = $('Sanitize Inputs').first().json;\nconst base = $('Parse Post').first().json.image_prompt || si.safe_topic || 'architectural lighting';\nconst styleStr = styleMap[si.style] || styleMap['photorealistic'];\nconst finalPrompt = base + ', ' + styleStr + ', Arak Lighting Saudi Arabia, ultra high detail, professional LinkedIn visual, wide 16:9 composition';\nreturn [{json: { final_prompt: finalPrompt, style: si.style }}];"
       },
-      "id": "254bcc09-af1c-43e8-9fe6-cb7e7efa76e3",
+      "id": "49eb24b5-5f5e-560d-9374-38ef80e58d06",
       "name": "Build Image Prompt",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -460,7 +460,7 @@
         "jsonBody": "={\n  \"input\": {\n    \"prompt\": \"{{ $json.final_prompt }}\",\n    \"aspect_ratio\": \"{{ $('Sanitize Inputs').item.json.aspect_ratio === '1.91:1' ? '3:2' : $('Sanitize Inputs').item.json.aspect_ratio || '3:2' }}\",\n    \"output_format\": \"webp\",\n    \"output_quality\": 90,\n    \"num_outputs\": 1\n  }\n}",
         "options": {}
       },
-      "id": "1b7f2f49-bdfb-45bb-bfba-1b378673084a",
+      "id": "4f08bdd0-7456-5f55-baf7-c6064ec17f69",
       "name": "FLUX: Start Prediction",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -473,7 +473,7 @@
       "parameters": {
         "amount": 8
       },
-      "id": "0583742e-6c05-4602-9dd5-368b79304bb3",
+      "id": "ae5a11fc-08ae-543d-a2c2-8c67de039205",
       "name": "Wait 8s",
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1.1,
@@ -497,7 +497,7 @@
         },
         "options": {}
       },
-      "id": "32c8753e-4ae5-40f7-986b-f2ea82306a62",
+      "id": "b16d38e3-982e-5bf1-9f0c-4523b5d3dcfd",
       "name": "FLUX: Poll Status",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -530,7 +530,7 @@
         },
         "options": {}
       },
-      "id": "538a0245-7a99-4f05-99f9-f7be8375fec3",
+      "id": "b09a56c8-f3a3-5ab7-b17a-930608fc1b1d",
       "name": "Image Ready?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.1,
@@ -545,7 +545,7 @@
         "responseBody": "={{ JSON.stringify({ success: true, route_type: \"full\", content_route: $(\"Sanitize Inputs\").item.json.content_route, hook: $(\"Parse Post\").item.json.hook, body: $(\"Parse Post\").item.json.body, hashtags: $(\"Parse Post\").item.json.hashtags, image_url: $(\"Set Permanent Image URL\").item.json.permanent_image_url, image_prompt: $(\"Parse Post\").item.json.image_prompt, trending_angle: $(\"Parse Post\").item.json.trending_angle, post_strategy: $(\"Parse Post\").item.json.post_strategy, include_image: true, supabase_id: $(\"Supabase: Save Manual Post\").item.json[0]?.id || $(\"Supabase: Save Manual Post\").item.json?.id || \"\" }) }}",
         "options": {}
       },
-      "id": "0badd5ab-ef1f-4076-9d0d-78cd63fdca6a",
+      "id": "25c3b189-0ce9-5df9-a169-75a91808386d",
       "name": "Respond: Full + Image",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
@@ -562,7 +562,7 @@
           "responseCode": 202
         }
       },
-      "id": "e094c470-e06d-4e3d-a756-fe0a9d9f6f5a",
+      "id": "0672f045-0f0b-5e78-a490-c44fa5655cd4",
       "name": "Respond: Image Timeout",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
@@ -577,7 +577,7 @@
         "responseBody": "={{ JSON.stringify({ success: true, route_type: \"full\", content_route: $(\"Sanitize Inputs\").item.json.content_route, hook: $(\"Parse Post\").item.json.hook, body: $(\"Parse Post\").item.json.body, hashtags: $(\"Parse Post\").item.json.hashtags, image_url: null, image_prompt: $(\"Parse Post\").item.json.image_prompt, trending_angle: $(\"Parse Post\").item.json.trending_angle, post_strategy: $(\"Parse Post\").item.json.post_strategy, include_image: false }) }}",
         "options": {}
       },
-      "id": "1a13eba3-fe91-470e-b6cc-50d835f892b1",
+      "id": "0f8af966-0547-578f-9bdf-df192b36aa80",
       "name": "Respond: Full No Image",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
@@ -610,7 +610,7 @@
         },
         "options": {}
       },
-      "id": "5fe05313-4665-488c-a4c4-33bf44f794b2",
+      "id": "fcbeaa20-9855-5a0b-a6fa-df4a238ce40c",
       "name": "Post Regen Route?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.1,
@@ -637,7 +637,7 @@
         "jsonBody": "={{ JSON.stringify({ api_key: $env.TAVILY_API_KEY, query: \"architectural lighting industry trends 2026 Saudi Arabia Vision 2030 LinkedIn B2B\", search_depth: \"basic\", max_results: 5, include_answer: true }) }}",
         "options": {}
       },
-      "id": "a75afdc0-949a-4b97-9f05-16f9d763600a",
+      "id": "0ad889c7-3fde-5590-b2b4-3f9e2c4f5488",
       "name": "Tavily: Post Regen",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -672,7 +672,7 @@
         "jsonBody": "={\n  \"model\": \"claude-sonnet-5\",\n  \"max_tokens\": 1500,\n  \"messages\": [{\n    \"role\": \"user\",\n    \"content\": \"You are a LinkedIn content strategist for Arak Lighting, Saudi Arabia's leading architectural lighting company.\\n\\nLATEST TRENDS: {{ $json.answer }}\\nTONE: {{ $('Sanitize Inputs').item.json.tone }}\\n\\nCURRENT POST (write COMPLETELY DIFFERENT — different hook, angle, structure):\\n{{ $('Sanitize Inputs').item.json.safe_current_post }}\\n\\nWrite a fresh LinkedIn post. End with an engaging question.\\n\\nReturn ONLY JSON, no markdown: {\\\"hook\\\": \\\"new bold hook, max 12 words\\\", \\\"body\\\": \\\"full body, line breaks as \\\\n\\\", \\\"hashtags\\\": \\\"#ArakLighting [4 tags total\\\"}\"\n  }]\n}",
         "options": {}
       },
-      "id": "3a167c25-6b46-4b02-8fde-113981a84ac7",
+      "id": "943d85ad-03be-5304-a278-875ac03813cc",
       "name": "Claude: Post Regen Trend",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -707,7 +707,7 @@
         "jsonBody": "={\n  \"model\": \"claude-sonnet-5\",\n  \"max_tokens\": 1500,\n  \"messages\": [{\n    \"role\": \"user\",\n    \"content\": \"You are a LinkedIn content strategist for Arak Lighting, Saudi Arabia's leading architectural lighting company.\\n\\nTOPIC: {{ $('Sanitize Inputs').item.json.safe_topic }}\\nTONE: {{ $('Sanitize Inputs').item.json.tone }}\\nINSTRUCTIONS: {{ $('Sanitize Inputs').item.json.safe_instructions }}\\n\\nCURRENT POST (write COMPLETELY DIFFERENT):\\n{{ $('Sanitize Inputs').item.json.safe_current_post }}\\n\\nWrite a fresh LinkedIn post with a different hook and angle. End with an engaging question.\\n\\nReturn ONLY JSON, no markdown: {\\\"hook\\\": \\\"new bold hook, max 12 words\\\", \\\"body\\\": \\\"full body, line breaks as \\\\n\\\", \\\"hashtags\\\": \\\"#ArakLighting [4 tags total\\\"}\"\n  }]\n}",
         "options": {}
       },
-      "id": "ea559b83-c3ea-4d61-b0a9-caff355d8bfb",
+      "id": "9bb87289-3339-55f5-9eb2-4d1aea2e56f4",
       "name": "Claude: Post Regen Instr",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -720,7 +720,7 @@
       "parameters": {
         "jsCode": "const raw = $input.first().json.content?.find(b=>b.type==='text')?.text || '';\nconst clean = raw.replace(/```json|```/g,'').trim();\nlet parsed;\ntry { parsed = JSON.parse(clean); }\ncatch(e) {\n  const match = clean.match(/\\{[\\s\\S]*\\}/);\n  parsed = match ? JSON.parse(match[0]) : {hook: '', body: clean, hashtags: '#ArakLighting'};\n}\nreturn [{json: { hook: parsed.hook || '', body: parsed.body || '', hashtags: parsed.hashtags || '#ArakLighting' }}];"
       },
-      "id": "c15f9973-62e4-4bb4-9544-77c930f52132",
+      "id": "3d5e472b-8e6c-5657-82bf-8a9508bbd450",
       "name": "Parse Post Regen",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -735,7 +735,7 @@
         "responseBody": "={{ JSON.stringify({ success: true, route_type: \"post_only\", hook: $(\"Parse Post Regen\").item.json.hook, body: $(\"Parse Post Regen\").item.json.body, hashtags: $(\"Parse Post Regen\").item.json.hashtags }) }}",
         "options": {}
       },
-      "id": "95d90647-175d-4e02-a268-b57b513e74a5",
+      "id": "1c15b158-6362-5fc6-ba61-f79963cd1628",
       "name": "Respond: Post Regen",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
@@ -770,7 +770,7 @@
         "jsonBody": "={\n  \"model\": \"claude-haiku-4-5-20251001\",\n  \"max_tokens\": 300,\n  \"messages\": [{\n    \"role\": \"user\",\n    \"content\": \"You are an expert at writing image generation prompts for professional LinkedIn visuals.\\n\\nTOPIC: {{ $('Sanitize Inputs').item.json.safe_topic || 'architectural lighting' }}\\nORIGINAL PROMPT: {{ $('Sanitize Inputs').item.json.image_prompt }}\\nTARGET STYLE: {{ $('Sanitize Inputs').item.json.style }}\\n\\nSTYLE DEFINITIONS:\\n- photorealistic: Canon EOS R5 professional photography, architectural, hyper-detailed\\n- dramatic: cinematic deep shadows, high contrast, corporate noir\\n- minimalist: clean lines, soft light, elegant white space\\n- warm_interior: warm amber 2700K, luxury interior, golden hour\\n- cool_commercial: cool white 5000K, modern glass and steel, corporate luxury\\n- facade_exterior: architectural exterior night, facade illumination\\n\\nRewrite for the target style. LinkedIn visuals should look authoritative and credible. Wide 1.91:1 format.\\n\\nReturn ONLY the prompt text. Max 100 words.\"\n  }]\n}",
         "options": {}
       },
-      "id": "afe03ed1-b823-483b-8250-ba6021c71af6",
+      "id": "500ded0b-5045-551d-9c21-051e338ba0b8",
       "name": "Claude: Rewrite Image Prompt",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -783,7 +783,7 @@
       "parameters": {
         "jsCode": "const rewritten = $input.first().json.content?.find(b=>b.type==='text')?.text || '';\nconst si = $('Sanitize Inputs').first().json;\nconst base = rewritten.trim() || si.image_prompt || 'architectural lighting Saudi Arabia';\nconst finalPrompt = base + ', Arak Lighting Saudi Arabia, ultra high detail, professional LinkedIn visual, wide 16:9 composition';\nreturn [{json: { final_prompt: finalPrompt }}];"
       },
-      "id": "7f2c4a87-bc17-40c6-a320-dbe77249f717",
+      "id": "ba305386-328f-5309-8f05-240966afd113",
       "name": "Build Regen Image Prompt",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -818,7 +818,7 @@
         "jsonBody": "={\n  \"input\": {\n    \"prompt\": \"{{ $json.final_prompt }}\",\n    \"aspect_ratio\": \"3:2\",\n    \"output_format\": \"webp\",\n    \"output_quality\": 90,\n    \"num_outputs\": 1\n  }\n}",
         "options": {}
       },
-      "id": "4a55664c-8b8e-48a5-a7c0-bef7709a8a45",
+      "id": "8c0b5e36-974a-5346-aed6-9c480bb12af8",
       "name": "FLUX: Regen Image",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -831,7 +831,7 @@
       "parameters": {
         "amount": 8
       },
-      "id": "a7bd3061-38ed-4952-9c69-412fcc4b5762",
+      "id": "6970b0dc-173a-5c95-a7b1-763b12c4e797",
       "name": "Wait 8s (Regen)",
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1.1,
@@ -855,7 +855,7 @@
         },
         "options": {}
       },
-      "id": "b8446421-a25a-4565-8519-35b6df90fe08",
+      "id": "e9b9efca-b468-5620-8e23-06243b94c76a",
       "name": "FLUX: Poll Regen",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -870,7 +870,7 @@
         "responseBody": "={{ JSON.stringify({ success: true, route_type: \"image_only\", image_url: $(\"Set Permanent Image URL (Regen)\").item.json.permanent_image_url }) }}",
         "options": {}
       },
-      "id": "bb6ca0c8-fa3f-4853-a2cc-8e4e6cc236dc",
+      "id": "6665670e-60b0-52b7-89d7-5f396756a341",
       "name": "Respond: Image Only",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
@@ -905,7 +905,7 @@
         "jsonBody": "={\n  \"model\": \"claude-haiku-4-5-20251001\",\n  \"max_tokens\": 800,\n  \"messages\": [{\n    \"role\": \"user\",\n    \"content\": \"You are a LinkedIn content expert for Arak Lighting, Saudi Arabia's leading architectural lighting company.\\n\\nTOPIC: {{ $('Sanitize Inputs').item.json.safe_topic }}\\nNEW TONE: {{ $('Sanitize Inputs').item.json.tone }}\\nCURRENT HOOK:\\n{{ $('Sanitize Inputs').item.json.current_hook }}\\nCURRENT BODY:\\n{{ $('Sanitize Inputs').item.json.current_body }}\\n\\nRewrite to match the new tone. Tone guide: thought_leader=authoritative and insightful, executive=formal and strategic, technical_expert=precise and data-driven, warm_human=personal storytelling, promotional=achievement-focused. Keep core message and hashtags identical.\\n\\nReturn ONLY valid JSON, no markdown: {\\\"hook\\\": \\\"rewritten hook\\\", \\\"body\\\": \\\"rewritten body with \\\\n line breaks\\\", \\\"hashtags\\\": \\\"same hashtags\\\"}\"\n  }]\n}",
         "options": {}
       },
-      "id": "07024158-fc3f-4335-b793-a24054bfc669",
+      "id": "948f47ec-0bb6-5ba3-8033-aa676bb0b190",
       "name": "Claude: Tone Sync",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -918,7 +918,7 @@
       "parameters": {
         "jsCode": "const raw = $input.first().json.content?.find(b=>b.type==='text')?.text || '';\nconst clean = raw.replace(/```json|```/g,'').trim();\nlet parsed;\ntry { parsed = JSON.parse(clean); }\ncatch(e) {\n  const match = clean.match(/\\{[\\s\\S]*\\}/);\n  parsed = match ? JSON.parse(match[0]) : {hook: '', body: clean, hashtags: '#ArakLighting'};\n}\nreturn [{json: { hook: parsed.hook || '', body: parsed.body || '', hashtags: parsed.hashtags || '#ArakLighting' }}];"
       },
-      "id": "d36a53cc-0ddd-422b-bdea-7db993f6eb41",
+      "id": "39c548e9-7a98-52bb-8e83-8eefb9480482",
       "name": "Parse Tone Sync",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -933,7 +933,7 @@
         "responseBody": "={{ JSON.stringify({ success: true, route_type: \"tone_sync\", hook: $(\"Parse Tone Sync\").item.json.hook, body: $(\"Parse Tone Sync\").item.json.body, hashtags: $(\"Parse Tone Sync\").item.json.hashtags }) }}",
         "options": {}
       },
-      "id": "5e26fe2f-43f4-4a89-be54-09673da3c6ec",
+      "id": "52d19ebe-6726-5469-8dcb-98d6c2d9d2eb",
       "name": "Respond: Tone Sync",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
@@ -950,7 +950,7 @@
           "responseCode": 400
         }
       },
-      "id": "c2e222a5-75c6-4fd2-b6f1-bb0283afcdc2",
+      "id": "8a4536fc-3696-5794-b064-eb37cd170fbc",
       "name": "Respond: Bad Route",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
@@ -964,7 +964,7 @@
         "url": "={{ $('FLUX: Poll Status').item.json.output?.[0] }}",
         "options": {}
       },
-      "id": "8c04223a-e156-4e75-a0a3-2dc7e6437240",
+      "id": "7ce89d3c-b485-57b7-bd99-926852f052c7",
       "name": "Download from Replicate",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -1003,7 +1003,7 @@
         "inputDataFieldName": "data",
         "options": {}
       },
-      "id": "029cb068-702b-440f-9033-c0c9f7192763",
+      "id": "5fe3c51b-33cd-5384-a8bb-3a29135dd809",
       "name": "Upload to Supabase Storage",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -1032,7 +1032,7 @@
         },
         "options": {}
       },
-      "id": "c0c899fe-bc24-488e-82e1-d878368d0715",
+      "id": "b340bd53-7497-5e6b-8364-cd854f0d26c5",
       "name": "Set Permanent Image URL",
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
@@ -1071,7 +1071,7 @@
         "jsonBody": "={ \"topic\": {{ JSON.stringify($(\"Sanitize Inputs\").item.json.safe_topic) }}, \"hook\": {{ JSON.stringify($(\"Parse Post\").item.json.hook) }}, \"body\": {{ JSON.stringify($(\"Parse Post\").item.json.body) }}, \"hashtags\": {{ JSON.stringify($(\"Parse Post\").item.json.hashtags) }}, \"image_url\": {{ JSON.stringify($(\"Set Permanent Image URL\").item.json.permanent_image_url) }}, \"image_prompt\": {{ JSON.stringify($(\"Parse Post\").item.json.image_prompt) }}, \"post_strategy\": {{ JSON.stringify($(\"Parse Post\").item.json.post_strategy) }}, \"trending_angle\": {{ JSON.stringify($(\"Parse Post\").item.json.trending_angle) }}, \"tone\": {{ JSON.stringify($(\"Sanitize Inputs\").item.json.tone) }}, \"style\": {{ JSON.stringify($(\"Sanitize Inputs\").item.json.style) }}, \"aspect_ratio\": {{ JSON.stringify($(\"Sanitize Inputs\").item.json.aspect_ratio) }}, \"post_type\": {{ JSON.stringify($(\"Sanitize Inputs\").item.json.post_type) }}, \"content_route\": {{ JSON.stringify($(\"Sanitize Inputs\").item.json.content_route) }}, \"include_image\": true, \"status\": \"pending_review\", \"source\": \"manual\" }",
         "options": {}
       },
-      "id": "dd8d9095-a79a-4111-b2f0-4baf3b85fe8e",
+      "id": "020b5675-646d-558d-8638-bc062c121728",
       "name": "Supabase: Save Manual Post",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -1110,7 +1110,7 @@
         "jsonBody": "={ \"topic\": {{ JSON.stringify($(\"Sanitize Inputs\").item.json.safe_topic) }}, \"hook\": {{ JSON.stringify($(\"Parse Post\").item.json.hook) }}, \"body\": {{ JSON.stringify($(\"Parse Post\").item.json.body) }}, \"hashtags\": {{ JSON.stringify($(\"Parse Post\").item.json.hashtags) }}, \"image_url\": null, \"post_strategy\": {{ JSON.stringify($(\"Parse Post\").item.json.post_strategy) }}, \"tone\": {{ JSON.stringify($(\"Sanitize Inputs\").item.json.tone) }}, \"content_route\": {{ JSON.stringify($(\"Sanitize Inputs\").item.json.content_route) }}, \"include_image\": false, \"status\": \"pending_review\", \"source\": \"manual\" }",
         "options": {}
       },
-      "id": "4ee46dd0-c41a-4a18-955a-5742d30f9f08",
+      "id": "1dea50f2-e555-5a02-8396-d51c215336bc",
       "name": "Supabase: Save Manual Post (No Image)",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -1124,7 +1124,7 @@
         "url": "={{ $('FLUX: Poll Regen').item.json.output?.[0] }}",
         "options": {}
       },
-      "id": "09900ff2-31ec-437c-aca3-5b6fed0bd5ac",
+      "id": "58ba58bb-ca99-562d-9dee-c44bf84db5d9",
       "name": "Download from Replicate (Regen)",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -1163,7 +1163,7 @@
         "inputDataFieldName": "data",
         "options": {}
       },
-      "id": "22dc9878-bded-4673-9311-1df0c6413d88",
+      "id": "4393c7c9-8107-5146-9e2c-945069026457",
       "name": "Upload to Supabase Storage (Regen)",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -1186,7 +1186,7 @@
         },
         "options": {}
       },
-      "id": "abcce7ad-665e-4c26-9a54-464e815e8987",
+      "id": "b92353b8-703b-5994-963b-dd2f8d324c6a",
       "name": "Set Permanent Image URL (Regen)",
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,

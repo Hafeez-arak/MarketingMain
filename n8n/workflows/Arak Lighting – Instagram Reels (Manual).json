@@ -7,7 +7,7 @@
         "height": 340,
         "width": 480
       },
-      "id": "note-overview-reels",
+      "id": "63f52940-e6c0-5713-9bde-7fe8dce87b9b",
       "name": "Note: Overview",
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
@@ -23,7 +23,7 @@
         "responseMode": "responseNode",
         "options": {}
       },
-      "id": "e57e3ef9-a43e-46e7-b6dd-d386f9c7b785",
+      "id": "509f110f-8cc8-535f-8ed7-6fa0ef8a324e",
       "name": "Webhook",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
@@ -101,7 +101,7 @@
         },
         "options": {}
       },
-      "id": "0a34a99b-6aa1-4236-b94e-8a72589baca4",
+      "id": "11d5d46e-a1b0-5b96-a0ca-16ce256e8b05",
       "name": "Sanitize Inputs",
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
@@ -136,7 +136,7 @@
         "jsonBody": "={\n  \"model\": \"claude-sonnet-5\",\n  \"max_tokens\": 1200,\n  \"messages\": [{\n    \"role\": \"user\",\n    \"content\": \"You are a social media video expert for Arak Lighting, Saudi Arabia's leading architectural lighting company with 45+ years of experience. Notable projects: Solitaire Mall, King Fahad Airport, Ritz Carlton Riyadh.\\n\\nCreate content for an Instagram Reel:\\n\\nREEL FORMAT: {{ $('Sanitize Inputs').item.json.reel_format }}\\nDURATION: {{ $('Sanitize Inputs').item.json.reel_duration }}\\nBRIEF: {{ $('Sanitize Inputs').item.json.reel_brief }}\\nOPENING HOOK: {{ $('Sanitize Inputs').item.json.reel_hook }}\\nMUSIC STYLE: {{ $('Sanitize Inputs').item.json.reel_music }}\\nCALL TO ACTION: {{ $('Sanitize Inputs').item.json.reel_cta }}\\nTONE: {{ $('Sanitize Inputs').item.json.tone }}\\n\\nBRAND INSTRUCTIONS:\\n{{ $('Sanitize Inputs').item.json.instructions }}\\n\\nReturn ONLY valid JSON, no markdown:\\n{\\n  \\\"caption\\\": \\\"reel caption with hook line first, emojis, line breaks, no hashtags\\\",\\n  \\\"hashtags\\\": \\\"#ArakLighting #Reels #LightingDesign [7 more relevant tags]\\\",\\n  \\\"cover_image_prompt\\\": \\\"detailed FLUX prompt for the reel cover/first frame — architectural lighting scene, photorealistic, cinematic, max 80 words\\\",\\n  \\\"motion_prompt\\\": \\\"Wan I2V animation prompt — describe camera movement and motion only, e.g. slow cinematic pan left, soft light flicker, gentle dolly zoom — max 40 words\\\",\\n  \\\"reel_strategy\\\": \\\"one sentence why this reel will perform well\\\"\\n}\"\n  }]\n}",
         "options": {}
       },
-      "id": "dfdfb8b1-7d8c-44e5-8523-9ba28fe802eb",
+      "id": "f704558f-52cd-520e-b1ba-52fc7d043237",
       "name": "Claude: Reel Script",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -149,7 +149,7 @@
       "parameters": {
         "jsCode": "const raw = $input.first().json.content?.find(b=>b.type==='text')?.text || '';\nconst clean = raw.replace(/```json|```/g,'').trim();\nlet parsed;\ntry { parsed = JSON.parse(clean); }\ncatch(e) {\n  const match = clean.match(/\\{[\\s\\S]*\\}/);\n  if (match) { try { parsed = JSON.parse(match[0]); } catch(e2) { throw new Error('Cannot parse: ' + clean.slice(0,200)); } }\n  else throw new Error('No JSON found: ' + clean.slice(0,200));\n}\nreturn [{\n  json: {\n    caption:            parsed.caption            || '',\n    hashtags:           parsed.hashtags           || '#ArakLighting #Reels',\n    cover_image_prompt: parsed.cover_image_prompt || '',\n    motion_prompt:      parsed.motion_prompt      || 'slow cinematic pan, warm light ambiance',\n    reel_strategy:      parsed.reel_strategy      || '',\n  }\n}];"
       },
-      "id": "5baa4e55-7bc4-488b-a36c-bdcf1e6af8e9",
+      "id": "b9867ae0-1777-5f3a-974c-38c6f1055888",
       "name": "Parse Script",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -184,7 +184,7 @@
         "jsonBody": "={\n  \"input\": {\n    \"prompt\": \"{{ $('Parse Script').item.json.cover_image_prompt }} -- Arak Lighting, architectural photography, luxury interior, Saudi Arabia, hyper-detailed, 4K, cinematic\",\n    \"aspect_ratio\": \"9:16\",\n    \"output_format\": \"png\"\n  }\n}",
         "options": {}
       },
-      "id": "698879b9-f314-442f-8284-367484114d3a",
+      "id": "0cf2210e-94a8-5956-b9b8-631445e771cf",
       "name": "FLUX: Start Cover",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -197,7 +197,7 @@
       "parameters": {
         "amount": 8
       },
-      "id": "326595d1-a87d-4fdf-a9aa-9b5431fd1035",
+      "id": "7671dc3e-0729-5282-a349-082a556d463c",
       "name": "Wait 8s",
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1.1,
@@ -225,7 +225,7 @@
         },
         "options": {}
       },
-      "id": "e363ffcd-5fc8-4b9e-b02a-3aff905cd2f5",
+      "id": "474f19df-7f26-50ef-bee9-6c82a81935e0",
       "name": "FLUX: Poll Status",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -257,7 +257,7 @@
         },
         "options": {}
       },
-      "id": "3d685db8-c700-417c-a5cf-5187df9459e6",
+      "id": "e48754c4-6330-54ee-b99a-4bb4292654e4",
       "name": "Cover Ready?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
@@ -277,7 +277,7 @@
           }
         }
       },
-      "id": "04c4f161-6d2a-4b5d-98cc-328945924fef",
+      "id": "48079ee0-2949-5aa9-ae13-a6b7daa2af26",
       "name": "Download Cover",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -316,7 +316,7 @@
         "inputDataFieldName": "data",
         "options": {}
       },
-      "id": "64396977-6dc9-4cca-9428-91a93de9d21b",
+      "id": "0af1dc1f-255e-506e-8cbe-67c1d875047d",
       "name": "Upload Cover",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -339,7 +339,7 @@
         },
         "options": {}
       },
-      "id": "658c50e8-04cb-4d73-9b73-4aeba9a0921b",
+      "id": "76b172af-4ecd-5927-88e9-01c46c9e7bc2",
       "name": "Set Cover URL",
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
@@ -370,7 +370,7 @@
         "jsonBody": "={\n  \"version\": \"8c47da666861d081eeb4d1261853087de23923a268a69b63febdf5dc1dee08e4\",\n  \"input\": {\n    \"image\": \"{{ $('Set Cover URL').item.json.cover_image_url }}\",\n    \"prompt\": \"{{ $('Parse Script').item.json.motion_prompt }}\",\n    \"aspect_ratio\": \"9:16\",\n    \"length\": 97,\n    \"negative_prompt\": \"blurry, distorted, low quality, watermark, warped architecture, text artifacts\"\n  }\n}",
         "options": {}
       },
-      "id": "0b76fa3e-f6a7-4e28-9477-72a4f3112cc0",
+      "id": "023be984-8c30-540f-aa38-6d1a3a79b2d3",
       "name": "Wan: Start Reel",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -383,7 +383,7 @@
       "parameters": {
         "amount": 10
       },
-      "id": "de4d7a82-99fc-4bcf-b741-eaafd64aadf2",
+      "id": "8dd734cc-089d-5e6d-9892-07cbbe7a8259",
       "name": "Wait 30s",
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1.1,
@@ -411,7 +411,7 @@
         },
         "options": {}
       },
-      "id": "6ccc67a9-669c-43cb-bf5a-73e3cc78e80a",
+      "id": "82a27297-3693-512e-b39a-826930f89e80",
       "name": "Wan: Poll Status",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -443,7 +443,7 @@
         },
         "options": {}
       },
-      "id": "5bad619e-62a1-4d94-9680-656f376e728b",
+      "id": "4afae97b-89f1-544d-9139-091d859390ae",
       "name": "Reel Ready?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
@@ -483,7 +483,7 @@
         },
         "options": {}
       },
-      "id": "bf8f1088-0e69-4519-bc22-c997faa1f878",
+      "id": "7754ac03-e4a6-5618-ab5b-92fe8b487d56",
       "name": "Reel Failed?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
@@ -496,7 +496,7 @@
       "parameters": {
         "amount": 10
       },
-      "id": "f12aadfe-cef9-481b-9c95-824c65a349cb",
+      "id": "3ccaca38-a4a7-5601-897e-71444e61c1dd",
       "name": "Wait 20s More",
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1.1,
@@ -517,7 +517,7 @@
           }
         }
       },
-      "id": "abf00afe-c002-462f-a162-fb2863b91fef",
+      "id": "229247ac-c7e8-552a-9477-d0a9e4d74ddf",
       "name": "Download Video",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -556,7 +556,7 @@
         "inputDataFieldName": "data",
         "options": {}
       },
-      "id": "c7ef2e64-24cf-40ca-9b4b-49f309de0163",
+      "id": "7f46dcc4-b455-5403-a749-062ad9c2462e",
       "name": "Upload Video",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -585,7 +585,7 @@
         },
         "options": {}
       },
-      "id": "3315e55a-3fa5-4036-919b-db60c3032171",
+      "id": "058537d6-edc7-5d02-a4b0-196cf4b4b11a",
       "name": "Set Video URL",
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
@@ -624,7 +624,7 @@
         "jsonBody": "={\n  \"reel_format\":    \"{{ $('Sanitize Inputs').item.json.reel_format }}\",\n  \"reel_duration\":  \"{{ $('Sanitize Inputs').item.json.reel_duration }}\",\n  \"hook\":           {{ JSON.stringify($('Sanitize Inputs').item.json.reel_hook) }},\n  \"brief\":          {{ JSON.stringify($('Sanitize Inputs').item.json.reel_brief) }},\n  \"music_note\":     {{ JSON.stringify($('Sanitize Inputs').item.json.reel_music) }},\n  \"cta\":            {{ JSON.stringify($('Sanitize Inputs').item.json.reel_cta) }},\n  \"caption\":        {{ JSON.stringify($('Parse Script').item.json.caption) }},\n  \"hashtags\":       {{ JSON.stringify($('Parse Script').item.json.hashtags) }},\n  \"motion_prompt\":  {{ JSON.stringify($('Parse Script').item.json.motion_prompt) }},\n  \"cover_image_url\":{{ JSON.stringify($('Set Video URL').item.json.cover_url) }},\n  \"video_url\":      {{ JSON.stringify($('Set Video URL').item.json.video_url) }},\n  \"publish_time\":   \"{{ $('Sanitize Inputs').item.json.publish_time }}\",\n  \"tone\":           \"{{ $('Sanitize Inputs').item.json.tone }}\",\n  \"status\":         \"ready\",\n  \"source\":         \"manual\"\n}",
         "options": {}
       },
-      "id": "1d1a622b-57d0-4e88-8848-4d7304c07dbe",
+      "id": "31c20b5e-4d43-589c-aadb-8fee4a71a696",
       "name": "Supabase: Save Reel",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -639,7 +639,7 @@
         "responseBody": "={\n  \"success\": true,\n  \"video_url\": \"{{ $('Set Video URL').item.json.video_url }}\",\n  \"cover_image_url\": \"{{ $('Set Video URL').item.json.cover_url }}\",\n  \"caption\": {{ JSON.stringify($('Parse Script').item.json.caption) }},\n  \"hashtags\": {{ JSON.stringify($('Parse Script').item.json.hashtags) }},\n  \"motion_prompt\": {{ JSON.stringify($('Parse Script').item.json.motion_prompt) }},\n  \"reel_strategy\": {{ JSON.stringify($('Parse Script').item.json.reel_strategy) }},\n  \"status\": \"ready\"\n}",
         "options": {}
       },
-      "id": "3c7e4f95-76c7-46da-8bf4-36ffbd0ea965",
+      "id": "ae0a6f51-1c57-5f27-ac90-f7428c90fa44",
       "name": "Respond: Success",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
@@ -654,7 +654,7 @@
         "responseBody": "={\"success\":false,\"error\":\"Reel generation failed\",\"status\":\"{{ $json.status }}\",\"error_detail\":\"{{ $json.error }}\"}",
         "options": {}
       },
-      "id": "bf36e598-5fc3-4447-ad23-ef52cd09c808",
+      "id": "4ebb877f-58e4-59e9-a7c7-87aa41ac39b3",
       "name": "Respond: Error",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
@@ -669,7 +669,7 @@
         "responseBody": "{\"success\":false,\"error\":\"Missing reel brief. Send reelBrief in request body.\"}",
         "options": {}
       },
-      "id": "89f7b738-5348-4b9c-8024-02efb1c5d19b",
+      "id": "db61c9d2-054b-5183-89fe-5af9fda3bf6a",
       "name": "Respond: Bad Request",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
@@ -701,7 +701,7 @@
         },
         "options": {}
       },
-      "id": "a1b2c3d4-reel-timeout-0001",
+      "id": "a27d24cc-e228-5b26-89d7-e8450cf2b205",
       "name": "Reel Timeout?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
@@ -716,7 +716,7 @@
         "responseBody": "={\"success\":false,\"error\":\"Reel generation timed out after polling limit\",\"status\":\"{{ $json.status }}\",\"prediction_id\":\"{{ $('Wan: Start Reel').item.json.id }}\"}",
         "options": {}
       },
-      "id": "b2c3d4e5-respond-timeout-001",
+      "id": "b29aff30-4f22-51ec-b62c-3a16a93f5398",
       "name": "Respond: Timeout",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
