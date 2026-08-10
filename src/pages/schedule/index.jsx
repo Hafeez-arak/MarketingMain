@@ -1,8 +1,8 @@
 import { useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useApp, actions } from '../../store/appStore'
-import { Card, WarmCard, Button, Badge, PlatformPill, Modal, Input, Select, PostImage } from '../../components/ui/index'
-import { formatDateTime, uid } from '../../lib/utils'
+import { useApp, actions } from '../../store/app'
+import { Card, WarmCard, Button, Badge, Modal, Input, PostImage } from '../../components/ui/index'
+import { formatDateTime } from '../../lib/utils'
 
 const DAYS   = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']
 const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December']

@@ -1,6 +1,6 @@
 import { createPlan, insertIdeas, markIdeasDrafting, markIdeasProcessing } from './contentPlans'
 import { requestDraftCopy, requestPlanContentGeneration, triggerVideoRenders } from './campaignPlanner'
-import { dbIdeaToDraft } from '../pages/campaigns/CampaignPlanner'
+import { dbIdeaToDraft } from './campaignPlan'
 import { derivePostKind, slideRange } from './postFormats'
 
 // ─── Quick Create ────────────────────────────────────────────────────────

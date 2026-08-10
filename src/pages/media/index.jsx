@@ -1,9 +1,8 @@
 import { useRef, useState, useEffect, useCallback } from 'react'
 import { createPortal } from 'react-dom'
-import { useAuth } from '../../store/AuthContext'
+import { useAuth } from '../../store/auth'
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from '../../lib/supabaseClient'
 import { Card, Button, Empty, ConfirmDialog } from '../../components/ui/index'
-import { uid } from '../../lib/utils'
 
 function humanSize(bytes) {
   if (!bytes || bytes === 0) return 'AI generated'
@@ -30,7 +29,7 @@ export function MediaLibrary() {
   const supabaseUrl = SUPABASE_URL
 
   const [assets,      setAssets]      = useState([])
-  const [loading,     setLoading]     = useState(false)
+  const [loading,     setLoading]     = useState(true)
   const [deleteId,    setDeleteId]    = useState(null)
   const [fullscreen,  setFullscreen]  = useState(null)  // { url, name }
   const [view,        setView]        = useState('grid')
@@ -39,9 +38,12 @@ export function MediaLibrary() {
 
   const headers = { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${accessToken || SUPABASE_ANON_KEY}` }
 
-  const fetchAssets = useCallback(async () => {
-    if (!activeWorkspaceId) return
-    setLoading(true)
+  // Split in two: `loadAssets` is pure I/O and touches no state, so the mount
+  // effect below can call it without setting state synchronously. `fetchAssets`
+  // wraps it with the spinner for the manual refreshes (after an upload or a
+  // delete) where a spinner is what you want.
+  const loadAssets = useCallback(async () => {
+    if (!activeWorkspaceId) return null
     try {
       // No explicit workspace_id filter needed — RLS already scopes this
       // to rows the signed-in user's workspace owns.
@@ -49,12 +51,30 @@ export function MediaLibrary() {
         `${supabaseUrl}/rest/v1/media_library?select=*&order=created_at.desc&limit=200`,
         { headers }
       )
-      if (res.ok) setAssets(await res.json())
-    } catch(e) { /* silent */ }
-    finally { setLoading(false) }
+      if (res.ok) return await res.json()
+    } catch {
+      // Silent: the library grid keeps whatever it already had rather than
+      // blanking out because one refresh didn't land.
+    }
+    return null
   }, [activeWorkspaceId, accessToken])
 
-  useEffect(() => { fetchAssets() }, [fetchAssets])
+  const fetchAssets = useCallback(async () => {
+    setLoading(true)
+    const rows = await loadAssets()
+    if (rows) setAssets(rows)
+    setLoading(false)
+  }, [loadAssets])
+
+  useEffect(() => {
+    let alive = true
+    loadAssets().then(rows => {
+      if (!alive) return
+      if (rows) setAssets(rows)
+      setLoading(false)
+    })
+    return () => { alive = false }
+  }, [loadAssets])
 
   async function saveToSupabase(item) {
     if (!activeWorkspaceId) return null
@@ -278,18 +298,8 @@ export function MediaLibrary() {
   )
 }
 
-// Export saveToMediaLibrary for use from other components
-export async function saveToMediaLibrary({ workspaceId, accessToken, name, url, platform, topic, source, mimeType, size }) {
-  if (!workspaceId) return null
-  const headers = {
-    apikey: SUPABASE_ANON_KEY,
-    Authorization: `Bearer ${accessToken || SUPABASE_ANON_KEY}`,
-    'Content-Type': 'application/json',
-    Prefer: 'return=minimal',
-  }
-  await fetch(`${SUPABASE_URL}/rest/v1/media_library`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({ workspace_id: workspaceId, name, url, platform: platform||null, topic: topic||null, source: source||'generated', mime_type: mimeType||'image/webp', size_bytes: size||0 }),
-  })
-}
+// NOTE: there is no saveToMediaLibrary here any more. A second copy of it
+// lived in this file — a different signature, no error handling, and no
+// caller: `App.jsx` imports only <MediaLibrary>, and every real caller already
+// used the one in lib/mediaLibrary.js. Two functions with the same name and
+// different argument shapes is a trap, so the unused one is gone.

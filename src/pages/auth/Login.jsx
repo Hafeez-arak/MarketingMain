@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
-import { useAuth } from '../../store/AuthContext'
+import { useAuth } from '../../store/auth'
 import { AuthLayout, AuthInput, AuthButton, PALETTE } from './AuthLayout'
 
 export function Login() {

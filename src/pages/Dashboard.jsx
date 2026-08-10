@@ -1,6 +1,7 @@
 import { useNavigate } from 'react-router-dom'
-import { useApp } from '../store/appStore'
-import { Card, Button, Badge, PlatformPill, Empty, PostImage, IconBadge, Icon } from '../components/ui/index'
+import { useApp } from '../store/app'
+import { Card, Button, Badge, PlatformPill, Empty, PostImage, IconBadge } from '../components/ui/index'
+import { Icon } from '../components/ui/icons'
 import { formatDateTime } from '../lib/utils'
 
 // ─── Dashboard ───────────────────────────────────────────────────────────

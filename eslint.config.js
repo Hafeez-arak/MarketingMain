@@ -6,6 +6,13 @@ import { defineConfig, globalIgnores } from 'eslint/config'
 
 export default defineConfig([
   globalIgnores(['dist']),
+  // Build config runs in Node, not the browser, so it gets Node's globals —
+  // `process.env` in vite.config.js is correct there and was only an error
+  // because every file was being linted as browser code.
+  {
+    files: ['vite.config.js', 'postcss.config.js', 'tailwind.config.js', 'eslint.config.js'],
+    languageOptions: { globals: globals.node },
+  },
   {
     files: ['**/*.{js,jsx}'],
     extends: [

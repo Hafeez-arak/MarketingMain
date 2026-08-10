@@ -1,5 +1,5 @@
 import { Navigate, useLocation } from 'react-router-dom'
-import { useAuth } from '../../store/AuthContext'
+import { useAuth } from '../../store/auth'
 
 export function RequireAuth({ children }) {
   const { session, loading, workspaces } = useAuth()

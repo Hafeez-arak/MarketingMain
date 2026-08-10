@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useApp, actions } from '../../store/appStore'
-import { Card, Button, Input, Textarea, Select, IconBadge, Icon } from '../../components/ui/index'
+import { useApp, actions } from '../../store/app'
+import { Card, Button, Input, Textarea, Select, IconBadge } from '../../components/ui/index'
+import { Icon } from '../../components/ui/icons'
 import { uid } from '../../lib/utils'
 
 const PLATFORMS = ['instagram','facebook','linkedin','tiktok','x']

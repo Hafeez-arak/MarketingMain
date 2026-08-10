@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useApp, actions } from '../../store/appStore'
-import { useAuth } from '../../store/AuthContext'
-import { Card, Button, Empty, Spinner, ConfirmDialog, IconBadge, Icon } from '../../components/ui/index'
+import { useApp, actions } from '../../store/app'
+import { useAuth } from '../../store/auth'
+import { Card, Button, Empty, Spinner, ConfirmDialog, IconBadge } from '../../components/ui/index'
+import { Icon } from '../../components/ui/icons'
 import { formatDate } from '../../lib/utils'
 import { fetchPlans, fetchPlanWithIdeas, deletePlan } from '../../lib/contentPlans'
-import { dbIdeaToDraft, momentsInRange } from './CampaignPlanner'
+import { dbIdeaToDraft, momentsInRange } from '../../lib/campaignPlan'
 
 const STATUS_STYLE = {
   draft:    'bg-stone-100 text-stone-600',
@@ -20,15 +21,24 @@ export function ContentPlans() {
   const { activeWorkspaceId, accessToken } = useAuth()
 
   const [plans,   setPlans]   = useState([])
-  const [loading, setLoading] = useState(true)
+  // Derived rather than a flag set inside the effect. As a bonus it fixes a
+  // race the flag had: a slow response for a workspace you've already
+  // navigated away from could overwrite the current one's plans.
+  const [loadedFor, setLoadedFor] = useState(null)
   const [opening, setOpening] = useState(null)
   const [deleteTarget, setDeleteTarget] = useState(null)
 
+  const loading = !!activeWorkspaceId && loadedFor !== activeWorkspaceId
+
   useEffect(() => {
     if (!activeWorkspaceId) return
-    setLoading(true)
-    fetchPlans(activeWorkspaceId, accessToken).then(p => { setPlans(p); setLoading(false) })
-  }, [activeWorkspaceId])
+    let alive = true
+    fetchPlans(activeWorkspaceId, accessToken).then(p => {
+      if (!alive) return
+      setPlans(p); setLoadedFor(activeWorkspaceId)
+    })
+    return () => { alive = false }
+  }, [activeWorkspaceId, accessToken])
 
   async function openPlan(plan) {
     setOpening(plan.id)

@@ -1,8 +1,8 @@
-import { useState, useRef, useCallback, useMemo, useEffect } from 'react'
+import { useState, useCallback, useMemo, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
-import { useApp, actions } from '../../store/appStore'
-import { useAuth } from '../../store/AuthContext'
+import { useApp, actions } from '../../store/app'
+import { useAuth } from '../../store/auth'
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from '../../lib/supabaseClient'
 import { Card, Button, Badge, Textarea, Spinner, PostImage } from '../../components/ui/index'
 import { uid, formatDateTime } from '../../lib/utils'
@@ -352,7 +352,7 @@ function MonthlySchedule({ state, dispatch, instructions }) {
   const [viewDay,        setViewDay]        = useState(null)   // dateKey for overview
   const [localSchedule,  setLocalSchedule]  = useState(state.linkedinSchedule || {})
   const [remoteSchedule, setRemoteSchedule] = useState({})
-  const [loadingMonth,   setLoadingMonth]   = useState(false)
+  const [loadedMonthKey, setLoadedMonthKey] = useState(null)
   const [lastFetched,    setLastFetched]    = useState('')
   const [saveError,      setSaveError]      = useState('')
 
@@ -383,14 +383,23 @@ function MonthlySchedule({ state, dispatch, instructions }) {
   }, [year, month])
 
   const [fetchTick, setFetchTick] = useState(0)
+  // The spinner is derived from whether the month on screen is the month we
+  // last finished loading, rather than a flag flipped inside the effect. Same
+  // behaviour, and a response for a month you've already paged past can no
+  // longer land on top of the one you're looking at.
+  const monthKey = `${year}-${month}-${fetchTick}`
+  const loadingMonth = isConfigured && loadedMonthKey !== monthKey
+
   useEffect(() => {
     if (!isConfigured) return
-    setLoadingMonth(true)
-    fetchMonth(year, month).then(({ data, error }) => {
-      setLoadingMonth(false)
+    let alive = true
+    fetchMonth(year, month).then(({ data }) => {
+      if (!alive) return
       if (data) { setRemoteSchedule(data); setLastFetched(new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'})) }
+      setLoadedMonthKey(monthKey)
     })
-  }, [year, month, fetchTick, isConfigured])
+    return () => { alive = false }
+  }, [year, month, fetchTick, isConfigured]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function handleSave(dateKey, entry) {
     setSaveError('')
@@ -497,9 +506,7 @@ function MonthlySchedule({ state, dispatch, instructions }) {
             const key          = dateKey(cell.date)
             const entries      = dayEntries(key)
             const count        = entries.length
-            const isPast       = cell.date < new Date(today.getFullYear(), today.getMonth(), today.getDate())
             const isCurrentMonth = cell.overflow === null
-            const hasGenerated = entries.some(e => e.status === 'generated')
 
             return (
               <button key={i} onClick={() => { if (isCurrentMonth) setViewDay(key) }}
@@ -669,7 +676,7 @@ function MonthlySchedule({ state, dispatch, instructions }) {
 }
 
 // ─── Day Editor ──────────────────────────────────────────────────────────────
-function DayEditor({ dateKey, entry, campaigns, supabaseUrl, anonKey, uploadToStorage, onSave, onClear, onClose }) {
+function DayEditor({ dateKey, entry, campaigns, uploadToStorage, onSave, onClear, onClose }) {
   const initTab = entry?.uploadType === 'video' ? 'video' : entry?.uploadType === 'upload' ? 'upload' : 'generate'
   const [tab, setTab] = useState(initTab)
 
@@ -1219,7 +1226,7 @@ function PostsList({ posts, dispatch, state, onCreateClick, updatePostStatus, we
   const [filter,       setFilter]       = useState('all')
   const [selectedPost, setSelectedPost] = useState(null)
 
-  const { activeWorkspaceId, accessToken } = useAuth()
+  const { accessToken } = useAuth()
   const supabaseUrl = SUPABASE_URL
   const anonKey     = accessToken || ''
 
@@ -1848,7 +1855,7 @@ const LI_VIDEO_STATUS_COLORS = {
   published: 'bg-green-50 text-green-700',
 }
 
-function LinkedInVideoPanel({ state, dispatch }) {
+function LinkedInVideoPanel({ dispatch }) {
   const [subView,    setSubView]    = useState('planner')
   const [videoType,  setVideoType]  = useState('thought_leadership')
   const [length,     setLength]     = useState('1m-3m')

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useApp } from '../../store/appStore'
-import { useAuth } from '../../store/AuthContext'
+import { useApp } from '../../store/app'
+import { useAuth } from '../../store/auth'
 import { Button, Card, Modal, SectionHead, Select, Spinner, Textarea, Empty } from '../../components/ui/index'
 import { BranchChat, BranchPill } from '../../components/studio/BranchChat'
 import { SessionSidebar } from '../../components/studio/SessionSidebar'

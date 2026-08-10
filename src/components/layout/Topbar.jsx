@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { useApp } from '../../store/appStore'
-import { useAuth } from '../../store/AuthContext'
+import { useApp } from '../../store/app'
+import { useAuth } from '../../store/auth'
 import { Button } from '../ui/index'
 import { timeAgo } from '../../lib/utils'
 

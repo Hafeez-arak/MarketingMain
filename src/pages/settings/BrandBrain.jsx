@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { useApp, actions } from '../../store/appStore'
-import { useAuth } from '../../store/AuthContext'
+import { useApp, actions } from '../../store/app'
+import { useAuth } from '../../store/auth'
 import { Card, WarmCard, Button, Textarea, Input, Select, ConfirmDialog, Modal } from '../../components/ui/index'
 import {
   DEFAULT_BRAND_PROFILE, fetchBrandProfile, saveBrandProfile,
@@ -535,12 +535,13 @@ function ProjectGroupModal({ name, photos, accessToken, activeWorkspaceId, onCha
     setUploading(false)
   }
 
-  // Clamp in case the photo at the open index gets deleted/removed while browsing.
-  useEffect(() => {
-    if (carouselIndex != null && carouselIndex >= photos.length) {
-      setCarouselIndex(photos.length > 0 ? photos.length - 1 : null)
-    }
-  }, [photos.length, carouselIndex])
+  // Clamp in case the photo at the open index gets deleted/removed while
+  // browsing. Done during render rather than in an effect: React re-renders
+  // immediately without committing, so the carousel never paints a frame
+  // pointing past the end of the array.
+  if (carouselIndex != null && carouselIndex >= photos.length) {
+    setCarouselIndex(photos.length > 0 ? photos.length - 1 : null)
+  }
 
   return (
     <Modal open onClose={onClose} title={name} width="max-w-4xl">
@@ -570,7 +571,7 @@ function ProjectGroupModal({ name, photos, accessToken, activeWorkspaceId, onCha
 function AssetLibrary() {
   const { activeWorkspaceId, accessToken } = useAuth()
   const [assets,   setAssets]   = useState([])
-  const [loading,  setLoading]  = useState(false)
+  const [loadedFor, setLoadedFor] = useState(null)
   const [uploading, setUploading] = useState(false)
   const [kind,     setKind]     = useState('product_photo')
   const [uploadProject, setUploadProject] = useState('')
@@ -582,11 +583,20 @@ function AssetLibrary() {
   const [collapsed, setCollapsed] = useState(true)
   const inputRef = useRef(null)
 
+  // `loading` is derived from whose data we're holding rather than set inside
+  // the effect — which also means a slow response for a workspace you've
+  // already left can't overwrite the current one's assets.
+  const loading = !!activeWorkspaceId && loadedFor !== activeWorkspaceId
+
   useEffect(() => {
     if (!activeWorkspaceId) return
-    setLoading(true)
-    fetchBrandAssets(activeWorkspaceId, accessToken).then(a => { setAssets(a); setLoading(false) })
-  }, [activeWorkspaceId])
+    let alive = true
+    fetchBrandAssets(activeWorkspaceId, accessToken).then(a => {
+      if (!alive) return
+      setAssets(a); setLoadedFor(activeWorkspaceId)
+    })
+    return () => { alive = false }
+  }, [activeWorkspaceId, accessToken])
 
   async function handleFiles(files) {
     if (!activeWorkspaceId || !files?.length) return
@@ -772,17 +782,23 @@ const TEMPLATE_FIELDS = [
   { key: 'status',   label: 'Status',   placeholder: 'draft / pending / approved' },
 ]
 
-function DirectoryEditor({ title, hint, api, fields, emptyRow, numbered }) {
+function DirectoryEditor({ title, api, fields, emptyRow, numbered }) {
   const { activeWorkspaceId, accessToken } = useAuth()
   const [rows,    setRows]    = useState([])
-  const [loading, setLoading] = useState(false)
+  const [loadedFor, setLoadedFor] = useState(null)
   const [collapsed, setCollapsed] = useState(true)
+
+  const loading = !!activeWorkspaceId && loadedFor !== activeWorkspaceId
 
   useEffect(() => {
     if (!activeWorkspaceId) return
-    setLoading(true)
-    api.list(activeWorkspaceId, accessToken).then(r => { setRows(r); setLoading(false) })
-  }, [activeWorkspaceId])
+    let alive = true
+    api.list(activeWorkspaceId, accessToken).then(r => {
+      if (!alive) return
+      setRows(r); setLoadedFor(activeWorkspaceId)
+    })
+    return () => { alive = false }
+  }, [activeWorkspaceId, accessToken, api])
 
   async function addRow() {
     setCollapsed(false)
@@ -847,26 +863,38 @@ export function BrandBrain() {
   const isConfigured = !!activeWorkspaceId
 
   const [profile,  setProfile]  = useState(() => state.brandProfile || { ...DEFAULT_BRAND_PROFILE })
-  const [loading,  setLoading]  = useState(false)
+  // Starts true when there is something to fetch, so the spinner no longer
+  // has to be switched on from inside the effect.
+  const [loading,  setLoading]  = useState(() => isConfigured && !state.brandProfile)
   const [saving,   setSaving]   = useState(false)
   const [dirty,    setDirty]    = useState(false)  // are there unsaved field edits?
   const [error,    setError]    = useState('')
-  const [loaded,   setLoaded]   = useState(false)
+  // A once-guard, so a ref: it never changes what's on screen, and as state
+  // it forced a second render on every load.
+  const loadedRef = useRef(false)
   const [showPreview, setShowPreview] = useState(false)
   const [activeSection, setActiveSection] = useState(GROUP_ORDER[0])
 
   useEffect(() => {
-    if (!isConfigured || loaded) return
+    if (!isConfigured || loadedRef.current) return
     // Already have it in the store (e.g. loaded by the sync hook on another
     // page)? The form initialised from it — skip the refetch so an in-flight
     // fetch can't clobber edits the user starts typing right away.
-    if (state.brandProfile) { setLoaded(true); return }
-    setLoading(true)
+    if (state.brandProfile) { loadedRef.current = true; return }
+    let alive = true
     fetchBrandProfile(activeWorkspaceId, accessToken).then(p => {
-      setLoading(false); setLoaded(true)
+      // The guard is set on SUCCESS, not before the request. StrictMode
+      // double-invokes effects on mount: setting it up front made the second
+      // run bail out, and since the first run's cleanup had already flipped
+      // `alive` to false, nothing was left to clear the loading flag — the
+      // page sat on "Loading your brand profile…" forever.
+      if (!alive) return
+      loadedRef.current = true
+      setLoading(false)
       if (p) { setProfile(p); dispatch(actions.setBrandProfile(p)) }
     })
-  }, [isConfigured, loaded, state.brandProfile])
+    return () => { alive = false }
+  }, [isConfigured, state.brandProfile, activeWorkspaceId, accessToken, dispatch])
 
   // Scroll-spy: highlight the section nearest the top of the viewport so the
   // sidebar always reflects where you are in the page.

@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react'
-import { useApp, actions } from '../../store/appStore'
-import { useAuth } from '../../store/AuthContext'
+import { useApp, actions } from '../../store/app'
+import { useAuth } from '../../store/auth'
 import { supabase } from '../../lib/supabaseClient'
 import { fetchWorkspaceWebhooks, saveWorkspaceWebhooks } from '../../lib/workspaceWebhooks'
-import { Card, WarmCard, Button, Input, Select, Toggle, Avatar, Modal, ConfirmDialog } from '../../components/ui/index'
+import { Card, Button, Input, Select, Avatar, Modal } from '../../components/ui/index'
 import { uid, PLATFORM_META } from '../../lib/utils'
 
 // ─── Workspace / Supabase status ────────────────────────────────────────────

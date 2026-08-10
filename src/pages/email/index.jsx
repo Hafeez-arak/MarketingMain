@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useApp, actions } from '../../store/appStore'
-import { Card, Button, Badge, Input, Textarea, Select, Modal, Empty, ConfirmDialog, Toggle } from '../../components/ui/index'
+import { useApp, actions } from '../../store/app'
+import { Card, Button, Badge, Input, Textarea, Select, Empty, ConfirmDialog, Toggle } from '../../components/ui/index'
 import { uid, formatDate } from '../../lib/utils'
 
 const TRIGGERS = ['New subscriber', 'Form submission', 'Cart abandoned', 'First purchase', 'No activity 30 days', 'Custom event']

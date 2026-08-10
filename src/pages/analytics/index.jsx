@@ -4,9 +4,10 @@ import {
   ResponsiveContainer, BarChart, Bar, LineChart, Line, XAxis, YAxis,
   CartesianGrid, Tooltip,
 } from 'recharts'
-import { useApp } from '../../store/appStore'
-import { useAuth } from '../../store/AuthContext'
-import { Card, Button, PlatformPill, Empty, Spinner, PostImage, IconBadge, PillSelect, Icon } from '../../components/ui/index'
+import { useApp } from '../../store/app'
+import { useAuth } from '../../store/auth'
+import { Card, Button, PlatformPill, Empty, Spinner, PostImage, IconBadge, PillSelect } from '../../components/ui/index'
+import { Icon } from '../../components/ui/icons'
 import { fetchSocialAccounts, syncZernio, fetchZernioDashboard } from '../../lib/zernio'
 import { BestTimeHeatmap, MetricToggle } from './charts'
 

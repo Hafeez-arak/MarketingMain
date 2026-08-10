@@ -1,7 +1,6 @@
-import { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
+import { AuthContext } from './auth'
 import { supabase } from '../lib/supabaseClient'
-
-const AuthContext = createContext(null)
 
 // ─── Auth + workspace context ──────────────────────────────────────────────
 // Phase 0: real accounts, real session, and a real workspace resolved from
@@ -103,10 +102,4 @@ export function AuthProvider({ children }) {
   }
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
-}
-
-export function useAuth() {
-  const ctx = useContext(AuthContext)
-  if (!ctx) throw new Error('useAuth must be used inside AuthProvider')
-  return ctx
 }

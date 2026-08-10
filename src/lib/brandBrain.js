@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react'
-import { actions } from '../store/appStore'
-import { useAuth } from '../store/AuthContext'
+import { useEffect, useRef } from 'react'
+import { actions } from '../store/app'
+import { useAuth } from '../store/auth'
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './supabaseClient'
 
 // ─── Brand Brain ─────────────────────────────────────────────────────────
@@ -300,14 +300,18 @@ export async function logEditFeedback(workspaceId, accessToken, { platform, post
 // session unless the profile is explicitly updated via SET_BRAND_PROFILE.
 export function useBrandProfileSync(state, dispatch) {
   const { activeWorkspaceId, accessToken } = useAuth()
-  const [attempted, setAttempted] = useState(false)
+  // A ref, not state: "have I already tried" changes nothing on screen, so
+  // storing it in state meant every first load rendered twice for no visible
+  // difference. AppProvider is keyed on the workspace (see App.jsx), so this
+  // resets when you switch companies, exactly as the state version did.
+  const attempted = useRef(false)
 
   useEffect(() => {
     if (!activeWorkspaceId) return
-    if (attempted || state.brandProfile) return
-    setAttempted(true)
+    if (attempted.current || state.brandProfile) return
+    attempted.current = true
     fetchBrandProfile(activeWorkspaceId, accessToken).then(profile => {
       if (profile) dispatch(actions.setBrandProfile(profile))
     })
-  }, [activeWorkspaceId, accessToken, attempted, state.brandProfile])
+  }, [activeWorkspaceId, accessToken, state.brandProfile])
 }

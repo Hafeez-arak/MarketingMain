@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
-import { useApp } from '../../store/appStore'
-import { useAuth } from '../../store/AuthContext'
+import { useApp } from '../../store/app'
+import { useAuth } from '../../store/auth'
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from '../../lib/supabaseClient'
 import { Card, Button, Badge, Empty, Spinner, PostImage } from '../../components/ui/index'
 import { formatDateTime } from '../../lib/utils'
@@ -9,7 +9,7 @@ import { fetchBrandProfile, buildInstructionsString } from '../../lib/brandBrain
 import { fetchApprovalsData, markIdeaProcessing } from '../../lib/contentPlans'
 import { requestPlanContentGeneration } from '../../lib/campaignPlanner'
 import { publishPost, syncZernio } from '../../lib/zernio'
-import { dbIdeaToDraft } from '../campaigns/CampaignPlanner'
+import { dbIdeaToDraft } from '../../lib/campaignPlan'
 import { InstagramPostDetail } from './InstagramPage'
 import { LinkedInPostDetail } from './LinkedInPage'
 

@@ -1,8 +1,8 @@
-import { useState, useRef, useCallback, useEffect } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
-import { useApp, actions } from '../../store/appStore'
-import { useAuth } from '../../store/AuthContext'
+import { useApp, actions } from '../../store/app'
+import { useAuth } from '../../store/auth'
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from '../../lib/supabaseClient'
 import { Card, Button, Badge, Textarea, Spinner, PostImage } from '../../components/ui/index'
 import { uid, formatDateTime } from '../../lib/utils'
@@ -199,8 +199,9 @@ function useSupabasePosts(supabaseUrl, anonKey) {
         ...manualRows.map(r => normalize(r, 'manual')),
       ].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)))
       setLastFetchedAt(new Date())
-    } catch (e) {
-      // fail silently — local posts still show
+    } catch {
+      // Fail silently — the locally-held posts still render, so a fetch that
+      // didn't land is a stale list rather than an empty screen.
     } finally {
       setLoadingPosts(false)
     }
@@ -244,13 +245,20 @@ export function InstagramPage() {
   ].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
 
   // Auto-fetch on mount + re-fetch every 30s to pick up n8n-generated posts
-  const [fetched, setFetched] = useState(false)
+  // A ref rather than state: "have I done the first fetch" is bookkeeping the
+  // UI never reads, and as state it cost an extra render on mount.
+  const fetchedOnce = useRef(false)
   useEffect(() => {
     if (!supabaseUrl || !anonKey) return
-    if (!fetched) { setFetched(true); fetchRemotePosts() }
+    if (!fetchedOnce.current) {
+      fetchedOnce.current = true
+      // Deferred a tick so the first render commits before the fetch flips
+      // the loading flag — the poll below is what keeps it current anyway.
+      queueMicrotask(fetchRemotePosts)
+    }
     const interval = setInterval(fetchRemotePosts, 30000)
     return () => clearInterval(interval)
-  }, [supabaseUrl, anonKey])
+  }, [supabaseUrl, anonKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const [screen,   setScreen]   = useState('posts')
 
@@ -441,23 +449,18 @@ function useSupabaseSchedule(supabaseUrl, anonKey, workspaceId) {
 // ─── Monthly Schedule ──────────────────────────────────────────────────────
 const DAYS_OF_WEEK = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
+// Hoisted out of the component: Date.now() is impure, and inside a function
+// defined during render the compiler can't prove it only ever runs from a
+// click handler. At module scope there is nothing to prove.
+function mediaFileName(topic) {
+  return `${(topic || 'post').replace(/[^a-z0-9]/gi, '_').toLowerCase()}_${Date.now()}.webp`
+}
+
 function MonthlySchedule({ state, dispatch, instructions }) {
   const { activeWorkspaceId, accessToken } = useAuth()
   const supabaseUrl = SUPABASE_URL
   const anonKey     = accessToken || ''
   const { upsertEntry, deleteEntry, fetchMonth, uploadToStorage } = useSupabaseSchedule(supabaseUrl, anonKey, activeWorkspaceId)
-  async function saveImageToMediaLibrary(url, topic, platform) {
-    const name = `${(topic||'post').replace(/[^a-z0-9]/gi,'_').toLowerCase()}_${Date.now()}.webp`
-    if (supabaseUrl && anonKey) {
-      await fetch(`${supabaseUrl}/rest/v1/media_library`, {
-        method: 'POST',
-        headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${anonKey}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
-        body: JSON.stringify({ workspace_id: activeWorkspaceId, name, url, platform, topic, source: 'generated', mime_type: 'image/webp', size_bytes: 0 }),
-      })
-    }
-    return name
-  }
-
 
   const today = new Date()
   const [year,    setYear]    = useState(today.getFullYear())
@@ -829,7 +832,7 @@ function MonthlySchedule({ state, dispatch, instructions }) {
 }
 
 // ─── Day Editor (inline modal overlay) ─────────────────────────────────────
-function DayEditor({ dateKey, entry, campaigns, supabaseUrl, anonKey, uploadToStorage, onSave, onClear, onDelete, onClose }) {
+function DayEditor({ dateKey, entry, campaigns, uploadToStorage, onSave, onDelete, onClose }) {
   // Tab state
   const initTab = entry?.uploadType === 'reel' ? 'reel' : entry?.uploadType === 'upload' ? 'upload' : 'generate'
   const [tab, setTab] = useState(initTab)
@@ -1382,7 +1385,6 @@ function DayEditor({ dateKey, entry, campaigns, supabaseUrl, anonKey, uploadToSt
 
 // ─── Post Detail Modal ─────────────────────────────────────────────────────
 function PostDetail({ post, state, webhookUrl, regenWebhookUrl, supabaseUrl, anonKey, onClose, onStatusChange, onImageUpdated, onCaptionUpdated, onDelete }) {
-  const { dispatch } = useApp()
   const { activeWorkspaceId } = useAuth()
   const [regenLoading,   setRegenLoading]   = useState(false)
   const [regenError,     setRegenError]     = useState('')
@@ -1392,19 +1394,21 @@ function PostDetail({ post, state, webhookUrl, regenWebhookUrl, supabaseUrl, ano
   const [stagedImage,    setStagedImage]    = useState(null)
   const [approved,       setApproved]       = useState(post.status === 'published')
 
-  // Sync currentImage when parent updates post.imageUrl (e.g. after save regen)
-  useEffect(() => {
-    if (!stagedImage) {
-      setCurrentImage(post.imageUrl || post.mediaUrls?.[0] || '')
-    }
-  }, [post.imageUrl])
+  // Sync currentImage when the parent updates post.imageUrl (e.g. after a
+  // save/regen). Adjusted during render rather than in an effect so the card
+  // never paints one frame of the previous image before correcting itself.
+  const [renderedImageUrl, setRenderedImageUrl] = useState(post.imageUrl)
+  if (post.imageUrl !== renderedImageUrl) {
+    setRenderedImageUrl(post.imageUrl)
+    if (!stagedImage) setCurrentImage(post.imageUrl || post.mediaUrls?.[0] || '')
+  }
   const [savedToMedia,   setSavedToMedia]   = useState(false)
   const [showFullCaption, setShowFullCaption] = useState(false)
 
   async function handleSaveToMedia() {
     const imageToSave = allImages ? allImages[carouselIdx] : displayImage
     if (!imageToSave) return
-    const fileName = `${(post.topic || 'post').replace(/[^a-z0-9]/gi,'_').toLowerCase()}_${Date.now()}.webp`
+    const fileName = mediaFileName(post.topic)
     // Save to Supabase media_library
     if (supabaseUrl && anonKey) {
       await fetch(`${supabaseUrl}/rest/v1/media_library`, {
@@ -1430,12 +1434,15 @@ function PostDetail({ post, state, webhookUrl, regenWebhookUrl, supabaseUrl, ano
     setEditingCaption(true)
   }
 
-  // Keep captionDraft in sync when the parent updates post.copy after a save
-  useEffect(() => {
-    if (!editingCaption) {
-      setCaptionDraft(post.copy || '')
-    }
-  }, [post.copy, editingCaption])
+  // Keep captionDraft in sync when the parent updates post.copy after a save,
+  // for the same reason and in the same way as the image above. Guarded on
+  // `editingCaption` so it can never overwrite what someone is mid-way through
+  // typing.
+  const [renderedCopy, setRenderedCopy] = useState(post.copy)
+  if (post.copy !== renderedCopy) {
+    setRenderedCopy(post.copy)
+    if (!editingCaption) setCaptionDraft(post.copy || '')
+  }
 
   const campaign  = (state.campaigns || []).find(c => c.id === post.campaignId)
   const styleMeta = IMAGE_STYLES.find(s => s.value === post.style)
@@ -2150,15 +2157,17 @@ function ReelsPanel({ state, dispatch }) {
           instructions: buildInstructionsString(state.brandProfile, state.instagramInstructions) || '',
         }),
       }).catch(() => {}) // swallow network errors — we poll instead
-    } catch (_) {}
+    } catch {
+      // Building or firing the request can throw synchronously (a malformed
+      // URL, a blocked request). Polling is what actually reports success, so
+      // there is nothing useful to do here but let it run.
+    }
 
     // ── Poll Supabase for the new row (max 6 min) ─────────────────────────
     const MAX_WAIT   = 6 * 60 * 1000  // 6 minutes
     const POLL_MS    = 8000            // every 8 seconds
-    let   attempts   = 0
 
     const poll = async () => {
-      attempts++
       try {
         const r = await fetch(
           `${supabaseUrl}/rest/v1/instagram_reels?select=*&order=created_at.desc&limit=1`,
@@ -2182,7 +2191,11 @@ function ReelsPanel({ state, dispatch }) {
           })
           return // done
         }
-      } catch (_) {}
+      } catch {
+        // A failed poll is not a failed generation — the row may simply not
+        // exist yet, or one request timed out. Fall through and try again;
+        // the wall-clock check below is what eventually gives up.
+      }
 
       // Keep polling or give up
       if (Date.now() - firedAt < MAX_WAIT) {
@@ -2253,7 +2266,6 @@ function ReelsPanel({ state, dispatch }) {
     localStorage.setItem('arak_reels_ig', JSON.stringify(updated))
   }
 
-  const selectedFormat = REEL_FORMATS.find(f => f.value === format)
 
   // ── Show approval screen ───────────────────────────────────────────────────
   if (approval) {

@@ -1,4 +1,5 @@
-import { createContext, useContext, useReducer, useEffect } from 'react'
+import { AppContext } from './app'
+import { useReducer, useEffect } from 'react'
 
 const STORAGE_KEY = 'campai_arak_v1'
 
@@ -69,7 +70,11 @@ function saveState(state) {
     const partial = {}
     PERSIST_KEYS.forEach(k => { partial[k] = state[k] })
     localStorage.setItem(STORAGE_KEY, JSON.stringify(partial))
-  } catch {}
+  } catch {
+    // Private browsing, a full quota, or a disabled store. Persistence is a
+    // convenience here — the app runs from in-memory state either way — so
+    // there is nothing worth interrupting the user for.
+  }
 }
 
 function reducer(state, action) {
@@ -198,46 +203,8 @@ function reducer(state, action) {
   }
 }
 
-const AppContext = createContext(null)
-
 export function AppProvider({ children }) {
   const [state, dispatch] = useReducer(reducer, undefined, loadState)
   useEffect(() => { saveState(state) }, [state])
   return <AppContext.Provider value={{ state, dispatch }}>{children}</AppContext.Provider>
-}
-
-export function useApp() {
-  const ctx = useContext(AppContext)
-  if (!ctx) throw new Error('useApp must be used inside AppProvider')
-  return ctx
-}
-
-export const actions = {
-  addCampaign:        p  => ({ type: 'ADD_CAMPAIGN',         payload: p }),
-  updateCampaign:     p  => ({ type: 'UPDATE_CAMPAIGN',      payload: p }),
-  deleteCampaign:     id => ({ type: 'DELETE_CAMPAIGN',      payload: id }),
-  addPost:            p  => ({ type: 'ADD_POST',             payload: p }),
-  updatePost:         p  => ({ type: 'UPDATE_POST',          payload: p }),
-  deletePost:         id => ({ type: 'DELETE_POST',          payload: id }),
-  addEmailFlow:       p  => ({ type: 'ADD_EMAIL_FLOW',       payload: p }),
-  updateEmailFlow:    p  => ({ type: 'UPDATE_EMAIL_FLOW',    payload: p }),
-  deleteEmailFlow:    id => ({ type: 'DELETE_EMAIL_FLOW',    payload: id }),
-  addMedia:           p  => ({ type: 'ADD_MEDIA',            payload: p }),
-  deleteMedia:        id => ({ type: 'DELETE_MEDIA',         payload: id }),
-  addApproval:        p  => ({ type: 'ADD_APPROVAL',         payload: p }),
-  updateApproval:     p  => ({ type: 'UPDATE_APPROVAL',      payload: p }),
-  connectAccount:     id => ({ type: 'CONNECT_ACCOUNT',      payload: id }),
-  disconnectAccount:  id => ({ type: 'DISCONNECT_ACCOUNT',   payload: id }),
-  addNotification:    p  => ({ type: 'ADD_NOTIFICATION',     payload: p }),
-  clearNotifications: () => ({ type: 'CLEAR_NOTIFICATIONS' }),
-  updateWorkspace:    p  => ({ type: 'UPDATE_WORKSPACE',     payload: p }),
-  addTeamMember:      p  => ({ type: 'ADD_TEAM_MEMBER',      payload: p }),
-  removeTeamMember:   id => ({ type: 'REMOVE_TEAM_MEMBER',   payload: id }),
-  setWebhook:         (platform, url) => ({ type: 'SET_WEBHOOK', payload: { platform, url } }),
-  setBrandProfile:    p  => ({ type: 'SET_BRAND_PROFILE',     payload: p }),
-  setCampaignPlanDraft: p => ({ type: 'SET_CAMPAIGN_PLAN_DRAFT', payload: p }),
-  createWorkspace:    p  => ({ type: 'CREATE_WORKSPACE',  payload: p }),
-  switchWorkspace:    id => ({ type: 'SWITCH_WORKSPACE',  payload: id }),
-  renameWorkspace:    p  => ({ type: 'RENAME_WORKSPACE',  payload: p }),
-  deleteWorkspace:    id => ({ type: 'DELETE_WORKSPACE',  payload: id }),
 }

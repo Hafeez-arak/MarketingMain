@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { useAuth } from '../store/AuthContext'
+import { useAuth } from '../store/auth'
 import { Modal, Button, Spinner, PostImage } from './ui/index'
 import { fetchBrandAssets, ASSET_KINDS } from '../lib/brandAssets'
 import { uploadReferenceImage } from '../lib/referenceImages'
@@ -27,7 +27,9 @@ export function ReferencePicker({ value = [], onSave, onClose, mode, onModeChang
   const { activeWorkspaceId, accessToken } = useAuth()
   const [tab,       setTab]       = useState('brain') // 'brain' | 'upload'
   const [assets,    setAssets]    = useState([])
-  const [loading,   setLoading]   = useState(true)
+  // Starts false with no workspace: there is nothing to fetch, so a spinner
+  // would be a promise the component can't keep.
+  const [loading,   setLoading]   = useState(!!activeWorkspaceId)
   const [kindFilter, setKindFilter] = useState('all')
   const [selected,  setSelected]  = useState(value)   // ordered array of URLs
   const [uploading, setUploading] = useState(false)
@@ -40,10 +42,15 @@ export function ReferencePicker({ value = [], onSave, onClose, mode, onModeChang
   // Single image only when using a real image AS a non-carousel post.
   const singleOnly  = useImage && format !== 'carousel'
 
-  // Switching into single-image mode with several already picked — keep the first.
-  useEffect(() => {
+  // Switching into single-image mode with several already picked — keep the
+  // first. Adjusted during render rather than in an effect so the grid never
+  // paints a frame with several images still selected in a mode that only
+  // permits one.
+  const [prevSingleOnly, setPrevSingleOnly] = useState(singleOnly)
+  if (singleOnly !== prevSingleOnly) {
+    setPrevSingleOnly(singleOnly)
     if (singleOnly && selected.length > 1) setSelected([selected[0]])
-  }, [singleOnly]) // eslint-disable-line react-hooks/exhaustive-deps
+  }
 
   async function handleSave() {
     if (useImage && selected.length === 0) { setError('Add at least one image to use, or switch to “Generate with AI”.'); return }
@@ -57,13 +64,16 @@ export function ReferencePicker({ value = [], onSave, onClose, mode, onModeChang
   }
 
   useEffect(() => {
-    if (!activeWorkspaceId) { setLoading(false); return }
+    if (!activeWorkspaceId) return
+    let alive = true
     fetchBrandAssets(activeWorkspaceId, accessToken).then(rows => {
+      if (!alive) return
       // Only assets we can actually show/condition on — must have a URL and
       // not be an audio asset.
       setAssets((rows || []).filter(a => a.public_url && a.kind !== 'music'))
       setLoading(false)
     })
+    return () => { alive = false }
   }, [activeWorkspaceId, accessToken])
 
   const isSelected = url => selected.includes(url)

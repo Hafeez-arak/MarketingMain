@@ -1,7 +1,7 @@
 import { useState, useRef } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { useApp, actions } from '../../store/appStore'
-import { Card, Button, Badge, PlatformPill, Input, Textarea, Select, Empty, PostImage } from '../../components/ui/index'
+import { useApp, actions } from '../../store/app'
+import { Card, Button, Badge, Input, Textarea, Select, Empty, PostImage } from '../../components/ui/index'
 import { uid, PLATFORM_META, formatDateTime } from '../../lib/utils'
 
 // ─── Social Overview ──────────────────────────────────────────────────────
