@@ -283,6 +283,19 @@ const WORKFLOW_CONFIGS = [
     ),
   },
   {
+    platform: 'creativeCompose',
+    label: 'Creative Studio — Compose (text on video)',
+    placeholder: 'https://your-instance.app.n8n.cloud/webhook/arak-creative-compose',
+    description: 'Stamps your text, logos and colours onto a finished clip with local ffmpeg. No model, no fal call — FREE, and unlimited. This is what lets the team change an Arabic headline as often as they like without ever re-rendering the footage; only changing what happens inside the scene costs money.',
+    icon: (
+      <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: 'linear-gradient(135deg,#059669,#34d399)' }}>
+        <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24">
+          <rect x="2" y="4" width="20" height="16" rx="2"/><path d="M7 12h10M7 16h6" strokeLinecap="round"/>
+        </svg>
+      </div>
+    ),
+  },
+  {
     platform: 'creativeEnhance',
     label: 'Creative Studio — Enhance Prompt',
     placeholder: 'https://your-instance.app.n8n.cloud/webhook/arak-creative-enhance',

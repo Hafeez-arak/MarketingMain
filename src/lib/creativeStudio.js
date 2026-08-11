@@ -288,6 +288,10 @@ async function fire(webhookUrl, payload, label) {
 export const requestGenerate = (url, payload) => fire(url, payload, 'Creative Generate')
 export const requestEdit     = (url, payload) => fire(url, payload, 'Creative Edit')
 export const requestVideo    = (url, payload) => fire(url, payload, 'Creative Video')
+// The only one of these that spends nothing: ffmpeg stamps our own text/logo
+// layer onto an existing clip locally. Same fire-and-poll shape as its
+// siblings, because it still takes a few seconds and still writes the row.
+export const requestCompose  = (url, payload) => fire(url, payload, 'Creative Compose')
 
 // ── Enhance ────────────────────────────────────────────────────────────────
 

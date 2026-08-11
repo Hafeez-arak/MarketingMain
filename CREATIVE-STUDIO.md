@@ -54,19 +54,46 @@ Numbered as the marketing team wrote them.
 | 6 | Edit the selected image: colour / font / text changes | C (AI) + D (editor) | ☑ |
 | 7 | **Accurate Arabic text on images** — top priority, bilingual Gulf content | D (+C) | ☐ |
 | 8 | Keep requesting edits until happy | C | ☐ |
-| 9 | Move to video generation (Higgsfield or Seedance) | E | ☐ |
-| 10 | Video supports the same edits: colour / font / text | E | ⚠️ see note |
-| 11 | Final output: ready-to-post image and/or video, accurate Arabic, no captions/analytics | C+E | ☐ |
+| 9 | Move to video generation (Higgsfield or Seedance) | E | ☑ |
+| 10 | Video supports the same edits: colour / font / text | E | ☑ — free and unlimited, see below |
+| 11 | Final output: ready-to-post image and/or video, accurate Arabic, no captions/analytics | C+E | ☑ |
 
 Also confirmed with the team: a session may be **image only**, **video only**,
 or **image then video** — none of the three is a special case.
 
-**⚠️ Requirement 10 — the one thing we must renegotiate.** No AI model today
-can reliably retype or restyle text *inside* an existing video. What works,
-and what every professional AI-video workflow does, is: **edit the still
-image, then re-animate it** (~1–2 min per render). The UI will make this a
-one-click loop rather than hiding it. Needs the team's sign-off — it's the
-only requirement we're not meeting literally.
+**✅ Requirement 10 — met, and better than asked for (2026-08-11).** The earlier
+note here said this had to be renegotiated because no model can retype text
+*inside* a video. That framing was wrong: it treated "edit" as one operation
+when it is three, with completely different cost profiles.
+
+- **Text, fonts, colours of text/graphics, logos, position, timing** —
+  compositing, not generation. Free, instant, unlimited, deterministic, and
+  bit-for-bit non-destructive to the footage.
+- **Lighting, objects, weather** — in-context video editing. One generation
+  each, but the take survives. Not built yet.
+- **"Something different happens in the scene"** — a full re-render.
+
+Three of the four things the team actually listed are in the first bucket. So
+the requirement is *more* deliverable than it read, not less. The clip is
+generated clean, our own layer is stamped on top with local ffmpeg, and
+changing an Arabic headline re-composites the same clip in about a second at no
+cost — where Higgsfield would charge for a new take that comes back visibly
+different.
+
+**What to tell the marketing team:**
+
+> Video works differently from a Photoshop file. Two categories:
+>
+> **Free and unlimited** — all text, fonts, colours, logos, timing and platform
+> sizing. Change these as often as you like, instantly, at no cost. Your Arabic
+> and English stay perfectly rendered because we place them as real text, not
+> AI-generated pixels.
+>
+> **Costs credits** — anything happening inside the scene: lighting, objects,
+> weather, or a different action. The interface shows you the price before you
+> click.
+>
+> Clips run 4–15s; longer pieces are assembled from several.
 
 ---
 
@@ -137,7 +164,15 @@ clip 1 ended on, which is the tool for making a chain look deliberate.
 **Tell the marketing team this before they plan around 30s reels.** Not in
 scope for the first build — the Studio ships single clips first.
 
-### …which also solves requirement 10 (editable text on video)
+### …which also solves requirement 10 (editable text on video) — built 2026-08-11
+
+**Built, and with local ffmpeg rather than `ffmpeg-api/compose`.** The open
+question below ("does compose honour a transparent overlay track?") is now moot:
+we run ffmpeg ourselves inside the n8n container, which costs nothing per
+composite. That matters more than convenience — if every text tweak were a paid
+API call, "free and unlimited typography" would be a false promise, and that
+promise is the whole reason this beats Higgsfield.
+
 
 Because the text was never baked into the image, it doesn't have to be baked
 into the video either. The sequence becomes:
@@ -249,6 +284,81 @@ Caveats, stated honestly:
   these models typically degrade.
 
 ---
+
+## 🔴 The bug that meant video never actually worked (fixed 2026-08-11)
+
+**Every video render this app ever attempted charged fal and then failed.** That
+is why `creative_versions` held 22 ready images and **zero** ready videos while
+the feature was marked "built and verified" — it had never once been followed
+all the way through to a finished clip.
+
+fal's queue is keyed on the **first two path segments only**. You submit to the
+full model path:
+
+```
+POST https://queue.fal.run/fal-ai/kling-video/v2.5-turbo/pro/image-to-video
+```
+
+and fal replies with a `response_url` pointing at the *app*, not the model:
+
+```
+https://queue.fal.run/fal-ai/kling-video/requests/<id>
+```
+
+Both workflows built their status/result URLs from the full model path, which
+returns **405 Method Not Allowed**. Proven directly:
+
+| URL | Result |
+|---|---|
+| `…/fal-ai/kling-video/v2.5-turbo/pro/image-to-video/requests/<id>/status` | **405** |
+| `…/fal-ai/kling-video/requests/<id>/status` | **200** |
+
+The failure lands *after* the submit, so the generation had already started and
+been billed — and the old code discarded the `request_id`, leaving the paid clip
+unreachable. One Kling render was lost this way before the cause was found.
+
+**Fixed** in both `Creative Video` and the plan board's `Video Render`: poll
+`submit.status_url` / `submit.response_url` — the URLs fal itself returns —
+falling back to the first two segments rather than the whole path. The
+`request_id` now appears in every failure message past the submit, so a paid
+render can never be orphaned again.
+
+**The lesson worth keeping:** "the webhook returns `accepted`" and "the workflow
+reports success" both looked green here for weeks. Neither is evidence that an
+asset exists. Only a row reaching `status:'ready'` with a playable URL is.
+
+## Endpoint facts — verified against fal's live schemas, 2026-08-11
+
+Two notes elsewhere in this file were stale. Corrected here.
+
+| Model | Aspect ratios accepted | Max | Notes |
+|---|---|---|---|
+| Seedance 2.0 | auto/21:9/16:9/4:3/3:4/1:1/9:16 | 15s, 4K | takes `end_image_url` |
+| Seedance 2.5 | **`auto` only** | 30s, 720p | takes `end_image_url` |
+| Veo 3.1 Fast | **auto/16:9/9:16 only** | 8s | one `image_url`, no refs, no end frame |
+| Kling 2.5 Turbo Pro | none | 10s | |
+| Hailuo 2.3 | none | 10s | |
+
+**Two live bugs found and fixed.** `ASPECT_MAP` was global where the constraint
+is per model:
+1. It rewrote 4:5 → 3:4 for everyone, and **Veo rejects 3:4** — so every 4:5 or
+   1:1 Veo render was failing outright.
+2. It sent a real ratio to Seedance 2.5, which accepts only `auto`.
+
+It is now per-model, and an approximate shape is acceptable because Creative
+Compose centre-crops the finished clip back to the overlay's own aspect.
+
+**Style references DO have a model input** — the earlier note saying otherwise
+was true of the image-to-video endpoints we were calling and false of fal.
+`bytedance/seedance-2.0/reference-to-video` (and 2.5) takes an **`image_urls`**
+array — up to 9 images plus 3 videos and 3 audio clips, 12 files total —
+addressed from the prompt as `@Image1`. A sentence naming them is prepended
+automatically; without it the model treats them as vague inspiration and mostly
+ignores them, the same failure the image Edit workflow hit with its own
+`image_urls` array.
+
+**Seedance's `generate_audio` defaults to `true` on fal**, so our explicit
+`false` is load-bearing and must stay.
 
 ## Provider review — 2026-08-10 (Higgsfield explored, declined)
 
@@ -415,5 +525,77 @@ alone, for no visible gain on the drafts nobody posts.
     the same blind spot** — worth the same fix next time one is touched.
   - "Pick the one you prefer" rendered above two *failed* cards.
 - [ ] **D — Overlay text editor.** Real fonts, guaranteed Arabic, re-editable. *Requirement 7.*
-- [ ] **E — Video.** Seedance i2v + t2v, re-render loop. *Requirements 9–11.*
+- [x] **E — Video.** ✅ **Done 2026-08-11.** *Requirements 9–11.*
+
+  Animation un-parked (`ANIMATE_ENABLED` deleted), and the piece that made
+  parking it reasonable — a clip you couldn't put editable text on — is gone.
+
+  **Creative Compose**, a fourth n8n workflow (`arak-creative-compose`), stamps
+  the editor's own layer onto a finished clip with **local ffmpeg**. It is the
+  only generation-adjacent workflow that spends nothing: no `FAL_KEY`, no model
+  call. That is what makes "change the wording as often as you like, free" true
+  rather than a slogan.
+
+  - **The editor is the same editor**, in `mode="video"`. Every coordinate was
+    already a fraction of the frame, so it doesn't care whether a photo or frame
+    one of a clip is underneath. Crop and photo-adjust are hidden (they cannot
+    reach footage); a **timeline strip** appears; Save emits a transparent brand
+    layer instead of a flattened picture. Rebuilding a separate video editor
+    would have thrown away the fonts, the Arabic shaping, the snapping and the
+    undo stack for nothing.
+  - **Per-layer timing.** `tIn` / `tOut` / `fade` in seconds (not fractions —
+    seconds are resolution-independent, and a fraction would silently move text
+    if the clip were re-rendered longer). One PNG per distinct timing group, so
+    the common case of "everything runs the whole clip" still costs one image
+    and one ffmpeg overlay.
+  - **The invariant that matters:** `overlay_state.baseVideoUrl` holds the clip
+    as the model rendered it, and re-editing always composites from THAT. Same
+    rule as `baseImageUrl` on the image side, same reason — compositing over a
+    previous composite burns the old wording permanently into the footage while
+    `overlay_state` replays the same layers on top, so a typo fix would show
+    both spellings with no way back.
+  - **No migration needed.** A composed clip is `kind:'overlay'`,
+    `provider:'manual'`, `media_type:'video'` — all three already pass the
+    existing check constraints — and everything else lives in `overlay_state`.
+
+  Also fixed in this pass: the style-reference slot now reaches Seedance's
+  **reference-to-video** endpoint (it was never true that no model input
+  existed — we were calling the wrong endpoint); start/end frames are sent;
+  and two live aspect-ratio bugs are gone (below).
+
+  **ffmpeg in the container.** `n8n/docker/Dockerfile` copies static ffmpeg and
+  ffprobe in from `mwader/static-ffmpeg:7.1`. Not `apk add` — `n8nio/n8n:latest`
+  is now a **Docker Hardened Image** with no package manager and no curl, only
+  busybox wget. Two more traps, both of which look nothing like their cause:
+  - n8n 2.0 **disables the ExecuteCommand node by default**
+    (`NODES_EXCLUDE` defaults to executeCommand + localFileTrigger). Without
+    re-enabling it the workflow imports and publishes fine, then never
+    activates and the webhook 404s. Re-enabled in `docker-compose.yml`, with the
+    security trade-off written down there.
+  - `restrictFileAccessTo` defaults to `~/.n8n-files`, so the Read File node
+    refuses anything in `/tmp` with "Access to the file is not allowed." The
+    composite is written inside `~/.n8n-files` instead of widening the setting.
+
+  Files: `n8n/gen_workflows.py` (`build_creative_compose`), `n8n/docker/*`,
+  `n8n/redeploy.sh` (new — the update-in-place recipe, which the docs referenced
+  but the repo never had), `src/components/studio/editor/canvas/Timeline.jsx`,
+  `editor/model/{document,render}.js`, `src/components/studio/videoFrame.js`,
+  `src/pages/studio/index.jsx`, `BranchChat.jsx`, `VideoSettings.jsx`.
+
+  **Verified without spending anything on fal:** the filter graph proved against
+  a synthetic clip (alpha respected, layers appear/leave on the second, fades
+  smooth, 3:4 → 4:5 centre-crop exact, audio preserved); the real workflow run
+  end to end against fixtures in Supabase storage, producing a correct 1080×1350
+  mp4; and the editor's own Arabic export inspected at native resolution —
+  correct joining and RTL order.
+
+  **And verified live, 2026-08-11.** Hotel-lobby still → Kling 2.5 Turbo Pro,
+  10s ($0.70) → 1292×1604 clip → the editor's real Arabic + English overlays
+  composited over it → **1282×1604 (ratio 0.7992, i.e. 4:5) in under 13 seconds
+  at no cost**. Frames either side of each cue confirm the timing: the Arabic
+  headline runs the whole clip, the English subline is absent at 0.5s, present
+  from 2.6s, and gone again by 8.0s, with its 0.5s fades visible at the edges.
+  Audio and duration preserved. The centre-crop was genuinely exercised — Kling
+  returned 0.8054 rather than an exact 0.8, and the composite trimmed 10px of
+  width to make the clip agree with the layer the marketer composed against.
 - [ ] **F — Canva hand-off.** Connect API via a Supabase Edge Function. Only phase with external-approval risk.

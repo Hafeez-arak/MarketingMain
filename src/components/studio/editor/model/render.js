@@ -2,7 +2,7 @@ import Konva from 'konva'
 import { buildTextBitmap } from './textBitmap'
 import { applyAdjustments, hasAdjustments } from './adjust'
 import { ensureLayerImages, getCachedImage } from './imageCache'
-import { cropPx, dashFor, docSize, isPoly, shapePoints } from './document'
+import { cropPx, dashFor, docSize, isPoly, layerTiming, shapePoints, timingKey } from './document'
 
 // ─── Headless render + export ──────────────────────────────────────────────
 // Renders the full document (base image + adjustments + every visible layer)
@@ -69,17 +69,26 @@ export function buildLayerNode(layer, W, H) {
   return new Konva.Line({ ...common, ...paint, points, fill: undefined })
 }
 
-// `textOnly` renders JUST the text layers on a transparent background,
-// preserving the output the video step composites over a finished clip
-// without a re-render.
-export async function renderDocument(baseCanvas, doc, { textOnly = false } = {}) {
+// Two ways of leaving the photo out, and they are not the same cut:
+//  · `textOnly` — JUST the text layers on transparency. The image path's
+//    long-standing third export.
+//  · `overlayOnly` — EVERY visible layer except the photo and its adjustments.
+//    This is what gets composited onto a clip: scrims, logos and shapes are as
+//    compositable as text (they're static pixels over a moving plate), so
+//    text-only would throw away most of what a brand layer actually is.
+//  · `only` — restrict to a named subset of layer ids, which is how the video
+//    export splits a document into one image per timing group.
+export async function renderDocument(baseCanvas, doc, { textOnly = false, overlayOnly = false, only = null } = {}) {
   const { layers, adjust } = doc
+  const bare = textOnly || overlayOnly
+  const wanted = only ? new Set(only) : null
   // The page size comes from the base image seen through the crop, not from
   // doc.width/height — the crop is state now (see document.js), and deriving
   // it here is what guarantees the export frames exactly what the editor did.
   const { width: W, height: H } = docSize(baseCanvas.width, baseCanvas.height, doc.crop)
   // Await the bytes before drawing anything: a slow upload must not silently
-  // drop an image layer the user could plainly see in the editor.
+  // drop an image layer the user could plainly see in the editor. textOnly is
+  // the one mode that never draws an image layer; overlayOnly still does.
   if (!textOnly) await ensureLayerImages(layers)
 
   const container = document.createElement('div')
@@ -92,7 +101,7 @@ export async function renderDocument(baseCanvas, doc, { textOnly = false } = {})
     const layer = new Konva.Layer()
     stage.add(layer)
 
-    if (!textOnly) {
+    if (!bare) {
       const img = new Konva.Image({
         image: baseCanvas, x: 0, y: 0, width: W, height: H, listening: false,
         // The crop is a source rectangle on the untouched base image, so the
@@ -112,6 +121,7 @@ export async function renderDocument(baseCanvas, doc, { textOnly = false } = {})
 
     for (const l of layers) {
       if (l.visible === false) continue
+      if (wanted && !wanted.has(l.id)) continue
       if (l.type === 'text') {
         const bmp = buildTextBitmap(l, W, H)
         layer.add(new Konva.Image({
@@ -120,6 +130,8 @@ export async function renderDocument(baseCanvas, doc, { textOnly = false } = {})
           listening: false, rotation: l.rotation || 0,
         }))
       } else if (!textOnly) {
+        // overlayOnly keeps shapes and images — only the photo underneath is
+        // withheld — where textOnly drops everything that isn't a word.
         const node = buildLayerNode(l, W, H)
         if (node) layer.add(node)
       }
@@ -175,4 +187,41 @@ export async function exportDocument(baseCanvas, doc) {
   ])
   const { width, height } = docSize(baseCanvas.width, baseCanvas.height, doc.crop)
   return { compositeBlob, textLayerBlob, cleanBlob, width, height }
+}
+
+// ── Video export ───────────────────────────────────────────────────────────
+// What the Save button calls in video mode. No composite and no clean plate:
+// the footage is the plate and it lives in storage untouched, so all the editor
+// owes the compose step is the brand layer.
+//
+// ONE PNG PER TIMING GROUP, not one per layer. A document whose headline,
+// subline and logo all run the full clip — the overwhelmingly common case —
+// comes back as a single image and costs a single ffmpeg overlay; only a
+// document that actually uses timing pays for more. Groups are emitted in first
+// -appearance order, which preserves the document's own bottom-to-top layer
+// order through the filter chain, so a scrim stays behind the text it dims.
+export async function exportOverlay(baseCanvas, doc) {
+  const groups = []
+  const byKey = new Map()
+  for (const l of doc.layers) {
+    if (l.visible === false) continue
+    const key = timingKey(l)
+    let g = byKey.get(key)
+    if (!g) {
+      g = { ...layerTiming(l), ids: [] }
+      byKey.set(key, g)
+      groups.push(g)
+    }
+    g.ids.push(l.id)
+  }
+
+  const canvases = await Promise.all(
+    groups.map(g => renderDocument(baseCanvas, doc, { overlayOnly: true, only: g.ids })),
+  )
+  const blobs = await Promise.all(canvases.map(c => canvasToBlob(c)))
+  const { width, height } = docSize(baseCanvas.width, baseCanvas.height, doc.crop)
+  return {
+    overlays: groups.map((g, i) => ({ blob: blobs[i], tIn: g.tIn, tOut: g.tOut, fade: g.fade })),
+    width, height,
+  }
 }

@@ -201,6 +201,60 @@ export function layerLabel(l) {
 
 export { DEFAULT_ADJUST }
 
+// ── Layer timing (video mode only) ─────────────────────────────────────────
+// When the document is composited onto a clip rather than a photo, a layer can
+// come and go: `tIn` is the second it appears, `tOut` the second it leaves
+// (null = runs to the end of the clip), `fade` the seconds of alpha ramp at
+// each end.
+//
+// All three are OPTIONAL and absent means "the whole clip", which is why this
+// needed no DOC_VERSION bump and why every existing image document keeps
+// working untouched — on an image nothing ever reads them.
+//
+// The one rule worth stating: these are SECONDS, not fractions. Everything
+// geometric in this file is a fraction of the document precisely so a preview
+// and an export agree, but time has a real unit that doesn't change with
+// resolution, and storing 0.25-of-a-clip would silently move the text when the
+// same layer document is reused on a clip of a different length.
+export const DEFAULT_TIMING = Object.freeze({ tIn: 0, tOut: null, fade: 0 })
+
+export function layerTiming(layer) {
+  const tIn = Math.max(0, Number(layer?.tIn) || 0)
+  const raw = layer?.tOut
+  const tOut = raw === null || raw === undefined || raw === '' ? null : Math.max(0, Number(raw) || 0)
+  return { tIn, tOut: tOut !== null && tOut <= tIn ? null : tOut, fade: Math.max(0, Number(layer?.fade) || 0) }
+}
+
+export function isFullLength(layer) {
+  const t = layerTiming(layer)
+  return t.tIn === 0 && t.tOut === null
+}
+
+// Layers that share a timing are rendered into ONE overlay PNG, so a document
+// where nothing is timed — the common case by a wide margin — still produces a
+// single image and a single ffmpeg overlay. Rounded to 2dp because that is the
+// precision the filter graph is given, and two layers agreeing to the
+// millisecond but not the microsecond should not cost an extra composite pass.
+export function timingKey(layer) {
+  const { tIn, tOut, fade } = layerTiming(layer)
+  return `${tIn.toFixed(2)}|${tOut === null ? 'end' : tOut.toFixed(2)}|${fade.toFixed(2)}`
+}
+
+// Keeps a bar inside the clip and never inverted. `duration` is the clip's
+// length; a tOut at or past it is stored as null rather than the exact number,
+// so the layer stays "to the end" if the clip is later re-rendered longer.
+export function clampTiming({ tIn, tOut, fade }, duration) {
+  const d = Math.max(0.1, Number(duration) || 0)
+  const inS = Math.min(Math.max(0, Number(tIn) || 0), d - 0.1)
+  let outS = tOut === null || tOut === undefined || tOut === '' ? null : Number(tOut)
+  if (outS !== null) {
+    outS = Math.min(d, Math.max(inS + 0.1, outS))
+    if (outS >= d) outS = null
+  }
+  const span = (outS === null ? d : outS) - inS
+  return { tIn: inS, tOut: outS, fade: Math.min(Math.max(0, Number(fade) || 0), span / 2) }
+}
+
 // ── Copy style ─────────────────────────────────────────────────────────────
 // What Canva's paint roller carries: appearance, never geometry. Position,
 // size and rotation are deliberately absent — "make this look like that" is

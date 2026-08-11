@@ -74,8 +74,11 @@ export function BranchChat({
   onChange,                // (patch) => void
   onSend,
   onActivate,              // typing in a lane focuses it
-  onAnimate,
+  onAnimate,               // still → clip. Costs a render.
   onReRender,              // optional: re-run a past render against the current base
+  onEditClip,              // text/logos onto a finished clip. Free — ffmpeg, no model.
+  reRenderCost,            // (version) => dollars, shown on the button BEFORE the click
+  preparingClip = '',      // version id whose first frame is being read
   onOpenEditor,
   onFinalize,
   onDownload,              // downloads the file AND files it in the library if it isn't already
@@ -94,11 +97,17 @@ export function BranchChat({
   const { text = '', baseId = null, attach = null } = composer || {}
 
   const ready = branch.versions.filter(v => v.status === 'ready')
-  const newest = ready[ready.length - 1] || null
+  const newest = branch.versions[branch.versions.length - 1] || null
   const picked = branch.versions.find(v => v.id === baseId) || null
   // The frame shows whatever was clicked on the strip, else the newest
   // result — including a video, because a render that just finished is the
   // thing you want to watch, not something to go hunting for.
+  //
+  // Newest of ALL versions, not just the ready ones. Filtering to ready meant
+  // a lane whose only render failed had no stage at all, so it fell through to
+  // the bare "Working…" spinner below and sat there forever — no error, no
+  // reason, no Retry, because both the failed branch and the pending branch's
+  // "this is taking too long" escape hatch need a stage to render against.
   const stage = picked || newest
   // An instruction always acts on a STILL: you edit the image and re-animate,
   // because no model edits a finished clip. So selecting a video to watch
@@ -115,8 +124,10 @@ export function BranchChat({
   const canAct = !!base && base.status === 'ready'
   const stageIsVideo = stage?.media_type === 'video' && !!stage?.video_url
   // Shown faintly behind a pending render so the lane isn't a blank rectangle
-  // while the next version is on its way.
-  const prevReady = newest
+  // while the next version is on its way — the last thing that actually
+  // rendered, which is not the same as the stage now that stage can be a
+  // pending or failed row.
+  const prevReady = ready[ready.length - 1] || null
 
   // Ticks only while this lane has something in flight. A render that dies
   // between fal and the database leaves the row 'pending' with nobody left to
@@ -315,7 +326,7 @@ export function BranchChat({
           every stage. It's only allowed to grow — deliberately, on THIS
           version alone — when its own "Show more" is actually clicked. */}
       <div className={`px-3 py-2 border-t border-border bg-amber-50/50 flex flex-col justify-center ${
-        expandedId === stage?.id ? 'min-h-[54px]' : 'h-[54px] overflow-hidden'
+        expandedId === stage?.id ? 'min-h-[76px]' : 'h-[76px] overflow-hidden'
       }`}>
         {stage?.user_prompt && stage.kind !== 'generate' ? (
           <p className={`text-[12px] text-text leading-relaxed ${expandedId === stage.id ? '' : 'line-clamp-2'}`}>
@@ -423,9 +434,29 @@ export function BranchChat({
           </Button>
         </div>
 
-        <div className="flex flex-wrap gap-1.5">
-          <Button size="sm" variant="outline" disabled={!canAct} onClick={() => onOpenEditor(base)}>✏️ Editor</Button>
-          <Button size="sm" variant="outline" disabled={!canAct} onClick={() => onAnimate(base)}>🎬 Animate</Button>
+        {/* ── Actions ──
+            Two visual languages, on purpose. Anything that only rearranges our
+            own layer is a plain outline button marked "Free" and can be pressed
+            all day; anything that calls a model wears the amber accent and its
+            price. The interface teaches which clicks spend money, so nobody has
+            to police it in a meeting. */}
+        <div className="flex flex-wrap items-center gap-1.5">
+          {!stageIsVideo && (
+            <Button size="sm" variant="outline" disabled={!canAct} onClick={() => onOpenEditor(base)}>✏️ Editor</Button>
+          )}
+          {stageIsVideo && onEditClip && stage?.status === 'ready' && (
+            <Button size="sm" variant="outline" disabled={preparingClip === stage.id}
+              onClick={() => onEditClip(stage)}
+              title="Add or change text, logos and colours on this clip — instant, and it never re-renders the footage">
+              {preparingClip === stage.id
+                ? <><Spinner size="sm" /> Opening…</>
+                : `✏️ ${stage.overlay_state?.overlays?.length ? 'Edit text' : 'Add text'}`}
+            </Button>
+          )}
+          {onAnimate && !stageIsVideo && (
+            <Button size="sm" disabled={!canAct} onClick={() => onAnimate(base)}
+              title="Generate a clip from this still — this one costs a render">🎬 Animate</Button>
+          )}
           <Button size="sm" variant="secondary" disabled={!canAct || busy === 'finalize' || base?.is_final}
             onClick={() => onFinalize(base)}>
             {busy === 'finalize' ? <Spinner size="sm" /> : base?.is_final ? '✓ Saved' : '✅ Save'}
@@ -440,10 +471,15 @@ export function BranchChat({
             </Button>
           )}
           {stageIsVideo && onReRender && (
-            <Button size="sm" variant="outline" onClick={() => onReRender(stage)}
-              title="Same motion and settings, run against the lane's current still">
-              🔄 Re-render
+            <Button size="sm" onClick={() => onReRender(stage)}
+              title="Same motion and settings, run against the lane's current still — generates new footage">
+              🔄 Re-render{reRenderCost ? ` · −$${reRenderCost(stage).toFixed(2)}` : ''}
             </Button>
+          )}
+          {stageIsVideo && stage?.status === 'ready' && (
+            <span className="ml-auto text-[10px] text-text-tertiary">
+              Text, fonts and colours are free · only re-rendering costs
+            </span>
           )}
         </div>
       </div>

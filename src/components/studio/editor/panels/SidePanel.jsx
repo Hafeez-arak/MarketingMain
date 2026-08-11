@@ -21,11 +21,15 @@ const RAIL = [
   { id: 'position', icon: '⌗', label: 'Position' },
 ]
 
-export function SidePanel({ panel, onOpenPanel, children }) {
+// `hide` drops rail entries that cannot apply in the current mode — video mode
+// hides Adjust, because a photo adjustment has no way to reach the footage
+// underneath a composited PNG. Hiding beats disabling: a greyed-out slider
+// still reads as "this should work and doesn't".
+export function SidePanel({ panel, onOpenPanel, hide = [], children }) {
   return (
     <div className="flex min-h-0">
       <div className="flex w-[62px] shrink-0 flex-col gap-1 border-r border-border bg-surface-subtle p-1.5">
-        {RAIL.map(item => (
+        {RAIL.filter(item => !hide.includes(item.id)).map(item => (
           <button key={item.id} type="button" onClick={() => onOpenPanel(item.id)}
             className={`flex flex-col items-center gap-0.5 rounded-lg py-2 text-[10px] font-medium transition-colors ${
               panel === item.id ? 'bg-amber-100 text-amber-900' : 'text-text-tertiary hover:bg-white hover:text-amber-800'
