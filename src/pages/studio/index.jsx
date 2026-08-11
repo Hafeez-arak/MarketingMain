@@ -45,6 +45,17 @@ const INTENTS = [
 ]
 const emptyComposer = { text: '', baseId: null, attach: null, refs: [] }
 
+// Which model a fresh render starts on, and the settings that come with it.
+// Read from the catalog rather than repeated as literals, because pickModel
+// already resets duration/resolution to the chosen model's own defaults —
+// hardcoding them here too would mean switching away from the default model
+// and back gave you different settings than you started with.
+const DEFAULT_VIDEO_MODEL = 'seedance-2.5'
+const videoDefaults = () => {
+  const m = getVideoModel(DEFAULT_VIDEO_MODEL)
+  return { modelId: m.id, duration: m.defaultDuration, resolution: m.defaultResolution }
+}
+
 // Animation was parked on 2026-08-11 while the image side was finished, and
 // un-parked the same day once video compositing landed — the reason for the
 // pause (a clip you couldn't put editable text on) is exactly what Creative
@@ -239,9 +250,9 @@ export function CreativeStudio() {
   // share VideoSettings.jsx), plus a look picker — with no source still, the
   // look has to come from somewhere, and writing one in prose is exactly the
   // job the preset library exists to remove.
-  const [modelId, setModelId] = useState('seedance-2')
-  const [duration, setDuration] = useState('5')
-  const [resolution, setResolution] = useState('720p')
+  const [modelId, setModelId] = useState(videoDefaults().modelId)
+  const [duration, setDuration] = useState(videoDefaults().duration)
+  const [resolution, setResolution] = useState(videoDefaults().resolution)
   const [audio, setAudio] = useState(false)
   const model = getVideoModel(modelId)
   // Each model has its own allowed durations/resolutions (Kling and Hailuo
@@ -344,7 +355,8 @@ export function CreativeStudio() {
     setSession(null); setVersions([]); setOpeningId(null); setPrompt(''); setAttachments({})
     setPromptRaw(''); setPromptSource('raw')
     setMotionNote(''); setMotionPresetId(''); setMotionStrength('medium'); setLookId('none')
-    setModelId('seedance-2'); setDuration('5'); setResolution('720p'); setAudio(false)
+    const d = videoDefaults()
+    setModelId(d.modelId); setDuration(d.duration); setResolution(d.resolution); setAudio(false)
     setComposers({}); setFocusedBranch(null); setError('')
   }
 

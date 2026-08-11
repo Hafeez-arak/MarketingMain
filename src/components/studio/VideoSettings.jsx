@@ -94,7 +94,11 @@ export function LookPicker({ lookId, onPick }) {
 //    reference has nowhere to go.
 const MODEL_CAVEATS = {
   'veo-3.1-fast': 'Renders 16:9 or 9:16 only — other shapes are trimmed to fit when text is added.',
-  'seedance-2.5': 'Shape follows the source image; no aspect control on text-to-video.',
+  // Said here rather than only when a marketer tries it: past 10s the clip is
+  // over Kling O1 Edit's input limit, so "change the lighting" becomes a fresh
+  // take instead of an edit of this one. Text/fonts/colours are unaffected at
+  // any length — those are composited by us, never regenerated.
+  'seedance-2.5': 'Shape follows the source image; no aspect control on text-to-video. Past 10s, scene changes (lighting, objects, what happens) need a full re-render — text, fonts and colours stay free and instant at any length.',
   'kling-2.5-turbo-pro': 'No style references, no end frame, one quality tier.',
   'hailuo-2.3': 'No style references, no end frame, one quality tier.',
 }

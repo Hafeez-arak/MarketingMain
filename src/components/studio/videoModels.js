@@ -12,6 +12,13 @@
 //    second even at matching quality — a real regression, not an oversight,
 //    kept here so the picker states it instead of hiding it.
 //
+// Seedance 2.5 is nonetheless the DEFAULT (2026-08-11): the marketing team
+// asked for finished videos of 15–30s, and it is the only model here whose
+// endpoint reaches past 15s at all. That trade is deliberate — length is a
+// hard requirement, 1080p is a preference, and the text layer that carries
+// the Arabic is composited by us afterwards at whatever resolution the clip
+// came back at.
+//
 // Cost verified against fal.ai's published rates, 2026-08-10:
 //  · Seedance 2.0: $0.3024/s @720p, $0.682/s @1080p
 //  · Seedance 2.5: $0.2205/s @480p, $0.4730/s @720p (no 1080p tier)
@@ -23,7 +30,7 @@ export const VIDEO_MODELS = [
   {
     id: 'seedance-2',
     label: 'Seedance 2.0',
-    hint: 'Default — reliable, up to 1080p',
+    hint: 'Sharpest — the only 1080p tier, but stops at 15s',
     durations: ['4', '5', '6', '8', '10', '12', '15'],
     defaultDuration: '5',
     resolutions: [
@@ -37,9 +44,13 @@ export const VIDEO_MODELS = [
   {
     id: 'seedance-2.5',
     label: 'Seedance 2.5',
-    hint: 'Newer, clips up to 30s — no 1080p yet, pricier per second',
+    hint: 'Default — the only model that reaches 15–30s; no 1080p yet',
     durations: ['4', '5', '6', '8', '10', '12', '15', '20', '25', '30'],
-    defaultDuration: '5',
+    // 20s: the middle of the 15–30s the team asked for. Draft tier by
+    // default like every other model here — at 20s the Final tier is $9.46 a
+    // click, which is exactly the "re-rendering until it's right quietly runs
+    // at the expensive setting" habit the price-per-button exists to prevent.
+    defaultDuration: '20',
     resolutions: [
       { value: '480p', label: 'Draft', hint: 'For checking the movement' },
       { value: '720p', label: 'Final', hint: 'For the post itself' },

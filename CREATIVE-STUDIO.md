@@ -57,6 +57,20 @@ Numbered as the marketing team wrote them.
 | 9 | Move to video generation (Higgsfield or Seedance) | E | ☑ |
 | 10 | Video supports the same edits: colour / font / text | E | ☑ — free and unlimited, see below |
 | 11 | Final output: ready-to-post image and/or video, accurate Arabic, no captions/analytics | C+E | ☑ |
+| 12 | Video creation **from images *and* from a prompt alone** | E | ☑ — both paths already exist |
+| 13 | Video length **15–30s**; sound not needed, added separately later | E | ☑ — 20s default, audio off |
+
+Rows 12–13 are the team's 2026-08-11 clarifications, numbered on from their
+original list.
+
+- **12 needed no work.** Both paths were already built: animating a chosen
+  still (`handleAnimate`) and generating straight from a description with no
+  image at all (the `intent === 'video'` path, which sends an empty
+  `image_url` — n8n then dispatches to the text-to-video endpoint rather than
+  image-to-video). Attaching a start frame switches one to the other.
+- **13 was a defaults change, not a capability gap** — Seedance 2.5 already
+  reached 30s; nothing shipped it as the thing you land on. See the clip-length
+  section below.
 
 Also confirmed with the team: a session may be **image only**, **video only**,
 or **image then video** — none of the three is a special case.
@@ -171,26 +185,38 @@ facade, an engraved plate. Overlay text for headlines, captions and anything
 that might change. That's a stronger product than either alone, and it is what
 should be put to the marketing team.
 
-### ⚠️ Clip length — no model makes a 30-second video
+### ✅ Clip length — 15–30s in one call (resolved 2026-08-11)
 
-Verified from the live schemas, 2026-08-09:
+**The warning that used to sit here is obsolete.** It was written 2026-08-09
+against Seedance 1.0 Pro (12s max) and concluded a 30s reel had to be stitched
+from 2–3 clips. Seedance **2.5** reaches **30s in a single call**, so the
+stitch step, the visible joins and the whole chaining problem simply don't
+arise. Nothing was built to solve it because nothing needed to be.
 
 | Model | Max single clip |
 |---|---|
-| Veo 3 | 8s |
+| Veo 3.1 Fast | 8s |
 | Kling 2.5 Turbo | 10s |
-| **Seedance 1.0 Pro** (ours) | **12s** |
-| Sora 2 | 20s (720p only) |
+| Seedance 2.0 | 15s |
+| **Seedance 2.5** (default) | **30s** (720p ceiling) |
 
-A 30-second reel therefore has to be **stitched from 2–3 generated clips**, not
-generated in one call. That is how reels are cut anyway, so it isn't fatal —
-but it is real extra work (a stitch step via `ffmpeg-api/compose`), and the
-joins will be visible as cuts unless clips are chained. Seedance's i2v takes
-an `end_image_url` as well as a start frame, so clip 2 can begin on the frame
-clip 1 ended on, which is the tool for making a chain look deliberate.
+The team asked for **15–30s** finished videos, so a fresh render now starts on
+**Seedance 2.5 at 20s**, the middle of that band (`videoModels.js`,
+`DEFAULT_VIDEO_MODEL` in `src/pages/studio/index.jsx`). The defaults are read
+from the model catalog rather than repeated as literals, because `pickModel`
+already resets length/quality to the chosen model's own defaults — hardcoding
+them in the page too would mean switching model and back handed you different
+settings than you started with.
 
-**Tell the marketing team this before they plan around 30s reels.** Not in
-scope for the first build — the Studio ships single clips first.
+**The trade, stated plainly:** 2.5 has no 1080p tier, so 15–30s costs us the
+sharpest quality setting. That is the right way round — length is a hard
+requirement from the team, 1080p is a preference, and the Arabic text layer is
+composited by us afterwards at whatever resolution the clip came back at, so
+the text stays crisp regardless. For a short, premium 1080p piece, Seedance
+2.0 is still in the picker and still goes to 15s.
+
+`end_image_url` remains wired (start/end frame boxes on the video tab) — now
+for deliberate framing rather than as a workaround for a length ceiling.
 
 ### …which also solves requirement 10 (editable text on video) — built 2026-08-11
 
@@ -425,22 +451,40 @@ across a whole campaign) and **talking avatars**. Neither has been asked for.
 | Resolution | up to 1080p | 480p / 720p / 1080p |
 | 5s clip | $0.62 (1080p) | **$1.51** (720p) · **$3.41** (1080p) |
 
-**Draft at 720p, final at 1080p** — exposed in the animate panel as
-Draft/Final with the price on each button. The reason for 1080p on finals
-isn't the footage, it's **our text overlay**: the layer is composited at video
-resolution, and fine Arabic strokes rendered at 720p and then put through
-Instagram's re-encode go visibly mushy. Motion checks don't need the pixels;
-the finished post does.
+**Draft tier first, final tier when it's right** — exposed in the animate
+panel as Draft/Final with the price on each button. Which pixels those tiers
+mean depends on the model (Seedance 2.0: 720p/1080p; Seedance 2.5: 480p/720p),
+which is why the catalog carries them per model instead of the UI assuming.
+The reason to spend on the final tier isn't the footage, it's **our text
+overlay**: the layer is composited at video resolution, and fine Arabic
+strokes rendered small and then put through Instagram's re-encode go visibly
+mushy. Motion checks don't need the pixels; the finished post does.
 
-**Audio defaults OFF.** It's free, but a model inventing ambient sound under a
-brand asset is a liability, not a bonus — it should be asked for. Toggle is in
+**Every render defaults to the Draft tier**, including the new 20s default. At
+20s the Final tier is $9.46 a click, and "re-render until it's right" at that
+price is exactly the habit the price-per-button exists to prevent.
+
+**Audio defaults OFF** — and the team has now confirmed this is what they want
+("videos do not need sound, I can add that after separately"). Free, but a
+model inventing ambient sound under a brand asset is a liability. Toggle is in
 the panel.
 
-**Budget at the team's stated volume** (15–30 posts/month, 4–6 of them video,
-editing included): roughly 18 renders — ~12 drafts at 720p + ~6 finals at
-1080p ≈ **$38/month of video**, plus ~$18/month of images. Call it **$55–60 a
-month on fal.** Rendering everything at 1080p instead would be ~$61 on video
-alone, for no visible gain on the drafts nobody posts.
+**⚠️ Budget — the 15–30s requirement roughly triples the video bill.** Worth
+putting to whoever owns the fal account before volume ramps, because the old
+figure below is quoted in places.
+
+| | Old (5s, Seedance 2.0) | Now (20s, Seedance 2.5) |
+|---|---|---|
+| One draft | $1.51 | **$4.41** |
+| One final | $3.41 | **$9.46** |
+| ~18 renders/month | ~$38 | **~$110** |
+
+At the team's stated volume (15–30 posts/month, 4–6 of them video, editing
+included) that's roughly **$110/month of video** plus ~$18/month of images —
+call it **$125–130 a month on fal**, against $55–60 before. At a 30s default
+it would be ~$164 of video instead. Nothing here is wasted spend; it is simply
+what 20-second clips cost, and the per-click price is on screen before the
+click.
 
 ---
 
@@ -450,14 +494,20 @@ alone, for no visible gain on the drafts nobody posts.
    "change the font" means *your* fonts. (Until then the editor ships with
    good Arabic-capable defaults: Cairo, Tajawal, IBM Plex Sans Arabic.)
 2. ~~**Video specs** — clip length, aspect ratios, is silent video fine?~~
-   **Answered internally 2026-08-10:** 4–15s on Seedance 2.0; drafts 720p,
-   finals 1080p; audio is available free but off by default until asked for.
-   Still worth confirming with the team which aspect ratios they actually
-   post in.
-3. **Requirement 10** — confirm the edit-image-then-re-animate loop is
-   acceptable, since in-video text editing isn't possible.
-4. **Volume** — roughly how many images/videos a month, for cost planning
-   (≈$0.10–0.30 per two-option round, ≈$0.30–1.00 per video render).
+   **Answered by the team 2026-08-11:** **15–30s**, and **no sound needed**
+   ("I can add that after separately"). Both are now the shipped defaults —
+   Seedance 2.5 at 20s, audio off. Still worth confirming which **aspect
+   ratios** they actually post in; that one is still open.
+3. ~~**Requirement 10** — confirm the edit-image-then-re-animate loop is
+   acceptable, since in-video text editing isn't possible.~~ **Moot.** Text on
+   video is free, instant and re-editable (Creative Compose), and scene changes
+   edit the footage directly (Kling O1 Edit). Nothing to renegotiate. The one
+   thing to *tell* them: past 10s a scene change is a fresh take rather than an
+   edit of that clip, because fal caps the edit endpoint's input at 10s — so a
+   20s clip's lighting change comes back as a different take. Text, fonts and
+   colours are unaffected at any length.
+4. ~~**Volume**~~ **Answered:** 15–30 posts/month, 4–6 of them video. Costed
+   above — note the 15–30s ask moves fal from ~$55–60 to ~$125–130 a month.
 5. **Canva** — does the team have a Canva account (Pro/Teams)? Needed for the
    hand-off in Phase F.
 
