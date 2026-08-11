@@ -560,7 +560,7 @@ function MonthlySchedule({ state, dispatch, instructions }) {
           <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
             style={{ background:'rgba(28,35,33,0.45)' }}
             onClick={e => { if (e.target === e.currentTarget) setViewDay(null) }}>
-            <div className="bg-white rounded-3xl  w-full max-w-lg flex flex-col overflow-hidden animate-fade-scale" style={{ maxHeight:'85vh' }}>
+            <div className="bg-white border border-border shadow-dropdown w-full max-w-lg flex flex-col overflow-hidden animate-fade-scale" style={{ maxHeight:'85vh' }}>
 
               {/* Header */}
               <div className="px-6 py-5 flex-shrink-0" style={{ background:'#f3f5f4', borderBottom:'1px solid #dde3e2' }}>
@@ -794,7 +794,7 @@ function DayEditor({ dateKey, entry, campaigns, uploadToStorage, onSave, onClear
     <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
       style={{ background: 'rgba(0,0,0,0.6)' }}
       onClick={e => { if (e.target === e.currentTarget) onClose() }}>
-      <div className="bg-white rounded-3xl  w-full flex flex-col overflow-hidden" style={{ maxWidth:'860px', height:'90vh' }}>
+      <div className="bg-white border border-border shadow-dropdown w-full flex flex-col overflow-hidden" style={{ maxWidth:'860px', height:'90vh' }}>
 
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-border flex-shrink-0">
@@ -1504,7 +1504,7 @@ ${post.body || ''}` : (post.body || post.copy || '')
     <div className="fixed inset-0 z-[9999] flex items-center justify-center"
       style={{ background: 'rgba(0,0,0,0.82)', padding: '24px' }}
       onClick={e => { if (e.target === e.currentTarget) onClose() }}>
-      <div className="bg-white rounded-3xl  overflow-hidden flex flex-col"
+      <div className="bg-white border border-border shadow-dropdown overflow-hidden flex flex-col"
         style={{ width: '100%', maxWidth: hasImage ? '1100px' : '700px', maxHeight: '94vh' }}>
 
         {/* Top bar */}

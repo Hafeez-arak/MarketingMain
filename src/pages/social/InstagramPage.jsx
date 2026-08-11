@@ -709,7 +709,7 @@ function MonthlySchedule({ state, dispatch, instructions }) {
           <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
             style={{ background:'rgba(28,35,33,0.45)' }}
             onClick={e => { if (e.target === e.currentTarget) setViewDay(null) }}>
-            <div className="bg-white rounded-3xl  w-full max-w-lg flex flex-col overflow-hidden animate-fade-scale" style={{ maxHeight:'85vh' }}>
+            <div className="bg-white border border-border shadow-dropdown w-full max-w-lg flex flex-col overflow-hidden animate-fade-scale" style={{ maxHeight:'85vh' }}>
 
               {/* Header */}
               <div className="px-6 py-5 flex-shrink-0" style={{ background:'#f3f5f4', borderBottom:'1px solid rgba(232,217,190,0.5)' }}>
@@ -953,7 +953,7 @@ function DayEditor({ dateKey, entry, campaigns, uploadToStorage, onSave, onDelet
       style={{ background: 'rgba(0,0,0,0.65)', padding: '24px' }}
       onClick={e => { if (e.target === e.currentTarget) onClose() }}>
 
-      <div className="bg-white rounded-3xl  flex flex-col overflow-hidden"
+      <div className="bg-white border border-border shadow-dropdown flex flex-col overflow-hidden"
         style={{ width: '100%', maxWidth: '860px', height: '90vh' }}>
 
         {/* ── Header ────────────────────────────────────────────────────── */}
@@ -1520,7 +1520,7 @@ function PostDetail({ post, state, webhookUrl, regenWebhookUrl, supabaseUrl, ano
       style={{ background: 'rgba(0,0,0,0.82)', padding: '24px' }}
       onClick={e => { if (e.target === e.currentTarget) onClose() }}>
 
-      <div className="bg-white rounded-3xl  overflow-hidden flex flex-col"
+      <div className="bg-white border border-border shadow-dropdown overflow-hidden flex flex-col"
         style={{ width: '100%', maxWidth: '1200px', maxHeight: '94vh' }}>
 
         {/* ── Top bar ─────────────────────────────────────────────────── */}
