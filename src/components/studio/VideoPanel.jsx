@@ -119,7 +119,16 @@ export function VideoPanel({
 
       <p className="text-[11px] text-text-tertiary leading-snug">
         Takes a minute or two. Longer reels are cut together from several clips — {model.durations[model.durations.length - 1]} seconds is
-        the most one render can produce. Need a change? Edit the still and re-render.
+        the most one render can produce.
+      </p>
+      {/* Worth saying here, before the money is spent, rather than leaving them
+          to discover it: the clip is generated CLEAN and the words go on
+          afterwards as real text. Changing that wording later is free and
+          instant, so nobody needs to get the copy right before rendering. */}
+      <p className="text-[11px] leading-snug text-emerald-800 bg-emerald-50 border border-emerald-200 px-2.5 py-1.5">
+        The clip comes back without any words on it. You add text, logos and colours afterwards
+        with <span className="font-semibold">Add text</span> — free, instant, and re-editable as often as you like,
+        with Arabic rendered properly. Only changing what happens <em>inside</em> the scene costs another render.
       </p>
 
       <div className="flex items-center justify-between gap-2 pt-1">

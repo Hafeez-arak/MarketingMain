@@ -74,8 +74,11 @@ export function BranchChat({
   onChange,                // (patch) => void
   onSend,
   onActivate,              // typing in a lane focuses it
-  onAnimate,               // optional: parked while animation is off (see ANIMATE_ENABLED)
+  onAnimate,               // still → clip. Costs a render.
   onReRender,              // optional: re-run a past render against the current base
+  onEditClip,              // text/logos onto a finished clip. Free — ffmpeg, no model.
+  reRenderCost,            // (version) => dollars, shown on the button BEFORE the click
+  preparingClip = '',      // version id whose first frame is being read
   onOpenEditor,
   onFinalize,
   onDownload,              // downloads the file AND files it in the library if it isn't already
@@ -323,7 +326,7 @@ export function BranchChat({
           every stage. It's only allowed to grow — deliberately, on THIS
           version alone — when its own "Show more" is actually clicked. */}
       <div className={`px-3 py-2 border-t border-border bg-amber-50/50 flex flex-col justify-center ${
-        expandedId === stage?.id ? 'min-h-[54px]' : 'h-[54px] overflow-hidden'
+        expandedId === stage?.id ? 'min-h-[76px]' : 'h-[76px] overflow-hidden'
       }`}>
         {stage?.user_prompt && stage.kind !== 'generate' ? (
           <p className={`text-[12px] text-text leading-relaxed ${expandedId === stage.id ? '' : 'line-clamp-2'}`}>
@@ -431,10 +434,28 @@ export function BranchChat({
           </Button>
         </div>
 
-        <div className="flex flex-wrap gap-1.5">
-          <Button square size="sm" variant="outline" disabled={!canAct} onClick={() => onOpenEditor(base)}>✏️ Editor</Button>
-          {onAnimate && (
-            <Button square size="sm" variant="outline" disabled={!canAct} onClick={() => onAnimate(base)}>🎬 Animate</Button>
+        {/* ── Actions ──
+            Two visual languages, on purpose. Anything that only rearranges our
+            own layer is a plain outline button marked "Free" and can be pressed
+            all day; anything that calls a model wears the amber accent and its
+            price. The interface teaches which clicks spend money, so nobody has
+            to police it in a meeting. */}
+        <div className="flex flex-wrap items-center gap-1.5">
+          {!stageIsVideo && (
+            <Button square size="sm" variant="outline" disabled={!canAct} onClick={() => onOpenEditor(base)}>✏️ Editor</Button>
+          )}
+          {stageIsVideo && onEditClip && stage?.status === 'ready' && (
+            <Button square size="sm" variant="outline" disabled={preparingClip === stage.id}
+              onClick={() => onEditClip(stage)}
+              title="Add or change text, logos and colours on this clip — instant, and it never re-renders the footage">
+              {preparingClip === stage.id
+                ? <><Spinner size="sm" /> Opening…</>
+                : `✏️ ${stage.overlay_state?.overlays?.length ? 'Edit text' : 'Add text'}`}
+            </Button>
+          )}
+          {onAnimate && !stageIsVideo && (
+            <Button square size="sm" disabled={!canAct} onClick={() => onAnimate(base)}
+              title="Generate a clip from this still — this one costs a render">🎬 Animate</Button>
           )}
           <Button square size="sm" variant="secondary" disabled={!canAct || busy === 'finalize' || base?.is_final}
             onClick={() => onFinalize(base)}>
@@ -450,10 +471,15 @@ export function BranchChat({
             </Button>
           )}
           {stageIsVideo && onReRender && (
-            <Button square size="sm" variant="outline" onClick={() => onReRender(stage)}
-              title="Same motion and settings, run against the lane's current still">
-              🔄 Re-render
+            <Button square size="sm" onClick={() => onReRender(stage)}
+              title="Same motion and settings, run against the lane's current still — generates new footage">
+              🔄 Re-render{reRenderCost ? ` · −$${reRenderCost(stage).toFixed(2)}` : ''}
             </Button>
+          )}
+          {stageIsVideo && stage?.status === 'ready' && (
+            <span className="ml-auto text-[10px] text-text-tertiary">
+              Text, fonts and colours are free · only re-rendering costs
+            </span>
           )}
         </div>
       </div>

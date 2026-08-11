@@ -43,7 +43,12 @@ export function TopToolbar({
       <ToolbarButton title="Redo (⇧⌘Z)" onClick={onRedo} disabled={!canRedo}>↷</ToolbarButton>
       <ToolbarDivider />
 
-      {!selection.length && (
+      {/* Every one of these reframes or regrades the PHOTO. In video mode the
+          photo is only frame one standing in for footage the editor never
+          touches, so the whole group is withheld — the caller signals that by
+          passing no handlers. Rendering them against undefined would give a row
+          of buttons that throw on click. */}
+      {!selection.length && onStartCrop && (
         <PhotoControls tool={tool} panel={panel} onOpenPanel={onOpenPanel}
           onRotate={onRotate} onFlip={onFlip} onStartCrop={onStartCrop} />
       )}

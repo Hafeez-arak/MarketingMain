@@ -1218,8 +1218,13 @@ try {
   const requestId = submit.request_id;
   if (!requestId) throw new Error('fal did not return a request_id: ' + JSON.stringify(submit).slice(0, 250));
 
-  const statusUrl = `https://queue.fal.run/${MODEL}/requests/${requestId}/status`;
-  const resultUrl = `https://queue.fal.run/${MODEL}/requests/${requestId}`;
+  // Poll where fal SAYS to poll. The queue is keyed on the first TWO path
+  // segments, so building these from the full MODEL path returns 405 — after
+  // the submit, i.e. after the render has already been started and charged.
+  // Same bug as Creative Video carried, found and fixed 2026-08-11.
+  const APP_ID = MODEL.split('/').slice(0, 2).join('/');
+  const statusUrl = submit.status_url || `https://queue.fal.run/${APP_ID}/requests/${requestId}/status`;
+  const resultUrl = submit.response_url || `https://queue.fal.run/${APP_ID}/requests/${requestId}`;
 
   // Poll rather than block on a long synchronous wait — video generation
   // routinely runs past what a single HTTP call should hold open. Up to
@@ -6789,18 +6794,35 @@ const MODEL_CONFIGS = {
   'seedance-2': {
     i2v: 'bytedance/seedance-2.0/image-to-video',
     t2v: 'bytedance/seedance-2.0/text-to-video',
-    build(imageUrl) {
+    // Reference-to-video is a DIFFERENT endpoint, not a parameter — which is
+    // why the studio's style-reference slot sat unwired until 2026-08-11 with a
+    // note saying no model input existed. It does: up to 9 images (plus videos
+    // and audio, 12 files total) in an `image_urls` array, addressed from the
+    // prompt as @Image1. Verified against fal's live schema.
+    r2v: 'bytedance/seedance-2.0/reference-to-video',
+    build(imageUrl, endImageUrl, refs) {
       const input = { prompt, duration, resolution, generate_audio: generateAudio, aspect_ratio: aspect };
+      if (refs && refs.length) { input.image_urls = refs; return input; }
       if (imageUrl) input.image_url = imageUrl;
+      // The last frame of the clip. What makes shot 2 of a stitched reel open
+      // exactly where shot 1 closed, so a cut reads as deliberate.
+      if (endImageUrl) input.end_image_url = endImageUrl;
       return input;
     },
   },
   'seedance-2.5': {
     i2v: 'bytedance/seedance-2.5/image-to-video',
     t2v: 'bytedance/seedance-2.5/text-to-video',
-    build(imageUrl) {
-      const input = { prompt, duration, resolution, generate_audio: generateAudio, aspect_ratio: aspect };
+    r2v: 'bytedance/seedance-2.5/reference-to-video',
+    build(imageUrl, endImageUrl, refs) {
+      // 2.5's aspect_ratio enum is 'auto' and nothing else — sending a real
+      // ratio is rejected. Harmless on image-to-video, where auto follows the
+      // source frame; on text-to-video it means this model genuinely offers no
+      // shape control, which the picker says out loud.
+      const input = { prompt, duration, resolution, generate_audio: generateAudio };
+      if (refs && refs.length) { input.image_urls = refs; return input; }
       if (imageUrl) input.image_url = imageUrl;
+      if (endImageUrl) input.end_image_url = endImageUrl;
       return input;
     },
   },
@@ -6821,6 +6843,11 @@ const MODEL_CONFIGS = {
     build(imageUrl) {
       const d = /s$/.test(duration) ? duration : duration + 's';
       const input = { prompt, duration: d, resolution: resolution === '1080p' ? '1080p' : '720p', generate_audio: generateAudio };
+      // Veo takes only auto/16:9/9:16, so it gets an ORIENTATION rather than
+      // the session's ratio (see mapAspect). Everything else is reconciled
+      // afterwards by Creative Compose, which centre-crops the finished clip to
+      // the shape the marketer actually composed against.
+      if (aspect) input.aspect_ratio = aspect;
       if (imageUrl) input.image_url = imageUrl;
       return input;
     },
@@ -6845,44 +6872,99 @@ function looksLikeVideo(buf){
   return buf.toString('ascii', 4, 8) === 'ftyp';
 }
 
-// Seedance 2.0's aspect_ratio enum is auto/21:9/16:9/4:3/3:4/1:1/9:16 — no
-// 4:5 bucket, same gap gpt-image-2 has on the image side. 3:4 is the nearest
-// (slightly taller); everything else in the Studio's own RATIOS list maps
-// straight through.
-const ASPECT_MAP = { '4:5': '3:4' };
-function mapAspect(a) { return ASPECT_MAP[a] || a || 'auto'; }
+// Aspect handling is PER MODEL, because the constraint is. It used to be one
+// global map, which produced a real and silent failure: 4:5 was rewritten to
+// 3:4 for everyone, and Veo rejects 3:4 outright — so every 4:5 or 1:1 Veo
+// render failed. Fixed 2026-08-11 along with 2.5's auto-only enum.
+//
+//  · Seedance 2.0 takes auto/21:9/16:9/4:3/3:4/1:1/9:16 — no 4:5 bucket, the
+//    same gap gpt-image-2 has on the image side, so 3:4 is the nearest.
+//  · Seedance 2.5 takes 'auto' only — handled in its build(), not here.
+//  · Veo 3.1 takes auto/16:9/9:16 only, so it gets an ORIENTATION: portrait
+//    ratios become 9:16, everything else 16:9.
+//  · Kling and Hailuo take no aspect_ratio at all.
+//
+// An approximate ratio is acceptable now in a way it wasn't before, because
+// Creative Compose centre-crops the finished clip to the overlay's own shape.
+const SEEDANCE_MAP = { '4:5': '3:4' };
+const PORTRAIT = { '4:5': 1, '9:16': 1, '3:4': 1, '2:3': 1 };
+function mapAspect(model, a) {
+  const want = a || '';
+  if (model === 'veo-3.1-fast') return PORTRAIT[want] ? '9:16' : '16:9';
+  if (model === 'seedance-2.5') return '';           // enum is 'auto' only
+  if (model === 'kling-2.5-turbo-pro' || model === 'hailuo-2.3') return '';
+  return SEEDANCE_MAP[want] || want || 'auto';
+}
 
 const body = ($input.first().json.body) || {};
 const sessionId = body.session_id || '';
 const versionId = body.version_id || '';
 const imageUrl  = body.image_url || '';       // absent => text-to-video
+const endImageUrl = body.end_image_url || ''; // optional last frame (Seedance only)
+// Style references. Seedance's reference-to-video takes these as a whole
+// separate endpoint; every other model here has nowhere to put them, so the
+// picker says so rather than accepting them and quietly ignoring them.
+const referenceUrls = Array.isArray(body.reference_image_urls)
+  ? body.reference_image_urls.filter(Boolean).slice(0, 9)
+  : [];
 const prompt    = String(body.prompt || '').trim();
 const duration  = String(body.duration || '5');
-const aspect    = mapAspect(body.aspect_ratio);
+const modelId   = MODEL_CONFIGS[body.model] ? body.model : 'seedance-2';
+const aspect    = mapAspect(modelId, body.aspect_ratio);
 const resolution = body.resolution || '720p';
 // Off unless asked: a model inventing ambient sound under a brand asset is a
 // liability, not a bonus (CREATIVE-STUDIO.md, 2026-08-10 provider review).
 const generateAudio = body.generate_audio === true;
 // Falls back to Seedance 2.0 for any request that predates the model picker
 // (or names one this workflow doesn't recognise) rather than failing outright.
-const cfg = MODEL_CONFIGS[body.model] || MODEL_CONFIGS['seedance-2'];
+const cfg = MODEL_CONFIGS[modelId];
 
 async function run(){
   if (!prompt) throw new Error('No direction given for the video.');
 
-  // Both modes live in one workflow because a session may be image-then-video
-  // OR video-only, and the team works both ways — an image is an optional
-  // starting point, not a prerequisite.
-  const model = imageUrl ? cfg.i2v : cfg.t2v;
-  const input = cfg.build(imageUrl);
+  // Three modes, one workflow, because a session may be image-then-video,
+  // video-only, or built from references — the team works all three ways and an
+  // image is an optional starting point, not a prerequisite.
+  const useRefs = referenceUrls.length > 0 && !!cfg.r2v;
+  const model = useRefs ? cfg.r2v : (imageUrl ? cfg.i2v : cfg.t2v);
+
+  // The references are only useful if the prompt says what to do with each one.
+  // Seedance addresses them positionally as @Image1/@Image2 and, without a
+  // sentence naming them, treats them as loose inspiration and mostly ignores
+  // them — the same failure the image Edit workflow hit with its image_urls
+  // array, and the same fix.
+  const refPrompt = useRefs
+    ? referenceUrls.map((_, i) => '@Image' + (i + 1)).join(' and ')
+      + ' show the look to follow — match their styling, palette and mood. '
+      + 'Do not copy them shot for shot.\n\n' + prompt
+    : prompt;
+
+  const input = cfg.build(imageUrl, endImageUrl, useRefs ? referenceUrls : null);
+  input.prompt = refPrompt;
 
   const submit = await req({ method:'POST', url:'https://queue.fal.run/' + model,
     headers:{ Authorization:'Key ' + FAL, 'Content-Type':'application/json' }, body: input, json:true });
   const requestId = submit.request_id;
   if (!requestId) throw new Error('fal did not return a request_id: ' + JSON.stringify(submit).slice(0, 250));
 
-  const statusUrl = 'https://queue.fal.run/' + model + '/requests/' + requestId + '/status';
-  const resultUrl = 'https://queue.fal.run/' + model + '/requests/' + requestId;
+  // ── Poll where fal SAYS to poll, not where we guess ──────────────────────
+  // Submitting takes the full model path, but the queue is keyed on the first
+  // TWO segments only: submit to
+  //   queue.fal.run/fal-ai/kling-video/v2.5-turbo/pro/image-to-video
+  // and fal replies with
+  //   queue.fal.run/fal-ai/kling-video/requests/<id>
+  // Building the status URL from the full path returns 405, and because that
+  // happens AFTER the submit, the generation had already started and been
+  // charged. Every video render in this app failed this way — which is exactly
+  // why creative_versions held zero ready videos while the bill still ran
+  // (found 2026-08-11, the first time a render was followed all the way
+  // through).
+  //
+  // The fallback keeps the first two segments rather than the whole path, so
+  // it is right even if fal ever stops returning the URLs.
+  const appId = model.split('/').slice(0, 2).join('/');
+  const statusUrl = submit.status_url || ('https://queue.fal.run/' + appId + '/requests/' + requestId + '/status');
+  const resultUrl = submit.response_url || ('https://queue.fal.run/' + appId + '/requests/' + requestId);
 
   // Poll rather than hold a single HTTP call open — video generation
   // routinely runs longer than any request should stay alive. ~7.5 minutes,
@@ -6902,7 +6984,11 @@ async function run(){
 
   const result = await req({ method:'GET', url: resultUrl, headers:{ Authorization:'Key ' + FAL }, json:true });
   const videoUrl = result.video && result.video.url;
-  if (!videoUrl) throw new Error('fal returned no video URL: ' + JSON.stringify(result).slice(0, 250));
+  // The request id goes in EVERY failure past this point. A render that fails
+  // after submitting has already been paid for, and without the id there is no
+  // way to fetch the clip fal did produce — which is how one paid Kling render
+  // was lost on 2026-08-11.
+  if (!videoUrl) throw new Error('fal returned no video URL (request ' + requestId + '): ' + JSON.stringify(result).slice(0, 250));
 
   const buf = await req({ method:'GET', url: videoUrl, encoding:'arraybuffer' });
   if (!looksLikeVideo(buf)) {
@@ -6921,6 +7007,160 @@ catch (err) {
   return { json: { _ok: false, version_id: versionId,
                    error: (err && err.message) ? err.message : String(err) } };
 }
+"""
+
+
+# ─── Creative Compose ───────────────────────────────────────────────────────
+# The ONLY generation-adjacent workflow that costs nothing to run. It stamps
+# our own text/logo layer onto a finished clip with local ffmpeg, so changing a
+# headline, a font or a colour re-composites the SAME footage in about a second
+# instead of buying a new take that comes back visibly different.
+#
+# This node builds a shell script; "Composite" runs it. Splitting it that way is
+# deliberate — the per-overlay filter chain is real logic (timing, fades, layer
+# order) that belongs in JS, while the crop has to be computed from the clip's
+# ACTUAL dimensions, which nothing knows until ffprobe has run. So the JS emits
+# a script with ${TW}/${TH} left as shell variables and the script fills them in.
+CREATIVE_COMPOSE_JS = r"""
+const body = ($input.first().json.body) || {};
+const sessionId = String(body.session_id || '');
+const versionId = String(body.version_id || '');
+const overlays  = Array.isArray(body.overlays) ? body.overlays : [];
+const BUCKET = 'creative-studio';
+
+// Everything below is interpolated into a shell command, so every URL is
+// checked twice: it must live in OUR OWN storage bucket, and it must contain
+// nothing that could end the argument and start a new command. `creative_versions`
+// is client-writable by design (the browser sets image_url/status itself), so a
+// workspace member could otherwise put a shell payload in a row and have n8n —
+// which holds the service_role key — run it. The allowlist has no quote,
+// backtick, dollar, semicolon, backslash or space in it.
+const SUP = String($env.SUPABASE_URL || '').replace(/\/+$/, '');
+const PREFIX = SUP + '/storage/v1/object/public/';
+function safeUrl(u, what) {
+  const s = String(u || '');
+  if (!s.startsWith(PREFIX)) throw new Error(what + ' is not a file in our own storage.');
+  if (!/^[A-Za-z0-9:/._~%()-]+$/.test(s)) throw new Error(what + ' contains characters we will not put in a shell command.');
+  return s;
+}
+
+const videoUrl = safeUrl(body.video_url, 'The clip');
+if (!versionId) throw new Error('No version to write the result back to.');
+if (!overlays.length) throw new Error('Nothing to composite onto the clip.');
+
+// ── the filter chain ──
+// Overlays arrive back-to-front, matching the editor's own layer order, and
+// each is chained onto the previous result so stacking survives the round trip.
+const num = n => (Math.round((Number(n) || 0) * 100) / 100).toFixed(2);
+const lines = ['[0:v]crop=${TW}:${TH}:${OX}:${OY},setsar=1[base]'];
+let prev = 'base';
+const fetches = [];
+
+overlays.forEach((o, i) => {
+  const url = safeUrl(o.url, 'An overlay');
+  fetches.push('wget -q -O ovl' + i + '.png ' + url);
+
+  const tIn  = Math.max(0, Number(o.t_in) || 0);
+  const hasOut = o.t_out !== null && o.t_out !== undefined && o.t_out !== '';
+  const tOut = hasOut ? Number(o.t_out) : null;
+  const fade = Math.max(0, Number(o.fade) || 0);
+
+  let f = '[' + (i + 1) + ':v]scale=${TW}:${TH},format=rgba';
+  if (fade > 0) {
+    f += ',fade=t=in:st=' + num(tIn) + ':d=' + num(fade) + ':alpha=1';
+    if (hasOut) f += ',fade=t=out:st=' + num(tOut - fade) + ':d=' + num(fade) + ':alpha=1';
+  }
+  lines.push(f + '[o' + i + ']');
+
+  let ov = '[' + prev + '][o' + i + ']overlay=0:0:format=auto';
+  // Only gate a layer that actually comes and goes. `enable` is evaluated per
+  // frame, and a full-length layer would pay for an expression that is always
+  // true — which is the common case by a wide margin.
+  if (hasOut)      ov += ":enable='between(t," + num(tIn) + ',' + num(tOut) + ")'";
+  else if (tIn > 0) ov += ":enable='gte(t," + num(tIn) + ")'";
+  lines.push(ov + '[v' + i + ']');
+  prev = 'v' + i;
+});
+
+const inputs = overlays.map((_, i) => '-loop 1 -framerate "$FPS" -i ovl' + i + '.png').join(' ');
+const filter = lines.join(';');
+
+const filename = (sessionId ? sessionId + '/' : '') + versionId + '-' + Date.now() + '.mp4';
+
+// Work inside ~/.n8n-files, NOT /tmp. n8n's `restrictFileAccessTo` defaults to
+// '~/.n8n-files', and the Read File node downstream refuses anything outside it
+// with "Access to the file is not allowed." — a message that says nothing about
+// paths. Using the directory n8n already sanctions means the default protection
+// stays on for the whole rest of the filesystem instead of being widened.
+// $HOME is only known to the shell, so the script prints the resolved path back
+// and the parser reads it from stdout.
+const dir = '"$HOME/.n8n-files/compose/' + versionId + '"';
+
+// `set -e` plus an explicit COMPOSE_OK sentinel: ffmpeg exits 0 in some partial
+// failures, so a zero exit code alone is not evidence that a file was written.
+const script = [
+  'set -e',
+  // Composited clips are a few MB each and nothing else ever deletes them, so
+  // the volume would grow without bound. Anything older than 3 hours is well
+  // past the seconds this workflow needs it for.
+  'find "$HOME/.n8n-files/compose" -maxdepth 1 -mindepth 1 -type d -mmin +180 -exec rm -rf {} + 2>/dev/null || true',
+  'rm -rf ' + dir + ' && mkdir -p ' + dir + ' && cd ' + dir,
+  'wget -q -O clip.mp4 ' + videoUrl,
+  fetches.join('\n'),
+  // Never trust the caller for geometry — the row is client-writable and the
+  // model may not have honoured the aspect ratio we asked for anyway.
+  'CW=$(ffprobe -v error -select_streams v:0 -show_entries stream=width  -of csv=p=0 clip.mp4)',
+  'CH=$(ffprobe -v error -select_streams v:0 -show_entries stream=height -of csv=p=0 clip.mp4)',
+  'FPS=$(ffprobe -v error -select_streams v:0 -show_entries stream=r_frame_rate -of csv=p=0 clip.mp4)',
+  'DUR=$(ffprobe -v error -show_entries format=duration -of csv=p=0 clip.mp4)',
+  'OW=$(ffprobe -v error -select_streams v:0 -show_entries stream=width  -of csv=p=0 ovl0.png)',
+  'OH=$(ffprobe -v error -select_streams v:0 -show_entries stream=height -of csv=p=0 ovl0.png)',
+  // Centre-crop the CLIP to the OVERLAY's aspect. The overlay was composed
+  // against the still, and the clip comes back in whatever shape the model
+  // would accept (a 4:5 session renders 3:4 on Seedance, 9:16 on Veo), so this
+  // is what makes the text land where the marketer put it. A no-op when the two
+  // already agree. Integer arithmetic only — this runs under busybox sh — and
+  // both results forced even, because yuv420p subsamples chroma and rejects
+  // odd dimensions.
+  'if [ $((CW*OH)) -gt $((CH*OW)) ]; then TH=$CH; TW=$((CH*OW/OH)); else TW=$CW; TH=$((CW*OH/OW)); fi',
+  'TW=$((TW/2*2)); TH=$((TH/2*2))',
+  'OX=$(((CW-TW)/2)); OY=$(((CH-TH)/2))',
+  // -loop 1 matters: a bare PNG is one frame at t=0, and `fade` needs a stream
+  // with timestamps to fade along. -t bounds the otherwise infinite loops.
+  // -c:a copy rather than re-encode: Seedance's native audio is the one thing a
+  // free composite must not quietly degrade.
+  'ffmpeg -nostdin -v error -y -i clip.mp4 ' + inputs +
+    ' -filter_complex "' + filter + '"' +
+    ' -map "[' + prev + ']" -map 0:a? -t "$DUR"' +
+    ' -c:v libx264 -preset veryfast -crf 18 -pix_fmt yuv420p -c:a copy -movflags +faststart out.mp4',
+  'test -s out.mp4',
+  // The path is echoed rather than predicted because only the shell knows what
+  // $HOME expanded to.
+  'echo "COMPOSE_OK $PWD/out.mp4"',
+].join('\n');
+
+return { json: { script, version_id: versionId, bucket: BUCKET, filename } };
+"""
+
+# Reads the shell step's result. Kept separate from the Code node above so the
+# failure path can say what ffmpeg actually complained about instead of "exit 1".
+CREATIVE_COMPOSE_PARSE_JS = r"""
+const src = $('Build Composite').first().json;
+const res = $input.first().json || {};
+// The sentinel carries the absolute path with it, because $HOME is resolved by
+// the shell and the file has to land inside ~/.n8n-files for the Read File node
+// to be allowed to touch it at all.
+const hit = String(res.stdout || '').match(/COMPOSE_OK\s+(\S+)/);
+
+if (!hit) {
+  // stderr's LAST lines are the useful ones — ffmpeg prints the failing filter
+  // or the missing file at the end, after any banner noise.
+  const err = String(res.stderr || res.stdout || '').trim().split('\n').slice(-4).join(' ').slice(0, 500);
+  return { json: { _ok: false, version_id: src.version_id,
+                   error: err || ('Compositing failed (exit ' + res.exitCode + ').') } };
+}
+return { json: { _ok: true, version_id: src.version_id, bucket: src.bucket,
+                 filename: src.filename, path: hit[1] } };
 """
 
 
@@ -7044,7 +7284,8 @@ try {
 """
 
 
-def _http_creative_upload(source_node: str, mime: str, name: str, x: int, y: int) -> dict:
+def _http_creative_upload(source_node: str, mime: str, name: str, x: int, y: int,
+                          ref_node: str = None) -> dict:
     """Binary upload to the creative-studio bucket.
 
     The bytes cannot be uploaded from inside the Code node: httpRequest is
@@ -7053,11 +7294,24 @@ def _http_creative_upload(source_node: str, mime: str, name: str, x: int, y: int
     arrives as the literal text '{"type":"Buffer","data":[...]}'. Only
     prepareBinaryData (a top-level RPC argument) survives, so the Code node
     prepares and this real HTTP node, running in the main process, uploads.
+
+    `ref_node` is for Compose, where the binary comes from a Read File node
+    sitting between the Code node and this one. That node replaces $json with
+    its own output, so bucket/filename have to be looked up by name instead.
+    Left unset everywhere else, which keeps the original $json behaviour.
+
+    Note `.first()` rather than `.item`: reading a file off disk does not carry
+    pairedItem through, so `.item` cannot resolve which input item this one came
+    from and throws. Compose only ever handles a single clip, so first() is
+    exact — unlike Generate, which runs both candidates through one node and
+    genuinely needs the paired lookup.
     """
+    loc = "$json" if ref_node is None else f"$('{ref_node}').first().json"
     return {
         "parameters": {
             "method": "POST",
-            "url": "={{ String($env.SUPABASE_URL).replace(/\\/+$/, '') }}/storage/v1/object/{{ $json.bucket }}/{{ $json.filename }}",
+            "url": "={{ String($env.SUPABASE_URL).replace(/\\/+$/, '') }}"
+                   f"/storage/v1/object/{{{{ {loc}.bucket }}}}/{{{{ {loc}.filename }}}}",
             "sendHeaders": True,
             "headerParameters": {
                 "parameters": [
@@ -7087,15 +7341,23 @@ def _http_creative_upload(source_node: str, mime: str, name: str, x: int, y: int
     }
 
 
-def _http_creative_save(source_node: str, media_field: str, name: str, x: int, y: int) -> dict:
+def _http_creative_save(source_node: str, media_field: str, name: str, x: int, y: int,
+                        single: bool = False) -> dict:
     """PATCH the version row to 'ready' with its now-permanent public URL.
 
     Reads `source_node` rather than this node's own input for the same reason
     Supabase: Save Video URL does — an HTTP node's json is the upload
     response, not the upstream item, so bucket/filename/version_id have to
     come from the Code node by paired-item lookup.
+
+    `single` swaps that paired lookup for first(). Compose needs it because a
+    Read File node sits in the chain and does not carry pairedItem through, so
+    `.item` has nothing to resolve against and throws — which, with the error
+    output wired to Mark Failed, shows up as a silent no-op rather than an
+    error. Only safe where the workflow handles exactly one row, which Compose
+    does and Generate (two candidates through one node) does not.
     """
-    ref = f"$('{source_node}').item.json"
+    ref = f"$('{source_node}').{'first()' if single else 'item'}.json"
     body_expr = (
         "={{ JSON.stringify({ status: 'ready', error: '', " + media_field + ": "
         "String($env.SUPABASE_URL).replace(/\\/+$/, '') + '/storage/v1/object/public/' "
@@ -7132,7 +7394,7 @@ def _http_creative_save(source_node: str, media_field: str, name: str, x: int, y
     }
 
 
-def _http_creative_fail(source_node: str, name: str, x: int, y: int) -> dict:
+def _http_creative_fail(source_node: str, name: str, x: int, y: int, single: bool = False) -> dict:
     """PATCH the version row to 'failed' with the real provider message.
 
     Without this branch a failed generation leaves the card spinning forever
@@ -7145,7 +7407,9 @@ def _http_creative_fail(source_node: str, name: str, x: int, y: int) -> dict:
     # paired-item lookup on the Code node is what makes the other two work:
     # it resolves to the row THIS item belongs to, which matters because
     # Generate runs several candidates through the same nodes at once.
-    ref = f"$('{source_node}').item.json"
+    # `single` is Compose's case — see _http_creative_save for why a Read File
+    # node in the chain makes the paired lookup impossible there.
+    ref = f"$('{source_node}').{'first()' if single else 'item'}.json"
     err_expr = (
         "={{ JSON.stringify({ status: 'failed', error: String("
         "$json.error && $json.error.message ? $json.error.message : "
@@ -7226,26 +7490,162 @@ CREATIVE_VIDEO_STICKY = """## Creative Studio — Video (model picker, added 202
 
 POST `arak-creative-video`
 ```
-{ session_id, version_id, prompt, model?, image_url?, duration?, aspect_ratio?,
-  resolution?, generate_audio? }
+{ session_id, version_id, prompt, model?, image_url?, end_image_url?,
+  reference_image_urls?: string[], duration?, aspect_ratio?, resolution?,
+  generate_audio? }
 ```
 
-`image_url` present → image-to-video; absent → text-to-video, because a
-session may be image-only, video-only, or image-then-video.
+Three modes, picked from what's in the payload:
+- `reference_image_urls` → **reference-to-video** (Seedance 2.0/2.5 only), a
+  separate endpoint taking `image_urls` (up to 9) addressed from the prompt as
+  `@Image1`. A sentence naming them is prepended automatically; without it the
+  model treats them as vague inspiration and mostly ignores them.
+- `image_url` → image-to-video, optionally with `end_image_url` as the last
+  frame (Seedance only), which is what makes a stitched two-clip sequence read
+  as a deliberate cut rather than a join.
+- neither → text-to-video, because a session may be image-only, video-only, or
+  image-then-video.
 
 `model` selects the fal endpoint via MODEL_CONFIGS at the top of the Code
 node — unrecognised or missing values fall back to 'seedance-2'. Each
 model's `build()` there knows its own accepted inputs (Kling and Hailuo take
 neither `resolution` nor `aspect_ratio`; Veo's `duration` needs an 's' suffix),
 so the caller doesn't have to. `generate_audio` defaults false — free on
-Seedance, billed separately on Veo, absent on Kling/Hailuo. `aspect_ratio`
-has no exact 4:5 bucket (nearest is 3:4) — same gap as gpt-image-2 on the
-image side, and only applies to the models that take it at all.
+Seedance, billed separately on Veo, absent on Kling/Hailuo.
+
+**Aspect ratio is per model** (fixed 2026-08-11 — it was one global map, and
+rewriting 4:5 to 3:4 for everyone meant every 4:5 and 1:1 Veo render failed,
+since Veo rejects 3:4). Seedance 2.0 has no 4:5 bucket so it gets 3:4; Seedance
+2.5 accepts only `auto`; Veo gets an orientation (9:16 or 16:9); Kling and
+Hailuo take none. An approximate shape is fine now because Creative Compose
+centre-crops the finished clip back to the overlay's own aspect.
 
 Add a model by adding one entry to MODEL_CONFIGS — nothing else in the
 workflow is model-specific.
 
 Needs env: FAL_KEY, SUPABASE_URL, SUPABASE_KEY."""
+
+
+CREATIVE_COMPOSE_STICKY = """## Creative Studio — Compose (text/logos onto a clip)
+
+POST `arak-creative-compose`
+```
+{ session_id, version_id, video_url,
+  overlays: [ { url, t_in, t_out, fade } ] }
+```
+
+**Costs nothing to run** — no FAL_KEY, no model call. This is what makes
+unlimited free wording/font/colour changes on video real rather than a slogan:
+the clip is never regenerated, our own layer is just stamped onto it again.
+
+`overlays` are back-to-front, one PNG per distinct timing group (layers that
+share an in/out are rendered into one image by the editor). `t_out: null`
+means "runs to the end"; `fade` is seconds of alpha ramp at both ends.
+
+The clip is centre-cropped to the OVERLAY's aspect, not the other way round —
+the overlay was composed against the still, while the clip comes back in
+whatever shape the model would accept. Dimensions come from ffprobe at run
+time; nothing trusts the caller, because `creative_versions` is
+client-writable and every URL here ends up in a shell command.
+
+Arabic is safe by construction: the browser renders the text with real fonts
+and real shaping, ffmpeg only ever composites a finished PNG, so ffmpeg's
+unreliable Arabic `drawtext` never enters the picture.
+
+Needs env: SUPABASE_URL, SUPABASE_KEY. Needs ffmpeg + ffprobe in the image
+(see n8n/docker/Dockerfile — a multi-stage copy, since the n8n base is a
+hardened image with no package manager)."""
+
+
+def _execute_command(name: str, command_expr: str, x: int, y: int) -> dict:
+    """Run a shell script built upstream.
+
+    onError continues so a non-zero exit reaches the parser, which can read
+    stderr and turn it into a message the marketer can act on — rather than
+    ending the execution with the row still 'pending' and nothing to explain it.
+    """
+    return {
+        "parameters": {"command": command_expr},
+        "onError": "continueRegularOutput",
+        "id": nid(),
+        "name": name,
+        "type": "n8n-nodes-base.executeCommand",
+        "typeVersion": 1,
+        "position": [x, y],
+    }
+
+
+def _read_binary_file(name: str, path_expr: str, x: int, y: int) -> dict:
+    """Load the composited mp4 off disk so the existing upload node can send it."""
+    return {
+        "parameters": {"fileSelector": path_expr, "options": {"dataPropertyName": "data"}},
+        "onError": "continueErrorOutput",
+        "id": nid(),
+        "name": name,
+        "type": "n8n-nodes-base.readWriteFile",
+        "typeVersion": 1,
+        "position": [x, y],
+    }
+
+
+def build_creative_compose() -> dict:
+    """Webhook -> Respond -> Build Composite -> Composite(sh) -> Parse -> OK?
+                                        -> Read File -> Upload -> Save
+                                        -> Mark Failed
+
+    Deliberately NOT _build_creative_workflow's shape: that one has the Code
+    node hand bytes straight to the upload node, whereas here ffmpeg writes to
+    disk and a Read File node picks the result back up. Everything downstream of
+    that is the same helpers as its three siblings, so the row still ends up
+    either 'ready' or 'failed' down every path.
+    """
+    fail = [{"node": "Supabase: Mark Failed", "type": "main", "index": 0}]
+    nodes = [
+        _sticky(CREATIVE_COMPOSE_STICKY, height=520, width=460, x=0, y=-260),
+        _webhook("arak-creative-compose", "responseNode", x=0, y=300),
+        _respond_json(
+            "Respond: Accepted",
+            "={{ JSON.stringify({ status: 'accepted', version_id: $json.body.version_id }) }}",
+            x=220, y=300),
+        _code("Build Composite", CREATIVE_COMPOSE_JS, x=440, y=300),
+        _execute_command("Composite", "={{ $json.script }}", x=660, y=300),
+        _code("Parse Composite", CREATIVE_COMPOSE_PARSE_JS, x=880, y=300),
+        _if_bool_equals("Composed OK?", "creative-compose-gate", "={{ $json._ok === true }}", x=1100, y=300),
+        _read_binary_file("Read Composed Clip", "={{ $json.path }}", x=1320, y=200),
+        _http_creative_upload("Parse Composite", "video/mp4", "Upload to Supabase Storage",
+                              x=1540, y=200, ref_node="Parse Composite"),
+        _http_creative_save("Parse Composite", "video_url", "Supabase: Save Version",
+                            x=1760, y=200, single=True),
+        _http_creative_fail("Parse Composite", "Supabase: Mark Failed", x=1320, y=420, single=True),
+    ]
+    connections = {
+        "Webhook": {"main": [[{"node": "Respond: Accepted", "type": "main", "index": 0}]]},
+        "Respond: Accepted": {"main": [[{"node": "Build Composite", "type": "main", "index": 0}]]},
+        "Build Composite": {"main": [[{"node": "Composite", "type": "main", "index": 0}]]},
+        "Composite": {"main": [[{"node": "Parse Composite", "type": "main", "index": 0}]]},
+        "Parse Composite": {"main": [[{"node": "Composed OK?", "type": "main", "index": 0}]]},
+        "Composed OK?": {
+            "main": [
+                [{"node": "Read Composed Clip", "type": "main", "index": 0}],
+                fail,
+            ]
+        },
+        "Read Composed Clip": {
+            "main": [[{"node": "Upload to Supabase Storage", "type": "main", "index": 0}], fail]
+        },
+        "Upload to Supabase Storage": {
+            "main": [[{"node": "Supabase: Save Version", "type": "main", "index": 0}], fail]
+        },
+        "Supabase: Save Version": {"main": [[], fail]},
+    }
+    return {
+        "name": "Arak Lighting – Creative Compose",
+        "nodes": nodes,
+        "connections": connections,
+        "active": False,
+        "settings": {"executionOrder": "v1"},
+        "tags": [],
+    }
 
 
 def _build_creative_workflow(name, webhook_path, sticky, js, code_node_name,
@@ -7387,6 +7787,7 @@ if __name__ == "__main__":
         build_creative_generate(),
         build_creative_edit(),
         build_creative_video(),
+        build_creative_compose(),
         build_creative_enhance(),
     ]
 

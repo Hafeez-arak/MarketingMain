@@ -11,14 +11,15 @@ import { VideoPanel } from '../../components/studio/VideoPanel'
 import { MediaPicker, AttachmentChip } from '../../components/studio/MediaPicker'
 import { AudioToggle, CostLine, LookPicker, ModelPicker, MotionPicker, QualityRow } from '../../components/studio/VideoSettings'
 import { buildVideoPrompt } from '../../components/studio/motionPresets'
-import { getVideoModel } from '../../components/studio/videoModels'
+import { estimateVideoCost, getVideoModel } from '../../components/studio/videoModels'
 import { aspectLabel } from '../../lib/postFormats'
 import { uploadReferenceImage } from '../../lib/referenceImages'
 import { buildInstructionsString } from '../../lib/brandBrain'
+import { captureFirstFrame, parentStillOf } from '../../components/studio/videoFrame'
 import {
   buildBranches, createSession, deleteSession, downloadVersion, fetchSessions, fetchVersions, finalizeVersion,
-  insertPendingVersions, renameSession, requestEdit, requestEnhance, requestGenerate, requestVideo, selectVersion,
-  touchSession, updateVersion, uploadToStudio,
+  insertPendingVersions, renameSession, requestCompose, requestEdit, requestEnhance, requestGenerate, requestVideo,
+  selectVersion, touchSession, updateVersion, uploadToStudio,
 } from '../../lib/creativeStudio'
 
 // ─── Creative Studio ───────────────────────────────────────────────────────
@@ -42,13 +43,10 @@ const INTENTS = [
 ]
 const emptyComposer = { text: '', baseId: null, attach: null }
 
-// Animation is parked (2026-08-11), not deleted — the image side is what's
-// being finished first, and the video workflow still has the unwired
-// start/end-frame inputs noted below. This hides both entry points (a lane's
-// 🎬 Animate and the re-render on an existing clip); the modal, handleAnimate
-// and VideoPanel stay wired behind it, so turning animation back on is this
-// one line. Text-to-video (the "A video" intent) is untouched.
-const ANIMATE_ENABLED = false
+// Animation was parked on 2026-08-11 while the image side was finished, and
+// un-parked the same day once video compositing landed — the reason for the
+// pause (a clip you couldn't put editable text on) is exactly what Creative
+// Compose removed.
 
 // What the ➕ can attach, per tab. `kind` filters the library grid; `notes`
 // says whether the chip offers a "what should it take from this?" box.
@@ -72,15 +70,14 @@ const VIDEO_FRAME_SLOTS = [
   { id: 'endFrame',   label: 'End frame',   hint: 'The clip lands on this image', kind: 'image', notes: false },
 ]
 
-// ⚠️ Frontend only, by decision (2026-08-10). These three attachments are
-// collected and shown, but nothing is sent to the video workflow yet:
-//   · startFrame → maps cleanly to Seedance's image_url (switches t2v → i2v)
-//   · endFrame   → maps cleanly to end_image_url
-//   · reference  → has NO model input; would need a separate describe-then-
-//     inject step, so it's the one that needs design rather than plumbing.
-// Wire these up when the video backend pass happens. (The note is the whole
-// point here; there was a `VIDEO_BACKEND_PENDING = true` under it that nothing
-// ever read, which is a lint error pretending to be documentation.)
+// All three are wired as of 2026-08-11. The note that used to sit here said the
+// style reference had "NO model input" — that was true of the image-to-video
+// endpoints we were calling and false of fal, which hosts a separate
+// reference-to-video endpoint taking an `image_urls` array. So:
+//   · startFrame → image_url (switches text-to-video → image-to-video)
+//   · endFrame   → end_image_url (Seedance only; what makes a cut deliberate)
+//   · reference  → reference_image_urls → the r2v endpoint, addressed in the
+//     prompt as @Image1. Seedance 2.0/2.5 only; the picker says so.
 
 // The ➕ itself. Icon only — the label crowded a row that already has
 // Enhance and the auto-enhance checkbox on it, and the icon alone reads
@@ -254,6 +251,14 @@ export function CreativeStudio() {
   const [videoPrefill, setVideoPrefill] = useState(null)
   const [editingOverlay, setEditingOverlay] = useState(null)
   const [savingOverlay, setSavingOverlay] = useState(false)
+  // Text/logos on a finished clip. Held separately from editingOverlay because
+  // the two open the SAME editor in different modes against different bases,
+  // and one piece of state trying to mean both is how you end up compositing an
+  // image or saving a clip as a PNG.
+  // Shape: { version, frameUrl } — the clip's row plus whatever frame one
+  // resolved to (its source still, or a frame captured from the clip itself).
+  const [editingClip, setEditingClip] = useState(null)
+  const [preparingClip, setPreparingClip] = useState('')
   // Every finished still in this session, offered inside the editor as image
   // layers you can drop onto another one — the "put the logo from round 1 on
   // this background" move, without a round trip through Downloads.
@@ -492,6 +497,12 @@ export function CreativeStudio() {
       ? await requestVideo(webhooks.creativeVideo, {
           session_id: s.id, version_id: ins.rows[0].id, prompt: videoPrompt,
           model: modelId, duration, aspect_ratio: aspect, resolution, generate_audio: audio,
+          // Collected by the frame slots beside the ➕ and, until this pass,
+          // thrown away. An absent slot sends '' rather than being omitted, so
+          // the workflow's own falsy checks decide the mode.
+          image_url: attachments.startFrame?.url || '',
+          end_image_url: attachments.endFrame?.url || '',
+          reference_image_urls: attachments.reference?.url ? [attachments.reference.url] : [],
         })
       : await requestGenerate(webhooks.creativeGenerate, {
           session_id: s.id, prompt: finalPrompt, aspect_ratio: aspect,
@@ -711,6 +722,100 @@ export function CreativeStudio() {
     return {}
   }
 
+  // ── Text and logos on a finished clip ───────────────────────────────────
+  // The free half of the studio. Nothing here calls a model: the clip stays
+  // exactly as it was rendered and ffmpeg stamps our own layer over it, so a
+  // wording, font or colour change costs seconds and nothing else.
+  async function openClipEditor(version) {
+    if (!version?.video_url) return
+    setPreparingClip(version.id); setError('')
+    try {
+      // The still it was animated from IS frame one, exactly — no decoding, no
+      // CORS, no guessing. Only a text-to-video clip, which has no source
+      // still, has to have a frame read out of it.
+      const still = parentStillOf(version, versions)
+      const frameUrl = still || await captureFirstFrame(version.video_url)
+      setEditingClip({ version, frameUrl })
+    } catch (err) {
+      setError(err.message || String(err))
+    } finally {
+      setPreparingClip('')
+    }
+  }
+
+  // Mirrors handleOverlaySave, with one invariant that matters more here than
+  // it does on images: the composite is ALWAYS built from the original clip.
+  //
+  // `baseVideoUrl` is the clip as the model rendered it, and re-editing reads
+  // that rather than the row's own video_url — which, on a row that has already
+  // been composited once, is the version WITH text burnt in. Compositing over
+  // that would burn the old wording permanently into the footage while
+  // overlay_state replays the same layers on top, so fixing a typo would leave
+  // both spellings visible and no way back.
+  async function handleComposeSave({ overlays, state: overlayState }) {
+    const target = editingClip?.version
+    if (!target) return { error: 'No clip to compose onto.' }
+    setSavingOverlay(true)
+
+    const sourceVideo = target.overlay_state?.baseVideoUrl || target.video_url
+    const uploaded = []
+    for (const [i, o] of overlays.entries()) {
+      const up = await uploadToStudio(activeWorkspaceId, accessToken, o.blob, `overlay-${i}.png`)
+      if (up.error) { setSavingOverlay(false); return { error: up.error } }
+      uploaded.push({ url: up.url, tIn: o.tIn, tOut: o.tOut, fade: o.fade })
+    }
+    const newOverlayState = { ...overlayState, overlays: uploaded, baseVideoUrl: sourceVideo }
+    const payload = {
+      video_url: sourceVideo,
+      overlays: uploaded.map(o => ({ url: o.url, t_in: o.tIn, t_out: o.tOut, fade: o.fade })),
+    }
+
+    // Editing a row that is already a composite replaces it in place, exactly
+    // as the image path does — it's a further tweak of one manual edit, not a
+    // new step in the thread. The row goes back to 'pending' so the existing
+    // poller picks up the re-composite.
+    if (target.kind === 'overlay' && target.media_type === 'video') {
+      const patch = { overlay_state: newOverlayState, status: 'pending', error: '' }
+      const upd = await updateVersion(accessToken, target.id, patch)
+      if (upd.error) { setSavingOverlay(false); return { error: upd.error } }
+      setVersions(prev => prev.map(v => (v.id === target.id ? { ...v, ...patch } : v)))
+      const fired = await requestCompose(webhooks.creativeCompose, {
+        ...payload, session_id: session.id, version_id: target.id,
+      })
+      setSavingOverlay(false)
+      if (fired.error) {
+        await updateVersion(accessToken, target.id, { status: 'failed', error: fired.error })
+        refresh(session.id)
+        return { error: fired.error }
+      }
+      setEditingClip(null)
+      return {}
+    }
+
+    const ins = await insertPendingVersions(activeWorkspaceId, accessToken, session.id, [{
+      round: nextRound, kind: 'overlay', provider: 'manual', mediaType: 'video',
+      parentVersionId: target.id, userPrompt: 'Text on the clip',
+      aspectRatio: session.aspect_ratio, overlayState: newOverlayState,
+      duration: target.duration || '', resolution: target.resolution || '',
+      model: target.model || '',
+    }])
+    if (ins.error) { setSavingOverlay(false); return { error: ins.error } }
+    const row = ins.rows[0]
+    const fired = await requestCompose(webhooks.creativeCompose, {
+      ...payload, session_id: session.id, version_id: row.id,
+    })
+    setSavingOverlay(false)
+    setVersions(prev => [...prev, row])
+    if (fired.error) {
+      await updateVersion(accessToken, row.id, { status: 'failed', error: fired.error })
+      refresh(session.id)
+      return { error: fired.error }
+    }
+    setEditingClip(null)
+    touchSession(accessToken, session.id)
+    return {}
+  }
+
   // Re-run one failed candidate against the same brief. Most failures at this
   // point are transient — a rate limit, a momentary provider error — and the
   // only previous way out was abandoning the session and retyping everything.
@@ -808,6 +913,10 @@ export function CreativeStudio() {
   const focused = branches.find(b => b.rootId === focusedBranch) || null
   const others = focused ? branches.filter(b => b.rootId !== focused.rootId) : []
   const missingWebhook = !webhooks.creativeGenerate && !webhooks.creativeVideo
+  // Called out separately: without it the whole free half of the video flow —
+  // text, logos, colours — silently isn't there, and it's easy to miss because
+  // generation itself keeps working.
+  const missingCompose = !!webhooks.creativeVideo && !webhooks.creativeCompose
 
   const laneProps = branch => ({
     branch,
@@ -816,13 +925,20 @@ export function CreativeStudio() {
     onChange: patch => patchComposer(branch.rootId, patch),
     onSend: () => handleSend(branch),
     onActivate: () => setFocusedBranch(branch.rootId),
-    onAnimate: ANIMATE_ENABLED ? v => { setVideoTarget(v); setVideoPrefill(null) } : undefined,
+    onAnimate: v => { setVideoTarget(v); setVideoPrefill(null) },
     // Only offered when the lane actually has a still to re-animate — a
     // video-only branch (no image round) has nothing for the button to do.
-    onReRender: ANIMATE_ENABLED && branch.versions.some(v => v.media_type !== 'video' && v.status === 'ready')
+    onReRender: branch.versions.some(v => v.media_type !== 'video' && v.status === 'ready')
       ? v => handleReRender(branch, v)
       : undefined,
     onOpenEditor: v => setEditingOverlay(v),
+    onEditClip: openClipEditor,
+    // What a re-render would cost, shown before the click. The free actions
+    // carry no badge at all, which is the whole distinction.
+    reRenderCost: v => estimateVideoCost(v.model || 'seedance-2', {
+      resolution: v.resolution || '720p', duration: v.duration || '5', audio: !!v.generate_audio,
+    }),
+    preparingClip,
     onFinalize: v => handleFinalize(branch, v),
     onDownload: handleDownload,
     onRetry: handleRetry,
@@ -846,8 +962,17 @@ export function CreativeStudio() {
       {missingWebhook && (
         <div className="mb-4 border border-amber-300 bg-amber-50 px-4 py-3">
           <p className="text-xs text-amber-900">
-            The Studio's workflows aren't connected yet — add the three Creative Studio webhook
+            The Studio's workflows aren't connected yet — add the Creative Studio webhook
             URLs in <span className="font-semibold">Settings → Integrations</span> before generating.
+          </p>
+        </div>
+      )}
+
+      {missingCompose && (
+        <div className="mb-4 border border-amber-300 bg-amber-50 px-4 py-3">
+          <p className="text-xs text-amber-900">
+            Adding text to a clip needs the <span className="font-semibold">Creative Studio — Compose</span> webhook,
+            which isn't set. Video will still generate; you just won't be able to put words on it yet.
           </p>
         </div>
       )}
@@ -1112,6 +1237,31 @@ export function CreativeStudio() {
           setAttachLane(null)
         }}
       />
+
+      {/* ── Text and logos on a clip ── */}
+      {/* The SAME editor as below, in video mode: same fonts, same Arabic
+          shaping, same snapping and undo. What differs is the base (frame one
+          of the clip, standing in for footage this editor never alters) and the
+          save (a brand layer for ffmpeg, not a flattened picture). */}
+      <Modal open={!!editingClip} onClose={() => setEditingClip(null)}
+        title="Text on this clip — free, no re-render" width="max-w-[96vw]" square>
+        <div className="p-0">
+          {editingClip && (
+            <PhotoEditor
+              mode="video"
+              duration={Number(editingClip.version.duration) || 5}
+              imageUrl={editingClip.frameUrl}
+              initialState={editingClip.version.overlay_state}
+              saving={savingOverlay}
+              onSave={handleComposeSave}
+              onCancel={() => setEditingClip(null)}
+              onUploadImage={file => uploadToStudio(activeWorkspaceId, accessToken, file, file.name || 'layer.png')}
+              imageLibrary={editorLibrary}
+              brandColorsText={state.brandProfile?.brandColors || ''}
+            />
+          )}
+        </div>
+      </Modal>
 
       {/* ── Image editor ── */}
       <Modal open={!!editingOverlay} onClose={() => setEditingOverlay(null)} title="Edit image" width="max-w-[96vw]" square>

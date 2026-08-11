@@ -12,7 +12,8 @@ import {
   rotateCrop, flipCrop, rotateLayers90,
 } from './model/transform'
 import { makePreviewCanvas, cacheRatioFor, autoAdjust, applyPreset, DEFAULT_ADJUST } from './model/adjust'
-import { exportDocument } from './model/render'
+import { exportDocument, exportOverlay } from './model/render'
+import { Timeline } from './canvas/Timeline'
 import { ensureLayerImages, loadLayerImage } from './model/imageCache'
 import { clearTextBitmapCache } from './model/textBitmap'
 import { layerRect, unionRect, translatePatch } from './model/geometry'
@@ -106,7 +107,18 @@ export function PhotoEditor({
   // Brand Brain's free-text "Brand Colours" field. Passed as written; the hex
   // codes are pulled out of the prose in model/palette.js.
   brandColorsText = '',
+  // 'photo' (default) or 'video'. In video mode the thing on screen is frame
+  // one of a clip, standing in for footage the editor cannot itself alter:
+  // Save produces only the brand layer, and ffmpeg composites it over the real
+  // clip. Crop and photo-adjust are hidden rather than disabled, because they
+  // genuinely cannot apply to a composite and a control that silently does
+  // nothing is worse than an absent one. Everything else — text, Arabic
+  // shaping, fonts, shapes, logos, snapping, undo — is identical, which is the
+  // whole reason this is a mode and not a second editor.
+  mode = 'photo',
+  duration = 5,
 }) {
+  const isVideo = mode === 'video'
   const history = useEditorHistory()
   const { doc, base } = history
 
@@ -604,6 +616,15 @@ export function PhotoEditor({
   async function handleSave() {
     setError('')
     try {
+      if (isVideo) {
+        // No composite and no clean plate: the footage is the plate, and it
+        // stays in storage untouched so the next wording change re-composites
+        // from the original rather than stacking on the last render.
+        const { overlays, width, height } = await exportOverlay(base, doc)
+        const res = await onSave({ overlays, state: { ...doc, width, height, v: DOC_VERSION } })
+        if (res?.error) setError(res.error)
+        return
+      }
       const { compositeBlob, textLayerBlob, cleanBlob, width, height } = await exportDocument(base, doc)
       // `v` marks this state as one whose clean plate is the UNTOUCHED photo,
       // so the adjustments and crop stored beside it are replayed rather than
@@ -679,17 +700,18 @@ export function PhotoEditor({
     <div className="flex h-[82vh] flex-col">
       <div className="flex min-h-0 flex-1">
         {/* ── Left rail + panel ── */}
-        <SidePanel panel={panel} onOpenPanel={p => { if (p !== 'crop' && tool === 'crop') cancelCrop(); setPanel(p) }}>
+        <SidePanel panel={panel} hide={isVideo ? ['adjust'] : []}
+          onOpenPanel={p => { if (p !== 'crop' && tool === 'crop') cancelCrop(); setPanel(p) }}>
           {panel === 'insert' && <InsertPanel onAddText={addText} onAddShape={addShape} />}
           {panel === 'uploads' && (
             <UploadsPanel onUploadImage={onUploadImage} onAddImage={addImage} library={imageLibrary} />
           )}
-          {panel === 'adjust' && (
+          {panel === 'adjust' && !isVideo && (
             <AdjustPanel adjust={doc.adjust} onBeginChange={begin}
               onChange={setAdjust} onResetAll={resetAdjust}
               onPreset={setPreset} onAuto={autoAdjustNow} />
           )}
-          {panel === 'crop' && (
+          {panel === 'crop' && !isVideo && (
             <CropPanel base={base} cropRect={cropRect} crop={doc.crop} ratio={cropRatio}
               onSetRatio={applyCropRatio} onApply={applyCrop} onCancel={cancelCrop} onReset={resetCrop} />
           )}
@@ -725,7 +747,13 @@ export function PhotoEditor({
               <TopToolbar doc={doc} selection={selection} tool={tool} panel={panel}
                 canUndo={history.canUndo} canRedo={history.canRedo} onUndo={history.undo} onRedo={history.redo}
                 onPatch={patchSelected} onBeginChange={begin} onOpenPanel={setPanel}
-                onRotate={rotate} onFlip={flip} onStartCrop={startCrop}
+                // Crop, rotate and flip all reframe the PHOTO, and in video
+                // mode the photo is only a stand-in for footage this editor
+                // never touches — the clip is reframed by the compose step's
+                // centre-crop instead. Withheld rather than wired to a no-op.
+                onRotate={isVideo ? undefined : rotate}
+                onFlip={isVideo ? undefined : flip}
+                onStartCrop={isVideo ? undefined : startCrop}
                 onCopyStyle={copyStyle} painting={painting}
                 palette={palette} />
             </div>
@@ -787,6 +815,18 @@ export function PhotoEditor({
           </div>
 
           <StatusBar doc={doc} view={zoom.view} zoom={zoom} layerCount={doc.layers.length} hint={hint} />
+
+          {/* Under the canvas, above the footer: the strip is about the
+              artwork, so it belongs with the artwork rather than in the
+              Save/Cancel band. */}
+          {isVideo && doc.layers.length > 0 && (
+            <Timeline
+              doc={doc} duration={duration} selectedIds={selectedIds}
+              onSelect={id => handleSelectionChange([id])}
+              onBegin={begin}
+              onPatchLayer={(id, timing) => applyDoc(d => patchLayers(d, { [id]: timing }))}
+            />
+          )}
         </div>
       </div>
 
