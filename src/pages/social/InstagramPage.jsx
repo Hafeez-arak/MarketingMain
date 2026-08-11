@@ -92,15 +92,15 @@ function AspectRatioSelector({ value, onChange }) {
 function VisualSelector({ mode, onModeChange, selectedStyle, onStyleChange, customType, onCustomTypeChange }) {
   return (
     <div className="space-y-3">
-      <div className="flex gap-1 bg-surface-subtle border border-border rounded-xl p-1">
+      <div className="flex">
         {[
           { key: null,       label: '✨ Auto' },
           { key: 'lighting', label: '💡 Lighting' },
           { key: 'custom',   label: '🎨 Custom' },
         ].map(m => (
           <button key={String(m.key)} onClick={() => onModeChange(m.key)}
-            className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-all ${
-              mode === m.key ? 'bg-white text-text shadow-sm border border-border' : 'text-text-secondary hover:text-text'
+            className={`flex-1 py-1.5 border -ml-px first:ml-0 text-xs font-semibold transition-colors ${
+              mode === m.key ? 'bg-amber-700 text-white border-amber-700 relative z-10' : 'bg-white text-text-secondary border-border hover:text-text hover:bg-surface-subtle'
             }`}>
             {m.label}
           </button>
@@ -313,10 +313,12 @@ export function InstagramPage() {
       </div>
 
       {/* Tab bar */}
-      <div className="flex gap-1 bg-surface-subtle border border-border rounded-xl p-1 w-fit">
+      <div className="flex w-fit">
         {[{ key: 'posts', label: 'Posts' }, { key: 'create', label: 'Create Post' }, { key: 'reels', label: '🎬 Reels' }, { key: 'schedule', label: '📅 Monthly Schedule' }].map(t => (
           <button key={t.key} onClick={() => setScreen(t.key)}
-            className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all ${screen === t.key ? 'bg-white text-text shadow-sm border border-border' : 'text-text-secondary hover:text-text hover:bg-white/60'}`}>
+            /* Active uses Instagram's own magenta, matching this page's other
+               primary affordances rather than the app accent. */
+            className={`px-3 py-1.5 border -ml-px first:ml-0 text-xs font-semibold transition-colors ${screen === t.key ? 'bg-[#E1306C] text-white border-[#E1306C] relative z-10' : 'bg-white text-text-secondary border-border hover:text-text hover:bg-surface-subtle'}`}>
             {t.label}
           </button>
         ))}
@@ -2302,10 +2304,10 @@ function ReelsPanel({ state, dispatch }) {
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-1 bg-white/10 rounded-xl p-1">
+          <div className="flex items-center">
             {[{ key:'planner', label:'+ New Reel' }, { key:'library', label:`Library (${reels.length})` }].map(v => (
               <button key={v.key} onClick={() => setSubView(v.key)}
-                className={`px-4 py-1.5 rounded-lg text-xs font-semibold transition-all ${subView === v.key ? 'bg-white text-stone-900' : 'text-white/70 hover:text-white'}`}>
+                className={`px-3 py-1.5 border -ml-px first:ml-0 text-xs font-semibold transition-colors ${subView === v.key ? 'bg-white text-stone-900 border-white relative z-10' : 'border-white/30 text-white/70 hover:text-white hover:bg-white/10'}`}>
                 {v.label}
               </button>
             ))}

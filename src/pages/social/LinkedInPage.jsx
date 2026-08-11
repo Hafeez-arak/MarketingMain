@@ -313,10 +313,12 @@ export function LinkedInPage() {
       </div>
 
       {/* Tab bar */}
-      <div className="flex gap-1 bg-surface-subtle border border-border rounded-xl p-1 w-fit">
+      <div className="flex w-fit">
         {[{ key: 'posts', label: 'Posts' }, { key: 'create', label: 'Create Post' }, { key: 'video', label: '🎬 Video' }, { key: 'schedule', label: '📅 Monthly Schedule' }].map(t => (
           <button key={t.key} onClick={() => setScreen(t.key)}
-            className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all ${screen === t.key ? 'bg-white text-text shadow-sm border border-border' : 'text-text-secondary hover:text-text hover:bg-white/60'}`}>
+            /* Active uses LinkedIn's own blue, matching this page's other
+               primary affordances rather than the app accent. */
+            className={`px-3 py-1.5 border -ml-px first:ml-0 text-xs font-semibold transition-colors ${screen === t.key ? 'bg-[#0A66C2] text-white border-[#0A66C2] relative z-10' : 'bg-white text-text-secondary border-border hover:text-text hover:bg-surface-subtle'}`}>
             {t.label}
           </button>
         ))}
@@ -810,19 +812,19 @@ function DayEditor({ dateKey, entry, campaigns, uploadToStorage, onSave, onClear
 
         {/* Tabs */}
         <div className="px-6 pt-4 flex-shrink-0">
-          <div className="flex gap-1 bg-surface-subtle border border-border rounded-xl p-1">
+          <div className="flex">
             <button onClick={() => setTab('generate')}
-              className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-semibold transition-all ${tab === 'generate' ? 'bg-[#0A66C2] text-white shadow-sm' : 'text-text-secondary hover:text-text hover:bg-white/60'}`}>
+              className={`flex-1 flex items-center justify-center gap-1.5 py-2 border -ml-px first:ml-0 text-xs font-semibold transition-colors ${tab === 'generate' ? 'bg-[#0A66C2] text-white border-[#0A66C2] relative z-10' : 'bg-white text-text-secondary border-border hover:text-text hover:bg-surface-subtle'}`}>
               <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
               Generate
             </button>
             <button onClick={() => setTab('upload')}
-              className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-semibold transition-all ${tab === 'upload' ? 'bg-[#0A66C2] text-white shadow-sm' : 'text-text-secondary hover:text-text hover:bg-white/60'}`}>
+              className={`flex-1 flex items-center justify-center gap-1.5 py-2 border -ml-px first:ml-0 text-xs font-semibold transition-colors ${tab === 'upload' ? 'bg-[#0A66C2] text-white border-[#0A66C2] relative z-10' : 'bg-white text-text-secondary border-border hover:text-text hover:bg-surface-subtle'}`}>
               <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
               Upload
             </button>
             <button onClick={() => setTab('video')}
-              className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-semibold transition-all ${tab === 'video' ? 'bg-[#0A66C2] text-white shadow-sm' : 'text-text-secondary hover:text-text hover:bg-white/60'}`}>
+              className={`flex-1 flex items-center justify-center gap-1.5 py-2 border -ml-px first:ml-0 text-xs font-semibold transition-colors ${tab === 'video' ? 'bg-[#0A66C2] text-white border-[#0A66C2] relative z-10' : 'bg-white text-text-secondary border-border hover:text-text hover:bg-surface-subtle'}`}>
               <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"/></svg>
               Video
             </button>
@@ -1922,10 +1924,10 @@ function LinkedInVideoPanel({ dispatch }) {
               <p className="text-xs text-white/60">Plan & track professional video content</p>
             </div>
           </div>
-          <div className="flex items-center gap-1 bg-white/15 rounded-xl p-1">
+          <div className="flex items-center">
             {[{ key: 'planner', label: '+ New Video' }, { key: 'library', label: `Library (${videos.length})` }].map(v => (
               <button key={v.key} onClick={() => setSubView(v.key)}
-                className={`px-4 py-1.5 rounded-lg text-xs font-semibold transition-all ${subView === v.key ? 'bg-white text-[#0A66C2]' : 'text-white/70 hover:text-white'}`}>
+                className={`px-3 py-1.5 border -ml-px first:ml-0 text-xs font-semibold transition-colors ${subView === v.key ? 'bg-white text-[#0A66C2] border-white relative z-10' : 'border-white/30 text-white/70 hover:text-white hover:bg-white/10'}`}>
                 {v.label}
               </button>
             ))}

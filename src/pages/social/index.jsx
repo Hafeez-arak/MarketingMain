@@ -105,10 +105,10 @@ export function SocialPlatform() {
       </Card>
 
       {/* Posts list */}
-      <div className="flex gap-1 bg-white border border-border rounded-xl p-1 w-fit">
+      <div className="flex w-fit">
         {['all','scheduled','published','draft'].map(f => (
           <button key={f} onClick={() => setFilter(f)}
-            className={`px-3 py-1.5 rounded-lg text-sm font-medium capitalize transition-colors ${filter===f?'bg-amber-600 text-white':'text-text-secondary hover:text-text hover:bg-surface-subtle'}`}>
+            className={`px-3 py-1.5 border -ml-px first:ml-0 text-xs font-semibold capitalize transition-colors ${filter===f?'bg-amber-700 text-white border-amber-700 relative z-10':'bg-white text-text-secondary border-border hover:text-text hover:bg-surface-subtle'}`}>
             {f}
           </button>
         ))}

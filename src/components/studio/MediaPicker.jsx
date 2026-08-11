@@ -64,11 +64,11 @@ function MediaPickerBody({ kind, accessToken, onPick, onClose, onUpload }) {
 
   return (
     <div className="p-5 space-y-4">
-      <div className="flex gap-1 p-1 bg-surface-subtle w-fit">
+      <div className="flex w-fit">
           {[['library', 'Media Library'], ['upload', 'Upload new']].map(([id, label]) => (
             <button key={id} type="button" onClick={() => setTab(id)}
-              className={`text-xs px-3 py-1.5 transition-colors ${
-                tab === id ? 'bg-white text-text font-semibold shadow-sm' : 'text-text-tertiary hover:text-text-secondary'
+              className={`text-xs font-semibold px-3 py-1.5 border -ml-px first:ml-0 transition-colors ${
+                tab === id ? 'bg-amber-700 text-white border-amber-700 relative z-10' : 'bg-white text-text-secondary border-border hover:text-text hover:bg-surface-subtle'
               }`}>
               {label}
             </button>

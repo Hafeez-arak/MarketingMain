@@ -18,16 +18,15 @@ import { STATUS_META, PLATFORM_META } from '../../lib/utils'
      the borderless variants — so a row of mixed buttons lines up on the same
      baseline instead of the ghost ones sitting 2px short.
 
-   The `square` prop that several of these used to take is now the only
-   behavior, so it does nothing. It's still accepted (and swallowed before the
-   DOM spread) because ~50 call sites pass it, and a stray square="true" on an
-   <input> is a React warning in the console.
+   Several of these used to take a `square` prop to opt into sharp corners for
+   Creative Studio. Sharp is now the only behaviour and every call site has
+   been updated, so the prop is gone rather than left as a no-op argument that
+   reads like it still does something.
 ──────────────────────────────────────────────────────────────────────────── */
 
 const FOCUS = 'focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-700 focus-visible:ring-offset-1 focus-visible:ring-offset-white'
 
-export function Button({ variant='primary', size='md', children, onClick, disabled, type='button', className='', square }) {
-  void square
+export function Button({ variant='primary', size='md', children, onClick, disabled, type='button', className='' }) {
   const base = `inline-flex items-center justify-center gap-2 font-semibold border transition-colors duration-150 cursor-pointer disabled:opacity-40 disabled:pointer-events-none ${FOCUS}`
   // Vertical padding is tuned per size so every variant lands on an exact
   // pixel height (28/32/38/44) — square corners make a half-pixel mismatch
@@ -81,8 +80,7 @@ export function PlatformPill({ platform }) {
   )
 }
 
-export function Card({ children, className='', onClick, hover=false, square }) {
-  void square
+export function Card({ children, className='', onClick, hover=false }) {
   return (
     <div onClick={onClick}
       className={`bg-white border border-border
@@ -102,11 +100,6 @@ export function WarmCard({ children, className='' }) {
       {children}
     </div>
   )
-}
-
-// Keep GoldCard as alias for WarmCard for compatibility
-export function GoldCard({ children, className='' }) {
-  return <WarmCard className={className}>{children}</WarmCard>
 }
 
 // The page title block. Every page used to hand-roll this, which is how the
@@ -143,8 +136,7 @@ export function SectionHead({ title, subtitle, action }) {
 const fieldBase = `w-full border border-border bg-white text-text placeholder-text-tertiary text-sm
   transition-colors duration-150 focus:outline-none focus:border-amber-700 focus:ring-1 focus:ring-amber-700`
 
-export function Input({ label, hint, error, className='', square, ...props }) {
-  void square
+export function Input({ label, hint, error, className='', ...props }) {
   return (
     <div className={className}>
       {label && <label className="block eyebrow mb-1.5">{label}</label>}
@@ -159,8 +151,7 @@ export function Input({ label, hint, error, className='', square, ...props }) {
 // keeps its fixed height — only a chat-style prompt box wants the Claude/
 // ChatGPT behavior of expanding as you type instead of scrolling internally
 // right away. `rows` still sets the minimum height either way.
-export function Textarea({ label, hint, error, className='', rows=4, autoGrow=false, maxHeight=260, value, square, ...props }) {
-  void square
+export function Textarea({ label, hint, error, className='', rows=4, autoGrow=false, maxHeight=260, value, ...props }) {
   const ref = useRef(null)
   useEffect(() => {
     if (!autoGrow || !ref.current) return
@@ -183,8 +174,7 @@ export function Textarea({ label, hint, error, className='', rows=4, autoGrow=fa
 // The native select arrow is drawn with the platform's own radius and sits in
 // its own inset box; suppressing it and drawing a flat chevron keeps the
 // control square on Safari and Chrome alike.
-export function Select({ label, hint, error, className='', children, square, ...props }) {
-  void square
+export function Select({ label, hint, error, className='', children, ...props }) {
   return (
     <div className={className}>
       {label && <label className="block eyebrow mb-1.5">{label}</label>}
@@ -201,8 +191,7 @@ export function Select({ label, hint, error, className='', children, square, ...
   )
 }
 
-export function Modal({ open, onClose, title, children, width='max-w-lg', square }) {
-  void square
+export function Modal({ open, onClose, title, children, width='max-w-lg' }) {
   const ref = useRef(null)
   useEffect(() => {
     const fn = e => { if (e.key === 'Escape') onClose() }
@@ -282,8 +271,7 @@ export function Toggle({ checked, onChange, label }) {
   )
 }
 
-export function ConfirmDialog({ open, onClose, onConfirm, title, message, danger=false, square }) {
-  void square
+export function ConfirmDialog({ open, onClose, onConfirm, title, message, danger=false }) {
   return (
     <Modal open={open} onClose={onClose} title={title} width="max-w-sm">
       <div className="p-5">
@@ -327,27 +315,6 @@ export function PillSelect({ value, onChange, className = '', children }) {
         {children}
       </select>
       <svg className="w-3 h-3 absolute right-2.5 top-1/2 -translate-y-1/2 text-text-tertiary pointer-events-none" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg>
-    </div>
-  )
-}
-
-// The metric tile. Label above number, left-aligned, no icon chrome and no
-// hover lift — these appear five-across in a divided strip, where anything
-// decorative repeats five times and turns the strip into noise. `accent`
-// marks the one tile that matters with a solid rule across its top edge.
-export function StatCard({ label, value, sub, icon, onClick, accent=false }) {
-  return (
-    <div onClick={onClick}
-      className={`relative border bg-white p-4 transition-colors duration-150
-        ${onClick ? 'cursor-pointer hover:bg-surface-subtle' : ''}
-        ${accent ? 'border-amber-300' : 'border-border'}`}>
-      {accent && <div className="absolute top-0 left-0 right-0 h-0.5 bg-amber-700" />}
-      <div className="flex items-center gap-1.5 mb-2">
-        {icon && <span className="text-text-tertiary flex-shrink-0">{icon}</span>}
-        <p className="eyebrow truncate">{label}</p>
-      </div>
-      <p className={`text-2xl font-bold leading-none tabular-nums ${accent ? 'text-amber-800' : 'text-text'}`}>{value}</p>
-      {sub && <p className="text-xs text-text-tertiary mt-1.5">{sub}</p>}
     </div>
   )
 }

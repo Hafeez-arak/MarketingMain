@@ -549,10 +549,10 @@ export function Approvals() {
             </button>
           ))}
         </div>
-        <div className="flex gap-1 bg-surface-subtle border border-border rounded-xl p-1">
+        <div className="flex">
           {PLATFORM_TABS.map(t => (
             <button key={t.key} onClick={() => setPlatformFilter(t.key)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${platformFilter === t.key ? 'bg-white text-text shadow-sm border border-border' : 'text-text-secondary hover:text-text'}`}>
+              className={`px-3 py-1.5 border -ml-px first:ml-0 text-xs font-semibold transition-colors ${platformFilter === t.key ? 'bg-amber-700 text-white border-amber-700 relative z-10' : 'bg-white text-text-secondary border-border hover:text-text hover:bg-surface-subtle'}`}>
               {t.label}
             </button>
           ))}
