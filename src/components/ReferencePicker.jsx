@@ -144,7 +144,7 @@ export function ReferencePicker({ value = [], onSave, onClose, mode, onModeChang
                 <div key={url} className="relative w-16 h-16 rounded-lg overflow-hidden border border-border group">
                   <PostImage src={url} alt="Reference" className="w-full h-full object-cover" />
                   <button onClick={() => remove(url)}
-                    className="absolute top-0.5 right-0.5 w-5 h-5 rounded-full bg-black/60 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                    className="absolute top-0.5 right-0.5 w-5 h-5 bg-black/70 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
                     title="Remove">
                     <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>
                   </button>
@@ -155,10 +155,10 @@ export function ReferencePicker({ value = [], onSave, onClose, mode, onModeChang
         )}
 
         {/* Tabs */}
-        <div className="flex gap-1 bg-surface-subtle border border-border rounded-xl p-1">
+        <div className="flex">
           {[{ key: 'brain', label: '🧠 From Brand Brain' }, { key: 'upload', label: '⬆️ Upload new' }].map(t => (
             <button key={t.key} onClick={() => setTab(t.key)}
-              className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-all ${tab === t.key ? 'bg-white text-text shadow-sm border border-border' : 'text-text-secondary hover:text-text'}`}>
+              className={`flex-1 py-1.5 border -ml-px first:ml-0 text-xs font-semibold transition-colors ${tab === t.key ? 'bg-amber-700 text-white border-amber-700 relative z-10' : 'bg-white text-text-secondary border-border hover:text-text hover:bg-surface-subtle'}`}>
               {t.label}
             </button>
           ))}
@@ -196,7 +196,7 @@ export function ReferencePicker({ value = [], onSave, onClose, mode, onModeChang
                     title={a.title || a.kind}>
                     <PostImage src={a.public_url} alt={a.title || 'Asset'} className="w-full h-full object-cover" />
                     {isSelected(a.public_url) && (
-                      <span className="absolute top-1 right-1 w-5 h-5 rounded-full bg-amber-500 flex items-center justify-center">
+                      <span className="absolute top-1 right-1 w-5 h-5 bg-amber-700 flex items-center justify-center">
                         <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" strokeWidth="3" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
                       </span>
                     )}

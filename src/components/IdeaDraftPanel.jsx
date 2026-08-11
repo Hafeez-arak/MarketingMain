@@ -96,7 +96,7 @@ export function IdeaDraftPanel({ idea, accessToken, workspaceId, mediaOptionsUrl
           <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
             {idea.captionOptions.map((opt, i) => (
               <button key={i} onClick={() => pickCaption(opt)}
-                className="text-left rounded-lg border border-border bg-surface-subtle/40 hover:border-amber-300 hover:bg-amber-50/40 p-2.5 transition-colors">
+                className="text-left rounded-lg border border-border bg-surface-subtle hover:border-amber-300 hover:bg-amber-50/40 p-2.5 transition-colors">
                 {opt.caption_ar && <p className="text-xs text-text leading-relaxed line-clamp-4" dir="rtl">{opt.caption_ar}</p>}
                 {opt.caption_en && <p className="text-xs text-text leading-relaxed line-clamp-4 mt-1">{opt.caption_en}</p>}
               </button>
@@ -136,7 +136,7 @@ export function IdeaDraftPanel({ idea, accessToken, workspaceId, mediaOptionsUrl
           <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
             {idea.mediaPromptOptions.map((opt, i) => (
               <button key={i} onClick={() => pickMediaPrompt(opt)}
-                className="text-left rounded-lg border border-border bg-surface-subtle/40 hover:border-sky-300 hover:bg-sky-50/40 p-2.5 transition-colors">
+                className="text-left rounded-lg border border-border bg-surface-subtle hover:border-sky-300 hover:bg-sky-50/40 p-2.5 transition-colors">
                 <p className="text-xs text-text leading-relaxed line-clamp-4">{opt.media_prompt}</p>
                 {opt.motion_prompt && <p className="text-[10px] text-sky-700 mt-1 line-clamp-2">🎬 {opt.motion_prompt}</p>}
               </button>

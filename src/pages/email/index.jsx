@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useApp, actions } from '../../store/app'
-import { Card, Button, Badge, Input, Textarea, Select, Empty, ConfirmDialog, Toggle } from '../../components/ui/index'
+import { Card, Button, Badge, Input, Textarea, Select, Empty, ConfirmDialog, Toggle, PageHeader } from '../../components/ui/index'
 import { uid, formatDate } from '../../lib/utils'
 
 const TRIGGERS = ['New subscriber', 'Form submission', 'Cart abandoned', 'First purchase', 'No activity 30 days', 'Custom event']
@@ -16,7 +16,14 @@ export function EmailFlows() {
   }
 
   return (
-    <div className="max-w-7xl space-y-5">
+    <div className="max-w-7xl space-y-4">
+      <PageHeader title="Email Flows" subtitle="Automated email sequences triggered by subscriber actions.">
+        <Button onClick={() => navigate('/email/new')}>
+          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+          New flow
+        </Button>
+      </PageHeader>
+
       {state.emailFlows.length === 0 ? (
         <Card>
           <Empty
@@ -129,7 +136,7 @@ export function NewEmailFlow() {
             <div className="space-y-2 mb-3">
               {steps.map((step, i) => (
                 <div key={step.id} className="flex items-center gap-2">
-                  <div className="w-5 h-5 rounded-full bg-amber-100 text-amber-600 text-[10px] font-bold flex items-center justify-center flex-shrink-0">{i+1}</div>
+                  <div className="w-5 h-5 bg-amber-100 text-amber-800 text-[10px] font-bold flex items-center justify-center flex-shrink-0 tabular-nums">{i+1}</div>
                   <div className="flex-1 flex items-center gap-2 px-3 py-2 bg-surface-subtle border border-border rounded-xl text-xs text-text">
                     <span className="capitalize text-text-secondary">{step.type}</span>
                     <span className="text-border-strong">·</span>

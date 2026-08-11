@@ -91,7 +91,6 @@ export function VideoPanel({
           label="Or describe it yourself"
           rows={3}
           autoGrow
-          square
           value={prompt}
           onChange={e => { setPrompt(e.target.value); setPresetId('') }}
           placeholder="e.g. slow push in towards the entrance, the facade lights glow warmer"
@@ -134,8 +133,8 @@ export function VideoPanel({
       <div className="flex items-center justify-between gap-2 pt-1">
         <CostLine model={model} resolution={resolution} duration={duration} audio={audio} />
         <div className="flex gap-2">
-          <Button square variant="secondary" onClick={onCancel}>Cancel</Button>
-          <Button square onClick={submit} disabled={busy || !prompt.trim()}>
+          <Button variant="secondary" onClick={onCancel}>Cancel</Button>
+          <Button onClick={submit} disabled={busy || !prompt.trim()}>
             {busy ? <><Spinner size="sm" /> Starting…</> : '🎬 Create video'}
           </Button>
         </div>

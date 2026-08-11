@@ -92,15 +92,15 @@ function AspectRatioSelector({ value, onChange }) {
 function VisualSelector({ mode, onModeChange, selectedStyle, onStyleChange, customType, onCustomTypeChange }) {
   return (
     <div className="space-y-3">
-      <div className="flex gap-1 bg-surface-subtle border border-border rounded-xl p-1">
+      <div className="flex">
         {[
           { key: null,       label: '✨ Auto' },
           { key: 'lighting', label: '💡 Lighting' },
           { key: 'custom',   label: '🎨 Custom' },
         ].map(m => (
           <button key={String(m.key)} onClick={() => onModeChange(m.key)}
-            className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-all ${
-              mode === m.key ? 'bg-white text-text shadow-sm border border-border' : 'text-text-secondary hover:text-text'
+            className={`flex-1 py-1.5 border -ml-px first:ml-0 text-xs font-semibold transition-colors ${
+              mode === m.key ? 'bg-amber-700 text-white border-amber-700 relative z-10' : 'bg-white text-text-secondary border-border hover:text-text hover:bg-surface-subtle'
             }`}>
             {m.label}
           </button>
@@ -117,7 +117,7 @@ function VisualSelector({ mode, onModeChange, selectedStyle, onStyleChange, cust
             <button key={s.value} onClick={() => onStyleChange(s.value)}
               className={`relative text-left rounded-xl border px-3 py-2.5 transition-all ${selectedStyle === s.value ? 'border-amber-500 bg-amber-100 shadow-amber ring-1 ring-amber-400' : 'border-border bg-white hover:border-border-strong hover:bg-surface-subtle'}`}>
               {selectedStyle === s.value && (
-                <span className="absolute top-2 right-2 w-4 h-4 rounded-full bg-amber-500 flex items-center justify-center">
+                <span className="absolute top-2 right-2 w-4 h-4 bg-amber-700 flex items-center justify-center">
                   <svg className="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" strokeWidth="3" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
                 </span>
               )}
@@ -136,7 +136,7 @@ function VisualSelector({ mode, onModeChange, selectedStyle, onStyleChange, cust
             <button key={t.value} onClick={() => onCustomTypeChange(t.value)}
               className={`relative text-left rounded-xl border px-3 py-2.5 transition-all ${customType === t.value ? 'border-amber-500 bg-amber-100 shadow-amber ring-1 ring-amber-400' : 'border-border bg-white hover:border-border-strong hover:bg-surface-subtle'}`}>
               {customType === t.value && (
-                <span className="absolute top-2 right-2 w-4 h-4 rounded-full bg-amber-500 flex items-center justify-center">
+                <span className="absolute top-2 right-2 w-4 h-4 bg-amber-700 flex items-center justify-center">
                   <svg className="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" strokeWidth="3" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
                 </span>
               )}
@@ -268,7 +268,7 @@ export function InstagramPage() {
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-2xl flex items-center justify-center shadow-sm"
-            style={{ background: 'linear-gradient(135deg,#f09433 0%,#e6683c 25%,#dc2743 50%,#cc2366 75%,#bc1888 100%)' }}>
+            style={{ background: '#E1306C' }}>
             <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24">
               <rect x="2" y="2" width="20" height="20" rx="5"/>
               <path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/>
@@ -276,7 +276,7 @@ export function InstagramPage() {
             </svg>
           </div>
           <div>
-            <h2 className="font-semibold text-text text-lg">Instagram</h2>
+            <h2 className="font-bold text-text text-base tracking-tight">Instagram</h2>
             <p className="text-xs text-text-secondary">{mergedPosts.length} post{mergedPosts.length !== 1 ? 's' : ''} · AI content generation</p>
           </div>
         </div>
@@ -313,10 +313,12 @@ export function InstagramPage() {
       </div>
 
       {/* Tab bar */}
-      <div className="flex gap-1 bg-surface-subtle border border-border rounded-xl p-1 w-fit">
+      <div className="flex w-fit">
         {[{ key: 'posts', label: 'Posts' }, { key: 'create', label: 'Create Post' }, { key: 'reels', label: '🎬 Reels' }, { key: 'schedule', label: '📅 Monthly Schedule' }].map(t => (
           <button key={t.key} onClick={() => setScreen(t.key)}
-            className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all ${screen === t.key ? 'bg-white text-text shadow-sm border border-border' : 'text-text-secondary hover:text-text hover:bg-white/60'}`}>
+            /* Active uses Instagram's own magenta, matching this page's other
+               primary affordances rather than the app accent. */
+            className={`px-3 py-1.5 border -ml-px first:ml-0 text-xs font-semibold transition-colors ${screen === t.key ? 'bg-[#E1306C] text-white border-[#E1306C] relative z-10' : 'bg-white text-text-secondary border-border hover:text-text hover:bg-surface-subtle'}`}>
             {t.label}
           </button>
         ))}
@@ -660,14 +662,14 @@ function MonthlySchedule({ state, dispatch, instructions }) {
                 relative rounded-xl border transition-all duration-150 text-left overflow-hidden
                 min-h-[72px] p-2 flex flex-col gap-0.5
                 ${isToday ? 'border-amber-400 ring-2 ring-amber-200' : 'border-border'}
-                ${hasGenerated ? 'bg-green-50 hover:bg-green-100' : count > 0 ? 'bg-amber-50 hover:bg-amber-100' : isPast ? 'bg-surface-subtle/50 hover:bg-surface-subtle' : 'bg-white hover:bg-surface-subtle'}
+                ${hasGenerated ? 'bg-green-50 hover:bg-green-100' : count > 0 ? 'bg-amber-50 hover:bg-amber-100' : isPast ? 'bg-surface-subtle hover:bg-surface-subtle' : 'bg-white hover:bg-surface-subtle'}
               `}>
               <div className="flex items-center justify-between mb-0.5">
                 <span className={`text-xs font-bold leading-none ${isToday ? 'text-amber-600' : isPast ? 'text-text-disabled' : 'text-text-secondary'}`}>
                   {day}
                 </span>
                 {count > 0 && (
-                  <span className="text-[9px] font-bold bg-amber-400 text-white w-4 h-4 rounded-full flex items-center justify-center flex-shrink-0">{count}</span>
+                  <span className="text-[9px] font-bold bg-amber-700 text-white w-4 h-4 flex items-center justify-center flex-shrink-0">{count}</span>
                 )}
               </div>
               {count > 0 ? (
@@ -707,16 +709,16 @@ function MonthlySchedule({ state, dispatch, instructions }) {
         const label   = dateObj.toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric', year:'numeric' })
         return (
           <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
-            style={{ background:'rgba(26,20,16,0.55)', backdropFilter:'blur(6px)' }}
+            style={{ background:'rgba(28,35,33,0.45)' }}
             onClick={e => { if (e.target === e.currentTarget) setViewDay(null) }}>
-            <div className="bg-white rounded-3xl shadow-2xl w-full max-w-lg flex flex-col overflow-hidden animate-fade-scale" style={{ maxHeight:'85vh' }}>
+            <div className="bg-white border border-border shadow-dropdown w-full max-w-lg flex flex-col overflow-hidden animate-fade-scale" style={{ maxHeight:'85vh' }}>
 
               {/* Header */}
-              <div className="px-6 py-5 flex-shrink-0" style={{ background:'linear-gradient(135deg,rgba(255,253,240,0.95),rgba(249,243,232,0.95))', borderBottom:'1px solid rgba(232,217,190,0.5)' }}>
+              <div className="px-6 py-5 flex-shrink-0" style={{ background:'#f3f5f4', borderBottom:'1px solid rgba(232,217,190,0.5)' }}>
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <p className="text-[10px] font-bold uppercase tracking-widest text-amber-500 mb-1">Instagram · Schedule</p>
-                    <h3 className="font-display font-bold text-lg text-text">{label}</h3>
+                    <h3 className="font-semibold text-sm text-text">{label}</h3>
                     <p className="text-xs text-text-tertiary mt-0.5">
                       {entries.length === 0 ? 'Nothing planned' : `${entries.length} post${entries.length !== 1 ? 's' : ''} planned`}
                     </p>
@@ -724,7 +726,7 @@ function MonthlySchedule({ state, dispatch, instructions }) {
                   <div className="flex items-center gap-2 flex-shrink-0">
                     <button onClick={() => { setEditDay(viewDay); setEditIndex(null) }}
                       className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-white transition-all"
-                      style={{ background:'linear-gradient(135deg,#f09433,#dc2743,#bc1888)' }}>
+                      style={{ background:'#E1306C' }}>
                       <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
                       Add Post
                     </button>
@@ -739,14 +741,14 @@ function MonthlySchedule({ state, dispatch, instructions }) {
               <div className="overflow-y-auto flex-1 p-5">
                 {entries.length === 0 ? (
                   <div className="py-12 text-center">
-                    <div className="w-12 h-12 rounded-2xl flex items-center justify-center mx-auto mb-3" style={{ background:'linear-gradient(135deg,#f09433,#bc1888)' }}>
+                    <div className="w-12 h-12 rounded-2xl flex items-center justify-center mx-auto mb-3" style={{ background:'#E1306C' }}>
                       <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
                     </div>
                     <p className="font-semibold text-text mb-1">Nothing scheduled</p>
                     <p className="text-sm text-text-secondary mb-4">Add your first post for this day.</p>
                     <button onClick={() => { setEditDay(viewDay); setEditIndex(null) }}
                       className="px-5 py-2.5 rounded-xl text-sm font-semibold text-white"
-                      style={{ background:'linear-gradient(135deg,#f09433,#bc1888)' }}>
+                      style={{ background:'#E1306C' }}>
                       + Add Post
                     </button>
                   </div>
@@ -757,14 +759,14 @@ function MonthlySchedule({ state, dispatch, instructions }) {
                       const statusColors = { planned:'bg-stone-100 text-stone-600', generated:'bg-green-50 text-green-700', pending:'bg-amber-50 text-amber-700' }
                       return (
                         <div key={idx} className="rounded-2xl border overflow-hidden" style={{ borderColor:'rgba(232,217,190,0.6)' }}>
-                          <div className="h-1" style={{ background:'linear-gradient(90deg,#f09433,#dc2743,#bc1888)' }} />
+                          <div className="h-1" style={{ background:'#E1306C' }} />
                           <div className="p-4">
                             <div className="flex items-start justify-between gap-3">
                               <div className="flex items-center gap-2 flex-wrap">
                                 <span className="text-sm">{lbl.icon}</span>
                                 <span className={`text-xs font-semibold ${lbl.color}`}>{lbl.text}</span>
-                                {entry.tone && <span className="text-[10px] bg-stone-100 text-stone-500 px-2 py-0.5 rounded-full capitalize">{entry.tone}</span>}
-                                {entry.aspectRatio && <span className="text-[10px] bg-stone-100 text-stone-500 px-2 py-0.5 rounded-full">{entry.aspectRatio}</span>}
+                                {entry.tone && <span className="text-[10px] bg-stone-100 text-stone-500 px-1.5 py-0.5 leading-[1.4] capitalize">{entry.tone}</span>}
+                                {entry.aspectRatio && <span className="text-[10px] bg-stone-100 text-stone-500 px-1.5 py-0.5 leading-[1.4]">{entry.aspectRatio}</span>}
                               </div>
                               <div className="flex items-center gap-1.5 flex-shrink-0">
                                 <button onClick={() => { setEditDay(viewDay); setEditIndex(idx) }}
@@ -781,7 +783,7 @@ function MonthlySchedule({ state, dispatch, instructions }) {
                             <p className="text-sm text-text mt-2 leading-relaxed line-clamp-2">{entry.topic || '—'}</p>
                             {entry.notes && <p className="text-xs text-text-tertiary mt-1 line-clamp-1">📝 {entry.notes}</p>}
                             <div className="flex items-center justify-between mt-3">
-                              <span className={`text-[10px] font-semibold px-2.5 py-1 rounded-full ${statusColors[entry.status] || 'bg-stone-100 text-stone-500'}`}>
+                              <span className={`text-[10px] font-semibold px-1.5 py-0.5 leading-[1.4] ${statusColors[entry.status] || 'bg-stone-100 text-stone-500'}`}>
                                 {entry.status || 'planned'}
                               </span>
                               <div className="flex items-center gap-2">
@@ -950,16 +952,16 @@ function DayEditor({ dateKey, entry, campaigns, uploadToStorage, onSave, onDelet
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center"
-      style={{ background: 'rgba(0,0,0,0.65)', backdropFilter: 'blur(6px)', padding: '24px' }}
+      style={{ background: 'rgba(0,0,0,0.65)', padding: '24px' }}
       onClick={e => { if (e.target === e.currentTarget) onClose() }}>
 
-      <div className="bg-white rounded-3xl shadow-2xl flex flex-col overflow-hidden"
+      <div className="bg-white border border-border shadow-dropdown flex flex-col overflow-hidden"
         style={{ width: '100%', maxWidth: '860px', height: '90vh' }}>
 
         {/* ── Header ────────────────────────────────────────────────────── */}
         <div className="flex items-start justify-between px-8 py-6 border-b border-border flex-shrink-0">
           <div>
-            <h2 className="font-bold text-text text-lg leading-tight">Plan post for</h2>
+            <h2 className="font-bold text-text text-base tracking-tight leading-tight">Plan post for</h2>
             <p className="text-base text-amber-600 font-semibold mt-0.5">{dateLabel}</p>
             <p className="text-xs text-text-tertiary mt-1">n8n will process this post automatically at 8am on this date</p>
           </div>
@@ -974,28 +976,28 @@ function DayEditor({ dateKey, entry, campaigns, uploadToStorage, onSave, onDelet
           <button onClick={() => setTab('generate')}
             className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all ${tab === 'generate'
               ? 'text-white' : 'text-text-secondary bg-surface-subtle hover:bg-stone-100'}`}
-            style={tab === 'generate' ? { background: 'linear-gradient(135deg,#f09433 0%,#dc2743 50%,#bc1888 100%)' } : {}}>
+            style={tab === 'generate' ? { background: '#E1306C' } : {}}>
             <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
             Generate
           </button>
           <button onClick={() => setTab('upload')}
             className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all ${tab === 'upload'
               ? 'text-white' : 'text-text-secondary bg-surface-subtle hover:bg-stone-100'}`}
-            style={tab === 'upload' ? { background: 'linear-gradient(135deg,#96acb2 0%,#7d98a1 50%,#4c5e61 100%)' } : {}}>
+            style={tab === 'upload' ? { background: '#4c5e61' } : {}}>
             <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
             Upload Images
           </button>
           <button onClick={() => setTab('reel')}
             className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all ${tab === 'reel'
               ? 'text-white' : 'text-text-secondary bg-surface-subtle hover:bg-stone-100'}`}
-            style={tab === 'reel' ? { background: 'linear-gradient(135deg,#7c3aed 0%,#dc2743 50%,#bc1888 100%)' } : {}}>
+            style={tab === 'reel' ? { background: '#E1306C' } : {}}>
             <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"/></svg>
             Reel
           </button>
         </div>
 
         {/* ── Publish Time Picker ────────────────────────────────────────── */}
-        <div className="px-8 py-4 flex-shrink-0 border-b border-border" style={{ background:'linear-gradient(135deg,rgba(255,248,235,0.8),rgba(249,243,232,0.6))' }}>
+        <div className="px-8 py-4 flex-shrink-0 border-b border-border" style={{ background:'#f3f5f4' }}>
           <div className="flex items-center gap-4 flex-wrap">
             <div className="flex items-center gap-2">
               <svg className="w-4 h-4 text-amber-500 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
@@ -1081,7 +1083,7 @@ function DayEditor({ dateKey, entry, campaigns, uploadToStorage, onSave, onDelet
                   <div key={url} className="relative w-14 h-14 rounded-lg overflow-hidden border border-border group">
                     <PostImage src={url} alt="Reference" className="w-full h-full object-cover" />
                     <button onClick={() => setReferences(refs => refs.filter(u => u !== url))}
-                      className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-black/60 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity" title="Remove">
+                      className="absolute top-0.5 right-0.5 w-4 h-4 bg-black/70 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity" title="Remove">
                       <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>
                     </button>
                   </div>
@@ -1147,7 +1149,7 @@ function DayEditor({ dateKey, entry, campaigns, uploadToStorage, onSave, onDelet
                     <div key={i} className="relative group w-20 h-20 rounded-xl overflow-hidden border border-border">
                       <img src={url} alt="" className="w-full h-full object-cover" />
                       <button onClick={() => removeExistingUrl(i)}
-                        className="absolute top-1 right-1 w-5 h-5 rounded-full bg-black/60 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                        className="absolute top-1 right-1 w-5 h-5 bg-black/70 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
                         <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>
                       </button>
                       {i === 0 && <span className="absolute bottom-1 left-1 text-[9px] bg-black/60 text-white px-1 rounded font-bold">1st</span>}
@@ -1163,7 +1165,7 @@ function DayEditor({ dateKey, entry, campaigns, uploadToStorage, onSave, onDelet
                     <div key={i} className="relative group w-20 h-20 rounded-xl overflow-hidden border border-amber-300">
                       <img src={URL.createObjectURL(file)} alt="" className="w-full h-full object-cover" />
                       <button onClick={() => removeNewFile(i)}
-                        className="absolute top-1 right-1 w-5 h-5 rounded-full bg-black/60 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                        className="absolute top-1 right-1 w-5 h-5 bg-black/70 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
                         <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>
                       </button>
                       <span className="absolute bottom-1 right-1 text-[9px] bg-amber-500 text-white px-1 rounded font-bold">NEW</span>
@@ -1351,7 +1353,7 @@ function DayEditor({ dateKey, entry, campaigns, uploadToStorage, onSave, onDelet
           {tab === 'generate' && (
             <button onClick={handleSaveGenerate} disabled={!topic.trim()}
               className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white disabled:opacity-50 transition-all active:scale-95"
-              style={{ background: topic.trim() ? 'linear-gradient(135deg,#f09433 0%,#dc2743 50%,#bc1888 100%)' : '#9ca3af', boxShadow: topic.trim() ? '0 4px 16px rgba(220,39,67,0.35)' : 'none' }}>
+              style={{ background: topic.trim() ? '#E1306C' : '#9ca3af' }}>
               Save Post Plan
             </button>
           )}
@@ -1359,7 +1361,7 @@ function DayEditor({ dateKey, entry, campaigns, uploadToStorage, onSave, onDelet
           {tab === 'upload' && (
             <button onClick={handleSaveUpload} disabled={!uploadTopic.trim() || totalImages === 0 || uploading}
               className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white disabled:opacity-50 transition-all active:scale-95 flex items-center justify-center gap-2"
-              style={{ background: (!uploadTopic.trim() || totalImages === 0 || uploading) ? '#9ca3af' : 'linear-gradient(135deg,#96acb2 0%,#7d98a1 50%,#4c5e61 100%)', boxShadow: (!uploadTopic.trim() || totalImages === 0) ? 'none' : '0 4px 16px rgba(125,152,161,0.35)' }}>
+              style={{ background: (!uploadTopic.trim() || totalImages === 0 || uploading) ? '#9ca3af' : '#4c5e61' }}>
               {uploading ? <><svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>Uploading…</> : 'Save & Upload Images'}
             </button>
           )}
@@ -1367,7 +1369,7 @@ function DayEditor({ dateKey, entry, campaigns, uploadToStorage, onSave, onDelet
           {tab === 'reel' && (
             <button onClick={handleSaveReel} disabled={!reelBrief.trim()}
               className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white disabled:opacity-50 transition-all active:scale-95"
-              style={{ background: reelBrief.trim() ? 'linear-gradient(135deg,#7c3aed 0%,#dc2743 50%,#bc1888 100%)' : '#9ca3af' }}>
+              style={{ background: reelBrief.trim() ? '#E1306C' : '#9ca3af' }}>
               Save Reel Plan
             </button>
           )}
@@ -1517,25 +1519,25 @@ function PostDetail({ post, state, webhookUrl, regenWebhookUrl, supabaseUrl, ano
 
   return createPortal(
     <div className="fixed inset-0 z-[9999] flex items-center justify-center"
-      style={{ background: 'rgba(0,0,0,0.82)', backdropFilter: 'blur(8px)', padding: '24px' }}
+      style={{ background: 'rgba(0,0,0,0.82)', padding: '24px' }}
       onClick={e => { if (e.target === e.currentTarget) onClose() }}>
 
-      <div className="bg-white rounded-3xl shadow-2xl overflow-hidden flex flex-col"
+      <div className="bg-white border border-border shadow-dropdown overflow-hidden flex flex-col"
         style={{ width: '100%', maxWidth: '1200px', maxHeight: '94vh' }}>
 
         {/* ── Top bar ─────────────────────────────────────────────────── */}
         <div className="flex items-center justify-between px-8 py-5 border-b border-border flex-shrink-0">
           <div className="flex items-center gap-2.5 flex-wrap">
-            <span className={`text-xs font-bold px-3 py-1.5 rounded-full tracking-wide ${
+            <span className={`text-xs font-bold px-2.5 py-1 leading-[1.4] tracking-wide ${
               post.status === 'pending_publish' ? 'bg-amber-100 text-amber-700' :
               post.status === 'published'       ? 'bg-green-100 text-green-700' :
                                                   'bg-blue-100 text-blue-700'}`}>
               {post.status === 'pending_publish' ? '● Pending Review' : post.status === 'published' ? '✓ Published' : '⏰ Scheduled'}
             </span>
-            {post._fromSupabase      && <span className="text-xs bg-emerald-50 text-emerald-600 border border-emerald-200 px-2.5 py-1 rounded-full font-medium">📅 Monthly Schedule</span>}
-            {post.generatedByWorkflow && <span className="text-xs bg-purple-50 text-purple-600 border border-purple-200 px-2.5 py-1 rounded-full font-medium">✦ AI Generated</span>}
-            {styleMeta && <span className="text-xs bg-stone-100 text-stone-600 px-2.5 py-1 rounded-full">{styleMeta.icon} {styleMeta.label}</span>}
-            {campaign  && <span className="text-xs bg-amber-50 text-amber-600 border border-amber-100 px-2.5 py-1 rounded-full font-medium">{campaign.name}</span>}
+            {post._fromSupabase      && <span className="text-xs bg-emerald-50 text-emerald-600 border border-emerald-200 px-1.5 py-0.5 leading-[1.4] font-medium">📅 Monthly Schedule</span>}
+            {post.generatedByWorkflow && <span className="text-xs bg-purple-50 text-purple-600 border border-purple-200 px-1.5 py-0.5 leading-[1.4] font-medium">✦ AI Generated</span>}
+            {styleMeta && <span className="text-xs bg-stone-100 text-stone-600 px-1.5 py-0.5 leading-[1.4]">{styleMeta.icon} {styleMeta.label}</span>}
+            {campaign  && <span className="text-xs bg-amber-50 text-amber-600 border border-amber-100 px-1.5 py-0.5 leading-[1.4] font-medium">{campaign.name}</span>}
           </div>
           <button onClick={onClose}
             className="w-9 h-9 flex items-center justify-center rounded-xl text-text-tertiary hover:bg-stone-100 hover:text-text transition-colors ml-4 flex-shrink-0">
@@ -1548,12 +1550,12 @@ function PostDetail({ post, state, webhookUrl, regenWebhookUrl, supabaseUrl, ano
 
           {/* Left — Image column */}
           <div className="flex-shrink-0 flex flex-col overflow-y-auto"
-            style={{ background: 'linear-gradient(160deg, #fdf2f5 0%, #fce8f0 60%, #f9e0ef 100%)', width: isPortrait ? '420px' : isSquare ? '500px' : '560px' }}>
+            style={{ background: '#f3f5f4', width: isPortrait ? '420px' : isSquare ? '500px' : '560px' }}>
 
             {/* Image */}
             <div className="flex-1 flex items-center justify-center p-6">
               <div style={{ width: '100%', position: 'relative' }}>
-                <div style={{ width: '100%', aspectRatio: arCss, borderRadius: '16px', overflow: 'hidden', boxShadow: '0 8px 32px rgba(188,24,136,0.15), 0 2px 8px rgba(0,0,0,0.08)', position: 'relative' }}>
+                <div style={{ width: '100%', aspectRatio: arCss, borderRadius: '16px', overflow: 'hidden', position: 'relative' }}>
                   {displayImage
                     ? <PostImage src={displayImage} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
                     : <div style={{ width: '100%', height: '100%', background: '#f5d0e8', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -1564,7 +1566,7 @@ function PostDetail({ post, state, webhookUrl, regenWebhookUrl, supabaseUrl, ano
 
                   {/* Staged preview badge */}
                   {stagedImage && (
-                    <div style={{ position: 'absolute', top: 10, left: 10, background: 'rgba(125,152,161,0.92)', backdropFilter: 'blur(6px)', borderRadius: 8, padding: '4px 10px' }}>
+                    <div style={{ position: 'absolute', top: 10, left: 10, background: 'rgba(125,152,161,0.92)', borderRadius: 8, padding: '4px 10px' }}>
                       <span style={{ color: '#fff', fontSize: 11, fontWeight: 700, letterSpacing: '0.04em' }}>PREVIEW</span>
                     </div>
                   )}
@@ -1574,18 +1576,18 @@ function PostDetail({ post, state, webhookUrl, regenWebhookUrl, supabaseUrl, ano
                     <button
                       onClick={() => setCarouselIdx(i => Math.max(0, i - 1))}
                       disabled={carouselIdx === 0}
-                      style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', background: 'rgba(255,255,255,0.85)', backdropFilter: 'blur(6px)', border: 'none', borderRadius: 10, width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', opacity: carouselIdx === 0 ? 0.3 : 1, transition: 'opacity 0.15s', boxShadow: '0 2px 8px rgba(0,0,0,0.15)' }}>
+                      style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', background: 'rgba(255,255,255,0.85)', border: 'none', borderRadius: 10, width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', opacity: carouselIdx === 0 ? 0.3 : 1, transition: 'opacity 0.15s' }}>
                       <svg width="16" height="16" fill="none" stroke="#1a1410" strokeWidth="2.5" viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg>
                     </button>
                     <button
                       onClick={() => setCarouselIdx(i => Math.min(allImages.length - 1, i + 1))}
                       disabled={carouselIdx === allImages.length - 1}
-                      style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', background: 'rgba(255,255,255,0.85)', backdropFilter: 'blur(6px)', border: 'none', borderRadius: 10, width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', opacity: carouselIdx === allImages.length - 1 ? 0.3 : 1, transition: 'opacity 0.15s', boxShadow: '0 2px 8px rgba(0,0,0,0.15)' }}>
+                      style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', background: 'rgba(255,255,255,0.85)', border: 'none', borderRadius: 10, width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', opacity: carouselIdx === allImages.length - 1 ? 0.3 : 1, transition: 'opacity 0.15s' }}>
                       <svg width="16" height="16" fill="none" stroke="#1a1410" strokeWidth="2.5" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg>
                     </button>
 
                     {/* Index badge */}
-                    <div style={{ position: 'absolute', top: 10, right: 10, background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)', borderRadius: 8, padding: '3px 8px' }}>
+                    <div style={{ position: 'absolute', top: 10, right: 10, background: 'rgba(0,0,0,0.5)', borderRadius: 8, padding: '3px 8px' }}>
                       <span style={{ color: '#fff', fontSize: 11, fontWeight: 600 }}>{carouselIdx + 1} / {allImages.length}</span>
                     </div>
                   </>)}
@@ -1596,7 +1598,7 @@ function PostDetail({ post, state, webhookUrl, regenWebhookUrl, supabaseUrl, ano
                   <div style={{ display: 'flex', justifyContent: 'center', gap: 6, marginTop: 10 }}>
                     {allImages.map((_, i) => (
                       <button key={i} onClick={() => setCarouselIdx(i)}
-                        style={{ width: i === carouselIdx ? 20 : 7, height: 7, borderRadius: 4, border: 'none', cursor: 'pointer', transition: 'all 0.2s', background: i === carouselIdx ? 'linear-gradient(135deg,#f09433,#bc1888)' : 'rgba(188,24,136,0.25)' }} />
+                        style={{ width: i === carouselIdx ? 20 : 7, height: 7, borderRadius: 4, border: 'none', cursor: 'pointer', transition: 'all 0.2s', background: i === carouselIdx ? '#E1306C' : 'rgba(188,24,136,0.25)' }} />
                     ))}
                   </div>
                 )}
@@ -1611,7 +1613,7 @@ function PostDetail({ post, state, webhookUrl, regenWebhookUrl, supabaseUrl, ano
                 <div className="flex gap-2">
                   <button onClick={handleSaveImage}
                     className="flex-1 flex items-center justify-center gap-2 py-3 rounded-2xl text-sm font-bold text-white transition-all active:scale-95"
-                    style={{ background: 'linear-gradient(135deg,#22c55e,#16a34a)', boxShadow: '0 4px 16px rgba(34,197,94,0.4)' }}>
+                    style={{ background: '#16a34a' }}>
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
                     Save Image
                   </button>
@@ -1624,7 +1626,7 @@ function PostDetail({ post, state, webhookUrl, regenWebhookUrl, supabaseUrl, ano
               ) : (
                 <button onClick={handleRegenImage} disabled={regenLoading}
                   className="w-full flex items-center justify-center gap-2.5 py-3 rounded-2xl text-sm font-bold text-white disabled:opacity-50 transition-all active:scale-95"
-                  style={{ background: regenLoading ? '#e8b4cc' : 'linear-gradient(135deg,#f09433 0%,#dc2743 50%,#bc1888 100%)', boxShadow: regenLoading ? 'none' : '0 4px 20px rgba(220,39,67,0.4)' }}>
+                  style={{ background: regenLoading ? '#e8b4cc' : '#E1306C' }}>
                   {regenLoading
                     ? <><Spinner size="sm" /><span>Generating new image…</span></>
                     : <><svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-.27-4.93"/></svg><span>Regenerate Image</span></>}
@@ -1662,12 +1664,16 @@ function PostDetail({ post, state, webhookUrl, regenWebhookUrl, supabaseUrl, ano
           <div className="flex-1 flex flex-col overflow-y-auto min-w-0 bg-[#fafafa]">
             <div className="flex-1 p-6 space-y-4">
 
-              {/* Instagram post card preview */}
-              <div className="bg-white rounded-2xl border border-stone-200 shadow-sm overflow-hidden max-w-[468px] mx-auto">
+              {/* Instagram post card preview.
+                  DESIGN-SYSTEM EXCEPTION — see the note in LinkedInPage: this
+                  mimics Instagram's own post chrome (rounded card, round
+                  avatar) on purpose, so it stays rounded while the rest of the
+                  app is square. */}
+              <div className="bg-white rounded-[8px] border border-stone-200 overflow-hidden max-w-[468px] mx-auto">
                 {/* Post header */}
                 <div className="px-4 py-3 flex items-center gap-3">
                   <div className="w-9 h-9 rounded-full flex-shrink-0 flex items-center justify-center"
-                    style={{ background: 'linear-gradient(135deg,#f09433 0%,#e6683c 25%,#dc2743 50%,#cc2366 75%,#bc1888 100%)' }}>
+                    style={{ background: '#E1306C' }}>
                     <span className="text-white text-xs font-bold">A</span>
                   </div>
                   <div className="flex-1 min-w-0">
@@ -1755,7 +1761,7 @@ function PostDetail({ post, state, webhookUrl, regenWebhookUrl, supabaseUrl, ano
                         <button onClick={handleCancelCaption} className="text-xs text-text-tertiary hover:text-text px-2.5 py-1 rounded-lg hover:bg-surface-subtle transition-colors">Cancel</button>
                         <button onClick={handleSaveCaption}
                           className="flex items-center gap-1 text-xs text-white font-semibold px-3 py-1 rounded-lg transition-colors"
-                          style={{ background: 'linear-gradient(135deg,#22c55e,#16a34a)' }}>
+                          style={{ background: '#16a34a' }}>
                           <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
                           Save
                         </button>
@@ -1780,7 +1786,7 @@ function PostDetail({ post, state, webhookUrl, regenWebhookUrl, supabaseUrl, ano
                     <p className="text-[11px] font-bold text-text-tertiary uppercase tracking-widest mb-2">Hashtags</p>
                     <div className="flex flex-wrap gap-1.5">
                       {post.hashtags.split(' ').filter(Boolean).map((tag, i) => (
-                        <span key={i} className="text-xs bg-pink-50 text-pink-600 border border-pink-100 px-2.5 py-1 rounded-full font-medium">{tag}</span>
+                        <span key={i} className="text-xs bg-pink-50 text-pink-600 border border-pink-100 px-1.5 py-0.5 leading-[1.4] font-medium">{tag}</span>
                       ))}
                     </div>
                   </div>
@@ -1801,8 +1807,7 @@ function PostDetail({ post, state, webhookUrl, regenWebhookUrl, supabaseUrl, ano
                   onClick={() => { onStatusChange(post, 'published'); setApproved(true) }}
                   className="flex-1 flex items-center justify-center gap-2.5 py-3.5 rounded-2xl text-sm font-bold text-white transition-all active:scale-95"
                   style={{
-                    background: approved ? '#16a34a' : 'linear-gradient(135deg,#f09433 0%,#dc2743 50%,#bc1888 100%)',
-                    boxShadow: approved ? '0 4px 16px rgba(22,163,74,0.35)' : '0 4px 20px rgba(220,39,67,0.4)',
+                    background: approved ? '#16a34a' : '#E1306C',
                   }}>
                   {approved
                     ? <><svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg> Approved!</>
@@ -1957,16 +1962,16 @@ function PostsList({ posts, dispatch, state, onCreateClick, updatePostStatus, we
             <button key={f.key} onClick={() => setFilter(f.key)}
               className={`relative px-4 py-1.5 rounded-xl text-xs font-semibold transition-all duration-200 ${
                 filter === f.key
-                  ? 'text-white shadow-lg scale-105'
+                  ? 'text-white  scale-105'
                   : 'text-text-secondary bg-white border border-border hover:border-stone-300 hover:text-text'
               }`}
               style={filter === f.key ? {
-                background: 'linear-gradient(135deg,#f09433 0%,#dc2743 50%,#bc1888 100%)',
-                boxShadow: '0 0 16px rgba(220,39,67,0.45), 0 2px 8px rgba(240,148,51,0.3)',
+                background: '#E1306C',
+                
               } : {}}>
               {f.label}
               {f.count > 0 && (
-                <span className={`ml-1.5 text-[10px] px-1.5 py-0.5 rounded-full font-bold ${
+                <span className={`ml-1.5 text-[10px] px-1.5 py-0.5 leading-[1.4] font-bold ${
                   filter === f.key ? 'bg-white/25 text-white' : 'bg-surface-subtle text-text-tertiary'
                 }`}>{f.count}</span>
               )}
@@ -1980,7 +1985,7 @@ function PostsList({ posts, dispatch, state, onCreateClick, updatePostStatus, we
       {filtered.length === 0 ? (
         <Card className="p-12 text-center">
           <div className="w-12 h-12 rounded-2xl mx-auto mb-4 flex items-center justify-center"
-            style={{ background: 'linear-gradient(135deg,#f09433 0%,#dc2743 50%,#bc1888 100%)' }}>
+            style={{ background: '#E1306C' }}>
             <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
               <rect x="2" y="2" width="20" height="20" rx="5"/><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/><line x1="17.5" y1="6.5" x2="17.51" y2="6.5"/>
             </svg>
@@ -2019,11 +2024,11 @@ function PostsList({ posts, dispatch, state, onCreateClick, updatePostStatus, we
                     <div className="flex items-start justify-between gap-2 mb-2">
                       <div className="flex items-center gap-1.5 flex-wrap">
                         <Badge status={p.status === 'pending_publish' ? 'pending' : p.status} />
-                        {p.generatedByWorkflow && <span className="text-[10px] bg-purple-50 text-purple-600 px-2 py-0.5 rounded-full font-medium">AI</span>}
-                        {p._fromSupabase && <span className="text-[10px] bg-green-50 text-green-600 px-2 py-0.5 rounded-full font-medium">📅 Scheduled</span>}
-                        {customMeta && <span className="text-[10px] bg-surface-subtle text-text-secondary px-2 py-0.5 rounded-full">{customMeta.icon} {customMeta.label}</span>}
-                        {!customMeta && styleMeta && <span className="text-[10px] bg-surface-subtle text-text-secondary px-2 py-0.5 rounded-full">{styleMeta.icon} {styleMeta.label}</span>}
-                        {campaign && <span className="text-[10px] bg-amber-50 text-amber-600 px-2 py-0.5 rounded-full font-medium">{campaign.name}</span>}
+                        {p.generatedByWorkflow && <span className="text-[10px] bg-purple-50 text-purple-600 px-1.5 py-0.5 leading-[1.4] font-medium">AI</span>}
+                        {p._fromSupabase && <span className="text-[10px] bg-green-50 text-green-600 px-1.5 py-0.5 leading-[1.4] font-medium">📅 Scheduled</span>}
+                        {customMeta && <span className="text-[10px] bg-surface-subtle text-text-secondary px-1.5 py-0.5 leading-[1.4]">{customMeta.icon} {customMeta.label}</span>}
+                        {!customMeta && styleMeta && <span className="text-[10px] bg-surface-subtle text-text-secondary px-1.5 py-0.5 leading-[1.4]">{styleMeta.icon} {styleMeta.label}</span>}
+                        {campaign && <span className="text-[10px] bg-amber-50 text-amber-600 px-1.5 py-0.5 leading-[1.4] font-medium">{campaign.name}</span>}
                       </div>
                       <button onClick={e => { e.stopPropagation(); handleDelete(p) }}
                         className="text-text-tertiary hover:text-red-500 transition-colors flex-shrink-0 p-1 -m-1">
@@ -2283,26 +2288,26 @@ function ReelsPanel({ state, dispatch }) {
 
       {/* Header strip */}
       <div className="rounded-2xl overflow-hidden border border-border"
-        style={{ background: 'linear-gradient(135deg,#1a1a2e 0%,#16213e 50%,#0f3460 100%)' }}>
+        style={{ background: '#1c2321' }}>
         <div className="p-5 flex items-center justify-between flex-wrap gap-4">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-2xl flex items-center justify-center"
-              style={{ background: 'linear-gradient(135deg,#f09433 0%,#dc2743 50%,#bc1888 100%)' }}>
+              style={{ background: '#E1306C' }}>
               <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24">
                 <polygon points="5 3 19 12 5 21 5 3"/>
               </svg>
             </div>
             <div>
-              <p className="font-display font-semibold text-white text-base">Reels Studio</p>
+              <p className="font-semibold text-white text-sm">Reels Studio</p>
               <p className="text-xs text-white/60">
                 {webhookUrl ? 'n8n connected · AI generation enabled' : 'Configure webhook to enable AI generation'}
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-1 bg-white/10 rounded-xl p-1">
+          <div className="flex items-center">
             {[{ key:'planner', label:'+ New Reel' }, { key:'library', label:`Library (${reels.length})` }].map(v => (
               <button key={v.key} onClick={() => setSubView(v.key)}
-                className={`px-4 py-1.5 rounded-lg text-xs font-semibold transition-all ${subView === v.key ? 'bg-white text-stone-900' : 'text-white/70 hover:text-white'}`}>
+                className={`px-3 py-1.5 border -ml-px first:ml-0 text-xs font-semibold transition-colors ${subView === v.key ? 'bg-white text-stone-900 border-white relative z-10' : 'border-white/30 text-white/70 hover:text-white hover:bg-white/10'}`}>
                 {v.label}
               </button>
             ))}
@@ -2350,8 +2355,8 @@ function ReelsPanel({ state, dispatch }) {
                 <button key={f.value} onClick={() => setFormat(f.value)}
                   className={`relative text-left rounded-xl border px-3 py-2.5 transition-all ${format === f.value ? 'border-pink-400 bg-pink-50 shadow-sm ring-1 ring-pink-300' : 'border-border bg-white hover:border-border-strong hover:bg-surface-subtle'}`}>
                   {format === f.value && (
-                    <span className="absolute top-2 right-2 w-4 h-4 rounded-full flex items-center justify-center"
-                      style={{ background:'linear-gradient(135deg,#f09433,#bc1888)' }}>
+                    <span className="absolute top-2 right-2 w-4 h-4 flex items-center justify-center"
+                      style={{ background:'#E1306C' }}>
                       <svg className="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" strokeWidth="3" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
                     </span>
                   )}
@@ -2375,7 +2380,7 @@ function ReelsPanel({ state, dispatch }) {
                   <button key={d.value} onClick={() => setDuration(d.value)}
                     className={`relative flex flex-col items-center px-4 py-2 rounded-xl border text-xs font-medium transition-all ${duration === d.value ? 'border-pink-400 bg-pink-50 text-pink-700' : 'border-border text-text-secondary hover:border-border-strong'}`}>
                     {(d.value === '5s' || d.value === '8s') && (
-                      <span className="absolute -top-2 left-1/2 -translate-x-1/2 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-amber-400 text-amber-900 whitespace-nowrap">test</span>
+                      <span className="absolute -top-2 left-1/2 -translate-x-1/2 text-[9px] font-bold px-1.5 py-0.5 leading-[1.4] bg-amber-400 text-amber-900 whitespace-nowrap">test</span>
                     )}
                     <span className="font-bold">{d.label}</span>
                     <span className="text-[10px] opacity-70">{d.desc}</span>
@@ -2472,7 +2477,7 @@ function ReelsPanel({ state, dispatch }) {
               {/* Generate via webhook */}
               <button onClick={handleGenerate} disabled={!brief.trim() || loading}
                 className="flex-[2] py-2.5 rounded-xl font-semibold text-sm text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-                style={{ background: (loading || !brief.trim()) ? '#9ca3af' : 'linear-gradient(135deg,#f09433 0%,#dc2743 50%,#bc1888 100%)' }}>
+                style={{ background: (loading || !brief.trim()) ? '#9ca3af' : '#E1306C' }}>
                 {loading ? (
                   <>
                     <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
@@ -2514,7 +2519,7 @@ function ReelsPanel({ state, dispatch }) {
           {reels.length === 0 ? (
             <Card className="py-16 flex flex-col items-center gap-3 text-center">
               <div className="w-12 h-12 rounded-2xl flex items-center justify-center"
-                style={{ background:'linear-gradient(135deg,#f09433,#bc1888)' }}>
+                style={{ background:'#E1306C' }}>
                 <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24">
                   <polygon points="5 3 19 12 5 21 5 3"/>
                 </svg>
@@ -2525,7 +2530,7 @@ function ReelsPanel({ state, dispatch }) {
               </div>
               <button onClick={() => setSubView('planner')}
                 className="px-4 py-2 rounded-xl text-sm font-semibold text-white"
-                style={{ background:'linear-gradient(135deg,#f09433,#bc1888)' }}>
+                style={{ background:'#E1306C' }}>
                 Create a Reel
               </button>
             </Card>
@@ -2534,7 +2539,7 @@ function ReelsPanel({ state, dispatch }) {
               const fmt = REEL_FORMATS.find(f => f.value === reel.format)
               return (
                 <Card key={reel.id} className="overflow-hidden">
-                  <div className="h-0.5" style={{ background:'linear-gradient(90deg,#f09433,#dc2743,#bc1888)' }} />
+                  <div className="h-0.5" style={{ background:'#E1306C' }} />
                   <div className="p-4">
                     <div className="flex items-start gap-3">
 
@@ -2555,9 +2560,9 @@ function ReelsPanel({ state, dispatch }) {
                           <div>
                             <div className="flex items-center gap-2 flex-wrap mb-1">
                               <span className="text-sm font-semibold text-text">{fmt?.icon} {fmt?.label}</span>
-                              <span className="text-xs bg-stone-100 text-stone-600 px-2 py-0.5 rounded-full font-medium">{reel.duration}</span>
+                              <span className="text-xs bg-stone-100 text-stone-600 px-1.5 py-0.5 leading-[1.4] font-medium">{reel.duration}</span>
                               <button onClick={() => cycleStatus(reel.id)}
-                                className={`text-xs px-2.5 py-0.5 rounded-full font-medium cursor-pointer transition-all hover:opacity-80 ${STATUS_COLORS_REEL[reel.status] || 'bg-stone-100 text-stone-600'}`}>
+                                className={`text-[10px] px-1.5 py-0.5 leading-[1.4] font-bold uppercase tracking-[0.08em] cursor-pointer transition-opacity hover:opacity-80 ${STATUS_COLORS_REEL[reel.status] || 'bg-stone-100 text-stone-600'}`}>
                                 {reel.status === 'generating' ? '⏳ Generating…' : reel.status.charAt(0).toUpperCase() + reel.status.slice(1)}
                               </button>
                             </div>
@@ -2657,12 +2662,12 @@ function ReelApprovalScreen({ data, onApprove, onDiscard }) {
         <div>
           <div className="flex items-center gap-2 mb-1">
             <div className="w-6 h-6 rounded-lg flex items-center justify-center"
-              style={{ background:'linear-gradient(135deg,#f09433,#bc1888)' }}>
+              style={{ background:'#E1306C' }}>
               <svg className="w-3.5 h-3.5 text-white" fill="currentColor" viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"/></svg>
             </div>
             <p className="text-[11px] font-bold uppercase tracking-widest text-text-tertiary">Reel Review</p>
           </div>
-          <h2 className="font-display font-bold text-xl text-text">Looks good?</h2>
+          <h2 className="font-semibold text-sm text-text">Looks good?</h2>
           <p className="text-xs text-text-secondary mt-0.5">Watch your reel, edit the caption if needed, then save it to your library.</p>
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
@@ -2672,7 +2677,7 @@ function ReelApprovalScreen({ data, onApprove, onDiscard }) {
           </button>
           <button onClick={() => onApprove({ ...data, caption: captionDraft, hashtags: hashtagDraft })}
             className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold text-white shadow-sm transition-all hover:opacity-90"
-            style={{ background:'linear-gradient(135deg,#f09433 0%,#dc2743 50%,#bc1888 100%)' }}>
+            style={{ background:'#E1306C' }}>
             <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
             Approve & Save
           </button>
@@ -2686,8 +2691,9 @@ function ReelApprovalScreen({ data, onApprove, onDiscard }) {
 
           {/* Phone frame */}
           <div className="relative w-full max-w-[300px] mx-auto">
-            {/* Phone shell */}
-            <div className="rounded-[32px] overflow-hidden border-[6px] border-stone-200 shadow-2xl bg-stone-100"
+            {/* Phone shell. Also an exception: this draws a physical handset,
+                and real handsets have rounded corners. */}
+            <div className="rounded-[32px] overflow-hidden border-[6px] border-stone-200 bg-stone-100"
               style={{ aspectRatio:'9/16' }}>
 
               {data.video_url ? (
@@ -2709,7 +2715,7 @@ function ReelApprovalScreen({ data, onApprove, onDiscard }) {
                     <button onClick={togglePlay}
                       className="absolute inset-0 flex items-center justify-center">
                       <div className="w-14 h-14 rounded-full flex items-center justify-center"
-                        style={{ background:'rgba(0,0,0,0.45)', backdropFilter:'blur(4px)' }}>
+                        style={{ background:'rgba(0,0,0,0.62)' }}>
                         <svg className="w-6 h-6 text-white ml-0.5" fill="currentColor" viewBox="0 0 24 24">
                           <polygon points="5 3 19 12 5 21 5 3"/>
                         </svg>
@@ -2724,8 +2730,8 @@ function ReelApprovalScreen({ data, onApprove, onDiscard }) {
                       {captionDraft.split('\n')[0]}
                     </p>
                     {/* Progress bar */}
-                    <div className="w-full h-0.5 bg-white/30 rounded-full cursor-pointer mb-1" onClick={seek}>
-                      <div className="h-full rounded-full bg-white transition-all" style={{ width:`${pct}%` }}/>
+                    <div className="w-full h-0.5 bg-white/30 cursor-pointer mb-1" onClick={seek}>
+                      <div className="h-full bg-white transition-all" style={{ width:`${pct}%` }}/>
                     </div>
                     <div className="flex items-center justify-between">
                       <span className="text-white/60 text-[10px] font-mono">{fmt(progress)} / {fmt(dur)}</span>
@@ -2749,12 +2755,12 @@ function ReelApprovalScreen({ data, onApprove, onDiscard }) {
 
                   {/* Badges top */}
                   <div className="absolute top-3 left-3 flex gap-1.5">
-                    <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full text-white"
-                      style={{ background:'rgba(0,0,0,0.5)', backdropFilter:'blur(4px)' }}>
+                    <span className="text-[10px] font-semibold px-1.5 py-0.5 leading-[1.4] text-white"
+                      style={{ background:'rgba(0,0,0,0.62)' }}>
                       {data.duration}
                     </span>
-                    <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full text-white"
-                      style={{ background:'rgba(0,0,0,0.5)', backdropFilter:'blur(4px)' }}>
+                    <span className="text-[10px] font-semibold px-1.5 py-0.5 leading-[1.4] text-white"
+                      style={{ background:'rgba(0,0,0,0.62)' }}>
                       720p
                     </span>
                   </div>
@@ -2769,7 +2775,7 @@ function ReelApprovalScreen({ data, onApprove, onDiscard }) {
             </div>
 
             {/* Phone notch */}
-            <div className="absolute top-2 left-1/2 -translate-x-1/2 w-16 h-1.5 bg-stone-300 rounded-full"/>
+            <div className="absolute top-2 left-1/2 -translate-x-1/2 w-16 h-1.5 bg-stone-300"/>
           </div>
 
           {/* Format + AI note below phone */}
@@ -2856,7 +2862,7 @@ function ReelApprovalScreen({ data, onApprove, onDiscard }) {
             </button>
             <button onClick={() => onApprove({ ...data, caption: captionDraft, hashtags: hashtagDraft })}
               className="flex-[2] py-3 rounded-xl text-sm font-bold text-white flex items-center justify-center gap-2 hover:opacity-90 transition-all"
-              style={{ background:'linear-gradient(135deg,#f09433 0%,#dc2743 50%,#bc1888 100%)' }}>
+              style={{ background:'#E1306C' }}>
               <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
               Approve & Save to Library
             </button>

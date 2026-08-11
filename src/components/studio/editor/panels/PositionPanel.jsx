@@ -24,7 +24,7 @@ export function PositionPanel({
   const [tab, setTab] = useState('arrange')
   return (
     <div className="space-y-4">
-      <div className="flex gap-1 rounded-lg bg-surface-subtle/60 p-0.5">
+      <div className="flex gap-1 rounded-lg bg-surface-subtle p-0.5">
         {['arrange', 'layers'].map(t => (
           <button key={t} type="button" onClick={() => setTab(t)}
             className={`flex-1 rounded-md px-2 py-1 text-[11px] font-medium capitalize transition-colors ${

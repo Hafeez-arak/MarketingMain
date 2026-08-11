@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useApp } from '../../store/app'
 import { useAuth } from '../../store/auth'
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from '../../lib/supabaseClient'
-import { Card, Button, Badge, Empty, Spinner, PostImage } from '../../components/ui/index'
+import { Card, Button, Badge, Empty, Spinner, PostImage, PageHeader } from '../../components/ui/index'
 import { formatDateTime } from '../../lib/utils'
 import { logEditFeedback } from '../../lib/brandBrain'
 import { fetchBrandProfile, buildInstructionsString } from '../../lib/brandBrain'
@@ -140,8 +140,8 @@ function ProcessingCard({ idea }) {
         </div>
         <div className="flex-1 p-4 min-w-0">
           <div className="flex items-center gap-1.5 flex-wrap mb-2">
-            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${platformMeta.color}`}>{platformMeta.label}</span>
-            <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 flex items-center gap-1">
+            <span className={`text-[10px] font-bold uppercase tracking-[0.08em] px-1.5 py-0.5 leading-[1.4] ${platformMeta.color}`}>{platformMeta.label}</span>
+            <span className="text-[10px] font-semibold px-1.5 py-0.5 leading-[1.4] bg-amber-50 text-amber-700 flex items-center gap-1">
               <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" /> Generating…
             </span>
           </div>
@@ -165,8 +165,8 @@ function FailedCard({ idea, post, onRetry, retrying }) {
         </div>
         <div className="flex-1 p-4 min-w-0">
           <div className="flex items-center gap-1.5 flex-wrap mb-2">
-            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${platformMeta.color}`}>{platformMeta.label}</span>
-            <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-red-50 text-red-600">✕ Generation failed</span>
+            <span className={`text-[10px] font-bold uppercase tracking-[0.08em] px-1.5 py-0.5 leading-[1.4] ${platformMeta.color}`}>{platformMeta.label}</span>
+            <span className="text-[10px] font-semibold px-1.5 py-0.5 leading-[1.4] bg-red-50 text-red-600">✕ Generation failed</span>
           </div>
           <p className="text-sm text-text leading-relaxed">{idea.title || idea.topic || 'Untitled idea'}</p>
           <p className="text-[11px] text-red-600 mt-1 leading-relaxed">{idea.generation_error || 'Unknown error.'}</p>
@@ -200,7 +200,7 @@ function PublishBar({ post, onPublish, busy }) {
   if (status === 'published' || status === 'scheduled' || status === 'publishing') {
     return (
       <div className="flex items-center gap-2 mt-2 flex-wrap" onClick={e => e.stopPropagation()}>
-        <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${meta.cls}`}>{meta.label}</span>
+        <span className={`text-[10px] font-bold uppercase tracking-[0.08em] px-1.5 py-0.5 leading-[1.4] ${meta.cls}`}>{meta.label}</span>
         {post.scheduledPublishAt && status === 'scheduled' && (
           <span className="text-[10px] text-text-tertiary">for {formatDateTime(post.scheduledPublishAt)}</span>
         )}
@@ -249,7 +249,7 @@ function PostCard({ post, onOpen, onApprove, onReject, onPublish, publishing }) 
                 <svg className="w-7 h-7 text-border-strong" fill="none" stroke="currentColor" strokeWidth="1" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
               </div>}
           {(post.mediaUrls?.length || 0) > 1 && (
-            <span className="absolute top-1 right-1 text-[9px] font-bold bg-black/60 text-white px-1.5 py-0.5 rounded-full flex items-center gap-0.5">
+            <span className="absolute top-1 right-1 text-[9px] font-bold bg-black/60 text-white px-1.5 py-0.5 leading-[1.4] flex items-center gap-0.5">
               <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><rect x="3" y="3" width="14" height="14" rx="2"/><path d="M21 7v12a2 2 0 0 1-2 2H7"/></svg>
               {post.mediaUrls.length}
             </span>
@@ -258,10 +258,10 @@ function PostCard({ post, onOpen, onApprove, onReject, onPublish, publishing }) 
         <div className="flex-1 p-4 min-w-0">
           <div className="flex items-start justify-between gap-2 mb-2">
             <div className="flex items-center gap-1.5 flex-wrap">
-              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${platformMeta.color}`}>{platformMeta.label}</span>
+              <span className={`text-[10px] font-bold uppercase tracking-[0.08em] px-1.5 py-0.5 leading-[1.4] ${platformMeta.color}`}>{platformMeta.label}</span>
               <Badge status={post.status} />
-              {post.source === 'plan' && <span className="text-[10px] bg-amber-50 text-amber-700 px-2 py-0.5 rounded-full font-medium">📋 From plan</span>}
-              {post.postKind && post.postKind !== 'caption_image' && <span className="text-[10px] bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full font-medium capitalize">{post.postKind.replace('_', ' ')}</span>}
+              {post.source === 'plan' && <span className="text-[10px] bg-amber-50 text-amber-700 px-1.5 py-0.5 leading-[1.4] font-medium">📋 From plan</span>}
+              {post.postKind && post.postKind !== 'caption_image' && <span className="text-[10px] bg-indigo-50 text-indigo-700 px-1.5 py-0.5 leading-[1.4] font-medium capitalize">{post.postKind.replace('_', ' ')}</span>}
             </div>
           </div>
           {post.captionAr && post.captionEn ? (
@@ -514,24 +514,20 @@ export function Approvals() {
   }
 
   return (
-    <div className="max-w-6xl space-y-5">
-      <div className="flex items-start justify-between gap-4 flex-wrap">
-        <div>
-          <h1 className="font-display text-2xl font-bold text-stone-900">Post Approvals</h1>
-          <p className="text-sm text-text-secondary mt-1">
-            Every post the Plan Generation workflows produce — grouped by the month they came from. Watch generation happen, review the real caption + image, approve, then publish or schedule.
-          </p>
-        </div>
+    <div className="max-w-6xl space-y-4">
+      <PageHeader
+        title="Post Approvals"
+        subtitle="Every post the Plan Generation workflows produce — grouped by the month they came from. Watch generation happen, review the real caption + image, approve, then publish or schedule.">
         <div className="text-right">
-          <Button size="xs" variant="ghost" onClick={handleSync} disabled={syncing}>
-            {syncing ? <><Spinner size="sm" /> Syncing…</> : '↻ Sync from Zernio'}
+          <Button size="sm" variant="secondary" onClick={handleSync} disabled={syncing}>
+            {syncing ? <><Spinner size="sm" /> Syncing…</> : 'Sync from Zernio'}
           </Button>
-          {syncNote && <p className="text-[10px] text-text-tertiary mt-1 max-w-[240px]">{syncNote}</p>}
+          {syncNote && <p className="text-[10px] text-text-tertiary mt-1.5 max-w-[240px]">{syncNote}</p>}
         </div>
-      </div>
+      </PageHeader>
 
       {publishError && (
-        <Card className="p-3 border-red-200 bg-red-50/50">
+        <Card className="p-3 border-red-200 bg-red-50">
           <p className="text-xs text-red-600">
             <span className="font-semibold">Publish failed.</span> {publishError.message}
           </p>
@@ -539,18 +535,24 @@ export function Approvals() {
       )}
 
       <div className="flex items-center justify-between flex-wrap gap-3">
-        <div className="flex gap-2 flex-wrap">
+        {/* Status tabs as one segmented bar. Separate bordered buttons with
+            gaps made the selected one read as "a button that happens to be
+            dark" rather than as the active segment of a control. */}
+        <div className="flex flex-wrap">
           {STATUS_TABS.map(t => (
             <button key={t.key} onClick={() => setStatusFilter(t.key)}
-              className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all ${statusFilter === t.key ? 'bg-amber-600 text-white shadow-sm' : 'bg-white border border-border text-text-secondary hover:border-amber-300'}`}>
-              {t.label}{t.count > 0 && <span className={`ml-1.5 ${statusFilter === t.key ? 'opacity-75' : 'text-text-tertiary'}`}>{t.count}</span>}
+              className={`px-3 py-1.5 border -ml-px first:ml-0 text-xs font-semibold transition-colors
+                ${statusFilter === t.key
+                  ? 'bg-amber-700 text-white border-amber-700 relative z-10'
+                  : 'bg-white border-border text-text-secondary hover:text-text hover:bg-surface-subtle'}`}>
+              {t.label}{t.count > 0 && <span className={`ml-1.5 tabular-nums ${statusFilter === t.key ? 'opacity-70' : 'text-text-tertiary'}`}>{t.count}</span>}
             </button>
           ))}
         </div>
-        <div className="flex gap-1 bg-surface-subtle border border-border rounded-xl p-1">
+        <div className="flex">
           {PLATFORM_TABS.map(t => (
             <button key={t.key} onClick={() => setPlatformFilter(t.key)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${platformFilter === t.key ? 'bg-white text-text shadow-sm border border-border' : 'text-text-secondary hover:text-text'}`}>
+              className={`px-3 py-1.5 border -ml-px first:ml-0 text-xs font-semibold transition-colors ${platformFilter === t.key ? 'bg-amber-700 text-white border-amber-700 relative z-10' : 'bg-white text-text-secondary border-border hover:text-text hover:bg-surface-subtle'}`}>
               {t.label}
             </button>
           ))}
@@ -576,7 +578,7 @@ export function Approvals() {
                 <button onClick={() => toggleExpanded(group.key, index)}
                   className="w-full flex items-center gap-2.5 px-4 py-3 hover:bg-surface-subtle transition-colors">
                   <svg className={`w-3.5 h-3.5 text-text-tertiary transition-transform flex-shrink-0 ${expanded ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg>
-                  <span className="font-display font-semibold text-text text-sm">{group.title}</span>
+                  <span className="font-semibold text-text text-sm">{group.title}</span>
                   <span className="text-[11px] text-text-tertiary">{group.items.length} post{group.items.length !== 1 ? 's' : ''}</span>
                 </button>
                 {expanded && (

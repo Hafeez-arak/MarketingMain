@@ -3,7 +3,7 @@ import { useApp, actions } from '../../store/app'
 import { useAuth } from '../../store/auth'
 import { supabase } from '../../lib/supabaseClient'
 import { fetchWorkspaceWebhooks, saveWorkspaceWebhooks } from '../../lib/workspaceWebhooks'
-import { Card, Button, Input, Select, Avatar, Modal } from '../../components/ui/index'
+import { Card, Button, Input, Select, Avatar, Modal, PageHeader } from '../../components/ui/index'
 import { uid, PLATFORM_META } from '../../lib/utils'
 
 // ─── Workspace / Supabase status ────────────────────────────────────────────
@@ -29,8 +29,8 @@ function SupabaseConfig() {
             <div className="flex items-center gap-2">
               <p className="font-medium text-text text-sm">Workspace data store</p>
               {isConfigured
-                ? <span className="text-[10px] bg-sage-100 text-sage-700 px-2 py-0.5 rounded-full font-semibold">● Connected</span>
-                : <span className="text-[10px] bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-semibold">No active workspace</span>}
+                ? <span className="text-[10px] bg-sage-100 text-sage-700 px-1.5 py-0.5 leading-[1.4] font-semibold">● Connected</span>
+                : <span className="text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 leading-[1.4] font-semibold">No active workspace</span>}
             </div>
             <p className="text-xs text-text-tertiary mt-0.5">
               {isConfigured
@@ -52,8 +52,8 @@ const WORKFLOW_CONFIGS = [
     placeholder: 'https://your-instance.app.n8n.cloud/webhook/arak-instagram',
     description: 'Triggers AI content generation — captions, images, style switching.',
     icon: (
-      <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
-        style={{ background: 'linear-gradient(135deg,#f09433 0%,#e6683c 25%,#dc2743 50%,#cc2366 75%,#bc1888 100%)' }}>
+      <div className="w-8 h-8 flex items-center justify-center flex-shrink-0"
+        style={{ background: '#E1306C' }}>
         <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24">
           <rect x="2" y="2" width="20" height="20" rx="5"/>
           <path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/>
@@ -68,8 +68,8 @@ const WORKFLOW_CONFIGS = [
     placeholder: 'https://your-instance.app.n8n.cloud/webhook/arak-instagram-reels',
     description: 'Triggers the Reels workflow — FLUX cover image + Wan 2.5 I2V video generation.',
     icon: (
-      <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
-        style={{ background: 'linear-gradient(135deg,#7c3aed 0%,#dc2743 50%,#bc1888 100%)' }}>
+      <div className="w-8 h-8 flex items-center justify-center flex-shrink-0"
+        style={{ background: '#E1306C' }}>
         <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24">
           <polygon points="5 3 19 12 5 21 5 3"/>
         </svg>
@@ -82,8 +82,8 @@ const WORKFLOW_CONFIGS = [
     placeholder: 'https://your-instance.app.n8n.cloud/webhook/arak-instagram-schedule',
     description: 'Separate path for dispatching pre-planned monthly schedule entries.',
     icon: (
-      <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
-        style={{ background: 'linear-gradient(135deg,#f09433 0%,#e6683c 25%,#dc2743 50%,#cc2366 75%,#bc1888 100%)' }}>
+      <div className="w-8 h-8 flex items-center justify-center flex-shrink-0"
+        style={{ background: '#E1306C' }}>
         <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24">
           <rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
         </svg>
@@ -96,8 +96,8 @@ const WORKFLOW_CONFIGS = [
     placeholder: 'https://your-instance.app.n8n.cloud/webhook/arak-instagram-schedule-regen',
     description: 'Called when you click Regenerate Image on a scheduled post.',
     icon: (
-      <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
-        style={{ background: 'linear-gradient(135deg,#f09433 0%,#e6683c 25%,#dc2743 50%,#cc2366 75%,#bc1888 100%)' }}>
+      <div className="w-8 h-8 flex items-center justify-center flex-shrink-0"
+        style={{ background: '#E1306C' }}>
         <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24">
           <polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-.27-4.93"/>
         </svg>
@@ -149,7 +149,7 @@ const WORKFLOW_CONFIGS = [
     placeholder: 'https://your-instance.app.n8n.cloud/webhook/arak-campaign-planner',
     description: 'Decomposes a stated goal into a dated set of post ideas across platforms. Returns a plan — never writes to Supabase itself.',
     icon: (
-      <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: 'linear-gradient(135deg,#7c3aed,#a78bfa)' }}>
+      <div className="w-8 h-8 flex items-center justify-center flex-shrink-0" style={{ background: '#7c3aed' }}>
         <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24">
           <path d="M12 3v3m0 12v3m9-9h-3M6 12H3m15.36-6.36l-2.12 2.12M8.76 15.24l-2.12 2.12m12.72 0l-2.12-2.12M8.76 8.76L6.64 6.64"/>
         </svg>
@@ -162,7 +162,7 @@ const WORKFLOW_CONFIGS = [
     placeholder: 'https://your-instance.app.n8n.cloud/webhook/arak-ig-plan-generation',
     description: 'When a plan is approved, generates each approved Instagram idea (caption + image) into pending_review, ready to review before scheduling.',
     icon: (
-      <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: 'linear-gradient(135deg,#f09433,#bc1888)' }}>
+      <div className="w-8 h-8 flex items-center justify-center flex-shrink-0" style={{ background: '#E1306C' }}>
         <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><rect x="2" y="2" width="20" height="20" rx="5"/><circle cx="12" cy="12" r="4"/><circle cx="17.5" cy="6.5" r="1"/></svg>
       </div>
     ),
@@ -173,7 +173,7 @@ const WORKFLOW_CONFIGS = [
     placeholder: 'https://your-instance.app.n8n.cloud/webhook/arak-li-plan-generation',
     description: 'When a plan is approved, generates each approved LinkedIn idea (hook/body + image) into pending_review, ready to review before scheduling.',
     icon: (
-      <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: '#0A66C2' }}>
+      <div className="w-8 h-8 flex items-center justify-center flex-shrink-0" style={{ background: '#0A66C2' }}>
         <svg className="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 24 24"><path d="M4.98 3.5a2.5 2.5 0 100 5 2.5 2.5 0 000-5zM3 9h4v12H3zM10 9h3.8v1.7h.05c.53-1 1.83-2.05 3.77-2.05 4.03 0 4.78 2.65 4.78 6.1V21h-4v-5.3c0-1.26-.02-2.9-1.77-2.9s-2.03 1.38-2.03 2.8V21h-4z"/></svg>
       </div>
     ),
@@ -184,7 +184,7 @@ const WORKFLOW_CONFIGS = [
     placeholder: 'https://your-instance.app.n8n.cloud/webhook/arak-elongate-idea',
     description: 'When you manually add your own idea in the planner, this turns your rough topic into a full brief (angle, objective, CTA, image direction) — same quality as AI-suggested ideas — before you approve it. Runs automatically on save.',
     icon: (
-      <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: 'linear-gradient(135deg,#059669,#34d399)' }}>
+      <div className="w-8 h-8 flex items-center justify-center flex-shrink-0" style={{ background: '#059669' }}>
         <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24">
           <path d="M12 20h9M16.5 3.5a2.12 2.12 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/>
         </svg>
@@ -197,7 +197,7 @@ const WORKFLOW_CONFIGS = [
     placeholder: 'https://your-instance.app.n8n.cloud/webhook/arak-caption-studio',
     description: 'Powers the ✨ Rewrite panel on the post review screen — 3 caption variants side by side, regenerate just the hook or hashtags, with length / hook-style / emoji / hashtag-count controls. On-demand only, so it never adds cost to normal generation.',
     icon: (
-      <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: 'linear-gradient(135deg,#7c3aed,#c084fc)' }}>
+      <div className="w-8 h-8 flex items-center justify-center flex-shrink-0" style={{ background: '#7c3aed' }}>
         <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24">
           <path d="M5 3v4M3 5h4M6 17v4m-2-2h4M13 3l2.5 6.5L22 12l-6.5 2.5L13 21l-2.5-6.5L4 12l6.5-2.5L13 3z"/>
         </svg>
@@ -210,7 +210,7 @@ const WORKFLOW_CONFIGS = [
     placeholder: 'https://your-instance.app.n8n.cloud/webhook/arak-draft-copy',
     description: 'Fires once per idea the moment a plan is created — writes 3 caption options and 3 media-prompt options onto the plan board before anything renders, so you review real proposals instead of blind topics. Async: fires and the board polls for the result.',
     icon: (
-      <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: 'linear-gradient(135deg,#0ea5e9,#38bdf8)' }}>
+      <div className="w-8 h-8 flex items-center justify-center flex-shrink-0" style={{ background: '#0ea5e9' }}>
         <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24">
           <path d="M12 20h9M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/>
         </svg>
@@ -223,7 +223,7 @@ const WORKFLOW_CONFIGS = [
     placeholder: 'https://your-instance.app.n8n.cloud/webhook/arak-media-options',
     description: 'Powers "🖼 Generate image options" on the plan board — real spend (fal.ai), so it only fires when you click it. Returns 2-3 actual candidate images (or a video cover) to pick from before Finalize, not just more prompts.',
     icon: (
-      <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: 'linear-gradient(135deg,#f59e0b,#fbbf24)' }}>
+      <div className="w-8 h-8 flex items-center justify-center flex-shrink-0" style={{ background: '#f59e0b' }}>
         <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24">
           <rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>
         </svg>
@@ -236,7 +236,7 @@ const WORKFLOW_CONFIGS = [
     placeholder: 'https://your-instance.app.n8n.cloud/webhook/arak-video-render',
     description: 'Renders the actual video clip for a reel/video-format idea once approved — Finalize fires this for every approved video post at once, using the cover image + motion direction already chosen during review. Real spend (fal.ai).',
     icon: (
-      <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: 'linear-gradient(135deg,#ef4444,#f87171)' }}>
+      <div className="w-8 h-8 flex items-center justify-center flex-shrink-0" style={{ background: '#ef4444' }}>
         <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24">
           <polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/>
         </svg>
@@ -249,7 +249,7 @@ const WORKFLOW_CONFIGS = [
     placeholder: 'https://your-instance.app.n8n.cloud/webhook/arak-creative-generate',
     description: 'The Creative Studio\'s two-option generator: one candidate from ChatGPT (gpt-image-2) and one from Gemini (nano-banana-2) for every prompt, so you compare and pick. Real spend (fal.ai) — fires when you hit Generate.',
     icon: (
-      <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: 'linear-gradient(135deg,#8b5cf6,#ec4899)' }}>
+      <div className="w-8 h-8 flex items-center justify-center flex-shrink-0" style={{ background: '#8b5cf6' }}>
         <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24">
           <rect x="2" y="4" width="9" height="16" rx="1.5"/><rect x="13" y="4" width="9" height="16" rx="1.5"/>
         </svg>
@@ -262,7 +262,7 @@ const WORKFLOW_CONFIGS = [
     placeholder: 'https://your-instance.app.n8n.cloud/webhook/arak-creative-edit',
     description: 'Conversational edits on the image you picked — "make the background navy", "warmer lighting". Each edit becomes a new version you can revert to. Real spend (fal.ai) per edit. Note: for changing TEXT, the built-in text editor is better — real fonts, exact Arabic, and always re-editable.',
     icon: (
-      <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: 'linear-gradient(135deg,#06b6d4,#22d3ee)' }}>
+      <div className="w-8 h-8 flex items-center justify-center flex-shrink-0" style={{ background: '#06b6d4' }}>
         <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24">
           <path d="M12 20h9M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/>
         </svg>
@@ -275,7 +275,7 @@ const WORKFLOW_CONFIGS = [
     placeholder: 'https://your-instance.app.n8n.cloud/webhook/arak-creative-video',
     description: 'Turns a finished image into a clip, or generates one straight from a prompt when there is no image (Seedance, 2–12s). Real spend (fal.ai) per render — the most expensive call in the app, so it only fires on request.',
     icon: (
-      <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: 'linear-gradient(135deg,#f43f5e,#fb7185)' }}>
+      <div className="w-8 h-8 flex items-center justify-center flex-shrink-0" style={{ background: '#f43f5e' }}>
         <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24">
           <polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/>
         </svg>
@@ -301,7 +301,7 @@ const WORKFLOW_CONFIGS = [
     placeholder: 'https://your-instance.app.n8n.cloud/webhook/arak-creative-enhance',
     description: 'The ✨ button next to the prompt box — rewrites a rough brief into a fuller one (lighting, framing, materials) before you generate. Text only, no image spend. Claude call, ~2 seconds, always shown to you before anything renders.',
     icon: (
-      <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: 'linear-gradient(135deg,#f59e0b,#fbbf24)' }}>
+      <div className="w-8 h-8 flex items-center justify-center flex-shrink-0" style={{ background: '#f59e0b' }}>
         <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24">
           <path d="M12 3v3M12 18v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M3 12h3M18 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1" strokeLinecap="round"/>
           <circle cx="12" cy="12" r="2.5"/>
@@ -315,7 +315,7 @@ const WORKFLOW_CONFIGS = [
     placeholder: 'https://your-instance.app.n8n.cloud/webhook/arak-publish-post',
     description: 'Publishes or schedules an approved post to its platform through Zernio. The Zernio API key lives in n8n, never in this app — the browser only ever calls this webhook.',
     icon: (
-      <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: 'linear-gradient(135deg,#8b5cf6,#a78bfa)' }}>
+      <div className="w-8 h-8 flex items-center justify-center flex-shrink-0" style={{ background: '#8b5cf6' }}>
         <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24">
           <line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>
         </svg>
@@ -328,7 +328,7 @@ const WORKFLOW_CONFIGS = [
     placeholder: 'https://your-instance.app.n8n.cloud/webhook/arak-zernio-sync',
     description: 'Pulls state back from Zernio: which accounts are connected, and per-day metrics for everything published. Runs daily on its own; this URL is what the "Refresh" buttons hit for an on-demand sync.',
     icon: (
-      <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: 'linear-gradient(135deg,#0d9488,#2dd4bf)' }}>
+      <div className="w-8 h-8 flex items-center justify-center flex-shrink-0" style={{ background: '#0d9488' }}>
         <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24">
           <polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/>
           <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
@@ -342,7 +342,7 @@ const WORKFLOW_CONFIGS = [
     placeholder: 'https://your-instance.app.n8n.cloud/webhook/arak-zernio-dashboard',
     description: 'Live, on-demand proxy for the fuller Zernio widgets — best time to post, posting frequency vs engagement, content decay, daily rollups, follower history. Nothing here is stored; the Analytics page fetches it fresh on load.',
     icon: (
-      <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: 'linear-gradient(135deg,#f59e0b,#fbbf24)' }}>
+      <div className="w-8 h-8 flex items-center justify-center flex-shrink-0" style={{ background: '#f59e0b' }}>
         <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24">
           <line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/>
         </svg>
@@ -410,7 +410,7 @@ function WorkflowWebhooks() {
         <div className="flex items-center gap-2 flex-wrap">
           <h3 className="font-semibold text-text">Workflow Webhooks</h3>
           {syncState === 'synced' && (
-            <span className="text-[10px] bg-sage-100 text-sage-700 px-2 py-0.5 rounded-full font-semibold">● Synced to your account</span>
+            <span className="text-[10px] bg-sage-100 text-sage-700 px-1.5 py-0.5 leading-[1.4] font-semibold">● Synced to your account</span>
           )}
         </div>
         <p className="text-xs text-text-tertiary mt-0.5">Paste your n8n webhook URLs — the webapp calls these to trigger content generation. Saved to your account, so they follow you to any browser or device you sign in on.</p>
@@ -430,8 +430,8 @@ function WorkflowWebhooks() {
                   <div className="flex items-center gap-2 flex-wrap">
                     <p className="font-medium text-text text-sm">{cfg.label}</p>
                     {isSet
-                      ? <span className="text-[10px] bg-sage-100 text-sage-700 px-2 py-0.5 rounded-full font-semibold">● Configured</span>
-                      : <span className="text-[10px] bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-semibold">Not set</span>
+                      ? <span className="text-[10px] bg-sage-100 text-sage-700 px-1.5 py-0.5 leading-[1.4] font-semibold">● Configured</span>
+                      : <span className="text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 leading-[1.4] font-semibold">Not set</span>
                     }
                   </div>
                   <p className="text-xs text-text-tertiary mt-0.5">{cfg.description}</p>
@@ -556,11 +556,13 @@ export function Settings() {
   }
 
   return (
-    <div className="max-w-3xl space-y-5">
+    <div className="max-w-3xl space-y-4">
+      <PageHeader title="Settings" subtitle="Companies, workspace preferences, and account details." />
+
       <Card className="overflow-hidden">
-        <div className="px-6 py-5 border-b border-border flex items-center justify-between">
+        <div className="px-5 py-4 border-b border-border flex items-center justify-between gap-4">
           <div>
-            <h3 className="font-display font-semibold text-text text-lg">Companies</h3>
+            <h3 className="font-semibold text-text text-sm">Companies</h3>
             <p className="text-xs text-text-tertiary mt-0.5">Each company is fully isolated — its own brand brain, content, plans, and posts. Switch between them from the sidebar.</p>
           </div>
           <Button size="sm" onClick={() => { setShowCreate(true); setNewWsName(''); setError('') }}>
@@ -604,7 +606,7 @@ export function Settings() {
                 className={`flex items-center gap-3 px-6 py-3.5 transition-colors ${isActive ? 'bg-amber-50/40' : 'hover:bg-surface-muted'}`}>
                 {/* Avatar */}
                 <div className="w-8 h-8 rounded-xl flex items-center justify-center text-[11px] font-bold text-white flex-shrink-0"
-                  style={{ background: isActive ? 'linear-gradient(135deg,#96acb2,#4c5e61)' : 'linear-gradient(135deg,#929ca7,#4b5357)' }}>
+                  style={{ background: isActive ? '#96acb2' : '#929ca7' }}>
                   {ws.name.charAt(0).toUpperCase()}
                 </div>
 
@@ -679,9 +681,9 @@ export function Settings() {
       {/* Confirm delete modal */}
       {confirmDelete && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
-          style={{ background: 'rgba(26,20,16,0.35)', backdropFilter: 'blur(6px)' }}>
+          style={{ background: 'rgba(28,35,33,0.45)' }}>
           <div className="bg-white rounded-2xl shadow-dropdown w-full max-w-sm border border-border animate-fade-scale p-6 space-y-4">
-            <h3 className="font-display font-semibold text-text text-lg">Delete "{confirmDelete.name}"?</h3>
+            <h3 className="font-semibold text-text text-sm">Delete "{confirmDelete.name}"?</h3>
             <p className="text-sm text-text-secondary leading-relaxed">
               All content, posts, campaigns, brand brain, and settings for this company will be permanently removed.
             </p>
@@ -713,7 +715,9 @@ export function Integrations() {
   const platforms = Object.entries(PLATFORM_META)
 
   return (
-    <div className="max-w-4xl space-y-6">
+    <div className="max-w-4xl space-y-4">
+      <PageHeader title="Integrations" subtitle="Connect the services this workspace publishes and generates through." />
+
       {/* Supabase — needed for schedule auto-generation */}
       <SupabaseConfig />
 
@@ -787,17 +791,13 @@ export function Team() {
   }
 
   return (
-    <div className="max-w-4xl space-y-5">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="font-display font-semibold text-text text-xl">Team</h2>
-          <p className="text-sm text-text-secondary mt-0.5">{state.team.length + 1} member{state.team.length + 1 !== 1 ? 's' : ''}</p>
-        </div>
+    <div className="max-w-4xl space-y-4">
+      <PageHeader title="Team" subtitle={`${state.team.length + 1} member${state.team.length + 1 !== 1 ? 's' : ''} in this workspace.`}>
         <Button onClick={() => setShowModal(true)}>
           <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
-          Invite Member
+          Invite member
         </Button>
-      </div>
+      </PageHeader>
 
       <Card className="overflow-hidden">
         {/* Current user */}

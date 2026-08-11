@@ -28,7 +28,7 @@ const RAIL = [
 export function SidePanel({ panel, onOpenPanel, hide = [], children }) {
   return (
     <div className="flex min-h-0">
-      <div className="flex w-[62px] shrink-0 flex-col gap-1 border-r border-border bg-surface-subtle/40 p-1.5">
+      <div className="flex w-[62px] shrink-0 flex-col gap-1 border-r border-border bg-surface-subtle p-1.5">
         {RAIL.filter(item => !hide.includes(item.id)).map(item => (
           <button key={item.id} type="button" onClick={() => onOpenPanel(item.id)}
             className={`flex flex-col items-center gap-0.5 rounded-lg py-2 text-[10px] font-medium transition-colors ${

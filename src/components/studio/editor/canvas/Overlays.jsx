@@ -35,7 +35,7 @@ export function FloatingToolbar({ box, toScreen, scale, locked, multiple, canFor
   return (
     <div
       ref={ref}
-      className="absolute z-20 flex items-center gap-0.5 rounded-full border border-border bg-white px-1.5 py-1 shadow-dropdown"
+      className="absolute z-20 flex items-center gap-0.5 border border-border bg-white px-1 py-1 shadow-dropdown"
       style={{ left, top, transform: 'translateX(-50%)' }}
       onMouseDown={e => e.stopPropagation()}
     >
@@ -54,7 +54,7 @@ export function FloatingToolbar({ box, toScreen, scale, locked, multiple, canFor
 function PillButton({ children, title, danger, disabled, onClick }) {
   return (
     <button type="button" title={title} disabled={disabled} onClick={onClick}
-      className={`w-7 h-7 flex items-center justify-center rounded-full text-sm leading-none transition-colors disabled:opacity-30 disabled:pointer-events-none ${
+      className={`w-7 h-7 flex items-center justify-center text-sm leading-none transition-colors disabled:opacity-30 disabled:pointer-events-none ${
         danger ? 'text-red-600 hover:bg-red-50' : 'text-text-secondary hover:bg-amber-50 hover:text-amber-800'
       }`}>
       {children}

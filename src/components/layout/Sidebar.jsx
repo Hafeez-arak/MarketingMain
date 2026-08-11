@@ -39,29 +39,32 @@ export function Sidebar() {
   return (
     <aside className="w-52 flex-shrink-0 flex flex-col h-full overflow-hidden bg-white border-r border-border">
 
-      {/* Logo */}
-      <div className="px-5 py-5 border-b border-border">
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl flex items-center justify-center shadow-sm flex-shrink-0"
-            style={{ background: 'linear-gradient(135deg, #96acb2 0%, #4c5e61 100%)' }}>
-            <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+      {/* Logo. Fixed to h-14 — the same height as the Topbar — so the sidebar's
+          header rule and the topbar's rule form one unbroken horizontal line
+          across the whole window. In a layout this dependent on rules, a 16px
+          step between two adjacent ones is the first thing you notice. */}
+      <div className="h-14 flex-shrink-0 px-4 flex items-center border-b border-border">
+        <div className="flex items-center gap-2.5 min-w-0">
+          {/* The one surviving gradient in the app. It's the brand mark, so it
+              gets to be the single place with any depth to it. */}
+          <div className="w-8 h-8 bg-logo-mark flex items-center justify-center flex-shrink-0">
+            <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
               <path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 17l-6.2 4.3 2.4-7.4L2 9.4h7.6z"/>
             </svg>
           </div>
-          <div>
-            <p className="font-display font-semibold text-text text-base leading-none">Arak</p>
-            <p className="text-[10px] font-medium text-text-tertiary tracking-wider uppercase mt-0.5">Content Studio</p>
+          <div className="min-w-0">
+            <p className="font-semibold text-text text-sm leading-none tracking-tight">Arak</p>
+            <p className="eyebrow text-text-tertiary mt-1">Content Studio</p>
           </div>
         </div>
       </div>
 
       {/* Workspace chip */}
-      <div className="px-4 py-3 border-b border-border/50 relative">
+      <div className="px-4 py-3 border-b border-border relative">
         <button
           onClick={() => setShowWsPicker(v => !v)}
-          className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl bg-surface-subtle hover:bg-stone-100 transition-colors group">
-          <div className="w-5 h-5 rounded-md flex items-center justify-center text-[9px] font-bold text-white flex-shrink-0"
-            style={{ background: 'linear-gradient(135deg, #7d98a1, #4c5e61)' }}>
+          className="w-full flex items-center gap-2.5 px-2.5 py-2 border border-border bg-white hover:border-stone-400 hover:bg-surface-subtle transition-colors group">
+          <div className="w-5 h-5 bg-amber-700 flex items-center justify-center text-[9px] font-bold text-white flex-shrink-0">
             {(activeWorkspace?.name || '?').charAt(0).toUpperCase()}
           </div>
           <div className="min-w-0 flex-1 text-left">
@@ -77,13 +80,13 @@ export function Sidebar() {
         {/* Workspace picker dropdown — only shows a "switch" list when the
             signed-in user actually belongs to more than one workspace. */}
         {showWsPicker && (
-          <div className="absolute left-4 right-4 top-full mt-1 bg-white rounded-xl border border-border shadow-dropdown z-50 animate-fade-scale overflow-hidden">
+          <div className="absolute left-4 right-4 top-full -mt-px bg-white border border-border shadow-dropdown z-50 animate-fade-scale">
             {workspaces.length > 1 && (
               <>
-                <div className="px-3 py-2 border-b border-border/50">
-                  <p className="text-[10px] font-bold uppercase tracking-wider text-text-disabled">Switch Workspace</p>
+                <div className="px-3 py-2 border-b border-border bg-surface-subtle">
+                  <p className="eyebrow text-text-tertiary">Switch workspace</p>
                 </div>
-                <ul className="py-1 max-h-48 overflow-y-auto scrollbar-thin">
+                <ul className="max-h-48 overflow-y-auto scrollbar-thin divide-y divide-border">
                   {workspaces.map(ws => (
                     <li key={ws.id}>
                       <button
@@ -92,14 +95,14 @@ export function Sidebar() {
                           setShowWsPicker(false)
                         }}
                         className={`w-full flex items-center gap-2.5 px-3 py-2 text-left transition-colors hover:bg-surface-subtle
-                          ${ws.id === activeWorkspaceId ? 'bg-amber-50/60' : ''}`}>
-                        <div className="w-5 h-5 rounded-md flex items-center justify-center text-[9px] font-bold text-white flex-shrink-0"
-                          style={{ background: ws.id === activeWorkspaceId ? 'linear-gradient(135deg,#96acb2,#4c5e61)' : 'linear-gradient(135deg,#929ca7,#4b5357)' }}>
+                          ${ws.id === activeWorkspaceId ? 'bg-amber-50' : ''}`}>
+                        <div className={`w-5 h-5 flex items-center justify-center text-[9px] font-bold text-white flex-shrink-0
+                          ${ws.id === activeWorkspaceId ? 'bg-amber-700' : 'bg-stone-500'}`}>
                           {ws.name.charAt(0).toUpperCase()}
                         </div>
                         <span className="flex-1 text-xs text-text truncate">{ws.name}</span>
                         {ws.id === activeWorkspaceId && (
-                          <svg className="w-3 h-3 text-amber-500 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg>
+                          <svg className="w-3 h-3 text-amber-700 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg>
                         )}
                       </button>
                     </li>
@@ -107,10 +110,10 @@ export function Sidebar() {
                 </ul>
               </>
             )}
-            <div className={workspaces.length > 1 ? 'border-t border-border/50 p-2' : 'p-2'}>
+            <div className={workspaces.length > 1 ? 'border-t border-border' : ''}>
               <button
                 onClick={() => { setShowWsPicker(false); signOut() }}
-                className="w-full flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs text-red-600 hover:bg-red-50 transition-colors">
+                className="w-full flex items-center gap-2 px-3 py-2 text-xs text-red-600 hover:bg-red-50 transition-colors">
                 <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
                 Sign out
               </button>
@@ -119,16 +122,22 @@ export function Sidebar() {
         )}
       </div>
 
-      {/* Nav */}
-      <nav className="flex-1 overflow-y-auto scrollbar-thin py-3 px-3">
+      {/* Nav — items run full-bleed to both edges so the active marker bar sits
+          flush against the sidebar's own border. Inset nav pills would put the
+          marker in the middle of a gutter, floating. */}
+      <nav className="flex-1 overflow-y-auto scrollbar-thin py-3">
         {nav.map((group, gi) => (
-          <div key={group.section} className={gi > 0 ? 'mt-4' : ''}>
-            <p className="px-3 mb-1 text-[9px] font-bold uppercase tracking-[0.14em] text-text-disabled">{group.section}</p>
+          <div key={group.section} className={gi > 0 ? 'mt-5' : ''}>
+            <p className="px-5 mb-1.5 eyebrow text-text-disabled">{group.section}</p>
             {group.items.map(item => (
               <NavLink key={item.to} to={item.to} end={item.exact}
+                /* border-l-2 border-transparent on the base state reserves the
+                   marker's column on EVERY item, so activating one doesn't
+                   nudge its label 2px right of its neighbours. */
                 className={({ isActive }) => `
-                  flex items-center gap-2.5 px-3 py-2 rounded-xl text-sm transition-all duration-150 w-full mb-0.5
-                  ${item.sub ? 'ml-2.5 py-1.5 text-xs' : ''}
+                  flex items-center gap-2.5 pl-[18px] pr-4 py-1.5 text-[13px] w-full
+                  border-l-2 border-transparent transition-colors duration-150
+                  ${item.sub ? 'pl-7 text-xs' : ''}
                   ${isActive ? 'nav-active' : 'text-text-secondary hover:bg-surface-subtle hover:text-text'}`}>
                 <span className="flex-shrink-0">{item.icon}</span>
                 <span className="flex-1 truncate">{item.label}</span>
@@ -139,14 +148,13 @@ export function Sidebar() {
       </nav>
 
       {/* User */}
-      <div className="px-3 py-3 border-t border-border">
-        <div className="flex items-center gap-2.5 px-2.5 py-2 rounded-xl">
-          <div className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white flex-shrink-0"
-            style={{ background: 'linear-gradient(135deg, #7d98a1, #4c5e61)' }}>
+      <div className="px-4 py-3 border-t border-border">
+        <div className="flex items-center gap-2.5">
+          <div className="w-6 h-6 rounded-full bg-stone-600 flex items-center justify-center text-[10px] font-bold text-white flex-shrink-0">
             {(user?.email || '?').charAt(0).toUpperCase()}
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-xs font-semibold text-text truncate">{user?.email || 'Signed out'}</p>
+            <p className="text-xs font-medium text-text truncate">{user?.email || 'Signed out'}</p>
             <p className="text-[10px] text-text-tertiary capitalize">{activeWorkspace?.role || ''}</p>
           </div>
         </div>

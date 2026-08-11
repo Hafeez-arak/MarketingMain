@@ -17,7 +17,7 @@ export function MediaPicker({
   onUpload,                  // async (file) => ({ url } | { error })
 }) {
   return (
-    <Modal open={open} onClose={onClose} title={title} width="max-w-3xl" square>
+    <Modal open={open} onClose={onClose} title={title} width="max-w-3xl" >
       {/* The body is mounted only while the picker is open, so every piece of
           its state — the tab, the fetched rows, an error from last time — is
           created fresh on open and torn down on close. It used to be reset by
@@ -64,11 +64,11 @@ function MediaPickerBody({ kind, accessToken, onPick, onClose, onUpload }) {
 
   return (
     <div className="p-5 space-y-4">
-      <div className="flex gap-1 p-1 bg-surface-subtle w-fit">
+      <div className="flex w-fit">
           {[['library', 'Media Library'], ['upload', 'Upload new']].map(([id, label]) => (
             <button key={id} type="button" onClick={() => setTab(id)}
-              className={`text-xs px-3 py-1.5 transition-colors ${
-                tab === id ? 'bg-white text-text font-semibold shadow-sm' : 'text-text-tertiary hover:text-text-secondary'
+              className={`text-xs font-semibold px-3 py-1.5 border -ml-px first:ml-0 transition-colors ${
+                tab === id ? 'bg-amber-700 text-white border-amber-700 relative z-10' : 'bg-white text-text-secondary border-border hover:text-text hover:bg-surface-subtle'
               }`}>
               {label}
             </button>
@@ -143,7 +143,7 @@ export function AttachmentChip({ label, url, note, onNote, onRemove, notePlaceho
       {onNote && (
         <input value={note || ''} onChange={e => onNote(e.target.value)}
           placeholder={notePlaceholder || 'What should it take from this? (optional)'}
-          className="w-full text-[11px] bg-surface-subtle/50 border border-border px-2 py-1.5 focus:outline-none focus:border-amber-400" />
+          className="w-full text-[11px] bg-surface-subtle border border-border px-2 py-1.5 focus:outline-none focus:border-amber-400" />
       )}
     </div>
   )

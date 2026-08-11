@@ -229,8 +229,8 @@ function SectionBar({ title, badge, collapsed, onToggle, action }) {
         </span>
         <span className="min-w-0 pt-0.5">
           <span className="flex items-center gap-2 flex-wrap">
-            <h2 className="font-display text-lg font-bold text-stone-900 group-hover/hd:text-amber-700 transition-colors">{title}</h2>
-            {badge != null && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-stone-100 text-stone-500">{badge}</span>}
+            <h2 className="font-semibold text-sm text-text group-hover/hd:text-amber-800 transition-colors">{title}</h2>
+            {badge != null && <span className="text-[10px] font-bold px-1.5 py-0.5 leading-[1.4] bg-stone-100 text-stone-500">{badge}</span>}
             <svg className={`w-4 h-4 text-text-tertiary transition-transform ${collapsed ? '-rotate-90' : ''}`}
               fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>
           </span>
@@ -296,7 +296,7 @@ function AssetCard({ asset, accessToken, onChange, onDelete, compact, onImageCli
         )}
       </div>
       <div className="p-3 space-y-2">
-        <span className="inline-block text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">{kindLabel}</span>
+        <span className="inline-block text-[10px] font-bold px-1.5 py-0.5 leading-[1.4] bg-amber-100 text-amber-700">{kindLabel}</span>
         <input value={title} onChange={e => setTitle(e.target.value)} onBlur={() => saveMeta()}
           placeholder="Title" className="w-full text-sm font-medium text-text bg-transparent focus:outline-none border-b border-transparent focus:border-amber-300 py-0.5" />
         {!compact && (
@@ -339,7 +339,7 @@ function ProjectGroupCard({ name, photos, onOpen }) {
     <Card className="overflow-hidden cursor-pointer group/proj" onClick={onOpen}>
       <div className="aspect-video bg-surface-subtle overflow-hidden relative">
         <img src={photos[0]?.public_url} alt={name} className="w-full h-full object-cover group-hover/proj:scale-105 transition-transform duration-300" />
-        <span className="absolute bottom-2 right-2 text-[10px] font-bold px-2 py-0.5 rounded-full bg-black/60 text-white">
+        <span className="absolute bottom-2 right-2 text-[10px] font-bold px-1.5 py-0.5 leading-[1.4] bg-black/60 text-white">
           {photos.length} photo{photos.length !== 1 ? 's' : ''}
         </span>
       </div>
@@ -357,7 +357,7 @@ function NewProjectGroupTile({ onClick }) {
   return (
     <div className="absolute -bottom-2 -right-2 group/new">
       <button onClick={onClick} title="Create new project group"
-        className="w-10 h-10 rounded-full bg-stone-800 hover:bg-amber-600 text-white shadow-lg flex items-center justify-center transition-colors">
+        className="w-10 h-10 bg-amber-700 hover:bg-amber-800 text-white flex items-center justify-center transition-colors">
         <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
       </button>
       <span className="pointer-events-none absolute bottom-full right-0 mb-2 whitespace-nowrap text-[11px] font-semibold text-white bg-stone-800 px-2.5 py-1 rounded-lg opacity-0 group-hover/new:opacity-100 transition-opacity">
@@ -422,7 +422,7 @@ function NewProjectGroupModal({ accessToken, activeWorkspaceId, onCreated, onClo
               <div key={i} className="relative aspect-square rounded-lg overflow-hidden bg-surface-subtle group/thumb">
                 <img src={URL.createObjectURL(file)} alt={file.name} className="w-full h-full object-cover" />
                 <button onClick={() => removeFile(i)}
-                  className="absolute top-1 right-1 w-5 h-5 rounded-full bg-black/60 hover:bg-black/80 text-white flex items-center justify-center opacity-0 group-hover/thumb:opacity-100 transition-opacity">
+                  className="absolute top-1 right-1 w-5 h-5 bg-black/70 hover:bg-black/85 text-white flex items-center justify-center opacity-0 group-hover/thumb:opacity-100 transition-opacity">
                   <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>
                 </button>
               </div>
@@ -471,7 +471,7 @@ function PhotoCarousel({ photos, index, onIndexChange, onClose }) {
       onClick={e => e.target === e.currentTarget && onClose()}>
 
       <button onClick={onClose}
-        className="absolute top-4 right-4 w-9 h-9 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition-colors">
+        className="absolute top-4 right-4 w-9 h-9 bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition-colors">
         <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>
       </button>
 
@@ -482,7 +482,7 @@ function PhotoCarousel({ photos, index, onIndexChange, onClose }) {
         <div className="relative inline-block">
           {photos.length > 1 && (
             <button onClick={() => onIndexChange(i => (i - 1 + photos.length) % photos.length)}
-              className="absolute -left-5 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-white/90 hover:bg-white text-stone-800 shadow-lg flex items-center justify-center transition-colors">
+              className="absolute -left-5 top-1/2 -translate-y-1/2 w-10 h-10 bg-white hover:bg-surface-subtle text-text flex items-center justify-center transition-colors border border-border">
               <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
             </button>
           )}
@@ -491,7 +491,7 @@ function PhotoCarousel({ photos, index, onIndexChange, onClose }) {
 
           {photos.length > 1 && (
             <button onClick={() => onIndexChange(i => (i + 1) % photos.length)}
-              className="absolute -right-5 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-white/90 hover:bg-white text-stone-800 shadow-lg flex items-center justify-center transition-colors">
+              className="absolute -right-5 top-1/2 -translate-y-1/2 w-10 h-10 bg-white hover:bg-surface-subtle text-text flex items-center justify-center transition-colors border border-border">
               <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
             </button>
           )}
@@ -501,7 +501,7 @@ function PhotoCarousel({ photos, index, onIndexChange, onClose }) {
           <div className="flex items-center gap-1.5">
             {photos.map((p, i) => (
               <button key={p.id} onClick={() => onIndexChange(() => i)}
-                className={`rounded-full transition-all ${i === index ? 'w-2.5 h-2.5 bg-amber-500' : 'w-1.5 h-1.5 bg-white/40 hover:bg-white/70'}`} />
+                className={`transition-all ${i === index ? 'w-4 h-1.5 bg-white' : 'w-1.5 h-1.5 bg-white/40 hover:bg-white/70'}`} />
             ))}
           </div>
         )}
@@ -832,7 +832,7 @@ function DirectoryEditor({ title, api, fields, emptyRow, numbered }) {
             {rows.map((row, i) => (
               <div key={row.id} className={`p-5 grid sm:grid-cols-2 gap-3 relative ${numbered ? 'pl-11' : ''}`}>
                 {numbered && (
-                  <span className="absolute left-5 top-5 w-6 h-6 rounded-full bg-amber-50 text-amber-700 text-[11px] font-bold flex items-center justify-center ring-1 ring-amber-100">
+                  <span className="absolute left-5 top-5 w-6 h-6 bg-amber-100 text-amber-800 text-[11px] font-bold flex items-center justify-center tabular-nums">
                     {i + 1}
                   </span>
                 )}
@@ -948,7 +948,7 @@ export function BrandBrain() {
               </span>
               <p className="text-xs font-semibold text-amber-700 tracking-[0.14em] uppercase">Brand Brain</p>
             </div>
-            <h1 className="font-display text-3xl font-bold text-stone-900 mb-2.5 leading-tight">One brand voice, every platform.</h1>
+            <h1 className="text-xl font-bold text-text tracking-tight mb-2.5 leading-tight">One brand voice, every platform.</h1>
             <p className="text-sm text-text-secondary leading-relaxed">
               This is the single source of truth every AI generation reads — captions, imagery, emails,
               and WhatsApp. Fill it in once; each platform layers its own notes on top, never replacing it.
@@ -1003,8 +1003,8 @@ export function BrandBrain() {
                 <span className="text-[11px] font-semibold text-text-secondary uppercase tracking-wide">Completion</span>
                 <span className="text-[11px] font-bold text-amber-700">{pct}%</span>
               </div>
-              <div className="h-1.5 rounded-full bg-stone-100 overflow-hidden">
-                <div className="h-full rounded-full btn-amber transition-all duration-500" style={{ width: `${pct}%` }} />
+              <div className="h-1.5 bg-stone-100 border border-border overflow-hidden">
+                <div className="h-full bg-amber-700 transition-all duration-500" style={{ width: `${pct}%` }} />
               </div>
               <p className="text-[11px] text-text-tertiary mt-2">{filledFields} of {totalFields} core fields filled</p>
             </div>
@@ -1029,7 +1029,7 @@ export function BrandBrain() {
             <div className="lg:hidden -mx-1 px-1 flex items-center gap-1.5 overflow-x-auto scrollbar-thin pb-1">
               {ALL_SECTIONS.map(s => (
                 <button key={s} onClick={() => scrollToSection(s)}
-                  className="flex-shrink-0 px-3 py-1.5 rounded-full text-[11px] font-semibold bg-white border border-border text-text-secondary hover:border-amber-300 hover:text-amber-700 transition-colors">
+                  className="flex-shrink-0 px-2.5 py-1 leading-[1.4] text-[11px] font-semibold bg-white border border-border text-text-secondary hover:border-amber-300 hover:text-amber-700 transition-colors">
                   {s}
                 </button>
               ))}
