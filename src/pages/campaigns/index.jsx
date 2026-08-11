@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useApp, actions } from '../../store/app'
-import { Card, Button, Input, Textarea, Select, IconBadge } from '../../components/ui/index'
+import { Card, Button, Input, Textarea, Select, IconBadge, PageHeader } from '../../components/ui/index'
 import { Icon } from '../../components/ui/icons'
 import { uid } from '../../lib/utils'
 
@@ -14,40 +14,42 @@ export function Campaigns() {
   const navigate = useNavigate()
 
   return (
-    <div className="max-w-5xl space-y-5">
+    <div className="max-w-5xl space-y-4">
+      <PageHeader title="Content Generation" subtitle="Plan a month of on-brand posts, or pick up a saved plan." />
+
+      {/* Two stacked entry rows sharing one border seam — the second card's
+          top edge is the first card's bottom edge (-mt-px), so the pair reads
+          as one panel with a division rather than two floating slabs. */}
       <div>
-        <h1 className="font-display text-2xl font-bold text-stone-900">Content Generation</h1>
-        <p className="text-sm text-text-secondary mt-1">Plan a month of on-brand posts, or pick up a saved plan.</p>
+        {/* "Plan with AI" always starts a fresh plan — clear any leftover draft
+            first, otherwise CampaignPlanner's useDraft() picks up wherever a
+            previous plan left off (mid-review, or already finalized) instead
+            of showing the setup screen. */}
+        <button onClick={() => { dispatch(actions.setCampaignPlanDraft(null)); navigate('/campaigns/plan') }}
+          className="group w-full text-left border border-border bg-white p-5 flex items-start gap-4 transition-colors hover:bg-surface-subtle focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-700 focus-visible:relative">
+          <IconBadge>{Icon.trending}</IconBadge>
+          <div className="flex-1 min-w-0">
+            <p className="eyebrow text-text-tertiary mb-1.5">Monthly planning</p>
+            <h2 className="font-semibold text-text text-sm mb-1.5">Plan with AI</h2>
+            <p className="text-xs text-text-secondary leading-relaxed max-w-lg">
+              Pick a month and we'll propose a full slate of on-brand post ideas — pulling from your Brand Brain
+              and the seasonal moments in range. You approve the ones worth making.
+            </p>
+          </div>
+          <svg className="w-4 h-4 text-text-tertiary flex-shrink-0 mt-0.5 transition-transform group-hover:translate-x-0.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+        </button>
+
+        {/* Saved plans entry */}
+        <button onClick={() => navigate('/campaigns/plans')}
+          className="group w-full text-left border border-border -mt-px bg-white p-5 flex items-center gap-4 transition-colors hover:bg-surface-subtle focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-700 focus-visible:relative">
+          <IconBadge tone="sage">{Icon.calendar}</IconBadge>
+          <div className="flex-1 min-w-0">
+            <h2 className="font-semibold text-text text-sm">Content Plans</h2>
+            <p className="text-xs text-text-secondary mt-1">View and reopen your saved monthly plans and their approved ideas.</p>
+          </div>
+          <svg className="w-4 h-4 text-text-tertiary flex-shrink-0 transition-transform group-hover:translate-x-0.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+        </button>
       </div>
-
-      {/* "Plan with AI" always starts a fresh plan — clear any leftover draft
-          first, otherwise CampaignPlanner's useDraft() picks up wherever a
-          previous plan left off (mid-review, or already finalized) instead
-          of showing the setup screen. */}
-      <button onClick={() => { dispatch(actions.setCampaignPlanDraft(null)); navigate('/campaigns/plan') }}
-        className="group w-full text-left rounded-2xl border border-border/80 bg-white p-6 flex items-start gap-4 transition-colors hover:border-stone-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400">
-        <IconBadge>{Icon.trending}</IconBadge>
-        <div className="flex-1 min-w-0">
-          <p className="text-[11px] font-semibold text-text-tertiary tracking-[0.12em] uppercase mb-1">Monthly planning</p>
-          <h2 className="font-semibold text-text text-lg mb-1.5">Plan with AI</h2>
-          <p className="text-sm text-text-secondary leading-relaxed max-w-lg">
-            Pick a month and we'll propose a full slate of on-brand post ideas — pulling from your Brand Brain
-            and the seasonal moments in range. You approve the ones worth making.
-          </p>
-        </div>
-        <svg className="w-4 h-4 text-text-tertiary flex-shrink-0 mt-1 transition-transform group-hover:translate-x-1" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
-      </button>
-
-      {/* Saved plans entry */}
-      <button onClick={() => navigate('/campaigns/plans')}
-        className="group w-full text-left rounded-2xl border border-border/80 bg-white p-5 flex items-center gap-4 transition-colors hover:border-stone-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400">
-        <IconBadge tone="sage">{Icon.calendar}</IconBadge>
-        <div className="flex-1 min-w-0">
-          <h2 className="font-semibold text-text text-sm">Content Plans</h2>
-          <p className="text-xs text-text-secondary mt-0.5">View and reopen your saved monthly plans and their approved ideas.</p>
-        </div>
-        <svg className="w-4 h-4 text-text-tertiary flex-shrink-0 transition-transform group-hover:translate-x-1" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
-      </button>
     </div>
   )
 }
@@ -91,16 +93,22 @@ export function NewCampaign() {
         </div>
 
         <div>
-          <p className="text-xs font-medium text-text-secondary mb-2">Platforms *</p>
-          <div className="flex flex-wrap gap-2">
+          <p className="eyebrow mb-2">Platforms *</p>
+          {/* Selected/unselected reads as a filled vs. outlined box. With
+              square corners and a shared border on both states, the row stays
+              on one baseline as items toggle. */}
+          <div className="flex flex-wrap gap-1.5">
             {PLATFORMS.map(p => (
               <button key={p} onClick={() => togglePlatform(p)}
-                className={`px-3 py-1.5 rounded-xl border text-sm font-medium capitalize transition-all ${form.platforms.includes(p) ? 'bg-amber-600 text-white border-amber-600' : 'bg-white border-border text-text-secondary hover:border-amber-400'}`}>
+                className={`px-3 py-1.5 border text-xs font-medium capitalize transition-colors
+                  ${form.platforms.includes(p)
+                    ? 'bg-amber-700 text-white border-amber-700'
+                    : 'bg-white border-border text-text-secondary hover:border-stone-400 hover:text-text'}`}>
                 {p === 'x' ? 'X / Twitter' : p}
               </button>
             ))}
           </div>
-          {errors.platforms && <p className="text-xs text-red-500 mt-1">{errors.platforms}</p>}
+          {errors.platforms && <p className="text-xs text-red-600 mt-1.5">{errors.platforms}</p>}
         </div>
 
         <Textarea label="Description" placeholder="What is this campaign about?" value={form.description} onChange={e => set('description', e.target.value)} rows={3} />

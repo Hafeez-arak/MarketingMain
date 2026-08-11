@@ -112,7 +112,7 @@ export function QuickCreatePanel({ platform, tones, workspaceId, accessToken, we
           <svg className="w-7 h-7 text-sage-600" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
         </div>
         <div>
-          <h3 className="font-display text-lg font-bold text-stone-900">Your post is generating.</h3>
+          <h3 className="text-sm font-bold text-text tracking-tight">Your post is generating.</h3>
           <p className="text-sm text-text-secondary mt-1">Since the caption and image were already chosen, this is quick — check the Posts tab in a moment.</p>
         </div>
         <div className="flex items-center justify-center gap-3">
@@ -148,7 +148,7 @@ export function QuickCreatePanel({ platform, tones, workspaceId, accessToken, we
 
   return (
     <Card className="overflow-hidden max-w-2xl">
-      <div className="h-1" style={{ background: 'linear-gradient(90deg,#f09433,#dc2743,#bc1888)' }} />
+      <div className="h-1" style={{ background: '#E1306C' }} />
       <div className="p-5 space-y-4">
         <div>
           <p className="text-xs font-medium text-text-secondary mb-1.5">Topic / Brief <span className="text-red-400">*</span></p>
@@ -167,7 +167,7 @@ export function QuickCreatePanel({ platform, tones, workspaceId, accessToken, we
           ) : ratios.length === 1 ? (
             <div>
               <p className="text-xs font-medium text-text-secondary mb-1.5">Orientation</p>
-              <p className="text-sm text-text-tertiary px-3 py-2 rounded-lg bg-surface-subtle/60 border border-border">{aspectLabel(ratios[0])} ({ratios[0]})</p>
+              <p className="text-sm text-text-tertiary px-3 py-2 rounded-lg bg-surface-subtle border border-border">{aspectLabel(ratios[0])} ({ratios[0]})</p>
             </div>
           ) : null}
         </div>

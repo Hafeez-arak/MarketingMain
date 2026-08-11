@@ -278,7 +278,7 @@ export function LinkedInPage() {
             </svg>
           </div>
           <div>
-            <h2 className="font-semibold text-text text-lg">LinkedIn</h2>
+            <h2 className="font-bold text-text text-base tracking-tight">LinkedIn</h2>
             <p className="text-xs text-text-secondary">{totalPosts} post{totalPosts !== 1 ? 's' : ''} · AI content generation</p>
           </div>
         </div>
@@ -511,7 +511,7 @@ function MonthlySchedule({ state, dispatch, instructions }) {
             return (
               <button key={i} onClick={() => { if (isCurrentMonth) setViewDay(key) }}
                 disabled={!isCurrentMonth}
-                className={`relative min-h-[64px] p-2 border-b border-r border-border/50 text-left transition-all
+                className={`relative min-h-[64px] p-2 border-b border-r border-border text-left transition-all
                   ${!isCurrentMonth ? 'opacity-25 cursor-default bg-surface-muted' : 'hover:bg-blue-50/50 cursor-pointer'}
                   ${isToday(cell.date) ? 'ring-2 ring-inset ring-blue-400' : ''}
                   ${count > 0 && isCurrentMonth ? 'bg-blue-50/30' : ''}
@@ -521,7 +521,7 @@ function MonthlySchedule({ state, dispatch, instructions }) {
                     {cell.date.getDate()}
                   </span>
                   {count > 0 && isCurrentMonth && (
-                    <span className="text-[9px] font-bold bg-[#0A66C2] text-white w-4 h-4 rounded-full flex items-center justify-center">{count}</span>
+                    <span className="text-[9px] font-bold bg-[#0A66C2] text-white w-4 h-4 flex items-center justify-center">{count}</span>
                   )}
                 </div>
                 {count > 0 && isCurrentMonth && (
@@ -558,16 +558,16 @@ function MonthlySchedule({ state, dispatch, instructions }) {
         const label   = dateObj.toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric', year:'numeric' })
         return (
           <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
-            style={{ background:'rgba(26,20,16,0.55)', backdropFilter:'blur(6px)' }}
+            style={{ background:'rgba(28,35,33,0.45)' }}
             onClick={e => { if (e.target === e.currentTarget) setViewDay(null) }}>
-            <div className="bg-white rounded-3xl shadow-2xl w-full max-w-lg flex flex-col overflow-hidden animate-fade-scale" style={{ maxHeight:'85vh' }}>
+            <div className="bg-white rounded-3xl  w-full max-w-lg flex flex-col overflow-hidden animate-fade-scale" style={{ maxHeight:'85vh' }}>
 
               {/* Header */}
-              <div className="px-6 py-5 flex-shrink-0" style={{ background:'linear-gradient(135deg,#f0f6ff,#e8f0fb)', borderBottom:'1px solid rgba(10,102,194,0.15)' }}>
+              <div className="px-6 py-5 flex-shrink-0" style={{ background:'#f3f5f4', borderBottom:'1px solid #dde3e2' }}>
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <p className="text-[10px] font-bold uppercase tracking-widest text-[#0A66C2] mb-1">LinkedIn · Schedule</p>
-                    <h3 className="font-display font-bold text-lg text-text">{label}</h3>
+                    <h3 className="font-semibold text-sm text-text">{label}</h3>
                     <p className="text-xs text-text-tertiary mt-0.5">
                       {entries.length === 0 ? 'Nothing planned' : `${entries.length} post${entries.length !== 1 ? 's' : ''} planned`}
                     </p>
@@ -613,8 +613,8 @@ function MonthlySchedule({ state, dispatch, instructions }) {
                               <div className="flex items-center gap-2 flex-wrap">
                                 <span className="text-sm">{lbl.icon}</span>
                                 <span className={`text-xs font-semibold ${lbl.color}`}>{lbl.text}</span>
-                                {postType && <span className="text-[10px] bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full">{postType.icon} {postType.label}</span>}
-                                {entry.tone && <span className="text-[10px] bg-stone-100 text-stone-500 px-2 py-0.5 rounded-full capitalize">{entry.tone?.replace('_',' ')}</span>}
+                                {postType && <span className="text-[10px] bg-blue-50 text-blue-600 px-1.5 py-0.5 leading-[1.4]">{postType.icon} {postType.label}</span>}
+                                {entry.tone && <span className="text-[10px] bg-stone-100 text-stone-500 px-1.5 py-0.5 leading-[1.4] capitalize">{entry.tone?.replace('_',' ')}</span>}
                               </div>
                               <div className="flex items-center gap-1.5 flex-shrink-0">
                                 <button onClick={() => { setEditDay(viewDay); setEditIndex(idx) }}
@@ -631,7 +631,7 @@ function MonthlySchedule({ state, dispatch, instructions }) {
                             <p className="text-sm text-text mt-2 leading-relaxed line-clamp-2">{entry.topic || '—'}</p>
                             {entry.notes && <p className="text-xs text-text-tertiary mt-1 line-clamp-1">📝 {entry.notes}</p>}
                             <div className="flex items-center justify-between mt-3">
-                              <span className={`text-[10px] font-semibold px-2.5 py-1 rounded-full ${statusColors[entry.status] || 'bg-stone-100 text-stone-500'}`}>
+                              <span className={`text-[10px] font-semibold px-1.5 py-0.5 leading-[1.4] ${statusColors[entry.status] || 'bg-stone-100 text-stone-500'}`}>
                                 {entry.status || 'planned'}
                               </span>
                               <div className="flex items-center gap-2">
@@ -792,9 +792,9 @@ function DayEditor({ dateKey, entry, campaigns, uploadToStorage, onSave, onClear
 
   const content = (
     <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
-      style={{ background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(6px)' }}
+      style={{ background: 'rgba(0,0,0,0.6)' }}
       onClick={e => { if (e.target === e.currentTarget) onClose() }}>
-      <div className="bg-white rounded-3xl shadow-2xl w-full flex flex-col overflow-hidden" style={{ maxWidth:'860px', height:'90vh' }}>
+      <div className="bg-white rounded-3xl  w-full flex flex-col overflow-hidden" style={{ maxWidth:'860px', height:'90vh' }}>
 
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-border flex-shrink-0">
@@ -830,7 +830,7 @@ function DayEditor({ dateKey, entry, campaigns, uploadToStorage, onSave, onClear
         </div>
 
         {/* Publish Time Picker */}
-        <div className="px-6 py-4 flex-shrink-0 border-b border-border" style={{ background:'linear-gradient(135deg,rgba(240,246,255,0.8),rgba(232,240,251,0.6))' }}>
+        <div className="px-6 py-4 flex-shrink-0 border-b border-border" style={{ background:'#f3f5f4' }}>
           <div className="flex items-center gap-4 flex-wrap">
             <div className="flex items-center gap-2">
               <svg className="w-4 h-4 text-[#0A66C2] flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
@@ -948,7 +948,7 @@ function DayEditor({ dateKey, entry, campaigns, uploadToStorage, onSave, onClear
                     <div key={url} className="relative w-14 h-14 rounded-lg overflow-hidden border border-border group">
                       <PostImage src={url} alt="Reference" className="w-full h-full object-cover" />
                       <button onClick={() => setReferences(refs => refs.filter(u => u !== url))}
-                        className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-black/60 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity" title="Remove">
+                        className="absolute top-0.5 right-0.5 w-4 h-4 bg-black/70 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity" title="Remove">
                         <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>
                       </button>
                     </div>
@@ -1008,7 +1008,7 @@ function DayEditor({ dateKey, entry, campaigns, uploadToStorage, onSave, onClear
                   {existingUrls.map((url,i) => (
                     <div key={i} className="relative group w-16 h-16 rounded-xl overflow-hidden border border-border">
                       <img src={url} alt="" className="w-full h-full object-cover" />
-                      <button onClick={() => removeExistingUrl(i)} className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-black/60 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button onClick={() => removeExistingUrl(i)} className="absolute top-0.5 right-0.5 w-4 h-4 bg-black/70 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
                         <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>
                       </button>
                     </div>
@@ -1021,7 +1021,7 @@ function DayEditor({ dateKey, entry, campaigns, uploadToStorage, onSave, onClear
                   {files.map((file,i) => (
                     <div key={i} className="relative group w-16 h-16 rounded-xl overflow-hidden border border-blue-300">
                       <img src={URL.createObjectURL(file)} alt="" className="w-full h-full object-cover" />
-                      <button onClick={() => removeNewFile(i)} className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-black/60 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button onClick={() => removeNewFile(i)} className="absolute top-0.5 right-0.5 w-4 h-4 bg-black/70 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
                         <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>
                       </button>
                       <span className="absolute bottom-0.5 right-0.5 text-[8px] bg-blue-500 text-white px-1 rounded font-bold">NEW</span>
@@ -1203,7 +1203,7 @@ function DayEditor({ dateKey, entry, campaigns, uploadToStorage, onSave, onClear
           {tab === 'video' && (
             <button onClick={handleSaveVideo} disabled={!videoTitle.trim() || !videoBrief.trim()}
               className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              style={{ background: videoTitle.trim() && videoBrief.trim() ? 'linear-gradient(135deg,#5b21b6,#7c3aed)' : '#9ca3af' }}>
+              style={{ background: videoTitle.trim() && videoBrief.trim() ? '#4c5e61' : '#9ca3af' }}>
               Save Video Plan
             </button>
           )}
@@ -1270,7 +1270,7 @@ function PostsList({ posts, dispatch, state, onCreateClick, updatePostStatus, we
               className={`relative px-4 py-1.5 rounded-xl text-xs font-semibold transition-all ${filter === f.key ? 'bg-[#0A66C2] text-white shadow-md' : 'text-text-secondary bg-white border border-border hover:border-stone-300 hover:text-text'}`}>
               {f.label}
               {f.count > 0 && (
-                <span className={`ml-1.5 text-[10px] px-1.5 py-0.5 rounded-full font-bold ${filter === f.key ? 'bg-white/25 text-white' : 'bg-surface-subtle text-text-tertiary'}`}>{f.count}</span>
+                <span className={`ml-1.5 text-[10px] px-1.5 py-0.5 leading-[1.4] font-bold ${filter === f.key ? 'bg-white/25 text-white' : 'bg-surface-subtle text-text-tertiary'}`}>{f.count}</span>
               )}
             </button>
           ))}
@@ -1310,11 +1310,11 @@ function PostsList({ posts, dispatch, state, onCreateClick, updatePostStatus, we
                     <div className="flex items-start justify-between gap-2 mb-2">
                       <div className="flex items-center gap-1.5 flex-wrap">
                         <Badge status={p.status === 'pending_publish' ? 'pending' : p.status} />
-                        {p.generatedByWorkflow && <span className="text-[10px] bg-purple-50 text-purple-600 px-2 py-0.5 rounded-full font-medium">AI</span>}
-                        {p._fromSupabase && <span className="text-[10px] bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full font-medium">📅 Scheduled</span>}
-                        {typeMeta && <span className="text-[10px] bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full">{typeMeta.icon} {typeMeta.label}</span>}
-                        {!imgSrc && <span className="text-[10px] bg-stone-100 text-stone-500 px-2 py-0.5 rounded-full">📝 Text only</span>}
-                        {campaign && <span className="text-[10px] bg-amber-50 text-amber-600 px-2 py-0.5 rounded-full font-medium">{campaign.name}</span>}
+                        {p.generatedByWorkflow && <span className="text-[10px] bg-purple-50 text-purple-600 px-1.5 py-0.5 leading-[1.4] font-medium">AI</span>}
+                        {p._fromSupabase && <span className="text-[10px] bg-blue-50 text-blue-600 px-1.5 py-0.5 leading-[1.4] font-medium">📅 Scheduled</span>}
+                        {typeMeta && <span className="text-[10px] bg-blue-50 text-blue-600 px-1.5 py-0.5 leading-[1.4]">{typeMeta.icon} {typeMeta.label}</span>}
+                        {!imgSrc && <span className="text-[10px] bg-stone-100 text-stone-500 px-1.5 py-0.5 leading-[1.4]">📝 Text only</span>}
+                        {campaign && <span className="text-[10px] bg-amber-50 text-amber-600 px-1.5 py-0.5 leading-[1.4] font-medium">{campaign.name}</span>}
                       </div>
                       <button onClick={e => { e.stopPropagation(); handleDelete(p) }} className="text-text-tertiary hover:text-red-500 transition-colors flex-shrink-0 p-1 -m-1">
                         <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/></svg>
@@ -1502,21 +1502,21 @@ ${post.body || ''}` : (post.body || post.copy || '')
 
   return createPortal(
     <div className="fixed inset-0 z-[9999] flex items-center justify-center"
-      style={{ background: 'rgba(0,0,0,0.82)', backdropFilter: 'blur(8px)', padding: '24px' }}
+      style={{ background: 'rgba(0,0,0,0.82)', padding: '24px' }}
       onClick={e => { if (e.target === e.currentTarget) onClose() }}>
-      <div className="bg-white rounded-3xl shadow-2xl overflow-hidden flex flex-col"
+      <div className="bg-white rounded-3xl  overflow-hidden flex flex-col"
         style={{ width: '100%', maxWidth: hasImage ? '1100px' : '700px', maxHeight: '94vh' }}>
 
         {/* Top bar */}
         <div className="flex items-center justify-between px-7 py-4 border-b border-border flex-shrink-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <span className={`text-xs font-bold px-3 py-1.5 rounded-full tracking-wide ${post.status === 'pending_publish' ? 'bg-amber-100 text-amber-700' : post.status === 'published' ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'}`}>
+            <span className={`text-xs font-bold px-2.5 py-1 leading-[1.4] tracking-wide ${post.status === 'pending_publish' ? 'bg-amber-100 text-amber-700' : post.status === 'published' ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'}`}>
               {post.status === 'pending_publish' ? '● Pending Review' : post.status === 'published' ? '✓ Published' : '⏰ Scheduled'}
             </span>
-            {post._fromSupabase       && <span className="text-xs bg-blue-50 text-blue-600 border border-blue-200 px-2.5 py-1 rounded-full font-medium">📅 Monthly Schedule</span>}
-            {post.generatedByWorkflow && <span className="text-xs bg-purple-50 text-purple-600 border border-purple-200 px-2.5 py-1 rounded-full font-medium">✦ AI Generated</span>}
-            {typeMeta  && <span className="text-xs bg-blue-50 text-blue-600 px-2.5 py-1 rounded-full">{typeMeta.icon} {typeMeta.label}</span>}
-            {!hasImage && <span className="text-xs bg-stone-100 text-stone-500 px-2.5 py-1 rounded-full">📝 Text only</span>}
+            {post._fromSupabase       && <span className="text-xs bg-blue-50 text-blue-600 border border-blue-200 px-1.5 py-0.5 leading-[1.4] font-medium">📅 Monthly Schedule</span>}
+            {post.generatedByWorkflow && <span className="text-xs bg-purple-50 text-purple-600 border border-purple-200 px-1.5 py-0.5 leading-[1.4] font-medium">✦ AI Generated</span>}
+            {typeMeta  && <span className="text-xs bg-blue-50 text-blue-600 px-1.5 py-0.5 leading-[1.4]">{typeMeta.icon} {typeMeta.label}</span>}
+            {!hasImage && <span className="text-xs bg-stone-100 text-stone-500 px-1.5 py-0.5 leading-[1.4]">📝 Text only</span>}
           </div>
           <button onClick={onClose} className="w-9 h-9 flex items-center justify-center rounded-xl text-text-tertiary hover:bg-stone-100 hover:text-text transition-colors ml-3 flex-shrink-0">
             <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>
@@ -1529,23 +1529,23 @@ ${post.body || ''}` : (post.body || post.copy || '')
           {/* Left — image panel (only when image exists) */}
           {hasImage && (
             <div className="flex-shrink-0 flex flex-col overflow-y-auto"
-              style={{ background: 'linear-gradient(160deg, #eef4fb 0%, #ddeaf7 60%, #cfe0f5 100%)', width: isPortrait ? '360px' : '460px' }}>
+              style={{ background: '#f3f5f4', width: isPortrait ? '360px' : '460px' }}>
               <div className="flex-1 flex items-center justify-center p-5">
                 <div style={{ width: '100%', position: 'relative' }}>
-                  <div style={{ width: '100%', aspectRatio: arCss, borderRadius: '14px', overflow: 'hidden', boxShadow: '0 8px 32px rgba(10,102,194,0.18), 0 2px 8px rgba(0,0,0,0.07)', position: 'relative' }}>
+                  <div style={{ width: '100%', aspectRatio: arCss, borderRadius: '14px', overflow: 'hidden', position: 'relative' }}>
                     <PostImage src={displayImage} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
 
                     {/* Carousel nav arrows */}
                     {allImages && allImages.length > 1 && (<>
                       <button onClick={() => setCarouselIdx(i => Math.max(0, i - 1))} disabled={carouselIdx === 0}
-                        style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', background: 'rgba(255,255,255,0.85)', backdropFilter: 'blur(6px)', border: 'none', borderRadius: 10, width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', opacity: carouselIdx === 0 ? 0.3 : 1, transition: 'opacity 0.15s', boxShadow: '0 2px 8px rgba(0,0,0,0.15)' }}>
+                        style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', background: 'rgba(255,255,255,0.85)', border: 'none', borderRadius: 10, width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', opacity: carouselIdx === 0 ? 0.3 : 1, transition: 'opacity 0.15s' }}>
                         <svg width="16" height="16" fill="none" stroke="#1a1410" strokeWidth="2.5" viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg>
                       </button>
                       <button onClick={() => setCarouselIdx(i => Math.min(allImages.length - 1, i + 1))} disabled={carouselIdx === allImages.length - 1}
-                        style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', background: 'rgba(255,255,255,0.85)', backdropFilter: 'blur(6px)', border: 'none', borderRadius: 10, width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', opacity: carouselIdx === allImages.length - 1 ? 0.3 : 1, transition: 'opacity 0.15s', boxShadow: '0 2px 8px rgba(0,0,0,0.15)' }}>
+                        style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', background: 'rgba(255,255,255,0.85)', border: 'none', borderRadius: 10, width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', opacity: carouselIdx === allImages.length - 1 ? 0.3 : 1, transition: 'opacity 0.15s' }}>
                         <svg width="16" height="16" fill="none" stroke="#1a1410" strokeWidth="2.5" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg>
                       </button>
-                      <div style={{ position: 'absolute', top: 10, right: 10, background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)', borderRadius: 8, padding: '3px 8px' }}>
+                      <div style={{ position: 'absolute', top: 10, right: 10, background: 'rgba(0,0,0,0.5)', borderRadius: 8, padding: '3px 8px' }}>
                         <span style={{ color: '#fff', fontSize: 11, fontWeight: 600 }}>{carouselIdx + 1} / {allImages.length}</span>
                       </div>
                     </>)}
@@ -1565,7 +1565,7 @@ ${post.body || ''}` : (post.body || post.copy || '')
               <div className="px-5 pb-5 flex flex-col gap-2.5">
                 {/* Preview badge */}
                 {stagedImage && (
-                  <div style={{ position: 'absolute', top: 10, left: 10, background: 'rgba(10,102,194,0.9)', backdropFilter: 'blur(4px)', borderRadius: 8, padding: '3px 10px', pointerEvents: 'none' }}>
+                  <div style={{ position: 'absolute', top: 10, left: 10, background: 'rgba(10,102,194,0.9)', borderRadius: 8, padding: '3px 10px', pointerEvents: 'none' }}>
                     <span style={{ color: '#fff', fontSize: 11, fontWeight: 700, letterSpacing: '0.04em' }}>PREVIEW</span>
                   </div>
                 )}
@@ -1575,7 +1575,7 @@ ${post.body || ''}` : (post.body || post.copy || '')
                   <div className="flex gap-2">
                     <button onClick={handleSaveRegenImage}
                       className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-2xl text-sm font-bold text-white transition-all active:scale-95"
-                      style={{ background: 'linear-gradient(135deg,#0A66C2,#004182)', boxShadow: '0 4px 14px rgba(10,102,194,0.45)' }}>
+                      style={{ background: '#0A66C2' }}>
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
                       Save Image
                     </button>
@@ -1612,7 +1612,13 @@ ${post.body || ''}` : (post.body || post.copy || '')
             <div className="flex-1 p-6 space-y-4">
 
               {/* LinkedIn post card */}
-              <div className="bg-white rounded-2xl border border-stone-200 shadow-sm overflow-hidden">
+                {/* DESIGN-SYSTEM EXCEPTION. Everything below renders a facsimile of
+                    the real platform's post UI, so it deliberately keeps that
+                    platform's rounded corners and round avatar instead of this
+                    app's square language. Its job is to answer "what will this
+                    look like once it's live", and a preview restyled to match
+                    our chrome answers a different question. Do not flatten. */}
+              <div className="bg-white rounded-[8px] border border-stone-200 overflow-hidden">
                 {/* Post header */}
                 <div className="px-4 pt-4 pb-3 flex items-start gap-3">
                   <div className="w-12 h-12 rounded-full bg-gradient-to-br from-blue-700 to-blue-900 flex items-center justify-center flex-shrink-0 shadow-sm">
@@ -1736,7 +1742,7 @@ ${post.body || ''}` : (post.body || post.copy || '')
               {post.status !== 'published' && (
                 <button onClick={() => { onStatusChange(post, 'published'); setApproved(true) }}
                   className="flex-1 flex items-center justify-center gap-2 py-3 rounded-2xl text-sm font-bold text-white transition-all active:scale-95"
-                  style={{ background: approved ? '#16a34a' : 'linear-gradient(135deg,#0A66C2,#004182)', boxShadow: approved ? '0 4px 16px rgba(22,163,74,0.35)' : '0 4px 20px rgba(10,102,194,0.4)' }}>
+                  style={{ background: approved ? '#16a34a' : '#0A66C2' }}>
                   {approved
                     ? <><svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg> Approved!</>
                     : <><svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg> Approve & Publish</>}
@@ -1903,7 +1909,7 @@ function LinkedInVideoPanel({ dispatch }) {
     <div className="space-y-4 max-w-6xl">
       {/* Header strip */}
       <div className="rounded-2xl overflow-hidden border border-[#0A66C2]/30"
-        style={{ background: 'linear-gradient(135deg,#004182 0%,#0A66C2 60%,#1d8fe0 100%)' }}>
+        style={{ background: '#0A66C2' }}>
         <div className="p-5 flex items-center justify-between flex-wrap gap-4">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-2xl bg-white/20 flex items-center justify-center">
@@ -1912,7 +1918,7 @@ function LinkedInVideoPanel({ dispatch }) {
               </svg>
             </div>
             <div>
-              <p className="font-display font-semibold text-white text-base">LinkedIn Video Studio</p>
+              <p className="font-semibold text-white text-sm">LinkedIn Video Studio</p>
               <p className="text-xs text-white/60">Plan & track professional video content</p>
             </div>
           </div>
@@ -1950,7 +1956,7 @@ function LinkedInVideoPanel({ dispatch }) {
                 <button key={t.value} onClick={() => setVideoType(t.value)}
                   className={`relative text-left rounded-xl border px-3 py-2.5 transition-all ${videoType === t.value ? 'border-[#0A66C2] bg-blue-50 shadow-sm ring-1 ring-[#0A66C2]/30' : 'border-border bg-white hover:border-border-strong hover:bg-surface-subtle'}`}>
                   {videoType === t.value && (
-                    <span className="absolute top-2 right-2 w-4 h-4 rounded-full bg-[#0A66C2] flex items-center justify-center">
+                    <span className="absolute top-2 right-2 w-4 h-4 bg-[#0A66C2] flex items-center justify-center">
                       <svg className="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" strokeWidth="3" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
                     </span>
                   )}
@@ -2087,10 +2093,10 @@ function LinkedInVideoPanel({ dispatch }) {
                         <p className="font-semibold text-text text-sm">{video.title}</p>
                         <div className="flex items-center gap-2 flex-wrap mt-1">
                           <span className="text-xs text-text-secondary">{vt?.icon} {vt?.label}</span>
-                          <span className="text-[10px] bg-stone-100 text-stone-600 px-2 py-0.5 rounded-full">{video.length}</span>
-                          {aud && <span className="text-[10px] bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full">{aud.label}</span>}
+                          <span className="text-[10px] bg-stone-100 text-stone-600 px-1.5 py-0.5 leading-[1.4]">{video.length}</span>
+                          {aud && <span className="text-[10px] bg-blue-50 text-blue-600 px-1.5 py-0.5 leading-[1.4]">{aud.label}</span>}
                           <button onClick={() => cycleStatus(video.id)}
-                            className={`text-xs px-2.5 py-0.5 rounded-full font-medium cursor-pointer transition-all hover:opacity-80 ${LI_VIDEO_STATUS_COLORS[video.status]}`}>
+                            className={`text-[10px] px-1.5 py-0.5 leading-[1.4] font-bold uppercase tracking-[0.08em] cursor-pointer transition-opacity hover:opacity-80 ${LI_VIDEO_STATUS_COLORS[video.status]}`}>
                             {video.status.charAt(0).toUpperCase() + video.status.slice(1)}
                           </button>
                         </div>

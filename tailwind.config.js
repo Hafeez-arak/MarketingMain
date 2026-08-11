@@ -2,10 +2,35 @@
 export default {
   content: ['./index.html','./src/**/*.{js,jsx,ts,tsx}'],
   theme: {
+    // Declared OUTSIDE `extend` on purpose: this replaces Tailwind's radius
+    // scale rather than adding to it, so every `rounded-*` class already
+    // written across the app collapses to a square corner in one move. That
+    // matters at this size — there are ~470 rounded-* usages across 25 pages,
+    // and chasing them by hand would guarantee a few stragglers keeping their
+    // pill shape on some page nobody reopened.
+    //
+    // `full` is the one deliberate exception. It survives because some things
+    // are genuinely circular and would look broken squared off: avatars,
+    // status dots, and spinners. Anything that is a *box* — cards, buttons,
+    // inputs, modals, badges, tags — must not use it.
+    borderRadius: {
+      none:    '0px',
+      sm:      '0px',
+      DEFAULT: '0px',
+      md:      '0px',
+      lg:      '0px',
+      xl:      '0px',
+      '2xl':   '0px',
+      '3xl':   '0px',
+      '4xl':   '0px',
+      full:    '9999px',
+    },
     extend: {
       fontFamily: {
-        sans:    ['"DM Sans"', 'system-ui', 'sans-serif'],
-        display: ['"Cormorant Garamond"', 'Georgia', 'serif'],
+        // One family. `display` is deliberately absent — see the note in
+        // src/index.css; nothing referenced it after the boxy pass, and a
+        // half-wired font utility is worse than no utility.
+        sans: ['"DM Sans"', 'system-ui', 'sans-serif'],
       },
       colors: {
         // Primary accent — was warm amber/sand, now Cool Steel
@@ -80,29 +105,35 @@ export default {
           disabled:  '#a9b4c2',
         },
       },
-      borderRadius: {
-        'xl':  '12px',
-        '2xl': '16px',
-        '3xl': '24px',
-        '4xl': '32px',
-      },
       boxShadow: {
-        'sm':        '0 1px 3px rgba(28,35,33,0.06)',
-        'card':      '0 1px 4px rgba(28,35,33,0.05), 0 1px 2px rgba(28,35,33,0.04)',
-        'card-hover':'0 6px 20px rgba(28,35,33,0.08), 0 2px 6px rgba(28,35,33,0.05)',
-        'amber':     '0 4px 16px rgba(125,152,161,0.28)',
-        'amber-lg':  '0 8px 32px rgba(125,152,161,0.32)',
-        'clay':      '0 4px 16px rgba(94,101,114,0.24)',
-        'dropdown':  '0 12px 32px rgba(28,35,33,0.10), 0 4px 8px rgba(28,35,33,0.05)',
-        'inset':     'inset 0 1px 0 rgba(255,255,255,0.6)',
+        // Elevation is not part of this design language — structure comes from
+        // 1px rules, not from lift. `card` and the accent shadows are kept as
+        // names (they're referenced in ~60 places) but resolve to nothing, so
+        // a stray `shadow-card` can't reintroduce a float. Only genuinely
+        // floating surfaces — dropdowns, popovers, modals — cast a shadow,
+        // because there the shadow carries meaning: "this is above the page."
+        'sm':        'none',
+        'card':      'none',
+        'card-hover':'none',
+        'amber':     'none',
+        'amber-lg':  'none',
+        'clay':      'none',
+        'dropdown':  '0 8px 24px rgba(28,35,33,0.10), 0 2px 6px rgba(28,35,33,0.06)',
+        'inset':     'none',
       },
       backgroundImage: {
-        'amber-gradient': 'linear-gradient(135deg, #96acb2 0%, #7d98a1 50%, #4c5e61 100%)',
-        'clay-gradient':  'linear-gradient(135deg, #7e848e 0%, #5e6572 50%, #2c3435 100%)',
-        'warm-gradient':  'linear-gradient(160deg, #eef1ef 0%, #f3f5f4 60%, #f6f8f7 100%)',
-        'card-warm':      'linear-gradient(135deg, #ffffff 0%, #eef1ef 100%)',
-        'hero-warm':      'radial-gradient(ellipse at 20% 0%, rgba(125,152,161,0.10) 0%, transparent 55%), radial-gradient(ellipse at 80% 100%, rgba(94,101,114,0.07) 0%, transparent 55%)',
-        'sidebar-warm':   'linear-gradient(180deg, #eef1ef 0%, #e0e5e6 100%)',
+        // One gradient survives the flattening: the logo mark. It's the single
+        // brand signature in an otherwise flat UI, so it reads as intentional
+        // rather than leftover. Everything else resolves to a solid fill —
+        // the *-gradient names stay so existing `bg-amber-gradient` call sites
+        // keep working, they just paint one color now.
+        'logo-mark':      'linear-gradient(135deg, #7d98a1 0%, #344041 100%)',
+        'amber-gradient': 'linear-gradient(#4c5e61, #4c5e61)',
+        'clay-gradient':  'linear-gradient(#3d444a, #3d444a)',
+        'warm-gradient':  'linear-gradient(#eef1ef, #eef1ef)',
+        'card-warm':      'linear-gradient(#ffffff, #ffffff)',
+        'hero-warm':      'none',
+        'sidebar-warm':   'linear-gradient(#ffffff, #ffffff)',
       },
       animation: {
         'shimmer':     'shimmer 2.5s ease-in-out infinite',

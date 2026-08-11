@@ -2,7 +2,7 @@ import { useRef, useState, useEffect, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { useAuth } from '../../store/auth'
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from '../../lib/supabaseClient'
-import { Card, Button, Empty, ConfirmDialog } from '../../components/ui/index'
+import { Card, Button, Empty, ConfirmDialog, PageHeader } from '../../components/ui/index'
 
 function humanSize(bytes) {
   if (!bytes || bytes === 0) return 'AI generated'
@@ -137,16 +137,20 @@ export function MediaLibrary() {
   })
 
   return (
-    <div className="max-w-7xl space-y-5">
+    <div className="max-w-7xl space-y-4">
+      <PageHeader title="Media Library" subtitle="Every image, video, and document uploaded to this workspace." />
+
       {/* Toolbar */}
       <div className="flex items-center justify-between flex-wrap gap-3">
-        <div className="flex gap-1 bg-stone-200 border border-stone-300 rounded-xl p-1 shadow-sm">
+        {/* Segmented bar. Was pills floating inside a grey tray with its own
+            border and shadow — three nested surfaces to express four options. */}
+        <div className="flex">
           {['all','images','videos','docs'].map(f => (
             <button key={f} onClick={() => setFilter(f)}
-              className={`px-4 py-2 rounded-lg text-sm font-semibold capitalize transition-all ${
+              className={`px-3 py-1.5 border -ml-px first:ml-0 text-xs font-semibold capitalize transition-colors ${
                 filter === f
-                  ? 'bg-white text-text shadow-sm border border-stone-200'
-                  : 'text-stone-500 hover:text-text hover:bg-stone-100'
+                  ? 'bg-amber-700 text-white border-amber-700 relative z-10'
+                  : 'bg-white text-text-secondary border-border hover:text-text hover:bg-surface-subtle'
               }`}>
               {f === 'all' ? `All (${assets.length})` : f}
             </button>
@@ -212,12 +216,12 @@ export function MediaLibrary() {
                 <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100 gap-2">
                   {asset.url && (
                     <a href={asset.url} download={asset.name} target="_blank" rel="noreferrer"
-                      className="w-8 h-8 rounded-full bg-white/90 flex items-center justify-center text-blue-600 hover:bg-white transition-colors"
+                      className="w-7 h-7 bg-white flex items-center justify-center text-text-secondary hover:text-text border border-border transition-colors"
                       onClick={e => e.stopPropagation()}>
                       <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
                     </a>
                   )}
-                  <button onClick={e => { e.stopPropagation(); setDeleteId(asset.id) }} className="w-8 h-8 rounded-full bg-white/90 flex items-center justify-center text-red-500 hover:bg-white transition-colors">
+                  <button onClick={e => { e.stopPropagation(); setDeleteId(asset.id) }} className="w-7 h-7 bg-white flex items-center justify-center text-red-600 hover:text-red-700 border border-border transition-colors">
                     <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/></svg>
                   </button>
                 </div>
@@ -227,7 +231,7 @@ export function MediaLibrary() {
                 <div className="flex items-center justify-between gap-1 mt-0.5">
                   <p className="text-[10px] text-text-tertiary">{humanSize(asset.size_bytes)}</p>
                   {asset.platform && (
-                    <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${asset.platform === 'instagram' ? 'bg-pink-100 text-pink-600' : asset.platform === 'linkedin' ? 'bg-blue-100 text-blue-600' : 'bg-stone-100 text-stone-500'}`}>
+                    <span className={`text-[9px] font-bold uppercase tracking-[0.08em] px-1.5 py-0.5 leading-[1.4] ${asset.platform === 'instagram' ? 'bg-pink-100 text-pink-600' : asset.platform === 'linkedin' ? 'bg-blue-100 text-blue-600' : 'bg-stone-100 text-stone-500'}`}>
                       {asset.platform === 'instagram' ? 'IG' : asset.platform === 'linkedin' ? 'LI' : asset.platform.toUpperCase()}
                     </span>
                   )}
@@ -273,11 +277,11 @@ export function MediaLibrary() {
       {/* Fullscreen overlay — portalled to body to avoid overflow clipping */}
       {fullscreen && createPortal(
         <div className="fixed inset-0 z-[9999] flex items-center justify-center"
-          style={{ background: 'rgba(0,0,0,0.92)', backdropFilter: 'blur(8px)' }}
+          style={{ background: 'rgba(0,0,0,0.92)' }}
           onClick={() => setFullscreen(null)}>
           <div className="relative max-w-[90vw] max-h-[90vh]" onClick={e => e.stopPropagation()}>
             <img src={fullscreen.url} alt={fullscreen.name}
-              className="max-w-[90vw] max-h-[88vh] rounded-2xl object-contain shadow-2xl" />
+              className="max-w-[90vw] max-h-[88vh] object-contain" />
             <div className="absolute top-3 right-3 flex gap-2">
               <a href={fullscreen.url} download={fullscreen.name} target="_blank" rel="noreferrer"
                 className="w-9 h-9 rounded-xl bg-white/20 hover:bg-white/30 backdrop-blur flex items-center justify-center text-white transition-colors"

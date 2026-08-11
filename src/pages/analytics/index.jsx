@@ -6,7 +6,7 @@ import {
 } from 'recharts'
 import { useApp } from '../../store/app'
 import { useAuth } from '../../store/auth'
-import { Card, Button, PlatformPill, Empty, Spinner, PostImage, IconBadge, PillSelect } from '../../components/ui/index'
+import { Card, Button, PlatformPill, Empty, Spinner, PostImage, IconBadge, PillSelect, PageHeader } from '../../components/ui/index'
 import { Icon } from '../../components/ui/icons'
 import { fetchSocialAccounts, syncZernio, fetchZernioDashboard } from '../../lib/zernio'
 import { BestTimeHeatmap, MetricToggle } from './charts'
@@ -99,7 +99,7 @@ const ZERO_METRICS = { impressions: 0, reach: 0, likes: 0, comments: 0, shares: 
 
 function ChartCard({ title, subtitle, total, right, icon, tone, children }) {
   return (
-    <Card className="p-5 shadow-none border-border/80">
+    <Card className="p-5">
       <div className="flex items-start justify-between gap-3 mb-4">
         <div className="flex items-start gap-2.5">
           {icon && <IconBadge tone={tone}>{icon}</IconBadge>}
@@ -278,24 +278,20 @@ export function Analytics() {
   }
 
   return (
-    <div className="max-w-7xl space-y-5">
-      <div className="flex items-start justify-between gap-4 flex-wrap">
-        <div>
-          <h1 className="font-display text-2xl font-bold text-stone-900">Analytics</h1>
-          <p className="text-sm text-text-secondary mt-1">Real performance pulled live from your connected accounts.</p>
-        </div>
+    <div className="max-w-7xl space-y-4">
+      <PageHeader title="Analytics" subtitle="Real performance pulled live from your connected accounts.">
         <div className="text-right">
-          <Button size="xs" variant="ghost" onClick={handleSync} disabled={syncing}>
-            {syncing ? <><Spinner size="sm" /> Syncing…</> : '↻ Refresh from Zernio'}
+          <Button size="sm" variant="secondary" onClick={handleSync} disabled={syncing}>
+            {syncing ? <><Spinner size="sm" /> Syncing…</> : 'Refresh from Zernio'}
           </Button>
-          {note && <p className="text-[10px] text-text-tertiary mt-1 max-w-[260px]">{note}</p>}
+          {note && <p className="text-[10px] text-text-tertiary mt-1.5 max-w-[260px]">{note}</p>}
         </div>
-      </div>
+      </PageHeader>
 
       {accounts.length === 0 ? (
         <Card className="p-6 border-dashed bg-surface-muted">
           <div className="flex items-start gap-4">
-            <div className="w-10 h-10 rounded-xl bg-amber-50 flex items-center justify-center text-amber-600 flex-shrink-0">
+            <div className="w-10 h-10 border border-amber-200 bg-amber-50 flex items-center justify-center text-amber-700 flex-shrink-0">
               <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><path d="m15 7-8.5 8.5a2.12 2.12 0 0 0 3 3L18 10a4.24 4.24 0 0 0-6-6l-8.5 8.5a6.36 6.36 0 0 0 9 9L21 13"/></svg>
             </div>
             <div className="flex-1">
@@ -352,7 +348,7 @@ export function Analytics() {
               {/* KPI strip — one flat row divided by rules, not five boxed
                   cards. Reads as a single stat panel rather than a scatter
                   of separate widgets. */}
-              <Card className="shadow-none border-border/80 overflow-hidden">
+              <Card className="overflow-hidden">
                 <div className="grid grid-cols-2 sm:grid-cols-5 divide-y sm:divide-y-0 divide-x-0 sm:divide-x divide-border">
                   <div className="p-5">
                     <p className="text-xs text-text-tertiary mb-1.5">Engagement rate</p>
@@ -380,7 +376,7 @@ export function Analytics() {
                     <p className="text-xs text-text-tertiary mb-1.5">Best post</p>
                     {bestPost ? (
                       <div className="flex items-center gap-2">
-                        <PostImage src={bestPost.thumbnailUrl} className="w-8 h-8 rounded-lg object-cover flex-shrink-0" />
+                        <PostImage src={bestPost.thumbnailUrl} className="w-8 h-8 object-cover flex-shrink-0 border border-border" />
                         <div className="min-w-0">
                           <p className="text-sm font-bold text-text leading-tight">{bestPost._er >= 0 ? `${bestPost._er.toFixed(0)}%` : '—'}</p>
                           {bestPost.platformPostUrl && (
@@ -475,7 +471,7 @@ export function Analytics() {
                       the metric toggle (Zernio's layout: chart left, a
                       grid of icon+value cells right, rather than a plain
                       checkbox row stacked above the chart). */}
-                  <Card className="p-5 shadow-none border-border/80">
+                  <Card className="p-5">
                     <div className="flex items-start gap-2.5 mb-5">
                       <IconBadge>{Icon.trending}</IconBadge>
                       <div>
@@ -542,7 +538,7 @@ export function Analytics() {
                   </div>
 
                   {/* Platform breakdown */}
-                  <Card className="overflow-hidden shadow-none border-border/80">
+                  <Card className="overflow-hidden">
                     <div className="px-5 py-4 border-b border-border flex items-center gap-2.5">
                       <IconBadge>{Icon.grid}</IconBadge>
                       <h3 className="font-semibold text-text text-sm">Platform breakdown</h3>
@@ -565,7 +561,7 @@ export function Analytics() {
                         </thead>
                         <tbody className="divide-y divide-border">
                           {platformBreakdown.map(r => (
-                            <tr key={r.platform} className="hover:bg-surface-muted/60 transition-colors">
+                            <tr key={r.platform} className="hover:bg-surface-muted transition-colors">
                               <td className="px-5 py-3"><PlatformPill platform={r.platform} /></td>
                               <td className="px-5 py-3 text-right text-text">{r.postCount}</td>
                               <td className="px-5 py-3 text-right text-text">{fmt(r.likes)}</td>
@@ -578,7 +574,7 @@ export function Analytics() {
                               <td className="px-5 py-3 text-right font-medium">
                                 {r.er === null
                                   ? <span className="text-text-tertiary">—</span>
-                                  : <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-sage-50 text-sage-700">{r.er.toFixed(0)}%</span>}
+                                  : <span className="text-[10px] font-semibold px-1.5 py-0.5 bg-sage-100 text-sage-800 uppercase tracking-[0.08em]">{r.er.toFixed(0)}%</span>}
                               </td>
                             </tr>
                           ))}
@@ -588,7 +584,7 @@ export function Analytics() {
                   </Card>
 
                   {/* Top performing posts */}
-                  <Card className="overflow-hidden shadow-none border-border/80">
+                  <Card className="overflow-hidden">
                     <div className="px-5 py-4 border-b border-border flex items-center gap-2.5">
                       <IconBadge tone="rose">{Icon.trophy}</IconBadge>
                       <h3 className="font-semibold text-text text-sm">Top performing posts</h3>
@@ -608,10 +604,10 @@ export function Analytics() {
                         </thead>
                         <tbody className="divide-y divide-border">
                           {topPosts.map(p => (
-                            <tr key={p._id} className="hover:bg-surface-muted/60 transition-colors">
+                            <tr key={p._id} className="hover:bg-surface-muted transition-colors">
                               <td className="px-5 py-3">
                                 <div className="flex items-center gap-3 max-w-xs">
-                                  <PostImage src={p.thumbnailUrl} className="w-9 h-9 rounded-lg object-cover flex-shrink-0" />
+                                  <PostImage src={p.thumbnailUrl} className="w-9 h-9 object-cover flex-shrink-0 border border-border" />
                                   <div className="min-w-0">
                                     <div className="flex items-center gap-1.5">
                                       <PlatformPill platform={p.platform} />
@@ -654,7 +650,7 @@ export function Analytics() {
                           </ResponsiveContainer>
                           <div className="flex flex-wrap gap-2 mt-2">
                             {frequencyRows.map(r => (
-                              <span key={r.platform} className="text-[10px] px-2 py-1 rounded-full bg-surface-muted text-text-secondary">
+                              <span key={r.platform} className="text-[10px] px-1.5 py-0.5 bg-surface-subtle border border-border text-text-secondary">
                                 <span className="capitalize font-medium">{r.platform}</span> · {r.posts_per_week}/wk · {r.avg_engagement_rate.toFixed(0)}%
                               </span>
                             ))}
@@ -693,7 +689,7 @@ export function Analytics() {
           )}
 
           {/* Connected accounts — always shown regardless of dashboard state */}
-          <Card className="overflow-hidden shadow-none border-border/80">
+          <Card className="overflow-hidden">
             <div className="px-5 py-4 border-b border-border flex items-center gap-2.5">
               <IconBadge>{Icon.users}</IconBadge>
               <div>
@@ -715,8 +711,8 @@ export function Analytics() {
                     </div>
                     <div className="text-sm text-text-secondary">{fmt(a.followers_count || 0)} followers</div>
                     {a.needs_reconnection
-                      ? <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-red-50 text-red-600">Reconnect needed</span>
-                      : <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-sage-50 text-sage-700">Connected</span>}
+                      ? <span className="text-[10px] font-semibold px-1.5 py-0.5 bg-red-50 text-red-600 uppercase tracking-[0.08em]">Reconnect needed</span>
+                      : <span className="text-[10px] font-semibold px-1.5 py-0.5 bg-sage-100 text-sage-800 uppercase tracking-[0.08em]">Connected</span>}
                     {active && <span className="text-[10px] font-semibold text-amber-700">Viewing</span>}
                     {a.profile_url && (
                       <a href={a.profile_url} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()}

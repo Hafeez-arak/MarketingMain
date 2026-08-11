@@ -14,17 +14,20 @@ export function AuthLayout({ eyebrow, title, subtitle, children }) {
         className="hidden lg:flex lg:w-[42%] flex-col justify-between p-12 relative overflow-hidden"
         style={{ background: PALETTE.carbon }}
       >
+        {/* Structure instead of glow: a hairline grid, drawn in the panel's
+            own ink at low contrast. It reads as drafting paper rather than as
+            a light source, which is the whole point of this design. */}
         <div
-          className="absolute inset-0 opacity-40"
-          style={{ background: `radial-gradient(circle at 20% 20%, ${PALETTE.slate} 0%, transparent 55%)` }}
-        />
-        <div
-          className="absolute inset-0 opacity-30"
-          style={{ background: `radial-gradient(circle at 85% 80%, ${PALETTE.steel} 0%, transparent 50%)` }}
+          aria-hidden
+          className="absolute inset-0 opacity-[0.14]"
+          style={{
+            backgroundImage: `linear-gradient(to right, ${PALETTE.powder} 1px, transparent 1px), linear-gradient(to bottom, ${PALETTE.powder} 1px, transparent 1px)`,
+            backgroundSize: '56px 56px',
+          }}
         />
 
         <div className="relative z-10 flex items-center gap-2">
-          <div className="w-2 h-6 rounded-full" style={{ background: `linear-gradient(180deg, ${PALETTE.steel}, ${PALETTE.slate})` }} />
+          <div className="w-2 h-6" style={{ background: PALETTE.steel }} />
           <span className="text-sm font-semibold tracking-[0.18em] uppercase" style={{ color: PALETTE.powder }}>
             CampAI
           </span>
@@ -77,7 +80,7 @@ export function AuthInput({ label, error, ...props }) {
       )}
       <input
         {...props}
-        className="w-full rounded-xl border px-3.5 py-2.5 text-sm outline-none transition-all duration-150 focus:ring-2"
+        className="w-full border px-3 py-2 text-sm outline-none transition-colors duration-150 focus:ring-1"
         style={{
           borderColor: error ? '#fca5a5' : PALETTE.powder,
           color: PALETTE.carbon,
@@ -95,8 +98,8 @@ export function AuthButton({ children, loading, ...props }) {
     <button
       {...props}
       disabled={loading || props.disabled}
-      className="w-full rounded-xl py-2.5 text-sm font-semibold text-white transition-all duration-150 disabled:opacity-60 flex items-center justify-center gap-2"
-      style={{ background: `linear-gradient(135deg, ${PALETTE.steel}, ${PALETTE.slate})` }}
+      className="w-full py-2.5 text-sm font-semibold text-white transition-colors duration-150 disabled:opacity-60 flex items-center justify-center gap-2 hover:brightness-110"
+      style={{ background: '#4C5E61' }}
     >
       {loading && <span className="w-3.5 h-3.5 border-2 border-white/60 border-t-transparent rounded-full animate-spin" />}
       {children}

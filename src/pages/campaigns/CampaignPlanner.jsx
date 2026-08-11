@@ -261,21 +261,21 @@ function IdeaCard({ idea, index, accessToken, workspaceId, onChange, onRemove, o
   const rejected = idea.status === 'rejected'
 
   return (
-    <div className={`rounded-2xl border transition-all ${rejected ? 'border-border bg-surface-subtle/40 opacity-70' : idea.status === 'approved' ? 'border-sage-200 bg-sage-50/30' : 'border-border bg-white'}`}>
+    <div className={`rounded-2xl border transition-all ${rejected ? 'border-border bg-surface-subtle opacity-70' : idea.status === 'approved' ? 'border-sage-200 bg-sage-50/30' : 'border-border bg-white'}`}>
       <div className="p-4">
         <div className="flex items-start gap-3">
           <span className="text-[11px] font-bold text-text-disabled w-5 flex-shrink-0 text-right pt-0.5">{index + 1}</span>
           <div className="flex-1 min-w-0">
             {/* Badges */}
             <div className="flex items-center gap-1.5 flex-wrap mb-1.5">
-              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${idea.platform === 'linkedin' ? 'bg-[#0A66C2]/10 text-[#0A66C2]' : 'bg-pink-50 text-pink-600'}`}>
+              <span className={`text-[10px] font-bold px-1.5 py-0.5 leading-[1.4] ${idea.platform === 'linkedin' ? 'bg-[#0A66C2]/10 text-[#0A66C2]' : 'bg-pink-50 text-pink-600'}`}>
                 {idea.platform === 'linkedin' ? 'LinkedIn' : 'Instagram'}
               </span>
-              {idea.occasion && <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${OCCASION_STYLE}`}>★ {idea.occasion}</span>}
-              {idea.pillar && <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full border ${PILLAR_STYLE}`}>{idea.pillar}</span>}
-              {idea.series && <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full border bg-violet-50 text-violet-700 border-violet-100" title="Deliberate recurring series — not flagged as repetition across months">🔁 {idea.series}</span>}
-              {idea.objective && <span className="text-[10px] font-medium px-2 py-0.5 rounded-full border bg-sky-50 text-sky-700 border-sky-100">{idea.objective}</span>}
-              <span className="text-[10px] font-medium px-2 py-0.5 rounded-full border bg-indigo-50 text-indigo-700 border-indigo-100">
+              {idea.occasion && <span className={`text-[10px] font-semibold px-1.5 py-0.5 leading-[1.4] border ${OCCASION_STYLE}`}>★ {idea.occasion}</span>}
+              {idea.pillar && <span className={`text-[10px] font-medium px-1.5 py-0.5 leading-[1.4] border ${PILLAR_STYLE}`}>{idea.pillar}</span>}
+              {idea.series && <span className="text-[10px] font-semibold px-1.5 py-0.5 leading-[1.4] border bg-violet-50 text-violet-700 border-violet-100" title="Deliberate recurring series — not flagged as repetition across months">🔁 {idea.series}</span>}
+              {idea.objective && <span className="text-[10px] font-medium px-1.5 py-0.5 leading-[1.4] border bg-sky-50 text-sky-700 border-sky-100">{idea.objective}</span>}
+              <span className="text-[10px] font-medium px-1.5 py-0.5 leading-[1.4] border bg-indigo-50 text-indigo-700 border-indigo-100">
                 {formatsFor(idea.platform).find(f => f.id === idea.postFormat)?.label || 'Feed image'}
                 {idea.aspectRatio ? ` · ${aspectLabel(idea.aspectRatio)}` : ''}
                 {(idea.postFormat === 'carousel' || idea.postFormat === 'photo_carousel') && idea.slideCount > 1 ? ` ·${idea.slideCount}` : ''}
@@ -300,7 +300,7 @@ function IdeaCard({ idea, index, accessToken, workspaceId, onChange, onRemove, o
               <p className="text-[11px] text-red-500 mt-1 leading-relaxed"><span className="font-semibold">Rejected:</span> {rejectReasonLabel(idea.rejectReason)}</p>
             )}
           </div>
-          <span className={`text-[10px] font-semibold px-2 py-1 rounded-full flex-shrink-0 ${st.cls}`}>{st.label}</span>
+          <span className={`text-[10px] font-semibold px-1.5 py-0.5 leading-[1.4] flex-shrink-0 ${st.cls}`}>{st.label}</span>
         </div>
 
         <IdeaDraftPanel idea={idea} accessToken={accessToken} workspaceId={workspaceId} mediaOptionsUrl={mediaOptionsUrl}
@@ -435,7 +435,7 @@ function IdeaEditModal({ idea, tones, saving, saveError, onClose, onSave }) {
           ) : ratios.length === 1 ? (
             <div>
               <p className="text-xs font-medium text-text-secondary mb-1.5">Orientation</p>
-              <p className="text-sm text-text-tertiary px-3 py-2 rounded-lg bg-surface-subtle/60 border border-border">{aspectLabel(ratios[0])} ({ratios[0]})</p>
+              <p className="text-sm text-text-tertiary px-3 py-2 rounded-lg bg-surface-subtle border border-border">{aspectLabel(ratios[0])} ({ratios[0]})</p>
             </div>
           ) : null}
         </div>
@@ -1174,19 +1174,20 @@ export function CampaignPlanner() {
   const setupMoments = includeHolidays ? momentsInRange(startDate, endDate) : []
 
   return (
-    <div className="max-w-4xl space-y-5">
-      {/* Hero */}
-      <div className="rounded-3xl overflow-hidden border border-purple-200/70 p-7"
-        style={{ background: 'linear-gradient(135deg,#faf5ff 0%,#f5f3ff 55%,#fdf4ff 100%)' }}>
-        <div className="flex items-start gap-5">
-          <div className="w-12 h-12 rounded-2xl flex items-center justify-center flex-shrink-0 shadow-sm"
-            style={{ background: 'linear-gradient(180deg,#7c3aed,#a78bfa)' }}>
-            <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M12 3v3m0 12v3m9-9h-3M6 12H3m15.36-6.36l-2.12 2.12M8.76 15.24l-2.12 2.12m12.72 0l-2.12-2.12M8.76 8.76L6.64 6.64"/></svg>
+    <div className="max-w-4xl space-y-4">
+      {/* Hero. Was a purple gradient panel with a violet icon tile — a colour
+          that appears in no palette this app defines, on the only page that
+          used it. Now a flat panel on the brand accent, with the accent
+          carried by a left rule rather than a fill. */}
+      <div className="border border-border border-l-2 border-l-amber-700 bg-white p-5">
+        <div className="flex items-start gap-4">
+          <div className="w-10 h-10 bg-amber-700 flex items-center justify-center flex-shrink-0">
+            <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M12 3v3m0 12v3m9-9h-3M6 12H3m15.36-6.36l-2.12 2.12M8.76 15.24l-2.12 2.12m12.72 0l-2.12-2.12M8.76 8.76L6.64 6.64"/></svg>
           </div>
           <div className="min-w-0">
-            <p className="text-[11px] font-semibold text-purple-700 tracking-[0.14em] uppercase mb-1">Monthly Planning</p>
-            <h1 className="font-display text-2xl font-bold text-stone-900 mb-1.5">Plan the month before it starts.</h1>
-            <p className="text-sm text-text-secondary leading-relaxed max-w-xl">
+            <p className="eyebrow text-text-tertiary mb-1.5">Monthly planning</p>
+            <h1 className="text-lg font-bold text-text tracking-tight mb-2">Plan the month before it starts.</h1>
+            <p className="text-xs text-text-secondary leading-relaxed max-w-xl">
               Pick a month and we'll propose a full slate of post ideas — pulling from your Brand Brain and
               the seasonal moments in range (Ramadan, Eid, National Day…). You approve the ideas worth making;
               only approved ones move on to content generation.
@@ -1195,18 +1196,21 @@ export function CampaignPlanner() {
         </div>
       </div>
 
-      {/* Step indicator */}
-      <div className="flex items-center gap-2 text-[11px] font-semibold">
-        {['Setup', 'Review & Approve', 'Approved'].map((label, i) => {
+      {/* Step indicator — segments of one continuous bar, sharing borders, so
+          the three steps read as a single track. The arrow glyphs between
+          floating pills were doing that job with punctuation instead. */}
+      <div className="flex text-[10px] font-bold uppercase tracking-[0.08em]">
+        {['Setup', 'Review & approve', 'Approved'].map((label, i) => {
           const active = ['setup', 'review', 'done'].indexOf(step) === i
           const done = ['setup', 'review', 'done'].indexOf(step) > i
           return (
-            <div key={label} className="flex items-center gap-2">
-              <span className={`px-3 py-1 rounded-full ${active ? 'bg-purple-100 text-purple-700' : done ? 'bg-sage-100 text-sage-700' : 'bg-stone-100 text-text-tertiary'}`}>
-                {done ? '✓ ' : ''}{label}
-              </span>
-              {i < 2 && <span className="text-text-disabled">→</span>}
-            </div>
+            <span key={label}
+              className={`px-3 py-1.5 border -ml-px first:ml-0
+                ${active ? 'bg-amber-700 text-white border-amber-700 relative z-10'
+                  : done ? 'bg-sage-100 text-sage-800 border-sage-200'
+                  : 'bg-white text-text-tertiary border-border'}`}>
+              {done ? '✓ ' : ''}{label}
+            </span>
           )
         })}
       </div>
@@ -1269,7 +1273,7 @@ export function CampaignPlanner() {
             <div className="flex items-center gap-1.5 flex-wrap rounded-xl bg-amber-50/60 border border-amber-100 px-3.5 py-2.5">
               <span className="text-[11px] font-semibold text-amber-800">Falls in this month:</span>
               {setupMoments.map((m, i) => (
-                <span key={i} className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200">★ {m.name}</span>
+                <span key={i} className="text-[10px] font-semibold px-1.5 py-0.5 leading-[1.4] bg-amber-100 text-amber-800 border border-amber-200">★ {m.name}</span>
               ))}
               <span className="text-[11px] text-amber-700/80">— worth a post yourself, or let AI cover it below.</span>
             </div>
@@ -1376,13 +1380,13 @@ export function CampaignPlanner() {
           </div>
 
           {/* ── SECONDARY: AI-assist is an explicit, off-by-default add-on ── */}
-          <div className="rounded-2xl border border-border bg-surface-subtle/40 p-4 space-y-4">
+          <div className="rounded-2xl border border-border bg-surface-subtle p-4 space-y-4">
             <Toggle checked={aiAssist} onChange={e => update({ aiAssist: e.target.checked })}
               label="Also let AI propose additional posts this month" />
             <p className="text-[11px] text-text-tertiary -mt-2.5">Fills out the rest of the month around your posts above. Leave this off for a plan that's exactly what you added.</p>
 
             {aiAssist && (
-              <div className="space-y-4 pt-3 border-t border-border/70">
+              <div className="space-y-4 pt-3 border-t border-border">
                 <div className="grid grid-cols-2 gap-4">
                   <Input
                     label="Roughly how many AI posts? (optional)"
@@ -1451,7 +1455,7 @@ export function CampaignPlanner() {
                 <span className="text-[11px] font-semibold text-text-secondary uppercase tracking-wide">Reviewed</span>
                 <span className="text-[11px] font-bold text-text">{reviewedCount} / {ideas.length}{seasonalCount > 0 && <span className="text-amber-700 font-semibold ml-2">★ {seasonalCount} seasonal</span>}</span>
               </div>
-              <div className="h-1.5 rounded-full bg-stone-100 overflow-hidden flex">
+              <div className="h-1.5 bg-stone-100 border border-border overflow-hidden flex">
                 <div className="h-full bg-sage-400 transition-all duration-300" style={{ width: `${ideas.length ? (approvedCount / ideas.length) * 100 : 0}%` }} />
                 <div className="h-full bg-red-300 transition-all duration-300" style={{ width: `${ideas.length ? (rejectedCount / ideas.length) * 100 : 0}%` }} />
               </div>
@@ -1460,16 +1464,16 @@ export function CampaignPlanner() {
             {/* Content mix — makes imbalance (7 product, 1 tip) visible at a
                 glance instead of something you'd only notice reading every card. */}
             {(pillarBreakdown.sorted.length > 0 || contentMixTarget) && (
-              <div className="rounded-xl bg-surface-subtle/60 border border-border/70 px-3 py-2.5">
+              <div className="bg-surface-subtle border border-border px-3 py-2.5">
                 <div className="flex items-center gap-1.5 flex-wrap text-[11px]">
                   <span className="font-semibold text-text-secondary">Mix:</span>
                   {pillarBreakdown.sorted.map(([pillar, n]) => (
-                    <span key={pillar} className="px-2 py-0.5 rounded-full border bg-white border-border text-text-secondary">
+                    <span key={pillar} className="px-1.5 py-0.5 leading-[1.4] border bg-white border-border text-text-secondary">
                       {n} {pillar}
                     </span>
                   ))}
                   {pillarBreakdown.unlabeled > 0 && (
-                    <span className="px-2 py-0.5 rounded-full border bg-white border-border text-text-tertiary">
+                    <span className="px-1.5 py-0.5 leading-[1.4] border bg-white border-border text-text-tertiary">
                       {pillarBreakdown.unlabeled} unlabeled
                     </span>
                   )}
@@ -1587,11 +1591,11 @@ export function CampaignPlanner() {
       {/* ── STEP: DONE ── */}
       {step === 'done' && (
         <Card className="p-8 text-center space-y-4">
-          <div className="w-14 h-14 rounded-2xl bg-sage-100 flex items-center justify-center mx-auto">
+          <div className="w-12 h-12 border border-sage-200 bg-sage-100 flex items-center justify-center mx-auto">
             <svg className="w-7 h-7 text-sage-600" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
           </div>
           <div>
-            <h2 className="font-display text-xl font-bold text-stone-900">Plan approved — generating content now.</h2>
+            <h2 className="text-lg font-bold text-text tracking-tight">Plan approved — generating content now.</h2>
             <p className="text-sm text-text-secondary mt-1 max-w-md mx-auto">
               <span className="font-semibold text-text">{approvedCount} idea{approvedCount === 1 ? '' : 's'}</span> approved for <span className="font-semibold text-text">{name}</span>.
               {pushResult && pushResult.failedCount === 0

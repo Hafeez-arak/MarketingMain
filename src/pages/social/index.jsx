@@ -28,7 +28,7 @@ export function SocialOverview() {
                     <span className={`w-8 h-8 rounded-xl flex items-center justify-center text-xs font-bold ${meta.bg} ${meta.text}`}>{meta.abbr}</span>
                     <span className="font-semibold text-text">{meta.label}</span>
                   </div>
-                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${connected ? 'bg-green-50 text-green-700' : 'bg-surface-subtle text-text-tertiary'}`}>
+                  <span className={`text-[10px] font-bold uppercase tracking-[0.08em] px-1.5 py-0.5 leading-[1.4] ${connected ? 'bg-green-50 text-green-700' : 'bg-surface-subtle text-text-tertiary'}`}>
                     {connected ? 'Connected' : 'Not connected'}
                   </span>
                 </div>
@@ -133,7 +133,7 @@ export function SocialPlatform() {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-2 flex-wrap">
                       <Badge status={p.status} />
-                      {campaign && <span className="text-xs bg-amber-50 text-amber-600 px-2 py-0.5 rounded-full">{campaign.name}</span>}
+                      {campaign && <span className="text-[10px] font-bold uppercase tracking-[0.08em] bg-amber-100 text-amber-800 px-1.5 py-0.5 leading-[1.4]">{campaign.name}</span>}
                       {p.scheduledAt && <span className="text-xs text-text-tertiary">{formatDateTime(p.scheduledAt)}</span>}
                     </div>
                     <p className="text-sm text-text whitespace-pre-line line-clamp-3">{p.copy || 'No caption'}</p>
@@ -254,7 +254,7 @@ export function NewPost() {
                 {mediaUrls.map((url,i) => (
                   <div key={i} className="relative">
                     <PostImage src={url} alt="" className="w-16 h-16 rounded-xl object-cover border border-border"/>
-                    <button onClick={() => setMediaUrls(u => u.filter((_,j)=>j!==i))} className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white rounded-full flex items-center justify-center text-[10px]">×</button>
+                    <button onClick={() => setMediaUrls(u => u.filter((_,j)=>j!==i))} className="absolute -top-1 -right-1 w-4 h-4 bg-red-600 text-white flex items-center justify-center text-[10px] leading-none">×</button>
                   </div>
                 ))}
               </div>

@@ -837,7 +837,7 @@ export function CreativeStudio() {
           )}
 
           {!session ? (
-            <Card square className="p-5 space-y-4 max-w-2xl">
+            <Card className="p-5 space-y-4 max-w-2xl">
               <div>
                 <p className="text-xs font-medium text-text-secondary mb-1.5">What are you making?</p>
                 <div className="grid grid-cols-2 gap-2">
@@ -854,7 +854,7 @@ export function CreativeStudio() {
               </div>
 
               <div className="space-y-1.5">
-                <Textarea label="Describe it" rows={4} autoGrow square value={prompt}
+                <Textarea label="Describe it" rows={4} autoGrow value={prompt}
                   onChange={e => {
                     setPrompt(e.target.value); setError('')
                     // Their edit makes it theirs again — auto-enhance won't
@@ -929,11 +929,11 @@ export function CreativeStudio() {
               </div>
 
               <div className={intent === 'video' ? '' : 'grid grid-cols-2 gap-3'}>
-                <Select label="Shape" square value={aspect} onChange={e => setAspect(e.target.value)}>
+                <Select label="Shape" value={aspect} onChange={e => setAspect(e.target.value)}>
                   {RATIOS.map(r => <option key={r} value={r}>{aspectLabel(r)} ({r})</option>)}
                 </Select>
                 {intent !== 'video' && (
-                  <Select label="Options per model" square value={String(variants)}
+                  <Select label="Options per model" value={String(variants)}
                     onChange={e => setVariants(Number(e.target.value))}>
                     <option value="1">1 each — 2 images</option>
                     <option value="2">2 each — 4 images</option>
@@ -948,7 +948,7 @@ export function CreativeStudio() {
                   move. Plus a look picker, which only makes sense here: with
                   no source still, nothing else decides how the clip looks. */}
               {intent === 'video' && (
-                <div className="border border-border bg-surface-subtle/40 p-3 space-y-3">
+                <div className="border border-border bg-surface-subtle p-3 space-y-3">
                   <ModelPicker modelId={modelId} onPick={pickModel} />
 
                   <LookPicker lookId={lookId} onPick={setLookId} />
@@ -961,7 +961,7 @@ export function CreativeStudio() {
                     onStrength={setMotionStrength}
                   />
 
-                  <Textarea rows={2} autoGrow square value={motionNote}
+                  <Textarea rows={2} autoGrow value={motionNote}
                     onChange={e => { setMotionNote(e.target.value); setMotionPresetId('') }}
                     placeholder="…or describe the movement yourself. Leave empty to let the model decide." />
 
@@ -980,7 +980,7 @@ export function CreativeStudio() {
                 </div>
               )}
 
-              <Button square onClick={handleGenerate} disabled={busy === 'generate' || !prompt.trim()}>
+              <Button onClick={handleGenerate} disabled={busy === 'generate' || !prompt.trim()}>
                 {busy === 'generate' ? <><Spinner size="sm" /> Starting…</> : '✨ Generate'}
               </Button>
             </Card>
@@ -1034,7 +1034,7 @@ export function CreativeStudio() {
 
       {/* ── Animate ── */}
       <Modal open={!!videoTarget} onClose={() => { setVideoTarget(null); setVideoPrefill(null) }}
-        title="Animate this image" width="max-w-lg" square>
+        title="Animate this image" width="max-w-lg">
         <VideoPanel
           target={videoTarget}
           busy={busy.startsWith('video:')}
@@ -1076,7 +1076,7 @@ export function CreativeStudio() {
       />
 
       {/* ── Image editor ── */}
-      <Modal open={!!editingOverlay} onClose={() => setEditingOverlay(null)} title="Edit image" width="max-w-[96vw]" square>
+      <Modal open={!!editingOverlay} onClose={() => setEditingOverlay(null)} title="Edit image" width="max-w-[96vw]" >
         <div className="p-0">
           {editingOverlay && (
             <PhotoEditor

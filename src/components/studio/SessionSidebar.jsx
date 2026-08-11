@@ -191,7 +191,6 @@ export function SessionSidebar({ sessions, session, loading, onOpen, onNew, onRe
         title="Delete this chat?"
         message={`"${deleteTarget?.title || 'Untitled'}" and every image or video in it will be permanently deleted. This can't be undone.`}
         danger
-        square
       />
     </aside>
   )

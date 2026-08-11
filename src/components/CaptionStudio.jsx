@@ -131,7 +131,7 @@ export function CaptionStudio({ open, onClose, webhookUrl, platform, language = 
         {variants.length > 0 && (
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             {variants.map((v, i) => (
-              <div key={i} className="rounded-xl border border-border bg-surface-subtle/40 p-3 space-y-2 flex flex-col">
+              <div key={i} className="rounded-xl border border-border bg-surface-subtle p-3 space-y-2 flex flex-col">
                 <span className="text-[10px] font-bold text-text-tertiary">Option {i + 1}</span>
                 <div className="flex-1 space-y-2">
                   {isLinkedIn

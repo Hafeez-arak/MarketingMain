@@ -17,7 +17,7 @@ export function MediaPicker({
   onUpload,                  // async (file) => ({ url } | { error })
 }) {
   return (
-    <Modal open={open} onClose={onClose} title={title} width="max-w-3xl" square>
+    <Modal open={open} onClose={onClose} title={title} width="max-w-3xl" >
       {/* The body is mounted only while the picker is open, so every piece of
           its state — the tab, the fetched rows, an error from last time — is
           created fresh on open and torn down on close. It used to be reset by
@@ -143,7 +143,7 @@ export function AttachmentChip({ label, url, note, onNote, onRemove, notePlaceho
       {onNote && (
         <input value={note || ''} onChange={e => onNote(e.target.value)}
           placeholder={notePlaceholder || 'What should it take from this? (optional)'}
-          className="w-full text-[11px] bg-surface-subtle/50 border border-border px-2 py-1.5 focus:outline-none focus:border-amber-400" />
+          className="w-full text-[11px] bg-surface-subtle border border-border px-2 py-1.5 focus:outline-none focus:border-amber-400" />
       )}
     </div>
   )

@@ -2,19 +2,49 @@ import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { STATUS_META, PLATFORM_META } from '../../lib/utils'
 
-// square is opt-in (default off) — every existing caller keeps the rounded
-// corners the rest of the app uses; only Creative Studio passes it, for the
-// sharp-cornered look requested there specifically.
-export function Button({ variant='primary', size='md', children, onClick, disabled, type='button', className='', square=false }) {
-  const base = `inline-flex items-center gap-2 font-medium ${square ? 'rounded-none' : 'rounded-xl'} transition-all duration-200 cursor-pointer disabled:opacity-50 disabled:pointer-events-none focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400`
-  const sizes = { xs:'px-2.5 py-1 text-xs', sm:'px-3.5 py-1.5 text-sm', md:'px-5 py-2.5 text-sm', lg:'px-6 py-3 text-base' }
+/* ─── Arak UI kit ───────────────────────────────────────────────────────────
+   One design language, enforced here so pages don't each invent their own.
+
+   The rules:
+   · Square corners. Not "small radius" — zero. The radius scale in
+     tailwind.config.js resolves every rounded-* class to 0px, so a component
+     can't opt back into a pill by accident. Circles are reserved for things
+     that are actually circular: Avatar, Spinner, status dots.
+   · Structure comes from 1px rules, never from elevation. Only surfaces that
+     genuinely float above the page (Modal, dropdowns) carry a shadow.
+   · One accent. Solid steel (amber-700 #4c5e61) marks the primary action on a
+     screen; everything else is white, border, and ink.
+   · Controls share a border on every variant — including a transparent one on
+     the borderless variants — so a row of mixed buttons lines up on the same
+     baseline instead of the ghost ones sitting 2px short.
+
+   The `square` prop that several of these used to take is now the only
+   behavior, so it does nothing. It's still accepted (and swallowed before the
+   DOM spread) because ~50 call sites pass it, and a stray square="true" on an
+   <input> is a React warning in the console.
+──────────────────────────────────────────────────────────────────────────── */
+
+const FOCUS = 'focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-700 focus-visible:ring-offset-1 focus-visible:ring-offset-white'
+
+export function Button({ variant='primary', size='md', children, onClick, disabled, type='button', className='', square }) {
+  void square
+  const base = `inline-flex items-center justify-center gap-2 font-semibold border transition-colors duration-150 cursor-pointer disabled:opacity-40 disabled:pointer-events-none ${FOCUS}`
+  // Vertical padding is tuned per size so every variant lands on an exact
+  // pixel height (28/32/38/44) — square corners make a half-pixel mismatch
+  // between two adjacent buttons obvious in a way rounded ones hide.
+  const sizes = {
+    xs:'px-2.5 py-1 text-[11px] tracking-wide',
+    sm:'px-3 py-1.5 text-xs',
+    md:'px-4 py-2 text-sm',
+    lg:'px-6 py-2.5 text-sm',
+  }
   const variants = {
-    primary:   'btn-amber active:scale-[.98]',
-    secondary: 'bg-white text-text border border-border hover:bg-surface-subtle hover:border-stone-300 active:scale-[.98] shadow-sm',
-    ghost:     'bg-transparent text-text-secondary hover:bg-surface-subtle hover:text-text active:scale-[.98]',
-    danger:    'bg-red-50 text-red-600 hover:bg-red-100 border border-red-200 active:scale-[.98]',
-    clay:      'btn-clay text-white active:scale-[.98]',
-    outline:   'bg-white text-text border border-border hover:border-amber-400 hover:bg-amber-50/50 active:scale-[.98]',
+    primary:   'bg-amber-700 text-white border-amber-700 hover:bg-amber-800 hover:border-amber-800 active:bg-amber-900',
+    secondary: 'bg-white text-text border-border hover:border-stone-400 hover:bg-surface-subtle active:bg-surface-muted',
+    ghost:     'bg-transparent text-text-secondary border-transparent hover:bg-surface-subtle hover:text-text',
+    danger:    'bg-white text-red-600 border-red-200 hover:bg-red-50 hover:border-red-300',
+    clay:      'bg-clay-700 text-white border-clay-700 hover:bg-clay-800 hover:border-clay-800',
+    outline:   'bg-white text-text border-stone-400 hover:bg-amber-50 hover:border-amber-700 hover:text-amber-800',
   }
   return (
     <button type={type} onClick={onClick} disabled={disabled}
@@ -24,40 +54,51 @@ export function Button({ variant='primary', size='md', children, onClick, disabl
   )
 }
 
+// Status is a typed label, not a lozenge. Uppercase at 10px with tracking is
+// what keeps a square chip from reading as a tiny disabled button.
 export function Badge({ status, children, className='' }) {
   const cfg = STATUS_META[status]
   return (
-    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-semibold ${cfg ? cfg.classes : 'bg-stone-100 text-stone-600'} ${className}`}>
+    <span className={`inline-flex items-center px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-[0.08em] leading-[1.4] whitespace-nowrap
+      ${cfg ? cfg.classes : 'bg-stone-100 text-stone-600'} ${className}`}>
       {cfg ? cfg.label : children}
     </span>
   )
 }
 
+// Squared off, and the platform's own color now shows as a 2px left marker
+// rather than tinting the whole chip — five of these in a row used to make a
+// list look like a bag of candy.
 export function PlatformPill({ platform }) {
   const m = PLATFORM_META[platform]
   if (!m) return null
   return (
-    <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold border ${m.bg} ${m.text} ${m.border}`}>
+    <span className={`inline-flex items-center gap-1.5 pl-1.5 pr-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.08em] leading-[1.4]
+      bg-surface-subtle text-text-secondary border-l-2 whitespace-nowrap`}
+      style={{ borderLeftColor: m.color }}>
       {m.label}
     </span>
   )
 }
 
-export function Card({ children, className='', onClick, hover=false, square=false }) {
+export function Card({ children, className='', onClick, hover=false, square }) {
+  void square
   return (
     <div onClick={onClick}
-      className={`bg-white ${square ? 'rounded-none' : 'rounded-2xl'} border border-border shadow-card
-        ${hover ? 'cursor-pointer hover:shadow-card-hover hover:border-stone-300 transition-all duration-200' : ''}
+      className={`bg-white border border-border
+        ${hover ? 'cursor-pointer hover:border-stone-400 transition-colors duration-150' : ''}
         ${className}`}>
       {children}
     </div>
   )
 }
 
+// The "highlighted" card: a flat tinted panel with a solid accent rule down
+// the left edge. Replaces the old three-stop cream gradient, which was the
+// only warm surface left in a cool-grey app.
 export function WarmCard({ children, className='' }) {
   return (
-    <div className={`rounded-2xl border border-amber-200/60 shadow-sm ${className}`}
-      style={{ background: 'linear-gradient(135deg, #fffbf0 0%, #fff4d6 60%, #fffbf0 100%)' }}>
+    <div className={`bg-amber-50 border border-amber-200 border-l-2 border-l-amber-700 ${className}`}>
       {children}
     </div>
   )
@@ -68,27 +109,48 @@ export function GoldCard({ children, className='' }) {
   return <WarmCard className={className}>{children}</WarmCard>
 }
 
-export function SectionHead({ title, subtitle, action }) {
+// The page title block. Every page used to hand-roll this, which is how the
+// app ended up with three different H1 sizes and two different fonts for the
+// same job. Sits above the page's content and closes with a full-width rule,
+// so the header reads as a band rather than as floating text.
+export function PageHeader({ title, subtitle, children }) {
   return (
-    <div className="flex items-start justify-between px-5 pt-5 pb-4 border-b border-border">
-      <div>
-        <h3 className="font-semibold text-text">{title}</h3>
-        {subtitle && <p className="text-xs text-text-tertiary mt-0.5">{subtitle}</p>}
+    <div className="flex items-end justify-between gap-4 flex-wrap pb-4 border-b border-border">
+      <div className="min-w-0">
+        <h1 className="text-lg font-bold text-text tracking-tight leading-none">{title}</h1>
+        {subtitle && <p className="text-xs text-text-secondary mt-2 leading-relaxed">{subtitle}</p>}
       </div>
-      {action && <div className="ml-4 flex-shrink-0">{action}</div>}
+      {children && <div className="flex items-center gap-2 flex-shrink-0">{children}</div>}
     </div>
   )
 }
 
-const fieldBase = (square=false) => `w-full ${square ? 'rounded-none' : 'rounded-xl'} border border-border bg-white text-text placeholder-text-tertiary focus:outline-none focus:ring-2 focus:ring-amber-400 focus:border-transparent transition-all duration-200 text-sm`
+export function SectionHead({ title, subtitle, action }) {
+  return (
+    <div className="flex items-start justify-between gap-4 px-5 py-4 border-b border-border">
+      <div className="min-w-0">
+        <h3 className="font-semibold text-text text-sm leading-tight">{title}</h3>
+        {subtitle && <p className="text-xs text-text-tertiary mt-1">{subtitle}</p>}
+      </div>
+      {action && <div className="flex-shrink-0">{action}</div>}
+    </div>
+  )
+}
 
-export function Input({ label, hint, error, className='', square=false, ...props }) {
+/* Fields. A 1px ring drawn tight to a square edge reads as the border
+   thickening; the old 2px blurred halo with a transparent border made the
+   field look like it had grown, and left a rounded glow around a sharp box. */
+const fieldBase = `w-full border border-border bg-white text-text placeholder-text-tertiary text-sm
+  transition-colors duration-150 focus:outline-none focus:border-amber-700 focus:ring-1 focus:ring-amber-700`
+
+export function Input({ label, hint, error, className='', square, ...props }) {
+  void square
   return (
     <div className={className}>
-      {label && <label className="block text-xs font-semibold text-text-secondary mb-1.5">{label}</label>}
-      <input {...props} className={`${fieldBase(square)} px-3.5 py-2.5 ${error ? 'border-red-300 focus:ring-red-300' : ''}`} />
-      {hint && !error && <p className="text-xs text-text-tertiary mt-1">{hint}</p>}
-      {error && <p className="text-xs text-red-500 mt-1">{error}</p>}
+      {label && <label className="block eyebrow mb-1.5">{label}</label>}
+      <input {...props} className={`${fieldBase} px-3 py-2 ${error ? 'border-red-400 focus:border-red-500 focus:ring-red-500' : ''}`} />
+      {hint && !error && <p className="text-xs text-text-tertiary mt-1.5">{hint}</p>}
+      {error && <p className="text-xs text-red-600 mt-1.5">{error}</p>}
     </div>
   )
 }
@@ -96,9 +158,9 @@ export function Input({ label, hint, error, className='', square=false, ...props
 // autoGrow is opt-in (default off) so every other form using this component
 // keeps its fixed height — only a chat-style prompt box wants the Claude/
 // ChatGPT behavior of expanding as you type instead of scrolling internally
-// right away. `rows` still sets the minimum height either way. `square` is
-// the same opt-in pattern as Button/Card/Modal below.
-export function Textarea({ label, hint, error, className='', rows=4, autoGrow=false, maxHeight=260, value, square=false, ...props }) {
+// right away. `rows` still sets the minimum height either way.
+export function Textarea({ label, hint, error, className='', rows=4, autoGrow=false, maxHeight=260, value, square, ...props }) {
+  void square
   const ref = useRef(null)
   useEffect(() => {
     if (!autoGrow || !ref.current) return
@@ -109,29 +171,38 @@ export function Textarea({ label, hint, error, className='', rows=4, autoGrow=fa
 
   return (
     <div className={className}>
-      {label && <label className="block text-xs font-semibold text-text-secondary mb-1.5">{label}</label>}
+      {label && <label className="block eyebrow mb-1.5">{label}</label>}
       <textarea {...props} ref={ref} value={value} rows={rows}
-        className={`${fieldBase(square)} px-3.5 py-2.5 resize-none ${autoGrow ? 'overflow-y-auto' : ''} ${error ? 'border-red-300' : ''}`} />
-      {hint && !error && <p className="text-xs text-text-tertiary mt-1">{hint}</p>}
-      {error && <p className="text-xs text-red-500 mt-1">{error}</p>}
+        className={`${fieldBase} px-3 py-2 resize-none ${autoGrow ? 'overflow-y-auto' : ''} ${error ? 'border-red-400 focus:border-red-500 focus:ring-red-500' : ''}`} />
+      {hint && !error && <p className="text-xs text-text-tertiary mt-1.5">{hint}</p>}
+      {error && <p className="text-xs text-red-600 mt-1.5">{error}</p>}
     </div>
   )
 }
 
-export function Select({ label, hint, error, className='', children, square=false, ...props }) {
+// The native select arrow is drawn with the platform's own radius and sits in
+// its own inset box; suppressing it and drawing a flat chevron keeps the
+// control square on Safari and Chrome alike.
+export function Select({ label, hint, error, className='', children, square, ...props }) {
+  void square
   return (
     <div className={className}>
-      {label && <label className="block text-xs font-semibold text-text-secondary mb-1.5">{label}</label>}
-      <select {...props} className={`${fieldBase(square)} px-3.5 py-2.5 cursor-pointer ${error ? 'border-red-300' : ''}`}>
-        {children}
-      </select>
-      {hint && !error && <p className="text-xs text-text-tertiary mt-1">{hint}</p>}
-      {error && <p className="text-xs text-red-500 mt-1">{error}</p>}
+      {label && <label className="block eyebrow mb-1.5">{label}</label>}
+      <div className="relative">
+        <select {...props} className={`${fieldBase} appearance-none pl-3 pr-9 py-2 cursor-pointer ${error ? 'border-red-400' : ''}`}>
+          {children}
+        </select>
+        <svg className="w-3.5 h-3.5 absolute right-3 top-1/2 -translate-y-1/2 text-text-tertiary pointer-events-none"
+          fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg>
+      </div>
+      {hint && !error && <p className="text-xs text-text-tertiary mt-1.5">{hint}</p>}
+      {error && <p className="text-xs text-red-600 mt-1.5">{error}</p>}
     </div>
   )
 }
 
-export function Modal({ open, onClose, title, children, width='max-w-lg', square=false }) {
+export function Modal({ open, onClose, title, children, width='max-w-lg', square }) {
+  void square
   const ref = useRef(null)
   useEffect(() => {
     const fn = e => { if (e.key === 'Escape') onClose() }
@@ -145,11 +216,14 @@ export function Modal({ open, onClose, title, children, width='max-w-lg', square
   return createPortal(
     <div ref={ref} onClick={e => e.target === ref.current && onClose()}
       className="fixed inset-0 z-50 flex items-center justify-center p-4"
-      style={{ background: 'rgba(26,20,16,0.35)', backdropFilter: 'blur(6px)' }}>
-      <div className={`bg-white ${square ? 'rounded-none' : 'rounded-2xl'} shadow-dropdown w-full ${width} max-h-[90vh] flex flex-col animate-fade-scale border border-border`}>
-        <div className="flex items-center justify-between px-6 py-4 border-b border-border flex-shrink-0">
-          <h2 className="font-display font-semibold text-text text-lg">{title}</h2>
-          <button onClick={onClose} className={`w-7 h-7 ${square ? 'rounded-none' : 'rounded-xl'} flex items-center justify-center text-text-secondary hover:bg-surface-subtle transition-colors`}>
+      style={{ background: 'rgba(28,35,33,0.45)' }}>
+      {/* The one place elevation survives: a modal must read as detached from
+          the page behind it, and there is no rule to do that job here. */}
+      <div className={`bg-white shadow-dropdown w-full ${width} max-h-[90vh] flex flex-col animate-fade-scale border border-border`}>
+        <div className="flex items-center justify-between gap-4 px-5 py-3.5 border-b border-border flex-shrink-0">
+          <h2 className="font-semibold text-text text-sm">{title}</h2>
+          <button onClick={onClose} aria-label="Close"
+            className={`w-7 h-7 flex items-center justify-center text-text-tertiary border border-transparent hover:border-border hover:text-text transition-colors ${FOCUS}`}>
             <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>
           </button>
         </div>
@@ -160,17 +234,21 @@ export function Modal({ open, onClose, title, children, width='max-w-lg', square
   )
 }
 
+// The icon no longer floats — a drifting element in an empty state draws the
+// eye away from the action that's meant to resolve it.
 export function Empty({ icon, title, description, action }) {
   return (
-    <div className="flex flex-col items-center justify-center py-16 px-8 text-center">
-      <div className="w-14 h-14 rounded-2xl bg-amber-100 flex items-center justify-center mb-4 text-amber-600 animate-float">{icon}</div>
-      <h3 className="font-display font-semibold text-text text-lg mb-1">{title}</h3>
-      <p className="text-sm text-text-secondary max-w-xs mb-5 leading-relaxed">{description}</p>
+    <div className="flex flex-col items-center justify-center py-14 px-8 text-center">
+      <div className="w-11 h-11 border border-border bg-surface-subtle flex items-center justify-center mb-4 text-text-tertiary">{icon}</div>
+      <h3 className="font-semibold text-text text-sm mb-1.5">{title}</h3>
+      <p className="text-xs text-text-secondary max-w-xs mb-5 leading-relaxed">{description}</p>
       {action}
     </div>
   )
 }
 
+// Round on purpose — an avatar is a portrait slot, and squaring it turns a
+// list of people into a list of files.
 const avColors = ['bg-amber-100 text-amber-800','bg-clay-100 text-clay-800','bg-sage-100 text-sage-800','bg-stone-100 text-stone-800','bg-sky-100 text-sky-800','bg-purple-100 text-purple-800']
 export function Avatar({ name='?', size='md', color }) {
   const initials = name.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase()
@@ -179,63 +257,73 @@ export function Avatar({ name='?', size='md', color }) {
   return <div className={`${sizes[size]} rounded-full flex items-center justify-center font-bold flex-shrink-0 ${c}`}>{initials}</div>
 }
 
+// Also round on purpose — it spins.
 export function Spinner({ size='md' }) {
   const sizes = { sm:'w-3 h-3 border-[1.5px]', md:'w-4 h-4 border-2', lg:'w-6 h-6 border-2' }
   return <div className={`${sizes[size]} border-current border-t-transparent rounded-full animate-spin`} />
 }
 
+// A square switch: the knob is a filled block that slides between two ends of
+// a bordered track. Reads as a physical two-position selector rather than the
+// soft iOS pill, which is the only shape in the app that couldn't be squared
+// without becoming ambiguous — solved by keeping the travel visible.
 export function Toggle({ checked, onChange, label }) {
   return (
     <label className="flex items-center gap-3 cursor-pointer group">
       <div className="relative flex-shrink-0">
-        <input type="checkbox" checked={checked} onChange={onChange} className="sr-only" />
-        <div className={`w-10 h-5 rounded-full transition-all duration-300 ${checked ? 'bg-amber-gradient shadow-amber' : 'bg-stone-200'}`} />
-        <div className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow-sm transition-transform duration-300 ${checked ? 'translate-x-5' : ''}`} />
+        <input type="checkbox" checked={checked} onChange={onChange} className="sr-only peer" />
+        <div className={`w-9 h-5 border transition-colors duration-150 peer-focus-visible:ring-2 peer-focus-visible:ring-amber-700 peer-focus-visible:ring-offset-1
+          ${checked ? 'bg-amber-700 border-amber-700' : 'bg-white border-stone-400 group-hover:border-stone-500'}`} />
+        <div className={`absolute top-1 w-3 h-3 transition-all duration-150
+          ${checked ? 'left-[21px] bg-white' : 'left-1 bg-stone-400 group-hover:bg-stone-500'}`} />
       </div>
       {label && <span className="text-sm text-text-secondary group-hover:text-text transition-colors">{label}</span>}
     </label>
   )
 }
 
-export function ConfirmDialog({ open, onClose, onConfirm, title, message, danger=false, square=false }) {
+export function ConfirmDialog({ open, onClose, onConfirm, title, message, danger=false, square }) {
+  void square
   return (
-    <Modal open={open} onClose={onClose} title={title} width="max-w-sm" square={square}>
-      <div className="p-6">
+    <Modal open={open} onClose={onClose} title={title} width="max-w-sm">
+      <div className="p-5">
         <p className="text-sm text-text-secondary mb-5 leading-relaxed">{message}</p>
-        <div className="flex gap-3 justify-end">
-          <Button variant="secondary" onClick={onClose} square={square}>Cancel</Button>
-          <Button variant={danger ? 'danger' : 'primary'} onClick={() => { onConfirm(); onClose() }} square={square}>Confirm</Button>
+        <div className="flex gap-2 justify-end">
+          <Button variant="secondary" onClick={onClose}>Cancel</Button>
+          <Button variant={danger ? 'danger' : 'primary'} onClick={() => { onConfirm(); onClose() }}>Confirm</Button>
         </div>
       </div>
     </Modal>
   )
 }
 
-// ─── Shared "clean dashboard" primitives ──────────────────────────────────
-// Introduced for the Analytics rebuild (matched against Zernio's own UI)
-// and promoted here so every page can use the same look: a small icon
-// badge in front of section titles, a compact pill dropdown instead of a
-// full-height form field, and one small stroke-icon set. Pages should
-// reach for these instead of re-inventing a badge/select each time.
+// ─── Shared structural primitives ─────────────────────────────────────────
+// A small icon block in front of section titles, a compact select that sits
+// inline with a heading, and the KPI tile. Pages should reach for these
+// instead of re-inventing a badge/select each time — that re-invention is how
+// the app ended up with four different card treatments before this pass.
 
 const BADGE_TONES = {
-  steel: 'bg-amber-50 text-amber-600',
-  sage:  'bg-sage-50 text-sage-600',
-  rose:  'bg-rose-50 text-rose-500',
+  steel: 'bg-amber-50 text-amber-700 border-amber-200',
+  sage:  'bg-sage-50 text-sage-700 border-sage-200',
+  rose:  'bg-rose-50 text-rose-600 border-rose-200',
 }
 export function IconBadge({ children, tone = 'steel' }) {
   return (
-    <span className={`w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 ${BADGE_TONES[tone] || BADGE_TONES.steel}`}>
+    <span className={`w-7 h-7 border flex items-center justify-center flex-shrink-0 ${BADGE_TONES[tone] || BADGE_TONES.steel}`}>
       {children}
     </span>
   )
 }
 
+// Named PillSelect for its call sites; it is not a pill any more. Sized to sit
+// on the same line as a card title without pushing the header taller.
 export function PillSelect({ value, onChange, className = '', children }) {
   return (
     <div className={`relative inline-flex ${className}`}>
       <select value={value} onChange={onChange}
-        className="appearance-none w-full bg-white border border-border rounded-full text-xs font-medium text-text-secondary pl-3 pr-7 py-1.5 cursor-pointer hover:border-stone-300 hover:text-text transition-colors focus:outline-none focus:ring-2 focus:ring-amber-400">
+        className={`appearance-none w-full bg-white border border-border text-xs font-medium text-text-secondary pl-2.5 pr-7 py-1.5
+          cursor-pointer hover:border-stone-400 hover:text-text transition-colors ${FOCUS}`}>
         {children}
       </select>
       <svg className="w-3 h-3 absolute right-2.5 top-1/2 -translate-y-1/2 text-text-tertiary pointer-events-none" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg>
@@ -243,34 +331,31 @@ export function PillSelect({ value, onChange, className = '', children }) {
   )
 }
 
-
+// The metric tile. Label above number, left-aligned, no icon chrome and no
+// hover lift — these appear five-across in a divided strip, where anything
+// decorative repeats five times and turns the strip into noise. `accent`
+// marks the one tile that matters with a solid rule across its top edge.
 export function StatCard({ label, value, sub, icon, onClick, accent=false }) {
   return (
     <div onClick={onClick}
-      className={`relative rounded-2xl border overflow-hidden transition-all duration-200 cursor-pointer group
-        ${accent ? 'border-amber-300 shadow-amber' : 'border-border bg-white shadow-card hover:shadow-card-hover hover:border-stone-300'}`}
-      style={accent ? { background: 'linear-gradient(135deg,#f4f6f5,#e1e7e6 80%)' } : {}}>
-      {accent && <div className="absolute top-0 left-0 right-0 h-0.5" style={{ background: 'linear-gradient(90deg,#96acb2,#4c5e61)' }} />}
-      <div className="p-5">
-        <div className="flex items-start justify-between mb-4">
-          <div className={`w-10 h-10 rounded-2xl flex items-center justify-center transition-colors
-            ${accent ? 'bg-amber-200 text-amber-700' : 'bg-surface-subtle text-text-secondary group-hover:bg-amber-100 group-hover:text-amber-600'}`}>
-            {icon}
-          </div>
-          <svg className="w-3 h-3 text-text-disabled group-hover:text-amber-400 transition-colors mt-1" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M7 17L17 7M17 7H7M17 7v10"/></svg>
-        </div>
-        <p className={`text-3xl font-display font-bold leading-none mb-1 ${accent ? 'text-gradient-amber' : 'text-text'}`}>{value}</p>
-        <p className="text-xs font-semibold text-text-secondary">{label}</p>
-        {sub && <p className="text-xs text-text-tertiary mt-0.5">{sub}</p>}
+      className={`relative border bg-white p-4 transition-colors duration-150
+        ${onClick ? 'cursor-pointer hover:bg-surface-subtle' : ''}
+        ${accent ? 'border-amber-300' : 'border-border'}`}>
+      {accent && <div className="absolute top-0 left-0 right-0 h-0.5 bg-amber-700" />}
+      <div className="flex items-center gap-1.5 mb-2">
+        {icon && <span className="text-text-tertiary flex-shrink-0">{icon}</span>}
+        <p className="eyebrow truncate">{label}</p>
       </div>
+      <p className={`text-2xl font-bold leading-none tabular-nums ${accent ? 'text-amber-800' : 'text-text'}`}>{value}</p>
+      {sub && <p className="text-xs text-text-tertiary mt-1.5">{sub}</p>}
     </div>
   )
 }
 
 /* ─── PostImage ─────────────────────────────────────────────────────────────
    Drop-in <img> replacement that handles expired Replicate URLs gracefully.
-   Shows a warm placeholder with a camera icon whenever src is missing,
-   a replicate.delivery URL (likely expired), or the image fails to load.
+   Shows a placeholder with a camera icon whenever src is missing, is a
+   replicate.delivery URL (likely expired), or the image fails to load.
    All existing className / style props pass through unchanged.
 ────────────────────────────────────────────────────────────────────────────── */
 function isLikelyExpired(url) {
@@ -298,12 +383,12 @@ export function PostImage({ src, alt = '', className = '', style = {}, ...rest }
   if (failed) {
     return (
       <div
-        className={`flex items-center justify-center bg-surface-subtle ${className}`}
+        className={`flex items-center justify-center bg-surface-subtle border border-border ${className}`}
         style={style}
         {...rest}
       >
         <svg className="w-5 h-5 text-text-disabled" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
-          <rect x="3" y="3" width="18" height="18" rx="2"/>
+          <rect x="3" y="3" width="18" height="18"/>
           <circle cx="8.5" cy="8.5" r="1.5"/>
           <polyline points="21 15 16 10 5 21"/>
         </svg>

@@ -1,14 +1,18 @@
 import { useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useApp, actions } from '../../store/app'
-import { Card, WarmCard, Button, Badge, Modal, Input, PostImage } from '../../components/ui/index'
+import { Card, WarmCard, Button, Badge, Modal, Input, PostImage, PageHeader } from '../../components/ui/index'
 import { formatDateTime } from '../../lib/utils'
 
 const DAYS   = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']
 const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December']
 
+// `bg` was an Instagram brand gradient; every other platform here was already
+// a flat hex, so one row of the calendar legend rendered as a colour ramp and
+// the rest as solids. Flat throughout now — these are identity swatches, and a
+// swatch that shifts hue across its own 4px width isn't identifying anything.
 const PLATFORM_COLORS = {
-  instagram: { bg: 'linear-gradient(135deg,#f09433,#bc1888)', dot: '#E1306C', light: '#fce4f0' },
+  instagram: { bg: '#E1306C', dot: '#E1306C', light: '#fce4f0' },
   facebook:  { bg: '#1877F2', dot: '#1877F2', light: '#e8f0fe' },
   linkedin:  { bg: '#0A66C2', dot: '#0A66C2', light: '#e1f0fb' },
   tiktok:    { bg: '#010101', dot: '#555', light: '#f0f0f0' },
@@ -186,133 +190,141 @@ export function Schedule() {
   }, [state.posts, filter])
 
   return (
-    <div className="max-w-7xl space-y-6">
+    <div className="max-w-7xl space-y-4">
 
       {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-4">
-        <div>
-          <h2 className="font-display font-bold text-2xl text-text">Content Calendar</h2>
-          <p className="text-sm text-text-secondary mt-0.5">Plan and schedule your brand content</p>
+      <PageHeader title="Content Calendar" subtitle="Plan and schedule your brand content.">
+        {/* Segmented control: two cells of one bar sharing a seam. The old
+            version nested rounded pills inside a rounded tray, which meant
+            three concentric radii stacked in 32px of height. */}
+        <div className="flex">
+          {[{ key:'month', label:'Calendar' },{ key:'list', label:'List' }].map(v => (
+            <button key={v.key} onClick={() => setViewMode(v.key)}
+              className={`px-3 py-1.5 border -ml-px first:ml-0 text-xs font-semibold transition-colors
+                ${viewMode === v.key
+                  ? 'bg-amber-700 text-white border-amber-700 relative z-10'
+                  : 'bg-white text-text-secondary border-border hover:text-text hover:bg-surface-subtle'}`}>
+              {v.label}
+            </button>
+          ))}
         </div>
-        <div className="flex items-center gap-2">
-          {/* View toggle */}
-          <div className="flex gap-1 p-1 rounded-xl" style={{ background: 'rgba(232,217,190,0.3)', border: '1px solid rgba(232,217,190,0.5)' }}>
-            {[{ key:'month', label:'Calendar' },{ key:'list', label:'List' }].map(v => (
-              <button key={v.key} onClick={() => setViewMode(v.key)}
-                className={`px-4 py-1.5 rounded-lg text-xs font-semibold transition-all duration-200 ${viewMode === v.key ? 'bg-white text-navy-900 shadow-sm' : 'text-text-secondary hover:text-text'}`}>
-                {v.label}
-              </button>
-            ))}
-          </div>
-          <Button onClick={() => setPlatformPicker(true)}>
-            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
-            New Post
-          </Button>
-        </div>
-      </div>
+        <Button onClick={() => setPlatformPicker(true)}>
+          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+          New post
+        </Button>
+      </PageHeader>
 
-      {/* Stats row */}
-      <div className="grid grid-cols-4 gap-3">
-        {[
-          { label: 'Scheduled', value: state.posts.filter(p=>p.status==='scheduled').length, color: 'text-blue-600', bg: 'bg-blue-50' },
-          { label: 'Published', value: state.posts.filter(p=>p.status==='published').length, color: 'text-green-700', bg: 'bg-green-50' },
-          { label: 'Pending',   value: state.posts.filter(p=>p.status==='pending_publish').length, color: 'text-amber-700', bg: 'bg-amber-50' },
-          { label: 'Draft',     value: state.posts.filter(p=>p.status==='draft').length, color: 'text-gray-600', bg: 'bg-gray-100' },
-        ].map(s => (
-          <div key={s.label} className="bg-white rounded-xl border border-border p-4 text-center shadow-card">
-            <p className={`text-2xl font-display font-bold ${s.color}`}>{s.value}</p>
-            <p className={`text-[10px] font-semibold uppercase tracking-wide mt-1 ${s.color} opacity-80`}>{s.label}</p>
-          </div>
-        ))}
-      </div>
+      {/* Stats row — one divided strip, matching Dashboard and Analytics.
+          Was four separate centered cards in four different accent colors;
+          the color-per-stat made the row read as four unrelated widgets. */}
+      <Card className="overflow-hidden">
+        <div className="grid grid-cols-2 sm:grid-cols-4 divide-y sm:divide-y-0 sm:divide-x divide-border">
+          {[
+            { label: 'Scheduled', value: state.posts.filter(p=>p.status==='scheduled').length },
+            { label: 'Published', value: state.posts.filter(p=>p.status==='published').length },
+            { label: 'Pending',   value: state.posts.filter(p=>p.status==='pending_publish').length },
+            { label: 'Draft',     value: state.posts.filter(p=>p.status==='draft').length },
+          ].map(s => (
+            <div key={s.label} className="p-4">
+              <p className="eyebrow mb-2">{s.label}</p>
+              <p className="text-2xl font-bold text-text leading-none tabular-nums">{s.value}</p>
+            </div>
+          ))}
+        </div>
+      </Card>
 
       {/* CALENDAR VIEW */}
       {viewMode === 'month' && (
         <Card className="overflow-hidden">
-          {/* Calendar header */}
-          <div className="flex items-center justify-between px-6 py-4" style={{ borderBottom: '1px solid rgba(232,217,190,0.5)', background: 'linear-gradient(135deg, rgba(255,253,240,0.8), rgba(249,243,232,0.8))' }}>
-            <div className="flex items-center gap-4">
-              <button onClick={prevMonth} className="w-8 h-8 rounded-xl flex items-center justify-center text-text-secondary hover:bg-surface-subtle hover:text-text transition-all">
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg>
+          {/* Calendar header. Every surface in this page used to be painted
+              with hardcoded rgba cream (255,253,240 / 249,243,232) left over
+              from the pre-rebrand palette — warm ivory inside a cool-grey app.
+              All of it is now the shared surface tokens. */}
+          <div className="flex items-center justify-between gap-4 px-4 py-3 border-b border-border bg-surface-subtle">
+            <div className="flex items-center gap-1">
+              <button onClick={prevMonth} aria-label="Previous month"
+                className="w-7 h-7 border border-border bg-white flex items-center justify-center text-text-secondary hover:text-text hover:border-stone-400 transition-colors">
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg>
               </button>
-              <h3 className="font-display font-semibold text-xl text-text min-w-[180px] text-center">
-                {MONTHS[month]} <span className="text-text-tertiary">{year}</span>
+              <button onClick={nextMonth} aria-label="Next month"
+                className="w-7 h-7 border border-border -ml-px bg-white flex items-center justify-center text-text-secondary hover:text-text hover:border-stone-400 transition-colors">
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg>
+              </button>
+              <h3 className="font-semibold text-sm text-text ml-3 tabular-nums">
+                {MONTHS[month]} <span className="text-text-tertiary font-normal">{year}</span>
               </h3>
-              <button onClick={nextMonth} className="w-8 h-8 rounded-xl flex items-center justify-center text-text-secondary hover:bg-surface-subtle hover:text-text transition-all">
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg>
-              </button>
             </div>
             <button onClick={() => setViewDate(new Date(today.getFullYear(), today.getMonth(), 1))}
-              className="px-3 py-1.5 rounded-xl text-xs font-semibold text-amber-700 hover:bg-amber-50 transition-colors"
-              style={{ border: '1px solid rgba(212,160,23,0.3)' }}>
+              className="px-3 py-1.5 border border-border bg-white text-xs font-semibold text-text-secondary hover:text-amber-800 hover:border-amber-700 transition-colors">
               Today
             </button>
           </div>
 
           {/* Day headers */}
-          <div className="grid grid-cols-7" style={{ borderBottom: '1px solid rgba(232,217,190,0.4)', background: 'rgba(249,243,232,0.4)' }}>
+          <div className="grid grid-cols-7 border-b border-border bg-surface-subtle">
             {DAYS.map(d => (
-              <div key={d} className="py-2.5 text-center">
-                <span className="text-[10px] font-bold tracking-[0.1em] uppercase text-text-tertiary">{d}</span>
+              <div key={d} className="py-2 text-center">
+                <span className="eyebrow text-text-tertiary">{d}</span>
               </div>
             ))}
           </div>
 
-          {/* Calendar grid */}
+          {/* Calendar grid. Cells are separated by a shared right/bottom rule
+              rather than a full border each — a 1px border on all four sides
+              of 42 adjacent cells doubles up to 2px on every internal seam,
+              which is what made the old grid look drawn in pencil. */}
           <div className="grid grid-cols-7">
             {calDays.map((cell, i) => {
               const dayPosts = postsForDay(cell.date)
               const dayCount = countForDay(cell.date)
               const todayCell = isToday(cell.date)
               const isSelected = selectedDay && cell.date.toDateString() === selectedDay.toDateString()
-              const isWeekend = cell.date.getDay() === 0 || cell.date.getDay() === 6
 
               return (
                 <div key={i}
                   onClick={() => !cell.overflow && setSelectedDay(cell.date)}
-                  className={`min-h-[100px] p-2 transition-all duration-200 relative group
-                    ${cell.overflow ? 'opacity-35' : 'cursor-pointer'}
-                    ${isSelected ? 'bg-amber-50' : isWeekend && !cell.overflow ? 'bg-warm-50/50' : !cell.overflow ? 'hover:bg-surface-subtle/50' : ''}`}
-                  style={{
-                    border: '1px solid rgba(232,217,190,0.25)',
-                    background: isSelected ? 'rgba(245,192,0,0.10)' : dayCount > 0 && !cell.overflow ? 'rgba(245,192,0,0.03)' : '',
-                  }}>
-                  {/* Date number */}
-                  <div className="flex items-start justify-between mb-1">
-                    <span className={`text-xs font-bold w-6 h-6 flex items-center justify-center rounded-full transition-all
-                      ${todayCell ? 'bg-amber-gradient text-navy-950 shadow-amber' : isSelected ? 'text-amber-700' : 'text-text-secondary'}`}>
+                  className={`min-h-[104px] p-1.5 relative group border-r border-b border-border transition-colors
+                    [&:nth-child(7n)]:border-r-0
+                    ${cell.overflow ? 'bg-surface-muted' : 'cursor-pointer'}
+                    ${isSelected ? 'bg-amber-50' : !cell.overflow ? 'hover:bg-surface-subtle' : ''}`}>
+                  {/* Date number. Today is a filled square, not a circle —
+                      it's a cell marker in a grid of squares. */}
+                  <div className="flex items-start justify-between mb-1.5">
+                    <span className={`text-[11px] font-bold w-5 h-5 flex items-center justify-center tabular-nums
+                      ${todayCell ? 'bg-amber-700 text-white'
+                        : cell.overflow ? 'text-text-disabled'
+                        : isSelected ? 'text-amber-800' : 'text-text-secondary'}`}>
                       {cell.date.getDate()}
                     </span>
                     {dayCount > 0 && !cell.overflow && (
-                      <div className="flex flex-col items-center leading-none">
-                        <span className="text-base font-bold text-amber-600 leading-none">{dayCount}</span>
-                        <span className="text-[8px] text-amber-500 font-medium leading-none mt-0.5">post{dayCount !== 1 ? 's' : ''}</span>
-                      </div>
+                      <span className="text-[10px] font-bold text-text-tertiary tabular-nums pr-0.5">{dayCount}</span>
                     )}
                   </div>
 
-                  {/* Post dots / pills */}
+                  {/* Post entries — a solid platform-colour rule down the left
+                      edge instead of a tinted pill plus a coloured dot, which
+                      was two encodings of the same fact in one 16px row. */}
                   <div className="space-y-1">
                     {dayPosts.slice(0, 3).map(p => {
                       const pc = PLATFORM_COLORS[p.platform] || PLATFORM_COLORS.instagram
                       return (
-                        <div key={p.id} className="flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-medium truncate"
-                          style={{ background: pc.light, color: pc.dot }}>
-                          <div className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: pc.dot }} />
+                        <div key={p.id}
+                          className="pl-1.5 pr-1 py-0.5 text-[10px] text-text-secondary truncate bg-surface-subtle border-l-2"
+                          style={{ borderLeftColor: pc.dot }}>
                           <span className="truncate">{p.copy?.slice(0,18) || p.platform}</span>
                         </div>
                       )
                     })}
                     {dayPosts.length > 3 && (
-                      <span className="text-[10px] text-text-tertiary px-1.5">+{dayPosts.length - 3} more</span>
+                      <span className="text-[10px] text-text-tertiary pl-1.5">+{dayPosts.length - 3} more</span>
                     )}
                   </div>
 
                   {/* Add post on hover */}
                   {!cell.overflow && (
-                    <button onClick={e => { e.stopPropagation(); setPlatformPicker(true) }}
-                      className="absolute bottom-1 right-1 w-5 h-5 rounded-lg bg-amber-gradient opacity-0 group-hover:opacity-100 transition-all duration-200 flex items-center justify-center shadow-amber">
-                      <svg className="w-3 h-3 text-navy-950" fill="none" stroke="currentColor" strokeWidth="3" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+                    <button onClick={e => { e.stopPropagation(); setPlatformPicker(true) }} aria-label="Add post"
+                      className="absolute bottom-1 right-1 w-5 h-5 bg-amber-700 text-white opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity flex items-center justify-center">
+                      <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth="3" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
                     </button>
                   )}
                 </div>
@@ -340,16 +352,15 @@ export function Schedule() {
 
         return (
           <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
-            style={{ background:'rgba(26,20,16,0.55)', backdropFilter:'blur(6px)' }}
+            style={{ background:'rgba(28,35,33,0.45)' }}
             onClick={e => { if (e.target === e.currentTarget) setSelectedDay(null) }}>
-            <div style={{ width:'720px', height:'82vh' }} className="bg-white rounded-3xl shadow-2xl flex flex-col overflow-hidden animate-fade-scale">
+            <div style={{ width:'720px', height:'82vh' }} className="bg-white border border-border shadow-dropdown flex flex-col overflow-hidden animate-fade-scale">
 
               {/* Header */}
-              <div className="flex items-center justify-between px-6 py-5 flex-shrink-0"
-                style={{ borderBottom:'1px solid rgba(232,217,190,0.5)', background:'linear-gradient(135deg,rgba(255,253,240,0.9),rgba(249,243,232,0.9))' }}>
+              <div className="flex items-center justify-between px-5 py-4 flex-shrink-0 border-b border-border bg-surface-subtle">
                 <div>
-                  <p className="text-[10px] font-bold uppercase tracking-widest text-amber-500 mb-1">Content Calendar</p>
-                  <h3 className="font-display font-bold text-xl text-text">{dateLabel}</h3>
+                  <p className="eyebrow text-text-tertiary mb-1.5">Content calendar</p>
+                  <h3 className="font-semibold text-sm text-text">{dateLabel}</h3>
                   <p className="text-xs text-text-tertiary mt-0.5">
                     {items.length === 0
                       ? 'Nothing scheduled across all platforms'
@@ -372,8 +383,8 @@ export function Schedule() {
               <div className="overflow-y-auto flex-1">
                 {items.length === 0 ? (
                   <div className="py-16 text-center px-6">
-                    <div className="w-14 h-14 rounded-2xl bg-amber-100 flex items-center justify-center mx-auto mb-4">
-                      <svg className="w-7 h-7 text-amber-500" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
+                    <div className="w-11 h-11 border border-border bg-surface-subtle flex items-center justify-center mx-auto mb-4 text-text-tertiary">
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
                         <rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
                       </svg>
                     </div>
@@ -387,16 +398,15 @@ export function Schedule() {
                     </div>
                   </div>
                 ) : (
-                  <div className="divide-y" style={{ borderColor:'rgba(232,217,190,0.4)' }}>
+                  <div className="divide-y divide-border">
                     {activePlatforms.map(platform => {
                       const pc     = PLATFORM_COLORS[platform] || PLATFORM_COLORS.instagram
                       const pItems = byPlatform[platform]
                       return (
                         <div key={platform}>
                           {/* Platform header */}
-                          <div className="flex items-center gap-2.5 px-6 py-3"
-                            style={{ background:'rgba(249,243,232,0.5)' }}>
-                            <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: pc.dot }} />
+                          <div className="flex items-center gap-2.5 px-5 py-2.5 bg-surface-subtle border-y border-border">
+                            <div className="w-2 h-2 flex-shrink-0" style={{ background: pc.dot }} />
                             <span className="text-xs font-bold uppercase tracking-wider" style={{ color: pc.dot }}>
                               {PLATFORM_LABELS[platform]}
                             </span>
@@ -408,15 +418,14 @@ export function Schedule() {
                           {/* Items */}
                           <div className="px-6 py-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
                             {pItems.map(item => (
-                              <div key={item.id} className="rounded-2xl border overflow-hidden hover:shadow-card-hover transition-all"
-                                style={{ borderColor:'rgba(232,217,190,0.5)' }}>
+                              <div key={item.id} className="border border-border overflow-hidden hover:border-stone-400 transition-colors">
                                 <div className="h-1" style={{ background: pc.bg }} />
                                 <div className="p-4">
                                   <div className="flex items-start gap-3">
                                     {item.imageUrl ? (
-                                      <PostImage src={item.imageUrl} alt="" className="w-12 h-12 rounded-xl object-cover flex-shrink-0" />
+                                      <PostImage src={item.imageUrl} alt="" className="w-12 h-12 object-cover flex-shrink-0 border border-border" />
                                     ) : (
-                                      <div className="w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 text-xl"
+                                      <div className="w-12 h-12 flex items-center justify-center flex-shrink-0 text-lg border border-border"
                                         style={{ background: pc.light }}>
                                         {item.type === 'reel' || item.type === 'video' ? '🎬' : '📋'}
                                       </div>
@@ -427,7 +436,7 @@ export function Schedule() {
                                           {TYPE_LABELS[item.type] || item.type}
                                         </span>
                                         {(item.source === 'instagram_schedule' || item.source === 'linkedin_schedule') && (
-                                          <span className="text-[9px] bg-blue-50 text-blue-500 px-1.5 py-0.5 rounded-full font-medium">Monthly Plan</span>
+                                          <span className="text-[9px] bg-sky-50 text-sky-700 px-1.5 py-0.5 font-bold uppercase tracking-[0.08em]">Monthly plan</span>
                                         )}
                                       </div>
                                       <p className="text-xs text-text leading-relaxed line-clamp-2">
@@ -437,7 +446,7 @@ export function Schedule() {
                                   </div>
 
                                   <div className="flex items-center justify-between mt-3">
-                                    <span className={`text-[10px] font-semibold px-2.5 py-1 rounded-full capitalize ${STATUS_STYLES[item.status] || 'bg-stone-100 text-stone-500'}`}>
+                                    <span className={`text-[10px] font-bold uppercase tracking-[0.08em] px-1.5 py-0.5 leading-[1.4] ${STATUS_STYLES[item.status] || 'bg-stone-100 text-stone-600'}`}>
                                       {item.status === 'pending_publish' ? 'Pending' : item.status}
                                     </span>
                                     {item.source === 'posts' && item.raw?.status === 'pending_publish' && (
@@ -473,10 +482,10 @@ export function Schedule() {
       {viewMode === 'list' && (
         <div className="space-y-4">
           {/* Filter bar */}
-          <div className="flex gap-1 p-1 rounded-xl w-fit" style={{ background: 'rgba(232,217,190,0.3)', border: '1px solid rgba(232,217,190,0.5)' }}>
+          <div className="flex w-fit">
             {['all','scheduled','pending_publish','published','draft'].map(f => (
               <button key={f} onClick={() => setFilter(f)}
-                className={`px-4 py-1.5 rounded-lg text-xs font-semibold capitalize transition-all duration-200 ${filter === f ? 'bg-amber-gradient text-navy-950 shadow-amber' : 'text-text-secondary hover:text-text'}`}>
+                className={`px-3 py-1.5 border -ml-px first:ml-0 text-xs font-semibold capitalize transition-colors ${filter === f ? 'bg-amber-700 text-white border-amber-700 relative z-10' : 'bg-white text-text-secondary border-border hover:text-text hover:bg-surface-subtle'}`}>
                 {f === 'pending_publish' ? 'Pending' : f}
               </button>
             ))}
@@ -485,11 +494,11 @@ export function Schedule() {
           {listPosts.length === 0 ? (
             <Card className="p-16 text-center">
               <div className="w-14 h-14 rounded-3xl bg-amber-100 flex items-center justify-center mx-auto mb-4 animate-float">
-                <svg className="w-7 h-7 text-amber-500" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
                   <rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
                 </svg>
               </div>
-              <p className="font-display font-semibold text-text text-lg mb-2">No posts yet</p>
+              <p className="font-semibold text-text text-sm mb-2">No posts yet</p>
               <p className="text-sm text-text-secondary mb-5">Start generating content for Arak Lighting</p>
               <Button onClick={() => setPlatformPicker(true)}>Create First Post</Button>
             </Card>
@@ -497,7 +506,7 @@ export function Schedule() {
             <Card className="overflow-hidden">
               <table className="w-full text-sm">
                 <thead>
-                  <tr style={{ background: 'rgba(249,243,232,0.6)', borderBottom: '1px solid rgba(232,217,190,0.4)' }}>
+                  <tr className="bg-surface-subtle border-b border-border">
                     {['Platform','Preview','Scheduled','Status',''].map(h => (
                       <th key={h} className="text-left px-5 py-3 text-[10px] font-bold uppercase tracking-[0.1em] text-text-tertiary">{h}</th>
                     ))}
@@ -507,11 +516,11 @@ export function Schedule() {
                   {listPosts.map((p, i) => {
                     const pc = PLATFORM_COLORS[p.platform] || PLATFORM_COLORS.instagram
                     return (
-                      <tr key={p.id} className="hover:bg-surface-subtle/50 transition-colors group"
-                        style={{ borderBottom: '1px solid rgba(232,217,190,0.25)', animationDelay: `${i * 0.03}s` }}>
+                      <tr key={p.id} className="hover:bg-surface-subtle transition-colors group"
+                        className="border-b border-border" style={{ animationDelay: `${i * 0.03}s` }}>
                         <td className="px-5 py-3.5">
                           <div className="flex items-center gap-2">
-                            <div className="w-2 h-6 rounded-full" style={{ background: pc.bg }} />
+                            <div className="w-1 h-6 flex-shrink-0" style={{ background: pc.dot }} />
                             <span className="text-xs font-semibold capitalize" style={{ color: pc.dot }}>{p.platform}</span>
                           </div>
                         </td>
@@ -556,7 +565,7 @@ export function Schedule() {
                 )}
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-1.5 mb-1">
-                    <div className="w-1.5 h-1.5 rounded-full" style={{ background: PLATFORM_COLORS[scheduleModal.platform]?.dot || '#888' }} />
+                    <div className="w-2 h-2 flex-shrink-0" style={{ background: PLATFORM_COLORS[scheduleModal.platform]?.dot || '#888' }} />
                     <span className="text-[10px] font-bold uppercase tracking-wide text-text-secondary">{scheduleModal.platform}</span>
                   </div>
                   <p className="text-xs text-text line-clamp-3 leading-relaxed">{scheduleModal.copy?.slice(0,100)}</p>
@@ -592,14 +601,14 @@ export function Schedule() {
       {/* ── Platform Picker Modal ──────────────────────────────────────── */}
       {platformPicker && (
         <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
-          style={{ background:'rgba(26,20,16,0.55)', backdropFilter:'blur(6px)' }}
+          style={{ background:'rgba(28,35,33,0.45)' }}
           onClick={e => { if (e.target === e.currentTarget) setPlatformPicker(false) }}>
-          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden animate-fade-scale">
+          <div className="bg-white border border-border shadow-dropdown w-full max-w-md overflow-hidden animate-fade-scale">
             {/* Header */}
-            <div className="px-6 py-5 flex items-center justify-between" style={{ borderBottom:'1px solid rgba(232,217,190,0.4)', background:'linear-gradient(135deg,rgba(255,253,240,0.9),rgba(249,243,232,0.9))' }}>
+            <div className="px-5 py-4 flex items-center justify-between border-b border-border bg-surface-subtle">
               <div>
                 <p className="text-[10px] font-bold uppercase tracking-widest text-amber-500 mb-1">New Post</p>
-                <h3 className="font-display font-bold text-lg text-text">Choose a platform</h3>
+                <h3 className="font-semibold text-sm text-text">Choose a platform</h3>
                 <p className="text-xs text-text-tertiary mt-0.5">Where would you like to create this post?</p>
               </div>
               <button onClick={() => setPlatformPicker(false)} className="w-8 h-8 rounded-xl flex items-center justify-center text-text-tertiary hover:bg-stone-100 transition-colors">
@@ -609,15 +618,15 @@ export function Schedule() {
             {/* Platform grid */}
             <div className="p-5 grid grid-cols-2 gap-3">
               {[
-                { key:'instagram', label:'Instagram', abbr:'IG', bg:'linear-gradient(135deg,#f09433,#e6683c,#dc2743,#cc2366,#bc1888)', desc:'Posts, Reels, Stories' },
+                { key:'instagram', label:'Instagram', abbr:'IG', bg:'#E1306C', desc:'Posts, Reels, Stories' },
                 { key:'linkedin',  label:'LinkedIn',  abbr:'in', bg:'#0A66C2', desc:'Articles, Posts, Videos' },
                 { key:'facebook',  label:'Facebook',  abbr:'fb', bg:'#1877F2', desc:'Posts, Stories, Reels' },
                 { key:'x',         label:'X / Twitter', abbr:'X', bg:'#000000', desc:'Posts, Threads' },
-                { key:'tiktok',    label:'TikTok',    abbr:'TT', bg:'linear-gradient(135deg,#010101,#69C9D0)', desc:'Videos, Lives' },
+                { key:'tiktok',    label:'TikTok',    abbr:'TT', bg:'#010101', desc:'Videos, Lives' },
               ].map(p => (
                 <button key={p.key}
                   onClick={() => { setPlatformPicker(false); navigate(`/social/${p.key}`) }}
-                  className="flex items-center gap-3 p-4 rounded-2xl border border-border hover:shadow-card-hover hover:border-transparent transition-all text-left group">
+                  className="flex items-center gap-3 p-4 border border-border -mt-px first:mt-0 hover:bg-surface-subtle hover:border-stone-400 transition-colors text-left group w-full">
                   <div className="w-10 h-10 rounded-xl flex items-center justify-center text-white text-xs font-bold flex-shrink-0"
                     style={{ background: p.bg }}>
                     {p.abbr}
@@ -658,7 +667,7 @@ const TIME_SLOTS = ['07:00','08:00','09:00','10:00','11:00','12:00','13:00','14:
 function ScheduledItemDetail({ item, onClose, onSave }) {
   const isIG = item.source === 'instagram_schedule'
   const pc   = isIG
-    ? { dot:'#E1306C', bg:'linear-gradient(135deg,#f09433,#bc1888)', light:'#fce4f0', accent:'amber' }
+    ? { dot:'#E1306C', bg:'#E1306C', light:'#fce4f0', accent:'amber' }
     : { dot:'#0A66C2', bg:'#0A66C2', light:'#e1f0fb', accent:'blue' }
   const typeLabels = isIG ? POST_TYPE_LABELS_IG : POST_TYPE_LABELS_LI
   const tones      = isIG ? IG_TONES : LI_TONES
@@ -697,24 +706,24 @@ function ScheduledItemDetail({ item, onClose, onSave }) {
 
   return (
     <div className="fixed inset-0 z-[10000] flex items-center justify-center p-4"
-      style={{ background:'rgba(26,20,16,0.6)', backdropFilter:'blur(6px)' }}
+      style={{ background:'rgba(28,35,33,0.45)' }}
       onClick={e => { if (e.target === e.currentTarget) onClose() }}>
-      <div className="bg-white rounded-3xl shadow-2xl flex flex-col overflow-hidden animate-fade-scale"
+      <div className="bg-white border border-border shadow-dropdown flex flex-col overflow-hidden animate-fade-scale"
         style={{ width:'100%', maxWidth:'600px', height:'85vh' }}>
 
         {/* Header */}
-        <div className="px-6 py-5 flex-shrink-0" style={{ background: isIG ? 'linear-gradient(135deg,rgba(255,248,235,0.9),rgba(252,228,240,0.6))' : 'linear-gradient(135deg,rgba(240,246,255,0.9),rgba(225,240,251,0.6))', borderBottom:'1px solid rgba(232,217,190,0.4)' }}>
+        <div className="px-5 py-4 flex-shrink-0 border-b border-border bg-surface-subtle">
           <div className="flex items-start justify-between gap-3">
             <div>
               <div className="flex items-center gap-2 mb-1">
-                <div className="w-5 h-5 rounded-md flex items-center justify-center" style={{ background: pc.bg }}>
+                <div className="w-5 h-5 flex items-center justify-center" style={{ background: pc.bg }}>
                   <span className="text-white text-[9px] font-bold">{isIG ? 'IG' : 'LI'}</span>
                 </div>
                 <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: pc.dot }}>
                   {isIG ? 'Instagram' : 'LinkedIn'} · Monthly Schedule
                 </p>
               </div>
-              <h3 className="font-display font-bold text-lg text-text">{dateLabel}</h3>
+              <h3 className="font-semibold text-sm text-text">{dateLabel}</h3>
               <p className="text-xs text-text-tertiary mt-0.5">{typeMeta.icon} {typeMeta.label}</p>
             </div>
             <div className="flex items-center gap-2 flex-shrink-0">
@@ -739,7 +748,7 @@ function ScheduledItemDetail({ item, onClose, onSave }) {
             /* ── Detail view ── */
             <>
               {/* Topic */}
-              <div className="rounded-2xl border p-4" style={{ borderColor:'rgba(232,217,190,0.5)', background:'rgba(249,243,232,0.3)' }}>
+              <div className="border border-border bg-surface-subtle p-4">
                 <p className="text-[10px] font-bold uppercase tracking-wider text-text-tertiary mb-2">Topic / Brief</p>
                 <p className="text-sm text-text leading-relaxed">{item.raw?.topic || '—'}</p>
                 {item.raw?.notes && <p className="text-xs text-text-tertiary mt-2 pt-2 border-t border-border">📝 {item.raw.notes}</p>}
@@ -748,7 +757,7 @@ function ScheduledItemDetail({ item, onClose, onSave }) {
               {/* Detail grid */}
               <div className="grid grid-cols-2 gap-2">
                 {DETAIL_ROWS.map(row => (
-                  <div key={row.label} className="rounded-xl border border-border bg-surface-subtle/50 px-3 py-2.5">
+                  <div key={row.label} className="rounded-xl border border-border bg-surface-subtle px-3 py-2.5">
                     <p className="text-[10px] font-bold uppercase tracking-wider text-text-disabled mb-0.5">{row.label}</p>
                     <p className="text-xs font-semibold text-text capitalize">{row.value}</p>
                   </div>
@@ -757,7 +766,7 @@ function ScheduledItemDetail({ item, onClose, onSave }) {
 
               {/* Status badge */}
               <div className="flex items-center gap-2">
-                <span className={`text-xs font-semibold px-3 py-1.5 rounded-full ${STATUS_STYLES[item.raw?.status] || 'bg-stone-100 text-stone-600'}`}>
+                <span className={`text-[10px] font-bold uppercase tracking-[0.08em] px-1.5 py-0.5 leading-[1.4] ${STATUS_STYLES[item.raw?.status] || 'bg-stone-100 text-stone-600'}`}>
                   {item.raw?.status || 'planned'}
                 </span>
                 <span className="text-xs text-text-tertiary">n8n will process this at 8am and post at {item.raw?.publishTime || '10:00'}</span>

@@ -344,7 +344,7 @@ export function BranchChat({
       {/* ── History ── */}
       {branch.versions.length > 1 && (
         <div ref={stripRef}
-          className="flex gap-1.5 px-2.5 py-2 border-t border-border bg-surface-subtle/40 overflow-x-auto overscroll-x-contain">
+          className="flex gap-1.5 px-2.5 py-2 border-t border-border bg-surface-subtle overflow-x-auto overscroll-x-contain">
           {branch.versions.map((v, i) => (
             <Thumb key={v.id} version={v} step={i + 1}
               active={stage?.id === v.id}
@@ -418,29 +418,29 @@ export function BranchChat({
             disabled={!canAct}
             className="flex-1 min-w-0 text-[13px] leading-relaxed bg-white border border-border px-3 py-2 resize-none overflow-y-auto overscroll-contain focus:outline-none focus:border-amber-400 disabled:bg-surface-subtle disabled:text-text-tertiary"
           />
-          <Button square size="sm" onClick={onSend} disabled={!canAct || busy === 'edit' || !text.trim()}>
+          <Button size="sm" onClick={onSend} disabled={!canAct || busy === 'edit' || !text.trim()}>
             {busy === 'edit' ? <Spinner size="sm" /> : 'Send'}
           </Button>
         </div>
 
         <div className="flex flex-wrap gap-1.5">
-          <Button square size="sm" variant="outline" disabled={!canAct} onClick={() => onOpenEditor(base)}>✏️ Editor</Button>
-          <Button square size="sm" variant="outline" disabled={!canAct} onClick={() => onAnimate(base)}>🎬 Animate</Button>
-          <Button square size="sm" variant="secondary" disabled={!canAct || busy === 'finalize' || base?.is_final}
+          <Button size="sm" variant="outline" disabled={!canAct} onClick={() => onOpenEditor(base)}>✏️ Editor</Button>
+          <Button size="sm" variant="outline" disabled={!canAct} onClick={() => onAnimate(base)}>🎬 Animate</Button>
+          <Button size="sm" variant="secondary" disabled={!canAct || busy === 'finalize' || base?.is_final}
             onClick={() => onFinalize(base)}>
             {busy === 'finalize' ? <Spinner size="sm" /> : base?.is_final ? '✓ Saved' : '✅ Save'}
           </Button>
           {/* Downloads whatever is actually on screen, so watching a clip and
               pressing Download can't hand you the still instead. */}
           {stage?.status === 'ready' && (
-            <Button square size="sm" variant="outline" disabled={pendingKey === `download:${stage.id}`}
+            <Button size="sm" variant="outline" disabled={pendingKey === `download:${stage.id}`}
               onClick={() => onDownload(stage)}
               title={stage.is_final ? 'Download (already in the Media Library)' : 'Download — also files it in the Media Library'}>
               {pendingKey === `download:${stage.id}` ? <Spinner size="sm" /> : stageIsVideo ? '⬇ Clip' : '⬇ Download'}
             </Button>
           )}
           {stageIsVideo && onReRender && (
-            <Button square size="sm" variant="outline" onClick={() => onReRender(stage)}
+            <Button size="sm" variant="outline" onClick={() => onReRender(stage)}
               title="Same motion and settings, run against the lane's current still">
               🔄 Re-render
             </Button>
