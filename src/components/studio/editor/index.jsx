@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Button, Spinner } from '../../ui/index'
 import { ensureFontsLoaded } from '../fonts'
 
@@ -12,7 +12,8 @@ import {
   rotateCrop, flipCrop, rotateLayers90,
 } from './model/transform'
 import { makePreviewCanvas, cacheRatioFor, autoAdjust, applyPreset, DEFAULT_ADJUST } from './model/adjust'
-import { exportDocument } from './model/render'
+import { exportDocument, exportOverlay } from './model/render'
+import { Timeline } from './canvas/Timeline'
 import { ensureLayerImages, loadLayerImage } from './model/imageCache'
 import { clearTextBitmapCache } from './model/textBitmap'
 import { layerRect, unionRect, translatePatch } from './model/geometry'
@@ -106,7 +107,18 @@ export function PhotoEditor({
   // Brand Brain's free-text "Brand Colours" field. Passed as written; the hex
   // codes are pulled out of the prose in model/palette.js.
   brandColorsText = '',
+  // 'photo' (default) or 'video'. In video mode the thing on screen is frame
+  // one of a clip, standing in for footage the editor cannot itself alter:
+  // Save produces only the brand layer, and ffmpeg composites it over the real
+  // clip. Crop and photo-adjust are hidden rather than disabled, because they
+  // genuinely cannot apply to a composite and a control that silently does
+  // nothing is worse than an absent one. Everything else — text, Arabic
+  // shaping, fonts, shapes, logos, snapping, undo — is identical, which is the
+  // whole reason this is a mode and not a second editor.
+  mode = 'photo',
+  duration = 5,
 }) {
+  const isVideo = mode === 'video'
   const history = useEditorHistory()
   const { doc, base } = history
 
@@ -122,6 +134,49 @@ export function PhotoEditor({
   const [fontsReady, setFontsReady] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+
+  // Height reserved for the contextual toolbar (see the band in the markup).
+  // Latched to the tallest the toolbar has needed at this width rather than
+  // hard-coded, because how many rows it wraps to depends on the window: a
+  // fixed number would either clip controls in a narrow editor or waste canvas
+  // in a wide one. The floor is three rows' worth, which is what a text
+  // selection needs at normal widths — without it the first text selection of
+  // each session would still shift the canvas once before the latch caught up,
+  // which is the exact jump this exists to remove. Latching only ever grows,
+  // so the canvas cannot move while a document is open; a width change resets
+  // it, since the wrap count genuinely changes then and the editor is being
+  // re-laid-out anyway.
+  const TOOLBAR_FLOOR = 118
+  const toolbarRef = useRef(null)
+  const toolbarWidth = useRef(0)
+  const [toolbarBand, setToolbarBand] = useState(TOOLBAR_FLOOR)
+  // scrollHeight, not offsetHeight: the measured element is stretched to fill
+  // the band, so its own box never reports the overflow — scrollHeight is what
+  // still sees content that needs another row. For the same reason this runs
+  // on every render rather than only from the observer: the observer watches
+  // the box, and the box no longer changes when the selection changes what is
+  // inside it. Two DOM reads per render, and setState with an equal value is a
+  // no-op, so a stable toolbar costs one measurement and no re-render.
+  const measureToolbar = useCallback(() => {
+    const el = toolbarRef.current
+    if (!el) return
+    const w = el.clientWidth
+    const h = el.scrollHeight
+    if (w !== toolbarWidth.current) {
+      toolbarWidth.current = w
+      setToolbarBand(Math.max(TOOLBAR_FLOOR, h))
+      return
+    }
+    setToolbarBand(prev => Math.max(prev, h))
+  }, [])
+  useLayoutEffect(measureToolbar)
+  useLayoutEffect(() => {
+    const el = toolbarRef.current
+    if (!el) return
+    const ro = new ResizeObserver(measureToolbar)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [measureToolbar])
 
   // The clipboard is state rather than a ref because the context menu has to
   // grey out "Paste" when it's empty, and that's a render-time question.
@@ -561,6 +616,15 @@ export function PhotoEditor({
   async function handleSave() {
     setError('')
     try {
+      if (isVideo) {
+        // No composite and no clean plate: the footage is the plate, and it
+        // stays in storage untouched so the next wording change re-composites
+        // from the original rather than stacking on the last render.
+        const { overlays, width, height } = await exportOverlay(base, doc)
+        const res = await onSave({ overlays, state: { ...doc, width, height, v: DOC_VERSION } })
+        if (res?.error) setError(res.error)
+        return
+      }
       const { compositeBlob, textLayerBlob, cleanBlob, width, height } = await exportDocument(base, doc)
       // `v` marks this state as one whose clean plate is the UNTOUCHED photo,
       // so the adjustments and crop stored beside it are replayed rather than
@@ -636,17 +700,18 @@ export function PhotoEditor({
     <div className="flex h-[82vh] flex-col">
       <div className="flex min-h-0 flex-1">
         {/* ── Left rail + panel ── */}
-        <SidePanel panel={panel} onOpenPanel={p => { if (p !== 'crop' && tool === 'crop') cancelCrop(); setPanel(p) }}>
+        <SidePanel panel={panel} hide={isVideo ? ['adjust'] : []}
+          onOpenPanel={p => { if (p !== 'crop' && tool === 'crop') cancelCrop(); setPanel(p) }}>
           {panel === 'insert' && <InsertPanel onAddText={addText} onAddShape={addShape} />}
           {panel === 'uploads' && (
             <UploadsPanel onUploadImage={onUploadImage} onAddImage={addImage} library={imageLibrary} />
           )}
-          {panel === 'adjust' && (
+          {panel === 'adjust' && !isVideo && (
             <AdjustPanel adjust={doc.adjust} onBeginChange={begin}
               onChange={setAdjust} onResetAll={resetAdjust}
               onPreset={setPreset} onAuto={autoAdjustNow} />
           )}
-          {panel === 'crop' && (
+          {panel === 'crop' && !isVideo && (
             <CropPanel base={base} cropRect={cropRect} crop={doc.crop} ratio={cropRatio}
               onSetRatio={applyCropRatio} onApply={applyCrop} onCancel={cancelCrop} onReset={resetCrop} />
           )}
@@ -665,12 +730,34 @@ export function PhotoEditor({
 
         {/* ── Toolbar + canvas + status ── */}
         <div className="flex min-w-0 flex-1 flex-col gap-2 p-2">
-          <TopToolbar doc={doc} selection={selection} tool={tool} panel={panel}
-            canUndo={history.canUndo} canRedo={history.canRedo} onUndo={history.undo} onRedo={history.redo}
-            onPatch={patchSelected} onBeginChange={begin} onOpenPanel={setPanel}
-            onRotate={rotate} onFlip={flip} onStartCrop={startCrop}
-            onCopyStyle={copyStyle} painting={painting}
-            palette={palette} />
+          {/* The toolbar is contextual, so its height follows the selection —
+              one row for the photo, three for a text layer. As a plain flex
+              sibling of the canvas that difference (measured: 46px against
+              118px) pushed the viewport 72px down and took 72px off its height
+              on every click on or off a layer. useZoomPan deliberately does
+              NOT re-fit on a resize — a window resize must not throw away your
+              zoom — so the artwork stayed pinned to the viewport's top-left
+              and visibly jumped down the screen each time, which is what read
+              as the canvas moving and everything on it re-aligning.
+              Reserving the band fixes it at the layout level: the viewport
+              below is the same size whatever is selected, so nothing it
+              contains can move. */}
+          <div className="shrink-0 overflow-hidden" style={{ height: toolbarBand }}>
+            <div ref={toolbarRef} className="h-full">
+              <TopToolbar doc={doc} selection={selection} tool={tool} panel={panel}
+                canUndo={history.canUndo} canRedo={history.canRedo} onUndo={history.undo} onRedo={history.redo}
+                onPatch={patchSelected} onBeginChange={begin} onOpenPanel={setPanel}
+                // Crop, rotate and flip all reframe the PHOTO, and in video
+                // mode the photo is only a stand-in for footage this editor
+                // never touches — the clip is reframed by the compose step's
+                // centre-crop instead. Withheld rather than wired to a no-op.
+                onRotate={isVideo ? undefined : rotate}
+                onFlip={isVideo ? undefined : flip}
+                onStartCrop={isVideo ? undefined : startCrop}
+                onCopyStyle={copyStyle} painting={painting}
+                palette={palette} />
+            </div>
+          </div>
 
           <div ref={viewportRef}
             className="relative min-h-0 flex-1 overflow-hidden rounded-xl border border-border bg-[repeating-conic-gradient(#f4f4f5_0_25%,#fff_0_50%)] bg-[length:20px_20px]"
@@ -728,6 +815,18 @@ export function PhotoEditor({
           </div>
 
           <StatusBar doc={doc} view={zoom.view} zoom={zoom} layerCount={doc.layers.length} hint={hint} />
+
+          {/* Under the canvas, above the footer: the strip is about the
+              artwork, so it belongs with the artwork rather than in the
+              Save/Cancel band. */}
+          {isVideo && doc.layers.length > 0 && (
+            <Timeline
+              doc={doc} duration={duration} selectedIds={selectedIds}
+              onSelect={id => handleSelectionChange([id])}
+              onBegin={begin}
+              onPatchLayer={(id, timing) => applyDoc(d => patchLayers(d, { [id]: timing }))}
+            />
+          )}
         </div>
       </div>
 

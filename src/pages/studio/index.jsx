@@ -11,14 +11,15 @@ import { VideoPanel } from '../../components/studio/VideoPanel'
 import { MediaPicker, AttachmentChip } from '../../components/studio/MediaPicker'
 import { AudioToggle, CostLine, LookPicker, ModelPicker, MotionPicker, QualityRow } from '../../components/studio/VideoSettings'
 import { buildVideoPrompt } from '../../components/studio/motionPresets'
-import { getVideoModel } from '../../components/studio/videoModels'
+import { estimateVideoCost, getVideoModel } from '../../components/studio/videoModels'
 import { aspectLabel } from '../../lib/postFormats'
 import { uploadReferenceImage } from '../../lib/referenceImages'
 import { buildInstructionsString } from '../../lib/brandBrain'
+import { captureFirstFrame, parentStillOf } from '../../components/studio/videoFrame'
 import {
   buildBranches, createSession, deleteSession, downloadVersion, fetchSessions, fetchVersions, finalizeVersion,
-  insertPendingVersions, renameSession, requestEdit, requestEnhance, requestGenerate, requestVideo, selectVersion,
-  touchSession, updateVersion, uploadToStudio,
+  insertPendingVersions, renameSession, requestCompose, requestEdit, requestEnhance, requestGenerate, requestVideo,
+  selectVersion, touchSession, updateVersion, uploadToStudio,
 } from '../../lib/creativeStudio'
 
 // ─── Creative Studio ───────────────────────────────────────────────────────
@@ -37,10 +38,15 @@ const RATIOS = ['1:1', '4:5', '9:16', '16:9']
 // check constraint and openSession's label both still accept it); it just
 // can't be chosen for new work.
 const INTENTS = [
-  { value: 'image', label: 'An image', hint: 'A post, story or ad visual — animate it after if you want' },
+  { value: 'image', label: 'An image', hint: 'A post, story or ad visual' },
   { value: 'video', label: 'A video',  hint: 'A clip generated straight from a description' },
 ]
 const emptyComposer = { text: '', baseId: null, attach: null }
+
+// Animation was parked on 2026-08-11 while the image side was finished, and
+// un-parked the same day once video compositing landed — the reason for the
+// pause (a clip you couldn't put editable text on) is exactly what Creative
+// Compose removed.
 
 // What the ➕ can attach, per tab. `kind` filters the library grid; `notes`
 // says whether the chip offers a "what should it take from this?" box.
@@ -64,15 +70,14 @@ const VIDEO_FRAME_SLOTS = [
   { id: 'endFrame',   label: 'End frame',   hint: 'The clip lands on this image', kind: 'image', notes: false },
 ]
 
-// ⚠️ Frontend only, by decision (2026-08-10). These three attachments are
-// collected and shown, but nothing is sent to the video workflow yet:
-//   · startFrame → maps cleanly to Seedance's image_url (switches t2v → i2v)
-//   · endFrame   → maps cleanly to end_image_url
-//   · reference  → has NO model input; would need a separate describe-then-
-//     inject step, so it's the one that needs design rather than plumbing.
-// Wire these up when the video backend pass happens. (The note is the whole
-// point here; there was a `VIDEO_BACKEND_PENDING = true` under it that nothing
-// ever read, which is a lint error pretending to be documentation.)
+// All three are wired as of 2026-08-11. The note that used to sit here said the
+// style reference had "NO model input" — that was true of the image-to-video
+// endpoints we were calling and false of fal, which hosts a separate
+// reference-to-video endpoint taking an `image_urls` array. So:
+//   · startFrame → image_url (switches text-to-video → image-to-video)
+//   · endFrame   → end_image_url (Seedance only; what makes a cut deliberate)
+//   · reference  → reference_image_urls → the r2v endpoint, addressed in the
+//     prompt as @Image1. Seedance 2.0/2.5 only; the picker says so.
 
 // The ➕ itself. Icon only — the label crowded a row that already has
 // Enhance and the auto-enhance checkbox on it, and the icon alone reads
@@ -152,6 +157,28 @@ function FrameSlot({ label, hint, value, onPick, onRemove }) {
   )
 }
 
+// Shown while a session's versions are being fetched. Shaped like the thread
+// that's about to replace it — opening prompt, then one or two lanes — so the
+// panel doesn't jump when the real rows land.
+function ThreadSkeleton() {
+  return (
+    <div className="space-y-3 animate-pulse" aria-busy="true" aria-label="Loading this session">
+      <div className="flex justify-end">
+        <div className="h-9 w-1/2 max-w-sm bg-surface-muted border border-border" />
+      </div>
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 items-start">
+        {[0, 1].map(i => (
+          <div key={i} className="border border-border bg-white p-3 space-y-2.5">
+            <div className="aspect-[4/5] w-full bg-surface-muted" />
+            <div className="h-2.5 w-2/3 bg-surface-muted" />
+            <div className="h-8 w-full bg-surface-muted" />
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 export function CreativeStudio() {
   const { state } = useApp()
   const { activeWorkspaceId, accessToken } = useAuth()
@@ -163,6 +190,12 @@ export function CreativeStudio() {
   // Derived, not set in an effect: with no workspace there is nothing to wait
   // for, so the list is already "loaded" (and empty) on first render.
   const [loading, setLoading] = useState(!!activeWorkspaceId)
+  // Which session's versions are still in flight. openSession clears the old
+  // thread before the new rows land, so without this the "Nothing here yet"
+  // empty state renders for the length of the fetch on every open — the thread
+  // looked briefly empty and then filled in. Holds the session id rather than a
+  // boolean so a fast second click doesn't have the first fetch clear its flag.
+  const [openingId, setOpeningId] = useState(null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState('')          // '' | 'generate' | '<action>:<branchId>'
 
@@ -178,10 +211,6 @@ export function CreativeStudio() {
   const [autoEnhance, setAutoEnhance] = useState(false)
   const [enhancing, setEnhancing] = useState('')            // '' | 'prompt' | 'motion'
   const [aspect, setAspect] = useState('4:5')
-  // Images per model per round. Default 1 so a round costs exactly what it did
-  // before unless more is deliberately asked for — 4 means EIGHT images (four
-  // per model), which the picker says out loud rather than leaving to arithmetic.
-  const [variants, setVariants] = useState(1)
   // Keyed by slot id (see IMAGE_SLOTS / VIDEO_MENU_SLOTS / VIDEO_FRAME_SLOTS): { url, name, note }.
   const [attachments, setAttachments] = useState({})
   const [pickerSlot, setPickerSlot] = useState(null)
@@ -222,6 +251,14 @@ export function CreativeStudio() {
   const [videoPrefill, setVideoPrefill] = useState(null)
   const [editingOverlay, setEditingOverlay] = useState(null)
   const [savingOverlay, setSavingOverlay] = useState(false)
+  // Text/logos on a finished clip. Held separately from editingOverlay because
+  // the two open the SAME editor in different modes against different bases,
+  // and one piece of state trying to mean both is how you end up compositing an
+  // image or saving a clip as a PNG.
+  // Shape: { version, frameUrl } — the clip's row plus whatever frame one
+  // resolved to (its source still, or a frame captured from the clip itself).
+  const [editingClip, setEditingClip] = useState(null)
+  const [preparingClip, setPreparingClip] = useState('')
   // Every finished still in this session, offered inside the editor as image
   // layers you can drop onto another one — the "put the logo from round 1 on
   // this background" move, without a round trip through Downloads.
@@ -270,7 +307,15 @@ export function CreativeStudio() {
   async function openSession(s) {
     setSession(s); setError(''); setVersions([]); setComposers({}); setFocusedBranch(null)
     setAspect(s.aspect_ratio || '4:5')
-    const rows = await refresh(s.id)
+    setOpeningId(s.id)
+    let rows
+    try {
+      rows = await refresh(s.id)
+    } finally {
+      // Only the newest open clears the flag — an earlier, slower fetch
+      // finishing after a second click must not unmask the empty state.
+      setOpeningId(prev => (prev === s.id ? null : prev))
+    }
     // Reopen where the work was left off: the last lane touched is the one
     // holding the selected version, and only if it has moved past round 0 —
     // landing in a lane you never edited would just hide the comparison.
@@ -281,12 +326,9 @@ export function CreativeStudio() {
   }
 
   function newSession() {
-    setSession(null); setVersions([]); setPrompt(''); setAttachments({})
+    setSession(null); setVersions([]); setOpeningId(null); setPrompt(''); setAttachments({})
     setPromptRaw(''); setPromptSource('raw')
     setMotionNote(''); setMotionPresetId(''); setMotionStrength('medium'); setLookId('none')
-    // Back to the cheap default — an 8-image round should be asked for each
-    // time, not inherited from whatever the last session happened to use.
-    setVariants(1)
     setModelId('seedance-2'); setDuration('5'); setResolution('720p'); setAudio(false)
     setComposers({}); setFocusedBranch(null); setError('')
   }
@@ -438,17 +480,15 @@ export function CreativeStudio() {
       ? [{ round: 0, kind: 'video', provider: 'seedance', mediaType: 'video',
            userPrompt: videoPrompt, originalPrompt, promptSource: source,
            aspectRatio: aspect, model: modelId, duration, resolution, generateAudio: audio }]
-      // N rows per provider rather than asking fal for num_images: N. Same
-      // image count and same cost (fal bills per image), but each variant gets
-      // its own row and lands the moment it's ready — the workflow already
-      // renders exactly one image per target, so this needed no change there.
-      : ['openai', 'gemini'].flatMap(provider =>
-          Array.from({ length: variants }, () => ({
-            round: 0, kind: 'generate', provider, mediaType: 'image',
-            userPrompt: finalPrompt, originalPrompt, promptSource: source,
-            aspectRatio: aspect,
-            referenceUrl: refUrl, referenceNotes: refNotes,
-          })))
+      // One row per provider — two candidates, which is what the split view
+      // compares. Each lands the moment it's ready; the workflow renders
+      // exactly one image per target.
+      : ['openai', 'gemini'].map(provider => ({
+          round: 0, kind: 'generate', provider, mediaType: 'image',
+          userPrompt: finalPrompt, originalPrompt, promptSource: source,
+          aspectRatio: aspect,
+          referenceUrl: refUrl, referenceNotes: refNotes,
+        }))
 
     const ins = await insertPendingVersions(activeWorkspaceId, accessToken, s.id, rows)
     if (ins.error) { setBusy(''); setError(ins.error); return }
@@ -457,6 +497,12 @@ export function CreativeStudio() {
       ? await requestVideo(webhooks.creativeVideo, {
           session_id: s.id, version_id: ins.rows[0].id, prompt: videoPrompt,
           model: modelId, duration, aspect_ratio: aspect, resolution, generate_audio: audio,
+          // Collected by the frame slots beside the ➕ and, until this pass,
+          // thrown away. An absent slot sends '' rather than being omitted, so
+          // the workflow's own falsy checks decide the mode.
+          image_url: attachments.startFrame?.url || '',
+          end_image_url: attachments.endFrame?.url || '',
+          reference_image_urls: attachments.reference?.url ? [attachments.reference.url] : [],
         })
       : await requestGenerate(webhooks.creativeGenerate, {
           session_id: s.id, prompt: finalPrompt, aspect_ratio: aspect,
@@ -676,6 +722,100 @@ export function CreativeStudio() {
     return {}
   }
 
+  // ── Text and logos on a finished clip ───────────────────────────────────
+  // The free half of the studio. Nothing here calls a model: the clip stays
+  // exactly as it was rendered and ffmpeg stamps our own layer over it, so a
+  // wording, font or colour change costs seconds and nothing else.
+  async function openClipEditor(version) {
+    if (!version?.video_url) return
+    setPreparingClip(version.id); setError('')
+    try {
+      // The still it was animated from IS frame one, exactly — no decoding, no
+      // CORS, no guessing. Only a text-to-video clip, which has no source
+      // still, has to have a frame read out of it.
+      const still = parentStillOf(version, versions)
+      const frameUrl = still || await captureFirstFrame(version.video_url)
+      setEditingClip({ version, frameUrl })
+    } catch (err) {
+      setError(err.message || String(err))
+    } finally {
+      setPreparingClip('')
+    }
+  }
+
+  // Mirrors handleOverlaySave, with one invariant that matters more here than
+  // it does on images: the composite is ALWAYS built from the original clip.
+  //
+  // `baseVideoUrl` is the clip as the model rendered it, and re-editing reads
+  // that rather than the row's own video_url — which, on a row that has already
+  // been composited once, is the version WITH text burnt in. Compositing over
+  // that would burn the old wording permanently into the footage while
+  // overlay_state replays the same layers on top, so fixing a typo would leave
+  // both spellings visible and no way back.
+  async function handleComposeSave({ overlays, state: overlayState }) {
+    const target = editingClip?.version
+    if (!target) return { error: 'No clip to compose onto.' }
+    setSavingOverlay(true)
+
+    const sourceVideo = target.overlay_state?.baseVideoUrl || target.video_url
+    const uploaded = []
+    for (const [i, o] of overlays.entries()) {
+      const up = await uploadToStudio(activeWorkspaceId, accessToken, o.blob, `overlay-${i}.png`)
+      if (up.error) { setSavingOverlay(false); return { error: up.error } }
+      uploaded.push({ url: up.url, tIn: o.tIn, tOut: o.tOut, fade: o.fade })
+    }
+    const newOverlayState = { ...overlayState, overlays: uploaded, baseVideoUrl: sourceVideo }
+    const payload = {
+      video_url: sourceVideo,
+      overlays: uploaded.map(o => ({ url: o.url, t_in: o.tIn, t_out: o.tOut, fade: o.fade })),
+    }
+
+    // Editing a row that is already a composite replaces it in place, exactly
+    // as the image path does — it's a further tweak of one manual edit, not a
+    // new step in the thread. The row goes back to 'pending' so the existing
+    // poller picks up the re-composite.
+    if (target.kind === 'overlay' && target.media_type === 'video') {
+      const patch = { overlay_state: newOverlayState, status: 'pending', error: '' }
+      const upd = await updateVersion(accessToken, target.id, patch)
+      if (upd.error) { setSavingOverlay(false); return { error: upd.error } }
+      setVersions(prev => prev.map(v => (v.id === target.id ? { ...v, ...patch } : v)))
+      const fired = await requestCompose(webhooks.creativeCompose, {
+        ...payload, session_id: session.id, version_id: target.id,
+      })
+      setSavingOverlay(false)
+      if (fired.error) {
+        await updateVersion(accessToken, target.id, { status: 'failed', error: fired.error })
+        refresh(session.id)
+        return { error: fired.error }
+      }
+      setEditingClip(null)
+      return {}
+    }
+
+    const ins = await insertPendingVersions(activeWorkspaceId, accessToken, session.id, [{
+      round: nextRound, kind: 'overlay', provider: 'manual', mediaType: 'video',
+      parentVersionId: target.id, userPrompt: 'Text on the clip',
+      aspectRatio: session.aspect_ratio, overlayState: newOverlayState,
+      duration: target.duration || '', resolution: target.resolution || '',
+      model: target.model || '',
+    }])
+    if (ins.error) { setSavingOverlay(false); return { error: ins.error } }
+    const row = ins.rows[0]
+    const fired = await requestCompose(webhooks.creativeCompose, {
+      ...payload, session_id: session.id, version_id: row.id,
+    })
+    setSavingOverlay(false)
+    setVersions(prev => [...prev, row])
+    if (fired.error) {
+      await updateVersion(accessToken, row.id, { status: 'failed', error: fired.error })
+      refresh(session.id)
+      return { error: fired.error }
+    }
+    setEditingClip(null)
+    touchSession(accessToken, session.id)
+    return {}
+  }
+
   // Re-run one failed candidate against the same brief. Most failures at this
   // point are transient — a rate limit, a momentary provider error — and the
   // only previous way out was abandoning the session and retyping everything.
@@ -773,6 +913,10 @@ export function CreativeStudio() {
   const focused = branches.find(b => b.rootId === focusedBranch) || null
   const others = focused ? branches.filter(b => b.rootId !== focused.rootId) : []
   const missingWebhook = !webhooks.creativeGenerate && !webhooks.creativeVideo
+  // Called out separately: without it the whole free half of the video flow —
+  // text, logos, colours — silently isn't there, and it's easy to miss because
+  // generation itself keeps working.
+  const missingCompose = !!webhooks.creativeVideo && !webhooks.creativeCompose
 
   const laneProps = branch => ({
     branch,
@@ -788,6 +932,13 @@ export function CreativeStudio() {
       ? v => handleReRender(branch, v)
       : undefined,
     onOpenEditor: v => setEditingOverlay(v),
+    onEditClip: openClipEditor,
+    // What a re-render would cost, shown before the click. The free actions
+    // carry no badge at all, which is the whole distinction.
+    reRenderCost: v => estimateVideoCost(v.model || 'seedance-2', {
+      resolution: v.resolution || '720p', duration: v.duration || '5', audio: !!v.generate_audio,
+    }),
+    preparingClip,
     onFinalize: v => handleFinalize(branch, v),
     onDownload: handleDownload,
     onRetry: handleRetry,
@@ -811,8 +962,17 @@ export function CreativeStudio() {
       {missingWebhook && (
         <div className="mb-4 border border-amber-300 bg-amber-50 px-4 py-3">
           <p className="text-xs text-amber-900">
-            The Studio's workflows aren't connected yet — add the three Creative Studio webhook
+            The Studio's workflows aren't connected yet — add the Creative Studio webhook
             URLs in <span className="font-semibold">Settings → Integrations</span> before generating.
+          </p>
+        </div>
+      )}
+
+      {missingCompose && (
+        <div className="mb-4 border border-amber-300 bg-amber-50 px-4 py-3">
+          <p className="text-xs text-amber-900">
+            Adding text to a clip needs the <span className="font-semibold">Creative Studio — Compose</span> webhook,
+            which isn't set. Video will still generate; you just won't be able to put words on it yet.
           </p>
         </div>
       )}
@@ -928,17 +1088,18 @@ export function CreativeStudio() {
                 )}
               </div>
 
-              <div className={intent === 'video' ? '' : 'grid grid-cols-2 gap-3'}>
+              {/* One image per model, always — the 2-each and 4-each rounds
+                  are gone (2026-08-11). Two candidates is the comparison the
+                  split view is built around; four or eight was a bigger bill
+                  and a longer wait for lanes nobody read. */}
+              <div>
                 <Select label="Shape" square value={aspect} onChange={e => setAspect(e.target.value)}>
                   {RATIOS.map(r => <option key={r} value={r}>{aspectLabel(r)} ({r})</option>)}
                 </Select>
                 {intent !== 'video' && (
-                  <Select label="Options per model" square value={String(variants)}
-                    onChange={e => setVariants(Number(e.target.value))}>
-                    <option value="1">1 each — 2 images</option>
-                    <option value="2">2 each — 4 images</option>
-                    <option value="4">4 each — 8 images</option>
-                  </Select>
+                  <p className="text-[11px] text-text-tertiary mt-1.5">
+                    Two options — one from each model — so you can compare and keep going with whichever works.
+                  </p>
                 )}
               </div>
 
@@ -984,6 +1145,8 @@ export function CreativeStudio() {
                 {busy === 'generate' ? <><Spinner size="sm" /> Starting…</> : '✨ Generate'}
               </Button>
             </Card>
+          ) : openingId === session.id ? (
+            <ThreadSkeleton />
           ) : branches.length === 0 ? (
             <Empty title="Nothing here yet" description="This session has no versions." />
           ) : (
@@ -1074,6 +1237,31 @@ export function CreativeStudio() {
           setAttachLane(null)
         }}
       />
+
+      {/* ── Text and logos on a clip ── */}
+      {/* The SAME editor as below, in video mode: same fonts, same Arabic
+          shaping, same snapping and undo. What differs is the base (frame one
+          of the clip, standing in for footage this editor never alters) and the
+          save (a brand layer for ffmpeg, not a flattened picture). */}
+      <Modal open={!!editingClip} onClose={() => setEditingClip(null)}
+        title="Text on this clip — free, no re-render" width="max-w-[96vw]" square>
+        <div className="p-0">
+          {editingClip && (
+            <PhotoEditor
+              mode="video"
+              duration={Number(editingClip.version.duration) || 5}
+              imageUrl={editingClip.frameUrl}
+              initialState={editingClip.version.overlay_state}
+              saving={savingOverlay}
+              onSave={handleComposeSave}
+              onCancel={() => setEditingClip(null)}
+              onUploadImage={file => uploadToStudio(activeWorkspaceId, accessToken, file, file.name || 'layer.png')}
+              imageLibrary={editorLibrary}
+              brandColorsText={state.brandProfile?.brandColors || ''}
+            />
+          )}
+        </div>
+      </Modal>
 
       {/* ── Image editor ── */}
       <Modal open={!!editingOverlay} onClose={() => setEditingOverlay(null)} title="Edit image" width="max-w-[96vw]" square>

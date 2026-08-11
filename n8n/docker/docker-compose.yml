@@ -14,10 +14,18 @@
 # Secrets (ANTHROPIC_API_KEY, SUPABASE_URL, SUPABASE_KEY, FAL_KEY,
 # REPLICATE_API_TOKEN) come from .env, which is gitignored — copy
 # .env.example to .env and fill in real values before starting.
+#
+# Built from ./Dockerfile rather than pulled, because the Creative Compose
+# workflow needs ffmpeg in the container (see the Dockerfile for why it's a
+# multi-stage copy and not `apk add`). Rebuild after changing it with:
+#     docker compose up -d --build
+# The named volume below is untouched by a rebuild, so imported workflows,
+# credentials and execution history all survive.
 
 services:
   n8n:
-    image: n8nio/n8n:latest
+    build: .
+    image: arak-marketing-n8n:ffmpeg
     container_name: arak-marketing-n8n
     restart: unless-stopped
     ports:
@@ -29,6 +37,23 @@ services:
       - N8N_PROTOCOL=http
       - N8N_SECURE_COOKIE=false
       - N8N_BLOCK_ENV_ACCESS_IN_NODE=false
+      # n8n 2.0 disabled ExecuteCommand and LocalFileTrigger by default as a
+      # documented breaking change; the default value of NODES_EXCLUDE is
+      # ["n8n-nodes-base.executeCommand", "n8n-nodes-base.localFileTrigger"].
+      # Creative Compose needs ExecuteCommand to run ffmpeg, so this re-enables
+      # that one and leaves the trigger off. Without it the workflow imports
+      # and publishes fine but never activates — the log says "Unrecognized
+      # node type" and the webhook 404s, which looks nothing like a config
+      # problem from the outside.
+      #
+      # The security trade-off, stated plainly: any workflow here can now run
+      # shell inside the container. Accepted 2026-08-11 because this instance
+      # is localhost-only and anyone who can edit a workflow could already read
+      # $env and exfiltrate the service_role key through an HTTP node, so it
+      # widens very little. Creative Compose additionally allowlists every URL
+      # (must be our own storage, no shell metacharacters) before it builds a
+      # command.
+      - NODES_EXCLUDE=["n8n-nodes-base.localFileTrigger"]
       - GENERIC_TIMEZONE=Asia/Riyadh
       - TZ=Asia/Riyadh
     volumes:

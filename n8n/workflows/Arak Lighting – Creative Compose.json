@@ -1,0 +1,389 @@
+{
+  "name": "Arak Lighting – Creative Compose",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Creative Studio — Compose (text/logos onto a clip)\n\nPOST `arak-creative-compose`\n```\n{ session_id, version_id, video_url,\n  overlays: [ { url, t_in, t_out, fade } ] }\n```\n\n**Costs nothing to run** — no FAL_KEY, no model call. This is what makes\nunlimited free wording/font/colour changes on video real rather than a slogan:\nthe clip is never regenerated, our own layer is just stamped onto it again.\n\n`overlays` are back-to-front, one PNG per distinct timing group (layers that\nshare an in/out are rendered into one image by the editor). `t_out: null`\nmeans \"runs to the end\"; `fade` is seconds of alpha ramp at both ends.\n\nThe clip is centre-cropped to the OVERLAY's aspect, not the other way round —\nthe overlay was composed against the still, while the clip comes back in\nwhatever shape the model would accept. Dimensions come from ffprobe at run\ntime; nothing trusts the caller, because `creative_versions` is\nclient-writable and every URL here ends up in a shell command.\n\nArabic is safe by construction: the browser renders the text with real fonts\nand real shaping, ffmpeg only ever composites a finished PNG, so ffmpeg's\nunreliable Arabic `drawtext` never enters the picture.\n\nNeeds env: SUPABASE_URL, SUPABASE_KEY. Needs ffmpeg + ffprobe in the image\n(see n8n/docker/Dockerfile — a multi-stage copy, since the n8n base is a\nhardened image with no package manager).",
+        "height": 520,
+        "width": 460
+      },
+      "id": "e90fc05e-fb83-563f-b2eb-c4d2d8db40b0",
+      "name": "Note: Overview",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        -260
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "arak-creative-compose",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "a50ce37f-e5d9-5d0b-974b-7c59bd120aad",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        300
+      ],
+      "webhookId": "arak-creative-compose"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ status: 'accepted', version_id: $json.body.version_id }) }}",
+        "options": {}
+      },
+      "id": "8e5defcc-7d77-5b33-aeb7-a083e5cb8f3f",
+      "name": "Respond: Accepted",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        220,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst body = ($input.first().json.body) || {};\nconst sessionId = String(body.session_id || '');\nconst versionId = String(body.version_id || '');\nconst overlays  = Array.isArray(body.overlays) ? body.overlays : [];\nconst BUCKET = 'creative-studio';\n\n// Everything below is interpolated into a shell command, so every URL is\n// checked twice: it must live in OUR OWN storage bucket, and it must contain\n// nothing that could end the argument and start a new command. `creative_versions`\n// is client-writable by design (the browser sets image_url/status itself), so a\n// workspace member could otherwise put a shell payload in a row and have n8n —\n// which holds the service_role key — run it. The allowlist has no quote,\n// backtick, dollar, semicolon, backslash or space in it.\nconst SUP = String($env.SUPABASE_URL || '').replace(/\\/+$/, '');\nconst PREFIX = SUP + '/storage/v1/object/public/';\nfunction safeUrl(u, what) {\n  const s = String(u || '');\n  if (!s.startsWith(PREFIX)) throw new Error(what + ' is not a file in our own storage.');\n  if (!/^[A-Za-z0-9:/._~%()-]+$/.test(s)) throw new Error(what + ' contains characters we will not put in a shell command.');\n  return s;\n}\n\nconst videoUrl = safeUrl(body.video_url, 'The clip');\nif (!versionId) throw new Error('No version to write the result back to.');\nif (!overlays.length) throw new Error('Nothing to composite onto the clip.');\n\n// ── the filter chain ──\n// Overlays arrive back-to-front, matching the editor's own layer order, and\n// each is chained onto the previous result so stacking survives the round trip.\nconst num = n => (Math.round((Number(n) || 0) * 100) / 100).toFixed(2);\nconst lines = ['[0:v]crop=${TW}:${TH}:${OX}:${OY},setsar=1[base]'];\nlet prev = 'base';\nconst fetches = [];\n\noverlays.forEach((o, i) => {\n  const url = safeUrl(o.url, 'An overlay');\n  fetches.push('wget -q -O ovl' + i + '.png ' + url);\n\n  const tIn  = Math.max(0, Number(o.t_in) || 0);\n  const hasOut = o.t_out !== null && o.t_out !== undefined && o.t_out !== '';\n  const tOut = hasOut ? Number(o.t_out) : null;\n  const fade = Math.max(0, Number(o.fade) || 0);\n\n  let f = '[' + (i + 1) + ':v]scale=${TW}:${TH},format=rgba';\n  if (fade > 0) {\n    f += ',fade=t=in:st=' + num(tIn) + ':d=' + num(fade) + ':alpha=1';\n    if (hasOut) f += ',fade=t=out:st=' + num(tOut - fade) + ':d=' + num(fade) + ':alpha=1';\n  }\n  lines.push(f + '[o' + i + ']');\n\n  let ov = '[' + prev + '][o' + i + ']overlay=0:0:format=auto';\n  // Only gate a layer that actually comes and goes. `enable` is evaluated per\n  // frame, and a full-length layer would pay for an expression that is always\n  // true — which is the common case by a wide margin.\n  if (hasOut)      ov += \":enable='between(t,\" + num(tIn) + ',' + num(tOut) + \")'\";\n  else if (tIn > 0) ov += \":enable='gte(t,\" + num(tIn) + \")'\";\n  lines.push(ov + '[v' + i + ']');\n  prev = 'v' + i;\n});\n\nconst inputs = overlays.map((_, i) => '-loop 1 -framerate \"$FPS\" -i ovl' + i + '.png').join(' ');\nconst filter = lines.join(';');\n\nconst filename = (sessionId ? sessionId + '/' : '') + versionId + '-' + Date.now() + '.mp4';\n\n// Work inside ~/.n8n-files, NOT /tmp. n8n's `restrictFileAccessTo` defaults to\n// '~/.n8n-files', and the Read File node downstream refuses anything outside it\n// with \"Access to the file is not allowed.\" — a message that says nothing about\n// paths. Using the directory n8n already sanctions means the default protection\n// stays on for the whole rest of the filesystem instead of being widened.\n// $HOME is only known to the shell, so the script prints the resolved path back\n// and the parser reads it from stdout.\nconst dir = '\"$HOME/.n8n-files/compose/' + versionId + '\"';\n\n// `set -e` plus an explicit COMPOSE_OK sentinel: ffmpeg exits 0 in some partial\n// failures, so a zero exit code alone is not evidence that a file was written.\nconst script = [\n  'set -e',\n  // Composited clips are a few MB each and nothing else ever deletes them, so\n  // the volume would grow without bound. Anything older than 3 hours is well\n  // past the seconds this workflow needs it for.\n  'find \"$HOME/.n8n-files/compose\" -maxdepth 1 -mindepth 1 -type d -mmin +180 -exec rm -rf {} + 2>/dev/null || true',\n  'rm -rf ' + dir + ' && mkdir -p ' + dir + ' && cd ' + dir,\n  'wget -q -O clip.mp4 ' + videoUrl,\n  fetches.join('\\n'),\n  // Never trust the caller for geometry — the row is client-writable and the\n  // model may not have honoured the aspect ratio we asked for anyway.\n  'CW=$(ffprobe -v error -select_streams v:0 -show_entries stream=width  -of csv=p=0 clip.mp4)',\n  'CH=$(ffprobe -v error -select_streams v:0 -show_entries stream=height -of csv=p=0 clip.mp4)',\n  'FPS=$(ffprobe -v error -select_streams v:0 -show_entries stream=r_frame_rate -of csv=p=0 clip.mp4)',\n  'DUR=$(ffprobe -v error -show_entries format=duration -of csv=p=0 clip.mp4)',\n  'OW=$(ffprobe -v error -select_streams v:0 -show_entries stream=width  -of csv=p=0 ovl0.png)',\n  'OH=$(ffprobe -v error -select_streams v:0 -show_entries stream=height -of csv=p=0 ovl0.png)',\n  // Centre-crop the CLIP to the OVERLAY's aspect. The overlay was composed\n  // against the still, and the clip comes back in whatever shape the model\n  // would accept (a 4:5 session renders 3:4 on Seedance, 9:16 on Veo), so this\n  // is what makes the text land where the marketer put it. A no-op when the two\n  // already agree. Integer arithmetic only — this runs under busybox sh — and\n  // both results forced even, because yuv420p subsamples chroma and rejects\n  // odd dimensions.\n  'if [ $((CW*OH)) -gt $((CH*OW)) ]; then TH=$CH; TW=$((CH*OW/OH)); else TW=$CW; TH=$((CW*OH/OW)); fi',\n  'TW=$((TW/2*2)); TH=$((TH/2*2))',\n  'OX=$(((CW-TW)/2)); OY=$(((CH-TH)/2))',\n  // -loop 1 matters: a bare PNG is one frame at t=0, and `fade` needs a stream\n  // with timestamps to fade along. -t bounds the otherwise infinite loops.\n  // -c:a copy rather than re-encode: Seedance's native audio is the one thing a\n  // free composite must not quietly degrade.\n  'ffmpeg -nostdin -v error -y -i clip.mp4 ' + inputs +\n    ' -filter_complex \"' + filter + '\"' +\n    ' -map \"[' + prev + ']\" -map 0:a? -t \"$DUR\"' +\n    ' -c:v libx264 -preset veryfast -crf 18 -pix_fmt yuv420p -c:a copy -movflags +faststart out.mp4',\n  'test -s out.mp4',\n  // The path is echoed rather than predicted because only the shell knows what\n  // $HOME expanded to.\n  'echo \"COMPOSE_OK $PWD/out.mp4\"',\n].join('\\n');\n\nreturn { json: { script, version_id: versionId, bucket: BUCKET, filename } };\n"
+      },
+      "id": "04c9ff82-6e31-5284-839a-44554ea67b75",
+      "name": "Build Composite",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "command": "={{ $json.script }}"
+      },
+      "onError": "continueRegularOutput",
+      "id": "e108fe54-2288-5c1d-bb4c-87d8933ce72b",
+      "name": "Composite",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        660,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst src = $('Build Composite').first().json;\nconst res = $input.first().json || {};\n// The sentinel carries the absolute path with it, because $HOME is resolved by\n// the shell and the file has to land inside ~/.n8n-files for the Read File node\n// to be allowed to touch it at all.\nconst hit = String(res.stdout || '').match(/COMPOSE_OK\\s+(\\S+)/);\n\nif (!hit) {\n  // stderr's LAST lines are the useful ones — ffmpeg prints the failing filter\n  // or the missing file at the end, after any banner noise.\n  const err = String(res.stderr || res.stdout || '').trim().split('\\n').slice(-4).join(' ').slice(0, 500);\n  return { json: { _ok: false, version_id: src.version_id,\n                   error: err || ('Compositing failed (exit ' + res.exitCode + ').') } };\n}\nreturn { json: { _ok: true, version_id: src.version_id, bucket: src.bucket,\n                 filename: src.filename, path: hit[1] } };\n"
+      },
+      "id": "11d4c64a-ba2f-51bc-a337-0ce03022b691",
+      "name": "Parse Composite",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "creative-compose-gate",
+              "leftValue": "={{ $json._ok === true }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "c116293d-1ec9-5c50-a5d8-1e02b678fdb4",
+      "name": "Composed OK?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "fileSelector": "={{ $json.path }}",
+        "options": {
+          "dataPropertyName": "data"
+        }
+      },
+      "onError": "continueErrorOutput",
+      "id": "1212b5e0-51c9-5948-aa16-d888e7c9d830",
+      "name": "Read Composed Clip",
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1,
+      "position": [
+        1320,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ String($env.SUPABASE_URL).replace(/\\/+$/, '') }}/storage/v1/object/{{ $('Parse Composite').first().json.bucket }}/{{ $('Parse Composite').first().json.filename }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SUPABASE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "video/mp4"
+            },
+            {
+              "name": "x-upsert",
+              "value": "true"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "binaryData",
+        "inputDataFieldName": "data",
+        "options": {}
+      },
+      "onError": "continueErrorOutput",
+      "id": "9aabbfe8-1450-5c8d-816c-17828976f6c4",
+      "name": "Upload to Supabase Storage",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1540,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ String($env.SUPABASE_URL).replace(/\\/+$/, '') }}/rest/v1/creative_versions?id=eq.{{ $('Parse Composite').first().json.version_id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SUPABASE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ status: 'ready', error: '', video_url: String($env.SUPABASE_URL).replace(/\\/+$/, '') + '/storage/v1/object/public/' + $('Parse Composite').first().json.bucket + '/' + $('Parse Composite').first().json.filename }) }}",
+        "options": {}
+      },
+      "onError": "continueErrorOutput",
+      "id": "a6751e61-161a-5300-852b-948cd2e775b1",
+      "name": "Supabase: Save Version",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1760,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ String($env.SUPABASE_URL).replace(/\\/+$/, '') }}/rest/v1/creative_versions?id=eq.{{ $json.version_id || $('Parse Composite').first().json.version_id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SUPABASE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ status: 'failed', error: String($json.error && $json.error.message ? $json.error.message : ($json.error || $('Parse Composite').first().json.error || 'Generation failed.')).slice(0, 500) }) }}",
+        "options": {}
+      },
+      "id": "d184caca-9eb4-51c8-9372-4212da00efbb",
+      "name": "Supabase: Mark Failed",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1320,
+        420
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Respond: Accepted",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respond: Accepted": {
+      "main": [
+        [
+          {
+            "node": "Build Composite",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Composite": {
+      "main": [
+        [
+          {
+            "node": "Composite",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Composite": {
+      "main": [
+        [
+          {
+            "node": "Parse Composite",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Composite": {
+      "main": [
+        [
+          {
+            "node": "Composed OK?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Composed OK?": {
+      "main": [
+        [
+          {
+            "node": "Read Composed Clip",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Supabase: Mark Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Composed Clip": {
+      "main": [
+        [
+          {
+            "node": "Upload to Supabase Storage",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Supabase: Mark Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload to Supabase Storage": {
+      "main": [
+        [
+          {
+            "node": "Supabase: Save Version",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Supabase: Mark Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Supabase: Save Version": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Supabase: Mark Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": []
+}

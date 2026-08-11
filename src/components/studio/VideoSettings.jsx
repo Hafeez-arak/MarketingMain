@@ -85,7 +85,22 @@ export function LookPicker({ lookId, onPick }) {
 // because switching models can change what those even offer (Kling and
 // Hailuo have no resolution dial at all, and every model has its own
 // allowed durations) — pick the model first, then its options.
+// What each model will and won't accept, said in the picker rather than
+// discovered from a failed render. Both of these are real endpoint limits
+// verified against fal's schemas (2026-08-11), not preferences:
+//  · Veo takes only 16:9 or 9:16, so any other shape is rendered to the nearest
+//    orientation and trimmed back when the text layer is composited.
+//  · Only Seedance has a reference-to-video endpoint; on the others a style
+//    reference has nowhere to go.
+const MODEL_CAVEATS = {
+  'veo-3.1-fast': 'Renders 16:9 or 9:16 only — other shapes are trimmed to fit when text is added.',
+  'seedance-2.5': 'Shape follows the source image; no aspect control on text-to-video.',
+  'kling-2.5-turbo-pro': 'No style references, no end frame, one quality tier.',
+  'hailuo-2.3': 'No style references, no end frame, one quality tier.',
+}
+
 export function ModelPicker({ modelId, onPick }) {
+  const caveat = MODEL_CAVEATS[modelId]
   return (
     <div>
       <p className="text-xs font-medium text-text-secondary mb-1.5">Model</p>
@@ -93,6 +108,7 @@ export function ModelPicker({ modelId, onPick }) {
         className="w-full text-sm bg-white border border-border px-3 py-2 focus:outline-none focus:border-amber-400">
         {VIDEO_MODELS.map(m => <option key={m.id} value={m.id}>{m.label} — {m.hint}</option>)}
       </select>
+      {caveat && <p className="text-[10px] text-text-tertiary mt-1 leading-snug">{caveat}</p>}
     </div>
   )
 }

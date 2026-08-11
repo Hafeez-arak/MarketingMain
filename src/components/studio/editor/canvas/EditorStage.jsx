@@ -319,6 +319,17 @@ export function EditorStage({
       ref={stageRef}
       width={viewport.w} height={viewport.h}
       scaleX={view.scale} scaleY={view.scale} x={view.x} y={view.y}
+      // Konva's default drag distance is ZERO, so a plain click on a layer
+      // began a drag: mousedown fired dragstart, the pointer never moved, and
+      // dragmove still ran — which put the layer through computeSnap and moved
+      // it to the nearest guide, then dragend committed that as a real edit
+      // (and an undo step). Selecting a layer therefore nudged it, every time,
+      // by up to SNAP_SCREEN_PX / scale document pixels — 21px at 28% zoom,
+      // which is what "the box moves when I click it again" was. Konva
+      // cascades this to every descendant, so setting it once on the Stage
+      // covers every layer type. 4px is below what a deliberate drag ever is
+      // and above hand jitter on a click.
+      dragDistance={4}
       draggable={panning}
       onDragEnd={handleStageDragEnd}
       onWheel={onWheel}
