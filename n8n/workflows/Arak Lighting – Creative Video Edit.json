@@ -1,0 +1,311 @@
+{
+  "name": "Arak Lighting – Creative Video Edit",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Creative Studio — Video Edit (in-context, added 2026-08-11)\n\nPOST `arak-creative-video-edit`\n```\n{ session_id, version_id, video_url, prompt, reference_image_urls?: string[] }\n```\n\nEdits an EXISTING clip via fal's Kling O1 Edit\n(`fal-ai/kling-video/o1/video-to-video/edit`) — a natural-language instruction\n(\"change the background to marble\", \"make the light pulse slower\") applied\nwhile the model preserves the source's own camera movement and motion\nstructure. This is what the chat box's Send does on a finished video, distinct\nfrom Re-render (same prompt, a brand-new take) and Add text (free, ffmpeg only,\nnever touches the footage).\n\nReal constraint from fal's own schema, not a choice made here: the source\nclip must be 3–10.05 seconds. The frontend checks the row's stored `duration`\nbefore offering this action at all — outside that range, only Re-render shows.\n\n`reference_image_urls` are optional style/appearance references, addressed in\nthe prompt as @Image1, @Image2 — capped at 4 (fal's own limit, shared with any\ncharacter \"elements\", which this app never sends).\n\n`keep_audio: true` always — an edit that changes the picture must not also\nsilently drop audio the source render had; fal defaults this to false.\n\nCosts $0.168/second of the SOURCE clip's duration, not the edit's own compute\ntime — a 5s edit is ~$0.84, a 10s edit ~$1.68.\n\nNeeds env: FAL_KEY, SUPABASE_URL, SUPABASE_KEY.",
+        "height": 360,
+        "width": 460
+      },
+      "id": "5e2ff78f-fe53-5634-a8be-d9050c0f47fd",
+      "name": "Note: Overview",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        -180
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "arak-creative-video-edit",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "8bed6ab4-d49a-5245-88bd-535b8d422c2e",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        300
+      ],
+      "webhookId": "arak-creative-video-edit"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ status: 'accepted', version_id: $json.body.version_id }) }}",
+        "options": {}
+      },
+      "id": "ed12bbfb-36b3-5fef-8c82-e022c35e935c",
+      "name": "Respond: Accepted",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        220,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst http = this.helpers.httpRequest;\nconst prepareBinaryData = this.helpers.prepareBinaryData;\nconst FAL = $env.FAL_KEY;\n\n// Pull the provider's ACTUAL message out of whatever shape n8n wrapped it in.\n// Verified necessary 2026-08-09: an exhausted fal balance reached the card as\n// the useless \"Request failed with status code 403\", when fal had actually\n// replied {\"detail\":\"User is locked. Reason: Exhausted balance.\"}. Those two\n// strings lead to completely different actions, so this walks every container\n// the body might hide in — including `response.body` and `cause`, which the\n// older unwrapper (still used by the other workflows) misses — and only falls\n// back to n8n's generic text when nothing real is found.\nfunction errText(e){\n  const candidates = [\n    e && e.response && e.response.data,\n    e && e.response && e.response.body,\n    e && e.error,\n    e && e.cause && e.cause.response && e.cause.response.data,\n    e && e.cause && e.cause.error,\n    e && e.cause,\n    e && e.description,\n  ];\n  for (const c of candidates) {\n    if (!c) continue;\n    if (typeof c === 'string' && c.trim()) return c.slice(0, 400);\n    if (Buffer.isBuffer(c)) return c.toString('utf8', 0, 300);\n    if (typeof c === 'object') {\n      if (c.detail) return (typeof c.detail === 'string' ? c.detail : JSON.stringify(c.detail)).slice(0, 400);\n      if (c.error && c.error.message) return String(c.error.message).slice(0, 400);\n      if (c.message && c.message !== (e && e.message)) return String(c.message).slice(0, 400);\n      const s = JSON.stringify(c);\n      if (s && s !== '{}' && s !== 'null') return s.slice(0, 400);\n    }\n  }\n  return (e && e.message) || String(e);\n}\n\nfunction bodyText(body, status){\n  if (body == null) return 'HTTP ' + status;\n  if (Buffer.isBuffer(body)) return 'HTTP ' + status + ': ' + body.toString('utf8', 0, 300);\n  if (typeof body === 'string') return 'HTTP ' + status + ': ' + body.slice(0, 400);\n  if (typeof body === 'object') {\n    if (body.detail) return (typeof body.detail === 'string' ? body.detail : JSON.stringify(body.detail)).slice(0, 400);\n    if (body.error && body.error.message) return String(body.error.message).slice(0, 400);\n    if (body.message) return String(body.message).slice(0, 400);\n    return 'HTTP ' + status + ': ' + JSON.stringify(body).slice(0, 400);\n  }\n  return 'HTTP ' + status;\n}\n\n// Don't let n8n throw on a non-2xx at all — ask for the full response and\n// judge the status here. Measured 2026-08-09: when n8n raises the error\n// itself, the provider's body is NOT reachable from the thrown object by any\n// path (errText below was tried and still yielded \"Request failed with status\n// code 403\"), so an exhausted balance and a rejected prompt were\n// indistinguishable on the card. Reading the body directly is the only way to\n// get the real reason out. errText stays as the fallback for older n8n builds\n// that ignore ignoreHttpStatusErrors and throw regardless.\n// returnFullResponse changes how a BINARY body comes back. Measured against\n// this n8n build, 2026-08-10, fetching the same JPEG both ways:\n//   encoding:'arraybuffer'                       -> real Buffer (isBuffer true)\n//   encoding:'arraybuffer' + returnFullResponse  -> {type:'Buffer', data:[...]}\n// i.e. the JSON-serialised form, whose .length is undefined. Since req() sets\n// returnFullResponse on every call to read error bodies, every image and video\n// download in these workflows was silently getting that object instead of\n// bytes — \"Downloaded file is not a real image (undefined bytes)\". It went\n// unnoticed because fal's balance was empty the whole time this code existed,\n// so the download line had never once been reached with a real response.\nfunction reviveBinary(b){\n  if (!b || typeof b !== 'object') return b;\n  if (typeof Buffer !== 'undefined' && Buffer.isBuffer(b)) return b;\n  if (b.type === 'Buffer' && Array.isArray(b.data)) return Buffer.from(b.data);\n  if (b instanceof ArrayBuffer) return Buffer.from(new Uint8Array(b));\n  if (ArrayBuffer.isView(b)) return Buffer.from(b.buffer, b.byteOffset, b.byteLength);\n  return b;\n}\n\nasync function req(opts){\n  let full;\n  try {\n    full = await http(Object.assign({}, opts, { returnFullResponse: true, ignoreHttpStatusErrors: true }));\n  } catch (e) {\n    throw new Error(errText(e));\n  }\n  const status = (full && (full.statusCode || full.status)) || 200;\n  const body = (full && full.body !== undefined) ? full.body : full;\n  if (status >= 400) throw new Error(bodyText(body, status));\n  return reviveBinary(body);\n}\n\n// A byte-count threshold is not enough — a corrupted buffer can be LARGER\n// than the real file (a JSON-stringified Buffer is ~7x bigger), which is how\n// a broken image once saved silently with no error anywhere. Check the actual\n// file signature instead.\nfunction looksLikeImage(buf){\n  if (!buf || buf.length < 12) return false;\n  // Same fix as the other looksLikeImage in this file: PNG's 0x89 lead byte\n  // cannot survive an 'ascii' string compare (Node masks the high bit off\n  // every byte for that encoding), so this always failed a genuine PNG.\n  const head = buf.toString('ascii', 0, 12);\n  return (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4E && buf[3] === 0x47)\n      || (buf[0] === 0xFF && buf[1] === 0xD8)\n      || (head.startsWith('RIFF') && head.indexOf('WEBP') !== -1);\n}\n\n// gpt-image-2's named buckets have no 4:5, which used to mean the GPT\n// candidate came back 3:4 while the Gemini one came back a true 4:5 — two\n// different shapes in a side-by-side that exists to compare models, and the\n// GPT one not post-ready. The prompt even claimed it would be \"cropped to\n// 4:5\" and no crop was ever performed anywhere in the pipeline.\n//\n// The endpoint also accepts explicit dimensions, which removes the problem at\n// the source rather than trimming after the fact: 1024x1280 is exactly 4:5,\n// both edges multiples of 16, and 1.31MP sits inside the documented\n// 655,360–8,294,400 pixel range. Every other ratio has an exact bucket\n// already, so only 4:5 needs this.\nconst GPT_SIZE = {\n  '1:1': 'square_hd', '3:4': 'portrait_4_3',\n  '9:16': 'portrait_16_9', '16:9': 'landscape_16_9',\n  '1.91:1': 'landscape_16_9', '4:3': 'landscape_4_3', '3:2': 'landscape_4_3',\n};\nconst GPT_EXACT = {\n  '4:5': { width: 1024, height: 1280 },\n};\n\nconst BUCKET = 'creative-studio';\nconst MODEL = 'fal-ai/kling-video/o1/video-to-video/edit';\n\nfunction looksLikeVideo(buf){\n  if (!buf || buf.length < 12) return false;\n  return buf.toString('ascii', 4, 8) === 'ftyp';\n}\n\nconst body = ($input.first().json.body) || {};\nconst sessionId = body.session_id || '';\nconst versionId = body.version_id || '';\nconst videoUrl  = String(body.video_url || '').trim();\nconst prompt    = String(body.prompt || '').trim();\n// Style/appearance references, addressed in the prompt as @Image1, @Image2 —\n// fal caps elements + reference images at 4 combined; we only ever send\n// plain images (no character \"elements\"), so 4 is the whole budget.\nconst referenceUrls = Array.isArray(body.reference_image_urls)\n  ? body.reference_image_urls.filter(Boolean).slice(0, 4)\n  : [];\n\nasync function run(){\n  if (!prompt) throw new Error('No instruction given for the edit.');\n  if (!videoUrl) throw new Error('No clip to edit.');\n\n  // keep_audio is unconditional: an edit that changes the picture must not\n  // also silently drop audio the original render had. fal defaults this to\n  // false, so it has to be stated explicitly.\n  const input = { prompt, video_url: videoUrl, keep_audio: true };\n  if (referenceUrls.length) input.image_urls = referenceUrls;\n\n  const submit = await req({ method:'POST', url:'https://queue.fal.run/' + MODEL,\n    headers:{ Authorization:'Key ' + FAL, 'Content-Type':'application/json' }, body: input, json:true });\n  const requestId = submit.request_id;\n  if (!requestId) throw new Error('fal did not return a request_id: ' + JSON.stringify(submit).slice(0, 250));\n\n  // See CREATIVE_VIDEO_JS for why this is saved before polling starts —\n  // same task-runner-timeout exposure, same fix, same reconciler reads it.\n  try {\n    await req({ method: 'PATCH',\n      url: String($env.SUPABASE_URL).replace(/\\/+$/, '') + '/rest/v1/creative_versions?id=eq.' + versionId,\n      headers: { Authorization: 'Bearer ' + $env.SUPABASE_KEY, apikey: $env.SUPABASE_KEY,\n                 'Content-Type': 'application/json', Prefer: 'return=minimal' },\n      body: { overlay_state: { pendingRequest: { requestId, model: MODEL, submittedAt: new Date().toISOString() } } },\n      json: true });\n  } catch (e) { /* recoverable by Reconcile only if this succeeded; never worth failing the edit over */ }\n\n  // See CREATIVE_VIDEO_JS for why this is built from the first two path\n  // segments rather than the full model path — submitting to the full path\n  // but polling the full path too is the bug that cost a real render on\n  // 2026-08-11, on this same queue mechanism.\n  const appId = MODEL.split('/').slice(0, 2).join('/');\n  const statusUrl = submit.status_url || ('https://queue.fal.run/' + appId + '/requests/' + requestId + '/status');\n  const resultUrl = submit.response_url || ('https://queue.fal.run/' + appId + '/requests/' + requestId);\n\n  let status = submit.status || 'IN_QUEUE';\n  let tries = 0;\n  while ((status === 'IN_QUEUE' || status === 'IN_PROGRESS') && tries < 150) {\n    await new Promise(r => setTimeout(r, 3000));\n    const s = await req({ method:'GET', url: statusUrl, headers:{ Authorization:'Key ' + FAL }, json:true });\n    status = s.status; tries++;\n  }\n  if (status !== 'COMPLETED') {\n    throw new Error(status === 'IN_QUEUE' || status === 'IN_PROGRESS'\n      ? 'Edit timed out after ~' + (tries * 3) + 's (request ' + requestId + ')'\n      : 'Edit ' + status + ' (request ' + requestId + ')');\n  }\n\n  const result = await req({ method:'GET', url: resultUrl, headers:{ Authorization:'Key ' + FAL }, json:true });\n  const outUrl = result.video && result.video.url;\n  if (!outUrl) throw new Error('fal returned no video URL (request ' + requestId + '): ' + JSON.stringify(result).slice(0, 250));\n\n  const buf = await req({ method:'GET', url: outUrl, encoding:'arraybuffer' });\n  if (!looksLikeVideo(buf)) {\n    throw new Error('Downloaded file is not a real video (' + buf.length + ' bytes)');\n  }\n  const base = versionId + '-' + Date.now() + '.mp4';\n  const filename = (sessionId ? sessionId + '/' : '') + base;\n  return {\n    json: { _ok: true, version_id: versionId, bucket: BUCKET, filename },\n    binary: { data: await prepareBinaryData(buf, base, 'video/mp4') },\n  };\n}\n\ntry { return await run(); }\ncatch (err) {\n  return { json: { _ok: false, version_id: versionId,\n                   error: (err && err.message) ? err.message : String(err) } };\n}\n"
+      },
+      "id": "7777dd23-c3b7-5b5c-95d8-823b017bb362",
+      "name": "Edit Video",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "creative-gate-1",
+              "leftValue": "={{ $json._ok === true }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "9a93d5fd-e737-5f98-b842-9f26531f88af",
+      "name": "Generated OK?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        660,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ String($env.SUPABASE_URL).replace(/\\/+$/, '') }}/storage/v1/object/{{ $json.bucket }}/{{ $json.filename }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SUPABASE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "video/mp4"
+            },
+            {
+              "name": "x-upsert",
+              "value": "true"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "binaryData",
+        "inputDataFieldName": "data",
+        "options": {}
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueErrorOutput",
+      "id": "d5dcb859-63a9-5fdd-a531-3894d575e314",
+      "name": "Upload to Supabase Storage",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        880,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ String($env.SUPABASE_URL).replace(/\\/+$/, '') }}/rest/v1/creative_versions?id=eq.{{ $('Edit Video').item.json.version_id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SUPABASE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ status: 'ready', error: '', video_url: String($env.SUPABASE_URL).replace(/\\/+$/, '') + '/storage/v1/object/public/' + $('Edit Video').item.json.bucket + '/' + $('Edit Video').item.json.filename }) }}",
+        "options": {}
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueErrorOutput",
+      "id": "52030b43-8e8e-5868-9682-79bcd55c71dc",
+      "name": "Supabase: Save Version",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1100,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ String($env.SUPABASE_URL).replace(/\\/+$/, '') }}/rest/v1/creative_versions?id=eq.{{ $json.version_id || $('Edit Video').item.json.version_id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SUPABASE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ status: 'failed', error: String($json.error && $json.error.message ? $json.error.message : ($json.error || $('Edit Video').item.json.error || 'Generation failed.')).slice(0, 500) }) }}",
+        "options": {}
+      },
+      "id": "8e4232cb-03ce-5280-8ac3-cab9f4bb5087",
+      "name": "Supabase: Mark Failed",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        880,
+        400
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Respond: Accepted",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respond: Accepted": {
+      "main": [
+        [
+          {
+            "node": "Edit Video",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Video": {
+      "main": [
+        [
+          {
+            "node": "Generated OK?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generated OK?": {
+      "main": [
+        [
+          {
+            "node": "Upload to Supabase Storage",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Supabase: Mark Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload to Supabase Storage": {
+      "main": [
+        [
+          {
+            "node": "Supabase: Save Version",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Supabase: Mark Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Supabase: Save Version": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Supabase: Mark Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": []
+}

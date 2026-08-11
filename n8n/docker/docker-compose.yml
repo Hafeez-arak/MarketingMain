@@ -54,6 +54,18 @@ services:
       # (must be our own storage, no shell metacharacters) before it builds a
       # command.
       - NODES_EXCLUDE=["n8n-nodes-base.localFileTrigger"]
+      # n8n's task runner kills a Code node's execution at 300s by default —
+      # unrelated to, and shorter than, the poll loop the video Code nodes
+      # (Render Video, Edit Video) intentionally run: up to 150 tries × 3s =
+      # 450s, waiting on fal. Found 2026-08-11 when a Seedance render that fal
+      # was still genuinely working on got silently killed at the 300s mark:
+      # execution status "error", NONE of our own nodes ran (not even Mark
+      # Failed), so the row was left 'pending' forever with no error and no
+      # trace of the request_id needed to ever recover it — worse than a
+      # normal failure, because our own error-handling design never got to
+      # run. 600s gives the full 450s poll budget real headroom; if a poll
+      # budget is ever raised above ~500s, raise this too.
+      - N8N_RUNNERS_TASK_TIMEOUT=600
       - GENERIC_TIMEZONE=Asia/Riyadh
       - TZ=Asia/Riyadh
     volumes:

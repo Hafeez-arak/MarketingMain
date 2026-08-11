@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { Button, Spinner } from '../ui/index'
 import { PROVIDER_LABEL, labelFor } from './labels'
+import { MultiRefRow } from './MediaPicker'
+import { VIDEO_EDIT_MAX_REFERENCES } from './videoModels'
 
 // ─── One candidate's own workspace ─────────────────────────────────────────
 // The ChatGPT image and the Gemini image are not two options to choose
@@ -78,6 +80,8 @@ export function BranchChat({
   onReRender,              // optional: re-run a past render against the current base
   onEditClip,              // text/logos onto a finished clip. Free — ffmpeg, no model.
   reRenderCost,            // (version) => dollars, shown on the button BEFORE the click
+  editVideoCost,           // (version) => dollars — what Send costs on a video stage
+  editVideoAllowed,        // (version) => bool — fal's 3–10s limit on the source clip
   preparingClip = '',      // version id whose first frame is being read
   onOpenEditor,
   onFinalize,
@@ -94,7 +98,7 @@ export function BranchChat({
   const composerRef = useRef(null)
   const stripRef = useRef(null)
 
-  const { text = '', baseId = null, attach = null } = composer || {}
+  const { text = '', baseId = null, attach = null, refs = [] } = composer || {}
 
   const ready = branch.versions.filter(v => v.status === 'ready')
   const newest = branch.versions[branch.versions.length - 1] || null
@@ -109,20 +113,34 @@ export function BranchChat({
   // reason, no Retry, because both the failed branch and the pending branch's
   // "this is taking too long" escape hatch need a stage to render against.
   const stage = picked || newest
-  // An instruction always acts on a STILL: you edit the image and re-animate,
-  // because no model edits a finished clip. So selecting a video to watch
-  // doesn't drag the conversation onto something it can't act on.
-  const base = picked && picked.media_type !== 'video' && picked.status === 'ready'
-    ? picked
-    : branch.latest
+  // What an instruction acts on, with no explicit pick: the newest thing IF
+  // it's ready — a just-finished video included, now that Kling O1 Edit can
+  // act on one — otherwise branch.latest's still-preferring fallback, so the
+  // composer stays usable while a new render is pending or just failed rather
+  // than going dead. Deliberately NOT branch.latest outright any more: that
+  // getter always prefers a still (it exists for handleReRender and friends,
+  // which genuinely need a still), and defaulting to it here silently routed
+  // a "change the background to marble" instruction on a finished clip into
+  // the OLD image-edit path instead of the new video one.
+  const defaultBase = (newest && newest.status === 'ready') ? newest : branch.latest
+  // What an instruction acts on: whatever is picked, as long as it's actually
+  // ready — a picked video included, since Kling O1 Edit can act on one, the
+  // same as it's always worked for a picked still — else the default above.
+  const base = picked && picked.status === 'ready' ? picked : defaultBase
 
-  const isOlderBase = !!base && !!branch.latest && base.id !== branch.latest.id
+  const isOlderBase = !!base && !!defaultBase && base.id !== defaultBase.id
   const baseLabel = PROVIDER_LABEL[branch.provider] || labelFor(branch.root) || 'Option'
   // buildBranches numbers lanes only when one model produced several
   // candidates this round, so a plain 1-vs-1 round stays "ChatGPT", not "ChatGPT 1".
   const label = branch.variantIndex ? `${baseLabel} ${branch.variantIndex}` : baseLabel
   const canAct = !!base && base.status === 'ready'
   const stageIsVideo = stage?.media_type === 'video' && !!stage?.video_url
+  // What Send actually acts on, not what's on screen — matters once `base`
+  // can be an older video the marketer clicked back to on the strip. Gates
+  // the composer's cost/placeholder text and the duration check below.
+  const baseIsVideo = base?.media_type === 'video'
+  const editAllowed = !baseIsVideo || !editVideoAllowed || editVideoAllowed(base)
+  const refsFull = refs.length >= VIDEO_EDIT_MAX_REFERENCES
   // Shown faintly behind a pending render so the lane isn't a blank rectangle
   // while the next version is on its way — the last thing that actually
   // rendered, which is not the same as the stage now that stage can be a
@@ -407,13 +425,25 @@ export function BranchChat({
           </div>
         )}
 
+        {refs.length > 0 && (
+          <MultiRefRow label="Style references" items={refs} max={VIDEO_EDIT_MAX_REFERENCES}
+            onRemove={i => onChange({ refs: refs.filter((_, idx) => idx !== i) })}
+          />
+        )}
+
+        {baseIsVideo && !editAllowed && (
+          <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 px-2 py-1">
+            This clip is {base.duration || '?'}s — edits only work on 3–10s clips. Use 🔄 Re-render below for a fresh take instead.
+          </p>
+        )}
+
         <div className="flex gap-2 items-end">
           {/* Dragging the sibling lane's image over is the only other way to
               attach a reference — which leaves no way to show the AI a fresh
               photo or a screenshot of the look you want. */}
           {onAttach && (
-            <button type="button" onClick={onAttach} disabled={!canAct}
-              title="Attach a reference image or screenshot"
+            <button type="button" onClick={onAttach} disabled={!canAct || (baseIsVideo && refsFull)}
+              title={baseIsVideo ? `Attach a style reference (up to ${VIDEO_EDIT_MAX_REFERENCES})` : 'Attach a reference image or screenshot'}
               className="shrink-0 inline-flex items-center justify-center w-9 h-9 border border-border hover:border-amber-400 hover:bg-amber-50 disabled:opacity-40 disabled:hover:border-border disabled:hover:bg-transparent">
               📎
             </button>
@@ -425,12 +455,16 @@ export function BranchChat({
             onFocus={onActivate}
             onChange={e => onChange({ text: e.target.value })}
             onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); onSend() } }}
-            placeholder={canAct ? 'Tell the AI what to change…' : 'Waiting for an image…'}
+            placeholder={!canAct
+              ? 'Waiting for an image…'
+              : baseIsVideo ? 'Describe the change — this edits the clip itself…' : 'Tell the AI what to change…'}
             disabled={!canAct}
             className="flex-1 min-w-0 text-[13px] leading-relaxed bg-white border border-border px-3 py-2 resize-none overflow-y-auto overscroll-contain focus:outline-none focus:border-amber-400 disabled:bg-surface-subtle disabled:text-text-tertiary"
           />
-          <Button size="sm" onClick={onSend} disabled={!canAct || busy === 'edit' || !text.trim()}>
-            {busy === 'edit' ? <Spinner size="sm" /> : 'Send'}
+          <Button size="sm" onClick={onSend} disabled={!canAct || busy === 'edit' || !text.trim() || !editAllowed}>
+            {busy === 'edit'
+              ? <Spinner size="sm" />
+              : baseIsVideo && editVideoCost ? `Send · −$${editVideoCost(base).toFixed(2)}` : 'Send'}
           </Button>
         </div>
 
@@ -478,7 +512,7 @@ export function BranchChat({
           )}
           {stageIsVideo && stage?.status === 'ready' && (
             <span className="ml-auto text-[10px] text-text-tertiary">
-              Text, fonts and colours are free · only re-rendering costs
+              Text, fonts and colours are free · asking for a change or re-rendering costs a render
             </span>
           )}
         </div>

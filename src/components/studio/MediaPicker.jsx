@@ -122,6 +122,41 @@ function MediaPickerBody({ kind, accessToken, onPick, onClose, onUpload }) {
   )
 }
 
+// Several references at once, each a small removable thumbnail plus a "+" to
+// add another — for the few slots that genuinely take more than one (a video's
+// style references, a video edit's references), unlike every other slot in the
+// studio which holds exactly one file. Capped by `max` at the call site, which
+// is the real limit the model's endpoint accepts, not a UI preference.
+export function MultiRefRow({ label, items = [], onRemove, onAdd, max }) {
+  return (
+    <div className="border border-border bg-white p-2 space-y-1.5">
+      <p className="text-[10px] font-semibold text-text-tertiary">
+        {label} · {items.length}{max ? `/${max}` : ''}
+      </p>
+      <div className="flex flex-wrap gap-1.5">
+        {items.map((it, i) => {
+          const isVideo = /\.(mp4|mov|webm)(\?|$)/i.test(it.url || '')
+          return (
+            <div key={i} className="relative">
+              {isVideo
+                ? <video src={it.url} className="w-10 h-10 object-cover border border-border" muted />
+                : <img src={it.url} alt="" className="w-10 h-10 object-cover border border-border" />}
+              <button type="button" onClick={() => onRemove(i)} title="Remove"
+                className="absolute -top-1.5 -right-1.5 w-3.5 h-3.5 bg-white border border-border text-text-tertiary hover:text-red-500 text-[9px] leading-none flex items-center justify-center">×</button>
+            </div>
+          )
+        })}
+        {onAdd && (
+          <button type="button" onClick={onAdd} title="Add another"
+            className="w-10 h-10 border border-dashed border-border hover:border-amber-400 hover:bg-amber-50 flex items-center justify-center">
+            <svg className="w-3 h-3 text-text-tertiary" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // The chip that stands in for an attached file once it's chosen, with the
 // slot it fills named on it — on the video tab three different things can be
 // attached and a bare thumbnail wouldn't say which is which.

@@ -124,6 +124,9 @@
         "inputDataFieldName": "data",
         "options": {}
       },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
       "onError": "continueErrorOutput",
       "id": "1520b6fb-a5d8-5c92-9759-dc1127c2ce54",
       "name": "Upload to Supabase Storage",
@@ -164,6 +167,9 @@
         "jsonBody": "={{ JSON.stringify({ status: 'ready', error: '', image_url: String($env.SUPABASE_URL).replace(/\\/+$/, '') + '/storage/v1/object/public/' + $('Generate Candidates').item.json.bucket + '/' + $('Generate Candidates').item.json.filename }) }}",
         "options": {}
       },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
       "onError": "continueErrorOutput",
       "id": "a0e00aea-d643-53ff-8741-67cf604b95c4",
       "name": "Supabase: Save Version",
@@ -301,6 +307,5 @@
   "settings": {
     "executionOrder": "v1"
   },
-  "tags": [],
-  "id": "s5U2DS1dybYQhHR0"
+  "tags": []
 }

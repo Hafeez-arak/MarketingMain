@@ -8,10 +8,12 @@ import { Lightbox } from '../../components/studio/Lightbox'
 import { PromptBubble } from '../../components/studio/VersionCard'
 import { PhotoEditor } from '../../components/studio/editor/index'
 import { VideoPanel } from '../../components/studio/VideoPanel'
-import { MediaPicker, AttachmentChip } from '../../components/studio/MediaPicker'
+import { MediaPicker, AttachmentChip, MultiRefRow } from '../../components/studio/MediaPicker'
 import { AudioToggle, CostLine, LookPicker, ModelPicker, MotionPicker, QualityRow } from '../../components/studio/VideoSettings'
 import { buildVideoPrompt } from '../../components/studio/motionPresets'
-import { estimateVideoCost, getVideoModel } from '../../components/studio/videoModels'
+import {
+  canEditVideoDuration, estimateVideoCost, estimateVideoEditCost, getVideoModel, VIDEO_EDIT_MAX_REFERENCES,
+} from '../../components/studio/videoModels'
 import { aspectLabel } from '../../lib/postFormats'
 import { uploadReferenceImage } from '../../lib/referenceImages'
 import { buildInstructionsString } from '../../lib/brandBrain'
@@ -19,7 +21,7 @@ import { captureFirstFrame, parentStillOf } from '../../components/studio/videoF
 import {
   buildBranches, createSession, deleteSession, downloadVersion, fetchSessions, fetchVersions, finalizeVersion,
   insertPendingVersions, renameSession, requestCompose, requestEdit, requestEnhance, requestGenerate, requestVideo,
-  selectVersion, touchSession, updateVersion, uploadToStudio,
+  requestVideoEdit, selectVersion, touchSession, updateVersion, uploadToStudio,
 } from '../../lib/creativeStudio'
 
 // ─── Creative Studio ───────────────────────────────────────────────────────
@@ -41,7 +43,7 @@ const INTENTS = [
   { value: 'image', label: 'An image', hint: 'A post, story or ad visual' },
   { value: 'video', label: 'A video',  hint: 'A clip generated straight from a description' },
 ]
-const emptyComposer = { text: '', baseId: null, attach: null }
+const emptyComposer = { text: '', baseId: null, attach: null, refs: [] }
 
 // Animation was parked on 2026-08-11 while the image side was finished, and
 // un-parked the same day once video compositing landed — the reason for the
@@ -58,9 +60,17 @@ const IMAGE_SLOTS = [
 // frame get their own small boxes beside it instead (VIDEO_FRAME_SLOTS
 // below), since they're core to what a video render actually is, not an
 // optional extra to bury in a dropdown.
+//
+// `multi: true` because fal's reference-to-video (and the video-edit
+// endpoint below) genuinely take several — up to 9 images on generate, 4
+// combined on an edit. `attachments.reference` is an ARRAY for this slot,
+// unlike every single-value slot elsewhere, which is what `multi` signals to
+// the render code. No per-reference note: nothing downstream ever read it —
+// Seedance's reference-to-video is addressed generically as "@Image1 and
+// @Image2 show the look to follow" (built server-side), not from marketer text.
 const VIDEO_MENU_SLOTS = [
-  { id: 'reference', label: 'Style reference', hint: 'An image or clip to echo', kind: 'all', notes: true,
-    notePlaceholder: 'e.g. match this pacing and grade' },
+  { id: 'reference', label: 'Style reference', hint: 'Up to 4 images or clips to echo', kind: 'all',
+    multi: true, max: VIDEO_EDIT_MAX_REFERENCES, notes: false },
 ]
 // Seedance genuinely takes a start frame and an end frame (image_url /
 // end_image_url) — the end frame is what makes clip-to-clip chaining look
@@ -207,6 +217,11 @@ export function CreativeStudio() {
   // has been touched — the browser is the only place that knows, which is why
   // the decision lives here and n8n just receives a finished string.
   const [promptRaw, setPromptRaw] = useState('')
+  // The last successful enhance, kept so Redo can restore it without a second
+  // round-trip. Cleared whenever a fresh enhance runs or the raw text changes
+  // underneath it (see the textarea's onChange) — stale means "not this text
+  // any more", and reapplying an enhance for different words would be wrong.
+  const [promptEnhanced, setPromptEnhanced] = useState('')
   const [promptSource, setPromptSource] = useState('raw')   // raw | enhanced | enhanced_edited
   const [autoEnhance, setAutoEnhance] = useState(false)
   const [enhancing, setEnhancing] = useState('')            // '' | 'prompt' | 'motion'
@@ -368,6 +383,27 @@ export function CreativeStudio() {
     })
   }
 
+  // The `multi: true` sibling of setAttachment above — appends instead of
+  // replacing, and caps at the slot's own `max` (fal's real limit, not a
+  // preference) rather than growing without bound.
+  function addAttachment(slotId, value, max) {
+    setAttachments(prev => {
+      const cur = Array.isArray(prev[slotId]) ? prev[slotId] : []
+      if (cur.length >= max) return prev
+      return { ...prev, [slotId]: [...cur, value] }
+    })
+  }
+  function removeAttachmentAt(slotId, index) {
+    setAttachments(prev => {
+      const cur = Array.isArray(prev[slotId]) ? prev[slotId] : []
+      const next = cur.filter((_, i) => i !== index)
+      const out = { ...prev }
+      if (next.length) out[slotId] = next
+      else delete out[slotId]
+      return out
+    })
+  }
+
   function openPickerFor(slot) { setPickerSlot(slot) }
 
   // Switching tabs must not carry an attachment into a slot the other tab
@@ -410,6 +446,7 @@ export function CreativeStudio() {
     if (res.error) { setError(`Couldn't enhance: ${res.error}`); return null }
     setPromptRaw(prompt)
     setPrompt(res.prompt)
+    setPromptEnhanced(res.prompt)
     setPromptSource('enhanced')
     return res.prompt
   }
@@ -417,6 +454,17 @@ export function CreativeStudio() {
   function undoEnhance() {
     setPrompt(promptRaw)
     setPromptSource('raw')
+  }
+
+  // The other half of Undo: brings back the enhanced text without spending a
+  // second webhook call. Only offered when there's something to bring back —
+  // right after an Undo, before the raw text is touched further (see the
+  // textarea's onChange, which clears promptEnhanced the moment it would stop
+  // matching what's on screen).
+  function redoEnhance() {
+    if (!promptEnhanced) return
+    setPrompt(promptEnhanced)
+    setPromptSource('enhanced')
   }
 
   // Passed into VideoPanel as onEnhance — it owns the text box, this just
@@ -502,7 +550,10 @@ export function CreativeStudio() {
           // the workflow's own falsy checks decide the mode.
           image_url: attachments.startFrame?.url || '',
           end_image_url: attachments.endFrame?.url || '',
-          reference_image_urls: attachments.reference?.url ? [attachments.reference.url] : [],
+          // The video tab's reference slot is multi (VIDEO_MENU_SLOTS above),
+          // so attachments.reference is an ARRAY here — unlike the image tab's
+          // single-value slot of the same id.
+          reference_image_urls: (attachments.reference || []).map(r => r.url),
         })
       : await requestGenerate(webhooks.creativeGenerate, {
           session_id: s.id, prompt: finalPrompt, aspect_ratio: aspect,
@@ -560,11 +611,49 @@ export function CreativeStudio() {
     return ins.rows[0]
   }
 
+  // Send under a finished VIDEO edits the footage itself — a genuinely
+  // different action from Send under a still, which is why this is its own
+  // function rather than a branch bolted onto handleSend's image logic below.
+  // No model touches a photo the way Kling O1 Edit touches a clip: the source
+  // video goes back in whole, so there's no "editing dropped image instead"
+  // concept here — there is nothing else in the request to edit.
+  async function handleVideoEdit(branch, instruction, base, refs) {
+    if (!canEditVideoDuration(base.duration)) {
+      setError(
+        `Kling O1 Edit only accepts 3–10s clips — this one is ${base.duration || '?'}s. `
+        + 'Use 🔄 Re-render for a fresh take instead.',
+      )
+      return
+    }
+    setFocusedBranch(branch.rootId)
+    const created = await runStep(branch, {
+      label: 'edit',
+      row: {
+        round: nextRound, kind: 'video', provider: 'seedance', mediaType: 'video',
+        parentVersionId: base.id, userPrompt: instruction, aspectRatio: session.aspect_ratio,
+        model: 'kling-o1-edit', duration: base.duration || '', resolution: base.resolution || '',
+        generateAudio: !!base.generate_audio,
+      },
+      payload: {
+        video_url: base.video_url,
+        prompt: instruction,
+        reference_image_urls: (refs || []).map(r => r.url),
+      },
+      send: p => requestVideoEdit(webhooks.creativeVideoEdit, p),
+    })
+    if (created) {
+      patchComposer(branch.rootId, { ...emptyComposer })
+      selectVersion(accessToken, session.id, base.id)
+    }
+  }
+
   async function handleSend(branch) {
-    const { text, baseId, attach } = composerFor(branch)
+    const { text, baseId, attach, refs } = composerFor(branch)
     const instruction = (text || '').trim()
     const base = branch.versions.find(v => v.id === baseId) || branch.latest
     if (!instruction || !base) return
+
+    if (base.media_type === 'video') return handleVideoEdit(branch, instruction, base, refs)
 
     // A dropped image is either the thing to edit or something to take cues
     // from — the drop can't know which, so the chip asks and this reads the
@@ -918,6 +1007,17 @@ export function CreativeStudio() {
   // generation itself keeps working.
   const missingCompose = !!webhooks.creativeVideo && !webhooks.creativeCompose
 
+  // What the 📎 mid-conversation picker is actually attaching to — needed
+  // because that one picker is shared by every lane, and a still's reference
+  // (single, "edit this instead / take cues from it") and a video's
+  // reference (multi, style-only) are different shapes on the composer.
+  function attachLaneBase() {
+    const b = branches.find(x => x.rootId === attachLane)
+    if (!b) return null
+    const c = composerFor(b)
+    return b.versions.find(v => v.id === c.baseId) || b.latest
+  }
+
   const laneProps = branch => ({
     branch,
     composer: composerFor(branch),
@@ -938,6 +1038,14 @@ export function CreativeStudio() {
     reRenderCost: v => estimateVideoCost(v.model || 'seedance-2', {
       resolution: v.resolution || '720p', duration: v.duration || '5', audio: !!v.generate_audio,
     }),
+    // What asking for a change in the chat box would cost — Kling O1 Edit
+    // bills by the SOURCE clip's own duration, not a model/resolution pair,
+    // so this is a plain per-second rate rather than reRenderCost's lookup.
+    editVideoCost: v => estimateVideoEditCost(v.duration || '5'),
+    // Whether that action is even offered — fal's own 3–10s limit on the
+    // source clip, checked here so the button can explain itself instead of
+    // firing and failing.
+    editVideoAllowed: v => canEditVideoDuration(v.duration),
     preparingClip,
     onFinalize: v => handleFinalize(branch, v),
     onDownload: handleDownload,
@@ -1016,10 +1124,16 @@ export function CreativeStudio() {
               <div className="space-y-1.5">
                 <Textarea label="Describe it" rows={4} autoGrow value={prompt}
                   onChange={e => {
-                    setPrompt(e.target.value); setError('')
+                    const v = e.target.value
+                    setPrompt(v); setError('')
                     // Their edit makes it theirs again — auto-enhance won't
                     // touch it, and the button warns before overwriting.
                     if (promptSource === 'enhanced') setPromptSource('enhanced_edited')
+                    // Typing something new after an Undo means the enhanced
+                    // text no longer corresponds to what's on screen — Redo
+                    // bringing it back at that point would silently overwrite
+                    // words the marketer just wrote, so it stops being offered.
+                    else if (promptSource === 'raw' && v !== promptRaw) setPromptEnhanced('')
                   }}
                   placeholder="e.g. A dusk shot of a modern Riyadh villa facade with warm linear lighting, for an Instagram post announcing our new residential range" />
 
@@ -1031,7 +1145,9 @@ export function CreativeStudio() {
                         rather than part of what you're asking for. */}
                     <AttachMenu
                       slots={intent === 'video' ? VIDEO_MENU_SLOTS : IMAGE_SLOTS}
-                      taken={attachments}
+                      taken={intent === 'video'
+                        ? { reference: (attachments.reference?.length || 0) >= VIDEO_EDIT_MAX_REFERENCES }
+                        : attachments}
                       onChoose={openPickerFor}
                     />
                     {intent === 'video' && VIDEO_FRAME_SLOTS.map(s => (
@@ -1058,6 +1174,16 @@ export function CreativeStudio() {
                         )}
                       </span>
                     )}
+                    {/* Only after an Undo, and only while the text still matches
+                        what Undo left behind (see the textarea's onChange) — the
+                        one moment "bring the enhanced version back" is safe to
+                        offer without a second webhook call. */}
+                    {promptSource === 'raw' && promptEnhanced && (
+                      <span className="text-[10px] text-text-tertiary">
+                        <button type="button" onClick={redoEnhance}
+                          className="underline hover:text-text-secondary">Redo</button>
+                      </span>
+                    )}
                   </div>
                   <label className="inline-flex items-center gap-1.5 text-[10px] text-text-tertiary cursor-pointer">
                     <input type="checkbox" checked={autoEnhance} className="accent-amber-500"
@@ -1072,17 +1198,24 @@ export function CreativeStudio() {
                   </p>
                 )}
 
-                {activeSlots.some(s => attachments[s.id]) && (
+                {activeSlots.some(s => (attachments[s.id]?.length ?? attachments[s.id])) && (
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
-                    {activeSlots.filter(s => attachments[s.id]).map(s => (
-                      <AttachmentChip key={s.id}
-                        label={s.label}
-                        url={attachments[s.id].url}
-                        note={attachments[s.id].note}
-                        notePlaceholder={s.notePlaceholder}
-                        onNote={s.notes ? v => setAttachment(s.id, { ...attachments[s.id], note: v }) : undefined}
-                        onRemove={() => setAttachment(s.id, null)}
-                      />
+                    {activeSlots.filter(s => (attachments[s.id]?.length ?? attachments[s.id])).map(s => (
+                      s.multi ? (
+                        <MultiRefRow key={s.id} label={s.label} items={attachments[s.id]} max={s.max}
+                          onRemove={i => removeAttachmentAt(s.id, i)}
+                          onAdd={attachments[s.id].length < s.max ? () => openPickerFor(s) : undefined}
+                        />
+                      ) : (
+                        <AttachmentChip key={s.id}
+                          label={s.label}
+                          url={attachments[s.id].url}
+                          note={attachments[s.id].note}
+                          notePlaceholder={s.notePlaceholder}
+                          onNote={s.notes ? v => setAttachment(s.id, { ...attachments[s.id], note: v }) : undefined}
+                          onRemove={() => setAttachment(s.id, null)}
+                        />
+                      )
                     ))}
                   </div>
                 )}
@@ -1221,19 +1354,33 @@ export function CreativeStudio() {
         kind={pickerSlot?.kind || 'image'}
         accessToken={accessToken}
         onUpload={file => uploadReferenceImage(activeWorkspaceId, accessToken, file)}
-        onPick={picked => setAttachment(pickerSlot.id, picked)}
+        onPick={picked => (pickerSlot.multi
+          ? addAttachment(pickerSlot.id, picked, pickerSlot.max)
+          : setAttachment(pickerSlot.id, picked))}
       />
 
       {/* ── Attach a reference (a lane's 📎, mid-conversation) ── */}
       <MediaPicker
         open={!!attachLane}
         onClose={() => setAttachLane(null)}
-        title="Add a reference for this edit"
+        title={attachLaneBase()?.media_type === 'video' ? 'Add a style reference for this edit' : 'Add a reference for this edit'}
+        // A still can only take an IMAGE reference (the edit endpoint has no
+        // video input); a video's reference goes to Kling O1 Edit's
+        // image_urls, but it too only accepts images — 'all' would let
+        // someone pick a clip that the endpoint would then reject.
         kind="image"
         accessToken={accessToken}
         onUpload={file => uploadReferenceImage(activeWorkspaceId, accessToken, file)}
         onPick={picked => {
-          patchComposer(attachLane, { attach: { url: picked.url, label: picked.name || 'your upload', mode: 'reference' } })
+          const base = attachLaneBase()
+          if (base?.media_type === 'video') {
+            const c = composerFor(branches.find(b => b.rootId === attachLane))
+            const next = [...(c.refs || []), { url: picked.url, name: picked.name || 'reference' }]
+              .slice(0, VIDEO_EDIT_MAX_REFERENCES)
+            patchComposer(attachLane, { refs: next })
+          } else {
+            patchComposer(attachLane, { attach: { url: picked.url, label: picked.name || 'your upload', mode: 'reference' } })
+          }
           setAttachLane(null)
         }}
       />

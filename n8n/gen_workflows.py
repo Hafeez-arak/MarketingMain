@@ -6947,6 +6947,24 @@ async function run(){
   const requestId = submit.request_id;
   if (!requestId) throw new Error('fal did not return a request_id: ' + JSON.stringify(submit).slice(0, 250));
 
+  // Saved BEFORE polling starts, not after — the request_id only ever lived
+  // in this function's local variables until now, and this function can be
+  // killed mid-poll by n8n's own task-runner timeout (found 2026-08-11: a
+  // render fal was genuinely still working on got killed at the 5-minute
+  // mark, and because the id was never written anywhere, the row was left
+  // 'pending' forever with no way to ever recover the finished clip). Best
+  // effort and non-fatal — a failed save here must never sink a render that
+  // is otherwise working; Creative Video Reconcile is what actually reads
+  // this back, sweeping for exactly this situation on a schedule.
+  try {
+    await req({ method: 'PATCH',
+      url: String($env.SUPABASE_URL).replace(/\/+$/, '') + '/rest/v1/creative_versions?id=eq.' + versionId,
+      headers: { Authorization: 'Bearer ' + $env.SUPABASE_KEY, apikey: $env.SUPABASE_KEY,
+                 'Content-Type': 'application/json', Prefer: 'return=minimal' },
+      body: { overlay_state: { pendingRequest: { requestId, model, submittedAt: new Date().toISOString() } } },
+      json: true });
+  } catch (e) { /* recoverable by Reconcile only if this succeeded; never worth failing the render over */ }
+
   // ── Poll where fal SAYS to poll, not where we guess ──────────────────────
   // Submitting takes the full model path, but the queue is keyed on the first
   // TWO segments only: submit to
@@ -7008,6 +7026,275 @@ catch (err) {
                    error: (err && err.message) ? err.message : String(err) } };
 }
 """
+
+
+# ─── Creative Video Edit ────────────────────────────────────────────────────
+# Every other video workflow GENERATES — a prompt (and maybe a still) becomes
+# a brand new take. This one EDITS: an existing clip goes back in, along with
+# a plain-English instruction, and fal-ai/kling-video/o1/video-to-video/edit
+# changes what the instruction names while preserving the source's own camera
+# movement and motion structure. Added 2026-08-11 once it turned out this
+# model exists — the original plan treated "edit the footage in place" as
+# out of scope because no known endpoint did it.
+#
+# Same submit/poll/download shape as CREATIVE_VIDEO_JS, including the fixed
+# queue-URL logic (appId = first two path segments) — this endpoint sits
+# behind the exact same queue.fal.run mechanics, so the same bug would apply.
+CREATIVE_VIDEO_EDIT_JS = _CREATIVE_REQ_JS + r"""
+const BUCKET = 'creative-studio';
+const MODEL = 'fal-ai/kling-video/o1/video-to-video/edit';
+
+function looksLikeVideo(buf){
+  if (!buf || buf.length < 12) return false;
+  return buf.toString('ascii', 4, 8) === 'ftyp';
+}
+
+const body = ($input.first().json.body) || {};
+const sessionId = body.session_id || '';
+const versionId = body.version_id || '';
+const videoUrl  = String(body.video_url || '').trim();
+const prompt    = String(body.prompt || '').trim();
+// Style/appearance references, addressed in the prompt as @Image1, @Image2 —
+// fal caps elements + reference images at 4 combined; we only ever send
+// plain images (no character "elements"), so 4 is the whole budget.
+const referenceUrls = Array.isArray(body.reference_image_urls)
+  ? body.reference_image_urls.filter(Boolean).slice(0, 4)
+  : [];
+
+async function run(){
+  if (!prompt) throw new Error('No instruction given for the edit.');
+  if (!videoUrl) throw new Error('No clip to edit.');
+
+  // keep_audio is unconditional: an edit that changes the picture must not
+  // also silently drop audio the original render had. fal defaults this to
+  // false, so it has to be stated explicitly.
+  const input = { prompt, video_url: videoUrl, keep_audio: true };
+  if (referenceUrls.length) input.image_urls = referenceUrls;
+
+  const submit = await req({ method:'POST', url:'https://queue.fal.run/' + MODEL,
+    headers:{ Authorization:'Key ' + FAL, 'Content-Type':'application/json' }, body: input, json:true });
+  const requestId = submit.request_id;
+  if (!requestId) throw new Error('fal did not return a request_id: ' + JSON.stringify(submit).slice(0, 250));
+
+  // See CREATIVE_VIDEO_JS for why this is saved before polling starts —
+  // same task-runner-timeout exposure, same fix, same reconciler reads it.
+  try {
+    await req({ method: 'PATCH',
+      url: String($env.SUPABASE_URL).replace(/\/+$/, '') + '/rest/v1/creative_versions?id=eq.' + versionId,
+      headers: { Authorization: 'Bearer ' + $env.SUPABASE_KEY, apikey: $env.SUPABASE_KEY,
+                 'Content-Type': 'application/json', Prefer: 'return=minimal' },
+      body: { overlay_state: { pendingRequest: { requestId, model: MODEL, submittedAt: new Date().toISOString() } } },
+      json: true });
+  } catch (e) { /* recoverable by Reconcile only if this succeeded; never worth failing the edit over */ }
+
+  // See CREATIVE_VIDEO_JS for why this is built from the first two path
+  // segments rather than the full model path — submitting to the full path
+  // but polling the full path too is the bug that cost a real render on
+  // 2026-08-11, on this same queue mechanism.
+  const appId = MODEL.split('/').slice(0, 2).join('/');
+  const statusUrl = submit.status_url || ('https://queue.fal.run/' + appId + '/requests/' + requestId + '/status');
+  const resultUrl = submit.response_url || ('https://queue.fal.run/' + appId + '/requests/' + requestId);
+
+  let status = submit.status || 'IN_QUEUE';
+  let tries = 0;
+  while ((status === 'IN_QUEUE' || status === 'IN_PROGRESS') && tries < 150) {
+    await new Promise(r => setTimeout(r, 3000));
+    const s = await req({ method:'GET', url: statusUrl, headers:{ Authorization:'Key ' + FAL }, json:true });
+    status = s.status; tries++;
+  }
+  if (status !== 'COMPLETED') {
+    throw new Error(status === 'IN_QUEUE' || status === 'IN_PROGRESS'
+      ? 'Edit timed out after ~' + (tries * 3) + 's (request ' + requestId + ')'
+      : 'Edit ' + status + ' (request ' + requestId + ')');
+  }
+
+  const result = await req({ method:'GET', url: resultUrl, headers:{ Authorization:'Key ' + FAL }, json:true });
+  const outUrl = result.video && result.video.url;
+  if (!outUrl) throw new Error('fal returned no video URL (request ' + requestId + '): ' + JSON.stringify(result).slice(0, 250));
+
+  const buf = await req({ method:'GET', url: outUrl, encoding:'arraybuffer' });
+  if (!looksLikeVideo(buf)) {
+    throw new Error('Downloaded file is not a real video (' + buf.length + ' bytes)');
+  }
+  const base = versionId + '-' + Date.now() + '.mp4';
+  const filename = (sessionId ? sessionId + '/' : '') + base;
+  return {
+    json: { _ok: true, version_id: versionId, bucket: BUCKET, filename },
+    binary: { data: await prepareBinaryData(buf, base, 'video/mp4') },
+  };
+}
+
+try { return await run(); }
+catch (err) {
+  return { json: { _ok: false, version_id: versionId,
+                   error: (err && err.message) ? err.message : String(err) } };
+}
+"""
+
+
+# ─── Creative Video Reconcile ───────────────────────────────────────────────
+# The permanent fix for "the video actually finished in fal, but the app never
+# shows it" — added 2026-08-11 after that happened twice in one afternoon, for
+# two DIFFERENT reasons (a transient upload-gateway blip, then a task-runner
+# timeout). Both left a version row 'pending' forever with no error, because
+# both failure modes killed the render's Code node execution somewhere the
+# workflow's own Generated OK? / Mark Failed branches never run — that pair
+# only fires when the Code node RETURNS, and a killed task never returns.
+#
+# Rather than chase every individual way a long-running task can die (there
+# will always be another one — a container restart, an OOM, a host reboot),
+# this closes the loop structurally: the render workflows now save fal's
+# request_id to the row the MOMENT they have it, before polling even starts
+# (see CREATIVE_VIDEO_JS / CREATIVE_VIDEO_EDIT_JS). This sweep runs on a
+# schedule, finds any video row that's been 'pending' for a while and has a
+# saved request_id, and asks fal directly what actually happened — same
+# status/result calls the render workflows make, just from outside the
+# execution that might have died. Whatever fal says, the row stops being a
+# silent ghost:
+#   COMPLETED → downloads the clip and marks the row ready. No re-render, no
+#     new charge — this is the exact recovery that was done by hand twice
+#     before this workflow existed.
+#   an explicit failure/unknown-request status from fal → marks the row
+#     failed with fal's own reason.
+#   still queued after 20 minutes → gives up and marks it failed rather than
+#     leaving a spinner nobody can act on forever.
+#   still queued but under 20 minutes → left alone for the next sweep tick.
+CREATIVE_VIDEO_RECONCILE_STICKY = """## Creative Studio — Video Reconcile (safety net, added 2026-08-11)
+
+Runs on a schedule, no webhook. Finds `creative_versions` rows that are
+`status = 'pending'`, `media_type = 'video'`, older than 3 minutes (room for
+the primary render workflow's own poll to finish first), with a
+`overlay_state.pendingRequest.requestId` saved — meaning a render was
+submitted to fal and then the workflow that submitted it never came back to
+say what happened, for whatever reason (task-runner timeout, container
+restart, a crash — this sweep doesn't need to know which).
+
+For each: asks fal for that request's real status.
+- `COMPLETED` → downloads the clip, uploads it, marks the row `ready`. Free —
+  the render was already paid for; this only ever finishes writing it down.
+- a real failure or an expired/unknown request → marks the row `failed` with
+  fal's own message, so it reads the same as any other failure card.
+- still queued past 20 minutes total → gives up and marks it `failed` rather
+  than leaving an unexplained spinner forever.
+- still queued, under 20 minutes → left for the next tick.
+
+Rows from before this fix existed have no `pendingRequest` and are skipped —
+nothing to reconcile against.
+
+Needs env: FAL_KEY, SUPABASE_URL, SUPABASE_KEY."""
+
+CREATIVE_VIDEO_RECONCILE_JS = _CREATIVE_REQ_JS + r"""
+const SUP = String($env.SUPABASE_URL || '').replace(/\/+$/, '');
+const KEY = $env.SUPABASE_KEY;
+const BUCKET = 'creative-studio';
+
+function looksLikeVideo(buf){
+  if (!buf || buf.length < 12) return false;
+  return buf.toString('ascii', 4, 8) === 'ftyp';
+}
+
+async function patchRow(id, patch) {
+  await req({ method: 'PATCH', url: SUP + '/rest/v1/creative_versions?id=eq.' + id,
+    headers: { apikey: KEY, Authorization: 'Bearer ' + KEY, 'Content-Type': 'application/json', Prefer: 'return=minimal' },
+    body: patch, json: true });
+}
+
+const STALE_MS = 3 * 60 * 1000;   // let the primary workflow's own poll finish first
+const GIVEUP_MS = 20 * 60 * 1000; // fal's queue doesn't hold a result forever either
+
+async function run() {
+  const rows = await req({ method: 'GET',
+    url: SUP + '/rest/v1/creative_versions?media_type=eq.video&status=eq.pending'
+      + '&select=id,session_id,created_at,overlay_state&order=created_at.asc&limit=25',
+    headers: { apikey: KEY, Authorization: 'Bearer ' + KEY }, json: true });
+
+  const now = Date.now();
+  const results = [];
+
+  for (const row of rows) {
+    const pr = row.overlay_state && row.overlay_state.pendingRequest;
+    if (!pr || !pr.requestId || !pr.model) continue; // predates this fix — nothing saved to check against
+    const age = now - new Date(row.created_at).getTime();
+    if (age < STALE_MS) continue;
+
+    try {
+      const appId = String(pr.model).split('/').slice(0, 2).join('/');
+      const statusUrl = 'https://queue.fal.run/' + appId + '/requests/' + pr.requestId + '/status';
+      const resultUrl = 'https://queue.fal.run/' + appId + '/requests/' + pr.requestId;
+      const s = await req({ method: 'GET', url: statusUrl, headers: { Authorization: 'Key ' + FAL }, json: true });
+
+      if (s.status === 'COMPLETED') {
+        const result = await req({ method: 'GET', url: resultUrl, headers: { Authorization: 'Key ' + FAL }, json: true });
+        const videoUrl = result.video && result.video.url;
+        if (!videoUrl) {
+          await patchRow(row.id, { status: 'failed', error: 'fal reported COMPLETED but returned no video URL (request ' + pr.requestId + ')' });
+          results.push({ id: row.id, outcome: 'failed-no-url' }); continue;
+        }
+        const buf = await req({ method: 'GET', url: videoUrl, encoding: 'arraybuffer' });
+        if (!looksLikeVideo(buf)) {
+          await patchRow(row.id, { status: 'failed', error: 'Recovered file was not a real video (request ' + pr.requestId + ')' });
+          results.push({ id: row.id, outcome: 'failed-bad-file' }); continue;
+        }
+        const filename = (row.session_id ? row.session_id + '/' : '') + row.id + '-' + Date.now() + '.mp4';
+        await req({ method: 'POST', url: SUP + '/storage/v1/object/' + BUCKET + '/' + filename,
+          headers: { apikey: KEY, Authorization: 'Bearer ' + KEY, 'Content-Type': 'video/mp4', 'x-upsert': 'true' }, body: buf });
+        await patchRow(row.id, { status: 'ready', error: '', video_url: SUP + '/storage/v1/object/public/' + BUCKET + '/' + filename });
+        results.push({ id: row.id, outcome: 'recovered' });
+      } else if (s.status === 'IN_QUEUE' || s.status === 'IN_PROGRESS') {
+        if (age > GIVEUP_MS) {
+          await patchRow(row.id, { status: 'failed', error: 'Gave up waiting on fal after 20 minutes with no result (request ' + pr.requestId + ')' });
+          results.push({ id: row.id, outcome: 'gave-up' });
+        } else {
+          results.push({ id: row.id, outcome: 'still-waiting' });
+        }
+      } else {
+        await patchRow(row.id, { status: 'failed', error: 'fal reported ' + s.status + ' (request ' + pr.requestId + ')' });
+        results.push({ id: row.id, outcome: 'failed-' + s.status });
+      }
+    } catch (err) {
+      // Either a transient error on OUR status check, or a request_id fal no
+      // longer recognises. Left for the next tick unless already past
+      // GIVEUP_MS, at which point a plain explanation beats an eternal ghost.
+      if (age > GIVEUP_MS) {
+        await patchRow(row.id, { status: 'failed', error: 'Could not reach fal to check this request (request ' + pr.requestId + '): ' + ((err && err.message) || String(err)) });
+        results.push({ id: row.id, outcome: 'gave-up-error' });
+      } else {
+        results.push({ id: row.id, outcome: 'check-failed', error: (err && err.message) || String(err) });
+      }
+    }
+  }
+
+  return [{ json: { checked: rows.length, acted: results.length, results } }];
+}
+
+return await run();
+"""
+
+
+def build_creative_video_reconcile() -> dict:
+    nodes = [
+        _sticky(CREATIVE_VIDEO_RECONCILE_STICKY, height=460, width=480, x=0, y=-240),
+        {
+            "parameters": {"rule": {"interval": [{"field": "minutes", "minutesInterval": 2}]}},
+            "id": nid(),
+            "name": "Every 2 minutes",
+            "type": "n8n-nodes-base.scheduleTrigger",
+            "typeVersion": 1.2,
+            "position": [0, 200],
+        },
+        _code("Reconcile Stuck Renders", CREATIVE_VIDEO_RECONCILE_JS, x=260, y=200),
+    ]
+    connections = {
+        "Every 2 minutes": {"main": [[{"node": "Reconcile Stuck Renders", "type": "main", "index": 0}]]},
+    }
+    return {
+        "name": "Arak Lighting – Creative Video Reconcile",
+        "nodes": nodes,
+        "connections": connections,
+        "active": False,
+        "settings": {"executionOrder": "v1"},
+        "tags": [],
+    }
 
 
 # ─── Creative Compose ───────────────────────────────────────────────────────
@@ -7332,6 +7619,21 @@ def _http_creative_upload(source_node: str, mime: str, name: str, x: int, y: int
         # already been generated and paid for. The error output routes to
         # Mark Failed instead, so a storage hiccup surfaces as a failure the
         # human can retry rather than an infinite spinner.
+        #
+        # retryOnFail matters specifically here, and specifically for video: a
+        # ~23MB upload failed with a raw "400 Bad Request" from an edge/gateway
+        # in front of Supabase Storage on 2026-08-11 — not a Supabase API error
+        # (those come back as JSON) and not a size problem (a 38MB upload right
+        # before it succeeded), so a one-off transient blip, not a real defect
+        # in the request. Before this, the ONLY recovery was the UI's "Try
+        # again", which re-fires the whole render — so a hiccup on the LAST
+        # step of an already-paid-for generation was throwing away the money
+        # and starting over. Three tries with backoff means that class of
+        # failure now self-heals before it ever reaches the human, on the free
+        # step that doesn't warrant repaying for the render just to redo it.
+        "retryOnFail": True,
+        "maxTries": 3,
+        "waitBetweenTries": 2000,
         "onError": "continueErrorOutput",
         "id": nid(),
         "name": name,
@@ -7384,7 +7686,12 @@ def _http_creative_save(source_node: str, media_field: str, name: str, x: int, y
         },
         # Same reasoning as the upload node: this is the ONLY node that turns
         # the row 'ready', so if it throws the row is left pending with the
-        # asset sitting in the bucket, unreachable.
+        # asset sitting in the bucket, unreachable. Same retry, cheap insurance
+        # here — a tiny JSON PATCH is far less exposed than the video upload,
+        # but it crosses the same gateway that produced the 2026-08-11 blip.
+        "retryOnFail": True,
+        "maxTries": 3,
+        "waitBetweenTries": 2000,
         "onError": "continueErrorOutput",
         "id": nid(),
         "name": name,
@@ -7522,6 +7829,38 @@ centre-crops the finished clip back to the overlay's own aspect.
 
 Add a model by adding one entry to MODEL_CONFIGS — nothing else in the
 workflow is model-specific.
+
+Needs env: FAL_KEY, SUPABASE_URL, SUPABASE_KEY."""
+
+
+CREATIVE_VIDEO_EDIT_STICKY = """## Creative Studio — Video Edit (in-context, added 2026-08-11)
+
+POST `arak-creative-video-edit`
+```
+{ session_id, version_id, video_url, prompt, reference_image_urls?: string[] }
+```
+
+Edits an EXISTING clip via fal's Kling O1 Edit
+(`fal-ai/kling-video/o1/video-to-video/edit`) — a natural-language instruction
+("change the background to marble", "make the light pulse slower") applied
+while the model preserves the source's own camera movement and motion
+structure. This is what the chat box's Send does on a finished video, distinct
+from Re-render (same prompt, a brand-new take) and Add text (free, ffmpeg only,
+never touches the footage).
+
+Real constraint from fal's own schema, not a choice made here: the source
+clip must be 3–10.05 seconds. The frontend checks the row's stored `duration`
+before offering this action at all — outside that range, only Re-render shows.
+
+`reference_image_urls` are optional style/appearance references, addressed in
+the prompt as @Image1, @Image2 — capped at 4 (fal's own limit, shared with any
+character "elements", which this app never sends).
+
+`keep_audio: true` always — an edit that changes the picture must not also
+silently drop audio the source render had; fal defaults this to false.
+
+Costs $0.168/second of the SOURCE clip's duration, not the edit's own compute
+time — a 5s edit is ~$0.84, a 10s edit ~$1.68.
 
 Needs env: FAL_KEY, SUPABASE_URL, SUPABASE_KEY."""
 
@@ -7739,6 +8078,19 @@ def build_creative_video() -> dict:
     )
 
 
+def build_creative_video_edit() -> dict:
+    return _build_creative_workflow(
+        name="Arak Lighting – Creative Video Edit",
+        webhook_path="arak-creative-video-edit",
+        sticky=CREATIVE_VIDEO_EDIT_STICKY,
+        js=CREATIVE_VIDEO_EDIT_JS,
+        code_node_name="Edit Video",
+        mime="video/mp4",
+        media_field="video_url",
+        accepted_expr="={{ JSON.stringify({ status: 'accepted', version_id: $json.body.version_id }) }}",
+    )
+
+
 def build_creative_enhance() -> dict:
     """
     Webhook (responseMode=lastNode) -> Enhance Prompt (single Code node).
@@ -7787,6 +8139,8 @@ if __name__ == "__main__":
         build_creative_generate(),
         build_creative_edit(),
         build_creative_video(),
+        build_creative_video_edit(),
+        build_creative_video_reconcile(),
         build_creative_compose(),
         build_creative_enhance(),
     ]

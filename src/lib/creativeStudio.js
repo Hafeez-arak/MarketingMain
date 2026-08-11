@@ -292,6 +292,10 @@ export const requestVideo    = (url, payload) => fire(url, payload, 'Creative Vi
 // layer onto an existing clip locally. Same fire-and-poll shape as its
 // siblings, because it still takes a few seconds and still writes the row.
 export const requestCompose  = (url, payload) => fire(url, payload, 'Creative Compose')
+// Edits an EXISTING clip in place (Kling O1 Edit) — a real render cost, unlike
+// requestCompose above, but a change to the footage itself rather than a
+// from-scratch take. What a video lane's chat box fires on Send.
+export const requestVideoEdit = (url, payload) => fire(url, payload, 'Creative Video Edit')
 
 // ── Enhance ────────────────────────────────────────────────────────────────
 

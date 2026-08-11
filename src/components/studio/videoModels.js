@@ -93,3 +93,27 @@ export function getVideoModel(id) {
 export function estimateVideoCost(modelId, { resolution, duration, audio } = {}) {
   return getVideoModel(modelId).cost({ resolution, duration, audio })
 }
+
+// ─── In-context video editing ──────────────────────────────────────────────
+// Kling O1 Edit (fal-ai/kling-video/o1/video-to-video/edit) — the model behind
+// "ask for a change" in a video lane's chat box. Distinct from every model
+// above: those generate a NEW clip from a prompt (and optionally a still);
+// this one takes an EXISTING clip and applies a natural-language change to it
+// while preserving the source's own camera movement and motion, which is what
+// makes "change the background to marble" a genuine edit rather than a
+// from-scratch re-roll. Verified against fal's schema, 2026-08-11.
+export const VIDEO_EDIT_RATE = 0.168 // $/second of the SOURCE clip's duration
+// fal's own hard limit on the input video — not a choice made here. Outside
+// this range the endpoint rejects the request outright, so the UI checks
+// before offering the action rather than letting the click fail.
+export const VIDEO_EDIT_DURATION_RANGE = [3, 10]
+export const VIDEO_EDIT_MAX_REFERENCES = 4 // fal's cap: elements + reference images combined
+
+export function estimateVideoEditCost(duration) {
+  return VIDEO_EDIT_RATE * (Number(duration) || 5)
+}
+
+export function canEditVideoDuration(duration) {
+  const d = Number(duration)
+  return d >= VIDEO_EDIT_DURATION_RANGE[0] && d <= VIDEO_EDIT_DURATION_RANGE[1]
+}

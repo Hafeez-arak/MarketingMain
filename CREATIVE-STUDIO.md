@@ -70,8 +70,36 @@ when it is three, with completely different cost profiles.
   compositing, not generation. Free, instant, unlimited, deterministic, and
   bit-for-bit non-destructive to the footage.
 - **Lighting, objects, weather** — in-context video editing. One generation
-  each, but the take survives. Not built yet.
+  each, but the take survives. **Built 2026-08-11** — see below.
 - **"Something different happens in the scene"** — a full re-render.
+
+**In-context editing, built 2026-08-11.** The original plan treated this
+bucket as out of scope — no known endpoint edited a finished clip in place, so
+"ask for a change" on a video either had to be a full re-render or nothing.
+That assumption was wrong: fal hosts `fal-ai/kling-video/o1/video-to-video/edit`
+("Kling O1 Edit"), which takes an existing clip plus a natural-language
+instruction ("change the background to marble") and returns an edited clip
+that keeps the source's own camera movement and motion structure. This is now
+what a video lane's **chat box** does on Send — the same box used for image
+edits, dispatching to the video path automatically once the thing being edited
+is a clip rather than a still (`src/pages/studio/index.jsx`,
+`handleVideoEdit`). Style/appearance references can be attached the same way,
+up to 4 at once (fal's own cap, shared with the reference-to-video endpoint's
+multi-reference UI).
+
+Real constraint, not a choice made here: the **source clip must be 3–10
+seconds**. Outside that range the button explains why and only Re-render (a
+full new take) is offered — checked client-side against the row's own stored
+duration before the call ever fires, so it fails with a clear message instead
+of a rejected fal request. Costs $0.168/second of the *source* clip, shown on
+the Send button before the click (e.g. a 10s edit is ~$1.68) — cheaper than a
+Re-render because it's shaping an existing take, not buying a new one.
+
+n8n workflow: `Arak Lighting – Creative Video Edit`, webhook
+`arak-creative-video-edit` (`n8n/gen_workflows.py`,
+`build_creative_video_edit()`). Same submit/poll/download shape as the
+generation workflow, including the fixed queue-URL logic — this endpoint sits
+behind the identical `queue.fal.run` mechanics the 2026-08-11 bug was found on.
 
 Three of the four things the team actually listed are in the first bucket. So
 the requirement is *more* deliverable than it read, not less. The clip is

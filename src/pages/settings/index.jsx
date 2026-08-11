@@ -283,6 +283,20 @@ const WORKFLOW_CONFIGS = [
     ),
   },
   {
+    platform: 'creativeVideoEdit',
+    label: 'Creative Studio — Video Edit',
+    placeholder: 'https://your-instance.app.n8n.cloud/webhook/arak-creative-video-edit',
+    description: 'What the chat box\'s Send does under a finished clip — edits the FOOTAGE itself ("change the background to marble") via Kling O1 Edit, keeping the source\'s own camera movement. Real spend (fal.ai), ~$0.17/second of the clip. Only works on clips 3–10s long; longer ones only offer Re-render.',
+    icon: (
+      <div className="w-8 h-8 flex items-center justify-center flex-shrink-0" style={{ background: '#8b5cf6' }}>
+        <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24">
+          <polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/>
+          <path d="M9 9l-2 2 2 2" strokeLinecap="round" strokeLinejoin="round"/>
+        </svg>
+      </div>
+    ),
+  },
+  {
     platform: 'creativeCompose',
     label: 'Creative Studio — Compose (text on video)',
     placeholder: 'https://your-instance.app.n8n.cloud/webhook/arak-creative-compose',
