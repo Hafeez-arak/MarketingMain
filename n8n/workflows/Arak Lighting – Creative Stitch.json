@@ -1,0 +1,495 @@
+{
+  "name": "Arak Lighting – Creative Stitch",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Creative Studio — Stitch (join a reel's clips)\n\nPOST `arak-creative-stitch`\n```\n{ session_id, version_id,\n  clips: [ { url, transition: 'cut'|'crossfade', transition_duration } ] }\n```\n\n**Costs nothing to run** — no FAL_KEY, no model call, same as Compose. This is\nthe second half of what makes long video affordable: no model here renders 30s\ncheaply (Seedance 2.5 is $14.19 a take and the only one that reaches it at\nall), so a reel is several short clips joined locally instead.\n\n`transition` describes the seam BEFORE that clip; `clips[0]`'s is ignored.\nNothing else is accepted — no geometry, no fps, no filenames. Fewer\ncaller-supplied values reaching a shell string is the entire point, and the\nsame `safeUrl` allowlist as Compose applies for the same reason.\n\n**Two shell passes, one Code node between them.** ffprobe returns float\ndurations and busybox `$(( ))` is integer-only, so pass 1 probes, `Plan\nStitch` does the crossfade arithmetic in JS, and pass 2 runs with literals.\n\n**Every clip is normalised first** — one size (the largest clip's, letterboxed\nnot cropped), one frame rate, one sample rate, one channel layout. The audio\nhalf is the one that is easy to skip and breaks the reel: clips without a\nsound track get one from `anullsrc`, because concat matches streams by index\nand a mixed set comes out with audio on the first segment only.\n\nRuns of hard cuts are joined with the concat demuxer and `-c copy` when there\nis no real audio — instant, and no second generation of encoding. Any real\naudio, or any crossfade, takes the filter path instead (AAC priming leaves an\naudible ~20ms click at a stream-copied join).\n\nThe parser compares the finished duration against what the arithmetic\npredicted and FAILS on a mismatch: a dropped segment is the one failure here\nthat otherwise exits 0 and just quietly ships a reel with a shot missing.\n\nNever writes `overlay_state` — the Video Reconcile sweep reads that column to\nfind abandoned renders, and a stitch row appearing there would confuse it.\n\nNeeds env: SUPABASE_URL, SUPABASE_KEY. Needs ffmpeg + ffprobe in the image\n(see n8n/docker/Dockerfile).",
+        "height": 760,
+        "width": 470
+      },
+      "id": "74072eab-7d63-5607-9afb-a6d743032987",
+      "name": "Note: Overview",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        -400
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "arak-creative-stitch",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "f4632bc0-6ee8-58d7-b6a2-542c8aa8b244",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        300
+      ],
+      "webhookId": "arak-creative-stitch"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ status: 'accepted', version_id: $json.body.version_id }) }}",
+        "options": {}
+      },
+      "id": "b35a89a3-0d22-5c19-9a07-02d6252cefc3",
+      "name": "Respond: Accepted",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        220,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst body = ($input.first().json.body) || {};\nconst sessionId = String(body.session_id || '');\nconst versionId = String(body.version_id || '');\nconst clips = Array.isArray(body.clips) ? body.clips : [];\nconst BUCKET = 'creative-studio';\nconst MAX_CLIPS = 12;   // must match MULTI_CLIP_MAX in src/lib/creativeStoryboard.js\n\n// Identical guard to Creative Compose's, and load-bearing for the same\n// reason: creative_versions is client-writable by design (the browser sets\n// image_url/status itself), these URLs are interpolated into a shell string,\n// and n8n holds the service_role key. The allowlist contains no quote,\n// backtick, dollar, semicolon, backslash or space.\nconst SUP = String($env.SUPABASE_URL || '').replace(/\\/+$/, '');\nconst PREFIX = SUP + '/storage/v1/object/public/';\nfunction safeUrl(u, what) {\n  const s = String(u || '');\n  if (!s.startsWith(PREFIX)) throw new Error(what + ' is not a file in our own storage.');\n  if (!/^[A-Za-z0-9:/._~%()-]+$/.test(s)) throw new Error(what + ' contains characters we will not put in a shell command.');\n  return s;\n}\n\nif (!versionId) throw new Error('No version to write the result back to.');\nif (clips.length < 2) throw new Error('A reel needs at least two clips.');\nif (clips.length > MAX_CLIPS) throw new Error('That is more clips than this can join at once (' + MAX_CLIPS + ').');\n\n// Filenames are OURS, never derived from the URL — one less thing the caller\n// can steer. Position in this array is the cut order and the only ordering\n// that exists downstream.\nconst plan = clips.map((c, i) => {\n  const t = c.transition === 'crossfade' ? 'crossfade' : 'cut';\n  let d = Number(c.transition_duration);\n  if (!isFinite(d)) d = 0.5;\n  return {\n    file: 'c' + i + '.mp4',\n    url: safeUrl(c.url, 'Clip ' + (i + 1)),\n    // The seam BEFORE this clip. Clip 0 has none.\n    transition: i === 0 ? 'cut' : t,\n    fade: Math.min(2, Math.max(0.1, d)),\n  };\n});\n\nconst dir = '\"$HOME/.n8n-files/stitch/' + versionId + '\"';\n\nconst lines = [\n  'set -e',\n  // Same 3-hour sweep as Compose: a reel's working directory holds every clip\n  // plus a normalised copy of each plus the output, so a few runs is a few\n  // hundred MB and nothing else ever deletes them.\n  'find \"$HOME/.n8n-files/stitch\" -maxdepth 1 -mindepth 1 -type d -mmin +180 -exec rm -rf {} + 2>/dev/null || true',\n  'rm -rf ' + dir + ' && mkdir -p ' + dir + ' && cd ' + dir,\n];\n\nfor (const p of plan) {\n  lines.push('wget -q -O ' + p.file + ' ' + p.url);\n  // busybox wget can exit 0 having written nothing; ffprobe's error on an\n  // empty file says far less than this does.\n  lines.push('test -s ' + p.file + ' || { echo \"EMPTY ' + p.file + '\" >&2; exit 1; }');\n}\n\nlines.push('echo \"PROBE_BEGIN\"');\nfor (const p of plan) {\n  lines.push([\n    'W=$(ffprobe -v error -select_streams v:0 -show_entries stream=width        -of csv=p=0 ' + p.file + ')',\n    'H=$(ffprobe -v error -select_streams v:0 -show_entries stream=height       -of csv=p=0 ' + p.file + ')',\n    'R=$(ffprobe -v error -select_streams v:0 -show_entries stream=r_frame_rate -of csv=p=0 ' + p.file + ')',\n    // format=duration, not stream=duration: it is the container duration, which\n    // is what xfade actually measures against, and stream=duration is missing\n    // on some muxers.\n    'D=$(ffprobe -v error -show_entries format=duration -of csv=p=0 ' + p.file + ')',\n    // Empty when the clip has no audio track at all — the case that silently\n    // breaks concat if it is not handled in the normalise pass.\n    'A=$(ffprobe -v error -select_streams a:0 -show_entries stream=index -of csv=p=0 ' + p.file + ' || true)',\n    'printf \"%s|%s|%s|%s|%s|%s\\\\n\" \"' + p.file + '\" \"$W\" \"$H\" \"$R\" \"$D\" \"${A:-none}\"',\n  ].join('\\n'));\n}\nlines.push('echo \"PROBE_OK $PWD\"');\n\nconst filename = (sessionId ? sessionId + '/' : '') + versionId + '-' + Date.now() + '.mp4';\n\nreturn { json: {\n  script: lines.join('\\n'),\n  version_id: versionId, bucket: BUCKET, filename,\n  plan,\n} };\n"
+      },
+      "id": "e6143c67-207e-5fcc-a807-4b1329d8932f",
+      "name": "Build Fetch",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "command": "={{ $json.script }}"
+      },
+      "onError": "continueRegularOutput",
+      "id": "4227bfd1-0ee6-545a-bdf0-d1e88bb5a27d",
+      "name": "Fetch & Probe",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        660,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst src = $('Build Fetch').first().json;\nconst res = $input.first().json || {};\nconst stdout = String(res.stdout || '');\n\nfunction bail(msg) {\n  return { json: { _ok: false, version_id: src.version_id, error: String(msg).slice(0, 500) } };\n}\n\nconst okHit = stdout.match(/PROBE_OK\\s+(\\S+)/);\nif (!okHit) {\n  const err = String(res.stderr || stdout || '').trim().split('\\n').slice(-4).join(' ');\n  return bail(err || ('Downloading the clips failed (exit ' + res.exitCode + ').'));\n}\nconst cwd = okHit[1];\n\n// ── Read the probe back ──\nconst rows = new Map();\nfor (const line of stdout.split('\\n')) {\n  const parts = line.trim().split('|');\n  if (parts.length !== 6) continue;\n  const [file, w, h, r, d, a] = parts;\n  rows.set(file, {\n    w: parseInt(w, 10), h: parseInt(h, 10),\n    fps: String(r || '').trim(),\n    dur: parseFloat(d),\n    hasAudio: a !== 'none' && a !== '',\n  });\n}\n\nconst plan = src.plan.map(p => {\n  const probe = rows.get(p.file);\n  if (!probe || !probe.w || !probe.h || !isFinite(probe.dur) || probe.dur <= 0) {\n    throw new Error('Could not read the size or length of ' + p.file + '.');\n  }\n  return { ...p, ...probe };\n});\n\n// ── Target geometry ──\n// The LARGEST clip by pixel area, not the first: a 480p draft in the middle\n// of the reel should not drag every other clip down to its size. Both forced\n// even because yuv420p subsamples chroma and rejects odd dimensions.\nlet target = plan[0];\nfor (const p of plan) if (p.w * p.h > target.w * target.h) target = p;\nconst TW = target.w - (target.w % 2);\nconst TH = target.h - (target.h % 2);\n\n// r_frame_rate is a FRACTION ('30000/1001'). Compared as a number, handed to\n// ffmpeg as the original string — converting it to a decimal is how you get\n// drift over a two-minute reel.\nfunction fpsValue(f) {\n  const m = String(f).split('/');\n  const n = parseFloat(m[0]);\n  const d = m.length > 1 ? parseFloat(m[1]) : 1;\n  return d ? n / d : n;\n}\nlet FPS = plan[0].fps;\nfor (const p of plan) if (fpsValue(p.fps) > fpsValue(FPS)) FPS = p.fps;\nif (!/^\\d+(\\/\\d+)?$/.test(FPS)) FPS = '30';\n\n// Letterbox rather than crop when a clip came back a different shape — a crop\n// silently eats whatever was at the edge of the frame, including composed text.\nconst ASPECT_TOLERANCE = 0.02;\nconst targetAspect = TW / TH;\nconst oddOnes = plan\n  .map((p, i) => ({ i, off: Math.abs((p.w / p.h) - targetAspect) / targetAspect }))\n  .filter(x => x.off > ASPECT_TOLERANCE)\n  .map(x => x.i + 1);\nconst warning = oddOnes.length\n  ? 'Clip' + (oddOnes.length > 1 ? 's ' : ' ') + oddOnes.join(', ') +\n    ' came back a different shape and will be letterboxed. Re-render them to match.'\n  : '';\n\n// Any real audio anywhere changes how the joins are done — see below.\nconst anyRealAudio = plan.some(p => p.hasAudio);\n\n// ── Segments ──\n// A run of clips joined by hard cuts is ONE segment, concatenated with no\n// transition at all. A crossfade seam starts a new segment. Doing cuts this\n// way rather than as a 1-frame xfade matters: xfade rejects duration=0, and a\n// 0.03s \"cut\" blends two frames, which is visible between different scenes.\nconst segments = [];\nplan.forEach((p, i) => {\n  // Clip 0 opens the first segment; after that only a crossfade seam starts a\n  // new one. A cut just extends the segment it lands in.\n  if (i === 0 || p.transition === 'crossfade') {\n    segments.push({ members: [i], dur: p.dur, fade: i === 0 ? 0 : p.fade, offset: 0 });\n  } else {\n    const seg = segments[segments.length - 1];\n    seg.members.push(i);\n    seg.dur += p.dur;\n  }\n});\n\n// ── The offset recurrence ──\n// xfade's `offset` is measured on the ACCUMULATED stream, and that stream has\n// already been shortened by every previous fade. So the running total carries\n// the subtraction with it rather than each offset being computed from raw\n// durations. Getting this wrong puts a transition past the end of the stream,\n// which ffmpeg renders as a frozen frame or a black gap WITHOUT erroring.\nconst r3 = n => Math.round(n * 1000) / 1000;\nlet acc = segments[0].dur;\nfor (let i = 1; i < segments.length; i++) {\n  // Both sides have to outlast the fade or the overlap runs off an end.\n  const f = Math.min(segments[i].fade, 0.5 * segments[i - 1].dur, 0.5 * segments[i].dur);\n  segments[i].fade = r3(f);\n  segments[i].offset = r3(acc - f);\n  acc = acc + segments[i].dur - f;\n}\nconst expected = r3(acc);\n\n// ── The script ──\nconst scale = 'scale=' + TW + ':' + TH + ':force_original_aspect_ratio=decrease,' +\n              'pad=' + TW + ':' + TH + ':(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,fps=' + FPS + ',format=yuv420p';\nconst VENC = '-c:v libx264 -preset veryfast -crf 18 -pix_fmt yuv420p';\nconst AENC = '-c:a aac -b:a 128k -ar 48000 -ac 2';\n\nconst lines = ['set -e', 'cd \"' + cwd + '\"'];\n\n// ── Normalise ──\n// Every clip is re-encoded to one shape, one frame rate, one sample rate and\n// one channel layout. The audio half is the part that is easy to skip and\n// breaks everything: a reel where some clips have sound and some do not comes\n// out with audio on the first segment only, because concat matches streams by\n// index. anullsrc gives the silent ones a real track to match against.\nplan.forEach((p, i) => {\n  const out = 'n' + i + '.mp4';\n  if (p.hasAudio) {\n    lines.push(\n      'ffmpeg -nostdin -v error -y -i ' + p.file +\n      ' -vf \"' + scale + '\"' +\n      // apad + -shortest forces the audio to be exactly as long as the video\n      // even when the source's track is a few ms short. That equality is what\n      // keeps acrossfade (which has no offset of its own) locked to xfade\n      // (which does) at every seam.\n      ' -af \"aresample=48000,apad\" -shortest ' +\n      VENC + ' ' + AENC + ' -movflags +faststart ' + out);\n  } else {\n    lines.push(\n      'ffmpeg -nostdin -v error -y -i ' + p.file +\n      ' -f lavfi -i anullsrc=channel_layout=stereo:sample_rate=48000' +\n      ' -map 0:v -map 1:a -shortest' +\n      ' -vf \"' + scale + '\" ' +\n      VENC + ' ' + AENC + ' -movflags +faststart ' + out);\n  }\n});\n\nif (segments.length === 1 && !anyRealAudio) {\n  // Every clip is now byte-compatible and the silence is ours, so the demuxer\n  // can stream-copy: instant, and not a second generation of encoding.\n  //\n  // Only when there is no REAL audio. AAC encoder priming leaves a ~20ms gap\n  // at each stream-copied join — inaudible across anullsrc silence, an audible\n  // click across actual sound.\n  lines.push('rm -f list.txt');\n  segments[0].members.forEach(i => lines.push(\"printf \\\"file 'n\" + i + \".mp4'\\\\n\\\" >> list.txt\"));\n  lines.push('ffmpeg -nostdin -v error -y -f concat -safe 0 -i list.txt -c copy -movflags +faststart out.mp4');\n} else {\n  // One filter graph: each segment concatenated from its members, then the\n  // segments crossfaded together pairwise.\n  const inputs = plan.map((_, i) => '-i n' + i + '.mp4').join(' ');\n  const parts = [];\n\n  segments.forEach((seg, s) => {\n    const feed = seg.members.map(i => '[' + i + ':v][' + i + ':a]').join('');\n    parts.push(feed + 'concat=n=' + seg.members.length + ':v=1:a=1[s' + s + 'v][s' + s + 'a]');\n  });\n\n  let vPrev = 's0v';\n  let aPrev = 's0a';\n  for (let s = 1; s < segments.length; s++) {\n    parts.push('[' + vPrev + '][s' + s + 'v]xfade=transition=fade:duration=' +\n               segments[s].fade.toFixed(3) + ':offset=' + segments[s].offset.toFixed(3) + '[x' + s + 'v]');\n    // Mirrors the video chain structurally but carries no offset of its own:\n    // acrossfade always joins at the end of its first input, and because every\n    // clip's audio is exactly as long as its video, both chains shorten by the\n    // same amount at every seam and stay in sync.\n    parts.push('[' + aPrev + '][s' + s + 'a]acrossfade=d=' + segments[s].fade.toFixed(3) + ':c1=tri:c2=tri[x' + s + 'a]');\n    vPrev = 'x' + s + 'v';\n    aPrev = 'x' + s + 'a';\n  }\n\n  lines.push(\n    'ffmpeg -nostdin -v error -y ' + inputs +\n    ' -filter_complex \"' + parts.join(';') + '\"' +\n    ' -map \"[' + vPrev + ']\" -map \"[' + aPrev + ']\" ' +\n    VENC + ' ' + AENC + ' -movflags +faststart out.mp4');\n}\n\nlines.push('test -s out.mp4');\nlines.push('OUTDUR=$(ffprobe -v error -show_entries format=duration -of csv=p=0 out.mp4)');\n// set -e plus a sentinel, for the reason Compose documents: ffmpeg exits 0 on\n// some partial failures, so a zero exit code alone is not evidence a usable\n// file was written. The measured duration rides along so the parser can catch\n// a segment that vanished.\nlines.push('echo \"STITCH_OK $PWD/out.mp4 $OUTDUR\"');\n\nreturn { json: {\n  _ok: true,\n  script: lines.join('\\n'),\n  version_id: src.version_id, bucket: src.bucket, filename: src.filename,\n  expected_duration: expected,\n  warning,\n} };\n"
+      },
+      "id": "a1dd360c-d7ef-52e5-8739-369f1cfd47a4",
+      "name": "Plan Stitch",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "creative-stitch-plan-gate",
+              "leftValue": "={{ $json._ok === true }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "c09abf28-1ba1-5de1-9439-2992c0277254",
+      "name": "Plan OK?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "command": "={{ $json.script }}"
+      },
+      "onError": "continueRegularOutput",
+      "id": "b3f1efb9-70f3-5312-b0ed-8aa52fab2070",
+      "name": "Stitch",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        1320,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst src = $('Plan Stitch').first().json;\nconst res = $input.first().json || {};\nconst hit = String(res.stdout || '').match(/STITCH_OK\\s+(\\S+)\\s+(\\S+)/);\n\nif (!hit) {\n  const err = String(res.stderr || res.stdout || '').trim().split('\\n').slice(-4).join(' ').slice(0, 500);\n  return { json: { _ok: false, version_id: src.version_id,\n                   error: err || ('Joining the clips failed (exit ' + res.exitCode + ').') } };\n}\n\n// A dropped segment is the failure mode that does NOT announce itself: the\n// filter graph runs, ffmpeg exits 0, and the reel is simply missing a shot.\n// The only thing that catches it is comparing what came out against what the\n// arithmetic said should. Three quarters of a second is well past rounding\n// and well under the shortest clip any model here produces.\nconst measured = parseFloat(hit[2]);\nconst expected = Number(src.expected_duration);\nif (isFinite(measured) && isFinite(expected) && Math.abs(measured - expected) > 0.75) {\n  return { json: { _ok: false, version_id: src.version_id,\n                   error: 'The joined video came out ' + measured.toFixed(1) + 's long but should be ' +\n                          expected.toFixed(1) + 's — a clip was dropped. Nothing was saved.' } };\n}\n\nreturn { json: { _ok: true, version_id: src.version_id, bucket: src.bucket,\n                 filename: src.filename, path: hit[1], warning: src.warning || '' } };\n"
+      },
+      "id": "5587f9a9-f9bc-5059-8aab-9afaf02e4159",
+      "name": "Parse Stitch",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "creative-stitch-gate",
+              "leftValue": "={{ $json._ok === true }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "f91880e3-0f97-54b3-9f1f-777b06ee96bd",
+      "name": "Stitched OK?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "fileSelector": "={{ $json.path }}",
+        "options": {
+          "dataPropertyName": "data"
+        }
+      },
+      "onError": "continueErrorOutput",
+      "id": "2c031112-7db6-5f1d-a4ff-b959b081f209",
+      "name": "Read Stitched Reel",
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1,
+      "position": [
+        1980,
+        140
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ String($env.SUPABASE_URL).replace(/\\/+$/, '') }}/storage/v1/object/{{ $('Parse Stitch').first().json.bucket }}/{{ $('Parse Stitch').first().json.filename }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SUPABASE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "video/mp4"
+            },
+            {
+              "name": "x-upsert",
+              "value": "true"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "binaryData",
+        "inputDataFieldName": "data",
+        "options": {}
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueErrorOutput",
+      "id": "fe69ff6e-dd8c-5ae6-9e40-2ba5e1ed423a",
+      "name": "Upload to Supabase Storage",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2200,
+        140
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ String($env.SUPABASE_URL).replace(/\\/+$/, '') }}/rest/v1/creative_versions?id=eq.{{ $('Parse Stitch').first().json.version_id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SUPABASE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ status: 'ready', error: '', video_url: String($env.SUPABASE_URL).replace(/\\/+$/, '') + '/storage/v1/object/public/' + $('Parse Stitch').first().json.bucket + '/' + $('Parse Stitch').first().json.filename }) }}",
+        "options": {}
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueErrorOutput",
+      "id": "e1f3eeb8-d4b0-5a4c-8c24-b16c5aabc0b4",
+      "name": "Supabase: Save Version",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2420,
+        140
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ String($env.SUPABASE_URL).replace(/\\/+$/, '') }}/rest/v1/creative_versions?id=eq.{{ $json.version_id || $('Parse Stitch').first().json.version_id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SUPABASE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ status: 'failed', error: String($json.error && $json.error.message ? $json.error.message : ($json.error || $('Parse Stitch').first().json.error || 'Generation failed.')).slice(0, 500) }) }}",
+        "options": {}
+      },
+      "id": "501f091c-12d4-5bd4-8da9-064df72b588a",
+      "name": "Supabase: Mark Failed",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1980,
+        420
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Respond: Accepted",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respond: Accepted": {
+      "main": [
+        [
+          {
+            "node": "Build Fetch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Fetch": {
+      "main": [
+        [
+          {
+            "node": "Fetch & Probe",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch & Probe": {
+      "main": [
+        [
+          {
+            "node": "Plan Stitch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Plan Stitch": {
+      "main": [
+        [
+          {
+            "node": "Plan OK?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Plan OK?": {
+      "main": [
+        [
+          {
+            "node": "Stitch",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Supabase: Mark Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Stitch": {
+      "main": [
+        [
+          {
+            "node": "Parse Stitch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Stitch": {
+      "main": [
+        [
+          {
+            "node": "Stitched OK?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Stitched OK?": {
+      "main": [
+        [
+          {
+            "node": "Read Stitched Reel",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Supabase: Mark Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Stitched Reel": {
+      "main": [
+        [
+          {
+            "node": "Upload to Supabase Storage",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Supabase: Mark Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload to Supabase Storage": {
+      "main": [
+        [
+          {
+            "node": "Supabase: Save Version",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Supabase: Mark Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Supabase: Save Version": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Supabase: Mark Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": []
+}

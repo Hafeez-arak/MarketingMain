@@ -297,6 +297,20 @@ const WORKFLOW_CONFIGS = [
     ),
   },
   {
+    platform: 'creativeStitch',
+    label: 'Creative Studio — Stitch (join the clips)',
+    placeholder: 'https://your-instance.app.n8n.cloud/webhook/arak-creative-stitch',
+    description: 'Joins a long video\'s clips into one reel with local ffmpeg — re-encodes every clip to a common size, frame rate and sound, then cuts or crossfades between them. No model, no fal call — FREE, like Compose. This is what makes a 30-second video cost $2 of short clips instead of $14 of one long render.',
+    icon: (
+      <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: 'linear-gradient(135deg,#0891b2,#22d3ee)' }}>
+        <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24">
+          <rect x="1" y="7" width="9" height="10" rx="1"/><rect x="14" y="7" width="9" height="10" rx="1"/>
+          <path d="M10 12h4" strokeLinecap="round"/>
+        </svg>
+      </div>
+    ),
+  },
+  {
     platform: 'creativeCompose',
     label: 'Creative Studio — Compose (text on video)',
     placeholder: 'https://your-instance.app.n8n.cloud/webhook/arak-creative-compose',

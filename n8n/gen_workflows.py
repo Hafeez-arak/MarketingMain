@@ -7205,17 +7205,36 @@ const GIVEUP_MS = 20 * 60 * 1000; // fal's queue doesn't hold a result forever e
 async function run() {
   const rows = await req({ method: 'GET',
     url: SUP + '/rest/v1/creative_versions?media_type=eq.video&status=eq.pending'
-      + '&select=id,session_id,created_at,overlay_state&order=created_at.asc&limit=25',
+      + '&select=id,session_id,created_at,overlay_state,provider,clip_role&order=created_at.asc&limit=25',
     headers: { apikey: KEY, Authorization: 'Bearer ' + KEY }, json: true });
 
   const now = Date.now();
   const results = [];
 
   for (const row of rows) {
-    const pr = row.overlay_state && row.overlay_state.pendingRequest;
-    if (!pr || !pr.requestId || !pr.model) continue; // predates this fix — nothing saved to check against
     const age = now - new Date(row.created_at).getTime();
     if (age < STALE_MS) continue;
+
+    // Rows this sweep must not touch: Compose and Stitch are local ffmpeg
+    // jobs with no fal request behind them, so there is nothing here to
+    // reconcile them against. They are provider 'manual'; a stitch row also
+    // carries clip_role.
+    if (row.provider === 'manual' || row.clip_role) continue;
+
+    const pr = row.overlay_state && row.overlay_state.pendingRequest;
+    if (!pr || !pr.requestId || !pr.model) {
+      // No fal request was ever recorded. Either the row predates the fix that
+      // started saving one, or — far likelier now that a multi-clip run
+      // inserts up to twelve rows per storyboard — the tab died in the
+      // moment between inserting the row and firing the webhook. Nothing is
+      // coming for it, so stop it spinning forever.
+      if (age > GIVEUP_MS) {
+        await patchRow(row.id, { status: 'failed',
+          error: 'The render was never submitted — the page was closed before it started. Press Retry.' });
+        results.push({ id: row.id, outcome: 'failed-never-submitted' });
+      }
+      continue;
+    }
 
     try {
       const appId = String(pr.model).split('/').slice(0, 2).join('/');
@@ -7448,6 +7467,344 @@ if (!hit) {
 }
 return { json: { _ok: true, version_id: src.version_id, bucket: src.bucket,
                  filename: src.filename, path: hit[1] } };
+"""
+
+
+# ── Creative Stitch ────────────────────────────────────────────────────────
+# Joins a multi-clip storyboard's finished clips into one reel.
+#
+# TWO executeCommand nodes rather than Compose's one, and the reason is
+# arithmetic. Compose only ever does integer crop geometry, which busybox sh
+# handles. Stitching needs cumulative crossfade offsets over FLOAT durations
+# (`ffprobe format=duration` returns 5.033333), and `$(( ))` is integer-only —
+# doing it in the shell means splitting every duration on '.', reassembling
+# milliseconds, and dodging octal on zero-prefixed fractions, per clip, in a
+# cumulative loop. So: pass 1 downloads and probes and echoes machine-readable
+# lines, a Code node does every float calculation in JS, and pass 2 runs with
+# all the numbers already baked in as literals. Both passes cd into the same
+# directory, so nothing is downloaded twice.
+
+CREATIVE_STITCH_FETCH_JS = r"""
+const body = ($input.first().json.body) || {};
+const sessionId = String(body.session_id || '');
+const versionId = String(body.version_id || '');
+const clips = Array.isArray(body.clips) ? body.clips : [];
+const BUCKET = 'creative-studio';
+const MAX_CLIPS = 12;   // must match MULTI_CLIP_MAX in src/lib/creativeStoryboard.js
+
+// Identical guard to Creative Compose's, and load-bearing for the same
+// reason: creative_versions is client-writable by design (the browser sets
+// image_url/status itself), these URLs are interpolated into a shell string,
+// and n8n holds the service_role key. The allowlist contains no quote,
+// backtick, dollar, semicolon, backslash or space.
+const SUP = String($env.SUPABASE_URL || '').replace(/\/+$/, '');
+const PREFIX = SUP + '/storage/v1/object/public/';
+function safeUrl(u, what) {
+  const s = String(u || '');
+  if (!s.startsWith(PREFIX)) throw new Error(what + ' is not a file in our own storage.');
+  if (!/^[A-Za-z0-9:/._~%()-]+$/.test(s)) throw new Error(what + ' contains characters we will not put in a shell command.');
+  return s;
+}
+
+if (!versionId) throw new Error('No version to write the result back to.');
+if (clips.length < 2) throw new Error('A reel needs at least two clips.');
+if (clips.length > MAX_CLIPS) throw new Error('That is more clips than this can join at once (' + MAX_CLIPS + ').');
+
+// Filenames are OURS, never derived from the URL — one less thing the caller
+// can steer. Position in this array is the cut order and the only ordering
+// that exists downstream.
+const plan = clips.map((c, i) => {
+  const t = c.transition === 'crossfade' ? 'crossfade' : 'cut';
+  let d = Number(c.transition_duration);
+  if (!isFinite(d)) d = 0.5;
+  return {
+    file: 'c' + i + '.mp4',
+    url: safeUrl(c.url, 'Clip ' + (i + 1)),
+    // The seam BEFORE this clip. Clip 0 has none.
+    transition: i === 0 ? 'cut' : t,
+    fade: Math.min(2, Math.max(0.1, d)),
+  };
+});
+
+const dir = '"$HOME/.n8n-files/stitch/' + versionId + '"';
+
+const lines = [
+  'set -e',
+  // Same 3-hour sweep as Compose: a reel's working directory holds every clip
+  // plus a normalised copy of each plus the output, so a few runs is a few
+  // hundred MB and nothing else ever deletes them.
+  'find "$HOME/.n8n-files/stitch" -maxdepth 1 -mindepth 1 -type d -mmin +180 -exec rm -rf {} + 2>/dev/null || true',
+  'rm -rf ' + dir + ' && mkdir -p ' + dir + ' && cd ' + dir,
+];
+
+for (const p of plan) {
+  lines.push('wget -q -O ' + p.file + ' ' + p.url);
+  // busybox wget can exit 0 having written nothing; ffprobe's error on an
+  // empty file says far less than this does.
+  lines.push('test -s ' + p.file + ' || { echo "EMPTY ' + p.file + '" >&2; exit 1; }');
+}
+
+lines.push('echo "PROBE_BEGIN"');
+for (const p of plan) {
+  lines.push([
+    'W=$(ffprobe -v error -select_streams v:0 -show_entries stream=width        -of csv=p=0 ' + p.file + ')',
+    'H=$(ffprobe -v error -select_streams v:0 -show_entries stream=height       -of csv=p=0 ' + p.file + ')',
+    'R=$(ffprobe -v error -select_streams v:0 -show_entries stream=r_frame_rate -of csv=p=0 ' + p.file + ')',
+    // format=duration, not stream=duration: it is the container duration, which
+    // is what xfade actually measures against, and stream=duration is missing
+    // on some muxers.
+    'D=$(ffprobe -v error -show_entries format=duration -of csv=p=0 ' + p.file + ')',
+    // Empty when the clip has no audio track at all — the case that silently
+    // breaks concat if it is not handled in the normalise pass.
+    'A=$(ffprobe -v error -select_streams a:0 -show_entries stream=index -of csv=p=0 ' + p.file + ' || true)',
+    'printf "%s|%s|%s|%s|%s|%s\\n" "' + p.file + '" "$W" "$H" "$R" "$D" "${A:-none}"',
+  ].join('\n'));
+}
+lines.push('echo "PROBE_OK $PWD"');
+
+const filename = (sessionId ? sessionId + '/' : '') + versionId + '-' + Date.now() + '.mp4';
+
+return { json: {
+  script: lines.join('\n'),
+  version_id: versionId, bucket: BUCKET, filename,
+  plan,
+} };
+"""
+
+
+CREATIVE_STITCH_PLAN_JS = r"""
+const src = $('Build Fetch').first().json;
+const res = $input.first().json || {};
+const stdout = String(res.stdout || '');
+
+function bail(msg) {
+  return { json: { _ok: false, version_id: src.version_id, error: String(msg).slice(0, 500) } };
+}
+
+const okHit = stdout.match(/PROBE_OK\s+(\S+)/);
+if (!okHit) {
+  const err = String(res.stderr || stdout || '').trim().split('\n').slice(-4).join(' ');
+  return bail(err || ('Downloading the clips failed (exit ' + res.exitCode + ').'));
+}
+const cwd = okHit[1];
+
+// ── Read the probe back ──
+const rows = new Map();
+for (const line of stdout.split('\n')) {
+  const parts = line.trim().split('|');
+  if (parts.length !== 6) continue;
+  const [file, w, h, r, d, a] = parts;
+  rows.set(file, {
+    w: parseInt(w, 10), h: parseInt(h, 10),
+    fps: String(r || '').trim(),
+    dur: parseFloat(d),
+    hasAudio: a !== 'none' && a !== '',
+  });
+}
+
+const plan = src.plan.map(p => {
+  const probe = rows.get(p.file);
+  if (!probe || !probe.w || !probe.h || !isFinite(probe.dur) || probe.dur <= 0) {
+    throw new Error('Could not read the size or length of ' + p.file + '.');
+  }
+  return { ...p, ...probe };
+});
+
+// ── Target geometry ──
+// The LARGEST clip by pixel area, not the first: a 480p draft in the middle
+// of the reel should not drag every other clip down to its size. Both forced
+// even because yuv420p subsamples chroma and rejects odd dimensions.
+let target = plan[0];
+for (const p of plan) if (p.w * p.h > target.w * target.h) target = p;
+const TW = target.w - (target.w % 2);
+const TH = target.h - (target.h % 2);
+
+// r_frame_rate is a FRACTION ('30000/1001'). Compared as a number, handed to
+// ffmpeg as the original string — converting it to a decimal is how you get
+// drift over a two-minute reel.
+function fpsValue(f) {
+  const m = String(f).split('/');
+  const n = parseFloat(m[0]);
+  const d = m.length > 1 ? parseFloat(m[1]) : 1;
+  return d ? n / d : n;
+}
+let FPS = plan[0].fps;
+for (const p of plan) if (fpsValue(p.fps) > fpsValue(FPS)) FPS = p.fps;
+if (!/^\d+(\/\d+)?$/.test(FPS)) FPS = '30';
+
+// Letterbox rather than crop when a clip came back a different shape — a crop
+// silently eats whatever was at the edge of the frame, including composed text.
+const ASPECT_TOLERANCE = 0.02;
+const targetAspect = TW / TH;
+const oddOnes = plan
+  .map((p, i) => ({ i, off: Math.abs((p.w / p.h) - targetAspect) / targetAspect }))
+  .filter(x => x.off > ASPECT_TOLERANCE)
+  .map(x => x.i + 1);
+const warning = oddOnes.length
+  ? 'Clip' + (oddOnes.length > 1 ? 's ' : ' ') + oddOnes.join(', ') +
+    ' came back a different shape and will be letterboxed. Re-render them to match.'
+  : '';
+
+// Any real audio anywhere changes how the joins are done — see below.
+const anyRealAudio = plan.some(p => p.hasAudio);
+
+// ── Segments ──
+// A run of clips joined by hard cuts is ONE segment, concatenated with no
+// transition at all. A crossfade seam starts a new segment. Doing cuts this
+// way rather than as a 1-frame xfade matters: xfade rejects duration=0, and a
+// 0.03s "cut" blends two frames, which is visible between different scenes.
+const segments = [];
+plan.forEach((p, i) => {
+  // Clip 0 opens the first segment; after that only a crossfade seam starts a
+  // new one. A cut just extends the segment it lands in.
+  if (i === 0 || p.transition === 'crossfade') {
+    segments.push({ members: [i], dur: p.dur, fade: i === 0 ? 0 : p.fade, offset: 0 });
+  } else {
+    const seg = segments[segments.length - 1];
+    seg.members.push(i);
+    seg.dur += p.dur;
+  }
+});
+
+// ── The offset recurrence ──
+// xfade's `offset` is measured on the ACCUMULATED stream, and that stream has
+// already been shortened by every previous fade. So the running total carries
+// the subtraction with it rather than each offset being computed from raw
+// durations. Getting this wrong puts a transition past the end of the stream,
+// which ffmpeg renders as a frozen frame or a black gap WITHOUT erroring.
+const r3 = n => Math.round(n * 1000) / 1000;
+let acc = segments[0].dur;
+for (let i = 1; i < segments.length; i++) {
+  // Both sides have to outlast the fade or the overlap runs off an end.
+  const f = Math.min(segments[i].fade, 0.5 * segments[i - 1].dur, 0.5 * segments[i].dur);
+  segments[i].fade = r3(f);
+  segments[i].offset = r3(acc - f);
+  acc = acc + segments[i].dur - f;
+}
+const expected = r3(acc);
+
+// ── The script ──
+const scale = 'scale=' + TW + ':' + TH + ':force_original_aspect_ratio=decrease,' +
+              'pad=' + TW + ':' + TH + ':(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,fps=' + FPS + ',format=yuv420p';
+const VENC = '-c:v libx264 -preset veryfast -crf 18 -pix_fmt yuv420p';
+const AENC = '-c:a aac -b:a 128k -ar 48000 -ac 2';
+
+const lines = ['set -e', 'cd "' + cwd + '"'];
+
+// ── Normalise ──
+// Every clip is re-encoded to one shape, one frame rate, one sample rate and
+// one channel layout. The audio half is the part that is easy to skip and
+// breaks everything: a reel where some clips have sound and some do not comes
+// out with audio on the first segment only, because concat matches streams by
+// index. anullsrc gives the silent ones a real track to match against.
+plan.forEach((p, i) => {
+  const out = 'n' + i + '.mp4';
+  if (p.hasAudio) {
+    lines.push(
+      'ffmpeg -nostdin -v error -y -i ' + p.file +
+      ' -vf "' + scale + '"' +
+      // apad + -shortest forces the audio to be exactly as long as the video
+      // even when the source's track is a few ms short. That equality is what
+      // keeps acrossfade (which has no offset of its own) locked to xfade
+      // (which does) at every seam.
+      ' -af "aresample=48000,apad" -shortest ' +
+      VENC + ' ' + AENC + ' -movflags +faststart ' + out);
+  } else {
+    lines.push(
+      'ffmpeg -nostdin -v error -y -i ' + p.file +
+      ' -f lavfi -i anullsrc=channel_layout=stereo:sample_rate=48000' +
+      ' -map 0:v -map 1:a -shortest' +
+      ' -vf "' + scale + '" ' +
+      VENC + ' ' + AENC + ' -movflags +faststart ' + out);
+  }
+});
+
+if (segments.length === 1 && !anyRealAudio) {
+  // Every clip is now byte-compatible and the silence is ours, so the demuxer
+  // can stream-copy: instant, and not a second generation of encoding.
+  //
+  // Only when there is no REAL audio. AAC encoder priming leaves a ~20ms gap
+  // at each stream-copied join — inaudible across anullsrc silence, an audible
+  // click across actual sound.
+  lines.push('rm -f list.txt');
+  segments[0].members.forEach(i => lines.push("printf \"file 'n" + i + ".mp4'\\n\" >> list.txt"));
+  lines.push('ffmpeg -nostdin -v error -y -f concat -safe 0 -i list.txt -c copy -movflags +faststart out.mp4');
+} else {
+  // One filter graph: each segment concatenated from its members, then the
+  // segments crossfaded together pairwise.
+  const inputs = plan.map((_, i) => '-i n' + i + '.mp4').join(' ');
+  const parts = [];
+
+  segments.forEach((seg, s) => {
+    const feed = seg.members.map(i => '[' + i + ':v][' + i + ':a]').join('');
+    parts.push(feed + 'concat=n=' + seg.members.length + ':v=1:a=1[s' + s + 'v][s' + s + 'a]');
+  });
+
+  let vPrev = 's0v';
+  let aPrev = 's0a';
+  for (let s = 1; s < segments.length; s++) {
+    parts.push('[' + vPrev + '][s' + s + 'v]xfade=transition=fade:duration=' +
+               segments[s].fade.toFixed(3) + ':offset=' + segments[s].offset.toFixed(3) + '[x' + s + 'v]');
+    // Mirrors the video chain structurally but carries no offset of its own:
+    // acrossfade always joins at the end of its first input, and because every
+    // clip's audio is exactly as long as its video, both chains shorten by the
+    // same amount at every seam and stay in sync.
+    parts.push('[' + aPrev + '][s' + s + 'a]acrossfade=d=' + segments[s].fade.toFixed(3) + ':c1=tri:c2=tri[x' + s + 'a]');
+    vPrev = 'x' + s + 'v';
+    aPrev = 'x' + s + 'a';
+  }
+
+  lines.push(
+    'ffmpeg -nostdin -v error -y ' + inputs +
+    ' -filter_complex "' + parts.join(';') + '"' +
+    ' -map "[' + vPrev + ']" -map "[' + aPrev + ']" ' +
+    VENC + ' ' + AENC + ' -movflags +faststart out.mp4');
+}
+
+lines.push('test -s out.mp4');
+lines.push('OUTDUR=$(ffprobe -v error -show_entries format=duration -of csv=p=0 out.mp4)');
+// set -e plus a sentinel, for the reason Compose documents: ffmpeg exits 0 on
+// some partial failures, so a zero exit code alone is not evidence a usable
+// file was written. The measured duration rides along so the parser can catch
+// a segment that vanished.
+lines.push('echo "STITCH_OK $PWD/out.mp4 $OUTDUR"');
+
+return { json: {
+  _ok: true,
+  script: lines.join('\n'),
+  version_id: src.version_id, bucket: src.bucket, filename: src.filename,
+  expected_duration: expected,
+  warning,
+} };
+"""
+
+
+CREATIVE_STITCH_PARSE_JS = r"""
+const src = $('Plan Stitch').first().json;
+const res = $input.first().json || {};
+const hit = String(res.stdout || '').match(/STITCH_OK\s+(\S+)\s+(\S+)/);
+
+if (!hit) {
+  const err = String(res.stderr || res.stdout || '').trim().split('\n').slice(-4).join(' ').slice(0, 500);
+  return { json: { _ok: false, version_id: src.version_id,
+                   error: err || ('Joining the clips failed (exit ' + res.exitCode + ').') } };
+}
+
+// A dropped segment is the failure mode that does NOT announce itself: the
+// filter graph runs, ffmpeg exits 0, and the reel is simply missing a shot.
+// The only thing that catches it is comparing what came out against what the
+// arithmetic said should. Three quarters of a second is well past rounding
+// and well under the shortest clip any model here produces.
+const measured = parseFloat(hit[2]);
+const expected = Number(src.expected_duration);
+if (isFinite(measured) && isFinite(expected) && Math.abs(measured - expected) > 0.75) {
+  return { json: { _ok: false, version_id: src.version_id,
+                   error: 'The joined video came out ' + measured.toFixed(1) + 's long but should be ' +
+                          expected.toFixed(1) + 's — a clip was dropped. Nothing was saved.' } };
+}
+
+return { json: { _ok: true, version_id: src.version_id, bucket: src.bucket,
+                 filename: src.filename, path: hit[1], warning: src.warning || '' } };
 """
 
 
@@ -7896,6 +8253,112 @@ Needs env: SUPABASE_URL, SUPABASE_KEY. Needs ffmpeg + ffprobe in the image
 hardened image with no package manager)."""
 
 
+CREATIVE_STITCH_STICKY = """## Creative Studio — Stitch (join a reel's clips)
+
+POST `arak-creative-stitch`
+```
+{ session_id, version_id,
+  clips: [ { url, transition: 'cut'|'crossfade', transition_duration } ] }
+```
+
+**Costs nothing to run** — no FAL_KEY, no model call, same as Compose. This is
+the second half of what makes long video affordable: no model here renders 30s
+cheaply (Seedance 2.5 is $14.19 a take and the only one that reaches it at
+all), so a reel is several short clips joined locally instead.
+
+`transition` describes the seam BEFORE that clip; `clips[0]`'s is ignored.
+Nothing else is accepted — no geometry, no fps, no filenames. Fewer
+caller-supplied values reaching a shell string is the entire point, and the
+same `safeUrl` allowlist as Compose applies for the same reason.
+
+**Two shell passes, one Code node between them.** ffprobe returns float
+durations and busybox `$(( ))` is integer-only, so pass 1 probes, `Plan
+Stitch` does the crossfade arithmetic in JS, and pass 2 runs with literals.
+
+**Every clip is normalised first** — one size (the largest clip's, letterboxed
+not cropped), one frame rate, one sample rate, one channel layout. The audio
+half is the one that is easy to skip and breaks the reel: clips without a
+sound track get one from `anullsrc`, because concat matches streams by index
+and a mixed set comes out with audio on the first segment only.
+
+Runs of hard cuts are joined with the concat demuxer and `-c copy` when there
+is no real audio — instant, and no second generation of encoding. Any real
+audio, or any crossfade, takes the filter path instead (AAC priming leaves an
+audible ~20ms click at a stream-copied join).
+
+The parser compares the finished duration against what the arithmetic
+predicted and FAILS on a mismatch: a dropped segment is the one failure here
+that otherwise exits 0 and just quietly ships a reel with a shot missing.
+
+Never writes `overlay_state` — the Video Reconcile sweep reads that column to
+find abandoned renders, and a stitch row appearing there would confuse it.
+
+Needs env: SUPABASE_URL, SUPABASE_KEY. Needs ffmpeg + ffprobe in the image
+(see n8n/docker/Dockerfile)."""
+
+
+def build_creative_stitch() -> dict:
+    """Webhook -> Respond -> Build Fetch -> Fetch&Probe -> Plan -> OK?
+                                     -> Stitch(sh) -> Parse -> OK?
+                                     -> Read File -> Upload -> Save
+                                     -> Mark Failed
+
+    Two gates rather than Compose's one, because there are two shell passes:
+    a clip that fails to download reports "clip 3 didn't download" instead of
+    surfacing later as an inscrutable ffmpeg filter error.
+    """
+    fail = [{"node": "Supabase: Mark Failed", "type": "main", "index": 0}]
+    nodes = [
+        _sticky(CREATIVE_STITCH_STICKY, height=760, width=470, x=0, y=-400),
+        _webhook("arak-creative-stitch", "responseNode", x=0, y=300),
+        _respond_json(
+            "Respond: Accepted",
+            "={{ JSON.stringify({ status: 'accepted', version_id: $json.body.version_id }) }}",
+            x=220, y=300),
+        _code("Build Fetch", CREATIVE_STITCH_FETCH_JS, x=440, y=300),
+        _execute_command("Fetch & Probe", "={{ $json.script }}", x=660, y=300),
+        _code("Plan Stitch", CREATIVE_STITCH_PLAN_JS, x=880, y=300),
+        _if_bool_equals("Plan OK?", "creative-stitch-plan-gate", "={{ $json._ok === true }}", x=1100, y=300),
+        _execute_command("Stitch", "={{ $json.script }}", x=1320, y=220),
+        _code("Parse Stitch", CREATIVE_STITCH_PARSE_JS, x=1540, y=220),
+        _if_bool_equals("Stitched OK?", "creative-stitch-gate", "={{ $json._ok === true }}", x=1760, y=220),
+        _read_binary_file("Read Stitched Reel", "={{ $json.path }}", x=1980, y=140),
+        _http_creative_upload("Parse Stitch", "video/mp4", "Upload to Supabase Storage",
+                              x=2200, y=140, ref_node="Parse Stitch"),
+        _http_creative_save("Parse Stitch", "video_url", "Supabase: Save Version",
+                            x=2420, y=140, single=True),
+        _http_creative_fail("Parse Stitch", "Supabase: Mark Failed", x=1980, y=420, single=True),
+    ]
+    connections = {
+        "Webhook": {"main": [[{"node": "Respond: Accepted", "type": "main", "index": 0}]]},
+        "Respond: Accepted": {"main": [[{"node": "Build Fetch", "type": "main", "index": 0}]]},
+        "Build Fetch": {"main": [[{"node": "Fetch & Probe", "type": "main", "index": 0}]]},
+        "Fetch & Probe": {"main": [[{"node": "Plan Stitch", "type": "main", "index": 0}]]},
+        "Plan Stitch": {"main": [[{"node": "Plan OK?", "type": "main", "index": 0}]]},
+        # The failed branch of the first gate carries Plan Stitch's own
+        # {_ok:false, error}, which is the shape Mark Failed already reads.
+        "Plan OK?": {"main": [[{"node": "Stitch", "type": "main", "index": 0}], fail]},
+        "Stitch": {"main": [[{"node": "Parse Stitch", "type": "main", "index": 0}]]},
+        "Parse Stitch": {"main": [[{"node": "Stitched OK?", "type": "main", "index": 0}]]},
+        "Stitched OK?": {"main": [[{"node": "Read Stitched Reel", "type": "main", "index": 0}], fail]},
+        "Read Stitched Reel": {
+            "main": [[{"node": "Upload to Supabase Storage", "type": "main", "index": 0}], fail]
+        },
+        "Upload to Supabase Storage": {
+            "main": [[{"node": "Supabase: Save Version", "type": "main", "index": 0}], fail]
+        },
+        "Supabase: Save Version": {"main": [[], fail]},
+    }
+    return {
+        "name": "Arak Lighting – Creative Stitch",
+        "nodes": nodes,
+        "connections": connections,
+        "active": False,
+        "settings": {"executionOrder": "v1"},
+        "tags": [],
+    }
+
+
 def _execute_command(name: str, command_expr: str, x: int, y: int) -> dict:
     """Run a shell script built upstream.
 
@@ -8142,6 +8605,7 @@ if __name__ == "__main__":
         build_creative_video_edit(),
         build_creative_video_reconcile(),
         build_creative_compose(),
+        build_creative_stitch(),
         build_creative_enhance(),
     ]
 

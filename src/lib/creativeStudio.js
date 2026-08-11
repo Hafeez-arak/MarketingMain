@@ -36,7 +36,7 @@ export async function fetchSessions(workspaceId, accessToken, limit = 40) {
   } catch { return [] }
 }
 
-export async function createSession(workspaceId, accessToken, { title, intent, aspectRatio }) {
+export async function createSession(workspaceId, accessToken, { title, intent, aspectRatio, storyboard }) {
   if (!workspaceId) return { error: 'No active workspace. Try signing out and back in.' }
   try {
     const res = await fetch(`${SUPABASE_URL}/rest/v1/creative_sessions`, {
@@ -49,6 +49,10 @@ export async function createSession(workspaceId, accessToken, { title, intent, a
         title: (title || 'Untitled').slice(0, 80),
         intent: intent || 'image',
         aspect_ratio: aspectRatio || '1:1',
+        // Multi-clip only: the shot list is seeded at creation so the
+        // storyboard has clip 1 already typed when it opens. Everything else
+        // leaves it null.
+        ...(storyboard ? { storyboard } : {}),
       }),
     })
     if (!res.ok) return { error: await res.text() }
@@ -143,6 +147,14 @@ export async function insertPendingVersions(workspaceId, accessToken, sessionId,
         duration: r.duration || '',
         resolution: r.resolution || '',
         generate_audio: !!r.generateAudio,
+        // Which shot of a multi-clip reel this is, and which try at it.
+        // `?? null` rather than `|| null` because clip 0 attempt 0 is the
+        // common case and `||` would turn both into null — which drops the
+        // row out of every storyboard lookup and out of the unique index
+        // that stops two tabs paying for the same render twice.
+        clip_index: r.clipIndex ?? null,
+        clip_attempt: r.clipAttempt ?? null,
+        clip_role: r.clipRole || null,
         overlay_state: r.overlayState || null,
         status: r.status || 'pending',
       }))),
@@ -296,6 +308,10 @@ export const requestCompose  = (url, payload) => fire(url, payload, 'Creative Co
 // requestCompose above, but a change to the footage itself rather than a
 // from-scratch take. What a video lane's chat box fires on Send.
 export const requestVideoEdit = (url, payload) => fire(url, payload, 'Creative Video Edit')
+// Joins a multi-clip storyboard's finished clips into one reel. Free, like
+// requestCompose and for the same reason — local ffmpeg, no model call — but
+// slower, since it re-encodes every clip to a common shape first.
+export const requestStitch   = (url, payload) => fire(url, payload, 'Creative Stitch')
 
 // ── Enhance ────────────────────────────────────────────────────────────────
 
@@ -341,6 +357,11 @@ function filenameFor(version, sessionTitle) {
   const slug = String(sessionTitle || 'arak-studio')
     .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'arak-studio'
   const ext = version.video_url ? 'mp4' : 'png'
+  // The stitched reel is the deliverable, not version N of anything — a
+  // filename saying "-manual-v7" would bury that. Clips keep the version
+  // numbering, because which take you downloaded genuinely matters there.
+  if (version.clip_role === 'stitch') return `${slug}-reel.${ext}`
+  if (version.clip_index != null) return `${slug}-clip${version.clip_index + 1}-v${version.clip_attempt ?? 0}.${ext}`
   const who = version.provider && version.provider !== 'manual' ? `-${version.provider}` : ''
   return `${slug}${who}-v${version.round ?? 0}.${ext}`
 }

@@ -11,6 +11,12 @@ import { VideoPanel } from '../../components/studio/VideoPanel'
 import { MediaPicker, AttachmentChip, MultiRefRow } from '../../components/studio/MediaPicker'
 import { AudioToggle, CostLine, LookPicker, ModelPicker, MotionPicker, QualityRow } from '../../components/studio/VideoSettings'
 import { buildVideoPrompt } from '../../components/studio/motionPresets'
+import { ClipBoard } from '../../components/studio/ClipBoard'
+import { useClipSequencer } from '../../components/studio/useClipSequencer'
+import {
+  MULTI_CLIP_MAX, emptyStoryboard, newClip, normalizeStoryboard, saveStoryboard,
+  stitchRowsOf, storyboardTotals,
+} from '../../lib/creativeStoryboard'
 import {
   canEditVideoDuration, estimateVideoCost, estimateVideoEditCost, getVideoModel, VIDEO_EDIT_MAX_REFERENCES,
 } from '../../components/studio/videoModels'
@@ -21,7 +27,7 @@ import { captureFirstFrame, parentStillOf } from '../../components/studio/videoF
 import {
   buildBranches, createSession, deleteSession, downloadVersion, fetchSessions, fetchVersions, finalizeVersion,
   insertPendingVersions, renameSession, requestCompose, requestEdit, requestEnhance, requestGenerate, requestVideo,
-  requestVideoEdit, selectVersion, touchSession, updateVersion, uploadToStudio,
+  requestStitch, requestVideoEdit, selectVersion, touchSession, updateVersion, uploadToStudio,
 } from '../../lib/creativeStudio'
 
 // ─── Creative Studio ───────────────────────────────────────────────────────
@@ -39,9 +45,14 @@ const RATIOS = ['1:1', '4:5', '9:16', '16:9']
 // lane's 🎬 button. Sessions created under it still open normally (the DB
 // check constraint and openSession's label both still accept it); it just
 // can't be chosen for new work.
+// 'multi_video' IS a third mode, unlike 'image_video': no model here renders a
+// long video affordably (Seedance 2.5 is the only one that reaches 30s at all,
+// at $14.19 a take), so length has to come from several short clips chained
+// and stitched rather than from one long render.
 const INTENTS = [
   { value: 'image', label: 'An image', hint: 'A post, story or ad visual' },
   { value: 'video', label: 'A video',  hint: 'A clip generated straight from a description' },
+  { value: 'multi_video', label: 'A long video', hint: 'Several shots, chained and stitched into one' },
 ]
 const emptyComposer = { text: '', baseId: null, attach: null, refs: [] }
 
@@ -269,6 +280,15 @@ export function CreativeStudio() {
   const [motionPresetId, setMotionPresetId] = useState('')
   const [motionStrength, setMotionStrength] = useState('medium')
   const [lookId, setLookId] = useState('none')
+
+  // Multi-clip. The shot list lives on the SESSION (creative_sessions.
+  // storyboard), not on the version rows, because the video workflow replaces
+  // creative_versions.overlay_state wholesale when it records a fal request
+  // id — anything the browser writes there on a video row is destroyed the
+  // moment the render is submitted. n8n never writes creative_sessions.
+  const [storyboard, setStoryboard] = useState(null)
+  const [stitching, setStitching] = useState(false)
+
   const [videoTarget, setVideoTarget] = useState(null)      // the still being animated
   // Set only by the 🔄 re-render action: the exact prompt/duration/
   // resolution/audio of a past render, so VideoPanel reopens pre-filled
@@ -321,19 +341,42 @@ export function CreativeStudio() {
     return rows
   }, [accessToken])
 
+  const isMulti = session?.intent === 'multi_video'
+
+  // The multi-clip render run. Sequential and browser-driven, same as every
+  // other generation here — see useClipSequencer for why one clip at a time
+  // is a cost safeguard as much as a continuity one.
+  const sequencer = useClipSequencer({
+    session: isMulti ? session : null,
+    versions, storyboard, webhooks,
+    workspaceId: activeWorkspaceId, accessToken,
+    onVersions: rows => setVersions(prev => [...prev, ...rows]),
+    onError: setError,
+    refresh,
+  })
+
   // n8n owns writing results back, so the thread is refreshed from the table
   // rather than from webhook responses — that's also why a refresh or a closed
   // tab mid-generation loses nothing.
+  //
+  // `sequencer.running` is in the condition as well as `anyPending`: between
+  // one clip going ready and the next clip's row existing there is a couple of
+  // seconds with nothing pending at all, and tearing the poller down inside
+  // that gap makes the run depend on the insert to restart it.
   useEffect(() => {
-    if (!session || !anyPending) return
+    if (!session || (!anyPending && !sequencer.running)) return
     const timer = setInterval(() => refresh(session.id), 4000)
     return () => clearInterval(timer)
-  }, [session, anyPending, refresh])
+  }, [session, anyPending, sequencer.running, refresh])
 
   async function openSession(s) {
     setSession(s); setError(''); setVersions([]); setComposers({}); setFocusedBranch(null)
     setAspect(s.aspect_ratio || '4:5')
     setOpeningId(s.id)
+    // Normalised on the way in: a blob written by an older build may be
+    // missing fields added since, and a half-written storyboard must not be
+    // able to crash the page it renders on.
+    setStoryboard(s.intent === 'multi_video' ? normalizeStoryboard(s.storyboard) : null)
     let rows
     try {
       rows = await refresh(s.id)
@@ -342,6 +385,10 @@ export function CreativeStudio() {
       // finishing after a second click must not unmask the empty state.
       setOpeningId(prev => (prev === s.id ? null : prev))
     }
+    // A multi-clip session has no lanes to reopen into — its clips are
+    // siblings on one board, not competing edit lineages, and buildBranches
+    // would read each hard-cut clip as its own chat lane.
+    if (s.intent === 'multi_video') return
     // Reopen where the work was left off: the last lane touched is the one
     // holding the selected version, and only if it has moved past round 0 —
     // landing in a lane you never edited would just hide the comparison.
@@ -358,6 +405,7 @@ export function CreativeStudio() {
     const d = videoDefaults()
     setModelId(d.modelId); setDuration(d.duration); setResolution(d.resolution); setAudio(false)
     setComposers({}); setFocusedBranch(null); setError('')
+    setStoryboard(null); setStitching(false)
   }
 
   // Renamed in place in the list — no need to also touch the open thread's
@@ -514,6 +562,25 @@ export function CreativeStudio() {
       if (enhanced) { originalPrompt = finalPrompt; finalPrompt = enhanced; source = 'enhanced' }
     }
 
+    // Multi-clip starts as a PLAN, not a render: the session is created with
+    // clip 1 already typed, the board opens, and nothing is spent until
+    // "Render all". That gap is deliberate — eight 20s clips on Seedance 2.5
+    // is $75.68, so the storyboard is where the cost becomes visible before
+    // it becomes real, not after.
+    if (intent === 'multi_video') {
+      const sb = emptyStoryboard({ model: modelId, lookId, prompt: finalPrompt })
+      const madeMulti = await createSession(activeWorkspaceId, accessToken, {
+        title: finalPrompt.slice(0, 80), intent, aspectRatio: aspect, storyboard: sb,
+      })
+      setBusy('')
+      if (madeMulti.error) { setError(madeMulti.error); return }
+      const ms = { ...madeMulti.session, storyboard: sb }
+      setSessions(prev => [ms, ...prev])
+      setSession(ms); setStoryboard(sb); setVersions([])
+      setComposers({}); setFocusedBranch(null)
+      return
+    }
+
     const created = await createSession(activeWorkspaceId, accessToken, {
       title: finalPrompt.slice(0, 80), intent, aspectRatio: aspect,
     })
@@ -587,6 +654,80 @@ export function CreativeStudio() {
       refresh(s.id)
     }
   }
+
+  // ── Multi-clip storyboard ──
+  // Every edit writes through to creative_sessions.storyboard immediately.
+  // Not debounced: these are discrete choices (a length, a seam, a toggle),
+  // not keystrokes, and the one field that IS typed into — the prompt —
+  // matters far more than the write it costs. A marketer who types six shot
+  // descriptions and closes the tab must not lose five of them.
+  const patchBoard = useCallback(patch => {
+    setStoryboard(prev => {
+      if (!prev) return prev
+      const next = { ...prev, ...patch }
+      // Switching model re-bases every clip's length and quality: each model
+      // has its own allowed durations (Kling does 5 or 10 only) and some have
+      // no resolution dial at all, so carrying the old values over would send
+      // settings the new endpoint rejects.
+      if (patch.model && patch.model !== prev.model) {
+        const m = getVideoModel(patch.model)
+        next.clips = prev.clips.map(c => ({
+          ...c,
+          duration: m.durations.includes(c.duration) ? c.duration : m.defaultDuration,
+          resolution: m.defaultResolution,
+        }))
+        if (m.audio === 'unsupported') next.audio = false
+      }
+      if (session) saveStoryboard(accessToken, session.id, next)
+      return next
+    })
+  }, [accessToken, session])
+
+  const patchClip = useCallback((index, patch) => {
+    setStoryboard(prev => {
+      if (!prev) return prev
+      const next = { ...prev, clips: prev.clips.map((c, i) => (i === index ? { ...c, ...patch } : c)) }
+      if (session) saveStoryboard(accessToken, session.id, next)
+      return next
+    })
+  }, [accessToken, session])
+
+  const addClip = useCallback(() => {
+    // Disarms any finished run first. Without this, adding a shot after a run
+    // completed makes the board "not all ready" again and the sequencer would
+    // start paying for the new clip the moment it appeared — the storyboard
+    // must never spend without someone pressing Render.
+    sequencer.stop('')
+    setStoryboard(prev => {
+      if (!prev || prev.clips.length >= MULTI_CLIP_MAX) return prev
+      // A new shot continues from the one before it by default — that's the
+      // reason to build a video this way rather than as separate clips.
+      const next = { ...prev, clips: [...prev.clips, newClip(prev.model, { continueFromPrevious: true })] }
+      if (session) saveStoryboard(accessToken, session.id, next)
+      return next
+    })
+  }, [accessToken, session, sequencer])
+
+  const removeClip = useCallback(index => {
+    setStoryboard(prev => {
+      if (!prev || prev.clips.length <= 1) return prev
+      const next = { ...prev, clips: prev.clips.filter((_, i) => i !== index) }
+      // Clip 1 can never continue from something before it.
+      if (next.clips[0]) next.clips[0] = { ...next.clips[0], continueFromPrevious: false }
+      if (session) saveStoryboard(accessToken, session.id, next)
+      return next
+    })
+  }, [accessToken, session])
+
+  // Re-taking one clip. nextClipAttempt gives it a fresh attempt number, so
+  // the unique index never collides with the failed try and the failed row
+  // stays in history rather than being overwritten.
+  const retryClip = useCallback(index => { sequencer.retry(index) }, [sequencer])
+
+  function addStoryboardRef() { setPickerSlot({ id: 'storyboardRef', label: 'Style reference', kind: 'all' }) }
+  const removeStoryboardRef = useCallback(i => {
+    patchBoard({ sharedRefs: (storyboard?.sharedRefs || []).filter((_, n) => n !== i) })
+  }, [patchBoard, storyboard])
 
   // ── Per-lane follow-ups ──
   const nextRound = useMemo(
@@ -834,7 +975,14 @@ export function CreativeStudio() {
       // The still it was animated from IS frame one, exactly — no decoding, no
       // CORS, no guessing. Only a text-to-video clip, which has no source
       // still, has to have a frame read out of it.
-      const still = parentStillOf(version, versions)
+      //
+      // A stitched reel is the worst case for that read: it's the biggest file
+      // in the session and it has no parent at all. Its opening frame is
+      // clip 1's opening frame, so borrow that instead when clip 1 has one.
+      const stitchOpener = version.clip_role === 'stitch'
+        ? (sequencer.clipRows[0]?.image_url || '')
+        : ''
+      const still = stitchOpener || parentStillOf(version, versions)
       const frameUrl = still || await captureFirstFrame(version.video_url)
       setEditingClip({ version, frameUrl })
     } catch (err) {
@@ -853,6 +1001,56 @@ export function CreativeStudio() {
   // that would burn the old wording permanently into the footage while
   // overlay_state replays the same layers on top, so fixing a typo would leave
   // both spellings visible and no way back.
+  // ── Stitch the storyboard into one reel ──
+  // Explicit, never automatic: the clips are reviewed and re-rendered first,
+  // and auto-stitching would burn a pass after every single re-render.
+  //
+  // Never overwrites a previous stitch either — a marketer comparing hard
+  // cuts against a crossfade needs both to still exist, and the version tree
+  // is the studio's whole answer to "keep the earlier one".
+  async function handleStitch() {
+    if (!session || !storyboard) return
+    const rows = sequencer.clipRows
+    if (rows.some(r => r?.status !== 'ready')) { setError('Every clip has to render before the reel can be assembled.'); return }
+    setStitching(true); setError('')
+
+    const clips = rows.map((r, i) => ({
+      url: r.video_url,
+      // The seam BEFORE this clip; clip 0's is ignored by the workflow.
+      transition: i > 0 ? (storyboard.clips[i]?.transition || 'cut') : 'cut',
+      transition_duration: storyboard.clips[i]?.transitionDuration ?? 0.5,
+    }))
+
+    // The reel's expected runtime is stored on the row up front because the
+    // text editor reads `duration` to size its timeline — an empty one would
+    // give a 5-second timeline for a two-minute video.
+    const totals = storyboardTotals(storyboard)
+    const ins = await insertPendingVersions(activeWorkspaceId, accessToken, session.id, [{
+      round: nextRound, kind: 'video', provider: 'manual', mediaType: 'video',
+      clipRole: 'stitch',
+      // Deliberately parentless: it keeps the reel out of every lineage walk
+      // (parentStillOf, the lane chain) and the board finds it by clip_role.
+      parentVersionId: null,
+      userPrompt: `The reel — ${storyboard.clips.length} clips`,
+      aspectRatio: session.aspect_ratio || '',
+      model: storyboard.model,
+      duration: String(Math.round(totals.seconds)),
+      resolution: storyboard.clips[0]?.resolution || '',
+    }])
+    if (ins.error) { setStitching(false); setError(ins.error); return }
+
+    const fired = await requestStitch(webhooks.creativeStitch, {
+      session_id: session.id, version_id: ins.rows[0].id, clips,
+    })
+    setStitching(false)
+    setVersions(prev => [...prev, ...ins.rows])
+    if (fired.error) {
+      setError(fired.error)
+      await updateVersion(accessToken, ins.rows[0].id, { status: 'failed', error: fired.error })
+      refresh(session.id)
+    }
+  }
+
   async function handleComposeSave({ overlays, state: overlayState }) {
     const target = editingClip?.version
     if (!target) return { error: 'No clip to compose onto.' }
@@ -1018,6 +1216,9 @@ export function CreativeStudio() {
   // text, logos, colours — silently isn't there, and it's easy to miss because
   // generation itself keeps working.
   const missingCompose = !!webhooks.creativeVideo && !webhooks.creativeCompose
+  // Only surfaced on a multi-clip session — everywhere else the stitcher is
+  // irrelevant, and a banner about a webhook you don't need is noise.
+  const missingStitch = isMulti && !webhooks.creativeStitch
 
   // What the 📎 mid-conversation picker is actually attaching to — needed
   // because that one picker is shared by every lane, and a still's reference
@@ -1097,6 +1298,15 @@ export function CreativeStudio() {
         </div>
       )}
 
+      {missingStitch && (
+        <div className="mb-4 border border-amber-300 bg-amber-50 px-4 py-3">
+          <p className="text-xs text-amber-900">
+            Joining the clips into one video needs the <span className="font-semibold">Creative Studio — Stitch</span> webhook,
+            which isn't set. The clips will still render; you'd just have to assemble them yourself.
+          </p>
+        </div>
+      )}
+
       <div className="flex flex-col lg:flex-row gap-6">
         <SessionSidebar
           sessions={sessions}
@@ -1120,7 +1330,7 @@ export function CreativeStudio() {
             <Card className="p-5 space-y-4 max-w-2xl">
               <div>
                 <p className="text-xs font-medium text-text-secondary mb-1.5">What are you making?</p>
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                   {INTENTS.map(i => (
                     <button key={i.value} onClick={() => changeIntent(i.value)}
                       className={`text-left border p-2.5 transition-all ${
@@ -1155,13 +1365,18 @@ export function CreativeStudio() {
                         it — the old reference box lived at the bottom of the
                         form, past the settings, which read as a separate step
                         rather than part of what you're asking for. */}
-                    <AttachMenu
-                      slots={intent === 'video' ? VIDEO_MENU_SLOTS : IMAGE_SLOTS}
-                      taken={intent === 'video'
-                        ? { reference: (attachments.reference?.length || 0) >= VIDEO_EDIT_MAX_REFERENCES }
-                        : attachments}
-                      onChoose={openPickerFor}
-                    />
+                    {/* Multi-clip attaches nothing here: its references are
+                        shared by every shot, so they live on the storyboard
+                        itself rather than on this one opening prompt. */}
+                    {intent !== 'multi_video' && (
+                      <AttachMenu
+                        slots={intent === 'video' ? VIDEO_MENU_SLOTS : IMAGE_SLOTS}
+                        taken={intent === 'video'
+                          ? { reference: (attachments.reference?.length || 0) >= VIDEO_EDIT_MAX_REFERENCES }
+                          : attachments}
+                        onChoose={openPickerFor}
+                      />
+                    )}
                     {intent === 'video' && VIDEO_FRAME_SLOTS.map(s => (
                       <FrameSlot key={s.id} label={s.label} hint={s.hint}
                         value={attachments[s.id]}
@@ -1241,9 +1456,15 @@ export function CreativeStudio() {
                 <Select label="Shape" value={aspect} onChange={e => setAspect(e.target.value)}>
                   {RATIOS.map(r => <option key={r} value={r}>{aspectLabel(r)} ({r})</option>)}
                 </Select>
-                {intent !== 'video' && (
+                {intent === 'image' && (
                   <p className="text-[11px] text-text-tertiary mt-1.5">
                     Two options — one from each model — so you can compare and keep going with whichever works.
+                  </p>
+                )}
+                {intent === 'multi_video' && (
+                  <p className="text-[11px] text-text-tertiary mt-1.5">
+                    This becomes the opening shot. You'll add the rest — and pick the model, look and lengths —
+                    on the storyboard next. Nothing renders until you say so.
                   </p>
                 )}
               </div>
@@ -1292,6 +1513,32 @@ export function CreativeStudio() {
             </Card>
           ) : openingId === session.id ? (
             <ThreadSkeleton />
+          /* Before the branches.length check, not after: a multi-clip session
+             starts with a storyboard and ZERO version rows, so the empty state
+             below would swallow the board on every new one. */
+          ) : isMulti && storyboard ? (
+            <ClipBoard
+              storyboard={storyboard}
+              clipRows={sequencer.clipRows}
+              states={sequencer.states}
+              activeIndex={sequencer.activeIndex}
+              running={sequencer.running}
+              allReady={sequencer.allReady}
+              stitchRow={stitchRowsOf(versions)[0] || null}
+              stitching={stitching}
+              onPatchClip={patchClip}
+              onPatchBoard={patchBoard}
+              onAddClip={addClip}
+              onRemoveClip={removeClip}
+              onStart={sequencer.start}
+              onStop={sequencer.stop}
+              onRetryClip={retryClip}
+              onStitch={handleStitch}
+              onAddRef={addStoryboardRef}
+              onRemoveRef={removeStoryboardRef}
+              onOpenStitch={openClipEditor}
+              onDownloadStitch={handleDownload}
+            />
           ) : branches.length === 0 ? (
             <Empty title="Nothing here yet" description="This session has no versions." />
           ) : (
@@ -1366,9 +1613,20 @@ export function CreativeStudio() {
         kind={pickerSlot?.kind || 'image'}
         accessToken={accessToken}
         onUpload={file => uploadReferenceImage(activeWorkspaceId, accessToken, file)}
-        onPick={picked => (pickerSlot.multi
-          ? addAttachment(pickerSlot.id, picked, pickerSlot.max)
-          : setAttachment(pickerSlot.id, picked))}
+        onPick={picked => {
+          // The storyboard's shared references live on the session blob, not
+          // in `attachments` — they apply to every clip rather than to one
+          // pending generation.
+          if (pickerSlot.id === 'storyboardRef') {
+            const refs = storyboard?.sharedRefs || []
+            if (refs.length < 9) patchBoard({ sharedRefs: [...refs, { url: picked.url, name: picked.name || '' }] })
+            setPickerSlot(null)
+            return
+          }
+          return pickerSlot.multi
+            ? addAttachment(pickerSlot.id, picked, pickerSlot.max)
+            : setAttachment(pickerSlot.id, picked)
+        }}
       />
 
       {/* ── Attach a reference (a lane's 📎, mid-conversation) ── */}

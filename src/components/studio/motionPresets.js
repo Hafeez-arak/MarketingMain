@@ -152,16 +152,45 @@ export const LOOK_PRESETS = [
   },
 ]
 
-// Scene, then look, then movement — in that order, because these models weight
-// the opening of the prompt most heavily and the subject must win. Kept as one
-// assembly function so the composer and any future caller can't drift apart on
-// ordering, which measurably changes the render.
-export function buildVideoPrompt({ scene, lookId, motion, strength, duration }) {
+// ── Style bible ────────────────────────────────────────────────────────────
+// The multi-clip equivalent of a look preset, written by hand: the tonal
+// parameters that must not re-roll between shots. Every platform that builds
+// long video out of short clips converges on this — Flow, Higgsfield and LTX
+// all repeat a fixed block across every shot — because a model given only the
+// shot description re-decides the lens, the grade and the light each time.
+//
+// It goes AFTER the scene for the same reason the look preset does (see
+// below), not at the top. Prepending it is the intuitive move and it's wrong:
+// it puts the least specific text in the position these models weight most.
+export const STYLE_BIBLE_PLACEHOLDER =
+  'Shared across every clip — camera signature, lighting, grade, texture.\n' +
+  'e.g. Shot on 35mm anamorphic, T2.8. Warm 3000K practical light against a cool ambient. ' +
+  'Gentle film grain, soft highlight rolloff, no crushed blacks.'
+
+// Appended to a clip that continues from the one before it. Without this, an
+// image-to-video model reads the handed-over last frame as a fresh scene to
+// reinterpret, which is exactly the seam this feature exists to hide.
+export const CONTINUITY_PREFACE =
+  'This shot continues directly from the previous one — the opening frame is the ' +
+  'previous shot’s final frame. Keep the same subject, wardrobe, lighting, lens and ' +
+  'camera position, and carry the existing motion through without resetting it.'
+
+// Scene, then look, then style bible, then movement — in that order, because
+// these models weight the opening of the prompt most heavily and the subject
+// must win. Kept as one assembly function so the composer and any future
+// caller can't drift apart on ordering, which measurably changes the render.
+export function buildVideoPrompt({ scene, lookId, styleBible, motion, strength, duration, continues }) {
   const look = LOOK_PRESETS.find(l => l.id === lookId)
   const parts = [String(scene || '').trim()]
   if (look && look.prompt) parts.push(look.prompt)
+  const bible = String(styleBible || '').trim()
+  if (bible) parts.push(bible)
   const move = String(motion || '').trim()
   if (move) parts.push(paceForDuration(applyStrength(move, strength), duration))
+  // Last, deliberately: it's an instruction about how to treat the input
+  // frame rather than a description of the shot, and burying it among the
+  // scene text gets it read as scene content.
+  if (continues) parts.push(CONTINUITY_PREFACE)
   return parts.filter(Boolean).join('\n\n')
 }
 

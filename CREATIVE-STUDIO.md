@@ -189,9 +189,17 @@ should be put to the marketing team.
 
 **The warning that used to sit here is obsolete.** It was written 2026-08-09
 against Seedance 1.0 Pro (12s max) and concluded a 30s reel had to be stitched
-from 2–3 clips. Seedance **2.5** reaches **30s in a single call**, so the
-stitch step, the visible joins and the whole chaining problem simply don't
-arise. Nothing was built to solve it because nothing needed to be.
+from 2–3 clips. Seedance **2.5** reaches **30s in a single call**, so for a
+single clip the stitch step, the visible joins and the whole chaining problem
+don't arise.
+
+> **Amended 2026-08-12.** Length was never the only constraint — price is the
+> other one, and it is the one that bites. A 30s Seedance 2.5 render at 720p is
+> **$14.19**; the same 30 seconds as 6×5s Kling 2.5 Turbo clips is **$2.10**.
+> So chaining came back, not as a workaround for a ceiling but as the cheap
+> path, and as the only way past 30s at all. See
+> [Multi-clip video](#multi-clip-video--built-2026-08-12) below. Single-clip
+> video is unchanged and is still the right default under 30s.
 
 | Model | Max single clip |
 |---|---|
@@ -217,6 +225,99 @@ the text stays crisp regardless. For a short, premium 1080p piece, Seedance
 
 `end_image_url` remains wired (start/end frame boxes on the video tab) — now
 for deliberate framing rather than as a workaround for a length ceiling.
+
+## Multi-clip video — built 2026-08-12
+
+A third intent (`multi_video`, "A long video") beside image and video: a
+storyboard of N shots, each with its own prompt and length, rendered one at a
+time and joined by local ffmpeg. **Why:** no model here renders long video
+affordably (see the amendment above), and nothing reaches past 30s at all.
+
+This is the shape every platform doing long-form AI video has converged on —
+Pika's Pikaframes, Flow's Scenebuilder, Kling's Multi-Shot, LTX's shot list.
+The interesting part isn't the list, it's how the seams are handled.
+
+**Continuity, in order of how much it does:**
+1. **Chained last frame.** Clip N's final frame becomes clip N+1's start frame
+   (`captureLastFrameBlob` → storage → `image_url`). Per-seam toggle, because
+   a deliberate scene change wants a hard cut and every chained seam is another
+   place for colour and identity to drift.
+2. **One shared reference set** applied to every *unchained* clip.
+3. **A style bible** repeated into every clip's prompt (`buildVideoPrompt`).
+
+### Four things in this pipeline that fail silently
+
+Each was found by reading the code, and each produces wrong output with no
+error at all. They are the reason this feature is shaped the way it is.
+
+- **`reference_image_urls` and `image_url` are mutually exclusive.** Seedance's
+  `build()` in `gen_workflows.py` early-returns on references and never reads
+  `image_url`, so sending both **discards the chained start frame**. A chained
+  clip therefore sends no references, and the seam toggle says so on screen.
+- **The video workflow replaces `overlay_state` wholesale** when it records a
+  fal request id. Anything the browser writes there on a video row is destroyed
+  at submit. That is why the storyboard lives on `creative_sessions.storyboard`
+  — n8n never writes that table. It is also why Stitch must never write
+  `overlay_state`: the Reconcile sweep reads it to find abandoned renders.
+- **`buildBranches` derives a chat lane per `parent_version_id` root.** Six
+  hard-cut clips would have rendered as six side-by-side lanes. Multi-clip
+  bypasses it, and `parent_version_id` keeps its usual meaning ("supersedes")
+  for re-render attempts at the same `clip_index`.
+- **A batch insert shares one `created_at`** (`now()` is the *transaction*
+  timestamp) while `fetchVersions` orders by it. Clip order is therefore read
+  from `clip_index`, never from array position.
+
+### What stops a clip being paid for twice
+
+Not the in-tab ref guard — it can't see a second tab. The guarantee is a
+partial unique index on `(session_id, clip_index, clip_attempt)`. Two racers
+both insert clip 4 attempt 0, one gets `23505` and backs off. No lease, no
+clock skew, nothing a crashed tab can wedge. `clip_run_status` on the session
+is UX only (the "this run stopped" banner) and never gates spending.
+
+Sequential rendering is a cost safeguard as much as a continuity one: a failure
+stops the run instead of paying for every shot after it. Eight 20s clips on
+Seedance 2.5 @720p is **$75.68**, so the board shows a running total and
+nothing renders until someone presses Render.
+
+### The stitcher
+
+`Arak Lighting – Creative Stitch`, free (local ffmpeg, no model call), same
+shape as Compose. **Two shell passes** rather than one: `ffprobe` returns float
+durations and busybox `$(( ))` is integer-only, so pass 1 probes, a Code node
+does the crossfade arithmetic in JS, and pass 2 runs with literals.
+
+Every clip is normalised first — one size (largest clip's, **padded not
+cropped**, since a crop eats composed text), one frame rate, one sample rate.
+**Clips with no audio track get one from `anullsrc`.** That branch is not
+defensive: verified 2026-08-12 against three mismatched clips, skipping it
+produces a 15s video whose audio stops at 6s, and ffmpeg **exits 0**.
+
+The xfade `offset` recurrence is the other thing that's easy to get wrong:
+
+```
+acc = D0
+for i in 1…m-1:
+    F[i]      = min(F[i], 0.5*D[i-1], 0.5*D[i])
+    offset[i] = acc - F[i]
+    acc       = acc + D[i] - F[i]
+```
+
+`offset` is measured on the accumulated stream, which every prior fade has
+already shortened. The naive `sum(D[0..i-1]) - F[i]` puts a transition past the
+end of the stream, which ffmpeg renders as a frozen frame or a black gap
+**without erroring**. The parser also compares the finished duration against
+the prediction and fails on a mismatch, because a dropped segment is otherwise
+a clean exit and a reel with a shot missing.
+
+### The known better shape, not built
+
+Seedance takes `end_image_url` (already wired). Generating the seam stills as
+**images** first would let every clip render with `image_url = still[k]` and
+`end_image_url = still[k+1]` — all clips in **parallel**, continuity exact at
+both ends rather than drifting across a chain. Seedance-only and a bigger UI,
+so v1 chains instead. If a 5-clip drift test shows visible subject drift by
+clip 5, this is the thing to build rather than tuning prompts.
 
 ### …which also solves requirement 10 (editable text on video) — built 2026-08-11
 
