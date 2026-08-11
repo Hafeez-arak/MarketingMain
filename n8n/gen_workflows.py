@@ -52,6 +52,25 @@ def _assign_deterministic_ids(wf: dict) -> None:
         seed = f"{wf['name']}::{name}::{occurrence}"
         node["id"] = str(uuid.uuid5(_ID_NAMESPACE, seed))
 
+    # The WORKFLOW's own id, derived the same way, and it fixes a real problem:
+    # `n8n import:workflow` keys on this field, so a file without one made the
+    # importer mint a fresh id every time and create a whole SECOND workflow
+    # with the same name rather than updating the first — both published, both
+    # listening on the same webhook path, with no defined winner. (That had
+    # already happened to Creative Video, twice over, by 2026-08-11.) With a
+    # stable id, re-importing updates in place, which is what the README's
+    # wipe-and-reimport dance existed to work around.
+    #
+    # n8n ids are 16 characters from [A-Za-z0-9]; uuid5 over the name gives a
+    # deterministic 128 bits to cut that out of.
+    alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+    n = uuid.uuid5(_ID_NAMESPACE, f"workflow::{wf['name']}").int
+    chars = []
+    for _ in range(16):
+        n, rem = divmod(n, len(alphabet))
+        chars.append(alphabet[rem])
+    wf["id"] = "".join(chars)
+
 
 # ============================================================
 # Code-node JavaScript bodies (Instagram / LinkedIn Content Generation v2)

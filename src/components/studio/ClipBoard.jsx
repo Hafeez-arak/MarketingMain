@@ -1,4 +1,5 @@
-import { Button, Spinner, Textarea, Toggle } from '../ui/index'
+import { useState } from 'react'
+import { Button, ConfirmDialog, Spinner, Textarea, Toggle } from '../ui/index'
 import { MultiRefRow } from './MediaPicker'
 import { LookPicker, ModelPicker } from './VideoSettings'
 import { STYLE_BIBLE_PLACEHOLDER } from './motionPresets'
@@ -183,6 +184,7 @@ export function ClipBoard({
   onStart, onStop, onRetryClip, onStitch, onAddRef, onRemoveRef,
   onOpenStitch, onDownloadStitch,
 }) {
+  const [confirming, setConfirming] = useState(false)
   const model = getVideoModel(storyboard.model)
   const totals = storyboardTotals(storyboard)
   const clips = storyboard.clips
@@ -191,6 +193,16 @@ export function ClipBoard({
   // so deleting one re-labels every rendered clip after it. Re-render freely,
   // append freely, delete only what hasn't been paid for.
   const renderedCount = clipRows.filter(Boolean).length
+
+  // What pressing the button ACTUALLY costs, which is not the board total once
+  // some clips are already rendered — a Continue after four of six shots is a
+  // third of the price, and quoting the full figure would train people to
+  // ignore it.
+  const pending = clips.filter((_, i) => states[i] !== 'ready')
+  const pendingCost = pending.reduce(
+    (sum, c) => sum + estimateVideoCost(model.id, { resolution: c.resolution, duration: c.duration, audio: !!storyboard.audio }),
+    0,
+  )
 
   return (
     <div className="space-y-3">
@@ -291,9 +303,14 @@ export function ClipBoard({
               </span>
             </>
           ) : (
-            <Button size="sm" onClick={onStart}
-              disabled={!clips.some(c => c.prompt.trim())}>
-              {renderedCount > 0 ? '▶ Continue rendering' : `▶ Render all ${clips.length} clips`}
+            // The cost is ON the button, not only in the dialog behind it.
+            // This is the most expensive control in the app and the amount
+            // changes with every length and quality tweak above it.
+            <Button size="sm" onClick={() => setConfirming(true)}
+              disabled={!clips.some(c => c.prompt.trim()) || pending.length === 0}>
+              {renderedCount > 0
+                ? `▶ Render the remaining ${pending.length} · ${money(pendingCost)}`
+                : `▶ Render all ${clips.length} clips · ${money(pendingCost)}`}
             </Button>
           )}
 
@@ -309,6 +326,21 @@ export function ClipBoard({
           </p>
         )}
       </div>
+
+      {/* Real money, spent by one click, and nothing recovers it once fal has
+          run. The dialog names the amount and the shot count rather than
+          asking "are you sure" — the number is the thing worth reading. */}
+      <ConfirmDialog
+        open={confirming}
+        onClose={() => setConfirming(false)}
+        onConfirm={onStart}
+        title={renderedCount > 0 ? 'Render the rest?' : 'Render the storyboard?'}
+        message={
+          `This renders ${pending.length} clip${pending.length === 1 ? '' : 's'} on ${model.label} ` +
+          `and costs about ${money(pendingCost)}. They render one at a time, so if one fails the run ` +
+          `stops there rather than paying for the rest.`
+        }
+      />
 
       {/* ── The reel ── */}
       {stitchRow && (

@@ -45,27 +45,51 @@ docker exec arak-marketing-n8n n8n publish:workflow --id=<id>   # repeat per wor
 docker compose restart n8n
 ```
 
-**Gotcha — re-importing does NOT update in place.** `gen_workflows.py`
-mints fresh random node/workflow IDs on every run (`nid()`), so a second
-`import:workflow` creates a whole SECOND set of workflows with the same
-names rather than replacing the first — both end up published, both
-listening on the same webhook paths, with no defined winner. This CLI
-version of n8n has no `delete:workflow` command either, so there's no
-clean way to remove just the stale set.
+You can also import a single workflow rather than the whole directory,
+which is what you want after changing just one:
 
-The reliable fix, since nothing valuable lives in this instance except
-imported workflow definitions (no real secrets should be typed into the
-n8n UI itself — they live in `.env` — and no execution history matters
-long-term): wipe and reimport clean.
+```bash
+docker exec arak-marketing-n8n n8n import:workflow \
+  --input="/workflows/Arak Lighting – Creative Stitch.json"
+```
+
+### Re-importing updates in place — fixed 2026-08-11
+
+**It didn't used to.** `gen_workflows.py` emitted no workflow-level `id`,
+and `import:workflow` keys on exactly that field, so every import minted a
+fresh id and created a whole SECOND workflow with the same name — both
+published, both listening on the same webhook path, with no defined
+winner. This CLI has no `delete:workflow`, so the only fix was to wipe the
+volume and reimport everything.
+
+`_assign_deterministic_ids()` now derives the workflow's id from its name
+(uuid5 → 16 chars of `[A-Za-z0-9]`, n8n's id shape), the same way node ids
+were already derived. Re-importing the same file now overwrites the same
+row. Verified by importing Creative Stitch twice and counting one workflow.
+
+**Two caveats.**
+
+1. Workflows imported *before* this fix still carry their old random ids,
+   so re-importing those files creates one final duplicate — the new,
+   stable-id copy — alongside the stale one. Check for leftovers with
+   `n8n list:workflow` and look for repeated names.
+2. **There is a known leftover right now:** `Arak Lighting – Creative
+   Video` exists twice (`NRLhBMQ0fDGhgCaW` and `bOZLNnrFOxH3X3kQ`), from
+   before the fix. Both claim `arak-creative-video`. Worth clearing.
+
+To clear leftovers, the wipe is still the only CLI-clean route — nothing
+valuable lives in this instance (secrets are in `.env`, not the n8n UI):
 
 ```bash
 docker compose down -v      # removes the container AND its volume
 docker compose up -d
 docker exec arak-marketing-n8n n8n import:workflow --separate --input=/workflows
-docker exec arak-marketing-n8n n8n list:workflow            # get the fresh ids
+docker exec arak-marketing-n8n n8n list:workflow            # ids are now stable
 docker exec arak-marketing-n8n n8n publish:workflow --id=<id>   # repeat per workflow
 docker compose restart n8n
 ```
+
+After this one wipe, ids stay put and ordinary re-imports are safe.
 
 If this instance ever DOES hold something worth keeping (saved
 credentials, execution history you care about), export it first —

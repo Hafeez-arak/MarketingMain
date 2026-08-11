@@ -32,6 +32,12 @@
 -- side-by-side lanes.
 --
 -- Run ONCE in the Supabase SQL editor. Idempotent + additive.
+--
+-- APPLIED to the live project (vxjhfvehccftvajgtqtv) 2026-08-11, recorded as
+-- migration 20260811151132 creative_multi_clip. Verified against the live
+-- schema: all five columns, both indexes (with the partial predicate) and the
+-- widened intent constraint are present and match this file. Kept here as the
+-- repo's record of what the schema is, like every other file in this folder.
 -- ════════════════════════════════════════════════════════════════════════
 
 -- ── Sessions ───────────────────────────────────────────────────────────
