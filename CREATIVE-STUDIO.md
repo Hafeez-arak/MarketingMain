@@ -193,13 +193,23 @@ from 2–3 clips. Seedance **2.5** reaches **30s in a single call**, so for a
 single clip the stitch step, the visible joins and the whole chaining problem
 don't arise.
 
-> **Amended 2026-08-12.** Length was never the only constraint — price is the
-> other one, and it is the one that bites. A 30s Seedance 2.5 render at 720p is
-> **$14.19**; the same 30 seconds as 6×5s Kling 2.5 Turbo clips is **$2.10**.
-> So chaining came back, not as a workaround for a ceiling but as the cheap
-> path, and as the only way past 30s at all. See
-> [Multi-clip video](#multi-clip-video--built-2026-08-12) below. Single-clip
-> video is unchanged and is still the right default under 30s.
+> **Amended 2026-08-11.** Length is still the constraint, but the ceiling is
+> lower than "30s" suggests and price interacts with it. Two facts, stated
+> carefully because it is easy to conflate them:
+>
+> - **Every model here prices per second.** The same footage costs the same
+>   whether it arrives as one clip or six. **Splitting a video does not save
+>   money by itself** — an earlier draft of this note implied it did, and the
+>   UI briefly claimed it too.
+> - **What saves money is using a cheaper model, and the cheap models have
+>   short ceilings.** Kling 2.5 Turbo is $0.07/s against Seedance 2.5's
+>   $0.2205/s at 480p — but Kling stops at **10s**. So 30s of Kling costs
+>   $2.10 versus $6.62 of Seedance, and is *only reachable* as 3 clips.
+>
+> Multi-clip is therefore what makes the cheap models usable at length, and
+> the only route past 30s at all. See
+> [Multi-clip video](#multi-clip-video--built-2026-08-11) below. Single-clip
+> is unchanged and still the right default for one shot under 30s.
 
 | Model | Max single clip |
 |---|---|
@@ -226,7 +236,7 @@ the text stays crisp regardless. For a short, premium 1080p piece, Seedance
 `end_image_url` remains wired (start/end frame boxes on the video tab) — now
 for deliberate framing rather than as a workaround for a length ceiling.
 
-## Multi-clip video — built 2026-08-12
+## Multi-clip video — built 2026-08-11
 
 A third intent (`multi_video`, "A long video") beside image and video: a
 storyboard of N shots, each with its own prompt and length, rendered one at a
@@ -290,7 +300,7 @@ does the crossfade arithmetic in JS, and pass 2 runs with literals.
 Every clip is normalised first — one size (largest clip's, **padded not
 cropped**, since a crop eats composed text), one frame rate, one sample rate.
 **Clips with no audio track get one from `anullsrc`.** That branch is not
-defensive: verified 2026-08-12 against three mismatched clips, skipping it
+defensive: verified 2026-08-11 against three mismatched clips, skipping it
 produces a 15s video whose audio stops at 6s, and ffmpeg **exits 0**.
 
 The xfade `offset` recurrence is the other thing that's easy to get wrong:

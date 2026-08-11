@@ -198,6 +198,10 @@ export function ClipBoard({
   // some clips are already rendered — a Continue after four of six shots is a
   // third of the price, and quoting the full figure would train people to
   // ignore it.
+  // The longest single render this model can produce — durations are listed
+  // shortest-first in the catalog, so the ceiling is the last one.
+  const maxSingleTake = Number(model.durations[model.durations.length - 1]) || 0
+
   const pending = clips.filter((_, i) => states[i] !== 'ready')
   const pendingCost = pending.reduce(
     (sum, c) => sum + estimateVideoCost(model.id, { resolution: c.resolution, duration: c.duration, audio: !!storyboard.audio }),
@@ -282,15 +286,19 @@ export function ClipBoard({
           </p>
         </div>
 
-        {/* The comparison that justifies this whole feature — and the one a
-            marketer can't make in their head, because the per-second rates
-            differ by model and by quality tier. */}
+        {/* What splitting the video ACTUALLY buys, which depends on the length.
+            An earlier version of this line quoted "one single render would
+            cost X" as if that were a saving — it isn't: every model here
+            prices per second, so the same footage costs the same whether it
+            arrives as one clip or six. The saving comes from picking a cheaper
+            MODEL, which is the picker above, not from splitting. Past the
+            model's ceiling the argument isn't money at all — it's that a
+            single render cannot produce the length. */}
         {totals.count > 1 && (
           <p className="text-[10px] text-text-tertiary leading-snug">
-            One single render of {Math.round(totals.rawSeconds)}s on this model would be{' '}
-            {money(estimateVideoCost(model.id, {
-              resolution: clips[0]?.resolution, duration: totals.rawSeconds, audio: !!storyboard.audio,
-            }))} — and no model here renders that long in one take.
+            {totals.rawSeconds > maxSingleTake
+              ? `${model.label} renders at most ${maxSingleTake}s in one take, so ${Math.round(totals.rawSeconds)}s can only be built as separate clips.`
+              : `${Math.round(totals.rawSeconds)}s would also fit in one ${maxSingleTake}s render on ${model.label} — clips are for directing each shot separately, and they cost the same per second.`}
           </p>
         )}
 
