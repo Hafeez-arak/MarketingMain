@@ -80,6 +80,45 @@ and n8n aren't on the same machine later (real deployment), swap
 `localhost:5680` for wherever this container ends up running — nothing
 else about the setup changes.
 
+## Going live for testing (Cloudflare Tunnel)
+
+To let people off this machine (e.g. the marketing team) reach this n8n
+instance — for example while the frontend is deployed somewhere that isn't
+`localhost` — run:
+
+```bash
+n8n/docker/start-tunnel.sh
+```
+
+This starts a **Cloudflare quick tunnel** (`cloudflared tunnel --url
+http://localhost:5680`) and prints a random `https://*.trycloudflare.com`
+URL that proxies straight to this container. No Cloudflare account, no
+domain, nothing to sign up for — it's live within seconds of running the
+script, and dies the moment you `Ctrl+C` it (runs in the foreground on
+purpose, so it can't linger unnoticed).
+
+Once you have the URL, every webhook entry in the app's **Settings →
+Workflow Webhooks** needs its host swapped to it, keeping the same
+`/webhook/<path>` suffix — e.g.
+`https://<tunnel>.trycloudflare.com/webhook/arak-creative-generate`. There
+are ~19 of them (see `src/pages/settings/index.jsx`), and **the URL changes
+every time the tunnel restarts**, so avoid restarting it mid-testing or
+everyone's saved webhooks silently break.
+
+**Security note before sharing the URL with anyone:** this container has
+`ExecuteCommand` enabled and real provider API keys in its environment
+(Anthropic, Supabase service role, fal, Replicate) — a trade-off accepted in
+`docker-compose.yml` specifically because the instance was localhost-only.
+A quick tunnel has **no login wall**, so anyone who obtains the URL can open
+the n8n editor and both read those keys via `$env` in a Code node and run
+shell commands in the container. Treat the URL as a secret while testing,
+and don't leave the tunnel running unattended longer than a session.
+
+For anything longer-lived than a short test window, upgrade to a **named
+tunnel** behind **Cloudflare Access** (free) instead — that needs a domain
+added to your Cloudflare account (not set up yet; revisit once one's
+picked), and gets you a stable hostname plus a login wall in front of it.
+
 ## Updating secrets
 
 Edit `.env`, then `docker compose restart n8n` — env var changes only
