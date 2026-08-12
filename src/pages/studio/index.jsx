@@ -736,10 +736,17 @@ export function CreativeStudio() {
       // settings the new endpoint rejects.
       if (patch.model && patch.model !== prev.model) {
         const m = getVideoModel(patch.model)
+        // Images get re-based along with length and quality, because how many
+        // a model can use changes too: Seedance reads up to nine as references,
+        // everything else takes exactly one as a start frame. Without this a
+        // board built on Seedance and switched to Hailuo keeps nine images per
+        // shot, shows "9/1", and quietly renders using only the first.
+        const cap = modelImageMax(patch.model)
         next.clips = prev.clips.map(c => ({
           ...c,
           duration: m.durations.includes(c.duration) ? c.duration : m.defaultDuration,
           resolution: m.defaultResolution,
+          refs: (c.refs || []).slice(0, cap),
         }))
         if (m.audio === 'unsupported') next.audio = false
       }
