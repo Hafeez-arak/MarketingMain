@@ -172,6 +172,62 @@ export function clipState(row) {
   return row.status === 'ready' ? 'ready' : row.status === 'failed' ? 'failed' : 'pending'
 }
 
+// ── Seams that no longer connect ───────────────────────────────────────────
+// Re-rendering one shot does NOT re-render the shots that continue from it.
+// Clip N+1 was generated from a still of the take clip N *used* to be, so the
+// moment clip N is replaced, that seam is joining two shots that were never
+// continuous — and nothing about the footage says so. The reel just has a jump
+// in the middle of what was sold as one unbroken move.
+//
+// Derived from created_at rather than tracked, because the ordering already
+// carries the answer: a chained clip is always rendered AFTER the clip it
+// continues from, so a chained clip older than its predecessor can only mean
+// the predecessor was re-rendered underneath it. Clips are inserted one at a
+// time here, so they never share the batch-insert timestamp that makes
+// created_at unreliable elsewhere in this file (strict `<`, so a tie is never
+// read as stale).
+//
+// The comparison is against the underlying TAKE, not the row: stamping text on
+// clip 2 mints a fresh overlay row that becomes clip 2's current take, and
+// comparing that row's timestamp would report clip 3's seam as broken when the
+// footage beneath the lettering never changed.
+function takeTimeOf(row, byId) {
+  let cur = row
+  for (let hops = 0; cur && cur.kind === 'overlay' && cur.parent_version_id && hops < 8; hops += 1) {
+    const parent = byId.get(cur.parent_version_id)
+    if (!parent) break
+    cur = parent
+  }
+  return cur?.created_at || row?.created_at || ''
+}
+
+export function staleSeams(sb, clipRows, versions) {
+  const out = new Set()
+  const clips = sb?.clips || []
+  const byId = new Map((versions || []).map(v => [v.id, v]))
+  for (let i = 1; i < clips.length; i += 1) {
+    if (!clips[i]?.continueFromPrevious) continue
+    const here = takeTimeOf(clipRows?.[i], byId)
+    const prev = takeTimeOf(clipRows?.[i - 1], byId)
+    if (!here || !prev) continue
+    if (new Date(here) < new Date(prev)) out.add(i)
+  }
+  return out
+}
+
+// The clips that continue, unbroken, from clip `index` — i.e. everything a
+// re-render of that clip leaves stranded. Stops at the first new shot, since a
+// hard cut was never continuous in the first place.
+export function chainedAfter(sb, index) {
+  const clips = sb?.clips || []
+  const out = []
+  for (let i = index + 1; i < clips.length; i += 1) {
+    if (!clips[i]?.continueFromPrevious) break
+    out.push(i)
+  }
+  return out
+}
+
 // ── Totals ─────────────────────────────────────────────────────────────────
 
 // Crossfades shorten the reel: each one overlaps its two neighbours, so the

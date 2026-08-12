@@ -1,10 +1,12 @@
 import { useState } from 'react'
-import { Button, ConfirmDialog, Spinner, Textarea, Toggle } from '../ui/index'
+import { Button, ConfirmDialog, Modal, Spinner, Textarea, Toggle } from '../ui/index'
 import { MultiRefRow } from './MediaPicker'
 import { LookPicker, ModelPicker } from './VideoSettings'
 import { STYLE_BIBLE_PLACEHOLDER } from './motionPresets'
 import { getVideoModel, estimateVideoCost } from './videoModels'
-import { MULTI_CLIP_MAX, storyboardTotals } from '../../lib/creativeStoryboard'
+import {
+  MULTI_CLIP_MAX, chainedAfter, clipPromptFor, staleSeams, storyboardTotals,
+} from '../../lib/creativeStoryboard'
 
 // ─── The storyboard ────────────────────────────────────────────────────────
 // A long video is a list of shots. Each gets its own prompt, its own length
@@ -14,7 +16,9 @@ import { MULTI_CLIP_MAX, storyboardTotals } from '../../lib/creativeStoryboard'
 // prompt cannot direct a minute of footage.
 //
 // Presentational. Every action is a prop, matching BranchChat's contract, so
-// the render run's state machine lives entirely in useClipSequencer.
+// the render run's state machine lives entirely in useClipSequencer. The one
+// exception is the preview modal below, which only ever displays a URL the
+// board already holds.
 //
 // What is session-level and what is per-clip is deliberate:
 //  · MODEL is session-level. Mixing Veo (8s, its own grade, 16:9 only) with
@@ -43,61 +47,117 @@ function StateDot({ state }) {
 //  · CROSSFADE vs HARD CUT is about assembly — what ffmpeg does at the join.
 // A continued seam almost always wants a hard cut at assembly, because the
 // footage already flows; crossfading it would blur a continuous shot.
-function Seam({ clip, index, onPatch, disabled }) {
+function Seam({ clip, index, startFrameUrl, sharedRefs, stale, onPatch, onPreviewFrame, disabled }) {
   const continues = !!clip.continueFromPrevious
   return (
-    <div className="flex flex-wrap items-center gap-2 pl-3 py-1.5 border-l-2 border-dashed border-stone-300 ml-3">
-      <div className="flex">
-        <button type="button" disabled={disabled}
-          onClick={() => onPatch(index, { continueFromPrevious: true })}
-          className={`text-[10px] px-2 py-1 border transition-colors disabled:opacity-40 ${
-            continues ? 'border-amber-500 bg-amber-50 text-amber-800 font-semibold' : 'border-border text-text-tertiary hover:border-amber-300'
-          }`}>
-          Continue from previous
-        </button>
-        <button type="button" disabled={disabled}
-          onClick={() => onPatch(index, { continueFromPrevious: false })}
-          className={`text-[10px] px-2 py-1 border border-l-0 transition-colors disabled:opacity-40 ${
-            !continues ? 'border-amber-500 bg-amber-50 text-amber-800 font-semibold' : 'border-border text-text-tertiary hover:border-amber-300'
-          }`}>
-          New shot
-        </button>
+    <div className="pl-3 py-1.5 border-l-2 border-dashed border-stone-300 ml-3 space-y-1.5">
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="flex">
+          <button type="button" disabled={disabled}
+            onClick={() => onPatch(index, { continueFromPrevious: true })}
+            className={`text-[10px] px-2 py-1 border transition-colors disabled:opacity-40 ${
+              continues ? 'border-amber-500 bg-amber-50 text-amber-800 font-semibold' : 'border-border text-text-tertiary hover:border-amber-300'
+            }`}>
+            Continue from previous
+          </button>
+          <button type="button" disabled={disabled}
+            onClick={() => onPatch(index, { continueFromPrevious: false })}
+            className={`text-[10px] px-2 py-1 border border-l-0 transition-colors disabled:opacity-40 ${
+              !continues ? 'border-amber-500 bg-amber-50 text-amber-800 font-semibold' : 'border-border text-text-tertiary hover:border-amber-300'
+            }`}>
+            New shot
+          </button>
+        </div>
+
+        <span className="text-[10px] text-text-tertiary">·</span>
+
+        <div className="flex">
+          <button type="button" disabled={disabled}
+            onClick={() => onPatch(index, { transition: 'cut' })}
+            className={`text-[10px] px-2 py-1 border transition-colors disabled:opacity-40 ${
+              clip.transition !== 'crossfade' ? 'border-stone-400 bg-surface-subtle text-text font-semibold' : 'border-border text-text-tertiary hover:border-stone-400'
+            }`}>
+            Hard cut
+          </button>
+          <button type="button" disabled={disabled}
+            onClick={() => onPatch(index, { transition: 'crossfade' })}
+            className={`text-[10px] px-2 py-1 border border-l-0 transition-colors disabled:opacity-40 ${
+              clip.transition === 'crossfade' ? 'border-stone-400 bg-surface-subtle text-text font-semibold' : 'border-border text-text-tertiary hover:border-stone-400'
+            }`}>
+            Crossfade
+          </button>
+        </div>
+
+        {clip.transition === 'crossfade' && (
+          <select value={clip.transitionDuration} disabled={disabled}
+            onChange={e => onPatch(index, { transitionDuration: Number(e.target.value) })}
+            className="text-[10px] bg-white border border-border px-1.5 py-1 focus:outline-none focus:border-amber-400">
+            {[0.25, 0.5, 0.75, 1, 1.5].map(d => <option key={d} value={d}>{d}s</option>)}
+          </select>
+        )}
+
+        {/* The one thing a marketer cannot discover on their own: the render
+            endpoint takes EITHER a start frame or style references, never both,
+            so continuing a shot silently costs it the shared references. */}
+        {continues && (
+          <span className="text-[10px] text-text-tertiary leading-snug">
+            Uses the previous clip's last frame, so the shared references don't apply here.
+          </span>
+        )}
       </div>
 
-      <span className="text-[10px] text-text-tertiary">·</span>
-
-      <div className="flex">
-        <button type="button" disabled={disabled}
-          onClick={() => onPatch(index, { transition: 'cut' })}
-          className={`text-[10px] px-2 py-1 border transition-colors disabled:opacity-40 ${
-            clip.transition !== 'crossfade' ? 'border-stone-400 bg-surface-subtle text-text font-semibold' : 'border-border text-text-tertiary hover:border-stone-400'
-          }`}>
-          Hard cut
-        </button>
-        <button type="button" disabled={disabled}
-          onClick={() => onPatch(index, { transition: 'crossfade' })}
-          className={`text-[10px] px-2 py-1 border border-l-0 transition-colors disabled:opacity-40 ${
-            clip.transition === 'crossfade' ? 'border-stone-400 bg-surface-subtle text-text font-semibold' : 'border-border text-text-tertiary hover:border-stone-400'
-          }`}>
-          Crossfade
-        </button>
+      {/* ── What clip N+1 is actually born from ──
+          The single most invisible thing in this feature. A chained clip is
+          generated from ONE still — the previous clip's final frame, grabbed
+          by seeking a hair before the end — and when that grab lands on a
+          motion-blurred or half-faded frame, the only symptom is "this shot
+          looks wrong" with nothing to inspect. It's already uploaded and
+          already on the row, so show it. */}
+      <div className="flex items-center gap-2">
+        {continues ? (
+          startFrameUrl ? (
+            <>
+              <button type="button" onClick={() => onPreviewFrame(startFrameUrl)}
+                title="See this frame full size"
+                className="w-11 h-11 border border-border hover:border-amber-400 overflow-hidden flex-shrink-0">
+                <img src={startFrameUrl} alt="" className="w-full h-full object-cover" />
+              </button>
+              <span className="text-[10px] text-text-tertiary leading-snug">
+                Clip {index + 1} starts from this frame.
+              </span>
+            </>
+          ) : (
+            <span className="text-[10px] text-text-tertiary leading-snug">
+              Clip {index + 1} will start from clip {index}'s last frame, once clip {index} has rendered.
+            </span>
+          )
+        ) : sharedRefs.length ? (
+          <>
+            <div className="flex gap-1">
+              {sharedRefs.slice(0, 4).map((r, n) => (
+                <button key={n} type="button" onClick={() => onPreviewFrame(r.url)}
+                  className="w-11 h-11 border border-border hover:border-amber-400 overflow-hidden flex-shrink-0">
+                  <img src={r.url} alt="" className="w-full h-full object-cover" />
+                </button>
+              ))}
+            </div>
+            <span className="text-[10px] text-text-tertiary leading-snug">
+              Clip {index + 1} starts fresh, guided by {sharedRefs.length === 1 ? 'this reference' : `these ${sharedRefs.length} references`}.
+            </span>
+          </>
+        ) : (
+          <span className="text-[10px] text-text-tertiary leading-snug">
+            Clip {index + 1} starts fresh from its prompt alone.
+          </span>
+        )}
       </div>
 
-      {clip.transition === 'crossfade' && (
-        <select value={clip.transitionDuration} disabled={disabled}
-          onChange={e => onPatch(index, { transitionDuration: Number(e.target.value) })}
-          className="text-[10px] bg-white border border-border px-1.5 py-1 focus:outline-none focus:border-amber-400">
-          {[0.25, 0.5, 0.75, 1, 1.5].map(d => <option key={d} value={d}>{d}s</option>)}
-        </select>
-      )}
-
-      {/* The one thing a marketer cannot discover on their own: the render
-          endpoint takes EITHER a start frame or style references, never both,
-          so continuing a shot silently costs it the shared references. */}
-      {continues && (
-        <span className="text-[10px] text-text-tertiary leading-snug">
-          Uses the previous clip's last frame, so the shared references don't apply here.
-        </span>
+      {stale && (
+        <p className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 px-2 py-1 leading-snug">
+          This seam no longer connects — clip {index} was re-rendered after clip {index + 1},
+          so clip {index + 1} still continues from a frame that isn't in the reel any more.
+          Re-render clip {index + 1} to close it.
+        </p>
       )}
     </div>
   )
@@ -105,22 +165,41 @@ function Seam({ clip, index, onPatch, disabled }) {
 
 // ── One shot ───────────────────────────────────────────────────────────────
 function ClipCard({
-  clip, index, row, state, model, audio, active,
-  onPatch, onRemove, onRetry, canRemove, disabled,
+  clip, index, row, state, model, audio, active, promptText, preparing,
+  onPatch, onRemove, onRetry, onRerender, onAddText, onPreview,
+  canRemove, disabled,
 }) {
   const cost = estimateVideoCost(model.id, { resolution: clip.resolution, duration: clip.duration, audio })
+  const ready = state === 'ready' && !!row?.video_url
+  // A composite has been through the text editor; the take you'd re-render is
+  // still the clip underneath it.
+  const composited = row?.kind === 'overlay'
 
   return (
     <div className={`border p-3 space-y-2 transition-colors ${
       active ? 'border-amber-500 ring-1 ring-amber-300 bg-amber-50/40' : 'border-border bg-white'
     }`}>
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 flex-wrap">
         <StateDot state={state} />
         <p className="text-xs font-semibold text-text">Clip {index + 1}</p>
         <span className="text-[10px] text-text-tertiary">{clip.duration}s · {money(cost)}</span>
+        {composited && <span className="text-[10px] text-emerald-700">· text added</span>}
         <div className="flex-1" />
         {state === 'failed' && (
           <Button size="xs" variant="secondary" onClick={() => onRetry(index)} disabled={disabled}>Retry</Button>
+        )}
+        {ready && (
+          <>
+            <Button size="xs" variant="secondary" onClick={() => onAddText(row)} disabled={disabled || !!preparing}>
+              {preparing ? <><Spinner size="sm" /> Opening…</> : '✏️ Text'}
+            </Button>
+            {/* Re-rendering one shot is the only way to fix a take that came
+                back wrong, and it costs the same as the first one did — so the
+                price is on the button, exactly like Render all. */}
+            <Button size="xs" variant="secondary" onClick={() => onRerender(index)} disabled={disabled}>
+              ↻ Re-render · {money(cost)}
+            </Button>
+          </>
         )}
         {canRemove && (
           <button type="button" onClick={() => onRemove(index)} disabled={disabled}
@@ -131,8 +210,13 @@ function ClipCard({
 
       <div className="flex gap-3">
         {/* The render itself once there is one, so the board reads as a
-            storyboard rather than a form. */}
-        <div className="w-24 h-24 flex-shrink-0 border border-border bg-surface-subtle flex items-center justify-center">
+            storyboard rather than a form. Hover previews the movement; click
+            opens it at a size you can actually judge. */}
+        <button type="button" disabled={!ready} onClick={() => onPreview(row, index)}
+          title={ready ? 'Watch this clip' : undefined}
+          className={`w-24 h-24 flex-shrink-0 border border-border bg-surface-subtle flex items-center justify-center overflow-hidden ${
+            ready ? 'hover:border-amber-400 cursor-pointer' : 'cursor-default'
+          }`}>
           {row?.video_url
             ? <video src={row.video_url} className="w-full h-full object-cover" muted playsInline controls={false}
                 onMouseEnter={e => e.currentTarget.play().catch(() => {})}
@@ -140,7 +224,7 @@ function ClipCard({
             : state === 'pending'
               ? <Spinner size="sm" />
               : <span className="text-[10px] text-text-tertiary text-center px-1">No take yet</span>}
-        </div>
+        </button>
 
         <div className="flex-1 min-w-0 space-y-2">
           <Textarea rows={2} autoGrow value={clip.prompt} disabled={disabled}
@@ -168,6 +252,22 @@ function ClipCard({
               className="flex-1 min-w-[8rem] text-[11px] bg-white border border-border px-2 py-1 focus:outline-none focus:border-amber-400" />
           </div>
 
+          {/* What the model is SENT, which is never what was typed: the look
+              preset, the style bible and the continuity line are all folded in
+              on the way out. Collapsed, because it's only wanted when a shot
+              keeps coming back wrong — and then it's the first thing to read. */}
+          {clip.prompt.trim() && (
+            <details className="group">
+              <summary className="text-[10px] text-text-tertiary cursor-pointer hover:text-text-secondary list-none marker:content-['']">
+                <span className="group-open:hidden">▸ See the exact prompt this shot renders with</span>
+                <span className="hidden group-open:inline">▾ The exact prompt this shot renders with</span>
+              </summary>
+              <p className="mt-1 text-[10px] text-text-secondary bg-surface-subtle border border-border p-2 whitespace-pre-wrap leading-snug">
+                {promptText}
+              </p>
+            </details>
+          )}
+
           {row?.status === 'failed' && row.error && (
             <p className="text-[10px] text-red-600 leading-snug">{row.error}</p>
           )}
@@ -179,12 +279,19 @@ function ClipCard({
 
 // ── The board ──────────────────────────────────────────────────────────────
 export function ClipBoard({
-  storyboard, clipRows, states, activeIndex, running, allReady, stitchRow, stitching,
+  storyboard, clipRows, versions, states, activeIndex, running, allReady, stitchRow, stitching,
+  preparingClipId,
   onPatchClip, onPatchBoard, onAddClip, onRemoveClip,
-  onStart, onStop, onRetryClip, onStitch, onAddRef, onRemoveRef,
-  onOpenStitch, onDownloadStitch,
+  onStart, onStop, onRetryClip, onRerenderClip, onStitch, onAddRef, onRemoveRef,
+  onOpenClip, onDownloadStitch,
 }) {
   const [confirming, setConfirming] = useState(false)
+  // Which clip a re-render is being confirmed for. A number, not a boolean —
+  // the dialog names the shot and its downstream damage.
+  const [rerendering, setRerendering] = useState(null)
+  // { url, kind } — a still handed between clips, or a clip played at size.
+  const [preview, setPreview] = useState(null)
+
   const model = getVideoModel(storyboard.model)
   const totals = storyboardTotals(storyboard)
   const clips = storyboard.clips
@@ -193,6 +300,7 @@ export function ClipBoard({
   // so deleting one re-labels every rendered clip after it. Re-render freely,
   // append freely, delete only what hasn't been paid for.
   const renderedCount = clipRows.filter(Boolean).length
+  const stale = staleSeams(storyboard, clipRows, versions)
 
   // What pressing the button ACTUALLY costs, which is not the board total once
   // some clips are already rendered — a Continue after four of six shots is a
@@ -207,6 +315,13 @@ export function ClipBoard({
     (sum, c) => sum + estimateVideoCost(model.id, { resolution: c.resolution, duration: c.duration, audio: !!storyboard.audio }),
     0,
   )
+
+  // The re-render dialog's two facts: the price, and what it strands.
+  const rerenderClip = rerendering == null ? null : clips[rerendering]
+  const rerenderCost = rerenderClip
+    ? estimateVideoCost(model.id, { resolution: rerenderClip.resolution, duration: rerenderClip.duration, audio: !!storyboard.audio })
+    : 0
+  const stranded = rerendering == null ? [] : chainedAfter(storyboard, rerendering).filter(i => clipRows[i])
 
   return (
     <div className="space-y-3">
@@ -251,11 +366,21 @@ export function ClipBoard({
       <div className="space-y-1">
         {clips.map((clip, i) => (
           <div key={clip.key}>
-            {i > 0 && <Seam clip={clip} index={i} onPatch={onPatchClip} disabled={locked} />}
+            {i > 0 && (
+              <Seam clip={clip} index={i} onPatch={onPatchClip} disabled={locked}
+                startFrameUrl={clipRows[i]?.image_url || ''}
+                sharedRefs={storyboard.sharedRefs || []}
+                stale={stale.has(i)}
+                onPreviewFrame={url => setPreview({ url, kind: 'image' })} />
+            )}
             <ClipCard
               clip={clip} index={i} row={clipRows[i]} state={states[i]} model={model}
               audio={!!storyboard.audio} active={activeIndex === i && running}
+              promptText={clipPromptFor(storyboard, i)}
+              preparing={preparingClipId && preparingClipId === clipRows[i]?.id}
               onPatch={onPatchClip} onRemove={onRemoveClip} onRetry={onRetryClip}
+              onRerender={setRerendering} onAddText={onOpenClip}
+              onPreview={row => setPreview({ url: row.video_url, kind: 'video', index: i })}
               canRemove={clips.length > 1 && !clipRows[i]} disabled={locked} />
           </div>
         ))}
@@ -338,6 +463,13 @@ export function ClipBoard({
             Stitching needs every clip rendered — {renderedCount} of {clips.length} so far.
           </p>
         )}
+
+        {allReady && stale.size > 0 && (
+          <p className="text-[10px] text-amber-700 leading-snug">
+            {stale.size === 1 ? 'One seam' : `${stale.size} seams`} above no longer connect after a re-render.
+            Stitching now would put a visible jump where a continuous move was intended.
+          </p>
+        )}
       </div>
 
       {/* Real money, spent by one click, and nothing recovers it once fal has
@@ -355,6 +487,27 @@ export function ClipBoard({
         }
       />
 
+      {/* A re-render is a second full charge for one shot, and — if anything
+          continues from it — it silently invalidates those takes too. Both
+          facts belong in front of the click, not after it. */}
+      <ConfirmDialog
+        open={rerendering != null}
+        onClose={() => setRerendering(null)}
+        onConfirm={() => { const i = rerendering; setRerendering(null); onRerenderClip(i) }}
+        title={`Render clip ${(rerendering ?? 0) + 1} again?`}
+        message={
+          `This is a fresh take on ${model.label} and costs another ${money(rerenderCost)}. ` +
+          'The current take is kept — you can compare them.' +
+          (stranded.length
+            ? ` Clip${stranded.length === 1 ? '' : 's'} ${stranded.map(i => i + 1).join(' and ')} ` +
+              `continue${stranded.length === 1 ? 's' : ''} from this one, and ` +
+              `${stranded.length === 1 ? 'its take was' : 'their takes were'} generated from the frame this shot ends on today. ` +
+              `Re-rendering here leaves ${stranded.length === 1 ? 'that seam' : 'those seams'} broken until you re-render ` +
+              `${stranded.length === 1 ? 'it' : 'them'} too — the board will flag which.`
+            : '')
+        }
+      />
+
       {/* ── The reel ── */}
       {stitchRow && (
         <div className="border border-border bg-white p-3 space-y-2">
@@ -364,24 +517,37 @@ export function ClipBoard({
             <div className="flex-1" />
             {stitchRow.status === 'ready' && (
               <>
-                <Button size="xs" variant="secondary" onClick={() => onOpenStitch(stitchRow)}>✏️ Add text</Button>
+                <Button size="xs" variant="secondary" onClick={() => onOpenClip(stitchRow)}>✏️ Add text</Button>
                 <Button size="xs" variant="secondary" onClick={() => onDownloadStitch(stitchRow)}>⬇ Download</Button>
               </>
             )}
           </div>
           {stitchRow.status === 'ready' && stitchRow.video_url && (
-            <video src={stitchRow.video_url} controls playsInline className="w-full max-h-96 bg-black" />
+            // Muted on load. Half these reels are stitched from a model that
+            // generates no audio at all, so the only thing unmuting buys is a
+            // room full of sound nobody asked for; the controls are right there.
+            <video src={stitchRow.video_url} controls muted playsInline className="w-full max-h-96 bg-black" />
           )}
           {stitchRow.status === 'pending' && (
-            <p className="text-[11px] text-text-tertiary inline-flex items-center gap-1.5">
+            // A div, not a p: Spinner renders a div, and a div inside a p is
+            // invalid HTML that React logs as a hydration error on every paint.
+            <div className="text-[11px] text-text-tertiary inline-flex items-center gap-1.5">
               <Spinner size="sm" /> Re-encoding every clip to a common shape, then joining them. Takes a minute or two.
-            </p>
+            </div>
           )}
           {stitchRow.status === 'failed' && (
             <p className="text-[11px] text-red-600 leading-snug">{stitchRow.error || 'The stitch failed.'}</p>
           )}
         </div>
       )}
+
+      {/* Judging a take from a 96px thumbnail is not judging it. */}
+      <Modal open={!!preview} onClose={() => setPreview(null)} width="max-w-3xl"
+        title={preview?.kind === 'video' ? `Clip ${(preview.index ?? 0) + 1}` : 'The frame handed to the next clip'}>
+        {preview?.kind === 'video'
+          ? <video src={preview.url} controls muted autoPlay playsInline className="w-full max-h-[70vh] bg-black" />
+          : <img src={preview?.url} alt="" className="w-full max-h-[70vh] object-contain bg-black" />}
+      </Modal>
     </div>
   )
 }

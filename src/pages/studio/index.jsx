@@ -14,8 +14,8 @@ import { buildVideoPrompt } from '../../components/studio/motionPresets'
 import { ClipBoard } from '../../components/studio/ClipBoard'
 import { useClipSequencer } from '../../components/studio/useClipSequencer'
 import {
-  MULTI_CLIP_MAX, emptyStoryboard, newClip, normalizeStoryboard, saveStoryboard,
-  stitchRowsOf, storyboardTotals,
+  MULTI_CLIP_MAX, emptyStoryboard, newClip, nextClipAttempt, normalizeStoryboard,
+  saveStoryboard, stitchRowsOf, storyboardTotals,
 } from '../../lib/creativeStoryboard'
 import {
   canEditVideoDuration, estimateVideoCost, estimateVideoEditCost, getVideoModel, VIDEO_EDIT_MAX_REFERENCES,
@@ -719,9 +719,12 @@ export function CreativeStudio() {
     })
   }, [accessToken, session])
 
-  // Re-taking one clip. nextClipAttempt gives it a fresh attempt number, so
-  // the unique index never collides with the failed try and the failed row
-  // stays in history rather than being overwritten.
+  // Re-taking one clip — both the Retry on a failure and the Re-render on a
+  // take that simply came back wrong. One path, because they are the same
+  // operation: nextClipAttempt gives a fresh attempt number, so the unique
+  // index never collides with the previous try and that try stays in history
+  // rather than being overwritten. Whether the old row was failed or perfectly
+  // good only changes what the button is called.
   const retryClip = useCallback(index => { sequencer.retry(index) }, [sequencer])
 
   function addStoryboardRef() { setPickerSlot({ id: 'storyboardRef', label: 'Style reference', kind: 'all' }) }
@@ -982,7 +985,14 @@ export function CreativeStudio() {
       const stitchOpener = version.clip_role === 'stitch'
         ? (sequencer.clipRows[0]?.image_url || '')
         : ''
-      const still = stitchOpener || parentStillOf(version, versions)
+      // A chained storyboard clip carries its own opening frame: image_url is
+      // the still it was told to start from, which is frame one by definition.
+      // parentStillOf can't find it — a clip's parent is its previous attempt,
+      // a video row, which that function correctly refuses to read a still from.
+      const chainedOpener = version.clip_index != null && !version.clip_role
+        ? (version.image_url || '')
+        : ''
+      const still = stitchOpener || chainedOpener || parentStillOf(version, versions)
       const frameUrl = still || await captureFirstFrame(version.video_url)
       setEditingClip({ version, frameUrl })
     } catch (err) {
@@ -1091,12 +1101,24 @@ export function CreativeStudio() {
       return {}
     }
 
+    // Text stamped on a STORYBOARD clip has to become that clip's current
+    // take, or the reel silently ships without it: handleStitch reads
+    // sequencer.clipRows, clipRowsByIndex ignores every row whose clip_index
+    // is null, and an overlay row carrying neither would leave the stitcher
+    // assembling the original, un-lettered footage with no error anywhere.
+    // Same clip_index, next attempt — "the latest take of this shot" is
+    // exactly what a composite of it is.
+    const clipCols = target.clip_index != null && !target.clip_role
+      ? { clipIndex: target.clip_index, clipAttempt: nextClipAttempt(versions, target.clip_index) }
+      : {}
+
     const ins = await insertPendingVersions(activeWorkspaceId, accessToken, session.id, [{
       round: nextRound, kind: 'overlay', provider: 'manual', mediaType: 'video',
       parentVersionId: target.id, userPrompt: 'Text on the clip',
       aspectRatio: session.aspect_ratio, overlayState: newOverlayState,
       duration: target.duration || '', resolution: target.resolution || '',
       model: target.model || '',
+      ...clipCols,
     }])
     if (ins.error) { setSavingOverlay(false); return { error: ins.error } }
     const row = ins.rows[0]
@@ -1520,12 +1542,14 @@ export function CreativeStudio() {
             <ClipBoard
               storyboard={storyboard}
               clipRows={sequencer.clipRows}
+              versions={versions}
               states={sequencer.states}
               activeIndex={sequencer.activeIndex}
               running={sequencer.running}
               allReady={sequencer.allReady}
               stitchRow={stitchRowsOf(versions)[0] || null}
               stitching={stitching}
+              preparingClipId={preparingClip}
               onPatchClip={patchClip}
               onPatchBoard={patchBoard}
               onAddClip={addClip}
@@ -1533,10 +1557,11 @@ export function CreativeStudio() {
               onStart={sequencer.start}
               onStop={sequencer.stop}
               onRetryClip={retryClip}
+              onRerenderClip={retryClip}
               onStitch={handleStitch}
               onAddRef={addStoryboardRef}
               onRemoveRef={removeStoryboardRef}
-              onOpenStitch={openClipEditor}
+              onOpenClip={openClipEditor}
               onDownloadStitch={handleDownload}
             />
           ) : branches.length === 0 ? (

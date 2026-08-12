@@ -134,8 +134,13 @@ export function useClipSequencer({
         stop('paused')
         return
       }
+      // The frame is read from the clip as the MODEL rendered it, never from a
+      // composite of it. Once text has been stamped on clip N, its video_url is
+      // the lettered version — handing that frame forward would ask the model to
+      // continue a shot with our own headline burnt into it, and it would try.
+      const prevSource = prev.overlay_state?.baseVideoUrl || prev.video_url
       try {
-        const blob = await captureLastFrameBlob(prev.video_url)
+        const blob = await captureLastFrameBlob(prevSource)
         if (!alive()) return
         const up = await uploadToStudio(ws, tok, blob, `clip${index}-tail.png`)
         if (!alive()) return

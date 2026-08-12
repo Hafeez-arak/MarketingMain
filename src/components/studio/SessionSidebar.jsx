@@ -13,6 +13,26 @@ import { aspectLabel } from '../../lib/postFormats'
 
 const GROUP_ORDER = ['Today', 'Yesterday', 'Previous 7 days', 'Previous 30 days', 'Older']
 
+// A map rather than the nested ternary this used to be — that ternary had no
+// arm for 'multi_video', so every long-video session in the rail described
+// itself as an "Image".
+const INTENT_LABEL = {
+  image: 'Image',
+  video: 'Video',
+  image_video: 'Image + video',
+  multi_video: 'Long video',
+}
+
+// The rail's one line of subtitle per session. A long video says how many
+// shots it is, because that — not the aspect ratio — is what tells two
+// storyboards apart at a glance.
+function sessionSubtitle(s) {
+  const kind = INTENT_LABEL[s.intent] || 'Image'
+  if (s.intent !== 'multi_video') return `${kind} · ${aspectLabel(s.aspect_ratio)}`
+  const n = s.storyboard?.clips?.length || 0
+  return n ? `${kind} · ${n} clip${n === 1 ? '' : 's'}` : kind
+}
+
 function groupFor(dateStr) {
   const d = new Date(dateStr)
   if (Number.isNaN(d.getTime())) return 'Older'
@@ -143,7 +163,7 @@ export function SessionSidebar({ sessions, session, loading, onOpen, onNew, onRe
                       <button onClick={() => onOpen(s)} className="w-full text-left pr-6">
                         <p className="text-xs font-medium text-text line-clamp-1 leading-snug">{s.title || 'Untitled'}</p>
                         <p className="text-[10px] text-text-tertiary mt-0.5">
-                          {s.intent === 'video' ? 'Video' : s.intent === 'image_video' ? 'Image + video' : 'Image'} · {aspectLabel(s.aspect_ratio)}
+                          {sessionSubtitle(s)}
                         </p>
                       </button>
                     )}
