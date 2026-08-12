@@ -85,6 +85,7 @@ export function BranchChat({
   preparingClip = '',      // version id whose first frame is being read
   onOpenEditor,
   onFinalize,
+  onUseThis,               // opens the sheet that turns this version into real posts
   onDownload,              // downloads the file AND files it in the library if it isn't already
   onRetry,                 // re-run a failed version against the same prompt
   onAttach,                // opens a picker (upload / Media Library) for this lane's composer
@@ -490,6 +491,16 @@ export function BranchChat({
           {onAnimate && !stageIsVideo && (
             <Button size="sm" disabled={!canAct} onClick={() => onAnimate(base)}
               title="Generate a clip from this still — this one costs a render">🎬 Animate</Button>
+          )}
+          {/* The way out of the studio. Acts on `stage` — what is actually on
+              screen — for the same reason Download does: watching a clip and
+              pressing this must not send the still instead. Primary, because
+              it is the point of everything above it. */}
+          {onUseThis && stage?.status === 'ready' && (
+            <Button size="sm" onClick={() => onUseThis(stage)}
+              title="Turn this into a post — pick the platforms, get a caption, then queue, schedule or publish it">
+              Use this →
+            </Button>
           )}
           <Button size="sm" variant="secondary" disabled={!canAct || busy === 'finalize' || base?.is_final}
             onClick={() => onFinalize(base)}>

@@ -1,5 +1,6 @@
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './supabaseClient'
 import { defaultAspectRatio, getFormat } from './postFormats'
+import { finalizeVersion } from './creativeStudio'
 
 // ─── Plan ↔ Creative Studio bridge ─────────────────────────────────────────
 // The join between the two halves of the app that never spoke: contentPlans
@@ -252,4 +253,171 @@ export async function saveIdeaPlatforms(accessToken, ideaId, platforms, primaryP
     if (!res.ok) return { error: await res.text() }
     return { ok: true, platforms: list }
   } catch (err) { return { error: err.message } }
+}
+
+
+// ── Studio asset → post rows ──────────────────────────────────────────────
+// The return leg. Everything above gets a plan idea INTO the studio; this is
+// what brings the finished asset back out, as real rows in the generated-post
+// tables that Approvals already reads and the publish workflow already knows
+// how to send.
+//
+// Three tables, not one, because that is what exists: Instagram and LinkedIn
+// have their own (with real data and workflows depending on them), and
+// generated_posts is the shared superset for everything else. The split is
+// contained here — no caller should ever need to know which table a platform
+// lives in.
+const PLATFORM_TABLE = {
+  instagram: 'instagram_generated_posts',
+  linkedin:  'linkedin_generated_posts',
+  tiktok:    'generated_posts',
+  snapchat:  'generated_posts',
+}
+export function tableForPlatform(platform) {
+  return PLATFORM_TABLE[platform] || null
+}
+export const SENDABLE_PLATFORMS = Object.keys(PLATFORM_TABLE)
+
+// Where the asset goes on the row.
+//
+// A video's still is a COVER, not the post image — the same distinction the
+// generation workflow makes. Getting this wrong doesn't error, it just
+// publishes a photo where a video was meant to go, which is the kind of thing
+// nobody notices until it is live.
+function mediaFieldsFor(version) {
+  const isVideo = version.media_type === 'video' || !!version.video_url
+  if (isVideo) {
+    return {
+      video_url: version.video_url || '',
+      cover_image_url: version.image_url || '',
+      image_url: '', image_urls: [],
+    }
+  }
+  const url = version.image_url || ''
+  return { image_url: url, image_urls: url ? [url] : [], video_url: '', cover_image_url: '' }
+}
+
+// Per-table copy fields. LinkedIn genuinely has a different shape — hook and
+// body rather than one caption — and flattening it here would lose the split
+// that LinkedInPage and Approvals are both built around.
+function copyFieldsFor(platform, { caption, captionAr, captionEn, hashtags }) {
+  const common = {
+    caption_ar: captionAr || '', caption_en: captionEn || '',
+    hashtags: hashtags || '',
+  }
+  if (platform === 'linkedin') {
+    const text = (caption || '').trim()
+    const nl = text.indexOf('\n')
+    // First line is the hook — it is what shows before "see more". Splitting on
+    // the first newline rather than asking the operator for two boxes keeps the
+    // sheet to one field; they can refine the split in Approvals.
+    return {
+      ...common,
+      hook: nl > 0 ? text.slice(0, nl).trim() : text,
+      body: nl > 0 ? text.slice(nl + 1).trim() : '',
+    }
+  }
+  return { ...common, caption: caption || '' }
+}
+
+// Find the post row a plan idea already has on this table, if any.
+//
+// This is what makes re-sending an asset UPDATE rather than duplicate. An idea
+// marked image_mode='studio' already had a row written for it by the plan
+// generation workflow — with an empty image_url, waiting for exactly this.
+// Inserting a second row instead would leave the empty one sitting in
+// Approvals forever, indistinguishable from a post whose generation failed.
+async function findPostForIdea(accessToken, table, ideaId) {
+  if (!ideaId) return null
+  try {
+    const res = await fetch(
+      `${SUPABASE_URL}/rest/v1/${table}?plan_idea_id=eq.${ideaId}&select=id,image_url,video_url&order=created_at.desc&limit=1`,
+      { headers: authHeaders(accessToken) },
+    )
+    if (!res.ok) return null
+    return (await res.json())[0] || null
+  } catch { return null }
+}
+
+// Send one finished version to one or more platforms.
+//
+// `targets` is a list of platform ids. `when` is { mode, at }: 'queue' leaves
+// the post in review, 'schedule'/'now' mark it approved and stamp the time —
+// but nothing here publishes. Publishing stays with zernio.js#publishPost so
+// there is one path to the platform, with one duplicate guard on it.
+//
+// Partial success is real and reported honestly: three targets can produce two
+// rows and one error, and silently succeeding on "some" would be worse than
+// saying which.
+export async function sendVersionToPosts(workspaceId, accessToken, {
+  version, session, targets, caption, captionAr, captionEn, hashtags, when,
+}) {
+  if (!workspaceId) return { error: 'No active workspace. Try signing out and back in.' }
+  if (!version?.id) return { error: 'Nothing to send yet.' }
+  if (!version.image_url && !version.video_url) return { error: 'This version has no finished media yet.' }
+  const list = (targets || []).filter(t => PLATFORM_TABLE[t])
+  if (!list.length) return { error: 'Pick at least one platform to send this to.' }
+
+  const mode = when?.mode || 'queue'
+  const scheduledAt = mode === 'schedule' ? (when?.at || null) : null
+  const media = mediaFieldsFor(version)
+  const ideaId = session?.plan_idea_id || null
+
+  const posts = []
+  const errors = []
+  for (const platform of list) {
+    const table = PLATFORM_TABLE[platform]
+    const base = {
+      ...media,
+      ...copyFieldsFor(platform, { caption, captionAr, captionEn, hashtags }),
+      topic: session?.brief?.topic || session?.title || '',
+      aspect_ratio: version.aspect_ratio || session?.aspect_ratio || '',
+      post_kind: media.video_url ? 'video' : 'caption_image',
+      // Provenance — which session and which exact version this came from.
+      creative_session_id: session?.id || null,
+      creative_version_id: version.id,
+      source: 'studio',
+      status: mode === 'queue' ? 'pending_review' : 'pending_publish',
+      ...(scheduledAt ? { scheduled_publish_at: scheduledAt } : {}),
+      ...(ideaId ? { plan_idea_id: ideaId } : {}),
+    }
+    // Columns that only exist on the shared table.
+    if (table === 'generated_posts') {
+      base.platform = platform
+      base.media_type = media.video_url ? 'video' : 'image'
+    }
+    if (table === 'linkedin_generated_posts') base.include_image = true
+
+    try {
+      const existing = await findPostForIdea(accessToken, table, ideaId)
+      const url = existing
+        ? `${SUPABASE_URL}/rest/v1/${table}?id=eq.${existing.id}`
+        : `${SUPABASE_URL}/rest/v1/${table}`
+      const res = await fetch(url, {
+        method: existing ? 'PATCH' : 'POST',
+        headers: jsonHeaders(accessToken),
+        body: JSON.stringify(existing ? base : { workspace_id: workspaceId, ...base }),
+      })
+      if (!res.ok) { errors.push(`${platform}: ${await res.text()}`); continue }
+      const [row] = await res.json()
+      posts.push({ platform, table, id: row?.id, updated: !!existing })
+    } catch (err) { errors.push(`${platform}: ${err.message}`) }
+  }
+
+  if (!posts.length) return { error: errors.join(' · ') || 'Could not create the post.' }
+
+  // Sending an asset out as a post is the strongest possible statement that it
+  // is the keeper, so it earns its place in the Media Library exactly as
+  // pressing Save would. Guarded on is_final because finalizeVersion appends a
+  // library row every time it runs, and re-sending to a second platform later
+  // should not file the same asset twice.
+  //
+  // Deliberately after the rows exist and deliberately not awaited into the
+  // result: the posts are the deliverable, and a library hiccup must not
+  // report the send as failed when the posts are sitting there.
+  if (!version.is_final) {
+    finalizeVersion(workspaceId, accessToken, version, session?.title).catch(() => {})
+  }
+
+  return { ok: true, posts, warning: errors.length ? errors.join(' · ') : undefined }
 }

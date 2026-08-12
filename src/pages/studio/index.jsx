@@ -33,6 +33,7 @@ import {
   touchSession, updateVersion, uploadToStudio,
 } from '../../lib/creativeStudio'
 import { fetchIdeaForStudio } from '../../lib/studioBridge'
+import { UseThisSheet } from '../../components/studio/UseThisSheet'
 
 // ─── Creative Studio ───────────────────────────────────────────────────────
 // Prompt → two candidates → keep talking to whichever one you like → animate.
@@ -363,6 +364,8 @@ export function CreativeStudio() {
   //
   // Guarded by a ref rather than by `session`, so navigating away inside the
   // studio isn't undone by the effect re-firing while the param is still set.
+  // The version the "Use this" sheet is open for, or null.
+  const [useThisFor, setUseThisFor] = useState(null)
   const [planBrief, setPlanBrief] = useState(null)
   const seededIdeaRef = useRef(null)
   useEffect(() => {
@@ -1441,6 +1444,7 @@ export function CreativeStudio() {
     editVideoAllowed: v => canEditVideoDuration(v.duration),
     preparingClip,
     onFinalize: v => handleFinalize(branch, v),
+    onUseThis: v => setUseThisFor(v),
     onDownload: handleDownload,
     onRetry: handleRetry,
     onAttach: () => setAttachLane(branch.rootId),
@@ -1950,6 +1954,23 @@ export function CreativeStudio() {
           )}
         </div>
       </Modal>
+
+      {/* Turns the version on screen into real posts. Everything it needs is
+          passed in — it owns no studio state, so closing it leaves the thread
+          exactly as it was. */}
+      <UseThisSheet
+        open={!!useThisFor}
+        onClose={() => setUseThisFor(null)}
+        version={useThisFor}
+        session={session}
+        workspaceId={activeWorkspaceId}
+        accessToken={accessToken}
+        webhooks={webhooks}
+        brandProfile={state.brandProfile}
+        // Sending marks the asset final, which is what Save does — so the
+        // thread's badges stay honest without a refetch.
+        onSent={() => { if (useThisFor) refresh(session?.id) }}
+      />
     </div>
   )
 }
