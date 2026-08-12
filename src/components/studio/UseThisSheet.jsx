@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Modal, Button, Input, Textarea, Spinner } from '../ui/index'
-import { sendVersionToPosts, SENDABLE_PLATFORMS } from '../../lib/studioBridge'
+import { sendVersionToPosts, markIdeaMediaReady, SENDABLE_PLATFORMS } from '../../lib/studioBridge'
 import { requestCaptionStudio } from '../../lib/campaignPlanner'
 import { publishPost } from '../../lib/zernio'
 import { buildInstructionsString } from '../../lib/brandBrain'
@@ -42,6 +42,18 @@ export function UseThisSheet({ open, onClose, version, session, workspaceId, acc
   const [done, setDone] = useState(null)
 
   const isVideo = version?.media_type === 'video' || !!version?.video_url
+
+  // Two modes, because two things happen here.
+  //
+  // From a plan: the picture is one stage of a month's work. She has iterated
+  // until she is happy, and all that is left is to say so — the caption and
+  // the schedule belong to later stages, over the whole plan, once every
+  // picture is done. Asking for them now would mean answering the same
+  // questions twelve times, out of order, before the copy stage even runs.
+  //
+  // Standalone: there is no plan to go back to, so this IS the whole flow and
+  // the full sheet is right.
+  const fromPlan = !!session?.plan_idea_id
   const ratio = version?.aspect_ratio || session?.aspect_ratio || ''
   const mismatched = targets.filter(p => ratio && NATIVE_RATIO[p] && !NATIVE_RATIO[p].includes(ratio))
 
@@ -79,6 +91,26 @@ export function UseThisSheet({ open, onClose, version, session, workspaceId, acc
     if (v.hashtags) setHashtags(v.hashtags)
   }
 
+  // Plan mode: mark the idea's media done and fill the media into whatever
+  // post row already exists for it. No caption is sent — plan generation may
+  // have written one already, and sendVersionToPosts leaves copy alone when
+  // none is supplied.
+  async function confirmForPlan() {
+    setBusy(true); setError('')
+    const res = await sendVersionToPosts(workspaceId, accessToken, {
+      version, session, targets: session?.brief?.platforms?.length ? session.brief.platforms : targets,
+      caption: '', hashtags: '', captionAr: '', captionEn: '',
+      when: { mode: 'queue' }, attachOnly: true,
+    })
+    if (res.error) { setBusy(false); setError(res.error); return }
+    // Marked after the row is written, so the board can never say "ready"
+    // about media that failed to attach to anything.
+    const marked = await markIdeaMediaReady(accessToken, session.plan_idea_id, { version })
+    setBusy(false)
+    setDone({ posts: res.posts, failures: [], warning: marked.error || res.warning, plan: true })
+    onSent?.(res.posts)
+  }
+
   async function confirm() {
     setBusy(true); setError('')
     const res = await sendVersionToPosts(workspaceId, accessToken, {
@@ -113,15 +145,21 @@ export function UseThisSheet({ open, onClose, version, session, workspaceId, acc
   const canConfirm = targets.length > 0 && !busy && (mode !== 'schedule' || !!at)
 
   return (
-    <Modal open={open} onClose={onClose} title="Use this" width="max-w-xl">
+    <Modal open={open} onClose={onClose} title={fromPlan ? "Use in plan" : "Use this"} width="max-w-xl">
       <div className="p-5 space-y-4">
         {done ? (
           <div className="space-y-3">
+            {done.plan ? (
+              <p className="text-sm font-semibold text-sage-700">
+                Picture saved — this idea's media is done. Back to the plan to finish the rest.
+              </p>
+            ) : (
             <p className="text-sm font-semibold text-sage-700">
               {done.posts.length === 1 ? '1 post' : `${done.posts.length} posts`}{' '}
               {done.posts.some(p => p.updated) ? 'updated' : 'created'}
               {mode === 'queue' ? ' — waiting in Approvals.' : mode === 'schedule' ? ' — scheduled.' : ' — publishing.'}
             </p>
+            )}
             <ul className="text-xs text-text-secondary space-y-1">
               {done.posts.map(p => (
                 <li key={p.platform}>· {PLATFORM_LABEL[p.platform] || p.platform}{p.updated ? ' (filled in the planned post)' : ''}</li>
@@ -136,6 +174,39 @@ export function UseThisSheet({ open, onClose, version, session, workspaceId, acc
               </div>
             )}
             <div className="flex justify-end pt-1"><Button onClick={onClose}>Done</Button></div>
+          </div>
+        ) : fromPlan ? (
+          /* From a plan — one decision, not five. The caption and the
+             schedule are stages of their own, run over the whole month once
+             every picture is finished. */
+          <div className="space-y-4">
+            <div className="border border-violet-200 bg-violet-50 px-4 py-3">
+              <p className="text-[11px] font-semibold text-violet-800">
+                For: {session?.brief?.title || session?.title || 'this plan idea'}
+              </p>
+              <p className="text-[11px] text-violet-700 mt-0.5 leading-relaxed">
+                This marks the picture done and attaches it to the planned post. The caption comes
+                later, once every idea in the plan has its media — so it can be written to match
+                what is actually in the shot.
+              </p>
+            </div>
+            {mismatched.length > 0 && (
+              <p className="text-[11px] text-amber-700">
+                This is {ratio}. {mismatched.map(p => PLATFORM_LABEL[p]).join(' and ')} expect
+                {mismatched.length === 1 ? 's' : ''} 9:16 — it will still post, but it may be cropped.
+              </p>
+            )}
+            {error && (
+              <div className="border border-red-200 bg-red-50 px-3 py-2">
+                <p className="text-[11px] text-red-700">{error}</p>
+              </div>
+            )}
+            <div className="flex items-center justify-end gap-2">
+              <Button variant="secondary" onClick={onClose} disabled={busy}>Not yet</Button>
+              <Button onClick={confirmForPlan} disabled={busy}>
+                {busy ? <><Spinner size="sm" /> Saving…</> : "✓ This one's it"}
+              </Button>
+            </div>
           </div>
         ) : (
           <>

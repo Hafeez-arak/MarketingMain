@@ -22,7 +22,7 @@ import {
   fetchPastIdeas, fetchPlanWithIdeas, markIdeasDrafting, fetchIdeaDrafts,
 } from '../../lib/contentPlans'
 import { IdeaDraftPanel } from '../../components/IdeaDraftPanel'
-import { openStudioForIdea, fetchSessionsForIdeas, saveIdeaPlatforms } from '../../lib/studioBridge'
+import { openStudioForIdea, fetchSessionsForIdeas, saveIdeaPlatforms, resetIdeaMedia } from '../../lib/studioBridge'
 
 const GOALS = ['Brand awareness','Lead generation','Product launch','Community engagement','Event promotion','Sales & offers']
 const PLATFORMS = ['instagram', 'linkedin'] // only platforms with a generation pipeline today
@@ -155,7 +155,7 @@ function normalizeAiIdea(p) {
 }
 
 const DEFAULT_DRAFT = {
-  step: 'setup', // 'setup' | 'review' | 'done'
+  step: 'setup', // 'setup' | 'review' | 'media' | 'done'
   month: '', goal: '', goalCategory: '', platforms: ['instagram', 'linkedin'],
   startDate: '', endDate: '', approxCount: '', includeHolidays: true,
   // Cadence: which weekdays this brand actually posts on (empty = AI decides
@@ -1070,13 +1070,28 @@ export function CampaignPlanner() {
   // and creates the session at the first generation — its normal path. Sending
   // a brand-new idea to ?session= would open an empty session, which the
   // studio renders as "Nothing here yet" with no way to prompt.
+  // The media stage works on approved ideas only — a rejected idea has no
+  // picture to make, and a still-proposed one hasn't earned the Studio time.
+  const approvedIdeas = ideas.filter(i => i.status === 'approved')
+  const mediaReadyCount = approvedIdeas.filter(i => i.mediaStatus === 'ready').length
+
+  // Start one over. Clears the accepted version but keeps the Studio session
+  // and the last thumbnail — what was tried before is useful context for the
+  // next attempt, and throwing the session away would abandon work already
+  // paid for.
+  async function redoMedia(idea) {
+    const res = await resetIdeaMedia(accessToken, idea.id)
+    if (res.error) { setError(res.error); return }
+    onIdeaChange({ ...idea, mediaStatus: 'none', mediaVersionId: null })
+  }
+
   async function openStudio(idea) {
     const result = await openStudioForIdea(accessToken, idea)
     if (result.error) { setError(result.error); return }
     // openStudioForIdea flips the idea to image_mode='studio' so plan
     // generation stops paying fal for an image nobody will use. Reflect it
     // locally rather than refetching the whole board for one field.
-    onIdeaChange({ ...idea, imageMode: 'studio' })
+    onIdeaChange({ ...idea, imageMode: 'studio', mediaStatus: idea.mediaStatus === 'ready' ? 'ready' : 'in_studio' })
     if (result.session) {
       setStudioSessions(prev => ({ ...prev, [idea.id]: result.session }))
       navigate(`/studio?session=${result.session.id}`)
@@ -1710,10 +1725,101 @@ export function CampaignPlanner() {
           <div className="sticky bottom-0 -mx-1 px-1 pb-1">
             <div className="flex items-center gap-3 bg-white/95 backdrop-blur-sm border border-border rounded-2xl shadow-dropdown px-5 py-3.5">
               <Button variant="secondary" onClick={() => update({ step: 'setup' })}>Back</Button>
-              <Button onClick={finalizePlan} disabled={busy || approvedCount === 0}>
-                {busy ? <><Spinner size="sm" /> Queuing for generation…</> : `Finalize Plan — ${approvedCount} approved`}
+              <Button onClick={() => update({ step: 'media' })} disabled={approvedCount === 0}>
+                Next — make the pictures ({approvedCount} approved)
               </Button>
-              <p className="text-xs text-text-tertiary flex-1">Approved ideas are pushed to Instagram/LinkedIn schedules — generate, approve, or regenerate each one there.</p>
+              <p className="text-xs text-text-tertiary flex-1">Every approved idea gets its image or video made by hand in the Studio, then the captions are written to match.</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+
+      {/* ── STEP: MEDIA ──
+          The stage the marketing team actually works in. An image is finished
+          when the person making it has edited and re-iterated until she is
+          happy with it — never when a model returns something first time — so
+          this is a worklist, not a progress bar you watch. Nothing here
+          generates anything; every card is a door into the Studio. */}
+      {step === 'media' && (
+        <div className="space-y-4">
+          <Card className="p-5">
+            <div className="flex items-baseline justify-between gap-4 mb-3">
+              <div>
+                <h2 className="text-base font-bold text-text tracking-tight">Make the pictures</h2>
+                <p className="text-xs text-text-secondary mt-0.5">
+                  Open each idea in the Studio and work on it until it's right. Captions come after —
+                  written against the picture you actually chose.
+                </p>
+              </div>
+              <p className="text-sm font-semibold text-text flex-shrink-0">
+                {mediaReadyCount} of {approvedIdeas.length} ready
+              </p>
+            </div>
+            <div className="h-1.5 bg-surface-subtle overflow-hidden">
+              <div className="h-full bg-sage-500 transition-all"
+                style={{ width: `${approvedIdeas.length ? (mediaReadyCount / approvedIdeas.length) * 100 : 0}%` }} />
+            </div>
+          </Card>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {approvedIdeas.map(idea => {
+              const st = idea.mediaStatus || 'none'
+              const sess = studioSessions[idea.id]
+              return (
+                <Card key={idea.id} className={`p-3 flex flex-col gap-2 ${st === 'ready' ? 'border-sage-200 bg-sage-50/30' : ''}`}>
+                  <div className="flex items-start gap-2.5">
+                    {idea.previewImageUrl ? (
+                      <img src={idea.previewImageUrl} alt="" className="w-14 h-14 object-cover border border-border flex-shrink-0" />
+                    ) : (
+                      <div className="w-14 h-14 border border-dashed border-border bg-surface-subtle flex items-center justify-center flex-shrink-0 text-text-disabled text-lg">
+                        {idea.mediaType === 'video' ? '🎬' : '🖼'}
+                      </div>
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-semibold text-text leading-snug line-clamp-2">{idea.title || idea.topic || 'Untitled idea'}</p>
+                      <p className="text-[10px] text-text-tertiary mt-0.5">
+                        {idea.date ? formatDate(idea.date) : 'No date'} · {aspectLabel(idea.aspectRatio)}
+                      </p>
+                      <span className={`inline-block mt-1 text-[10px] font-bold px-1.5 py-0.5 leading-[1.4] ${
+                        st === 'ready' ? 'bg-sage-100 text-sage-700'
+                        : st === 'in_studio' ? 'bg-violet-50 text-violet-700'
+                        : 'bg-stone-100 text-text-tertiary'}`}>
+                        {st === 'ready' ? '✓ Ready' : st === 'in_studio' ? '🎬 In Studio' : 'Not started'}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1.5 mt-auto pt-1">
+                    <Button size="xs" variant={st === 'ready' ? 'secondary' : 'primary'} onClick={() => openStudio(idea)}>
+                      {st === 'ready' ? 'Change it' : sess ? 'Back to Studio' : 'Open Studio'}
+                    </Button>
+                    {st === 'ready' && (
+                      <button onClick={() => redoMedia(idea)}
+                        title="Start this one over — the picture is unset, the Studio session is kept"
+                        className="text-[11px] text-text-tertiary hover:text-red-500 transition-colors ml-auto">Reset</button>
+                    )}
+                  </div>
+                </Card>
+              )
+            })}
+          </div>
+
+          {error && <div className="rounded-xl bg-red-50 border border-red-100 px-4 py-3 text-xs text-red-600">{error}</div>}
+
+          <div className="sticky bottom-0 -mx-1 px-1 pb-1">
+            <div className="flex items-center gap-3 bg-white/95 backdrop-blur-sm border border-border rounded-2xl shadow-dropdown px-5 py-3.5">
+              <Button variant="secondary" onClick={() => update({ step: 'review' })}>Back to ideas</Button>
+              <Button onClick={finalizePlan} disabled={busy || approvedCount === 0}>
+                {busy ? <><Spinner size="sm" /> Writing captions…</> : 'Write the captions'}
+              </Button>
+              {/* A soft gate. Blocking outright would just get worked around,
+                  and there are real reasons to move on with one picture
+                  outstanding. */}
+              <p className="text-xs text-text-tertiary flex-1">
+                {mediaReadyCount < approvedIdeas.length
+                  ? `${approvedIdeas.length - mediaReadyCount} still without a picture — you can carry on, they'll generate one instead.`
+                  : 'Every idea has its media. Captions will be written against them.'}
+              </p>
             </div>
           </div>
         </div>

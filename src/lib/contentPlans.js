@@ -123,7 +123,11 @@ export async function insertIdeas(workspaceId, accessToken, planId, ideas, start
     post_kind:        idea.postKind || (idea.format === 'carousel' ? 'carousel' : 'caption_image'),
     slide_count:      idea.slideCount || (idea.format === 'carousel' ? 3 : 1),
     image_text:       idea.imageText || '',
-    image_mode:       idea.imageMode || 'generate',
+    // Studio by default. Plan generation renders with flux-schnell while the
+    // studio uses gpt-image-2 / nano-banana-2, so a bulk image arrives looking
+    // finished, isn't, and can't be iterated on — 'generate' stays available
+    // as a deliberate opt-out for low-stakes formats, not as the default.
+    image_mode:       idea.imageMode || 'studio',
     reference_image_urls: idea.references || [],
     // Format & orientation system — the human-editable fields generation
     // actually reads now; suggested_format/suggested_aspect_ratio above stay

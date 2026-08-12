@@ -163,7 +163,14 @@ export async function openStudioForIdea(accessToken, idea) {
   // Marked in both branches on purpose: an idea whose mode was reverted in
   // between must not silently fall back to paid auto-generation just because
   // its session already existed.
-  const marked = await markIdeaStudioMode(accessToken, idea.id)
+  //
+  // media_status only moves forward to 'in_studio'. An idea whose picture is
+  // already 'ready' and is being reopened for another pass must not lose that
+  // — the accepted asset is still accepted until a new one replaces it, and
+  // dropping it back would empty the post row for as long as she is iterating.
+  const patch = { image_mode: 'studio' }
+  if (idea.mediaStatus !== 'ready') patch.media_status = 'in_studio'
+  const marked = await patchIdea(accessToken, idea.id, patch)
   return { ok: true, session: existing, warning: marked.error }
 }
 
@@ -214,6 +221,46 @@ export async function fetchIdeaForStudio(accessToken, ideaId) {
       aspect: studioAspectForIdea(idea),
     }
   } catch { return null }
+}
+
+// One place that writes to a plan idea, so the stage transitions below can't
+// drift apart in how they talk to PostgREST.
+async function patchIdea(accessToken, ideaId, patch) {
+  if (!ideaId) return { error: 'No idea id.' }
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/plan_ideas?id=eq.${ideaId}`, {
+      method: 'PATCH',
+      headers: jsonHeaders(accessToken, 'return=minimal'),
+      body: JSON.stringify(patch),
+    })
+    if (!res.ok) return { error: await res.text() }
+    return { ok: true }
+  } catch (err) { return { error: err.message } }
+}
+
+// The picture is finished — she edited and re-iterated until she was happy,
+// and this is the one she accepted.
+//
+// preview_image_url is reused as the board thumbnail rather than adding a
+// second image column; it already means "the picture standing in for this idea
+// on the board". For a video the still is what goes here, because a thumbnail
+// is what a board needs.
+export async function markIdeaMediaReady(accessToken, ideaId, { version, sessionId } = {}) {
+  if (!ideaId) return { error: 'No idea id.' }
+  const thumb = version?.image_url || version?.cover_image_url || ''
+  return patchIdea(accessToken, ideaId, {
+    media_status: 'ready',
+    media_version_id: version?.id || null,
+    ...(thumb ? { preview_image_url: thumb } : {}),
+    ...(sessionId ? {} : {}),
+  })
+}
+
+// Put an idea back to "not started" — she rejected what was made, or wants to
+// begin again. Deliberately clears the accepted version but NOT the thumbnail:
+// seeing what was previously tried is useful context for the next attempt.
+export async function resetIdeaMedia(accessToken, ideaId) {
+  return patchIdea(accessToken, ideaId, { media_status: 'none', media_version_id: null })
 }
 
 // Set / clear the 'a human is making this in Studio' flag.
@@ -355,8 +402,18 @@ async function findPostForIdea(accessToken, table, ideaId) {
 // Partial success is real and reported honestly: three targets can produce two
 // rows and one error, and silently succeeding on "some" would be worse than
 // saying which.
+// `attachOnly` is what keeps the media-first order from producing two rows per
+// idea. In that order the picture is finished BEFORE the plan is finalised, so
+// there is no post row yet — and creating one here would mean the generation
+// workflow later inserts a second, leaving a caption-only row and a media-only
+// row for the same idea with nothing to say which is real.
+//
+// So when the media comes first, this fills in a row if one already exists and
+// otherwise writes nothing: markIdeaMediaReady records the choice on the idea
+// (including preview_image_url, which the generation workflow already reads to
+// skip generating), and finalising the plan produces one complete row.
 export async function sendVersionToPosts(workspaceId, accessToken, {
-  version, session, targets, caption, captionAr, captionEn, hashtags, when,
+  version, session, targets, caption, captionAr, captionEn, hashtags, when, attachOnly = false,
 }) {
   if (!workspaceId) return { error: 'No active workspace. Try signing out and back in.' }
   if (!version?.id) return { error: 'Nothing to send yet.' }
@@ -373,9 +430,15 @@ export async function sendVersionToPosts(workspaceId, accessToken, {
   const errors = []
   for (const platform of list) {
     const table = PLATFORM_TABLE[platform]
+    // Copy is written only when there is copy to write. Under the media-first
+    // flow the picture is finished BEFORE the caption exists, and the post row
+    // may already carry a caption that plan generation wrote — sending an
+    // empty string here would silently erase it, and the loss would only show
+    // up at publish time.
+    const hasCopy = !!(caption || captionAr || captionEn || hashtags)
     const base = {
       ...media,
-      ...copyFieldsFor(platform, { caption, captionAr, captionEn, hashtags }),
+      ...(hasCopy ? copyFieldsFor(platform, { caption, captionAr, captionEn, hashtags }) : {}),
       topic: session?.brief?.topic || session?.title || '',
       aspect_ratio: version.aspect_ratio || session?.aspect_ratio || '',
       post_kind: media.video_url ? 'video' : 'caption_image',
@@ -396,6 +459,7 @@ export async function sendVersionToPosts(workspaceId, accessToken, {
 
     try {
       const existing = await findPostForIdea(accessToken, table, ideaId)
+      if (!existing && attachOnly) continue      // nothing to fill in yet — finalising the plan will make it
       const url = existing
         ? `${SUPABASE_URL}/rest/v1/${table}?id=eq.${existing.id}`
         : `${SUPABASE_URL}/rest/v1/${table}`
@@ -410,6 +474,9 @@ export async function sendVersionToPosts(workspaceId, accessToken, {
     } catch (err) { errors.push(`${platform}: ${err.message}`) }
   }
 
+  // attachOnly with nothing to attach to is the normal media-first case, not a
+  // failure — the idea is recorded and the row comes later.
+  if (!posts.length && attachOnly && !errors.length) return { ok: true, posts: [], deferred: true }
   if (!posts.length) return { error: errors.join(' · ') || 'Could not create the post.' }
 
   // Sending an asset out as a post is the strongest possible statement that it
