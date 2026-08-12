@@ -9,6 +9,7 @@ import { fetchBrandProfile, buildInstructionsString } from '../../lib/brandBrain
 import { fetchApprovalsData, markIdeaProcessing } from '../../lib/contentPlans'
 import { requestPlanContentGeneration } from '../../lib/campaignPlanner'
 import { publishPost, syncZernio } from '../../lib/zernio'
+import { fetchScheduledPosts } from '../../lib/scheduledPosts'
 import { dbIdeaToDraft } from '../../lib/campaignPlan'
 import { InstagramPostDetail } from './InstagramPage'
 import { LinkedInPostDetail } from './LinkedInPage'
@@ -47,7 +48,7 @@ const mediaOf = r => (Array.isArray(r.image_urls) && r.image_urls.length ? r.ima
 // hardcodes 'scheduled', LinkedIn falls back to it from content_route.
 function normalizePost(row, platform) {
   const base = {
-    id: row.id, platform, _table: TABLES[platform],
+    id: row.id, platform, _table: row.post_table || TABLES[platform],
     captionAr: row.caption_ar || '', captionEn: row.caption_en || '',
     postKind: row.post_kind || 'caption_image',
     hashtags: row.hashtags, imageUrl: row.image_url, imagePrompt: row.image_prompt,
@@ -88,22 +89,23 @@ function useApprovalPosts(accessToken, workspaceId) {
   const fetchAll = useCallback(async () => {
     if (!accessToken) return
     setLoading(true)
-    const headers = { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${accessToken}` }
-    // Scope to the active company so one company never sees another's posts.
-    const wsFilter = workspaceId ? `&workspace_id=eq.${workspaceId}` : ''
+    // Still scoped to the active company so one company never sees another's
+    // posts — fetchScheduledPosts filters on workspace_id, and the view is
+    // declared security_invoker so the base tables' RLS applies underneath it
+    // too. Both, deliberately: the filter is what makes the query small, the
+    // RLS is what makes it safe.
     try {
-      const [igRes, liRes, approvalsData] = await Promise.all([
-        fetch(`${SUPABASE_URL}/rest/v1/${TABLES.instagram}?select=*${wsFilter}&order=created_at.desc&limit=200`, { headers }),
-        fetch(`${SUPABASE_URL}/rest/v1/${TABLES.linkedin}?select=*${wsFilter}&order=created_at.desc&limit=200`, { headers }),
+      // One ordered query over all three post tables, via the scheduled_posts
+      // view. This replaced a hand-union of Instagram and LinkedIn — which is
+      // the reason TikTok and Snapchat posts existed in the database but never
+      // appeared on this screen. Adding a platform is now a change in the view
+      // and in lib/scheduledPosts.js, not here.
+      const [rows, approvalsData] = await Promise.all([
+        fetchScheduledPosts(workspaceId, accessToken),
         fetchApprovalsData(workspaceId, accessToken),
       ])
-      const igRows = igRes.ok ? await igRes.json() : []
-      const liRows = liRes.ok ? await liRes.json() : []
 
-      const igPosts = igRows.map(r => normalizePost(r, 'instagram'))
-      const liPosts = liRows.map(r => normalizePost(r, 'linkedin'))
-
-      setPosts([...igPosts, ...liPosts].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)))
+      setPosts(rows.map(r => normalizePost(r, r.platform)))
       setIdeas(approvalsData.ideas || [])
       setPlans(approvalsData.plans || [])
     } finally {
