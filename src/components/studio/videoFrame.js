@@ -19,13 +19,33 @@
 
 // Seeking to 0 is served out of the bytes the browser already has. Seeking to
 // the END of an mp4 usually needs a second range request, so it gets longer.
+//
+// The tail budget was 15s and that turned out to be too tight on a real run:
+// the window covers DOWNLOADING the clip as well as seeking in it, and a 6s
+// 1080p render over a slow link spends most of it on the transfer alone. A
+// timeout here strands a storyboard that is otherwise three-quarters paid for,
+// so the budget is generous and the attempt is made more than once.
 const FIRST_TIMEOUT_MS = 12000
-const LAST_TIMEOUT_MS = 15000
+const LAST_TIMEOUT_MS = 30000
+
+// Transient failures get another go; structural ones don't. A clip that
+// reports no length or no dimensions will report the same thing every time,
+// and retrying it just makes the marketer wait longer for the same message.
+const TAIL_TRIES = 3
+const TAIL_RETRY_PAUSE_MS = 1200
 
 // How far back from the reported end to seek. Asking for exactly `duration`
 // commonly lands past the last decodable frame and paints nothing; these are
 // tried in order until a frame with actual content comes back.
 const TAIL_OFFSETS = [0.04, 0.12, 0.3]
+
+// Marks a failure as worth another attempt: the clip is fine, the network or
+// the decoder just didn't finish in time. Everything NOT marked is a fact
+// about the file that a second attempt would rediscover unchanged.
+function transient(err) {
+  err.transient = true
+  return err
+}
 
 // Sets up a <video>, guarantees single-settlement and cleanup, and hands the
 // element to `run`. Every capture goes through here.
@@ -51,13 +71,13 @@ function withVideo(videoUrl, timeoutMs, run) {
     const fail = done(reject)
 
     const timer = setTimeout(
-      () => fail(new Error("Couldn't read a frame from this clip in time.")),
+      () => fail(transient(new Error("Couldn't read a frame from this clip in time."))),
       timeoutMs,
     )
 
     video.addEventListener(
       'error',
-      () => fail(new Error("Couldn't load this clip to read a frame from it.")),
+      () => fail(transient(new Error("Couldn't load this clip to read a frame from it."))),
       { once: true },
     )
 
@@ -174,9 +194,35 @@ function captureTail(videoUrl, toResult) {
   })
 }
 
+// One capture, retried while the failure looks like bad luck rather than a bad
+// file. Each try builds a fresh <video>: a element that has already errored or
+// stalled will not reliably recover by being re-seeked, and the whole point is
+// to start the fetch over.
+//
+// Worth the complexity because of where this sits. The tail read is the single
+// point of failure in a chained storyboard — it runs between two paid renders,
+// and a run that dies here has already spent money on everything before it and
+// cannot continue without a human. Observed live 2026-08-12: a 4-clip run made
+// it to clip 4 and then lost the whole chain to one 15s timeout.
+async function captureTailWithRetry(videoUrl, toResult) {
+  let last
+  for (let tryN = 0; tryN < TAIL_TRIES; tryN += 1) {
+    try {
+      return await captureTail(videoUrl, toResult)
+    } catch (err) {
+      last = err
+      if (!err?.transient) throw err
+      if (tryN < TAIL_TRIES - 1) {
+        await new Promise(r => setTimeout(r, TAIL_RETRY_PAUSE_MS))
+      }
+    }
+  }
+  throw last
+}
+
 // Data URL — for anything that wants to hand the frame straight to an <img>.
 export function captureLastFrame(videoUrl) {
-  return captureTail(videoUrl, (canvas, ok, fail) => {
+  return captureTailWithRetry(videoUrl, (canvas, ok, fail) => {
     try { ok(canvas.toDataURL('image/png')) } catch (err) { fail(err) }
   })
 }
@@ -185,7 +231,7 @@ export function captureLastFrame(videoUrl) {
 // into Supabase storage. toBlob rather than toDataURL + re-fetch: a 720p PNG
 // data URL is ~2MB of base64 built only to be parsed straight back.
 export function captureLastFrameBlob(videoUrl) {
-  return captureTail(videoUrl, (canvas, ok, fail) => {
+  return captureTailWithRetry(videoUrl, (canvas, ok, fail) => {
     canvas.toBlob(
       blob => (blob ? ok(blob) : fail(new Error("Couldn't encode the clip's last frame."))),
       'image/png',
