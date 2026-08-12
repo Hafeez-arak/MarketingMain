@@ -357,10 +357,11 @@ export function CreativeStudio() {
   // with no versions, which renders as "Nothing here yet" and offers no
   // composer — a dead end.
   //
-  // Known boundary: only the image/video path carries the plan link. Switching
-  // to "A long video" here creates a multi-clip session with no plan_idea_id,
-  // so that asset won't find its way back to the idea. Long-form is a
-  // storyboard with its own cost model and is deliberately left alone.
+  // All three modes carry the plan link — image, video and "A long video"
+  // alike. The composer opens on image or video (a plan idea says nothing
+  // about shot count, and guessing long-form would spend an order of magnitude
+  // more than asked), but switching to long video keeps the idea attached, and
+  // the stitched result gets its own "Use this →" on the clip board.
   //
   // Guarded by a ref rather than by `session`, so navigating away inside the
   // studio isn't undone by the effect re-firing while the param is still set.
@@ -642,6 +643,11 @@ export function CreativeStudio() {
       const sb = emptyStoryboard({ model: modelId, lookId, prompt: finalPrompt })
       const madeMulti = await createSession(activeWorkspaceId, accessToken, {
         title: finalPrompt.slice(0, 80), intent, aspectRatio: aspect, storyboard: sb,
+        // A long video started from a plan card belongs to that idea just as
+        // much as a single image does. This used to be left off, so choosing
+        // "A long video" silently detached the session and the finished reel
+        // had no way back to the post it was meant to become.
+        planIdeaId: planBrief?.ideaId, brief: planBrief?.brief,
       })
       setBusy('')
       if (madeMulti.error) { setError(madeMulti.error); return }
@@ -1771,6 +1777,7 @@ export function CreativeStudio() {
               onRemoveClipRef={removeClipRef}
               onOpenClip={openClipEditor}
               onDownloadStitch={handleDownload}
+              onUseThis={v => setUseThisFor(v)}
             />
           ) : branches.length === 0 ? (
             <Empty title="Nothing here yet" description="This session has no versions." />

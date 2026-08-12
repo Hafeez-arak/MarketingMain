@@ -329,7 +329,7 @@ export function ClipBoard({
   onPatchClip, onPatchBoard, onAddClip, onRemoveClip, onMoveClip,
   onStart, onStop, onRenderClip, onCancelClip, onStitch,
   onAddRef, onRemoveRef, onAddClipRef, onRemoveClipRef,
-  onOpenClip, onDownloadStitch,
+  onOpenClip, onDownloadStitch, onUseThis,
 }) {
   const [confirming, setConfirming] = useState(false)
   // Which clip a re-render is being confirmed for. A number, not a boolean —
@@ -628,6 +628,17 @@ export function ClipBoard({
               <>
                 <Button size="xs" variant="secondary" onClick={() => onOpenClip(stitchRow)}>✏️ Add text</Button>
                 <Button size="xs" variant="secondary" onClick={() => onDownloadStitch(stitchRow)}>⬇ Download</Button>
+                {/* The finished long video's way out. It is the stitch row —
+                    not any single clip — that is the deliverable here, which
+                    is why this lives on this row and nowhere else on the
+                    board: sending one shot of a five-shot reel would be a
+                    quietly wrong post rather than an obvious mistake. */}
+                {onUseThis && (
+                  <Button size="xs" onClick={() => onUseThis(stitchRow)}
+                    title="Turn this finished video into a post — pick the platforms, get a caption, then queue, schedule or publish it">
+                    Use this →
+                  </Button>
+                )}
               </>
             )}
           </div>

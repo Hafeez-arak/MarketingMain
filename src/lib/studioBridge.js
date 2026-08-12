@@ -74,12 +74,18 @@ export function buildBriefFromIdea(idea) {
 
 // Which Studio mode an idea should open in.
 //
-// Note what is NOT here: 'multi_video'. A long video is a storyboard of
-// several chained clips with its own cost model and its own sequencer, and
-// nothing about a plan idea says "this should be five shots". Opening one
-// from a plan card would start a materially more expensive run than the
-// operator asked for. Long-form stays something you choose explicitly inside
-// the studio.
+// Never 'multi_video', and that is about cost rather than capability: a long
+// video is a storyboard of several chained clips, and eight 20s shots is an
+// order of magnitude more expensive than one render. Nothing on a plan idea
+// says "this should be five shots" — `media_type` distinguishes image from
+// video and stops there — so defaulting to it would spend far more than the
+// operator asked for on a guess.
+//
+// Long-form therefore stays an explicit choice in the composer. Switching to
+// it there keeps the plan link (the multi-clip session carries plan_idea_id
+// and the brief exactly as the single-render path does), and the stitched
+// result has its own "Use this →" on the clip board, so a long video reaches
+// a post the same way everything else does.
 export function studioIntentForIdea(idea) {
   const mediaType = idea?.mediaType
     || getFormat(idea?.platform || 'instagram', idea?.postFormat)?.media
