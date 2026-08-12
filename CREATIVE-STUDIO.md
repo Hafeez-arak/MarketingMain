@@ -320,6 +320,39 @@ end of the stream, which ffmpeg renders as a frozen frame or a black gap
 the prediction and fails on a mismatch, because a dropped segment is otherwise
 a clean exit and a reel with a shot missing.
 
+### Reviewing and re-shooting a clip — added 2026-08-12
+
+The first build could render a storyboard and nothing else. A clip that came
+back *wrong* — not failed, just wrong — was a dead end, because the only
+per-clip action was Retry and Retry only appeared on a failure. Clips now open
+at size in a modal, and every rendered clip has a priced **Re-render** that
+routes to the same `sequencer.retry()`; Retry and Re-render were always one
+operation, and only the label depended on how the last attempt ended.
+
+**Re-rendering one shot silently breaks the seams after it.** Clip N+1 was
+generated from a still of the clip N that no longer exists, so a chain that was
+sold as one unbroken move now has a jump in it — and nothing about the footage
+says so. `staleSeams()` derives this rather than tracking it: a chained clip is
+always rendered *after* the clip it continues from, so a chained clip with an
+**older** `created_at` can only mean its predecessor was replaced underneath it.
+The comparison walks `parent_version_id` back to the underlying take first,
+because stamping text on a clip mints a fresh row that would otherwise read as
+a re-render of footage that never changed.
+
+**Text on a clip needed a fix to reach the reel.** The overlay row carried no
+`clip_index`, and `clipRowsByIndex` skips every row without one — so the
+stitcher would have assembled the original un-lettered footage and reported
+success. A composite now takes the same `clip_index` at the next attempt, which
+is what "the current take of this shot" means. Relatedly, chaining reads
+`overlay_state.baseVideoUrl` and never the composite: handing a lettered frame
+forward asks the model to continue our own headline, and it tries.
+
+The board also shows what each clip is **born from** — the chained still in the
+seam, or the shared references on a new-shot seam, plus the assembled prompt
+(look + style bible + continuity preface) behind a per-card disclosure. The
+still was always uploaded and always on the row; leaving it invisible made the
+one mechanism here that fails invisibly the one thing nobody could inspect.
+
 ### The known better shape, not built
 
 Seedance takes `end_image_url` (already wired). Generating the seam stills as
