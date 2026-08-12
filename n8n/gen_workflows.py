@@ -207,6 +207,10 @@ const slideCount = kind === 'carousel' ? Math.max(2, Math.min(10, Number(idea.sl
 // path below is completely unchanged for them.
 const hasSelectedCaption = !!(idea.caption_ar || idea.caption_en);
 const hasSelectedImage   = !!idea.preview_image_url;
+// A clip accepted in the Studio during the media stage. Attached as-is: it is
+// already permanent storage (our own bucket, uploaded by the Creative Video
+// workflow), unlike a fal URL, so there is nothing to re-download.
+const selectedVideo      = String(idea.preview_video_url || '').trim();
 
 // Durable per-idea status on plan_ideas — lets Post Approvals show real
 // processing/failed/completed state instead of the idea silently vanishing
@@ -602,6 +606,16 @@ if (!needsUpload){
   // (same distinction as the uploaded-candidate path below).
   if (idea.media_type === 'video') row.cover_image_url = image_url;
   else { row.image_url = image_url; row.image_urls = image_urls; }
+}
+
+// A video chosen in the media stage wins over anything derived above: it is
+// what a person watched and accepted. The still travels with it as the cover,
+// which is also the board thumbnail.
+if (selectedVideo){
+  row.video_url = selectedVideo;
+  if (idea.preview_image_url) row.cover_image_url = idea.preview_image_url;
+  row.image_url = '';
+  row.image_urls = [];
 }
 if (PLATFORM === 'instagram'){
   row.caption = displayCaption;

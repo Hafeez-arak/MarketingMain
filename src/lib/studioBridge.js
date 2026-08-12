@@ -247,12 +247,20 @@ async function patchIdea(accessToken, ideaId, patch) {
 // is what a board needs.
 export async function markIdeaMediaReady(accessToken, ideaId, { version, sessionId } = {}) {
   if (!ideaId) return { error: 'No idea id.' }
+  // The still is the board thumbnail AND the video's cover, which is what a
+  // grid of cards needs either way. The clip itself needs its own column:
+  // without it an accepted reel is marked ready and then silently not
+  // attached, leaving a post with a caption and no video — indistinguishable
+  // from a render that failed.
   const thumb = version?.image_url || version?.cover_image_url || ''
+  const clip  = version?.video_url || ''
   return patchIdea(accessToken, ideaId, {
     media_status: 'ready',
     media_version_id: version?.id || null,
     ...(thumb ? { preview_image_url: thumb } : {}),
-    ...(sessionId ? {} : {}),
+    // Always written, including as '' — re-accepting a still after a video
+    // must clear the old clip rather than leave it to be attached instead.
+    preview_video_url: clip,
   })
 }
 

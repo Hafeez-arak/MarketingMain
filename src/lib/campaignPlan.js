@@ -82,6 +82,7 @@ export function dbIdeaToDraft(row) {
     draftError: row.draft_error || '',
     draftedAt: row.drafted_at || '',
     previewImageUrl: row.preview_image_url || '',
+    previewVideoUrl: row.preview_video_url || '',
     status: row.status || 'proposed',
     position: row.position ?? 0,
   }
