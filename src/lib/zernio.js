@@ -15,10 +15,17 @@ import { SUPABASE_URL, SUPABASE_ANON_KEY } from './supabaseClient'
 // as an opaque n8n error.
 const POST_TABLES = ['instagram_generated_posts', 'linkedin_generated_posts', 'generated_posts']
 
+// `force` bypasses the workflow's duplicate guard. The workflow claims a post
+// atomically before publishing (PATCH filtered on publish_status), so a second
+// tab, a double-click or a retried webhook is refused rather than posting to
+// the platform twice. The one case that legitimately needs overriding is a run
+// that died between claiming and writing the id back, leaving the row stuck on
+// 'publishing' — nothing else can move it until a stale-job reconciler exists.
+// Default false: forcing is how you publish twice on purpose.
 export async function publishPost(webhookUrl, {
   postId, postTable, workspaceId, platform, accountId,
   caption, hashtags, imageUrl, imageUrls, videoUrl, coverImageUrl, altText,
-  scheduledFor, timezone,
+  scheduledFor, timezone, force = false,
 }) {
   if (!webhookUrl) return { error: 'Publish webhook not configured — set it in Settings → Integrations.' }
   if (!POST_TABLES.includes(postTable)) return { error: `Unknown post table: ${postTable}` }
@@ -33,6 +40,7 @@ export async function publishPost(webhookUrl, {
         image_url: imageUrl || '', image_urls: imageUrls || undefined,
         video_url: videoUrl || '', cover_image_url: coverImageUrl || '', alt_text: altText || '',
         scheduled_for: scheduledFor || undefined, timezone: timezone || undefined,
+        force: force === true ? true : undefined,
       }),
     })
     const data = await res.json().catch(() => ({}))

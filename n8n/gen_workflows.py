@@ -1380,6 +1380,50 @@ async function patchPost(fields){
   } catch (e) { /* never let status bookkeeping mask the real publish result */ }
 }
 
+// Claim this post for publishing, atomically.
+//
+// Nothing here used to look at our own row before calling Zernio: the flow was
+// mark 'publishing' -> POST /posts -> write the id back. A double-click, a
+// second tab, a retried webhook or a bulk run that overlaps itself therefore
+// published the SAME post twice, on the real platform, with no way to tell
+// afterwards which id was the duplicate. The browser's `setPublishingId` only
+// ever guarded one tab's buttons.
+//
+// A read-then-check can't fix that — two callers both read "not published"
+// before either writes. So the claim IS the check: PATCH filtered on the
+// states it is legal to publish FROM, asking for the row back. Postgres
+// serialises the two updates, so exactly one caller sees a row returned and
+// the loser sees none. Whoever gets the row owns the publish.
+//
+// Legal starting states are 'not_published' and 'failed' (a retry after a
+// genuine failure). Deliberately NOT 'publishing': a row already in flight is
+// someone else's, and re-entering it is the exact bug this closes.
+//
+// Escape hatch: force:true skips the claim. A run that dies between claiming
+// and writing the id back leaves the row stuck in 'publishing' forever, and
+// until a stale-job reconciler exists that is the only way to recover it.
+async function claimPost(){
+  if (!postId) return { ok: true, claimed: false };   // ad-hoc publish, no row to guard
+  if (body.force === true) return { ok: true, claimed: true, forced: true };
+  const rows = await http({
+    method:'PATCH',
+    url:`${SUPA_URL}/rest/v1/${postTable}?id=eq.${postId}&publish_status=in.(not_published,failed)`,
+    headers:{ apikey:SUPA_KEY, Authorization:`Bearer ${SUPA_KEY}`, 'Content-Type':'application/json', Prefer:'return=representation' },
+    body:{ publish_status:'publishing', publish_error:'' }, json:true });
+  if (Array.isArray(rows) && rows.length) return { ok: true, claimed: true };
+
+  // Lost the race, or it was already published. Read back the real reason so
+  // the caller gets something better than "no".
+  let current = {};
+  try {
+    const got = await http({ method:'GET',
+      url:`${SUPA_URL}/rest/v1/${postTable}?id=eq.${postId}&select=publish_status,zernio_post_id,platform_post_url`,
+      headers:{ apikey:SUPA_KEY, Authorization:`Bearer ${SUPA_KEY}` }, json:true });
+    current = (Array.isArray(got) && got[0]) || {};
+  } catch (e) { /* the refusal stands either way */ }
+  return { ok: false, claimed: false, current };
+}
+
 try {
   if (!ZERNIO) throw new Error('ZERNIO_API_KEY is not set on this n8n instance.');
 
@@ -1462,7 +1506,23 @@ try {
     payload.publishNow = true;
   }
 
-  await patchPost({ publish_status: 'publishing', publish_error: '' });
+  // Claimed here rather than at the top of the try: the window between owning
+  // the row and actually calling Zernio should be as short as possible.
+  const claim = await claimPost();
+  if (!claim.ok){
+    // RETURN, never throw. The catch below writes publish_status='failed', and
+    // reaching it here would stamp 'failed' onto a post that is in fact live —
+    // turning a harmless duplicate click into corrupted state.
+    const cur = claim.current || {};
+    const st  = cur.publish_status || 'in flight';
+    return [{ json: {
+      ok: false, skipped: true, post_id: postId, platform,
+      publish_status: st,
+      zernio_post_id: cur.zernio_post_id || '',
+      platform_post_url: cur.platform_post_url || '',
+      error: `Already ${st} — refusing to publish this post a second time. Send force:true to override.`,
+    } }];
+  }
 
   // ---- 3) publish ----
   const resp = await req({ method:'POST', url:`${ZBASE}/posts`, headers:zHeaders, body:payload, json:true });

@@ -5,6 +5,42 @@ const STORAGE_KEY = 'campai_arak_v1'
 
 const DEFAULT_WORKSPACE_ID = 'ws_default'
 
+// ─── The webhook slots ──────────────────────────────────────────────────────
+// Every n8n webhook the app can be pointed at. ONE list — this object used to
+// be written out as a literal in five separate places, and two of them (the
+// `|| {...}` fallbacks in SWITCH_WORKSPACE and DELETE_WORKSPACE) had drifted
+// to six keys while the other three carried twenty-seven.
+//
+// That drift was survivable only by luck: a missing key reads `undefined`,
+// which is falsy, and every consumer already treats falsy as "not configured
+// yet" (`if (!webhookUrl) return { error: 'set it in Settings' }`), while the
+// Settings page coerces with `|| ''` before binding an input. So nothing broke.
+// What it did guarantee is that ADDING a slot meant remembering five edits,
+// and the two easiest to miss were the ones no test or type would catch.
+//
+// Read it as the schema: a workspace's webhooks are always exactly these keys.
+// Anything loaded from localStorage or the workspace_webhooks table is spread
+// ON TOP of this (see webhooksFrom), never used in place of it, so a blob
+// written by an older build gains the newer keys as '' instead of holes.
+export const DEFAULT_WEBHOOKS = {
+  instagram: '', linkedin: '',
+  instagramSchedule: '', instagramScheduleRegen: '',
+  linkedinSchedule: '', linkedinScheduleRegen: '',
+  instagramReels: '',
+  campaignPlanner: '', instagramPlanGen: '', linkedinPlanGen: '',
+  elongateIdea: '', captionStudio: '', draftCopy: '', mediaOptions: '',
+  videoRender: '',
+  publishPost: '', zernioSync: '', zernioDashboard: '',
+  creativeGenerate: '', creativeEdit: '', creativeVideo: '', creativeCompose: '',
+  creativeEnhance: '', creativeVideoEdit: '', creativeStitch: '', creativeCancel: '',
+  falBalance: '',
+}
+
+// Fill in whatever a stored blob is missing. Used everywhere webhooks come
+// back from persistence, so the in-memory shape is complete no matter how old
+// the data is.
+const webhooksFrom = saved => ({ ...DEFAULT_WEBHOOKS, ...(saved || {}) })
+
 const initialState = {
   campaigns: [],
   posts: [],
@@ -23,7 +59,7 @@ const initialState = {
       connectedAccounts: { instagram: false, facebook: false, linkedin: false, tiktok: false, x: false },
       instagramInstructions: '', instagramSchedule: {},
       linkedinInstructions: '', linkedinSchedule: {},
-      webhooks: { instagram: '', linkedin: '', instagramSchedule: '', instagramScheduleRegen: '', linkedinSchedule: '', linkedinScheduleRegen: '', instagramReels: '', campaignPlanner: '', instagramPlanGen: '', linkedinPlanGen: '', elongateIdea: '', captionStudio: '', draftCopy: '', mediaOptions: '', videoRender: '', publishPost: '', zernioSync: '', zernioDashboard: '', creativeGenerate: '', creativeEdit: '', creativeVideo: '', creativeCompose: '', creativeEnhance: '', creativeVideoEdit: '', creativeStitch: '', creativeCancel: '', falBalance: '' },
+      webhooks: { ...DEFAULT_WEBHOOKS },
       supabase: { url: '', anonKey: '' },
     }
   },
@@ -32,7 +68,7 @@ const initialState = {
   instagramSchedule: {},
   linkedinInstructions: '',
   linkedinSchedule: {},   // { 'YYYY-MM-DD': { topic, tone, postType, includeImage, style, aspectRatio, contentRoute, notes } }
-  webhooks: { instagram: '', linkedin: '', instagramSchedule: '', instagramScheduleRegen: '', linkedinSchedule: '', linkedinScheduleRegen: '', instagramReels: '', campaignPlanner: '', instagramPlanGen: '', linkedinPlanGen: '', elongateIdea: '', captionStudio: '', draftCopy: '', mediaOptions: '', videoRender: '', publishPost: '', zernioSync: '', zernioDashboard: '', creativeGenerate: '', creativeEdit: '', creativeVideo: '', creativeCompose: '', creativeEnhance: '', creativeVideoEdit: '', creativeStitch: '', creativeCancel: '', falBalance: '' },
+  webhooks: { ...DEFAULT_WEBHOOKS },
   supabase: { url: '', anonKey: '' },
   // Canonical brand profile, fetched from Supabase (not persisted to
   // localStorage — Supabase is the source of truth so n8n workflows and the
@@ -61,7 +97,17 @@ function loadState() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (!raw) return initialState
-    return { ...initialState, ...JSON.parse(raw) }
+    const saved = JSON.parse(raw)
+    return {
+      ...initialState,
+      ...saved,
+      // The spread above is shallow, so a persisted `webhooks` object replaces
+      // the defaults wholesale rather than filling in around them — which
+      // means a blob written before a slot existed would keep its old shape
+      // forever, across every reload, with no way to notice. Re-based here so
+      // adding a slot to DEFAULT_WEBHOOKS reaches existing browsers too.
+      webhooks: webhooksFrom(saved.webhooks),
+    }
   } catch { return initialState }
 }
 
@@ -115,7 +161,7 @@ function reducer(state, action) {
         connectedAccounts: { instagram: false, facebook: false, linkedin: false, tiktok: false, x: false },
         instagramInstructions: '', instagramSchedule: {},
         linkedinInstructions: '', linkedinSchedule: {},
-        webhooks: { instagram: '', linkedin: '', instagramSchedule: '', instagramScheduleRegen: '', linkedinSchedule: '', linkedinScheduleRegen: '', instagramReels: '', campaignPlanner: '', instagramPlanGen: '', linkedinPlanGen: '', elongateIdea: '', captionStudio: '', draftCopy: '', mediaOptions: '', videoRender: '', publishPost: '', zernioSync: '', zernioDashboard: '', creativeGenerate: '', creativeEdit: '', creativeVideo: '', creativeCompose: '', creativeEnhance: '', creativeVideoEdit: '', creativeStitch: '', creativeCancel: '', falBalance: '' },
+        webhooks: { ...DEFAULT_WEBHOOKS },
         supabase: { url: '', anonKey: '' },
       }
       return {
@@ -154,7 +200,7 @@ function reducer(state, action) {
         instagramSchedule: newData.instagramSchedule || {},
         linkedinInstructions: newData.linkedinInstructions || '',
         linkedinSchedule: newData.linkedinSchedule || {},
-        webhooks: newData.webhooks || { instagram: '', linkedin: '', instagramSchedule: '', instagramScheduleRegen: '', linkedinSchedule: '', linkedinScheduleRegen: '' },
+        webhooks: webhooksFrom(newData.webhooks),
         supabase: newData.supabase || { url: '', anonKey: '' },
       }
     }
@@ -192,7 +238,7 @@ function reducer(state, action) {
           instagramSchedule: nextData.instagramSchedule || {},
           linkedinInstructions: nextData.linkedinInstructions || '',
           linkedinSchedule: nextData.linkedinSchedule || {},
-          webhooks: nextData.webhooks || { instagram: '', linkedin: '', instagramSchedule: '', instagramScheduleRegen: '', linkedinSchedule: '', linkedinScheduleRegen: '' },
+          webhooks: webhooksFrom(nextData.webhooks),
           supabase: nextData.supabase || { url: '', anonKey: '' },
         }
       }
