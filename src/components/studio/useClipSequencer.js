@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { insertPendingVersions, requestVideo, updateVersion, uploadToStudio } from '../../lib/creativeStudio'
 import {
-  chainsFrom, clipPromptFor, clipRowsByIndex, clipState, nextClipAttempt, setRunStatus,
+  insertPendingVersions, requestCancel, requestVideo, updateVersion, uploadToStudio,
+} from '../../lib/creativeStudio'
+import {
+  chainsFrom, clipImagePlan, clipPromptFor, clipRowsByIndex, clipState, nextClipAttempt,
+  setRunStatus,
 } from '../../lib/creativeStoryboard'
 import { captureLastFrameBlob } from './videoFrame'
 
@@ -123,10 +126,11 @@ export function useClipSequencer({
     const alive = () => token === runId.current && ctx.current.session?.id === startedOn
 
     // ── The chained start frame ──
-    // Only when this seam is marked to continue. A hard-cut clip starts from
-    // the shared style references instead (see the mutual exclusivity note
-    // below), and clip 0 never chains.
-    let startUrl = ''
+    // Only when this seam is marked to continue. An unchained clip gets its
+    // images from clipImagePlan instead — references on Seedance, a start
+    // frame on every other model — and clip 0 never chains.
+    const plan = clipImagePlan(sb, index)
+    let startUrl = plan.startFrom
     if (chainsFrom(sb, index)) {
       const prev = rows[index - 1]
       if (!prev?.video_url) {
@@ -205,11 +209,11 @@ export function useClipSequencer({
     ctx.current.onVersions(ins.rows)
 
     // ── The render ──
-    // reference_image_urls and image_url are MUTUALLY EXCLUSIVE at the
-    // workflow: Seedance's build() early-returns on references and never
-    // reads image_url, so sending both silently discards the chained start
-    // frame. A chained clip therefore sends no references, and the seam
-    // toggle in the UI says so.
+    // clipImagePlan owns the three-way choice (chained start frame / Seedance
+    // references / a start image on models that have no reference endpoint),
+    // including the rule that reference_image_urls and image_url are MUTUALLY
+    // EXCLUSIVE — Seedance's build() early-returns on references and never
+    // reads image_url, so sending both silently discards the start frame.
     const fired = await requestVideo(hooks.creativeVideo, {
       session_id: s.id,
       version_id: ins.rows[0].id,
@@ -221,7 +225,7 @@ export function useClipSequencer({
       generate_audio: !!sb.audio,
       image_url: startUrl,
       end_image_url: '',
-      reference_image_urls: startUrl ? [] : (sb.sharedRefs || []).map(r => r.url).filter(Boolean),
+      reference_image_urls: plan.refs,
     })
 
     if (fired.error) {
@@ -234,20 +238,48 @@ export function useClipSequencer({
     }
   }, [stop])
 
-  // Re-takes one clip. Has to fire directly rather than just re-arming: the
-  // failed row is still the latest attempt at that clip, so `anyFailed` stays
-  // true — and therefore `running` stays false — until a newer attempt row
-  // exists. This is what creates that row. Once it lands as pending, the
-  // driver below takes the run back over on its own.
-  const retry = useCallback(index => {
+  // Renders exactly ONE clip and stops there — a first take, a re-take, or a
+  // retry after a failure. It fires directly rather than arming the board, and
+  // that is the whole point: arming means the driver walks on into every
+  // following clip, and someone who asked for one shot has not agreed to pay
+  // for the rest of the storyboard. Continuing the board is the
+  // Render-the-remaining button's job, and that button quotes its own price.
+  const renderOne = useCallback(index => {
     const s = ctx.current.session
     if (!s) return
     runId.current += 1
     lock.current = { sessionId: s.id, clipIndex: index }
-    setArmedFor(s.id)
-    setRunStatus(ctx.current.accessToken, s.id, 'running')
+    setArmedFor(null)
+    setRunStatus(ctx.current.accessToken, s.id, '')
     void fireClip(index, runId.current)
   }, [fireClip])
+
+  // ── Cancelling a clip fal is already working on ──
+  // Two separate things, and only one of them is guaranteed. Marking the row
+  // failed locally is what frees the board. Asking fal to drop the job is what
+  // MIGHT save the money — fal can only cancel while the request is still
+  // IN_QUEUE, so a job already running is billed whatever we do. The UI says
+  // that rather than implying a refund.
+  //
+  // Disarms first: a cancelled clip reads as "not ready", and an armed driver
+  // would take that as its cue to pay for it all over again.
+  const cancelClip = useCallback(async index => {
+    const { session: s, clipRows: rows, webhooks: hooks, accessToken: tok } = ctx.current
+    const row = rows?.[index]
+    if (!s || !row || row.status !== 'pending') return
+    runId.current += 1
+    lock.current = { sessionId: null, clipIndex: null }
+    setArmedFor(null)
+    setRunStatus(tok, s.id, 'paused')
+
+    await updateVersion(tok, row.id, {
+      status: 'failed',
+      error: "Cancelled. If fal had already started it, it's still charged.",
+    })
+    ctx.current.refresh(s.id)
+    const res = await requestCancel(hooks.creativeCancel, { session_id: s.id, version_id: row.id })
+    if (res.error) ctx.current.onError(res.error)
+  }, [])
 
   // ── The driver ──
   // Fires the next clip and nothing else. It never ends the run: `running`
@@ -267,16 +299,26 @@ export function useClipSequencer({
     void fireClip(i, runId.current)
   }, [running, session, states, fireClip])
 
+  const anyPending = states.some(st => st === 'pending')
+
   return {
     running,
     start,
     stop,
-    retry,
+    renderOne,
+    cancelClip,
     clipRows,
     states,
     allReady,
-    // What the storyboard highlights as "working on this one".
-    activeIndex: running ? states.findIndex(st => st !== 'ready') : -1,
-    anyPending: states.some(st => st === 'pending'),
+    // What the storyboard highlights as "working on this one". A solo render
+    // isn't a run, so it highlights the pending clip directly rather than
+    // "the first one that isn't finished".
+    activeIndex: running
+      ? states.findIndex(st => st !== 'ready')
+      : states.findIndex(st => st === 'pending'),
+    anyPending,
+    // True while ANY clip is in flight, armed run or not. Gates every other
+    // render control so two clips can never be paid for at once.
+    busy: running || anyPending,
   }
 }

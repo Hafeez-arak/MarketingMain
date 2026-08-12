@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useApp } from '../../store/app'
 import { useAuth } from '../../store/auth'
 import { Button, Card, Modal, SectionHead, Select, Spinner, Textarea, Empty } from '../../components/ui/index'
@@ -14,20 +14,22 @@ import { buildVideoPrompt } from '../../components/studio/motionPresets'
 import { ClipBoard } from '../../components/studio/ClipBoard'
 import { useClipSequencer } from '../../components/studio/useClipSequencer'
 import {
-  MULTI_CLIP_MAX, emptyStoryboard, newClip, nextClipAttempt, normalizeStoryboard,
+  MULTI_CLIP_MAX, emptyStoryboard, moveClip, newClip, nextClipAttempt, normalizeStoryboard,
   saveStoryboard, stitchRowsOf, storyboardTotals,
 } from '../../lib/creativeStoryboard'
 import {
-  canEditVideoDuration, estimateVideoCost, estimateVideoEditCost, getVideoModel, VIDEO_EDIT_MAX_REFERENCES,
+  canEditVideoDuration, estimateVideoCost, estimateVideoEditCost, getVideoModel, modelImageMax,
+  VIDEO_EDIT_MAX_REFERENCES,
 } from '../../components/studio/videoModels'
 import { aspectLabel } from '../../lib/postFormats'
 import { uploadReferenceImage } from '../../lib/referenceImages'
 import { buildInstructionsString } from '../../lib/brandBrain'
 import { captureFirstFrame, parentStillOf } from '../../components/studio/videoFrame'
 import {
-  buildBranches, createSession, deleteSession, downloadVersion, fetchSessions, fetchVersions, finalizeVersion,
-  insertPendingVersions, renameSession, requestCompose, requestEdit, requestEnhance, requestGenerate, requestVideo,
-  requestStitch, requestVideoEdit, selectVersion, touchSession, updateVersion, uploadToStudio,
+  buildBranches, createSession, deleteSession, downloadVersion, fetchFalBalance, fetchSessions,
+  fetchVersions, finalizeVersion, insertPendingVersions, renameSession, requestCompose, requestEdit,
+  requestEnhance, requestGenerate, requestVideo, requestStitch, requestVideoEdit, selectVersion,
+  touchSession, updateVersion, uploadToStudio,
 } from '../../lib/creativeStudio'
 
 // ─── Creative Studio ───────────────────────────────────────────────────────
@@ -288,6 +290,10 @@ export function CreativeStudio() {
   // moment the render is submitted. n8n never writes creative_sessions.
   const [storyboard, setStoryboard] = useState(null)
   const [stitching, setStitching] = useState(false)
+  // null means "no figure to show" — either the webhook isn't configured or
+  // the lookup failed. Deliberately not 0: a balance of zero and a balance we
+  // couldn't read must never render the same, since one of them means "stop".
+  const [falBalance, setFalBalance] = useState(null)
 
   const [videoTarget, setVideoTarget] = useState(null)      // the still being animated
   // Set only by the 🔄 re-render action: the exact prompt/duration/
@@ -341,6 +347,15 @@ export function CreativeStudio() {
     return rows
   }, [accessToken])
 
+  // Read once per page load, and again whenever a render run finishes — often
+  // enough to be useful, rare enough that a spend figure never turns into a
+  // poll against someone else's API.
+  useEffect(() => {
+    let cancelled = false
+    fetchFalBalance(webhooks.falBalance).then(n => { if (!cancelled) setFalBalance(n) })
+    return () => { cancelled = true }
+  }, [webhooks.falBalance, versions.length])
+
   const isMulti = session?.intent === 'multi_video'
 
   // The multi-clip render run. Sequential and browser-driven, same as every
@@ -370,6 +385,10 @@ export function CreativeStudio() {
   }, [session, anyPending, sequencer.running, refresh])
 
   async function openSession(s) {
+    // Any storyboard edit still sitting in the debounce belongs to the session
+    // being left, not the one being opened. flushStoryboard writes it against
+    // the id it was made under.
+    flushStoryboard()
     setSession(s); setError(''); setVersions([]); setComposers({}); setFocusedBranch(null)
     setAspect(s.aspect_ratio || '4:5')
     setOpeningId(s.id)
@@ -656,11 +675,49 @@ export function CreativeStudio() {
   }
 
   // ── Multi-clip storyboard ──
-  // Every edit writes through to creative_sessions.storyboard immediately.
-  // Not debounced: these are discrete choices (a length, a seam, a toggle),
-  // not keystrokes, and the one field that IS typed into — the prompt —
-  // matters far more than the write it costs. A marketer who types six shot
-  // descriptions and closes the tab must not lose five of them.
+  // Every edit writes the WHOLE blob back to creative_sessions.storyboard.
+  //
+  // This used to fire one PATCH per edit with no coalescing, on the reasoning
+  // that losing typed text is worse than an extra write. It lost typed text.
+  // Each PATCH carries the entire storyboard, so several in flight at once is
+  // not "a few redundant writes" — it is several complete versions of the
+  // board racing, and Postgres keeps whichever ARRIVES last, not whichever was
+  // issued last. Two shot descriptions were silently discarded that way on
+  // 2026-08-12 and were only noticed because the clips rendered with nothing
+  // but the style bible in them.
+  //
+  // Coalescing to one trailing write per burst removes the race outright:
+  // there is only ever one PATCH in flight, and it always carries the newest
+  // state. The original worry is answered by flushing on session change and on
+  // unmount rather than by writing constantly.
+  const saveTimer = useRef(null)
+  const pendingSave = useRef(null)
+
+  const flushStoryboard = useCallback(() => {
+    if (saveTimer.current) { clearTimeout(saveTimer.current); saveTimer.current = null }
+    const p = pendingSave.current
+    pendingSave.current = null
+    // Pinned to the session it was edited in, so a flush triggered BY a
+    // session switch can't write one board's clips onto another's row.
+    if (p) saveStoryboard(accessToken, p.sessionId, p.storyboard)
+  }, [accessToken])
+
+  const queueSave = useCallback((sessionId, storyboard) => {
+    if (!sessionId) return
+    pendingSave.current = { sessionId, storyboard }
+    if (saveTimer.current) clearTimeout(saveTimer.current)
+    saveTimer.current = setTimeout(() => {
+      saveTimer.current = null
+      const p = pendingSave.current
+      pendingSave.current = null
+      if (p) saveStoryboard(accessToken, p.sessionId, p.storyboard)
+    }, 600)
+  }, [accessToken])
+
+  // Closing the tab mid-edit is the case the immediate write was protecting,
+  // and it's the one a debounce could genuinely regress. Flushed here instead.
+  useEffect(() => flushStoryboard, [flushStoryboard])
+
   const patchBoard = useCallback(patch => {
     setStoryboard(prev => {
       if (!prev) return prev
@@ -678,19 +735,19 @@ export function CreativeStudio() {
         }))
         if (m.audio === 'unsupported') next.audio = false
       }
-      if (session) saveStoryboard(accessToken, session.id, next)
+      if (session) queueSave(session.id, next)
       return next
     })
-  }, [accessToken, session])
+  }, [queueSave, session])
 
   const patchClip = useCallback((index, patch) => {
     setStoryboard(prev => {
       if (!prev) return prev
       const next = { ...prev, clips: prev.clips.map((c, i) => (i === index ? { ...c, ...patch } : c)) }
-      if (session) saveStoryboard(accessToken, session.id, next)
+      if (session) queueSave(session.id, next)
       return next
     })
-  }, [accessToken, session])
+  }, [queueSave, session])
 
   const addClip = useCallback(() => {
     // Disarms any finished run first. Without this, adding a shot after a run
@@ -703,10 +760,10 @@ export function CreativeStudio() {
       // A new shot continues from the one before it by default — that's the
       // reason to build a video this way rather than as separate clips.
       const next = { ...prev, clips: [...prev.clips, newClip(prev.model, { continueFromPrevious: true })] }
-      if (session) saveStoryboard(accessToken, session.id, next)
+      if (session) queueSave(session.id, next)
       return next
     })
-  }, [accessToken, session, sequencer])
+  }, [queueSave, session, sequencer])
 
   const removeClip = useCallback(index => {
     setStoryboard(prev => {
@@ -714,23 +771,56 @@ export function CreativeStudio() {
       const next = { ...prev, clips: prev.clips.filter((_, i) => i !== index) }
       // Clip 1 can never continue from something before it.
       if (next.clips[0]) next.clips[0] = { ...next.clips[0], continueFromPrevious: false }
-      if (session) saveStoryboard(accessToken, session.id, next)
+      if (session) queueSave(session.id, next)
       return next
     })
-  }, [accessToken, session])
+  }, [queueSave, session])
 
-  // Re-taking one clip — both the Retry on a failure and the Re-render on a
-  // take that simply came back wrong. One path, because they are the same
-  // operation: nextClipAttempt gives a fresh attempt number, so the unique
-  // index never collides with the previous try and that try stays in history
-  // rather than being overwritten. Whether the old row was failed or perfectly
-  // good only changes what the button is called.
-  const retryClip = useCallback(index => { sequencer.retry(index) }, [sequencer])
+  // Reordering only ever moves shots that have no take — canMoveClip enforces
+  // it and the arrows are disabled otherwise. clip_index is positional and
+  // rendered rows are keyed by it, so moving a rendered clip would leave clip
+  // 3's footage answering to "clip 2".
+  const moveClipTo = useCallback((from, to) => {
+    setStoryboard(prev => {
+      if (!prev) return prev
+      const next = moveClip(prev, from, to)
+      if (session) queueSave(session.id, next)
+      return next
+    })
+  }, [queueSave, session])
 
-  function addStoryboardRef() { setPickerSlot({ id: 'storyboardRef', label: 'Style reference', kind: 'all' }) }
+  // Rendering one shot — a first take, a re-take, or a try again after a
+  // failure. All one operation: nextClipAttempt gives a fresh attempt number,
+  // so the unique index never collides with the previous try and that try
+  // stays in history rather than being overwritten. What differs is only what
+  // the button is called.
+  // The sequencer writes clip_run_status to the DB; the open session object
+  // was read once and would otherwise keep claiming whatever was true then.
+  // Mirroring it locally is what keeps the "this run stopped" banner honest
+  // in the tab that did the stopping, not just in the one that reopens later.
+  const markRun = useCallback(status => {
+    setSession(prev => (prev ? { ...prev, clip_run_status: status } : prev))
+  }, [])
+
+  const startRun = useCallback(() => { markRun('running'); sequencer.start() }, [markRun, sequencer])
+  const stopRun = useCallback(() => { markRun('paused'); sequencer.stop('paused') }, [markRun, sequencer])
+  const renderClip = useCallback(index => { markRun(''); sequencer.renderOne(index) }, [markRun, sequencer])
+  const cancelClip = useCallback(index => { markRun('paused'); sequencer.cancelClip(index) }, [markRun, sequencer])
+
+  function addStoryboardRef() { setPickerSlot({ id: 'storyboardRef', label: 'Image for every new shot', kind: 'all' }) }
   const removeStoryboardRef = useCallback(i => {
     patchBoard({ sharedRefs: (storyboard?.sharedRefs || []).filter((_, n) => n !== i) })
   }, [patchBoard, storyboard])
+
+  // Images belonging to ONE shot. The picker slot carries the clip index so
+  // the result lands on the right card — there is one picker and up to twelve
+  // places it can be opened from.
+  function addClipRef(index) {
+    setPickerSlot({ id: 'clipRef', clipIndex: index, label: `Image for clip ${index + 1}`, kind: 'all' })
+  }
+  const removeClipRef = useCallback((index, n) => {
+    patchClip(index, { refs: (storyboard?.clips?.[index]?.refs || []).filter((_, i) => i !== n) })
+  }, [patchClip, storyboard])
 
   // ── Per-lane follow-ups ──
   const nextRound = useMemo(
@@ -1300,6 +1390,12 @@ export function CreativeStudio() {
       <SectionHead
         title="Creative Studio"
         subtitle="Describe what you want, then keep talking to whichever option is going the right way."
+        action={falBalance == null ? null : (
+          <span className="text-[11px] text-text-secondary whitespace-nowrap"
+            title="Credit left on the fal.ai account, refreshed when this page loads">
+            fal credit <span className="font-semibold text-text">${falBalance.toFixed(2)}</span>
+          </span>
+        )}
       />
 
       {missingWebhook && (
@@ -1547,20 +1643,25 @@ export function CreativeStudio() {
               activeIndex={sequencer.activeIndex}
               running={sequencer.running}
               allReady={sequencer.allReady}
+              busy={sequencer.busy}
               stitchRow={stitchRowsOf(versions)[0] || null}
               stitching={stitching}
               preparingClipId={preparingClip}
+              runStatus={session.clip_run_status || ''}
               onPatchClip={patchClip}
               onPatchBoard={patchBoard}
               onAddClip={addClip}
               onRemoveClip={removeClip}
-              onStart={sequencer.start}
-              onStop={sequencer.stop}
-              onRetryClip={retryClip}
-              onRerenderClip={retryClip}
+              onMoveClip={moveClipTo}
+              onStart={startRun}
+              onStop={stopRun}
+              onRenderClip={renderClip}
+              onCancelClip={cancelClip}
               onStitch={handleStitch}
               onAddRef={addStoryboardRef}
               onRemoveRef={removeStoryboardRef}
+              onAddClipRef={addClipRef}
+              onRemoveClipRef={removeClipRef}
               onOpenClip={openClipEditor}
               onDownloadStitch={handleDownload}
             />
@@ -1645,6 +1746,16 @@ export function CreativeStudio() {
           if (pickerSlot.id === 'storyboardRef') {
             const refs = storyboard?.sharedRefs || []
             if (refs.length < 9) patchBoard({ sharedRefs: [...refs, { url: picked.url, name: picked.name || '' }] })
+            setPickerSlot(null)
+            return
+          }
+          // Same blob, one clip deeper. The slot carries which clip opened it,
+          // because one picker serves up to twelve cards.
+          if (pickerSlot.id === 'clipRef') {
+            const i = pickerSlot.clipIndex
+            const refs = storyboard?.clips?.[i]?.refs || []
+            const cap = modelImageMax(storyboard?.model)
+            if (refs.length < cap) patchClip(i, { refs: [...refs, { url: picked.url, name: picked.name || '' }] })
             setPickerSlot(null)
             return
           }

@@ -297,6 +297,32 @@ const WORKFLOW_CONFIGS = [
     ),
   },
   {
+    platform: 'creativeCancel',
+    label: 'Creative Studio — Cancel a render',
+    placeholder: 'https://your-instance.app.n8n.cloud/webhook/arak-creative-cancel',
+    description: 'Asks fal to drop a clip that is already generating. Worth knowing what this can actually do: fal only cancels a request still waiting in its queue — once generation has started, the clip finishes and is charged whatever we send. So it saves money on a misfire caught quickly, and frees the storyboard either way.',
+    icon: (
+      <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: 'linear-gradient(135deg,#b91c1c,#ef4444)' }}>
+        <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="9"/><path d="M15 9l-6 6M9 9l6 6" strokeLinecap="round"/>
+        </svg>
+      </div>
+    ),
+  },
+  {
+    platform: 'falBalance',
+    label: 'fal.ai — credit balance',
+    placeholder: 'https://your-instance.app.n8n.cloud/webhook/arak-fal-balance',
+    description: 'Shows what is left on the fal account beside the Creative Studio header, so the price on a Render button can be read against something. Goes through n8n rather than straight from the browser because reading the balance needs FAL_KEY — a credential that can spend money and must never reach a browser. Optional: leave it blank and the header simply shows no figure.',
+    icon: (
+      <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: 'linear-gradient(135deg,#047857,#10b981)' }}>
+        <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24">
+          <rect x="2" y="6" width="20" height="13" rx="2"/><path d="M2 10h20" strokeLinecap="round"/>
+        </svg>
+      </div>
+    ),
+  },
+  {
     platform: 'creativeStitch',
     label: 'Creative Studio — Stitch (join the clips)',
     placeholder: 'https://your-instance.app.n8n.cloud/webhook/arak-creative-stitch',

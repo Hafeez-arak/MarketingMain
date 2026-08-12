@@ -312,6 +312,29 @@ export const requestVideoEdit = (url, payload) => fire(url, payload, 'Creative V
 // requestCompose and for the same reason — local ffmpeg, no model call — but
 // slower, since it re-encodes every clip to a common shape first.
 export const requestStitch   = (url, payload) => fire(url, payload, 'Creative Stitch')
+// Asks fal to drop a render that is already submitted. Best effort by nature:
+// fal only cancels a request still sitting IN_QUEUE, so a job it has already
+// started is billed regardless. The caller marks the row failed itself and
+// does not wait on this to decide anything.
+export const requestCancel   = (url, payload) => fire(url, payload, 'Creative Cancel')
+
+// The one webhook here whose ANSWER is the point, so it doesn't go through
+// fire(). Returns a number or null — never 0 on failure, because "we couldn't
+// ask" and "you have nothing left" mean opposite things to whoever reads it.
+export async function fetchFalBalance(webhookUrl) {
+  if (!webhookUrl) return null
+  try {
+    const res = await fetch(webhookUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}',
+    })
+    if (!res.ok) return null
+    const data = await res.json()
+    const n = Number(data?.balance)
+    return Number.isFinite(n) ? n : null
+  } catch { return null }
+}
 
 // ── Enhance ────────────────────────────────────────────────────────────────
 

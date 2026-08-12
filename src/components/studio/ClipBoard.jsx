@@ -3,9 +3,10 @@ import { Button, ConfirmDialog, Modal, Spinner, Textarea, Toggle } from '../ui/i
 import { MultiRefRow } from './MediaPicker'
 import { LookPicker, ModelPicker } from './VideoSettings'
 import { STYLE_BIBLE_PLACEHOLDER } from './motionPresets'
-import { getVideoModel, estimateVideoCost } from './videoModels'
+import { getVideoModel, estimateVideoCost, modelImageMax, modelImageRole } from './videoModels'
 import {
-  MULTI_CLIP_MAX, chainedAfter, clipPromptFor, staleSeams, storyboardTotals,
+  MULTI_CLIP_MAX, canMoveClip, chainedAfter, clipImagePlan, clipPromptFor, staleSeams,
+  storyboardTotals,
 } from '../../lib/creativeStoryboard'
 
 // ─── The storyboard ────────────────────────────────────────────────────────
@@ -25,6 +26,8 @@ import {
 //    Hailuo (6s, no aspect input) across a chained sequence guarantees a
 //    visible aesthetic jump at every seam — the exact thing this is for.
 //  · LENGTH is per-clip. Pacing is the whole craft of a cut.
+//  · IMAGES are both. A board-wide set for the look, plus a per-shot set for
+//    "this shot features THAT product".
 
 const money = n => `$${n.toFixed(2)}`
 
@@ -47,7 +50,7 @@ function StateDot({ state }) {
 //  · CROSSFADE vs HARD CUT is about assembly — what ffmpeg does at the join.
 // A continued seam almost always wants a hard cut at assembly, because the
 // footage already flows; crossfading it would blur a continuous shot.
-function Seam({ clip, index, startFrameUrl, sharedRefs, stale, onPatch, onPreviewFrame, disabled }) {
+function Seam({ clip, index, startFrameUrl, stale, onPatch, onPreviewFrame, disabled }) {
   const continues = !!clip.continueFromPrevious
   return (
     <div className="pl-3 py-1.5 border-l-2 border-dashed border-stone-300 ml-3 space-y-1.5">
@@ -95,27 +98,16 @@ function Seam({ clip, index, startFrameUrl, sharedRefs, stale, onPatch, onPrevie
             {[0.25, 0.5, 0.75, 1, 1.5].map(d => <option key={d} value={d}>{d}s</option>)}
           </select>
         )}
-
-        {/* The one thing a marketer cannot discover on their own: the render
-            endpoint takes EITHER a start frame or style references, never both,
-            so continuing a shot silently costs it the shared references. */}
-        {continues && (
-          <span className="text-[10px] text-text-tertiary leading-snug">
-            Uses the previous clip's last frame, so the shared references don't apply here.
-          </span>
-        )}
       </div>
 
-      {/* ── What clip N+1 is actually born from ──
-          The single most invisible thing in this feature. A chained clip is
-          generated from ONE still — the previous clip's final frame, grabbed
-          by seeking a hair before the end — and when that grab lands on a
-          motion-blurred or half-faded frame, the only symptom is "this shot
-          looks wrong" with nothing to inspect. It's already uploaded and
+      {/* Chaining is the one mechanism here that fails invisibly: a chained
+          clip is generated from ONE still grabbed a hair before the previous
+          clip ends, and when that grab lands on a motion-blurred frame the
+          only symptom is "this shot looks wrong". It's already uploaded and
           already on the row, so show it. */}
-      <div className="flex items-center gap-2">
-        {continues ? (
-          startFrameUrl ? (
+      {continues && (
+        <div className="flex items-center gap-2">
+          {startFrameUrl ? (
             <>
               <button type="button" onClick={() => onPreviewFrame(startFrameUrl)}
                 title="See this frame full size"
@@ -130,27 +122,9 @@ function Seam({ clip, index, startFrameUrl, sharedRefs, stale, onPatch, onPrevie
             <span className="text-[10px] text-text-tertiary leading-snug">
               Clip {index + 1} will start from clip {index}'s last frame, once clip {index} has rendered.
             </span>
-          )
-        ) : sharedRefs.length ? (
-          <>
-            <div className="flex gap-1">
-              {sharedRefs.slice(0, 4).map((r, n) => (
-                <button key={n} type="button" onClick={() => onPreviewFrame(r.url)}
-                  className="w-11 h-11 border border-border hover:border-amber-400 overflow-hidden flex-shrink-0">
-                  <img src={r.url} alt="" className="w-full h-full object-cover" />
-                </button>
-              ))}
-            </div>
-            <span className="text-[10px] text-text-tertiary leading-snug">
-              Clip {index + 1} starts fresh, guided by {sharedRefs.length === 1 ? 'this reference' : `these ${sharedRefs.length} references`}.
-            </span>
-          </>
-        ) : (
-          <span className="text-[10px] text-text-tertiary leading-snug">
-            Clip {index + 1} starts fresh from its prompt alone.
-          </span>
-        )}
-      </div>
+          )}
+        </div>
+      )}
 
       {stale && (
         <p className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 px-2 py-1 leading-snug">
@@ -163,14 +137,45 @@ function Seam({ clip, index, startFrameUrl, sharedRefs, stale, onPatch, onPrevie
   )
 }
 
+// ── What this shot is built from, in the shot's own words ──────────────────
+// The three cases differ in a way nobody can guess from the UI, and getting it
+// wrong is expensive: images handed to a model with no reference endpoint used
+// to be dropped in silence, at full price.
+function ImageNote({ plan, model, index }) {
+  if (plan.mode === 'chained') {
+    return (
+      <p className="text-[10px] text-text-tertiary leading-snug">
+        Continues from clip {index}, so it starts on that clip's last frame — images can't be added
+        to a continued shot.
+      </p>
+    )
+  }
+  if (plan.mode === 'references') {
+    return (
+      <p className="text-[10px] text-text-tertiary leading-snug">
+        {model.label} reads these as style references — describe them in the prompt
+        (“@Image1 is the fixture”) or it treats them as loose inspiration.
+      </p>
+    )
+  }
+  return (
+    <p className="text-[10px] text-text-tertiary leading-snug">
+      {model.label} has no reference mode, so the first image becomes this shot's
+      <span className="font-medium"> opening frame</span> and the prompt says what happens to it.
+    </p>
+  )
+}
+
 // ── One shot ───────────────────────────────────────────────────────────────
 function ClipCard({
-  clip, index, row, state, model, audio, active, promptText, preparing,
-  onPatch, onRemove, onRetry, onRerender, onAddText, onPreview,
-  canRemove, disabled,
+  clip, index, row, state, model, audio, active, promptText, preparing, plan,
+  canRender, renderBlockedWhy, busy,
+  onPatch, onRemove, onRender, onCancel, onAddText, onPreview, onMove, onAddRef, onRemoveRef,
+  canRemove, canUp, canDown, disabled,
 }) {
   const cost = estimateVideoCost(model.id, { resolution: clip.resolution, duration: clip.duration, audio })
   const ready = state === 'ready' && !!row?.video_url
+  const pending = state === 'pending'
   // A composite has been through the text editor; the take you'd re-render is
   // still the clip underneath it.
   const composited = row?.kind === 'overlay'
@@ -184,22 +189,44 @@ function ClipCard({
         <p className="text-xs font-semibold text-text">Clip {index + 1}</p>
         <span className="text-[10px] text-text-tertiary">{clip.duration}s · {money(cost)}</span>
         {composited && <span className="text-[10px] text-emerald-700">· text added</span>}
+
+        {/* Reorder. Only between two shots that have no take: clip_index is
+            positional and rendered rows are keyed by it, so moving a rendered
+            clip would quietly relabel finished footage. */}
+        <div className="flex">
+          <button type="button" onClick={() => onMove(index, index - 1)} disabled={disabled || !canUp}
+            title={canUp ? 'Move up' : 'Only shots with no take can be reordered'}
+            className="text-text-tertiary hover:text-text text-[10px] leading-none px-1 disabled:opacity-25">▲</button>
+          <button type="button" onClick={() => onMove(index, index + 1)} disabled={disabled || !canDown}
+            title={canDown ? 'Move down' : 'Only shots with no take can be reordered'}
+            className="text-text-tertiary hover:text-text text-[10px] leading-none px-1 disabled:opacity-25">▼</button>
+        </div>
+
         <div className="flex-1" />
-        {state === 'failed' && (
-          <Button size="xs" variant="secondary" onClick={() => onRetry(index)} disabled={disabled}>Retry</Button>
+
+        {pending && (
+          // Real money is in flight. Whether cancelling saves it depends on
+          // whether fal has started, which we can't know from here — the
+          // dialog behind this says so rather than promising a refund.
+          <Button size="xs" variant="secondary" onClick={() => onCancel(index)}>✕ Cancel</Button>
         )}
         {ready && (
           <>
             <Button size="xs" variant="secondary" onClick={() => onAddText(row)} disabled={disabled || !!preparing}>
               {preparing ? <><Spinner size="sm" /> Opening…</> : '✏️ Text'}
             </Button>
-            {/* Re-rendering one shot is the only way to fix a take that came
-                back wrong, and it costs the same as the first one did — so the
-                price is on the button, exactly like Render all. */}
-            <Button size="xs" variant="secondary" onClick={() => onRerender(index)} disabled={disabled}>
+            <Button size="xs" variant="secondary" onClick={() => onRender(index)} disabled={busy}>
               ↻ Re-render · {money(cost)}
             </Button>
           </>
+        )}
+        {!ready && !pending && (
+          // One shot at a time, without committing to the whole board. The
+          // price is on the button for the same reason it is on Render all.
+          <Button size="xs" onClick={() => onRender(index)} disabled={busy || !canRender || !clip.prompt.trim()}
+            title={renderBlockedWhy || undefined}>
+            {state === 'failed' ? '↻ Try again' : '▶ Render'} · {money(cost)}
+          </Button>
         )}
         {canRemove && (
           <button type="button" onClick={() => onRemove(index)} disabled={disabled}
@@ -207,6 +234,10 @@ function ClipCard({
             className="text-text-tertiary hover:text-red-500 text-xs leading-none px-1 disabled:opacity-40">×</button>
         )}
       </div>
+
+      {!ready && !pending && !canRender && renderBlockedWhy && (
+        <p className="text-[10px] text-text-tertiary">{renderBlockedWhy}</p>
+      )}
 
       <div className="flex gap-3">
         {/* The render itself once there is one, so the board reads as a
@@ -221,7 +252,7 @@ function ClipCard({
             ? <video src={row.video_url} className="w-full h-full object-cover" muted playsInline controls={false}
                 onMouseEnter={e => e.currentTarget.play().catch(() => {})}
                 onMouseLeave={e => { e.currentTarget.pause(); e.currentTarget.currentTime = 0 }} />
-            : state === 'pending'
+            : pending
               ? <Spinner size="sm" />
               : <span className="text-[10px] text-text-tertiary text-center px-1">No take yet</span>}
         </button>
@@ -252,6 +283,20 @@ function ClipCard({
               className="flex-1 min-w-[8rem] text-[11px] bg-white border border-border px-2 py-1 focus:outline-none focus:border-amber-400" />
           </div>
 
+          {/* Images for this shot alone. Hidden on a chained clip, which has
+              already spent its one image slot on the previous clip's tail. */}
+          {plan.mode !== 'chained' && (
+            <div className="space-y-1">
+              <MultiRefRow
+                label={plan.mode === 'references' ? 'References for this shot' : 'Start this shot from an image'}
+                items={clip.refs || []} max={modelImageMax(model.id)}
+                onAdd={(clip.refs || []).length < modelImageMax(model.id) ? () => onAddRef(index) : null}
+                onRemove={n => onRemoveRef(index, n)} />
+              <ImageNote plan={plan} model={model} index={index} />
+            </div>
+          )}
+          {plan.mode === 'chained' && <ImageNote plan={plan} model={model} index={index} />}
+
           {/* What the model is SENT, which is never what was typed: the look
               preset, the style bible and the continuity line are all folded in
               on the way out. Collapsed, because it's only wanted when a shot
@@ -279,16 +324,18 @@ function ClipCard({
 
 // ── The board ──────────────────────────────────────────────────────────────
 export function ClipBoard({
-  storyboard, clipRows, versions, states, activeIndex, running, allReady, stitchRow, stitching,
-  preparingClipId,
-  onPatchClip, onPatchBoard, onAddClip, onRemoveClip,
-  onStart, onStop, onRetryClip, onRerenderClip, onStitch, onAddRef, onRemoveRef,
+  storyboard, clipRows, versions, states, activeIndex, running, allReady, busy,
+  stitchRow, stitching, preparingClipId, runStatus,
+  onPatchClip, onPatchBoard, onAddClip, onRemoveClip, onMoveClip,
+  onStart, onStop, onRenderClip, onCancelClip, onStitch,
+  onAddRef, onRemoveRef, onAddClipRef, onRemoveClipRef,
   onOpenClip, onDownloadStitch,
 }) {
   const [confirming, setConfirming] = useState(false)
   // Which clip a re-render is being confirmed for. A number, not a boolean —
   // the dialog names the shot and its downstream damage.
   const [rerendering, setRerendering] = useState(null)
+  const [cancelling, setCancelling] = useState(null)
   // { url, kind } — a still handed between clips, or a clip played at size.
   const [preview, setPreview] = useState(null)
 
@@ -296,9 +343,6 @@ export function ClipBoard({
   const totals = storyboardTotals(storyboard)
   const clips = storyboard.clips
   const locked = running
-  // A clip that already has a take can't be removed: clip_index is positional,
-  // so deleting one re-labels every rendered clip after it. Re-render freely,
-  // append freely, delete only what hasn't been paid for.
   const renderedCount = clipRows.filter(Boolean).length
   const stale = staleSeams(storyboard, clipRows, versions)
 
@@ -306,8 +350,6 @@ export function ClipBoard({
   // some clips are already rendered — a Continue after four of six shots is a
   // third of the price, and quoting the full figure would train people to
   // ignore it.
-  // The longest single render this model can produce — durations are listed
-  // shortest-first in the catalog, so the ceiling is the last one.
   const maxSingleTake = Number(model.durations[model.durations.length - 1]) || 0
 
   const pending = clips.filter((_, i) => states[i] !== 'ready')
@@ -316,12 +358,36 @@ export function ClipBoard({
     0,
   )
 
-  // The re-render dialog's two facts: the price, and what it strands.
+  // A shot with no description still renders — it just goes out carrying the
+  // style bible and nothing else, and comes back as an expensive continuation
+  // of whatever preceded it. That happened for real on 2026-08-12 and read as
+  // a model problem rather than an empty box, because nothing on the board
+  // said the box was empty. Render-all used to require only that SOME clip had
+  // a prompt; it now names the ones that don't.
+  const blank = clips
+    .map((c, i) => (states[i] !== 'ready' && !c.prompt.trim() ? i + 1 : 0))
+    .filter(Boolean)
+
+  // A chained shot cannot be rendered before the shot it continues from —
+  // there would be no frame to start it on. This is what keeps "render them
+  // one at a time" honest about order.
+  const renderBlock = i => {
+    if (!clips[i]?.continueFromPrevious || i === 0) return ''
+    return states[i - 1] === 'ready'
+      ? ''
+      : `Continues from clip ${i}, so clip ${i} has to render first.`
+  }
+
   const rerenderClip = rerendering == null ? null : clips[rerendering]
   const rerenderCost = rerenderClip
     ? estimateVideoCost(model.id, { resolution: rerenderClip.resolution, duration: rerenderClip.duration, audio: !!storyboard.audio })
     : 0
   const stranded = rerendering == null ? [] : chainedAfter(storyboard, rerendering).filter(i => clipRows[i])
+
+  // The run died with work outstanding — a closed tab, a failure, a cancel.
+  // Only worth saying when the board can't already be read as finished.
+  const showStopped = !running && !allReady && renderedCount > 0
+    && (runStatus === 'running' || runStatus === 'paused')
 
   return (
     <div className="space-y-3">
@@ -343,8 +409,18 @@ export function ClipBoard({
             placeholder={STYLE_BIBLE_PLACEHOLDER} />
         </div>
 
-        <MultiRefRow label="Style references (new shots only)" items={storyboard.sharedRefs}
-          max={9} onRemove={onRemoveRef} onAdd={onAddRef} />
+        <div className="space-y-1">
+          <MultiRefRow label="Images for every new shot" items={storyboard.sharedRefs}
+            max={9} onRemove={onRemoveRef} onAdd={onAddRef} />
+          {/* Said out loud because it was silently untrue for three of the
+              five models: only Seedance has a reference endpoint, and the
+              others discarded these images at full price without an error. */}
+          <p className="text-[10px] text-text-tertiary leading-snug">
+            {modelImageRole(model.id) === 'references'
+              ? `${model.label} takes these as style references on any shot that isn't continued.`
+              : `${model.label} has no reference mode — on a new shot the first image is used as its opening frame instead. A shot's own image, set below, is used before these.`}
+          </p>
+        </div>
 
         {model.audio === 'unsupported' ? (
           <p className="text-[11px] text-text-tertiary">{model.label} doesn't generate audio.</p>
@@ -352,8 +428,6 @@ export function ClipBoard({
           <div>
             <Toggle checked={!!storyboard.audio} onChange={e => onPatchBoard({ audio: e.target.checked })}
               label={model.audio === 'paid' ? 'Generate sound too (adds to the cost)' : 'Generate sound too (free)'} />
-            {/* Off by default and worth saying why — a handed-over last frame
-                carries no audio state, so each clip invents its own ambience. */}
             <p className="text-[10px] text-text-tertiary mt-1 leading-snug">
               Left off for multi-clip: each clip would invent its own ambience, so every seam gets an audible jump.
               Lay one track over the finished reel instead.
@@ -362,28 +436,49 @@ export function ClipBoard({
         )}
       </div>
 
+      {showStopped && (
+        <div className="border border-amber-300 bg-amber-50 px-3 py-2">
+          <p className="text-[11px] text-amber-900 leading-snug">
+            This run stopped with {pending.length} shot{pending.length === 1 ? '' : 's'} left — a closed tab,
+            a failure or a cancel. Nothing is rendering now, and nothing restarts on its own.
+            Pick it up with the button below, or render a single shot from its own card.
+          </p>
+        </div>
+      )}
+
       {/* ── The shots ── */}
       <div className="space-y-1">
-        {clips.map((clip, i) => (
-          <div key={clip.key}>
-            {i > 0 && (
-              <Seam clip={clip} index={i} onPatch={onPatchClip} disabled={locked}
-                startFrameUrl={clipRows[i]?.image_url || ''}
-                sharedRefs={storyboard.sharedRefs || []}
-                stale={stale.has(i)}
-                onPreviewFrame={url => setPreview({ url, kind: 'image' })} />
-            )}
-            <ClipCard
-              clip={clip} index={i} row={clipRows[i]} state={states[i]} model={model}
-              audio={!!storyboard.audio} active={activeIndex === i && running}
-              promptText={clipPromptFor(storyboard, i)}
-              preparing={preparingClipId && preparingClipId === clipRows[i]?.id}
-              onPatch={onPatchClip} onRemove={onRemoveClip} onRetry={onRetryClip}
-              onRerender={setRerendering} onAddText={onOpenClip}
-              onPreview={row => setPreview({ url: row.video_url, kind: 'video', index: i })}
-              canRemove={clips.length > 1 && !clipRows[i]} disabled={locked} />
-          </div>
-        ))}
+        {clips.map((clip, i) => {
+          const plan = clipImagePlan(storyboard, i)
+          const why = renderBlock(i)
+          return (
+            <div key={clip.key}>
+              {i > 0 && (
+                <Seam clip={clip} index={i} onPatch={onPatchClip} disabled={locked}
+                  startFrameUrl={clipRows[i]?.image_url || ''}
+                  stale={stale.has(i)}
+                  onPreviewFrame={url => setPreview({ url, kind: 'image' })} />
+              )}
+              <ClipCard
+                clip={clip} index={i} row={clipRows[i]} state={states[i]} model={model}
+                audio={!!storyboard.audio} active={activeIndex === i && states[i] === 'pending'}
+                promptText={clipPromptFor(storyboard, i)}
+                preparing={preparingClipId && preparingClipId === clipRows[i]?.id}
+                plan={plan} canRender={!why} renderBlockedWhy={why} busy={busy}
+                onPatch={onPatchClip} onRemove={onRemoveClip}
+                onRender={idx => (clipRows[idx] ? setRerendering(idx) : onRenderClip(idx))}
+                onCancel={setCancelling}
+                onAddText={onOpenClip}
+                onPreview={row => setPreview({ url: row.video_url, kind: 'video', index: i })}
+                onMove={onMoveClip}
+                onAddRef={onAddClipRef} onRemoveRef={onRemoveClipRef}
+                canRemove={clips.length > 1 && !clipRows[i]}
+                canUp={canMoveClip(clipRows, i, i - 1)}
+                canDown={canMoveClip(clipRows, i, i + 1)}
+                disabled={locked} />
+            </div>
+          )
+        })}
       </div>
 
       <div className="flex items-center gap-2">
@@ -412,13 +507,10 @@ export function ClipBoard({
         </div>
 
         {/* What splitting the video ACTUALLY buys, which depends on the length.
-            An earlier version of this line quoted "one single render would
-            cost X" as if that were a saving — it isn't: every model here
-            prices per second, so the same footage costs the same whether it
-            arrives as one clip or six. The saving comes from picking a cheaper
-            MODEL, which is the picker above, not from splitting. Past the
-            model's ceiling the argument isn't money at all — it's that a
-            single render cannot produce the length. */}
+            Every model here prices per second, so the same footage costs the
+            same whether it arrives as one clip or six — the saving comes from
+            picking a cheaper MODEL. Past the model's ceiling the argument
+            isn't money at all: a single render cannot produce the length. */}
         {totals.count > 1 && (
           <p className="text-[10px] text-text-tertiary leading-snug">
             {totals.rawSeconds > maxSingleTake
@@ -436,16 +528,10 @@ export function ClipBoard({
               </span>
             </>
           ) : allReady ? (
-            // Nothing left to spend on. A disabled "Render the remaining
-            // 0 · $0.00" was technically correct and read like a stuck
-            // button — every clip really is done, so say that instead.
             <span className="text-[11px] text-emerald-700 font-medium">✓ Every clip is rendered</span>
           ) : (
-            // The cost is ON the button, not only in the dialog behind it.
-            // This is the most expensive control in the app and the amount
-            // changes with every length and quality tweak above it.
             <Button size="sm" onClick={() => setConfirming(true)}
-              disabled={!clips.some(c => c.prompt.trim()) || pending.length === 0}>
+              disabled={busy || blank.length > 0 || pending.length === 0}>
               {renderedCount > 0
                 ? `▶ Render the remaining ${pending.length} · ${money(pendingCost)}`
                 : `▶ Render all ${clips.length} clips · ${money(pendingCost)}`}
@@ -457,6 +543,14 @@ export function ClipBoard({
             {stitching ? <><Spinner size="sm" /> Stitching…</> : '🎞 Stitch into one video'}
           </Button>
         </div>
+
+        {blank.length > 0 && !running && (
+          <p className="text-[10px] text-amber-700 leading-snug">
+            {blank.length === 1 ? `Clip ${blank[0]} has` : `Clips ${blank.join(', ')} have`} no description yet.
+            A shot with an empty box still costs full price and comes back as more of the shot before it —
+            say what happens in {blank.length === 1 ? 'it' : 'them'} first.
+          </p>
+        )}
 
         {!allReady && renderedCount > 0 && !running && (
           <p className="text-[10px] text-text-tertiary">
@@ -488,12 +582,11 @@ export function ClipBoard({
       />
 
       {/* A re-render is a second full charge for one shot, and — if anything
-          continues from it — it silently invalidates those takes too. Both
-          facts belong in front of the click, not after it. */}
+          continues from it — it silently invalidates those takes too. */}
       <ConfirmDialog
         open={rerendering != null}
         onClose={() => setRerendering(null)}
-        onConfirm={() => { const i = rerendering; setRerendering(null); onRerenderClip(i) }}
+        onConfirm={() => { const i = rerendering; setRerendering(null); onRenderClip(i) }}
         title={`Render clip ${(rerendering ?? 0) + 1} again?`}
         message={
           `This is a fresh take on ${model.label} and costs another ${money(rerenderCost)}. ` +
@@ -505,6 +598,22 @@ export function ClipBoard({
               `Re-rendering here leaves ${stranded.length === 1 ? 'that seam' : 'those seams'} broken until you re-render ` +
               `${stranded.length === 1 ? 'it' : 'them'} too — the board will flag which.`
             : '')
+        }
+      />
+
+      {/* Cancelling is not a refund and the dialog must not imply one. fal
+          only drops a request still sitting in its queue; once generation has
+          started the money is gone whatever we send. */}
+      <ConfirmDialog
+        open={cancelling != null}
+        onClose={() => setCancelling(null)}
+        danger
+        onConfirm={() => { const i = cancelling; setCancelling(null); onCancelClip(i) }}
+        title={`Cancel clip ${(cancelling ?? 0) + 1}?`}
+        message={
+          'This asks fal to drop the render and frees the board straight away. It only avoids the ' +
+          'charge if the job is still queued — once fal has started generating, that take is paid for ' +
+          'either way. The run stops here rather than moving on to the next shot.'
         }
       />
 

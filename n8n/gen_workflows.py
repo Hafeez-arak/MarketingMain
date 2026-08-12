@@ -6980,7 +6980,14 @@ async function run(){
       url: String($env.SUPABASE_URL).replace(/\/+$/, '') + '/rest/v1/creative_versions?id=eq.' + versionId,
       headers: { Authorization: 'Bearer ' + $env.SUPABASE_KEY, apikey: $env.SUPABASE_KEY,
                  'Content-Type': 'application/json', Prefer: 'return=minimal' },
-      body: { overlay_state: { pendingRequest: { requestId, model, submittedAt: new Date().toISOString() } } },
+      // cancel_url comes straight from fal's own submit response, for exactly
+      // the reason the status URL does below: the queue is keyed on the app id
+      // rather than the full model path, and a URL derived from the wrong one
+      // 405s. Creative Cancel prefers this and only derives a fallback if fal
+      // ever stops returning it.
+      body: { overlay_state: { pendingRequest: {
+        requestId, model, cancelUrl: submit.cancel_url || '',
+        submittedAt: new Date().toISOString() } } },
       json: true });
   } catch (e) { /* recoverable by Reconcile only if this succeeded; never worth failing the render over */ }
 
@@ -7327,6 +7334,212 @@ def build_creative_video_reconcile() -> dict:
     }
     return {
         "name": "Arak Lighting – Creative Video Reconcile",
+        "nodes": nodes,
+        "connections": connections,
+        "active": False,
+        "settings": {"executionOrder": "v1"},
+        "tags": [],
+    }
+
+
+# ─── Creative Cancel ────────────────────────────────────────────────────────
+# Asks fal to drop a render the studio has already submitted.
+#
+# WHAT THIS CAN AND CANNOT DO, because the UI promises exactly this and no
+# more: fal only cancels a request that is still IN_QUEUE. Once generation has
+# started the job runs to completion and is billed, and the cancel call comes
+# back saying so. So this is "stop it if it hasn't started", not "refund it" —
+# and the honest outcome is reported back rather than a blanket success.
+#
+# The row is already marked failed by the browser before this fires. That
+# ordering is deliberate: freeing the board must not depend on fal answering,
+# or a cancel during a network wobble would leave a clip spinning forever —
+# which is the exact failure this feature exists to rescue people from.
+
+CREATIVE_CANCEL_STICKY = """## Creative Cancel
+
+`POST /webhook/arak-creative-cancel` — `{ session_id, version_id }`
+
+Reads the row's `overlay_state.pendingRequest` (written by Creative Video at
+submit time) and asks fal to drop that request.
+
+**Cancelling is not a refund.** fal drops a request only while it is still
+`IN_QUEUE`; once it is `IN_PROGRESS` the render finishes and is charged.
+
+Outcomes, all returned with `ok: true` because none of them is a fault:
+`cancelled` (dropped before it started), `too_late` (400/409 — already
+generating), `not_queued` (404 — already finished or already cancelled;
+fal removes completed requests from the queue), `no_request` (never reached
+fal, so nothing was spent), `error` (fal genuinely unreachable).
+
+Uses `cancel_url` as fal returned it at submit, falling back to the two-segment
+queue path. Building that URL by guessing the full model path is what once
+broke every video render in this app (405 on the status URL, after the money
+was spent), so the returned URL is always preferred.
+
+The version row is ALREADY marked failed by the browser before this runs — it
+must not depend on fal replying.
+
+Needs env: FAL_KEY, SUPABASE_URL, SUPABASE_KEY."""
+
+CREATIVE_CANCEL_JS = _CREATIVE_REQ_JS + r"""
+const SUP = String($env.SUPABASE_URL || '').replace(/\/+$/, '');
+const KEY = $env.SUPABASE_KEY;
+// FAL comes from _CREATIVE_REQ_JS above — declaring it again is a SyntaxError
+// that kills the node before any of this runs.
+
+const body = ($input.first().json.body) || {};
+const versionId = String(body.version_id || '');
+
+async function run() {
+  if (!versionId) return { ok: false, outcome: 'no_version', detail: 'No version_id given.' };
+
+  const rows = await req({ method: 'GET',
+    url: SUP + '/rest/v1/creative_versions?id=eq.' + encodeURIComponent(versionId)
+      + '&select=id,overlay_state',
+    headers: { apikey: KEY, Authorization: 'Bearer ' + KEY }, json: true });
+
+  const row = Array.isArray(rows) ? rows[0] : null;
+  const pr = row && row.overlay_state && row.overlay_state.pendingRequest;
+  if (!pr || !pr.requestId) {
+    // Never reached fal, so there is nothing to cancel and nothing was spent.
+    // The commonest case by far: cancelled in the seconds between the row
+    // being inserted and the submit coming back.
+    return { ok: true, outcome: 'no_request',
+             detail: 'No fal request had been recorded, so nothing was submitted.' };
+  }
+
+  // Prefer the URL fal handed us. The fallback keeps the first TWO segments of
+  // the model path, never the whole thing — the queue is keyed on the app id
+  // (fal-ai/kling-video), not the endpoint (…/v2.5-turbo/pro/image-to-video).
+  const appId = String(pr.model || '').split('/').slice(0, 2).join('/');
+  const url = pr.cancelUrl
+    || ('https://queue.fal.run/' + appId + '/requests/' + pr.requestId + '/cancel');
+
+  try {
+    // PUT, not POST — POST on this route returns 405.
+    const res = await req({ method: 'PUT', url,
+      headers: { Authorization: 'Key ' + FAL }, json: true });
+    return { ok: true, outcome: 'cancelled', requestId: pr.requestId,
+             detail: 'fal accepted the cancellation.', fal: res };
+  } catch (e) {
+    // Most non-200s here are ordinary answers, not faults, and reporting them
+    // as "couldn't reach fal" would be a lie — fal answered, it just didn't
+    // say yes. Classified on the status code rather than by matching words in
+    // a message, because the two that matter look nothing alike:
+    //
+    //  · 404 — no such request in the queue. Verified against a finished
+    //    render 2026-08-12: fal drops completed requests from the queue, so a
+    //    cancel arriving after the render finished reads exactly like this.
+    //  · 400/409 — the request exists and is already generating.
+    const msg = String((e && e.message) || e);
+    const code = (e && (e.statusCode || e.status || (e.response && e.response.status)))
+      || Number((msg.match(/\b(\d{3})\b/) || [])[1])
+      || 0;
+
+    if (code === 404) {
+      return { ok: true, outcome: 'not_queued', requestId: pr.requestId,
+               detail: 'fal has no queued request with that id — it had already finished or been cancelled. '
+                     + 'If it finished, that take is charged.' };
+    }
+    if (code === 400 || code === 409) {
+      return { ok: true, outcome: 'too_late', requestId: pr.requestId,
+               detail: 'fal had already started this render, so it finishes and is charged.' };
+    }
+    return { ok: true, outcome: 'error', requestId: pr.requestId,
+             detail: 'Could not reach fal to cancel: ' + msg };
+  }
+}
+
+return [{ json: await run() }];
+"""
+
+
+def build_creative_cancel() -> dict:
+    """Webhook -> Cancel at fal -> Respond.
+
+    Responds LAST rather than immediately, unlike the render workflows: the
+    whole call is one HTTP round-trip to fal and the caller genuinely wants to
+    know which of the three outcomes happened.
+    """
+    nodes = [
+        _sticky(CREATIVE_CANCEL_STICKY, height=520, width=470, x=0, y=-320),
+        _webhook("arak-creative-cancel", "responseNode", x=0, y=300),
+        _code("Cancel at fal", CREATIVE_CANCEL_JS, x=240, y=300),
+        _respond_json("Respond", "={{ JSON.stringify($json) }}", x=480, y=300),
+    ]
+    connections = {
+        "Webhook": {"main": [[{"node": "Cancel at fal", "type": "main", "index": 0}]]},
+        "Cancel at fal": {"main": [[{"node": "Respond", "type": "main", "index": 0}]]},
+    }
+    return {
+        "name": "Arak Lighting – Creative Cancel",
+        "nodes": nodes,
+        "connections": connections,
+        "active": False,
+        "settings": {"executionOrder": "v1"},
+        "tags": [],
+    }
+
+
+# ─── fal balance ────────────────────────────────────────────────────────────
+# What is left on the account, shown beside the studio header so the price on
+# a Render button can be read against something.
+#
+# It has to be proxied through here for one reason: FAL_KEY. The balance
+# endpoint needs it, the browser must never see it, and this container already
+# holds it. A direct call from the app would ship a key that can spend money to
+# every browser that loads the page.
+
+FAL_BALANCE_STICKY = """## fal Balance
+
+`POST /webhook/arak-fal-balance` — no payload. Returns `{ balance, currency }`.
+
+Exists purely to keep `FAL_KEY` server-side. The balance endpoint needs the
+key; the browser must never hold a credential that can spend money.
+
+`rest.alpha.fal.ai` is fal's own console API, not the documented model API —
+it is what the fal CLI reads. Treat it as liable to move: a failure here
+returns `{ balance: null }` and the header simply shows nothing, because a
+missing number must never be mistaken for a zero balance.
+
+Needs env: FAL_KEY."""
+
+FAL_BALANCE_JS = _CREATIVE_REQ_JS + r"""
+// FAL is already declared by _CREATIVE_REQ_JS above.
+
+async function run() {
+  try {
+    const res = await req({ method: 'GET', url: 'https://rest.alpha.fal.ai/billing/user_balance',
+      headers: { Authorization: 'Key ' + FAL } });
+    // The endpoint answers with a bare number, not an object.
+    const n = typeof res === 'number' ? res : parseFloat(String(res));
+    if (!Number.isFinite(n)) return { balance: null, error: 'fal returned no usable balance.' };
+    return { balance: n, currency: 'USD' };
+  } catch (e) {
+    // null, never 0 — "we could not ask" and "you have nothing left" must not
+    // look the same to whatever renders this.
+    return { balance: null, error: String(e && e.message || e) };
+  }
+}
+
+return [{ json: await run() }];
+"""
+
+
+def build_fal_balance() -> dict:
+    nodes = [
+        _sticky(FAL_BALANCE_STICKY, height=380, width=470, x=0, y=-260),
+        _webhook("arak-fal-balance", "responseNode", x=0, y=300),
+        _code("Read Balance", FAL_BALANCE_JS, x=240, y=300),
+        _respond_json("Respond", "={{ JSON.stringify($json) }}", x=480, y=300),
+    ]
+    connections = {
+        "Webhook": {"main": [[{"node": "Read Balance", "type": "main", "index": 0}]]},
+        "Read Balance": {"main": [[{"node": "Respond", "type": "main", "index": 0}]]},
+    }
+    return {
+        "name": "Arak Lighting – fal Balance",
         "nodes": nodes,
         "connections": connections,
         "active": False,
@@ -8625,6 +8838,8 @@ if __name__ == "__main__":
         build_creative_video_reconcile(),
         build_creative_compose(),
         build_creative_stitch(),
+        build_creative_cancel(),
+        build_fal_balance(),
         build_creative_enhance(),
     ]
 

@@ -1,5 +1,5 @@
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './supabaseClient'
-import { getVideoModel, estimateVideoCost } from '../components/studio/videoModels'
+import { getVideoModel, estimateVideoCost, modelImageRole } from '../components/studio/videoModels'
 import { buildVideoPrompt } from '../components/studio/motionPresets'
 
 // ─── Multi-clip storyboard ─────────────────────────────────────────────────
@@ -43,6 +43,11 @@ export function newClip(modelId, overrides = {}) {
     resolution: model.defaultResolution,
     motion: '',
     motionStrength: 'medium',
+    // Images for THIS shot alone, on top of the board's shared set. What they
+    // mean depends on the model (modelImageRole): style references on
+    // Seedance, a start frame everywhere else. Ignored entirely on a chained
+    // clip, whose start frame is the previous clip's last one.
+    refs: [],
     // Ignored on clip 0 — there is nothing before it to continue from.
     continueFromPrevious: true,
     transition: 'cut',
@@ -85,6 +90,8 @@ export function normalizeStoryboard(raw, fallback = {}) {
       ...c,
       key: c.key || clipKey(),
       continueFromPrevious: i === 0 ? false : !!c.continueFromPrevious,
+      // Predates the field on any board saved before 2026-08-12.
+      refs: Array.isArray(c.refs) ? c.refs.slice(0, 9) : [],
     })),
     sharedRefs: Array.isArray(raw.sharedRefs) ? raw.sharedRefs.slice(0, 9) : [],
   }
@@ -272,4 +279,49 @@ export function clipPromptFor(sb, index) {
 // a clip that isn't marked to continue starts fresh from the shared refs.
 export function chainsFrom(sb, index) {
   return index > 0 && !!sb?.clips?.[index]?.continueFromPrevious
+}
+
+// ── What images a clip actually sends ──────────────────────────────────────
+// One place, so the board can promise exactly what the sequencer will do.
+// Three-way, and the third case is the one that used to fail silently:
+//
+//  · chained  — the previous clip's last frame is the start image, and
+//    reference_image_urls must be EMPTY (Seedance's build() early-returns on
+//    references and never reads image_url, so sending both drops the frame).
+//  · references — Seedance only. Its reference-to-video endpoint takes up to 9.
+//  · start — every other model has no reference endpoint at all, so extra
+//    images would be dropped without an error. The first one is sent as the
+//    clip's start frame instead, which every model does support.
+export function clipImagePlan(sb, index) {
+  if (chainsFrom(sb, index)) return { mode: 'chained', refs: [], startFrom: '' }
+  const own = (sb?.clips?.[index]?.refs || []).map(r => r?.url).filter(Boolean)
+  const shared = (sb?.sharedRefs || []).map(r => r?.url).filter(Boolean)
+  const all = [...own, ...shared]
+  if (modelImageRole(sb?.model) === 'references') {
+    return { mode: 'references', refs: all.slice(0, 9), startFrom: '' }
+  }
+  // Own images win over the board's: "this shot features THAT lamp" is a more
+  // specific instruction than the set applied to everything.
+  return { mode: 'start', refs: [], startFrom: all[0] || '' }
+}
+
+// ── Reorder ────────────────────────────────────────────────────────────────
+// clip_index is positional and is what rendered rows are keyed by, so moving a
+// clip that has a take would silently relabel finished renders — clip 3's
+// footage would start answering to "clip 2". Only unrendered clips move, and
+// the swap partner has to be unrendered too.
+export function canMoveClip(clipRows, from, to) {
+  const clips = clipRows || []
+  if (to < 0 || to >= clips.length) return false
+  return !clips[from] && !clips[to]
+}
+
+export function moveClip(sb, from, to) {
+  const clips = [...(sb?.clips || [])]
+  if (to < 0 || to >= clips.length) return sb
+  const [moved] = clips.splice(from, 1)
+  clips.splice(to, 0, moved)
+  // Whatever lands first can't continue from something before it.
+  if (clips[0]) clips[0] = { ...clips[0], continueFromPrevious: false }
+  return { ...sb, clips }
 }

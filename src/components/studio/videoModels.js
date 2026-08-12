@@ -101,6 +101,28 @@ export function getVideoModel(id) {
   return VIDEO_MODELS.find(m => m.id === id) || VIDEO_MODELS[0]
 }
 
+// ─── What a model does with extra images ───────────────────────────────────
+// Only Seedance has a reference-to-video endpoint. The workflow picks it with
+// `useRefs = referenceUrls.length && !!cfg.r2v`, so references handed to Kling,
+// Veo or Hailuo fall through to text-to-video and are **discarded without an
+// error** — the render succeeds, costs full price, and simply ignored the
+// pictures. That was invisible in the UI until 2026-08-12.
+//
+// Every model does accept a single start image (`image_url`). So one picker
+// serves both, and this is what says which meaning applies:
+//
+//   'references' — up to 9, sent as reference_image_urls (Seedance only)
+//   'start'      — the first image only, sent as image_url (everything else)
+const MODELS_WITH_REFERENCES = new Set(['seedance-2', 'seedance-2.5'])
+
+export function modelImageRole(modelId) {
+  return MODELS_WITH_REFERENCES.has(modelId) ? 'references' : 'start'
+}
+
+export function modelImageMax(modelId) {
+  return modelImageRole(modelId) === 'references' ? 9 : 1
+}
+
 export function estimateVideoCost(modelId, { resolution, duration, audio } = {}) {
   return getVideoModel(modelId).cost({ resolution, duration, audio })
 }
