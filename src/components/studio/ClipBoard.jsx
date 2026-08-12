@@ -310,6 +310,11 @@ export function ClipBoard({
                 <Spinner size="sm" /> Rendering clip {activeIndex + 1} of {clips.length}
               </span>
             </>
+          ) : allReady ? (
+            // Nothing left to spend on. A disabled "Render the remaining
+            // 0 · $0.00" was technically correct and read like a stuck
+            // button — every clip really is done, so say that instead.
+            <span className="text-[11px] text-emerald-700 font-medium">✓ Every clip is rendered</span>
           ) : (
             // The cost is ON the button, not only in the dialog behind it.
             // This is the most expensive control in the app and the amount
