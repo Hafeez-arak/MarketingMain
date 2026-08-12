@@ -36,7 +36,7 @@ export async function fetchSessions(workspaceId, accessToken, limit = 40) {
   } catch { return [] }
 }
 
-export async function createSession(workspaceId, accessToken, { title, intent, aspectRatio, storyboard }) {
+export async function createSession(workspaceId, accessToken, { title, intent, aspectRatio, storyboard, planIdeaId, brief }) {
   if (!workspaceId) return { error: 'No active workspace. Try signing out and back in.' }
   try {
     const res = await fetch(`${SUPABASE_URL}/rest/v1/creative_sessions`, {
@@ -53,6 +53,11 @@ export async function createSession(workspaceId, accessToken, { title, intent, a
         // storyboard has clip 1 already typed when it opens. Everything else
         // leaves it null.
         ...(storyboard ? { storyboard } : {}),
+        // Set only when the session was started from a plan idea (see
+        // lib/studioBridge.js). Omitted entirely otherwise, so a plain studio
+        // session is written exactly as it was before this existed.
+        ...(planIdeaId ? { plan_idea_id: planIdeaId } : {}),
+        ...(brief ? { brief } : {}),
       }),
     })
     if (!res.ok) return { error: await res.text() }

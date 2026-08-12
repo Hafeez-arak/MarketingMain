@@ -29,6 +29,11 @@ export function dbIdeaToDraft(row) {
     id: row.id,
     _rowId: row.id,
     platform: row.platform || 'instagram',
+    // Where this idea is meant to go. `platform` above stays the authoritative
+    // single value every workflow reads; this is the full target set, and it
+    // falls back to [platform] so a row written before the column existed
+    // never renders an empty chip row.
+    platforms: row.platforms?.length ? row.platforms : [row.platform || 'instagram'],
     date: row.scheduled_date || '',
     time: row.publish_time || '',
     title: row.title || '',
