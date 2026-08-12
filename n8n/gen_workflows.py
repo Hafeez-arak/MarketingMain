@@ -461,13 +461,48 @@ if (needsCaption && hasSelectedCaption){
   // strength and ~40% cheaper. Opus is reserved for the monthly Campaign
   // Planner call, which genuinely needs the extra reasoning (holidays,
   // cadence, whole-month consistency).
-  const resp = await req({ method:'POST', url:'https://api.anthropic.com/v1/messages',
+  // Show the model the actual picture, when there is one.
+  //
+  // Under the media-first flow the image is finished and chosen BEFORE the
+  // caption is written — that is the whole point of the reordering. So the
+  // caption no longer has to be guessed from a topic; it can be written about
+  // the fixture and the room really in the shot. preview_image_url is set by
+  // the plan board when a version is accepted in the Studio, and is the same
+  // picture this workflow is about to attach to the post.
+  //
+  // Placed AFTER the cached prefix deliberately: that prefix is identical for
+  // every idea and carries cache_control, so putting a per-idea image inside
+  // it would break the cache on every call.
+  const shotUrl = String(idea.preview_image_url || '').trim();
+  const canSeeShot = /^https:\/\//i.test(shotUrl);
+
+  function captionContent(withImage){
+    const parts = [{ type:'text', text: buildCachedPrefix(), cache_control:{ type:'ephemeral' } }];
+    if (withImage){
+      parts.push({ type:'image', source:{ type:'url', url: shotUrl } });
+      parts.push({ type:'text', text:
+        'The image above is the FINAL picture for this post — a person chose it deliberately. '
+        + 'Write the caption about what is actually in it: the fixture, the space, the quality of '
+        + 'the light. Do NOT narrate the image ("a photo showing..."); write as the brand would, '
+        + 'informed by what you can see.' });
+    }
+    parts.push({ type:'text', text: buildVariableSuffix() });
+    return parts;
+  }
+  const callClaude = withImage => req({ method:'POST', url:'https://api.anthropic.com/v1/messages',
     headers:{ 'x-api-key':ANTHROPIC, 'anthropic-version':'2023-06-01', 'content-type':'application/json' },
-    body:{ model:'claude-sonnet-5', max_tokens:2500, messages:[{ role:'user', content: [
-      { type:'text', text: buildCachedPrefix(), cache_control:{ type:'ephemeral' } },
-      { type:'text', text: buildVariableSuffix() },
-    ] }] },
+    body:{ model:'claude-sonnet-5', max_tokens:2500,
+           messages:[{ role:'user', content: captionContent(withImage) }] },
     json:true });
+
+  let resp = await callClaude(canSeeShot);
+  // The picture is an enhancement, never a reason a caption fails. Anthropic
+  // fetches that URL itself, so a storage hiccup, a bucket permission change or
+  // a format it will not accept would otherwise take down caption generation
+  // for a whole plan — much worse than a caption written from the topic alone.
+  if (canSeeShot && (!resp || resp.type === 'error')){
+    resp = await callClaude(false);
+  }
   // Anthropic errors come back as {type:'error', error:{type, message}} — a
   // 200-shaped body with no .content. Without this check, a failed call was
   // silently read as "empty response" and produced a blank-caption post that
