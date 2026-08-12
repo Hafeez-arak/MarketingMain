@@ -19,7 +19,7 @@ import {
 } from '../../lib/creativeStoryboard'
 import {
   canEditVideoDuration, estimateVideoCost, estimateVideoEditCost, getVideoModel, modelImageMax,
-  VIDEO_EDIT_MAX_REFERENCES,
+  modelImageRole, VIDEO_EDIT_MAX_REFERENCES,
 } from '../../components/studio/videoModels'
 import { aspectLabel } from '../../lib/postFormats'
 import { uploadReferenceImage } from '../../lib/referenceImages'
@@ -651,7 +651,15 @@ export function CreativeStudio() {
           // The video tab's reference slot is multi (VIDEO_MENU_SLOTS above),
           // so attachments.reference is an ARRAY here — unlike the image tab's
           // single-value slot of the same id.
-          reference_image_urls: (attachments.reference || []).map(r => r.url),
+          //
+          // Sent ONLY to a model that has a reference-to-video endpoint, which
+          // is Seedance and nothing else. The workflow would discard them
+          // anyway (useRefs requires cfg.r2v), but sending them regardless made
+          // the stored request claim inputs the render never used. The composer
+          // warns before this point rather than dropping them silently.
+          reference_image_urls: modelImageRole(modelId) === 'references'
+            ? (attachments.reference || []).map(r => r.url)
+            : [],
         })
       : await requestGenerate(webhooks.creativeGenerate, {
           session_id: s.id, prompt: finalPrompt, aspect_ratio: aspect,
@@ -1502,6 +1510,20 @@ export function CreativeStudio() {
                         onRemove={() => setAttachment(s.id, null)}
                       />
                     ))}
+                    {/* Style references only exist on Seedance's
+                        reference-to-video endpoint. Every other model here
+                        falls through to text-to-video and DISCARDS them —
+                        no error, full price, pictures ignored. Said out loud
+                        rather than letting someone attach four images to a
+                        Kling render and wonder why none of them showed up. */}
+                    {intent === 'video' && (attachments.reference?.length || 0) > 0
+                      && modelImageRole(modelId) !== 'references' && (
+                      <span className="text-[10px] text-amber-700 leading-snug max-w-md">
+                        {getVideoModel(modelId).label} can't take style references — it would ignore
+                        {(attachments.reference?.length || 0) === 1 ? ' that image' : ' those images'} and
+                        still charge for the render. Use Start frame instead, or switch to Seedance.
+                      </span>
+                    )}
                     <button type="button" onClick={enhancePrompt}
                       disabled={!prompt.trim() || !!enhancing || busy === 'generate'}
                       title={promptSource === 'raw'
