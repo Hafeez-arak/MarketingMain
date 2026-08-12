@@ -54,7 +54,10 @@ with (security_invoker = true) as
     null::text    as content_route,
     p.scheduled_date, p.publish_time,
     p.status, p.source,
-    p.plan_id, p.plan_idea_id, p.campaign_id,
+    p.plan_id, p.plan_idea_id,
+    -- campaign_id is text here and on LinkedIn but uuid on generated_posts,
+    -- so the union is aligned on text (see the cast in the third branch).
+    p.campaign_id,
     p.creative_session_id, p.creative_version_id,
     p.zernio_post_id, p.zernio_account_id,
     p.publish_status, p.published_at, p.scheduled_publish_at,
@@ -115,7 +118,14 @@ with (security_invoker = true) as
     null::text    as content_route,
     p.scheduled_date, p.publish_time,
     p.status, p.source,
-    p.plan_id, p.plan_idea_id, p.campaign_id,
+    p.plan_id, p.plan_idea_id,
+    -- The one genuine type difference between the three tables: campaign_id is
+    -- uuid here and text on the other two, and a UNION will not match them.
+    -- Cast to text rather than the reverse — uuid::text always succeeds, while
+    -- text::uuid would fail the moment an Instagram or LinkedIn row held a
+    -- campaign id that wasn't a well-formed uuid, and those columns have never
+    -- been constrained to be.
+    p.campaign_id::text,
     p.creative_session_id, p.creative_version_id,
     p.zernio_post_id, p.zernio_account_id,
     p.publish_status, p.published_at, p.scheduled_publish_at,
