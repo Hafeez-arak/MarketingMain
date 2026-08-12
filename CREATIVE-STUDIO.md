@@ -353,6 +353,37 @@ seam, or the shared references on a new-shot seam, plus the assembled prompt
 still was always uploaded and always on the row; leaving it invisible made the
 one mechanism here that fails invisibly the one thing nobody could inspect.
 
+### Two more silent failures — found 2026-08-12
+
+Both were found by one bad reel, and both had been shipping quietly.
+
+**Only Seedance takes reference images.** The video workflow picks its endpoint
+with `useRefs = referenceUrls.length && !!cfg.r2v`, and only Seedance 2.0/2.5
+have an `r2v`. References handed to Kling, Veo or Hailuo therefore fell through
+to text-to-video and were **discarded with no error** — the render succeeded and
+cost full price, having ignored the pictures entirely. Nothing in the UI said
+so. `modelImageRole()` now decides what a model can actually do with images and
+the board states it: style references on Seedance, and on everything else the
+first image becomes the shot's opening frame, which every model supports.
+
+**Storyboard writes raced each other.** Each edit PATCHed the WHOLE
+`storyboard` blob with no coalescing, deliberately, so typed text couldn't be
+lost to a closed tab. The opposite happened. Several PATCHes in flight are not
+redundant writes — each is a complete version of the board, and Postgres keeps
+whichever **arrives** last, not whichever was issued last. Three shot
+descriptions typed in quick succession, and the write holding only the first
+one landed last; two were gone. Coalesced to one trailing write per burst now,
+with an explicit flush on session change and unmount, pinned to the session the
+edit was made under.
+
+**What that cost, beyond the money:** the first 4-clip drift test appeared to
+show chained clips ignoring their prompts. They had no prompts —
+`user_prompt` on those rows is the style bible alone. No conclusion about
+chaining versus prompt adherence can be drawn from that run, and the question
+is still open. A shot with an empty description also rendered at full price,
+because Render-all only required that SOME clip had one; it now requires all of
+them and names the empties.
+
 ### The known better shape, not built
 
 Seedance takes `end_image_url` (already wired). Generating the seam stills as
