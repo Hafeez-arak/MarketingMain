@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useApp } from '../../store/app'
 import { useAuth } from '../../store/auth'
 import { Button, Card, Modal, SectionHead, Select, Spinner, Textarea, Empty } from '../../components/ui/index'
@@ -31,6 +32,7 @@ import {
   requestEnhance, requestGenerate, requestVideo, requestStitch, requestVideoEdit, selectVersion,
   touchSession, updateVersion, uploadToStudio,
 } from '../../lib/creativeStudio'
+import { fetchIdeaForStudio } from '../../lib/studioBridge'
 
 // ─── Creative Studio ───────────────────────────────────────────────────────
 // Prompt → two candidates → keep talking to whichever one you like → animate.
@@ -217,6 +219,7 @@ export function CreativeStudio() {
   const { state } = useApp()
   const { activeWorkspaceId, accessToken } = useAuth()
   const webhooks = state.webhooks || {}
+  const [searchParams] = useSearchParams()
 
   const [sessions, setSessions] = useState([])
   const [session, setSession] = useState(null)
@@ -338,6 +341,48 @@ export function CreativeStudio() {
     return () => { cancelled = true }
   }, [activeWorkspaceId, accessToken])
 
+  // ── Arriving from the plan board ────────────────────────────────────────
+  // Two entry points, neither of which creates anything:
+  //
+  //   /studio?session=<id>  an idea that already has a session — just open it.
+  //                         Handled by SessionSidebar's autoOpenId, because
+  //                         opening a session is the rail's job and routing it
+  //                         there keeps exactly one way in.
+  //   /studio?ideaId=<id>   a fresh idea — pre-fill this composer and let the
+  //                         normal generate path create the session, carrying
+  //                         the plan link with it (see startSession below).
+  //
+  // Creating the session up front instead would land the operator on a session
+  // with no versions, which renders as "Nothing here yet" and offers no
+  // composer — a dead end.
+  //
+  // Known boundary: only the image/video path carries the plan link. Switching
+  // to "A long video" here creates a multi-clip session with no plan_idea_id,
+  // so that asset won't find its way back to the idea. Long-form is a
+  // storyboard with its own cost model and is deliberately left alone.
+  //
+  // Guarded by a ref rather than by `session`, so navigating away inside the
+  // studio isn't undone by the effect re-firing while the param is still set.
+  const [planBrief, setPlanBrief] = useState(null)
+  const seededIdeaRef = useRef(null)
+  useEffect(() => {
+    const ideaId = searchParams.get('ideaId')
+    if (!ideaId || seededIdeaRef.current === ideaId || !accessToken) return
+    seededIdeaRef.current = ideaId
+    let alive = true
+    fetchIdeaForStudio(accessToken, ideaId).then(seed => {
+      if (!alive || !seed) return
+      setPlanBrief({ ideaId, brief: seed.brief, title: seed.idea.title || seed.idea.topic })
+      // Pre-fill the composer as if the operator had typed it. promptRaw is
+      // set alongside prompt so Undo after an enhance returns to the brief's
+      // words rather than to an empty box.
+      setPrompt(seed.prompt); setPromptRaw(seed.prompt); setPromptSource('raw')
+      setIntent(seed.intent)
+      setAspect(seed.aspect)
+    })
+    return () => { alive = false }
+  }, [searchParams, accessToken])
+
   const branches = useMemo(() => buildBranches(versions), [versions])
   const anyPending = versions.some(v => v.status === 'pending')
 
@@ -425,6 +470,10 @@ export function CreativeStudio() {
     setModelId(d.modelId); setDuration(d.duration); setResolution(d.resolution); setAudio(false)
     setComposers({}); setFocusedBranch(null); setError('')
     setStoryboard(null); setStitching(false)
+    // Starting a fresh session by hand means it is no longer the plan idea's —
+    // without this, the next session created in this tab would silently
+    // attach itself to a plan card the operator has moved on from.
+    setPlanBrief(null)
   }
 
   // Renamed in place in the list — no need to also touch the open thread's
@@ -602,6 +651,10 @@ export function CreativeStudio() {
 
     const created = await createSession(activeWorkspaceId, accessToken, {
       title: finalPrompt.slice(0, 80), intent, aspectRatio: aspect,
+      // Set only when the studio was opened from a plan card, so the finished
+      // asset can find its way back to the idea it was made for. Undefined on
+      // every other path, which writes exactly what it always did.
+      planIdeaId: planBrief?.ideaId, brief: planBrief?.brief,
     })
     if (created.error) { setBusy(''); setError(created.error); return }
     const s = created.session
@@ -1442,6 +1495,7 @@ export function CreativeStudio() {
           onNew={newSession}
           onRename={handleRenameSession}
           onDelete={handleDeleteSession}
+          autoOpenId={searchParams.get('session')}
         />
 
         {/* ── Thread / composer ── */}
@@ -1449,6 +1503,26 @@ export function CreativeStudio() {
           {error && (
             <div className="border border-red-200 bg-red-50 px-4 py-2.5">
               <p className="text-xs text-red-700">{error}</p>
+            </div>
+          )}
+
+          {!session && planBrief && (
+            <div className="max-w-2xl border border-violet-200 bg-violet-50 px-4 py-2.5">
+              <p className="text-[11px] font-semibold text-violet-800">
+                From plan: {planBrief.title || 'Untitled idea'}
+              </p>
+              <p className="text-[11px] text-violet-700 mt-0.5 leading-relaxed">
+                {[
+                  planBrief.brief?.pillar,
+                  planBrief.brief?.occasion,
+                  planBrief.brief?.tone,
+                  (planBrief.brief?.platforms || []).join(' · '),
+                  planBrief.brief?.aspectRatio,
+                ].filter(Boolean).join(' — ')}
+              </p>
+              {planBrief.brief?.cta && (
+                <p className="text-[11px] text-violet-700 mt-0.5"><span className="font-semibold">CTA:</span> {planBrief.brief.cta}</p>
+              )}
             </div>
           )}
 

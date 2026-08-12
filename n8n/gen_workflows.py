@@ -191,7 +191,13 @@ const PROVIDER  = String($env.IMAGE_PROVIDER || 'replicate').toLowerCase();
 const kind = idea.post_kind || 'caption_image';
 const lang = idea.caption_language || 'both';          // ar | en | both
 const needsCaption = kind !== 'image_only';
-const needsImage   = kind !== 'caption_only';
+// image_mode='studio' means a human is building this idea's media by hand in
+// Creative Studio. Generating an image here as well would bill fal twice for
+// one post — once for a picture nobody will ever use — so the media half is
+// skipped and the row is written with an empty image_url for the Studio asset
+// to fill in. The caption half is unaffected: that IS still wanted from here.
+const madeInStudio = idea.image_mode === 'studio';
+const needsImage   = kind !== 'caption_only' && !madeInStudio;
 const refs = Array.isArray(idea.reference_image_urls) ? idea.reference_image_urls : [];
 const useReference = idea.image_mode === 'use_reference' && refs.length > 0;
 const slideCount = kind === 'carousel' ? Math.max(2, Math.min(10, Number(idea.slide_count) || 3)) : 1;
@@ -572,7 +578,10 @@ if (PLATFORM === 'instagram'){
   row.hook = lang === 'ar' ? hook_ar : lang === 'en' ? hook_en : [hook_ar, hook_en].filter(Boolean).join(' / ');
   row.body = lang === 'ar' ? body_ar : lang === 'en' ? body_en : [body_ar, body_en].filter(Boolean).join('\n\n—\n\n');
   row.post_type = 'thought_leadership';
-  row.include_image = needsImage;
+  // Studio-built ideas still get an image — it just arrives later, from the
+  // Studio session rather than from here. Reporting false would render the
+  // post as deliberately text-only.
+  row.include_image = needsImage || madeInStudio;
   row.content_route = 'plan';
 }
 

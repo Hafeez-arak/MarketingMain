@@ -22,9 +22,23 @@ import {
   fetchPastIdeas, fetchPlanWithIdeas, markIdeasDrafting, fetchIdeaDrafts,
 } from '../../lib/contentPlans'
 import { IdeaDraftPanel } from '../../components/IdeaDraftPanel'
+import { openStudioForIdea, fetchSessionsForIdeas, saveIdeaPlatforms } from '../../lib/studioBridge'
 
 const GOALS = ['Brand awareness','Lead generation','Product launch','Community engagement','Event promotion','Sales & offers']
 const PLATFORMS = ['instagram', 'linkedin'] // only platforms with a generation pipeline today
+
+// Where one idea can be SENT. Distinct from PLATFORMS above, which is where
+// ideas can be GENERATED — the plan-generation workflows only speak Instagram
+// and LinkedIn today, but an asset made by hand in Studio can go anywhere
+// Zernio publishes. Keeping the two lists separate is what lets targets widen
+// without implying a generation pipeline that doesn't exist yet.
+const TARGET_PLATFORMS = [
+  { id: 'instagram', label: 'Instagram', cls: 'bg-pink-50 text-pink-600 border-pink-100' },
+  { id: 'tiktok',    label: 'TikTok',    cls: 'bg-stone-900/5 text-stone-700 border-stone-200' },
+  { id: 'snapchat',  label: 'Snapchat',  cls: 'bg-yellow-50 text-yellow-700 border-yellow-200' },
+  { id: 'linkedin',  label: 'LinkedIn',  cls: 'bg-[#0A66C2]/10 text-[#0A66C2] border-[#0A66C2]/20' },
+]
+const targetLabel = id => TARGET_PLATFORMS.find(p => p.id === id)?.label || id
 
 const IG_TONES = [
   { value: 'professional',  label: 'Professional' },
@@ -188,18 +202,38 @@ const STATUS_META = {
 }
 
 // ─── One idea in the review list, with inline approve/reject + edit ─────────
-function IdeaCard({ idea, index, accessToken, workspaceId, onChange, onRemove, onCreate, onDuplicate, onRedraft, mediaOptionsUrl, autoEdit = false }) {
+function IdeaCard({ idea, index, accessToken, workspaceId, onChange, onRemove, onCreate, onDuplicate, onRedraft, onOpenStudio, studioSession, mediaOptionsUrl, autoEdit = false }) {
   const [redrafting, setRedrafting] = useState(false)
   const [editing, setEditing] = useState(autoEdit)
   const [saving,  setSaving]  = useState(false)
   const [saveError, setSaveError] = useState('')
   const [duplicating, setDuplicating] = useState(false)
   const [showRejectReasons, setShowRejectReasons] = useState(false)
+  const [showTargets, setShowTargets] = useState(false)
+  const [openingStudio, setOpeningStudio] = useState(false)
   const [pickingRefs, setPickingRefs] = useState(false)
   const [imgMode, setImgMode] = useState(idea.imageMode || 'generate')
   const tones = idea.platform === 'linkedin' ? LI_TONES : IG_TONES
   const refCount = (idea.references || []).length
   const usingImage = idea.imageMode === 'use_reference'
+  const usingStudio = idea.imageMode === 'studio'
+  const targets = idea.platforms?.length ? idea.platforms : [idea.platform]
+
+  // Toggle one target. The primary platform can't be removed — it's what the
+  // format catalog, the tone list and every generation workflow read, so an
+  // idea with it deselected would be describing two different things.
+  async function toggleTarget(id) {
+    if (id === idea.platform) return
+    const next = targets.includes(id) ? targets.filter(t => t !== id) : [...targets, id]
+    const result = await saveIdeaPlatforms(accessToken, idea.id, next, idea.platform)
+    if (result.ok) onChange({ ...idea, platforms: result.platforms })
+  }
+
+  async function handleOpenStudio() {
+    setOpeningStudio(true)
+    await onOpenStudio(idea)
+    setOpeningStudio(false)
+  }
 
   // Persist both the chosen images and the AI-vs-use-image mode together, so
   // the card and generation always agree on how this idea's image is produced.
@@ -208,7 +242,14 @@ function IdeaCard({ idea, index, accessToken, workspaceId, onChange, onRemove, o
     if (result.ok) { onChange({ ...idea, references: urls, imageMode: imgMode }); setPickingRefs(false); return { ok: true } }
     return { error: result.error || 'Could not save.' }
   }
-  function openImagePicker() { setImgMode(idea.imageMode || 'generate'); setPickingRefs(true) }
+  // 'studio' normalises to 'generate' on the way into the picker: the picker
+  // only knows the AI-vs-use-an-image choice, and showing it a third value it
+  // can't represent would save that value straight back on close. Choosing in
+  // here is also how you deliberately move an idea OFF studio mode.
+  function openImagePicker() {
+    setImgMode(idea.imageMode === 'use_reference' ? 'use_reference' : 'generate')
+    setPickingRefs(true)
+  }
 
   async function duplicateToOtherPlatform() {
     setDuplicating(true)
@@ -271,6 +312,14 @@ function IdeaCard({ idea, index, accessToken, workspaceId, onChange, onRemove, o
               <span className={`text-[10px] font-bold px-1.5 py-0.5 leading-[1.4] ${idea.platform === 'linkedin' ? 'bg-[#0A66C2]/10 text-[#0A66C2]' : 'bg-pink-50 text-pink-600'}`}>
                 {idea.platform === 'linkedin' ? 'LinkedIn' : 'Instagram'}
               </span>
+              {/* Extra targets only — the primary is already the badge above,
+                  and repeating it reads as a duplicate rather than a set. */}
+              {targets.filter(t => t !== idea.platform).map(t => (
+                <span key={t} className={`text-[10px] font-bold px-1.5 py-0.5 leading-[1.4] border ${TARGET_PLATFORMS.find(p => p.id === t)?.cls || 'bg-surface-subtle text-text-secondary border-border'}`}
+                  title="Also publishing here — one render covers every 9:16 target">
+                  +{targetLabel(t)}
+                </span>
+              ))}
               {idea.occasion && <span className={`text-[10px] font-semibold px-1.5 py-0.5 leading-[1.4] border ${OCCASION_STYLE}`}>★ {idea.occasion}</span>}
               {idea.pillar && <span className={`text-[10px] font-medium px-1.5 py-0.5 leading-[1.4] border ${PILLAR_STYLE}`}>{idea.pillar}</span>}
               {idea.series && <span className="text-[10px] font-semibold px-1.5 py-0.5 leading-[1.4] border bg-violet-50 text-violet-700 border-violet-100" title="Deliberate recurring series — not flagged as repetition across months">🔁 {idea.series}</span>}
@@ -286,6 +335,12 @@ function IdeaCard({ idea, index, accessToken, workspaceId, onChange, onRemove, o
               {usingImage
                 ? <span className="text-[10px] font-semibold text-sage-700">· 🖼 using {refCount || 'no'} image{refCount !== 1 ? 's' : ''}</span>
                 : refCount > 0 && <span className="text-[10px] font-semibold text-amber-700">· 📎 {refCount} ref{refCount !== 1 ? 's' : ''}</span>}
+              {usingStudio && (
+                <span className="text-[10px] font-semibold text-violet-700"
+                  title="A human is making this one in Creative Studio — plan generation will not pay for an image for it">
+                  · 🎬 {studioSession ? 'in Studio' : 'Studio'}
+                </span>
+              )}
             </div>
             {/* Title / topic */}
             <p className="text-sm font-semibold text-text leading-snug">{idea.title || idea.topic || 'Untitled idea'}</p>
@@ -319,6 +374,22 @@ function IdeaCard({ idea, index, accessToken, workspaceId, onChange, onRemove, o
             ))}
             <button onClick={() => setShowRejectReasons(false)} className="text-[11px] text-text-tertiary hover:text-text ml-1">Cancel</button>
           </div>
+        ) : showTargets ? (
+          <div className="flex items-center gap-1.5 mt-3 pl-8 flex-wrap">
+            <span className="text-[11px] text-text-tertiary mr-1">Publish to?</span>
+            {TARGET_PLATFORMS.map(p => {
+              const on = targets.includes(p.id)
+              const locked = p.id === idea.platform
+              return (
+                <button key={p.id} onClick={() => toggleTarget(p.id)} disabled={locked}
+                  title={locked ? 'The idea’s primary platform — it sets the format and tone, so it can’t be removed here' : ''}
+                  className={`text-[11px] font-medium px-2.5 py-1 rounded-lg border transition-colors ${on ? p.cls : 'border-border text-text-secondary hover:border-text-tertiary'} ${locked ? 'opacity-100 cursor-default' : ''}`}>
+                  {on ? '✓ ' : ''}{p.label}{locked ? ' ·' : ''}
+                </button>
+              )
+            })}
+            <button onClick={() => setShowTargets(false)} className="text-[11px] text-text-tertiary hover:text-text ml-1">Done</button>
+          </div>
         ) : (
         <div className="flex items-center gap-2 mt-3 pl-8">
           <button onClick={() => setStatus('approved')} disabled={saving || idea.isNew || idea.status === 'approved'}
@@ -334,6 +405,22 @@ function IdeaCard({ idea, index, accessToken, workspaceId, onChange, onRemove, o
             <button onClick={openImagePicker}
               className={`text-[11px] font-medium px-2.5 py-1 rounded-lg transition-colors ${usingImage ? 'text-sage-700 bg-sage-50 hover:bg-sage-100' : refCount > 0 ? 'text-amber-700 bg-amber-50 hover:bg-amber-100' : 'text-text-tertiary hover:text-text hover:bg-surface-subtle'}`}>
               {usingImage ? '🖼 Image set' : refCount > 0 ? `📎 Image (${refCount})` : '🖼 Image'}
+            </button>
+          )}
+          {!idea.isNew && (
+            <button onClick={handleOpenStudio} disabled={openingStudio}
+              title={studioSession
+                ? 'Reopen this idea’s Creative Studio session — nothing already generated is lost'
+                : 'Make this one by hand in Creative Studio. The prompt, format and aspect ratio are pre-filled from this idea, and plan generation stops paying for an image for it.'}
+              className={`text-[11px] font-medium px-2.5 py-1 rounded-lg transition-colors disabled:opacity-50 ${usingStudio ? 'text-violet-700 bg-violet-50 hover:bg-violet-100' : 'text-text-tertiary hover:text-text hover:bg-surface-subtle'}`}>
+              {openingStudio ? <><Spinner size="sm" /> Opening…</> : studioSession ? '🎬 Reopen Studio' : '🎬 Make in Studio'}
+            </button>
+          )}
+          {!idea.isNew && (
+            <button onClick={() => setShowTargets(true)}
+              title="Which platforms this post goes to. Pick them before generating — one 9:16 render covers Reel, TikTok and Spotlight."
+              className={`text-[11px] font-medium px-2.5 py-1 rounded-lg transition-colors ${targets.length > 1 ? 'text-sky-700 bg-sky-50 hover:bg-sky-100' : 'text-text-tertiary hover:text-text hover:bg-surface-subtle'}`}>
+              🎯 {targets.length > 1 ? `${targets.length} platforms` : 'Targets'}
             </button>
           )}
           {!idea.isNew && (
@@ -954,6 +1041,49 @@ export function CampaignPlanner() {
   function onIdeaChange(updated) {
     update({ ideas: ideas.map(i => i.id === updated.id ? updated : i) })
   }
+
+  // ── Creative Studio sessions opened from this plan ──────────────────────
+  // One call for the whole board rather than a lookup per card. Keyed by
+  // plan_idea_id; only the newest session per idea is kept, which is what
+  // "Reopen Studio" should land on.
+  const [studioSessions, setStudioSessions] = useState({})
+  const savedIdeaIds = ideas.filter(i => !i.isNew && !String(i.id).startsWith('new_')).map(i => i.id)
+  const savedIdsKey = savedIdeaIds.join(',')
+  useEffect(() => {
+    if (!savedIdsKey || !accessToken) return
+    let alive = true
+    fetchSessionsForIdeas(accessToken, savedIdsKey.split(',')).then(rows => {
+      if (!alive) return
+      const byIdea = {}
+      // Rows arrive newest-first, so the first one wins per idea.
+      for (const r of rows) if (!byIdea[r.plan_idea_id]) byIdea[r.plan_idea_id] = r
+      setStudioSessions(byIdea)
+    })
+    return () => { alive = false }
+  }, [savedIdsKey, accessToken])
+
+  // Open (or reopen) Creative Studio for one idea.
+  //
+  // Two different destinations on purpose. An idea that already has a session
+  // goes straight to it (?session=), because it has versions to show. An idea
+  // that doesn't goes to ?ideaId=, where the studio pre-fills its own composer
+  // and creates the session at the first generation — its normal path. Sending
+  // a brand-new idea to ?session= would open an empty session, which the
+  // studio renders as "Nothing here yet" with no way to prompt.
+  async function openStudio(idea) {
+    const result = await openStudioForIdea(accessToken, idea)
+    if (result.error) { setError(result.error); return }
+    // openStudioForIdea flips the idea to image_mode='studio' so plan
+    // generation stops paying fal for an image nobody will use. Reflect it
+    // locally rather than refetching the whole board for one field.
+    onIdeaChange({ ...idea, imageMode: 'studio' })
+    if (result.session) {
+      setStudioSessions(prev => ({ ...prev, [idea.id]: result.session }))
+      navigate(`/studio?session=${result.session.id}`)
+    } else {
+      navigate(`/studio?ideaId=${idea.id}`)
+    }
+  }
   async function onIdeaRemove(idea) {
     update({ ideas: ideas.filter(i => i.id !== idea.id) })
     // isNew ideas never made it to the database (see addIdea/onIdeaCreate) —
@@ -1567,6 +1697,7 @@ export function CampaignPlanner() {
                     <IdeaCard key={idea.id} idea={idea} index={ideas.indexOf(idea)} accessToken={accessToken} workspaceId={activeWorkspaceId}
                       autoEdit={idea.id === autoEditId} mediaOptionsUrl={state.webhooks?.mediaOptions}
                       onChange={onIdeaChange} onRemove={onIdeaRemove} onCreate={onIdeaCreate} onDuplicate={fanOutIdea}
+                      onOpenStudio={openStudio} studioSession={studioSessions[idea.id]}
                       onRedraft={target => draftIdeas(ideas, [target.id])} />
                   ))}
                 </div>

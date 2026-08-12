@@ -47,7 +47,7 @@ function groupFor(dateStr) {
 
 const COLLAPSE_KEY = 'studio.sidebarCollapsed'
 
-export function SessionSidebar({ sessions, session, loading, onOpen, onNew, onRename, onDelete }) {
+export function SessionSidebar({ sessions, session, loading, onOpen, onNew, onRename, onDelete, autoOpenId }) {
   const [collapsed, setCollapsed] = useState(() => {
     try { return localStorage.getItem(COLLAPSE_KEY) === '1' } catch { return false }
   })
@@ -65,6 +65,28 @@ export function SessionSidebar({ sessions, session, loading, onOpen, onNew, onRe
   useEffect(() => {
     if (renamingId && renameRef.current) { renameRef.current.focus(); renameRef.current.select() }
   }, [renamingId])
+
+  // Open one session on arrival, when the studio was linked to from elsewhere
+  // in the app (today: a plan card's "Reopen Studio"). It lives here rather
+  // than in the studio page because this is where a session gets opened
+  // normally — the rail already owns that action, and routing it through the
+  // same onOpen keeps there being exactly one way a session is opened.
+  //
+  // Fires once per id: after that the operator is free to click away, and a
+  // stale query param must not keep dragging them back.
+  const autoOpenedRef = useRef(null)
+  useEffect(() => {
+    if (!autoOpenId || autoOpenedRef.current === autoOpenId) return
+    const match = sessions.find(s => s.id === autoOpenId)
+    if (!match) return          // not loaded yet, or not this workspace
+    autoOpenedRef.current = autoOpenId
+    // Deferred a tick: onOpen sets several pieces of state on the parent, and
+    // doing that synchronously inside an effect body cascades a second render
+    // before paint.
+    let alive = true
+    Promise.resolve().then(() => { if (alive) onOpen(match) })
+    return () => { alive = false }
+  }, [autoOpenId, sessions, onOpen])
 
   const groups = useMemo(() => {
     const m = new Map()
