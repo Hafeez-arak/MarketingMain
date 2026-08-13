@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import { useReelPlayback } from './useReelPlayback'
 import { clipRuntime, normalizeClipTrim } from '../../lib/creativeStoryboard'
+// The same transport glyphs the clip strip uses. They were duplicated here as
+// two more inline <svg>s, which is how a play triangle ends up a different
+// size on the two surfaces that both call themselves a timeline.
+import { IconPause, IconPlay } from './editor/icons'
 
 // ─── The reel, before you pay to assemble it ───────────────────────────────
 // The storyboard above this decides what to GENERATE. This decides what to
@@ -21,13 +25,6 @@ const MIN_BLOCK_PCT = 4
 const EDGE_PX = 8
 
 const fmt = s => `${Number(s || 0).toFixed(1)}s`
-
-const IconPlay = () => (
-  <svg viewBox="0 0 24 24" className="ml-[1px] h-3 w-3" fill="currentColor"><path d="M8 5v14l11-7z" /></svg>
-)
-const IconPause = () => (
-  <svg viewBox="0 0 24 24" className="h-3 w-3" fill="currentColor"><path d="M6 5h4v14H6zM14 5h4v14h-4z" /></svg>
-)
 
 // The length of each rendered clip, probed once from its metadata. `preload`
 // is 'metadata', so this costs headers rather than the whole file — the clips
@@ -180,7 +177,7 @@ export function ReelTimeline({ storyboard, clipRows, onPatchClip, disabled }) {
         <button type="button" onClick={toggle} disabled={!reelReady}
           title={playing ? 'Pause' : 'Play the reel'}
           className="flex h-6 w-6 items-center justify-center rounded-full bg-amber-500 text-white transition-colors hover:bg-amber-600 disabled:opacity-40">
-          {playing ? <IconPause /> : <IconPlay />}
+          {playing ? <IconPause /> : <IconPlay className="ml-[1px] h-3 w-3" />}
         </button>
         <p className="font-mono text-[10px] tabular-nums text-text-tertiary">
           <span ref={readoutRef}>0.0s</span> / {fmt(reelDuration)}

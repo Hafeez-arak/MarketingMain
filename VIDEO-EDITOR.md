@@ -362,7 +362,162 @@ moves it without resizing (2.0→6.0 becomes 3.0→7.0).
 
 ---
 
-## 9. Still out
+## 9. The finishing pass — what a timeline is expected to do
+
+Everything above was about whether the editor could show the truth. This pass
+was about whether it behaves like a tool someone has used before. The test
+applied throughout: **a person who has used CapCut or Canva reaches for
+something — is it there?** Six things weren't, and none of them cost a render.
+
+- **Snapping, with a guide.** Dragging a bar onto the playhead, onto the ends
+  of the clip, onto the shipping window, or flush against another layer's cue
+  was previously impossible — you dragged near it and then typed the number
+  into the In/Out fields, which is what those fields were there to *rescue*,
+  not to be the way you work. Now every edge snaps within 8px and a line shows
+  what it landed on. **⌥ suspends it**, because sometimes 2.03s really is what
+  you meant and without an escape hatch the eight pixels either side of every
+  cue become unreachable.
+  Two details worth keeping: a MOVE tests both edges and applies the winning
+  correction to *the pair*, since snapping one edge on its own would silently
+  change the layer's length — the one thing that gesture promises not to do;
+  and a layer never snaps to itself, or a bar could collapse onto its own
+  start. Targets are captured once at pointerdown rather than rebuilt per
+  frame — nothing this gesture moves is in the list.
+- **Sound.** Every model we render with returns audio and there was no way to
+  hear it or to silence it. There is now a speaker and a short volume slider,
+  and dragging the volume up from zero unmutes — the two being independent
+  facts is the classic way a volume control ends up doing nothing.
+  The autoplay fallback also **stopped lying**: it used to set `v.muted = true`
+  and say nothing, so a clip the browser had silenced looked exactly like one
+  the user had. It now raises the flag the UI reads, and the strip says who did
+  it.
+  This is *preview* audio and the code says so. The control the strip
+  deliberately still lacks is a mute for the model's own generated track: that
+  is a property of the document, it survives a reload and it costs an ffmpeg
+  flag. Behind one speaker, someone would silence a delivered reel by turning
+  their own monitors down.
+- **Loop.** An eight-second clip is watched twenty times while its captions are
+  timed. Looping never pauses the element — a pause/play round trip per lap
+  stalls visibly and can be refused outright by an autoplay policy the second
+  time — so the trimmed case wraps inside the frame pump and the untrimmed case
+  wraps on `ended`. Both read the flag through a ref, because `ended` is bound
+  once per URL and would otherwise hold whatever the flag was when the clip
+  loaded.
+- **The fades became visible.** They were a number in a field and nothing else,
+  on the one surface built to show how an overlay *reads*. Each bar now carries
+  the wedge every NLE draws. The out wedge appears **only when there is a real
+  `tOut`** — the same asymmetry §3 and §5 already describe, copied rather than
+  tidied, because ffmpeg has nothing to anchor an out-fade to on a layer that
+  runs to the end. Drawing a ramp here that neither `layerAlphaAt` nor the
+  filter graph performs would have put the lie back at the top of the stack.
+- **Home / End / I / O.** End goes to the end of what *ships*, not of the file —
+  play already starts at the in point and stops at the out, and this is the one
+  place that would have stopped being true. I and O set the trim at the
+  playhead, which is both more precise than a drag and what anyone who has used
+  an editor will try first.
+- **The empty toolbar.** In video mode with nothing selected there was nothing
+  to put in the ~118px band the canvas reserves (the photo group is withheld,
+  the style controls need a selection), so the first thing you saw on opening a
+  clip was a large blank white card that read as a panel which had failed to
+  load. It now carries the shortcuts.
+
+### Fonts — 7 to 45, and the weight bug it exposed
+
+The library was five Arabic faces and two Latin. It is now ~45 across Arabic,
+sans, serif, display, handwriting and mono, with Arabic first in the menu
+because this is a studio for a Saudi brand and the faces that cannot set an
+Arabic headline have no business where the eye lands first. A flat list of that
+length in a 230px popover is not a picker, so the menu is **searchable and
+grouped, with every name set in its own face** — which is the whole reason it
+was a portalled popover rather than a `<select>` in the first place.
+
+**Each face now carries the weights it actually has.** The menu used to offer
+Regular / Semibold / Bold / Black for everything. Bebas Neue has one weight,
+Amiri two, Cairo nine — and asking a canvas for a weight a face lacks doesn't
+error, it picks the nearest or synthesises a smeared fake bold. The toolbar
+then says "Black" while the canvas draws Regular. So the weight menu is built
+from the family, ⌘B and the B button jump between that family's own lightest
+and heaviest (and are disabled outright on a single-weight face rather than
+appearing to work), and changing family **snaps the weight to the nearest one
+that exists** — including on the automatic Latin→Cairo switch when someone
+starts typing Arabic, which would otherwise have carried a weight Cairo happens
+not to have.
+
+**They no longer load app-wide.** The old five sat in an `@import` in
+`index.css` on the correct reasoning that canvas silently falls back for a face
+that hasn't finished loading. Forty-five faces is ~150KB of `@font-face` rules,
+and every screen with no canvas on it — dashboard, calendar, settings — was
+going to block its first paint on them. They now load when the editor opens,
+and the guarantee is preserved rather than traded: `ensureFontsLoaded` awaits
+the stylesheets' own load events before resolving a single pair, and the editor
+already gates its canvas and its Save button on that promise. `document.fonts.
+load` for a family with no rule yet does **not** wait and does not throw — it
+resolves immediately with nothing — so kicking the stylesheets off without
+awaiting them would have been the same bug wearing a promise.
+
+### The chrome stopped being emoji
+
+The toolbar, rail and shape grid were drawn with 🎚 🖌 ✚ ▣ ⌗ ⬚ ⟲ ⟳ ⇋ ⇅ ∅ ⛏.
+Those are not icons, they are *text*: on macOS half resolve to full-colour
+emoji, which in a flat monochrome UI look like stickers; on Windows and Linux
+several have no glyph in the UI font and render as tofu; and none of them
+follow their button's colour, so active and disabled states left them
+unchanged. `editor/icons.jsx` replaces them with one 24×24 `currentColor`
+grid — still inline SVG and still no package, which is the choice `Timeline.jsx`
+had already made for its transport. The reel timeline's two duplicate transport
+glyphs now come from there too.
+
+### Verified
+
+Nothing here spent anything; no fal render was triggered.
+
+**Snapping, by arithmetic rather than by eye.** With the playhead parked at
+62.5% and a bar at 25%→75%, dragging the out edge to a position corresponding
+to 4.954s left the bar at **exactly `width: 37.5%`** — i.e. 25 + 37.5 = 62.5,
+the playhead to the digit — with the guide showing at exactly `left: 62.5%` and
+hidden again on release. The same drag with ⌥ held landed at **36.9266%**
+(4.954s, unsnapped) and never showed the guide.
+
+**Loop, sampled off the media element** at 250ms: `… 1.72, 1.97 → 0.06 … 1.81 →
+0 … 1.40`, against a 2.0s out point — two full laps, never past the out point,
+`paused` false throughout, and `muted: false, volume: 1`, i.e. the sound is
+genuinely on rather than quietly forced off.
+
+**Fonts.** All three stylesheets inject; every sampled family reports
+`document.fonts.check` true after `load` and measures a distinct advance width
+against the fallback (647.2 Latin / 472 Arabic): Bebas Neue 371.4, Anton 447.5,
+Playfair 616, Pacifico 772.2, Space Mono 587.5; Reem Kufi 453.1, Almarai 460,
+Alexandria 471. Setting a Bold layer to Anton snapped it to Regular and
+disabled both weight controls, and Save still produced the right two timing
+groups at 1600×2000.
+
+Also measured: `O` at a 5.0s playhead set the trim and dimmed the rest of the
+strip; `End` then went to **5.0s, not the file's 8.0s**; photo mode still has
+Crop, Adjust, rotate and flip and no timeline.
+
+**Two bugs this pass produced and fixed.** The font menu's search box opened
+*unfocused*: the popover is `visibility: hidden` for the one layout pass it
+takes to measure itself, and **a visibility:hidden element cannot take focus**,
+so `focus()` on mount was a silent no-op and every keystroke went to the
+trigger button instead. Confirmed by probing the panel's computed visibility at
+the moment of the call, and fixed by focusing a frame later. And the volume
+slider was first revealed on hover at `left-full`, which floated it straight
+over the timecode — the one number the strip exists to show. Forty pixels of
+permanent width is cheaper than that.
+
+**A measuring note to add to the one in §7.** The browser pane reports
+`document.hidden === true`, and rAF there is not merely throttled to 0.7fps —
+it can be **suspended outright**, so the frame pump never ticks, the out point
+is never enforced and playback looks broken while the element is in fact
+playing perfectly. Read `currentTime` off the media element, or shim
+`requestAnimationFrame` onto `setTimeout`, before believing anything about
+transport behaviour. Separately: the pane's `key` action sends an **empty**
+`key` for `space`, so a space-bar binding cannot be tested that way at all —
+click the transport button instead.
+
+---
+
+## 10. Still out
 
 - **Tier 3, the rest.** Re-ordering shots from the timeline (`moveClip` exists
   and the board exposes it, but not the strip); overlays spanning a seam; and
@@ -374,10 +529,23 @@ moves it without resizing (2.0→6.0 becomes 3.0→7.0).
   replaces that column wholesale when it records a fal request id.
 - **Crossfade seams preview as cuts.** The preview plays the sum of the kept
   lengths; a stitched crossfade is shorter by the overlap. The UI says so.
-- **Tier 4 — audio.** All free ffmpeg work, and Canva's shape is the one to
-  copy: multiple tracks, trim handles, volume, fades, and a mute for the
-  model's own generated audio. Roughly the size of Tier 1 on its own.
+- **Tier 4 — audio, the part that ships.** §9 added *monitoring* — a speaker, a
+  volume slider and an honest autoplay fallback — and that is all it added.
+  None of it reaches the render. What is still out is everything that changes
+  the delivered file, and Canva's shape is the one to copy: multiple tracks,
+  trim handles per track, fades, and a mute for the model's own generated
+  audio. That last one is the smallest and the most asked for, and it is the
+  reason the preview mute is deliberately **not** wired to the document — see
+  §9. Roughly the size of Tier 1 on its own.
 - **Tier 5 — polish.** Safe-area guides for reel/story/feed, export presets.
+- **The reel timeline has none of §9.** Snapping, loop, sound and the fade
+  wedges all landed on the single-clip strip; `ReelTimeline.jsx` still has a
+  bare transport and unsnapped block handles. It shares no code with
+  `Timeline.jsx` — different objects, different playback hook — so this is a
+  second pass rather than a prop.
+- **A shortcut reference.** The editor now has around forty bindings and they
+  live in tooltips and one line in the toolbar's empty state. That was
+  survivable at ten.
 - Split, for the reason in §4.
 
 ---

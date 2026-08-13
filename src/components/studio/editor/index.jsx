@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Button, Spinner } from '../../ui/index'
-import { ensureFontsLoaded } from '../fonts'
+import { ensureFontsLoaded, weightsFor } from '../fonts'
 
 import {
   migrateDocument, newTextLayer, newShapeLayer, newImageLayer,
@@ -93,8 +93,20 @@ function textShortcut(e, key, layer, docH, apply) {
   if (!e.shiftKey && !e.altKey) {
     switch (key) {
       // Bold moves between two real weights rather than setting a flag, so it
-      // and the weight menu can't disagree about what the layer is.
-      case 'b': return done({ weight: layer.weight >= 700 ? 400 : 700 })
+      // and the weight menu can't disagree about what the layer is — including
+      // about which weights this FACE has. Half the library is not 400/700:
+      // Bebas Neue has one weight, Amiri two, Cairo nine. Jumping to a 700 the
+      // family lacks leaves the toolbar claiming Bold while the canvas picks
+      // whatever is nearest, which is the drift weightsFor exists to close.
+      case 'b': {
+        const ws = weightsFor(layer.family)
+        // Swallowed rather than applied on a single-weight face: an empty
+        // patch would still push an undo step for a keystroke that changed
+        // nothing, and letting it through would insert a "b" into the canvas.
+        if (ws.length < 2) { e.preventDefault(); return true }
+        const heavy = ws[ws.length - 1]
+        return done({ weight: layer.weight >= heavy ? ws[0] : heavy })
+      }
       case 'i': return done({ italic: !layer.italic })
       case 'u': return done({ underline: !layer.underline })
       default: return false
@@ -106,6 +118,11 @@ function textShortcut(e, key, layer, docH, apply) {
 export function PhotoEditor({
   imageUrl, initialState, onSave, onCancel, saving = false,
   onUploadImage, imageLibrary = [],
+  // Signed-in fetch for the account's persistent Media Library, offered in
+  // the Images panel alongside the upload button and this session's own
+  // generations. Absent in the dev harness, where the library call just
+  // comes back empty.
+  accessToken,
   // Brand Brain's free-text "Brand Colours" field. Passed as written; the hex
   // codes are pulled out of the prose in model/palette.js.
   brandColorsText = '',
@@ -626,6 +643,32 @@ export function PhotoEditor({
         playback.seek(playback.timeRef.current + (e.key === 'ArrowLeft' ? -step : step))
         return
       }
+      // Home and End, which every transport in every editor has and which are
+      // the only way to get to the ends of a long reel without either dragging
+      // precisely or holding an arrow key down. Unlike the arrows they are NOT
+      // gated on an empty selection: nothing else in this editor binds them,
+      // so there is no gesture for them to steal.
+      if (isVideo && !mod && (e.key === 'Home' || e.key === 'End')) {
+        stop()
+        // To the ends of what SHIPS rather than of the file. The window is the
+        // subject of every other transport decision here — play starts at the
+        // in point and stops at the out — and jumping End onto footage that
+        // has been cut would be the one place that stopped being true.
+        playback.seek(e.key === 'Home' ? trim.start : trim.end)
+        return
+      }
+      // I and O set the trim at the playhead, which is the standard binding
+      // and the reason the trim handles are not the only way to do it: parking
+      // the playhead on the frame you want and pressing a key is both more
+      // precise than a drag and the way anyone who has used an editor before
+      // will try first. Free letters — ⌘I is italic, and neither is bound bare.
+      if (isVideo && !mod && !e.altKey && (key === 'i' || key === 'o')) {
+        stop()
+        begin()
+        const at = playback.timeRef.current
+        setTrim(key === 'i' ? { start: at, end: doc.trim?.end ?? null } : { start: trim.start, end: at })
+        return
+      }
 
       if (key === 'escape') {
         stop()
@@ -694,7 +737,7 @@ export function PhotoEditor({
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [doc, tool, editingId, selectedIds, single, painting, history, zoom, addText, addShape, cancelCrop,
       duplicateSelected, deleteSelected, copySelected, pasteClipboard, order, orderExtreme,
-      tidyUp, toggleLock, nudge, begin, patchSelected, isVideo, playback])
+      tidyUp, toggleLock, nudge, begin, patchSelected, isVideo, playback, trim, setTrim])
 
   // ── Save ────────────────────────────────────────────────────────────────
   async function handleSave() {
@@ -788,7 +831,7 @@ export function PhotoEditor({
           onOpenPanel={p => { if (p !== 'crop' && tool === 'crop') cancelCrop(); setPanel(p) }}>
           {panel === 'insert' && <InsertPanel onAddText={addText} onAddShape={addShape} />}
           {panel === 'uploads' && (
-            <UploadsPanel onUploadImage={onUploadImage} onAddImage={addImage} library={imageLibrary} />
+            <UploadsPanel onUploadImage={onUploadImage} onAddImage={addImage} library={imageLibrary} accessToken={accessToken} />
           )}
           {panel === 'adjust' && !isVideo && (
             <AdjustPanel adjust={doc.adjust} onBeginChange={begin}

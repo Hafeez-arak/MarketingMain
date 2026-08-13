@@ -6,15 +6,27 @@
    tailwind.config.js — both, or the class silently does nothing. */
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600;9..40,700&display=swap');
 
-/* Creative Studio overlay-editor typefaces. Loaded app-wide (not lazily)
-   because the editor draws to a <canvas>, and canvas silently falls back to a
-   default face for any font that hasn't finished loading — producing an
-   exported image that doesn't match the preview. See STUDIO_FONTS in
-   src/components/studio/fonts.js; keep the two lists in sync.
-   All five cover Arabic; the Latin pairings are chosen to sit alongside the
-   brand's DM Sans without clashing. Swap in Arak's licensed brand fonts via
-   @font-face once the team sends the files. */
-@import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;900&family=Tajawal:wght@400;500;700;900&family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&family=Amiri:ital,wght@0,400;0,700;1,400&family=Noto+Kufi+Arabic:wght@400;700;900&display=swap');
+/* The Creative Studio overlay-editor typefaces are NOT imported here.
+
+   They used to be — five families, loaded app-wide, on the reasoning that the
+   editor draws to a <canvas> and canvas silently falls back to a default face
+   for any font that hasn't finished loading, producing an export that doesn't
+   match the preview. That reasoning is still exactly right; what changed is
+   the size of the list. There are now ~45 faces (see STUDIO_FONTS in
+   src/components/studio/fonts.js), which is ~150KB of @font-face rules, and
+   every page of the app that has no canvas on it — the dashboard, the
+   calendar, the settings screens — was going to block its first paint on them.
+
+   So they load when the editor opens instead, from STUDIO_FONT_CSS in
+   fonts.js. The correctness guarantee is preserved rather than traded away:
+   `ensureFontsLoaded` awaits the stylesheets' own load events before it
+   resolves a single (weight, family) pair, and the editor already gates both
+   its canvas and its Save button on that promise. Nothing rasterises before
+   the rules exist.
+
+   Swap in Arak's licensed brand fonts via @font-face once the team sends the
+   files — those DO belong here, since a self-hosted file is a local request
+   and the brand faces are the ones most documents will actually use. */
 
 @tailwind base;
 @tailwind components;
