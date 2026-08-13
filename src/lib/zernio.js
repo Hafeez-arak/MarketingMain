@@ -1,4 +1,5 @@
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './supabaseClient'
+import { BRAND_TIMEZONE } from './brandTime'
 
 // ─── Zernio (publishing + analytics) ─────────────────────────────────────
 // The browser NEVER calls zernio.com directly and never sees the Zernio
@@ -22,10 +23,15 @@ const POST_TABLES = ['instagram_generated_posts', 'linkedin_generated_posts', 'g
 // that died between claiming and writing the id back, leaving the row stuck on
 // 'publishing' — nothing else can move it until a stale-job reconciler exists.
 // Default false: forcing is how you publish twice on purpose.
+// `reschedule: true` means "this post is already scheduled at Zernio, move
+// it": the workflow cancels the existing Zernio post before creating the new
+// one, and widens its claim guard to accept a row in 'scheduled'. Without the
+// flag a scheduled row is refused, which is the correct default — an
+// unqualified second publish of a scheduled post is a double-post.
 export async function publishPost(webhookUrl, {
   postId, postTable, workspaceId, platform, accountId,
   caption, hashtags, imageUrl, imageUrls, videoUrl, coverImageUrl, altText,
-  scheduledFor, timezone, force = false,
+  scheduledFor, timezone, force = false, reschedule = false,
 }) {
   if (!webhookUrl) return { error: 'Publish webhook not configured — set it in Settings → Integrations.' }
   if (!POST_TABLES.includes(postTable)) return { error: `Unknown post table: ${postTable}` }
@@ -39,8 +45,15 @@ export async function publishPost(webhookUrl, {
         caption: caption || '', hashtags: hashtags || '',
         image_url: imageUrl || '', image_urls: imageUrls || undefined,
         video_url: videoUrl || '', cover_image_url: coverImageUrl || '', alt_text: altText || '',
-        scheduled_for: scheduledFor || undefined, timezone: timezone || undefined,
+        // A schedule is a wall-clock time plus the zone to read it in, and the
+        // zone is the BRAND's, never the browser's. This used to send
+        // Intl.DateTimeFormat().resolvedOptions().timeZone, so scheduling from
+        // a laptop outside KSA published at the wrong local hour — the times in
+        // a content plan have always meant Riyadh time.
+        scheduled_for: scheduledFor || undefined,
+        timezone: scheduledFor ? (timezone || BRAND_TIMEZONE) : undefined,
         force: force === true ? true : undefined,
+        reschedule: reschedule === true ? true : undefined,
       }),
     })
     const data = await res.json().catch(() => ({}))
