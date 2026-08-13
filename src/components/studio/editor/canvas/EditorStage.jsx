@@ -17,11 +17,27 @@ import { centreCropRect, layerAlphaAt, layerLiveAt, motionOffsetAt } from '../mo
 // mostly-empty UI layer.
 const ACCENT = '#f59e0b'
 
-const HANDLE_PROPS = {
-  anchorSize: 12, anchorCornerRadius: 6,
-  anchorFill: '#ffffff', anchorStroke: ACCENT, anchorStrokeWidth: 2,
-  borderStroke: ACCENT, borderStrokeWidth: 1.5,
-  ignoreStroke: true,
+// Konva lays anchors out in the Transformer's own (document-space) coordinate
+// frame, which the Stage then scales by `view.scale` like everything else on
+// it — so fixed numbers here would render as literal 12px squares at 100%
+// zoom but shrink to a few, barely-grabbable pixels at the 30-60% "fit to
+// screen" zoom most documents open at, and balloon at high zoom. Canva's
+// handles are a constant size on SCREEN regardless of zoom, which is what
+// makes them easy to grab precisely; every other screen-space element in this
+// file (guides, marquee, crop border) already divides by `view.scale` for the
+// same reason — this just applies the same fix to the resize handles.
+const HANDLE_SIZE = 12
+const HANDLE_CORNER_RADIUS = 6
+const HANDLE_ANCHOR_STROKE = 2
+const HANDLE_BORDER_STROKE = 1.5
+
+function handleProps(scale) {
+  return {
+    anchorSize: HANDLE_SIZE / scale, anchorCornerRadius: HANDLE_CORNER_RADIUS / scale,
+    anchorFill: '#ffffff', anchorStroke: ACCENT, anchorStrokeWidth: HANDLE_ANCHOR_STROKE / scale,
+    borderStroke: ACCENT, borderStrokeWidth: HANDLE_BORDER_STROKE / scale,
+    ignoreStroke: true,
+  }
 }
 const SHAPE_ANCHORS = ['top-left', 'top-right', 'bottom-left', 'bottom-right', 'middle-left', 'middle-right', 'top-center', 'bottom-center']
 // Text has no stored height (it's derived from the wrapped line count), so its
@@ -490,7 +506,7 @@ export function EditorStage({
           />
         ))}
 
-        <Transformer ref={transformerRef} {...HANDLE_PROPS}
+        <Transformer ref={transformerRef} {...handleProps(view.scale)}
           rotateEnabled={!editingSingle}
           rotationSnaps={ROTATION_SNAPS}
           rotationSnapTolerance={7}
@@ -558,7 +574,7 @@ export function EditorStage({
                 onCropRect({ x, y, w: Math.min(w, stageW - x), h: Math.min(h, stageH - y) })
               }}
             />
-            <Transformer ref={cropTransformerRef} rotateEnabled={false} {...HANDLE_PROPS}
+            <Transformer ref={cropTransformerRef} rotateEnabled={false} {...handleProps(view.scale)}
               enabledAnchors={['top-left', 'top-right', 'bottom-left', 'bottom-right']}
               // A chosen aspect ratio has to survive the handles, not just set
               // the box once — height follows width for the whole drag.
