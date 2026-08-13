@@ -1409,11 +1409,80 @@ const SUPA_KEY = $env.SUPABASE_KEY;
 const ZBASE    = 'https://zernio.com/api/v1';
 const zHeaders = { Authorization: `Bearer ${ZERNIO}`, 'Content-Type': 'application/json' };
 
+// ── Wall clock -> absolute instant ──────────────────────────────────────
+// Zernio takes a schedule as two fields: a naive wall time ('2026-08-20T19:00')
+// plus the zone to read it in. Our `scheduled_publish_at` column is timestamptz
+// — an absolute instant. Those are different things, and this workflow used to
+// write the wall string straight into the column. Postgres then resolved the
+// naive literal in the SESSION zone (UTC on Supabase), so 7 PM Riyadh was
+// stored as 7 PM UTC: three hours later than the moment Zernio would actually
+// publish. Zernio was right and our database was wrong, silently, on every
+// scheduled post — and any calendar reading the column inherited the error.
+//
+// The conversion happens HERE rather than in the browser on purpose: this node
+// is the last thing between a caller and the column, so doing it here means a
+// cron, a bulk run or a future internal caller cannot reintroduce the bug by
+// forgetting to convert.
+function offsetMsAt(utcMs, tz){
+  const p = {};
+  for (const { type, value } of new Intl.DateTimeFormat('en-US', {
+    timeZone: tz, hourCycle: 'h23',
+    year:'numeric', month:'2-digit', day:'2-digit',
+    hour:'2-digit', minute:'2-digit', second:'2-digit',
+  }).formatToParts(utcMs)) p[type] = value;
+  const asIfUtc = Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute, +p.second);
+  return asIfUtc - Math.floor(utcMs / 1000) * 1000;
+}
+function wallToUtcISO(wall, tz){
+  const s = String(wall || '').trim();
+  if (!s) return null;
+  // Already carries a zone (trailing Z or ±HH:MM)? Then it is an instant
+  // already and re-interpreting it would shift a correct value.
+  if (/(Z|[+-]\d{2}:?\d{2})$/.test(s)) {
+    const ms = Date.parse(s);
+    return Number.isFinite(ms) ? new Date(ms).toISOString() : null;
+  }
+  const m = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{1,2}):(\d{2})(?::(\d{2}))?$/.exec(s);
+  if (!m) return null;
+  const guess = Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +(m[6] || 0));
+  let utcMs = guess - offsetMsAt(guess, tz);
+  const refined = guess - offsetMsAt(utcMs, tz);   // second pass matters across DST
+  if (refined !== utcMs) utcMs = refined;
+  return new Date(utcMs).toISOString();
+}
+
+// Cancel a scheduled post on Zernio's side.
+//
+// DELETE /posts/{id} removes a draft or scheduled post (published ones need
+// Unpublish and are refused below). This is what makes rescheduling honest:
+// once a post is handed to Zernio, Zernio owns when it fires, so moving it in
+// our database alone would leave the two disagreeing and Zernio would win.
+//
+// A 404 counts as success — the post is gone, which is the outcome we wanted.
+async function cancelZernioPost(zernioPostId){
+  if (!zernioPostId) return { ok: true, skipped: true };
+  try {
+    await req({ method:'DELETE', url:`${ZBASE}/posts/${encodeURIComponent(zernioPostId)}`,
+                headers:zHeaders, json:true });
+    return { ok: true, deleted: true };
+  } catch (e) {
+    const msg = (e && e.message) || String(e);
+    if (/\b404\b|Not found/i.test(msg)) return { ok: true, deleted: false, alreadyGone: true };
+    return { ok: false, error: msg };
+  }
+}
+
 // Our row, so we can write the result back.
 const postId      = body.post_id || '';
 const postTable   = body.post_table || 'instagram_generated_posts';
 const workspaceId = body.workspace_id || null;
 const platform    = body.platform || 'instagram';
+// Moving an already-scheduled post to a new time, rather than a first publish.
+const isReschedule = body.reschedule === true;
+// Set once a reschedule has actually retired the old Zernio post, so the
+// failure path can say so — "nothing is scheduled any more" is a very
+// different thing to tell someone than "your change didn't apply".
+let retiredZernioId = '';
 
 // Only these three tables exist; anything else is a caller bug, and
 // interpolating an arbitrary string into the PATCH URL would be worse.
@@ -1448,18 +1517,30 @@ async function patchPost(fields){
 // genuine failure). Deliberately NOT 'publishing': a row already in flight is
 // someone else's, and re-entering it is the exact bug this closes.
 //
+// A reschedule (`reschedule: true`) adds 'scheduled' to that list, and ONLY
+// that one. Moving a post that Zernio already holds is legitimate — cancel the
+// old, create the new — but 'publishing' stays excluded even here: that row is
+// mid-flight at the platform, and cancelling underneath it is precisely how you
+// end up either double-posted or silently unpublished. 'published' is excluded
+// because it has already gone out; Zernio's DELETE refuses it too.
+//
 // Escape hatch: force:true skips the claim. A run that dies between claiming
 // and writing the id back leaves the row stuck in 'publishing' forever, and
 // until a stale-job reconciler exists that is the only way to recover it.
 async function claimPost(){
-  if (!postId) return { ok: true, claimed: false };   // ad-hoc publish, no row to guard
-  if (body.force === true) return { ok: true, claimed: true, forced: true };
+  if (!postId) return { ok: true, claimed: false, row: {} };   // ad-hoc publish, no row to guard
+  if (body.force === true) return { ok: true, claimed: true, forced: true, row: {} };
+  const from = isReschedule ? 'not_published,failed,scheduled' : 'not_published,failed';
   const rows = await http({
     method:'PATCH',
-    url:`${SUPA_URL}/rest/v1/${postTable}?id=eq.${postId}&publish_status=in.(not_published,failed)`,
+    url:`${SUPA_URL}/rest/v1/${postTable}?id=eq.${postId}&publish_status=in.(${from})`,
     headers:{ apikey:SUPA_KEY, Authorization:`Bearer ${SUPA_KEY}`, 'Content-Type':'application/json', Prefer:'return=representation' },
     body:{ publish_status:'publishing', publish_error:'' }, json:true });
-  if (Array.isArray(rows) && rows.length) return { ok: true, claimed: true };
+  // The claimed row comes back with it, which is how the reschedule path
+  // learns which Zernio post to cancel. Deliberately not taken from the
+  // request body: a caller holding a stale id would have us delete some other
+  // post entirely, and the row is the only authority on what we last created.
+  if (Array.isArray(rows) && rows.length) return { ok: true, claimed: true, row: rows[0] || {} };
 
   // Lost the race, or it was already published. Read back the real reason so
   // the caller gets something better than "no".
@@ -1475,6 +1556,34 @@ async function claimPost(){
 
 try {
   if (!ZERNIO) throw new Error('ZERNIO_API_KEY is not set on this n8n instance.');
+
+  // ---- 0) cancel-only: give the slot back, keep the post ----
+  //
+  // Its own branch because none of the publish machinery applies — no account
+  // to resolve, no media to assemble, and the "nothing to publish" guard below
+  // would reject a perfectly valid cancel of a post whose caption is empty.
+  // Still goes through claimPost, so a cancel racing a publish loses the same
+  // way any other second writer does.
+  if (isReschedule && body.cancel_only === true){
+    const c = await claimPost();
+    if (!c.ok){
+      const cur = c.current || {};
+      return [{ json: { ok: false, skipped: true, post_id: postId,
+        publish_status: cur.publish_status || 'in flight',
+        error: `Cannot unschedule a post that is ${cur.publish_status || 'in flight'}.` } }];
+    }
+    const existingId = String((c.row && c.row.zernio_post_id) || '');
+    const cancelled = await cancelZernioPost(existingId);
+    if (!cancelled.ok){
+      await patchPost({ publish_status:'scheduled', publish_error:`Could not cancel at Zernio: ${cancelled.error}` });
+      return [{ json: { ok:false, post_id:postId, publish_status:'scheduled',
+        error:`Could not cancel at Zernio — the post is still scheduled for its original time. ${cancelled.error}` } }];
+    }
+    await patchPost({ publish_status:'not_published', publish_error:'',
+                      zernio_post_id:null, scheduled_publish_at:null });
+    return [{ json: { ok:true, post_id:postId, publish_status:'not_published',
+                      cancelled:true, zernio_post_id:existingId } }];
+  }
 
   // ---- 1) resolve which connected account to post as ----
   let accountId = body.account_id || '';
@@ -1547,12 +1656,26 @@ try {
 
   // scheduledFor vs publishNow are mutually exclusive in intent; prefer an
   // explicit schedule when one is given.
+  //
+  // `scheduled_for` is a NAIVE wall time and must stay naive here — Zernio
+  // reads it against the `timezone` field beside it. The absolute instant for
+  // our own column is derived from the pair further down.
   const scheduledFor = body.scheduled_for || '';
+  const scheduleTz   = body.timezone || 'Asia/Riyadh';
   if (scheduledFor){
     payload.scheduledFor = scheduledFor;
-    payload.timezone = body.timezone || 'Asia/Riyadh';
+    payload.timezone = scheduleTz;
   } else {
     payload.publishNow = true;
+  }
+
+  // Refuse a schedule we cannot resolve to a real instant, before anything is
+  // claimed or sent. Letting it through would publish at a time nobody chose
+  // and leave the column null, which reads in the calendar as "unscheduled"
+  // for a post that is in fact queued at the platform.
+  const scheduledAtUTC = scheduledFor ? wallToUtcISO(scheduledFor, scheduleTz) : null;
+  if (scheduledFor && !scheduledAtUTC){
+    throw new Error(`Unparseable scheduled_for: ${JSON.stringify(scheduledFor)} (expected 'YYYY-MM-DDTHH:MM' read in ${scheduleTz}).`);
   }
 
   // Claimed here rather than at the top of the try: the window between owning
@@ -1573,7 +1696,34 @@ try {
     } }];
   }
 
-  // ---- 3) publish ----
+  // ---- 3) if this is a reschedule, retire the old Zernio post FIRST ----
+  //
+  // Order is the whole safety argument. Cancel-then-create can only fail
+  // toward "nothing is scheduled" — visible in the UI, recoverable by sending
+  // it again. Create-then-cancel fails toward TWO live scheduled posts on the
+  // real platform, which is the failure the claim guard above exists to
+  // prevent and which no amount of retrying undoes.
+  //
+  // So a failed cancel aborts: the row goes back to 'scheduled' with its
+  // original Zernio post still standing, which is exactly where it started.
+  const previousZernioId = String((claim.row && claim.row.zernio_post_id) || '');
+  if (isReschedule && previousZernioId){
+    const cancelled = await cancelZernioPost(previousZernioId);
+    if (cancelled.ok && cancelled.deleted) retiredZernioId = previousZernioId;
+    if (!cancelled.ok){
+      await patchPost({
+        publish_status: 'scheduled',
+        publish_error: `Could not cancel the existing scheduled post — it is still set for its original time. ${cancelled.error}`,
+      });
+      return [{ json: {
+        ok: false, post_id: postId, platform, publish_status: 'scheduled',
+        zernio_post_id: previousZernioId,
+        error: `Reschedule aborted: ${cancelled.error}. The post is unchanged and still scheduled for its original time.`,
+      } }];
+    }
+  }
+
+  // ---- 4) publish ----
   const resp = await req({ method:'POST', url:`${ZBASE}/posts`, headers:zHeaders, body:payload, json:true });
   const post = (resp && (resp.post || resp)) || {};
   const zernioPostId = post._id || post.id || '';
@@ -1603,7 +1753,9 @@ try {
     publish_error: '',
     platform_post_url: post.platformPostUrl || '',
   };
-  if (publishStatus === 'scheduled') fields.scheduled_publish_at = scheduledFor || null;
+  // The absolute instant, NOT the wall string. See wallToUtcISO above for the
+  // three-hour bug this replaced.
+  if (publishStatus === 'scheduled') fields.scheduled_publish_at = scheduledAtUTC;
   if (publishStatus === 'published') fields.published_at = post.publishedAt || new Date().toISOString();
   await patchPost(fields);
 
@@ -1611,9 +1763,19 @@ try {
                     publish_status: publishStatus, platform, account_id: accountId,
                     platform_post_url: fields.platform_post_url } }];
 } catch (err) {
-  const message = (err && err.message) ? err.message : String(err);
-  await patchPost({ publish_status: 'failed', publish_error: message });
-  return [{ json: { ok: false, post_id: postId, error: message } }];
+  let message = (err && err.message) ? err.message : String(err);
+  // A reschedule that got past the cancel and then failed has left the post
+  // with NO schedule at all — the old one is genuinely gone from Zernio. Say
+  // so, because "failed" alone reads as "nothing changed" and someone would
+  // reasonably assume the original time still stands.
+  if (retiredZernioId){
+    message = `${message} — note: the previous schedule (Zernio post ${retiredZernioId}) was already cancelled, so this post is NOT scheduled any more. Send it again to pick a new time.`;
+  }
+  await patchPost({
+    publish_status: 'failed', publish_error: message,
+    ...(retiredZernioId ? { zernio_post_id: null, scheduled_publish_at: null } : {}),
+  });
+  return [{ json: { ok: false, post_id: postId, error: message, unscheduled: !!retiredZernioId } }];
 }
 """
 

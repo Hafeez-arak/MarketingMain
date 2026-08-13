@@ -1,207 +1,161 @@
 import { useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useApp, actions } from '../../store/app'
-import { Card, WarmCard, Button, Badge, Modal, Input, PostImage, PageHeader } from '../../components/ui/index'
-import { formatDateTime } from '../../lib/utils'
+import { useApp } from '../../store/app'
+import { useAuth } from '../../store/auth'
+import { Card, Button, PageHeader, Spinner, PostImage } from '../../components/ui/index'
+import {
+  MONTH_LABELS, indexByDay, dayEntries, findCrowding,
+  summarize, platformColor, publishState, addDays, startOfWeek, isPastSlot,
+} from './calendarModel'
+import { MonthGrid, DEFAULT_DROP_TIME } from './MonthGrid'
+import { WeekGrid } from './WeekGrid'
+import { TrayChip } from './PostChip'
+import { useCalendarPosts } from './useCalendarPosts'
+import {
+  brandMonthRangeUTC, brandRangeUTC, brandTodayKey, formatBrandDateTime,
+  formatBrandTime, utcToBrandParts, BRAND_TIMEZONE_LABEL,
+} from '../../lib/brandTime'
+import { moveKindFor } from '../../lib/scheduledPosts'
 
-const DAYS   = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']
-const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December']
+// ─── Content calendar ──────────────────────────────────────────────────────
+// Reads the `scheduled_posts` view — one ordered query across all three post
+// tables — so every platform appears, including the TikTok and Snapchat posts
+// that a hand-written union kept invisible. Every date and hour on this page
+// is BRAND time (Asia/Riyadh); see lib/brandTime.js for why that is a decision
+// rather than a formatting detail.
+//
+// This page previously rendered `state.posts` and the two localStorage
+// monthly-plan maps, which meant it showed planning artifacts and never showed
+// a single real scheduled post.
 
-// `bg` was an Instagram brand gradient; every other platform here was already
-// a flat hex, so one row of the calendar legend rendered as a colour ramp and
-// the rest as solids. Flat throughout now — these are identity swatches, and a
-// swatch that shifts hue across its own 4px width isn't identifying anything.
-const PLATFORM_COLORS = {
-  instagram: { bg: '#E1306C', dot: '#E1306C', light: '#fce4f0' },
-  facebook:  { bg: '#1877F2', dot: '#1877F2', light: '#e8f0fe' },
-  linkedin:  { bg: '#0A66C2', dot: '#0A66C2', light: '#e1f0fb' },
-  tiktok:    { bg: '#010101', dot: '#555', light: '#f0f0f0' },
-  x:         { bg: '#000',    dot: '#333', light: '#f5f5f5' },
-}
+const PLATFORM_FILTERS = ['all', 'instagram', 'linkedin', 'tiktok', 'snapchat', 'facebook', 'x']
 
 export function Schedule() {
-  const { state, dispatch } = useApp()
+  const { state } = useApp()
+  const { activeWorkspaceId, accessToken } = useAuth()
   const navigate = useNavigate()
 
-  const today = new Date()
-  const [viewDate,  setViewDate]  = useState(new Date(today.getFullYear(), today.getMonth(), 1))
-  const [viewMode,  setViewMode]  = useState('month') // 'month' | 'list'
-  const [filter,    setFilter]    = useState('all')
+  const today = brandTodayKey()
+  const [view, setView]             = useState('month')      // 'month' | 'week'
+  const [anchor, setAnchor]         = useState(today)        // any date inside the shown period
+  const [platform, setPlatform]     = useState('all')
   const [selectedDay, setSelectedDay] = useState(null)
-  const [scheduleModal, setScheduleModal] = useState(null) // post to schedule
-  const [schedDate,  setSchedDate]  = useState('')
-  const [schedTime,  setSchedTime]  = useState('10:00')
-  const [viewItem,   setViewItem]   = useState(null)   // schedule item to view/edit
-  const [platformPicker, setPlatformPicker] = useState(false) // show platform picker modal
+  const [dragging, setDragging]     = useState(null)
+  const [confirmMove, setConfirmMove] = useState(null)       // { post, dateKey, time }
+  const [notice, setNotice]         = useState(null)         // { tone, text }
+  const [platformPicker, setPlatformPicker] = useState(false)
 
-  // Save edited schedule entry back to instagramSchedule / linkedinSchedule in state
-  function saveScheduleEdit(item, updatedFields) {
-    const key        = item.dateKey
-    const stateKey   = item.source === 'instagram_schedule' ? 'instagramSchedule' : 'linkedinSchedule'
-    const actionType = item.source === 'instagram_schedule' ? 'SET_INSTAGRAM_SCHEDULE' : 'SET_LINKEDIN_SCHEDULE'
-    const existing   = state[stateKey] || {}
-    const dayArr     = existing[key] ? (Array.isArray(existing[key]) ? existing[key] : [existing[key]]) : []
-    const updated    = dayArr.map((e, i) => i === item.rawIndex ? { ...e, ...updatedFields } : e)
-    dispatch({ type: actionType, payload: { ...existing, [key]: updated } })
-    setViewItem(null)
-    setSelectedDay(new Date(key + 'T12:00:00'))
+  const year  = Number(anchor.slice(0, 4))
+  const month = Number(anchor.slice(5, 7)) - 1
+
+  // The window to fetch. A week view still fetches its whole month: paging
+  // week to week inside one month then costs no extra round-trips, and the
+  // month is only a few hundred rows at the very most.
+  const range = useMemo(() => {
+    if (view === 'month') return brandMonthRangeUTC(year, month)
+    const start = startOfWeek(anchor)
+    // Padded a week either side so scrubbing across a month edge does not
+    // briefly render an empty column while the next fetch lands.
+    return brandRangeUTC(addDays(start, -7), addDays(start, 13))
+  }, [view, year, month, anchor])
+
+  const { posts, tray, loading, error, pendingId, move, unschedule } =
+    useCalendarPosts({
+      workspaceId: activeWorkspaceId, accessToken,
+      from: range.from, to: range.to, webhooks: state.webhooks,
+    })
+
+  const shown = useMemo(
+    () => (platform === 'all' ? posts : posts.filter(p => p.platform === platform)),
+    [posts, platform])
+
+  const index    = useMemo(() => indexByDay(shown), [shown])
+  const crowded  = useMemo(() => findCrowding(shown), [shown])
+  const counts   = useMemo(() => summarize(shown), [shown])
+  const byId     = useMemo(() => new Map([...posts, ...tray].map(p => [p.id, p])), [posts, tray])
+
+  // ── Moving a post ────────────────────────────────────────────────────────
+  // A drop on a month cell carries no hour, so the post keeps its own; one
+  // that has never been scheduled gets a sensible default rather than midnight.
+  function resolveTime(post, time) {
+    if (time) return time
+    const existing = utcToBrandParts(post.scheduled_publish_at)
+    return existing ? existing.time : DEFAULT_DROP_TIME
   }
 
-  const year  = viewDate.getFullYear()
-  const month = viewDate.getMonth()
-
-  // ── date key helper (YYYY-MM-DD) ──────────────────────────────────────────
-  function toKey(date) {
-    return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`
-  }
-
-  // Build calendar grid
-  const calDays = useMemo(() => {
-    const firstDay  = new Date(year, month, 1).getDay()
-    const daysInMonth = new Date(year, month + 1, 0).getDate()
-    const prevMonthDays = new Date(year, month, 0).getDate()
-    const cells = []
-
-    // Prev month overflow
-    for (let i = firstDay - 1; i >= 0; i--) {
-      cells.push({ date: new Date(year, month - 1, prevMonthDays - i), overflow: 'prev' })
+  // Plain functions rather than useCallback: neither grid is memoised, so a
+  // stable identity buys nothing, and threading runMove through a dependency
+  // array only creates a way for the two to fall out of step.
+  function handleDrop(postId, dateKey, time) {
+    const post = byId.get(postId)
+    if (!post) return
+    const resolved = resolveTime(post, time)
+    if (isPastSlot(dateKey, resolved)) {
+      setNotice({ tone: 'error', text: 'That slot is in the past — pick a future time.' })
+      return
     }
-    // Current month
-    for (let d = 1; d <= daysInMonth; d++) {
-      cells.push({ date: new Date(year, month, d), overflow: null })
+    const kind = moveKindFor(post).kind
+    if (kind === 'blocked') {
+      setNotice({ tone: 'error', text: moveKindFor(post).reason })
+      return
     }
-    // Next month overflow (fill to 6 rows)
-    let next = 1
-    while (cells.length % 7 !== 0) {
-      cells.push({ date: new Date(year, month + 1, next++), overflow: 'next' })
+    // A post Zernio already holds cannot just be updated: the move cancels the
+    // booked slot and books a new one at the platform. That is a real outward
+    // action and a drag is easy to do by accident, so it gets one confirmation.
+    // A draft that Zernio has never seen moves immediately — nothing external
+    // happens and an undo is just another drag.
+    if (kind === 'zernio') { setConfirmMove({ post, dateKey, time: resolved }); return }
+    void runMove(post, dateKey, resolved)
+  }
+
+  async function runMove(post, dateKey, time) {
+    setNotice(null)
+    const res = await move(post, dateKey, time)
+    if (res?.error) {
+      setNotice({
+        tone: 'error',
+        text: res.unscheduled
+          ? `${res.error}`
+          : `Could not move that post: ${res.error}`,
+      })
+    } else if (res?.movedVia === 'zernio') {
+      setNotice({ tone: 'ok', text: `Rebooked at Zernio for ${formatBrandDateTime(res.scheduledPublishAt)} — the old slot was cancelled.` })
+    } else {
+      setNotice({ tone: 'ok', text: `Moved to ${formatBrandDateTime(res.scheduledPublishAt)}.` })
     }
-    return cells
-  }, [year, month])
-
-  // Posts (state.posts) indexed by date string
-  const postsByDate = useMemo(() => {
-    const map = {}
-    state.posts.forEach(p => {
-      const dt = p.scheduledAt || p.createdAt
-      const key = new Date(dt).toDateString()
-      if (!map[key]) map[key] = []
-      map[key].push(p)
-    })
-    return map
-  }, [state.posts])
-
-  function postsForDay(date) {
-    return postsByDate[date.toDateString()] || []
   }
 
-  // ── Full cross-platform schedule for a given date ─────────────────────────
-  function scheduleForDay(date) {
-    const key = toKey(date)
-    const items = []
-
-    // 1. state.posts (manually created / approved posts)
-    postsForDay(date).forEach(p => {
-      items.push({
-        id:       p.id,
-        platform: p.platform,
-        type:     p.uploadType === 'reel' ? 'reel' : 'post',
-        topic:    p.copy?.slice(0, 60) || p.topic || '',
-        status:   p.status,
-        imageUrl: p.imageUrl || p.mediaUrls?.[0] || null,
-        source:   'posts',
-        raw:      p,
-      })
-    })
-
-    // 2. Instagram monthly schedule
-    const igRaw = (state.instagramSchedule || {})[key]
-    const igEntries = igRaw ? (Array.isArray(igRaw) ? igRaw : [igRaw]) : []
-    igEntries.forEach((igEntry, idx) => {
-      items.push({
-        id:       `ig-sched-${key}-${idx}`,
-        platform: 'instagram',
-        type:     igEntry.uploadType === 'reel' ? 'reel' : 'scheduled',
-        topic:    igEntry.topic || '',
-        status:   igEntry.status || 'planned',
-        imageUrl: null,
-        source:   'instagram_schedule',
-        rawIndex: idx,
-        dateKey:  key,
-        raw:      igEntry,
-      })
-    })
-
-    // 3. LinkedIn monthly schedule
-    const liRaw = (state.linkedinSchedule || {})[key]
-    const liEntries = liRaw ? (Array.isArray(liRaw) ? liRaw : [liRaw]) : []
-    liEntries.forEach((liEntry, idx) => {
-      items.push({
-        id:       `li-sched-${key}-${idx}`,
-        platform: 'linkedin',
-        type:     liEntry.uploadType === 'video' ? 'video' : 'scheduled',
-        topic:    liEntry.topic || '',
-        status:   liEntry.status || 'planned',
-        imageUrl: null,
-        source:   'linkedin_schedule',
-        rawIndex: idx,
-        dateKey:  key,
-        raw:      liEntry,
-      })
-    })
-
-    return items
+  // ── Period navigation ────────────────────────────────────────────────────
+  function step(delta) {
+    if (view === 'month') {
+      const m = month + delta
+      const y = year + Math.floor(m / 12)
+      const mm = ((m % 12) + 12) % 12
+      setAnchor(`${y}-${String(mm + 1).padStart(2, '0')}-01`)
+    } else {
+      setAnchor(addDays(anchor, delta * 7))
+    }
   }
 
-  // Count for calendar dot (include schedule plans)
-  function countForDay(date) {
-    const key = toKey(date)
-    let n = postsForDay(date).length
-    const igRaw = (state.instagramSchedule || {})[key]
-    const liRaw = (state.linkedinSchedule  || {})[key]
-    if (igRaw) n += Array.isArray(igRaw) ? igRaw.length : 1
-    if (liRaw) n += Array.isArray(liRaw) ? liRaw.length : 1
-    return n
-  }
-
-  function isToday(date) {
-    return date.toDateString() === today.toDateString()
-  }
-
-  function prevMonth() { setViewDate(new Date(year, month - 1, 1)) }
-  function nextMonth() { setViewDate(new Date(year, month + 1, 1)) }
-
-  function handleSchedulePost(post) {
-    setScheduleModal(post)
-    setSchedDate(new Date().toISOString().split('T')[0])
-  }
-
-  function confirmSchedule() {
-    if (!scheduleModal || !schedDate) return
-    const scheduledAt = new Date(`${schedDate}T${schedTime}`).toISOString()
-    dispatch(actions.updatePost({ id: scheduleModal.id, status: 'scheduled', scheduledAt }))
-    setScheduleModal(null)
-  }
-
-  // List view posts
-  const listPosts = useMemo(() => {
-    let posts = [...state.posts]
-    if (filter !== 'all') posts = posts.filter(p => p.status === filter)
-    return posts.sort((a, b) => new Date(a.scheduledAt || a.createdAt) - new Date(b.scheduledAt || b.createdAt))
-  }, [state.posts, filter])
+  const periodLabel = view === 'month'
+    ? `${MONTH_LABELS[month]} ${year}`
+    : (() => {
+        const s = startOfWeek(anchor), e = addDays(s, 6)
+        const fmt = k => `${MONTH_LABELS[Number(k.slice(5, 7)) - 1].slice(0, 3)} ${Number(k.slice(8, 10))}`
+        return `${fmt(s)} – ${fmt(e)}, ${e.slice(0, 4)}`
+      })()
 
   return (
     <div className="max-w-7xl space-y-4">
 
-      {/* Header */}
-      <PageHeader title="Content Calendar" subtitle="Plan and schedule your brand content.">
-        {/* Segmented control: two cells of one bar sharing a seam. The old
-            version nested rounded pills inside a rounded tray, which meant
-            three concentric radii stacked in 32px of height. */}
+      <PageHeader
+        title="Content Calendar"
+        subtitle={`Every scheduled post, across all platforms. Times are ${BRAND_TIMEZONE_LABEL} (Asia/Riyadh).`}>
         <div className="flex">
-          {[{ key:'month', label:'Calendar' },{ key:'list', label:'List' }].map(v => (
-            <button key={v.key} onClick={() => setViewMode(v.key)}
+          {[{ key: 'month', label: 'Month' }, { key: 'week', label: 'Week' }].map(v => (
+            <button key={v.key} onClick={() => setView(v.key)}
               className={`px-3 py-1.5 border -ml-px first:ml-0 text-xs font-semibold transition-colors
-                ${viewMode === v.key
+                ${view === v.key
                   ? 'bg-amber-700 text-white border-amber-700 relative z-10'
                   : 'bg-white text-text-secondary border-border hover:text-text hover:bg-surface-subtle'}`}>
               {v.label}
@@ -214,16 +168,29 @@ export function Schedule() {
         </Button>
       </PageHeader>
 
-      {/* Stats row — one divided strip, matching Dashboard and Analytics.
-          Was four separate centered cards in four different accent colors;
-          the color-per-stat made the row read as four unrelated widgets. */}
+      {/* Result of the last move, and any load failure. */}
+      {(notice || error) && (
+        <div className={`px-4 py-2.5 border text-xs flex items-start gap-2
+          ${notice?.tone === 'ok'
+            ? 'bg-green-50 border-green-200 text-green-800'
+            : 'bg-red-50 border-red-200 text-red-700'}`}>
+          <span className="flex-1">{error || notice.text}</span>
+          {notice && (
+            <button onClick={() => setNotice(null)} className="font-bold opacity-60 hover:opacity-100">×</button>
+          )}
+        </div>
+      )}
+
+      {/* Counts, for what is actually in view — filter included, so the numbers
+          always describe the grid below them. */}
       <Card className="overflow-hidden">
-        <div className="grid grid-cols-2 sm:grid-cols-4 divide-y sm:divide-y-0 sm:divide-x divide-border">
+        <div className="grid grid-cols-2 sm:grid-cols-5 divide-y sm:divide-y-0 sm:divide-x divide-border">
           {[
-            { label: 'Scheduled', value: state.posts.filter(p=>p.status==='scheduled').length },
-            { label: 'Published', value: state.posts.filter(p=>p.status==='published').length },
-            { label: 'Pending',   value: state.posts.filter(p=>p.status==='pending_publish').length },
-            { label: 'Draft',     value: state.posts.filter(p=>p.status==='draft').length },
+            { label: 'Scheduled', value: counts.scheduled },
+            { label: 'Published', value: counts.published },
+            { label: 'Publishing', value: counts.publishing },
+            { label: 'Failed',    value: counts.failed },
+            { label: 'Unscheduled', value: tray.length },
           ].map(s => (
             <div key={s.label} className="p-4">
               <p className="eyebrow mb-2">{s.label}</p>
@@ -233,628 +200,327 @@ export function Schedule() {
         </div>
       </Card>
 
-      {/* CALENDAR VIEW */}
-      {viewMode === 'month' && (
+      {/* Staging tray — posts that exist and are ready but have no slot. This
+          is what makes the calendar an editor rather than a report: drag one
+          onto a day (or, in week view, onto an hour) to schedule it. */}
+      {tray.length > 0 && (
         <Card className="overflow-hidden">
-          {/* Calendar header. Every surface in this page used to be painted
-              with hardcoded rgba cream (255,253,240 / 249,243,232) left over
-              from the pre-rebrand palette — warm ivory inside a cool-grey app.
-              All of it is now the shared surface tokens. */}
-          <div className="flex items-center justify-between gap-4 px-4 py-3 border-b border-border bg-surface-subtle">
-            <div className="flex items-center gap-1">
-              <button onClick={prevMonth} aria-label="Previous month"
-                className="w-7 h-7 border border-border bg-white flex items-center justify-center text-text-secondary hover:text-text hover:border-stone-400 transition-colors">
-                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg>
-              </button>
-              <button onClick={nextMonth} aria-label="Next month"
-                className="w-7 h-7 border border-border -ml-px bg-white flex items-center justify-center text-text-secondary hover:text-text hover:border-stone-400 transition-colors">
-                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg>
-              </button>
-              <h3 className="font-semibold text-sm text-text ml-3 tabular-nums">
-                {MONTHS[month]} <span className="text-text-tertiary font-normal">{year}</span>
-              </h3>
-            </div>
-            <button onClick={() => setViewDate(new Date(today.getFullYear(), today.getMonth(), 1))}
-              className="px-3 py-1.5 border border-border bg-white text-xs font-semibold text-text-secondary hover:text-amber-800 hover:border-amber-700 transition-colors">
-              Today
-            </button>
+          <div className="px-4 py-2.5 border-b border-border bg-surface-subtle flex items-center gap-2">
+            <p className="eyebrow text-text-tertiary">Not scheduled yet</p>
+            <span className="text-[10px] text-text-tertiary">
+              {tray.length} post{tray.length !== 1 ? 's' : ''} · drag onto the calendar to book a slot
+            </span>
           </div>
-
-          {/* Day headers */}
-          <div className="grid grid-cols-7 border-b border-border bg-surface-subtle">
-            {DAYS.map(d => (
-              <div key={d} className="py-2 text-center">
-                <span className="eyebrow text-text-tertiary">{d}</span>
-              </div>
+          <div className="p-3 flex gap-2 overflow-x-auto">
+            {tray.map(post => (
+              <TrayChip key={post.id} post={post}
+                pending={pendingId === post.id}
+                onDragStart={setDragging}
+                onDragEnd={() => setDragging(null)}
+                onOpen={() => setSelectedDay(null)} />
             ))}
-          </div>
-
-          {/* Calendar grid. Cells are separated by a shared right/bottom rule
-              rather than a full border each — a 1px border on all four sides
-              of 42 adjacent cells doubles up to 2px on every internal seam,
-              which is what made the old grid look drawn in pencil. */}
-          <div className="grid grid-cols-7">
-            {calDays.map((cell, i) => {
-              const dayPosts = postsForDay(cell.date)
-              const dayCount = countForDay(cell.date)
-              const todayCell = isToday(cell.date)
-              const isSelected = selectedDay && cell.date.toDateString() === selectedDay.toDateString()
-
-              return (
-                <div key={i}
-                  onClick={() => !cell.overflow && setSelectedDay(cell.date)}
-                  className={`min-h-[104px] p-1.5 relative group border-r border-b border-border transition-colors
-                    [&:nth-child(7n)]:border-r-0
-                    ${cell.overflow ? 'bg-surface-muted' : 'cursor-pointer'}
-                    ${isSelected ? 'bg-amber-50' : !cell.overflow ? 'hover:bg-surface-subtle' : ''}`}>
-                  {/* Date number. Today is a filled square, not a circle —
-                      it's a cell marker in a grid of squares. */}
-                  <div className="flex items-start justify-between mb-1.5">
-                    <span className={`text-[11px] font-bold w-5 h-5 flex items-center justify-center tabular-nums
-                      ${todayCell ? 'bg-amber-700 text-white'
-                        : cell.overflow ? 'text-text-disabled'
-                        : isSelected ? 'text-amber-800' : 'text-text-secondary'}`}>
-                      {cell.date.getDate()}
-                    </span>
-                    {dayCount > 0 && !cell.overflow && (
-                      <span className="text-[10px] font-bold text-text-tertiary tabular-nums pr-0.5">{dayCount}</span>
-                    )}
-                  </div>
-
-                  {/* Post entries — a solid platform-colour rule down the left
-                      edge instead of a tinted pill plus a coloured dot, which
-                      was two encodings of the same fact in one 16px row. */}
-                  <div className="space-y-1">
-                    {dayPosts.slice(0, 3).map(p => {
-                      const pc = PLATFORM_COLORS[p.platform] || PLATFORM_COLORS.instagram
-                      return (
-                        <div key={p.id}
-                          className="pl-1.5 pr-1 py-0.5 text-[10px] text-text-secondary truncate bg-surface-subtle border-l-2"
-                          style={{ borderLeftColor: pc.dot }}>
-                          <span className="truncate">{p.copy?.slice(0,18) || p.platform}</span>
-                        </div>
-                      )
-                    })}
-                    {dayPosts.length > 3 && (
-                      <span className="text-[10px] text-text-tertiary pl-1.5">+{dayPosts.length - 3} more</span>
-                    )}
-                  </div>
-
-                  {/* Add post on hover */}
-                  {!cell.overflow && (
-                    <button onClick={e => { e.stopPropagation(); setPlatformPicker(true) }} aria-label="Add post"
-                      className="absolute bottom-1 right-1 w-5 h-5 bg-amber-700 text-white opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity flex items-center justify-center">
-                      <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth="3" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
-                    </button>
-                  )}
-                </div>
-              )
-            })}
           </div>
         </Card>
       )}
 
-      {/* Day detail modal overlay */}
-      {selectedDay && (() => {
-        const items = scheduleForDay(selectedDay)
-        const dateLabel = selectedDay.toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric', year:'numeric' })
-        const platforms = ['instagram','facebook','linkedin','tiktok','x']
-        const byPlatform = {}
-        platforms.forEach(pl => { byPlatform[pl] = items.filter(it => it.platform === pl) })
-        const activePlatforms = platforms.filter(pl => byPlatform[pl].length > 0)
-        const TYPE_LABELS   = { reel:'🎬 Reel', video:'🎬 Video', scheduled:'📅 Scheduled', post:'✦ Post' }
-        const STATUS_STYLES = {
-          planned:'bg-stone-100 text-stone-600', generated:'bg-green-50 text-green-700',
-          scheduled:'bg-blue-50 text-blue-600', published:'bg-green-50 text-green-700',
-          pending_publish:'bg-amber-50 text-amber-700', draft:'bg-gray-100 text-gray-600',
-        }
-        const PLATFORM_LABELS = { instagram:'Instagram', facebook:'Facebook', linkedin:'LinkedIn', tiktok:'TikTok', x:'X / Twitter' }
-
-        return (
-          <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
-            style={{ background:'rgba(28,35,33,0.45)' }}
-            onClick={e => { if (e.target === e.currentTarget) setSelectedDay(null) }}>
-            <div style={{ width:'720px', height:'82vh' }} className="bg-white border border-border shadow-dropdown flex flex-col overflow-hidden animate-fade-scale">
-
-              {/* Header */}
-              <div className="flex items-center justify-between px-5 py-4 flex-shrink-0 border-b border-border bg-surface-subtle">
-                <div>
-                  <p className="eyebrow text-text-tertiary mb-1.5">Content calendar</p>
-                  <h3 className="font-semibold text-sm text-text">{dateLabel}</h3>
-                  <p className="text-xs text-text-tertiary mt-0.5">
-                    {items.length === 0
-                      ? 'Nothing scheduled across all platforms'
-                      : `${items.length} item${items.length !== 1 ? 's' : ''} · ${activePlatforms.length} platform${activePlatforms.length !== 1 ? 's' : ''}`}
-                  </p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Button size="sm" onClick={() => { setSelectedDay(null); setPlatformPicker(true) }}>
-                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
-                    Add Post
-                  </Button>
-                  <button onClick={() => setSelectedDay(null)}
-                    className="w-8 h-8 rounded-xl flex items-center justify-center text-text-tertiary hover:bg-stone-100 transition-colors">
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>
-                  </button>
-                </div>
-              </div>
-
-              {/* Body */}
-              <div className="overflow-y-auto flex-1">
-                {items.length === 0 ? (
-                  <div className="py-16 text-center px-6">
-                    <div className="w-11 h-11 border border-border bg-surface-subtle flex items-center justify-center mx-auto mb-4 text-text-tertiary">
-                      <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
-                        <rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
-                      </svg>
-                    </div>
-                    <p className="font-semibold text-text mb-1">Nothing scheduled</p>
-                    <p className="text-sm text-text-secondary mb-5">No posts or plans across any platform for this day.</p>
-                    <div className="flex gap-2 justify-center flex-wrap">
-                      <Button size="sm" onClick={() => { setSelectedDay(null); setPlatformPicker(true) }}>
-                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
-                        Add Post
-                      </Button>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="divide-y divide-border">
-                    {activePlatforms.map(platform => {
-                      const pc     = PLATFORM_COLORS[platform] || PLATFORM_COLORS.instagram
-                      const pItems = byPlatform[platform]
-                      return (
-                        <div key={platform}>
-                          {/* Platform header */}
-                          <div className="flex items-center gap-2.5 px-5 py-2.5 bg-surface-subtle border-y border-border">
-                            <div className="w-2 h-2 flex-shrink-0" style={{ background: pc.dot }} />
-                            <span className="text-xs font-bold uppercase tracking-wider" style={{ color: pc.dot }}>
-                              {PLATFORM_LABELS[platform]}
-                            </span>
-                            <span className="text-[10px] text-text-tertiary">
-                              {pItems.length} item{pItems.length !== 1 ? 's' : ''}
-                            </span>
-                          </div>
-
-                          {/* Items */}
-                          <div className="px-6 py-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
-                            {pItems.map(item => (
-                              <div key={item.id} className="border border-border overflow-hidden hover:border-stone-400 transition-colors">
-                                <div className="h-1" style={{ background: pc.bg }} />
-                                <div className="p-4">
-                                  <div className="flex items-start gap-3">
-                                    {item.imageUrl ? (
-                                      <PostImage src={item.imageUrl} alt="" className="w-12 h-12 object-cover flex-shrink-0 border border-border" />
-                                    ) : (
-                                      <div className="w-12 h-12 flex items-center justify-center flex-shrink-0 text-lg border border-border"
-                                        style={{ background: pc.light }}>
-                                        {item.type === 'reel' || item.type === 'video' ? '🎬' : '📋'}
-                                      </div>
-                                    )}
-                                    <div className="flex-1 min-w-0">
-                                      <div className="flex items-center gap-1.5 mb-1 flex-wrap">
-                                        <span className="text-[10px] font-semibold text-text-tertiary">
-                                          {TYPE_LABELS[item.type] || item.type}
-                                        </span>
-                                        {(item.source === 'instagram_schedule' || item.source === 'linkedin_schedule') && (
-                                          <span className="text-[9px] bg-sky-50 text-sky-700 px-1.5 py-0.5 font-bold uppercase tracking-[0.08em]">Monthly plan</span>
-                                        )}
-                                      </div>
-                                      <p className="text-xs text-text leading-relaxed line-clamp-2">
-                                        {item.topic || 'No brief'}
-                                      </p>
-                                    </div>
-                                  </div>
-
-                                  <div className="flex items-center justify-between mt-3">
-                                    <span className={`text-[10px] font-bold uppercase tracking-[0.08em] px-1.5 py-0.5 leading-[1.4] ${STATUS_STYLES[item.status] || 'bg-stone-100 text-stone-600'}`}>
-                                      {item.status === 'pending_publish' ? 'Pending' : item.status}
-                                    </span>
-                                    {item.source === 'posts' && item.raw?.status === 'pending_publish' && (
-                                      <button onClick={() => { setSelectedDay(null); handleSchedulePost(item.raw) }}
-                                        className="text-[10px] font-semibold text-amber-600 hover:text-amber-700 transition-colors">
-                                        Schedule →
-                                      </button>
-                                    )}
-                                    {(item.source === 'instagram_schedule' || item.source === 'linkedin_schedule') && (
-                                      <button onClick={() => { setSelectedDay(null); setViewItem(item) }}
-                                        className="flex items-center gap-1 text-[10px] font-semibold px-2 py-1 rounded-lg border border-border text-text-secondary hover:text-text hover:bg-surface-subtle transition-all">
-                                        <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-                                        View
-                                      </button>
-                                    )}
-                                  </div>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )
-                    })}
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        )
-      })()}
-
-      {/* LIST VIEW */}
-      {viewMode === 'list' && (
-        <div className="space-y-4">
-          {/* Filter bar */}
-          <div className="flex w-fit">
-            {['all','scheduled','pending_publish','published','draft'].map(f => (
-              <button key={f} onClick={() => setFilter(f)}
-                className={`px-3 py-1.5 border -ml-px first:ml-0 text-xs font-semibold capitalize transition-colors ${filter === f ? 'bg-amber-700 text-white border-amber-700 relative z-10' : 'bg-white text-text-secondary border-border hover:text-text hover:bg-surface-subtle'}`}>
-                {f === 'pending_publish' ? 'Pending' : f}
-              </button>
-            ))}
+      <Card className="overflow-hidden">
+        {/* Period bar */}
+        <div className="flex items-center justify-between gap-4 px-4 py-3 border-b border-border bg-surface-subtle">
+          <div className="flex items-center gap-1">
+            <button onClick={() => step(-1)} aria-label="Previous"
+              className="w-7 h-7 border border-border bg-white flex items-center justify-center text-text-secondary hover:text-text hover:border-stone-400 transition-colors">
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg>
+            </button>
+            <button onClick={() => step(1)} aria-label="Next"
+              className="w-7 h-7 border border-border -ml-px bg-white flex items-center justify-center text-text-secondary hover:text-text hover:border-stone-400 transition-colors">
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg>
+            </button>
+            <h3 className="font-semibold text-sm text-text ml-3 tabular-nums">{periodLabel}</h3>
+            {loading && <span className="ml-2"><Spinner size="sm" /></span>}
           </div>
 
-          {listPosts.length === 0 ? (
-            <Card className="p-16 text-center">
-              <div className="w-14 h-14 rounded-3xl bg-amber-100 flex items-center justify-center mx-auto mb-4 animate-float">
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
-                  <rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
-                </svg>
-              </div>
-              <p className="font-semibold text-text text-sm mb-2">No posts yet</p>
-              <p className="text-sm text-text-secondary mb-5">Start generating content for Arak Lighting</p>
-              <Button onClick={() => setPlatformPicker(true)}>Create First Post</Button>
-            </Card>
-          ) : (
-            <Card className="overflow-hidden">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="bg-surface-subtle border-b border-border">
-                    {['Platform','Preview','Scheduled','Status',''].map(h => (
-                      <th key={h} className="text-left px-5 py-3 text-[10px] font-bold uppercase tracking-[0.1em] text-text-tertiary">{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {listPosts.map((p, i) => {
-                    const pc = PLATFORM_COLORS[p.platform] || PLATFORM_COLORS.instagram
-                    return (
-                      <tr key={p.id} className="hover:bg-surface-subtle transition-colors group"
-                        className="border-b border-border" style={{ animationDelay: `${i * 0.03}s` }}>
-                        <td className="px-5 py-3.5">
-                          <div className="flex items-center gap-2">
-                            <div className="w-1 h-6 flex-shrink-0" style={{ background: pc.dot }} />
-                            <span className="text-xs font-semibold capitalize" style={{ color: pc.dot }}>{p.platform}</span>
-                          </div>
-                        </td>
-                        <td className="px-5 py-3.5">
-                          <div className="flex items-center gap-3">
-                            {(p.imageUrl || p.mediaUrls?.[0]) && (
-                              <PostImage src={p.imageUrl || p.mediaUrls?.[0]} alt="" className="w-10 h-10 rounded-xl object-cover flex-shrink-0" />
-                            )}
-                            <p className="text-text text-xs max-w-xs truncate">{p.copy?.slice(0,60) || '—'}</p>
-                          </div>
-                        </td>
-                        <td className="px-5 py-3.5 text-text-secondary text-xs whitespace-nowrap">
-                          {p.scheduledAt ? formatDateTime(p.scheduledAt) : <span className="text-text-disabled">Not scheduled</span>}
-                        </td>
-                        <td className="px-5 py-3.5">
-                          <Badge status={p.status === 'pending_publish' ? 'pending' : p.status} />
-                        </td>
-                        <td className="px-5 py-3.5">
-                          {p.status === 'pending_publish' && (
-                            <Button variant="ghost" size="xs" onClick={() => handleSchedulePost(p)}>Schedule</Button>
-                          )}
-                        </td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-            </Card>
-          )}
-        </div>
-      )}
-
-      {/* Schedule Modal */}
-      <Modal open={!!scheduleModal} onClose={() => setScheduleModal(null)} title="Schedule Post" width="max-w-md">
-        {scheduleModal && (
-          <div className="p-6 space-y-5">
-            {/* Post preview */}
-            <WarmCard className="p-4">
-              <div className="flex items-start gap-3">
-                {(scheduleModal.imageUrl || scheduleModal.mediaUrls?.[0]) && (
-                  <PostImage src={scheduleModal.imageUrl || scheduleModal.mediaUrls?.[0]} alt="" className="w-14 h-14 rounded-xl object-cover flex-shrink-0" />
-                )}
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-1.5 mb-1">
-                    <div className="w-2 h-2 flex-shrink-0" style={{ background: PLATFORM_COLORS[scheduleModal.platform]?.dot || '#888' }} />
-                    <span className="text-[10px] font-bold uppercase tracking-wide text-text-secondary">{scheduleModal.platform}</span>
-                  </div>
-                  <p className="text-xs text-text line-clamp-3 leading-relaxed">{scheduleModal.copy?.slice(0,100)}</p>
-                </div>
-              </div>
-            </WarmCard>
-
-            {/* Date + time */}
-            <div className="grid grid-cols-2 gap-3">
-              <Input label="Date" type="date" value={schedDate} onChange={e => setSchedDate(e.target.value)} />
-              <Input label="Time (KSA)" type="time" value={schedTime} onChange={e => setSchedTime(e.target.value)} />
-            </div>
-
-            {/* Best time tip */}
-            <div className="px-4 py-3 rounded-xl text-xs" style={{ background: 'rgba(245,192,0,0.08)', border: '1px solid rgba(212,160,23,0.2)' }}>
-              <p className="font-semibold text-amber-700 mb-1">💡 Best times for KSA audience</p>
-              <p className="text-text-secondary">Instagram: <strong>10–11 AM</strong> or <strong>7–9 PM</strong> on weekdays. Thursdays see highest engagement.</p>
-            </div>
-
-            <div className="flex gap-3">
-              <Button variant="secondary" className="flex-1 justify-center" onClick={() => setScheduleModal(null)}>Cancel</Button>
-              <Button className="flex-1 justify-center" onClick={confirmSchedule} disabled={!schedDate}>
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                  <rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
-                </svg>
-                Schedule Post
-              </Button>
-            </div>
-          </div>
-        )}
-      </Modal>
-
-      {/* ── Platform Picker Modal ──────────────────────────────────────── */}
-      {platformPicker && (
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
-          style={{ background:'rgba(28,35,33,0.45)' }}
-          onClick={e => { if (e.target === e.currentTarget) setPlatformPicker(false) }}>
-          <div className="bg-white border border-border shadow-dropdown w-full max-w-md overflow-hidden animate-fade-scale">
-            {/* Header */}
-            <div className="px-5 py-4 flex items-center justify-between border-b border-border bg-surface-subtle">
-              <div>
-                <p className="text-[10px] font-bold uppercase tracking-widest text-amber-500 mb-1">New Post</p>
-                <h3 className="font-semibold text-sm text-text">Choose a platform</h3>
-                <p className="text-xs text-text-tertiary mt-0.5">Where would you like to create this post?</p>
-              </div>
-              <button onClick={() => setPlatformPicker(false)} className="w-8 h-8 rounded-xl flex items-center justify-center text-text-tertiary hover:bg-stone-100 transition-colors">
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>
-              </button>
-            </div>
-            {/* Platform grid */}
-            <div className="p-5 grid grid-cols-2 gap-3">
-              {[
-                { key:'instagram', label:'Instagram', abbr:'IG', bg:'#E1306C', desc:'Posts, Reels, Stories' },
-                { key:'linkedin',  label:'LinkedIn',  abbr:'in', bg:'#0A66C2', desc:'Articles, Posts, Videos' },
-                { key:'facebook',  label:'Facebook',  abbr:'fb', bg:'#1877F2', desc:'Posts, Stories, Reels' },
-                { key:'x',         label:'X / Twitter', abbr:'X', bg:'#000000', desc:'Posts, Threads' },
-                { key:'tiktok',    label:'TikTok',    abbr:'TT', bg:'#010101', desc:'Videos, Lives' },
-              ].map(p => (
-                <button key={p.key}
-                  onClick={() => { setPlatformPicker(false); navigate(`/social/${p.key}`) }}
-                  className="flex items-center gap-3 p-4 border border-border -mt-px first:mt-0 hover:bg-surface-subtle hover:border-stone-400 transition-colors text-left group w-full">
-                  <div className="w-10 h-10 rounded-xl flex items-center justify-center text-white text-xs font-bold flex-shrink-0"
-                    style={{ background: p.bg }}>
-                    {p.abbr}
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-sm font-semibold text-text group-hover:text-amber-700 transition-colors">{p.label}</p>
-                    <p className="text-[10px] text-text-tertiary">{p.desc}</p>
-                  </div>
-                  <svg className="w-4 h-4 text-text-disabled ml-auto flex-shrink-0 group-hover:text-amber-500 transition-colors" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg>
-                </button>
+          <div className="flex items-center gap-3">
+            <select value={platform} onChange={e => setPlatform(e.target.value)}
+              className="text-xs border border-border bg-white px-2 py-1.5 text-text-secondary">
+              {PLATFORM_FILTERS.map(p => (
+                <option key={p} value={p}>{p === 'all' ? 'All platforms' : platformColor(p).label}</option>
               ))}
-            </div>
+            </select>
+            <button onClick={() => setAnchor(today)}
+              className="px-3 py-1.5 border border-border bg-white text-xs font-semibold text-text-secondary hover:text-amber-800 hover:border-amber-700 transition-colors">
+              Today
+            </button>
           </div>
         </div>
+
+        {view === 'month' ? (
+          <MonthGrid
+            year={year} month={month} index={index} crowded={crowded}
+            pendingId={pendingId} selectedDay={selectedDay} draggingPost={dragging}
+            onSelectDay={setSelectedDay} onDropPost={handleDrop}
+            onOpenPost={p => setSelectedDay(utcToBrandParts(p.scheduled_publish_at)?.dateKey || null)} />
+        ) : (
+          <WeekGrid
+            anchorDate={anchor} index={index} crowded={crowded}
+            pendingId={pendingId} draggingPost={dragging}
+            onSelectDay={setSelectedDay} onDropPost={handleDrop}
+            onOpenPost={p => setSelectedDay(utcToBrandParts(p.scheduled_publish_at)?.dateKey || null)} />
+        )}
+      </Card>
+
+      {!loading && shown.length === 0 && (
+        <Card className="p-12 text-center">
+          <p className="font-semibold text-text text-sm mb-1">Nothing scheduled in this period</p>
+          <p className="text-sm text-text-secondary">
+            Approve posts in Approvals, then drag them here from the tray above — or schedule them directly.
+          </p>
+        </Card>
       )}
 
-      {/* ── Scheduled Item Detail / Edit Modal ─────────────────────────── */}
-      {viewItem && <ScheduledItemDetail item={viewItem} onClose={() => { setViewItem(null); setSelectedDay(new Date(viewItem.dateKey + 'T12:00:00')) }} onSave={saveScheduleEdit} />}
+      {selectedDay && (
+        <DayPanel
+          dateKey={selectedDay} entries={dayEntries(index, selectedDay)}
+          crowded={crowded} pendingId={pendingId}
+          onClose={() => setSelectedDay(null)}
+          onMove={(post, dateKey, time) => handleDrop(post.id, dateKey, time)}
+          onUnschedule={async post => {
+            const res = await unschedule(post)
+            setNotice(res?.error
+              ? { tone: 'error', text: res.error }
+              : { tone: 'ok', text: 'Slot cleared — the post is back in the tray.' })
+          }} />
+      )}
+
+      {confirmMove && (
+        <ConfirmReschedule
+          {...confirmMove}
+          onCancel={() => setConfirmMove(null)}
+          onConfirm={async () => {
+            const { post, dateKey, time } = confirmMove
+            setConfirmMove(null)
+            await runMove(post, dateKey, time)
+          }} />
+      )}
+
+      {platformPicker && (
+        <PlatformPicker
+          onClose={() => setPlatformPicker(false)}
+          onPick={key => { setPlatformPicker(false); navigate(`/social/${key}`) }} />
+      )}
     </div>
   )
 }
 
-// ─── Scheduled Item Detail Panel ──────────────────────────────────────────
-const POST_TYPE_LABELS_IG = {
-  generate: { icon: '✦', label: 'AI Generate', color: '#E1306C' },
-  upload:   { icon: '🖼️', label: 'Upload',      color: '#E1306C' },
-  reel:     { icon: '🎬', label: 'Reel',        color: '#bc1888' },
+// ─── Day panel ─────────────────────────────────────────────────────────────
+// Everything on one brand day, with the time each post goes out and a way to
+// change it that does not require a drag — a keyboard user has to be able to
+// reschedule too, and a 15-minute snap is not a precise enough instrument for
+// "make it exactly 19:05".
+function DayPanel({ dateKey, entries, crowded, pendingId, onClose, onMove, onUnschedule }) {
+  const [editing, setEditing] = useState(null)   // post id
+  const [draftTime, setDraftTime] = useState('')
+  const label = new Date(`${dateKey}T12:00:00Z`).toLocaleDateString('en-US', {
+    weekday: 'long', month: 'long', day: 'numeric', year: 'numeric', timeZone: 'UTC',
+  })
+
+  return (
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
+      style={{ background: 'rgba(28,35,33,0.45)' }}
+      onClick={e => { if (e.target === e.currentTarget) onClose() }}>
+      <div style={{ width: '720px', maxHeight: '82vh' }}
+        className="bg-white border border-border shadow-dropdown flex flex-col overflow-hidden animate-fade-scale">
+
+        <div className="flex items-center justify-between px-5 py-4 flex-shrink-0 border-b border-border bg-surface-subtle">
+          <div>
+            <p className="eyebrow text-text-tertiary mb-1.5">Content calendar · {BRAND_TIMEZONE_LABEL}</p>
+            <h3 className="font-semibold text-sm text-text">{label}</h3>
+            <p className="text-xs text-text-tertiary mt-0.5">
+              {entries.length === 0 ? 'Nothing scheduled' : `${entries.length} post${entries.length !== 1 ? 's' : ''}`}
+            </p>
+          </div>
+          <button onClick={onClose}
+            className="w-8 h-8 flex items-center justify-center text-text-tertiary hover:bg-stone-100 transition-colors">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>
+          </button>
+        </div>
+
+        <div className="overflow-y-auto flex-1 divide-y divide-border">
+          {entries.length === 0 && (
+            <p className="py-14 text-center text-sm text-text-secondary">
+              Nothing goes out on this day.
+            </p>
+          )}
+          {entries.map(({ post, time }) => {
+            const pc = platformColor(post.platform)
+            const st = publishState(post.publish_status)
+            const plan = moveKindFor(post)
+            const isEditing = editing === post.id
+            return (
+              <div key={post.id} className="p-4 flex gap-3">
+                <div className="w-1 self-stretch flex-shrink-0" style={{ background: pc.dot }} />
+                {post.image_url
+                  ? <PostImage src={post.image_url} alt="" className="w-14 h-14 object-cover flex-shrink-0 border border-border" />
+                  : <div className="w-14 h-14 flex items-center justify-center flex-shrink-0 border border-border text-lg"
+                      style={{ background: pc.light }}>{post.video_url ? '🎬' : '📋'}</div>}
+
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-1 flex-wrap">
+                    <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: pc.dot }}>{pc.label}</span>
+                    <span className={`text-[10px] font-bold uppercase tracking-[0.08em] px-1.5 py-0.5 ${st.cls}`}>{st.label}</span>
+                    <span className="text-[11px] font-semibold tabular-nums text-text-secondary">{formatBrandTime(time)}</span>
+                    {crowded.has(post.id) && (
+                      <span className="text-[9px] font-bold text-amber-700 bg-amber-50 px-1.5 py-0.5">
+                        within an hour of another {pc.label} post
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-text leading-relaxed line-clamp-2">
+                    {post.caption || post.topic || 'No caption yet'}
+                  </p>
+                  {post.publish_error && (
+                    <p className="text-[11px] text-red-600 mt-1.5 leading-relaxed">{post.publish_error}</p>
+                  )}
+
+                  <div className="flex items-center gap-2 mt-2 flex-wrap">
+                    {isEditing ? (
+                      <>
+                        <input type="time" value={draftTime} onChange={e => setDraftTime(e.target.value)}
+                          className="text-xs border border-border px-2 py-1" />
+                        <span className="text-[10px] text-text-tertiary">{BRAND_TIMEZONE_LABEL}</span>
+                        <button
+                          onClick={() => { setEditing(null); onMove(post, dateKey, draftTime) }}
+                          disabled={!draftTime}
+                          className="text-[11px] font-semibold px-2 py-1 border border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100 disabled:opacity-40">
+                          Save time
+                        </button>
+                        <button onClick={() => setEditing(null)}
+                          className="text-[11px] px-2 py-1 border border-border text-text-secondary hover:bg-surface-subtle">
+                          Cancel
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <button
+                          onClick={() => { setEditing(post.id); setDraftTime(time) }}
+                          disabled={plan.kind === 'blocked' || pendingId === post.id}
+                          title={plan.kind === 'blocked' ? plan.reason : ''}
+                          className="text-[11px] font-semibold px-2 py-1 border border-border text-text-secondary hover:bg-surface-subtle disabled:opacity-40">
+                          Change time
+                        </button>
+                        <button
+                          onClick={() => onUnschedule(post)}
+                          disabled={plan.kind === 'blocked' || pendingId === post.id}
+                          title={plan.kind === 'blocked' ? plan.reason : ''}
+                          className="text-[11px] px-2 py-1 border border-border text-text-secondary hover:bg-surface-subtle disabled:opacity-40">
+                          Unschedule
+                        </button>
+                        {plan.kind === 'zernio' && (
+                          <span className="text-[10px] text-text-tertiary">Zernio holds this slot</span>
+                        )}
+                        {plan.kind === 'blocked' && (
+                          <span className="text-[10px] text-text-tertiary">{plan.reason}</span>
+                        )}
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+    </div>
+  )
 }
-const POST_TYPE_LABELS_LI = {
-  generate: { icon: '✦', label: 'AI Generate', color: '#0A66C2' },
-  upload:   { icon: '🖼️', label: 'Upload',      color: '#0A66C2' },
-  video:    { icon: '🎬', label: 'Video',       color: '#5b21b6' },
-}
-const IG_TONES   = ['professional','inspirational','educational','casual','promotional']
-const LI_TONES   = ['thought_leader','executive','technical_expert','warm_human','promotional']
-const TIME_SLOTS = ['07:00','08:00','09:00','10:00','11:00','12:00','13:00','14:00','15:00','16:00','17:00','18:00','19:00','20:00','21:00']
 
-function ScheduledItemDetail({ item, onClose, onSave }) {
-  const isIG = item.source === 'instagram_schedule'
-  const pc   = isIG
-    ? { dot:'#E1306C', bg:'#E1306C', light:'#fce4f0', accent:'amber' }
-    : { dot:'#0A66C2', bg:'#0A66C2', light:'#e1f0fb', accent:'blue' }
-  const typeLabels = isIG ? POST_TYPE_LABELS_IG : POST_TYPE_LABELS_LI
-  const tones      = isIG ? IG_TONES : LI_TONES
-  const typeMeta   = typeLabels[item.raw?.uploadType] || typeLabels['generate']
-  const dateLabel  = new Date(item.dateKey + 'T12:00:00').toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric', year:'numeric' })
-
-  const [editing, setEditing] = useState(false)
-  // Edit fields
-  const [topic,       setTopic]       = useState(item.raw?.topic || '')
-  const [tone,        setTone]        = useState(item.raw?.tone || (isIG ? 'professional' : 'thought_leader'))
-  const [notes,       setNotes]       = useState(item.raw?.notes || '')
-  const [publishTime, setPublishTime] = useState(item.raw?.publishTime || '10:00')
-
-  const STATUS_STYLES = {
-    planned:'bg-stone-100 text-stone-600', generated:'bg-green-50 text-green-700',
-    pending:'bg-amber-50 text-amber-700',  published:'bg-green-50 text-green-700',
-  }
-
-  const DETAIL_ROWS = [
-    { label: 'Date',          value: dateLabel },
-    { label: 'Platform',      value: isIG ? 'Instagram' : 'LinkedIn' },
-    { label: 'Type',          value: `${typeMeta.icon} ${typeMeta.label}` },
-    { label: 'Tone',          value: item.raw?.tone?.replace(/_/g,' ') || '—' },
-    { label: 'Aspect Ratio',  value: item.raw?.aspectRatio || '—' },
-    { label: 'Publish Time',  value: item.raw?.publishTime ? (() => { const [h,m] = item.raw.publishTime.split(':'); const hr = parseInt(h); return `${hr > 12 ? hr-12 : hr || 12}:${m} ${hr >= 12 ? 'PM' : 'AM'}` })() : 'Not set' },
-    { label: 'Status',        value: item.raw?.status || 'planned' },
-    ...(item.raw?.style         ? [{ label: 'Image Style',    value: item.raw.style }] : []),
-    ...(item.raw?.customType    ? [{ label: 'Custom Type',    value: item.raw.customType?.replace(/_/g,' ') }] : []),
-    ...(item.raw?.postType      ? [{ label: 'Post Type',      value: item.raw.postType?.replace(/_/g,' ') }] : []),
-    ...(item.raw?.reelFormat    ? [{ label: 'Reel Format',    value: item.raw.reelFormat?.replace(/_/g,' ') }] : []),
-    ...(item.raw?.reelDuration  ? [{ label: 'Reel Duration',  value: item.raw.reelDuration }] : []),
-    ...(item.raw?.videoType     ? [{ label: 'Video Type',     value: item.raw.videoType?.replace(/_/g,' ') }] : []),
-    ...(item.raw?.videoLength   ? [{ label: 'Video Length',   value: item.raw.videoLength }] : []),
-    ...(item.raw?.videoAudience ? [{ label: 'Audience',       value: item.raw.videoAudience?.replace(/_/g,' ') }] : []),
-  ]
+// ─── Reschedule confirmation ───────────────────────────────────────────────
+// Only shown for posts Zernio already holds. It spells out both halves of what
+// is about to happen at the platform, because "moved a card on a calendar" and
+// "cancelled a booked post and booked a new one" are not the same mental model
+// and the drag looks identical either way.
+function ConfirmReschedule({ post, dateKey, time, onCancel, onConfirm }) {
+  const pc = platformColor(post.platform)
+  const from = post.scheduled_publish_at ? formatBrandDateTime(post.scheduled_publish_at) : 'unscheduled'
+  const toLabel = `${new Date(`${dateKey}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })}, ${formatBrandTime(time)} ${BRAND_TIMEZONE_LABEL}`
 
   return (
     <div className="fixed inset-0 z-[10000] flex items-center justify-center p-4"
-      style={{ background:'rgba(28,35,33,0.45)' }}
-      onClick={e => { if (e.target === e.currentTarget) onClose() }}>
-      <div className="bg-white border border-border shadow-dropdown flex flex-col overflow-hidden animate-fade-scale"
-        style={{ width:'100%', maxWidth:'600px', height:'85vh' }}>
-
-        {/* Header */}
-        <div className="px-5 py-4 flex-shrink-0 border-b border-border bg-surface-subtle">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <div className="flex items-center gap-2 mb-1">
-                <div className="w-5 h-5 flex items-center justify-center" style={{ background: pc.bg }}>
-                  <span className="text-white text-[9px] font-bold">{isIG ? 'IG' : 'LI'}</span>
-                </div>
-                <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: pc.dot }}>
-                  {isIG ? 'Instagram' : 'LinkedIn'} · Monthly Schedule
-                </p>
-              </div>
-              <h3 className="font-semibold text-sm text-text">{dateLabel}</h3>
-              <p className="text-xs text-text-tertiary mt-0.5">{typeMeta.icon} {typeMeta.label}</p>
+      style={{ background: 'rgba(28,35,33,0.45)' }}
+      onClick={e => { if (e.target === e.currentTarget) onCancel() }}>
+      <div className="bg-white border border-border shadow-dropdown w-full max-w-md overflow-hidden animate-fade-scale">
+        <div className="px-5 py-4 border-b border-border bg-surface-subtle">
+          <p className="eyebrow text-text-tertiary mb-1">Reschedule at {pc.label}</p>
+          <h3 className="font-semibold text-sm text-text">This post is already booked with Zernio</h3>
+        </div>
+        <div className="p-5 space-y-4">
+          <div className="text-xs space-y-1.5">
+            <div className="flex justify-between gap-4">
+              <span className="text-text-tertiary">Currently</span>
+              <span className="font-semibold text-text tabular-nums">{from}</span>
             </div>
-            <div className="flex items-center gap-2 flex-shrink-0">
-              {!editing && (
-                <button onClick={() => setEditing(true)}
-                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold border border-border text-text-secondary hover:text-text hover:bg-surface-subtle transition-all">
-                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-                  Edit
-                </button>
-              )}
-              <button onClick={onClose} className="w-8 h-8 rounded-xl flex items-center justify-center text-text-tertiary hover:bg-stone-100 transition-colors">
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>
-              </button>
+            <div className="flex justify-between gap-4">
+              <span className="text-text-tertiary">Move to</span>
+              <span className="font-semibold text-amber-800 tabular-nums">{toLabel}</span>
             </div>
           </div>
+          <p className="text-xs text-text-secondary leading-relaxed">
+            Zernio's copy is the one that actually fires, so moving it means cancelling
+            the booked post and creating a new one. The old slot is cancelled first — if
+            the new booking then fails, the post ends up unscheduled rather than going
+            out twice.
+          </p>
+          <div className="flex gap-3">
+            <button onClick={onCancel}
+              className="flex-1 py-2.5 border border-border text-sm font-medium text-text-secondary hover:bg-surface-subtle transition-colors">
+              Keep current time
+            </button>
+            <button onClick={onConfirm}
+              className="flex-1 py-2.5 text-sm font-bold text-white bg-amber-700 hover:bg-amber-800 transition-colors">
+              Cancel &amp; rebook
+            </button>
+          </div>
         </div>
+      </div>
+    </div>
+  )
+}
 
-        {/* Body */}
-        <div className="overflow-y-auto flex-1 p-6 space-y-5">
+// ─── Platform picker ───────────────────────────────────────────────────────
+const NEW_POST_PLATFORMS = [
+  { key: 'instagram', label: 'Instagram', abbr: 'IG', bg: '#E1306C', desc: 'Posts, Reels, Stories' },
+  { key: 'linkedin',  label: 'LinkedIn',  abbr: 'in', bg: '#0A66C2', desc: 'Articles, Posts, Videos' },
+  { key: 'tiktok',    label: 'TikTok',    abbr: 'TT', bg: '#010101', desc: 'Videos' },
+  { key: 'snapchat',  label: 'Snapchat',  abbr: 'SC', bg: '#B8A400', desc: 'Spotlight, Stories' },
+]
 
-          {!editing ? (
-            /* ── Detail view ── */
-            <>
-              {/* Topic */}
-              <div className="border border-border bg-surface-subtle p-4">
-                <p className="text-[10px] font-bold uppercase tracking-wider text-text-tertiary mb-2">Topic / Brief</p>
-                <p className="text-sm text-text leading-relaxed">{item.raw?.topic || '—'}</p>
-                {item.raw?.notes && <p className="text-xs text-text-tertiary mt-2 pt-2 border-t border-border">📝 {item.raw.notes}</p>}
-              </div>
-
-              {/* Detail grid */}
-              <div className="grid grid-cols-2 gap-2">
-                {DETAIL_ROWS.map(row => (
-                  <div key={row.label} className="rounded-xl border border-border bg-surface-subtle px-3 py-2.5">
-                    <p className="text-[10px] font-bold uppercase tracking-wider text-text-disabled mb-0.5">{row.label}</p>
-                    <p className="text-xs font-semibold text-text capitalize">{row.value}</p>
-                  </div>
-                ))}
-              </div>
-
-              {/* Status badge */}
-              <div className="flex items-center gap-2">
-                <span className={`text-[10px] font-bold uppercase tracking-[0.08em] px-1.5 py-0.5 leading-[1.4] ${STATUS_STYLES[item.raw?.status] || 'bg-stone-100 text-stone-600'}`}>
-                  {item.raw?.status || 'planned'}
-                </span>
-                <span className="text-xs text-text-tertiary">n8n will process this at 8am and post at {item.raw?.publishTime || '10:00'}</span>
-              </div>
-            </>
-          ) : (
-            /* ── Edit view ── */
-            <>
-              <div className="rounded-xl bg-amber-50 border border-amber-100 px-4 py-2.5 flex items-center gap-2">
-                <svg className="w-3.5 h-3.5 text-amber-500 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-                <p className="text-xs text-amber-700">Changes will also update the {isIG ? 'Instagram' : 'LinkedIn'} Monthly Schedule.</p>
-              </div>
-
-              {/* Topic */}
-              <div>
-                <label className="block text-xs font-semibold text-text-secondary mb-1.5 uppercase tracking-wider">Topic / Brief</label>
-                <textarea value={topic} onChange={e => setTopic(e.target.value)} rows={4}
-                  className="w-full text-sm border border-border rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-amber-400 resize-none" />
-              </div>
-
-              {/* Tone */}
-              <div>
-                <label className="block text-xs font-semibold text-text-secondary mb-1.5 uppercase tracking-wider">Tone</label>
-                <div className="flex flex-wrap gap-2">
-                  {tones.map(t => (
-                    <button key={t} onClick={() => setTone(t)}
-                      className={`px-3 py-1.5 rounded-xl border text-xs font-medium capitalize transition-all ${tone === t ? `border-${pc.accent}-400 bg-${pc.accent}-50 text-${pc.accent}-700` : 'border-border text-text-secondary hover:border-border-strong'}`}
-                      style={tone === t ? { borderColor: pc.dot, background: isIG ? '#fff4f0' : '#e8f0fb', color: pc.dot } : {}}>
-                      {t.replace(/_/g,' ')}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Publish Time */}
-              <div>
-                <label className="block text-xs font-semibold text-text-secondary mb-1.5 uppercase tracking-wider">Publish Time (KSA)</label>
-                <div className="flex items-center gap-3 flex-wrap">
-                  <input type="time" value={publishTime} onChange={e => setPublishTime(e.target.value)}
-                    className="text-sm font-semibold border-2 rounded-xl px-3 py-2 bg-white text-text focus:outline-none focus:ring-2 cursor-pointer"
-                    style={{ borderColor: isIG ? '#7d98a1' : '#0A66C2' }} />
-                  <div className="flex gap-1.5 flex-wrap">
-                    {TIME_SLOTS.map(slot => {
-                      const [h] = slot.split(':'); const hr = parseInt(h); const label = `${hr > 12 ? hr-12 : hr || 12}${hr >= 12 ? 'pm' : 'am'}`
-                      return (
-                        <button key={slot} onClick={() => setPublishTime(slot)}
-                          className={`px-2 py-1 rounded-lg text-[11px] font-semibold border transition-all ${publishTime === slot ? 'text-white border-transparent' : 'bg-white text-text-secondary border-border hover:border-stone-300'}`}
-                          style={publishTime === slot ? { background: pc.bg, borderColor:'transparent' } : {}}>
-                          {label}
-                        </button>
-                      )
-                    })}
-                  </div>
-                </div>
-              </div>
-
-              {/* Notes */}
-              <div>
-                <label className="block text-xs font-semibold text-text-secondary mb-1.5 uppercase tracking-wider">Additional Notes</label>
-                <input value={notes} onChange={e => setNotes(e.target.value)}
-                  placeholder="Hashtag ideas, references, things to avoid…"
-                  className="w-full text-sm border border-border rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-amber-400" />
-              </div>
-            </>
-          )}
+function PlatformPicker({ onClose, onPick }) {
+  return (
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
+      style={{ background: 'rgba(28,35,33,0.45)' }}
+      onClick={e => { if (e.target === e.currentTarget) onClose() }}>
+      <div className="bg-white border border-border shadow-dropdown w-full max-w-md overflow-hidden animate-fade-scale">
+        <div className="px-5 py-4 flex items-center justify-between border-b border-border bg-surface-subtle">
+          <div>
+            <p className="eyebrow text-amber-600 mb-1">New post</p>
+            <h3 className="font-semibold text-sm text-text">Choose a platform</h3>
+          </div>
+          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center text-text-tertiary hover:bg-stone-100 transition-colors">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>
+          </button>
         </div>
-
-        {/* Footer */}
-        <div className="px-6 py-4 border-t border-border flex-shrink-0 flex gap-3">
-          {editing ? (
-            <>
-              <button onClick={() => setEditing(false)} className="flex-1 py-2.5 rounded-xl border border-border text-sm font-medium text-text-secondary hover:bg-surface-subtle transition-colors">Cancel</button>
-              <button onClick={() => onSave(item, { topic, tone, notes, publishTime })}
-                className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white transition-all"
-                style={{ background: pc.bg }}>
-                Save Changes
-              </button>
-            </>
-          ) : (
-            <>
-              <button onClick={onClose} className="flex-1 py-2.5 rounded-xl border border-border text-sm font-medium text-text-secondary hover:bg-surface-subtle transition-colors">Close</button>
-              <button onClick={() => setEditing(true)}
-                className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white transition-all"
-                style={{ background: pc.bg }}>
-                Edit Post
-              </button>
-            </>
-          )}
+        <div className="p-5">
+          {NEW_POST_PLATFORMS.map(p => (
+            <button key={p.key} onClick={() => onPick(p.key)}
+              className="flex items-center gap-3 p-4 border border-border -mt-px first:mt-0 hover:bg-surface-subtle hover:border-stone-400 transition-colors text-left group w-full">
+              <div className="w-10 h-10 flex items-center justify-center text-white text-xs font-bold flex-shrink-0"
+                style={{ background: p.bg }}>{p.abbr}</div>
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-text group-hover:text-amber-700 transition-colors">{p.label}</p>
+                <p className="text-[10px] text-text-tertiary">{p.desc}</p>
+              </div>
+              <svg className="w-4 h-4 text-text-disabled ml-auto flex-shrink-0 group-hover:text-amber-600 transition-colors" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg>
+            </button>
+          ))}
         </div>
       </div>
     </div>

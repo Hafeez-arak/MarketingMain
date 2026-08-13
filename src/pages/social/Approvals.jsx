@@ -4,6 +4,7 @@ import { useAuth } from '../../store/auth'
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from '../../lib/supabaseClient'
 import { Card, Button, Badge, Empty, Spinner, PostImage, PageHeader } from '../../components/ui/index'
 import { formatDateTime } from '../../lib/utils'
+import { formatBrandDateTime, BRAND_TIMEZONE_LABEL } from '../../lib/brandTime'
 import { logEditFeedback } from '../../lib/brandBrain'
 import { fetchBrandProfile, buildInstructionsString } from '../../lib/brandBrain'
 import { fetchApprovalsData, markIdeaProcessing } from '../../lib/contentPlans'
@@ -204,7 +205,7 @@ function PublishBar({ post, onPublish, busy }) {
       <div className="flex items-center gap-2 mt-2 flex-wrap" onClick={e => e.stopPropagation()}>
         <span className={`text-[10px] font-bold uppercase tracking-[0.08em] px-1.5 py-0.5 leading-[1.4] ${meta.cls}`}>{meta.label}</span>
         {post.scheduledPublishAt && status === 'scheduled' && (
-          <span className="text-[10px] text-text-tertiary">for {formatDateTime(post.scheduledPublishAt)}</span>
+          <span className="text-[10px] text-text-tertiary">for {formatBrandDateTime(post.scheduledPublishAt)}</span>
         )}
         {post.platformPostUrl && (
           <a href={post.platformPostUrl} target="_blank" rel="noreferrer"
@@ -227,6 +228,10 @@ function PublishBar({ post, onPublish, busy }) {
         <span className="text-[10px] text-text-tertiary">or</span>
         <input type="datetime-local" value={when} onChange={e => setWhen(e.target.value)}
           className="text-[11px] border border-border rounded-lg px-2 py-1 bg-white" />
+        {/* The zone is not optional decoration. A bare datetime-local renders
+            in whatever zone the machine is set to, so without this the same
+            digits mean different moments to different people on the team. */}
+        <span className="text-[10px] font-semibold text-text-tertiary">{BRAND_TIMEZONE_LABEL}</span>
         <button onClick={() => onPublish(post, when)} disabled={busy || !when}
           className="text-[11px] font-semibold px-2.5 py-1 rounded-lg border border-border text-text-secondary hover:bg-surface-subtle transition-colors disabled:opacity-40">
           🗓 Schedule
@@ -421,8 +426,12 @@ export function Approvals() {
       imageUrls: (post.mediaUrls || []).length > 1 ? post.mediaUrls : undefined,
       videoUrl: post.videoUrl || '',
       coverImageUrl: post.coverImageUrl || '',
+      // No timezone passed: publishPost applies the brand's. `when` is the raw
+      // datetime-local value, which is a wall clock with no zone of its own —
+      // and the label beside the input says KSA, so KSA is what it means.
+      // This used to send the browser's zone, which quietly made the same
+      // input mean a different moment depending on where you opened the app.
       scheduledFor: when || undefined,
-      timezone: when ? Intl.DateTimeFormat().resolvedOptions().timeZone : undefined,
     })
     setPublishingId(null)
     if (result.error) {
