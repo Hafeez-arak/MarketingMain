@@ -83,6 +83,7 @@ export function BranchChat({
   branch,
   composer,                // { text, baseId, attach }
   split,                   // both lanes visible — drives the frame height
+  focused = false,         // this lane has taken over the width
   busy,                    // '' | 'edit' | 'video' | 'finalize' — lane-level
   // The raw busy key, for actions scoped to ONE version rather than the lane
   // (download, retry). laneBusy() strips these to a bare label and only
@@ -164,6 +165,17 @@ export function BranchChat({
   // pending or failed row.
   const prevReady = ready[ready.length - 1] || null
 
+  // Taking over the width puts the caret in the box, so the lane you just
+  // opened is ready to type in. Only on the false → true edge: a lane that
+  // mounts already focused (a reloaded session picks one) must not yank the
+  // page's focus, and preventScroll keeps the browser from jumping the
+  // composer into view mid-transition.
+  const wasFocused = useRef(focused)
+  useEffect(() => {
+    if (focused && !wasFocused.current && canAct) composerRef.current?.focus({ preventScroll: true })
+    wasFocused.current = focused
+  }, [focused, canAct])
+
   // Ticks only while this lane has something in flight. A render that dies
   // between fal and the database leaves the row 'pending' with nobody left to
   // change it, and without a clock the card has no way to ever notice.
@@ -231,7 +243,7 @@ export function BranchChat({
   const laneH = split ? 'h-[72vh] min-h-[520px]' : 'h-[78vh] min-h-[560px]'
 
   return (
-    <div className={`border border-border bg-surface flex flex-col ${laneH}`}>
+    <div className={`border border-border bg-surface flex flex-col transition-[height,min-height] duration-300 ease-out ${laneH}`}>
       {/* ── Header ── */}
       <div className="flex items-center justify-between px-3 py-2 border-b border-border">
         <p className="text-[11px] font-bold uppercase tracking-wide text-text-secondary">{label}</p>

@@ -1898,31 +1898,52 @@ export function CreativeStudio() {
               <PromptBubble text={opening?.user_prompt} note={opening?.reference_notes}
                 referenceUrl={opening?.reference_url} />
 
-              {focused ? (
-                <div className="space-y-3">
-                  {others.length > 0 && (
-                    <div className="flex justify-end gap-2">
-                      {others.map(b => (
-                        <BranchPill key={b.rootId} branch={b} onClick={() => setFocusedBranch(null)} />
-                      ))}
-                    </div>
-                  )}
-                  <BranchChat {...laneProps(focused)} focused split={false} />
+              {/* ONE tree for both the split and the focused state, rather
+                  than two branches of a ternary. Two trees meant React tore
+                  the lane down and built a new one on every switch, which
+                  cost the caret — you clicked into a box, the lane took over
+                  the width, and the click's focus died with the old DOM node,
+                  so you had to click again. Keeping the lanes mounted also
+                  makes the switch animatable: widths, opacity and scale are
+                  now a transition the eye can follow instead of a jump cut. */}
+              {focused && others.length > 0 && (
+                <div className="flex justify-end gap-2 animate-fade-scale">
+                  {others.map(b => (
+                    <BranchPill key={b.rootId} branch={b} onClick={() => setFocusedBranch(null)} />
+                  ))}
                 </div>
-              ) : (
-                <>
-                  <div className={branches.length > 1 ? 'grid grid-cols-1 xl:grid-cols-2 gap-4 items-start' : 'max-w-2xl'}>
-                    {branches.map(b => (
-                      <BranchChat key={b.rootId} {...laneProps(b)} split={branches.length > 1} />
-                    ))}
-                  </div>
-                  {branches.length > 1 && (
-                    <p className="text-[11px] text-text-tertiary">
-                      Click a picture to open it full size. Type in either box to work on that one — it fills the
-                      width and the other waits as a chip. Drag an image from one into the other to reuse it there.
-                    </p>
-                  )}
-                </>
+              )}
+              <div className={branches.length > 1 ? 'flex flex-col xl:flex-row gap-4 items-start' : 'max-w-2xl'}>
+                {branches.map(b => {
+                  const isFocused = !!focused && focused.rootId === b.rootId
+                  const collapsed = !!focused && !isFocused
+                  // Side by side the lanes share the row; focused, the chosen
+                  // one takes the whole basis and the other is squeezed to
+                  // nothing — a width the browser interpolates. Stacked
+                  // (below xl) the same collapse has to happen vertically,
+                  // hence the max-height pair: it drives the small screens and
+                  // is unlocked again at xl so a full-height lane isn't clipped.
+                  return (
+                    // inert rather than aria-hidden: the squeezed lane keeps
+                    // its whole chat in the DOM, and without it Tab walks into
+                    // a lane nobody can see and a screen reader reads it out.
+                    <div key={b.rootId} inert={collapsed}
+                      className={`min-w-0 overflow-hidden transition-all duration-300 ease-out
+                        ${branches.length > 1 ? 'w-full xl:w-auto' : ''}
+                        ${collapsed
+                          ? 'max-h-0 opacity-0 scale-90 pointer-events-none xl:max-h-[100vh] xl:flex-[0_0_0px]'
+                          : 'max-h-[100vh] opacity-100 scale-100 xl:flex-1'}`}>
+                      <BranchChat {...laneProps(b)} focused={isFocused}
+                        split={!focused && branches.length > 1} />
+                    </div>
+                  )
+                })}
+              </div>
+              {!focused && branches.length > 1 && (
+                <p className="text-[11px] text-text-tertiary">
+                  Click a picture to open it full size. Type in either box to work on that one — it fills the
+                  width and the other waits as a chip. Drag an image from one into the other to reuse it there.
+                </p>
               )}
             </div>
           )}
