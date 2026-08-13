@@ -211,7 +211,9 @@ function useSupabaseLinkedInPosts(supabaseUrl, anonKey) {
         source:              r.source || src,
         scheduledAt:         r.scheduled_date || null,
         createdAt:           r.created_at,
-        generatedByWorkflow: true,
+        // See InstagramPage: the "AI Generated" badge must reflect what
+        // actually wrote the post, not where the row happens to live.
+        generatedByWorkflow: (r.source || src) !== 'manual',
         _fromSupabase:       true,
         _table:              src === 'manual' ? 'linkedin_manual_posts' : 'linkedin_generated_posts',
       })

@@ -187,7 +187,11 @@ function useSupabasePosts(supabaseUrl, anonKey) {
         mediaUrls:           (r.image_urls && r.image_urls.length > 0) ? r.image_urls : [r.image_url].filter(Boolean),
         status:              r.status,
         source:              r.source || source,
-        generatedByWorkflow: true,
+        // Drives the "✦ AI Generated" badge, so it has to be a fact rather
+        // than an assumption. A post written by hand (copy_mode='own' on the
+        // plan idea, source='manual' on the row) has never been near a model,
+        // and badging it AI misattributes the operator's own words.
+        generatedByWorkflow: (r.source || source) !== 'manual',
         contentRoute:        source === 'manual' ? 'manual' : 'scheduled',
         createdAt:           r.created_at,
         _fromSupabase:       true,

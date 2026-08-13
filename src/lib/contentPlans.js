@@ -138,6 +138,12 @@ export async function insertIdeas(workspaceId, accessToken, planId, ideas, start
     media_type:       idea.mediaType || 'image',
     group_id:         idea.groupId || null,
     wants_caption:    idea.wantsCaption !== false,
+    // Whose words go out. 'own' means the caption below is final and must
+    // reach the post verbatim — finalize writes the row itself instead of
+    // briefing the AI writer. See 20260815_manual_copy_mode.sql.
+    copy_mode:        idea.copyMode === 'own' ? 'own' : 'ai',
+    caption_ar:       idea.captionAr || '',
+    caption_en:       idea.captionEn || '',
     status:           'proposed',
     position:         startPosition + i,
   }))
@@ -221,9 +227,14 @@ export async function fetchIdeaDrafts(accessToken, ideaIds) {
 // Marked 'processing' the instant a plan is finalized (or a retry fires) —
 // before n8n even responds — so Post Approvals shows real state on reload,
 // not just while the browser tab that fired it stays open.
-export async function markIdeasProcessing(accessToken, planId) {
+// `copyMode` scopes this to one side of the finalize partition. Only ideas
+// actually being generated may be marked 'processing' — a manually-written
+// post never enters the generation engine, so flagging it would leave it
+// stuck in Post Approvals waiting for a workflow that is never coming.
+export async function markIdeasProcessing(accessToken, planId, { copyMode } = {}) {
+  const scope = copyMode ? `&copy_mode=eq.${copyMode}` : ''
   try {
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/plan_ideas?plan_id=eq.${planId}&status=eq.approved`, {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/plan_ideas?plan_id=eq.${planId}&status=eq.approved${scope}`, {
       method: 'PATCH',
       headers: { ...authHeaders(accessToken), 'Content-Type': 'application/json', Prefer: 'return=minimal' },
       body: JSON.stringify({ generation_status: 'processing', generation_error: '', generation_started_at: new Date().toISOString() }),

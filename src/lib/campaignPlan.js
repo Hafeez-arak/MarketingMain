@@ -76,6 +76,10 @@ export function dbIdeaToDraft(row) {
     mediaPromptOptions: row.media_prompt_options || [],
     captionAr: row.caption_ar || '',
     captionEn: row.caption_en || '',
+    // Whose words go out — 'ai' (brief the writer) or 'own' (these are final).
+    // Defaulted rather than read raw so a row written before the column
+    // existed reads as 'ai', which is what it actually was.
+    copyMode: row.copy_mode === 'own' ? 'own' : 'ai',
     mediaPrompt: row.media_prompt || '',
     motionPrompt: row.motion_prompt || '',
     draftStatus: row.draft_status || 'not_started',
