@@ -56,7 +56,11 @@ export function dbIdeaToDraft(row) {
     postKind: row.post_kind || (row.suggested_format === 'carousel' ? 'carousel' : 'caption_image'),
     slideCount: row.slide_count || 1,
     imageText: row.image_text || '',
-    imageMode: row.image_mode || 'generate',
+    imageMode: row.image_mode || 'studio',
+    // Whether the picture is done, which is a different question from whether
+    // the idea is approved. See 20260813_plan_media_stage.sql.
+    mediaStatus: row.media_status || 'none',
+    mediaVersionId: row.media_version_id || null,
     references: row.reference_image_urls || [],
     // Format & orientation system — the fields generation actually reads.
     // Fall back to the catalog default when a row predates this migration
@@ -78,6 +82,7 @@ export function dbIdeaToDraft(row) {
     draftError: row.draft_error || '',
     draftedAt: row.drafted_at || '',
     previewImageUrl: row.preview_image_url || '',
+    previewVideoUrl: row.preview_video_url || '',
     status: row.status || 'proposed',
     position: row.position ?? 0,
   }

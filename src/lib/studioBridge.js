@@ -1,5 +1,6 @@
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './supabaseClient'
 import { defaultAspectRatio, getFormat } from './postFormats'
+import { finalizeVersion } from './creativeStudio'
 
 // ─── Plan ↔ Creative Studio bridge ─────────────────────────────────────────
 // The join between the two halves of the app that never spoke: contentPlans
@@ -73,12 +74,18 @@ export function buildBriefFromIdea(idea) {
 
 // Which Studio mode an idea should open in.
 //
-// Note what is NOT here: 'multi_video'. A long video is a storyboard of
-// several chained clips with its own cost model and its own sequencer, and
-// nothing about a plan idea says "this should be five shots". Opening one
-// from a plan card would start a materially more expensive run than the
-// operator asked for. Long-form stays something you choose explicitly inside
-// the studio.
+// Never 'multi_video', and that is about cost rather than capability: a long
+// video is a storyboard of several chained clips, and eight 20s shots is an
+// order of magnitude more expensive than one render. Nothing on a plan idea
+// says "this should be five shots" — `media_type` distinguishes image from
+// video and stops there — so defaulting to it would spend far more than the
+// operator asked for on a guess.
+//
+// Long-form therefore stays an explicit choice in the composer. Switching to
+// it there keeps the plan link (the multi-clip session carries plan_idea_id
+// and the brief exactly as the single-render path does), and the stitched
+// result has its own "Use this →" on the clip board, so a long video reaches
+// a post the same way everything else does.
 export function studioIntentForIdea(idea) {
   const mediaType = idea?.mediaType
     || getFormat(idea?.platform || 'instagram', idea?.postFormat)?.media
@@ -156,7 +163,14 @@ export async function openStudioForIdea(accessToken, idea) {
   // Marked in both branches on purpose: an idea whose mode was reverted in
   // between must not silently fall back to paid auto-generation just because
   // its session already existed.
-  const marked = await markIdeaStudioMode(accessToken, idea.id)
+  //
+  // media_status only moves forward to 'in_studio'. An idea whose picture is
+  // already 'ready' and is being reopened for another pass must not lose that
+  // — the accepted asset is still accepted until a new one replaces it, and
+  // dropping it back would empty the post row for as long as she is iterating.
+  const patch = { image_mode: 'studio' }
+  if (idea.mediaStatus !== 'ready') patch.media_status = 'in_studio'
+  const marked = await patchIdea(accessToken, idea.id, patch)
   return { ok: true, session: existing, warning: marked.error }
 }
 
@@ -209,6 +223,54 @@ export async function fetchIdeaForStudio(accessToken, ideaId) {
   } catch { return null }
 }
 
+// One place that writes to a plan idea, so the stage transitions below can't
+// drift apart in how they talk to PostgREST.
+async function patchIdea(accessToken, ideaId, patch) {
+  if (!ideaId) return { error: 'No idea id.' }
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/plan_ideas?id=eq.${ideaId}`, {
+      method: 'PATCH',
+      headers: jsonHeaders(accessToken, 'return=minimal'),
+      body: JSON.stringify(patch),
+    })
+    if (!res.ok) return { error: await res.text() }
+    return { ok: true }
+  } catch (err) { return { error: err.message } }
+}
+
+// The picture is finished — she edited and re-iterated until she was happy,
+// and this is the one she accepted.
+//
+// preview_image_url is reused as the board thumbnail rather than adding a
+// second image column; it already means "the picture standing in for this idea
+// on the board". For a video the still is what goes here, because a thumbnail
+// is what a board needs.
+export async function markIdeaMediaReady(accessToken, ideaId, { version, sessionId } = {}) {
+  if (!ideaId) return { error: 'No idea id.' }
+  // The still is the board thumbnail AND the video's cover, which is what a
+  // grid of cards needs either way. The clip itself needs its own column:
+  // without it an accepted reel is marked ready and then silently not
+  // attached, leaving a post with a caption and no video — indistinguishable
+  // from a render that failed.
+  const thumb = version?.image_url || version?.cover_image_url || ''
+  const clip  = version?.video_url || ''
+  return patchIdea(accessToken, ideaId, {
+    media_status: 'ready',
+    media_version_id: version?.id || null,
+    ...(thumb ? { preview_image_url: thumb } : {}),
+    // Always written, including as '' — re-accepting a still after a video
+    // must clear the old clip rather than leave it to be attached instead.
+    preview_video_url: clip,
+  })
+}
+
+// Put an idea back to "not started" — she rejected what was made, or wants to
+// begin again. Deliberately clears the accepted version but NOT the thumbnail:
+// seeing what was previously tried is useful context for the next attempt.
+export async function resetIdeaMedia(accessToken, ideaId) {
+  return patchIdea(accessToken, ideaId, { media_status: 'none', media_version_id: null })
+}
+
 // Set / clear the 'a human is making this in Studio' flag.
 //
 // Kept as its own export so the plan board can revert an idea to paid
@@ -252,4 +314,191 @@ export async function saveIdeaPlatforms(accessToken, ideaId, platforms, primaryP
     if (!res.ok) return { error: await res.text() }
     return { ok: true, platforms: list }
   } catch (err) { return { error: err.message } }
+}
+
+
+// ── Studio asset → post rows ──────────────────────────────────────────────
+// The return leg. Everything above gets a plan idea INTO the studio; this is
+// what brings the finished asset back out, as real rows in the generated-post
+// tables that Approvals already reads and the publish workflow already knows
+// how to send.
+//
+// Three tables, not one, because that is what exists: Instagram and LinkedIn
+// have their own (with real data and workflows depending on them), and
+// generated_posts is the shared superset for everything else. The split is
+// contained here — no caller should ever need to know which table a platform
+// lives in.
+const PLATFORM_TABLE = {
+  instagram: 'instagram_generated_posts',
+  linkedin:  'linkedin_generated_posts',
+  tiktok:    'generated_posts',
+  snapchat:  'generated_posts',
+}
+export function tableForPlatform(platform) {
+  return PLATFORM_TABLE[platform] || null
+}
+export const SENDABLE_PLATFORMS = Object.keys(PLATFORM_TABLE)
+
+// Where the asset goes on the row.
+//
+// A video's still is a COVER, not the post image — the same distinction the
+// generation workflow makes. Getting this wrong doesn't error, it just
+// publishes a photo where a video was meant to go, which is the kind of thing
+// nobody notices until it is live.
+function mediaFieldsFor(version) {
+  const isVideo = version.media_type === 'video' || !!version.video_url
+  if (isVideo) {
+    return {
+      video_url: version.video_url || '',
+      cover_image_url: version.image_url || '',
+      image_url: '', image_urls: [],
+    }
+  }
+  const url = version.image_url || ''
+  return { image_url: url, image_urls: url ? [url] : [], video_url: '', cover_image_url: '' }
+}
+
+// Per-table copy fields. LinkedIn genuinely has a different shape — hook and
+// body rather than one caption — and flattening it here would lose the split
+// that LinkedInPage and Approvals are both built around.
+function copyFieldsFor(platform, { caption, captionAr, captionEn, hashtags }) {
+  const common = {
+    caption_ar: captionAr || '', caption_en: captionEn || '',
+    hashtags: hashtags || '',
+  }
+  if (platform === 'linkedin') {
+    const text = (caption || '').trim()
+    const nl = text.indexOf('\n')
+    // First line is the hook — it is what shows before "see more". Splitting on
+    // the first newline rather than asking the operator for two boxes keeps the
+    // sheet to one field; they can refine the split in Approvals.
+    return {
+      ...common,
+      hook: nl > 0 ? text.slice(0, nl).trim() : text,
+      body: nl > 0 ? text.slice(nl + 1).trim() : '',
+    }
+  }
+  return { ...common, caption: caption || '' }
+}
+
+// Find the post row a plan idea already has on this table, if any.
+//
+// This is what makes re-sending an asset UPDATE rather than duplicate. An idea
+// marked image_mode='studio' already had a row written for it by the plan
+// generation workflow — with an empty image_url, waiting for exactly this.
+// Inserting a second row instead would leave the empty one sitting in
+// Approvals forever, indistinguishable from a post whose generation failed.
+async function findPostForIdea(accessToken, table, ideaId) {
+  if (!ideaId) return null
+  try {
+    const res = await fetch(
+      `${SUPABASE_URL}/rest/v1/${table}?plan_idea_id=eq.${ideaId}&select=id,image_url,video_url&order=created_at.desc&limit=1`,
+      { headers: authHeaders(accessToken) },
+    )
+    if (!res.ok) return null
+    return (await res.json())[0] || null
+  } catch { return null }
+}
+
+// Send one finished version to one or more platforms.
+//
+// `targets` is a list of platform ids. `when` is { mode, at }: 'queue' leaves
+// the post in review, 'schedule'/'now' mark it approved and stamp the time —
+// but nothing here publishes. Publishing stays with zernio.js#publishPost so
+// there is one path to the platform, with one duplicate guard on it.
+//
+// Partial success is real and reported honestly: three targets can produce two
+// rows and one error, and silently succeeding on "some" would be worse than
+// saying which.
+// `attachOnly` is what keeps the media-first order from producing two rows per
+// idea. In that order the picture is finished BEFORE the plan is finalised, so
+// there is no post row yet — and creating one here would mean the generation
+// workflow later inserts a second, leaving a caption-only row and a media-only
+// row for the same idea with nothing to say which is real.
+//
+// So when the media comes first, this fills in a row if one already exists and
+// otherwise writes nothing: markIdeaMediaReady records the choice on the idea
+// (including preview_image_url, which the generation workflow already reads to
+// skip generating), and finalising the plan produces one complete row.
+export async function sendVersionToPosts(workspaceId, accessToken, {
+  version, session, targets, caption, captionAr, captionEn, hashtags, when, attachOnly = false,
+}) {
+  if (!workspaceId) return { error: 'No active workspace. Try signing out and back in.' }
+  if (!version?.id) return { error: 'Nothing to send yet.' }
+  if (!version.image_url && !version.video_url) return { error: 'This version has no finished media yet.' }
+  const list = (targets || []).filter(t => PLATFORM_TABLE[t])
+  if (!list.length) return { error: 'Pick at least one platform to send this to.' }
+
+  const mode = when?.mode || 'queue'
+  const scheduledAt = mode === 'schedule' ? (when?.at || null) : null
+  const media = mediaFieldsFor(version)
+  const ideaId = session?.plan_idea_id || null
+
+  const posts = []
+  const errors = []
+  for (const platform of list) {
+    const table = PLATFORM_TABLE[platform]
+    // Copy is written only when there is copy to write. Under the media-first
+    // flow the picture is finished BEFORE the caption exists, and the post row
+    // may already carry a caption that plan generation wrote — sending an
+    // empty string here would silently erase it, and the loss would only show
+    // up at publish time.
+    const hasCopy = !!(caption || captionAr || captionEn || hashtags)
+    const base = {
+      ...media,
+      ...(hasCopy ? copyFieldsFor(platform, { caption, captionAr, captionEn, hashtags }) : {}),
+      topic: session?.brief?.topic || session?.title || '',
+      aspect_ratio: version.aspect_ratio || session?.aspect_ratio || '',
+      post_kind: media.video_url ? 'video' : 'caption_image',
+      // Provenance — which session and which exact version this came from.
+      creative_session_id: session?.id || null,
+      creative_version_id: version.id,
+      source: 'studio',
+      status: mode === 'queue' ? 'pending_review' : 'pending_publish',
+      ...(scheduledAt ? { scheduled_publish_at: scheduledAt } : {}),
+      ...(ideaId ? { plan_idea_id: ideaId } : {}),
+    }
+    // Columns that only exist on the shared table.
+    if (table === 'generated_posts') {
+      base.platform = platform
+      base.media_type = media.video_url ? 'video' : 'image'
+    }
+    if (table === 'linkedin_generated_posts') base.include_image = true
+
+    try {
+      const existing = await findPostForIdea(accessToken, table, ideaId)
+      if (!existing && attachOnly) continue      // nothing to fill in yet — finalising the plan will make it
+      const url = existing
+        ? `${SUPABASE_URL}/rest/v1/${table}?id=eq.${existing.id}`
+        : `${SUPABASE_URL}/rest/v1/${table}`
+      const res = await fetch(url, {
+        method: existing ? 'PATCH' : 'POST',
+        headers: jsonHeaders(accessToken),
+        body: JSON.stringify(existing ? base : { workspace_id: workspaceId, ...base }),
+      })
+      if (!res.ok) { errors.push(`${platform}: ${await res.text()}`); continue }
+      const [row] = await res.json()
+      posts.push({ platform, table, id: row?.id, updated: !!existing })
+    } catch (err) { errors.push(`${platform}: ${err.message}`) }
+  }
+
+  // attachOnly with nothing to attach to is the normal media-first case, not a
+  // failure — the idea is recorded and the row comes later.
+  if (!posts.length && attachOnly && !errors.length) return { ok: true, posts: [], deferred: true }
+  if (!posts.length) return { error: errors.join(' · ') || 'Could not create the post.' }
+
+  // Sending an asset out as a post is the strongest possible statement that it
+  // is the keeper, so it earns its place in the Media Library exactly as
+  // pressing Save would. Guarded on is_final because finalizeVersion appends a
+  // library row every time it runs, and re-sending to a second platform later
+  // should not file the same asset twice.
+  //
+  // Deliberately after the rows exist and deliberately not awaited into the
+  // result: the posts are the deliverable, and a library hiccup must not
+  // report the send as failed when the posts are sitting there.
+  if (!version.is_final) {
+    finalizeVersion(workspaceId, accessToken, version, session?.title).catch(() => {})
+  }
+
+  return { ok: true, posts, warning: errors.length ? errors.join(' · ') : undefined }
 }
