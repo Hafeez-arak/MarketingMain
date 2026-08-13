@@ -25,7 +25,8 @@ import { SocialOverview, SocialPlatform, NewPost } from './pages/social/index'
 import { InstagramPage } from './pages/social/InstagramPage'
 import { LinkedInPage }  from './pages/social/LinkedInPage'
 import { Approvals as PostApprovals } from './pages/social/Approvals'
-import { Settings, Integrations, Team } from './pages/settings/index'
+import { Settings, Integrations } from './pages/settings/index'
+import { Access } from './pages/settings/Access'
 import { BrandBrain } from './pages/settings/BrandBrain'
 import { CreativeStudio } from './pages/studio/index'
 
@@ -115,7 +116,7 @@ function ProtectedApp() {
             <Route path="/social/tiktok/new"     element={<NewPost />} />
             <Route path="/settings"             element={<Settings />} />
             <Route path="/integrations"          element={<Integrations />} />
-            <Route path="/team"                  element={<Team />} />
+            <Route path="/team"                  element={<Access />} />
             <Route path="*"                      element={<NotFound />} />
           </Routes>
           </ErrorBoundary>
