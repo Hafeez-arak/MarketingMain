@@ -42,7 +42,7 @@ export function Login() {
         <AuthButton type="submit" loading={loading}>Sign in</AuthButton>
       </form>
       <p className="text-sm mt-6 text-center" style={{ color: PALETTE.slate }}>
-        Don't have a workspace yet?{' '}
+        Don't have an account yet?{' '}
         <Link to="/signup" className="font-semibold" style={{ color: PALETTE.carbon }}>Create one</Link>
       </p>
     </AuthLayout>
