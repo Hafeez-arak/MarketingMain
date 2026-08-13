@@ -1,6 +1,5 @@
 import { useAuth } from '../../store/auth'
 import { AuthLayout, AuthButton, PALETTE } from './AuthLayout'
-import { ACCESS_ADMIN_EMAIL } from '../../lib/access'
 
 // Where a signed-in but not-yet-approved person lands. Two states share this
 // screen because they need the same thing from the reader — wait, or ask a
@@ -26,18 +25,16 @@ export function PendingApproval() {
             <>
               The account{' '}
               <span className="font-semibold" style={{ color: PALETTE.carbon }}>{user?.email}</span>{' '}
-              no longer has access to the workspaces. If this is a mistake, ask{' '}
-              <span className="font-semibold" style={{ color: PALETTE.carbon }}>{ACCESS_ADMIN_EMAIL}</span>{' '}
-              to restore it.
+              no longer has access to the workspaces. If this is a mistake, ask
+              your administrator to restore it.
             </>
           ) : (
             <>
-              We've sent a request for{' '}
+              Your request for{' '}
               <span className="font-semibold" style={{ color: PALETTE.carbon }}>{user?.email}</span>{' '}
-              to{' '}
-              <span className="font-semibold" style={{ color: PALETTE.carbon }}>{ACCESS_ADMIN_EMAIL}</span>.
-              Once it's approved you'll have access to every company in the
-              workspace — nothing else to set up.
+              has been sent to the administrator. Once it's approved you'll
+              have access to every company in the workspace — nothing else to
+              set up.
             </>
           )}
         </p>

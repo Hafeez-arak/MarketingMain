@@ -2,12 +2,15 @@ import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../store/auth'
 import { AuthLayout, AuthInput, AuthButton, PALETTE } from './AuthLayout'
-import { ACCESS_ADMIN_EMAIL } from '../../lib/access'
 
-// Signing up no longer creates anything. It files an access request that
-// {ACCESS_ADMIN_EMAIL} approves — so the copy here promises a request, not a
+// Signing up no longer creates anything. It files an access request that an
+// administrator approves — so the copy here promises a request, not a
 // workspace. The old version asked for a workspace name and told people
 // their workspace was ready; both were true then and would be lies now.
+//
+// Who the admin is stays unnamed. This page is reachable by anyone with the
+// URL, and printing an address on it is free reconnaissance for whoever
+// wants to phish or pester the one account that can grant access.
 export function Signup() {
   const { signUp } = useAuth()
   const navigate = useNavigate()
@@ -37,8 +40,7 @@ export function Signup() {
       <AuthLayout eyebrow="Almost there" title="Check your email" subtitle="">
         <p className="text-sm leading-relaxed" style={{ color: PALETTE.slate }}>
           We sent a confirmation link to <span className="font-semibold" style={{ color: PALETTE.carbon }}>{email}</span>.
-          Confirm it, then sign in — your access request goes to{' '}
-          <span className="font-semibold" style={{ color: PALETTE.carbon }}>{ACCESS_ADMIN_EMAIL}</span> for approval.
+          Confirm it, then sign in — your access request has been sent to the administrator for approval.
         </p>
         <Link to="/login" className="inline-block mt-6 text-sm font-semibold" style={{ color: PALETTE.carbon }}>
           Back to sign in
@@ -51,7 +53,7 @@ export function Signup() {
     <AuthLayout
       eyebrow="Get started"
       title="Request access"
-      subtitle={`Creating an account sends a request to ${ACCESS_ADMIN_EMAIL}. Once approved, you get every company with the same full access as the rest of the team.`}
+      subtitle="Creating an account sends a request to the administrator. Once approved, you get every company with the same full access as the rest of the team."
     >
       <form onSubmit={handleSubmit}>
         <AuthInput

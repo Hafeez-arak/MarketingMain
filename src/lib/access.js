@@ -8,7 +8,10 @@ import { supabase } from './supabaseClient'
 // and we surface the message; the UI hiding the button is a courtesy, not a
 // control.
 
-export const ACCESS_ADMIN_EMAIL = 'hafeez@arak-sa.com'
+// The admin's address is deliberately not exported, and not shown anywhere a
+// non-admin can see. Users are told their request went to "the admin" — who
+// that is, is an internal detail, and publishing it on a page anyone can
+// reach by signing up just hands out a target.
 
 // The signed-in user's own access row. RLS lets everyone read exactly this
 // one, which is what makes it safe to call before we know anything about them.
@@ -58,5 +61,33 @@ export async function approveAccess(userId) {
 // nothing to reason about at 6pm on a Thursday.
 export async function revokeAccess(userId) {
   const { error } = await supabase.rpc('revoke_access', { target_user: userId })
+  return error ? error.message : null
+}
+
+// Addresses cleared ahead of signup — people the admin added who haven't
+// created an account yet. Empty for non-admins by RLS.
+export async function fetchInvites() {
+  const { data, error } = await supabase
+    .from('access_invites')
+    .select('email, invited_at')
+    .order('invited_at', { ascending: false })
+  if (error) return { invites: [], error: error.message }
+  return { invites: data || [], error: null }
+}
+
+// Add someone by email. One click means three different things depending on
+// whether that address already has an account, so the function reports back
+// which happened rather than leaving the UI to guess:
+//   'approved' — they had signed up already, and are now in
+//   'invited'  — no account yet; they're cleared for when they sign up
+//   'already'  — nothing to do, they already had access
+export async function inviteAccess(email) {
+  const { data, error } = await supabase.rpc('invite_access', { target_email: email })
+  if (error) return { outcome: null, error: error.message }
+  return { outcome: data, error: null }
+}
+
+export async function cancelInvite(email) {
+  const { error } = await supabase.rpc('cancel_invite', { target_email: email })
   return error ? error.message : null
 }
