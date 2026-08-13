@@ -136,7 +136,7 @@ export function Topbar() {
               <div className="px-4 py-3 border-b border-border bg-surface-subtle">
                 <p className="eyebrow text-text-tertiary">Workspace</p>
                 <p className="text-sm font-semibold text-text truncate mt-1">{activeWorkspace?.name}</p>
-                <p className="text-[11px] text-text-tertiary capitalize mt-0.5">{activeWorkspace?.role} · {activeWorkspace?.plan} plan</p>
+                <p className="text-[11px] text-text-tertiary capitalize mt-0.5">{activeWorkspace?.role}</p>
               </div>
               <button onClick={signOut}
                 className="w-full text-left px-4 py-2.5 text-xs text-red-600 hover:bg-red-50 transition-colors">

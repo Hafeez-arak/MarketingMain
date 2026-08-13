@@ -9,7 +9,7 @@ import { supabase } from '../lib/supabaseClient'
 // today) or several (the agency case, Phase 4); this exposes both.
 export function AuthProvider({ children }) {
   const [session, setSession]   = useState(undefined) // undefined = not loaded yet, null = signed out
-  const [workspaces, setWorkspaces] = useState([])     // [{ id, name, slug, plan, role }]
+  const [workspaces, setWorkspaces] = useState([])     // [{ id, name, slug, role }]
   const [activeWorkspaceId, setActiveWorkspaceId] = useState(null)
   const [loadingWorkspaces, setLoadingWorkspaces] = useState(false)
   const [authError, setAuthError] = useState('')
@@ -22,7 +22,9 @@ export function AuthProvider({ children }) {
     setLoadingWorkspaces(true)
     const { data, error } = await supabase
       .from('workspace_members')
-      .select('role, workspaces ( id, name, slug, plan, created_at )')
+      // No `plan` — every workspace is the same product, so there was no tier
+      // for the "Trial plan" / "Agency plan" line to name truthfully.
+      .select('role, workspaces ( id, name, slug, created_at )')
       .eq('user_id', userId)
     setLoadingWorkspaces(false)
     if (error) { setAuthError(error.message); return }

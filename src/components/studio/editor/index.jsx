@@ -118,19 +118,15 @@ function textShortcut(e, key, layer, docH, apply) {
 export function PhotoEditor({
   imageUrl, initialState, onSave, onCancel, saving = false,
   onUploadImage, imageLibrary = [],
-  // Signed-in fetch for the account's persistent Media Library, offered in
-  // the Images panel alongside the upload button and this session's own
-  // generations.
-  //
-  // Absent in the dev harness — but NOT, as this comment first claimed,
-  // leaving the panel empty. `fetchMediaLibrary` falls back to
-  // `Bearer ${accessToken || SUPABASE_ANON_KEY}`, and `media_library` answers
-  // the anon key with real rows (verified: 200 and five workspace ids from a
-  // token-less request), so the harness shows a populated library whose
-  // thumbnails happen not to resolve. The panel is therefore never blocked on
-  // this prop, which is why nothing here guards on it — but that also means
-  // the grid is not proof of a signed-in read, so don't treat it as one when
-  // testing auth.
+  // Which workspace's persistent Media Library the Images panel offers,
+  // alongside the upload button and this session's own generations. Libraries
+  // do not span workspaces, so with no id the panel simply shows none —
+  // which is what the dev harness, having no workspace, now gets. (It used to
+  // show rows: `fetchMediaLibrary` falls back to the anon key and the table
+  // answered that with real rows, so the harness grid was populated with
+  // thumbnails that did not resolve. Either way the grid was never proof of a
+  // signed-in read, so don't treat it as one when testing auth.)
+  workspaceId,
   accessToken,
   // Brand Brain's free-text "Brand Colours" field. Passed as written; the hex
   // codes are pulled out of the prose in model/palette.js.
@@ -840,7 +836,7 @@ export function PhotoEditor({
           onOpenPanel={p => { if (p !== 'crop' && tool === 'crop') cancelCrop(); setPanel(p) }}>
           {panel === 'insert' && <InsertPanel onAddText={addText} onAddShape={addShape} />}
           {panel === 'uploads' && (
-            <UploadsPanel onUploadImage={onUploadImage} onAddImage={addImage} library={imageLibrary} accessToken={accessToken} />
+            <UploadsPanel onUploadImage={onUploadImage} onAddImage={addImage} library={imageLibrary} workspaceId={workspaceId} accessToken={accessToken} />
           )}
           {panel === 'adjust' && !isVideo && (
             <AdjustPanel adjust={doc.adjust} onBeginChange={begin}

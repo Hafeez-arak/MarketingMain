@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useApp } from '../../store/app'
 import { useAuth } from '../../store/auth'
-import { Button, Card, Modal, SectionHead, Select, Spinner, Textarea, Empty } from '../../components/ui/index'
+import { Button, Card, ConfirmDialog, Modal, SectionHead, Select, Spinner, Textarea, Empty } from '../../components/ui/index'
 import { BranchChat, BranchPill } from '../../components/studio/BranchChat'
 import { SessionSidebar } from '../../components/studio/SessionSidebar'
 import { Lightbox } from '../../components/studio/Lightbox'
@@ -28,7 +28,7 @@ import { uploadReferenceImage } from '../../lib/referenceImages'
 import { buildInstructionsString } from '../../lib/brandBrain'
 import { captureFirstFrame, parentStillOf } from '../../components/studio/videoFrame'
 import {
-  buildBranches, createSession, deleteSession, downloadVersion, fetchFalBalance, fetchSessions,
+  buildBranches, createSession, deleteSession, deleteVersion, downloadVersion, fetchFalBalance, fetchSessions,
   fetchVersions, finalizeVersion, insertPendingVersions, renameSession, requestCompose, requestEdit,
   requestEnhance, requestGenerate, requestVideo, requestStitch, requestVideoEdit, selectVersion,
   touchSession, updateVersion, uploadToStudio,
@@ -316,6 +316,9 @@ export function CreativeStudio() {
   // resolved to (its source still, or a frame captured from the clip itself).
   const [editingClip, setEditingClip] = useState(null)
   const [preparingClip, setPreparingClip] = useState('')
+  // A history-strip thumbnail pending confirmation to delete — never deleted
+  // straight off the click, since a candidate is real generated work.
+  const [deleteVersionTarget, setDeleteVersionTarget] = useState(null)
   // Every finished still in this session, offered inside the editor as image
   // layers you can drop onto another one — the "put the logo from round 1 on
   // this background" move, without a round trip through Downloads.
@@ -324,7 +327,7 @@ export function CreativeStudio() {
       .filter(v => v.status === 'ready' && v.media_type !== 'video' && v.image_url)
       .map(v => ({ url: v.image_url, label: v.user_prompt || 'Earlier version' }))
   ), [versions])
-  // Which lane's 📎 opened the picker — null when closed. Separate from
+  // Which lane's + button opened the picker — null when closed. Separate from
   // `pickerSlot` above: that one fills a slot on the pre-generation form,
   // this one fills a single lane's composer.attach once a session exists.
   const [attachLane, setAttachLane] = useState(null)
@@ -1341,6 +1344,12 @@ export function CreativeStudio() {
     setBusy(`retry:${version.id}`); setError('')
 
     const isRound0 = !version.parent_version_id
+    // A storyboard clip's overlay carries its shot position — losing it here
+    // would drop the retried row out of clipRowsByIndex and out of the reel
+    // silently, exactly as handleComposeSave's own clipCols comment warns.
+    const clipCols = version.clip_index != null && !version.clip_role
+      ? { clipIndex: version.clip_index, clipAttempt: nextClipAttempt(versions, version.clip_index) }
+      : {}
     const row = {
       round: version.round, kind: version.kind, provider: version.provider,
       mediaType: version.media_type, parentVersionId: version.parent_version_id || null,
@@ -1349,13 +1358,35 @@ export function CreativeStudio() {
       referenceUrl: version.reference_url || '', referenceNotes: version.reference_notes || '',
       duration: version.duration || '', resolution: version.resolution || '',
       generateAudio: !!version.generate_audio, model: version.model || '',
+      // Only an overlay row has this, and it's what lets the retry below
+      // rebuild the compose payload without re-uploading anything — the
+      // layers were already uploaded to storage when Save first ran.
+      overlayState: version.overlay_state || null,
+      clipRole: version.clip_role || null,
+      ...clipCols,
     }
     const ins = await insertPendingVersions(activeWorkspaceId, accessToken, session.id, [row])
     if (ins.error) { setBusy(''); setError(ins.error); return }
     const fresh = ins.rows[0]
 
     let fired
-    if (version.kind === 'video') {
+    if (version.kind === 'video' && version.model === 'kling-o1-edit') {
+      // Editing a video (Kling O1 Edit, see handleVideoEdit above) sends the
+      // clip itself back in — its parent row IS a video, not a still to
+      // animate. The generic 'video' branch below reads `image_url` off that
+      // parent, which a video row doesn't have, and fires it at the ANIMATE
+      // webhook — so retrying a stuck edit silently launched a broken animate
+      // request instead, leaving the new pending row just as stuck as the one
+      // it replaced. This branch has to come first and match on the model,
+      // since both kinds share kind: 'video'.
+      const parent = versions.find(v => v.id === version.parent_version_id)
+      fired = await requestVideoEdit(webhooks.creativeVideoEdit, {
+        session_id: session.id, version_id: fresh.id,
+        video_url: parent?.video_url || '',
+        prompt: version.user_prompt,
+        reference_image_urls: version.reference_url ? [version.reference_url] : [],
+      })
+    } else if (version.kind === 'video') {
       fired = await requestVideo(webhooks.creativeVideo, {
         session_id: session.id, version_id: fresh.id, prompt: version.user_prompt,
         image_url: version.parent_version_id
@@ -1364,6 +1395,25 @@ export function CreativeStudio() {
         model: version.model || 'seedance-2', duration: version.duration || '5',
         aspect_ratio: version.aspect_ratio, resolution: version.resolution || '720p',
         generate_audio: !!version.generate_audio,
+      })
+    } else if (version.kind === 'overlay') {
+      // The manual clip editor's Save (handleComposeSave above) — free, local
+      // ffmpeg, no model. Retrying it had NO case here at all, so it fell into
+      // the catch-all image-edit branch below: that branch reads image_url off
+      // the parent, but an overlay's parent is a VIDEO, so it sent an empty
+      // image_url to the wrong webhook (creativeEdit, not creativeCompose).
+      // The row this created was exactly as stuck as the one it was meant to
+      // replace, with no way out from the UI — which is what "editing a video
+      // and saving it doesn't work" actually was. overlay_state already has
+      // the uploaded layer URLs from the original Save, so nothing needs
+      // re-uploading to retry it.
+      const st = version.overlay_state || {}
+      fired = await requestCompose(webhooks.creativeCompose, {
+        session_id: session.id, version_id: fresh.id,
+        video_url: st.baseVideoUrl || '',
+        overlays: (st.overlays || []).map(o => ({ url: o.url, t_in: o.tIn, t_out: o.tOut, fade: o.fade, anim: o.anim })),
+        trim_start: st.trim?.start || 0,
+        trim_end: st.trim?.end ?? null,
       })
     } else if (isRound0) {
       fired = await requestGenerate(webhooks.creativeGenerate, {
@@ -1419,6 +1469,28 @@ export function CreativeStudio() {
     setVersions(prev => prev.map(v => (v.id === version.id ? { ...v, is_final: true } : v)))
   }
 
+  // Removes one candidate from a lane's history strip — a middle round the
+  // team no longer wants cluttering the strip, not the whole thread. Applied
+  // optimistically, closing over the gap the same way the DB call does (see
+  // deleteVersion), so a later edit's thumbnail doesn't flash as its own new
+  // branch for the round trip.
+  async function handleDeleteVersion(target) {
+    if (!target) return
+    setDeleteVersionTarget(null)
+    setVersions(prev => prev
+      .filter(v => v.id !== target.id)
+      .map(v => (v.parent_version_id === target.id
+        ? { ...v, parent_version_id: target.parent_version_id || null }
+        : v)))
+    // A composer left pointed at the version that just vanished falls back to
+    // the lane's latest, same as "use the newest" already does elsewhere.
+    setComposers(prev => Object.fromEntries(
+      Object.entries(prev).map(([rootId, c]) => [rootId, c.baseId === target.id ? { ...c, baseId: null } : c]),
+    ))
+    const res = await deleteVersion(accessToken, target, versions)
+    if (res.error) setError(res.error)
+  }
+
   // The opening prompt belongs to the session, not to either lane — shown once
   // above both so the split reads as one brief taken two ways.
   const opening = versions.find(v => v.round === 0) || null
@@ -1433,7 +1505,7 @@ export function CreativeStudio() {
   // irrelevant, and a banner about a webhook you don't need is noise.
   const missingStitch = isMulti && !webhooks.creativeStitch
 
-  // What the 📎 mid-conversation picker is actually attaching to — needed
+  // What the + mid-conversation picker is actually attaching to — needed
   // because that one picker is shared by every lane, and a still's reference
   // (single, "edit this instead / take cues from it") and a video's
   // reference (multi, style-only) are different shapes on the composer.
@@ -1477,6 +1549,10 @@ export function CreativeStudio() {
     onUseThis: v => setUseThisFor(v),
     onDownload: handleDownload,
     onRetry: handleRetry,
+    // Only offered once there's more than one candidate in the strip, so this
+    // can never empty a lane out from under itself — the strip itself is
+    // already hidden below that threshold (see BranchChat's History section).
+    onDelete: branch.versions.length > 1 ? v => setDeleteVersionTarget(v) : undefined,
     onAttach: () => setAttachLane(branch.rootId),
     // Only this lane's versions, so ← → in the viewer walks one candidate's
     // own history rather than interleaving the two models' results.
@@ -1887,6 +1963,7 @@ export function CreativeStudio() {
         onClose={() => setPickerSlot(null)}
         title={pickerSlot ? `Add ${pickerSlot.label.toLowerCase()}` : ''}
         kind={pickerSlot?.kind || 'image'}
+        workspaceId={activeWorkspaceId}
         accessToken={accessToken}
         onUpload={file => uploadReferenceImage(activeWorkspaceId, accessToken, file)}
         onPick={picked => {
@@ -1915,7 +1992,7 @@ export function CreativeStudio() {
         }}
       />
 
-      {/* ── Attach a reference (a lane's 📎, mid-conversation) ── */}
+      {/* ── Attach a reference (a lane's +, mid-conversation) ── */}
       <MediaPicker
         open={!!attachLane}
         onClose={() => setAttachLane(null)}
@@ -1925,6 +2002,7 @@ export function CreativeStudio() {
         // image_urls, but it too only accepts images — 'all' would let
         // someone pick a clip that the endpoint would then reject.
         kind="image"
+        workspaceId={activeWorkspaceId}
         accessToken={accessToken}
         onUpload={file => uploadReferenceImage(activeWorkspaceId, accessToken, file)}
         onPick={picked => {
@@ -1961,6 +2039,7 @@ export function CreativeStudio() {
               onCancel={() => setEditingClip(null)}
               onUploadImage={file => uploadToStudio(activeWorkspaceId, accessToken, file, file.name || 'layer.png')}
               imageLibrary={editorLibrary}
+              workspaceId={activeWorkspaceId}
               accessToken={accessToken}
               brandColorsText={state.brandProfile?.brandColors || ''}
             />
@@ -1991,6 +2070,7 @@ export function CreativeStudio() {
               // studio bucket first and the layer stores that URL.
               onUploadImage={file => uploadToStudio(activeWorkspaceId, accessToken, file, file.name || 'layer.png')}
               imageLibrary={editorLibrary}
+              workspaceId={activeWorkspaceId}
               accessToken={accessToken}
               // Brand Brain's "Brand Colours" field, so the account's own
               // palette is a click away in every colour picker rather than
@@ -2000,6 +2080,15 @@ export function CreativeStudio() {
           )}
         </div>
       </Modal>
+
+      <ConfirmDialog
+        open={!!deleteVersionTarget}
+        onClose={() => setDeleteVersionTarget(null)}
+        onConfirm={() => handleDeleteVersion(deleteVersionTarget)}
+        title="Delete this version?"
+        message="This candidate is removed from the history strip for good. Anything edited from it afterwards stays — it just skips over this one."
+        danger
+      />
 
       {/* Turns the version on screen into real posts. Everything it needs is
           passed in — it owns no studio state, so closing it leaves the thread

@@ -49,7 +49,7 @@ const initialState = {
   approvals: [],
   connectedAccounts: { instagram: false, facebook: false, linkedin: false, tiktok: false, x: false },
   notifications: [],
-  workspace: { name: 'Arak Lighting', plan: 'Free', logo: '' },
+  workspace: { name: 'Arak Lighting', logo: '' },
   workspaces: [{ id: DEFAULT_WORKSPACE_ID, name: 'Arak Lighting', createdAt: new Date().toISOString() }],
   activeWorkspaceId: DEFAULT_WORKSPACE_ID,
   // Per-workspace data keyed by workspaceId

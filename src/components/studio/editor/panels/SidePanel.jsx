@@ -102,11 +102,11 @@ export function InsertPanel({ onAddText, onAddShape }) {
 
 // ── Images ─────────────────────────────────────────────────────────────────
 // Three sources: a file from the marketer's machine, anything already saved
-// to the account's Media Library (past uploads and generations, across every
-// session), and anything already generated in this session — which is the one
+// to THIS workspace's Media Library (its past uploads and generations, across
+// every session), and anything already generated in this session — which is the one
 // people actually reach for, to drop a logo or an earlier crop onto a new
 // background.
-export function UploadsPanel({ onUploadImage, onAddImage, library = [], accessToken }) {
+export function UploadsPanel({ onUploadImage, onAddImage, library = [], workspaceId, accessToken }) {
   const fileRef = useRef(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -115,12 +115,12 @@ export function UploadsPanel({ onUploadImage, onAddImage, library = [], accessTo
 
   useEffect(() => {
     let alive = true
-    fetchMediaLibrary(accessToken, { kind: 'image' }).then(rows => {
+    fetchMediaLibrary(workspaceId, accessToken, { kind: 'image' }).then(rows => {
       if (!alive) return
       setMediaAssets(rows); setMediaLoading(false)
     })
     return () => { alive = false }
-  }, [accessToken])
+  }, [workspaceId, accessToken])
 
   async function handleFile(e) {
     const file = e.target.files?.[0]

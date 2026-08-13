@@ -13,6 +13,7 @@ export function MediaPicker({
   open, onClose, onPick,
   kind = 'image',            // 'image' | 'video' | 'all' — filters the library grid
   title = 'Add a reference',
+  workspaceId,               // the library shown is this workspace's, and only this one's
   accessToken,
   onUpload,                  // async (file) => ({ url } | { error })
 }) {
@@ -24,14 +25,14 @@ export function MediaPicker({
           an effect that fired on `open`, which is a cascading render and left
           the previous session's error on screen for a frame. */}
       {open && (
-        <MediaPickerBody kind={kind} accessToken={accessToken}
+        <MediaPickerBody kind={kind} workspaceId={workspaceId} accessToken={accessToken}
           onPick={onPick} onClose={onClose} onUpload={onUpload} />
       )}
     </Modal>
   )
 }
 
-function MediaPickerBody({ kind, accessToken, onPick, onClose, onUpload }) {
+function MediaPickerBody({ kind, workspaceId, accessToken, onPick, onClose, onUpload }) {
   const [tab, setTab] = useState('library')
   const [assets, setAssets] = useState([])
   const [loading, setLoading] = useState(true)
@@ -41,12 +42,12 @@ function MediaPickerBody({ kind, accessToken, onPick, onClose, onUpload }) {
 
   useEffect(() => {
     let alive = true
-    fetchMediaLibrary(accessToken, { kind }).then(rows => {
+    fetchMediaLibrary(workspaceId, accessToken, { kind }).then(rows => {
       if (!alive) return
       setAssets(rows); setLoading(false)
     })
     return () => { alive = false }
-  }, [accessToken, kind])
+  }, [workspaceId, accessToken, kind])
 
   async function handleFile(e) {
     const file = e.target.files?.[0]

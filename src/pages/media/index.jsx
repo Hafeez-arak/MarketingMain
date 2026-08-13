@@ -4,6 +4,10 @@ import { useAuth } from '../../store/auth'
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from '../../lib/supabaseClient'
 import { Card, Button, Empty, ConfirmDialog, PageHeader } from '../../components/ui/index'
 
+function isVideo(mimeType) {
+  return (mimeType || '').startsWith('video/')
+}
+
 function humanSize(bytes) {
   if (!bytes || bytes === 0) return 'AI generated'
   if (bytes < 1024)    return bytes + ' B'
@@ -25,10 +29,11 @@ function displayName(name) {
 }
 
 export function MediaLibrary() {
-  const { activeWorkspaceId, accessToken } = useAuth()
+  const { activeWorkspaceId, activeWorkspace, accessToken } = useAuth()
   const supabaseUrl = SUPABASE_URL
 
   const [assets,      setAssets]      = useState([])
+  const [loadedFor,   setLoadedFor]   = useState(null)  // workspace `assets` was fetched for
   const [loading,     setLoading]     = useState(true)
   const [deleteId,    setDeleteId]    = useState(null)
   const [fullscreen,  setFullscreen]  = useState(null)  // { url, name }
@@ -45,10 +50,12 @@ export function MediaLibrary() {
   const loadAssets = useCallback(async () => {
     if (!activeWorkspaceId) return null
     try {
-      // No explicit workspace_id filter needed — RLS already scopes this
-      // to rows the signed-in user's workspace owns.
+      // Filter by the ACTIVE workspace, not just by RLS. RLS lets through every
+      // workspace this user belongs to, which for an operator running several
+      // brands is all of them at once — one merged grid where switching
+      // workspace changed nothing. Each workspace owns its own library.
       const res = await fetch(
-        `${supabaseUrl}/rest/v1/media_library?select=*&order=created_at.desc&limit=200`,
+        `${supabaseUrl}/rest/v1/media_library?select=*&workspace_id=eq.${activeWorkspaceId}&order=created_at.desc&limit=200`,
         { headers }
       )
       if (res.ok) return await res.json()
@@ -70,11 +77,17 @@ export function MediaLibrary() {
     let alive = true
     loadAssets().then(rows => {
       if (!alive) return
-      if (rows) setAssets(rows)
+      if (rows) { setAssets(rows); setLoadedFor(activeWorkspaceId) }
       setLoading(false)
     })
     return () => { alive = false }
-  }, [loadAssets])
+  }, [loadAssets, activeWorkspaceId])
+
+  // `assets` still holds the workspace we were on a moment ago until the new
+  // fetch lands. Rendering it would show one workspace's library under
+  // another's name, so the grid treats a mismatch as "still loading" rather
+  // than blanking state inside the effect (a cascading render).
+  const stale = loadedFor !== activeWorkspaceId
 
   async function saveToSupabase(item) {
     if (!activeWorkspaceId) return null
@@ -102,7 +115,10 @@ export function MediaLibrary() {
 
   async function deleteAsset(id) {
     if (!activeWorkspaceId) return
-    await fetch(`${supabaseUrl}/rest/v1/media_library?id=eq.${id}`, {
+    // Scoped to the active workspace as well as the id — a delete is the one
+    // call where a stale id from a workspace you just switched away from
+    // would do real damage.
+    await fetch(`${supabaseUrl}/rest/v1/media_library?id=eq.${id}&workspace_id=eq.${activeWorkspaceId}`, {
       method: 'DELETE',
       headers,
     })
@@ -129,7 +145,7 @@ export function MediaLibrary() {
 
   function onDrop(e) { e.preventDefault(); handleFiles(e.dataTransfer.files) }
 
-  const filtered = assets.filter(a => {
+  const filtered = (stale ? [] : assets).filter(a => {
     if (filter === 'images') return (a.mime_type || '').startsWith('image/')
     if (filter === 'videos') return (a.mime_type || '').startsWith('video/')
     if (filter === 'docs')   return !(a.mime_type || '').startsWith('image/') && !(a.mime_type || '').startsWith('video/')
@@ -138,7 +154,10 @@ export function MediaLibrary() {
 
   return (
     <div className="max-w-7xl space-y-4">
-      <PageHeader title="Media Library" subtitle="Every image, video, and document uploaded to this workspace." />
+      <PageHeader title="Media Library"
+        subtitle={activeWorkspace?.name
+          ? `Every image, video, and document in ${activeWorkspace.name}. Each workspace keeps its own library.`
+          : 'Every image, video, and document in this workspace.'} />
 
       {/* Toolbar */}
       <div className="flex items-center justify-between flex-wrap gap-3">
@@ -152,7 +171,7 @@ export function MediaLibrary() {
                   ? 'bg-amber-700 text-white border-amber-700 relative z-10'
                   : 'bg-white text-text-secondary border-border hover:text-text hover:bg-surface-subtle'
               }`}>
-              {f === 'all' ? `All (${assets.length})` : f}
+              {f === 'all' ? `All (${stale ? 0 : assets.length})` : f}
             </button>
           ))}
         </div>
@@ -192,7 +211,7 @@ export function MediaLibrary() {
       </div>
 
       {/* Files */}
-      {loading ? (
+      {loading || stale ? (
         <div className="flex items-center justify-center py-12 text-text-tertiary text-sm">Loading…</div>
       ) : filtered.length === 0 ? (
         <Card>
@@ -205,11 +224,18 @@ export function MediaLibrary() {
       ) : view === 'grid' ? (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
           {filtered.map(asset => (
-            <Card key={asset.id} className="overflow-hidden group cursor-zoom-in" onClick={() => asset.url && setFullscreen({ url: asset.url, name: asset.name })}>
+            <Card key={asset.id} className="overflow-hidden group cursor-zoom-in" onClick={() => asset.url && setFullscreen({ url: asset.url, name: asset.name, mimeType: asset.mime_type })}>
               <div className="aspect-square bg-surface-subtle flex items-center justify-center overflow-hidden relative">
                 {asset.url ? (
-                  <img src={asset.url} alt={asset.name}
-                    className="w-full h-full object-cover" />
+                  isVideo(asset.mime_type) ? (
+                    <>
+                      <video src={asset.url} className="w-full h-full object-cover" muted playsInline />
+                      <span className="absolute inset-0 flex items-center justify-center text-white text-lg bg-black/20 pointer-events-none">▶</span>
+                    </>
+                  ) : (
+                    <img src={asset.url} alt={asset.name}
+                      className="w-full h-full object-cover" />
+                  )
                 ) : (
                   <svg className="w-8 h-8 text-text-tertiary" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
                 )}
@@ -251,7 +277,11 @@ export function MediaLibrary() {
                 <tr key={a.id} className="hover:bg-surface-muted transition-colors">
                   <td className="px-5 py-3">
                     <div className="flex items-center gap-2">
-                      {a.url ? <img src={a.url} alt="" className="w-8 h-8 rounded-lg object-cover flex-shrink-0"/> : <div className="w-8 h-8 rounded-lg bg-surface-subtle flex-shrink-0"/>}
+                      {a.url ? (
+                        isVideo(a.mime_type)
+                          ? <video src={a.url} className="w-8 h-8 rounded-lg object-cover flex-shrink-0" muted />
+                          : <img src={a.url} alt="" className="w-8 h-8 rounded-lg object-cover flex-shrink-0"/>
+                      ) : <div className="w-8 h-8 rounded-lg bg-surface-subtle flex-shrink-0"/>}
                       <span className="font-medium text-text truncate max-w-xs">{displayName(a.name)}</span>
                     </div>
                   </td>
@@ -280,8 +310,13 @@ export function MediaLibrary() {
           style={{ background: 'rgba(0,0,0,0.92)' }}
           onClick={() => setFullscreen(null)}>
           <div className="relative max-w-[90vw] max-h-[90vh]" onClick={e => e.stopPropagation()}>
-            <img src={fullscreen.url} alt={fullscreen.name}
-              className="max-w-[90vw] max-h-[88vh] object-contain" />
+            {isVideo(fullscreen.mimeType) ? (
+              <video src={fullscreen.url} controls autoPlay playsInline
+                className="max-w-[90vw] max-h-[88vh] object-contain" />
+            ) : (
+              <img src={fullscreen.url} alt={fullscreen.name}
+                className="max-w-[90vw] max-h-[88vh] object-contain" />
+            )}
             <div className="absolute top-3 right-3 flex gap-2">
               <a href={fullscreen.url} download={fullscreen.name} target="_blank" rel="noreferrer"
                 className="w-9 h-9 rounded-xl bg-white/20 hover:bg-white/30 backdrop-blur flex items-center justify-center text-white transition-colors"

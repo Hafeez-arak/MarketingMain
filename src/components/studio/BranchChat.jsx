@@ -28,12 +28,12 @@ const DRAG_MIME = 'application/x-arak-version'
 // A past version, as one square on the strip. Deliberately uniform: the strip
 // is for navigating, and letting each thumb keep its own aspect ratio turns a
 // row of them into a ragged edge that's harder to scan.
-function Thumb({ version, step, active, onClick, onRetry, retrying }) {
+function Thumb({ version, step, active, onClick, onRetry, retrying, onDelete }) {
   const failed = version.status === 'failed'
   const pending = version.status === 'pending'
   return (
     <button type="button" onClick={onClick} title={version.user_prompt || labelFor(version) || ''}
-      className={`relative w-11 h-11 flex-shrink-0 overflow-hidden border-2 transition-colors ${
+      className={`group relative w-11 h-11 flex-shrink-0 overflow-hidden border-2 transition-colors ${
         active ? 'border-amber-500' : failed ? 'border-red-200' : 'border-border hover:border-amber-300'
       }`}>
       {/* The strip is the conversation's running order, so it's numbered.
@@ -42,6 +42,21 @@ function Thumb({ version, step, active, onClick, onRetry, retrying }) {
       <span className={`absolute top-0 left-0 z-10 px-1 text-[9px] font-bold leading-tight ${
         active ? 'bg-amber-500 text-white' : 'bg-black/55 text-white'
       }`}>{step}</span>
+      {/* Hidden until hovered, same as the ✕ everywhere else in this file
+          (the composer's reference chip, the attach chip) — a thumbnail this
+          small has no room for a permanently-visible delete affordance
+          without it reading as the dominant thing on the square. Offered on
+          a pending row too, deliberately: a render stuck at "still working"
+          forever (the webhook died without writing back) has no OTHER way
+          out of the strip, and a late write from a dead job landing on a
+          since-deleted id is harmless — Supabase just matches nothing. */}
+      {onDelete && (
+        <span onClick={e => { e.stopPropagation(); onDelete(version) }}
+          title="Delete this version"
+          className="absolute top-0 right-0 z-10 w-4 h-4 flex items-center justify-center bg-black/55 text-white text-[10px] leading-none opacity-0 group-hover:opacity-100 hover:bg-red-600 transition-opacity">
+          ×
+        </span>
+      )}
       {pending ? (
         <span className="w-full h-full flex items-center justify-center bg-surface-subtle text-text-tertiary"><Spinner size="sm" /></span>
       ) : failed ? (
@@ -88,6 +103,7 @@ export function BranchChat({
   onUseThis,               // opens the sheet that turns this version into real posts
   onDownload,              // downloads the file AND files it in the library if it isn't already
   onRetry,                 // re-run a failed version against the same prompt
+  onDelete,                // remove one candidate from the history strip
   onAttach,                // opens a picker (upload / Media Library) for this lane's composer
   onZoom,                  // opens the full-screen viewer at this version
 }) {
@@ -259,12 +275,24 @@ export function BranchChat({
                   <p className="text-[10px] text-text-tertiary leading-snug max-w-[15rem]">
                     This is taking much longer than usual. It may have failed without reporting back.
                   </p>
-                  {onRetry && (
-                    <button type="button" onClick={() => onRetry(stage)} disabled={pendingKey === `retry:${stage.id}`}
-                      className="border border-border bg-white px-2.5 py-1 text-[10px] font-semibold text-text hover:border-amber-400 hover:bg-amber-50 disabled:opacity-50">
-                      {pendingKey === `retry:${stage.id}` ? 'Retrying…' : '↻ Try this step again'}
-                    </button>
-                  )}
+                  <div className="flex items-center gap-1.5">
+                    {onRetry && (
+                      <button type="button" onClick={() => onRetry(stage)} disabled={pendingKey === `retry:${stage.id}`}
+                        className="border border-border bg-white px-2.5 py-1 text-[10px] font-semibold text-text hover:border-amber-400 hover:bg-amber-50 disabled:opacity-50">
+                        {pendingKey === `retry:${stage.id}` ? 'Retrying…' : '↻ Try this step again'}
+                      </button>
+                    )}
+                    {/* A row stuck here has no OTHER way out of the strip — the
+                        webhook that was supposed to write it to 'ready' or
+                        'failed' just never did, and Try again only helps if
+                        THAT retry succeeds. Delete is the actual escape hatch. */}
+                    {onDelete && (
+                      <button type="button" onClick={() => onDelete(stage)}
+                        className="border border-red-200 bg-white px-2.5 py-1 text-[10px] font-semibold text-red-700 hover:bg-red-50">
+                        Delete
+                      </button>
+                    )}
+                  </div>
                 </div>
               )}
             </div>
@@ -275,12 +303,20 @@ export function BranchChat({
             {/* The real provider message, not a generic apology — an exhausted
                 balance and a rejected prompt need very different responses. */}
             <p className="text-[10px] text-red-600 leading-snug line-clamp-3 max-w-xs">{stage.error || 'No reason given.'}</p>
-            {onRetry && (
-              <button type="button" onClick={() => onRetry(stage)} disabled={pendingKey === `retry:${stage.id}`}
-                className="mt-1 inline-flex items-center gap-1.5 border border-red-300 bg-white px-2.5 py-1 text-[10px] font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50">
-                {pendingKey === `retry:${stage.id}` ? <><Spinner size="sm" /> Retrying…</> : '↻ Try again'}
-              </button>
-            )}
+            <div className="flex items-center gap-1.5 mt-1">
+              {onRetry && (
+                <button type="button" onClick={() => onRetry(stage)} disabled={pendingKey === `retry:${stage.id}`}
+                  className="inline-flex items-center gap-1.5 border border-red-300 bg-white px-2.5 py-1 text-[10px] font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50">
+                  {pendingKey === `retry:${stage.id}` ? <><Spinner size="sm" /> Retrying…</> : '↻ Try again'}
+                </button>
+              )}
+              {onDelete && (
+                <button type="button" onClick={() => onDelete(stage)}
+                  className="border border-border bg-white px-2.5 py-1 text-[10px] font-semibold text-text hover:border-red-300 hover:bg-red-50">
+                  Delete
+                </button>
+              )}
+            </div>
           </div>
         ) : stageIsVideo ? (
           <video src={stage.video_url} controls playsInline className="max-h-full max-w-full" />
@@ -381,6 +417,7 @@ export function BranchChat({
               onClick={() => onChange({ baseId: v.id })}
               onRetry={onRetry}
               retrying={pendingKey === `retry:${v.id}`}
+              onDelete={onDelete}
             />
           ))}
         </div>
@@ -445,8 +482,8 @@ export function BranchChat({
           {onAttach && (
             <button type="button" onClick={onAttach} disabled={!canAct || (baseIsVideo && refsFull)}
               title={baseIsVideo ? `Attach a style reference (up to ${VIDEO_EDIT_MAX_REFERENCES})` : 'Attach a reference image or screenshot'}
-              className="shrink-0 inline-flex items-center justify-center w-9 h-9 border border-border hover:border-amber-400 hover:bg-amber-50 disabled:opacity-40 disabled:hover:border-border disabled:hover:bg-transparent">
-              📎
+              className="shrink-0 inline-flex items-center justify-center w-9 h-9 border border-border text-text-secondary hover:text-amber-700 hover:border-amber-400 hover:bg-amber-50 disabled:opacity-40 disabled:hover:border-border disabled:hover:bg-transparent disabled:hover:text-text-secondary">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
             </button>
           )}
           <textarea

@@ -181,6 +181,35 @@ export async function updateVersion(accessToken, versionId, patch) {
   } catch (err) { return { error: err.message } }
 }
 
+// Removes exactly one candidate from a lane's history — not the whole thread
+// (deleteSession above). Any later version that named this one as its base
+// gets re-pointed to ITS parent FIRST, so the chain closes over the gap
+// instead of leaving those rows' parent_version_id pointing at nothing —
+// which buildBranches would read as "no parent" and turn every edit made
+// after the deleted one into its own new, orphaned branch.
+export async function deleteVersion(accessToken, version, allVersions) {
+  const children = (allVersions || []).filter(v => v.parent_version_id === version.id)
+  if (children.length) {
+    const res = await fetch(
+      `${SUPABASE_URL}/rest/v1/creative_versions?parent_version_id=eq.${version.id}`,
+      {
+        method: 'PATCH',
+        headers: jsonHeaders(accessToken, 'return=minimal'),
+        body: JSON.stringify({ parent_version_id: version.parent_version_id || null }),
+      },
+    )
+    if (!res.ok) return { error: await res.text() }
+  }
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/creative_versions?id=eq.${version.id}`, {
+      method: 'DELETE',
+      headers: jsonHeaders(accessToken, 'return=minimal'),
+    })
+    if (!res.ok) return { error: await res.text() }
+    return { ok: true }
+  } catch (err) { return { error: err.message } }
+}
+
 // Exactly one version in a session is the current pick. Cleared across the
 // whole session first so the flag can never be true on two rows at once —
 // the toolbar and every downstream step read it to decide what they act on.
