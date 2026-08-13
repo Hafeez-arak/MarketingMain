@@ -7704,21 +7704,113 @@ const videoUrl = safeUrl(body.video_url, 'The clip');
 if (!versionId) throw new Error('No version to write the result back to.');
 if (!overlays.length) throw new Error('Nothing to composite onto the clip.');
 
+// ── Trim ──
+// Which part of the clip ships, in seconds of SOURCE time. Absent means all of
+// it, which is every request made before trimming existed.
+//
+// The editor authors layer cues against the clip as rendered, so trimming the
+// front does NOT move them in the document — it moves them here, once, because
+// the trimmed output's t=0 is the source's t=trimStart. Doing the shift in the
+// document instead would silently rewrite every cue the moment a handle moved.
+const trimStart = Math.max(0, Number(body.trim_start) || 0);
+const rawTrimEnd = body.trim_end;
+const trimEnd = rawTrimEnd === null || rawTrimEnd === undefined || rawTrimEnd === ''
+  ? null : Math.max(0, Number(rawTrimEnd) || 0);
+if (trimEnd !== null && trimEnd <= trimStart) throw new Error('The trim ends before it starts.');
+const trimmed = trimStart > 0 || trimEnd !== null;
+
+// A layer that lives entirely in the trimmed-away part is dropped rather than
+// shifted. Without this its cues both clamp to 0 and `between(t,0,0)` flashes
+// it for a single frame at the very start of the video — a layer the marketer
+// deliberately cut, reappearing.
+const kept = overlays.filter(function (o) {
+  const sIn = Math.max(0, Number(o.t_in) || 0);
+  const hasOut = o.t_out !== null && o.t_out !== undefined && o.t_out !== '';
+  const sOut = hasOut ? Number(o.t_out) : null;
+  if (sOut !== null && sOut <= trimStart) return false;
+  if (trimEnd !== null && sIn >= trimEnd) return false;
+  return true;
+});
+if (!kept.length) throw new Error('Every layer sits outside the part of the clip you kept, so there is nothing to composite.');
+
 // ── the filter chain ──
 // Overlays arrive back-to-front, matching the editor's own layer order, and
 // each is chained onto the previous result so stacking survives the round trip.
 const num = n => (Math.round((Number(n) || 0) * 100) / 100).toFixed(2);
+
+// ── Motion ──
+// `overlay` takes expressions in `t` for x and y, which is what makes an
+// animated headline free: no per-frame rendering, no second pass, just a
+// longer string in a filter chain that already exists.
+//
+// The curve is ease-out cubic written as REMAINING travel — pow(1-p,3) — which
+// is character-for-character the shape model/playback.js uses for the preview.
+// If one of the two is ever changed, the other has to change with it or the
+// editor starts lying about what will ship.
+//
+// Distance is 6% of the OVERLAY's height on both axes, matching MOTION_DISTANCE
+// there, so a slide reads as the same gesture whatever shape the frame is.
+const MOTION_VECTORS = {
+  rise: [0, 1], fall: [0, -1], 'slide-left': [1, 0], 'slide-right': [-1, 0],
+};
+const MOTION_FRACTION = 0.06;
+
+// Progress ramps clamped to [0,1] so the expression is flat outside its own
+// window — ffmpeg evaluates this on every frame of the clip, not just during
+// the ramp.
+//
+// Commas are left BARE. The whole expression is wrapped in single quotes at
+// the call site, which is how the `enable=` option next to it has always
+// protected its own commas; adding backslash escapes on top would survive the
+// quote stripping and reach the expression evaluator as literal backslashes.
+function rampIn(tIn, d) {
+  return 'pow(1-min(max((t-' + num(tIn) + ')/' + num(d) + ',0),1),3)';
+}
+function rampOut(tOut, d) {
+  return 'pow(1-min(max((' + num(tOut) + '-t)/' + num(d) + ',0),1),3)';
+}
+
+// Returns { x, y } as ffmpeg expressions, or null when nothing moves — in
+// which case the caller keeps the plain `overlay=0:0` it always emitted.
+function motionExpr(anim, tIn, tOut, hasOut) {
+  if (!anim) return null;
+  const vIn = MOTION_VECTORS[anim.in];
+  const vOut = hasOut ? MOTION_VECTORS[anim.out] : null;
+  if (!vIn && !vOut) return null;
+  const d = Math.max(0.05, Number(anim.duration) || 0.4);
+  // 'H' is the overlay input's height in overlay's expression vocabulary; the
+  // travel therefore scales with the frame instead of being baked in pixels.
+  const travel = '(H*' + MOTION_FRACTION + ')';
+  const axis = i => {
+    const terms = [];
+    if (vIn && vIn[i]) terms.push((vIn[i] > 0 ? '' : '-') + travel + '*' + rampIn(tIn, d));
+    // Negated, so on the way out it keeps going the way it came in rather
+    // than reversing back over its own path.
+    if (vOut && vOut[i]) terms.push((vOut[i] > 0 ? '-' : '') + travel + '*' + rampOut(tOut, d));
+    return terms.length ? terms.join('+') : '0';
+  };
+  return { x: axis(0), y: axis(1) };
+}
 const lines = ['[0:v]crop=${TW}:${TH}:${OX}:${OY},setsar=1[base]'];
 let prev = 'base';
 const fetches = [];
 
-overlays.forEach((o, i) => {
+kept.forEach((o, i) => {
   const url = safeUrl(o.url, 'An overlay');
   fetches.push('wget -q -O ovl' + i + '.png ' + url);
 
-  const tIn  = Math.max(0, Number(o.t_in) || 0);
-  const hasOut = o.t_out !== null && o.t_out !== undefined && o.t_out !== '';
-  const tOut = hasOut ? Number(o.t_out) : null;
+  // Source time in, output time out. A cue that started 1.2s into a clip whose
+  // first second was trimmed away starts 0.2s into what ships.
+  const srcIn = Math.max(0, Number(o.t_in) || 0);
+  const hasSrcOut = o.t_out !== null && o.t_out !== undefined && o.t_out !== '';
+  const srcOut = hasSrcOut ? Number(o.t_out) : null;
+
+  const tIn = Math.max(0, srcIn - trimStart);
+  // A layer that ran to the end of the clip still runs to the end of the
+  // trimmed clip — `null` has to survive the shift, or trimming would pin
+  // every open-ended cue to a number and stop it following a re-render.
+  const hasOut = hasSrcOut;
+  const tOut = hasOut ? Math.max(0, srcOut - trimStart) : null;
   const fade = Math.max(0, Number(o.fade) || 0);
 
   let f = '[' + (i + 1) + ':v]scale=${TW}:${TH},format=rgba';
@@ -7728,7 +7820,9 @@ overlays.forEach((o, i) => {
   }
   lines.push(f + '[o' + i + ']');
 
-  let ov = '[' + prev + '][o' + i + ']overlay=0:0:format=auto';
+  const mv = motionExpr(o.anim, tIn, tOut, hasOut);
+  let ov = '[' + prev + '][o' + i + ']overlay='
+    + (mv ? "x='" + mv.x + "':y='" + mv.y + "'" : '0:0') + ':format=auto';
   // Only gate a layer that actually comes and goes. `enable` is evaluated per
   // frame, and a full-length layer would pay for an expression that is always
   // true — which is the common case by a wide margin.
@@ -7738,7 +7832,7 @@ overlays.forEach((o, i) => {
   prev = 'v' + i;
 });
 
-const inputs = overlays.map((_, i) => '-loop 1 -framerate "$FPS" -i ovl' + i + '.png').join(' ');
+const inputs = kept.map((_, i) => '-loop 1 -framerate "$FPS" -i ovl' + i + '.png').join(' ');
 const filter = lines.join(';');
 
 const filename = (sessionId ? sessionId + '/' : '') + versionId + '-' + Date.now() + '.mp4';
@@ -7769,6 +7863,14 @@ const script = [
   'CH=$(ffprobe -v error -select_streams v:0 -show_entries stream=height -of csv=p=0 clip.mp4)',
   'FPS=$(ffprobe -v error -select_streams v:0 -show_entries stream=r_frame_rate -of csv=p=0 clip.mp4)',
   'DUR=$(ffprobe -v error -show_entries format=duration -of csv=p=0 clip.mp4)',
+  // The trimmed length, computed in the shell because only it has the probed
+  // duration. awk rather than $(( )) — busybox sh does integer arithmetic only,
+  // and a clip is 8.04 seconds, not 8.
+  ...(trimmed ? [
+    'KEEP=$(awk -v d="$DUR" -v s=' + num(trimStart)
+      + ' -v e=' + (trimEnd === null ? '-1' : num(trimEnd))
+      + ' \'BEGIN{ end = (e < 0 ? d : (e < d ? e : d)); k = end - s; if (k < 0.1) k = 0.1; printf "%.3f", k }\')',
+  ] : []),
   'OW=$(ffprobe -v error -select_streams v:0 -show_entries stream=width  -of csv=p=0 ovl0.png)',
   'OH=$(ffprobe -v error -select_streams v:0 -show_entries stream=height -of csv=p=0 ovl0.png)',
   // Centre-crop the CLIP to the OVERLAY's aspect. The overlay was composed
@@ -7785,9 +7887,22 @@ const script = [
   // with timestamps to fade along. -t bounds the otherwise infinite loops.
   // -c:a copy rather than re-encode: Seedance's native audio is the one thing a
   // free composite must not quietly degrade.
-  'ffmpeg -nostdin -v error -y -i clip.mp4 ' + inputs +
+  // `-ss` goes BEFORE `-i` so the decoder seeks rather than decoding and
+  // discarding everything up to the in point — on a 30s clip trimmed to its
+  // last five seconds that is the difference between a second and half a
+  // minute. Modern ffmpeg is still frame-accurate there; the old
+  // keyframe-rounding caveat applies to `-ss` used as an output option.
+  //
+  // It applies to input 0 ONLY. The overlay PNGs are `-loop 1` streams with no
+  // meaningful timeline of their own, and seeking them would be meaningless;
+  // their cues were already shifted onto output time above.
+  //
+  // Audio is still `-c:a copy` — a stream copy cut at an arbitrary point can
+  // only start at an audio frame boundary, which is a few milliseconds, and
+  // re-encoding the model's own audio to save that is a bad trade.
+  'ffmpeg -nostdin -v error -y ' + (trimStart > 0 ? '-ss ' + num(trimStart) + ' ' : '') + '-i clip.mp4 ' + inputs +
     ' -filter_complex "' + filter + '"' +
-    ' -map "[' + prev + ']" -map 0:a? -t "$DUR"' +
+    ' -map "[' + prev + ']" -map 0:a? -t "' + (trimmed ? '$KEEP' : '$DUR') + '"' +
     ' -c:v libx264 -preset veryfast -crf 18 -pix_fmt yuv420p -c:a copy -movflags +faststart out.mp4',
   'test -s out.mp4',
   // The path is echoed rather than predicted because only the shell knows what
@@ -7867,12 +7982,24 @@ const plan = clips.map((c, i) => {
   const t = c.transition === 'crossfade' ? 'crossfade' : 'cut';
   let d = Number(c.transition_duration);
   if (!isFinite(d)) d = 0.5;
+  // How much of this shot's own footage to keep, in seconds. Absent means all
+  // of it, which is every request made before the reel could be trimmed.
+  // Applied during normalisation below, where each clip is already being
+  // re-encoded — so a trim costs nothing at all, unlike shortening a shot by
+  // re-rendering it.
+  const ts = Math.max(0, Number(c.trim_start) || 0);
+  const rawEnd = c.trim_end;
+  const te = rawEnd === null || rawEnd === undefined || rawEnd === ''
+    ? null : Math.max(0, Number(rawEnd) || 0);
+  if (te !== null && te <= ts) throw new Error('Clip ' + (i + 1) + ' is trimmed to nothing.');
   return {
     file: 'c' + i + '.mp4',
     url: safeUrl(c.url, 'Clip ' + (i + 1)),
     // The seam BEFORE this clip. Clip 0 has none.
     transition: i === 0 ? 'cut' : t,
     fade: Math.min(2, Math.max(0.1, d)),
+    trimStart: ts,
+    trimEnd: te,
   };
 });
 
@@ -7957,7 +8084,21 @@ const plan = src.plan.map(p => {
   if (!probe || !probe.w || !probe.h || !isFinite(probe.dur) || probe.dur <= 0) {
     throw new Error('Could not read the size or length of ' + p.file + '.');
   }
-  return { ...p, ...probe };
+  // The trim resolved against what the file turned out to be. ffprobe has the
+  // last word here rather than the browser: the editor's figure came from
+  // metadata, and a clip that reported one length while loading and another
+  // once complete would put every seam after it in the wrong place.
+  //
+  // `dur` is overwritten with the KEPT length deliberately — every downstream
+  // calculation (the segment runs, the xfade offset recurrence, the expected
+  // total) is about what ends up in the reel, and leaving the full length in
+  // there would put a crossfade past the end of a trimmed stream, which ffmpeg
+  // renders as a frozen frame or a black gap without erroring.
+  const start = Math.min(Math.max(0, p.trimStart || 0), Math.max(0, probe.dur - 0.1));
+  const end = p.trimEnd === null || p.trimEnd === undefined
+    ? probe.dur : Math.min(p.trimEnd, probe.dur);
+  const kept = Math.max(0.1, end - start);
+  return { ...p, ...probe, srcDur: probe.dur, trimStart: start, dur: kept };
 });
 
 // ── Target geometry ──
@@ -8047,11 +8188,21 @@ const lines = ['set -e', 'cd "' + cwd + '"'];
 // breaks everything: a reel where some clips have sound and some do not comes
 // out with audio on the first segment only, because concat matches streams by
 // index. anullsrc gives the silent ones a real track to match against.
+// The trim rides along on the normalise pass that was happening anyway, which
+// is what makes it free: `-ss` before `-i` so the decoder seeks instead of
+// decoding and throwing frames away, and `-t` on the output to stop at the
+// kept length. A clip with no trim gets neither flag and the command is
+// character-for-character what it always was.
+const r2 = n => (Math.round((Number(n) || 0) * 1000) / 1000).toFixed(3);
+const cutIn = p => (p.trimStart > 0 ? '-ss ' + r2(p.trimStart) + ' ' : '');
+const cutLen = p => (p.dur < p.srcDur - 0.02 ? ' -t ' + r2(p.dur) : '');
+
 plan.forEach((p, i) => {
   const out = 'n' + i + '.mp4';
   if (p.hasAudio) {
     lines.push(
-      'ffmpeg -nostdin -v error -y -i ' + p.file +
+      'ffmpeg -nostdin -v error -y ' + cutIn(p) + '-i ' + p.file +
+      cutLen(p) +
       ' -vf "' + scale + '"' +
       // apad + -shortest forces the audio to be exactly as long as the video
       // even when the source's track is a few ms short. That equality is what
@@ -8061,9 +8212,9 @@ plan.forEach((p, i) => {
       VENC + ' ' + AENC + ' -movflags +faststart ' + out);
   } else {
     lines.push(
-      'ffmpeg -nostdin -v error -y -i ' + p.file +
+      'ffmpeg -nostdin -v error -y ' + cutIn(p) + '-i ' + p.file +
       ' -f lavfi -i anullsrc=channel_layout=stereo:sample_rate=48000' +
-      ' -map 0:v -map 1:a -shortest' +
+      ' -map 0:v -map 1:a -shortest' + cutLen(p) +
       ' -vf "' + scale + '" ' +
       VENC + ' ' + AENC + ' -movflags +faststart ' + out);
   }

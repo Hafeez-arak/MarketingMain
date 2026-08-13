@@ -3,6 +3,7 @@ import { buildTextBitmap } from './textBitmap'
 import { applyAdjustments, hasAdjustments } from './adjust'
 import { ensureLayerImages, getCachedImage } from './imageCache'
 import { cropPx, dashFor, docSize, isPoly, layerTiming, shapePoints, timingKey } from './document'
+import { layerMotion } from './playback'
 
 // ─── Headless render + export ──────────────────────────────────────────────
 // Renders the full document (base image + adjustments + every visible layer)
@@ -208,7 +209,10 @@ export async function exportOverlay(baseCanvas, doc) {
     const key = timingKey(l)
     let g = byKey.get(key)
     if (!g) {
-      g = { ...layerTiming(l), ids: [] }
+      // The motion travels with the group because ffmpeg applies it to the
+      // whole PNG. timingKey already guarantees every layer in a group shares
+      // one, so reading it off the first is reading it off all of them.
+      g = { ...layerTiming(l), anim: layerMotion(l), ids: [] }
       byKey.set(key, g)
       groups.push(g)
     }
@@ -221,7 +225,13 @@ export async function exportOverlay(baseCanvas, doc) {
   const blobs = await Promise.all(canvases.map(c => canvasToBlob(c)))
   const { width, height } = docSize(baseCanvas.width, baseCanvas.height, doc.crop)
   return {
-    overlays: groups.map((g, i) => ({ blob: blobs[i], tIn: g.tIn, tOut: g.tOut, fade: g.fade })),
+    // Each PNG is rendered at REST — the layer where it sits when nothing is
+    // moving. The motion is described rather than drawn, and ffmpeg applies it
+    // by moving the whole image, which is why baking any part of it in here
+    // would double it.
+    overlays: groups.map((g, i) => ({
+      blob: blobs[i], tIn: g.tIn, tOut: g.tOut, fade: g.fade, anim: g.anim,
+    })),
     width, height,
   }
 }

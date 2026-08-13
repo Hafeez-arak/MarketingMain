@@ -18,6 +18,14 @@ import { dashFor, isPoly, shapePoints } from '../model/document'
 //     than once for the whole Transformer) is what makes a multi-selection
 //     resize work: Konva fires the event on every node it transformed, and
 //     each patch is applied functionally, so they compose instead of racing.
+//   · alpha / live — the layer's opacity AT THE CURRENT TIME, and whether it
+//     is within its own time range at all. On a photo both are trivially the
+//     layer's own opacity and true; on a clip they come from model/playback.js
+//     so what is on the canvas is what ffmpeg will composite. `live` is kept
+//     separate from `alpha` rather than inferred from it because a layer can
+//     legitimately be given zero opacity by the marketer, and that one should
+//     still be clickable — the one you cannot click is the one that isn't on
+//     screen yet.
 
 // Konva's `perfectDraw` renders through an offscreen buffer to get fills and
 // strokes exactly right at overlaps. We don't have translucent stroked
@@ -26,7 +34,7 @@ import { dashFor, isPoly, shapePoints } from '../model/document'
 const PERF = { perfectDrawEnabled: false, shadowForStrokeEnabled: false }
 
 // ── Shapes: rect / ellipse ─────────────────────────────────────────────────
-export function ShapeNode({ layer, W, H, selectable, onSelect, onChange, registerRef, onDragStart, onDragMove, onDragEnd, onContextMenu }) {
+export function ShapeNode({ layer, W, H, selectable, alpha, live = true, onSelect, onChange, registerRef, onDragStart, onDragMove, onDragEnd, onContextMenu }) {
   const ref = useRef(null)
   useEffect(() => {
     registerRef(layer.id, ref.current)
@@ -36,11 +44,11 @@ export function ShapeNode({ layer, W, H, selectable, onSelect, onChange, registe
   const common = {
     ref, ...PERF,
     onMouseDown: onSelect, onTap: onSelect, onContextMenu,
-    draggable: selectable && !layer.locked,
+    draggable: selectable && !layer.locked && live,
     onDragStart, onDragMove, onDragEnd,
-    opacity: layer.opacity ?? 1,
+    opacity: alpha ?? layer.opacity ?? 1,
     rotation: layer.rotation || 0,
-    listening: selectable,
+    listening: selectable && live,
   }
 
   const strokeWidth = (layer.strokeWidth || 0) * H
@@ -107,7 +115,7 @@ export function ShapeNode({ layer, W, H, selectable, onSelect, onChange, registe
 // The node itself only selects and drags as a whole; each END is dragged by
 // its own handle circle (rendered by the Stage for the selected path), which
 // sidesteps Konva's points-vs-node-position double accounting entirely.
-export function PathNode({ layer, W, H, selectable, onSelect, registerRef, onDragStart, onDragMove, onDragEnd, onContextMenu }) {
+export function PathNode({ layer, W, H, selectable, alpha, live = true, onSelect, registerRef, onDragStart, onDragMove, onDragEnd, onContextMenu }) {
   const ref = useRef(null)
   useEffect(() => {
     registerRef(layer.id, ref.current)
@@ -122,10 +130,10 @@ export function PathNode({ layer, W, H, selectable, onSelect, registerRef, onDra
     <Comp ref={ref} {...PERF}
       points={[layer.x1 * W, layer.y1 * H, layer.x2 * W, layer.y2 * H]}
       onMouseDown={onSelect} onTap={onSelect} onContextMenu={onContextMenu}
-      draggable={selectable && !layer.locked}
+      draggable={selectable && !layer.locked && live}
       onDragStart={onDragStart} onDragMove={onDragMove} onDragEnd={onDragEnd}
-      listening={selectable}
-      opacity={layer.opacity ?? 1}
+      listening={selectable && live}
+      opacity={alpha ?? layer.opacity ?? 1}
       stroke={layer.stroke || undefined}
       fill={isArrow ? layer.stroke || undefined : undefined}
       strokeWidth={stroke}
@@ -160,7 +168,7 @@ function useLayerImage(url) {
   return cached
 }
 
-export function ImageNode({ layer, W, H, selectable, onSelect, onChange, registerRef, onDragStart, onDragMove, onDragEnd, onContextMenu }) {
+export function ImageNode({ layer, W, H, selectable, alpha, live = true, onSelect, onChange, registerRef, onDragStart, onDragMove, onDragEnd, onContextMenu }) {
   const ref = useRef(null)
   const img = useLayerImage(layer.url)
   useEffect(() => {
@@ -184,8 +192,8 @@ export function ImageNode({ layer, W, H, selectable, onSelect, onChange, registe
     <KonvaImage ref={ref} {...PERF} image={img}
       x={layer.x * W} y={layer.y * H} width={layer.w * W} height={layer.h * H}
       cornerRadius={(layer.cornerRadius || 0) * H}
-      opacity={layer.opacity ?? 1} rotation={layer.rotation || 0}
-      draggable={selectable && !layer.locked} listening={selectable}
+      opacity={alpha ?? layer.opacity ?? 1} rotation={layer.rotation || 0}
+      draggable={selectable && !layer.locked && live} listening={selectable && live}
       onMouseDown={onSelect} onTap={onSelect} onContextMenu={onContextMenu}
       onDragStart={onDragStart} onDragMove={onDragMove} onDragEnd={onDragEnd}
       onTransformEnd={commitTransformEnd}
@@ -200,7 +208,7 @@ export function ImageNode({ layer, W, H, selectable, onSelect, onChange, registe
 // drag's scale factor back into real size/w fractions so the NEXT render
 // regenerates a crisp bitmap at the new font size rather than stretching the
 // old one. Editing the words happens in an HTML overlay on double-click.
-export function TextNode({ layer, W, H, epoch, selectable, hidden, onSelect, onChange, registerRef, onDragStart, onDragMove, onDragEnd, onEditStart, onContextMenu }) {
+export function TextNode({ layer, W, H, epoch, selectable, hidden, alpha, live = true, onSelect, onChange, registerRef, onDragStart, onDragMove, onDragEnd, onEditStart, onContextMenu }) {
   const ref = useRef(null)
   useEffect(() => {
     registerRef(layer.id, ref.current)
@@ -235,10 +243,10 @@ export function TextNode({ layer, W, H, epoch, selectable, hidden, onSelect, onC
     <KonvaImage ref={ref} {...PERF} image={bmp.canvas}
       x={layer.x * W - bmp.offsetX} y={layer.y * H - bmp.offsetY}
       width={bmp.width} height={bmp.height}
-      opacity={hidden ? 0 : (layer.opacity ?? 1)}
-      listening={selectable && !hidden}
+      opacity={hidden ? 0 : (alpha ?? layer.opacity ?? 1)}
+      listening={selectable && !hidden && live}
       rotation={layer.rotation || 0}
-      draggable={selectable && !layer.locked}
+      draggable={selectable && !layer.locked && live}
       onMouseDown={onSelect} onTap={onSelect} onContextMenu={onContextMenu}
       onDblClick={onEditStart} onDblTap={onEditStart}
       onDragStart={onDragStart} onDragMove={onDragMove} onDragEnd={onDragEnd}

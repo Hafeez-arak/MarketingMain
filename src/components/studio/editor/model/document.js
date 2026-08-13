@@ -235,9 +235,64 @@ export function isFullLength(layer) {
 // single image and a single ffmpeg overlay. Rounded to 2dp because that is the
 // precision the filter graph is given, and two layers agreeing to the
 // millisecond but not the microsecond should not cost an extra composite pass.
+//
+// **Motion is part of the key, not just timing.** An overlay's animation is
+// applied by ffmpeg to the whole PNG, so two layers sharing a group also share
+// every pixel of movement. Bundling a sliding headline with a static logo that
+// happened to run for the same seconds would drag the logo across the frame
+// with it. Layers that move differently must therefore be different images —
+// which costs an extra overlay pass, and only for documents that asked for it.
 export function timingKey(layer) {
   const { tIn, tOut, fade } = layerTiming(layer)
-  return `${tIn.toFixed(2)}|${tOut === null ? 'end' : tOut.toFixed(2)}|${fade.toFixed(2)}`
+  const a = layer?.anim
+  const motion = a && (a.in || a.out) && (a.in !== 'none' || a.out !== 'none')
+    ? `${a.in || 'none'}>${a.out || 'none'}@${Number(a.duration) || 0.4}`
+    : 'still'
+  return `${tIn.toFixed(2)}|${tOut === null ? 'end' : tOut.toFixed(2)}|${fade.toFixed(2)}|${motion}`
+}
+
+// ── Trim (video mode only) ─────────────────────────────────────────────────
+// Which part of the clip actually ships. `{ start, end }` in seconds of SOURCE
+// time — the clip as the model rendered it — with `end: null` meaning "to the
+// end of the footage".
+//
+// This is deliberately the same shape of idea as `crop`: a window onto media
+// that is never itself cut. The footage in storage stays whole, so a trim from
+// last week can be widened again, and — as with the crop — the timeline shows
+// the WHOLE clip with the excluded parts dimmed rather than absent, because
+// being able to drag the edge back out over them is the entire point.
+//
+// The consequence that matters most is what it does NOT change: layer timings
+// stay in source time. A headline written to appear at 2s still means 2s of
+// the original clip whether or not someone later trims the first second off
+// the front. Re-basing them onto the trimmed window would silently move every
+// cue in the document the moment a handle was dragged, which is exactly the
+// kind of quiet damage `tOut: null` exists to avoid. The compose step shifts
+// the overlays onto output time at the end, once, where the real duration is
+// known.
+export const DEFAULT_TRIM = Object.freeze({ start: 0, end: null })
+
+export function normalizeTrim(raw) {
+  if (!raw || typeof raw !== 'object') return { ...DEFAULT_TRIM }
+  const start = Math.max(0, Number(raw.start) || 0)
+  const rawEnd = raw.end
+  const end = rawEnd === null || rawEnd === undefined || rawEnd === '' ? null : Math.max(0, Number(rawEnd) || 0)
+  return { start, end: end !== null && end <= start ? null : end }
+}
+
+export function isFullClip(trim) {
+  const t = normalizeTrim(trim)
+  return t.start === 0 && t.end === null
+}
+
+// The window resolved against a real clip length: what actually plays, and
+// what the compose step is told to keep.
+export function trimWindow(trim, duration) {
+  const d = Math.max(0.1, Number(duration) || 0)
+  const t = normalizeTrim(trim)
+  const start = Math.min(t.start, Math.max(0, d - 0.1))
+  const end = t.end === null ? d : Math.min(t.end, d)
+  return { start, end: Math.max(start + 0.1, end), length: Math.max(0.1, Math.max(start + 0.1, end) - start) }
 }
 
 // Keeps a bar inside the clip and never inverted. `duration` is the clip's
@@ -322,13 +377,18 @@ export function migrateDocument(state, baseW, baseH) {
   const baked = state && !state.v
   const adjust = { ...DEFAULT_ADJUST, ...(baked ? null : state?.adjust) }
 
+  // Absent on every document ever saved, and absent means the whole clip —
+  // which is why this needed no version bump. Meaningless on a photo, where
+  // nothing ever reads it.
+  const trim = normalizeTrim(state?.trim)
+
   if (state && Array.isArray(state.layers)) {
-    return { width, height, crop, layers: state.layers.map(l => ({ ...l })), adjust }
+    return { width, height, crop, trim, layers: state.layers.map(l => ({ ...l })), adjust }
   }
   if (state && Array.isArray(state.boxes)) {
-    return { width, height, crop, layers: state.boxes.map(b => newTextLayer({ ...b })), adjust }
+    return { width, height, crop, trim, layers: state.boxes.map(b => newTextLayer({ ...b })), adjust }
   }
-  return { width, height, crop, layers: [], adjust: { ...DEFAULT_ADJUST } }
+  return { width, height, crop, trim, layers: [], adjust: { ...DEFAULT_ADJUST } }
 }
 
 // ── Layer-list operations, all pure ────────────────────────────────────────

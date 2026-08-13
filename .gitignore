@@ -13,6 +13,10 @@ dist-ssr
 *.local
 __pycache__
 
+# Fixture for the dev-only editor harness (dev-editor.html). Regenerate with
+# the ffmpeg inside the n8n container — see src/dev/editorHarness.jsx.
+public/dev-clip*.mp4
+
 # Secrets — Supabase URL/anon key, never commit
 .env
 .env.*

@@ -829,6 +829,27 @@ click.
     refuses anything in `/tmp` with "Access to the file is not allowed." The
     composite is written inside `~/.n8n-files` instead of widening the setting.
 
+  **Extended 2026-08-12 into a real video editor — see `VIDEO-EDITOR.md`.**
+  The clip now *plays* under the layers with a playhead, a ruler and a
+  transport, instead of the still it used to be; the footage has trim handles
+  (free, `-ss`/`-t`, with the cues shifted onto the trimmed clock by the
+  compose step rather than rewritten in the document); and layers have **motion
+  in and out** — rise, drop, slide — done with `overlay` x/y expressions in the
+  filter chain that already existed, so it stays free. The preview is
+  centre-cropped exactly as the composite is, so the framing on screen is the
+  framing that ships. The long-video board is still a pre-render form; making
+  the shot list and the timeline one object is the open work.
+
+  A multi-clip session also opens with a **reel timeline** above the board: the
+  rendered shots in order, playable back to back in the browser, each with its
+  own free trim handles. So the cut can be watched and adjusted against real
+  footage before anything is paid to assemble it — where every assembly
+  decision used to be a guess made before a frame existed.
+
+  ✅ **Creative Compose and Creative Stitch both redeployed 2026-08-12** — the
+  deployed JSON carries the new code and both webhooks answer
+  `{"status":"accepted"}`, so trim, motion and per-clip trim are live.
+
   Files: `n8n/gen_workflows.py` (`build_creative_compose`), `n8n/docker/*`,
   `n8n/redeploy.sh` (new — the update-in-place recipe, which the docs referenced
   but the repo never had), `src/components/studio/editor/canvas/Timeline.jsx`,

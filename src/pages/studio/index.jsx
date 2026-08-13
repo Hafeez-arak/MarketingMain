@@ -8,6 +8,7 @@ import { SessionSidebar } from '../../components/studio/SessionSidebar'
 import { Lightbox } from '../../components/studio/Lightbox'
 import { PromptBubble } from '../../components/studio/VersionCard'
 import { PhotoEditor } from '../../components/studio/editor/index'
+import { ReelTimeline } from '../../components/studio/ReelTimeline'
 import { VideoPanel } from '../../components/studio/VideoPanel'
 import { MediaPicker, AttachmentChip, MultiRefRow } from '../../components/studio/MediaPicker'
 import { AudioToggle, CostLine, LookPicker, ModelPicker, MotionPicker, QualityRow } from '../../components/studio/VideoSettings'
@@ -15,8 +16,8 @@ import { buildVideoPrompt } from '../../components/studio/motionPresets'
 import { ClipBoard } from '../../components/studio/ClipBoard'
 import { useClipSequencer } from '../../components/studio/useClipSequencer'
 import {
-  MULTI_CLIP_MAX, emptyStoryboard, moveClip, newClip, nextClipAttempt, normalizeStoryboard,
-  saveStoryboard, stitchRowsOf, storyboardTotals,
+  MULTI_CLIP_MAX, emptyStoryboard, moveClip, newClip, nextClipAttempt, normalizeClipTrim,
+  normalizeStoryboard, saveStoryboard, stitchRowsOf, storyboardTotals,
 } from '../../lib/creativeStoryboard'
 import {
   canEditVideoDuration, estimateVideoCost, estimateVideoEditCost, getVideoModel, modelImageMax,
@@ -1161,7 +1162,14 @@ export function CreativeStudio() {
         : ''
       const still = stitchOpener || chainedOpener || parentStillOf(version, versions)
       const frameUrl = still || await captureFirstFrame(version.video_url)
-      setEditingClip({ version, frameUrl })
+      // What PLAYS under the layers has to be the same footage the composite
+      // is built from — `baseVideoUrl` is the clip as the model rendered it,
+      // and on a row that has already been composited once `video_url` is the
+      // version with the previous wording burnt in. Previewing that one would
+      // show every past headline underneath the current layers and none of it
+      // would be in the render. Same rule, same reason, as handleComposeSave.
+      const playUrl = version.overlay_state?.baseVideoUrl || version.video_url
+      setEditingClip({ version, frameUrl, playUrl })
     } catch (err) {
       setError(err.message || String(err))
     } finally {
@@ -1191,12 +1199,21 @@ export function CreativeStudio() {
     if (rows.some(r => r?.status !== 'ready')) { setError('Every clip has to render before the reel can be assembled.'); return }
     setStitching(true); setError('')
 
-    const clips = rows.map((r, i) => ({
-      url: r.video_url,
-      // The seam BEFORE this clip; clip 0's is ignored by the workflow.
-      transition: i > 0 ? (storyboard.clips[i]?.transition || 'cut') : 'cut',
-      transition_duration: storyboard.clips[i]?.transitionDuration ?? 0.5,
-    }))
+    const clips = rows.map((r, i) => {
+      // Seconds of THIS clip's own footage to keep. Sent unresolved for the
+      // same reason the compose step's trim is: ffprobe in the workflow is the
+      // only thing that knows how long the file really is, and the browser's
+      // figure came from metadata it may have read before the file finished.
+      const trim = normalizeClipTrim(storyboard.clips[i]?.trim)
+      return {
+        url: r.video_url,
+        // The seam BEFORE this clip; clip 0's is ignored by the workflow.
+        transition: i > 0 ? (storyboard.clips[i]?.transition || 'cut') : 'cut',
+        transition_duration: storyboard.clips[i]?.transitionDuration ?? 0.5,
+        trim_start: trim.start || 0,
+        trim_end: trim.end ?? null,
+      }
+    })
 
     // The reel's expected runtime is stored on the row up front because the
     // text editor reads `duration` to size its timeline — an empty one would
@@ -1238,12 +1255,19 @@ export function CreativeStudio() {
     for (const [i, o] of overlays.entries()) {
       const up = await uploadToStudio(activeWorkspaceId, accessToken, o.blob, `overlay-${i}.png`)
       if (up.error) { setSavingOverlay(false); return { error: up.error } }
-      uploaded.push({ url: up.url, tIn: o.tIn, tOut: o.tOut, fade: o.fade })
+      uploaded.push({ url: up.url, tIn: o.tIn, tOut: o.tOut, fade: o.fade, anim: o.anim || null })
     }
     const newOverlayState = { ...overlayState, overlays: uploaded, baseVideoUrl: sourceVideo }
     const payload = {
       video_url: sourceVideo,
-      overlays: uploaded.map(o => ({ url: o.url, t_in: o.tIn, t_out: o.tOut, fade: o.fade })),
+      overlays: uploaded.map(o => ({ url: o.url, t_in: o.tIn, t_out: o.tOut, fade: o.fade, anim: o.anim })),
+      // The trim, in seconds of SOURCE time. Sent unresolved — ffprobe is the
+      // only thing that knows the clip's real length, and the workflow is
+      // where the overlay cues get shifted onto the trimmed output's clock.
+      // Absent or zero-to-null means the whole clip, which is every row saved
+      // before trimming existed.
+      trim_start: overlayState?.trim?.start || 0,
+      trim_end: overlayState?.trim?.end ?? null,
     }
 
     // Editing a row that is already a composite replaces it in place, exactly
@@ -1748,6 +1772,17 @@ export function CreativeStudio() {
              starts with a storyboard and ZERO version rows, so the empty state
              below would swallow the board on every new one. */
           ) : isMulti && storyboard ? (
+            <div className="space-y-3">
+              {/* The cut, as footage, above the shot list that produced it.
+                  Every control on it is free — watching, trimming, re-ordering
+                  — which is exactly why it is a separate surface from the
+                  board, where the buttons spend money. */}
+              <ReelTimeline
+                storyboard={storyboard}
+                clipRows={sequencer.clipRows}
+                onPatchClip={patchClip}
+                disabled={sequencer.running}
+              />
             <ClipBoard
               storyboard={storyboard}
               clipRows={sequencer.clipRows}
@@ -1779,6 +1814,7 @@ export function CreativeStudio() {
               onDownloadStitch={handleDownload}
               onUseThis={v => setUseThisFor(v)}
             />
+            </div>
           ) : branches.length === 0 ? (
             <Empty title="Nothing here yet" description="This session has no versions." />
           ) : (
@@ -1918,6 +1954,7 @@ export function CreativeStudio() {
               mode="video"
               duration={Number(editingClip.version.duration) || 5}
               imageUrl={editingClip.frameUrl}
+              videoUrl={editingClip.playUrl}
               initialState={editingClip.version.overlay_state}
               saving={savingOverlay}
               onSave={handleComposeSave}

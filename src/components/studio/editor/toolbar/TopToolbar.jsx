@@ -1,6 +1,7 @@
 import { WEIGHTS, fontsFor } from '../../fonts'
 import { EFFECTS, ANCHORS } from '../../overlayModel'
 import { DASH_STYLES, isPath, isShape } from '../model/document'
+import { MOTIONS, MOTION_LABELS, DEFAULT_MOTION_SECONDS } from '../model/playback'
 import { ToolbarButton, ToolbarDivider, ToolbarMenu, MenuItem, NumberField, ColorField, SliderField } from '../controls'
 
 // ─── The contextual toolbar above the canvas ───────────────────────────────
@@ -20,7 +21,7 @@ export function TopToolbar({
   doc, selection, tool, panel,
   canUndo, canRedo, onUndo, onRedo,
   onPatch, onBeginChange, onOpenPanel,
-  onRotate, onFlip, onStartCrop, onCopyStyle, painting, palette,
+  onRotate, onFlip, onStartCrop, onCopyStyle, painting, palette, isVideo = false,
 }) {
   const H = doc.height
   const single = selection.length === 1 ? selection[0] : null
@@ -71,6 +72,9 @@ export function TopToolbar({
         <>
           <ToolbarDivider />
           <OpacityControl selection={selection} onPatch={onPatch} onBeginChange={onBeginChange} />
+          {isVideo && (
+            <AnimateMenu selection={selection} onPatch={onPatch} onBeginChange={onBeginChange} />
+          )}
         </>
       )}
 
@@ -354,6 +358,54 @@ function ImageControls({ layer, H, onPatch, onBeginChange }) {
   return (
     <NumberField label="R" value={Math.round((layer.cornerRadius || 0) * H)} min={0} max={Math.round(H / 2)} suffix="px" className="w-[92px]"
       onCommitStart={onBeginChange} onChange={px => onPatch({ cornerRadius: px / H })} />
+  )
+}
+
+// ── Animate ────────────────────────────────────────────────────────────────
+// Canva's split, kept: element TIMING is when it is on screen and lives on the
+// timeline; ANIMATION is how it arrives and leaves and lives here. The fade
+// sliders stay on the timeline with the timing they belong to.
+//
+// Video mode only, because it is the only mode with a `t`.
+function AnimateMenu({ selection, onPatch, onBeginChange }) {
+  const anim = selection[0]?.anim || {}
+  const inM = MOTIONS.includes(anim.in) ? anim.in : 'none'
+  const outM = MOTIONS.includes(anim.out) ? anim.out : 'none'
+  const secs = Math.max(0.05, Number(anim.duration) || DEFAULT_MOTION_SECONDS)
+  const set = patch => { onBeginChange(); onPatch({ anim: { in: inM, out: outM, duration: secs, ...patch } }) }
+  const label = inM === 'none' && outM === 'none' ? 'Animate' : `${MOTION_LABELS[inM]} / ${MOTION_LABELS[outM]}`
+
+  const row = (title, key, value) => (
+    <div className="px-1.5 py-1">
+      <p className="pb-1 text-[10px] font-semibold uppercase tracking-wide text-text-tertiary">{title}</p>
+      <div className="grid grid-cols-2 gap-1">
+        {MOTIONS.map(m => (
+          <button key={m} type="button" onClick={() => set({ [key]: m })}
+            className={`border px-1.5 py-1 text-left text-[11px] transition-colors ${
+              value === m ? 'border-amber-500 bg-amber-50 font-semibold text-amber-800' : 'border-border text-text hover:border-amber-300'
+            }`}>
+            {MOTION_LABELS[m]}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+
+  return (
+    <ToolbarMenu label={label} title="How this layer arrives and leaves" width={248} closeOnClick={false}>
+      {row('In', 'in', inM)}
+      {row('Out', 'out', outM)}
+      <div className="px-1.5 pb-1.5 pt-1">
+        <SliderField label="Speed" min={0.1} max={1.5} step={0.05} value={secs}
+          format={v => `${v.toFixed(2)}s`}
+          onCommitStart={onBeginChange} onChange={v => set({ duration: v })} />
+        {/* Said plainly, because it is the difference between our editor and
+            Canva's: this one is on the free side of the line. */}
+        <p className="px-0.5 pt-1 text-[10px] leading-snug text-text-tertiary">
+          Movement is added when the clip is composited — no re-render, no cost.
+        </p>
+      </div>
+    </ToolbarMenu>
   )
 }
 

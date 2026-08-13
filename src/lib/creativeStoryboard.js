@@ -52,8 +52,39 @@ export function newClip(modelId, overrides = {}) {
     continueFromPrevious: true,
     transition: 'cut',
     transitionDuration: 0.5,
+    // Which part of THIS SHOT'S RENDERED FOOTAGE ends up in the reel, in
+    // seconds. `end: null` is all of it, which is every clip until someone
+    // drags a handle.
+    //
+    // This is the free half of "make the shot shorter". The other half is
+    // re-rendering it at a different length, which costs $0.28–$14.19 and
+    // comes back a different take; trimming costs nothing and keeps the
+    // footage that was approved. The distinction is the whole reason the
+    // board and the timeline are different surfaces.
+    trim: { start: 0, end: null },
     ...overrides,
   }
+}
+
+// Normalised the same way `doc.trim` is in the editor, and for the same
+// reasons — see editor/model/document.js.
+export function normalizeClipTrim(raw) {
+  if (!raw || typeof raw !== 'object') return { start: 0, end: null }
+  const start = Math.max(0, Number(raw.start) || 0)
+  const e = raw.end
+  const end = e === null || e === undefined || e === '' ? null : Math.max(0, Number(e) || 0)
+  return { start, end: end !== null && end <= start ? null : end }
+}
+
+// How long a shot actually runs, given what its footage turned out to be.
+// `actual` is the length read off the rendered clip; before it has rendered
+// there is only the length we asked for, which is what the board has always
+// shown.
+export function clipRuntime(clip, actual) {
+  const full = Math.max(0, Number(actual) || Number(clip?.duration) || 0)
+  const t = normalizeClipTrim(clip?.trim)
+  const end = t.end === null ? full : Math.min(t.end, full)
+  return Math.max(0.1, end - Math.min(t.start, Math.max(0, full - 0.1)))
 }
 
 export function emptyStoryboard({ model, lookId, prompt } = {}) {
@@ -92,6 +123,7 @@ export function normalizeStoryboard(raw, fallback = {}) {
       continueFromPrevious: i === 0 ? false : !!c.continueFromPrevious,
       // Predates the field on any board saved before 2026-08-12.
       refs: Array.isArray(c.refs) ? c.refs.slice(0, 9) : [],
+      trim: normalizeClipTrim(c.trim),
     })),
     sharedRefs: Array.isArray(raw.sharedRefs) ? raw.sharedRefs.slice(0, 9) : [],
   }
@@ -241,13 +273,21 @@ export function chainedAfter(sb, index) {
 // finished runtime is the sum of the clips MINUS every fade. Same arithmetic
 // the stitch workflow does on the real probed durations — this is the
 // estimate shown before spending, from the requested durations.
-export function storyboardTotals(sb) {
+// `actuals` — the real lengths read off the rendered clips, by clip index —
+// is optional and absent before anything has rendered. Passing it makes the
+// runtime the length of what will actually ship rather than the length that
+// was ordered: a shot trimmed by two seconds shortens the reel here, and a
+// model that returned 5.2s when asked for 5 stops being rounded away.
+//
+// COST is deliberately unaffected by any of that. A trim is free, and a
+// rendered clip has already been paid for at the length it was rendered.
+export function storyboardTotals(sb, actuals = null) {
   const clips = sb?.clips || []
   let seconds = 0
   let cost = 0
   let overlap = 0
   clips.forEach((c, i) => {
-    seconds += Number(c.duration) || 0
+    seconds += actuals ? clipRuntime(c, actuals[i]) : (Number(c.duration) || 0)
     cost += estimateVideoCost(sb.model, {
       resolution: c.resolution, duration: c.duration, audio: sb.audio,
     })

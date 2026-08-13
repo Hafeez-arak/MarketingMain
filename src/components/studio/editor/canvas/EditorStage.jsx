@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Stage, Layer, Group, Rect, Circle, Line, Image as KonvaImage, Transformer } from 'react-konva'
 import { ShapeNode, PathNode, ImageNode, TextNode } from './LayerNodes'
 import { applyAdjustments, hasAdjustments } from '../model/adjust'
 import { patchLayers, isPath } from '../model/document'
 import { layerRect, translatePatch } from '../model/geometry'
 import { buildSnapTargets, computeSnap, constrainAxis, SNAP_SCREEN_PX, ROTATION_STEP } from '../model/snapping'
+import { centreCropRect, layerAlphaAt, layerLiveAt, motionOffsetAt } from '../model/playback'
 
 // ─── The canvas ────────────────────────────────────────────────────────────
 // Two Konva Layers, not one. The content layer holds the photo and every
@@ -43,9 +44,22 @@ export function EditorStage({
   tool, cropRect, cropRatio, onCropRect,
   editingId, onEditStart, onContextMenu,
   onInteractingChange,
+  // ── Video mode ──
+  // `playback` is the useVideoPlayback hook's return, or null on a photo.
+  // `time` is the committed time — the one React knows about, updated on
+  // pause, seek and end. While the clip is PLAYING the time never enters
+  // React at all; the subscription below mutates the Konva nodes directly.
+  // Both paths call the same layerAlphaAt, so the frame you scrub to and the
+  // frame you play past are identical.
+  playback = null, time = 0,
 }) {
   const { viewport, view, spaceDown, onWheel, setPan } = zoom
   const cropping = tool === 'crop'
+  const playing = !!playback?.playing
+  // Only once a frame has actually decoded. A <video> with metadata but no
+  // decoded frame draws as a blank rectangle rather than throwing, so the
+  // still stays up until there is something real to swap in.
+  const videoEl = playback?.ready ? playback.el : null
   // The layers' own coordinate frame is always the PAGE, cropping or not.
   const W = doc.width, H = doc.height
   // What the Stage is showing, and how the photo sits in it.
@@ -63,11 +77,13 @@ export function EditorStage({
   }
 
   const stageRef = useRef(null)
+  const contentLayerRef = useRef(null)
   const baseImgRef = useRef(null)
   const transformerRef = useRef(null)
   const cropNodeRef = useRef(null)
   const cropTransformerRef = useRef(null)
   const nodeRefs = useRef(new Map())
+  const motionRefs = useRef(new Map())
   const dragRef = useRef(null)
   const marqueeRef = useRef(null)
 
@@ -79,6 +95,14 @@ export function EditorStage({
     else nodeRefs.current.delete(id)
   }, [])
 
+  // The window onto the clip: the same centre-crop the compose script applies,
+  // so the framing on screen is the framing that ships. Without it a 3:4 clip
+  // under a 4:5 document would preview with margins the render never has.
+  const videoCrop = useMemo(
+    () => (videoEl ? centreCropRect(videoEl.videoWidth, videoEl.videoHeight, W, H) : null),
+    [videoEl, W, H],
+  )
+
   const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds])
   const selectedLayers = useMemo(() => doc.layers.filter(l => selectedSet.has(l.id)), [doc.layers, selectedSet])
   const single = selectedLayers.length === 1 ? selectedLayers[0] : null
@@ -87,7 +111,12 @@ export function EditorStage({
   // that starts on an element pans instead of moving it, which is what the
   // space-bar idiom means everywhere else.
   const panning = spaceDown || tool === 'pan'
-  const selectable = tool === 'select' && !panning
+  // Nothing is selectable or draggable while the clip runs. That's not a
+  // restriction so much as the only coherent reading of a drag during
+  // playback — you'd be moving a layer against footage that is moving under
+  // it — and it also means the Transformer and every node stop listening for
+  // the duration, which is exactly what the frame pump wants.
+  const selectable = tool === 'select' && !panning && !playing
 
   // ── Base photo + adjustments ────────────────────────────────────────────
   // Filtering happens on the DOWNSCALED preview canvas (see adjust.js) and is
@@ -96,7 +125,10 @@ export function EditorStage({
   const adjustFrame = useRef(0)
   useEffect(() => {
     const node = baseImgRef.current
-    if (!node) return
+    // Adjustments cannot reach footage — the panel is hidden in video mode —
+    // and caching a <video> source node would freeze the frame that happened
+    // to be showing when the cache was taken.
+    if (!node || videoEl) return
     cancelAnimationFrame(adjustFrame.current)
     adjustFrame.current = requestAnimationFrame(() => {
       if (hasAdjustments(doc.adjust)) {
@@ -114,7 +146,40 @@ export function EditorStage({
       node.getLayer()?.batchDraw()
     })
     return () => cancelAnimationFrame(adjustFrame.current)
-  }, [doc.adjust, previewCanvas, cacheRatio, H, cropping])
+  }, [doc.adjust, previewCanvas, cacheRatio, H, cropping, videoEl])
+
+  // ── The frame pump ──────────────────────────────────────────────────────
+  // While the clip plays, each frame arrives here rather than through React.
+  // Two things happen and nothing else: every layer's opacity is set from the
+  // same layerAlphaAt the export mirrors, and the content layer is redrawn —
+  // which is also what pulls the new video frame onto the canvas, since the
+  // base node's source is the <video> itself.
+  //
+  // The UI layer is deliberately untouched. It holds the Transformer, the
+  // guides and the marquee, none of which can change while playing, and
+  // leaving it alone is the entire reason the two-layer split exists.
+  useEffect(() => {
+    if (!playback?.subscribe) return undefined
+    return playback.subscribe(t => {
+      for (const l of doc.layers) {
+        const node = nodeRefs.current.get(l.id)
+        if (!node) continue
+        node.opacity(l.id === editingId ? 0 : layerAlphaAt(l, t))
+        // Motion moves the layer's own wrapper Group, whose resting position
+        // is the origin — so this can write absolute values without ever
+        // needing to know where the layer itself sits, and a ramp that ends
+        // leaves nothing behind to undo. A Konva `offset()` would have done
+        // the translation too, but it also relocates the rotation pivot, so a
+        // rotated caption would have swung into place instead of sliding.
+        const g = motionRefs.current.get(l.id)
+        if (g) {
+          const m = motionOffsetAt(l, t, H)
+          g.position({ x: m ? m.dx : 0, y: m ? m.dy : 0 })
+        }
+      }
+      contentLayerRef.current?.batchDraw()
+    })
+  }, [playback, doc.layers, editingId, H])
 
   // ── Transformer attachment ──────────────────────────────────────────────
   // Lines and arrows are deliberately excluded: they're edited by dragging
@@ -128,9 +193,9 @@ export function EditorStage({
       .filter(l => !isPath(l) && !l.locked && l.visible !== false && l.id !== editingId)
       .map(l => nodeRefs.current.get(l.id))
       .filter(Boolean)
-    tr.nodes(tool === 'select' ? nodes : [])
+    tr.nodes(tool === 'select' && !playing ? nodes : [])
     tr.getLayer()?.batchDraw()
-  }, [selectedLayers, editingId, tool, doc])
+  }, [selectedLayers, editingId, tool, doc, playing])
 
   useEffect(() => {
     const tr = cropTransformerRef.current
@@ -340,15 +405,17 @@ export function EditorStage({
       style={{ cursor }}
     >
       {/* ── Content ── */}
-      <Layer>
+      <Layer ref={contentLayerRef}>
         {/* A white plate under the photo so a transparent PNG reads as a page
             rather than as the app's own background showing through. */}
         <Rect x={0} y={0} width={stageW} height={stageH} fill="#ffffff" listening={false} />
-        <KonvaImage ref={baseImgRef} image={previewCanvas}
+        <KonvaImage ref={baseImgRef} image={videoEl || previewCanvas}
           x={0} y={0} width={stageW} height={stageH}
-          // Cropping shows the whole photo; otherwise the page is a window
-          // onto it and Konva takes the source rectangle directly.
-          crop={sourceCrop || undefined}
+          // Three cases, one node. On a photo the page is a window onto the
+          // base image and Konva takes the source rectangle directly; while
+          // cropping the whole photo is shown uncropped; on a clip the window
+          // is the compose step's centre-crop.
+          crop={(videoEl ? videoCrop : sourceCrop) || undefined}
           listening={false} />
 
         <Group x={contentX} y={contentY}>
@@ -360,19 +427,39 @@ export function EditorStage({
           // guaranteed to be read. It's written explicitly on each node below.
           const shared = {
             layer: l, W, H, selectable, registerRef,
+            // On a photo `playback` is null and these collapse to what the
+            // nodes always did. On a clip they are the layer's state at the
+            // committed time; the pump above overwrites the opacity frame by
+            // frame during playback and React puts it back the moment the
+            // clip pauses, from the same function.
+            alpha: playback ? layerAlphaAt(l, time) : (l.opacity ?? 1),
+            live: playback ? layerLiveAt(l, time) : true,
             onSelect: e => selectLayer(e, l),
             onDragStart: e => handleDragStart(e, l),
             onDragMove: handleDragMove,
             onDragEnd: e => handleDragEnd(e, l),
             onContextMenu: e => { e.evt.preventDefault(); e.cancelBubble = true; onContextMenu?.(e, l.id) },
           }
-          if (l.type === 'text') {
-            return <TextNode key={l.id} {...shared} epoch={epoch} onChange={patchOne} hidden={editingId === l.id}
-              onEditStart={() => { if (!l.locked) onEditStart?.(l.id) }} />
-          }
-          if (l.type === 'image') return <ImageNode key={l.id} {...shared} onChange={patchOne} />
-          if (isPath(l)) return <PathNode key={l.id} {...shared} />
-          return <ShapeNode key={l.id} {...shared} onChange={patchOne} />
+          const node = l.type === 'text'
+            ? <TextNode {...shared} epoch={epoch} onChange={patchOne} hidden={editingId === l.id}
+                onEditStart={() => { if (!l.locked) onEditStart?.(l.id) }} />
+            : l.type === 'image' ? <ImageNode {...shared} onChange={patchOne} />
+            : isPath(l) ? <PathNode {...shared} />
+            : <ShapeNode {...shared} onChange={patchOne} />
+
+          // On a photo the node is mounted bare, exactly as it always was. On
+          // a clip it gets a translation wrapper that the animation moves; it
+          // rests at the origin, so a document with no animation is a Group at
+          // 0,0 and behaves identically.
+          if (!playback) return <Fragment key={l.id}>{node}</Fragment>
+          const m = motionOffsetAt(l, time, H)
+          return (
+            <Group key={l.id}
+              ref={g => { if (g) motionRefs.current.set(l.id, g); else motionRefs.current.delete(l.id) }}
+              x={m ? m.dx : 0} y={m ? m.dy : 0}>
+              {node}
+            </Group>
+          )
         })}
         </Group>
       </Layer>

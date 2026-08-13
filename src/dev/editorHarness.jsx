@@ -1,5 +1,7 @@
+import { useState } from 'react'
 import ReactDOM from 'react-dom/client'
 import { PhotoEditor } from '../components/studio/editor/index'
+import { ReelTimeline } from '../components/studio/ReelTimeline'
 import '../index.css'
 
 // ─── Dev-only editor harness ───────────────────────────────────────────────
@@ -37,6 +39,24 @@ const params = new URLSearchParams(window.location.search)
 const MODE = params.get('mode') === 'video' ? 'video' : 'photo'
 const DURATION = Number(params.get('duration')) || 8
 
+// Real footage under the layers. The fixture is deliberately 1280×720 against
+// a 1600×2000 still, i.e. 16:9 footage under a 4:5 document — which is the
+// ordinary case in production (a 4:5 session renders 3:4 on Seedance and 9:16
+// on Veo) and the only way to see whether the preview applies the compose
+// step's centre-crop or quietly shows a frame the render will never produce.
+//
+// Not committed; regenerate with the ffmpeg already inside the n8n container:
+//   docker exec arak-marketing-n8n sh -c 'ffmpeg -y \
+//     -f lavfi -i "testsrc2=size=1280x720:rate=25:duration=8" \
+//     -f lavfi -i "sine=frequency=440:duration=8" \
+//     -c:v libx264 -pix_fmt yuv420p -c:a aac -shortest /tmp/dev-clip.mp4'
+//   docker cp arak-marketing-n8n:/tmp/dev-clip.mp4 public/dev-clip.mp4
+//
+// `?clip=` overrides it; `?clip=none` goes back to the still-only behaviour
+// this mode had before playback existed.
+const CLIP_PARAM = params.get('clip')
+const CLIP = CLIP_PARAM === 'none' ? '' : (CLIP_PARAM || '/dev-clip.mp4')
+
 // `?arabic=1` seeds a bilingual document instead of an empty one. Reproducible
 // on purpose: the Arabic headline is the thing most worth re-checking after any
 // change to text rasterising or the video export, and clicking it in by hand
@@ -70,19 +90,57 @@ const ARABIC_FIXTURE = {
 }
 const INITIAL = params.get('arabic') === '1' ? ARABIC_FIXTURE : null
 
+// `/dev-editor.html?reel=1` mounts the multi-clip reel timeline instead, on two
+// fixture clips of different lengths. Same reason as the video switch above:
+// the reel surface has real playback logic in it — two elements alternating
+// across a seam, trims that change the cut — and none of it is reachable from
+// the app without signing in and paying for three renders first.
+const REEL = params.get('reel') === '1'
+
+const REEL_STORYBOARD = {
+  clips: [
+    { key: 'r1', prompt: 'Lobby, slow push in', duration: 8, transition: 'cut', trim: { start: 0, end: null } },
+    { key: 'r2', prompt: 'Facade at dusk', duration: 6, transition: 'crossfade', transitionDuration: 0.6, trim: { start: 0, end: null } },
+  ],
+}
+const REEL_ROWS = [
+  { id: 'a', status: 'ready', video_url: '/dev-clip.mp4' },
+  { id: 'b', status: 'ready', video_url: '/dev-clip2.mp4' },
+]
+
+function ReelHarness() {
+  const [sb, setSb] = useState(REEL_STORYBOARD)
+  const patch = (i, p) => setSb(s => ({ ...s, clips: s.clips.map((c, n) => (n === i ? { ...c, ...p } : c)) }))
+  return (
+    <div className="max-w-3xl p-4">
+      <p className="mb-2 text-xs text-emerald-800">
+        Reel timeline · two fixture clips (8s + 6s). Drag a block’s ends to trim; play to watch the
+        cut. Trims are echoed below as they would be sent to the stitcher.
+      </p>
+      <ReelTimeline storyboard={sb} clipRows={REEL_ROWS} onPatchClip={patch} />
+      <pre className="mt-3 overflow-x-auto bg-stone-100 p-2 text-[10px]">
+        {JSON.stringify(sb.clips.map(c => ({ prompt: c.prompt, trim: c.trim })), null, 1)}
+      </pre>
+    </div>
+  )
+}
+
 export function EditorHarness() {
+  if (REEL) return <ReelHarness />
   return (
     <div className="p-4">
       {MODE === 'video' && (
         <p className="mb-2 text-xs text-emerald-800">
-          Video mode · {DURATION}s clip — Adjust and Crop are hidden, and Save reports the overlay
-          groups rather than a flattened image. Switch with <code>?mode=photo</code>.
+          Video mode · {DURATION}s clip{CLIP ? ` · playing ${CLIP}` : ' · still only'} — Adjust and
+          Crop are hidden, and Save reports the overlay groups rather than a flattened image.
+          Switch with <code>?mode=photo</code>.
         </p>
       )}
       <PhotoEditor
         mode={MODE}
         duration={DURATION}
         imageUrl={TEST_PHOTO}
+        videoUrl={MODE === 'video' ? CLIP : ''}
         initialState={INITIAL}
         saving={false}
         onSave={async payload => {

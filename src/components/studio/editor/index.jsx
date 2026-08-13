@@ -22,6 +22,8 @@ import { documentColorsOf, parseBrandColors, samplePhotoColors } from './model/p
 
 import { useEditorHistory } from './useEditorHistory'
 import { useZoomPan } from './useZoomPan'
+import { useVideoPlayback } from './useVideoPlayback'
+import { layerTiming, normalizeTrim, trimWindow } from './model/document'
 import { EditorStage } from './canvas/EditorStage'
 import { FloatingToolbar, InlineTextEditor, ContextMenu } from './canvas/Overlays'
 import { TopToolbar } from './toolbar/TopToolbar'
@@ -117,6 +119,11 @@ export function PhotoEditor({
   // whole reason this is a mode and not a second editor.
   mode = 'photo',
   duration = 5,
+  // The clip itself, in video mode. `imageUrl` is still frame one and is still
+  // what the document's geometry, palette and export are built against — this
+  // is only what plays underneath. Absent, the editor behaves exactly as it
+  // did before: a still with a timing strip.
+  videoUrl = '',
 }) {
   const isVideo = mode === 'video'
   const history = useEditorHistory()
@@ -197,6 +204,28 @@ export function PhotoEditor({
   // binding at the point of use, rather than reached through an object.
   const { viewportRef, ...zoom } = useZoomPan(stageW, stageH)
 
+  // ── Playback ────────────────────────────────────────────────────────────
+  // Null on a photo, and every consumer treats null as "there is no time" —
+  // so nothing about the image editor changes shape to accommodate this.
+  //
+  // The trim goes in RAW rather than resolved against the clip's length: only
+  // the hook knows that length (it reads it off the media), so resolving it
+  // out here would need the duration the hook is about to produce.
+  const playback = useVideoPlayback(isVideo ? videoUrl : '', duration, isVideo ? doc?.trim : null)
+  // The clip's real length wins over the requested one as soon as it reports
+  // it. `duration` on the version row is what we ASKED the model for, rounded
+  // to a string; Kling returning 10.0 when asked for 10 is luck, not a rule,
+  // and a timeline drawn to the wrong length puts every cue in the wrong
+  // place. Only the strip and the clamps use this — the export writes seconds,
+  // and ffprobe has the last word at compose time regardless.
+  const clipDuration = (isVideo && playback.duration) || duration
+
+  // The trim resolved against that length — what the strip draws and what the
+  // compose step is told to keep. Declared here because it needs nothing but
+  // the duration; the SETTER lives further down, next to the other document
+  // edits, because it needs applyDoc.
+  const trim = useMemo(() => trimWindow(doc?.trim, clipDuration), [doc?.trim, clipDuration])
+
   // ── Load ────────────────────────────────────────────────────────────────
   useEffect(() => {
     let cancelled = false
@@ -265,6 +294,24 @@ export function PhotoEditor({
   const patchSelected = useCallback(patch => {
     applyDoc(d => patchLayers(d, Object.fromEntries(selectedIds.map(id => [id, patch]))))
   }, [applyDoc, selectedIds])
+
+  // `applyDoc` rather than `commitDoc`, with `begin()` fired once at
+  // pointerdown, so a whole drag of a trim handle is one undo step and not
+  // forty.
+  const setTrim = useCallback(next => {
+    applyDoc(d => {
+      const t = normalizeTrim(next)
+      // Clamped here rather than in the gesture so a handle dragged past the
+      // far end of the clip, or past its opposite number, stops at something
+      // real. 0.1s is the same floor clampTiming uses for a layer.
+      const start = Math.min(Math.max(0, t.start), Math.max(0, clipDuration - 0.1))
+      const end = t.end === null ? null : Math.min(Math.max(t.end, start + 0.1), clipDuration)
+      // Stored as null rather than the exact length once it reaches the end,
+      // for the same reason `tOut` is: it keeps meaning "all of it" if the
+      // clip is ever re-rendered at a different length.
+      return { ...d, trim: { start, end: end !== null && end >= clipDuration - 0.001 ? null : end } }
+    })
+  }, [applyDoc, clipDuration])
 
   const addLayer = useCallback(layer => {
     commitDoc(d => ({ ...d, layers: [...d.layers, layer] }))
@@ -370,6 +417,22 @@ export function PhotoEditor({
     // lingers, and since the node it names is hidden while it's being edited,
     // that layer stays invisible on the canvas forever.
     setEditingId(id => (id && (ids.length !== 1 || ids[0] !== id) ? null : id))
+
+    // ── Selecting a layer that isn't on screen yet moves the playhead to it ──
+    // Out-of-range layers are genuinely absent from the canvas, because that
+    // is what the render does with them. Without this you could select a
+    // headline from the timeline, see nothing appear, and have no way to edit
+    // it. Seeking to its first frame is what every editor does and it makes
+    // the rule "what you see is what composites" survivable.
+    if (isVideo && ids.length === 1 && !playback.playing) {
+      const layer = doc?.layers.find(l => l.id === ids[0])
+      if (layer) {
+        const { tIn, tOut } = layerTiming(layer)
+        const t = playback.timeRef.current
+        if (t < tIn || (tOut !== null && t > tOut)) playback.seek(tIn)
+      }
+    }
+
     if (!painting || !styleClip || ids.length !== 1) return
     setPainting(false)
     commitDoc(d => {
@@ -377,7 +440,7 @@ export function PhotoEditor({
       if (!target) return d
       return patchLayers(d, { [target.id]: styleFor(target, styleClip) })
     })
-  }, [painting, styleClip, commitDoc])
+  }, [painting, styleClip, commitDoc, isVideo, doc, playback])
 
   // ── Clipboard ───────────────────────────────────────────────────────────
   // Editor-local, not the system clipboard: what's being copied is a layer
@@ -543,6 +606,27 @@ export function PhotoEditor({
       const key = e.key.toLowerCase()
       const stop = () => e.preventDefault()
 
+      // ── Transport ──
+      // Space plays, as it does in every editor. It comes before everything
+      // else because a space is never an insert shortcut and never a
+      // modifier combination, and because a play button you have to reach for
+      // with the mouse is the difference between checking your timing twice
+      // and checking it once.
+      if (isVideo && key === ' ' && !mod) {
+        stop()
+        playback.toggle()
+        return
+      }
+      // Arrow keys nudge the SELECTION when there is one and step the
+      // PLAYHEAD when there isn't — the same split Canva uses, and the reason
+      // the nudge branch further down is guarded on a selection existing.
+      if (isVideo && !mod && !selectedIds.length && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+        stop()
+        const step = e.shiftKey ? 1 : 1 / 30
+        playback.seek(playback.timeRef.current + (e.key === 'ArrowLeft' ? -step : step))
+        return
+      }
+
       if (key === 'escape') {
         stop()
         if (painting) setPainting(false)
@@ -610,7 +694,7 @@ export function PhotoEditor({
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [doc, tool, editingId, selectedIds, single, painting, history, zoom, addText, addShape, cancelCrop,
       duplicateSelected, deleteSelected, copySelected, pasteClipboard, order, orderExtreme,
-      tidyUp, toggleLock, nudge, begin, patchSelected])
+      tidyUp, toggleLock, nudge, begin, patchSelected, isVideo, playback])
 
   // ── Save ────────────────────────────────────────────────────────────────
   async function handleSave() {
@@ -755,7 +839,7 @@ export function PhotoEditor({
                 onFlip={isVideo ? undefined : flip}
                 onStartCrop={isVideo ? undefined : startCrop}
                 onCopyStyle={copyStyle} painting={painting}
-                palette={palette} />
+                palette={palette} isVideo={isVideo} />
             </div>
           </div>
 
@@ -778,6 +862,7 @@ export function PhotoEditor({
                 // editor isn't actually open would hide that layer for good.
                 editingId={editingSingle ? editingId : null} onEditStart={setEditingId}
                 onInteractingChange={setInteracting}
+                playback={isVideo ? playback : null} time={playback.time}
                 onContextMenu={(e, layerId) => {
                   if (layerId && !selectedIds.includes(layerId)) setSelectedIds([layerId])
                   const rect = zoom.getViewportRect()
@@ -819,12 +904,14 @@ export function PhotoEditor({
           {/* Under the canvas, above the footer: the strip is about the
               artwork, so it belongs with the artwork rather than in the
               Save/Cancel band. */}
-          {isVideo && doc.layers.length > 0 && (
+          {isVideo && (
             <Timeline
-              doc={doc} duration={duration} selectedIds={selectedIds}
+              doc={doc} duration={clipDuration} selectedIds={selectedIds}
+              playback={playback} trim={trim}
               onSelect={id => handleSelectionChange([id])}
               onBegin={begin}
               onPatchLayer={(id, timing) => applyDoc(d => patchLayers(d, { [id]: timing }))}
+              onTrim={setTrim}
             />
           )}
         </div>
