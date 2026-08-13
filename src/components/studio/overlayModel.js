@@ -1,4 +1,4 @@
-import { STUDIO_FONTS } from './fonts'
+import { STUDIO_FONTS, nearestWeight } from './fonts'
 
 // ─── Overlay text: the data model and the renderer ─────────────────────────
 // Kept out of the editor component on purpose. The editor is one consumer;
@@ -56,7 +56,14 @@ export function autoDirectionPatch(box, text) {
   if (box.dirTouched) return patch
   const wantsRtl = ARABIC_RE.test(text)
   patch.dir = wantsRtl ? 'rtl' : 'ltr'
-  if (wantsRtl && !STUDIO_FONTS.find(f => f.value === box.family)?.arabic) patch.family = 'Cairo'
+  // Switching the family has to bring the weight with it: the Latin list runs
+  // all the way to Archivo Black at 400-only and Lato at 900, so a box carrying
+  // a weight Cairo happens not to have would arrive silently wrong. See
+  // nearestWeight in fonts.js.
+  if (wantsRtl && !STUDIO_FONTS.find(f => f.value === box.family)?.arabic) {
+    patch.family = 'Cairo'
+    patch.weight = nearestWeight('Cairo', box.weight)
+  }
   return patch
 }
 

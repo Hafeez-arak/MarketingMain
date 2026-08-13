@@ -54,8 +54,39 @@ export function useVideoPlayback(videoUrl, fallbackDuration = 0, trim = null) {
   const [duration, setDuration] = useState(Number(fallbackDuration) || 0)
   const [time, setTime] = useState(0)
 
+  // ── Sound ───────────────────────────────────────────────────────────────
+  // The clip has audio — every model we render with returns some — and until
+  // now there was no way to hear it or to turn it off. Both matter: a marketer
+  // timing a caption to a beat needs to hear the beat, and a marketer working
+  // in an open office needs one click to stop it.
+  //
+  // `muted` starts FALSE and is raised by the autoplay fallback below when the
+  // browser refuses sound. That used to happen silently, which meant a clip
+  // that had been forced mute looked exactly like one the user had muted, and
+  // the speaker button would have been lying about the state of the element.
+  const [muted, setMuted] = useState(false)
+  const [volume, setVolume] = useState(1)
+  // Raised only by the autoplay fallback, so the UI can say "the browser did
+  // this, not you" rather than leaving a mystery.
+  const [forcedMute, setForcedMute] = useState(false)
+
+  // ── Loop ────────────────────────────────────────────────────────────────
+  // An eight-second clip gets watched twenty times while its captions are
+  // being timed, and reaching for play after each one is the friction that
+  // makes people check their timing once instead of five times.
+  //
+  // A ref as well as state because the two consumers run on different clocks:
+  // the rAF pump reads it every frame, and `ended` is bound once per URL and
+  // would otherwise close over whatever the flag was when the clip loaded.
+  const [loop, setLoop] = useState(false)
+  const loopRef = useRef(false)
+
   const timeRef = useRef(0)
   const subs = useRef(new Set())
+  // The in point, for the two handlers that restart a loop. Same reason as
+  // loopRef: `ended` is bound once and must not restart at a stale in point
+  // after the trim has been dragged.
+  const inRef = useRef(0)
 
   const notify = useCallback(t => {
     timeRef.current = t
@@ -92,7 +123,18 @@ export function useVideoPlayback(videoUrl, fallbackDuration = 0, trim = null) {
     const onData = () => { setReadyEl(video); notify(video.currentTime) }
     const onPlay = () => setPlaying(true)
     const onPause = () => { setPlaying(false); setTime(video.currentTime); notify(video.currentTime) }
-    const onEnded = () => { setPlaying(false); setTime(video.currentTime); notify(video.currentTime) }
+    // `ended` fires only for a clip with no trimmed OUT point — anything with
+    // one is stopped by the pump before the file runs out. So this is the loop
+    // restart for the untrimmed case, and the pump owns the trimmed one.
+    const onEnded = () => {
+      if (loopRef.current) {
+        video.currentTime = inRef.current
+        notify(inRef.current)
+        video.play().catch(() => {})
+        return
+      }
+      setPlaying(false); setTime(video.currentTime); notify(video.currentTime)
+    }
     const onSeeked = () => notify(video.currentTime)
     const onError = () => setError("This clip couldn't be loaded for playback.")
 
@@ -144,12 +186,32 @@ export function useVideoPlayback(videoUrl, fallbackDuration = 0, trim = null) {
   const outAt = rawOut === null || rawOut === undefined || rawOut === ''
     ? null
     : Math.min(Number(rawOut) || 0, duration || Number(rawOut) || 0)
+
+  // The two facts `ended` needs, mirrored into refs. `ended` is bound once per
+  // URL — it has to be, or every trim drag would tear the element's listeners
+  // down and rebuild them — so it cannot close over either value directly.
+  // Written from an effect rather than during render: a ref assigned in the
+  // render body is read by React's own lint as exactly the bug it usually is,
+  // and an effect runs long before any media event could fire against it.
+  useEffect(() => { loopRef.current = loop }, [loop])
+  useEffect(() => { inRef.current = inAt }, [inAt])
+
   useEffect(() => {
     const v = videoRef.current
     if (!playing || !v) return undefined
     let raf = 0
     const tick = () => {
       if (outAt !== null && v.currentTime >= outAt) {
+        // Looping jumps back to the in point without ever pausing, so the
+        // element never leaves the playing state and the pump keeps running —
+        // a pause/play round trip at every lap would show a visible stall and
+        // could be refused outright by an autoplay policy the second time.
+        if (loopRef.current) {
+          v.currentTime = inAt
+          notify(inAt)
+          raf = requestAnimationFrame(tick)
+          return
+        }
         v.pause()
         v.currentTime = outAt
         notify(outAt)
@@ -160,7 +222,18 @@ export function useVideoPlayback(videoUrl, fallbackDuration = 0, trim = null) {
     }
     raf = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(raf)
-  }, [playing, notify, outAt])
+  }, [playing, notify, inAt, outAt])
+
+  // The element's own audio properties, kept in step with the two controls.
+  // Written from an effect rather than at the call site because the element is
+  // rebuilt whenever the URL changes, and a fresh one would otherwise come up
+  // at full volume however the transport was set.
+  useEffect(() => {
+    const v = videoRef.current
+    if (!v) return
+    v.muted = muted
+    v.volume = Math.min(1, Math.max(0, volume))
+  }, [muted, volume, readyEl])
 
   const seek = useCallback(t => {
     const v = videoRef.current
@@ -188,7 +261,13 @@ export function useVideoPlayback(videoUrl, fallbackDuration = 0, trim = null) {
     } catch {
       // Autoplay policy can refuse a clip with sound even from inside a click
       // in some embeddings. Losing the audio is a far better outcome than a
-      // play button that does nothing, so retry muted and say nothing.
+      // play button that does nothing, so retry muted — but SAY SO. This used
+      // to mutate `v.muted` and nothing else, which left the element muted
+      // while the transport still showed sound on: the speaker button then
+      // both looked wrong and, if clicked, would have "unmuted" a clip that
+      // was already silent, muted it, and looked broken twice over.
+      setMuted(true)
+      setForcedMute(true)
       v.muted = true
       try { await v.play() } catch { setError('This clip could not be played here.') }
     }
@@ -197,8 +276,33 @@ export function useVideoPlayback(videoUrl, fallbackDuration = 0, trim = null) {
   const pause = useCallback(() => { videoRef.current?.pause() }, [])
   const toggle = useCallback(() => { (playing ? pause() : play()) }, [playing, play, pause])
 
+  // Unmuting by hand clears the "the browser did this" note — whatever
+  // refused the sound, the user has now overruled it, and leaving the note up
+  // would keep explaining a state that no longer exists.
+  const toggleMuted = useCallback(() => {
+    setMuted(m => {
+      if (m) setForcedMute(false)
+      return !m
+    })
+  }, [])
+
+  // Dragging the volume up from zero is the same intent as clicking the
+  // speaker, so it unmutes too — otherwise the slider moves and nothing
+  // happens, which is the single most common complaint about volume controls
+  // that keep the two as independent facts.
+  const changeVolume = useCallback(v => {
+    const next = Math.min(1, Math.max(0, Number(v) || 0))
+    setVolume(next)
+    if (next > 0) { setMuted(false); setForcedMute(false) }
+    else setMuted(true)
+  }, [])
+
+  const toggleLoop = useCallback(() => setLoop(l => !l), [])
+
   return {
     el: readyEl, ready, playing, error, duration, time, timeRef,
     subscribe, seek, play, pause, toggle,
+    muted, volume, forcedMute, setMuted: toggleMuted, setVolume: changeVolume,
+    loop, toggleLoop,
   }
 }

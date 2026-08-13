@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import {
   EMPTY_PALETTE, hasEyeDropper, loadRecentColors, normalizeHex, pickWithEyeDropper, pushRecentColor,
 } from './model/palette'
+import { IconEyedropper, IconNone } from './icons'
 
 // ─── Small shared controls for the editor chrome ───────────────────────────
 // Deliberately not in src/components/ui — these are editor-density widgets
@@ -328,8 +329,8 @@ function ColorPanel({ value, onChange, onCommitStart, title, allowNone, palette,
         <p className="text-[11px] font-semibold text-text">{title}</p>
         {allowNone && (
           <button type="button" onClick={() => pick('')}
-            className="rounded-md border border-border px-1.5 py-0.5 text-[10px] text-text-tertiary hover:border-amber-400 hover:text-amber-800">
-            ∅ None
+            className="flex items-center gap-1 rounded-md border border-border px-1.5 py-0.5 text-[10px] text-text-tertiary hover:border-amber-400 hover:text-amber-800">
+            <IconNone className="h-3 w-3" /> None
           </button>
         )}
       </div>
@@ -366,8 +367,8 @@ function ColorPanel({ value, onChange, onCommitStart, title, allowNone, palette,
         </span>
         {hasEyeDropper() && (
           <button type="button" title="Pick a colour from anywhere on screen" onClick={eyedrop}
-            className="h-7 w-7 shrink-0 rounded-md border border-border text-[12px] leading-none hover:border-amber-400 hover:bg-amber-50">
-            ⛏
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-border text-text-secondary hover:border-amber-400 hover:bg-amber-50 hover:text-amber-800">
+            <IconEyedropper className="h-3.5 w-3.5" />
           </button>
         )}
         {/* Left open while it changes: the OS picker streams values as you
@@ -392,23 +393,75 @@ function ColorPanel({ value, onChange, onCommitStart, title, allowNone, palette,
 // `closeOnClick` is off for menus that hold sliders or colour pickers rather
 // than a list of choices — closing on the first pointer-down would make a
 // slider impossible to drag.
+//
+// `children` may be a function, which receives `close`. That is for the one
+// menu that is neither: the font picker holds a search box (so it cannot close
+// on every click) but its rows ARE choices (so they must close on click). A
+// render prop hands it the close it needs without a third boolean.
 export function ToolbarMenu({ label, title, width = 200, children, disabled, closeOnClick = true, align }) {
   const [open, setOpen] = useState(false)
   const anchorRef = useRef(null)
   const close = useCallback(() => setOpen(false), [])
+  const isRenderProp = typeof children === 'function'
 
   return (
     <>
       <span ref={anchorRef} className="inline-flex shrink-0">
         <ToolbarButton title={title} onClick={() => setOpen(o => !o)} disabled={disabled} active={open}>
           <span className="max-w-[130px] truncate">{label}</span>
-          <span className="text-[9px] opacity-60">▾</span>
+          <Caret />
         </ToolbarButton>
       </span>
       <Popover open={open} onClose={close} anchorRef={anchorRef} width={width} align={align} className="p-1">
-        <div onClick={closeOnClick ? close : undefined}>{children}</div>
+        <div onClick={closeOnClick && !isRenderProp ? close : undefined}>
+          {isRenderProp ? children({ close }) : children}
+        </div>
       </Popover>
     </>
+  )
+}
+
+function Caret() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-2.5 w-2.5 shrink-0 opacity-50" fill="none"
+      stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M6 9l6 6 6-6" />
+    </svg>
+  )
+}
+
+// The search field the font menu opens with. Its own component so the autofocus
+// and the Escape handling stay next to each other, and so nothing else has to
+// know that a menu can be filtered.
+export function MenuSearch({ value, onChange, placeholder = 'Search…' }) {
+  const ref = useRef(null)
+  // Focused a frame late, deliberately. The Popover this lives in renders
+  // itself `visibility: hidden` for the one layout pass it takes to measure
+  // where it should sit (see `place()` above), and **a visibility:hidden
+  // element cannot take focus** — `focus()` against one is a silent no-op.
+  // Focusing on mount therefore left the menu open with a search box that
+  // looked ready and swallowed nothing: every keystroke went to the trigger
+  // button instead, so typing did nothing at all. Measured, not guessed: the
+  // panel's computed visibility at the moment of the mount-time focus call is
+  // `hidden`. One frame later it is `visible` and the focus lands.
+  useEffect(() => {
+    const raf = requestAnimationFrame(() => ref.current?.focus())
+    return () => cancelAnimationFrame(raf)
+  }, [])
+  return (
+    <div className="sticky top-0 z-10 -mx-1 -mt-1 mb-1 border-b border-border bg-white px-2 py-1.5">
+      <div className="relative">
+        <svg viewBox="0 0 24 24" className="pointer-events-none absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-text-tertiary"
+          fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden="true">
+          <circle cx="11" cy="11" r="7" /><path d="M20 20l-3.5-3.5" />
+        </svg>
+        <input
+          ref={ref} type="text" value={value} placeholder={placeholder} spellCheck={false}
+          onChange={e => onChange(e.target.value)}
+          className="h-7 w-full border border-border bg-white pl-7 pr-2 text-[12px] text-text placeholder:text-text-disabled focus:border-amber-400 focus:outline-none"
+        />
+      </div>
+    </div>
   )
 }
 

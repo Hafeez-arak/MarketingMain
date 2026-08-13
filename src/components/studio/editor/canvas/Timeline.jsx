@@ -1,5 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { clampTiming, layerLabel, layerTiming } from '../model/document'
+import { MOTION_LABELS, layerMotion } from '../model/playback'
+import { IconLoop, IconPause, IconPlay, IconSkipStart, IconVolume, IconVolumeMuted } from '../icons'
 
 // ─── The timeline ──────────────────────────────────────────────────────────
 // A transport, a ruler with a playhead, and one bar per layer across the
@@ -30,6 +32,10 @@ const ROW_H = 26
 const EDGE_PX = 7          // how close to an end counts as "trim" rather than "move"
 const LABEL_W = 96         // the layer-name gutter; the track starts after it
 const PAD_X = 12           // the strip's own horizontal padding (px-3)
+// How close a dragged edge has to come to something meaningful before it
+// jumps onto it. Eight pixels is Canva's feel: close enough that you have to
+// mean it, far enough that you don't have to aim.
+const SNAP_PX = 8
 // Where every track starts, measured from the strip's left edge. This has to
 // be the sum of everything to the left of a bar — the padding, the name
 // column and the flex gap — because the ruler and the playhead are positioned
@@ -42,18 +48,6 @@ function fmt(s) {
   return `${Number(s).toFixed(1)}s`
 }
 
-// Inline, like every other icon in the app — nothing else in src/ pulls an
-// icon package in, and a transport is three glyphs.
-const IconPlay = () => (
-  <svg viewBox="0 0 24 24" className="ml-[1px] h-3 w-3" fill="currentColor"><path d="M8 5v14l11-7z" /></svg>
-)
-const IconPause = () => (
-  <svg viewBox="0 0 24 24" className="h-3 w-3" fill="currentColor"><path d="M6 5h4v14H6zM14 5h4v14h-4z" /></svg>
-)
-const IconStart = () => (
-  <svg viewBox="0 0 24 24" className="h-3 w-3" fill="currentColor"><path d="M7 5h2v14H7zM19 5v14l-9-7z" /></svg>
-)
-
 // Enough ticks to read the clip against, few enough to stay legible at any
 // length from a 4-second loop to a two-minute reel.
 function tickStep(duration) {
@@ -64,6 +58,50 @@ function tickStep(duration) {
   return 15
 }
 
+// ─── Snapping ──────────────────────────────────────────────────────────────
+// Dragging a bar to land exactly on the playhead, on the clip's start, or
+// flush against the layer above it was previously impossible — you dragged
+// near it and then typed the number in the In/Out fields, which is what those
+// fields existed to rescue rather than to be the primary way of working. Every
+// timeline in every editor snaps, and its absence is most of what made this
+// one feel like a diagram of a timeline rather than one.
+//
+// What is worth snapping to is exactly what a person is trying to line up
+// with: the ends of the clip, the ends of the shipping window, the playhead
+// they just parked, and the cues of every OTHER layer. A layer never snaps to
+// itself — its own far edge is being dragged with it, and offering it would
+// let a bar collapse onto its own start.
+function snapTargets({ doc, duration, trim, playhead, exceptId }) {
+  const out = [
+    { t: 0, kind: 'clip' },
+    { t: duration, kind: 'clip' },
+    { t: playhead, kind: 'playhead' },
+  ]
+  if (trim.start > 0.001) out.push({ t: trim.start, kind: 'trim' })
+  if (trim.end < duration - 0.001) out.push({ t: trim.end, kind: 'trim' })
+  for (const l of doc.layers) {
+    if (l.id === exceptId) continue
+    const { tIn, tOut } = layerTiming(l)
+    out.push({ t: tIn, kind: 'layer' })
+    if (tOut !== null) out.push({ t: tOut, kind: 'layer' })
+  }
+  return out
+}
+
+// The correction to add to a value to put it on the nearest target, or null if
+// nothing is close enough. Returns the correction rather than the snapped
+// value so a MOVE — which has two edges and must not change length — can apply
+// the same shift to both.
+function snapCorrection(value, targets, tolerance) {
+  let best = null
+  for (const target of targets) {
+    const delta = target.t - value
+    if (Math.abs(delta) > tolerance) continue
+    if (best === null || Math.abs(delta) < Math.abs(best.delta)) best = { delta, at: target.t }
+  }
+  return best
+}
+
 export function Timeline({
   doc, duration, selectedIds, playback, trim, onSelect, onBegin, onPatchLayer, onTrim,
 }) {
@@ -72,9 +110,22 @@ export function Timeline({
   const clipTrackRef = useRef(null)
   const headRef = useRef(null)
   const readoutRef = useRef(null)
+  // The snap guide. Written to directly for the same reason the playhead is:
+  // it moves with the pointer, it is one CSS `left`, and routing sixty of
+  // those a second through setState would re-render the whole strip.
+  const snapRef = useRef(null)
 
   const rows = [...doc.layers].reverse()
   const selected = new Set(selectedIds)
+
+  // Shown at the snapped time while a drag is held on one, hidden otherwise.
+  function showSnap(at) {
+    const el = snapRef.current
+    if (!el) return
+    if (at === null || duration <= 0) { el.style.opacity = '0'; return }
+    el.style.left = `${Math.min(100, Math.max(0, (at / duration) * 100))}%`
+    el.style.opacity = '1'
+  }
 
   // ── The playhead ────────────────────────────────────────────────────────
   useEffect(() => {
@@ -134,10 +185,24 @@ export function Timeline({
     const perPx = duration / trackW
     const start = { ...layerTiming(layer), startX: e.clientX }
     const span = (start.tOut === null ? duration : start.tOut) - start.tIn
+    // Captured once at pointerdown, not recomputed per frame: the targets are
+    // the OTHER layers and the playhead, none of which this gesture moves, and
+    // rebuilding the list sixty times a second would be pure waste.
+    const targets = snapTargets({
+      doc, duration, trim, playhead: playback?.timeRef.current ?? 0, exceptId: layer.id,
+    })
+    const tolerance = SNAP_PX * perPx
 
     function move(ev) {
       const delta = (ev.clientX - start.startX) * perPx
       let next
+      // ⌥ suspends snapping for the rest of the gesture, which is the escape
+      // hatch every snapping timeline has: sometimes 2.03s really is what you
+      // want, and without this the eight pixels either side of a cue become
+      // unreachable.
+      const snapping = !ev.altKey
+      let landedOn = null
+
       if (mode === 'move') {
         next = { tIn: start.tIn + delta, tOut: start.tOut === null ? null : start.tOut + delta, fade: start.fade }
         // Moving must not also resize: a bar pushed past either end stops there
@@ -146,14 +211,33 @@ export function Timeline({
         if (next.tOut !== null && next.tOut > duration) {
           next = { ...next, tIn: Math.max(0, duration - span), tOut: duration }
         }
+        if (snapping) {
+          // BOTH edges are candidates and the nearer one wins, then the shift
+          // is applied to the pair — a move that snapped one edge by adjusting
+          // only that edge would silently change the layer's length, which is
+          // the one thing this gesture promises not to do.
+          const head = snapCorrection(next.tIn, targets, tolerance)
+          const tail = next.tOut === null ? null : snapCorrection(next.tOut, targets, tolerance)
+          const win = !tail || (head && Math.abs(head.delta) <= Math.abs(tail.delta)) ? head : tail
+          if (win) {
+            next = { ...next, tIn: next.tIn + win.delta, tOut: next.tOut === null ? null : next.tOut + win.delta }
+            landedOn = win.at
+          }
+        }
       } else if (mode === 'in') {
         next = { tIn: start.tIn + delta, tOut: start.tOut, fade: start.fade }
+        const win = snapping ? snapCorrection(next.tIn, targets, tolerance) : null
+        if (win) { next = { ...next, tIn: win.at }; landedOn = win.at }
       } else {
         next = { tIn: start.tIn, tOut: (start.tOut === null ? duration : start.tOut) + delta, fade: start.fade }
+        const win = snapping ? snapCorrection(next.tOut, targets, tolerance) : null
+        if (win) { next = { ...next, tOut: win.at }; landedOn = win.at }
       }
+      showSnap(landedOn)
       onPatchLayer(layer.id, clampTiming(next, duration))
     }
     function up() {
+      showSnap(null)
       window.removeEventListener('pointermove', move)
       window.removeEventListener('pointerup', up)
       cleanupRef.current = null
@@ -178,15 +262,26 @@ export function Timeline({
     const trackW = Math.max(1, clipTrackRef.current?.clientWidth || 1)
     const perPx = duration / trackW
     const start = { ...trim, startX: e.clientX }
+    // The trim snaps to the layer cues and the playhead, but NOT to the
+    // existing trim edges — those are what this gesture is moving, and the
+    // other one would be an odd thing to line an in point up with. Passing no
+    // trim keeps them out of the list.
+    const targets = snapTargets({
+      doc, duration, trim: { start: 0, end: duration },
+      playhead: playback?.timeRef.current ?? 0, exceptId: null,
+    })
+    const tolerance = SNAP_PX * perPx
 
     function move(ev) {
       const delta = (ev.clientX - start.startX) * perPx
-      const next = edge === 'start'
-        ? { start: start.start + delta, end: start.end }
-        : { start: start.start, end: start.end + delta }
-      onTrim(next)
+      const raw = edge === 'start' ? start.start + delta : start.end + delta
+      const win = ev.altKey ? null : snapCorrection(raw, targets, tolerance)
+      const at = win ? win.at : raw
+      showSnap(win ? win.at : null)
+      onTrim(edge === 'start' ? { start: at, end: start.end } : { start: start.start, end: at })
     }
     function up() {
+      showSnap(null)
       window.removeEventListener('pointermove', move)
       window.removeEventListener('pointerup', up)
       cleanupRef.current = null
@@ -213,17 +308,31 @@ export function Timeline({
   return (
     <div className="border-t border-border bg-surface-subtle/40">
       {/* ── Transport ── */}
-      <div className="flex items-center gap-2 px-3 py-1.5">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 px-3 py-1.5">
         <button type="button" onClick={() => playback?.toggle()}
           disabled={!playback?.ready}
           title={playback?.playing ? 'Pause (space)' : 'Play (space)'}
           className="flex h-6 w-6 items-center justify-center rounded-full bg-amber-500 text-white transition-colors hover:bg-amber-600 disabled:opacity-40">
-          {playback?.playing ? <IconPause /> : <IconPlay />}
+          {playback?.playing ? <IconPause /> : <IconPlay className="ml-[1px] h-3 w-3" />}
         </button>
         <button type="button" onClick={() => playback?.seek(0)} disabled={!playback?.ready}
-          title="Back to the start" className="text-text-tertiary hover:text-text disabled:opacity-40">
-          <IconStart />
+          title="Back to the start (Home)" className="text-text-tertiary hover:text-text disabled:opacity-40">
+          <IconSkipStart />
         </button>
+        {/* Loop and sound. Both are preview-only and neither reaches the
+            render: a looped clip still ships once, and the mute is this
+            element's, not the footage's. Muting what the MODEL generated is a
+            document-level decision that belongs with the audio work in §9 of
+            VIDEO-EDITOR.md, and conflating the two here would let someone
+            silence a reel by turning their own speakers down. */}
+        <button type="button" onClick={() => playback?.toggleLoop()} disabled={!playback?.ready}
+          title={playback?.loop ? 'Looping — click to play once' : 'Loop the clip while you work'}
+          className={`flex h-5 w-5 items-center justify-center transition-colors disabled:opacity-40 ${
+            playback?.loop ? 'bg-amber-100 text-amber-900' : 'text-text-tertiary hover:text-text'
+          }`}>
+          <IconLoop />
+        </button>
+        <AudioControl playback={playback} />
         <p className="font-mono text-[10px] tabular-nums text-text-tertiary">
           <span ref={readoutRef}>0.0s</span> / {fmt(duration)}
         </p>
@@ -243,9 +352,15 @@ export function Timeline({
           <p className="text-[10px] text-text-tertiary">
             {playback?.error
               ? playback.error
-              : doc.layers.length
-                ? 'Drag a bar to move it, its ends to trim · space to play'
-                : 'Space to play. Add text or a logo and it appears here as a bar you can time.'}
+              : playback?.forcedMute
+                // Said out loud rather than left as a silently muted element.
+                // The browser refused sound on a clip the user asked to play,
+                // and a speaker icon showing "muted" with no explanation reads
+                // as the app having done it.
+                ? 'Your browser blocked the sound — click the speaker to turn it on.'
+                : doc.layers.length
+                  ? 'Drag a bar to move it, its ends to trim · ⌥ to ignore snapping'
+                  : 'Space to play. Add text or a logo and it appears here as a bar you can time.'}
           </p>
         )}
       </div>
@@ -324,12 +439,30 @@ export function Timeline({
           </div>
         </div>
 
+        {/* The snap guide. In the same wrapper geometry as the playhead so its
+            percentage resolves against the track (see the note above), above
+            it in z so the two are distinguishable when a bar lands exactly on
+            the playhead — which is the single most common snap. Opacity rather
+            than mount/unmount: it appears and disappears at pointer speed, and
+            a React round trip per frame is exactly what this file avoids. */}
+        <div className="pointer-events-none absolute inset-y-0 z-20" style={{ left: GUTTER, right: PAD_X }}>
+          <div ref={snapRef} className="absolute top-0 bottom-0 w-px bg-clay-600 opacity-0"
+            style={{ left: '0%' }} />
+        </div>
+
         <div className="max-h-[132px] overflow-y-auto px-3 py-1.5">
           {rows.map(layer => {
             const t = layerTiming(layer)
             const left = (t.tIn / duration) * 100
             const right = ((t.tOut === null ? duration : t.tOut) / duration) * 100
             const isSel = selected.has(layer.id)
+            const span = (t.tOut === null ? duration : t.tOut) - t.tIn
+            // As a percentage OF THE BAR, which is what the wedges below are
+            // positioned inside. Capped at half: clampTiming already limits a
+            // fade to half the span, but a bar dragged shorter mid-gesture can
+            // momentarily be narrower than its own ramps.
+            const fadePct = span > 0 ? Math.min(50, (t.fade / span) * 100) : 0
+            const motion = layerMotion(layer)
             return (
               <div key={layer.id} className="flex items-center gap-2" style={{ height: ROW_H }}>
                 <button type="button" onClick={() => onSelect(layer.id)}
@@ -347,13 +480,47 @@ export function Timeline({
                         : box.right - e.clientX < EDGE_PX ? 'out' : 'move'
                       startDrag(e, layer, mode)
                     }}
-                    title={`${fmt(t.tIn)} → ${t.tOut === null ? 'end' : fmt(t.tOut)}${t.fade ? ` · ${fmt(t.fade)} fade` : ''}`}
-                    className={`absolute inset-y-0 cursor-grab rounded ${
+                    title={[
+                      `${fmt(t.tIn)} → ${t.tOut === null ? 'end' : fmt(t.tOut)}`,
+                      t.fade ? `${fmt(t.fade)} fade` : null,
+                      motion ? `${MOTION_LABELS[motion.in]} in / ${MOTION_LABELS[motion.out]} out` : null,
+                    ].filter(Boolean).join(' · ')}
+                    className={`absolute inset-y-0 cursor-grab overflow-hidden rounded ${
                       isSel ? 'bg-amber-500' : 'bg-amber-300 hover:bg-amber-400'
                     }`}
                     style={{ left: `${left}%`, width: `${Math.max(1.5, right - left)}%` }}>
+                    {/* ── The fade ramps ──
+                        Drawn as the wedge every NLE draws, by cutting the
+                        corner of the bar away with the track's own colour. The
+                        fade was previously a number in a field and nothing
+                        else, which meant the one property that most changes how
+                        an overlay READS was invisible on the surface built to
+                        show how overlays read.
+
+                        The out wedge is drawn ONLY when there is a real tOut,
+                        and that asymmetry is not an oversight — it is copied
+                        from the compose graph, which has nothing to anchor an
+                        out-fade to on a layer that runs to the end of the clip.
+                        layerAlphaAt reproduces it, the canvas preview shows it,
+                        and drawing a ramp here that neither of them performs
+                        would put the lie back at the top of the stack. */}
+                    {fadePct > 1 && (
+                      <span className="pointer-events-none absolute inset-y-0 left-0"
+                        style={{
+                          width: `${fadePct}%`,
+                          backgroundImage: 'linear-gradient(to bottom right, rgba(255,255,255,0.92) 49.6%, transparent 50%)',
+                        }} />
+                    )}
+                    {fadePct > 1 && t.tOut !== null && (
+                      <span className="pointer-events-none absolute inset-y-0 right-0"
+                        style={{
+                          width: `${fadePct}%`,
+                          backgroundImage: 'linear-gradient(to top right, transparent 49.6%, rgba(255,255,255,0.92) 50%)',
+                        }} />
+                    )}
                     {/* Grab handles. Visual only — the hit test above is what
-                        decides trim vs move, so they can stay this thin. */}
+                        decides trim vs move, so they can stay this thin. Drawn
+                        after the wedges so a fade never buries the grip. */}
                     <span className="absolute inset-y-0 left-0 w-[3px] cursor-ew-resize rounded-l bg-black/25" />
                     <span className="absolute inset-y-0 right-0 w-[3px] cursor-ew-resize rounded-r bg-black/25" />
                   </div>
@@ -364,6 +531,45 @@ export function Timeline({
         </div>
       </div>
     </div>
+  )
+}
+
+// ── Sound ──────────────────────────────────────────────────────────────────
+// A speaker that toggles and a short slider beside it, both always on screen.
+//
+// The slider was briefly revealed on hover instead, to save the width. That
+// was wrong for a reason worth writing down: it was positioned `left-full`,
+// so on hover it floated straight over the timecode readout — you could not
+// see the time you were setting the volume against, and the transport
+// appeared to lose its readout whenever the pointer crossed the speaker.
+// Forty pixels of permanent width is cheaper than a control that hides the
+// one number the strip exists to show.
+//
+// This is PREVIEW audio: it changes what this browser plays and nothing about
+// what ships. Worth being explicit about, since the one control the strip does
+// NOT have is a mute for the model's own generated track — that is a property
+// of the document, it survives a reload, and it costs an ffmpeg flag. Putting
+// the two behind one speaker would let someone silence a delivered reel by
+// turning their own monitors down.
+function AudioControl({ playback }) {
+  if (!playback) return null
+  const muted = playback.muted || playback.volume === 0
+  return (
+    <span className="flex items-center gap-1">
+      <button type="button" onClick={() => playback.setMuted()} disabled={!playback.ready}
+        title={muted
+          ? (playback.forcedMute ? 'Your browser blocked the sound — click to turn it on' : 'Unmute the preview')
+          : 'Mute the preview'}
+        className={`flex h-5 w-5 items-center justify-center transition-colors disabled:opacity-40 ${
+          muted ? 'text-text-tertiary hover:text-text' : 'text-amber-800 hover:text-amber-900'
+        }`}>
+        {muted ? <IconVolumeMuted /> : <IconVolume />}
+      </button>
+      <input type="range" min={0} max={1} step={0.05} value={playback.muted ? 0 : playback.volume}
+        onChange={e => playback.setVolume(Number(e.target.value))}
+        disabled={!playback.ready} title="Preview volume"
+        className="h-4 w-12 accent-amber-600 disabled:opacity-40" />
+    </span>
   )
 }
 

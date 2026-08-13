@@ -1,11 +1,16 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Spinner } from '../../../ui/index'
+import { fetchMediaLibrary } from '../../../../lib/mediaLibrary'
 import {
   ADJUST_GROUPS, ADJUST_LABELS, ADJUST_RANGE,
   FILTER_PRESETS, matchPreset, hasAdjustments,
 } from '../model/adjust'
 import { isFullFrame } from '../model/document'
 import { SliderField, PanelSection, ToolbarButton } from '../controls'
+import {
+  IconAdjust, IconArrow, IconEllipse, IconImage, IconLayers, IconLine, IconPolygon,
+  IconPlus, IconRect, IconStar, IconTriangle, IconUpload,
+} from '../icons'
 import { PositionPanel } from './PositionPanel'
 
 // ─── The left rail and its panels ──────────────────────────────────────────
@@ -15,10 +20,10 @@ import { PositionPanel } from './PositionPanel'
 // TopToolbar.jsx.
 
 const RAIL = [
-  { id: 'insert', icon: '✚', label: 'Add' },
-  { id: 'uploads', icon: '▣', label: 'Images' },
-  { id: 'adjust', icon: '🎚', label: 'Adjust' },
-  { id: 'position', icon: '⌗', label: 'Position' },
+  { id: 'insert', Icon: IconPlus, label: 'Add' },
+  { id: 'uploads', Icon: IconImage, label: 'Images' },
+  { id: 'adjust', Icon: IconAdjust, label: 'Adjust' },
+  { id: 'position', Icon: IconLayers, label: 'Position' },
 ]
 
 // `hide` drops rail entries that cannot apply in the current mode — video mode
@@ -29,13 +34,13 @@ export function SidePanel({ panel, onOpenPanel, hide = [], children }) {
   return (
     <div className="flex min-h-0">
       <div className="flex w-[62px] shrink-0 flex-col gap-1 border-r border-border bg-surface-subtle p-1.5">
-        {RAIL.filter(item => !hide.includes(item.id)).map(item => (
-          <button key={item.id} type="button" onClick={() => onOpenPanel(item.id)}
-            className={`flex flex-col items-center gap-0.5 rounded-lg py-2 text-[10px] font-medium transition-colors ${
-              panel === item.id ? 'bg-amber-100 text-amber-900' : 'text-text-tertiary hover:bg-white hover:text-amber-800'
+        {RAIL.filter(item => !hide.includes(item.id)).map(({ id, Icon, label }) => (
+          <button key={id} type="button" onClick={() => onOpenPanel(id)}
+            className={`flex flex-col items-center gap-1 rounded-lg py-2 text-[10px] font-medium transition-colors ${
+              panel === id ? 'bg-amber-100 text-amber-900' : 'text-text-tertiary hover:bg-white hover:text-amber-800'
             }`}>
-            <span className="text-base leading-none">{item.icon}</span>
-            {item.label}
+            <Icon className="h-[18px] w-[18px]" />
+            {label}
           </button>
         ))}
       </div>
@@ -55,13 +60,13 @@ const TEXT_PRESETS = [
 ]
 
 const SHAPES = [
-  { id: 'rect', icon: '▭', label: 'Rectangle' },
-  { id: 'ellipse', icon: '◯', label: 'Ellipse' },
-  { id: 'triangle', icon: '△', label: 'Triangle' },
-  { id: 'polygon', icon: '⬡', label: 'Polygon' },
-  { id: 'star', icon: '★', label: 'Star' },
-  { id: 'line', icon: '／', label: 'Line' },
-  { id: 'arrow', icon: '→', label: 'Arrow' },
+  { id: 'rect', Icon: IconRect, label: 'Rectangle' },
+  { id: 'ellipse', Icon: IconEllipse, label: 'Ellipse' },
+  { id: 'triangle', Icon: IconTriangle, label: 'Triangle' },
+  { id: 'polygon', Icon: IconPolygon, label: 'Polygon' },
+  { id: 'star', Icon: IconStar, label: 'Star' },
+  { id: 'line', Icon: IconLine, label: 'Line' },
+  { id: 'arrow', Icon: IconArrow, label: 'Arrow' },
 ]
 
 export function InsertPanel({ onAddText, onAddShape }) {
@@ -82,11 +87,11 @@ export function InsertPanel({ onAddText, onAddShape }) {
 
       <PanelSection title="Elements">
         <div className="grid grid-cols-2 gap-1.5">
-          {SHAPES.map(s => (
-            <button key={s.id} type="button" onClick={() => onAddShape(s.id)}
-              className="flex flex-col items-center gap-1 rounded-lg border border-border bg-white py-3 text-[11px] text-text-secondary hover:border-amber-400 hover:bg-amber-50">
-              <span className="text-lg leading-none">{s.icon}</span>
-              {s.label}
+          {SHAPES.map(({ id, Icon, label }) => (
+            <button key={id} type="button" onClick={() => onAddShape(id)}
+              className="flex flex-col items-center gap-1.5 rounded-lg border border-border bg-white py-3 text-[11px] text-text-secondary transition-colors hover:border-amber-400 hover:bg-amber-50 hover:text-amber-800">
+              <Icon />
+              {label}
             </button>
           ))}
         </div>
@@ -96,13 +101,26 @@ export function InsertPanel({ onAddText, onAddShape }) {
 }
 
 // ── Images ─────────────────────────────────────────────────────────────────
-// Two sources: a file from the marketer's machine, and anything already
-// generated in this session — which is the one people actually reach for, to
-// drop a logo or an earlier crop onto a new background.
-export function UploadsPanel({ onUploadImage, onAddImage, library = [] }) {
+// Three sources: a file from the marketer's machine, anything already saved
+// to the account's Media Library (past uploads and generations, across every
+// session), and anything already generated in this session — which is the one
+// people actually reach for, to drop a logo or an earlier crop onto a new
+// background.
+export function UploadsPanel({ onUploadImage, onAddImage, library = [], accessToken }) {
   const fileRef = useRef(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [mediaAssets, setMediaAssets] = useState([])
+  const [mediaLoading, setMediaLoading] = useState(true)
+
+  useEffect(() => {
+    let alive = true
+    fetchMediaLibrary(accessToken, { kind: 'image' }).then(rows => {
+      if (!alive) return
+      setMediaAssets(rows); setMediaLoading(false)
+    })
+    return () => { alive = false }
+  }, [accessToken])
 
   async function handleFile(e) {
     const file = e.target.files?.[0]
@@ -121,10 +139,28 @@ export function UploadsPanel({ onUploadImage, onAddImage, library = [] }) {
       <PanelSection title="Upload">
         <button type="button" disabled={busy || !onUploadImage} onClick={() => fileRef.current?.click()}
           className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-border bg-white py-6 text-[11px] text-text-secondary hover:border-amber-400 hover:bg-amber-50 disabled:opacity-50">
-          {busy ? <><Spinner size="sm" /> Uploading…</> : '＋ Upload an image'}
+          {busy ? <><Spinner size="sm" /> Uploading…</> : <><IconUpload /> Upload an image</>}
         </button>
         <input ref={fileRef} type="file" accept="image/*" hidden onChange={handleFile} />
         {error && <p className="text-[11px] text-red-600">{error}</p>}
+      </PanelSection>
+
+      <PanelSection title="Media library">
+        {mediaLoading ? (
+          <div className="flex justify-center py-4"><Spinner size="sm" /></div>
+        ) : mediaAssets.length === 0 ? (
+          <p className="text-[11px] text-text-tertiary">Nothing saved to your library yet.</p>
+        ) : (
+          <div className="grid grid-cols-2 gap-1.5">
+            {mediaAssets.map(a => (
+              <button key={a.id} type="button" onClick={() => onAddImage(a.url)}
+                title={a.name || 'Add to canvas'}
+                className="aspect-square overflow-hidden rounded-lg border border-border bg-surface-subtle hover:border-amber-400">
+                <img src={a.url} alt="" loading="lazy" className="h-full w-full object-cover" />
+              </button>
+            ))}
+          </div>
+        )}
       </PanelSection>
 
       <PanelSection title="From this session">

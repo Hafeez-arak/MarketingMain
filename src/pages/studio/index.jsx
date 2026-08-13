@@ -1961,6 +1961,7 @@ export function CreativeStudio() {
               onCancel={() => setEditingClip(null)}
               onUploadImage={file => uploadToStudio(activeWorkspaceId, accessToken, file, file.name || 'layer.png')}
               imageLibrary={editorLibrary}
+              accessToken={accessToken}
               brandColorsText={state.brandProfile?.brandColors || ''}
             />
           )}
@@ -1990,6 +1991,7 @@ export function CreativeStudio() {
               // studio bucket first and the layer stores that URL.
               onUploadImage={file => uploadToStudio(activeWorkspaceId, accessToken, file, file.name || 'layer.png')}
               imageLibrary={editorLibrary}
+              accessToken={accessToken}
               // Brand Brain's "Brand Colours" field, so the account's own
               // palette is a click away in every colour picker rather than
               // something a marketer has to retype as a hex each time.

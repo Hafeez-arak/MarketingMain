@@ -1,8 +1,13 @@
-import { WEIGHTS, fontsFor } from '../../fonts'
+import { useState } from 'react'
+import { fontStack, groupedFonts, nearestWeight, weightLabel, weightsFor } from '../../fonts'
 import { EFFECTS, ANCHORS } from '../../overlayModel'
 import { DASH_STYLES, isPath, isShape } from '../model/document'
 import { MOTIONS, MOTION_LABELS, DEFAULT_MOTION_SECONDS } from '../model/playback'
-import { ToolbarButton, ToolbarDivider, ToolbarMenu, MenuItem, NumberField, ColorField, SliderField } from '../controls'
+import { ToolbarButton, ToolbarDivider, ToolbarMenu, MenuItem, MenuSearch, NumberField, ColorField, SliderField } from '../controls'
+import {
+  IconAdjust, IconAlignCenter, IconAlignJustify, IconAlignLeft, IconAlignRight, IconBrush,
+  IconCrop, IconFlipH, IconFlipV, IconLayers, IconRedo, IconRotateLeft, IconRotateRight, IconUndo,
+} from '../icons'
 
 // ─── The contextual toolbar above the canvas ───────────────────────────────
 // Canva's model, adopted directly: the toolbar shows the controls for
@@ -40,8 +45,8 @@ export function TopToolbar({
     // panel rather than a short bar with dead space under it, and packing the
     // wrapped rows to the top stops one row floating in the middle.
     <div className="flex h-full flex-wrap content-start items-center gap-1 rounded-xl border border-border bg-white px-1.5 py-1.5">
-      <ToolbarButton title="Undo (⌘Z)" onClick={onUndo} disabled={!canUndo}>↶</ToolbarButton>
-      <ToolbarButton title="Redo (⇧⌘Z)" onClick={onRedo} disabled={!canRedo}>↷</ToolbarButton>
+      <ToolbarButton title="Undo (⌘Z)" onClick={onUndo} disabled={!canUndo}><IconUndo /></ToolbarButton>
+      <ToolbarButton title="Redo (⇧⌘Z)" onClick={onRedo} disabled={!canRedo}><IconRedo /></ToolbarButton>
       <ToolbarDivider />
 
       {/* Every one of these reframes or regrades the PHOTO. In video mode the
@@ -52,6 +57,22 @@ export function TopToolbar({
       {!selection.length && onStartCrop && (
         <PhotoControls tool={tool} panel={panel} onOpenPanel={onOpenPanel}
           onRotate={onRotate} onFlip={onFlip} onStartCrop={onStartCrop} />
+      )}
+
+      {/* Video mode, nothing selected. The parent reserves a fixed ~118px band
+          so the canvas can't move when the selection changes what is in here
+          (see index.jsx), and in this one combination there was nothing to put
+          in it: the photo group is withheld because there is no photo to
+          reframe, and the style controls need a selection. The result was a
+          large empty white card that read as a panel that had failed to load.
+          A hint costs nothing and is what the space is for — this is the first
+          thing on screen after a clip opens. */}
+      {!selection.length && !onStartCrop && (
+        <span className="px-2 text-[12px] text-text-tertiary">
+          Nothing selected — press <Key>T</Key> for text or pick a shape from Add, then time it on
+          the strip below. <Key>Space</Key> plays, <Key>I</Key> and <Key>O</Key> trim the clip at the
+          playhead.
+        </span>
       )}
 
       {single?.type === 'text' && (
@@ -84,12 +105,25 @@ export function TopToolbar({
         {single && (
           <ToolbarButton active={painting} onClick={onCopyStyle}
             title={painting ? 'Now click the layer to paint this style onto (Esc to cancel)' : 'Copy this style, then click another layer to apply it'}>
-            🖌 {painting ? 'Pick a target' : 'Copy style'}
+            <IconBrush /> {painting ? 'Pick a target' : 'Copy style'}
           </ToolbarButton>
         )}
-        <ToolbarButton title="Position, align and layers" active={panel === 'position'} onClick={() => onOpenPanel('position')}>Position</ToolbarButton>
+        <ToolbarButton title="Position, align and layers" active={panel === 'position'} onClick={() => onOpenPanel('position')}>
+          <IconLayers /> Position
+        </ToolbarButton>
       </span>
     </div>
+  )
+}
+
+// A keycap. Inline in the hint above rather than a <kbd> with app-wide styling,
+// because this is the only place in the editor that spells a shortcut out in
+// running text — everywhere else it lives in a tooltip.
+function Key({ children }) {
+  return (
+    <kbd className="mx-0.5 border border-border bg-surface-subtle px-1 py-px font-sans text-[10px] font-semibold text-text-secondary">
+      {children}
+    </kbd>
   )
 }
 
@@ -103,49 +137,118 @@ function PhotoControls({ tool, panel, onOpenPanel, onRotate, onFlip, onStartCrop
   // be nonsense, not a feature.
   return (
     <>
-      <ToolbarButton title="Crop the photo — non-destructive, re-editable at any time" active={tool === 'crop'} onClick={onStartCrop}>⬚ Crop</ToolbarButton>
-      <ToolbarButton title="Filters, auto-adjust, light and colour" active={panel === 'adjust'} onClick={() => onOpenPanel('adjust')}>🎚 Adjust</ToolbarButton>
+      <ToolbarButton title="Crop the photo — non-destructive, re-editable at any time" active={tool === 'crop'} onClick={onStartCrop}>
+        <IconCrop /> Crop
+      </ToolbarButton>
+      <ToolbarButton title="Filters, auto-adjust, light and colour" active={panel === 'adjust'} onClick={() => onOpenPanel('adjust')}>
+        <IconAdjust /> Adjust
+      </ToolbarButton>
       <ToolbarDivider />
-      <ToolbarButton title="Rotate 90° left" onClick={() => onRotate(false)}>⟲</ToolbarButton>
-      <ToolbarButton title="Rotate 90° right" onClick={() => onRotate(true)}>⟳</ToolbarButton>
-      <ToolbarButton title="Flip the photo horizontally (layers stay put)" onClick={() => onFlip('horizontal')}>⇋</ToolbarButton>
-      <ToolbarButton title="Flip the photo vertically (layers stay put)" onClick={() => onFlip('vertical')}>⇅</ToolbarButton>
+      <ToolbarButton title="Rotate 90° left" onClick={() => onRotate(false)}><IconRotateLeft /></ToolbarButton>
+      <ToolbarButton title="Rotate 90° right" onClick={() => onRotate(true)}><IconRotateRight /></ToolbarButton>
+      <ToolbarButton title="Flip the photo horizontally (layers stay put)" onClick={() => onFlip('horizontal')}><IconFlipH /></ToolbarButton>
+      <ToolbarButton title="Flip the photo vertically (layers stay put)" onClick={() => onFlip('vertical')}><IconFlipV /></ToolbarButton>
     </>
   )
 }
 
 // ── Text ───────────────────────────────────────────────────────────────────
 const ALIGNMENTS = [
-  { value: 'left', icon: '⇤', title: 'Align left (⇧⌘L)' },
-  { value: 'center', icon: '↔', title: 'Align centre (⇧⌘C)' },
-  { value: 'right', icon: '⇥', title: 'Align right (⇧⌘R)' },
-  { value: 'justify', icon: '≡', title: 'Justify' },
+  { value: 'left', Icon: IconAlignLeft, title: 'Align left (⇧⌘L)' },
+  { value: 'center', Icon: IconAlignCenter, title: 'Align centre (⇧⌘C)' },
+  { value: 'right', Icon: IconAlignRight, title: 'Align right (⇧⌘R)' },
+  { value: 'justify', Icon: IconAlignJustify, title: 'Justify' },
 ]
 
+// ── The font picker ────────────────────────────────────────────────────────
+// This was a flat list of seven names. At forty-five it needs to be a real
+// picker, and the three things that make it one are all here:
+//
+//  · **Search.** Forty-five rows is three screens of scrolling in a 230px
+//    popover, and people arrive knowing the name they want.
+//  · **Groups.** The list is ordered by what a face is FOR, and Arabic sits
+//    first — this is a studio for a Saudi brand, and putting the faces that
+//    cannot set an Arabic headline where the eye lands first would be
+//    backwards. An RTL box filters to the Arabic-capable faces, so its Serif
+//    and Handwriting groups vanish rather than sitting there empty.
+//  · **The name set in its own face**, which is the entire reason this is a
+//    portalled popover and not a native <select>.
+//
+// Picking a family also SNAPS THE WEIGHT (see nearestWeight in fonts.js).
+// Bebas Neue has one weight and Amiri has two; carrying a layer's 900 across
+// to either leaves the toolbar saying "Black" while the canvas draws Regular.
+function FontMenu({ layer, onPick }) {
+  const [query, setQuery] = useState('')
+  const groups = groupedFonts(layer.dir || 'ltr', query)
+
+  return (
+    <ToolbarMenu label={layer.family} title="Font" width={278} closeOnClick={false}>
+      {({ close }) => (
+        <>
+          <MenuSearch value={query} onChange={setQuery} placeholder="Search fonts…" />
+          {!groups.length && (
+            <p className="px-2 py-3 text-center text-[11px] text-text-tertiary">
+              No font matches “{query}”.
+              {layer.dir === 'rtl' && <span className="block pt-1">This box is right-to-left, so only Arabic faces are listed.</span>}
+            </p>
+          )}
+          {groups.map(g => (
+            <div key={g.id} className="pb-1">
+              <p className="px-2 pb-0.5 pt-1.5 text-[9px] font-semibold uppercase tracking-wider text-text-tertiary">
+                {g.label}
+              </p>
+              {g.fonts.map(f => (
+                <button key={f.value} type="button"
+                  onClick={() => { onPick(f.value); close() }}
+                  className={`block w-full px-2.5 py-1.5 text-left transition-colors ${
+                    f.value === layer.family ? 'bg-amber-100 text-amber-900' : 'text-text hover:bg-amber-50'
+                  }`}>
+                  {/* The name in its own face at a size you can actually judge
+                      — a 12px preview of Playfair against Lora is no preview
+                      at all. The note stays in the UI font so the two can't be
+                      confused for each other. */}
+                  <span className="block truncate text-[15px] leading-tight"
+                    style={{ fontFamily: fontStack(f.value) }}>
+                    {f.label}
+                  </span>
+                  <span className="block truncate pt-0.5 text-[10px] leading-none text-text-tertiary">
+                    {f.note}
+                  </span>
+                </button>
+              ))}
+            </div>
+          ))}
+        </>
+      )}
+    </ToolbarMenu>
+  )
+}
+
 function TextControls({ layer, H, onPatch, onBeginChange, palette }) {
-  const fonts = fontsFor(layer.dir || 'ltr')
   const sizePx = Math.round(layer.size * H)
-  const weightLabel = WEIGHTS.find(w => w.value === layer.weight)?.label || layer.weight
+  const weights = weightsFor(layer.family)
   const effect = layer.effect || 'none'
   const anchor = layer.anchor || 'top'
+  // ⌘B and the B button jump between the lightest and the heaviest weight this
+  // FACE has, rather than a hard-coded 400/700. On Bebas Neue, which has one
+  // weight, that correctly makes bold a no-op instead of a lie.
+  const boldWeight = weights[weights.length - 1]
+  const isBold = weights.length > 1 && layer.weight >= boldWeight
 
   function set(patch) { onBeginChange(); onPatch(patch) }
 
   return (
     <>
-      <ToolbarMenu label={layer.family} title="Font" width={230}>
-        {fonts.map(f => (
-          <MenuItem key={f.value} active={f.value === layer.family}
-            style={{ fontFamily: `"${f.value}", sans-serif` }}
-            onClick={() => set({ family: f.value })}>
-            {f.label}
-          </MenuItem>
-        ))}
-      </ToolbarMenu>
-      <ToolbarMenu label={weightLabel} title="Font weight" width={150}>
-        {WEIGHTS.map(w => (
-          <MenuItem key={w.value} active={w.value === layer.weight} onClick={() => set({ weight: w.value })}>
-            {w.label}
+      <FontMenu layer={layer}
+        onPick={family => set({ family, weight: nearestWeight(family, layer.weight) })} />
+      <ToolbarMenu label={weightLabel(layer.family, layer.weight)}
+        title={weights.length > 1 ? 'Font weight' : `${layer.family} has only one weight`}
+        width={160} disabled={weights.length < 2}>
+        {weights.map(w => (
+          <MenuItem key={w} active={w === layer.weight} onClick={() => set({ weight: w })}>
+            <span style={{ fontFamily: fontStack(layer.family), fontWeight: w }}>
+              {weightLabel(layer.family, w)}
+            </span>
           </MenuItem>
         ))}
       </ToolbarMenu>
@@ -166,9 +269,14 @@ function TextControls({ layer, H, onPatch, onBeginChange, palette }) {
       <span className="flex items-center gap-0.5">
         {/* Bold is a jump between two weights rather than a separate flag: the
             weight menu is the real control, and B is the shortcut people reach
-            for. Keeping one source of truth means they can't disagree. */}
-        <ToolbarButton title="Bold (⌘B)" active={layer.weight >= 700}
-          onClick={() => set({ weight: layer.weight >= 700 ? 400 : 700 })}>
+            for. Keeping one source of truth means they can't disagree — which
+            now includes agreeing about what weights the face HAS, so the jump
+            is to this family's heaviest rather than to a 700 that may not
+            exist. Disabled on a single-weight face, because a bold button that
+            visibly does nothing is the thing this whole change is about. */}
+        <ToolbarButton title={weights.length > 1 ? 'Bold (⌘B)' : `${layer.family} has only one weight`}
+          disabled={weights.length < 2} active={isBold}
+          onClick={() => set({ weight: isBold ? weights[0] : boldWeight })}>
           <b>B</b>
         </ToolbarButton>
         <ToolbarButton title="Italic (⌘I)" active={!!layer.italic}
@@ -183,9 +291,9 @@ function TextControls({ layer, H, onPatch, onBeginChange, palette }) {
 
       <ToolbarDivider />
       <span className="flex items-center gap-0.5">
-        {ALIGNMENTS.map(a => (
-          <ToolbarButton key={a.value} title={a.title} active={layer.align === a.value}
-            onClick={() => set({ align: a.value })}>{a.icon}</ToolbarButton>
+        {ALIGNMENTS.map(({ value, Icon, title }) => (
+          <ToolbarButton key={value} title={title} active={layer.align === value}
+            onClick={() => set({ align: value })}><Icon /></ToolbarButton>
         ))}
       </span>
 
