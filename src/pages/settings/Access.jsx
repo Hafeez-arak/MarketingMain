@@ -2,7 +2,8 @@ import { useState, useEffect, useCallback } from 'react'
 import { useAuth } from '../../store/auth'
 import { Card, Button, PageHeader } from '../../components/ui/index'
 import {
-  fetchAllAccess, approveAccess, revokeAccess, ACCESS_ADMIN_EMAIL,
+  fetchAllAccess, approveAccess, revokeAccess,
+  fetchInvites, inviteAccess, cancelInvite,
 } from '../../lib/access'
 
 // ─── Team & Access ─────────────────────────────────────────────────────────
@@ -68,17 +69,24 @@ function PersonRow({ row, busy, onApprove, onRevoke, isSelf }) {
 export function Access() {
   const { user, isAccessAdmin, workspaces, refreshWorkspaces } = useAuth()
   const [rows, setRows]   = useState([])
+  const [invites, setInvites] = useState([])
   const [loading, setLoading] = useState(true)
   const [busyId, setBusyId]   = useState(null)
   const [error, setError]     = useState('')
+  const [notice, setNotice]   = useState('')
   const [confirm, setConfirm] = useState(null)  // person pending a remove/deny confirmation
+  const [newEmail, setNewEmail] = useState('')
+  const [adding, setAdding]     = useState(false)
 
   // Refresh after a decision. Deliberately does not flip `loading` — the
   // list is already on screen and blanking it to a spinner for 200ms makes
   // an approval feel like a page reload rather than a row changing state.
   const load = useCallback(async () => {
-    const { rows: data, error: e } = await fetchAllAccess()
+    const [{ rows: data, error: e }, { invites: inv }] = await Promise.all([
+      fetchAllAccess(), fetchInvites(),
+    ])
     setRows(data)
+    setInvites(inv)
     setError(e || '')
   }, [])
 
@@ -86,14 +94,43 @@ export function Access() {
   // synchronous setState in it; `loading` starts true and is cleared once.
   useEffect(() => {
     let cancelled = false
-    fetchAllAccess().then(({ rows: data, error: e }) => {
+    Promise.all([fetchAllAccess(), fetchInvites()]).then(([{ rows: data, error: e }, { invites: inv }]) => {
       if (cancelled) return
       setRows(data)
+      setInvites(inv)
       setError(e || '')
       setLoading(false)
     })
     return () => { cancelled = true }
   }, [])
+
+  async function handleAdd(e) {
+    e?.preventDefault()
+    const email = newEmail.trim()
+    if (!email) return
+    setAdding(true); setError(''); setNotice('')
+    const { outcome, error: err } = await inviteAccess(email)
+    if (err) { setError(err); setAdding(false); return }
+    // Say which of the three things happened. "Done" would leave the admin
+    // unsure whether that person can log in right now or still has to sign up.
+    setNotice({
+      approved: `${email} now has access to every company.`,
+      invited:  `${email} is cleared. They'll be let straight in when they sign up — tell them to create an account.`,
+      already:  `${email} already has access.`,
+    }[outcome] || 'Done.')
+    setNewEmail('')
+    await load()
+    await refreshWorkspaces()
+    setAdding(false)
+  }
+
+  async function handleCancelInvite(email) {
+    setBusyId(email); setError(''); setNotice('')
+    const err = await cancelInvite(email)
+    if (err) setError(err)
+    await load()
+    setBusyId(null)
+  }
 
   async function handleApprove(row) {
     setBusyId(row.user_id); setError('')
@@ -129,9 +166,8 @@ export function Access() {
             everyone on the team.
           </p>
           <p className="text-sm text-text-secondary leading-relaxed mt-3">
-            Adding or removing people is the one action reserved for{' '}
-            <span className="font-semibold text-text">{ACCESS_ADMIN_EMAIL}</span>.
-            Ask there and it takes about ten seconds.
+            Adding or removing people is the one action reserved for the
+            administrator. Ask them and it takes about ten seconds.
           </p>
         </Card>
       </div>
@@ -153,6 +189,67 @@ export function Access() {
         <div className="border border-red-200 bg-red-50/60 px-5 py-3">
           <p className="text-xs text-red-600">{error}</p>
         </div>
+      )}
+      {notice && (
+        <div className="border border-emerald-200 bg-emerald-50/60 px-5 py-3">
+          <p className="text-xs text-emerald-700">{notice}</p>
+        </div>
+      )}
+
+      {/* Add by email. The reactive half of this page (approving requests)
+          only works once someone has signed up and is waiting; teams
+          normally grow the other way round — the person is hired, and access
+          is arranged before they ever open the app. */}
+      <Card className="overflow-hidden">
+        <div className="px-5 py-4 border-b border-border">
+          <h3 className="font-semibold text-text text-sm">Add someone</h3>
+          <p className="text-xs text-text-tertiary mt-0.5">
+            Works whether or not they have an account yet. Nothing is emailed — you'll still need to tell them to sign up.
+          </p>
+        </div>
+        <form onSubmit={handleAdd} className="px-5 py-4 flex gap-2">
+          <input
+            type="email"
+            value={newEmail}
+            onChange={e => setNewEmail(e.target.value)}
+            placeholder="name@company.com"
+            className="flex-1 border border-border bg-white text-text text-sm px-3.5 py-2 focus:outline-none focus:ring-1 focus:ring-amber-400"
+          />
+          <Button type="submit" size="sm" disabled={!newEmail.trim() || adding}>
+            {adding ? 'Adding…' : 'Add'}
+          </Button>
+        </form>
+      </Card>
+
+      {/* People cleared but not yet signed up. Shown separately from the
+          roster because they hold no access today — an invite is a promise,
+          not a membership, and merging the two lists would overstate it. */}
+      {invites.length > 0 && (
+        <Card className="overflow-hidden">
+          <div className="px-5 py-4 border-b border-border">
+            <h3 className="font-semibold text-text text-sm">Cleared, waiting to sign up</h3>
+            <p className="text-xs text-text-tertiary mt-0.5">
+              No account yet. They get in automatically the moment they create one.
+            </p>
+          </div>
+          <ul className="divide-y divide-border">
+            {invites.map(inv => (
+              <li key={inv.email} className="flex items-center gap-4 px-6 py-3.5 hover:bg-surface-muted transition-colors">
+                <div className="w-8 h-8 flex items-center justify-center text-[11px] font-bold text-white flex-shrink-0 bg-stone-400">
+                  {inv.email.charAt(0).toUpperCase()}
+                </div>
+                <p className="flex-1 min-w-0 text-sm text-text truncate">{inv.email}</p>
+                <span className="text-[10px] font-semibold uppercase tracking-wide px-2 py-1 border bg-sky-50 text-sky-700 border-sky-200">
+                  Invited
+                </span>
+                <Button size="xs" variant="ghost" disabled={busyId === inv.email}
+                  onClick={() => handleCancelInvite(inv.email)}>
+                  Cancel
+                </Button>
+              </li>
+            ))}
+          </ul>
+        </Card>
       )}
 
       {/* Requests waiting on a decision. Kept at the top and given the amber
