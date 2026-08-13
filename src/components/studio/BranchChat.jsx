@@ -318,7 +318,7 @@ export function BranchChat({
                 </button>
                 <button type="button" onClick={() => onOpenEditor(stage)}
                   className="px-2.5 py-1 bg-white/95 text-text text-[10px] font-semibold shadow-dropdown hover:bg-white">
-                  ✏️ Edit
+                  Editor
                 </button>
               </div>
             )}
@@ -477,20 +477,18 @@ export function BranchChat({
             to police it in a meeting. */}
         <div className="flex flex-wrap items-center gap-1.5">
           {!stageIsVideo && (
-            <Button size="sm" variant="outline" disabled={!canAct} onClick={() => onOpenEditor(base)}>✏️ Editor</Button>
+            <Button size="sm" variant="outline" disabled={!canAct} onClick={() => onOpenEditor(base)}>Editor</Button>
           )}
           {stageIsVideo && onEditClip && stage?.status === 'ready' && (
             <Button size="sm" variant="outline" disabled={preparingClip === stage.id}
               onClick={() => onEditClip(stage)}
               title="Add or change text, logos and colours on this clip — instant, and it never re-renders the footage">
-              {preparingClip === stage.id
-                ? <><Spinner size="sm" /> Opening…</>
-                : `✏️ ${stage.overlay_state?.overlays?.length ? 'Edit text' : 'Add text'}`}
+              {preparingClip === stage.id ? <><Spinner size="sm" /> Opening…</> : 'Editor'}
             </Button>
           )}
           {onAnimate && !stageIsVideo && (
             <Button size="sm" disabled={!canAct} onClick={() => onAnimate(base)}
-              title="Generate a clip from this still — this one costs a render">🎬 Animate</Button>
+              title="Generate a clip from this still — this one costs a render">Animate</Button>
           )}
           {/* The way out of the studio. Acts on `stage` — what is actually on
               screen — for the same reason Download does: watching a clip and
@@ -504,7 +502,7 @@ export function BranchChat({
           )}
           <Button size="sm" variant="secondary" disabled={!canAct || busy === 'finalize' || base?.is_final}
             onClick={() => onFinalize(base)}>
-            {busy === 'finalize' ? <Spinner size="sm" /> : base?.is_final ? '✓ Saved' : '✅ Save'}
+            {busy === 'finalize' ? <Spinner size="sm" /> : base?.is_final ? 'Saved' : 'Save'}
           </Button>
           {/* Downloads whatever is actually on screen, so watching a clip and
               pressing Download can't hand you the still instead. */}

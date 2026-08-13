@@ -213,7 +213,7 @@ function ClipCard({
         {ready && (
           <>
             <Button size="xs" variant="secondary" onClick={() => onAddText(row)} disabled={disabled || !!preparing}>
-              {preparing ? <><Spinner size="sm" /> Opening…</> : '✏️ Text'}
+              {preparing ? <><Spinner size="sm" /> Opening…</> : 'Editor'}
             </Button>
             <Button size="xs" variant="secondary" onClick={() => onRender(index)} disabled={busy}>
               ↻ Re-render · {money(cost)}
@@ -626,7 +626,7 @@ export function ClipBoard({
             <div className="flex-1" />
             {stitchRow.status === 'ready' && (
               <>
-                <Button size="xs" variant="secondary" onClick={() => onOpenClip(stitchRow)}>✏️ Add text</Button>
+                <Button size="xs" variant="secondary" onClick={() => onOpenClip(stitchRow)}>Editor</Button>
                 <Button size="xs" variant="secondary" onClick={() => onDownloadStitch(stitchRow)}>⬇ Download</Button>
                 {/* The finished long video's way out. It is the stitch row —
                     not any single clip — that is the deliverable here, which
