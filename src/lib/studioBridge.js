@@ -502,3 +502,135 @@ export async function sendVersionToPosts(workspaceId, accessToken, {
 
   return { ok: true, posts, warning: errors.length ? errors.join(' · ') : undefined }
 }
+
+
+// ─── Manual posts: a plan idea straight to a post row ───────────────────────
+// The exit for copy_mode='own' ideas — the ones whose words are already
+// written. See 20260815_manual_copy_mode.sql for why that is a stored fact
+// and not something inferred from a populated caption field.
+//
+// This deliberately mirrors sendVersionToPosts rather than extending it. That
+// function is about one finished Studio VERSION going to several platforms;
+// this is about several plan IDEAS each going to their own. They share the
+// table map and the copy splitting (the parts that would actually hurt to
+// duplicate) and nothing else.
+//
+// Nothing here calls a webhook, so a fully manual plan finalises with no n8n
+// configured at all — which was the whole point.
+
+// The image for a manual idea, in the order the operator most likely meant it.
+//
+// A Studio version wins over an uploaded reference: if someone opened the
+// Studio for this idea and accepted a version, that is a later and more
+// deliberate act than the reference they attached at plan time. References
+// are only the post image when image_mode says so — under 'generate' or
+// 'studio' they are guides for a picture that does not exist yet, and
+// publishing a guide as the post is exactly the silent wrong-image failure
+// mediaFieldsFor was written to avoid.
+function manualMediaFor(idea) {
+  const video = idea.previewVideoUrl || ''
+  if (video) {
+    return { video_url: video, cover_image_url: idea.previewImageUrl || '', image_url: '', image_urls: [] }
+  }
+  const refs = idea.imageMode === 'use_reference' ? (idea.references || []).filter(Boolean) : []
+  const urls = idea.previewImageUrl ? [idea.previewImageUrl] : refs
+  return { image_url: urls[0] || '', image_urls: urls, video_url: '', cover_image_url: '' }
+}
+
+// Write one post row per idea per target platform.
+//
+// Partial success is reported honestly for the same reason it is in
+// sendVersionToPosts: eight ideas can produce seven rows and one error, and
+// reporting that as a clean success would lose a post silently. The caller
+// gets both lists and decides what to say.
+export async function publishIdeasAsPosts(workspaceId, accessToken, planId, ideas) {
+  if (!workspaceId) return { error: 'No active workspace. Try signing out and back in.' }
+  const list = ideas || []
+  if (!list.length) return { ok: true, posts: [], errors: [] }
+
+  const posts = []
+  const errors = []
+
+  for (const idea of list) {
+    const label = idea.title || idea.topic || 'Untitled idea'
+    // `platforms` is the operator's full target set; `platform` stays the
+    // authoritative single value every existing workflow reads. Falling back
+    // to it means an idea saved before multi-target existed still posts once,
+    // to the right place, rather than nowhere.
+    const targets = (idea.platforms?.length ? idea.platforms : [idea.platform || 'instagram'])
+      .filter(p => PLATFORM_TABLE[p])
+    if (!targets.length) { errors.push(`${label}: no platform to post to.`); continue }
+
+    const media = manualMediaFor(idea)
+    // The operator's own words. caption_en is where the manual editor writes;
+    // caption_ar carries the Arabic when the brand posts bilingually.
+    const caption = idea.captionEn || idea.captionAr || ''
+
+    // instagram_generated_posts declares topic, caption and image_url NOT NULL
+    // with no default, so an INSERT has to carry all three even when empty —
+    // which is why media is spread unconditionally on the insert path below.
+    // An UPDATE is the opposite case: writing image_url:'' over a row that
+    // already has a picture would erase it, and the loss would only surface at
+    // publish time. Same reasoning as the hasCopy guard in sendVersionToPosts.
+    const hasMedia = !!(media.image_url || media.video_url)
+
+    for (const platform of targets) {
+      const table = PLATFORM_TABLE[platform]
+      const base = {
+        ...copyFieldsFor(platform, {
+          caption,
+          captionAr: idea.captionAr || '',
+          captionEn: idea.captionEn || '',
+          hashtags: idea.hashtags || '',
+        }),
+        first_comment: idea.firstComment || '',
+        topic: idea.topic || idea.title || '',
+        aspect_ratio: idea.aspectRatio || defaultAspectRatio(platform, idea.postFormat || 'post'),
+        post_kind: media.video_url ? 'video' : 'caption_image',
+        scheduled_date: idea.date || null,
+        publish_time: idea.time || '',
+        plan_id: planId || null,
+        plan_idea_id: idea.id,
+        // 'manual' is the honest provenance — a human wrote this and no model
+        // touched the copy.
+        source: 'manual',
+        // Still pending_review rather than approved. Writing your own caption
+        // is not the same as having checked it against the picture that ended
+        // up attached, and Approvals is where that check already happens for
+        // every other kind of post.
+        status: 'pending_review',
+      }
+      if (table === 'generated_posts') {
+        base.platform = platform
+        base.media_type = media.video_url ? 'video' : 'image'
+      }
+      if (table === 'linkedin_generated_posts') base.include_image = !!media.image_url
+
+      try {
+        // Same duplicate guard as the Studio path: an idea that already has a
+        // row (because its media was attached before the plan was finalised)
+        // gets that row filled in, not a second one beside it.
+        const existing = await findPostForIdea(accessToken, table, idea.id)
+        const body = existing
+          ? { ...base, ...(hasMedia ? media : {}) }
+          : { workspace_id: workspaceId, ...media, ...base }
+        const res = await fetch(
+          existing ? `${SUPABASE_URL}/rest/v1/${table}?id=eq.${existing.id}` : `${SUPABASE_URL}/rest/v1/${table}`,
+          {
+            method: existing ? 'PATCH' : 'POST',
+            headers: jsonHeaders(accessToken),
+            body: JSON.stringify(body),
+          },
+        )
+        if (!res.ok) { errors.push(`${label} (${platform}): ${await res.text()}`); continue }
+        const [row] = await res.json()
+        posts.push({ platform, table, id: row?.id, ideaId: idea.id, updated: !!existing })
+      } catch (err) {
+        errors.push(`${label} (${platform}): ${err.message}`)
+      }
+    }
+  }
+
+  if (!posts.length && errors.length) return { error: errors.join(' · ') }
+  return { ok: true, posts, errors }
+}

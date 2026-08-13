@@ -22,7 +22,7 @@ import {
   fetchPastIdeas, fetchPlanWithIdeas, markIdeasDrafting, fetchIdeaDrafts,
 } from '../../lib/contentPlans'
 import { IdeaDraftPanel } from '../../components/IdeaDraftPanel'
-import { openStudioForIdea, fetchSessionsForIdeas, saveIdeaPlatforms, resetIdeaMedia } from '../../lib/studioBridge'
+import { openStudioForIdea, fetchSessionsForIdeas, saveIdeaPlatforms, resetIdeaMedia, publishIdeasAsPosts } from '../../lib/studioBridge'
 
 const GOALS = ['Brand awareness','Lead generation','Product launch','Community engagement','Event promotion','Sales & offers']
 const PLATFORMS = ['instagram', 'linkedin'] // only platforms with a generation pipeline today
@@ -181,6 +181,9 @@ const DEFAULT_DRAFT = {
   // on the board (same field, same picker, just a different moment).
   seedPosts: [],            // { text, platform, format, references: [], imageMode: 'generate' }
   name: '', ideas: [], planId: null, pushResult: null,
+  // What the manual half of finalize did, when there was one. Separate from
+  // pushResult because the two halves succeed and fail independently.
+  manualResult: null,
 }
 
 function useDraft() {
@@ -195,6 +198,7 @@ function useDraft() {
 
 const OCCASION_STYLE = 'bg-amber-100 text-amber-800 border-amber-200'
 const PILLAR_STYLE   = 'bg-purple-50 text-purple-700 border-purple-100'
+const OWN_COPY_STYLE = 'bg-sage-100 text-sage-700 border-sage-200'
 const STATUS_META = {
   proposed: { label: 'Proposed', cls: 'bg-stone-100 text-stone-600' },
   approved: { label: 'Approved', cls: 'bg-sage-100 text-sage-700' },
@@ -292,6 +296,12 @@ function IdeaCard({ idea, index, accessToken, workspaceId, onChange, onRemove, o
       post_kind: patch.postKind || 'caption_image',
       slide_count: patch.slideCount || 1,
       image_text: patch.imageText || '',
+      // Whose words go out, and the words themselves when they're the
+      // operator's. Written together so the mode can never disagree with the
+      // caption it describes.
+      copy_mode: patch.copyMode === 'own' ? 'own' : 'ai',
+      caption_en: patch.captionEn || '',
+      caption_ar: patch.captionAr || '',
     }
     const result = await updateIdea(accessToken, idea.id, dbPatch)
     setSaving(false)
@@ -320,6 +330,11 @@ function IdeaCard({ idea, index, accessToken, workspaceId, onChange, onRemove, o
                   +{targetLabel(t)}
                 </span>
               ))}
+              {/* Which ideas are the operator's own words. Without this the
+                  board looks identical either way, and the difference — who
+                  writes the caption — is the one thing that cannot be undone
+                  once the plan is finalised. */}
+              {idea.copyMode === 'own' && <span className={`text-[10px] font-semibold px-1.5 py-0.5 leading-[1.4] border ${OWN_COPY_STYLE}`}>✎ My words</span>}
               {idea.occasion && <span className={`text-[10px] font-semibold px-1.5 py-0.5 leading-[1.4] border ${OCCASION_STYLE}`}>★ {idea.occasion}</span>}
               {idea.pillar && <span className={`text-[10px] font-medium px-1.5 py-0.5 leading-[1.4] border ${PILLAR_STYLE}`}>{idea.pillar}</span>}
               {idea.series && <span className="text-[10px] font-semibold px-1.5 py-0.5 leading-[1.4] border bg-violet-50 text-violet-700 border-violet-100" title="Deliberate recurring series — not flagged as repetition across months">🔁 {idea.series}</span>}
@@ -462,6 +477,12 @@ function IdeaEditModal({ idea, tones, saving, saveError, onClose, onSave }) {
   const [hashtags,  setHashtags]  = useState(idea.hashtags || '')
   const [firstComment, setFirstComment] = useState(idea.firstComment || '')
   const [series, setSeries] = useState(idea.series || '')
+  // Whose words go out. 'own' means the two caption boxes below are the post,
+  // verbatim — finalize writes the row itself rather than briefing the AI
+  // writer. See 20260815_manual_copy_mode.sql.
+  const [copyMode, setCopyMode] = useState(idea.copyMode === 'own' ? 'own' : 'ai')
+  const [captionEn, setCaptionEn] = useState(idea.captionEn || '')
+  const [captionAr, setCaptionAr] = useState(idea.captionAr || '')
 
   // Format drives orientation and slide count from the catalog — pick a
   // format, only the orientations/slide range it actually supports show up.
@@ -577,6 +598,55 @@ function IdeaEditModal({ idea, tones, saving, saveError, onClose, onSave }) {
           )}
         </div>
 
+        {/* ── Who writes the caption ──
+            The single question that decides whether this idea ever touches a
+            model. Everything above it (topic, angle, tone, objective) is a
+            BRIEF — material for the AI writer — and is simply unused when the
+            words are already written, which is why the brief fields stay put
+            rather than being hidden: they still describe the post for the
+            board, the mix bar and cross-month history. */}
+        <div className="rounded-xl border border-border p-3 space-y-2.5">
+          <p className="text-xs font-medium text-text-secondary">Who writes the caption?</p>
+          <div className="flex gap-2">
+            {[
+              { id: 'ai',  label: 'AI writes it',   hint: 'Generated from the brief above' },
+              { id: 'own', label: "I'll write it",  hint: 'Posted exactly as typed' },
+            ].map(o => (
+              <button key={o.id} onClick={() => setCopyMode(o.id)}
+                className={`flex-1 text-left px-3 py-2 rounded-xl border transition-all ${
+                  copyMode === o.id
+                    ? 'bg-amber-600 text-white border-amber-600'
+                    : 'bg-white border-border text-text-secondary hover:border-amber-400'}`}>
+                <span className="block text-sm font-medium">{o.label}</span>
+                <span className={`block text-[10px] leading-snug mt-0.5 ${copyMode === o.id ? 'opacity-80' : 'text-text-tertiary'}`}>{o.hint}</span>
+              </button>
+            ))}
+          </div>
+          {copyMode === 'own' && (
+            <>
+              <Textarea
+                rows={4} autoGrow
+                label="Your caption"
+                placeholder="Type the post exactly as it should go out."
+                value={captionEn} onChange={e => setCaptionEn(e.target.value)}
+              />
+              {/* Arabic gets its own box rather than being detected from the
+                  text: this brand posts bilingually, and a single field would
+                  force a choice between the two that publishing doesn't make. */}
+              <Textarea
+                rows={3} autoGrow dir="rtl"
+                label="Arabic caption (optional)"
+                placeholder="النص العربي كما سيُنشر"
+                value={captionAr} onChange={e => setCaptionAr(e.target.value)}
+              />
+              <p className="text-[11px] text-text-tertiary">
+                Nothing rewrites this. Finalising the plan turns it straight into a post for review —
+                no generation webhook involved.
+              </p>
+            </>
+          )}
+        </div>
+
         <Input
           label="Call-to-action (optional)"
           placeholder="e.g. DM us for a quote"
@@ -606,7 +676,10 @@ function IdeaEditModal({ idea, tones, saving, saveError, onClose, onSave }) {
             topic, angle, tone, date, time, suggestedStyle: style, imageIdea, objective, cta, hashtags, firstComment, series,
             postFormat, aspectRatio, mediaType: currentFormat?.media || 'image', wantsCaption, imageText, slideCount,
             postKind: derivedKind,
-          })} disabled={saving || (idea.isNew && !topic.trim())}>
+            // Trimmed on the way out so a box left with only whitespace can't
+            // make an idea look manually written when there is nothing to post.
+            copyMode, captionEn: captionEn.trim(), captionAr: captionAr.trim(),
+          })} disabled={saving || (idea.isNew && !topic.trim()) || (copyMode === 'own' && !captionEn.trim() && !captionAr.trim())}>
             {saving ? <><Spinner size="sm" /> Saving…</> : 'Save'}
           </Button>
         </div>
@@ -767,7 +840,7 @@ export function CampaignPlanner() {
   const [moreLoading,   setMoreLoading]   = useState(false)
   const [moreError,     setMoreError]     = useState('')
 
-  const { step, month, goal, goalCategory, platforms, startDate, endDate, approxCount, includeHolidays, brandBrainSections, featuredProductIds, seedPosts, name, ideas, planId, pushResult, postingDays, defaultTime, aiAssist, contentMixTarget } = draft
+  const { step, month, goal, goalCategory, platforms, startDate, endDate, approxCount, includeHolidays, brandBrainSections, featuredProductIds, seedPosts, name, ideas, planId, pushResult, manualResult, postingDays, defaultTime, aiAssist, contentMixTarget } = draft
   const months = monthOptions()
 
   // Supabase is the source of truth for a saved plan's ideas — the draft
@@ -864,6 +937,9 @@ export function CampaignPlanner() {
     update({ seedPosts: [...seedPosts, {
       text: '', platform: p, date: '', references: [], imageMode: 'generate',
       postFormat: fmt, aspectRatio: defaultAspectRatio(p, fmt), slideCount: slideRange(p, fmt)?.default || 1,
+      // 'ai' preserves what this box has always meant — a topic to write from.
+      // Opting into 'own' is what turns the text into the post itself.
+      copyMode: 'ai',
     }] })
   }
   const updateSeed = (i, patch)  => update({ seedPosts: seedPosts.map((s, idx) => idx === i ? { ...s, ...patch } : s) })
@@ -908,15 +984,32 @@ export function CampaignPlanner() {
     const seedIdeas = seedPosts.filter(s => s.text.trim()).map(s => {
       const postFormat = s.postFormat || defaultFormat(s.platform)
       const mediaType = formatsFor(s.platform).find(f => f.id === postFormat)?.media || 'image'
+      const ownCopy = s.copyMode === 'own'
+      // A manual seed's text is BOTH the caption and the title/topic. The
+      // title is what the board, the week groups and the media stage label
+      // their cards with, so leaving it empty would produce a month of
+      // "Untitled idea"; truncating keeps a long caption from becoming the
+      // heading. topic still carries the full text — cross-month history and
+      // the mix bar read it.
+      const title = ownCopy && s.text.trim().length > 80
+        ? `${s.text.trim().slice(0, 77)}…`
+        : s.text.trim()
       return {
-        platform: s.platform, date: s.date, title: s.text, topic: s.text,
+        platform: s.platform, date: s.date, title, topic: s.text,
         tone: s.platform === 'linkedin' ? 'thought_leader' : 'professional',
-        rationale: 'You added this as a specific post you wanted.',
+        rationale: ownCopy
+          ? 'You wrote this post yourself — it goes out exactly as typed.'
+          : 'You added this as a specific post you wanted.',
         imageMode: s.imageMode, references: s.references,
         postFormat, aspectRatio: s.aspectRatio || defaultAspectRatio(s.platform, postFormat), mediaType,
         slideCount: s.slideCount || slideRange(s.platform, postFormat)?.default || 1,
         wantsCaption: true,
         postKind: derivePostKind({ platform: s.platform, format: postFormat, wantsCaption: true, slideCount: s.slideCount }),
+        // The text is the post. captionEn is where the manual editor reads and
+        // writes; publishIdeasAsPosts falls back to captionAr for an
+        // Arabic-only post, so an Arabic seed is not lost either.
+        copyMode: ownCopy ? 'own' : 'ai',
+        captionEn: ownCopy ? s.text.trim() : '',
       }
     })
 
@@ -990,7 +1083,12 @@ export function CampaignPlanner() {
       name: planRes.plan.name,
       step: 'review',
     })
-    draftIdeas(createdIdeas, createdIdeas.map(i => i.id))
+    // Draft Copy proposes caption options for the reviewer to pick from. An
+    // idea whose caption is already written has nothing to propose and no
+    // reviewer decision left to make, so it is left out entirely — drafting it
+    // would spend a webhook call to offer alternatives to words the operator
+    // deliberately chose.
+    draftIdeas(createdIdeas, createdIdeas.filter(i => i.copyMode !== 'own').map(i => i.id))
   }
 
   // Top up the existing plan with more AI ideas — same webhook, but with the
@@ -1073,7 +1171,16 @@ export function CampaignPlanner() {
   // The media stage works on approved ideas only — a rejected idea has no
   // picture to make, and a still-proposed one hasn't earned the Studio time.
   const approvedIdeas = ideas.filter(i => i.status === 'approved')
-  const mediaReadyCount = approvedIdeas.filter(i => i.mediaStatus === 'ready').length
+  // An idea using its own uploaded image already HAS its picture — it was
+  // attached at plan time. Counting only Studio-accepted media would show
+  // "0 of 4 ready" to someone who supplied all four themselves, and push them
+  // into a Studio they have no reason to open.
+  const hasOwnMedia = i => i.imageMode === 'use_reference' && (i.references || []).length > 0
+  const mediaReadyCount = approvedIdeas.filter(i => i.mediaStatus === 'ready' || hasOwnMedia(i)).length
+  // Which side of the finalize partition each approved idea falls on. Drives
+  // the button's label and the copy around it.
+  const ownCopyCount = approvedIdeas.filter(i => i.copyMode === 'own').length
+  const aiCopyCount  = approvedIdeas.length - ownCopyCount
 
   // Start one over. Clears the accepted version but keeps the Studio session
   // and the last thumbnail — what was tried before is useful context for the
@@ -1083,6 +1190,26 @@ export function CampaignPlanner() {
     const res = await resetIdeaMedia(accessToken, idea.id)
     if (res.error) { setError(res.error); return }
     onIdeaChange({ ...idea, mediaStatus: 'none', mediaVersionId: null })
+  }
+
+  // ── Attaching your own picture at the media stage ────────────────────────
+  // The same ReferencePicker the setup step and the idea card already use
+  // (brand-asset library + upload), pinned to 'use_reference' — at this stage
+  // the question is only "which image IS this post", never "what should guide
+  // a generation".
+  const [mediaPickIdea, setMediaPickIdea] = useState(null)
+  function openMediaPicker(idea) { setMediaPickIdea(idea) }
+  async function saveMediaImages(urls) {
+    const idea = mediaPickIdea
+    if (!idea) return { ok: true }
+    // Clearing every image is a real choice — it puts the idea back to having
+    // no picture, rather than leaving image_mode claiming one that isn't there.
+    const mode = urls.length ? 'use_reference' : 'generate'
+    const result = await updateIdea(accessToken, idea.id, { reference_image_urls: urls, image_mode: mode })
+    if (result.error) return { error: result.error }
+    onIdeaChange({ ...idea, references: urls, imageMode: mode })
+    setMediaPickIdea(null)
+    return { ok: true }
   }
 
   async function openStudio(idea) {
@@ -1171,6 +1298,7 @@ export function CampaignPlanner() {
       postFormat: merged.postFormat, aspectRatio: merged.aspectRatio, mediaType: merged.mediaType,
       wantsCaption: merged.wantsCaption,
       postKind: merged.postKind, slideCount: merged.slideCount, imageText: merged.imageText,
+      copyMode: merged.copyMode, captionEn: merged.captionEn, captionAr: merged.captionAr,
     }], ideas.length)
     if (res.error || !res.rows?.[0]) return { error: res.error || 'Could not save idea.' }
     let created = dbIdeaToDraft(res.rows[0])
@@ -1180,7 +1308,11 @@ export function CampaignPlanner() {
     // fields an AI-suggested idea already gets, BEFORE the user approves it.
     // Best-effort: if this fails or isn't configured, the idea just stays as
     // typed — never blocks the save itself.
-    const elongateUrl = state.webhooks?.elongateIdea
+    // Skipped outright when the operator writes their own copy. Elongating
+    // exists to give the AI writer a fuller brief, and there is no AI writer
+    // on this idea — running it anyway would send their post to a model they
+    // deliberately opted out of, and overwrite the topic they typed.
+    const elongateUrl = created.copyMode === 'own' ? '' : state.webhooks?.elongateIdea
     if (elongateUrl) {
       const blocks = buildSectionBlocks(state.brandProfile, directory)
       const instructions = brandBrainSections.map(s => blocks[s]).filter(Boolean).join('\n\n')
@@ -1249,39 +1381,85 @@ export function CampaignPlanner() {
     setTimeout(() => setAutoEditId(null), 400)
   }
 
+  // Finalising a plan turns approved ideas into real post rows — and there are
+  // two genuinely different ways for that to happen, which is why this
+  // partitions rather than doing one thing.
+  //
+  //   copy_mode 'own' → the words are already written. The row is written HERE,
+  //                     directly, with no webhook. This is what makes a fully
+  //                     manual plan possible with no n8n configured at all.
+  //   copy_mode 'ai'  → the idea is a brief. It goes to the Plan Generation
+  //                     webhooks exactly as it always has.
+  //
+  // A plan can hold both, and a mixed plan must not fail on one side because
+  // the other is unconfigured — so the AI half is only attempted when there is
+  // an AI half.
   async function finalizePlan() {
     const approved = ideas.filter(i => i.status === 'approved')
     if (approved.length === 0) { setError('Approve at least one idea before finalizing the plan.'); return }
     setError(''); setBusy(true)
 
-    const blocks = buildSectionBlocks(state.brandProfile, directory)
-    const instructions = brandBrainSections.map(s => blocks[s]).filter(Boolean).join('\n\n')
-    // Fire the approved ideas at the Plan Generation webhooks — each one
-    // generates the real caption + image into *_generated_posts as
-    // 'pending_review'. The user then reviews the actual content (Instagram /
-    // LinkedIn → Posts, "Pending review") before it's cleared to schedule.
-    // Mark every approved idea 'processing' BEFORE firing the webhook — durable
-    // and instant, so Post Approvals shows real state even on reload, not just
-    // while this tab stays open waiting for n8n's background generation.
-    await markIdeasProcessing(accessToken, planId)
+    const ownIdeas = approved.filter(i => i.copyMode === 'own')
+    const aiIdeas  = approved.filter(i => i.copyMode !== 'own')
 
-    const pushResult = await requestPlanContentGeneration({
-      webhooks: state.webhooks, planId, instructions, ideas: approved,
-      workspaceId: activeWorkspaceId,
-      captionLanguage: state.brandProfile?.captionLanguage || 'both',
-    })
-    if (pushResult.error) { setBusy(false); setError(pushResult.error); return }
-    await updatePlan(accessToken, planId, { status: 'generating' })
+    // ── The operator's own posts ──
+    // Written first, and deliberately so: it is the half that cannot fail for
+    // configuration reasons, and if the AI half then fails these are already
+    // safe rather than lost with it.
+    let manualPosts = []
+    let manualWarnings = []
+    if (ownIdeas.length) {
+      const res = await publishIdeasAsPosts(activeWorkspaceId, accessToken, planId, ownIdeas)
+      if (res.error) { setBusy(false); setError(`Your posts couldn't be saved: ${res.error}`); return }
+      manualPosts = res.posts || []
+      manualWarnings = res.errors || []
+    }
+
+    // ── The briefed ones ──
+    let pushResult = null
+    if (aiIdeas.length) {
+      const blocks = buildSectionBlocks(state.brandProfile, directory)
+      const instructions = brandBrainSections.map(s => blocks[s]).filter(Boolean).join('\n\n')
+      // Mark them 'processing' BEFORE firing the webhook — durable and instant,
+      // so Post Approvals shows real state even on reload, not just while this
+      // tab stays open waiting for n8n's background generation. Scoped to the
+      // AI half so a manual post is never left waiting on a workflow that will
+      // never run for it.
+      await markIdeasProcessing(accessToken, planId, { copyMode: 'ai' })
+
+      pushResult = await requestPlanContentGeneration({
+        webhooks: state.webhooks, planId, instructions, ideas: aiIdeas,
+        workspaceId: activeWorkspaceId,
+        captionLanguage: state.brandProfile?.captionLanguage || 'both',
+      })
+      if (pushResult.error) {
+        setBusy(false)
+        // Said plainly rather than swallowed: the manual posts really are
+        // saved, and telling someone the whole finalize failed would send them
+        // to re-do work that is already done.
+        setError(manualPosts.length
+          ? `${manualPosts.length} of your own post${manualPosts.length === 1 ? '' : 's'} saved, but the AI-written ones failed: ${pushResult.error}`
+          : pushResult.error)
+        return
+      }
+    }
+
+    // 'generating' only when something actually is. A fully manual plan is
+    // finished the moment its rows exist, and leaving it 'generating' would
+    // show a progress state that nothing will ever advance.
+    await updatePlan(accessToken, planId, { status: aiIdeas.length ? 'generating' : 'active' })
 
     // Batch-render every approved video-format idea at once — runs in the
     // background (never awaited here), each polling for its own cover
     // image to finish uploading before firing. See triggerVideoRenders.
+    // Manual ideas are excluded: their video is already made (Studio or
+    // upload), so rendering one would replace the operator's own footage.
     triggerVideoRenders({
-      webhooks: state.webhooks, videoIdeas: approved.filter(i => i.mediaType === 'video'), accessToken,
+      webhooks: state.webhooks, videoIdeas: aiIdeas.filter(i => i.mediaType === 'video'), accessToken,
     })
 
     setBusy(false)
-    update({ step: 'done', pushResult })
+    update({ step: 'done', pushResult, manualResult: { count: manualPosts.length, warnings: manualWarnings } })
   }
 
   const brandReady = state.brandProfile && !isBrandProfileEmpty(state.brandProfile)
@@ -1466,6 +1644,7 @@ export function CampaignPlanner() {
                 {seedPosts.map((s, i) => {
                   const refCount = (s.references || []).length
                   const usingImage = s.imageMode === 'use_reference'
+                  const ownCopy = s.copyMode === 'own'
                   const sFormat = s.postFormat || defaultFormat(s.platform)
                   const sRatios = aspectRatiosFor(s.platform, sFormat)
                   const sSlides = slideRange(s.platform, sFormat)
@@ -1479,11 +1658,33 @@ export function CampaignPlanner() {
                   return (
                     <div key={i} className="rounded-xl border border-border p-3 space-y-2 bg-white">
                       <textarea
-                        className="w-full rounded-lg border border-border px-3 py-2 text-sm focus:outline-none focus:border-amber-400 resize-none"
-                        rows={2}
-                        placeholder="e.g. Announce the new Riyadh showroom opening"
+                        className={`w-full rounded-lg border border-border px-3 py-2 text-sm focus:outline-none focus:border-amber-400 resize-none ${ownCopy ? 'font-medium' : ''}`}
+                        rows={ownCopy ? 4 : 2}
+                        placeholder={ownCopy
+                          ? 'Type the post exactly as it should go out.'
+                          : 'e.g. Announce the new Riyadh showroom opening'}
                         value={s.text} onChange={e => updateSeed(i, { text: e.target.value })}
                       />
+                      {/* The one decision that separates a brief from a post.
+                          Off by default: the existing meaning of this box is
+                          "a topic I want covered", and silently reinterpreting
+                          everyone's seed posts as finished captions would
+                          publish notes-to-self. */}
+                      <label className="flex items-start gap-2 cursor-pointer select-none">
+                        <input type="checkbox" checked={ownCopy}
+                          onChange={e => updateSeed(i, { copyMode: e.target.checked ? 'own' : 'ai' })}
+                          className="mt-0.5 accent-amber-600" />
+                        <span className="text-[11px] leading-snug">
+                          <span className={ownCopy ? 'font-semibold text-amber-700' : 'text-text-secondary'}>
+                            This text is my final caption
+                          </span>
+                          <span className="block text-text-tertiary">
+                            {ownCopy
+                              ? 'Posted exactly as typed — no AI writes or rewrites it.'
+                              : 'Leave off to have the caption written from this as a brief.'}
+                          </span>
+                        </span>
+                      </label>
                       <div className="flex items-center gap-2 flex-wrap">
                         <select value={s.platform} onChange={e => onPlatformChange(e.target.value)}
                           className="rounded-lg border border-border px-2 py-1.5 text-xs bg-white capitalize focus:outline-none focus:border-amber-400">
@@ -1728,7 +1929,11 @@ export function CampaignPlanner() {
               <Button onClick={() => update({ step: 'media' })} disabled={approvedCount === 0}>
                 Next — make the pictures ({approvedCount} approved)
               </Button>
-              <p className="text-xs text-text-tertiary flex-1">Every approved idea gets its image or video made by hand in the Studio, then the captions are written to match.</p>
+              <p className="text-xs text-text-tertiary flex-1">
+                {aiCopyCount === 0
+                  ? 'Attach your own image to each, or make one in the Studio. Your captions go out exactly as written.'
+                  : 'Every approved idea gets its image or video made by hand in the Studio, then the captions are written to match.'}
+              </p>
             </div>
           </div>
         </div>
@@ -1764,7 +1969,10 @@ export function CampaignPlanner() {
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             {approvedIdeas.map(idea => {
-              const st = idea.mediaStatus || 'none'
+              // An own-image idea reads as ready without ever entering the
+              // Studio — the picture is the one the operator attached.
+              const ownMedia = hasOwnMedia(idea)
+              const st = idea.mediaStatus === 'ready' || ownMedia ? 'ready' : (idea.mediaStatus || 'none')
               const sess = studioSessions[idea.id]
               return (
                 <Card key={idea.id} className={`p-3 flex flex-col gap-2 ${st === 'ready' ? 'border-sage-200 bg-sage-50/30' : ''}`}>
@@ -1785,15 +1993,21 @@ export function CampaignPlanner() {
                         st === 'ready' ? 'bg-sage-100 text-sage-700'
                         : st === 'in_studio' ? 'bg-violet-50 text-violet-700'
                         : 'bg-stone-100 text-text-tertiary'}`}>
-                        {st === 'ready' ? '✓ Ready' : st === 'in_studio' ? '🎬 In Studio' : 'Not started'}
+                        {ownMedia ? '✓ Your image' : st === 'ready' ? '✓ Ready' : st === 'in_studio' ? '🎬 In Studio' : 'Not started'}
                       </span>
                     </div>
                   </div>
-                  <div className="flex items-center gap-1.5 mt-auto pt-1">
-                    <Button size="xs" variant={st === 'ready' ? 'secondary' : 'primary'} onClick={() => openStudio(idea)}>
-                      {st === 'ready' ? 'Change it' : sess ? 'Back to Studio' : 'Open Studio'}
+                  <div className="flex items-center gap-1.5 mt-auto pt-1 flex-wrap">
+                    {/* Two ways to get a picture, neither privileged. Someone
+                        posting a photo they already have should never have to
+                        go through a generation surface to attach it. */}
+                    <Button size="xs" variant={ownMedia ? 'secondary' : 'primary'} onClick={() => openMediaPicker(idea)}>
+                      {ownMedia ? 'Change image' : 'Use my image'}
                     </Button>
-                    {st === 'ready' && (
+                    <Button size="xs" variant="secondary" onClick={() => openStudio(idea)}>
+                      {idea.mediaStatus === 'ready' ? 'Change it' : sess ? 'Back to Studio' : 'Open Studio'}
+                    </Button>
+                    {idea.mediaStatus === 'ready' && (
                       <button onClick={() => redoMedia(idea)}
                         title="Start this one over — the picture is unset, the Studio session is kept"
                         className="text-[11px] text-text-tertiary hover:text-red-500 transition-colors ml-auto">Reset</button>
@@ -1809,16 +2023,32 @@ export function CampaignPlanner() {
           <div className="sticky bottom-0 -mx-1 px-1 pb-1">
             <div className="flex items-center gap-3 bg-white/95 backdrop-blur-sm border border-border rounded-2xl shadow-dropdown px-5 py-3.5">
               <Button variant="secondary" onClick={() => update({ step: 'review' })}>Back to ideas</Button>
+              {/* The label is the promise this button makes, so it has to
+                  match which halves actually exist. Telling someone who wrote
+                  every caption themselves that we are about to "write the
+                  captions" describes the one thing they opted out of. */}
               <Button onClick={finalizePlan} disabled={busy || approvedCount === 0}>
-                {busy ? <><Spinner size="sm" /> Writing captions…</> : 'Write the captions'}
+                {busy
+                  ? <><Spinner size="sm" /> {aiCopyCount ? 'Writing captions…' : 'Saving your posts…'}</>
+                  : aiCopyCount === 0 ? 'Schedule my posts'
+                  : ownCopyCount === 0 ? 'Write the captions'
+                  : `Write ${aiCopyCount} caption${aiCopyCount === 1 ? '' : 's'} · save ${ownCopyCount} of mine`}
               </Button>
               {/* A soft gate. Blocking outright would just get worked around,
                   and there are real reasons to move on with one picture
                   outstanding. */}
               <p className="text-xs text-text-tertiary flex-1">
                 {mediaReadyCount < approvedIdeas.length
-                  ? `${approvedIdeas.length - mediaReadyCount} still without a picture — you can carry on, they'll generate one instead.`
-                  : 'Every idea has its media. Captions will be written against them.'}
+                  ? aiCopyCount === 0
+                    // Nothing generates on a fully manual plan, so the old
+                    // reassurance ("they'll generate one instead") would be a
+                    // promise this path cannot keep — those posts go out with
+                    // no picture at all unless one is attached.
+                    ? `${approvedIdeas.length - mediaReadyCount} still without a picture — those will be saved as text-only.`
+                    : `${approvedIdeas.length - mediaReadyCount} still without a picture — you can carry on, they'll generate one instead.`
+                  : aiCopyCount === 0
+                    ? 'Every post has its media and its words. Nothing left to write.'
+                    : 'Every idea has its media. Captions will be written against them.'}
               </p>
             </div>
           </div>
@@ -1832,15 +2062,28 @@ export function CampaignPlanner() {
             <svg className="w-7 h-7 text-sage-600" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
           </div>
           <div>
-            <h2 className="text-lg font-bold text-text tracking-tight">Plan approved — generating content now.</h2>
+            {/* The heading has to be true for a fully manual plan too — there
+                is nothing generating, and saying so would leave someone
+                watching Approvals for posts that already arrived complete. */}
+            <h2 className="text-lg font-bold text-text tracking-tight">
+              {pushResult ? 'Plan approved — generating content now.' : 'Plan approved — your posts are ready to review.'}
+            </h2>
             <p className="text-sm text-text-secondary mt-1 max-w-md mx-auto">
               <span className="font-semibold text-text">{approvedCount} idea{approvedCount === 1 ? '' : 's'}</span> approved for <span className="font-semibold text-text">{name}</span>.
+              {manualResult?.count > 0 && (
+                <> <span className="font-semibold text-text">{manualResult.count} written by you</span> {manualResult.count === 1 ? 'is' : 'are'} already sitting in Post Approvals, exactly as you typed {manualResult.count === 1 ? 'it' : 'them'}.</>
+              )}
               {pushResult && pushResult.failedCount === 0
-                ? ' They\'re being generated now (caption + image for each). This takes a few minutes — open Post Approvals and watch them appear as they\'re ready, where you can approve, reject, or regenerate each before scheduling.'
+                ? ' The rest are being generated now (caption + image for each). This takes a few minutes — open Post Approvals and watch them appear as they\'re ready, where you can approve, reject, or regenerate each before scheduling.'
                 : pushResult
                   ? ` ${pushResult.results.filter(r => r.ok).map(r => `${r.count} ${r.platform}`).join(', ') || '0'} sent to generate; some platforms failed — ${pushResult.results.filter(r => !r.ok).map(r => r.error).join(' ')}`
-                  : ' They\'re being generated now.'}
+                  : ' Nothing was sent to AI — open Post Approvals to check them over and schedule.'}
             </p>
+            {manualResult?.warnings?.length > 0 && (
+              <p className="text-xs text-red-600 mt-2 max-w-md mx-auto">
+                Some didn't save: {manualResult.warnings.join(' · ')}
+              </p>
+            )}
           </div>
           <div className="flex items-center justify-center gap-3 pt-2 flex-wrap">
             <Button onClick={() => navigate('/social/approvals')}>Open Post Approvals</Button>
@@ -1848,6 +2091,18 @@ export function CampaignPlanner() {
             <Button variant="secondary" onClick={() => { clear(); navigate('/campaigns/plan') }}>Plan another month</Button>
           </div>
         </Card>
+      )}
+
+      {/* Media-stage image picker — persists straight to the idea, since by
+          this point the idea is a real row. No mode toggle: choosing here
+          always means "this image IS the post". */}
+      {mediaPickIdea && (
+        <ReferencePicker
+          value={mediaPickIdea.references || []}
+          onSave={saveMediaImages}
+          onClose={() => setMediaPickIdea(null)}
+          format={mediaPickIdea.postFormat}
+        />
       )}
 
       {/* Per-seed-post image picker (Stage-1 brief) — stores URLs + mode on the

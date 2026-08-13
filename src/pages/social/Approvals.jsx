@@ -57,7 +57,13 @@ function normalizePost(row, platform) {
     scheduledAt: row.scheduled_date || null, campaignId: row.campaign_id,
     mediaUrls: mediaOf(row), status: row.status, source: row.source,
     planIdeaId: row.plan_idea_id || null,
-    generatedByWorkflow: true, createdAt: row.created_at,
+    // Carried so a hand-written post created from a plan still groups under
+    // that plan here, instead of falling into the ungrouped pile as though it
+    // had nothing to do with the month it was planned in.
+    planId: row.plan_id || null,
+    // See InstagramPage: a post the operator wrote themselves is not AI work,
+    // and the badge is read as a claim about authorship.
+    generatedByWorkflow: row.source !== 'manual', createdAt: row.created_at,
     // Zernio publish state — distinct from `status` (the review decision).
     zernioPostId: row.zernio_post_id || '',
     publishStatus: row.publish_status || 'not_published',
@@ -361,7 +367,7 @@ export function Approvals() {
       .filter(x => x.effectiveStatus) // drop the rare "completed but post vanished" case
     const manualItems = posts
       .filter(p => p.source !== 'plan')
-      .map(p => ({ key: `manual_${p.platform}_${p.id}`, type: 'manual', post: p, effectiveStatus: p.status, platform: p.platform, planId: null }))
+      .map(p => ({ key: `manual_${p.platform}_${p.id}`, type: 'manual', post: p, effectiveStatus: p.status, platform: p.platform, planId: p.planId || null }))
     return [...ideaItems, ...manualItems]
   }, [ideas, posts, now])
 
