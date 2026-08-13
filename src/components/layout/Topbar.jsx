@@ -13,7 +13,7 @@ const titles = {
   '/social/linkedin': 'LinkedIn', '/social/tiktok': 'TikTok',
   '/social/instagram/new': 'New Instagram Post',
   '/social/linkedin/new': 'New LinkedIn Post', '/social/tiktok/new': 'New TikTok Post',
-  '/settings': 'Settings', '/integrations': 'Integrations', '/team': 'Team',
+  '/settings': 'Settings', '/integrations': 'Integrations', '/team': 'Team & Access',
 }
 
 // Sub-pages reached via a flow (not a direct sidebar link) get a back button

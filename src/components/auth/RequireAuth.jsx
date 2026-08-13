@@ -1,8 +1,9 @@
 import { Navigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../../store/auth'
+import { PendingApproval } from '../../pages/auth/PendingApproval'
 
 export function RequireAuth({ children }) {
-  const { session, loading, workspaces } = useAuth()
+  const { session, loading, isApproved, workspaces } = useAuth()
   const location = useLocation()
 
   if (loading) {
@@ -17,9 +18,16 @@ export function RequireAuth({ children }) {
     return <Navigate to="/login" state={{ from: location }} replace />
   }
 
-  // Authenticated but no workspace yet — shouldn't normally happen since
-  // handle_new_user() provisions one at signup, but covers the edge case
-  // (e.g. email confirmation flows where the session resolves separately).
+  // Signed in, but the admin hasn't let them in yet — or has taken it away.
+  // Rendered in place rather than redirected to a route, so there's no URL
+  // for a pending user to skip past by typing a different one.
+  if (!isApproved) {
+    return <PendingApproval />
+  }
+
+  // Approved but no companies exist at all. Only reachable if every company
+  // was deleted, since approval joins you to all of them; the onboarding
+  // page just creates the first one back.
   if (workspaces.length === 0) {
     return <Navigate to="/onboarding" replace />
   }

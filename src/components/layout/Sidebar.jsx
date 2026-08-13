@@ -1,6 +1,7 @@
 import { NavLink } from 'react-router-dom'
 import { useAuth } from '../../store/auth'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import { fetchPendingCount } from '../../lib/access'
 
 const nav = [
   { section: 'Overview', items: [
@@ -28,13 +29,29 @@ const nav = [
   { section: 'Settings', items: [
     { to: '/settings',     label: 'Settings',     icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg> },
     { to: '/integrations', label: 'Integrations', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><path d="m15 7-8.5 8.5a2.12 2.12 0 0 0 3 3L18 10a4.24 4.24 0 0 0-6-6l-8.5 8.5a6.36 6.36 0 0 0 9 9L21 13"/></svg> },
-    { to: '/team',         label: 'Team',         icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg> },
+    { to: '/team',         label: 'Team & Access', badge: 'pendingAccess', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg> },
   ]},
 ]
 
 export function Sidebar() {
-  const { user, workspaces, activeWorkspace, activeWorkspaceId, switchWorkspace, signOut } = useAuth()
+  const { user, workspaces, activeWorkspace, activeWorkspaceId, switchWorkspace, signOut, isAccessAdmin } = useAuth()
   const [showWsPicker, setShowWsPicker] = useState(false)
+  // The only notification the access gate has: a count on the nav item.
+  // Requests otherwise sit unseen until someone thinks to look, and a
+  // teammate blocked on approval has no way to nudge from inside the app.
+  // Admin-only — for everyone else there is nothing to act on.
+  const [pendingAccess, setPendingAccess] = useState(0)
+  useEffect(() => {
+    if (!isAccessAdmin) return
+    let cancelled = false
+    fetchPendingCount().then(n => { if (!cancelled) setPendingAccess(n) })
+    return () => { cancelled = true }
+  }, [isAccessAdmin])
+  // Gated at render rather than by resetting the count when isAccessAdmin
+  // flips: a stale number from a previous session can then never leak into
+  // a non-admin's sidebar, and the effect stays free of a synchronous
+  // setState (which React's lint rule rightly flags as a cascading render).
+  const badges = { pendingAccess: isAccessAdmin ? pendingAccess : 0 }
 
   return (
     <aside className="w-52 flex-shrink-0 flex flex-col h-full overflow-hidden bg-white border-r border-border">
@@ -141,6 +158,11 @@ export function Sidebar() {
                   ${isActive ? 'nav-active' : 'text-text-secondary hover:bg-surface-subtle hover:text-text'}`}>
                 <span className="flex-shrink-0">{item.icon}</span>
                 <span className="flex-1 truncate">{item.label}</span>
+                {item.badge && badges[item.badge] > 0 && (
+                  <span className="flex-shrink-0 min-w-[16px] h-4 px-1 flex items-center justify-center text-[10px] font-bold text-white bg-amber-700">
+                    {badges[item.badge]}
+                  </span>
+                )}
               </NavLink>
             ))}
           </div>
@@ -155,7 +177,10 @@ export function Sidebar() {
           </div>
           <div className="flex-1 min-w-0">
             <p className="text-xs font-medium text-text truncate">{user?.email || 'Signed out'}</p>
-            <p className="text-[10px] text-text-tertiary capitalize">{activeWorkspace?.role || ''}</p>
+            {/* Was the workspace_members role, which is now the same string
+                for everyone and told you nothing. The only distinction that
+                exists is who can change the access list. */}
+            <p className="text-[10px] text-text-tertiary">{isAccessAdmin ? 'Access admin' : 'Team member'}</p>
           </div>
         </div>
       </div>
