@@ -152,7 +152,23 @@ function reducer(state, action) {
     case 'SET_WEBHOOK': return { ...state, webhooks: { ...state.webhooks, [action.payload.platform]: action.payload.url } }
     case 'UPDATE_SUPABASE': return { ...state, supabase: { ...state.supabase, ...action.payload } }
     case 'SET_BRAND_PROFILE': return { ...state, brandProfile: action.payload }
-    case 'SET_CAMPAIGN_PLAN_DRAFT': return { ...state, campaignPlanDraft: action.payload }
+    // A function payload is applied against the CURRENT draft instead of one
+    // captured at render time.
+    //
+    // The planner's flows are async and dispatch more than once from a single
+    // render: creating a plan sets step:'review', then immediately starts
+    // caption drafting, which updates `ideas`. Both calls closed over the same
+    // stale draft, so the second silently reverted step to 'setup' — the plan
+    // and its ideas were written, nothing errored, and the user landed back on
+    // the form with no explanation, creating another duplicate plan on every
+    // retry. Merging against current state is what makes two updates in one
+    // tick compose instead of clobber.
+    case 'SET_CAMPAIGN_PLAN_DRAFT': return {
+      ...state,
+      campaignPlanDraft: typeof action.payload === 'function'
+        ? action.payload(state.campaignPlanDraft)
+        : action.payload,
+    }
 
     case 'CREATE_WORKSPACE': {
       const ws = action.payload

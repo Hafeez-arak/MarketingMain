@@ -191,7 +191,15 @@ function useDraft() {
   // Merge over DEFAULT_DRAFT (not a plain `||` fallback) so an older persisted
   // draft missing newer fields (e.g. ideas, planId) can't leave them undefined.
   const draft = { ...DEFAULT_DRAFT, ...(state.campaignPlanDraft || {}) }
-  const update = patch => dispatch(actions.setCampaignPlanDraft({ ...draft, ...patch }))
+  // Patches merge against the CURRENT draft, not the one this render captured.
+  // handleGeneratePlan sets step:'review' and then kicks off drafting, which
+  // updates `ideas` — two dispatches from one render. Spreading the captured
+  // `draft` here made the second one carry step:'setup' along with it and undo
+  // the first, which is why a plan could be created successfully and still
+  // leave the user sitting on the form. See the reducer for the full story.
+  const update = patch => dispatch(actions.setCampaignPlanDraft(
+    prev => ({ ...DEFAULT_DRAFT, ...(prev || {}), ...patch }),
+  ))
   const clear  = () => dispatch(actions.setCampaignPlanDraft(null))
   return { draft, update, clear, state, dispatch }
 }
