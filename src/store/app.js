@@ -9,6 +9,41 @@ import { createContext, useContext } from 'react'
 
 export const AppContext = createContext(null)
 
+// ─── The webhook slots ──────────────────────────────────────────────────────
+// Every n8n webhook the app can be pointed at. ONE list — this object used to
+// be written out as a literal in five separate places, and two of them (the
+// `|| {...}` fallbacks in SWITCH_WORKSPACE and DELETE_WORKSPACE) had drifted
+// to six keys while the other three carried twenty-seven.
+//
+// That drift was survivable only by luck: a missing key reads `undefined`,
+// which is falsy, and every consumer already treats falsy as "not configured
+// yet" (`if (!webhookUrl) return { error: 'set it in Settings' }`), while the
+// Settings page coerces with `|| ''` before binding an input. So nothing broke.
+// What it did guarantee is that ADDING a slot meant remembering five edits,
+// and the two easiest to miss were the ones no test or type would catch.
+//
+// Read it as the schema: a workspace's webhooks are always exactly these keys.
+// Anything loaded from localStorage or the workspace_webhooks table is spread
+// ON TOP of this (see webhooksFrom), never used in place of it, so a blob
+// written by an older build gains the newer keys as '' instead of holes.
+//
+// Lives here rather than in appStore.jsx for the reason at the top of this
+// file: a module exporting both <AppProvider> and a plain object costs Fast
+// Refresh on every edit to either.
+export const DEFAULT_WEBHOOKS = {
+  instagram: '', linkedin: '',
+  instagramSchedule: '', instagramScheduleRegen: '',
+  linkedinSchedule: '', linkedinScheduleRegen: '',
+  instagramReels: '',
+  campaignPlanner: '', instagramPlanGen: '', linkedinPlanGen: '',
+  elongateIdea: '', captionStudio: '', draftCopy: '', mediaOptions: '',
+  videoRender: '',
+  publishPost: '', zernioSync: '', zernioDashboard: '',
+  creativeGenerate: '', creativeEdit: '', creativeVideo: '', creativeCompose: '',
+  creativeEnhance: '', creativeVideoEdit: '', creativeStitch: '', creativeCancel: '',
+  falBalance: '',
+}
+
 export function useApp() {
   const ctx = useContext(AppContext)
   if (!ctx) throw new Error('useApp must be used inside AppProvider')

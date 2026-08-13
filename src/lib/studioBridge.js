@@ -245,7 +245,7 @@ async function patchIdea(accessToken, ideaId, patch) {
 // second image column; it already means "the picture standing in for this idea
 // on the board". For a video the still is what goes here, because a thumbnail
 // is what a board needs.
-export async function markIdeaMediaReady(accessToken, ideaId, { version, sessionId } = {}) {
+export async function markIdeaMediaReady(accessToken, ideaId, { version } = {}) {
   if (!ideaId) return { error: 'No idea id.' }
   // The still is the board thumbnail AND the video's cover, which is what a
   // grid of cards needs either way. The clip itself needs its own column:
