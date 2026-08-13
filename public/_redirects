@@ -1,0 +1,18 @@
+# SPA fallback for Netlify.
+#
+# This is a client-routed app: the server has exactly one HTML file, and
+# react-router decides what to render from the path. Without this rule
+# Netlify looks for a file at the requested path, doesn't find one, and
+# serves its 404 — so the app worked at "/" and every deep link died.
+#
+# It went unnoticed because normal use never requests a deep path from the
+# server: you land on "/", and every route change after that is JavaScript.
+# It only bites on a hard load — a bookmark, a refresh, or a link someone
+# was sent. Which is exactly how a new teammate reaches /signup.
+#
+# 200 rather than 301: rewrite the response, don't redirect the browser, so
+# the URL the user typed survives for react-router to read.
+#
+# Vite copies everything in public/ to the root of dist/, which is where
+# Netlify expects this file.
+/*  /index.html  200

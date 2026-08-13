@@ -3,7 +3,7 @@ import { useApp, actions } from '../../store/app'
 import { useAuth } from '../../store/auth'
 import { supabase } from '../../lib/supabaseClient'
 import { fetchWorkspaceWebhooks, saveWorkspaceWebhooks } from '../../lib/workspaceWebhooks'
-import { Card, Button, Input, Select, Avatar, Modal, PageHeader } from '../../components/ui/index'
+import { Card, Button, PageHeader } from '../../components/ui/index'
 import { uid, PLATFORM_META } from '../../lib/utils'
 
 // ─── Workspace / Supabase status ────────────────────────────────────────────
@@ -617,7 +617,7 @@ export function Settings() {
         <div className="px-5 py-4 border-b border-border flex items-center justify-between gap-4">
           <div>
             <h3 className="font-semibold text-text text-sm">Companies</h3>
-            <p className="text-xs text-text-tertiary mt-0.5">Each company is fully isolated — its own brand brain, content, plans, and posts. Switch between them from the sidebar.</p>
+            <p className="text-xs text-text-tertiary mt-0.5">Each company keeps its own brand brain, content, plans, and posts. Everyone on the team can see and edit all of them — add or remove people under Team &amp; Access.</p>
           </div>
           <Button size="sm" onClick={() => { setShowCreate(true); setNewWsName(''); setError('') }}>
             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
@@ -827,86 +827,6 @@ export function Integrations() {
           ))}
         </div>
       </Card>
-    </div>
-  )
-}
-
-// ─── Team ──────────────────────────────────────────────────────────────────
-export function Team() {
-  const { state, dispatch } = useApp()
-  const [showModal, setShowModal] = useState(false)
-  const [form, setForm] = useState({ name:'', email:'', role:'editor' })
-
-  function handleAdd() {
-    if (!form.name || !form.email) return
-    dispatch(actions.addTeamMember({ id: uid(), ...form, joinedAt: new Date().toISOString() }))
-    setForm({ name:'', email:'', role:'editor' })
-    setShowModal(false)
-  }
-
-  return (
-    <div className="max-w-4xl space-y-4">
-      <PageHeader title="Team" subtitle={`${state.team.length + 1} member${state.team.length + 1 !== 1 ? 's' : ''} in this workspace.`}>
-        <Button onClick={() => setShowModal(true)}>
-          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
-          Invite member
-        </Button>
-      </PageHeader>
-
-      <Card className="overflow-hidden">
-        {/* Current user */}
-        <div className="flex items-center gap-4 px-6 py-4 border-b border-border bg-amber-50/30">
-          <Avatar name="Admin" size="md" />
-          <div className="flex-1">
-            <p className="font-semibold text-text text-sm">Admin (You)</p>
-            <p className="text-xs text-text-tertiary">admin@arak.sa</p>
-          </div>
-          <span className="tag-amber">Owner</span>
-        </div>
-
-        {state.team.length === 0 ? (
-          <div className="py-14 text-center">
-            <div className="w-12 h-12 rounded-2xl bg-stone-100 flex items-center justify-center mx-auto mb-3">
-              <svg className="w-6 h-6 text-stone-400" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
-                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/>
-                <path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>
-              </svg>
-            </div>
-            <p className="text-sm text-text-secondary mb-3">No team members yet</p>
-            <Button size="sm" onClick={() => setShowModal(true)}>Invite someone</Button>
-          </div>
-        ) : (
-          <ul className="divide-y divide-border">
-            {state.team.map(m => (
-              <li key={m.id} className="flex items-center gap-4 px-6 py-4 hover:bg-surface-muted transition-colors">
-                <Avatar name={m.name} size="md" />
-                <div className="flex-1 min-w-0">
-                  <p className="font-medium text-text text-sm truncate">{m.name}</p>
-                  <p className="text-xs text-text-tertiary">{m.email}</p>
-                </div>
-                <span className="text-xs capitalize text-text-secondary px-2 py-1 rounded-lg bg-surface-subtle">{m.role}</span>
-                <Button variant="ghost" size="xs" onClick={() => dispatch(actions.removeTeamMember(m.id))}>Remove</Button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </Card>
-
-      <Modal open={showModal} onClose={() => setShowModal(false)} title="Invite Team Member">
-        <div className="p-6 space-y-4">
-          <Input label="Full name" placeholder="e.g. Sara Ahmed" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
-          <Input label="Email address" type="email" placeholder="sara@arak.sa" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} />
-          <Select label="Role" value={form.role} onChange={e => setForm(f => ({ ...f, role: e.target.value }))}>
-            <option value="editor">Editor</option>
-            <option value="viewer">Viewer</option>
-            <option value="manager">Manager</option>
-          </Select>
-          <div className="flex gap-3 pt-2">
-            <Button variant="secondary" className="flex-1 justify-center" onClick={() => setShowModal(false)}>Cancel</Button>
-            <Button className="flex-1 justify-center" onClick={handleAdd} disabled={!form.name || !form.email}>Send Invite</Button>
-          </div>
-        </div>
-      </Modal>
     </div>
   )
 }

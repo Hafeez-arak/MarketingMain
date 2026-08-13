@@ -3,11 +3,19 @@ import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../store/auth'
 import { AuthLayout, AuthInput, AuthButton, PALETTE } from './AuthLayout'
 
+// Signing up no longer creates anything. It files an access request that an
+// administrator approves — so the copy here promises a request, not a
+// workspace. The old version asked for a workspace name and told people
+// their workspace was ready; both were true then and would be lies now.
+//
+// Who the admin is stays unnamed. This page is reachable by anyone with the
+// URL, and printing an address on it is free reconnaissance for whoever
+// wants to phish or pester the one account that can grant access.
 export function Signup() {
   const { signUp } = useAuth()
   const navigate = useNavigate()
 
-  const [workspaceName, setWorkspaceName] = useState('')
+  const [fullName, setFullName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
@@ -17,11 +25,12 @@ export function Signup() {
   async function handleSubmit(e) {
     e.preventDefault()
     setError(''); setLoading(true)
-    const { data, error } = await signUp({ email: email.trim(), password, workspaceName: workspaceName.trim() })
+    const { data, error } = await signUp({ email: email.trim(), password, fullName: fullName.trim() })
     setLoading(false)
     if (error) { setError(error.message); return }
-    // If email confirmation is required, there's no session yet — show a
-    // "check your inbox" state instead of bouncing to a blank dashboard.
+    // Email confirmation on: no session yet, so tell them to check their
+    // inbox. Off: they get a session and land on the pending screen, which
+    // RequireAuth renders for them at "/".
     if (!data?.session) { setConfirmSent(true); return }
     navigate('/', { replace: true })
   }
@@ -31,7 +40,7 @@ export function Signup() {
       <AuthLayout eyebrow="Almost there" title="Check your email" subtitle="">
         <p className="text-sm leading-relaxed" style={{ color: PALETTE.slate }}>
           We sent a confirmation link to <span className="font-semibold" style={{ color: PALETTE.carbon }}>{email}</span>.
-          Click it to activate your workspace, then come back and sign in.
+          Confirm it, then sign in — your access request has been sent to the administrator for approval.
         </p>
         <Link to="/login" className="inline-block mt-6 text-sm font-semibold" style={{ color: PALETTE.carbon }}>
           Back to sign in
@@ -43,14 +52,14 @@ export function Signup() {
   return (
     <AuthLayout
       eyebrow="Get started"
-      title="Create your workspace"
-      subtitle="A KSA email (@arak-sa.com) joins the existing Arak Lighting workspace automatically — anyone else gets a brand new, private one."
+      title="Request access"
+      subtitle="Creating an account sends a request to the administrator. Once approved, you get every company with the same full access as the rest of the team."
     >
       <form onSubmit={handleSubmit}>
         <AuthInput
-          label="Workspace name" type="text"
-          value={workspaceName} onChange={e => setWorkspaceName(e.target.value)}
-          placeholder="e.g. Arak Lighting"
+          label="Full name" type="text"
+          value={fullName} onChange={e => setFullName(e.target.value)}
+          placeholder="e.g. Sara Ahmed"
         />
         <AuthInput
           label="Email" type="email" autoComplete="email" required
@@ -65,7 +74,7 @@ export function Signup() {
         {error && (
           <p className="text-xs mb-4 px-3 py-2.5 rounded-xl bg-red-50 text-red-600 border border-red-100">{error}</p>
         )}
-        <AuthButton type="submit" loading={loading}>Create workspace</AuthButton>
+        <AuthButton type="submit" loading={loading}>Request access</AuthButton>
       </form>
       <p className="text-sm mt-6 text-center" style={{ color: PALETTE.slate }}>
         Already have an account?{' '}

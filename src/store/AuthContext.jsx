@@ -1,31 +1,45 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { AuthContext } from './auth'
 import { supabase } from '../lib/supabaseClient'
+import { fetchMyAccess } from '../lib/access'
 
 // ─── Auth + workspace context ──────────────────────────────────────────────
 // Phase 0: real accounts, real session, and a real workspace resolved from
 // workspace_members — not the old localStorage-only `workspaces` array in
 // appStore. A signed-in user can belong to one workspace (the common case
 // today) or several (the agency case, Phase 4); this exposes both.
+//
+// Since the access gate landed, a session alone no longer means "let them
+// in" — every signed-in user also has a public.user_access row that is
+// pending until the admin approves it. That row is loaded here alongside
+// the workspace list because both answer the same question (what is this
+// person allowed to see?) and both must settle before RequireAuth decides
+// which screen to render. Splitting them into two loading flags would let
+// the app flash the dashboard at someone still waiting for approval.
 export function AuthProvider({ children }) {
   const [session, setSession]   = useState(undefined) // undefined = not loaded yet, null = signed out
   const [workspaces, setWorkspaces] = useState([])     // [{ id, name, slug, role }]
   const [activeWorkspaceId, setActiveWorkspaceId] = useState(null)
   const [loadingWorkspaces, setLoadingWorkspaces] = useState(false)
+  const [access, setAccess] = useState(null)           // { status, role, ... } | null
   const [authError, setAuthError] = useState('')
   // Tracks the currently-loaded user id so we can ignore the auth events
   // Supabase re-fires on tab focus / token refresh (same user) — see effect below.
   const lastUserIdRef = useRef(undefined)
 
   const loadWorkspaces = useCallback(async (userId) => {
-    if (!userId) { setWorkspaces([]); setActiveWorkspaceId(null); return }
+    if (!userId) { setWorkspaces([]); setActiveWorkspaceId(null); setAccess(null); return }
     setLoadingWorkspaces(true)
-    const { data, error } = await supabase
-      .from('workspace_members')
-      // No `plan` — every workspace is the same product, so there was no tier
-      // for the "Trial plan" / "Agency plan" line to name truthfully.
-      .select('role, workspaces ( id, name, slug, created_at )')
-      .eq('user_id', userId)
+    const [{ data, error }, { access: myAccess }] = await Promise.all([
+      supabase
+        .from('workspace_members')
+        // No `plan` — every workspace is the same product, so there was no
+        // tier for the "Trial plan" / "Agency plan" line to name truthfully.
+        .select('role, workspaces ( id, name, slug, created_at )')
+        .eq('user_id', userId),
+      fetchMyAccess(userId),
+    ])
+    setAccess(myAccess)
     setLoadingWorkspaces(false)
     if (error) { setAuthError(error.message); return }
     const ws = (data || [])
@@ -58,13 +72,13 @@ export function AuthProvider({ children }) {
     return () => sub.subscription.unsubscribe()
   }, [loadWorkspaces])
 
-  async function signUp({ email, password, workspaceName }) {
+  async function signUp({ email, password, fullName }) {
     setAuthError('')
     const { data, error } = await supabase.auth.signUp({
       email, password,
-      // Picked up by the handle_new_user() trigger for the new workspace's
-      // display name — falls back to "<email prefix>'s Workspace" if blank.
-      options: { data: { workspace_name: workspaceName || '' } },
+      // handle_new_user() copies this onto the access request, so the admin
+      // sees a name next to the email instead of guessing from the address.
+      options: { data: { full_name: fullName || '' } },
     })
     if (error) { setAuthError(error.message); return { error } }
     return { data }
@@ -92,6 +106,15 @@ export function AuthProvider({ children }) {
     // legacy workspace anyway, never to a real tenant's data.
     accessToken: session?.access_token || null,
     loading: session === undefined || loadingWorkspaces,
+    // Access gate. `accessStatus` is 'pending' | 'approved' | 'revoked', or
+    // null while signed out. Treat a missing row as pending, not approved:
+    // if the trigger ever failed to file the request, the safe reading is
+    // "not let in yet", and the admin will see nothing to approve — which
+    // is a visible bug rather than a silent hole.
+    access,
+    accessStatus: access?.status || (session ? 'pending' : null),
+    isApproved: access?.status === 'approved',
+    isAccessAdmin: access?.role === 'admin' && access?.status === 'approved',
     workspaces,
     activeWorkspace,
     activeWorkspaceId,
