@@ -120,8 +120,17 @@ export function PhotoEditor({
   onUploadImage, imageLibrary = [],
   // Signed-in fetch for the account's persistent Media Library, offered in
   // the Images panel alongside the upload button and this session's own
-  // generations. Absent in the dev harness, where the library call just
-  // comes back empty.
+  // generations.
+  //
+  // Absent in the dev harness — but NOT, as this comment first claimed,
+  // leaving the panel empty. `fetchMediaLibrary` falls back to
+  // `Bearer ${accessToken || SUPABASE_ANON_KEY}`, and `media_library` answers
+  // the anon key with real rows (verified: 200 and five workspace ids from a
+  // token-less request), so the harness shows a populated library whose
+  // thumbnails happen not to resolve. The panel is therefore never blocked on
+  // this prop, which is why nothing here guards on it — but that also means
+  // the grid is not proof of a signed-in read, so don't treat it as one when
+  // testing auth.
   accessToken,
   // Brand Brain's free-text "Brand Colours" field. Passed as written; the hex
   // codes are pulled out of the prose in model/palette.js.
