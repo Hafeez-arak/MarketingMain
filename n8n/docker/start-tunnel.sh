@@ -24,10 +24,25 @@ fi
 echo "Starting Cloudflare quick tunnel -> http://localhost:5680"
 echo "Watch below for the https://*.trycloudflare.com URL Cloudflare assigns."
 echo
-echo "Once you have it, every webhook URL in this app's Settings > Workflow"
-echo "Webhooks needs its host swapped to that URL, keeping the same /webhook/<path>"
-echo "suffix (e.g. https://<tunnel>.trycloudflare.com/webhook/arak-creative-generate)."
-echo "There are ~19 of them — see src/pages/settings/index.jsx for the full list."
+echo "Once you have it, point the app at it by setting ONE value — the host,"
+echo "with no /webhook suffix and no trailing slash:"
+echo
+echo "  VITE_N8N_BASE_URL=https://<tunnel>.trycloudflare.com"
+echo
+echo "in .env for local dev, and in the Vercel project's environment variables"
+echo "for the deployed app (then redeploy). The 23 /webhook/<path> suffixes are"
+echo "baked into the build from src/lib/n8nWebhooks.js and never change, so"
+echo "nothing in Supabase and nothing in Settings needs touching — not even"
+echo "after this tunnel restarts with a different hostname."
 echo
 
-exec cloudflared tunnel --url http://localhost:5680
+# --protocol http2 instead of the default QUIC. cloudflared prefers QUIC
+# (UDP/7844) and only falls back on its own after several slow retries; on
+# this network that dial times out indefinitely ("failed to dial to edge
+# with quic: timeout: no recent network activity"), and the symptom is not
+# an obvious network error — the tunnel prints a perfectly normal
+# *.trycloudflare.com URL that then serves HTTP 530 to every request,
+# because the edge has a hostname with no origin behind it. http2 rides
+# TCP/443 like ordinary HTTPS and connects immediately. Drop this flag if
+# you ever want QUIC's lower latency on a network that allows outbound UDP.
+exec cloudflared tunnel --protocol http2 --url http://localhost:5680

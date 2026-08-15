@@ -1,4 +1,5 @@
 import { createContext, useContext } from 'react'
+import { defaultWebhooks } from '../lib/n8nWebhooks'
 
 // ─── App store: the context, the hook, and the action creators ─────────────
 // Split out of appStore.jsx, which keeps <AppProvider>. A module that exports
@@ -30,19 +31,28 @@ export const AppContext = createContext(null)
 // Lives here rather than in appStore.jsx for the reason at the top of this
 // file: a module exporting both <AppProvider> and a plain object costs Fast
 // Refresh on every edit to either.
-export const DEFAULT_WEBHOOKS = {
-  instagram: '', linkedin: '',
-  instagramSchedule: '', instagramScheduleRegen: '',
-  linkedinSchedule: '', linkedinScheduleRegen: '',
-  instagramReels: '',
-  campaignPlanner: '', instagramPlanGen: '', linkedinPlanGen: '',
-  elongateIdea: '', captionStudio: '', draftCopy: '', mediaOptions: '',
-  videoRender: '',
-  publishPost: '', zernioSync: '', zernioDashboard: '',
-  creativeGenerate: '', creativeEdit: '', creativeVideo: '', creativeCompose: '',
-  creativeEnhance: '', creativeVideoEdit: '', creativeStitch: '', creativeCancel: '',
-  falBalance: '',
-}
+//
+// The slots are still the schema; what changed is that they no longer
+// default to ''. Each one now resolves to VITE_N8N_BASE_URL + the slot's
+// fixed webhook path (lib/n8nWebhooks.js), so a fresh workspace is already
+// pointed at the live n8n instance and nobody has to paste 27 URLs into
+// Settings. Slots with no deployed workflow still resolve to '' — see the
+// note on WEBHOOK_PATHS.
+export const WEBHOOK_SLOTS = [
+  'instagram', 'linkedin',
+  'instagramSchedule', 'instagramScheduleRegen',
+  'linkedinSchedule', 'linkedinScheduleRegen',
+  'instagramReels',
+  'campaignPlanner', 'instagramPlanGen', 'linkedinPlanGen',
+  'elongateIdea', 'captionStudio', 'draftCopy', 'mediaOptions',
+  'videoRender',
+  'publishPost', 'zernioSync', 'zernioDashboard',
+  'creativeGenerate', 'creativeEdit', 'creativeVideo', 'creativeCompose',
+  'creativeEnhance', 'creativeVideoEdit', 'creativeStitch', 'creativeCancel',
+  'falBalance',
+]
+
+export const DEFAULT_WEBHOOKS = defaultWebhooks(WEBHOOK_SLOTS)
 
 export function useApp() {
   const ctx = useContext(AppContext)
@@ -72,6 +82,7 @@ export const actions = {
   addTeamMember:      p  => ({ type: 'ADD_TEAM_MEMBER',      payload: p }),
   removeTeamMember:   id => ({ type: 'REMOVE_TEAM_MEMBER',   payload: id }),
   setWebhook:         (platform, url) => ({ type: 'SET_WEBHOOK', payload: { platform, url } }),
+  hydrateWebhooks:    saved => ({ type: 'HYDRATE_WEBHOOKS', payload: saved }),
   setBrandProfile:    p  => ({ type: 'SET_BRAND_PROFILE',     payload: p }),
   setCampaignPlanDraft: p => ({ type: 'SET_CAMPAIGN_PLAN_DRAFT', payload: p }),
   createWorkspace:    p  => ({ type: 'CREATE_WORKSPACE',  payload: p }),

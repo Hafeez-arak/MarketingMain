@@ -1,4 +1,5 @@
-import { AppContext, DEFAULT_WEBHOOKS } from './app'
+import { AppContext, DEFAULT_WEBHOOKS, WEBHOOK_SLOTS } from './app'
+import { mergeWebhooks } from '../lib/n8nWebhooks'
 import { useReducer, useEffect } from 'react'
 
 const STORAGE_KEY = 'campai_arak_v1'
@@ -12,7 +13,13 @@ const DEFAULT_WORKSPACE_ID = 'ws_default'
 // Fill in whatever a stored blob is missing. Used everywhere webhooks come
 // back from persistence, so the in-memory shape is complete no matter how old
 // the data is.
-const webhooksFrom = saved => ({ ...DEFAULT_WEBHOOKS, ...(saved || {}) })
+//
+// This is no longer a plain spread, because the defaults are now real URLs
+// rather than ''. A spread lets a stored '' — which every persisted blob is
+// full of, since 27 slots were saved together and most were never filled —
+// overwrite a perfectly good default with nothing. mergeWebhooks treats
+// blank as "unset" and rebases our own paths off any stale host; see there.
+const webhooksFrom = saved => mergeWebhooks(WEBHOOK_SLOTS, saved)
 
 const initialState = {
   campaigns: [],
@@ -123,6 +130,13 @@ function reducer(state, action) {
     case 'SET_LINKEDIN_INSTRUCTIONS':  return { ...state, linkedinInstructions: action.payload }
     case 'SET_LINKEDIN_SCHEDULE':      return { ...state, linkedinSchedule: action.payload }
     case 'SET_WEBHOOK': return { ...state, webhooks: { ...state.webhooks, [action.payload.platform]: action.payload.url } }
+    // Applying a blob fetched from workspace_webhooks. Deliberately NOT a
+    // loop of SET_WEBHOOK over its entries, which is what the two loaders
+    // used to do: that path writes every stored key verbatim, so the ''s
+    // and stale hosts in an old row land in the store unfiltered and
+    // clobber the build's defaults. Routing it through webhooksFrom applies
+    // the same blank/rebase rules as localStorage hydration.
+    case 'HYDRATE_WEBHOOKS': return { ...state, webhooks: webhooksFrom(action.payload) }
     case 'UPDATE_SUPABASE': return { ...state, supabase: { ...state.supabase, ...action.payload } }
     case 'SET_BRAND_PROFILE': return { ...state, brandProfile: action.payload }
     // A function payload is applied against the CURRENT draft instead of one

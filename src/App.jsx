@@ -45,9 +45,7 @@ function WebhooksLoader() {
     let cancelled = false
     fetchWorkspaceWebhooks(activeWorkspaceId, accessToken).then(saved => {
       if (cancelled || !saved) return
-      Object.entries(saved).forEach(([platform, url]) => {
-        if (typeof url === 'string') dispatch(actions.setWebhook(platform, url))
-      })
+      dispatch(actions.hydrateWebhooks(saved))
     })
     return () => { cancelled = true }
   }, [activeWorkspaceId, accessToken, dispatch])

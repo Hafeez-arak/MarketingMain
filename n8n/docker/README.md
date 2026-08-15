@@ -121,13 +121,27 @@ domain, nothing to sign up for — it's live within seconds of running the
 script, and dies the moment you `Ctrl+C` it (runs in the foreground on
 purpose, so it can't linger unnoticed).
 
-Once you have the URL, every webhook entry in the app's **Settings →
-Workflow Webhooks** needs its host swapped to it, keeping the same
-`/webhook/<path>` suffix — e.g.
-`https://<tunnel>.trycloudflare.com/webhook/arak-creative-generate`. There
-are ~19 of them (see `src/pages/settings/index.jsx`), and **the URL changes
-every time the tunnel restarts**, so avoid restarting it mid-testing or
-everyone's saved webhooks silently break.
+Once you have the URL, point the app at it by setting **one** value — the
+host only, no `/webhook` suffix, no trailing slash:
+
+```
+VITE_N8N_BASE_URL=https://<tunnel>.trycloudflare.com
+```
+
+in the repo's `.env` for local dev, and in the **Vercel project's
+environment variables** for the deployed app (then redeploy). That's the
+whole procedure. The 23 `/webhook/<path>` suffixes come from
+`src/lib/n8nWebhooks.js` and are baked into the build; nothing in Supabase
+and nothing in Settings → Workflow Webhooks has to be touched, and no user
+has to configure anything.
+
+The URL **does** change every time the tunnel restarts — that's the cost of
+a quick tunnel — but recovering is now "change one env var, redeploy"
+rather than 27 URLs re-pasted per workspace. Rows already in
+`workspace_webhooks` that still hold a dead host self-heal: a stored value
+whose path matches the slot's own webhook path is rebased onto the current
+`VITE_N8N_BASE_URL` at load (see `mergeWebhooks`), so old rows never shadow
+the live instance.
 
 **Security note before sharing the URL with anyone:** this container has
 `ExecuteCommand` enabled and real provider API keys in its environment

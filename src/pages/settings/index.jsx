@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
-import { useApp, actions } from '../../store/app'
+import { useApp, actions, WEBHOOK_SLOTS } from '../../store/app'
+import { mergeWebhooks, defaultWebhookUrl, N8N_BASE_URL } from '../../lib/n8nWebhooks'
 import { useAuth } from '../../store/auth'
 import { supabase } from '../../lib/supabaseClient'
 import { fetchWorkspaceWebhooks, saveWorkspaceWebhooks } from '../../lib/workspaceWebhooks'
@@ -427,10 +428,12 @@ function WorkflowWebhooks() {
     fetchWorkspaceWebhooks(activeWorkspaceId, accessToken).then(saved => {
       if (cancelled) return
       if (saved) {
-        Object.entries(saved).forEach(([platform, url]) => {
-          if (typeof url === 'string') dispatch(actions.setWebhook(platform, url))
-        })
-        setDrafts(d => ({ ...d, ...saved }))
+        dispatch(actions.hydrateWebhooks(saved))
+        // Show the same merged values the rest of the app will use, not the
+        // raw row — otherwise a slot the row has as '' or on a dead tunnel
+        // host renders blank/stale here while every other page correctly
+        // calls the current default.
+        setDrafts(mergeWebhooks(WEBHOOK_SLOTS, saved))
       }
       setSyncState('synced')
     })
@@ -440,20 +443,33 @@ function WorkflowWebhooks() {
 
   async function handleSave(platform) {
     const url = drafts[platform].trim()
-    dispatch(actions.setWebhook(platform, url))
+    // Clearing a field now means "stop overriding", not "blank it". What's
+    // stored stays '' so the row carries no host at all, and the slot falls
+    // back to the build's default — which is what keeps the app following
+    // the tunnel across restarts instead of freezing on whatever host was
+    // current the day someone last typed here.
+    const effective = url || defaultWebhookUrl(platform)
+    dispatch(actions.setWebhook(platform, effective))
     // Normalise the draft to the trimmed value so isDirty resolves to false
     // right after saving (otherwise a trailing space keeps the button "dirty").
-    setDrafts(d => ({ ...d, [platform]: url }))
+    setDrafts(d => ({ ...d, [platform]: effective }))
     setSaved(s => ({ ...s, [platform]: true }))
     setTimeout(() => setSaved(s => ({ ...s, [platform]: false })), 2000)
 
-    const merged = { ...state.webhooks, [platform]: url }
+    // Persist only genuine overrides. A slot equal to its own default is
+    // written as '' rather than as today's tunnel URL, so a row saved now
+    // doesn't become 27 stale hosts the next time the tunnel restarts.
+    const merged = {}
+    for (const slot of WEBHOOK_SLOTS) {
+      const value = slot === platform ? url : (state.webhooks?.[slot] || '')
+      merged[slot] = value === defaultWebhookUrl(slot) ? '' : value
+    }
     const result = await saveWorkspaceWebhooks(activeWorkspaceId, accessToken, merged)
     dispatch(actions.addNotification({
       id: uid(),
       message: result.error
         ? `${platform} webhook saved locally, but failed to sync to your account: ${result.error}`
-        : (url ? `${platform} webhook saved to your account.` : `${platform} webhook cleared.`),
+        : (url ? `${platform} webhook saved to your account.` : `${platform} webhook reset to the default.`),
       createdAt: new Date().toISOString(),
     }))
   }
@@ -467,12 +483,21 @@ function WorkflowWebhooks() {
             <span className="text-[10px] bg-sage-100 text-sage-700 px-1.5 py-0.5 leading-[1.4] font-semibold">● Synced to your account</span>
           )}
         </div>
-        <p className="text-xs text-text-tertiary mt-0.5">Paste your n8n webhook URLs — the webapp calls these to trigger content generation. Saved to your account, so they follow you to any browser or device you sign in on.</p>
+        <p className="text-xs text-text-tertiary mt-0.5">
+          {N8N_BASE_URL
+            ? <>These are already pointed at the team&apos;s n8n instance (<code className="text-[11px]">{N8N_BASE_URL}</code>) — you don&apos;t need to fill anything in. Override one only if you&apos;re testing against your own n8n; clear it to go back to the default.</>
+            : <>No n8n instance is configured for this build (<code className="text-[11px]">VITE_N8N_BASE_URL</code> is unset), so paste your own webhook URLs below. Saved to your account, so they follow you to any browser or device you sign in on.</>}
+        </p>
       </div>
       <div className="divide-y divide-border">
         {WORKFLOW_CONFIGS.map(cfg => {
-          const isSet   = !!(state.webhooks?.[cfg.platform])
-          const isDirty = drafts[cfg.platform] !== (state.webhooks?.[cfg.platform] || '')
+          const current = state.webhooks?.[cfg.platform] || ''
+          const isSet   = !!current
+          // "Default" vs "Custom" matters here in a way "Configured" doesn't:
+          // a custom value is the one thing that won't follow the tunnel when
+          // the base URL changes, so it should be visible at a glance.
+          const isDefault = isSet && current === defaultWebhookUrl(cfg.platform)
+          const isDirty = drafts[cfg.platform] !== current
           const show    = visible[cfg.platform]
 
           return (
@@ -483,9 +508,11 @@ function WorkflowWebhooks() {
                 <div className="flex-1">
                   <div className="flex items-center gap-2 flex-wrap">
                     <p className="font-medium text-text text-sm">{cfg.label}</p>
-                    {isSet
-                      ? <span className="text-[10px] bg-sage-100 text-sage-700 px-1.5 py-0.5 leading-[1.4] font-semibold">● Configured</span>
-                      : <span className="text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 leading-[1.4] font-semibold">Not set</span>
+                    {!isSet
+                      ? <span className="text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 leading-[1.4] font-semibold">Not set</span>
+                      : isDefault
+                        ? <span className="text-[10px] bg-sage-100 text-sage-700 px-1.5 py-0.5 leading-[1.4] font-semibold">● Default</span>
+                        : <span className="text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 leading-[1.4] font-semibold">● Custom</span>
                     }
                   </div>
                   <p className="text-xs text-text-tertiary mt-0.5">{cfg.description}</p>
