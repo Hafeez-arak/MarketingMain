@@ -29,8 +29,8 @@ echo "with no /webhook suffix and no trailing slash:"
 echo
 echo "  VITE_N8N_BASE_URL=https://<tunnel>.trycloudflare.com"
 echo
-echo "in .env for local dev, and in the Vercel project's environment variables"
-echo "for the deployed app (then redeploy). The 23 /webhook/<path> suffixes are"
+echo "in .env for local dev, and in the deployed app's environment variables"
+echo "(then redeploy - Vite inlines this at build time). The 23 /webhook/<path> suffixes are"
 echo "baked into the build from src/lib/n8nWebhooks.js and never change, so"
 echo "nothing in Supabase and nothing in Settings needs touching — not even"
 echo "after this tunnel restarts with a different hostname."

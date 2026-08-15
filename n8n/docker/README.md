@@ -128,9 +128,12 @@ host only, no `/webhook` suffix, no trailing slash:
 VITE_N8N_BASE_URL=https://<tunnel>.trycloudflare.com
 ```
 
-in the repo's `.env` for local dev, and in the **Vercel project's
-environment variables** for the deployed app (then redeploy). That's the
-whole procedure. The 23 `/webhook/<path>` suffixes come from
+in the repo's `.env` for local dev, and in **the deployed app's environment
+variables** — then redeploy, since Vite inlines this at build time and a
+running deployment won't pick it up on its own. (The repo carries a
+`vercel.json`, but a row in `workspace_webhooks` referenced
+`arak-marketing.netlify.app`, so confirm which host is actually serving the
+team before hunting for the setting.) That's the whole procedure. The 23 `/webhook/<path>` suffixes come from
 `src/lib/n8nWebhooks.js` and are baked into the build; nothing in Supabase
 and nothing in Settings → Workflow Webhooks has to be touched, and no user
 has to configure anything.
