@@ -140,7 +140,12 @@ has to configure anything.
 
 The URL **does** change every time the tunnel restarts — that's the cost of
 a quick tunnel — but recovering is now "change one env var, redeploy"
-rather than 27 URLs re-pasted per workspace. Rows already in
+rather than 27 URLs re-pasted per workspace. The tunnel can also die on its
+own mid-session, not just on `Ctrl+C`: a network blip can leave `cloudflared`
+stuck retrying against a registration Cloudflare has already dropped
+(`ERR ... Unauthorized: Tunnel not found` repeating in its output). That
+process won't recover by itself — kill it and rerun the script for a fresh
+URL. Rows already in
 `workspace_webhooks` that still hold a dead host self-heal: a stored value
 whose path matches the slot's own webhook path is rebased onto the current
 `VITE_N8N_BASE_URL` at load (see `mergeWebhooks`), so old rows never shadow
