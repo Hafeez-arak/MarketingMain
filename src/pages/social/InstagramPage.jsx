@@ -155,19 +155,25 @@ function VisualSelector({ mode, onModeChange, selectedStyle, onStyleChange, cust
 
 // ─── Main Page ─────────────────────────────────────────────────────────────
 // ─── Supabase generated posts hook ────────────────────────────────────────
-function useSupabasePosts(supabaseUrl, anonKey) {
+function useSupabasePosts(supabaseUrl, anonKey, workspaceId) {
   const [remotePosts,   setRemotePosts]   = useState([])
   const [loadingPosts,  setLoadingPosts]  = useState(false)
   const [lastFetchedAt, setLastFetchedAt] = useState(null)
 
   async function fetchRemotePosts() {
-    if (!supabaseUrl || !anonKey) return
+    if (!supabaseUrl || !anonKey || !workspaceId) return
     setLoadingPosts(true)
     try {
       const headers = { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${anonKey}` }
+      // Scoped to the company, and scoped BEFORE the limit — which is the
+      // half that's easy to miss. Unfiltered, the 100 newest rows are drawn
+      // from every company at once, so a busy brand pushes another brand's
+      // posts off the end. That reads as "my posts are missing", not as a
+      // leak, which is what made it survive this long.
+      const scope = `workspace_id=eq.${workspaceId}`
       const [schedRes, manualRes] = await Promise.all([
-        fetch(`${supabaseUrl}/rest/v1/instagram_generated_posts?select=*&order=created_at.desc&limit=100`, { headers }),
-        fetch(`${supabaseUrl}/rest/v1/instagram_manual_posts?select=*&order=created_at.desc&limit=100`, { headers }),
+        fetch(`${supabaseUrl}/rest/v1/instagram_generated_posts?${scope}&select=*&order=created_at.desc&limit=100`, { headers }),
+        fetch(`${supabaseUrl}/rest/v1/instagram_manual_posts?${scope}&select=*&order=created_at.desc&limit=100`, { headers }),
       ])
       const schedRows  = schedRes.ok  ? await schedRes.json()  : []
       const manualRows = manualRes.ok ? await manualRes.json() : []
@@ -239,7 +245,7 @@ export function InstagramPage() {
   const anonKey     = accessToken || ''
 
   const { remotePosts, loadingPosts, lastFetchedAt, fetchRemotePosts, updatePostStatus } =
-    useSupabasePosts(supabaseUrl, anonKey)
+    useSupabasePosts(supabaseUrl, anonKey, activeWorkspaceId)
 
   // Merge: remote posts first (newest), deduplicate by id against local
   const localIds   = new Set(localPosts.map(p => p.id))
@@ -345,6 +351,12 @@ export function InstagramPage() {
 }
 
 // ─── Supabase helpers ──────────────────────────────────────────────────────
+// Every call below bails when there's no workspace rather than running the
+// query unscoped. An absent id used to interpolate into the URL as the string
+// "undefined", which PostgREST rejects — but the real hazard is the query
+// that would have been valid without any scope at all.
+const NO_WORKSPACE = 'No active workspace. Try signing out and back in.'
+
 function useSupabaseSchedule(supabaseUrl, anonKey, workspaceId) {
   const headers = {
     'Content-Type':  'application/json',
@@ -355,6 +367,7 @@ function useSupabaseSchedule(supabaseUrl, anonKey, workspaceId) {
 
   async function upsertEntry(dateKey, entry) {
     if (!supabaseUrl || !anonKey) return { error: 'Supabase not configured. Go to Settings → Integrations.' }
+    if (!workspaceId) return { error: NO_WORKSPACE }
     const body = {
       workspace_id:         workspaceId,
       webapp_id:            entry._id || null,
@@ -374,9 +387,12 @@ function useSupabaseSchedule(supabaseUrl, anonKey, workspaceId) {
       publish_time:         entry.publishTime       || null,
       status:               'pending',
     }
-    // Use webapp_id as the upsert key — allows multiple posts per day
+    // Use webapp_id as the upsert key — allows multiple posts per day.
+    // Scoped to the company for the same reason deleteEntry is: webapp_id is
+    // generated in the browser, so on its own it can address another
+    // company's row.
     const url = entry._id
-      ? `${supabaseUrl}/rest/v1/instagram_schedule?webapp_id=eq.${entry._id}`
+      ? `${supabaseUrl}/rest/v1/instagram_schedule?webapp_id=eq.${entry._id}&workspace_id=eq.${workspaceId}`
       : `${supabaseUrl}/rest/v1/instagram_schedule`
     const method = entry._id ? 'PATCH' : 'POST'
     const res = await fetch(url, {
@@ -390,8 +406,14 @@ function useSupabaseSchedule(supabaseUrl, anonKey, workspaceId) {
 
   async function uploadToStorage(file, dateKey, index) {
     if (!supabaseUrl || !anonKey) return { error: 'Supabase not configured.' }
+    if (!workspaceId) return { error: NO_WORKSPACE }
     const ext  = file.name.split('.').pop()
-    const path = `instagram/${dateKey}/${Date.now()}_${index}.${ext}`
+    // Workspace-first, matching every other upload path in the app
+    // (brand-assets, creative-studio, references). This bucket was the one
+    // place a company's files landed in a namespace shared with everyone
+    // else's. Existing files keep their old paths — the URLs already stored
+    // on schedule rows stay valid; only new uploads move.
+    const path = `${workspaceId}/instagram/${dateKey}/${Date.now()}_${index}.${ext}`
     const res  = await fetch(`${supabaseUrl}/storage/v1/object/schedule-uploads/${path}`, {
       method:  'POST',
       headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${anonKey}`, 'Content-Type': file.type },
@@ -404,10 +426,17 @@ function useSupabaseSchedule(supabaseUrl, anonKey, workspaceId) {
 
   async function deleteEntry(dateKey, entry) {
     if (!supabaseUrl || !anonKey) return { error: 'Supabase not configured.' }
-    // Delete by webapp_id if available, otherwise by date (legacy fallback)
+    if (!workspaceId) return { error: NO_WORKSPACE }
+    // Delete by webapp_id if available, otherwise by date (legacy fallback).
+    // BOTH branches are scoped to the company. The date fallback is the one
+    // that mattered most: unscoped, deleting a single legacy entry wiped
+    // every company's schedule rows for that date. webapp_id is scoped too —
+    // it's generated client-side, so it is not unique across companies and
+    // must never be trusted on its own to identify a row.
+    const scope = `workspace_id=eq.${workspaceId}`
     const url = entry?._id
-      ? `${supabaseUrl}/rest/v1/instagram_schedule?webapp_id=eq.${entry._id}`
-      : `${supabaseUrl}/rest/v1/instagram_schedule?scheduled_date=eq.${dateKey}`
+      ? `${supabaseUrl}/rest/v1/instagram_schedule?webapp_id=eq.${entry._id}&${scope}`
+      : `${supabaseUrl}/rest/v1/instagram_schedule?scheduled_date=eq.${dateKey}&${scope}`
     const res = await fetch(url, { method: 'DELETE', headers })
     if (!res.ok) { const err = await res.text(); return { error: err } }
     return { ok: true }
@@ -415,10 +444,11 @@ function useSupabaseSchedule(supabaseUrl, anonKey, workspaceId) {
 
   async function fetchMonth(year, month) {
     if (!supabaseUrl || !anonKey) return { data: null, error: 'Supabase not configured.' }
+    if (!workspaceId) return { data: null, error: NO_WORKSPACE }
     const from = `${year}-${String(month + 1).padStart(2, '0')}-01`
     const to   = `${year}-${String(month + 1).padStart(2, '0')}-31`
     const res = await fetch(
-      `${supabaseUrl}/rest/v1/instagram_schedule?scheduled_date=gte.${from}&scheduled_date=lte.${to}&select=*&order=publish_time.asc`,
+      `${supabaseUrl}/rest/v1/instagram_schedule?workspace_id=eq.${workspaceId}&scheduled_date=gte.${from}&scheduled_date=lte.${to}&select=*&order=publish_time.asc`,
       { headers }
     )
     if (!res.ok) { const err = await res.text(); return { data: null, error: err } }
@@ -2166,6 +2196,13 @@ function ReelsPanel({ state, dispatch }) {
           // updating to read this and stamp it on the row it inserts — until
           // then, every reel lands in the legacy Arak workspace regardless of
           // who triggered it, since n8n authenticates with the shared anon key.
+          //
+          // Verified against the live schema 2026-08-16: instagram_reels DOES
+          // have a workspace_id column, but it is NOT NULL defaulting to
+          // '00000000-0000-0000-0000-000000000001' (the legacy workspace), so
+          // an n8n insert that omits it is silently filed under that company
+          // rather than failing. That default is why the poll below cannot be
+          // scoped from here — see the note on it. This is an n8n-side fix.
           reelFormat:   format,
           reelDuration: duration,
           reelBrief:    brief.trim(),
@@ -2188,6 +2225,19 @@ function ReelsPanel({ state, dispatch }) {
 
     const poll = async () => {
       try {
+        // DELIBERATELY UNSCOPED, and the only query in this file that is.
+        // Adding workspace_id=eq.<current> here would not fix the leak, it
+        // would break the feature: n8n omits the column, so every row it
+        // writes takes the legacy-workspace default and a filter on any other
+        // company matches nothing — the poll would spin for its full 6
+        // minutes and report a timeout for a reel that generated fine.
+        // Filtering on the default instead would still hand you a reel
+        // belonging to whoever else was generating at the time.
+        // There is no correct client-side answer while n8n writes the
+        // default; the fix is for the reels workflow to stamp the
+        // workspace_id already present in its webhook payload. Until then
+        // this can surface another company's reel for approval when two
+        // generate at once.
         const r = await fetch(
           `${supabaseUrl}/rest/v1/instagram_reels?select=*&order=created_at.desc&limit=1`,
           { headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${supabaseKey}` } }
