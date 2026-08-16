@@ -121,26 +121,35 @@ domain, nothing to sign up for — it's live within seconds of running the
 script, and dies the moment you `Ctrl+C` it (runs in the foreground on
 purpose, so it can't linger unnoticed).
 
-Once you have the URL, point the app at it by setting **one** value — the
-host only, no `/webhook` suffix, no trailing slash:
+**For the deployed app you no longer have to do anything.** The script
+publishes the new hostname to Supabase (`app_config.n8n_base_url`) the moment
+Cloudflare assigns it, and the deployed app reads that per request through its
+own `/api/n8n/<slot>` proxy. No env var to change, no redeploy, no waiting on
+a build — the team is working again seconds after the tunnel comes up.
+
+For **local dev only**, update the repo's `.env`, because Vite's dev proxy
+reads the host from there rather than from Supabase (that keeps a service-role
+key off every developer's laptop):
 
 ```
 VITE_N8N_BASE_URL=https://<tunnel>.trycloudflare.com
 ```
 
-in the repo's `.env` for local dev, and in **the deployed app's environment
-variables** — then redeploy, since Vite inlines this at build time and a
-running deployment won't pick it up on its own. (The repo carries a
-`vercel.json`, but a row in `workspace_webhooks` referenced
-`arak-marketing.netlify.app`, so confirm which host is actually serving the
-team before hunting for the setting.) That's the whole procedure. The 23 `/webhook/<path>` suffixes come from
-`src/lib/n8nWebhooks.js` and are baked into the build; nothing in Supabase
-and nothing in Settings → Workflow Webhooks has to be touched, and no user
-has to configure anything.
+The 23 `/webhook/<path>` suffixes come from `src/lib/n8nWebhookPaths.js` and
+are shared by the browser and the proxy; nothing in Settings → Workflow
+Webhooks has to be touched, and no user has to configure anything.
 
-The URL **does** change every time the tunnel restarts — that's the cost of
-a quick tunnel — but recovering is now "change one env var, redeploy"
-rather than 27 URLs re-pasted per workspace. The tunnel can also die on its
+Why the proxy exists at all: `VITE_N8N_BASE_URL` was inlined into the public
+JS bundle by Vite, so anyone who opened the deployed site could read the
+tunnel hostname and fire the workflows themselves — and those workflows spend
+real money on fal, Replicate and Anthropic. Routing through
+`api/n8n/[slot].js` keeps the hostname, the Supabase service key and the
+optional shared secret server-side. `npx vite build && grep trycloudflare
+dist/assets/*.js` should find nothing; if it does, something started reading
+that env var in client code again.
+
+The URL **does** still change every time the tunnel restarts — that's the cost
+of a quick tunnel — but for the deployed app that is now invisible. The tunnel can also die on its
 own mid-session, not just on `Ctrl+C`: a network blip can leave `cloudflared`
 stuck retrying against a registration Cloudflare has already dropped
 (`ERR ... Unauthorized: Tunnel not found` repeating in its output). That

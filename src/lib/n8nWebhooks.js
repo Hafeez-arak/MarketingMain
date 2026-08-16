@@ -1,3 +1,5 @@
+import { WEBHOOK_PATHS } from './n8nWebhookPaths'
+
 // ─── n8n webhook URLs: one base URL, fixed paths ────────────────────────────
 // Every webhook this app calls is the SAME n8n instance with a different
 // path. The paths never change — they're baked into the workflow JSON in
@@ -15,56 +17,35 @@
 // tunnel URL a 27-field data-entry job that every workspace had to redo,
 // and until they did, every button in the app failed against a dead host.
 
-// Slot → webhook path. Slot keys are the schema (see DEFAULT_WEBHOOKS in
-// store/app.js); paths must match `parameters.path` on the Webhook node of
-// the matching file in n8n/workflows/.
+// The slot → path map moved to ./n8nWebhookPaths.js so the serverless proxy
+// can share it: this module reads import.meta.env, which does not exist in
+// the Node runtime the proxy runs in. Re-exported so existing importers of
+// WEBHOOK_PATHS from here keep working.
+export { WEBHOOK_PATHS }
+
+// There is deliberately no N8N_BASE_URL export any more. Reading
+// VITE_N8N_BASE_URL here inlined the tunnel hostname into the bundle, and the
+// Settings screen then printed it on the page — so the host was published to
+// every visitor even after the proxy was in place. The only remaining use of
+// that variable is the Vite dev proxy (see vite.config.js), which runs in
+// Node and never ships.
+
+// Every call goes to this app's own origin, and api/n8n/[slot].js forwards it
+// to n8n. The n8n hostname is therefore absent from the shipped bundle.
 //
-// The four schedule slots are deliberately absent: no workflow in
-// n8n/workflows/ answers arak-{instagram,linkedin}-schedule[-regen], so
-// there is nothing to point them at. Giving them a derived URL anyway would
-// turn today's honest "not configured yet" into a 404 at call time. Add
-// them here the day the workflows land.
-export const WEBHOOK_PATHS = {
-  instagram:        'arak-instagram',
-  instagramReels:   'arak-instagram-reels',
-  linkedin:         'arak-linkedin',
-  campaignPlanner:  'arak-campaign-planner',
-  instagramPlanGen: 'arak-ig-plan-generation',
-  linkedinPlanGen:  'arak-li-plan-generation',
-  elongateIdea:     'arak-elongate-idea',
-  captionStudio:    'arak-caption-studio',
-  draftCopy:        'arak-draft-copy',
-  mediaOptions:     'arak-media-options',
-  videoRender:      'arak-video-render',
-  creativeGenerate: 'arak-creative-generate',
-  creativeEdit:     'arak-creative-edit',
-  creativeVideo:    'arak-creative-video',
-  creativeVideoEdit:'arak-creative-video-edit',
-  creativeCompose:  'arak-creative-compose',
-  creativeEnhance:  'arak-creative-enhance',
-  creativeStitch:   'arak-creative-stitch',
-  creativeCancel:   'arak-creative-cancel',
-  falBalance:       'arak-fal-balance',
-  publishPost:      'arak-publish-post',
-  zernioSync:       'arak-zernio-sync',
-  zernioDashboard:  'arak-zernio-dashboard',
-}
-
-// Trailing slashes are stripped so `.../webhook/x` never comes out as
-// `...//webhook/x` — n8n 404s on the doubled slash, which reads like a
-// missing workflow rather than a typo in an env var.
-export const N8N_BASE_URL = String(import.meta.env.VITE_N8N_BASE_URL || '')
-  .trim()
-  .replace(/\/+$/, '')
-
-// The URL a slot points at when nobody has overridden it. Empty when
-// VITE_N8N_BASE_URL isn't set (local dev without a tunnel), which every
-// caller already handles as "not configured" — see the `if (!webhookUrl)`
-// guard in creativeStudio.js and friends.
+// It used to be `${N8N_BASE_URL}/webhook/${path}` with the host inlined by
+// Vite at build time, which published the tunnel URL to anyone who opened the
+// site and made every tunnel restart a redeploy. Both problems belong to the
+// build-time env var, not to n8n, so the env var stopped being the source of
+// truth — see api/n8n/[slot].js and app_config.n8n_base_url.
+//
+// Unlike before, this is never empty: the proxy answers with a clear 503 when
+// no base URL is configured, which is a better failure than the silent
+// "not configured" branch a blank string used to trigger in every caller.
 export function defaultWebhookUrl(slot) {
   const path = WEBHOOK_PATHS[slot]
-  if (!path || !N8N_BASE_URL) return ''
-  return `${N8N_BASE_URL}/webhook/${path}`
+  if (!path) return ''
+  return `/api/n8n/${slot}`
 }
 
 export function defaultWebhooks(slots) {

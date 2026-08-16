@@ -13,6 +13,12 @@ export default defineConfig([
     files: ['vite.config.js', 'postcss.config.js', 'tailwind.config.js', 'eslint.config.js'],
     languageOptions: { globals: globals.node },
   },
+  // Vercel serverless functions are Node too — they read process.env for the
+  // secrets that must never be bundled into the client.
+  {
+    files: ['api/**/*.js'],
+    languageOptions: { globals: globals.node },
+  },
   {
     files: ['**/*.{js,jsx}'],
     extends: [

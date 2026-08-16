@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useApp, actions, WEBHOOK_SLOTS } from '../../store/app'
-import { mergeWebhooks, defaultWebhookUrl, N8N_BASE_URL } from '../../lib/n8nWebhooks'
+import { mergeWebhooks, defaultWebhookUrl } from '../../lib/n8nWebhooks'
 import { useAuth } from '../../store/auth'
 import { supabase } from '../../lib/supabaseClient'
 import { fetchWorkspaceWebhooks, saveWorkspaceWebhooks } from '../../lib/workspaceWebhooks'
@@ -483,10 +483,14 @@ function WorkflowWebhooks() {
             <span className="text-[10px] bg-sage-100 text-sage-700 px-1.5 py-0.5 leading-[1.4] font-semibold">● Synced to your account</span>
           )}
         </div>
+        {/* The n8n hostname is deliberately not shown. It is server-side
+            config now (app_config.n8n_base_url, read by /api/n8n/<slot>), and
+            printing it here would put it back in the page for every visitor —
+            the exact leak the proxy exists to close. */}
         <p className="text-xs text-text-tertiary mt-0.5">
-          {N8N_BASE_URL
-            ? <>These are already pointed at the team&apos;s n8n instance (<code className="text-[11px]">{N8N_BASE_URL}</code>) — you don&apos;t need to fill anything in. Override one only if you&apos;re testing against your own n8n; clear it to go back to the default.</>
-            : <>No n8n instance is configured for this build (<code className="text-[11px]">VITE_N8N_BASE_URL</code> is unset), so paste your own webhook URLs below. Saved to your account, so they follow you to any browser or device you sign in on.</>}
+          These already route to the team&apos;s n8n instance through this app, so you
+          don&apos;t need to fill anything in. Override one only if you&apos;re testing
+          against your own n8n; clear it to go back to the default.
         </p>
       </div>
       <div className="divide-y divide-border">

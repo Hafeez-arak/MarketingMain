@@ -1,8 +1,9 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
-import { defineConfig } from 'vite'
+import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
+import { WEBHOOK_PATHS } from './src/lib/n8nWebhookPaths.js'
 
 // ─── Dev-only: save an exported blob to disk ───────────────────────────────
 // POST a binary body to /__dev/save?name=foo.png and it lands in
@@ -43,10 +44,59 @@ function devExportSink() {
   }
 }
 
+// ─── Dev-only: stand in for the Vercel /api/n8n proxy ──────────────────────
+// In production api/n8n/[slot].js forwards webhook calls to n8n so the tunnel
+// hostname never enters the browser bundle. The Vite dev server does not run
+// Vercel functions, so without this every webhook 404s locally and the app
+// looks broken in a way that has nothing to do with the code under test.
+//
+// Here the host comes from VITE_N8N_BASE_URL in .env — a local developer
+// already has it, and keeping dev off the Supabase-backed config avoids
+// needing a service-role key on anyone's laptop.
+function devN8nProxy(baseUrl) {
+  return {
+    name: 'arak-dev-n8n-proxy',
+    apply: 'serve',
+    configureServer(server) {
+      server.middlewares.use('/api/n8n', async (req, res) => {
+        const base = String(baseUrl || '').trim().replace(/\/+$/, '')
+        const slot = (req.url || '').split('?')[0].replace(/^\//, '')
+        const path = WEBHOOK_PATHS[slot]
+        res.setHeader('Content-Type', 'application/json')
+        if (!path) { res.statusCode = 404; return res.end(JSON.stringify({ error: `Unknown webhook slot: ${slot}` })) }
+        if (!base) { res.statusCode = 503; return res.end(JSON.stringify({ error: 'VITE_N8N_BASE_URL is not set in .env' })) }
+
+        const chunks = []
+        req.on('data', c => chunks.push(c))
+        req.on('end', async () => {
+          try {
+            const upstream = await fetch(`${base}/webhook/${path}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: Buffer.concat(chunks),
+            })
+            const text = await upstream.text()
+            res.statusCode = upstream.status
+            res.end(text)
+          } catch (err) {
+            res.statusCode = 502
+            res.end(JSON.stringify({ error: `Could not reach n8n: ${err.message}` }))
+          }
+        })
+      })
+    },
+  }
+}
+
 // https://vite.dev/config/
-export default defineConfig({
-  plugins: [react(), devExportSink()],
-  server: {
-    port: process.env.PORT ? Number(process.env.PORT) : 5173,
-  },
+// A config function, not a plain object, so loadEnv can read .env here in
+// Node — the dev proxy needs VITE_N8N_BASE_URL before any client code exists.
+export default defineConfig(({ mode }) => {
+  const env = loadEnv(mode, process.cwd(), '')
+  return {
+    plugins: [react(), devExportSink(), devN8nProxy(env.VITE_N8N_BASE_URL)],
+    server: {
+      port: process.env.PORT ? Number(process.env.PORT) : 5173,
+    },
+  }
 })

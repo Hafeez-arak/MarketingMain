@@ -39,7 +39,10 @@ export function ConfigError({ message }) {
         }}>
 {`VITE_SUPABASE_URL=https://<project>.supabase.co
 VITE_SUPABASE_ANON_KEY=<anon key>
-VITE_N8N_BASE_URL=https://<host>   # host only, no /webhook suffix`}
+
+# Server-side only (no VITE_ prefix — these must never
+# reach the browser). Used by the /api/n8n proxy.
+SUPABASE_SERVICE_ROLE_KEY=<service role key>`}
         </pre>
       </div>
     </div>

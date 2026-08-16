@@ -24,17 +24,51 @@ fi
 echo "Starting Cloudflare quick tunnel -> http://localhost:5680"
 echo "Watch below for the https://*.trycloudflare.com URL Cloudflare assigns."
 echo
-echo "Once you have it, point the app at it by setting ONE value — the host,"
-echo "with no /webhook suffix and no trailing slash:"
+echo "The new URL is published to Supabase (app_config.n8n_base_url) automatically,"
+echo "and the deployed app reads it per request through /api/n8n/<slot>."
+echo "That means NO Vercel env change and NO redeploy after a restart — the"
+echo "testing team keeps working within seconds."
 echo
-echo "  VITE_N8N_BASE_URL=https://<tunnel>.trycloudflare.com"
+echo "Local dev is the exception: Vite's dev proxy reads VITE_N8N_BASE_URL from"
+echo ".env, so update that line too if you're running the app locally."
 echo
-echo "in .env for local dev, and in the deployed app's environment variables"
-echo "(then redeploy - Vite inlines this at build time). The 23 /webhook/<path> suffixes are"
-echo "baked into the build from src/lib/n8nWebhooks.js and never change, so"
-echo "nothing in Supabase and nothing in Settings needs touching — not even"
-echo "after this tunnel restarts with a different hostname."
-echo
+
+# ── Publish the URL the moment Cloudflare assigns it ───────────────────────
+# Runs in the background, watching the tunnel's own output for the hostname.
+# Writing it to app_config is what makes a restart a non-event for the
+# deployed app; before this, every restart meant editing a Vercel env var and
+# waiting on a rebuild while the team sat blocked.
+#
+# The service-role key is read from this directory's .env — the same key n8n
+# already uses. It never leaves this machine.
+publish_url() {
+  local url="$1"
+  local env_file="$(dirname "$0")/.env"
+  local sb_url sb_key
+  sb_url=$(grep -E '^SUPABASE_URL=' "$env_file" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'")
+  sb_key=$(grep -E '^SUPABASE_KEY=' "$env_file" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'")
+  if [ -z "$sb_url" ] || [ -z "$sb_key" ]; then
+    echo "!! Could not read SUPABASE_URL/SUPABASE_KEY from $env_file." >&2
+    echo "!! Set app_config.n8n_base_url to $url by hand, or the app will 503." >&2
+    return
+  fi
+  local code
+  code=$(curl -s -o /dev/null -w '%{http_code}' -X PATCH \
+    "$sb_url/rest/v1/app_config?key=eq.n8n_base_url" \
+    -H "apikey: $sb_key" -H "Authorization: Bearer $sb_key" \
+    -H "Content-Type: application/json" -H "Prefer: return=minimal" \
+    -d "{\"value\":\"$url\",\"updated_at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}")
+  if [ "$code" = "204" ] || [ "$code" = "200" ]; then
+    echo
+    echo "✓ Published $url — the deployed app is now pointing here. No redeploy needed."
+    echo
+  else
+    echo
+    echo "!! Publishing to Supabase failed (HTTP $code). The tunnel is up, but the" >&2
+    echo "!! deployed app will keep using the previous URL until this is fixed." >&2
+    echo
+  fi
+}
 
 # --protocol http2 instead of the default QUIC. cloudflared prefers QUIC
 # (UDP/7844) and only falls back on its own after several slow retries; on
@@ -45,4 +79,17 @@ echo
 # because the edge has a hostname with no origin behind it. http2 rides
 # TCP/443 like ordinary HTTPS and connects immediately. Drop this flag if
 # you ever want QUIC's lower latency on a network that allows outbound UDP.
-exec cloudflared tunnel --protocol http2 --url http://localhost:5680
+#
+# Piped rather than exec'd so the hostname can be caught as it scrolls past
+# and published to Supabase. cloudflared still runs in the foreground and
+# still dies with the terminal — the tunnel cannot outlive this window.
+cloudflared tunnel --protocol http2 --url http://localhost:5680 2>&1 | while IFS= read -r line; do
+  echo "$line"
+  if [ -z "${published:-}" ]; then
+    url=$(printf '%s' "$line" | grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' | head -1 || true)
+    if [ -n "$url" ]; then
+      publish_url "$url"
+      published=1
+    fi
+  fi
+done
