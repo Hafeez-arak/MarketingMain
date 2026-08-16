@@ -19,6 +19,7 @@ import { WEBHOOK_PATHS } from '../../src/lib/n8nWebhookPaths.js'
 
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || ''
 const SERVICE_KEY  = process.env.SUPABASE_SERVICE_ROLE_KEY || ''
+const ANON_KEY     = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || ''
 // Optional. When set, it is sent as x-webhook-secret so n8n can reject calls
 // that did not come through this proxy. Harmless until the workflows check it.
 const WEBHOOK_SECRET = process.env.N8N_WEBHOOK_SECRET || ''
@@ -46,10 +47,54 @@ async function readBaseUrl() {
   return value
 }
 
+// ─── Who is calling ────────────────────────────────────────────────────────
+// Until the deployment was made public, Vercel Authentication was the only
+// thing in front of this endpoint — reaching it at all required an account on
+// the Vercel team. That is no longer true, and everything past this point
+// spends money, so the caller has to prove it is a signed-in user of the app.
+//
+// The token is checked against Supabase rather than decoded locally: verifying
+// the signature here would mean holding the JWT secret in another place, and
+// asking Supabase is the same answer without the extra copy. It costs one
+// request against a workflow that runs for seconds to minutes.
+//
+// A rejected caller gets 401 and nothing is forwarded, so an unauthenticated
+// request cannot cost anything.
+async function callerIsSignedIn(req) {
+  const header = req.headers?.authorization || req.headers?.Authorization || ''
+  const token = header.startsWith('Bearer ') ? header.slice(7).trim() : ''
+  // The apikey only identifies the project — the Bearer token is what is
+  // actually being verified. Falling back to the service key matters because
+  // the anon key is normally a build-time VITE_ variable: if it is not also
+  // present in the function's environment, an anon-key-only check would
+  // reject every caller and take the whole app down rather than just this
+  // endpoint. The service key is already required here for readBaseUrl.
+  const apiKey = ANON_KEY || SERVICE_KEY
+  if (!token || !SUPABASE_URL || !apiKey) return false
+  try {
+    const res = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+      headers: { apikey: apiKey, Authorization: `Bearer ${token}` },
+    })
+    if (!res.ok) return false
+    const user = await res.json()
+    return Boolean(user?.id)
+  } catch {
+    // Supabase unreachable. Fail closed: the alternative is letting an
+    // unverified call through to a workflow that bills real money.
+    return false
+  }
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     res.setHeader('Allow', 'POST')
     return res.status(405).json({ error: 'POST only' })
+  }
+
+  if (!(await callerIsSignedIn(req))) {
+    return res.status(401).json({
+      error: 'Sign in to run this. If you are signed in, your session expired — reload the page.',
+    })
   }
 
   // Allowlist check FIRST. Without it this endpoint would forward to any path
