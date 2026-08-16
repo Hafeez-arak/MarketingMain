@@ -11,6 +11,9 @@ import {
   ASSET_KINDS, fetchBrandAssets, uploadBrandAsset, updateBrandAsset, deleteBrandAsset,
 } from '../../lib/brandAssets'
 import {
+  TASKS, TASK_LABELS, fetchBrandMemory, createBrandMemory, updateBrandMemory, deleteBrandMemory,
+} from '../../lib/brandContext'
+import {
   fetchBrandSchema, fetchDirectoryRows, getFieldValue, setFieldValue, sortFieldsBySection,
   sectionsApi, fieldsApi, dirColumnsApi, dirRowsApi, slugKey, nextSortOrder,
 } from '../../lib/brandSchema'
@@ -138,6 +141,37 @@ function FieldEditorModal({ field, sections, onSave, onDelete, onClose }) {
             </span>
           </span>
         </label>
+
+        {/* Task scoping sits beside the send-to-AI toggle deliberately: it is
+            the same idea one step finer, so it reads as "and only for these",
+            not as a separate concept to learn. */}
+        {draft.include_in_prompt !== false && (
+          <div>
+            <label className="text-[11px] font-semibold text-text-tertiary uppercase tracking-wide">
+              Only send it to
+            </label>
+            <div className="flex flex-wrap gap-1.5 mt-1.5">
+              {TASKS.map(t => {
+                const tags = draft.tasks || []
+                const on = tags.includes(t)
+                return (
+                  <button key={t} type="button"
+                    onClick={() => set('tasks', on ? tags.filter(x => x !== t) : [...tags, t])}
+                    className={`text-[11px] font-medium px-2.5 py-1 rounded-lg border transition-colors ${
+                      on ? 'bg-sage-50 border-sage-300 text-sage-700'
+                         : 'border-border text-text-secondary hover:border-sage-200'}`}>
+                    {TASK_LABELS[t] || t}
+                  </button>
+                )
+              })}
+            </div>
+            <p className="text-[10px] text-text-tertiary mt-1.5 leading-relaxed">
+              {(draft.tasks || []).length
+                ? 'Sent only to the tasks selected above.'
+                : 'Nothing selected — sent to every kind of generation. Pick some to narrow it (a price list is useful when planning, wasted in an image prompt).'}
+            </p>
+          </div>
+        )}
 
         {!isNew && field.storage_column && (
           <p className="text-[11px] text-text-tertiary bg-surface-subtle rounded-lg px-3 py-2">
@@ -900,6 +934,120 @@ function AssetLibrary({ section, structureMode, onEditSection }) {
 // Arabic names and SAR prices and "Suppliers" with product lines are the same
 // component reading different column definitions.
 
+
+// ─── Learned Guidance ──────────────────────────────────────────────────────
+// brand_memory surfaced inside the Brand Brain rather than in a separate
+// screen, because a rule that steers generation IS brand knowledge — it just
+// happens to have been learned rather than typed.
+//
+// Only 'active' rules are injected into prompts. A 'proposed' rule is
+// something the system inferred and no human has agreed to yet; letting those
+// steer output automatically would mean the brand's voice drifting on the
+// strength of an unreviewed guess.
+function LearnedGuidance({ rules, onAdd, onSetStatus, onDelete, busy }) {
+  const [text, setText] = useState('')
+  const [scope, setScope] = useState('global')
+
+  const active   = rules.filter(r => r.status === 'active')
+  const proposed = rules.filter(r => r.status === 'proposed')
+  const retired  = rules.filter(r => r.status === 'retired')
+
+  function submit() {
+    const rule = text.trim()
+    if (!rule) return
+    onAdd({ rule, scope, status: 'active', source: 'human' })
+    setText('')
+  }
+
+  const Row = ({ r }) => (
+    <div className="flex items-start gap-2 rounded-xl border border-border bg-white px-3 py-2">
+      <span className="flex-1 min-w-0">
+        <span className="block text-xs text-text leading-relaxed">{r.rule}</span>
+        <span className="block text-[10px] text-text-tertiary mt-0.5">
+          {r.scope} · from {r.source}
+          {r.evidence?.sample_size ? ` · ${r.evidence.sample_size} posts` : ''}
+        </span>
+        {r.detail && <span className="block text-[10px] text-text-tertiary mt-1 leading-relaxed">{r.detail}</span>}
+      </span>
+      <span className="flex items-center gap-1 shrink-0">
+        {r.status !== 'active' && (
+          <button type="button" disabled={busy} onClick={() => onSetStatus(r, 'active')}
+            className="text-[11px] font-semibold px-2 py-1 rounded-lg border border-sage-200 text-sage-700 hover:bg-sage-50">
+            Activate
+          </button>
+        )}
+        {r.status === 'active' && (
+          <button type="button" disabled={busy} onClick={() => onSetStatus(r, 'retired')}
+            className="text-[11px] font-semibold px-2 py-1 rounded-lg border border-border text-text-secondary hover:bg-surface-subtle">
+            Retire
+          </button>
+        )}
+        <button type="button" disabled={busy} onClick={() => onDelete(r)}
+          className="text-[11px] font-semibold px-2 py-1 rounded-lg border border-border text-text-tertiary hover:text-red-500 hover:border-red-200">
+          Delete
+        </button>
+      </span>
+    </div>
+  )
+
+  return (
+    <Card id={slug('learned_guidance')} className="scroll-mt-24">
+      <div className="px-5 pt-5">
+        <h2 className="text-sm font-semibold text-text">Learned Guidance</h2>
+        <p className="text-xs text-text-secondary mt-1 leading-relaxed">
+          Short rules that get added to every matching generation, on top of the fields above.
+          Write them yourself, or approve ones the system proposes from what was rejected,
+          edited, or how posts actually performed.
+        </p>
+      </div>
+
+      <div className="p-5 space-y-4">
+        <div className="flex flex-wrap items-end gap-2">
+          <div className="flex-1 min-w-[240px]">
+            <label className="text-[11px] font-semibold text-text-tertiary uppercase tracking-wide">Add a rule</label>
+            <Input value={text} onChange={e => setText(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') submit() }}
+              placeholder="One imperative sentence, e.g. Do not open captions with a rhetorical question." />
+          </div>
+          <Select value={scope} onChange={e => setScope(e.target.value)}>
+            {['global', 'plan', 'caption', 'image', 'timing', 'competitor', 'trend'].map(v => (
+              <option key={v} value={v}>{v}</option>
+            ))}
+          </Select>
+          <Button onClick={submit} disabled={busy || !text.trim()} variant="secondary">Add</Button>
+        </div>
+
+        {proposed.length > 0 && (
+          <div className="space-y-1.5">
+            <p className="text-[11px] font-semibold text-amber-700 uppercase tracking-wide">
+              Proposed — not steering anything yet ({proposed.length})
+            </p>
+            {proposed.map(r => <Row key={r.id} r={r} />)}
+          </div>
+        )}
+
+        <div className="space-y-1.5">
+          <p className="text-[11px] font-semibold text-text-tertiary uppercase tracking-wide">
+            Active — sent with every matching generation ({active.length})
+          </p>
+          {active.length === 0
+            ? <p className="text-xs text-text-tertiary">Nothing active yet.</p>
+            : active.map(r => <Row key={r.id} r={r} />)}
+        </div>
+
+        {retired.length > 0 && (
+          <details>
+            <summary className="text-[11px] font-semibold text-text-tertiary uppercase tracking-wide cursor-pointer">
+              Retired ({retired.length})
+            </summary>
+            <div className="space-y-1.5 mt-1.5">{retired.map(r => <Row key={r.id} r={r} />)}</div>
+          </details>
+        )}
+      </div>
+    </Card>
+  )
+}
+
 function DirectoryEditor({
   section, columns, rows, onRowsChange,
   structureMode, onEditSection, onEditColumn, onAddColumn,
@@ -1047,6 +1195,45 @@ export function BrandBrain() {
     return () => { alive = false }
   }, [activeWorkspaceId, accessToken, dispatch])
 
+  // Learned rules for this brand. All statuses fetched — a human reviewing
+  // proposals is the whole point of the section, so filtering to active here
+  // would hide exactly what needs deciding.
+  const [memory, setMemory] = useState([])
+  const [memoryBusy, setMemoryBusy] = useState(false)
+  useEffect(() => {
+    if (!activeWorkspaceId) return
+    let alive = true
+    fetchBrandMemory(activeWorkspaceId, accessToken, { status: 'all' })
+      .then(rows => { if (alive) setMemory(rows) })
+    return () => { alive = false }
+  }, [activeWorkspaceId, accessToken])
+
+  async function addMemory(row) {
+    setMemoryBusy(true)
+    const res = await createBrandMemory(activeWorkspaceId, accessToken, row)
+    setMemoryBusy(false)
+    if (res.error) { setError(res.error); return }
+    setMemory(m => [res.row, ...m])
+  }
+
+  async function setMemoryStatus(rule, status) {
+    setMemoryBusy(true)
+    const res = await updateBrandMemory(accessToken, rule.id, {
+      status, reviewed_at: new Date().toISOString(),
+    })
+    setMemoryBusy(false)
+    if (res.error) { setError(res.error); return }
+    setMemory(m => m.map(r => r.id === rule.id ? res.row : r))
+  }
+
+  async function removeMemory(rule) {
+    setMemoryBusy(true)
+    const res = await deleteBrandMemory(accessToken, rule.id)
+    setMemoryBusy(false)
+    if (res.error) { setError(res.error); return }
+    setMemory(m => m.filter(r => r.id !== rule.id))
+  }
+
   const visibleSections = schema.sections.filter(s => s.enabled !== false)
   const fieldsFor = key => schema.fields.filter(f => f.section_key === key && f.enabled !== false)
 
@@ -1098,6 +1285,7 @@ export function BrandBrain() {
         label: draft.label, hint: draft.hint || '', placeholder: draft.placeholder || '',
         input_type: draft.input_type, section_key: draft.section_key,
         prompt_label: draft.prompt_label || '', include_in_prompt: draft.include_in_prompt !== false,
+        tasks: draft.tasks || [],
       }
       const result = await fieldsApi.update(accessToken, draft.id, patch)
       if (result.error) { setError(result.error); return }
@@ -1111,6 +1299,7 @@ export function BrandBrain() {
         storage_column: '',                     // new fields always live in custom_fields
         prompt_label: draft.prompt_label || '',
         include_in_prompt: draft.include_in_prompt !== false,
+        tasks: draft.tasks || [],
         sort_order: nextSortOrder(fieldsFor(draft.section_key)),
       })
       if (result.error) { setError(result.error); return }
@@ -1377,7 +1566,7 @@ export function BrandBrain() {
                   onEditSection={setSectionTarget}
                   onAddField={s => setFieldTarget({
                     section_key: s.key, label: '', hint: '', placeholder: '',
-                    input_type: 'textarea', prompt_label: '', include_in_prompt: true,
+                    input_type: 'textarea', prompt_label: '', include_in_prompt: true, tasks: [],
                   })} />
               )
             })}
@@ -1417,6 +1606,14 @@ export function BrandBrain() {
                 </div>
               )}
             </Card>
+
+            <LearnedGuidance
+              rules={memory}
+              busy={memoryBusy}
+              onAdd={addMemory}
+              onSetStatus={setMemoryStatus}
+              onDelete={removeMemory}
+            />
 
             <div className="h-2" />
           </div>

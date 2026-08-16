@@ -11,7 +11,7 @@ import { saveToMediaLibrary } from '../lib/mediaLibrary'
 //   ready, no selection yet -> pick from 3 caption + 3 media-prompt options
 //   selected  -> the picked (or hand-edited) text, editable, with a
 //                "generate image options" action once a media prompt exists
-export function IdeaDraftPanel({ idea, accessToken, workspaceId, mediaOptionsUrl, onIdeaChange, onRedraft, redrafting }) {
+export function IdeaDraftPanel({ idea, accessToken, workspaceId, mediaOptionsUrl, brandName = '', onIdeaChange, onRedraft, redrafting }) {
   const [savingField, setSavingField] = useState('')     // which field is mid-save, for a subtle spinner
   const [genLoading, setGenLoading] = useState(false)
   const [genError, setGenError] = useState('')
@@ -42,6 +42,10 @@ export function IdeaDraftPanel({ idea, accessToken, workspaceId, mediaOptionsUrl
       plan_idea_id: idea.id, platform: idea.platform, media_prompt: idea.mediaPrompt,
       aspect_ratio: idea.aspectRatio, style: idea.suggestedStyle || 'photorealistic',
       reference_image_urls: idea.references || [], count: 3,
+      // The image prompt's brand tail. Without this the workflow falls back
+      // to no tail at all — which is correct-but-generic, and far better than
+      // the hardcoded lighting tail it replaced, but this is the real value.
+      brand_name: brandName,
     })
     setGenLoading(false)
     if (res.error) { setGenError(res.error); return }

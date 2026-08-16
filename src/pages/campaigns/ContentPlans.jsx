@@ -50,7 +50,7 @@ export function ContentPlans() {
       // behind a bare summary card).
       step: 'review',
       month: plan.month || '', goal: plan.goal || '', goalCategory: plan.goal_category || '',
-      platforms: plan.platforms || ['instagram', 'linkedin'],
+      platforms: plan.platforms || ['instagram'],
       startDate: plan.start_date || '', endDate: plan.end_date || '',
       approxCount: '', includeHolidays: true,
       contentMixTarget: plan.content_mix_target || '',
@@ -107,7 +107,7 @@ export function ContentPlans() {
               <div className="flex items-center gap-1.5 flex-wrap mb-3">
                 {(plan.platforms || []).map(p => (
                   <span key={p} className="text-[10px] font-bold uppercase tracking-[0.08em] px-1.5 py-0.5 leading-[1.4] bg-surface-subtle border border-border text-text-secondary">
-                    {p === 'linkedin' ? 'LinkedIn' : 'Instagram'}
+                    {'Instagram'}
                   </span>
                 ))}
                 {moments.map((m, i) => (

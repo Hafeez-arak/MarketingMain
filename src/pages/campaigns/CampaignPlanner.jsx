@@ -6,14 +6,15 @@ import { Card, Button, Input, Textarea, Select, Spinner, Toggle, Empty, Modal } 
 import { uid, formatDate } from '../../lib/utils'
 import {
   isBrandProfileEmpty, useBrandProfileSync,
-  getBrandBrainSections, DEFAULT_BRAND_BRAIN_SECTIONS, buildSectionBlocks,
+  getBrandBrainSections, DEFAULT_BRAND_BRAIN_SECTIONS,
 } from '../../lib/brandBrain'
+import { buildContext, fetchBrandMemory, logIdeaEvent, ideaSnapshot } from '../../lib/brandContext'
 import { fetchBrandSchema, fetchDirectoryRows } from '../../lib/brandSchema'
 import { fetchBrandAssets } from '../../lib/brandAssets'
 import { requestCampaignPlan, requestPlanContentGeneration, elongateIdea, requestDraftCopy, triggerVideoRenders } from '../../lib/campaignPlanner'
 import {
   formatsFor, defaultFormat, aspectRatiosFor, defaultAspectRatio, slideRange, aspectLabel,
-  stylesFor, crosswalkTone, crosswalkStyle, crosswalkFormat, derivePostKind,
+  stylesFor, derivePostKind,
 } from '../../lib/postFormats'
 import { momentsInRange, dbIdeaToDraft } from '../../lib/campaignPlan'
 import { ReferencePicker } from '../../components/ReferencePicker'
@@ -22,21 +23,20 @@ import {
   fetchPastIdeas, fetchPlanWithIdeas, markIdeasDrafting, fetchIdeaDrafts,
 } from '../../lib/contentPlans'
 import { IdeaDraftPanel } from '../../components/IdeaDraftPanel'
+import { BrandContextPanel } from '../../components/BrandContextPanel'
 import { openStudioForIdea, fetchSessionsForIdeas, saveIdeaPlatforms, resetIdeaMedia, publishIdeasAsPosts } from '../../lib/studioBridge'
 
 const GOALS = ['Brand awareness','Lead generation','Product launch','Community engagement','Event promotion','Sales & offers']
-const PLATFORMS = ['instagram', 'linkedin'] // only platforms with a generation pipeline today
+const PLATFORMS = ['instagram'] // the only platform with a generation pipeline
 
 // Where one idea can be SENT. Distinct from PLATFORMS above, which is where
-// ideas can be GENERATED — the plan-generation workflows only speak Instagram
-// and LinkedIn today, but an asset made by hand in Studio can go anywhere
-// Zernio publishes. Keeping the two lists separate is what lets targets widen
+// ideas can be GENERATED — the plan-generation workflow only speaks Instagram,
+// but an asset made by hand in Studio can go anywhere Zernio publishes. Keeping the two lists separate is what lets targets widen
 // without implying a generation pipeline that doesn't exist yet.
 const TARGET_PLATFORMS = [
   { id: 'instagram', label: 'Instagram', cls: 'bg-pink-50 text-pink-600 border-pink-100' },
   { id: 'tiktok',    label: 'TikTok',    cls: 'bg-stone-900/5 text-stone-700 border-stone-200' },
   { id: 'snapchat',  label: 'Snapchat',  cls: 'bg-yellow-50 text-yellow-700 border-yellow-200' },
-  { id: 'linkedin',  label: 'LinkedIn',  cls: 'bg-[#0A66C2]/10 text-[#0A66C2] border-[#0A66C2]/20' },
 ]
 const targetLabel = id => TARGET_PLATFORMS.find(p => p.id === id)?.label || id
 
@@ -46,13 +46,6 @@ const IG_TONES = [
   { value: 'educational',   label: 'Educational' },
   { value: 'casual',        label: 'Casual & Friendly' },
   { value: 'promotional',   label: 'Promotional' },
-]
-const LI_TONES = [
-  { value: 'thought_leader',   label: 'Thought Leader' },
-  { value: 'executive',        label: 'Executive' },
-  { value: 'technical_expert', label: 'Technical Expert' },
-  { value: 'warm_human',       label: 'Warm & Human' },
-  { value: 'promotional',      label: 'Promotional' },
 ]
 
 // What a post is FOR — lets the reviewer judge purpose, not just topic.
@@ -156,11 +149,10 @@ function normalizeAiIdea(p) {
 
 const DEFAULT_DRAFT = {
   step: 'setup', // 'setup' | 'review' | 'media' | 'done'
-  month: '', goal: '', goalCategory: '', platforms: ['instagram', 'linkedin'],
+  month: '', goal: '', goalCategory: '', platforms: ['instagram'],
   startDate: '', endDate: '', approxCount: '', includeHolidays: true,
   // Cadence: which weekdays this brand actually posts on (empty = AI decides
-  // freely, today's behavior) and the default publish time for Instagram —
-  // LinkedIn is biased to business hours by the planner regardless.
+  // freely, today's behavior) and the default publish time.
   postingDays: [], defaultTime: '19:00',
   // Individually curated posts (below) are the PRIMARY planning surface.
   // AI-proposed filler is an explicit, off-by-default add-on — when false,
@@ -214,18 +206,17 @@ const STATUS_META = {
 }
 
 // ─── One idea in the review list, with inline approve/reject + edit ─────────
-function IdeaCard({ idea, index, accessToken, workspaceId, onChange, onRemove, onCreate, onDuplicate, onRedraft, onOpenStudio, studioSession, mediaOptionsUrl, autoEdit = false }) {
+function IdeaCard({ idea, index, accessToken, workspaceId, onChange, onRemove, onCreate, onRedraft, onOpenStudio, studioSession, mediaOptionsUrl, brandName = '', autoEdit = false }) {
   const [redrafting, setRedrafting] = useState(false)
   const [editing, setEditing] = useState(autoEdit)
   const [saving,  setSaving]  = useState(false)
   const [saveError, setSaveError] = useState('')
-  const [duplicating, setDuplicating] = useState(false)
   const [showRejectReasons, setShowRejectReasons] = useState(false)
   const [showTargets, setShowTargets] = useState(false)
   const [openingStudio, setOpeningStudio] = useState(false)
   const [pickingRefs, setPickingRefs] = useState(false)
   const [imgMode, setImgMode] = useState(idea.imageMode || 'generate')
-  const tones = idea.platform === 'linkedin' ? LI_TONES : IG_TONES
+  const tones = IG_TONES
   const refCount = (idea.references || []).length
   const usingImage = idea.imageMode === 'use_reference'
   const usingStudio = idea.imageMode === 'studio'
@@ -263,11 +254,6 @@ function IdeaCard({ idea, index, accessToken, workspaceId, onChange, onRemove, o
     setPickingRefs(true)
   }
 
-  async function duplicateToOtherPlatform() {
-    setDuplicating(true)
-    await onDuplicate(idea)
-    setDuplicating(false)
-  }
 
   async function setStatus(status, rejectReason = '') {
     setSaving(true)
@@ -275,7 +261,19 @@ function IdeaCard({ idea, index, accessToken, workspaceId, onChange, onRemove, o
     // it shouldn't linger once the idea is no longer rejected.
     const result = await updateIdea(accessToken, idea.id, { status, reject_reason: rejectReason })
     setSaving(false)
-    if (result.ok) onChange({ ...idea, status, rejectReason })
+    if (result.ok) {
+      onChange({ ...idea, status, rejectReason })
+      // Append-only decision log. plan_ideas is overwritten in place, so
+      // without this the fact that an idea was rejected — and for what
+      // reason — is lost the moment anyone re-approves or edits it. This is
+      // the raw material the learning loop reads.
+      logIdeaEvent(workspaceId, accessToken, {
+        planId: idea.planId, ideaId: idea.id,
+        event: status === 'rejected' ? 'rejected' : status === 'approved' ? 'approved' : 'edited',
+        reason: rejectReason,
+        before: { status: idea.status }, after: ideaSnapshot({ ...idea, status }),
+      })
+    }
   }
 
   async function saveEdits(patch) {
@@ -313,7 +311,17 @@ function IdeaCard({ idea, index, accessToken, workspaceId, onChange, onRemove, o
     }
     const result = await updateIdea(accessToken, idea.id, dbPatch)
     setSaving(false)
-    if (result.ok) { onChange({ ...idea, ...patch }); setEditing(false) }
+    if (result.ok) {
+      const before = ideaSnapshot(idea)
+      const after  = ideaSnapshot({ ...idea, ...patch })
+      onChange({ ...idea, ...patch }); setEditing(false)
+      // What a human changed about an AI's suggestion is the single most
+      // direct signal of where the brief was wrong — worth more than the
+      // final text on its own, which is why both sides are stored.
+      logIdeaEvent(workspaceId, accessToken, {
+        planId: idea.planId, ideaId: idea.id, event: 'edited', before, after,
+      })
+    }
   }
 
   const st = STATUS_META[idea.status] || STATUS_META.proposed
@@ -327,8 +335,8 @@ function IdeaCard({ idea, index, accessToken, workspaceId, onChange, onRemove, o
           <div className="flex-1 min-w-0">
             {/* Badges */}
             <div className="flex items-center gap-1.5 flex-wrap mb-1.5">
-              <span className={`text-[10px] font-bold px-1.5 py-0.5 leading-[1.4] ${idea.platform === 'linkedin' ? 'bg-[#0A66C2]/10 text-[#0A66C2]' : 'bg-pink-50 text-pink-600'}`}>
-                {idea.platform === 'linkedin' ? 'LinkedIn' : 'Instagram'}
+              <span className="text-[10px] font-bold px-1.5 py-0.5 leading-[1.4] bg-pink-50 text-pink-600">
+                Instagram
               </span>
               {/* Extra targets only — the primary is already the badge above,
                   and repeating it reads as a duplicate rather than a set. */}
@@ -382,7 +390,7 @@ function IdeaCard({ idea, index, accessToken, workspaceId, onChange, onRemove, o
         </div>
 
         <IdeaDraftPanel idea={idea} accessToken={accessToken} workspaceId={workspaceId} mediaOptionsUrl={mediaOptionsUrl}
-          onIdeaChange={onChange} redrafting={redrafting}
+          brandName={brandName} onIdeaChange={onChange} redrafting={redrafting}
           onRedraft={async () => { setRedrafting(true); await onRedraft(idea); setRedrafting(false) }} />
 
         {/* Actions — Reject reveals one-tap reason chips instead of rejecting blind */}
@@ -444,13 +452,6 @@ function IdeaCard({ idea, index, accessToken, workspaceId, onChange, onRemove, o
               title="Which platforms this post goes to. Pick them before generating — one 9:16 render covers Reel, TikTok and Spotlight."
               className={`text-[11px] font-medium px-2.5 py-1 rounded-lg transition-colors ${targets.length > 1 ? 'text-sky-700 bg-sky-50 hover:bg-sky-100' : 'text-text-tertiary hover:text-text hover:bg-surface-subtle'}`}>
               🎯 {targets.length > 1 ? `${targets.length} platforms` : 'Targets'}
-            </button>
-          )}
-          {!idea.isNew && (
-            <button onClick={duplicateToOtherPlatform} disabled={duplicating}
-              title={`Copy this idea to ${idea.platform === 'linkedin' ? 'Instagram' : 'LinkedIn'} — tone adapts automatically, images are not carried over`}
-              className="text-[11px] font-medium px-2.5 py-1 rounded-lg text-text-tertiary hover:text-text hover:bg-surface-subtle transition-colors disabled:opacity-50">
-              {duplicating ? <><Spinner size="sm" /> Copying…</> : `⧉ Also ${idea.platform === 'linkedin' ? 'Instagram' : 'LinkedIn'}`}
             </button>
           )}
           <button onClick={() => onRemove(idea)} className="text-[11px] font-medium px-2.5 py-1 rounded-lg text-text-tertiary hover:text-red-500 transition-colors ml-auto">
@@ -786,7 +787,7 @@ function CalendarView({ ideas, startDate, endDate, selectedDay, onDayClick }) {
                   <div className="mt-1 space-y-0.5">
                     {dayIdeas.slice(0, 3).map(i => (
                       <div key={i.id} className={`text-[9px] px-1 py-0.5 rounded truncate border-l-2 ${i.status === 'approved' ? 'border-sage-400 bg-sage-50 text-sage-700' : i.status === 'rejected' ? 'border-red-300 bg-red-50 text-red-500 line-through' : 'border-stone-300 bg-stone-50 text-text-secondary'}`}>
-                        {i.platform === 'linkedin' ? '💼' : '📷'} {i.title || i.topic || 'Untitled'}
+                        📷 {i.title || i.topic || 'Untitled'}
                       </div>
                     ))}
                     {dayIdeas.length > 3 && <div className="text-[9px] text-text-tertiary px-1">+{dayIdeas.length - 3} more</div>}
@@ -821,6 +822,10 @@ export function CampaignPlanner() {
   const [directory, setDirectory] = useState({
     schema: { sections: [], fields: [], columns: [] }, rowsBySection: {}, assets: [],
   })
+  // Active learned rules for this brand. Fetched alongside the schema because
+  // every context build needs them, and an extra round-trip per generation
+  // would be paid on a list that changes maybe weekly.
+  const [brandMemory, setBrandMemory] = useState([])
   useEffect(() => {
     if (!activeWorkspaceId) return
     let alive = true
@@ -828,14 +833,55 @@ export function CampaignPlanner() {
       fetchBrandSchema(activeWorkspaceId, accessToken),
       fetchDirectoryRows(activeWorkspaceId, accessToken),
       fetchBrandAssets(activeWorkspaceId, accessToken),
-    ]).then(([schema, rows, assets]) => {
+      fetchBrandMemory(activeWorkspaceId, accessToken),
+    ]).then(([schema, rows, assets, memory]) => {
       if (!alive) return
       const rowsBySection = {}
       for (const r of rows) (rowsBySection[r.section_key] ||= []).push(r)
       setDirectory({ schema, rowsBySection, assets })
+      setBrandMemory(memory)
+      // Turn the workspace's own directories on by default. For Aqeeq and Alo
+      // Kheyatah the service menu IS the subject matter, and leaving it off
+      // meant the planner never saw what the company actually sells. Only
+      // applied while the selection is still the untouched default, so a
+      // deliberate de-selection is never overridden.
+      const dirKeys = (schema.sections || [])
+        .filter(sec => sec.kind === 'directory' && sec.enabled !== false)
+        .map(sec => sec.key)
+      if (dirKeys.length) {
+        // Dispatched directly rather than through update(), which takes a
+        // plain patch — this needs to read the CURRENT selection to decide
+        // whether it is still untouched.
+        dispatch(actions.setCampaignPlanDraft(prev => {
+          const base = { ...DEFAULT_DRAFT, ...(prev || {}) }
+          const sel = base.brandBrainSections || []
+          const untouched = sel.length === DEFAULT_BRAND_BRAIN_SECTIONS.length &&
+            DEFAULT_BRAND_BRAIN_SECTIONS.every(k => sel.includes(k))
+          if (!untouched) return base
+          return { ...base, brandBrainSections: [...sel, ...dirKeys] }
+        }))
+      }
     })
     return () => { alive = false }
   }, [activeWorkspaceId, accessToken])
+
+  // One place the whole page gets its AI context from. Returns the payload
+  // fields every webhook expects — the flattened instructions plus the brand's
+  // own identity, which used to be hardcoded to a lighting company inside the
+  // n8n prompts regardless of which brand was posting.
+
+  function contextFor(task, extra = {}) {
+    const ctx = buildContext(state.brandProfile, directory.schema, directory, brandMemory, {
+      task,
+      sections: brandBrainSections,
+      ...extra,
+    })
+    return {
+      instructions: ctx.instructions,
+      brand_name: ctx.brandName,
+      brand_descriptor: ctx.brandDescriptor,
+    }
+  }
 
   // Rows the planner can be told to build the month around. Any directory
   // qualifies — Arak features fixtures, Aqeeq features services, Alo Kheyatah
@@ -873,6 +919,15 @@ export function CampaignPlanner() {
   const [moreError,     setMoreError]     = useState('')
 
   const { step, month, goal, goalCategory, platforms, startDate, endDate, approxCount, includeHolidays, brandBrainSections, featuredProductIds, seedPosts, name, ideas, planId, pushResult, manualResult, postingDays, defaultTime, aiAssist, contentMixTarget } = draft
+
+  // What the plan call will actually be given, for the preview panel. Same
+  // builder as the payload — see contextFor below.
+  // Not memoised: it is string assembly over a few dozen fields on a setup
+  // form, and memoising it here defeated the compiler's own optimisation.
+  const setupContext = buildContext(state.brandProfile, directory.schema, directory, brandMemory, {
+    task: 'plan', sections: brandBrainSections,
+  })
+  const activeRuleCount = brandMemory.filter(r => r.status === 'active').length
   const months = monthOptions()
 
   // Supabase is the source of truth for a saved plan's ideas — the draft
@@ -918,8 +973,8 @@ export function CampaignPlanner() {
     const nowIso = new Date().toISOString()
     update({ ideas: allIdeas.map(i => newIds.includes(i.id) ? { ...i, draftStatus: 'drafting', draftedAt: nowIso, draftError: '' } : i) })
     await markIdeasDrafting(accessToken, newIds)
-    const blocks = buildSectionBlocks(state.brandProfile, directory)
-    const instructions = brandBrainSections.map(s => blocks[s]).filter(Boolean).join('\n\n')
+    const brandCtx = contextFor('caption')
+    const instructions = brandCtx.instructions
     const captionLanguage = state.brandProfile?.captionLanguage || 'both'
     const targets = allIdeas.filter(i => newIds.includes(i.id))
     Promise.allSettled(targets.map(idea => requestDraftCopy(draftCopyUrl, {
@@ -928,6 +983,7 @@ export function CampaignPlanner() {
       format: idea.postFormat, aspect_ratio: idea.aspectRatio, media_type: idea.mediaType,
       wants_caption: idea.wantsCaption, image_idea: idea.imageIdea,
       caption_language: captionLanguage, instructions,
+      brand_name: brandCtx.brand_name, brand_descriptor: brandCtx.brand_descriptor,
     })))
   }
 
@@ -965,7 +1021,6 @@ export function CampaignPlanner() {
     return () => clearInterval(timer)
   }, [ideas, accessToken])
 
-  const togglePlatform = p => update({ platforms: platforms.includes(p) ? platforms.filter(x => x !== p) : [...platforms, p] })
   const toggleSection  = s => update({ brandBrainSections: brandBrainSections.includes(s) ? brandBrainSections.filter(x => x !== s) : [...brandBrainSections, s] })
   const toggleProduct  = id => update({ featuredProductIds: featuredProductIds.includes(id) ? featuredProductIds.filter(x => x !== id) : [...featuredProductIds, id] })
   const toggleDay      = d  => update({ postingDays: postingDays.includes(d) ? postingDays.filter(x => x !== d) : [...postingDays, d] })
@@ -1036,7 +1091,7 @@ export function CampaignPlanner() {
         : s.text.trim()
       return {
         platform: s.platform, date: s.date, title, topic: s.text,
-        tone: s.platform === 'linkedin' ? 'thought_leader' : 'professional',
+        tone: 'professional',
         rationale: ownCopy
           ? 'You wrote this post yourself — it goes out exactly as typed.'
           : 'You added this as a specific post you wanted.',
@@ -1057,8 +1112,8 @@ export function CampaignPlanner() {
     let featuredProducts = []
     let effectiveGoal = ''
     if (aiAssist) {
-      const blocks = buildSectionBlocks(state.brandProfile, directory)
-      const instructions = brandBrainSections.map(s => blocks[s]).filter(Boolean).join('\n\n')
+      const brandCtx = contextFor('plan')
+      const instructions = brandCtx.instructions
       effectiveGoal = goal.trim() ||
         `A well-rounded month of brand content for ${activeWorkspace?.name || 'this brand'} — a mix of service and product highlights, educational content, and the seasonal/cultural moments falling in this month, all in the brand's own voice.`
       // Stage-1 brief material: the rows to feature with their full context,
@@ -1090,6 +1145,8 @@ export function CampaignPlanner() {
         include_holidays: includeHolidays,
         brand_brain_sections: brandBrainSections,
         instructions: instructions || null,
+        brand_name: brandCtx.brand_name,
+        brand_descriptor: brandCtx.brand_descriptor,
         featured_products: featuredProducts,
         seed_posts: cleanSeeds,
         content_mix_target: contentMixTarget || null,
@@ -1147,10 +1204,10 @@ export function CampaignPlanner() {
     if (!webhookUrl) { setMoreError('Campaign Planner webhook not configured (Settings → Integrations).'); return }
     setMoreError(''); setMoreLoading(true)
 
-    const blocks = buildSectionBlocks(state.brandProfile, directory)
-    const instructions = brandBrainSections.map(s => blocks[s]).filter(Boolean).join('\n\n')
+    const brandCtx = contextFor('plan')
+    const instructions = brandCtx.instructions
     const effectiveGoal = focus.trim() || goal.trim() ||
-      'A well-rounded month of brand content for Arak Lighting — a mix of project showcases, product highlights, educational lighting content, and the seasonal/cultural moments falling in this month.'
+      `A well-rounded month of brand content for ${activeWorkspace?.name || 'this brand'} — a mix of service and product highlights, educational content, and the seasonal/cultural moments falling in this month, all in the brand's own voice.`
     const existingIdeas = ideas.slice(-60).map(i => ({
       platform: i.platform, date: i.date, topic: i.topic || i.title, pillar: i.pillar,
     }))
@@ -1167,6 +1224,8 @@ export function CampaignPlanner() {
       include_holidays: includeHolidays,
       brand_brain_sections: brandBrainSections,
       instructions: instructions || null,
+      brand_name: brandCtx.brand_name,
+      brand_descriptor: brandCtx.brand_descriptor,
       existing_ideas: existingIdeas,
       past_ideas: pastIdeas,
       posting_days: postingDays,
@@ -1295,44 +1354,6 @@ export function CampaignPlanner() {
   // fresh one if it didn't already have one — so cross-platform siblings can
   // be told apart from genuine repeats (anti-repetition history, Step 5's
   // collapsed multi-platform card) without being conflated.
-  async function fanOutIdea(idea) {
-    if (idea.isNew) return
-    const targetPlatform = idea.platform === 'linkedin' ? 'instagram' : 'linkedin'
-    const groupId = idea.groupId || crypto.randomUUID()
-    if (!idea.groupId) {
-      const patchRes = await updateIdea(accessToken, idea.id, { group_id: groupId })
-      if (patchRes.ok) onIdeaChange({ ...idea, groupId })
-    }
-
-    const newFormat = crosswalkFormat(idea.postFormat, idea.platform, targetPlatform)
-    const newAspectRatio = defaultAspectRatio(targetPlatform, newFormat)
-    const newMediaType = formatsFor(targetPlatform).find(f => f.id === newFormat)?.media || 'image'
-    const newPostKind = derivePostKind({ platform: targetPlatform, format: newFormat, wantsCaption: idea.wantsCaption, imageText: idea.imageText, slideCount: idea.slideCount })
-
-    const res = await insertIdeas(activeWorkspaceId, accessToken, planId, [{
-      platform: targetPlatform, date: idea.date, time: idea.time,
-      title: idea.title || idea.topic, topic: idea.topic, angle: idea.angle,
-      tone: crosswalkTone(idea.tone, idea.platform, targetPlatform),
-      occasion: idea.occasion, pillar: idea.pillar,
-      objective: idea.objective, cta: idea.cta,
-      suggestedStyle: crosswalkStyle(idea.suggestedStyle, idea.platform, targetPlatform),
-      imageIdea: idea.imageIdea,
-      // Hashtag conventions differ by platform (Instagram: dense; LinkedIn:
-      // few/none) — reset rather than carry over verbatim. First comment
-      // isn't platform-specific, so it copies over fine.
-      firstComment: idea.firstComment, series: idea.series,
-      postFormat: newFormat, aspectRatio: newAspectRatio, mediaType: newMediaType,
-      wantsCaption: idea.wantsCaption, groupId,
-      postKind: newPostKind, slideCount: idea.slideCount, imageText: idea.imageText,
-    }], ideas.length)
-    if (res.error || !res.rows?.[0]) { setError(res.error || 'Could not duplicate idea.'); return }
-    const created = dbIdeaToDraft(res.rows[0])
-    const nextIdeas = [...ideas, created]
-    update({ ideas: nextIdeas })
-    setAutoEditId(created.id)
-    setTimeout(() => setAutoEditId(null), 400)
-    draftIdeas(nextIdeas, [created.id])
-  }
 
   // Called once the "+ Add idea" editor's Save is clicked — this is the
   // only point a manually-added idea actually gets written to the database.
@@ -1363,10 +1384,11 @@ export function CampaignPlanner() {
     // deliberately opted out of, and overwrite the topic they typed.
     const elongateUrl = created.copyMode === 'own' ? '' : state.webhooks?.elongateIdea
     if (elongateUrl) {
-      const blocks = buildSectionBlocks(state.brandProfile, directory)
-      const instructions = brandBrainSections.map(s => blocks[s]).filter(Boolean).join('\n\n')
+      const brandCtx = contextFor('plan')
+      const instructions = brandCtx.instructions
       const elongated = await elongateIdea(elongateUrl, {
         instructions,
+        brand_name: brandCtx.brand_name, brand_descriptor: brandCtx.brand_descriptor,
         idea: { platform: created.platform, topic: created.topic, tone: created.tone, date: created.date },
       })
       if (elongated.ok) {
@@ -1420,7 +1442,7 @@ export function CampaignPlanner() {
       date: startDate, title: '', topic: '', angle: '',
       postFormat: fmt, aspectRatio: defaultAspectRatio(p, fmt), mediaType: formatsFor(p).find(f => f.id === fmt)?.media || 'image',
       wantsCaption: true, slideCount: slideRange(p, fmt)?.default || 1,
-      tone: (platformFilter === 'linkedin' || platforms[0] === 'linkedin') ? 'thought_leader' : 'professional',
+      tone: 'professional',
     }
     setStatusFilter('all'); setSeasonalOnly(false); setPlatformFilter('all')
     setAutoEditId(draftIdea.id)
@@ -1467,8 +1489,8 @@ export function CampaignPlanner() {
     // ── The briefed ones ──
     let pushResult = null
     if (aiIdeas.length) {
-      const blocks = buildSectionBlocks(state.brandProfile, directory)
-      const instructions = brandBrainSections.map(s => blocks[s]).filter(Boolean).join('\n\n')
+      const brandCtx = contextFor('caption')
+      const instructions = brandCtx.instructions
       // Mark them 'processing' BEFORE firing the webhook — durable and instant,
       // so Post Approvals shows real state even on reload, not just while this
       // tab stays open waiting for n8n's background generation. Scoped to the
@@ -1478,6 +1500,7 @@ export function CampaignPlanner() {
 
       pushResult = await requestPlanContentGeneration({
         webhooks: state.webhooks, planId, instructions, ideas: aiIdeas,
+        brand_name: brandCtx.brand_name, brand_descriptor: brandCtx.brand_descriptor,
         workspaceId: activeWorkspaceId,
         captionLanguage: state.brandProfile?.captionLanguage || 'both',
       })
@@ -1602,23 +1625,13 @@ export function CampaignPlanner() {
       {/* ── STEP: SETUP ── */}
       {step === 'setup' && (
         <Card className="p-6 space-y-5">
-          <div className="grid grid-cols-2 gap-4">
-            <Select label="Which month? *" value={month} onChange={e => pickMonth(e.target.value)}>
-              <option value="">Select month…</option>
-              {months.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
-            </Select>
-            <div>
-              <p className="text-xs font-medium text-text-secondary mb-2">Platforms *</p>
-              <div className="flex gap-2">
-                {PLATFORMS.map(p => (
-                  <button key={p} onClick={() => togglePlatform(p)}
-                    className={`px-3 py-1.5 rounded-xl border text-sm font-medium capitalize transition-all ${platforms.includes(p) ? 'bg-amber-600 text-white border-amber-600' : 'bg-white border-border text-text-secondary hover:border-amber-400'}`}>
-                    {p}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
+          {/* Instagram is the only platform with a generation pipeline, so a
+              required picker with one option was a mandatory click that could
+              only ever be answered one way. */}
+          <Select label="Which month? *" value={month} onChange={e => pickMonth(e.target.value)}>
+            <option value="">Select month…</option>
+            {months.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+          </Select>
 
           {/* ── Cadence: shared by manual + AI posts alike ── */}
           <div className="grid grid-cols-2 gap-4">
@@ -1634,9 +1647,8 @@ export function CampaignPlanner() {
               </div>
               <p className="text-[11px] text-text-tertiary mt-1.5">Leave all unselected to let the AI choose freely.</p>
             </div>
-            <Input label="Default posting time (Instagram)" type="time" value={defaultTime} onChange={e => update({ defaultTime: e.target.value })} />
+            <Input label="Default posting time" type="time" value={defaultTime} onChange={e => update({ defaultTime: e.target.value })} />
           </div>
-          <p className="text-[11px] text-text-tertiary -mt-3">LinkedIn posts are timed for business hours automatically, regardless of the time above — B2B engagement peaks during the work day.</p>
 
           <Toggle checked={includeHolidays} onChange={e => update({ includeHolidays: e.target.checked })}
             label="Flag Saudi seasonal & cultural moments in range (Ramadan, Eid al-Fitr, Eid al-Adha, Founding Day, National Day)" />
@@ -1675,6 +1687,20 @@ export function CampaignPlanner() {
               })}
             </div>
             <p className="text-[11px] text-text-tertiary mt-1.5">Feeds every post's content generation — your own posts and any AI-proposed ones alike.</p>
+
+            {/* The exact text the plan call will receive. Built by the SAME
+                buildContext() that assembles the payload, so this preview
+                cannot drift from what is actually sent — and it lands before
+                the Opus call rather than after it. */}
+            <div className="mt-3">
+              <BrandContextPanel context={setupContext} task="plan" />
+            </div>
+            {activeRuleCount > 0 && (
+              <p className="text-[11px] text-text-tertiary mt-1.5">
+                <span className="font-medium text-text-secondary">{activeRuleCount} learned rule{activeRuleCount === 1 ? '' : 's'}</span>
+                {' '}steering this plan — see Brand Brain → Learned Guidance.
+              </p>
+            )}
           </div>
 
           <div className="h-px bg-border" />
@@ -1963,7 +1989,8 @@ export function CampaignPlanner() {
                   {group.ideas.map(idea => (
                     <IdeaCard key={idea.id} idea={idea} index={ideas.indexOf(idea)} accessToken={accessToken} workspaceId={activeWorkspaceId}
                       autoEdit={idea.id === autoEditId} mediaOptionsUrl={state.webhooks?.mediaOptions}
-                      onChange={onIdeaChange} onRemove={onIdeaRemove} onCreate={onIdeaCreate} onDuplicate={fanOutIdea}
+                      brandName={state.brandProfile?.customFields?.brand_name || ''}
+                      onChange={onIdeaChange} onRemove={onIdeaRemove} onCreate={onIdeaCreate}
                       onOpenStudio={openStudio} studioSession={studioSessions[idea.id]}
                       onRedraft={target => draftIdeas(ideas, [target.id])} />
                   ))}

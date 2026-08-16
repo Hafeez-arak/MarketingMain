@@ -28,6 +28,10 @@ export function dbIdeaToDraft(row) {
   return {
     id: row.id,
     _rowId: row.id,
+    // Carried so a decision logged against this idea can be attributed to
+    // the plan it belonged to — the review board mutates ideas in place, and
+    // idea_events is the only record of what changed.
+    planId: row.plan_id || null,
     platform: row.platform || 'instagram',
     // Where this idea is meant to go. `platform` above stays the authoritative
     // single value every workflow reads; this is the full target set, and it

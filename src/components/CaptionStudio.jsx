@@ -7,7 +7,7 @@ import { requestCaptionStudio } from '../lib/campaignPlanner'
 // talks to the Caption Studio webhook, and hands the chosen result back via
 // onApply so the parent saves it through its existing caption-save path.
 //
-// Platform-aware: Instagram works on one caption; LinkedIn on hook + body
+// Instagram works on one caption plus hashtags.
 // (so "take hook from variant A, body from variant B" is a real action).
 // Bilingual — Arabic is rendered RTL. Nothing here writes to the DB; the
 // parent owns persistence.
@@ -37,7 +37,6 @@ function TextBlock({ label, text }) {
 }
 
 export function CaptionStudio({ open, onClose, webhookUrl, platform, language = 'both', context, current, onApply }) {
-  const isLinkedIn = platform === 'linkedin'
   const [controls, setControls] = useState({ length: 'medium', hookStyle: '', emoji: 'light', hashtagCount: 'default' })
   const [variants, setVariants] = useState([])
   const [loading, setLoading]   = useState(false)      // 'variants' | 'hook' | 'body' | 'caption' | 'hashtags' | false
@@ -80,17 +79,12 @@ export function CaptionStudio({ open, onClose, webhookUrl, platform, language = 
 
   // Pull a whole variant, or just one piece of it, into the working draft.
   function applyVariant(v) {
-    if (isLinkedIn) setDraft({ hook: pick(v.hook_ar, v.hook_en, language), body: pick(v.body_ar, v.body_en, language), hashtags: v.hashtags || '' })
-    else setDraft(d => ({ ...d, body: pick(v.caption_ar, v.caption_en, language), hashtags: v.hashtags || '' }))
+    setDraft(d => ({ ...d, body: pick(v.caption_ar, v.caption_en, language), hashtags: v.hashtags || '' }))
   }
-  function takeHook(v) { setDraft(d => ({ ...d, hook: pick(v.hook_ar, v.hook_en, language) })) }
-  function takeBody(v) { setDraft(d => ({ ...d, body: pick(v.body_ar, v.body_en, language) })) }
 
   function apply() {
     // Hand the assembled result back; parent maps it to its own fields.
-    onApply(isLinkedIn
-      ? { hook: draft.hook, body: draft.body, hashtags: draft.hashtags }
-      : { caption: draft.body, hashtags: draft.hashtags })
+    onApply({ caption: draft.body, hashtags: draft.hashtags })
     onClose()
   }
 
@@ -134,17 +128,11 @@ export function CaptionStudio({ open, onClose, webhookUrl, platform, language = 
               <div key={i} className="rounded-xl border border-border bg-surface-subtle p-3 space-y-2 flex flex-col">
                 <span className="text-[10px] font-bold text-text-tertiary">Option {i + 1}</span>
                 <div className="flex-1 space-y-2">
-                  {isLinkedIn
-                    ? <><TextBlock label="Hook" text={pick(v.hook_ar, v.hook_en, language)} /><TextBlock label="Body" text={pick(v.body_ar, v.body_en, language)} /></>
-                    : <TextBlock text={pick(v.caption_ar, v.caption_en, language)} />}
+                  <TextBlock text={pick(v.caption_ar, v.caption_en, language)} />
                   {v.hashtags && <p className="text-[11px] text-text-tertiary">{v.hashtags}</p>}
                 </div>
                 <div className="flex flex-wrap gap-1.5 pt-1">
                   <button onClick={() => applyVariant(v)} className="text-[11px] font-semibold px-2 py-1 rounded-lg bg-violet-600 text-white hover:bg-violet-700 transition-colors">Use this</button>
-                  {isLinkedIn && <>
-                    <button onClick={() => takeHook(v)} className="text-[11px] font-medium px-2 py-1 rounded-lg border border-border text-text-secondary hover:bg-surface-subtle transition-colors">Hook</button>
-                    <button onClick={() => takeBody(v)} className="text-[11px] font-medium px-2 py-1 rounded-lg border border-border text-text-secondary hover:bg-surface-subtle transition-colors">Body</button>
-                  </>}
                 </div>
               </div>
             ))}
@@ -154,22 +142,12 @@ export function CaptionStudio({ open, onClose, webhookUrl, platform, language = 
         {/* Working draft — what "Apply" will save. Per-piece regen lives here. */}
         <div className="rounded-xl border border-violet-200 bg-violet-50/30 p-4 space-y-3">
           <p className="text-[11px] font-bold text-violet-700 uppercase tracking-wide">Your draft</p>
-          {isLinkedIn && (
-            <div className="space-y-1">
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] font-semibold text-text-tertiary uppercase">Hook</span>
-                <button onClick={() => regeneratePiece('hook')} disabled={busy} className="text-[11px] font-medium text-violet-700 hover:text-violet-900 disabled:opacity-50">{loading === 'hook' ? '…' : '↻ regenerate hook'}</button>
-              </div>
-              <textarea value={draft.hook} onChange={e => setDraft(d => ({ ...d, hook: e.target.value }))} rows={2}
-                dir={isArabic(draft.hook) ? 'rtl' : 'ltr'} className="w-full text-sm bg-white border border-border rounded-lg px-3 py-2 resize-none focus:outline-none focus:border-violet-300" />
-            </div>
-          )}
           <div className="space-y-1">
             <div className="flex items-center justify-between">
-              <span className="text-[10px] font-semibold text-text-tertiary uppercase">{isLinkedIn ? 'Body' : 'Caption'}</span>
-              <button onClick={() => regeneratePiece(isLinkedIn ? 'body' : 'caption')} disabled={busy} className="text-[11px] font-medium text-violet-700 hover:text-violet-900 disabled:opacity-50">{(loading === 'body' || loading === 'caption') ? '…' : `↻ regenerate ${isLinkedIn ? 'body' : 'caption'}`}</button>
+              <span className="text-[10px] font-semibold text-text-tertiary uppercase">Caption</span>
+              <button onClick={() => regeneratePiece('caption')} disabled={busy} className="text-[11px] font-medium text-violet-700 hover:text-violet-900 disabled:opacity-50">{(loading === 'body' || loading === 'caption') ? '…' : '↻ regenerate caption'}</button>
             </div>
-            <textarea value={draft.body} onChange={e => setDraft(d => ({ ...d, body: e.target.value }))} rows={isLinkedIn ? 6 : 8}
+            <textarea value={draft.body} onChange={e => setDraft(d => ({ ...d, body: e.target.value }))} rows={8}
               dir={isArabic(draft.body) ? 'rtl' : 'ltr'} className="w-full text-sm bg-white border border-border rounded-lg px-3 py-2 resize-none focus:outline-none focus:border-violet-300" />
           </div>
           <div className="space-y-1">

@@ -20,14 +20,14 @@ import { buildInstructionsString } from '../../lib/brandBrain'
 // there stays exactly one path out, with one duplicate guard on it.
 
 const PLATFORM_LABEL = {
-  instagram: 'Instagram', tiktok: 'TikTok', snapchat: 'Snapchat', linkedin: 'LinkedIn',
+  instagram: 'Instagram', tiktok: 'TikTok', snapchat: 'Snapchat',
 }
 
 // 9:16 covers Reel, TikTok and Spotlight at once — the whole reason targets are
 // chosen before generating. A mismatch is a warning rather than a block: the
 // operator may well know better than the catalog, and refusing outright would
 // mean re-rendering to post something that would have been fine.
-const NATIVE_RATIO = { instagram: ['4:5', '1:1', '9:16', '1.91:1'], tiktok: ['9:16'], snapchat: ['9:16'], linkedin: ['1.91:1', '1:1', '16:9', '4:5'] }
+const NATIVE_RATIO = { instagram: ['4:5', '1:1', '9:16', '1.91:1'], tiktok: ['9:16'], snapchat: ['9:16'] }
 
 export function UseThisSheet({ open, onClose, version, session, workspaceId, accessToken, webhooks, brandProfile, onSent }) {
   const briefPlatforms = session?.brief?.platforms?.filter(p => SENDABLE_PLATFORMS.includes(p))
@@ -84,7 +84,7 @@ export function UseThisSheet({ open, onClose, version, session, workspaceId, acc
     if (res.error) { setError(res.error); return }
     const v = (res.variants || [])[0]
     if (!v) { setError('Caption Studio returned nothing to use.'); return }
-    // hook/body come back for LinkedIn, caption_* for everything else.
+    // caption_* is the shape every platform returns now.
     const text = v.caption_en || v.caption_ar
       || [v.hook_en || v.hook_ar, v.body_en || v.body_ar].filter(Boolean).join('\n')
     setCaption(text || '')

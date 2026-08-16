@@ -323,14 +323,13 @@ export async function saveIdeaPlatforms(accessToken, ideaId, platforms, primaryP
 // tables that Approvals already reads and the publish workflow already knows
 // how to send.
 //
-// Three tables, not one, because that is what exists: Instagram and LinkedIn
-// have their own (with real data and workflows depending on them), and
-// generated_posts is the shared superset for everything else. The split is
+// Two tables, not one, because that is what exists: Instagram has its own
+// (with real data and workflows depending on it), and generated_posts is the
+// shared superset for everything else. The split is
 // contained here — no caller should ever need to know which table a platform
 // lives in.
 const PLATFORM_TABLE = {
   instagram: 'instagram_generated_posts',
-  linkedin:  'linkedin_generated_posts',
   tiktok:    'generated_posts',
   snapchat:  'generated_posts',
 }
@@ -358,25 +357,11 @@ function mediaFieldsFor(version) {
   return { image_url: url, image_urls: url ? [url] : [], video_url: '', cover_image_url: '' }
 }
 
-// Per-table copy fields. LinkedIn genuinely has a different shape — hook and
-// body rather than one caption — and flattening it here would lose the split
-// that LinkedInPage and Approvals are both built around.
+// Per-table copy fields.
 function copyFieldsFor(platform, { caption, captionAr, captionEn, hashtags }) {
   const common = {
     caption_ar: captionAr || '', caption_en: captionEn || '',
     hashtags: hashtags || '',
-  }
-  if (platform === 'linkedin') {
-    const text = (caption || '').trim()
-    const nl = text.indexOf('\n')
-    // First line is the hook — it is what shows before "see more". Splitting on
-    // the first newline rather than asking the operator for two boxes keeps the
-    // sheet to one field; they can refine the split in Approvals.
-    return {
-      ...common,
-      hook: nl > 0 ? text.slice(0, nl).trim() : text,
-      body: nl > 0 ? text.slice(nl + 1).trim() : '',
-    }
   }
   return { ...common, caption: caption || '' }
 }
@@ -463,7 +448,6 @@ export async function sendVersionToPosts(workspaceId, accessToken, {
       base.platform = platform
       base.media_type = media.video_url ? 'video' : 'image'
     }
-    if (table === 'linkedin_generated_posts') base.include_image = true
 
     try {
       const existing = await findPostForIdea(accessToken, table, ideaId)
@@ -604,7 +588,6 @@ export async function publishIdeasAsPosts(workspaceId, accessToken, planId, idea
         base.platform = platform
         base.media_type = media.video_url ? 'video' : 'image'
       }
-      if (table === 'linkedin_generated_posts') base.include_image = !!media.image_url
 
       try {
         // Same duplicate guard as the Studio path: an idea that already has a

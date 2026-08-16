@@ -41,12 +41,12 @@ function fixtures() {
     mk('a', 'instagram', 0, '01:30', 'scheduled',  'Late-night reel — 1:30 AM KSA, the day-boundary case'),
     mk('b', 'instagram', 0, '19:00', 'scheduled',  'Evening villa facade shot'),
     mk('c', 'instagram', 0, '19:30', 'not_published', 'Crowding test — 30 min after the last one'),
-    mk('d', 'linkedin',  0, '19:00', 'scheduled',  'Same instant, different platform — must NOT flag'),
-    mk('e', 'linkedin',  1, '09:00', 'published',  'Already out — cannot be dragged'),
+    mk('d', 'instagram', 0, '19:00', 'scheduled',  'Same instant, different account — must NOT flag'),
+    mk('e', 'instagram', 1, '09:00', 'published',  'Already out — cannot be dragged'),
     mk('f', 'tiktok',    1, '14:15', 'publishing', 'Mid-flight — cannot be dragged'),
     mk('g', 'snapchat',  2, '11:00', 'failed',     'Failed publish — draggable, retryable'),
     mk('h', 'instagram', 3, '20:00', 'not_published', 'Plain draft'),
-    mk('i', 'linkedin',  4, '08:00', 'scheduled',  'Early morning thought-leadership post'),
+    mk('i', 'instagram', 4, '08:00', 'scheduled',  'Early morning post'),
     mk('j', 'instagram', -2, '10:00', 'published', 'Last week, already published'),
   ]
 }
@@ -54,7 +54,7 @@ function fixtures() {
 const TRAY = [
   { id: 't1', platform: 'instagram', publish_status: 'not_published', post_table: 'instagram_generated_posts',
     caption: 'Unscheduled — drag me onto a day', scheduled_publish_at: null },
-  { id: 't2', platform: 'linkedin', publish_status: 'failed', post_table: 'linkedin_generated_posts',
+  { id: 't2', platform: 'instagram', publish_status: 'failed', post_table: 'instagram_generated_posts',
     caption: 'Failed, still movable', scheduled_publish_at: null },
 ]
 
@@ -154,7 +154,7 @@ function Harness() {
 // With no workspace id the hook never fetches, so this shows the page's real
 // empty state, which is exactly the path a first-run user hits.
 const APP_STUB = {
-  state: { webhooks: {}, posts: [], instagramSchedule: {}, linkedinSchedule: {} },
+  state: { webhooks: {}, posts: [], instagramSchedule: {} },
   dispatch: () => {},
 }
 const AUTH_STUB = { activeWorkspaceId: null, accessToken: null, user: null, session: null }

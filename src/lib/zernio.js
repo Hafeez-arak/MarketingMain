@@ -14,7 +14,7 @@ import { BRAND_TIMEZONE } from './brandTime'
 // three generated-post tables — see the workflow's own ALLOWED_TABLES
 // guard, which this mirrors so a typo fails fast in the browser instead of
 // as an opaque n8n error.
-const POST_TABLES = ['instagram_generated_posts', 'linkedin_generated_posts', 'generated_posts']
+const POST_TABLES = ['instagram_generated_posts', 'generated_posts']
 
 // `force` bypasses the workflow's duplicate guard. The workflow claims a post
 // atomically before publishing (PATCH filtered on publish_status), so a second

@@ -6,18 +6,19 @@ import { Card, Button, Badge, Empty, Spinner, PostImage, PageHeader } from '../.
 import { formatDateTime } from '../../lib/utils'
 import { formatBrandDateTime, BRAND_TIMEZONE_LABEL } from '../../lib/brandTime'
 import { logEditFeedback } from '../../lib/brandBrain'
-import { fetchBrandProfile, buildInstructionsString } from '../../lib/brandBrain'
+import { fetchBrandProfile } from '../../lib/brandBrain'
+import { buildContext, fetchBrandMemory } from '../../lib/brandContext'
+import { fetchBrandSchema, fetchDirectoryRows } from '../../lib/brandSchema'
 import { fetchApprovalsData, markIdeaProcessing } from '../../lib/contentPlans'
 import { requestPlanContentGeneration } from '../../lib/campaignPlanner'
 import { publishPost, syncZernio } from '../../lib/zernio'
 import { fetchScheduledPosts } from '../../lib/scheduledPosts'
 import { dbIdeaToDraft } from '../../lib/campaignPlan'
 import { InstagramPostDetail } from './InstagramPage'
-import { LinkedInPostDetail } from './LinkedInPage'
 
 // ─── Post Approvals ──────────────────────────────────────────────────────
 // One place to review everything the Plan Generation workflows produce —
-// Instagram and LinkedIn together, grouped by the monthly plan they came
+// Instagram posts, grouped by the monthly plan they came
 // from. Every approved idea has a durable generation_status (processing /
 // completed / failed) tracked on plan_ideas — see 20260723_generation_status
 // migration — so a card here is never just "missing" if generation is still
@@ -27,7 +28,6 @@ import { LinkedInPostDetail } from './LinkedInPage'
 
 const TABLES = {
   instagram: 'instagram_generated_posts',
-  linkedin:  'linkedin_generated_posts',
 }
 
 // A "processing" idea has no guaranteed path back to 'failed' — n8n's own
@@ -41,12 +41,9 @@ const STALE_PROCESSING_MS = 90 * 1000
 // image_urls (carousel) preferred; fall back to the single image_url.
 const mediaOf = r => (Array.isArray(r.image_urls) && r.image_urls.length ? r.image_urls : [r.image_url].filter(Boolean))
 
-// Instagram and LinkedIn rows map onto the same UI post shape. Instagram
-// carries a single caption; LinkedIn splits hook/body (copy is derived from
-// them) and carries a few LinkedIn-only fields (postStrategy/postType/
-// includeImage) that are simply absent on Instagram posts — nothing reads
-// them there. contentRoute's default differs on purpose: Instagram always
-// hardcodes 'scheduled', LinkedIn falls back to it from content_route.
+// Rows map onto the UI post shape: a single caption, plus the shared media
+// and publishing fields. contentRoute is hardcoded to 'scheduled' — the
+// alternative routes belonged to a platform that no longer exists here.
 function normalizePost(row, platform) {
   const base = {
     id: row.id, platform, _table: row.post_table || TABLES[platform],
@@ -75,15 +72,6 @@ function normalizePost(row, platform) {
     coverImageUrl: row.cover_image_url || '',
     _fromSupabase: true,
   }
-  if (platform === 'linkedin') {
-    return {
-      ...base,
-      hook: row.hook, copy: row.hook ? `${row.hook}\n\n${row.body || ''}` : (row.body || ''), body: row.body,
-      postStrategy: row.post_strategy, postType: row.post_type,
-      includeImage: row.include_image !== false,
-      contentRoute: row.content_route || 'scheduled',
-    }
-  }
   return { ...base, copy: row.caption, contentRoute: 'scheduled' }
 }
 
@@ -103,7 +91,7 @@ function useApprovalPosts(accessToken, workspaceId) {
     // RLS is what makes it safe.
     try {
       // One ordered query over all three post tables, via the scheduled_posts
-      // view. This replaced a hand-union of Instagram and LinkedIn — which is
+      // view. This replaced a hand-union of post tables — which is
       // the reason TikTok and Snapchat posts existed in the database but never
       // appeared on this screen. Adding a platform is now a change in the view
       // and in lib/scheduledPosts.js, not here.
@@ -138,9 +126,7 @@ function useApprovalPosts(accessToken, workspaceId) {
 
 // ─── Small card variants for in-flight/failed generation ──────────────────
 function ProcessingCard({ idea }) {
-  const platformMeta = idea.platform === 'linkedin'
-    ? { label: 'LinkedIn', color: 'bg-[#0A66C2]/10 text-[#0A66C2]' }
-    : { label: 'Instagram', color: 'bg-pink-50 text-pink-600' }
+  const platformMeta = { label: 'Instagram', color: 'bg-pink-50 text-pink-600' }
   return (
     <Card className="overflow-hidden">
       <div className="flex">
@@ -163,9 +149,7 @@ function ProcessingCard({ idea }) {
 }
 
 function FailedCard({ idea, post, onRetry, retrying }) {
-  const platformMeta = idea.platform === 'linkedin'
-    ? { label: 'LinkedIn', color: 'bg-[#0A66C2]/10 text-[#0A66C2]' }
-    : { label: 'Instagram', color: 'bg-pink-50 text-pink-600' }
+  const platformMeta = { label: 'Instagram', color: 'bg-pink-50 text-pink-600' }
   return (
     <Card className="overflow-hidden border-red-200">
       <div className="flex">
@@ -248,9 +232,7 @@ function PublishBar({ post, onPublish, busy }) {
 }
 
 function PostCard({ post, onOpen, onApprove, onReject, onPublish, publishing }) {
-  const platformMeta = post.platform === 'linkedin'
-    ? { label: 'LinkedIn', color: 'bg-[#0A66C2]/10 text-[#0A66C2]' }
-    : { label: 'Instagram', color: 'bg-pink-50 text-pink-600' }
+  const platformMeta = { label: 'Instagram', color: 'bg-pink-50 text-pink-600' }
   return (
     <Card className="overflow-hidden cursor-pointer hover:shadow-md hover:-translate-y-0.5 transition-all duration-150" onClick={() => onOpen(post)}>
       <div className="flex">
@@ -313,7 +295,7 @@ export function Approvals() {
   const { state } = useApp()
   const { activeWorkspaceId, accessToken } = useAuth()
   const { posts, ideas, plans, loading, fetchAll, updateStatus, setIdeas } = useApprovalPosts(accessToken, activeWorkspaceId)
-  const [platformFilter, setPlatformFilter] = useState('all')  // all | instagram | linkedin
+  const [platformFilter, setPlatformFilter] = useState('all')  // all | instagram
   const [statusFilter,   setStatusFilter]   = useState('pending_review')
   const [selectedPost,   setSelectedPost]   = useState(null)
   const [retryingId,     setRetryingId]     = useState(null)
@@ -387,7 +369,6 @@ export function Approvals() {
   const PLATFORM_TABS = [
     { key: 'all',       label: 'All' },
     { key: 'instagram', label: 'Instagram' },
-    { key: 'linkedin',  label: 'LinkedIn' },
   ]
 
   // Group filtered items by plan (most-recent plan first, since `plans` is
@@ -456,7 +437,19 @@ export function Approvals() {
     setIdeas(prev => prev.map(i => i.id === idea.id ? { ...i, generation_status: 'processing', generation_error: '' } : i))
     await markIdeaProcessing(accessToken, idea.id)
     const profile = await fetchBrandProfile(activeWorkspaceId, accessToken)
-    const instructions = buildInstructionsString(profile)
+    // Same context path as the original generation. Built here rather than
+    // flattened directly so a retry carries the brand's identity and learned
+    // rules too — otherwise a retried post is written by a differently
+    // briefed model than the one that wrote its siblings.
+    const [schema, dirRows, memory] = await Promise.all([
+      fetchBrandSchema(activeWorkspaceId, accessToken),
+      fetchDirectoryRows(activeWorkspaceId, accessToken),
+      fetchBrandMemory(activeWorkspaceId, accessToken),
+    ])
+    const rowsBySection = {}
+    for (const r of dirRows) (rowsBySection[r.section_key] ||= []).push(r)
+    const brandCtx = buildContext(profile, schema, { rowsBySection, assets: [] }, memory, { task: 'caption' })
+    const instructions = brandCtx.instructions
     // If this idea already produced a post (an earlier attempt succeeded
     // and the reviewer may have edited its caption/image in Approvals
     // since), that post is the freshest truth. Sending the plan_ideas
@@ -474,6 +467,7 @@ export function Approvals() {
     const result = await requestPlanContentGeneration({
       webhooks: state.webhooks, planId: idea.plan_id, instructions, ideas: [ideaForRetry],
       workspaceId: activeWorkspaceId, captionLanguage: profile?.captionLanguage || 'both',
+      brand_name: brandCtx.brandName, brand_descriptor: brandCtx.brandDescriptor,
     })
     setRetryingId(null)
     if (result.error) {
@@ -506,8 +500,7 @@ export function Approvals() {
   // image regen, which does) — it hands the new text back via this callback
   // and expects the caller to write it. Must replicate that PATCH here or
   // caption edits silently vanish on close, exactly like the ReferencePicker
-  // bug fixed earlier — LinkedIn's PostDetail persists its own edits, so it
-  // doesn't need this.
+  // bug fixed earlier.
   async function handleCaptionUpdated(postId, newCopy, originalCopy) {
     setSelectedPost(prev => (prev && prev.id === postId) ? { ...prev, copy: newCopy } : prev)
     logEditFeedback(activeWorkspaceId, accessToken, { platform: 'instagram', postId, field: 'caption', original: originalCopy, edited: newCopy })
@@ -627,20 +620,6 @@ export function Approvals() {
           onStatusChange={handleStatusChange}
           onImageUpdated={() => {}}
           onCaptionUpdated={handleCaptionUpdated}
-          onDelete={handleDelete}
-        />
-      )}
-      {selectedPost && selectedPost.platform === 'linkedin' && (
-        <LinkedInPostDetail
-          post={selectedPost}
-          state={state}
-          webhookUrl={state.webhooks?.linkedin || ''}
-          regenWebhookUrl={state.webhooks?.linkedinScheduleRegen || ''}
-          supabaseUrl={SUPABASE_URL}
-          anonKey={accessToken || ''}
-          onClose={() => setSelectedPost(null)}
-          onStatusChange={handleStatusChange}
-          onImageUpdated={() => {}}
           onDelete={handleDelete}
         />
       )}

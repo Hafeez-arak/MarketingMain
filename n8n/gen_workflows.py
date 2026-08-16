@@ -7,7 +7,6 @@ survived. This version lives in the actual git repo so that never happens again.
 
 Builds 4 workflows as n8n-importable JSON:
   - Arak Lighting – Instagram Content Generation v2   (webhook: arak-ig-plan-generation)
-  - Arak Lighting – Linkedin Content Generation v2     (webhook: arak-li-plan-generation)
   - Arak Lighting – Caption Studio                     (webhook: arak-caption-studio)
   - Arak Lighting – Elongate Idea                       (webhook: arak-elongate-idea)
 
@@ -73,7 +72,105 @@ def _assign_deterministic_ids(wf: dict) -> None:
 
 
 # ============================================================
-# Code-node JavaScript bodies (Instagram / LinkedIn Content Generation v2)
+# Shared prompt scaffolding — brand identity and precedence
+# ============================================================
+# Every prompt in this file used to OPEN by asserting the writer worked for
+# "Arak Lighting, Saudi Arabia's leading architectural lighting company",
+# hardcoded in 52 places — and crucially placed ABOVE the BRAND CONTEXT
+# block. So Aqeeq (an at-home spa) and Alo Kheyatah (a tailoring service)
+# were told they manufactured lighting, and then handed their own brand brain
+# underneath to argue with. Identity is now data, interpolated from the
+# payload, like every other fact about the brand.
+#
+# These are JS *fragments* embedded into Code nodes, and plain strings
+# embedded into the jsonBody of HTTP nodes. Keep them dependency-free.
+
+# Derives the persona clause from whatever payload shape the workflow has.
+# The fallback deliberately does NOT name an industry: a workflow that has
+# lost its brand identity should defer to the BRAND CONTEXT block rather
+# than invent a company, which is exactly the bug this replaces.
+BRAND_PERSONA_JS = r"""
+function brandPersona(src){
+  const name = String((src && src.brand_name) || '').trim();
+  const desc = String((src && src.brand_descriptor) || '').trim();
+  if (!name) return 'the brand described in the BRAND CONTEXT below';
+  return desc ? (name + ', ' + desc) : name;
+}
+function brandOnly(src){
+  const name = String((src && src.brand_name) || '').trim();
+  return name || 'this brand';
+}
+// Used wherever a prompt previously hardcoded '#ArakLighting'. Derives a
+// tag from the brand's own name rather than naming a company that may not
+// be the one posting.
+function brandTag(src){
+  const name = String((src && src.brand_name) || '').trim();
+  // Strip an Arabic wordmark in brackets — "Aqeeq (عقيق)" tags as #Aqeeq.
+  const latin = name.replace(/\([^)]*\)/g, '').replace(/[^A-Za-z0-9 ]/g, '').trim();
+  if (!latin) return '';
+  return '#' + latin.split(/\s+/).map(w => w[0].toUpperCase() + w.slice(1)).join('');
+}
+"""
+
+# The determinism fix. Without this, "make it blue" against a brand palette
+# of warm bronze resolved differently run to run, because nothing in the
+# prompt said which one outranked the other. The file already set this
+# precedent for reference-image notes ("their own note wins ... because it is
+# a specific instruction rather than a default") — this applies the same
+# reasoning to the brand block.
+PRECEDENCE_RULES = (
+    "PRECEDENCE — when the request and the brand context disagree, resolve in this order:\n"
+    "1. Brand guardrails always win. Anything the brand context lists as a never-do, "
+    "a compliance rule, or a hard restriction is absolute — no request overrides it.\n"
+    "2. The requester's explicit instruction beats a brand DEFAULT. If they asked for a "
+    "specific colour, format, angle or tone, do that, even where the brand's usual "
+    "default differs. A stated ask is a decision, not an oversight.\n"
+    "3. Brand defaults fill in everything left unspecified — palette, tone, style, structure.\n"
+    "When you override a brand default under rule 2, say so in one short clause in "
+    "post_strategy (or the nearest explanatory field) so the choice is explainable."
+)
+
+# Blank contact_info is the normal state for a brand that has not supplied
+# one yet, and an unguarded model will happily invent a booking link or phone
+# number that then publishes. Facts about how to reach a business must come
+# from the brand brain or not at all.
+NO_INVENTED_FACTS = (
+    "NEVER state a phone number, booking link, website, address, account handle, price, "
+    "discount or promotional offer unless it appears verbatim in the BRAND CONTEXT. If "
+    "none is given, end with a soft call to action (\"book your session\", \"send us a "
+    "message\") and no specifics. Inventing a contact detail or a price is a serious error."
+)
+
+# One string, since almost every prompt wants both.
+PROMPT_RULES = PRECEDENCE_RULES + "\n\n" + NO_INVENTED_FACTS
+
+
+def js_str(text: str) -> str:
+    """Embed a Python string as a JS template-literal-safe literal."""
+    return json.dumps(text)
+
+
+def _with_brand(js: str) -> str:
+    """Give a Code-node body the brand helpers and the shared rule text.
+
+    Every prompt builder needs the same two things — a persona derived from
+    the payload instead of a hardcoded company, and the precedence /
+    no-invented-facts rules — so they are spliced in from one place rather
+    than pasted into each builder and left to drift apart.
+
+    The placeholder is always written as `${__PROMPT_RULES__}` inside a
+    template literal, so it is replaced with a bare JSON string literal —
+    the surrounding `${ }` is already there. Emitting it as a JSON literal
+    rather than raw text means the rules cannot terminate the template or be
+    re-parsed as JS, whatever punctuation they contain.
+    """
+    return (
+        BRAND_PERSONA_JS + "\n" + js
+    ).replace('__PROMPT_RULES__', js_str(PROMPT_RULES))
+
+
+# ============================================================
+# Code-node JavaScript bodies (Instagram Content Generation v2)
 # ============================================================
 
 PREPARE_BATCH_JS = r"""
@@ -83,6 +180,11 @@ if (!ideas.length) throw new Error('No ideas in payload');
 return [{ json: {
   plan_id:          body.plan_id || null,
   instructions:     body.instructions || '',
+  // Who this brand actually is. Carried alongside the instructions blob
+  // rather than baked into it, because the persona line sits above the
+  // brand context in the cached prefix and has to be interpolated there.
+  brand_name:       body.brand_name || '',
+  brand_descriptor: body.brand_descriptor || '',
   workspace_id:     body.workspace_id || null,
   caption_language: body.caption_language || 'both',
   ideas,
@@ -102,6 +204,8 @@ return ideas.map((idea, i) => ({
     workspace_id:   b.workspace_id || null,
     caption_language: b.caption_language || 'both',
     instructions:   b.instructions || '',
+    brand_name:       b.brand_name || '',
+    brand_descriptor: b.brand_descriptor || '',
     topic:          idea.topic || idea.title || '',
     title:          idea.title || idea.topic || '',
     angle:          idea.angle || '',
@@ -140,7 +244,6 @@ return ideas.map((idea, i) => ({
 """
 
 INSTAGRAM_SPLIT_IDEAS_JS = SPLIT_IDEAS_JS_TEMPLATE.replace('__ASPECT_DEFAULT__', '1:1')
-LINKEDIN_SPLIT_IDEAS_JS = SPLIT_IDEAS_JS_TEMPLATE.replace('__ASPECT_DEFAULT__', '1.91:1')
 
 # Differs from Instagram only in the PLATFORM / BUCKET consts at the top —
 # every other line (captions, image generation, upload prep, DB row shape)
@@ -154,8 +257,9 @@ GENERATE_POST_JS_TEMPLATE = r"""
 //   ANTHROPIC_API_KEY, REPLICATE_API_TOKEN, SUPABASE_URL, SUPABASE_KEY
 //   optional: IMAGE_PROVIDER (replicate|fal, default replicate), FAL_KEY
 // ══════════════════════════════════════════════════════════════════════════
-const PLATFORM = '__PLATFORM__';   // 'instagram' | 'linkedin'
+const PLATFORM = '__PLATFORM__';   // 'instagram'
 const BUCKET   = '__BUCKET__';     // supabase storage bucket
+__BRAND_PERSONA_JS__
 const http = this.helpers.httpRequest;
 const prepareBinaryData = this.helpers.prepareBinaryData;
 
@@ -248,8 +352,13 @@ const STYLE_MAP = {
 
 function decoratePrompt(base, isTextImage){
   const style = STYLE_MAP[idea.style] || STYLE_MAP.photorealistic;
-  let p = (base || idea.topic || '') + ', ' + style +
-    ', Arak Lighting Saudi Arabia, luxury architectural lighting, ultra high detail';
+  // The brand tail used to hardcode "Arak Lighting Saudi Arabia, luxury
+  // architectural lighting" onto EVERY brand's images — which is why a spa's
+  // generated visuals came back looking like lit architecture. It is now
+  // just the brand's name; the actual look comes from the brand context the
+  // caller assembled (palette, visual modes), not from a fixed industry.
+  const tail = brandOnly(idea) !== 'this brand' ? ', ' + brandOnly(idea) : '';
+  let p = (base || idea.topic || '') + ', ' + style + tail + ', ultra high detail';
   if (idea.design_tip) p += '. Art direction: ' + idea.design_tip;
   // The human's own freeform vision (set on the idea at plan time) — takes
   // priority over the generic design_tip when they conflict, since it's an
@@ -264,7 +373,7 @@ function decoratePrompt(base, isTextImage){
 
 function aspectFor(){
   return idea.aspect_ratio === '1.91:1' ? '3:2'
-       : (idea.aspect_ratio || (PLATFORM === 'linkedin' ? '3:2' : '1:1'));
+       : (idea.aspect_ratio || '1:1');
 }
 
 // ---- image providers (replicate = active, fal = prepared) ----
@@ -310,7 +419,7 @@ async function genFal(prompt){
   const FAL = $env.FAL_KEY;
   const useI2I = refs.length > 0 && !useReference;
   const endpoint = useI2I ? 'fal-ai/flux-2/pro/image-to-image' : 'fal-ai/flux-2/pro';
-  const body = { prompt, image_size: (PLATFORM === 'linkedin' ? 'landscape_16_9' : 'square_hd') };
+  const body = { prompt, image_size: 'square_hd' };
   if (useI2I){ body.image_url = refs[0]; body.strength = 0.72; }
   const r = await req({ method:'POST', url:`https://fal.run/${endpoint}`,
     headers:{ Authorization:`Key ${FAL}`, 'Content-Type':'application/json' }, body, json:true });
@@ -389,32 +498,30 @@ function buildCachedPrefix(){
     : lang === 'en'
     ? 'Write the caption in ENGLISH. Put it in "caption_en"; set "caption_ar" to "".'
     : 'Write TWO captions for the SAME post: one in SAUDI ARABIC (Gulf/Najdi dialect — natural, modern, warm; NOT stiff MSA) in "caption_ar", and one in ENGLISH in "caption_en". They should match in meaning, not be word-for-word translations.';
-  const platformName = PLATFORM === 'linkedin' ? 'LinkedIn' : 'Instagram';
-  return `You are a senior social media copywriter for Arak Lighting, Saudi Arabia's leading architectural lighting company (45+ years; projects incl. Solitaire Mall, King Fahad Airport, Ritz Carlton Riyadh).
+  const platformName = 'Instagram';
+  return `You are a senior social media copywriter for ${brandPersona(idea)}.
 
 You write ${platformName} posts, pre-planned in a monthly content calendar.
 
 BRAND CONTEXT:
-${idea.instructions || 'No brand profile set — keep it premium and on-brand for a luxury lighting company.'}
+${idea.instructions || 'No brand profile has been filled in yet — work only from the post specifics below and make no claims about the company.'}
 
-LANGUAGE (applies to every post): ${langRule}`;
+LANGUAGE (applies to every post): ${langRule}
+
+${__PROMPT_RULES__}`;
 }
 
 function buildVariableSuffix(){
   const carouselRule = kind === 'carousel'
     ? `This is a CAROUSEL of ${slideCount} slides. Return "slide_prompts": an array of EXACTLY ${slideCount} distinct image-generation prompts (max 60 words each), one per slide, telling a coherent visual story.`
     : 'Return "image_prompt": one detailed image-generation prompt (max 70 words) for this post’s visual.';
-  // LinkedIn posts are read/edited elsewhere in the app as a distinct HOOK
-  // (the line shown before "see more") + BODY — Instagram has no such split,
-  // captions there are one flowing block. Ask for the right shape per
-  // platform instead of forcing LinkedIn through Instagram's single-field
-  // schema (which was leaving every LinkedIn post's hook blank).
-  const structureRule = PLATFORM === 'linkedin'
-    ? 'LinkedIn needs a distinct HOOK: a short, scroll-stopping opening line, question, or bold statement (1 sentence) shown before "see more" — separate from the BODY that follows it (the rest of the post, can be several paragraphs). Write both, in each language.'
-    : 'Instagram captions are ONE flowing block — no separate hook needed.';
-  const schema = PLATFORM === 'linkedin'
-    ? '{"hook_ar":"...", "hook_en":"...", "body_ar":"...", "body_en":"...", "hashtags":"#ArakLighting #LightingDesign plus 6-8 relevant tags, mixing Arabic and English", "image_prompt":"...", "slide_prompts":[], "post_strategy":"one sentence on why this post works"}'
-    : '{"caption_ar":"...", "caption_en":"...", "hashtags":"#ArakLighting #LightingDesign plus 6-8 relevant tags, mixing Arabic and English", "image_prompt":"...", "slide_prompts":[], "post_strategy":"one sentence on why this post works"}';
+  const structureRule = 'Instagram captions are ONE flowing block — no separate hook needed.';
+  // The brand's own tag leads, where it has one — this used to hardcode
+  // '#ArakLighting' into every brand's captions.
+  const ownTag = brandTag(idea);
+  const tagRule = (ownTag ? ownTag + ' plus 6-8' : '6-8') +
+    ' relevant tags drawn from this brand\'s own industry and market, mixing Arabic and English';
+  const schema = '{"caption_ar":"...", "caption_en":"...", "hashtags":"' + tagRule + '", "image_prompt":"...", "slide_prompts":[], "post_strategy":"one sentence on why this post works"}';
   return `Now write ONE post with these specifics:
 
 TOPIC: ${idea.topic || ''}
@@ -440,26 +547,16 @@ ${schema}`;
 
 try {
 // ---------- 1) caption ----------
-// LinkedIn writes hook_ar/hook_en + body_ar/body_en separately (see
-// buildVariableSuffix) — caption_ar/caption_en are then derived as the whole
-// post per language (hook+body joined) so Approvals' bilingual toggle still
-// works the same way it always has, regardless of platform.
-let caption_ar='', caption_en='', hook_ar='', hook_en='', body_ar='', body_en='',
+let caption_ar='', caption_en='',
     // A human-set hashtag list at plan time always wins over whatever Claude
     // proposes (or the hardcoded fallback) — applies regardless of post_kind,
     // including image_only where no caption call happens at all.
-    hashtags = idea.hashtags || '#ArakLighting #LightingDesign',
+    hashtags = idea.hashtags || brandTag(idea),
     post_strategy='', image_prompt = idea.media_prompt || idea.topic || '', slide_prompts = [];
 if (needsCaption && hasSelectedCaption){
   // Picked (or hand-edited) during review — commit it as-is, no Claude call.
-  // LinkedIn note: Draft Copy proposes one flowing caption, not a separate
-  // hook/body split — the whole thing lands in body_*, hook_* stays empty.
-  // The reviewer can still split it in Approvals afterward; this only
-  // affects ideas that went through the new review flow with a LinkedIn
-  // caption already selected.
   caption_ar = idea.caption_ar || '';
   caption_en = idea.caption_en || '';
-  if (PLATFORM === 'linkedin') { body_ar = caption_ar; body_en = caption_en; }
 } else if (needsCaption){
   // Sonnet 5, not Opus: per-post caption writing is well within Sonnet's
   // strength and ~40% cheaper. Opus is reserved for the monthly Campaign
@@ -519,17 +616,8 @@ if (needsCaption && hasSelectedCaption){
   // text block, so find it by type instead of indexing.
   const textBlock = resp.content.find(b => b.type === 'text');
   const parsed = safeJson(textBlock && textBlock.text);
-  if (PLATFORM === 'linkedin') {
-    hook_ar = parsed.hook_ar || '';
-    hook_en = parsed.hook_en || '';
-    body_ar = parsed.body_ar || '';
-    body_en = parsed.body_en || '';
-    caption_ar = [hook_ar, body_ar].filter(Boolean).join('\n\n');
-    caption_en = [hook_en, body_en].filter(Boolean).join('\n\n');
-  } else {
-    caption_ar = parsed.caption_ar || '';
-    caption_en = parsed.caption_en || '';
-  }
+  caption_ar = parsed.caption_ar || '';
+  caption_en = parsed.caption_en || '';
   hashtags     = idea.hashtags || parsed.hashtags || hashtags;
   post_strategy= parsed.post_strategy || '';
   image_prompt = parsed.image_prompt || idea.topic || '';
@@ -595,7 +683,7 @@ const row = {
   first_comment: idea.first_comment || '',
   tone:  idea.tone || '',
   style: idea.style || 'photorealistic',
-  aspect_ratio: idea.aspect_ratio || (PLATFORM === 'linkedin' ? '1.91:1' : '1:1'),
+  aspect_ratio: idea.aspect_ratio || '1:1',
   status: 'pending_review', source: 'plan',
   plan_id: idea.plan_id || null, plan_idea_id: idea.plan_idea_id || null,
   post_kind: kind, caption_ar, caption_en, workspace_id: idea.workspace_id || null,
@@ -617,22 +705,7 @@ if (selectedVideo){
   row.image_url = '';
   row.image_urls = [];
 }
-if (PLATFORM === 'instagram'){
-  row.caption = displayCaption;
-} else {
-  // A real hook/body split (was always blank hook before) — LinkedInPage.jsx
-  // is built around a distinct hook line shown before "see more", separate
-  // from the body. caption_ar/caption_en (hook+body already joined per
-  // language, set above) still drive Approvals' bilingual toggle unchanged.
-  row.hook = lang === 'ar' ? hook_ar : lang === 'en' ? hook_en : [hook_ar, hook_en].filter(Boolean).join(' / ');
-  row.body = lang === 'ar' ? body_ar : lang === 'en' ? body_en : [body_ar, body_en].filter(Boolean).join('\n\n—\n\n');
-  row.post_type = 'thought_leadership';
-  // Studio-built ideas still get an image — it just arrives later, from the
-  // Studio session rather than from here. Reporting false would render the
-  // post as deliberately text-only.
-  row.include_image = needsImage || madeInStudio;
-  row.content_route = 'plan';
-}
+row.caption = displayCaption;
 
 return {
   json: { db_row: row, _failed: false, needsUpload, pending_uploads, plan_idea_id: idea.plan_idea_id || null,
@@ -652,14 +725,19 @@ return {
 }
 """
 
-INSTAGRAM_GENERATE_POST_JS = (
-    GENERATE_POST_JS_TEMPLATE.replace('__PLATFORM__', 'instagram')
-    .replace('__BUCKET__', 'instagram-posts')
-)
-LINKEDIN_GENERATE_POST_JS = (
-    GENERATE_POST_JS_TEMPLATE.replace('__PLATFORM__', 'linkedin')
-    .replace('__BUCKET__', 'linkedin-posts')
-)
+def _finish_post_js(template: str, platform: str, bucket: str) -> str:
+    """Substitute the per-platform names, then splice in the shared brand
+    helpers and rule text every prompt builder in this file needs."""
+    return (
+        template.replace('__PLATFORM__', platform)
+        .replace('__BUCKET__', bucket)
+        .replace('__BRAND_PERSONA_JS__', BRAND_PERSONA_JS)
+        .replace('__PROMPT_RULES__', js_str(PROMPT_RULES))
+    )
+
+
+INSTAGRAM_GENERATE_POST_JS = _finish_post_js(
+    GENERATE_POST_JS_TEMPLATE, 'instagram', 'instagram-posts')
 
 SPLIT_PENDING_UPLOADS_JS = r"""
 const items = $input.all();
@@ -730,20 +808,6 @@ Handles every post_kind (caption_only / image_only / caption_image / carousel / 
 
 **Generate Post never throws** — it catches its own errors and marks `plan_ideas.generation_status='failed'` with the real message, so Post Approvals can show it instead of the idea silently vanishing. On success, 'Mark Completed' flips it to 'completed' only after the post row actually saves."""
 
-LINKEDIN_STICKY = r"""## Arak Linkedin Content Generation v2
-
-**Zero secrets in this file.** Set these n8n ENV VARS:
-- `ANTHROPIC_API_KEY`
-- `REPLICATE_API_TOKEN`
-- `SUPABASE_URL`
-- `SUPABASE_KEY`
-- optional: `IMAGE_PROVIDER` (replicate|fal, default replicate), `FAL_KEY`
-
-Handles every post_kind (caption_only / image_only / caption_image / carousel / text_image), image_mode=use_reference, and bilingual (Saudi Arabic + English) captions.
-
-**Why images route through a real HTTP Request node**: Code nodes run in n8n's external task runner, and this.helpers.httpRequest proxies to the main process as ONE JSON message — a Buffer nested inside the request body (e.g. an image upload) silently corrupts into literal text '{"type":"Buffer",...}'. prepareBinaryData() avoids this (Buffer is a top-level RPC arg, which n8n DOES reconstruct correctly), then 'Upload to Supabase Storage' — a native node, not sandboxed — sends the real bytes with no RPC boundary in the way.
-
-**Generate Post never throws** — it catches its own errors and marks `plan_ideas.generation_status='failed'` with the real message, so Post Approvals can show it instead of the idea silently vanishing. On success, 'Mark Completed' flips it to 'completed' only after the post row actually saves."""
 
 CAPTION_STUDIO_STICKY = r"""## Arak – Caption Studio
 
@@ -768,7 +832,7 @@ Turns a manually-typed idea's thin topic/tone into a full brief (angle, objectiv
 # Code-node JavaScript bodies (Caption Studio / Elongate Idea)
 # ============================================================
 
-CAPTION_STUDIO_JS = r"""
+CAPTION_STUDIO_JS = _with_brand(r"""
 const http = this.helpers.httpRequest;
 const ANTHROPIC = $env.ANTHROPIC_API_KEY;
 
@@ -798,7 +862,7 @@ function safeJson(t){
 
 const body     = ($input.first().json.body) || {};
 const mode     = body.mode === 'piece' ? 'piece' : 'variants';
-const platform = body.platform === 'linkedin' ? 'linkedin' : 'instagram';
+const platform = 'instagram';
 const lang     = body.language || 'both';         // ar | en | both
 const ctx      = body.context || {};              // topic, angle, tone, objective, cta, instructions
 const controls = body.controls || {};             // length, hookStyle, emoji, hashtagCount
@@ -825,15 +889,17 @@ const langRule = lang === 'ar'
 // CACHED prefix (persona + brand + language rule) is identical across every
 // call in an editing session, so the 2nd+ rewrite of the same post reads it
 // at ~10% cost.
-const platformName = platform === 'linkedin' ? 'LinkedIn' : 'Instagram';
-const cachedPrefix = `You are a senior social media copywriter for Arak Lighting, Saudi Arabia's leading architectural lighting company (45+ years; landmark projects incl. Solitaire Mall, King Fahad Airport, Ritz Carlton Riyadh).
+const platformName = 'Instagram';
+const cachedPrefix = `You are a senior social media copywriter for ${brandPersona(ctx)}.
 
 You are helping a marketer refine the copy for ONE ${platformName} post they are reviewing.
 
 BRAND CONTEXT:
-${ctx.instructions || 'No brand profile set — keep it premium and on-brand for a luxury lighting company.'}
+${ctx.instructions || 'No brand profile has been filled in yet — work only from the post facts below and make no claims about the company.'}
 
-LANGUAGE: ${langRule}`;
+LANGUAGE: ${langRule}
+
+${__PROMPT_RULES__}`;
 
 const postFacts = `POST TOPIC: ${ctx.topic || ''}
 ANGLE: ${ctx.angle || ''}
@@ -849,9 +915,7 @@ STYLE CONTROLS:
 
 let variableSuffix, schema;
 if (mode === 'variants') {
-  schema = platform === 'linkedin'
-    ? '{"variants":[{"hook_ar":"","hook_en":"","body_ar":"","body_en":"","hashtags":""}, {…}, {…}]}'
-    : '{"variants":[{"caption_ar":"","caption_en":"","hashtags":""}, {…}, {…}]}';
+  schema = '{"variants":[{"caption_ar":"","caption_en":"","hashtags":""}, {…}, {…}]}';
   variableSuffix = `${postFacts}
 
 Write THREE genuinely DIFFERENT variants of this post's copy — not three rephrasings of the same sentence. Vary the hook, structure and rhythm across them so the reviewer has a real choice.
@@ -862,7 +926,7 @@ ${schema}`;
   // Regenerate ONE piece; hand the model the current draft so the new piece
   // fits what's staying.
   const pieceFieldMap = {
-    caption: platform === 'linkedin' ? 'the BODY text' : 'the caption',
+    caption: 'the caption',
     hook:    'the opening HOOK line',
     body:    'the BODY text',
     hashtags:'the hashtag set',
@@ -913,9 +977,9 @@ try {
 } catch (err) {
   return [{ json: { ok: false, error: (err && err.message) ? err.message : String(err) } }];
 }
-"""
+""")
 
-ELONGATE_IDEA_JS = r"""
+ELONGATE_IDEA_JS = _with_brand(r"""
 const http = this.helpers.httpRequest;
 const ANTHROPIC = $env.ANTHROPIC_API_KEY;
 
@@ -944,14 +1008,16 @@ function safeJson(t){
 const body = ($input.first().json.body) || {};
 const idea = body.idea || {};
 const instructions = body.instructions || '';
-const platformName = idea.platform === 'linkedin' ? 'LinkedIn' : 'Instagram';
+const platformName = 'Instagram';
 
-const cachedPrefix = `You are a senior social media strategist for Arak Lighting, Saudi Arabia's leading architectural lighting company (45+ years; projects incl. Solitaire Mall, King Fahad Airport, Ritz Carlton Riyadh).
+const cachedPrefix = `You are a senior social media strategist for ${brandPersona(body)}.
 
 A team member has a rough idea for a ${platformName} post and wants you to turn it into a proper creative brief — the same quality of brief your AI planner already writes for auto-suggested posts. Keep their original intent; elaborate, don't replace it.
 
 BRAND CONTEXT:
-${instructions || 'No brand profile set — keep it premium and on-brand for a luxury lighting company.'}`;
+${instructions || 'No brand profile has been filled in yet — work only from their rough idea and make no claims about the company.'}
+
+${__PROMPT_RULES__}`;
 
 const variableSuffix = `ROUGH IDEA (their own words):
 "${idea.topic || ''}"
@@ -968,7 +1034,7 @@ Turn this into a proper post brief. Return ONLY valid JSON, no markdown fences:
  "image_idea":"a vivid 1-2 sentence description of the image itself, ready to hand to an image generator",
  "occasion":"a specific occasion/holiday this ties to, or empty string if none",
  "content_pillar":"a short content-pillar label, 2-4 words, or empty string",
- "hashtags":"6-8 relevant hashtags mixing Arabic and English, e.g. #ArakLighting #تصميم_اضاءة #LightingDesign"}`;
+ "hashtags":"6-8 relevant hashtags for THIS brand's own industry and market, mixing Arabic and English${brandTag(body) ? ', leading with ' + brandTag(body) : ''}"}`;
 
 try {
   const resp = await req({ method:'POST', url:'https://api.anthropic.com/v1/messages',
@@ -997,7 +1063,7 @@ try {
 } catch (err) {
   return [{ json: { ok: false, error: (err && err.message) ? err.message : String(err) } }];
 }
-"""
+""")
 
 DRAFT_COPY_STICKY = r"""## Arak – Draft Copy
 
@@ -1014,7 +1080,7 @@ Writes straight to `plan_ideas` (caption_options, media_prompt_options, draft_st
 # ============================================================
 # Code-node JavaScript body (Draft Copy)
 # ============================================================
-DRAFT_COPY_JS = r"""
+DRAFT_COPY_JS = _with_brand(r"""
 const http = this.helpers.httpRequest;
 const ANTHROPIC = $env.ANTHROPIC_API_KEY;
 
@@ -1042,8 +1108,8 @@ function safeJson(t){
 
 const body     = ($input.first().json.body) || {};
 const planIdeaId = body.plan_idea_id || '';
-const platform = body.platform === 'linkedin' ? 'linkedin' : 'instagram';
-const platformName = platform === 'linkedin' ? 'LinkedIn' : 'Instagram';
+const platform = 'instagram';
+const platformName = 'Instagram';
 const lang     = body.caption_language || 'both';   // ar | en | both
 const format   = body.format || 'feed_image';
 const aspectRatio = body.aspect_ratio || '';
@@ -1060,14 +1126,16 @@ const langRule = lang === 'ar'
 // CACHED prefix (persona + brand context + language rule) is identical
 // across every idea drafted in the same plan, so the 2nd+ call in a
 // "create plan" burst reads it at ~10% cost.
-const cachedPrefix = `You are a senior social media strategist and copywriter for Arak Lighting, Saudi Arabia's leading architectural lighting company (45+ years; landmark projects incl. Solitaire Mall, King Fahad Airport, Ritz Carlton Riyadh).
+const cachedPrefix = `You are a senior social media strategist and copywriter for ${brandPersona(body)}.
 
 You are drafting options for ONE ${platformName} post BEFORE it gets generated — the marketer will pick or edit from what you write here, so give them real, distinct choices rather than three near-identical rewrites.
 
 BRAND CONTEXT:
-${instructions || 'No brand profile set — keep it premium and on-brand for a luxury lighting company.'}
+${instructions || 'No brand profile has been filled in yet — work only from the post facts below and make no claims about the company.'}
 
-LANGUAGE: ${langRule}`;
+LANGUAGE: ${langRule}
+
+${__PROMPT_RULES__}`;
 
 const postFacts = `POST TOPIC: ${body.topic || ''}
 ANGLE: ${body.angle || ''}
@@ -1122,7 +1190,7 @@ try {
 } catch (err) {
   return { json: { _ok: false, plan_idea_id: planIdeaId, error: (err && err.message) ? err.message : String(err) } };
 }
-"""
+""")
 
 
 
@@ -1158,7 +1226,7 @@ async function req(opts){
 
 const body = ($input.first().json.body) || {};
 const planIdeaId = body.plan_idea_id || '';
-const platform = body.platform === 'linkedin' ? 'linkedin' : 'instagram';
+const platform = 'instagram';
 const prompt = body.media_prompt || '';
 const aspectRatio = body.aspect_ratio || '';
 const style = body.style || 'photorealistic';
@@ -1179,7 +1247,10 @@ const STYLE_MAP = {
   cool_commercial: 'cool white 5000K, modern commercial space, crisp corporate luxury',
   facade_exterior: 'architectural exterior night photography, facade illumination, dramatic night sky',
 };
-const basePrompt = `${prompt}, ${STYLE_MAP[style] || STYLE_MAP.photorealistic}, Arak Lighting Saudi Arabia, luxury architectural lighting, ultra high detail`;
+// Brand tail comes from the payload, not from a hardcoded industry — see
+// decoratePrompt in Generate Post for the same reasoning.
+const brandTail = String(body.brand_name || '').trim();
+const basePrompt = `${prompt}, ${STYLE_MAP[style] || STYLE_MAP.photorealistic}${brandTail ? ', ' + brandTail : ''}, ultra high detail`;
 
 // fal.ai's aspect_ratio-style image_size buckets — closest match per the
 // idea's chosen orientation, not just a platform default.
@@ -1324,7 +1395,7 @@ try {
   if (!videoUrl) throw new Error('fal returned no video URL: ' + JSON.stringify(result).slice(0, 250));
 
   const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.mp4`;
-  const bucket = idea.platform === 'linkedin' ? 'linkedin-posts' : 'instagram-posts';
+  const bucket = 'instagram-posts';
   const binary = { data: await downloadAndPrepareVideo(videoUrl, filename) };
 
   return { json: { _ok: true, plan_idea_id: idea.plan_idea_id || null, platform: idea.platform || 'instagram', filename, bucket }, binary };
@@ -1486,7 +1557,7 @@ let retiredZernioId = '';
 
 // Only these three tables exist; anything else is a caller bug, and
 // interpolating an arbitrary string into the PATCH URL would be worse.
-const ALLOWED_TABLES = ['instagram_generated_posts','linkedin_generated_posts','generated_posts'];
+const ALLOWED_TABLES = ['instagram_generated_posts','generated_posts'];
 if (!ALLOWED_TABLES.includes(postTable)) throw new Error('Unknown post_table: ' + postTable);
 
 async function patchPost(fields){
@@ -1791,7 +1862,7 @@ Runs on a daily schedule AND on an on-demand webhook (`arak-zernio-sync`) so a "
 
 `/analytics/post-timeline` is the primary source (it returns exactly our per-day shape); the single-post totals are the fallback when a post is too new to have a timeline, written as one row dated today.
 
-**`metrics_present`** records which metrics the platform actually reported, so a real 0 stays distinguishable from "this platform doesn't measure saves" — without it, averaging `saves` across platforms silently counts every LinkedIn post as zero-saves."""
+**`metrics_present`** records which metrics the platform actually reported, so a real 0 stays distinguishable from "this platform doesn't measure saves" — without it, averaging `saves` across platforms silently counts a non-reporting post as zero-saves."""
 
 ZERNIO_SYNC_JS = r"""
 const http = this.helpers.httpRequest;
@@ -1821,7 +1892,7 @@ const ZBASE    = 'https://zernio.com/api/v1';
 const zHeaders = { Authorization: `Bearer ${ZERNIO}`, 'Content-Type': 'application/json' };
 const sHeaders = { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}`, 'Content-Type': 'application/json' };
 
-const POST_TABLES = ['instagram_generated_posts','linkedin_generated_posts','generated_posts'];
+const POST_TABLES = ['instagram_generated_posts','generated_posts'];
 const METRIC_KEYS = ['impressions','reach','likes','comments','shares','saves','clicks','views'];
 
 function today(){ return new Date().toISOString().slice(0, 10); }
@@ -2046,11 +2117,11 @@ Turns a stated goal + date range into a full slate of dated, platform-specific p
 
 Model: Opus 4.8 with adaptive thinking — this is the one call in the whole pipeline that genuinely needs the extra reasoning (whole-month coherence, holiday judgment), unlike per-post Sonnet calls."""
 
-BUILD_PROMPT_JS = r"""const input = $input.first().json.body;
+BUILD_PROMPT_JS = _with_brand(r"""const input = $input.first().json.body;
 
 const goal         = input.goal || '';
 const goalCategory = input.goal_category || '';
-const platforms    = input.platforms || ['instagram', 'linkedin'];
+const platforms    = input.platforms || ['instagram'];
 const startDate    = input.start_date || '';
 const endDate      = input.end_date || '';
 const approxCount  = input.approx_post_count || null;
@@ -2073,7 +2144,7 @@ const cadenceSection = postingDays.length
   ? `\nPOSTING DAYS: This brand only posts on: ${postingDays.map(d => DAY_NAMES[d] || d).join(', ')}. EVERY post's "date" MUST fall on one of these weekdays — no exceptions.\n`
   : `\nPOSTING DAYS: No fixed posting days were given — spread posts sensibly across the week yourself.\n`;
 
-const timeSection = `\nPOSTING TIME: For Instagram posts, use "${defaultTime}" (KSA time, 24h HH:MM) as the default "time" unless a specific post genuinely calls for something else. For LinkedIn posts, IGNORE that default and instead pick a business-hours slot (between 09:00-11:00 or 13:00-15:00 KSA time) regardless of what the Instagram default is — LinkedIn is a B2B platform and engagement is highest during the work day, not the evening. Every post needs its own "time" value (HH:MM, 24h).\n`;
+const timeSection = `\nPOSTING TIME: Use "${defaultTime}" (KSA time, 24h HH:MM) as the default "time" unless a specific post genuinely calls for something else. Every post needs its own "time" value (HH:MM, 24h).\n`;
 
 const KSA_HOLIDAYS = [
   { name: 'Saudi Founding Day', start: '2026-02-22', end: '2026-02-22', tentative: false },
@@ -2132,12 +2203,62 @@ const existingIdeasSection = existingIdeas.length
 // months), same workspace. Split into ongoing recurring series (continue
 // these -- a deliberate weekly/monthly repeat format is good, not a
 // repetition problem) vs one-off ideas (avoid repeating their angle). --
+// A rejected idea and a published one are opposite signals, and until now
+// both arrived here in the same "already covered, don't repeat" list — so
+// the only memory the planner had was actively teaching it that a rejected
+// idea was a done idea. They are now three separate buckets.
 const pastSeriesNames = [...new Set(pastIdeas.filter(p => p.series).map(p => p.series))];
-const pastOneOffs = pastIdeas.filter(p => !p.series).slice(0, 60);
-const pastIdeasSection = (pastSeriesNames.length || pastOneOffs.length)
+const pastOneOffs = pastIdeas.filter(p => !p.series);
+const fmtIdea = p => `  - [${p.platform}] ${p.topic}${p.angle ? ' — ' + p.angle : ''}${p.content_pillar ? ` (${p.content_pillar})` : ''}`;
+
+const covered  = pastOneOffs.filter(p => p.status !== 'rejected').slice(0, 45);
+const rejected = pastOneOffs.filter(p => p.status === 'rejected').slice(0, 25);
+
+// Reject reasons are a fixed four-value taxonomy in the review UI, so they
+// can be grouped into a real instruction rather than replayed one by one.
+const REJECT_LABELS = {
+  off_brand:    'off-brand — wrong voice, tone or values for this company',
+  repetitive:   'too repetitive — too close to something already done',
+  wrong_product:'wrong product or service focus',
+  weak:         'a weak idea — not interesting or useful enough to post',
+};
+const rejectGroups = {};
+for (const p of rejected) {
+  const key = p.reject_reason || 'unspecified';
+  (rejectGroups[key] = rejectGroups[key] || []).push(p);
+}
+
+const pastIdeasSection = (pastSeriesNames.length || covered.length || rejected.length)
   ? `\nPREVIOUS MONTHS' CONTENT (this company's history -- read before proposing new ideas):\n` +
     (pastSeriesNames.length ? `- Ongoing recurring series already running: ${pastSeriesNames.join(', ')}. If one fits naturally this month too, continue it on its usual cadence and set "series" to its name -- a deliberate repeat format is good, not a repetition problem.\n` : '') +
-    (pastOneOffs.length ? `- One-off ideas already covered in past months (do NOT repeat these angles/content -- propose genuinely new angles even if the topic area is similar):\n${pastOneOffs.map(p => `  - [${p.platform}] ${p.topic}${p.angle ? ' — ' + p.angle : ''}${p.content_pillar ? ` (${p.content_pillar})` : ''}`).join('\n')}\n` : '')
+    (covered.length ? `- ALREADY COVERED (approved or published in past months -- do NOT repeat these angles; propose genuinely new ones even if the topic area is similar):\n${covered.map(fmtIdea).join('\n')}\n` : '') +
+    (rejected.length ? `- TURNED DOWN BY THIS BRAND'S REVIEWERS. These are not "already covered" -- they were judged wrong for the brand. Do not propose ideas of this SHAPE again:\n` +
+      Object.entries(rejectGroups).map(([reason, items]) =>
+        `  Rejected as ${REJECT_LABELS[reason] || reason}:\n${items.map(fmtIdea).join('\n')}`
+      ).join('\n') + '\n' : '')
+  : '';
+
+// ── Variety guard ─────────────────────────────────────────────────────────
+// The direct fix for "it keeps suggesting the same kind of idea". Counting
+// what has actually been proposed before and handing back the distribution
+// is far more effective than asking for "variety" in the abstract, because
+// the model can see which pillars are already saturated.
+function distributionOf(field){
+  const counts = {};
+  for (const p of pastIdeas) {
+    const v = String(p[field] || '').trim();
+    if (v) counts[v] = (counts[v] || 0) + 1;
+  }
+  return Object.entries(counts).sort((a, b) => b[1] - a[1]);
+}
+const pillarDist   = distributionOf('content_pillar').slice(0, 12);
+const occasionDist = distributionOf('occasion').slice(0, 10);
+const totalPast    = pastIdeas.length;
+const varietySection = totalPast >= 5 && pillarDist.length
+  ? `\nWHAT THIS BRAND HAS LEANED ON SO FAR (${totalPast} past ideas):\n` +
+    `Content pillars used: ${pillarDist.map(([k, n]) => `${k} ×${n}`).join(', ')}\n` +
+    (occasionDist.length ? `Occasions used: ${occasionDist.map(([k, n]) => `${k} ×${n}`).join(', ')}\n` : '') +
+    `Deliberately rebalance AWAY from the most-used pillars above. If a pillar already accounts for a large share of past ideas, it should be a small share of this plan -- reach for the brand's under-used pillars and formats instead. Do not simply produce more of what dominates that list.\n`
   : '';
 
 // -- Target content mix: a freeform ratio the human wants (e.g. "40% product,
@@ -2152,16 +2273,18 @@ const contentMixSection = contentMixTarget
 // range is being requested — so a "Generate more" a few minutes after the
 // original "Generate" (same company) reads this block at ~10% of its normal
 // cost instead of resending it fresh. ──
-const promptCached = `You are a social media campaign planner for Arak Lighting, a KSA-based architectural lighting manufacturer.
+const promptCached = `You are a social media campaign planner for ${brandPersona(input)}.
 
-${instructions ? `BRAND CONTEXT:\n${instructions}` : 'No brand profile has been set yet — keep the plan professional and generic.'}
+${instructions ? `BRAND CONTEXT:\n${instructions}` : 'No brand profile has been filled in yet — keep the plan professional and make no claims about the company.'}
+
+${__PROMPT_RULES__}
 
 You will be given a specific goal, date range, platform list, and any constraints for ONE planning request. Decompose it into a list of individual post ideas, spread across the date range and platforms — do not put everything on day one, and vary the topic/angle so the campaign doesn't feel repetitive.
 
-IMPORTANT: For each Saudi seasonal/cultural moment that falls in the given date range, create at least one dedicated post tied to it and set its "occasion" accordingly. Vary the "content_pillar" across the month so it isn't all product pushes — mix project showcases, educational lighting content, brand story, and the seasonal moments.
+IMPORTANT: For each Saudi seasonal/cultural moment that falls in the given date range, create at least one dedicated post tied to it and set its "occasion" accordingly. Vary the "content_pillar" across the month so it isn't all product pushes — mix the content pillars this brand actually uses (see the brand context above for its own recurring formats and pillars), its service or product range, educational content, brand story, and the seasonal moments.
 
 Each post needs:
-- "platform": exactly "instagram" or "linkedin"
+- "platform": always exactly "instagram"
 - "date": a date in YYYY-MM-DD format, within the given date range inclusive, and matching the posting-days constraint if one was given
 - "time": a time in HH:MM 24h format (KSA time), per the posting-time guidance given
 - "topic": a specific, concrete topic for that post
@@ -2173,16 +2296,10 @@ Each post needs:
 - "objective": what this specific post is FOR — pick ONE: "Awareness", "Engagement", "Sales/Leads", "Trust/Credibility", "Community"
 - "cta": a short, specific call-to-action matching the objective and platform — e.g. "DM us for a quote", "Save this for your next project", "Tag someone planning a renovation", "Visit our showroom this weekend", "Share your thoughts in the comments". Never generic filler like "Learn more" — make it concrete to this post.
 - "suggested_format": pick ONE — "post", "carousel", or "reel" (step-by-step/list -> carousel; motion/showcase -> reel; single strong visual -> post)
-- "tone": pick ONE value from the correct list for that platform —
-  Instagram tones: professional, inspirational, educational, casual, promotional
-  LinkedIn tones: thought_leader, executive, technical_expert, warm_human, promotional
-- "suggested_style": how this specific post should actually look — pick ONE value from the correct list for that platform —
-  Instagram styles: photorealistic, dramatic, minimalist, warm_residential, cool_commercial, facade_exterior
-  LinkedIn styles: photorealistic, dramatic, minimalist, warm_interior, cool_commercial, facade_exterior
+- "tone": pick ONE — professional, inspirational, educational, casual, promotional
+- "suggested_style": how this specific post should actually look — pick ONE — photorealistic, dramatic, minimalist, warm_residential, cool_commercial, facade_exterior
   Base this on the topic and angle, not just the tone — e.g. a comparison/breakdown topic should usually be minimalist, a before/after topic should usually be dramatic, an exterior/landscape topic should usually be facade_exterior.
-- "suggested_aspect_ratio": pick ONE value from the correct list for that platform —
-  Instagram: 1:1, 4:5, 1.91:1
-  LinkedIn: 1.91:1, 1:1, 4:5
+- "suggested_aspect_ratio": pick ONE — 1:1, 4:5, 1.91:1
 - "series": a short recurring-series name if this post is a deliberate weekly/monthly repeat format (e.g. "Tip Tuesday"), or "" if it's a one-off. Check the previous-months history below before inventing a new series name -- continue an existing one if it fits.
 - "design_tip": a real creative-direction note (2-4 full sentences) on how to actually design this post's visual — written the way you'd genuinely brief a photographer or designer, not a generic platitude. Cover the mood/lighting, the framing or composition, and what should be in or out of frame. This is the ONLY place visual guidance shows up to the user, so it needs to stand on its own without a separate style label next to it.
 
@@ -2201,7 +2318,7 @@ PLATFORMS: ${platforms.join(', ')}
 DATE RANGE: ${startDate} to ${endDate}
 ${countLine}
 ${cadenceSection}${timeSection}${ramadanTimeNote}${holidaySection}
-${featuredProductsSection}${seedPostsSection}${existingIdeasSection}${contentMixSection}${pastIdeasSection}
+${featuredProductsSection}${seedPostsSection}${existingIdeasSection}${contentMixSection}${pastIdeasSection}${varietySection}
 Now produce the plan for the request above, following all the rules already given.`;
 
 return [{
@@ -2214,7 +2331,7 @@ return [{
     _posting_days: postingDays,
     _default_time: defaultTime,
   }
-}];"""
+}];""")
 
 PARSE_VALIDATE_PLAN_JS = r"""const response = $input.first().json;
 const bounds   = $('Build Prompt').first().json;
@@ -2238,18 +2355,15 @@ try {
 
 const startDate = bounds._start_date;
 const endDate   = bounds._end_date;
-const allowedPlatforms = bounds._platforms || ['instagram', 'linkedin'];
+const allowedPlatforms = bounds._platforms || ['instagram'];
 const postingDays = bounds._posting_days || []; // e.g. ['sun','tue','thu'] — [] means no constraint
 const defaultTime = bounds._default_time || '19:00';
 
 const igTones = ['professional', 'inspirational', 'educational', 'casual', 'promotional'];
-const liTones = ['thought_leader', 'executive', 'technical_expert', 'warm_human', 'promotional'];
 
 const igStyles = ['photorealistic', 'dramatic', 'minimalist', 'warm_residential', 'cool_commercial', 'facade_exterior'];
-const liStyles = ['photorealistic', 'dramatic', 'minimalist', 'warm_interior', 'cool_commercial', 'facade_exterior'];
 
 const igAspects = ['1:1', '4:5', '1.91:1'];
-const liAspects = ['1.91:1', '1:1', '4:5'];
 
 const OBJECTIVES = ['Awareness', 'Engagement', 'Sales/Leads', 'Trust/Credibility', 'Community'];
 
@@ -2287,24 +2401,20 @@ const posts = (parsed.posts || [])
   .filter(p => p && p.platform && p.date && p.topic)
   .filter(p => allowedPlatforms.includes(p.platform))
   .map(p => {
-    const platform = p.platform === 'linkedin' ? 'linkedin' : 'instagram';
+    const platform = 'instagram';
     let date = p.date;
     if (date < startDate) date = startDate;
     if (date > endDate) date = endDate;
     date = enforcePostingDay(date);
 
-    const fallbackTime = platform === 'linkedin' ? '10:00' : defaultTime;
+    const fallbackTime = defaultTime;
     const time = validTime(p.time, fallbackTime);
 
-    const validTones = platform === 'linkedin' ? liTones : igTones;
-    const tone = validTones.includes(p.tone) ? p.tone : (platform === 'linkedin' ? 'thought_leader' : 'professional');
+    const tone = igTones.includes(p.tone) ? p.tone : 'professional';
 
-    const validStyles = platform === 'linkedin' ? liStyles : igStyles;
-    const suggestedStyle = validStyles.includes(p.suggested_style) ? p.suggested_style : 'photorealistic';
+    const suggestedStyle = igStyles.includes(p.suggested_style) ? p.suggested_style : 'photorealistic';
 
-    const validAspects = platform === 'linkedin' ? liAspects : igAspects;
-    const defaultAspect = platform === 'linkedin' ? '1.91:1' : '1:1';
-    const suggestedAspectRatio = validAspects.includes(p.suggested_aspect_ratio) ? p.suggested_aspect_ratio : defaultAspect;
+    const suggestedAspectRatio = igAspects.includes(p.suggested_aspect_ratio) ? p.suggested_aspect_ratio : '1:1';
 
     const objective = OBJECTIVES.includes(p.objective) ? p.objective : 'Awareness';
 
@@ -2526,7 +2636,7 @@ def _http_save_video_url(x: int, y: int) -> dict:
     Video Render node directly (not this node's own input) — same reason
     Aggregate Uploaded Images reads Split Pending Uploads directly: an
     HTTP node's own passthrough of upstream $json isn't reliable to lean on."""
-    table_expr = "( $('Video: Render').item.json.platform === 'linkedin' ? 'linkedin_generated_posts' : 'instagram_generated_posts' )"
+    table_expr = "'instagram_generated_posts'"
     return {
         "parameters": {
             "method": "PATCH",
@@ -2611,7 +2721,7 @@ def _build_content_generation_workflow(
     supabase_table: str,
 ) -> dict:
     """
-    Shared node graph for the Instagram and LinkedIn Content Generation v2
+    Node graph for the Instagram Content Generation v2
     workflows — same structure, same node names, same webhook responseMode
     (responseNode), differing only in webhook path / JS bodies / DB table.
 
@@ -2686,15 +2796,6 @@ def build_instagram() -> dict:
     )
 
 
-def build_linkedin() -> dict:
-    return _build_content_generation_workflow(
-        workflow_name="Arak Lighting – Linkedin Content Generation v2",
-        sticky_content=LINKEDIN_STICKY,
-        webhook_path="arak-li-plan-generation",
-        split_ideas_js=LINKEDIN_SPLIT_IDEAS_JS,
-        generate_post_js=LINKEDIN_GENERATE_POST_JS,
-        supabase_table="linkedin_generated_posts",
-    )
 
 
 def build_caption_studio() -> dict:
@@ -5070,1652 +5171,6 @@ def build_instagram_manual_generation() -> dict:
 }""")
 
 
-def build_linkedin_manual_generation() -> dict:
-    """
-    Ported from the original manual LinkedIn workflow (Tavily trend search
-    + Claude + FLUX) via the same secret-substitution pass. One extra fix
-    beyond the standard pattern: a live Tavily API key was hardcoded inside
-    jsonBody on two nodes, missed by the generic Anthropic/Replicate/Supabase
-    stripper — rewritten as a proper `={{ JSON.stringify(...) }}` expression
-    referencing $env.TAVILY_API_KEY (jsonBody without a leading = is static
-    text in n8n; {{ }} inside it does not get evaluated).
-    """
-    return json.loads(r"""{
-  "name": "Arak Lighting – LinkedIn Manual Generation",
-  "nodes": [
-    {
-      "parameters": {
-        "content": "## Arak Lighting – LinkedIn Manual Generation\n\n**Zero secrets in this file.** Needs `ANTHROPIC_API_KEY`, `REPLICATE_API_TOKEN`, `SUPABASE_URL`, `SUPABASE_KEY`, `TAVILY_API_KEY`.\n\nHandles all real-time requests from the LinkedIn Studio tab, routed by `route_type` (trend-aware full post / content regen / image-only regen / tone sync) — Tavily search grounds the \"trend\" variants in real current search results before Claude writes the post.\n\nWebhook path: `/arak-linkedin`.\n\nPorted via secret-substitution, structure untouched. Three real fixes beyond the standard Anthropic/Replicate/Supabase substitution:\n1. A live Tavily API key (`tvly-dev-...`) was hardcoded inside `jsonBody` on both \"Tavily: Trend Search\" and \"Tavily: Post Regen\" — missed by the generic secret-stripper since it only knew Anthropic/Replicate/Supabase shapes. Fixed by rewriting the whole `jsonBody` as a proper `={{ JSON.stringify({ api_key: $env.TAVILY_API_KEY, ... }) }}` expression (a `jsonBody` without a leading `=` is static text in n8n — `{{ }}` inside it does NOT get evaluated, so a bare string-replace leaving off the `=` prefix would have shipped a broken/unexpanded placeholder).\n2. All 4 Claude post-writing nodes (\"Claude: Trend Post\", \"Claude: Instructions Post\", \"Claude: Post Regen Trend\", \"Claude: Post Regen Instr\") were pinned to a very stale dated snapshot `claude-sonnet-4-20250514` — now `claude-sonnet-5`, matching this codebase's convention.\n3. \"Claude: Rewrite Image Prompt\" and \"Claude: Tone Sync\" were already on a correctly-dated current model (`claude-haiku-4-5-20251001`) — left as-is.",
-        "height": 460,
-        "width": 520
-      },
-      "id": "sticky-li-manual-gen",
-      "name": "Note: Overview",
-      "type": "n8n-nodes-base.stickyNote",
-      "typeVersion": 1,
-      "position": [
-        4624,
-        8880
-      ]
-    },
-    {
-      "parameters": {
-        "httpMethod": "POST",
-        "path": "arak-linkedin",
-        "responseMode": "responseNode",
-        "options": {}
-      },
-      "id": "0d3348b4-5df6-4e6e-9e1a-d0a3be7006de",
-      "name": "Webhook",
-      "type": "n8n-nodes-base.webhook",
-      "typeVersion": 2,
-      "position": [
-        4624,
-        10144
-      ],
-      "webhookId": "arak-linkedin-manual-001"
-    },
-    {
-      "parameters": {
-        "assignments": {
-          "assignments": [
-            {
-              "id": "si-1",
-              "name": "safe_topic",
-              "type": "string",
-              "value": "={{ ($json.body.topic || '').replace(/[\\n\\r\\t]/g, ' ').replace(/\"/g, \"'\").trim() }}"
-            },
-            {
-              "id": "si-2",
-              "name": "safe_instructions",
-              "type": "string",
-              "value": "={{ ($json.body.instructions || '').replace(/[\\n\\r\\t]/g, ' ').replace(/\"/g, \"'\").trim() }}"
-            },
-            {
-              "id": "si-3",
-              "name": "safe_current_post",
-              "type": "string",
-              "value": "={{ ($json.body.current_post || '').replace(/[\\n\\r\\t]/g, ' ').replace(/\"/g, \"'\").slice(0, 800) }}"
-            },
-            {
-              "id": "si-4",
-              "name": "tone",
-              "type": "string",
-              "value": "={{ $json.body.tone || 'thought_leader' }}"
-            },
-            {
-              "id": "si-5",
-              "name": "route_type",
-              "type": "string",
-              "value": "={{ $json.body.route_type }}"
-            },
-            {
-              "id": "si-6",
-              "name": "content_route",
-              "type": "string",
-              "value": "={{ $json.body.content_route || 'instructions' }}"
-            },
-            {
-              "id": "si-7",
-              "name": "post_type",
-              "type": "string",
-              "value": "={{ $json.body.post_type || 'thought_leadership' }}"
-            },
-            {
-              "id": "si-8",
-              "name": "include_image",
-              "type": "boolean",
-              "value": "={{ $json.body.include_image === true }}"
-            },
-            {
-              "id": "si-9",
-              "name": "style",
-              "type": "string",
-              "value": "={{ $json.body.style || 'photorealistic' }}"
-            },
-            {
-              "id": "si-10",
-              "name": "image_prompt",
-              "type": "string",
-              "value": "={{ ($json.body.image_prompt || '').replace(/[\\n\\r\\t]/g, ' ').replace(/\"/g, \"'\") }}"
-            },
-            {
-              "id": "si-11",
-              "name": "aspect_ratio",
-              "type": "string",
-              "value": "={{ $json.body.aspect_ratio || '1.91:1' }}"
-            },
-            {
-              "id": "si-12",
-              "name": "campaign_id",
-              "type": "string",
-              "value": "={{ $json.body.campaignId || '' }}"
-            },
-            {
-              "id": "si-13",
-              "name": "current_hook",
-              "type": "string",
-              "value": "={{ ($json.body.current_hook || '').replace(/[\\n\\r\\t]/g, ' ').replace(/\"/g, \"'\").slice(0, 200) }}"
-            },
-            {
-              "id": "si-14",
-              "name": "current_body",
-              "type": "string",
-              "value": "={{ ($json.body.current_body || '').replace(/[\\n\\r\\t]/g, ' ').replace(/\"/g, \"'\").slice(0, 800) }}"
-            }
-          ]
-        },
-        "options": {}
-      },
-      "id": "93d9c09f-d0e2-465f-b8fd-06d04cb604a8",
-      "name": "Sanitize Inputs",
-      "type": "n8n-nodes-base.set",
-      "typeVersion": 3.4,
-      "position": [
-        4864,
-        10144
-      ]
-    },
-    {
-      "parameters": {
-        "rules": {
-          "values": [
-            {
-              "conditions": {
-                "options": {
-                  "caseSensitive": false,
-                  "leftValue": "",
-                  "typeValidation": "strict",
-                  "version": 1
-                },
-                "conditions": [
-                  {
-                    "leftValue": "={{ $('Sanitize Inputs').item.json.route_type }}",
-                    "rightValue": "full",
-                    "operator": {
-                      "type": "string",
-                      "operation": "equals"
-                    }
-                  }
-                ],
-                "combinator": "and"
-              },
-              "renameOutput": true,
-              "outputKey": "full"
-            },
-            {
-              "conditions": {
-                "options": {
-                  "caseSensitive": false,
-                  "leftValue": "",
-                  "typeValidation": "strict",
-                  "version": 1
-                },
-                "conditions": [
-                  {
-                    "leftValue": "={{ $('Sanitize Inputs').item.json.route_type }}",
-                    "rightValue": "post_only",
-                    "operator": {
-                      "type": "string",
-                      "operation": "equals"
-                    }
-                  }
-                ],
-                "combinator": "and"
-              },
-              "renameOutput": true,
-              "outputKey": "post_only"
-            },
-            {
-              "conditions": {
-                "options": {
-                  "caseSensitive": false,
-                  "leftValue": "",
-                  "typeValidation": "strict",
-                  "version": 1
-                },
-                "conditions": [
-                  {
-                    "leftValue": "={{ $('Sanitize Inputs').item.json.route_type }}",
-                    "rightValue": "image_only",
-                    "operator": {
-                      "type": "string",
-                      "operation": "equals"
-                    }
-                  }
-                ],
-                "combinator": "and"
-              },
-              "renameOutput": true,
-              "outputKey": "image_only"
-            },
-            {
-              "conditions": {
-                "options": {
-                  "caseSensitive": false,
-                  "leftValue": "",
-                  "typeValidation": "strict",
-                  "version": 1
-                },
-                "conditions": [
-                  {
-                    "leftValue": "={{ $('Sanitize Inputs').item.json.route_type }}",
-                    "rightValue": "tone_sync",
-                    "operator": {
-                      "type": "string",
-                      "operation": "equals"
-                    }
-                  }
-                ],
-                "combinator": "and"
-              },
-              "renameOutput": true,
-              "outputKey": "tone_sync"
-            }
-          ]
-        },
-        "options": {
-          "fallbackOutput": "extra"
-        }
-      },
-      "id": "08defdd1-49a0-4522-83c0-3a7385d7be4b",
-      "name": "Route Type?",
-      "type": "n8n-nodes-base.switch",
-      "typeVersion": 3,
-      "position": [
-        5136,
-        10096
-      ]
-    },
-    {
-      "parameters": {
-        "conditions": {
-          "options": {
-            "caseSensitive": false,
-            "leftValue": "",
-            "typeValidation": "strict",
-            "version": 1
-          },
-          "conditions": [
-            {
-              "id": "cr-1",
-              "leftValue": "={{ $('Sanitize Inputs').item.json.content_route }}",
-              "rightValue": "trend",
-              "operator": {
-                "type": "string",
-                "operation": "equals"
-              }
-            }
-          ],
-          "combinator": "and"
-        },
-        "options": {}
-      },
-      "id": "e86d2891-76ce-4bb6-98a4-64bdfa65ef67",
-      "name": "Content Route?",
-      "type": "n8n-nodes-base.if",
-      "typeVersion": 2.1,
-      "position": [
-        5472,
-        9744
-      ]
-    },
-    {
-      "parameters": {
-        "method": "POST",
-        "url": "https://api.tavily.com/search",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "Content-Type",
-              "value": "application/json"
-            }
-          ]
-        },
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ api_key: $env.TAVILY_API_KEY, query: \"architectural lighting industry trends 2026 Saudi Arabia Vision 2030 LinkedIn B2B\", search_depth: \"basic\", max_results: 5, include_answer: true }) }}",
-        "options": {}
-      },
-      "id": "d80fa34b-ac95-4aa3-beeb-70efa564ddbf",
-      "name": "Tavily: Trend Search",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [
-        5712,
-        9616
-      ]
-    },
-    {
-      "parameters": {
-        "method": "POST",
-        "url": "https://api.anthropic.com/v1/messages",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "x-api-key",
-              "value": "={{ $env.ANTHROPIC_API_KEY }}"
-            },
-            {
-              "name": "anthropic-version",
-              "value": "2023-06-01"
-            },
-            {
-              "name": "content-type",
-              "value": "application/json"
-            }
-          ]
-        },
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={\n  \"model\": \"claude-sonnet-5\",\n  \"max_tokens\": 1500,\n  \"messages\": [{\n    \"role\": \"user\",\n    \"content\": \"You are a LinkedIn content strategist for Arak Lighting — Saudi Arabia's leading architectural lighting company with 45+ years of experience. Notable projects: Solitaire Mall, King Fahad Airport, Ritz Carlton Riyadh, major Vision 2030 developments.\\n\\nAudience: architects, interior designers, real estate developers, hospitality directors, procurement managers, and C-suite executives across the GCC.\\n\\nCURRENT INDUSTRY TRENDS:\\n{{ $json.answer || '' }}\\n\\nTONE: {{ $('Sanitize Inputs').item.json.tone }}\\nPOST TYPE: {{ $('Sanitize Inputs').item.json.post_type }}\\n\\nTONE GUIDE:\\n- thought_leader: authoritative insights, industry expertise, forward-looking\\n- executive: formal, strategic, C-suite peers\\n- technical_expert: precise, data-driven, specs and performance\\n- warm_human: personal storytelling, behind-the-scenes authenticity\\n- promotional: achievement-focused, project showcases, milestones\\n\\nLINKEDIN POST RULES:\\n1. HOOK (first line, max 12 words): bold, surprising, or curiosity-provoking. Shows before 'see more'.\\n2. BODY: 150-250 words, line breaks every 2-3 sentences. Numbered lists or bullets sparingly.\\n3. CTA: end with a genuine question to spark comments.\\n4. HASHTAGS: exactly 4-5 — NOT in body, separate field.\\n5. No clichés: no 'In today's fast-paced world', no 'We are excited to announce'.\\n\\nWrite a LinkedIn post based on the trends. Return ONLY valid JSON, no markdown:\\n{\\\"hook\\\": \\\"first line only\\\", \\\"body\\\": \\\"post body after hook, line breaks as \\\\n\\\", \\\"hashtags\\\": \\\"#ArakLighting #ArchitecturalLighting [3 more]\\\", \\\"image_prompt\\\": \\\"detailed prompt for professional LinkedIn visual, max 80 words, wide 1.91:1\\\", \\\"trending_angle\\\": \\\"one sentence on what trend this taps\\\"}\"\n  }]\n}",
-        "options": {}
-      },
-      "id": "f395c8fa-24a3-4335-8e77-0d8c2d0ec6d2",
-      "name": "Claude: Trend Post",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [
-        5952,
-        9616
-      ]
-    },
-    {
-      "parameters": {
-        "method": "POST",
-        "url": "https://api.anthropic.com/v1/messages",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "x-api-key",
-              "value": "={{ $env.ANTHROPIC_API_KEY }}"
-            },
-            {
-              "name": "anthropic-version",
-              "value": "2023-06-01"
-            },
-            {
-              "name": "content-type",
-              "value": "application/json"
-            }
-          ]
-        },
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={\n  \"model\": \"claude-sonnet-5\",\n  \"max_tokens\": 1500,\n  \"messages\": [{\n    \"role\": \"user\",\n    \"content\": \"You are a LinkedIn content strategist for Arak Lighting — Saudi Arabia's leading architectural lighting company with 45+ years of experience. Notable projects: Solitaire Mall, King Fahad Airport, Ritz Carlton Riyadh, Vision 2030.\\n\\nAudience: architects, interior designers, real estate developers, hospitality directors, procurement managers, C-suite across GCC.\\n\\nTOPIC: {{ $('Sanitize Inputs').item.json.safe_topic }}\\nTONE: {{ $('Sanitize Inputs').item.json.tone }}\\nPOST TYPE: {{ $('Sanitize Inputs').item.json.post_type }}\\n\\nBRAND INSTRUCTIONS:\\n{{ $('Sanitize Inputs').item.json.safe_instructions }}\\n\\nTONE GUIDE:\\n- thought_leader: authoritative insights, forward-looking perspective\\n- executive: formal, strategic, C-suite peers\\n- technical_expert: precise, data-driven\\n- warm_human: personal storytelling, authentic\\n- promotional: achievement-focused, milestones\\n\\nPOST TYPE GUIDE:\\n- thought_leadership: big idea, contrarian take, industry insight\\n- project_case_study: specific project, measurable impact\\n- team_spotlight: people, culture, behind the scenes\\n- industry_insight: data, research, market observation\\n- milestone_award: achievement, anniversary, recognition\\n- job_opening: recruitment, culture story\\n- product_launch: new product, innovation, technical feature\\n\\nLINKEDIN POST RULES:\\n1. HOOK (first line, max 12 words): bold, surprising, curiosity-provoking.\\n2. BODY: 150-250 words, line breaks every 2-3 sentences.\\n3. CTA: genuine question for comments.\\n4. HASHTAGS: exactly 4-5 — separate field.\\n5. No clichés.\\n\\nReturn ONLY valid JSON, no markdown:\\n{\\\"hook\\\": \\\"first line only\\\", \\\"body\\\": \\\"post body after hook, line breaks as \\\\n\\\", \\\"hashtags\\\": \\\"#ArakLighting #ArchitecturalLighting [3 more]\\\", \\\"image_prompt\\\": \\\"detailed prompt for professional LinkedIn visual, max 80 words\\\", \\\"post_strategy\\\": \\\"one sentence on why this format and angle works\\\"}\"\n  }]\n}",
-        "options": {}
-      },
-      "id": "27f228ef-2480-4584-88b4-d1ecead0ce54",
-      "name": "Claude: Instructions Post",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [
-        5824,
-        9856
-      ]
-    },
-    {
-      "parameters": {
-        "jsCode": "const raw = $input.first().json.content?.find(b=>b.type==='text')?.text || '';\nconst clean = raw.replace(/```json|```/g,'').trim();\nlet parsed;\ntry { parsed = JSON.parse(clean); }\ncatch(e) {\n  const match = clean.match(/\\{[\\s\\S]*\\}/);\n  if (match) { try { parsed = JSON.parse(match[0]); } catch(e2) { throw new Error('Cannot parse: ' + clean.slice(0,200)); } }\n  else throw new Error('No JSON found: ' + clean.slice(0,200));\n}\nconst si = $('Sanitize Inputs').first().json;\nreturn [{json: {\n  hook:           parsed.hook || '',\n  body:           parsed.body || '',\n  hashtags:       parsed.hashtags || '#ArakLighting #ArchitecturalLighting',\n  image_prompt:   parsed.image_prompt || '',\n  trending_angle: parsed.trending_angle || '',\n  post_strategy:  parsed.post_strategy || '',\n  topic:          si.safe_topic,\n  tone:           si.tone,\n  post_type:      si.post_type,\n  style:          si.style,\n  content_route:  si.content_route,\n  include_image:  si.include_image,\n  aspect_ratio:   si.aspect_ratio,\n}}];"
-      },
-      "id": "70920dd6-c5f7-42a1-a0d8-d7d5f761f17e",
-      "name": "Parse Post",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        6240,
-        9744
-      ]
-    },
-    {
-      "parameters": {
-        "conditions": {
-          "options": {
-            "caseSensitive": false,
-            "leftValue": "",
-            "typeValidation": "strict",
-            "version": 1
-          },
-          "conditions": [
-            {
-              "id": "img-1",
-              "leftValue": "={{ $('Sanitize Inputs').item.json.include_image }}",
-              "rightValue": true,
-              "operator": {
-                "type": "boolean",
-                "operation": "equals"
-              }
-            }
-          ],
-          "combinator": "and"
-        },
-        "options": {}
-      },
-      "id": "bb4f6266-6f30-47c5-9312-1d7fb0dc4ca3",
-      "name": "Include Image?",
-      "type": "n8n-nodes-base.if",
-      "typeVersion": 2.1,
-      "position": [
-        6432,
-        9744
-      ]
-    },
-    {
-      "parameters": {
-        "jsCode": "const styleMap = {\n  \"photorealistic\":   \"architectural photography, Canon EOS R5, professional lighting, hyper-detailed, 4K, wide format\",\n  \"dramatic\":         \"cinematic lighting, deep shadows, high contrast, noir atmosphere, professional corporate\",\n  \"minimalist\":       \"clean lines, soft diffused light, Scandinavian aesthetic, white space, elegant\",\n  \"warm_interior\":    \"warm amber tones, luxury interior, golden hour, premium hospitality space\",\n  \"cool_commercial\":  \"cool white 5000K, modern commercial architecture, crisp, glass and steel, corporate luxury\",\n  \"facade_exterior\":  \"architectural exterior night photography, facade illumination, dramatic night sky\"\n};\nconst si = $('Sanitize Inputs').first().json;\nconst base = $('Parse Post').first().json.image_prompt || si.safe_topic || 'architectural lighting';\nconst styleStr = styleMap[si.style] || styleMap['photorealistic'];\nconst finalPrompt = base + ', ' + styleStr + ', Arak Lighting Saudi Arabia, ultra high detail, professional LinkedIn visual, wide 16:9 composition';\nreturn [{json: { final_prompt: finalPrompt, style: si.style }}];"
-      },
-      "id": "254bcc09-af1c-43e8-9fe6-cb7e7efa76e3",
-      "name": "Build Image Prompt",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        6640,
-        9600
-      ]
-    },
-    {
-      "parameters": {
-        "method": "POST",
-        "url": "https://api.replicate.com/v1/models/black-forest-labs/flux-schnell/predictions",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "Authorization",
-              "value": "=Bearer {{ $env.REPLICATE_API_TOKEN }}"
-            },
-            {
-              "name": "Content-Type",
-              "value": "application/json"
-            },
-            {
-              "name": "Prefer",
-              "value": "wait"
-            }
-          ]
-        },
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={\n  \"input\": {\n    \"prompt\": \"{{ $json.final_prompt }}\",\n    \"aspect_ratio\": \"{{ $('Sanitize Inputs').item.json.aspect_ratio === '1.91:1' ? '3:2' : $('Sanitize Inputs').item.json.aspect_ratio || '3:2' }}\",\n    \"output_format\": \"webp\",\n    \"output_quality\": 90,\n    \"num_outputs\": 1\n  }\n}",
-        "options": {}
-      },
-      "id": "1b7f2f49-bdfb-45bb-bfba-1b378673084a",
-      "name": "FLUX: Start Prediction",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [
-        6848,
-        9600
-      ]
-    },
-    {
-      "parameters": {
-        "amount": 8
-      },
-      "id": "0583742e-6c05-4602-9dd5-368b79304bb3",
-      "name": "Wait 8s",
-      "type": "n8n-nodes-base.wait",
-      "typeVersion": 1.1,
-      "position": [
-        7040,
-        9600
-      ],
-      "webhookId": "linkedin-manual-wait-001"
-    },
-    {
-      "parameters": {
-        "url": "=https://api.replicate.com/v1/predictions/{{ $('FLUX: Start Prediction').item.json.id }}",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "Authorization",
-              "value": "=Bearer {{ $env.REPLICATE_API_TOKEN }}"
-            }
-          ]
-        },
-        "options": {}
-      },
-      "id": "32c8753e-4ae5-40f7-986b-f2ea82306a62",
-      "name": "FLUX: Poll Status",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [
-        7264,
-        9600
-      ]
-    },
-    {
-      "parameters": {
-        "conditions": {
-          "options": {
-            "caseSensitive": false,
-            "leftValue": "",
-            "typeValidation": "strict",
-            "version": 1
-          },
-          "conditions": [
-            {
-              "id": "ir-1",
-              "leftValue": "={{ $json.status }}",
-              "rightValue": "succeeded",
-              "operator": {
-                "type": "string",
-                "operation": "equals"
-              }
-            }
-          ],
-          "combinator": "and"
-        },
-        "options": {}
-      },
-      "id": "538a0245-7a99-4f05-99f9-f7be8375fec3",
-      "name": "Image Ready?",
-      "type": "n8n-nodes-base.if",
-      "typeVersion": 2.1,
-      "position": [
-        7456,
-        9600
-      ]
-    },
-    {
-      "parameters": {
-        "respondWith": "json",
-        "responseBody": "={{ JSON.stringify({ success: true, route_type: \"full\", content_route: $(\"Sanitize Inputs\").item.json.content_route, hook: $(\"Parse Post\").item.json.hook, body: $(\"Parse Post\").item.json.body, hashtags: $(\"Parse Post\").item.json.hashtags, image_url: $(\"Set Permanent Image URL\").item.json.permanent_image_url, image_prompt: $(\"Parse Post\").item.json.image_prompt, trending_angle: $(\"Parse Post\").item.json.trending_angle, post_strategy: $(\"Parse Post\").item.json.post_strategy, include_image: true, supabase_id: $(\"Supabase: Save Manual Post\").item.json[0]?.id || $(\"Supabase: Save Manual Post\").item.json?.id || \"\" }) }}",
-        "options": {}
-      },
-      "id": "0badd5ab-ef1f-4076-9d0d-78cd63fdca6a",
-      "name": "Respond: Full + Image",
-      "type": "n8n-nodes-base.respondToWebhook",
-      "typeVersion": 1.1,
-      "position": [
-        8560,
-        9472
-      ]
-    },
-    {
-      "parameters": {
-        "respondWith": "json",
-        "responseBody": "{\"success\":false,\"error\":\"Image generation timed out. Post text is ready — try regenerating the image.\"}",
-        "options": {
-          "responseCode": 202
-        }
-      },
-      "id": "e094c470-e06d-4e3d-a756-fe0a9d9f6f5a",
-      "name": "Respond: Image Timeout",
-      "type": "n8n-nodes-base.respondToWebhook",
-      "typeVersion": 1.1,
-      "position": [
-        7664,
-        9760
-      ]
-    },
-    {
-      "parameters": {
-        "respondWith": "json",
-        "responseBody": "={{ JSON.stringify({ success: true, route_type: \"full\", content_route: $(\"Sanitize Inputs\").item.json.content_route, hook: $(\"Parse Post\").item.json.hook, body: $(\"Parse Post\").item.json.body, hashtags: $(\"Parse Post\").item.json.hashtags, image_url: null, image_prompt: $(\"Parse Post\").item.json.image_prompt, trending_angle: $(\"Parse Post\").item.json.trending_angle, post_strategy: $(\"Parse Post\").item.json.post_strategy, include_image: false }) }}",
-        "options": {}
-      },
-      "id": "1a13eba3-fe91-470e-b6cc-50d835f892b1",
-      "name": "Respond: Full No Image",
-      "type": "n8n-nodes-base.respondToWebhook",
-      "typeVersion": 1.1,
-      "position": [
-        6944,
-        9840
-      ]
-    },
-    {
-      "parameters": {
-        "conditions": {
-          "options": {
-            "caseSensitive": false,
-            "leftValue": "",
-            "typeValidation": "strict",
-            "version": 1
-          },
-          "conditions": [
-            {
-              "id": "pr-1",
-              "leftValue": "={{ $('Sanitize Inputs').item.json.content_route }}",
-              "rightValue": "trend",
-              "operator": {
-                "type": "string",
-                "operation": "equals"
-              }
-            }
-          ],
-          "combinator": "and"
-        },
-        "options": {}
-      },
-      "id": "5fe05313-4665-488c-a4c4-33bf44f794b2",
-      "name": "Post Regen Route?",
-      "type": "n8n-nodes-base.if",
-      "typeVersion": 2.1,
-      "position": [
-        5584,
-        10112
-      ]
-    },
-    {
-      "parameters": {
-        "method": "POST",
-        "url": "https://api.tavily.com/search",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "Content-Type",
-              "value": "application/json"
-            }
-          ]
-        },
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ api_key: $env.TAVILY_API_KEY, query: \"architectural lighting industry trends 2026 Saudi Arabia Vision 2030 LinkedIn B2B\", search_depth: \"basic\", max_results: 5, include_answer: true }) }}",
-        "options": {}
-      },
-      "id": "a75afdc0-949a-4b97-9f05-16f9d763600a",
-      "name": "Tavily: Post Regen",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [
-        5840,
-        10048
-      ]
-    },
-    {
-      "parameters": {
-        "method": "POST",
-        "url": "https://api.anthropic.com/v1/messages",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "x-api-key",
-              "value": "={{ $env.ANTHROPIC_API_KEY }}"
-            },
-            {
-              "name": "anthropic-version",
-              "value": "2023-06-01"
-            },
-            {
-              "name": "content-type",
-              "value": "application/json"
-            }
-          ]
-        },
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={\n  \"model\": \"claude-sonnet-5\",\n  \"max_tokens\": 1500,\n  \"messages\": [{\n    \"role\": \"user\",\n    \"content\": \"You are a LinkedIn content strategist for Arak Lighting, Saudi Arabia's leading architectural lighting company.\\n\\nLATEST TRENDS: {{ $json.answer }}\\nTONE: {{ $('Sanitize Inputs').item.json.tone }}\\n\\nCURRENT POST (write COMPLETELY DIFFERENT — different hook, angle, structure):\\n{{ $('Sanitize Inputs').item.json.safe_current_post }}\\n\\nWrite a fresh LinkedIn post. End with an engaging question.\\n\\nReturn ONLY JSON, no markdown: {\\\"hook\\\": \\\"new bold hook, max 12 words\\\", \\\"body\\\": \\\"full body, line breaks as \\\\n\\\", \\\"hashtags\\\": \\\"#ArakLighting [4 tags total\\\"}\"\n  }]\n}",
-        "options": {}
-      },
-      "id": "3a167c25-6b46-4b02-8fde-113981a84ac7",
-      "name": "Claude: Post Regen Trend",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [
-        6080,
-        10048
-      ]
-    },
-    {
-      "parameters": {
-        "method": "POST",
-        "url": "https://api.anthropic.com/v1/messages",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "x-api-key",
-              "value": "={{ $env.ANTHROPIC_API_KEY }}"
-            },
-            {
-              "name": "anthropic-version",
-              "value": "2023-06-01"
-            },
-            {
-              "name": "content-type",
-              "value": "application/json"
-            }
-          ]
-        },
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={\n  \"model\": \"claude-sonnet-5\",\n  \"max_tokens\": 1500,\n  \"messages\": [{\n    \"role\": \"user\",\n    \"content\": \"You are a LinkedIn content strategist for Arak Lighting, Saudi Arabia's leading architectural lighting company.\\n\\nTOPIC: {{ $('Sanitize Inputs').item.json.safe_topic }}\\nTONE: {{ $('Sanitize Inputs').item.json.tone }}\\nINSTRUCTIONS: {{ $('Sanitize Inputs').item.json.safe_instructions }}\\n\\nCURRENT POST (write COMPLETELY DIFFERENT):\\n{{ $('Sanitize Inputs').item.json.safe_current_post }}\\n\\nWrite a fresh LinkedIn post with a different hook and angle. End with an engaging question.\\n\\nReturn ONLY JSON, no markdown: {\\\"hook\\\": \\\"new bold hook, max 12 words\\\", \\\"body\\\": \\\"full body, line breaks as \\\\n\\\", \\\"hashtags\\\": \\\"#ArakLighting [4 tags total\\\"}\"\n  }]\n}",
-        "options": {}
-      },
-      "id": "ea559b83-c3ea-4d61-b0a9-caff355d8bfb",
-      "name": "Claude: Post Regen Instr",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [
-        5968,
-        10272
-      ]
-    },
-    {
-      "parameters": {
-        "jsCode": "const raw = $input.first().json.content?.find(b=>b.type==='text')?.text || '';\nconst clean = raw.replace(/```json|```/g,'').trim();\nlet parsed;\ntry { parsed = JSON.parse(clean); }\ncatch(e) {\n  const match = clean.match(/\\{[\\s\\S]*\\}/);\n  parsed = match ? JSON.parse(match[0]) : {hook: '', body: clean, hashtags: '#ArakLighting'};\n}\nreturn [{json: { hook: parsed.hook || '', body: parsed.body || '', hashtags: parsed.hashtags || '#ArakLighting' }}];"
-      },
-      "id": "c15f9973-62e4-4bb4-9544-77c930f52132",
-      "name": "Parse Post Regen",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        6352,
-        10144
-      ]
-    },
-    {
-      "parameters": {
-        "respondWith": "json",
-        "responseBody": "={{ JSON.stringify({ success: true, route_type: \"post_only\", hook: $(\"Parse Post Regen\").item.json.hook, body: $(\"Parse Post Regen\").item.json.body, hashtags: $(\"Parse Post Regen\").item.json.hashtags }) }}",
-        "options": {}
-      },
-      "id": "95d90647-175d-4e02-a268-b57b513e74a5",
-      "name": "Respond: Post Regen",
-      "type": "n8n-nodes-base.respondToWebhook",
-      "typeVersion": 1.1,
-      "position": [
-        6592,
-        10144
-      ]
-    },
-    {
-      "parameters": {
-        "method": "POST",
-        "url": "https://api.anthropic.com/v1/messages",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "x-api-key",
-              "value": "={{ $env.ANTHROPIC_API_KEY }}"
-            },
-            {
-              "name": "anthropic-version",
-              "value": "2023-06-01"
-            },
-            {
-              "name": "content-type",
-              "value": "application/json"
-            }
-          ]
-        },
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={\n  \"model\": \"claude-haiku-4-5-20251001\",\n  \"max_tokens\": 300,\n  \"messages\": [{\n    \"role\": \"user\",\n    \"content\": \"You are an expert at writing image generation prompts for professional LinkedIn visuals.\\n\\nTOPIC: {{ $('Sanitize Inputs').item.json.safe_topic || 'architectural lighting' }}\\nORIGINAL PROMPT: {{ $('Sanitize Inputs').item.json.image_prompt }}\\nTARGET STYLE: {{ $('Sanitize Inputs').item.json.style }}\\n\\nSTYLE DEFINITIONS:\\n- photorealistic: Canon EOS R5 professional photography, architectural, hyper-detailed\\n- dramatic: cinematic deep shadows, high contrast, corporate noir\\n- minimalist: clean lines, soft light, elegant white space\\n- warm_interior: warm amber 2700K, luxury interior, golden hour\\n- cool_commercial: cool white 5000K, modern glass and steel, corporate luxury\\n- facade_exterior: architectural exterior night, facade illumination\\n\\nRewrite for the target style. LinkedIn visuals should look authoritative and credible. Wide 1.91:1 format.\\n\\nReturn ONLY the prompt text. Max 100 words.\"\n  }]\n}",
-        "options": {}
-      },
-      "id": "afe03ed1-b823-483b-8250-ba6021c71af6",
-      "name": "Claude: Rewrite Image Prompt",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [
-        5616,
-        10464
-      ]
-    },
-    {
-      "parameters": {
-        "jsCode": "const rewritten = $input.first().json.content?.find(b=>b.type==='text')?.text || '';\nconst si = $('Sanitize Inputs').first().json;\nconst base = rewritten.trim() || si.image_prompt || 'architectural lighting Saudi Arabia';\nconst finalPrompt = base + ', Arak Lighting Saudi Arabia, ultra high detail, professional LinkedIn visual, wide 16:9 composition';\nreturn [{json: { final_prompt: finalPrompt }}];"
-      },
-      "id": "7f2c4a87-bc17-40c6-a320-dbe77249f717",
-      "name": "Build Regen Image Prompt",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        5856,
-        10464
-      ]
-    },
-    {
-      "parameters": {
-        "method": "POST",
-        "url": "https://api.replicate.com/v1/models/black-forest-labs/flux-schnell/predictions",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "Authorization",
-              "value": "=Bearer {{ $env.REPLICATE_API_TOKEN }}"
-            },
-            {
-              "name": "Content-Type",
-              "value": "application/json"
-            },
-            {
-              "name": "Prefer",
-              "value": "wait"
-            }
-          ]
-        },
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={\n  \"input\": {\n    \"prompt\": \"{{ $json.final_prompt }}\",\n    \"aspect_ratio\": \"3:2\",\n    \"output_format\": \"webp\",\n    \"output_quality\": 90,\n    \"num_outputs\": 1\n  }\n}",
-        "options": {}
-      },
-      "id": "4a55664c-8b8e-48a5-a7c0-bef7709a8a45",
-      "name": "FLUX: Regen Image",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [
-        6096,
-        10464
-      ]
-    },
-    {
-      "parameters": {
-        "amount": 8
-      },
-      "id": "a7bd3061-38ed-4952-9c69-412fcc4b5762",
-      "name": "Wait 8s (Regen)",
-      "type": "n8n-nodes-base.wait",
-      "typeVersion": 1.1,
-      "position": [
-        6336,
-        10464
-      ],
-      "webhookId": "linkedin-manual-wait-002"
-    },
-    {
-      "parameters": {
-        "url": "=https://api.replicate.com/v1/predictions/{{ $('FLUX: Regen Image').item.json.id }}",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "Authorization",
-              "value": "=Bearer {{ $env.REPLICATE_API_TOKEN }}"
-            }
-          ]
-        },
-        "options": {}
-      },
-      "id": "b8446421-a25a-4565-8519-35b6df90fe08",
-      "name": "FLUX: Poll Regen",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [
-        6576,
-        10464
-      ]
-    },
-    {
-      "parameters": {
-        "respondWith": "json",
-        "responseBody": "={{ JSON.stringify({ success: true, route_type: \"image_only\", image_url: $(\"Set Permanent Image URL (Regen)\").item.json.permanent_image_url }) }}",
-        "options": {}
-      },
-      "id": "bb6ca0c8-fa3f-4853-a2cc-8e4e6cc236dc",
-      "name": "Respond: Image Only",
-      "type": "n8n-nodes-base.respondToWebhook",
-      "typeVersion": 1.1,
-      "position": [
-        7632,
-        10464
-      ]
-    },
-    {
-      "parameters": {
-        "method": "POST",
-        "url": "https://api.anthropic.com/v1/messages",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "x-api-key",
-              "value": "={{ $env.ANTHROPIC_API_KEY }}"
-            },
-            {
-              "name": "anthropic-version",
-              "value": "2023-06-01"
-            },
-            {
-              "name": "content-type",
-              "value": "application/json"
-            }
-          ]
-        },
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={\n  \"model\": \"claude-haiku-4-5-20251001\",\n  \"max_tokens\": 800,\n  \"messages\": [{\n    \"role\": \"user\",\n    \"content\": \"You are a LinkedIn content expert for Arak Lighting, Saudi Arabia's leading architectural lighting company.\\n\\nTOPIC: {{ $('Sanitize Inputs').item.json.safe_topic }}\\nNEW TONE: {{ $('Sanitize Inputs').item.json.tone }}\\nCURRENT HOOK:\\n{{ $('Sanitize Inputs').item.json.current_hook }}\\nCURRENT BODY:\\n{{ $('Sanitize Inputs').item.json.current_body }}\\n\\nRewrite to match the new tone. Tone guide: thought_leader=authoritative and insightful, executive=formal and strategic, technical_expert=precise and data-driven, warm_human=personal storytelling, promotional=achievement-focused. Keep core message and hashtags identical.\\n\\nReturn ONLY valid JSON, no markdown: {\\\"hook\\\": \\\"rewritten hook\\\", \\\"body\\\": \\\"rewritten body with \\\\n line breaks\\\", \\\"hashtags\\\": \\\"same hashtags\\\"}\"\n  }]\n}",
-        "options": {}
-      },
-      "id": "07024158-fc3f-4335-b793-a24054bfc669",
-      "name": "Claude: Tone Sync",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [
-        5616,
-        10704
-      ]
-    },
-    {
-      "parameters": {
-        "jsCode": "const raw = $input.first().json.content?.find(b=>b.type==='text')?.text || '';\nconst clean = raw.replace(/```json|```/g,'').trim();\nlet parsed;\ntry { parsed = JSON.parse(clean); }\ncatch(e) {\n  const match = clean.match(/\\{[\\s\\S]*\\}/);\n  parsed = match ? JSON.parse(match[0]) : {hook: '', body: clean, hashtags: '#ArakLighting'};\n}\nreturn [{json: { hook: parsed.hook || '', body: parsed.body || '', hashtags: parsed.hashtags || '#ArakLighting' }}];"
-      },
-      "id": "d36a53cc-0ddd-422b-bdea-7db993f6eb41",
-      "name": "Parse Tone Sync",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        5856,
-        10704
-      ]
-    },
-    {
-      "parameters": {
-        "respondWith": "json",
-        "responseBody": "={{ JSON.stringify({ success: true, route_type: \"tone_sync\", hook: $(\"Parse Tone Sync\").item.json.hook, body: $(\"Parse Tone Sync\").item.json.body, hashtags: $(\"Parse Tone Sync\").item.json.hashtags }) }}",
-        "options": {}
-      },
-      "id": "5e26fe2f-43f4-4a89-be54-09673da3c6ec",
-      "name": "Respond: Tone Sync",
-      "type": "n8n-nodes-base.respondToWebhook",
-      "typeVersion": 1.1,
-      "position": [
-        6096,
-        10704
-      ]
-    },
-    {
-      "parameters": {
-        "respondWith": "json",
-        "responseBody": "{\"success\":false,\"error\":\"Invalid route_type. Use: full, post_only, image_only, or tone_sync\"}",
-        "options": {
-          "responseCode": 400
-        }
-      },
-      "id": "c2e222a5-75c6-4fd2-b6f1-bb0283afcdc2",
-      "name": "Respond: Bad Route",
-      "type": "n8n-nodes-base.respondToWebhook",
-      "typeVersion": 1.1,
-      "position": [
-        5616,
-        10896
-      ]
-    },
-    {
-      "parameters": {
-        "url": "={{ $('FLUX: Poll Status').item.json.output?.[0] }}",
-        "options": {}
-      },
-      "id": "8c04223a-e156-4e75-a0a3-2dc7e6437240",
-      "name": "Download from Replicate",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [
-        7664,
-        9472
-      ]
-    },
-    {
-      "parameters": {
-        "method": "POST",
-        "url": "={{ String($env.SUPABASE_URL).replace(/\\/+$/, '') }}/storage/v1/object/linkedin-posts/{{ $now.toMillis() }}-.webp",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "apikey",
-              "value": "={{ $env.SUPABASE_KEY }}"
-            },
-            {
-              "name": "Authorization",
-              "value": "=Bearer {{ $env.SUPABASE_KEY }}"
-            },
-            {
-              "name": "Content-Type",
-              "value": "image/webp"
-            },
-            {
-              "name": "x-upsert",
-              "value": "true"
-            }
-          ]
-        },
-        "sendBody": true,
-        "contentType": "binaryData",
-        "inputDataFieldName": "data",
-        "options": {}
-      },
-      "id": "029cb068-702b-440f-9033-c0c9f7192763",
-      "name": "Upload to Supabase Storage",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [
-        7888,
-        9472
-      ]
-    },
-    {
-      "parameters": {
-        "assignments": {
-          "assignments": [
-            {
-              "id": "linkedin-spu-1",
-              "name": "permanent_image_url",
-              "type": "string",
-              "value": "={{ String($env.SUPABASE_URL).replace(/\\/+$/, '') }}/storage/v1/object/public/linkedin-posts/{{ $('Upload to Supabase Storage').item.json.Key.split('/').pop() }}"
-            },
-            {
-              "id": "linkedin-spu-2",
-              "name": "replicate_url",
-              "type": "string",
-              "value": "={{ $('FLUX: Poll Status').item.json.output?.[0] }}"
-            }
-          ]
-        },
-        "options": {}
-      },
-      "id": "c0c899fe-bc24-488e-82e1-d878368d0715",
-      "name": "Set Permanent Image URL",
-      "type": "n8n-nodes-base.set",
-      "typeVersion": 3.4,
-      "position": [
-        8128,
-        9472
-      ]
-    },
-    {
-      "parameters": {
-        "method": "POST",
-        "url": "={{ String($env.SUPABASE_URL).replace(/\\/+$/, '') }}/rest/v1/linkedin_manual_posts",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "apikey",
-              "value": "={{ $env.SUPABASE_KEY }}"
-            },
-            {
-              "name": "Authorization",
-              "value": "=Bearer {{ $env.SUPABASE_KEY }}"
-            },
-            {
-              "name": "Content-Type",
-              "value": "application/json"
-            },
-            {
-              "name": "Prefer",
-              "value": "return=representation"
-            }
-          ]
-        },
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={ \"topic\": {{ JSON.stringify($(\"Sanitize Inputs\").item.json.safe_topic) }}, \"hook\": {{ JSON.stringify($(\"Parse Post\").item.json.hook) }}, \"body\": {{ JSON.stringify($(\"Parse Post\").item.json.body) }}, \"hashtags\": {{ JSON.stringify($(\"Parse Post\").item.json.hashtags) }}, \"image_url\": {{ JSON.stringify($(\"Set Permanent Image URL\").item.json.permanent_image_url) }}, \"image_prompt\": {{ JSON.stringify($(\"Parse Post\").item.json.image_prompt) }}, \"post_strategy\": {{ JSON.stringify($(\"Parse Post\").item.json.post_strategy) }}, \"trending_angle\": {{ JSON.stringify($(\"Parse Post\").item.json.trending_angle) }}, \"tone\": {{ JSON.stringify($(\"Sanitize Inputs\").item.json.tone) }}, \"style\": {{ JSON.stringify($(\"Sanitize Inputs\").item.json.style) }}, \"aspect_ratio\": {{ JSON.stringify($(\"Sanitize Inputs\").item.json.aspect_ratio) }}, \"post_type\": {{ JSON.stringify($(\"Sanitize Inputs\").item.json.post_type) }}, \"content_route\": {{ JSON.stringify($(\"Sanitize Inputs\").item.json.content_route) }}, \"include_image\": true, \"status\": \"pending_review\", \"source\": \"manual\" }",
-        "options": {}
-      },
-      "id": "dd8d9095-a79a-4111-b2f0-4baf3b85fe8e",
-      "name": "Supabase: Save Manual Post",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [
-        8336,
-        9472
-      ]
-    },
-    {
-      "parameters": {
-        "method": "POST",
-        "url": "={{ String($env.SUPABASE_URL).replace(/\\/+$/, '') }}/rest/v1/linkedin_manual_posts",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "apikey",
-              "value": "={{ $env.SUPABASE_KEY }}"
-            },
-            {
-              "name": "Authorization",
-              "value": "=Bearer {{ $env.SUPABASE_KEY }}"
-            },
-            {
-              "name": "Content-Type",
-              "value": "application/json"
-            },
-            {
-              "name": "Prefer",
-              "value": "return=minimal"
-            }
-          ]
-        },
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={ \"topic\": {{ JSON.stringify($(\"Sanitize Inputs\").item.json.safe_topic) }}, \"hook\": {{ JSON.stringify($(\"Parse Post\").item.json.hook) }}, \"body\": {{ JSON.stringify($(\"Parse Post\").item.json.body) }}, \"hashtags\": {{ JSON.stringify($(\"Parse Post\").item.json.hashtags) }}, \"image_url\": null, \"post_strategy\": {{ JSON.stringify($(\"Parse Post\").item.json.post_strategy) }}, \"tone\": {{ JSON.stringify($(\"Sanitize Inputs\").item.json.tone) }}, \"content_route\": {{ JSON.stringify($(\"Sanitize Inputs\").item.json.content_route) }}, \"include_image\": false, \"status\": \"pending_review\", \"source\": \"manual\" }",
-        "options": {}
-      },
-      "id": "4ee46dd0-c41a-4a18-955a-5742d30f9f08",
-      "name": "Supabase: Save Manual Post (No Image)",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [
-        6736,
-        9840
-      ]
-    },
-    {
-      "parameters": {
-        "url": "={{ $('FLUX: Poll Regen').item.json.output?.[0] }}",
-        "options": {}
-      },
-      "id": "09900ff2-31ec-437c-aca3-5b6fed0bd5ac",
-      "name": "Download from Replicate (Regen)",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [
-        6848,
-        10464
-      ]
-    },
-    {
-      "parameters": {
-        "method": "POST",
-        "url": "={{ String($env.SUPABASE_URL).replace(/\\/+$/, '') }}/storage/v1/object/linkedin-posts/{{ $now.toMillis() }}-.webp",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "apikey",
-              "value": "={{ $env.SUPABASE_KEY }}"
-            },
-            {
-              "name": "Authorization",
-              "value": "=Bearer {{ $env.SUPABASE_KEY }}"
-            },
-            {
-              "name": "Content-Type",
-              "value": "image/webp"
-            },
-            {
-              "name": "x-upsert",
-              "value": "true"
-            }
-          ]
-        },
-        "sendBody": true,
-        "contentType": "binaryData",
-        "inputDataFieldName": "data",
-        "options": {}
-      },
-      "id": "22dc9878-bded-4673-9311-1df0c6413d88",
-      "name": "Upload to Supabase Storage (Regen)",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [
-        7072,
-        10464
-      ]
-    },
-    {
-      "parameters": {
-        "assignments": {
-          "assignments": [
-            {
-              "id": "li-rsu-1",
-              "name": "permanent_image_url",
-              "type": "string",
-              "value": "={{ String($env.SUPABASE_URL).replace(/\\/+$/, '') }}/storage/v1/object/public/linkedin-posts/{{ $('Upload to Supabase Storage (Regen)').item.json.Key.split('/').pop() }}"
-            }
-          ]
-        },
-        "options": {}
-      },
-      "id": "abcce7ad-665e-4c26-9a54-464e815e8987",
-      "name": "Set Permanent Image URL (Regen)",
-      "type": "n8n-nodes-base.set",
-      "typeVersion": 3.4,
-      "position": [
-        7312,
-        10464
-      ]
-    }
-  ],
-  "connections": {
-    "Webhook": {
-      "main": [
-        [
-          {
-            "node": "Sanitize Inputs",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Sanitize Inputs": {
-      "main": [
-        [
-          {
-            "node": "Route Type?",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Route Type?": {
-      "main": [
-        [
-          {
-            "node": "Content Route?",
-            "type": "main",
-            "index": 0
-          }
-        ],
-        [
-          {
-            "node": "Post Regen Route?",
-            "type": "main",
-            "index": 0
-          }
-        ],
-        [
-          {
-            "node": "Claude: Rewrite Image Prompt",
-            "type": "main",
-            "index": 0
-          }
-        ],
-        [
-          {
-            "node": "Claude: Tone Sync",
-            "type": "main",
-            "index": 0
-          }
-        ],
-        [
-          {
-            "node": "Respond: Bad Route",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Content Route?": {
-      "main": [
-        [
-          {
-            "node": "Tavily: Trend Search",
-            "type": "main",
-            "index": 0
-          }
-        ],
-        [
-          {
-            "node": "Claude: Instructions Post",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Tavily: Trend Search": {
-      "main": [
-        [
-          {
-            "node": "Claude: Trend Post",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Claude: Trend Post": {
-      "main": [
-        [
-          {
-            "node": "Parse Post",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Claude: Instructions Post": {
-      "main": [
-        [
-          {
-            "node": "Parse Post",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Parse Post": {
-      "main": [
-        [
-          {
-            "node": "Include Image?",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Include Image?": {
-      "main": [
-        [
-          {
-            "node": "Build Image Prompt",
-            "type": "main",
-            "index": 0
-          }
-        ],
-        [
-          {
-            "node": "Supabase: Save Manual Post (No Image)",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Build Image Prompt": {
-      "main": [
-        [
-          {
-            "node": "FLUX: Start Prediction",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "FLUX: Start Prediction": {
-      "main": [
-        [
-          {
-            "node": "Wait 8s",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Wait 8s": {
-      "main": [
-        [
-          {
-            "node": "FLUX: Poll Status",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "FLUX: Poll Status": {
-      "main": [
-        [
-          {
-            "node": "Image Ready?",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Image Ready?": {
-      "main": [
-        [
-          {
-            "node": "Download from Replicate",
-            "type": "main",
-            "index": 0
-          }
-        ],
-        [
-          {
-            "node": "Respond: Image Timeout",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Post Regen Route?": {
-      "main": [
-        [
-          {
-            "node": "Tavily: Post Regen",
-            "type": "main",
-            "index": 0
-          }
-        ],
-        [
-          {
-            "node": "Claude: Post Regen Instr",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Tavily: Post Regen": {
-      "main": [
-        [
-          {
-            "node": "Claude: Post Regen Trend",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Claude: Post Regen Trend": {
-      "main": [
-        [
-          {
-            "node": "Parse Post Regen",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Claude: Post Regen Instr": {
-      "main": [
-        [
-          {
-            "node": "Parse Post Regen",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Parse Post Regen": {
-      "main": [
-        [
-          {
-            "node": "Respond: Post Regen",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Claude: Rewrite Image Prompt": {
-      "main": [
-        [
-          {
-            "node": "Build Regen Image Prompt",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Build Regen Image Prompt": {
-      "main": [
-        [
-          {
-            "node": "FLUX: Regen Image",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "FLUX: Regen Image": {
-      "main": [
-        [
-          {
-            "node": "Wait 8s (Regen)",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Wait 8s (Regen)": {
-      "main": [
-        [
-          {
-            "node": "FLUX: Poll Regen",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "FLUX: Poll Regen": {
-      "main": [
-        [
-          {
-            "node": "Download from Replicate (Regen)",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Claude: Tone Sync": {
-      "main": [
-        [
-          {
-            "node": "Parse Tone Sync",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Parse Tone Sync": {
-      "main": [
-        [
-          {
-            "node": "Respond: Tone Sync",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Download from Replicate": {
-      "main": [
-        [
-          {
-            "node": "Upload to Supabase Storage",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Upload to Supabase Storage": {
-      "main": [
-        [
-          {
-            "node": "Set Permanent Image URL",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Set Permanent Image URL": {
-      "main": [
-        [
-          {
-            "node": "Supabase: Save Manual Post",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Supabase: Save Manual Post": {
-      "main": [
-        [
-          {
-            "node": "Respond: Full + Image",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Supabase: Save Manual Post (No Image)": {
-      "main": [
-        [
-          {
-            "node": "Respond: Full No Image",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Download from Replicate (Regen)": {
-      "main": [
-        [
-          {
-            "node": "Upload to Supabase Storage (Regen)",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Upload to Supabase Storage (Regen)": {
-      "main": [
-        [
-          {
-            "node": "Set Permanent Image URL (Regen)",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Set Permanent Image URL (Regen)": {
-      "main": [
-        [
-          {
-            "node": "Respond: Image Only",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    }
-  },
-  "active": false,
-  "settings": {
-    "executionOrder": "v1"
-  },
-  "tags": []
-}""")
 
 # ============================================================
 # Creative Studio (2026-08-10) — the marketing team's standalone
@@ -6890,7 +5345,14 @@ if (!basePrompt) return targets.map(t => ({ json: { _ok: false, version_id: t.ve
 // those has a measured reason rather than folklore about prompt styles.
 function buildPrompt(provider){
   let p = basePrompt;
-  if (instructions) p += '\n\nBRAND CONTEXT:\n' + instructions;
+  // The brand block used to be appended with no statement of precedence, so
+  // "make it cool blue" against a warm-bronze palette resolved arbitrarily —
+  // differently run to run. The same reasoning already applied to reference
+  // notes below (a specific instruction beats a default) is now stated for
+  // the brand block too, which is what makes the outcome repeatable.
+  if (instructions) {
+    p += '\n\nBRAND CONTEXT (defaults — the brief above is the specific ask and takes precedence over any default here, except brand guardrails and never-do rules, which are absolute):\n' + instructions;
+  }
   if (referenceUrl) {
     // The team's explicit ask: take inspiration from the reference, do not
     // reproduce it. Their own note wins over the generic wording when both
@@ -8496,7 +6958,21 @@ The result is ALWAYS shown in the composer before anything generates. This
 workflow never triggers a generation itself.
 """
 
-CREATIVE_ENHANCE_JS = _CREATIVE_REQ_JS + r"""
+# safeJson is defined inline in the older Code bodies but NOT in the shared
+# creative request preamble, so Enhance — which now parses a JSON contract to
+# report brand conflicts — brings its own copy.
+_SAFE_JSON_JS = r"""
+function safeJson(t){
+  const c = String(t||'').replace(/```json|```/g,'').trim();
+  try { return JSON.parse(c); } catch(e){
+    const m = c.match(/\{[\s\S]*\}/);
+    if(m){ try { return JSON.parse(m[0]); } catch(_){} }
+    return {};
+  }
+}
+"""
+
+CREATIVE_ENHANCE_JS = _with_brand(_CREATIVE_REQ_JS + _SAFE_JSON_JS + r"""
 const ANTHROPIC = $env.ANTHROPIC_API_KEY;
 
 const body = ($input.first().json.body) || {};
@@ -8515,20 +6991,20 @@ if (!rawPrompt) return [{ json: { ok: false, error: 'Nothing to enhance yet.' } 
 // plus brand context. Sonnet 5 needs a 1024-token prefix to cache at all — if
 // usage.cache_read_input_tokens stays 0 across clicks, this is under the floor
 // and the breakpoint is only paying the write premium; drop it then.
-const IMAGE_RULES = `You rewrite rough image briefs into precise prompts for an AI image generator, for Arak Lighting — Saudi Arabia's leading architectural lighting company (45+ years; Solitaire Mall, King Fahad Airport, Ritz Carlton Riyadh).
+const IMAGE_RULES = `You rewrite rough image briefs into precise prompts for an AI image generator, for ${brandPersona(body)}.
 
 Rules, in priority order:
 
 1. NEVER change the subject. Elaborate what the requester actually asked for. Do not substitute a different idea, setting or mood, however much better it would be.
 2. Do NOT put text, lettering, captions or typography in the image unless the requester explicitly asked for it. Words are added afterwards as a real editable text layer, so an image generated with baked-in text is unusable. If they DID ask for text in the scene, quote their exact string verbatim (Arabic included, character for character) and add: render this text exactly — no other text anywhere in the image.
-3. Add the concrete lighting detail a photographer would need: colour temperature (2700K warm through 4000K neutral to 5000K cool), fixture type and technique (grazing, wall-wash, cove, linear, uplight, downlight, backlight), beam quality, time of day, and how the light reads across the specific materials in frame.
-4. Fill gaps only. Add lighting, framing, lens, materials and colour temperature. Leave subject, setting and mood exactly as stated. If a detail was not implied by the requester, do not invent it.
+3. Add the concrete detail a photographer would need for THIS subject: lighting quality and direction, colour temperature (2700K warm through 4000K neutral to 5000K cool), time of day, lens and framing, surface and material behaviour, depth of field. Ground every choice in the actual subject in front of the camera — the correct detail for a treatment room, a garment on a rail, or an illuminated facade is not the same detail.
+4. Fill gaps only. Leave subject, setting and mood exactly as stated. If a detail was not implied by the requester or by the brand context, do not invent it.
 5. 60–120 words. Do not pad to reach a length; a brief that needed little may come back short.
 6. Write flowing descriptive prose, not a keyword list.
 
-Output the prompt text only. No preamble, no quotes, no markdown, no explanation.`;
+${__PROMPT_RULES__}`;
 
-const MOTION_RULES = `You rewrite rough animation notes into motion prompts for an AI image-to-video model (Seedance, 2–12 second clips), for Arak Lighting.
+const MOTION_RULES = `You rewrite rough animation notes into motion prompts for an AI image-to-video model (Seedance, 2–12 second clips), for ${brandOnly(body)}.
 
 The still image already exists. Rules:
 
@@ -8536,12 +7012,28 @@ The still image already exists. Rules:
 2. One movement, paced to the clip length. A 5-second clip gets one slow move, not three.
 3. House style: slow cinematic pan, gentle dolly in, subtle parallax, soft light bloom, drifting shadow.
 4. Never mention text, captions or titles. Text is composited onto the finished clip afterwards.
-5. Maximum 40 words.
+5. Maximum 40 words.`;
 
-Output the prompt text only. No preamble, no quotes, no markdown.`;
+// Enhance already runs before generation, already receives both the brief and
+// the brand context, and already returns without spending anything on an
+// image. That makes it the one place a brand-vs-prompt conflict can be
+// surfaced BEFORE the paid round, without adding a call of its own.
+//
+// It reports rather than resolves: sometimes the contradiction is deliberate
+// (a Ramadan piece that deliberately drops the usual palette), so the
+// rewritten prompt still follows the requester's ask per the precedence
+// rules — the flag just makes the divergence visible and reversible.
+const OUTPUT_CONTRACT = `
+
+Return ONLY valid JSON, no markdown fences, exactly this shape:
+{"prompt":"the rewritten prompt text, nothing else",
+ "conflicts":[{"field":"what the brand defines, e.g. brand colours","brandRule":"what the brand context says, quoted briefly","promptAsks":"what the requester asked for instead"}]}
+
+"conflicts" lists only DIRECT contradictions between the requester's brief and a brand DEFAULT — a colour, tone, style or format the brand states and the brief overrides. Do not list gaps the brief simply left unspecified, and never list a brand guardrail (those are absolute and you must follow them regardless). Most briefs conflict with nothing: return an empty array.`;
 
 const cachedPrefix = (mode === 'motion' ? MOTION_RULES : IMAGE_RULES)
-  + (instructions ? '\n\nBRAND CONTEXT:\n' + instructions : '');
+  + (instructions ? '\n\nBRAND CONTEXT:\n' + instructions : '')
+  + OUTPUT_CONTRACT;
 
 let variable;
 if (mode === 'motion') {
@@ -8581,14 +7073,27 @@ try {
   // Find the text block by type rather than indexing content[0] — block order
   // is not contractual even with thinking disabled.
   const textBlock = resp.content.find(b => b.type === 'text');
-  const out = String((textBlock && textBlock.text) || '').trim().replace(/^["']|["']$/g, '');
+  const raw = String((textBlock && textBlock.text) || '').trim();
+  if (!raw) throw new Error('The model returned an empty prompt.');
+
+  // Parse the JSON contract, but never fail the whole enhance over it: a
+  // model that answered with a bare prompt string still produced the thing
+  // the user actually clicked for. Conflicts are the bonus, not the payload.
+  let out = '', conflicts = [];
+  const parsed = safeJson(raw);
+  if (parsed && typeof parsed.prompt === 'string' && parsed.prompt.trim()) {
+    out = parsed.prompt.trim();
+    conflicts = Array.isArray(parsed.conflicts) ? parsed.conflicts.filter(c => c && c.field) : [];
+  } else {
+    out = raw.replace(/^["']|["']$/g, '');
+  }
   if (!out) throw new Error('The model returned an empty prompt.');
 
-  return [{ json: { ok: true, prompt: out, mode } }];
+  return [{ json: { ok: true, prompt: out, conflicts, mode } }];
 } catch (err) {
   return [{ json: { ok: false, error: (err && err.message) ? err.message : String(err) } }];
 }
-"""
+""")
 
 
 def _http_creative_upload(source_node: str, mime: str, name: str, x: int, y: int,
@@ -9249,7 +7754,6 @@ if __name__ == "__main__":
 
     workflows = [
         build_instagram(),
-        build_linkedin(),
         build_caption_studio(),
         build_elongate_idea(),
         build_draft_copy(),
@@ -9258,7 +7762,6 @@ if __name__ == "__main__":
         build_campaign_planner(),
         build_instagram_reels(),
         build_instagram_manual_generation(),
-        build_linkedin_manual_generation(),
         build_zernio_publish(),
         build_zernio_sync(),
         build_zernio_dashboard(),

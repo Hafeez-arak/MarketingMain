@@ -257,8 +257,8 @@ export function MediaLibrary() {
                 <div className="flex items-center justify-between gap-1 mt-0.5">
                   <p className="text-[10px] text-text-tertiary">{humanSize(asset.size_bytes)}</p>
                   {asset.platform && (
-                    <span className={`text-[9px] font-bold uppercase tracking-[0.08em] px-1.5 py-0.5 leading-[1.4] ${asset.platform === 'instagram' ? 'bg-pink-100 text-pink-600' : asset.platform === 'linkedin' ? 'bg-blue-100 text-blue-600' : 'bg-stone-100 text-stone-500'}`}>
-                      {asset.platform === 'instagram' ? 'IG' : asset.platform === 'linkedin' ? 'LI' : asset.platform.toUpperCase()}
+                    <span className={`text-[9px] font-bold uppercase tracking-[0.08em] px-1.5 py-0.5 leading-[1.4] ${asset.platform === 'instagram' ? 'bg-pink-100 text-pink-600' : 'bg-stone-100 text-stone-500'}`}>
+                      {asset.platform === 'instagram' ? 'IG' : asset.platform.toUpperCase()}
                     </span>
                   )}
                 </div>

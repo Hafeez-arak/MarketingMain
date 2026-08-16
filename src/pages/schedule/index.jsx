@@ -28,7 +28,7 @@ import { moveKindFor } from '../../lib/scheduledPosts'
 // monthly-plan maps, which meant it showed planning artifacts and never showed
 // a single real scheduled post.
 
-const PLATFORM_FILTERS = ['all', 'instagram', 'linkedin', 'tiktok', 'snapchat', 'facebook', 'x']
+const PLATFORM_FILTERS = ['all', 'instagram', 'tiktok', 'snapchat', 'facebook', 'x']
 
 export function Schedule() {
   const { state } = useApp()
@@ -488,7 +488,6 @@ function ConfirmReschedule({ post, dateKey, time, onCancel, onConfirm }) {
 // ─── Platform picker ───────────────────────────────────────────────────────
 const NEW_POST_PLATFORMS = [
   { key: 'instagram', label: 'Instagram', abbr: 'IG', bg: '#E1306C', desc: 'Posts, Reels, Stories' },
-  { key: 'linkedin',  label: 'LinkedIn',  abbr: 'in', bg: '#0A66C2', desc: 'Articles, Posts, Videos' },
   { key: 'tiktok',    label: 'TikTok',    abbr: 'TT', bg: '#010101', desc: 'Videos' },
   { key: 'snapchat',  label: 'Snapchat',  abbr: 'SC', bg: '#B8A400', desc: 'Spotlight, Stories' },
 ]

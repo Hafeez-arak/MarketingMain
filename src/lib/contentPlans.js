@@ -54,15 +54,22 @@ export async function fetchPlanWithIdeas(workspaceId, accessToken, planId) {
 // workspace, most recent first. Sent to the Campaign Planner as history so a
 // new month doesn't repeat last month's angle — deliberate recurring series
 // (idea.series set) are called out separately as "continue this," not
-// "avoid repeating this." All statuses included (even rejected — the AI
-// shouldn't independently re-propose something that was already turned down
-// either), capped to keep the prompt lean.
+// "avoid repeating this."
+//
+// `status` and `reject_reason` are selected because without them an idea a
+// human REJECTED came back to the planner in the same "already covered,
+// don't repeat" list as one that was approved and published. Those are
+// opposite signals: one means the ground is taken, the other means the brand
+// does not want that shape of idea at all. The workflow now splits them into
+// separate buckets (see pastIdeasSection in gen_workflows.py), which it
+// cannot do unless the status actually travels with the row.
 export async function fetchPastIdeas(workspaceId, accessToken, excludePlanId, limit = 60) {
   if (!workspaceId) return []
   try {
     const res = await fetch(
       `${SUPABASE_URL}/rest/v1/plan_ideas?workspace_id=eq.${workspaceId}&plan_id=neq.${excludePlanId || '00000000-0000-0000-0000-000000000000'}` +
-      `&select=platform,topic,angle,content_pillar,occasion,series,created_at&order=created_at.desc&limit=${limit}`,
+      `&select=platform,topic,angle,content_pillar,occasion,series,status,reject_reason,scheduled_date,created_at` +
+      `&order=created_at.desc&limit=${limit}`,
       { headers: authHeaders(accessToken) }
     )
     if (!res.ok) return []

@@ -28,7 +28,6 @@ export const MONTH_LABELS = ['January', 'February', 'March', 'April', 'May', 'Ju
 export const PLATFORM_COLORS = {
   instagram: { dot: '#E1306C', light: '#fce4f0', label: 'Instagram' },
   facebook:  { dot: '#1877F2', light: '#e8f0fe', label: 'Facebook' },
-  linkedin:  { dot: '#0A66C2', light: '#e1f0fb', label: 'LinkedIn' },
   tiktok:    { dot: '#555555', light: '#f0f0f0', label: 'TikTok' },
   snapchat:  { dot: '#B8A400', light: '#fffbe6', label: 'Snapchat' },
   x:         { dot: '#333333', light: '#f5f5f5', label: 'X / Twitter' },
@@ -168,7 +167,7 @@ export function laneRange(entries) {
 //
 // In the week view a chip is positioned purely by its time, so two posts at
 // 7 PM render at the same offset and the second one hides the first entirely.
-// That is not an edge case: posting to Instagram and LinkedIn at the same
+// That is not an edge case: posting to two accounts at the same
 // moment is normal and deliberate — findCrowding above goes out of its way NOT
 // to flag it — so the layout has to show both.
 //

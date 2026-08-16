@@ -23,11 +23,10 @@ function jsonHeaders(accessToken, prefer = 'return=representation') {
 
 export const POST_TABLES = [
   'instagram_generated_posts',
-  'linkedin_generated_posts',
   'generated_posts',
 ]
 
-// Every post for a workspace, newest first, across all three tables in ONE
+// Every post for a workspace, newest first, across both tables in ONE
 // ordered query — the thing a client-side union cannot do.
 //
 // `from`/`to` filter on scheduled_publish_at for the calendar; omitted, you
@@ -67,25 +66,11 @@ export async function fetchScheduledPosts(workspaceId, accessToken, {
 }
 
 // Write back to the row's own table.
-//
-// LinkedIn is the case that stops this being a pass-through: the view
-// synthesises `caption` from hook + body, so writing `caption` back would put
-// text in a column LinkedIn never reads and leave the real hook/body stale.
-// Patching caption on a LinkedIn row therefore splits it the same way the
-// Studio sheet does — first line is the hook, the rest is the body.
 export async function patchPost(accessToken, postTable, postId, patch) {
   if (!POST_TABLES.includes(postTable)) return { error: `Unknown post table: ${postTable}` }
   if (!postId) return { error: 'No post id.' }
 
   const body = { ...patch, updated_at: new Date().toISOString() }
-  if (postTable === 'linkedin_generated_posts' && typeof body.caption === 'string') {
-    const text = body.caption.trim()
-    const nl = text.indexOf('\n')
-    body.hook = nl > 0 ? text.slice(0, nl).trim() : text
-    body.body = nl > 0 ? text.slice(nl + 1).trim() : ''
-    delete body.caption
-  }
-
   try {
     const res = await fetch(`${SUPABASE_URL}/rest/v1/${postTable}?id=eq.${postId}`, {
       method: 'PATCH',

@@ -5,7 +5,7 @@ import { Card, Button, Input, Textarea, Select, IconBadge, PageHeader } from '..
 import { Icon } from '../../components/ui/icons'
 import { uid } from '../../lib/utils'
 
-const PLATFORMS = ['instagram','facebook','linkedin','tiktok','x']
+const PLATFORMS = ['instagram','facebook','tiktok','x']
 const STATUSES  = ['draft','live','paused','completed']
 const GOALS     = ['Brand awareness','Lead generation','Product launch','Community engagement','Event promotion','Sales & offers']
 

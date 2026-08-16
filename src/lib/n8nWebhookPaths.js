@@ -8,17 +8,15 @@
 // in n8n/workflows/. They are the schema — the host in front of them is
 // runtime config held in Supabase (app_config.n8n_base_url), never in code.
 //
-// The four schedule slots are deliberately absent: no workflow in
-// n8n/workflows/ answers arak-{instagram,linkedin}-schedule[-regen], so there
+// The schedule slots are deliberately absent: no workflow in
+// n8n/workflows/ answers arak-instagram-schedule[-regen], so there
 // is nothing to point them at. Giving them a derived URL anyway would turn
 // today's honest "not configured yet" into a 404 at call time.
 export const WEBHOOK_PATHS = {
   instagram:        'arak-instagram',
   instagramReels:   'arak-instagram-reels',
-  linkedin:         'arak-linkedin',
   campaignPlanner:  'arak-campaign-planner',
   instagramPlanGen: 'arak-ig-plan-generation',
-  linkedinPlanGen:  'arak-li-plan-generation',
   elongateIdea:     'arak-elongate-idea',
   captionStudio:    'arak-caption-studio',
   draftCopy:        'arak-draft-copy',

@@ -1669,7 +1669,7 @@ function PostDetail({ post, state, webhookUrl, regenWebhookUrl, supabaseUrl, ano
             <div className="flex-1 p-6 space-y-4">
 
               {/* Instagram post card preview.
-                  DESIGN-SYSTEM EXCEPTION — see the note in LinkedInPage: this
+                  DESIGN-SYSTEM EXCEPTION: this
                   mimics Instagram's own post chrome (rounded card, round
                   avatar) on purpose, so it stays rounded while the rest of the
                   app is square. */}
@@ -2913,10 +2913,10 @@ function InstructionsAccordion({ state }) {
           <p className="text-xs text-text-tertiary">
             Your core brand voice, dos/don'ts, and audience now live in one place —{' '}
             <button type="button" onClick={() => navigate('/brand-brain')} className="text-purple-600 hover:text-purple-700 underline font-medium">Brand Brain</button>.
-            Use this field only for things specific to Instagram, e.g. Reels-style hooks or emoji usage that wouldn't apply on LinkedIn.
+            Use this field only for things specific to Instagram, e.g. Reels-style hooks or emoji usage.
           </p>
           <Textarea
-            placeholder={"Examples:\n• Lean into emoji more here than on LinkedIn\n• Reels hooks should be punchy, under 6 words\n• Carousel posts: keep each slide to one idea"}
+            placeholder={"Examples:\n• Reels hooks should be punchy, under 6 words\n• Carousel posts: keep each slide to one idea"}
             value={instructions} onChange={e => setInstructions(e.target.value)} rows={5} />
           <Button onClick={handleSave} variant={saved ? 'secondary' : 'primary'} className="w-full justify-center">
             {saved ? '✓ Saved' : 'Save Instagram Notes'}

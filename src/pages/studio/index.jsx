@@ -25,7 +25,10 @@ import {
 } from '../../components/studio/videoModels'
 import { aspectLabel } from '../../lib/postFormats'
 import { uploadReferenceImage } from '../../lib/referenceImages'
-import { buildInstructionsString } from '../../lib/brandBrain'
+import { buildContext, fetchBrandMemory } from '../../lib/brandContext'
+import { BrandContextPanel, BrandConflictNotice } from '../../components/BrandContextPanel'
+import { fetchBrandSchema, fetchDirectoryRows } from '../../lib/brandSchema'
+import { fetchBrandAssets } from '../../lib/brandAssets'
 import { captureFirstFrame, parentStillOf } from '../../components/studio/videoFrame'
 import {
   buildBranches, createSession, deleteSession, deleteVersion, downloadVersion, fetchFalBalance, fetchSessions,
@@ -336,6 +339,31 @@ export function CreativeStudio() {
   // through that lane's own history with ← →.
   const [zoomView, setZoomView] = useState(null)
 
+  // Everything buildContext needs beyond the profile itself. Studio never
+  // loaded these before, which is why its brand block was only ever the
+  // flattened field blob — no directories, no learned rules.
+  const [brandSchema, setBrandSchema] = useState({ sections: [], fields: [], columns: [] })
+  const [brandDirectory, setBrandDirectory] = useState({ rowsBySection: {}, assets: [] })
+  const [brandMemory, setBrandMemory] = useState([])
+  useEffect(() => {
+    if (!activeWorkspaceId) return
+    let alive = true
+    Promise.all([
+      fetchBrandSchema(activeWorkspaceId, accessToken),
+      fetchDirectoryRows(activeWorkspaceId, accessToken),
+      fetchBrandAssets(activeWorkspaceId, accessToken),
+      fetchBrandMemory(activeWorkspaceId, accessToken),
+    ]).then(([schema, rows, assets, memory]) => {
+      if (!alive) return
+      const rowsBySection = {}
+      for (const r of rows) (rowsBySection[r.section_key] ||= []).push(r)
+      setBrandSchema(schema)
+      setBrandDirectory({ rowsBySection, assets })
+      setBrandMemory(memory)
+    })
+    return () => { alive = false }
+  }, [activeWorkspaceId, accessToken])
+
   useEffect(() => {
     if (!activeWorkspaceId) return
     let cancelled = false
@@ -558,10 +586,19 @@ export function CreativeStudio() {
   // The brand profile has always been read by the Creative workflows
   // (`BRAND CONTEXT` in their prompt builders) but was never sent from this
   // screen, so that block has been arriving empty. Both calls below pass it.
-  const brandInstructions = useMemo(
-    () => buildInstructionsString(state.brandProfile) || '',
-    [state.brandProfile],
+  // Blocks the operator muted for the NEXT generation only. Deliberately not
+  // persisted: this is the "skip the usual palette for this one Ramadan
+  // piece" lever, not an edit to the brand.
+  const [mutedBlocks, setMutedBlocks] = useState([])
+  const [conflicts, setConflicts] = useState([])
+
+  const brandCtx = useMemo(
+    () => buildContext(state.brandProfile, brandSchema, brandDirectory, brandMemory, {
+      task: 'image', mutedKeys: mutedBlocks,
+    }),
+    [state.brandProfile, brandSchema, brandDirectory, brandMemory, mutedBlocks],
   )
+  const brandInstructions = brandCtx.instructions
 
   // Rewrites the box in place and stops. It deliberately does NOT generate:
   // the whole point is that the prompt is read and editable before it costs a
@@ -580,6 +617,9 @@ export function CreativeStudio() {
     })
     setEnhancing('')
     if (res.error) { setError(`Couldn't enhance: ${res.error}`); return null }
+    // Rides the call that was already happening, and lands before the paid
+    // generate round rather than after it.
+    setConflicts(Array.isArray(res.conflicts) ? res.conflicts : [])
     setPromptRaw(prompt)
     setPrompt(res.prompt)
     setPromptEnhanced(res.prompt)
@@ -1755,6 +1795,19 @@ export function CreativeStudio() {
                     result here before anything is generated.
                   </p>
                 )}
+
+                <BrandConflictNotice
+                  conflicts={conflicts}
+                  onDismiss={() => setConflicts([])}
+                />
+
+                <BrandContextPanel
+                  context={brandCtx}
+                  task="image"
+                  mutedKeys={mutedBlocks}
+                  onToggleBlock={key => setMutedBlocks(m =>
+                    m.includes(key) ? m.filter(k => k !== key) : [...m, key])}
+                />
 
                 {activeSlots.some(s => (attachments[s.id]?.length ?? attachments[s.id])) && (
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">

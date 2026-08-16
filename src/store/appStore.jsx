@@ -57,7 +57,7 @@ const initialState = {
   emailFlows: [],
   mediaAssets: [],
   approvals: [],
-  connectedAccounts: { instagram: false, facebook: false, linkedin: false, tiktok: false, x: false },
+  connectedAccounts: { instagram: false, facebook: false, tiktok: false, x: false },
   notifications: [],
   workspace: { name: 'Arak Lighting', logo: '' },
   workspaces: [{ id: DEFAULT_WORKSPACE_ID, name: 'Arak Lighting', createdAt: new Date().toISOString() }],
@@ -66,9 +66,8 @@ const initialState = {
   workspaceData: {
     [DEFAULT_WORKSPACE_ID]: {
       campaigns: [], posts: [], emailFlows: [], mediaAssets: [], approvals: [],
-      connectedAccounts: { instagram: false, facebook: false, linkedin: false, tiktok: false, x: false },
+      connectedAccounts: { instagram: false, facebook: false, tiktok: false, x: false },
       instagramInstructions: '', instagramSchedule: {},
-      linkedinInstructions: '', linkedinSchedule: {},
       webhooks: { ...DEFAULT_WEBHOOKS },
       supabase: { url: '', anonKey: '' },
     }
@@ -76,8 +75,6 @@ const initialState = {
   team: [],
   instagramInstructions: '',
   instagramSchedule: {},
-  linkedinInstructions: '',
-  linkedinSchedule: {},   // { 'YYYY-MM-DD': { topic, tone, postType, includeImage, style, aspectRatio, contentRoute, notes } }
   webhooks: { ...DEFAULT_WEBHOOKS },
   supabase: { url: '', anonKey: '' },
   // Canonical brand profile, fetched from Supabase (not persisted to
@@ -96,8 +93,6 @@ const PERSIST_KEYS = [
   'workspaces','activeWorkspaceId','workspaceData',
   'instagramInstructions',
   'instagramSchedule',
-  'linkedinInstructions',
-  'linkedinSchedule',
   'webhooks',
   'supabase',
   'campaignPlanDraft',
@@ -168,8 +163,6 @@ function reducer(state, action) {
     case 'REMOVE_TEAM_MEMBER': return { ...state, team: state.team.filter(m => m.id !== action.payload) }
     case 'SET_INSTAGRAM_INSTRUCTIONS': return { ...state, instagramInstructions: action.payload }
     case 'SET_INSTAGRAM_SCHEDULE':     return { ...state, instagramSchedule: action.payload }
-    case 'SET_LINKEDIN_INSTRUCTIONS':  return { ...state, linkedinInstructions: action.payload }
-    case 'SET_LINKEDIN_SCHEDULE':      return { ...state, linkedinSchedule: action.payload }
     case 'SET_WEBHOOK': return { ...state, webhooks: { ...state.webhooks, [action.payload.platform]: action.payload.url } }
     // Applying a blob fetched from workspace_webhooks. Deliberately NOT a
     // loop of SET_WEBHOOK over its entries, which is what the two loaders
@@ -202,10 +195,9 @@ function reducer(state, action) {
       const ws = action.payload
       const emptyData = {
         campaigns: [], posts: [], emailFlows: [], mediaAssets: [], approvals: [],
-        connectedAccounts: { instagram: false, facebook: false, linkedin: false, tiktok: false, x: false },
+        connectedAccounts: { instagram: false, facebook: false, tiktok: false, x: false },
         instagramInstructions: '', instagramSchedule: {},
-        linkedinInstructions: '', linkedinSchedule: {},
-        webhooks: { ...DEFAULT_WEBHOOKS },
+          webhooks: { ...DEFAULT_WEBHOOKS },
         supabase: { url: '', anonKey: '' },
       }
       return {
@@ -225,7 +217,6 @@ function reducer(state, action) {
         mediaAssets: state.mediaAssets, approvals: state.approvals,
         connectedAccounts: state.connectedAccounts,
         instagramInstructions: state.instagramInstructions, instagramSchedule: state.instagramSchedule,
-        linkedinInstructions: state.linkedinInstructions, linkedinSchedule: state.linkedinSchedule,
         webhooks: state.webhooks, supabase: state.supabase,
       }
       const newData = (state.workspaceData || {})[id] || {}
@@ -239,11 +230,9 @@ function reducer(state, action) {
         emailFlows: newData.emailFlows || [],
         mediaAssets: newData.mediaAssets || [],
         approvals: newData.approvals || [],
-        connectedAccounts: newData.connectedAccounts || { instagram: false, facebook: false, linkedin: false, tiktok: false, x: false },
+        connectedAccounts: newData.connectedAccounts || { instagram: false, facebook: false, tiktok: false, x: false },
         instagramInstructions: newData.instagramInstructions || '',
         instagramSchedule: newData.instagramSchedule || {},
-        linkedinInstructions: newData.linkedinInstructions || '',
-        linkedinSchedule: newData.linkedinSchedule || {},
         webhooks: webhooksFrom(newData.webhooks),
         supabase: newData.supabase || { url: '', anonKey: '' },
       }
@@ -277,11 +266,9 @@ function reducer(state, action) {
           emailFlows: nextData.emailFlows || [],
           mediaAssets: nextData.mediaAssets || [],
           approvals: nextData.approvals || [],
-          connectedAccounts: nextData.connectedAccounts || { instagram: false, facebook: false, linkedin: false, tiktok: false, x: false },
+          connectedAccounts: nextData.connectedAccounts || { instagram: false, facebook: false, tiktok: false, x: false },
           instagramInstructions: nextData.instagramInstructions || '',
           instagramSchedule: nextData.instagramSchedule || {},
-          linkedinInstructions: nextData.linkedinInstructions || '',
-          linkedinSchedule: nextData.linkedinSchedule || {},
           webhooks: webhooksFrom(nextData.webhooks),
           supabase: nextData.supabase || { url: '', anonKey: '' },
         }

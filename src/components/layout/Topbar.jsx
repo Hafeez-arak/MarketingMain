@@ -10,9 +10,9 @@ const titles = {
   '/schedule': 'Content Calendar', '/email': 'Email Flows', '/email/new': 'New Email Flow',
   '/analytics': 'Analytics', '/media': 'Media Library', '/social': 'Social Media',
   '/social/instagram': 'Instagram',
-  '/social/linkedin': 'LinkedIn', '/social/tiktok': 'TikTok',
+  '/social/tiktok': 'TikTok',
   '/social/instagram/new': 'New Instagram Post',
-  '/social/linkedin/new': 'New LinkedIn Post', '/social/tiktok/new': 'New TikTok Post',
+  '/social/tiktok/new': 'New TikTok Post',
   '/settings': 'Settings', '/integrations': 'Integrations', '/team': 'Team & Access',
 }
 
@@ -24,7 +24,6 @@ const BACK_TARGETS = {
   '/campaigns/plan':       '/campaigns',
   '/email/new':            '/email',
   '/social/instagram/new': '/social/instagram',
-  '/social/linkedin/new':  '/social/linkedin',
   '/social/tiktok/new':    '/social/tiktok',
 }
 
@@ -45,14 +44,12 @@ export function Topbar() {
     const p = location.pathname
     if (p === '/campaigns') return <Button size="sm" onClick={() => navigate('/campaigns/new')}><Plus/>New Campaign</Button>
     if (p === '/email')     return <Button size="sm" onClick={() => navigate('/email/new')}><Plus/>New Flow</Button>
-    // Instagram and LinkedIn have their own "Create Post" flow built into
-    // the page now (real generation, not a placeholder) — this global
-    // shortcut duplicated it, and worse, always routed to /social/instagram
-    // regardless of which platform page you were actually on. Other social
-    // pages (no real create flow yet) still get a shortcut, fixed to route
-    // to THEIR OWN /new page instead of the hardcoded Instagram one.
+    // Instagram has its own "Create Post" flow built into the page (real
+    // generation, not a placeholder) — this global shortcut duplicated it.
+    // Other social pages (no real create flow yet) still get a shortcut,
+    // routed to THEIR OWN /new page rather than a hardcoded Instagram one.
     const platformMatch = p.match(/^\/social\/([a-z]+)$/)
-    if (platformMatch && !['instagram', 'linkedin'].includes(platformMatch[1])) {
+    if (platformMatch && platformMatch[1] !== 'instagram') {
       return <Button size="sm" onClick={() => navigate(`/social/${platformMatch[1]}/new`)}><Plus/>New Post</Button>
     }
     return null

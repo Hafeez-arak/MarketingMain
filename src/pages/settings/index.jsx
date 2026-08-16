@@ -106,45 +106,6 @@ const WORKFLOW_CONFIGS = [
     ),
   },
   {
-    platform: 'linkedin',
-    label: 'LinkedIn Workflow',
-    placeholder: 'https://your-instance.app.n8n.cloud/webhook/arak-linkedin',
-    description: 'Triggers AI post generation — hooks, body copy, optional image.',
-    icon: (
-      <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 bg-[#0A66C2]">
-        <svg className="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 24 24">
-          <path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433a2.062 2.062 0 0 1-2.063-2.065 2.064 2.064 0 1 1 2.063 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/>
-        </svg>
-      </div>
-    ),
-  },
-  {
-    platform: 'linkedinSchedule',
-    label: 'LinkedIn Schedule Webhook',
-    placeholder: 'https://your-instance.app.n8n.cloud/webhook/arak-linkedin-schedule',
-    description: 'Separate path for dispatching pre-planned monthly schedule entries.',
-    icon: (
-      <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 bg-[#0A66C2]">
-        <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24">
-          <rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
-        </svg>
-      </div>
-    ),
-  },
-  {
-    platform: 'linkedinScheduleRegen',
-    label: 'LinkedIn Schedule — Regen Image',
-    placeholder: 'https://your-instance.app.n8n.cloud/webhook/arak-linkedin-schedule-regen',
-    description: 'Called when you click Regenerate Image on a monthly schedule post.',
-    icon: (
-      <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 bg-[#0A66C2]">
-        <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24">
-          <polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-.27-4.93"/>
-        </svg>
-      </div>
-    ),
-  },
-  {
     platform: 'campaignPlanner',
     label: 'Campaign Planner Workflow',
     placeholder: 'https://your-instance.app.n8n.cloud/webhook/arak-campaign-planner',
@@ -165,17 +126,6 @@ const WORKFLOW_CONFIGS = [
     icon: (
       <div className="w-8 h-8 flex items-center justify-center flex-shrink-0" style={{ background: '#E1306C' }}>
         <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><rect x="2" y="2" width="20" height="20" rx="5"/><circle cx="12" cy="12" r="4"/><circle cx="17.5" cy="6.5" r="1"/></svg>
-      </div>
-    ),
-  },
-  {
-    platform: 'linkedinPlanGen',
-    label: 'LinkedIn Plan Generation',
-    placeholder: 'https://your-instance.app.n8n.cloud/webhook/arak-li-plan-generation',
-    description: 'When a plan is approved, generates each approved LinkedIn idea (hook/body + image) into pending_review, ready to review before scheduling.',
-    icon: (
-      <div className="w-8 h-8 flex items-center justify-center flex-shrink-0" style={{ background: '#0A66C2' }}>
-        <svg className="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 24 24"><path d="M4.98 3.5a2.5 2.5 0 100 5 2.5 2.5 0 000-5zM3 9h4v12H3zM10 9h3.8v1.7h.05c.53-1 1.83-2.05 3.77-2.05 4.03 0 4.78 2.65 4.78 6.1V21h-4v-5.3c0-1.26-.02-2.9-1.77-2.9s-2.03 1.38-2.03 2.8V21h-4z"/></svg>
       </div>
     ),
   },

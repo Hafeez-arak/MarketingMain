@@ -23,7 +23,6 @@ import { Analytics }               from './pages/analytics/index'
 import { MediaLibrary }            from './pages/media/index'
 import { SocialOverview, SocialPlatform, NewPost } from './pages/social/index'
 import { InstagramPage } from './pages/social/InstagramPage'
-import { LinkedInPage }  from './pages/social/LinkedInPage'
 import { Approvals as PostApprovals } from './pages/social/Approvals'
 import { Settings, Integrations } from './pages/settings/index'
 import { Access } from './pages/settings/Access'
@@ -112,10 +111,8 @@ function ProtectedApp() {
             <Route path="/social"                element={<SocialOverview />} />
             <Route path="/social/approvals"      element={<PostApprovals />} />
             <Route path="/social/instagram"      element={<InstagramPage />} />
-            <Route path="/social/linkedin"       element={<LinkedInPage />} />
             <Route path="/social/tiktok"         element={<SocialPlatform />} />
             <Route path="/social/instagram/new"  element={<NewPost />} />
-            <Route path="/social/linkedin/new"   element={<NewPost />} />
             <Route path="/social/tiktok/new"     element={<NewPost />} />
             <Route path="/settings"             element={<Settings />} />
             <Route path="/integrations"          element={<Integrations />} />

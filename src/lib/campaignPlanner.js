@@ -3,15 +3,14 @@ import { describeWebhookFailure } from './n8nWebhooks'
 
 // ─── Campaign Planner ───────────────────────────────────────────────────────
 // Turns a single stated goal into a set of dated, platform-specific post
-// ideas, then drops each one into the SAME schedule tables (instagram_schedule
-// / linkedin_schedule) that manual scheduling already writes to. Nothing
+// ideas, then drops each one into the SAME schedule table (instagram_schedule)
+// that manual scheduling already writes to. Nothing
 // downstream needs to change — whatever already turns a "pending" schedule
 // row into a finished post keeps working exactly as before. This module only
 // decides WHAT to post and WHEN; it never talks to the generation webhooks
 // directly.
 
 const INSTAGRAM_TONE_FALLBACK = 'professional'
-const LINKEDIN_TONE_FALLBACK  = 'thought_leader'
 
 // Ask n8n to decompose a goal into a list of post ideas. The webhook is
 // expected to return JSON shaped like:
@@ -33,13 +32,13 @@ export async function requestCampaignPlan(webhookUrl, payload) {
     if (posts.length === 0) return { error: 'The workflow returned no posts. Check the n8n response shape against the spec.' }
     const normalized = posts.map((p, i) => ({
       _rowId:   `plan_${i}_${Date.now()}`,
-      platform: p.platform === 'linkedin' ? 'linkedin' : 'instagram',
+      platform: 'instagram',
       date:     p.date    || '',
       time:     p.time    || '',
       title:    p.title   || p.topic || '',
       topic:    p.topic   || '',
       angle:    p.angle   || '',
-      tone:     p.tone    || (p.platform === 'linkedin' ? LINKEDIN_TONE_FALLBACK : INSTAGRAM_TONE_FALLBACK),
+      tone:     p.tone    || INSTAGRAM_TONE_FALLBACK,
       // Planning metadata — surfaced in the review/approval UI so each idea can
       // be judged on WHAT it is (occasion, pillar) and WHY (rationale) before
       // it's approved for generation. All optional; blank if the workflow
@@ -190,7 +189,7 @@ export async function requestVideoRender(webhookUrl, payload) {
 export async function triggerVideoRenders({ webhooks, videoIdeas, accessToken }) {
   const videoRenderUrl = webhooks?.videoRender
   if (!videoRenderUrl || !videoIdeas?.length) return
-  const TABLES = { instagram: 'instagram_generated_posts', linkedin: 'linkedin_generated_posts' }
+  const TABLES = { instagram: 'instagram_generated_posts' }
   const headers = { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${accessToken || SUPABASE_ANON_KEY}` }
 
   async function waitForCoverThenRender(idea) {
@@ -220,12 +219,11 @@ export async function triggerVideoRenders({ webhooks, videoIdeas, accessToken })
 // every idea in the background (caption + image) into the *_generated_posts
 // tables with status 'pending_review' — so the browser never waits on a long
 // batch, and posts appear in the review list as they finish. Ideas are split
-// by platform because Instagram and LinkedIn are separate workflows/tables.
-export async function requestPlanContentGeneration({ webhooks, planId, instructions, ideas, workspaceId, captionLanguage }) {
-  const byPlatform = { instagram: [], linkedin: [] }
+// Instagram is the only platform with a generation pipeline.
+export async function requestPlanContentGeneration({ webhooks, planId, instructions, ideas, workspaceId, captionLanguage, brand_name, brand_descriptor }) {
+  const byPlatform = { instagram: [] }
   for (const idea of ideas) {
-    const platform = idea.platform === 'linkedin' ? 'linkedin' : 'instagram'
-    byPlatform[platform].push({
+    byPlatform.instagram.push({
       plan_idea_id:         idea.id,
       title:                idea.title || idea.topic || '',
       topic:                idea.angle ? `${idea.topic} — ${idea.angle}` : idea.topic,
@@ -235,7 +233,7 @@ export async function requestPlanContentGeneration({ webhooks, planId, instructi
       // aspectRatio is the human-editable, authoritative field (postFormats
       // system) — suggestedAspectRatio is AI telemetry only and must not
       // win over it.
-      aspect_ratio:         idea.aspectRatio || idea.suggestedAspectRatio || (platform === 'linkedin' ? '1.91:1' : '1:1'),
+      aspect_ratio:         idea.aspectRatio || idea.suggestedAspectRatio || '1:1',
       design_tip:           idea.designTip || '',
       // Freeform human direction for the visual — passed straight to the
       // image step so it overrides/augments the generic design_tip.
@@ -278,7 +276,6 @@ export async function requestPlanContentGeneration({ webhooks, planId, instructi
 
   const targets = [
     { platform: 'instagram', url: webhooks?.instagramPlanGen, ideas: byPlatform.instagram },
-    { platform: 'linkedin',  url: webhooks?.linkedinPlanGen,  ideas: byPlatform.linkedin },
   ].filter(t => t.ideas.length > 0)
 
   if (targets.length === 0) return { error: 'No approved ideas to generate.' }
@@ -293,6 +290,11 @@ export async function requestPlanContentGeneration({ webhooks, planId, instructi
           plan_id: planId, instructions: instructions || '',
           workspace_id: workspaceId || null,
           caption_language: captionLanguage || 'both',
+          // Who the posts are actually for. Prepare Batch fans these out to
+          // every idea, so the persona line in the cached prefix names this
+          // brand instead of a hardcoded one.
+          brand_name: brand_name || '',
+          brand_descriptor: brand_descriptor || '',
           ideas: t.ideas,
         }),
       })
@@ -318,51 +320,26 @@ export async function writeCampaignPosts(workspaceId, accessToken, campaignId, p
   const results = []
 
   for (const post of posts) {
-    if (post.platform === 'linkedin') {
-      const body = {
-        workspace_id:   workspaceId,
-        scheduled_date: post.date,
-        topic:          post.angle ? `${post.topic} — ${post.angle}` : post.topic,
-        tone:           post.tone || LINKEDIN_TONE_FALLBACK,
-        post_type:      'thought_leadership',
-        content_route:  'instructions',
-        include_image:  true,
-        style:          post.suggestedStyle       || 'photorealistic',
-        aspect_ratio:   post.suggestedAspectRatio || '1.91:1',
-        notes:          post.designTip ? `Generated from Campaign Automation. Design tip: ${post.designTip}` : 'Generated from Campaign Automation',
-        instructions:   instructions || '',
-        campaign_id:    campaignId,
-        upload_type:    'generate',
-        reference_image_urls: post.references || [],
-        status:         'pending',
-      }
-      const res = await fetch(`${SUPABASE_URL}/rest/v1/linkedin_schedule`, {
-        method: 'POST', headers: { ...headers, Prefer: 'resolution=merge-duplicates,return=representation' },
-        body: JSON.stringify(body),
-      })
-      results.push({ post, ok: res.ok, error: res.ok ? null : await res.text() })
-    } else {
-      const body = {
-        workspace_id:   workspaceId,
-        scheduled_date: post.date,
-        topic:          post.angle ? `${post.topic} — ${post.angle}` : post.topic,
-        tone:           post.tone || INSTAGRAM_TONE_FALLBACK,
-        visual_mode:    'lighting',
-        style:          post.suggestedStyle       || 'photorealistic',
-        aspect_ratio:   post.suggestedAspectRatio || '1:1',
-        notes:          post.designTip ? `Generated from Campaign Automation. Design tip: ${post.designTip}` : 'Generated from Campaign Automation',
-        instructions:   instructions || null,
-        campaign_id:    campaignId,
-        upload_type:    'generate',
-        reference_image_urls: post.references || [],
-        status:         'pending',
-      }
-      const res = await fetch(`${SUPABASE_URL}/rest/v1/instagram_schedule`, {
-        method: 'POST', headers: { ...headers, Prefer: 'return=representation' },
-        body: JSON.stringify(body),
-      })
-      results.push({ post, ok: res.ok, error: res.ok ? null : await res.text() })
+    const body = {
+      workspace_id:   workspaceId,
+      scheduled_date: post.date,
+      topic:          post.angle ? `${post.topic} — ${post.angle}` : post.topic,
+      tone:           post.tone || INSTAGRAM_TONE_FALLBACK,
+      visual_mode:    'lighting',
+      style:          post.suggestedStyle       || 'photorealistic',
+      aspect_ratio:   post.suggestedAspectRatio || '1:1',
+      notes:          post.designTip ? `Generated from Campaign Automation. Design tip: ${post.designTip}` : 'Generated from Campaign Automation',
+      instructions:   instructions || null,
+      campaign_id:    campaignId,
+      upload_type:    'generate',
+      reference_image_urls: post.references || [],
+      status:         'pending',
     }
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/instagram_schedule`, {
+      method: 'POST', headers: { ...headers, Prefer: 'return=representation' },
+      body: JSON.stringify(body),
+    })
+    results.push({ post, ok: res.ok, error: res.ok ? null : await res.text() })
   }
 
   const failed = results.filter(r => !r.ok)

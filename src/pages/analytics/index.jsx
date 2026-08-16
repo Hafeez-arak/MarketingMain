@@ -310,7 +310,6 @@ export function Analytics() {
             <PillSelect value={platform} onChange={e => setPlatform(e.target.value)} className="w-32">
               <option value="">All platforms</option>
               <option value="instagram">Instagram</option>
-              <option value="linkedin">LinkedIn</option>
             </PillSelect>
             {accounts.length > 1 && (
               <PillSelect value={selectedAccount} onChange={e => setSelectedAccount(e.target.value)} className="w-40">

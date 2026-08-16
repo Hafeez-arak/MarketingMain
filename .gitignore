@@ -31,3 +31,5 @@ public/dev-clip*.mp4
 *.njsproj
 *.sln
 *.sw?
+.vercel
+.env*

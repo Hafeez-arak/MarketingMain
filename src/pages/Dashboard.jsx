@@ -18,7 +18,6 @@ import { formatDateTime } from '../lib/utils'
 const PLATFORMS = [
   { key: 'instagram', label: 'Instagram', color: '#e0687a' },
   { key: 'facebook',  label: 'Facebook',  color: '#657b81' },
-  { key: 'linkedin',  label: 'LinkedIn',  color: '#4c5e61' },
   { key: 'tiktok',    label: 'TikTok',    color: '#325130' },
   { key: 'x',         label: 'X',         color: '#7a848c' },
 ]
