@@ -48,6 +48,41 @@ export function defaultWebhookUrl(slot) {
   return `/api/n8n/${slot}`
 }
 
+// ─── Turning a failed webhook response into something a human can act on ───
+// Since calls go through /api/n8n/<slot>, three failures are now possible that
+// a direct browser call could never produce, and all three look like an
+// opaque error string unless they're named:
+//
+//   504 — the serverless function hit its 60s ceiling. Crucially this does NOT
+//         mean the work failed: n8n keeps running and still writes its result.
+//         Telling the user to retry would run an expensive job a second time,
+//         so the message says to wait and refresh instead.
+//   503 — no base URL configured (tunnel never started).
+//   502 — the tunnel restarted or died mid-flight.
+//
+// Callers pass the Response; this reads the body once and returns a string.
+export async function describeWebhookFailure(res) {
+  const text = await res.text().catch(() => '')
+  // The proxy sends {"error": "..."} for the cases it detects itself.
+  let fromProxy = ''
+  try { fromProxy = JSON.parse(text)?.error || '' } catch { /* not JSON */ }
+
+  if (res.status === 504 || /FUNCTION_INVOCATION_TIMEOUT|task timed out/i.test(text)) {
+    return 'This took longer than the 60-second request limit, but it has NOT been ' +
+           'cancelled — the workflow is still running and will save its result. ' +
+           'Wait a moment and refresh rather than running it again, so it does not ' +
+           'generate (and bill) twice.'
+  }
+  if (res.status === 503) {
+    return fromProxy || 'n8n is not reachable: no instance is configured right now. ' +
+           'Whoever runs the tunnel needs to start it.'
+  }
+  if (res.status === 502) {
+    return fromProxy || 'Could not reach n8n — the tunnel may have restarted or stopped.'
+  }
+  return fromProxy || text || `The workflow returned ${res.status}.`
+}
+
 export function defaultWebhooks(slots) {
   const out = {}
   for (const slot of slots) out[slot] = defaultWebhookUrl(slot)

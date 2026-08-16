@@ -1,4 +1,5 @@
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './supabaseClient'
+import { describeWebhookFailure } from './n8nWebhooks'
 
 // ─── Campaign Planner ───────────────────────────────────────────────────────
 // Turns a single stated goal into a set of dated, platform-specific post
@@ -25,7 +26,7 @@ export async function requestCampaignPlan(webhookUrl, payload) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     })
-    if (!res.ok) { const err = await res.text(); return { error: err || `Webhook returned ${res.status}` } }
+    if (!res.ok) return { error: await describeWebhookFailure(res) }
     const data = await res.json()
     const raw  = Array.isArray(data) ? data[0] : data
     const posts = Array.isArray(raw?.posts) ? raw.posts : []
@@ -85,7 +86,7 @@ export async function elongateIdea(webhookUrl, payload) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     })
-    if (!res.ok) { const err = await res.text(); return { error: err || `Webhook returned ${res.status}` } }
+    if (!res.ok) return { error: await describeWebhookFailure(res) }
     const data = await res.json()
     const raw  = Array.isArray(data) ? data[0] : data
     if (!raw || raw.ok === false) return { error: raw?.error || 'Elongation failed.' }
@@ -108,7 +109,7 @@ export async function requestCaptionStudio(webhookUrl, payload) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     })
-    if (!res.ok) { const err = await res.text(); return { error: err || `Webhook returned ${res.status}` } }
+    if (!res.ok) return { error: await describeWebhookFailure(res) }
     const data = await res.json()
     const raw  = Array.isArray(data) ? data[0] : data
     if (!raw || raw.ok === false) return { error: raw?.error || 'Caption rewrite failed.' }
@@ -151,7 +152,7 @@ export async function requestMediaOptions(webhookUrl, payload) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     })
-    if (!res.ok) { const err = await res.text(); return { error: err || `Webhook returned ${res.status}` } }
+    if (!res.ok) return { error: await describeWebhookFailure(res) }
     const data = await res.json()
     const raw  = Array.isArray(data) ? data[0] : data
     if (!raw || raw.ok === false) return { error: raw?.error || 'Image generation failed.' }
