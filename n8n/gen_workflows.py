@@ -3102,6 +3102,20 @@ def build_instagram_reels() -> dict:
     predates those helpers and uses a different polling style (Wait+IF
     nodes, not a Code-node internal loop) that's already proven in
     production — preserved as-is rather than rewritten.
+
+    One deliberate change on top of that port: Sanitize Inputs now reads
+    `workspace_id` off the webhook body (node ri-11) and Save Reel writes it
+    onto the row. The browser had always sent it; this workflow just never
+    read it. That mattered more than an unset column usually would, because
+    instagram_reels.workspace_id is NOT NULL DEFAULT the legacy workspace —
+    so an insert omitting it was silently filed under that one company
+    rather than failing, and every brand's reels collected there. The Reels
+    Studio polls for "the newest reel row", so it also meant one brand could
+    be handed another brand's reel to approve.
+
+    The fallback in ri-11 resolves to the same value the column default
+    would have applied, so this is additive: correct when the id is sent,
+    byte-identical behaviour when it isn't.
     """
     return json.loads(r"""{
   "name": "Arak Lighting – Instagram Reels (Manual)",
@@ -3201,6 +3215,12 @@ def build_instagram_reels() -> dict:
               "name": "wan_duration",
               "type": "number",
               "value": "={{ ($json.body.reelDuration || $json.body.reel_duration || '5s') === '10s' ? 10 : 5 }}"
+            },
+            {
+              "id": "ri-11",
+              "name": "workspace_id",
+              "type": "string",
+              "value": "={{ $json.body.workspace_id || $json.body.workspaceId || '00000000-0000-0000-0000-000000000001' }}"
             }
           ]
         },
@@ -3726,7 +3746,7 @@ def build_instagram_reels() -> dict:
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\n  \"reel_format\":    \"{{ $('Sanitize Inputs').item.json.reel_format }}\",\n  \"reel_duration\":  \"{{ $('Sanitize Inputs').item.json.reel_duration }}\",\n  \"hook\":           {{ JSON.stringify($('Sanitize Inputs').item.json.reel_hook) }},\n  \"brief\":          {{ JSON.stringify($('Sanitize Inputs').item.json.reel_brief) }},\n  \"music_note\":     {{ JSON.stringify($('Sanitize Inputs').item.json.reel_music) }},\n  \"cta\":            {{ JSON.stringify($('Sanitize Inputs').item.json.reel_cta) }},\n  \"caption\":        {{ JSON.stringify($('Parse Script').item.json.caption) }},\n  \"hashtags\":       {{ JSON.stringify($('Parse Script').item.json.hashtags) }},\n  \"motion_prompt\":  {{ JSON.stringify($('Parse Script').item.json.motion_prompt) }},\n  \"cover_image_url\":{{ JSON.stringify($('Set Video URL').item.json.cover_url) }},\n  \"video_url\":      {{ JSON.stringify($('Set Video URL').item.json.video_url) }},\n  \"publish_time\":   \"{{ $('Sanitize Inputs').item.json.publish_time }}\",\n  \"tone\":           \"{{ $('Sanitize Inputs').item.json.tone }}\",\n  \"status\":         \"ready\",\n  \"source\":         \"manual\"\n}",
+        "jsonBody": "={\n  \"workspace_id\":   \"{{ $('Sanitize Inputs').item.json.workspace_id }}\",\n  \"reel_format\":    \"{{ $('Sanitize Inputs').item.json.reel_format }}\",\n  \"reel_duration\":  \"{{ $('Sanitize Inputs').item.json.reel_duration }}\",\n  \"hook\":           {{ JSON.stringify($('Sanitize Inputs').item.json.reel_hook) }},\n  \"brief\":          {{ JSON.stringify($('Sanitize Inputs').item.json.reel_brief) }},\n  \"music_note\":     {{ JSON.stringify($('Sanitize Inputs').item.json.reel_music) }},\n  \"cta\":            {{ JSON.stringify($('Sanitize Inputs').item.json.reel_cta) }},\n  \"caption\":        {{ JSON.stringify($('Parse Script').item.json.caption) }},\n  \"hashtags\":       {{ JSON.stringify($('Parse Script').item.json.hashtags) }},\n  \"motion_prompt\":  {{ JSON.stringify($('Parse Script').item.json.motion_prompt) }},\n  \"cover_image_url\":{{ JSON.stringify($('Set Video URL').item.json.cover_url) }},\n  \"video_url\":      {{ JSON.stringify($('Set Video URL').item.json.video_url) }},\n  \"publish_time\":   \"{{ $('Sanitize Inputs').item.json.publish_time }}\",\n  \"tone\":           \"{{ $('Sanitize Inputs').item.json.tone }}\",\n  \"status\":         \"ready\",\n  \"source\":         \"manual\"\n}",
         "options": {}
       },
       "id": "1d1a622b-57d0-4e88-8848-4d7304c07dbe",

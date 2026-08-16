@@ -2192,17 +2192,14 @@ function ReelsPanel({ state, dispatch }) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          workspace_id: activeWorkspaceId, // NOTE: n8n's workflow still needs
-          // updating to read this and stamp it on the row it inserts — until
-          // then, every reel lands in the legacy Arak workspace regardless of
-          // who triggered it, since n8n authenticates with the shared anon key.
-          //
-          // Verified against the live schema 2026-08-16: instagram_reels DOES
-          // have a workspace_id column, but it is NOT NULL defaulting to
-          // '00000000-0000-0000-0000-000000000001' (the legacy workspace), so
-          // an n8n insert that omits it is silently filed under that company
-          // rather than failing. That default is why the poll below cannot be
-          // scoped from here — see the note on it. This is an n8n-side fix.
+          // The reels workflow reads this and stamps it on the row it
+          // inserts (gen_workflows.py, Sanitize Inputs node ri-11). It used
+          // to ignore it, and because instagram_reels.workspace_id is NOT
+          // NULL defaulting to '00000000-0000-0000-0000-000000000001' — the
+          // legacy workspace — an insert that omitted it was filed under
+          // that company instead of failing. Every brand's reels collected
+          // there, and the poll below could hand one brand another's reel.
+          workspace_id: activeWorkspaceId,
           reelFormat:   format,
           reelDuration: duration,
           reelBrief:    brief.trim(),
@@ -2225,21 +2222,15 @@ function ReelsPanel({ state, dispatch }) {
 
     const poll = async () => {
       try {
-        // DELIBERATELY UNSCOPED, and the only query in this file that is.
-        // Adding workspace_id=eq.<current> here would not fix the leak, it
-        // would break the feature: n8n omits the column, so every row it
-        // writes takes the legacy-workspace default and a filter on any other
-        // company matches nothing — the poll would spin for its full 6
-        // minutes and report a timeout for a reel that generated fine.
-        // Filtering on the default instead would still hand you a reel
-        // belonging to whoever else was generating at the time.
-        // There is no correct client-side answer while n8n writes the
-        // default; the fix is for the reels workflow to stamp the
-        // workspace_id already present in its webhook payload. Until then
-        // this can surface another company's reel for approval when two
-        // generate at once.
+        // Scoped, which this could not be until the reels workflow started
+        // writing workspace_id (gen_workflows.py, node ri-11). Before that,
+        // n8n omitted the column and every row took the NOT NULL default —
+        // the legacy workspace — so a filter on any other company matched
+        // nothing and this poll spun for its full 6 minutes on a reel that
+        // had generated fine. Both halves shipped together for that reason:
+        // this filter is only correct against a workflow that stamps.
         const r = await fetch(
-          `${supabaseUrl}/rest/v1/instagram_reels?select=*&order=created_at.desc&limit=1`,
+          `${supabaseUrl}/rest/v1/instagram_reels?workspace_id=eq.${activeWorkspaceId}&select=*&order=created_at.desc&limit=1`,
           { headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${supabaseKey}` } }
         )
         const rows = await r.json()
