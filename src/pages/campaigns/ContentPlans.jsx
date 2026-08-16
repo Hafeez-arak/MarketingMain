@@ -105,9 +105,15 @@ export function ContentPlans() {
               {plan.goal && <p className="text-xs text-text-secondary leading-relaxed line-clamp-2 mb-3">{plan.goal}</p>}
 
               <div className="flex items-center gap-1.5 flex-wrap mb-3">
-                {(plan.platforms || []).map(p => (
+                {/* Plans written before LinkedIn was dropped still carry
+                    ['instagram','linkedin'], and every entry now renders the
+                    same label — so those rows showed "INSTAGRAM INSTAGRAM".
+                    Filter the stored array rather than trusting it: the row is
+                    history, and rewriting it to match today's platform list
+                    would edit what the plan actually asked for. */}
+                {(plan.platforms || []).filter(p => p === 'instagram').map(p => (
                   <span key={p} className="text-[10px] font-bold uppercase tracking-[0.08em] px-1.5 py-0.5 leading-[1.4] bg-surface-subtle border border-border text-text-secondary">
-                    {'Instagram'}
+                    Instagram
                   </span>
                 ))}
                 {moments.map((m, i) => (

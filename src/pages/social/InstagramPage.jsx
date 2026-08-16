@@ -2033,7 +2033,13 @@ function PostsList({ posts, dispatch, state, onCreateClick, updatePostStatus, we
             </svg>
           </div>
           <p className="font-medium text-text mb-1">No {filter !== 'all' ? FILTERS.find(f=>f.key===filter)?.label.toLowerCase()+' ' : ''}posts yet</p>
-          <p className="text-sm text-text-secondary mb-4">Generate your first AI-powered post for Arak Lighting.</p>
+          {/* Named the wrong company on every workspace but the original one.
+              Falls back to no name rather than a placeholder: an empty state
+              that names nobody reads fine, one that names the wrong brand
+              does not. */}
+          <p className="text-sm text-text-secondary mb-4">
+            Generate your first AI-powered post{state.brandProfile?.customFields?.brand_name ? ` for ${state.brandProfile.customFields.brand_name}` : ''}.
+          </p>
           <Button onClick={onCreateClick}>Create Post</Button>
         </Card>
       ) : (
