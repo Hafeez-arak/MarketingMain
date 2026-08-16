@@ -42,7 +42,7 @@ export function ContentPlans() {
 
   async function openPlan(plan) {
     setOpening(plan.id)
-    const { ideas } = await fetchPlanWithIdeas(accessToken, plan.id)
+    const { ideas } = await fetchPlanWithIdeas(activeWorkspaceId, accessToken, plan.id)
     setOpening(null)
     dispatch(actions.setCampaignPlanDraft({
       // Always open on the review screen so the ideas are visible and editable —

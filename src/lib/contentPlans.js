@@ -23,16 +23,31 @@ export async function fetchPlans(workspaceId, accessToken) {
   } catch { return [] }
 }
 
-export async function fetchPlanWithIdeas(accessToken, planId) {
+// Workspace-scoped on purpose, like every other read in this file: a plan id
+// on its own says nothing about which company owns it, so a stale one left
+// over from another company would happily load that company's ideas onto the
+// board. `plan: null` with no ideas is the honest answer for a plan this
+// workspace doesn't own — callers already treat that as "nothing to restore."
+// `ok` separates the two ways this comes back empty, because callers act on
+// them very differently: ok:false is "the lookup failed" (offline, 5xx) and
+// means leave whatever is on screen alone, while ok:true with plan:null is a
+// definite "this workspace does not own that plan" — the answer a caller can
+// safely discard a stale draft on.
+export async function fetchPlanWithIdeas(workspaceId, accessToken, planId) {
+  if (!workspaceId || !planId) return { ok: false, plan: null, ideas: [] }
   try {
     const [planRes, ideasRes] = await Promise.all([
-      fetch(`${SUPABASE_URL}/rest/v1/content_plans?id=eq.${planId}&select=*`, { headers: authHeaders(accessToken) }),
-      fetch(`${SUPABASE_URL}/rest/v1/plan_ideas?plan_id=eq.${planId}&select=*&order=position.asc`, { headers: authHeaders(accessToken) }),
+      fetch(`${SUPABASE_URL}/rest/v1/content_plans?id=eq.${planId}&workspace_id=eq.${workspaceId}&select=*`, { headers: authHeaders(accessToken) }),
+      fetch(`${SUPABASE_URL}/rest/v1/plan_ideas?plan_id=eq.${planId}&workspace_id=eq.${workspaceId}&select=*&order=position.asc`, { headers: authHeaders(accessToken) }),
     ])
-    const plan  = (await planRes.json())?.[0] || null
+    if (!planRes.ok) return { ok: false, plan: null, ideas: [] }
+    const plan = (await planRes.json())?.[0] || null
+    // No row means the id isn't this workspace's — don't hand back ideas for
+    // it either, whatever the second query happened to return.
+    if (!plan) return { ok: true, plan: null, ideas: [] }
     const ideas = ideasRes.ok ? await ideasRes.json() : []
-    return { plan, ideas }
-  } catch { return { plan: null, ideas: [] } }
+    return { ok: true, plan, ideas }
+  } catch { return { ok: false, plan: null, ideas: [] } }
 }
 
 // Cross-month anti-repetition memory: past ideas from OTHER plans in this

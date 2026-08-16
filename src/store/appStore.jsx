@@ -1,8 +1,38 @@
 import { AppContext, DEFAULT_WEBHOOKS, WEBHOOK_SLOTS } from './app'
 import { mergeWebhooks } from '../lib/n8nWebhooks'
-import { useReducer, useEffect } from 'react'
+import { useReducer, useEffect, useRef } from 'react'
 
-const STORAGE_KEY = 'campai_arak_v1'
+// ─── Persistence is per company, not per browser ───────────────────────────
+// Everything in PERSIST_KEYS belongs to ONE workspace — an in-progress
+// monthly plan most of all. They used to share a single localStorage key, so
+// switching companies mid-plan carried that company's draft (goal, seed
+// posts, every proposed idea, even its planId) straight into the next one,
+// where the next Save wrote it against the NEW workspace_id. Nothing errored;
+// the ideas simply ended up filed under the wrong brand.
+//
+// Keying the blob by workspace id is what actually separates them: each
+// company gets its own store, its own draft, and switching back finds the
+// plan exactly where it was left rather than wherever it drifted to.
+const STORAGE_PREFIX = 'campai_arak_v1'
+const LEGACY_KEY  = STORAGE_PREFIX
+const ARCHIVE_KEY = `${STORAGE_PREFIX}__pre_workspace_split`
+
+const storageKeyFor = workspaceId => `${STORAGE_PREFIX}:${workspaceId || 'none'}`
+
+// The old shared blob can't be adopted by any one company — which company it
+// described is exactly the thing it never recorded. Set aside once (not
+// deleted, in case anything in it is ever wanted back) so it can't be read as
+// if it belonged to whichever workspace happens to load first. Nothing real
+// is lost: saved plans and their ideas live in Supabase, and webhooks are
+// re-hydrated per workspace from workspace_webhooks on every mount.
+function archiveLegacyBlob() {
+  try {
+    const legacy = localStorage.getItem(LEGACY_KEY)
+    if (legacy === null) return
+    if (localStorage.getItem(ARCHIVE_KEY) === null) localStorage.setItem(ARCHIVE_KEY, legacy)
+    localStorage.removeItem(LEGACY_KEY)
+  } catch { /* see saveState — persistence is a convenience, never a blocker */ }
+}
 
 const DEFAULT_WORKSPACE_ID = 'ws_default'
 
@@ -73,11 +103,17 @@ const PERSIST_KEYS = [
   'campaignPlanDraft',
 ]
 
-function loadState() {
+function loadState(workspaceId) {
+  archiveLegacyBlob()
   try {
-    const raw = localStorage.getItem(STORAGE_KEY)
+    const raw = localStorage.getItem(storageKeyFor(workspaceId))
     if (!raw) return initialState
     const saved = JSON.parse(raw)
+    // A blob stamped with a different company is not this company's data, no
+    // matter which key it was found under. Belt-and-braces against a future
+    // refactor reintroducing a shared key: the stamp makes the mismatch
+    // detectable here rather than invisible on screen.
+    if (saved._workspaceId && saved._workspaceId !== (workspaceId || 'none')) return initialState
     return {
       ...initialState,
       ...saved,
@@ -91,11 +127,11 @@ function loadState() {
   } catch { return initialState }
 }
 
-function saveState(state) {
+function saveState(state, workspaceId) {
   try {
-    const partial = {}
+    const partial = { _workspaceId: workspaceId || 'none' }
     PERSIST_KEYS.forEach(k => { partial[k] = state[k] })
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(partial))
+    localStorage.setItem(storageKeyFor(workspaceId), JSON.stringify(partial))
   } catch {
     // Private browsing, a full quota, or a disabled store. Persistence is a
     // convenience here — the app runs from in-memory state either way — so
@@ -105,6 +141,11 @@ function saveState(state) {
 
 function reducer(state, action) {
   switch (action.type) {
+    // Swap the whole store for another company's. Payload is already a full
+    // state object (loadState's output), so this replaces rather than merges —
+    // merging is what would let one company's leftovers show through in the
+    // next, which is the entire bug this is here to prevent.
+    case 'HYDRATE_WORKSPACE': return action.payload
     case 'ADD_CAMPAIGN':    return { ...state, campaigns: [action.payload, ...state.campaigns] }
     case 'UPDATE_CAMPAIGN': return { ...state, campaigns: state.campaigns.map(c => c.id === action.payload.id ? { ...c, ...action.payload } : c) }
     case 'DELETE_CAMPAIGN': return { ...state, campaigns: state.campaigns.filter(c => c.id !== action.payload) }
@@ -252,8 +293,26 @@ function reducer(state, action) {
   }
 }
 
-export function AppProvider({ children }) {
-  const [state, dispatch] = useReducer(reducer, undefined, loadState)
-  useEffect(() => { saveState(state) }, [state])
+export function AppProvider({ workspaceId, children }) {
+  const [state, dispatch] = useReducer(reducer, workspaceId, loadState)
+  // Which company the state currently in memory was loaded for. App.jsx also
+  // keys this provider on the workspace, so in practice a switch remounts and
+  // this ref starts out correct — but the store must not depend on that. If
+  // the key is ever dropped, the two effects below still re-hydrate on the
+  // way in and refuse to persist company A's state under company B's key,
+  // instead of quietly writing one brand's plan into another's.
+  const hydratedFor = useRef(workspaceId)
+
+  useEffect(() => {
+    if (hydratedFor.current === workspaceId) return
+    hydratedFor.current = workspaceId
+    dispatch({ type: 'HYDRATE_WORKSPACE', payload: loadState(workspaceId) })
+  }, [workspaceId])
+
+  useEffect(() => {
+    if (hydratedFor.current !== workspaceId) return
+    saveState(state, workspaceId)
+  }, [state, workspaceId])
+
   return <AppContext.Provider value={{ state, dispatch }}>{children}</AppContext.Provider>
 }

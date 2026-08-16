@@ -81,8 +81,13 @@ function ProtectedApp() {
     <RequireAuth>
       {/* Key the whole data subtree on the active company: switching companies
           remounts it, so every page re-runs its Supabase fetches and the
-          cached brand profile / in-progress draft reset — no manual refresh. */}
-      <AppProvider key={activeWorkspaceId || 'none'}>
+          cached brand profile resets — no manual refresh.
+          The remount alone was never enough for the persisted half of the
+          store: it re-read the same localStorage blob, so an in-progress
+          monthly plan survived the switch and reappeared under the next
+          company. Passing the id down is what scopes that blob per company;
+          see appStore.jsx. */}
+      <AppProvider key={activeWorkspaceId || 'none'} workspaceId={activeWorkspaceId || 'none'}>
         <WebhooksLoader />
         <AppLayout>
           {/* Inside AppLayout, so a crashed page keeps the sidebar and you can

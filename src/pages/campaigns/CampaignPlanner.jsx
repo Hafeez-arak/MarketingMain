@@ -886,16 +886,24 @@ export function CampaignPlanner() {
   // not on every render.
   const syncedPlanIdRef = useRef(null)
   useEffect(() => {
-    if (!planId || !accessToken) return
+    if (!planId || !accessToken || !activeWorkspaceId) return
     if (syncedPlanIdRef.current === planId) return
     syncedPlanIdRef.current = planId
-    fetchPlanWithIdeas(accessToken, planId).then(({ ideas: dbIdeas }) => {
+    fetchPlanWithIdeas(activeWorkspaceId, accessToken, planId).then(({ ok, plan, ideas: dbIdeas }) => {
+      // Lookup failed rather than answered — a dropped request must never be
+      // read as "not yours" and cost someone their in-progress board.
+      if (!ok) { syncedPlanIdRef.current = null; return }
+      // Answered, and the plan isn't this company's. The board must not show
+      // it, and — more importantly — must not keep its planId around, or the
+      // next "+ Add idea" would write this company's idea into the other
+      // company's plan. Start clean instead.
+      if (!plan) { syncedPlanIdRef.current = null; clear(); return }
       if (!dbIdeas) return
       const dbDraftIdeas = dbIdeas.map(dbIdeaToDraft)
       const localOnly = (draft.ideas || []).filter(i => typeof i.id === 'string' && i.id.startsWith('new_'))
       update({ ideas: [...dbDraftIdeas, ...localOnly] })
     })
-  }, [planId, accessToken])
+  }, [planId, accessToken, activeWorkspaceId])
 
   // Fire arak-draft-copy for a batch of freshly-created ideas — ONE call per
   // idea (no cross-idea batching), so a slow/failed draft never blocks the

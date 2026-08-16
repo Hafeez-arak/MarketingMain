@@ -2109,6 +2109,11 @@ const STATUS_COLORS_REEL = {
   error:     'bg-red-50 text-red-600',
 }
 
+// Reels belong to a company, so the key they're stored under has to name it.
+// One shared key meant a reel library filled in for one brand reappeared in
+// the next brand's library after a switch.
+const reelsKey = workspaceId => `arak_reels_ig:${workspaceId || 'none'}`
+
 function ReelsPanel({ state, dispatch }) {
   const { activeWorkspaceId, accessToken } = useAuth()
   const webhookUrl = state.webhooks?.instagramReels || ''
@@ -2126,8 +2131,13 @@ function ReelsPanel({ state, dispatch }) {
   const [approval,   setApproval]   = useState(null) // reel pending approval
 
   const [reels, setReels] = useState(() => {
-    try { return JSON.parse(localStorage.getItem('arak_reels_ig') || '[]') } catch { return [] }
+    try { return JSON.parse(localStorage.getItem(reelsKey(activeWorkspaceId)) || '[]') } catch { return [] }
   })
+  // Every write goes through here so no call site can forget the scope.
+  function persistReels(updated) {
+    setReels(updated)
+    try { localStorage.setItem(reelsKey(activeWorkspaceId), JSON.stringify(updated)) } catch { /* quota/private mode — the list still works in memory */ }
+  }
 
   // ── Generate reel via n8n webhook ────────────────────────────────────────
   async function handleGenerate() {
@@ -2232,9 +2242,7 @@ function ReelsPanel({ state, dispatch }) {
       hashtags:   finalData.hashtags,
       createdAt:  new Date().toISOString(),
     }
-    const updated = [newReel, ...reels]
-    setReels(updated)
-    localStorage.setItem('arak_reels_ig', JSON.stringify(updated))
+    persistReels([newReel, ...reels])
     dispatch(actions.addNotification({ id: newReel.id, message: `Reel approved and saved to library.`, createdAt: new Date().toISOString() }))
     setApproval(null)
     setBrief(''); setHook(''); setMusicNote(''); setCta('')
@@ -2254,25 +2262,19 @@ function ReelsPanel({ state, dispatch }) {
       status: 'planned', videoUrl: '', coverUrl: '', caption: '', hashtags: '',
       createdAt: new Date().toISOString(),
     }
-    const updated = [newReel, ...reels]
-    setReels(updated)
-    localStorage.setItem('arak_reels_ig', JSON.stringify(updated))
+    persistReels([newReel, ...reels])
     dispatch(actions.addNotification({ id: newReel.id, message: `Reel brief saved.`, createdAt: new Date().toISOString() }))
     setBrief(''); setHook(''); setMusicNote(''); setCta('')
     setSubView('library')
   }
 
   function deleteReel(id) {
-    const updated = reels.filter(r => r.id !== id)
-    setReels(updated)
-    localStorage.setItem('arak_reels_ig', JSON.stringify(updated))
+    persistReels(reels.filter(r => r.id !== id))
   }
 
   function cycleStatus(id) {
     const cycle = { planned:'filming', filming:'editing', editing:'ready', ready:'published', published:'planned', error:'planned' }
-    const updated = reels.map(r => r.id === id ? { ...r, status: cycle[r.status] || 'planned' } : r)
-    setReels(updated)
-    localStorage.setItem('arak_reels_ig', JSON.stringify(updated))
+    persistReels(reels.map(r => r.id === id ? { ...r, status: cycle[r.status] || 'planned' } : r))
   }
 
 
