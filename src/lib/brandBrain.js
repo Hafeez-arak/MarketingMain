@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react'
 import { actions } from '../store/app'
 import { useAuth } from '../store/auth'
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './supabaseClient'
+import { fetchBrandFieldDefs, getFieldValue, buildDirectoryBlock } from './brandSchema'
 
 // ─── Brand Brain ─────────────────────────────────────────────────────────
 // A single, canonical brand profile stored in Supabase (table: brand_profile,
@@ -44,12 +45,23 @@ export const DEFAULT_BRAND_PROFILE = {
   complianceNotes:   '',
   offersCtas:        '',
   captionLanguage:   'both',   // ar | en | both — which language(s) captions are written in
+  arabicDialect:     'saudi',
+  // Values for schema-defined fields that don't map to a fixed column above
+  // (see brandSchema.js). Keyed by the field's `key`.
+  customFields:      {},
+  // The workspace's field definitions, in display order — attached at fetch
+  // so buildInstructionsString can flatten the profile without every caller
+  // having to plumb the schema through. Empty = fall back to the legacy order.
+  fieldDefs:         [],
   updatedAt:         null,
 }
 
-function rowToProfile(row) {
+function rowToProfile(row, fieldDefs) {
   if (!row) return null
   return {
+    customFields:     row.custom_fields       || {},
+    arabicDialect:    row.arabic_dialect      || 'saudi',
+    fieldDefs:        fieldDefs               || [],
     mission:          row.mission             || '',
     positioning:      row.positioning         || '',
     valueProposition: row.value_proposition   || '',
@@ -82,12 +94,20 @@ function authHeaders(accessToken) {
 export async function fetchBrandProfile(workspaceId, accessToken) {
   if (!workspaceId) return null
   try {
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/brand_profile?workspace_id=eq.${workspaceId}&select=*`, {
-      headers: authHeaders(accessToken),
-    })
+    // The values and the field definitions that describe them are fetched
+    // together: a profile without its schema would flatten into the prompt in
+    // the legacy lighting-company order, which is right for no one now.
+    const [res, fieldDefs] = await Promise.all([
+      fetch(`${SUPABASE_URL}/rest/v1/brand_profile?workspace_id=eq.${workspaceId}&select=*`, {
+        headers: authHeaders(accessToken),
+      }),
+      fetchBrandFieldDefs(workspaceId, accessToken),
+    ])
     if (!res.ok) return null
     const rows = await res.json()
-    return rows?.[0] ? rowToProfile(rows[0]) : { ...DEFAULT_BRAND_PROFILE }
+    return rows?.[0]
+      ? rowToProfile(rows[0], fieldDefs)
+      : { ...DEFAULT_BRAND_PROFILE, fieldDefs }
   } catch {
     return null
   }
@@ -111,11 +131,18 @@ export async function saveBrandProfile(workspaceId, accessToken, profile) {
     brand_colors:        profile.brandColors       || '',
     market_context:      profile.marketContext     || '',
     key_projects:        profile.keyProjects       || '',
+    // Aqeeq and Alo Kheyatah both bind a schema field (the service-menu /
+    // price-list summary) to this column, so it has to round-trip. It was
+    // absent from this payload before v4, which meant edits to it were
+    // silently dropped on save.
+    product_index:       profile.productIndex      || '',
     contact_info:        profile.contactInfo       || '',
     languages:           profile.languages         || '',
     compliance_notes:    profile.complianceNotes   || '',
     offers_ctas:         profile.offersCtas        || '',
     caption_language:    profile.captionLanguage   || 'both',
+    arabic_dialect:      profile.arabicDialect     || 'saudi',
+    custom_fields:       profile.customFields      || {},
     updated_at:          new Date().toISOString(),
   }
   try {
@@ -137,7 +164,10 @@ export async function saveBrandProfile(workspaceId, accessToken, profile) {
     // save never reports back a null profile that would blank the app's state.
     let row = null
     try { const rows = await res.json(); row = Array.isArray(rows) ? rows[0] : rows } catch { /* empty body */ }
-    return { ok: true, profile: rowToProfile(row || body) }
+    // Carry the field defs across: they describe the values, aren't stored on
+    // this row, and losing them here would drop the page back to the legacy
+    // field order right after a successful save.
+    return { ok: true, profile: rowToProfile(row || body, profile.fieldDefs) }
   } catch (err) {
     return { error: err.message }
   }
@@ -149,6 +179,29 @@ export async function saveBrandProfile(workspaceId, accessToken, profile) {
 // they just receive a richer instructions block.
 export function buildInstructionsString(profile, platformNotes) {
   if (!profile) profile = DEFAULT_BRAND_PROFILE
+
+  // Schema-driven path: emit the workspace's own fields, in its own order,
+  // under its own headings. A field marked include_in_prompt = false is
+  // stored and editable but never sent — that's how a brand keeps, say, an
+  // internal note out of every generation.
+  if (profile.fieldDefs?.length) {
+    const blocks = profile.fieldDefs
+      .filter(f => f.enabled !== false && f.include_in_prompt !== false)
+      .map(f => {
+        const value = String(getFieldValue(profile, f) || '').trim()
+        if (!value) return ''
+        const heading = f.prompt_label?.trim() || f.label
+        // Multi-line values read better under their heading than beside it.
+        return value.includes('\n') ? `${heading}:\n${value}` : `${heading}: ${value}`
+      })
+      .filter(Boolean)
+    if (platformNotes?.trim()) blocks.push(`Platform-specific notes:\n${platformNotes.trim()}`)
+    return blocks.join('\n\n')
+  }
+
+  // Legacy path — used only when a workspace has no field definitions yet
+  // (a brand new workspace, or a failed schema fetch). Keeps generation
+  // working rather than sending an empty instructions block.
   const sections = [
     // Identity first — this is the company persona the AI writes *as*.
     profile.mission          && `Mission: ${profile.mission}`,
@@ -179,46 +232,28 @@ export function buildInstructionsString(profile, platformNotes) {
 // CampaignPlanner lets the user pick which of these feed the plan prompt.
 // "voice" is the existing brand_profile block (buildInstructionsString);
 // the rest are directory tables that were never wired into plan generation.
+// Fallback picker options, used only before a workspace's schema loads.
+// The real list is per-workspace — see getBrandBrainSections below.
 export const BRAND_BRAIN_SECTIONS = [
-  { value: 'voice',       label: 'Brand Voice & Identity' },
-  { value: 'assets',      label: 'Asset Library' },
-  { value: 'suppliers',   label: 'Suppliers' },
-  { value: 'competitors', label: 'Competitor Watch' },
-  { value: 'products',    label: 'Products' },
+  { value: 'voice',  label: 'Brand Voice & Identity' },
+  { value: 'assets', label: 'Asset Library' },
 ]
 export const DEFAULT_BRAND_BRAIN_SECTIONS = ['voice', 'assets']
 
+// The sections CampaignPlanner lets a user tick when generating a plan.
+// "voice" is the flattened field blob, "assets" is the file library, and
+// every enabled directory the workspace has defined shows up under its own
+// name — "Service Menu" for Aqeeq, "Suppliers" for Arak, and so on.
+export function getBrandBrainSections(schema) {
+  const directories = (schema?.sections || [])
+    .filter(s => s.kind === 'directory' && s.enabled !== false)
+    .map(s => ({ value: s.key, label: s.title }))
+  return [...BRAND_BRAIN_SECTIONS, ...directories]
+}
+
+// Cap on how many rows of any one list get flattened into a prompt — a
+// 27-service menu is useful context, an unbounded list is just token burn.
 const LIST_CAP = 30
-
-function fmtSuppliers(rows) {
-  const list = (rows || []).slice(0, LIST_CAP)
-  if (!list.length) return ''
-  const lines = list.map(s => {
-    const bits = [s.category && `Category: ${s.category}`, s.brand_lines && `Brand lines: ${s.brand_lines}`, s.notes && `Notes: ${s.notes}`].filter(Boolean)
-    return `- ${s.name}${bits.length ? ` — ${bits.join(' — ')}` : ''}`
-  })
-  return `Suppliers we work with:\n${lines.join('\n')}`
-}
-
-function fmtCompetitors(rows) {
-  const list = (rows || []).slice(0, LIST_CAP)
-  if (!list.length) return ''
-  const lines = list.map(c => {
-    const bits = [c.positioning && `Positioning: ${c.positioning}`, c.strengths && `Their strengths: ${c.strengths}`, c.how_we_differ && `How we differ: ${c.how_we_differ}`].filter(Boolean)
-    return `- ${c.name}${bits.length ? ` — ${bits.join(' — ')}` : ''}`
-  })
-  return `Competitor watch (avoid copying their angles; differentiate instead):\n${lines.join('\n')}`
-}
-
-function fmtProducts(rows) {
-  const list = (rows || []).slice(0, LIST_CAP)
-  if (!list.length) return ''
-  const lines = list.map(p => {
-    const bits = [p.category && `Category: ${p.category}`, p.description && p.description, p.specs && `Specs: ${p.specs}`].filter(Boolean)
-    return `- ${p.name}${bits.length ? ` — ${bits.join(' — ')}` : ''}`
-  })
-  return `Product range available to feature:\n${lines.join('\n')}`
-}
 
 function fmtAssets(rows) {
   const projectPhotos = (rows || []).filter(a => a.kind === 'project_photo')
@@ -241,21 +276,32 @@ function fmtAssets(rows) {
 }
 
 // Builds one formatted text block per selectable section (see
-// BRAND_BRAIN_SECTIONS). CampaignPlanner joins only the sections the user
+// getBrandBrainSections). CampaignPlanner joins only the sections the user
 // selected before sending them as the `instructions` payload.
+//
+// `directory` is { schema, rowsBySection, assets }: the workspace's own
+// section/column definitions plus its rows, so a directory renders into the
+// prompt under its own name with its own columns.
 export function buildSectionBlocks(profile, directory) {
-  const { suppliers, competitors, products, assets } = directory || {}
-  return {
-    voice:       buildInstructionsString(profile, ''),
-    suppliers:   fmtSuppliers(suppliers),
-    competitors: fmtCompetitors(competitors),
-    products:    fmtProducts(products),
-    assets:      fmtAssets(assets),
+  const { schema, rowsBySection, assets } = directory || {}
+  const blocks = {
+    voice:  buildInstructionsString(profile, ''),
+    assets: fmtAssets(assets),
   }
+  for (const section of schema?.sections || []) {
+    if (section.kind !== 'directory' || section.enabled === false) continue
+    const columns = (schema.columns || []).filter(c => c.section_key === section.key)
+    blocks[section.key] = buildDirectoryBlock(section, columns, rowsBySection?.[section.key])
+  }
+  return blocks
 }
 
 export function isBrandProfileEmpty(profile) {
   if (!profile) return true
+  // A brand whose schema is mostly custom fields (Aqeeq, Alo Kheyatah) can be
+  // richly filled in while every fixed column below is still blank — checking
+  // only those would report a fully-trained brain as empty.
+  if (Object.values(profile.customFields || {}).some(v => String(v || '').trim())) return false
   return !profile.mission && !profile.positioning && !profile.valueProposition &&
     !profile.brandStory && !profile.companyFacts && !profile.voiceDescriptors &&
     !profile.toneDos && !profile.toneDonts && !profile.targetPersonas &&

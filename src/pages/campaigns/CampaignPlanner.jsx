@@ -6,9 +6,9 @@ import { Card, Button, Input, Textarea, Select, Spinner, Toggle, Empty, Modal } 
 import { uid, formatDate } from '../../lib/utils'
 import {
   isBrandProfileEmpty, useBrandProfileSync,
-  BRAND_BRAIN_SECTIONS, DEFAULT_BRAND_BRAIN_SECTIONS, buildSectionBlocks,
+  getBrandBrainSections, DEFAULT_BRAND_BRAIN_SECTIONS, buildSectionBlocks,
 } from '../../lib/brandBrain'
-import { suppliersApi, competitorsApi, productsApi } from '../../lib/brandDirectory'
+import { fetchBrandSchema, fetchDirectoryRows } from '../../lib/brandSchema'
 import { fetchBrandAssets } from '../../lib/brandAssets'
 import { requestCampaignPlan, requestPlanContentGeneration, elongateIdea, requestDraftCopy, triggerVideoRenders } from '../../lib/campaignPlanner'
 import {
@@ -805,7 +805,7 @@ function CalendarView({ ideas, startDate, endDate, selectedDay, onDayClick }) {
 export function CampaignPlanner() {
   const { draft, update, clear, state, dispatch } = useDraft()
   const navigate = useNavigate()
-  const { activeWorkspaceId, accessToken } = useAuth()
+  const { activeWorkspaceId, accessToken, activeWorkspace } = useAuth()
   const webhookUrl = state.webhooks?.campaignPlanner || ''
   useBrandProfileSync(state, dispatch)
 
@@ -815,18 +815,42 @@ export function CampaignPlanner() {
 
   // Directory data behind the Brand Brain section toggles — fetched once so
   // the setup step can show live counts and plan generation can pull from it.
-  const [directory, setDirectory] = useState({ suppliers: [], competitors: [], products: [], assets: [] })
+  // Which directories exist is per-brand now (Arak has Suppliers, Aqeeq has a
+  // Service Menu, Alo Kheyatah has Alterations), so this loads the workspace's
+  // own schema rather than four fixed tables.
+  const [directory, setDirectory] = useState({
+    schema: { sections: [], fields: [], columns: [] }, rowsBySection: {}, assets: [],
+  })
   useEffect(() => {
     if (!activeWorkspaceId) return
+    let alive = true
     Promise.all([
-      suppliersApi.list(activeWorkspaceId, accessToken),
-      competitorsApi.list(activeWorkspaceId, accessToken),
-      productsApi.list(activeWorkspaceId, accessToken),
+      fetchBrandSchema(activeWorkspaceId, accessToken),
+      fetchDirectoryRows(activeWorkspaceId, accessToken),
       fetchBrandAssets(activeWorkspaceId, accessToken),
-    ]).then(([suppliers, competitors, products, assets]) => {
-      setDirectory({ suppliers, competitors, products, assets })
+    ]).then(([schema, rows, assets]) => {
+      if (!alive) return
+      const rowsBySection = {}
+      for (const r of rows) (rowsBySection[r.section_key] ||= []).push(r)
+      setDirectory({ schema, rowsBySection, assets })
     })
+    return () => { alive = false }
   }, [activeWorkspaceId, accessToken])
+
+  // Rows the planner can be told to build the month around. Any directory
+  // qualifies — Arak features fixtures, Aqeeq features services, Alo Kheyatah
+  // features alteration types. A row's first column is its display name.
+  const featurableItems = []
+  for (const section of directory.schema.sections) {
+    if (section.kind !== 'directory' || section.enabled === false) continue
+    const cols = directory.schema.columns.filter(c => c.section_key === section.key && c.enabled !== false)
+    if (!cols.length) continue
+    for (const row of directory.rowsBySection[section.key] || []) {
+      const name = String(row.data?.[cols[0].key] || '').trim()
+      if (!name) continue
+      featurableItems.push({ id: row.id, name, sectionTitle: section.title, cols, data: row.data || {} })
+    }
+  }
 
   // Review-step view controls (client-side only).
   const [statusFilter,   setStatusFilter]   = useState('all')   // all | undecided | approved | rejected
@@ -1028,12 +1052,21 @@ export function CampaignPlanner() {
       const blocks = buildSectionBlocks(state.brandProfile, directory)
       const instructions = brandBrainSections.map(s => blocks[s]).filter(Boolean).join('\n\n')
       effectiveGoal = goal.trim() ||
-        'A well-rounded month of brand content for Arak Lighting — a mix of project showcases, product highlights, educational lighting content, and the seasonal/cultural moments falling in this month.'
-      // Stage-1 brief material: the products to feature (full context, not
-      // just ids), so the planner can build a coherent month around them.
-      featuredProducts = directory.products
-        .filter(p => featuredProductIds.includes(p.id))
-        .map(p => ({ name: p.name, category: p.category || '', specs: p.specs || '', description: p.description || '' }))
+        `A well-rounded month of brand content for ${activeWorkspace?.name || 'this brand'} — a mix of service and product highlights, educational content, and the seasonal/cultural moments falling in this month, all in the brand's own voice.`
+      // Stage-1 brief material: the rows to feature with their full context,
+      // not just ids, so the planner can build a coherent month around them.
+      // Columns flagged out of the prompt (prices) stay out here too.
+      featuredProducts = featurableItems
+        .filter(item => featuredProductIds.includes(item.id))
+        .map(item => {
+          const out = { name: item.name, catalogue: item.sectionTitle }
+          for (const c of item.cols.slice(1)) {
+            if (c.in_prompt === false) continue
+            const v = String(item.data[c.key] || '').trim()
+            if (v) out[c.key] = v
+          }
+          return out
+        })
 
       // Cross-month anti-repetition: this is a BRAND NEW plan (no planId yet),
       // so "past" here means every idea from every OTHER plan in the workspace.
@@ -1620,8 +1653,10 @@ export function CampaignPlanner() {
           <div>
             <p className="text-xs font-medium text-text-secondary mb-2">Pull from Brand Brain</p>
             <div className="flex gap-2 flex-wrap">
-              {BRAND_BRAIN_SECTIONS.map(s => {
-                const count = { suppliers: directory.suppliers.length, competitors: directory.competitors.length, products: directory.products.length }[s.value]
+              {getBrandBrainSections(directory.schema).map(s => {
+                const count = s.value === 'assets'
+                  ? directory.assets.length
+                  : (directory.rowsBySection[s.value] || []).length
                 const active = brandBrainSections.includes(s.value)
                 return (
                   <button key={s.value} onClick={() => toggleSection(s.value)}
@@ -1765,16 +1800,16 @@ export function CampaignPlanner() {
                 />
                 <p className="text-[11px] text-text-tertiary -mt-2.5">The planner will aim for this ratio. Once ideas are proposed, the board shows the actual breakdown next to it.</p>
 
-                {directory.products.length > 0 && (
+                {featurableItems.length > 0 && (
                   <div>
-                    <p className="text-xs font-medium text-text-secondary mb-2">Feature these products this month (optional)</p>
+                    <p className="text-xs font-medium text-text-secondary mb-2">Feature these this month (optional)</p>
                     <div className="flex gap-2 flex-wrap">
-                      {directory.products.map(p => {
-                        const active = featuredProductIds.includes(p.id)
+                      {featurableItems.map(item => {
+                        const active = featuredProductIds.includes(item.id)
                         return (
-                          <button key={p.id} onClick={() => toggleProduct(p.id)}
+                          <button key={item.id} onClick={() => toggleProduct(item.id)}
                             className={`px-3 py-1.5 rounded-xl border text-sm font-medium transition-all ${active ? 'bg-amber-600 text-white border-amber-600' : 'bg-white border-border text-text-secondary hover:border-amber-400'}`}>
-                            {p.name}{p.category && <span className={active ? 'opacity-75 ml-1' : 'text-text-tertiary ml-1'}>· {p.category}</span>}
+                            {item.name}<span className={active ? 'opacity-75 ml-1' : 'text-text-tertiary ml-1'}>· {item.sectionTitle}</span>
                           </button>
                         )
                       })}

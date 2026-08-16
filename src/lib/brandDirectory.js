@@ -1,9 +1,18 @@
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './supabaseClient'
 
-// ─── Suppliers & Competitors ─────────────────────────────────────────────
-// Thin CRUD over brand_suppliers / brand_competitors (see
-// supabase/migrations/20260630_brand_brain_v2.sql). Same auth model as
-// brandBrain.js: anon key for gateway routing, user's session token for RLS.
+// ─── Suppliers & Competitors — SUPERSEDED by brandSchema.js ──────────────
+// Thin CRUD over brand_suppliers / brand_competitors / brand_products /
+// brand_message_templates (see supabase/migrations/20260630_brand_brain_v2.sql).
+//
+// Nothing imports this any more. Brand Brain v4 replaced these four
+// fixed-shape tables with per-workspace directories: brand_sections defines
+// which directories a brand has, brand_directory_columns defines their
+// columns, and brand_directory_rows holds the rows (see brandSchema.js).
+// Arak's 24 supplier + 7 competitor rows were copied into that model by
+// supabase/seed_brand_brain_arak.sql.
+//
+// Kept — along with the underlying tables — as the recovery path for that
+// migration. Delete both once v4 has run in production long enough to trust.
 
 function authHeaders(accessToken) {
   return { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${accessToken || SUPABASE_ANON_KEY}` }
