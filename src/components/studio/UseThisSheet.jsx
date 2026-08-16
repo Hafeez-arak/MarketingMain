@@ -3,7 +3,7 @@ import { Modal, Button, Input, Textarea, Spinner } from '../ui/index'
 import { sendVersionToPosts, markIdeaMediaReady, SENDABLE_PLATFORMS } from '../../lib/studioBridge'
 import { requestCaptionStudio } from '../../lib/campaignPlanner'
 import { publishPost } from '../../lib/zernio'
-import { buildInstructionsString } from '../../lib/brandBrain'
+import { BrandContextPanel } from '../BrandContextPanel'
 
 // ─── "Use this →" ───────────────────────────────────────────────────────────
 // The step that turns a finished Studio asset into real posts. Everything the
@@ -29,7 +29,11 @@ const PLATFORM_LABEL = {
 // mean re-rendering to post something that would have been fine.
 const NATIVE_RATIO = { instagram: ['4:5', '1:1', '9:16', '1.91:1'], tiktok: ['9:16'], snapchat: ['9:16'] }
 
-export function UseThisSheet({ open, onClose, version, session, workspaceId, accessToken, webhooks, brandProfile, onSent }) {
+// `brandContextFor` is Studio's own builder, passed down rather than rebuilt
+// here — Studio has already loaded the schema, directory and memory for its
+// generate panel, and a second loader would fetch the same rows again just to
+// draft one caption.
+export function UseThisSheet({ open, onClose, version, session, workspaceId, accessToken, webhooks, brandContextFor, onSent }) {
   const briefPlatforms = session?.brief?.platforms?.filter(p => SENDABLE_PLATFORMS.includes(p))
   const [targets, setTargets] = useState(briefPlatforms?.length ? briefPlatforms : ['instagram'])
   const [caption, setCaption] = useState(session?.brief?.caption || '')
@@ -40,6 +44,13 @@ export function UseThisSheet({ open, onClose, version, session, workspaceId, acc
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [done, setDone] = useState(null)
+  const [mutedKeys, setMutedKeys] = useState([])
+
+  // Built here, from the mute state this sheet owns, so the panel below and
+  // the payload in draftCaption are the same assembly — see CaptionStudio for
+  // the same contract.
+  const brandContext = brandContextFor ? brandContextFor({ mutedKeys }) : null
+  const toggleBlock = key => setMutedKeys(prev => prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key])
 
   const isVideo = version?.media_type === 'video' || !!version?.video_url
 
@@ -76,7 +87,9 @@ export function UseThisSheet({ open, onClose, version, session, workspaceId, acc
         tone: session?.brief?.tone || '',
         objective: session?.brief?.objective || '',
         cta: session?.brief?.cta || '',
-        instructions: buildInstructionsString(brandProfile) || '',
+        instructions: brandContext?.instructions || '',
+        brand_name: brandContext?.brandName || '',
+        brand_descriptor: brandContext?.brandDescriptor || '',
       },
       controls: {},
     })
@@ -241,6 +254,11 @@ export function UseThisSheet({ open, onClose, version, session, workspaceId, acc
                   {drafting ? <><Spinner size="sm" /> Writing…</> : '✨ Draft it for me'}
                 </button>
               </div>
+              {brandContext && (
+                <div className="mb-2">
+                  <BrandContextPanel context={brandContext} mutedKeys={mutedKeys} onToggleBlock={toggleBlock} task="caption" />
+                </div>
+              )}
               <Textarea rows={4} autoGrow value={caption} onChange={e => setCaption(e.target.value)}
                 placeholder="What should this post say?" />
               <Input className="mt-2" value={hashtags} onChange={e => setHashtags(e.target.value)}

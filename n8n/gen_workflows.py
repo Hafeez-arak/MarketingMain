@@ -3116,6 +3116,17 @@ def build_instagram_reels() -> dict:
     The fallback in ri-11 resolves to the same value the column default
     would have applied, so this is additive: correct when the id is sent,
     byte-identical behaviour when it isn't.
+
+    Second deliberate change: this workflow was the last live path still
+    telling the model it worked for a lighting company. Its script prompt
+    opened with the hardcoded Arak persona and asked for "#ArakLighting" and
+    an "architectural lighting scene" cover, and the FLUX call appended a
+    lighting tail — so a spa's reel came back as light fittings whatever the
+    brand instructions underneath said. ri-12/ri-13 derive the persona and
+    the hashtag from the payload's brand_name/brand_descriptor instead, the
+    same helpers every generated prompt in this file already uses. Both fall
+    back to brand-neutral text, so an older client that sends neither gets a
+    generic reel rather than another company's.
     """
     return json.loads(r"""{
   "name": "Arak Lighting – Instagram Reels (Manual)",
@@ -3221,6 +3232,18 @@ def build_instagram_reels() -> dict:
               "name": "workspace_id",
               "type": "string",
               "value": "={{ $json.body.workspace_id || $json.body.workspaceId || '00000000-0000-0000-0000-000000000001' }}"
+            },
+            {
+              "id": "ri-12",
+              "name": "brand_persona",
+              "type": "string",
+              "value": "={{ (() => { const n = String($json.body.brand_name || '').replace(/[\\n\\r\\t\"]/g,' ').trim(); const d = String($json.body.brand_descriptor || '').replace(/[\\n\\r\\t\"]/g,' ').trim(); if (!n) return 'the brand described in the BRAND INSTRUCTIONS below'; return d ? (n + ', ' + d) : n; })() }}"
+            },
+            {
+              "id": "ri-13",
+              "name": "brand_tag",
+              "type": "string",
+              "value": "={{ (() => { const latin = String($json.body.brand_name || '').replace(/\\([^)]*\\)/g,'').replace(/[^A-Za-z0-9 ]/g,'').trim(); return latin ? ('#' + latin.split(/\\s+/).map(w => w[0].toUpperCase() + w.slice(1)).join('')) : ''; })() }}"
             }
           ]
         },
@@ -3258,7 +3281,7 @@ def build_instagram_reels() -> dict:
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\n  \"model\": \"claude-sonnet-5\",\n  \"max_tokens\": 1200,\n  \"messages\": [{\n    \"role\": \"user\",\n    \"content\": \"You are a social media video expert for Arak Lighting, Saudi Arabia's leading architectural lighting company with 45+ years of experience. Notable projects: Solitaire Mall, King Fahad Airport, Ritz Carlton Riyadh.\\n\\nCreate content for an Instagram Reel:\\n\\nREEL FORMAT: {{ $('Sanitize Inputs').item.json.reel_format }}\\nDURATION: {{ $('Sanitize Inputs').item.json.reel_duration }}\\nBRIEF: {{ $('Sanitize Inputs').item.json.reel_brief }}\\nOPENING HOOK: {{ $('Sanitize Inputs').item.json.reel_hook }}\\nMUSIC STYLE: {{ $('Sanitize Inputs').item.json.reel_music }}\\nCALL TO ACTION: {{ $('Sanitize Inputs').item.json.reel_cta }}\\nTONE: {{ $('Sanitize Inputs').item.json.tone }}\\n\\nBRAND INSTRUCTIONS:\\n{{ $('Sanitize Inputs').item.json.instructions }}\\n\\nReturn ONLY valid JSON, no markdown:\\n{\\n  \\\"caption\\\": \\\"reel caption with hook line first, emojis, line breaks, no hashtags\\\",\\n  \\\"hashtags\\\": \\\"#ArakLighting #Reels #LightingDesign [7 more relevant tags]\\\",\\n  \\\"cover_image_prompt\\\": \\\"detailed FLUX prompt for the reel cover/first frame — architectural lighting scene, photorealistic, cinematic, max 80 words\\\",\\n  \\\"motion_prompt\\\": \\\"Wan I2V animation prompt — describe camera movement and motion only, e.g. slow cinematic pan left, soft light flicker, gentle dolly zoom — max 40 words\\\",\\n  \\\"reel_strategy\\\": \\\"one sentence why this reel will perform well\\\"\\n}\"\n  }]\n}",
+        "jsonBody": "={\n  \"model\": \"claude-sonnet-5\",\n  \"max_tokens\": 1200,\n  \"messages\": [{\n    \"role\": \"user\",\n    \"content\": \"You are a social media video expert for {{ $('Sanitize Inputs').item.json.brand_persona }}.\\n\\nCreate content for an Instagram Reel:\\n\\nREEL FORMAT: {{ $('Sanitize Inputs').item.json.reel_format }}\\nDURATION: {{ $('Sanitize Inputs').item.json.reel_duration }}\\nBRIEF: {{ $('Sanitize Inputs').item.json.reel_brief }}\\nOPENING HOOK: {{ $('Sanitize Inputs').item.json.reel_hook }}\\nMUSIC STYLE: {{ $('Sanitize Inputs').item.json.reel_music }}\\nCALL TO ACTION: {{ $('Sanitize Inputs').item.json.reel_cta }}\\nTONE: {{ $('Sanitize Inputs').item.json.tone }}\\n\\nBRAND INSTRUCTIONS:\\n{{ $('Sanitize Inputs').item.json.instructions }}\\n\\nReturn ONLY valid JSON, no markdown:\\n{\\n  \\\"caption\\\": \\\"reel caption with hook line first, emojis, line breaks, no hashtags\\\",\\n  \\\"hashtags\\\": \\\"{{ $('Sanitize Inputs').item.json.brand_tag }} #Reels [8 more tags relevant to THIS brand's actual industry]\\\",\\n  \\\"cover_image_prompt\\\": \\\"detailed FLUX prompt for the reel cover/first frame — a scene from this brand's own subject matter, photorealistic, cinematic, max 80 words\\\",\\n  \\\"motion_prompt\\\": \\\"Wan I2V animation prompt — describe camera movement and motion only, e.g. slow cinematic pan left, soft light flicker, gentle dolly zoom — max 40 words\\\",\\n  \\\"reel_strategy\\\": \\\"one sentence why this reel will perform well\\\"\\n}\"\n  }]\n}",
         "options": {}
       },
       "id": "dfdfb8b1-7d8c-44e5-8523-9ba28fe802eb",
@@ -3272,7 +3295,7 @@ def build_instagram_reels() -> dict:
     },
     {
       "parameters": {
-        "jsCode": "const raw = $input.first().json.content?.find(b=>b.type==='text')?.text || '';\nconst clean = raw.replace(/```json|```/g,'').trim();\nlet parsed;\ntry { parsed = JSON.parse(clean); }\ncatch(e) {\n  const match = clean.match(/\\{[\\s\\S]*\\}/);\n  if (match) { try { parsed = JSON.parse(match[0]); } catch(e2) { throw new Error('Cannot parse: ' + clean.slice(0,200)); } }\n  else throw new Error('No JSON found: ' + clean.slice(0,200));\n}\nreturn [{\n  json: {\n    caption:            parsed.caption            || '',\n    hashtags:           parsed.hashtags           || '#ArakLighting #Reels',\n    cover_image_prompt: parsed.cover_image_prompt || '',\n    motion_prompt:      parsed.motion_prompt      || 'slow cinematic pan, warm light ambiance',\n    reel_strategy:      parsed.reel_strategy      || '',\n  }\n}];"
+        "jsCode": "const raw = $input.first().json.content?.find(b=>b.type==='text')?.text || '';\nconst clean = raw.replace(/```json|```/g,'').trim();\nlet parsed;\ntry { parsed = JSON.parse(clean); }\ncatch(e) {\n  const match = clean.match(/\\{[\\s\\S]*\\}/);\n  if (match) { try { parsed = JSON.parse(match[0]); } catch(e2) { throw new Error('Cannot parse: ' + clean.slice(0,200)); } }\n  else throw new Error('No JSON found: ' + clean.slice(0,200));\n}\nreturn [{\n  json: {\n    caption:            parsed.caption            || '',\n    hashtags:           parsed.hashtags           || [$('Sanitize Inputs').first().json.brand_tag, '#Reels'].filter(Boolean).join(' '),\n    cover_image_prompt: parsed.cover_image_prompt || '',\n    motion_prompt:      parsed.motion_prompt      || 'slow cinematic pan, soft ambient light',\n    reel_strategy:      parsed.reel_strategy      || '',\n  }\n}];"
       },
       "id": "5baa4e55-7bc4-488b-a36c-bdcf1e6af8e9",
       "name": "Parse Script",
@@ -3306,7 +3329,7 @@ def build_instagram_reels() -> dict:
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\n  \"input\": {\n    \"prompt\": \"{{ $('Parse Script').item.json.cover_image_prompt }} -- Arak Lighting, architectural photography, luxury interior, Saudi Arabia, hyper-detailed, 4K, cinematic\",\n    \"aspect_ratio\": \"9:16\",\n    \"output_format\": \"png\"\n  }\n}",
+        "jsonBody": "={\n  \"input\": {\n    \"prompt\": \"{{ $('Parse Script').item.json.cover_image_prompt }} -- {{ $('Sanitize Inputs').item.json.brand_persona }}, Saudi Arabia, hyper-detailed, 4K, cinematic\",\n    \"aspect_ratio\": \"9:16\",\n    \"output_format\": \"png\"\n  }\n}",
         "options": {}
       },
       "id": "698879b9-f314-442f-8284-367484114d3a",

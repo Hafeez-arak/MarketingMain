@@ -8,7 +8,7 @@ import {
   isBrandProfileEmpty, useBrandProfileSync,
   getBrandBrainSections, DEFAULT_BRAND_BRAIN_SECTIONS,
 } from '../../lib/brandBrain'
-import { buildContext, fetchBrandMemory, logIdeaEvent, ideaSnapshot } from '../../lib/brandContext'
+import { buildContext, fetchBrandMemory, logIdeaEvent, logIdeaEvents, ideaSnapshot } from '../../lib/brandContext'
 import { fetchBrandSchema, fetchDirectoryRows } from '../../lib/brandSchema'
 import { fetchBrandAssets } from '../../lib/brandAssets'
 import { requestCampaignPlan, requestPlanContentGeneration, elongateIdea, requestDraftCopy, triggerVideoRenders } from '../../lib/campaignPlanner'
@@ -927,6 +927,13 @@ export function CampaignPlanner() {
   const setupContext = buildContext(state.brandProfile, directory.schema, directory, brandMemory, {
     task: 'plan', sections: brandBrainSections,
   })
+  // The caption-task slice, for the review board's panel. Separate from
+  // setupContext because the two calls genuinely take different slices once
+  // fields are task-tagged — showing the plan context over a board of drafted
+  // captions would misreport what wrote them.
+  const draftContext = buildContext(state.brandProfile, directory.schema, directory, brandMemory, {
+    task: 'caption', sections: brandBrainSections,
+  })
   const activeRuleCount = brandMemory.filter(r => r.status === 'active').length
   const months = monthOptions()
 
@@ -985,6 +992,20 @@ export function CampaignPlanner() {
       caption_language: captionLanguage, instructions,
       brand_name: brandCtx.brand_name, brand_descriptor: brandCtx.brand_descriptor,
     })))
+  }
+
+  // A redraft is a rejection of the copy without a rejection of the idea —
+  // the reviewer read what the model wrote and asked for another take. Worth
+  // recording separately from the first draft, which draftIdeas also serves:
+  // the interesting number is how often a given kind of idea needs a second
+  // pass, and that is invisible if both look the same in the log.
+  function redraftIdea(target) {
+    logIdeaEvent(activeWorkspaceId, accessToken, {
+      planId, ideaId: target.id, event: 'redrafted',
+      reason: target.draftStatus === 'failed' ? 'retry after failure' : 'asked for another take',
+      before: ideaSnapshot(target),
+    })
+    return draftIdeas(ideas, [target.id])
   }
 
   // Poll plan_ideas for cards currently 'drafting' — 4s while any are in
@@ -1339,7 +1360,15 @@ export function CampaignPlanner() {
     // isNew ideas never made it to the database (see addIdea/onIdeaCreate) —
     // nothing to delete server-side, and deleteIdea would just no-op on a
     // fake temp id anyway.
-    if (!idea.isNew) await deleteIdea(accessToken, idea.id)
+    if (idea.isNew) return
+    // Logged BEFORE the delete, and with the full snapshot: this row is about
+    // to stop existing, so the event is the only remaining record of what was
+    // thrown away. A silently deleted idea reads to every later report as one
+    // that was never suggested, which is the opposite of what happened.
+    logIdeaEvent(activeWorkspaceId, accessToken, {
+      planId, ideaId: idea.id, event: 'deleted', before: ideaSnapshot(idea),
+    })
+    await deleteIdea(accessToken, idea.id)
   }
 
   // Copies a fully-briefed idea onto the OTHER platform — same topic/angle/
@@ -1427,7 +1456,17 @@ export function CampaignPlanner() {
     // still 'proposed' — otherwise the local board would claim a change the
     // DB didn't actually make (a previously-rejected idea showing "approved"
     // in this tab while the row itself never moved).
+    const affected = ideas.filter(i => !i.isNew && (status === 'proposed' || i.status === 'proposed'))
     update({ ideas: ideas.map(i => (status === 'proposed' || i.status === 'proposed') ? { ...i, status } : i) })
+    // Same scoping again, for the same reason: logging every card would claim
+    // decisions the DB never made. 'proposed' is a reset, not a judgement, so
+    // it records as an edit rather than an approval.
+    logIdeaEvents(activeWorkspaceId, accessToken, affected.map(i => ({
+      planId, ideaId: i.id,
+      event: status === 'rejected' ? 'rejected' : status === 'approved' ? 'approved' : 'edited',
+      reason: status === 'proposed' ? 'reset to undecided' : 'bulk action',
+      before: { status: i.status }, after: { status },
+    })))
     setBusy(false)
   }
 
@@ -1960,6 +1999,15 @@ export function CampaignPlanner() {
               <Button variant="ghost" size="xs" onClick={() => setShowMoreModal(true)} disabled={busy} className="ml-auto">✨ Generate more with AI</Button>
               <Button variant="ghost" size="xs" onClick={addIdea} disabled={busy}>+ Add idea</Button>
             </div>
+
+            {/* What the copy on this board was written against. Shown once for
+                the board rather than once per card: it is the same context for
+                every idea here, and twelve identical chips would be noise. No
+                mute control — the captions were already written, so a toggle
+                here would only describe a past call. */}
+            <div className="pt-1">
+              <BrandContextPanel context={draftContext} task="caption" />
+            </div>
           </Card>
 
           {showMoreModal && (
@@ -1992,7 +2040,7 @@ export function CampaignPlanner() {
                       brandName={state.brandProfile?.customFields?.brand_name || ''}
                       onChange={onIdeaChange} onRemove={onIdeaRemove} onCreate={onIdeaCreate}
                       onOpenStudio={openStudio} studioSession={studioSessions[idea.id]}
-                      onRedraft={target => draftIdeas(ideas, [target.id])} />
+                      onRedraft={redraftIdea} />
                   ))}
                 </div>
               ))}

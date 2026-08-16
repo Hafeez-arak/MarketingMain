@@ -7,6 +7,7 @@ import { SUPABASE_URL, SUPABASE_ANON_KEY } from '../../lib/supabaseClient'
 import { Card, Button, Badge, Textarea, Spinner, PostImage } from '../../components/ui/index'
 import { uid, formatDateTime } from '../../lib/utils'
 import { buildInstructionsString, isBrandProfileEmpty, useBrandProfileSync, logEditFeedback } from '../../lib/brandBrain'
+import { useBrandContext } from '../../lib/brandContext'
 import { ReferencePicker } from '../../components/ReferencePicker'
 import { CaptionStudio } from '../../components/CaptionStudio'
 import { QuickCreatePanel } from '../../components/QuickCreatePanel'
@@ -1421,7 +1422,13 @@ function DayEditor({ dateKey, entry, campaigns, uploadToStorage, onSave, onDelet
 
 // ─── Post Detail Modal ─────────────────────────────────────────────────────
 function PostDetail({ post, state, webhookUrl, regenWebhookUrl, supabaseUrl, anonKey, onClose, onStatusChange, onImageUpdated, onCaptionUpdated, onDelete }) {
-  const { activeWorkspaceId } = useAuth()
+  const { activeWorkspaceId, accessToken } = useAuth()
+  // The rewrite panel used to be handed buildInstructionsString(profile) —
+  // the flattened profile and nothing else, with no brand identity line, no
+  // task scoping and none of the brand's learned rules. Same builder as every
+  // other AI call on the app now, so a caption rewritten here is briefed the
+  // same way as the caption it is replacing.
+  const brandContextFor = useBrandContext(activeWorkspaceId, accessToken, state.brandProfile)
   const [regenLoading,   setRegenLoading]   = useState(false)
   const [regenError,     setRegenError]     = useState('')
   // currentImage = the saved/committed image shown in the card list
@@ -1890,7 +1897,8 @@ function PostDetail({ post, state, webhookUrl, regenWebhookUrl, supabaseUrl, ano
           webhookUrl={state.webhooks?.captionStudio || ''}
           platform="instagram"
           language={state.brandProfile?.captionLanguage || 'both'}
-          context={{ topic: post.topic || '', angle: post.angle || '', tone: post.tone || '', objective: post.objective || '', cta: post.cta || '', instructions: buildInstructionsString(state.brandProfile) || '' }}
+          context={{ topic: post.topic || '', angle: post.angle || '', tone: post.tone || '', objective: post.objective || '', cta: post.cta || '' }}
+          brandContextFor={options => brandContextFor('caption', options)}
           current={{ caption: post.copy || '', hashtags: post.hashtags || '' }}
           onApply={applyStudio}
         />
@@ -2208,6 +2216,11 @@ function ReelsPanel({ state, dispatch }) {
           reelCta:      cta.trim(),
           tone,
           instructions: buildInstructionsString(state.brandProfile, state.instagramInstructions) || '',
+          // The reel workflow's persona and hashtag used to be hardcoded to a
+          // lighting company, so a spa's reel was written by a model told it
+          // manufactured light fittings. It builds both from these now.
+          brand_name:       state.brandProfile?.customFields?.brand_name || '',
+          brand_descriptor: state.brandProfile?.customFields?.brand_descriptor || '',
         }),
       }).catch(() => {}) // swallow network errors — we poll instead
     } catch {

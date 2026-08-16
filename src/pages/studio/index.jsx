@@ -2175,7 +2175,10 @@ export function CreativeStudio() {
         workspaceId={activeWorkspaceId}
         accessToken={accessToken}
         webhooks={webhooks}
-        brandProfile={state.brandProfile}
+        // The caption slice, not the image slice this page generates against —
+        // the sheet is writing copy, and once fields are task-tagged the two
+        // are deliberately different sets.
+        brandContextFor={options => buildContext(state.brandProfile, brandSchema, brandDirectory, brandMemory, { task: 'caption', ...options })}
         // Sending marks the asset final, which is what Save does — so the
         // thread's badges stay honest without a refetch.
         onSent={() => { if (useThisFor) refresh(session?.id) }}

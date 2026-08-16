@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Modal, Button, Select, Spinner } from './ui/index'
 import { requestCaptionStudio } from '../lib/campaignPlanner'
+import { BrandContextPanel } from './BrandContextPanel'
 
 // On-demand caption rewriting panel, opened from the post review screen.
 // Self-contained: takes the post's context + the reviewer's current draft,
@@ -36,8 +37,16 @@ function TextBlock({ label, text }) {
   )
 }
 
-export function CaptionStudio({ open, onClose, webhookUrl, platform, language = 'both', context, current, onApply }) {
+// `brandContextFor` is a builder, not a built context, and that is the whole
+// point: this panel owns the per-rewrite mute toggles, so it has to be the
+// thing that re-runs buildContext with them. Handing it a finished object
+// would mean the preview and the payload were assembled by two different
+// calls, which is exactly the drift the panel exists to rule out. Optional —
+// a host that hasn't been wired up yet falls back to whatever `context`
+// already carried.
+export function CaptionStudio({ open, onClose, webhookUrl, platform, language = 'both', context, current, onApply, brandContextFor }) {
   const [controls, setControls] = useState({ length: 'medium', hookStyle: '', emoji: 'light', hashtagCount: 'default' })
+  const [mutedKeys, setMutedKeys] = useState([])
   const [variants, setVariants] = useState([])
   const [loading, setLoading]   = useState(false)      // 'variants' | 'hook' | 'body' | 'caption' | 'hashtags' | false
   const [error, setError]       = useState('')
@@ -49,11 +58,27 @@ export function CaptionStudio({ open, onClose, webhookUrl, platform, language = 
   }))
 
   const set = (k, v) => setControls(c => ({ ...c, [k]: v }))
+  const toggleBlock = key => setMutedKeys(prev => prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key])
+
+  const brandContext = brandContextFor ? brandContextFor({ mutedKeys }) : null
+
+  // One payload builder for both calls below, so a muted block cannot be
+  // honoured by "give me 3 options" and quietly ignored by "regenerate
+  // hashtags".
+  function payloadContext() {
+    if (!brandContext) return context
+    return {
+      ...context,
+      instructions: brandContext.instructions,
+      brand_name: brandContext.brandName,
+      brand_descriptor: brandContext.brandDescriptor,
+    }
+  }
 
   async function generateVariants() {
     setLoading('variants'); setError('')
     const res = await requestCaptionStudio(webhookUrl, {
-      mode: 'variants', platform, language, context,
+      mode: 'variants', platform, language, context: payloadContext(),
       controls: cleanControls(controls),
     })
     setLoading(false)
@@ -64,7 +89,7 @@ export function CaptionStudio({ open, onClose, webhookUrl, platform, language = 
   async function regeneratePiece(piece) {
     setLoading(piece); setError('')
     const res = await requestCaptionStudio(webhookUrl, {
-      mode: 'piece', platform, language, context, piece,
+      mode: 'piece', platform, language, context: payloadContext(), piece,
       controls: cleanControls(controls),
       current: { hook: draft.hook, body: draft.body, caption: draft.body, hashtags: draft.hashtags },
     })
@@ -114,6 +139,10 @@ export function CaptionStudio({ open, onClose, webhookUrl, platform, language = 
             {HASHTAGS.map(o => <option key={o.v} value={o.v}>{o.l}</option>)}
           </Select>
         </div>
+
+        {brandContext && (
+          <BrandContextPanel context={brandContext} mutedKeys={mutedKeys} onToggleBlock={toggleBlock} task="caption" />
+        )}
 
         <Button onClick={generateVariants} disabled={busy || !webhookUrl}>
           {loading === 'variants' ? <><Spinner size="sm" /> Writing 3 options…</> : variants.length ? '↻ New 3 options' : '✨ Give me 3 options'}

@@ -1,5 +1,8 @@
+import { useCallback, useEffect, useState } from 'react'
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './supabaseClient'
 import { buildInstructionsString, buildSectionBlocks } from './brandBrain'
+import { fetchBrandSchema, fetchDirectoryRows } from './brandSchema'
+import { fetchBrandAssets } from './brandAssets'
 
 // ─── Brand context assembly ────────────────────────────────────────────────
 // The single entry point every AI call goes through to turn the Brand Brain
@@ -220,6 +223,52 @@ export function buildContext(profile, schema, directory, memory, options = {}) {
   }
 }
 
+// ─── useBrandContext ───────────────────────────────────────────────────────
+// Loads the three things buildContext needs beyond the profile — schema,
+// directory rows/assets, and memory — and returns a builder already bound to
+// them, so a page can ask for `ctx('caption')` without growing its own
+// three-fetch effect.
+//
+// Studio and the planner keep their own loaders: they need the raw schema and
+// directory for other things (the section chips, the featurable-row list), so
+// routing them through here would mean fetching the same rows twice. This is
+// for the surfaces that had no brand wiring beyond the flattened profile blob.
+//
+// Returns a builder rather than a context object because the task differs per
+// call site within a page — the Instagram page writes captions AND rewrites
+// image prompts, and those want different slices of the brain.
+export function useBrandContext(workspaceId, accessToken, profile) {
+  const [schema, setSchema] = useState({ sections: [], fields: [], columns: [] })
+  const [directory, setDirectory] = useState({ rowsBySection: {}, assets: [] })
+  const [memory, setMemory] = useState([])
+
+  useEffect(() => {
+    if (!workspaceId) return
+    let alive = true
+    Promise.all([
+      fetchBrandSchema(workspaceId, accessToken),
+      fetchDirectoryRows(workspaceId, accessToken),
+      fetchBrandAssets(workspaceId, accessToken),
+      fetchBrandMemory(workspaceId, accessToken),
+    ]).then(([nextSchema, rows, assets, nextMemory]) => {
+      if (!alive) return
+      const rowsBySection = {}
+      for (const r of rows) (rowsBySection[r.section_key] ||= []).push(r)
+      setSchema(nextSchema)
+      setDirectory({ rowsBySection, assets })
+      setMemory(nextMemory)
+    })
+    // A failed load leaves the empty defaults in place, which degrades to the
+    // profile-only context this replaced rather than to no context at all.
+    return () => { alive = false }
+  }, [workspaceId, accessToken])
+
+  return useCallback(
+    (task, options = {}) => buildContext(profile, schema, directory, memory, { task, ...options }),
+    [profile, schema, directory, memory],
+  )
+}
+
 // ─── brand_memory data access ──────────────────────────────────────────────
 // Same auth model as the rest of the brand_* tables: anon key routes the
 // request, the user's token makes RLS resolve them as a real member.
@@ -306,6 +355,36 @@ export async function logIdeaEvent(workspaceId, accessToken, { planId, ideaId, e
     })
   } catch {
     // best-effort — never block the user's action on the audit trail
+  }
+}
+
+// Bulk variant — one request for the whole batch. "Reject all" on a
+// thirty-idea plan is a single decision and should cost a single insert, not
+// thirty; firing them individually also made the log's timestamps imply a
+// deliberation that never happened.
+export async function logIdeaEvents(workspaceId, accessToken, events) {
+  if (!workspaceId || !events?.length) return
+  const rows = events
+    .filter(e => e && e.event)
+    .map(e => ({
+      workspace_id: workspaceId,
+      plan_id: e.planId || null,
+      idea_id: e.ideaId || null,
+      event: e.event,
+      reason: e.reason || '',
+      before: e.before || {},
+      after: e.after || {},
+      actor: e.actor || null,
+    }))
+  if (!rows.length) return
+  try {
+    await fetch(`${SUPABASE_URL}/rest/v1/idea_events`, {
+      method: 'POST',
+      headers: { ...authHeaders(accessToken), 'Content-Type': 'application/json', Prefer: 'return=minimal' },
+      body: JSON.stringify(rows),
+    })
+  } catch {
+    // best-effort, same contract as logIdeaEvent
   }
 }
 
