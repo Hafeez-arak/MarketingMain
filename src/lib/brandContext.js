@@ -50,6 +50,12 @@ export function matchesTask(tags, task) {
 // pure token burn, and the prices are deliberately withheld anyway.
 const DIRECTORY_INDEX_THRESHOLD = 12
 
+// A ceiling on how many rows can be pulled in as detail at once. A caption
+// naming six services is already an unusual post; beyond that the caller is
+// almost certainly matching too loosely, and silently truncating costs less
+// than sending a whole catalogue back after it was deliberately indexed.
+const MAX_FEATURED_ROWS = 6
+
 // A compact "what exists" list: the first column plus the category-ish
 // column, nothing else. The full detail for the handful of rows a plan
 // actually selects arrives separately via `featuredRows` — the same
@@ -100,6 +106,71 @@ function buildFeaturedRowsBlock(section, columns, rows, featuredKeys) {
   return `${section?.title || 'Directory'} — full detail for the entries this post is about:\n${lines.join('\n')}`
 }
 
+// Lowercase and collapse whitespace. Deliberately not stripping punctuation
+// or Arabic diacritics: row names here are matched against copy written about
+// them, and both sides come from the same people typing the same way.
+function normalizeForMatch(text) {
+  return String(text || '').toLowerCase().replace(/\s+/g, ' ').trim()
+}
+
+// The primary name column, plus its translations and any other column that
+// names the row rather than describing it — `name_ar` beside `name`, or a
+// `title_ar` beside `title`. Deliberately narrow: matching against a notes or
+// description column would pull in rows on a single shared word.
+function isIdentityColumn(key, nameKey) {
+  if (!key) return false
+  if (key === nameKey) return true
+  if (key.startsWith(`${nameKey}_`)) return true
+  return /^(name|title)(_[a-z]{2,3})?$/i.test(key)
+}
+
+// Which directory rows a piece of text is actually about.
+//
+// The index/detail split only pays off if something decides what "detail"
+// means for a given call. The planner has an explicit row picker; every
+// downstream surface — drafting a caption, rewriting an image prompt, a
+// free-text Studio prompt — has only the text itself. So the text is what we
+// read: a row whose name appears in the brief is a row the model should see
+// in full.
+//
+// Only sections large enough to have been indexed are considered. A small
+// directory was already sent whole, and matching there would print the same
+// row twice.
+export function matchFeaturedRows(schema, directory, ...texts) {
+  const haystack = normalizeForMatch(texts.filter(Boolean).join(' \n '))
+  if (!haystack) return {}
+  const out = {}
+  for (const section of schema?.sections || []) {
+    if (section.kind !== 'directory' || section.enabled === false) continue
+    const rows = directory?.rowsBySection?.[section.key] || []
+    if (rows.length <= DIRECTORY_INDEX_THRESHOLD) continue
+    const sectionCols = (schema.columns || []).filter(
+      c => c.section_key === section.key && c.enabled !== false,
+    )
+    const cols = sectionCols.filter(c => c.in_prompt !== false)
+    if (!cols.length) continue
+    const nameCol = cols[0]
+    // A row is named in more than one language here: Aqeeq's services carry
+    // `name` and `name_ar`, and a brief written in Arabic would otherwise
+    // match nothing. Any of a row's names identifies it; the primary name is
+    // still what gets returned, since that is what the detail block keys on.
+    const idCols = sectionCols.filter(c => isIdentityColumn(c.key, nameCol.key))
+    const hits = []
+    for (const row of rows) {
+      const name = String(row.data?.[nameCol.key] || '').trim()
+      if (!name) continue
+      const aliases = idCols
+        .map(c => String(row.data?.[c.key] || '').trim())
+        // Two-character names ("A4", "XL") appear inside unrelated words
+        // often enough to drag in rows the post was never about.
+        .filter(v => v.length >= 3)
+      if (aliases.some(v => haystack.includes(normalizeForMatch(v)))) hits.push(name)
+    }
+    if (hits.length) out[section.key] = hits.slice(0, MAX_FEATURED_ROWS)
+  }
+  return out
+}
+
 // ─── The identity line ─────────────────────────────────────────────────────
 // What replaces the hardcoded "You are a copywriter for Arak Lighting,
 // Saudi Arabia's leading architectural lighting company" in 52 places.
@@ -142,12 +213,25 @@ export function buildContext(profile, schema, directory, memory, options = {}) {
     platformNotes = '',
     mutedKeys = [],
     featuredRows = {},
+    // The brief this call is about, in whatever fields the caller has — the
+    // topic and angle of an idea, a Studio prompt box, a reference note.
+    // Handled here rather than by each caller because the schema and rows
+    // needed to match against already live in this function's arguments.
+    matchText = null,
     sections: allowedSections = null,
   } = options
 
   const { brandName, brandDescriptor } = getBrandIdentity(profile)
   const muted = new Set(mutedKeys)
   const blocks = []
+
+  // An explicit selection wins over a matched one: the planner's row picker
+  // is a person stating what the month is about, and that should not be
+  // narrowed by whether the words happen to appear in the copy.
+  const matched = matchText
+    ? matchFeaturedRows(schema, directory, ...(Array.isArray(matchText) ? matchText : [matchText]))
+    : {}
+  const effectiveFeatured = { ...matched, ...featuredRows }
 
   // 1) Voice — the flattened field blob, scoped to this task.
   //    Filtering the field defs and handing them to the existing flattener
@@ -182,12 +266,17 @@ export function buildContext(profile, schema, directory, memory, options = {}) {
     const rows = directory?.rowsBySection?.[section.key] || []
     if (!rows.length) continue
 
-    const text = rows.length > DIRECTORY_INDEX_THRESHOLD
+    const indexed = rows.length > DIRECTORY_INDEX_THRESHOLD
+    const text = indexed
       ? buildDirectoryIndex(section, columns, rows)
       : legacyBlocks[section.key]
     if (text) blocks.push({ key: section.key, label: section.title, text })
 
-    const featured = buildFeaturedRowsBlock(section, columns, rows, featuredRows[section.key])
+    // Only meaningful on top of an index. An un-indexed section already
+    // carries every column of every row, so a "selected" block there would
+    // repeat what is directly above it.
+    if (!indexed) continue
+    const featured = buildFeaturedRowsBlock(section, columns, rows, effectiveFeatured[section.key])
     if (featured) blocks.push({ key: `${section.key}__featured`, label: `${section.title} (selected)`, text: featured })
   }
 

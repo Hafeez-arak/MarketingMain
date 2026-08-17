@@ -448,7 +448,10 @@ export function Approvals() {
     ])
     const rowsBySection = {}
     for (const r of dirRows) (rowsBySection[r.section_key] ||= []).push(r)
-    const brandCtx = buildContext(profile, schema, { rowsBySection, assets: [] }, memory, { task: 'caption' })
+    const brandCtx = buildContext(profile, schema, { rowsBySection, assets: [] }, memory, {
+      task: 'caption',
+      matchText: [idea.topic, idea.title, idea.angle, idea.image_idea],
+    })
     const instructions = brandCtx.instructions
     // If this idea already produced a post (an earlier attempt succeeded
     // and the reviewer may have edited its caption/image in Approvals

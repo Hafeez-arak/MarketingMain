@@ -49,7 +49,18 @@ export function UseThisSheet({ open, onClose, version, session, workspaceId, acc
   // Built here, from the mute state this sheet owns, so the panel below and
   // the payload in draftCaption are the same assembly — see CaptionStudio for
   // the same contract.
-  const brandContext = brandContextFor ? brandContextFor({ mutedKeys }) : null
+  const brandContext = brandContextFor
+    ? brandContextFor({
+        mutedKeys,
+        // Same brief the caption request below is built from, so a service
+        // named in the idea reaches the writer with its real detail.
+        matchText: [
+          session?.brief?.topic || session?.title || version?.user_prompt,
+          session?.brief?.angle,
+          session?.brief?.objective,
+        ],
+      })
+    : null
   const toggleBlock = key => setMutedKeys(prev => prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key])
 
   const isVideo = version?.media_type === 'video' || !!version?.video_url

@@ -60,7 +60,12 @@ export function CaptionStudio({ open, onClose, webhookUrl, platform, language = 
   const set = (k, v) => setControls(c => ({ ...c, [k]: v }))
   const toggleBlock = key => setMutedKeys(prev => prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key])
 
-  const brandContext = brandContextFor ? brandContextFor({ mutedKeys }) : null
+  // The brief, not the live draft: the subject of the post is what should
+  // pull a directory row's detail in, and keying off the text being typed
+  // would rebuild the context on every keystroke to no benefit.
+  const brandContext = brandContextFor
+    ? brandContextFor({ mutedKeys, matchText: [context?.topic, context?.angle, context?.objective] })
+    : null
 
   // One payload builder for both calls below, so a muted block cannot be
   // honoured by "give me 3 options" and quietly ignored by "regenerate

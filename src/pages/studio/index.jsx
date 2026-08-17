@@ -595,8 +595,12 @@ export function CreativeStudio() {
   const brandCtx = useMemo(
     () => buildContext(state.brandProfile, brandSchema, brandDirectory, brandMemory, {
       task: 'image', mutedKeys: mutedBlocks,
+      // Studio has no plan idea to inherit a selection from — the prompt box
+      // is the whole brief. Naming a service or fixture in it is what pulls
+      // that row's real detail out of the index.
+      matchText: [prompt, refNotes],
     }),
-    [state.brandProfile, brandSchema, brandDirectory, brandMemory, mutedBlocks],
+    [state.brandProfile, brandSchema, brandDirectory, brandMemory, mutedBlocks, prompt, refNotes],
   )
   const brandInstructions = brandCtx.instructions
 

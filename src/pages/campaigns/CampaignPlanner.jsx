@@ -980,18 +980,25 @@ export function CampaignPlanner() {
     const nowIso = new Date().toISOString()
     update({ ideas: allIdeas.map(i => newIds.includes(i.id) ? { ...i, draftStatus: 'drafting', draftedAt: nowIso, draftError: '' } : i) })
     await markIdeasDrafting(accessToken, newIds)
-    const brandCtx = contextFor('caption')
-    const instructions = brandCtx.instructions
     const captionLanguage = state.brandProfile?.captionLanguage || 'both'
     const targets = allIdeas.filter(i => newIds.includes(i.id))
-    Promise.allSettled(targets.map(idea => requestDraftCopy(draftCopyUrl, {
-      plan_idea_id: idea.id, platform: idea.platform, topic: idea.topic, angle: idea.angle, tone: idea.tone,
-      objective: idea.objective, cta: idea.cta, occasion: idea.occasion, content_pillar: idea.pillar,
-      format: idea.postFormat, aspect_ratio: idea.aspectRatio, media_type: idea.mediaType,
-      wants_caption: idea.wantsCaption, image_idea: idea.imageIdea,
-      caption_language: captionLanguage, instructions,
-      brand_name: brandCtx.brand_name, brand_descriptor: brandCtx.brand_descriptor,
-    })))
+    Promise.allSettled(targets.map(idea => {
+      // Per idea, not per batch: a large directory reaches the prompt as a
+      // bare name index, so the one thing that makes a caption specific —
+      // what the featured service or fixture actually is — only arrives if
+      // this idea's own brief is what selects it.
+      const brandCtx = contextFor('caption', {
+        matchText: [idea.topic, idea.title, idea.angle, idea.imageIdea],
+      })
+      return requestDraftCopy(draftCopyUrl, {
+        plan_idea_id: idea.id, platform: idea.platform, topic: idea.topic, angle: idea.angle, tone: idea.tone,
+        objective: idea.objective, cta: idea.cta, occasion: idea.occasion, content_pillar: idea.pillar,
+        format: idea.postFormat, aspect_ratio: idea.aspectRatio, media_type: idea.mediaType,
+        wants_caption: idea.wantsCaption, image_idea: idea.imageIdea,
+        caption_language: captionLanguage, instructions: brandCtx.instructions,
+        brand_name: brandCtx.brand_name, brand_descriptor: brandCtx.brand_descriptor,
+      })
+    }))
   }
 
   // A redraft is a rejection of the copy without a rejection of the idea —
