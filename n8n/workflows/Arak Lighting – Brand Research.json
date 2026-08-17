@@ -35,6 +35,19 @@
     },
     {
       "parameters": {
+        "jsCode": "const expected = String($env.N8N_WEBHOOK_SECRET || '').trim();\nif (expected) {\n  const headers = ($input.first().json || {}).headers || {};\n  const got = String(headers['x-webhook-secret'] || headers['X-Webhook-Secret'] || '').trim();\n  if (got !== expected) {\n    throw new Error('Unauthorized: missing or invalid webhook secret');\n  }\n}\nreturn $input.all();"
+      },
+      "id": "8e85d95c-ab4d-5ee8-a998-18e8a9830612",
+      "name": "Webhook Secret Guard",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        130,
+        200
+      ]
+    },
+    {
+      "parameters": {
         "jsCode": "\nconst http = this.helpers.httpRequest;\n\nasync function req(opts){\n  const res = await http({ ...opts, returnFullResponse: true, ignoreHttpStatusErrors: true });\n  const status = res.statusCode;\n  if (status >= 200 && status < 300) return res.body;\n  const b = res.body;\n  const msg = (b && typeof b === 'object') ? (b.error || b.message || JSON.stringify(b).slice(0, 300))\n            : (typeof b === 'string' && b) ? b.slice(0, 300)\n            : `HTTP ${status}`;\n  throw new Error(`${opts.__label || 'Request'} ${status}: ${msg}`);\n}\n\nconst raw  = ($input.first() && $input.first().json) || {};\nconst body = raw.body || {};\nconst SUPA_URL = String($env.SUPABASE_URL || '').replace(/\\/+$/, '');\nconst SUPA_KEY = $env.SUPABASE_KEY;\nconst TAVILY   = $env.TAVILY_API_KEY;\nconst sHeaders = { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}`, 'Content-Type': 'application/json' };\n\nconst wsId = String(body.workspace_id || '').trim();\nif (!wsId) throw new Error('workspace_id is required.');\n\nconst brandName  = String(body.brand_name || '').trim();\nconst descriptor = String(body.brand_descriptor || '').trim();\nconst market     = String(body.market || 'Saudi Arabia').trim();\nconst competitors = (Array.isArray(body.competitors) ? body.competitors : [])\n  .map(c => String(c || '').trim()).filter(Boolean).slice(0, 6);\nconst instructions = String(body.instructions || '').trim();\n\n// Refuse rather than search for nothing. A query built from an empty brain is\n// just the market's name, and the results would be generic trend copy that a\n// model would then attribute to THIS brand.\nif (!descriptor) {\n  return [{ json: { ok: true, skipped: true, proceed: false, workspace_id: wsId,\n    reason: 'This brand has no one-line descriptor yet, so there is nothing specific to research. Add one in Brand Brain first.' } }];\n}\nif (!TAVILY) {\n  return [{ json: { ok: true, skipped: true, proceed: false, workspace_id: wsId,\n    reason: 'TAVILY_API_KEY is not set on this n8n instance, so the web search cannot run.' } }];\n}\n\nconst year = new Date().getFullYear();\n\n// A good descriptor usually already says where the brand operates (\"an\n// at-home spa in Riyadh, Saudi Arabia\"), and appending the market anyway\n// produced \"... in Riyadh, Saudi Arabia — trends 2026 Saudi Arabia\". Search\n// engines tolerate that; it still reads as a worse query than the one a\n// person would type, and these strings end up quoted in the prompt.\nconst marketSuffix = (market && !descriptor.toLowerCase().includes(market.toLowerCase()))\n  ? ` in ${market}` : '';\n\n// Two kinds of question, kept separate because they produce different kinds\n// of rule: what is moving in the market, and what the named rivals are doing.\nconst queries = [\n  { scope: 'trend', q: `${descriptor}${marketSuffix} — customer trends and demand ${year}` },\n  { scope: 'trend', q: `social media content trends ${year} for ${descriptor}${marketSuffix}` },\n];\nif (competitors.length) {\n  queries.push({ scope: 'competitor', q: `${competitors.join(' OR ')} ${market} — recent marketing, offers and social media activity` });\n}\n\n// Searched in sequence rather than in parallel: three calls is not worth a\n// concurrency bug, and a rate-limited provider answering 429 to two of three\n// would silently narrow the research without saying so.\nconst findings = [];\nconst searchErrors = [];\nfor (const { scope, q } of queries) {\n  try {\n    const r = await req({\n      __label: 'Tavily', method: 'POST', url: 'https://api.tavily.com/search',\n      body: { api_key: TAVILY, query: q, max_results: 5, search_depth: 'basic',\n              include_answer: true, topic: 'general' },\n      json: true,\n    });\n    findings.push({\n      scope, query: q,\n      answer: String(r?.answer || '').slice(0, 1200),\n      results: (r?.results || []).slice(0, 5).map(x => ({\n        title: String(x.title || '').slice(0, 200),\n        url: String(x.url || ''),\n        content: String(x.content || '').slice(0, 600),\n      })),\n    });\n  } catch (e) { searchErrors.push(`${q}: ${String(e.message || e).slice(0, 160)}`); }\n}\n\nif (!findings.length) {\n  return [{ json: { ok: true, skipped: true, proceed: false, workspace_id: wsId,\n    reason: `Every search failed. ${searchErrors.join(' · ')}`.slice(0, 500) } }];\n}\n\n// Same workspace filter as everywhere else: this runs on the service key, so\n// the filter IS the isolation.\nconst existing = await req({\n  __label: 'Supabase', method: 'GET',\n  url: `${SUPA_URL}/rest/v1/brand_memory?workspace_id=eq.${wsId}&select=rule,scope,status&limit=200`,\n  headers: sHeaders, json: true,\n});\n\nconst lines = [];\nfor (const f of findings) {\n  lines.push(`— SEARCH (${f.scope}): ${f.query}`);\n  if (f.answer) lines.push(`Summary: ${f.answer}`);\n  for (const r of f.results) lines.push(`  * ${r.title} (${r.url})\\n    ${r.content}`);\n  lines.push('');\n}\n\nlines.push('RULES THAT ALREADY EXIST — do not repeat or rephrase any of these:');\nif (existing.length) for (const r of existing) lines.push(`- [${r.status}] (${r.scope}) ${r.rule}`);\nelse lines.push('- (none yet)');\n\nconst prompt = `You are a marketing strategist reviewing live web research for one brand, to propose a small number of concrete rules that will improve the content it produces.\n\nTHE BRAND: ${brandName || 'this brand'} — ${descriptor}\nMARKET: ${market}\n${competitors.length ? `KNOWN COMPETITORS: ${competitors.join(', ')}` : ''}\n\n${instructions ? `WHAT THE BRAND SAYS ABOUT ITSELF:\\n${instructions}\\n` : ''}\nWEB RESEARCH:\n${lines.join('\\n')}\n\nPropose AT MOST 4 rules. Fewer is better; propose none at all if the research says nothing this brand can act on.\n\nEach rule must be:\n- ONE imperative sentence a planner or copywriter could follow directly. It is injected verbatim into future prompts, so it must make sense with no other context.\n- Specific to THIS brand and market. \"Post more video\" is true of every brand on earth and is worth nothing here.\n- Grounded in something that actually appears in the research above. Never invent a statistic, a competitor, or a trend.\n- Genuinely new — not a restatement of a rule already listed, in any status.\n\nSet \"scope\" to \"trend\" for something moving in the market, or \"competitor\" for something a named rival is doing.\n\nReturn ONLY valid JSON, no markdown:\n{\"rules\":[{\"rule\":\"one imperative sentence\",\"detail\":\"what in the research supports this, in plain language, and how strong that evidence is\",\"scope\":\"trend|competitor\",\"sources\":[\"url\"],\"confidence\":<0-1>}]}\n\nReturn {\"rules\":[]} if the research does not support anything specific.`;\n\nreturn [{ json: { ok: true, proceed: true, skipped: false, workspace_id: wsId, prompt,\n                  searched: queries.length, found: findings.length,\n                  warning: searchErrors.length ? searchErrors.join(' · ') : undefined } }];\n"
       },
       "id": "1a95130f-7dc8-5775-9944-b56a08dade8d",
@@ -166,7 +179,7 @@
       "main": [
         [
           {
-            "node": "Research: Search",
+            "node": "Webhook Secret Guard",
             "type": "main",
             "index": 0
           }
@@ -218,6 +231,17 @@
         [
           {
             "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook Secret Guard": {
+      "main": [
+        [
+          {
+            "node": "Research: Search",
             "type": "main",
             "index": 0
           }

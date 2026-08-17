@@ -2486,6 +2486,60 @@ def _code(name: str, js: str, x: int, y: int, run_once_for_each_item: bool = Fal
     }
 
 
+# The Vercel proxy (api/n8n/[slot].js) has sent x-webhook-secret since the
+# proxy was built, but it was "harmless until the workflows check it" — no
+# workflow ever did. Reaching a workflow directly (bypassing the proxy's own
+# sign-in check) needs nothing but the current tunnel hostname and a webhook
+# path, both of which are just strings a determined caller can find, and every
+# workflow past this point spends real money on fal/Replicate/Anthropic.
+#
+# Enforced only when N8N_WEBHOOK_SECRET is set in n8n's own environment —
+# unset, this node is a no-op, so it's safe to ship before anyone has
+# configured the secret on both sides (n8n's .env and Vercel's project env).
+# Throwing (rather than branching to an explicit 401 response) works
+# uniformly across every responseMode used in this file: an unhandled Code
+# node error stops the workflow before any downstream node runs, and n8n
+# sends its own error response to the caller either way.
+_WEBHOOK_GUARD_JS = """
+const expected = String($env.N8N_WEBHOOK_SECRET || '').trim();
+if (expected) {
+  const headers = ($input.first().json || {}).headers || {};
+  const got = String(headers['x-webhook-secret'] || headers['X-Webhook-Secret'] || '').trim();
+  if (got !== expected) {
+    throw new Error('Unauthorized: missing or invalid webhook secret');
+  }
+}
+return $input.all();
+""".strip()
+
+
+def _inject_webhook_guard(wf: dict) -> dict:
+    """Splice a secret-check Code node between every node named "Webhook" and
+    whatever it used to connect to. Generic over all workflows in this file
+    rather than threaded through each build_* function, because two of them
+    (Instagram Reels, Instagram Manual Generation) embed their whole node
+    graph as ported JSON rather than building it through these helpers — this
+    runs after that JSON is parsed into the same dict shape as everything
+    else, so one pass covers both styles.
+
+    Connections are keyed by node NAME (see _assign_deterministic_ids), so
+    inserting a node and repointing one connection entry is enough; nothing
+    else in the graph needs to change."""
+    nodes = wf.get("nodes", [])
+    connections = wf.get("connections", {})
+    webhook = next((n for n in nodes if n.get("name") == "Webhook"), None)
+    if webhook is None:
+        return wf
+    wx, wy = webhook["position"]
+    guard = _code("Webhook Secret Guard", _WEBHOOK_GUARD_JS, x=wx + 130, y=wy)
+    nodes.insert(nodes.index(webhook) + 1, guard)
+    original = connections.get("Webhook")
+    connections["Webhook"] = {"main": [[{"node": guard["name"], "type": "main", "index": 0}]]}
+    if original:
+        connections[guard["name"]] = original
+    return wf
+
+
 def _respond_json(name: str, response_body_expr: str, x: int, y: int) -> dict:
     return {
         "parameters": {"respondWith": "json", "responseBody": response_body_expr, "options": {}},
@@ -8442,6 +8496,7 @@ if __name__ == "__main__":
     ]
 
     for wf in workflows:
+        _inject_webhook_guard(wf)
         _assign_deterministic_ids(wf)
         out_path = os.path.join(out_dir, f"{wf['name']}.json")
         with open(out_path, "w") as f:
