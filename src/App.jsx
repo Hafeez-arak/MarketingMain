@@ -14,15 +14,15 @@ import { Signup } from './pages/auth/Signup'
 import { Onboarding } from './pages/auth/Onboarding'
 
 import Dashboard from './pages/Dashboard'
-import { Campaigns, NewCampaign }  from './pages/campaigns/index'
+import { Campaigns }              from './pages/campaigns/index'
 import { CampaignPlanner, CampaignPostEditor } from './pages/campaigns/CampaignPlanner'
 import { ContentPlans } from './pages/campaigns/ContentPlans'
 import { Schedule }                from './pages/schedule/index'
-import { EmailFlows, NewEmailFlow }from './pages/email/index'
+import { EmailFlows }             from './pages/email/index'
 import { Analytics }               from './pages/analytics/index'
 import { Insights }                from './pages/insights/index'
 import { MediaLibrary }            from './pages/media/index'
-import { SocialOverview, SocialPlatform, NewPost } from './pages/social/index'
+import { SocialOverview, SocialPlatform } from './pages/social/index'
 import { InstagramPage } from './pages/social/InstagramPage'
 import { Approvals as PostApprovals } from './pages/social/Approvals'
 import { Settings, Integrations } from './pages/settings/index'
@@ -103,10 +103,8 @@ function ProtectedApp() {
             <Route path="/campaigns/plans"       element={<ContentPlans />} />
             <Route path="/campaigns/plan"        element={<CampaignPlanner />} />
             <Route path="/campaigns/plan/post/:rowId" element={<CampaignPostEditor />} />
-            <Route path="/campaigns/new"         element={<NewCampaign />} />
             <Route path="/schedule"              element={<Schedule />} />
             <Route path="/email"                 element={<EmailFlows />} />
-            <Route path="/email/new"             element={<NewEmailFlow />} />
             <Route path="/analytics"             element={<Analytics />} />
             <Route path="/insights"              element={<Insights />} />
             <Route path="/media"                 element={<MediaLibrary />} />
@@ -114,8 +112,6 @@ function ProtectedApp() {
             <Route path="/social/approvals"      element={<PostApprovals />} />
             <Route path="/social/instagram"      element={<InstagramPage />} />
             <Route path="/social/tiktok"         element={<SocialPlatform />} />
-            <Route path="/social/instagram/new"  element={<NewPost />} />
-            <Route path="/social/tiktok/new"     element={<NewPost />} />
             <Route path="/settings"             element={<Settings />} />
             <Route path="/integrations"          element={<Integrations />} />
             <Route path="/team"                  element={<Access />} />

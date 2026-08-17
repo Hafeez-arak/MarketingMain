@@ -39,6 +39,8 @@ export function MediaLibrary() {
   const [fullscreen,  setFullscreen]  = useState(null)  // { url, name }
   const [view,        setView]        = useState('grid')
   const [filter,      setFilter]      = useState('all')
+  const [uploading,   setUploading]   = useState(false)
+  const [uploadError, setUploadError] = useState('')
   const inputRef = useRef(null)
 
   const headers = { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${accessToken || SUPABASE_ANON_KEY}` }
@@ -98,6 +100,7 @@ export function MediaLibrary() {
         workspace_id: activeWorkspaceId,
         name:       item.name,
         url:        item.url,
+        storage_path: item.storagePath || null,
         platform:   item.platform  || null,
         topic:      item.topic     || null,
         source:     item.source    || 'manual',
@@ -118,6 +121,15 @@ export function MediaLibrary() {
     // Scoped to the active workspace as well as the id — a delete is the one
     // call where a stale id from a workspace you just switched away from
     // would do real damage.
+    // Remove the object first. A row deleted while its file stays behind is
+    // an orphan nothing will ever point at again; the reverse (file gone, row
+    // still listed) is at least visible.
+    const asset = assets.find(a => a.id === id)
+    if (asset?.storage_path) {
+      await fetch(`${supabaseUrl}/storage/v1/object/media-library/${asset.storage_path}`, {
+        method: 'DELETE', headers,
+      }).catch(() => {})
+    }
     await fetch(`${supabaseUrl}/rest/v1/media_library?id=eq.${id}&workspace_id=eq.${activeWorkspaceId}`, {
       method: 'DELETE',
       headers,
@@ -126,21 +138,46 @@ export function MediaLibrary() {
     setDeleteId(null)
   }
 
+  // Uploads go to the media-library bucket and the row stores a URL to the
+  // object — the same shape brand assets, Studio renders and post images all
+  // use.
+  //
+  // This used to read each file with FileReader.readAsDataURL and write the
+  // resulting data: URL into media_library.url, so the database WAS the file
+  // store: a 4 MB image became a ~5.5 MB base64 string that every listing
+  // query then had to read in full. Rows written that way still render (their
+  // url is self-contained) and are left alone — see the migration.
   async function handleFiles(files) {
+    if (!activeWorkspaceId) return
+    setUploadError('')
+    setUploading(true)
     for (const file of Array.from(files)) {
-      const reader = new FileReader()
-      reader.onload = async e => {
-        await saveToSupabase({
-          name:     file.name,
-          url:      e.target.result,   // base64 for local uploads
-          platform: null,
-          source:   'upload',
-          mimeType: file.type,
-          size:     file.size,
+      const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_')
+      const path = `${activeWorkspaceId}/${Date.now()}_${safeName}`
+      try {
+        const up = await fetch(`${supabaseUrl}/storage/v1/object/media-library/${path}`, {
+          method: 'POST',
+          headers: { ...headers, 'Content-Type': file.type || 'application/octet-stream' },
+          body: file,
         })
+        // Reported rather than swallowed: the old path could not fail (it just
+        // stuffed the bytes in a column), so a silent failure here would look
+        // exactly like a file that vanished on drop.
+        if (!up.ok) { setUploadError(`${file.name}: ${(await up.text()).slice(0, 160)}`); continue }
+        await saveToSupabase({
+          name:        file.name,
+          url:         `${supabaseUrl}/storage/v1/object/public/media-library/${path}`,
+          storagePath: path,
+          platform:    null,
+          source:      'upload',
+          mimeType:    file.type,
+          size:        file.size,
+        })
+      } catch (err) {
+        setUploadError(`${file.name}: ${err.message}`)
       }
-      reader.readAsDataURL(file)
     }
+    setUploading(false)
   }
 
   function onDrop(e) { e.preventDefault(); handleFiles(e.dataTransfer.files) }
@@ -205,10 +242,20 @@ export function MediaLibrary() {
         onClick={() => inputRef.current?.click()}>
         <div className="flex flex-col items-center gap-2 text-text-secondary">
           <svg className="w-8 h-8 text-text-tertiary" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-          <p className="text-sm font-medium">Drop files here or <span className="text-amber-600">browse</span></p>
+          {uploading ? (
+            <p className="text-sm font-medium">Uploading…</p>
+          ) : (
+            <p className="text-sm font-medium">Drop files here or <span className="text-amber-600">browse</span></p>
+          )}
           <p className="text-xs text-text-tertiary">Images, videos, PDFs and documents</p>
         </div>
       </div>
+
+      {uploadError && (
+        <div className="border border-red-200 bg-red-50 px-3 py-2">
+          <p className="text-xs text-red-700">Upload failed — {uploadError}</p>
+        </div>
+      )}
 
       {/* Files */}
       {loading || stale ? (

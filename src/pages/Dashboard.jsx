@@ -49,7 +49,7 @@ export default function Dashboard() {
   const quickActions = [
     { label: 'Create Instagram post', icon: Icon.image,       path: '/social/instagram' },
     { label: 'Schedule content',      icon: Icon.calendar,     path: '/schedule' },
-    { label: 'New campaign',          icon: Icon.trending,     path: '/campaigns/new' },
+    { label: 'Plan a month',          icon: Icon.trending,     path: '/campaigns' },
     { label: 'Upload media',          icon: Icon.grid,         path: '/media' },
     { label: 'View analytics',        icon: Icon.activity,     path: '/analytics' },
   ]

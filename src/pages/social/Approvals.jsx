@@ -616,7 +616,7 @@ export function Approvals() {
           post={selectedPost}
           state={state}
           webhookUrl={state.webhooks?.instagram || ''}
-          regenWebhookUrl={state.webhooks?.instagramScheduleRegen || ''}
+          regenWebhookUrl=""
           supabaseUrl={SUPABASE_URL}
           anonKey={accessToken || ''}
           onClose={() => setSelectedPost(null)}

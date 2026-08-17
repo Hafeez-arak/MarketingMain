@@ -1,7 +1,7 @@
-import { useState, useRef } from 'react'
+import { useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { useApp, actions } from '../../store/app'
-import { Card, Button, Badge, Input, Textarea, Select, Empty, PostImage } from '../../components/ui/index'
+import { Card, Button, Badge, Empty, PostImage } from '../../components/ui/index'
 import { uid, PLATFORM_META, formatDateTime } from '../../lib/utils'
 
 // ─── Social Overview ──────────────────────────────────────────────────────
@@ -37,9 +37,7 @@ export function SocialOverview() {
                 </p>
                 <div className="flex gap-2">
                   <Button variant="secondary" size="sm" className="flex-1 justify-center" onClick={e => { e.stopPropagation(); navigate(`/social/${key}`) }}>Open</Button>
-                  {connected ? (
-                    <Button size="sm" className="flex-1 justify-center" onClick={e => { e.stopPropagation(); navigate(`/social/${key}/new`) }}>New post</Button>
-                  ) : (
+                  {!connected && (
                     <Button variant="outline" size="sm" className="flex-1 justify-center" onClick={e => { e.stopPropagation(); dispatch(actions.connectAccount(key)); dispatch(actions.addNotification({ id: uid(), message: `${meta.label} account connected.`, createdAt: new Date().toISOString() })) }}>
                       Connect
                     </Button>
@@ -59,7 +57,6 @@ export function SocialPlatform() {
   const { pathname } = useLocation()
   const platform = pathname.split('/')[2] // /social/facebook -> 'facebook'
   const { state, dispatch } = useApp()
-  const navigate = useNavigate()
   const meta = PLATFORM_META[platform]
   const connected = state.connectedAccounts[platform]
   const posts = state.posts.filter(p => p.platform === platform)
@@ -91,10 +88,6 @@ export function SocialPlatform() {
             {connected && (
               <Button variant="ghost" size="sm" onClick={() => dispatch(actions.disconnectAccount(platform))}>Disconnect</Button>
             )}
-            <Button size="sm" onClick={() => navigate(`/social/${platform}/new`)}>
-              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
-              New post
-            </Button>
           </div>
         </div>
         <div className="grid grid-cols-3 divide-x divide-border border-t border-border">
@@ -119,8 +112,7 @@ export function SocialPlatform() {
           <Empty
             icon={<svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>}
             title={`No ${filter === 'all' ? '' : filter + ' '}posts for ${meta.label}`}
-            description="Create your first post and schedule or publish it."
-            action={<Button onClick={() => navigate(`/social/${platform}/new`)}>Create post</Button>}
+            description="Posts reach this page from a content plan — plan a month, approve the ideas, and they appear here."
           />
         </Card>
       ) : (
@@ -158,140 +150,3 @@ export function SocialPlatform() {
     </div>
   )
 }
-
-// ─── New Post Composer ────────────────────────────────────────────────────
-export function NewPost() {
-  const { pathname } = useLocation()
-  const platform = pathname.split('/')[2] // /social/facebook/new -> 'facebook'
-  const { state, dispatch } = useApp()
-  const navigate = useNavigate()
-  const meta = PLATFORM_META[platform]
-
-  const [form, setForm] = useState({ copy: '', hashtags: '', scheduledAt: '', scheduledTime: '', campaignId: '', status: 'draft' })
-  const [errors, setErrors] = useState({})
-  const [mediaUrls, setMediaUrls] = useState([])
-  const fileRef = useRef(null)
-
-  const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
-  const charCount = form.copy.length
-  const overLimit = charCount > (meta?.maxChars || 9999)
-
-  function handleFiles(files) {
-    Array.from(files).forEach(file => {
-      if (!file.type.startsWith('image/')) return
-      const reader = new FileReader()
-      reader.onload = e => setMediaUrls(urls => [...urls, e.target.result])
-      reader.readAsDataURL(file)
-    })
-  }
-
-  function validate() {
-    const e = {}
-    if (!form.copy.trim()) e.copy = 'Post copy is required'
-    if (overLimit) e.copy = `Exceeds ${meta?.maxChars} character limit`
-    setErrors(e)
-    return Object.keys(e).length === 0
-  }
-
-  function save(status) {
-    if (!validate()) return
-    let scheduledAt = null
-    if (form.scheduledAt && form.scheduledTime) {
-      scheduledAt = new Date(`${form.scheduledAt}T${form.scheduledTime}`).toISOString()
-    }
-    dispatch(actions.addPost({
-      id: uid(),
-      platform,
-      copy: form.copy,
-      hashtags: form.hashtags,
-      scheduledAt,
-      campaignId: form.campaignId || null,
-      mediaUrls,
-      status: status === 'schedule' ? 'scheduled' : status === 'publish' ? 'published' : 'draft',
-      createdAt: new Date().toISOString(),
-    }))
-    dispatch(actions.addNotification({ id: uid(), message: `Post ${status === 'schedule' ? 'scheduled' : status === 'publish' ? 'published' : 'saved as draft'} on ${meta?.label}.`, createdAt: new Date().toISOString() }))
-    // add to approval queue
-    dispatch(actions.addApproval({ id: uid(), title: `${meta?.label} post: ${form.copy.slice(0,40)}...`, platform, status: 'pending', createdAt: new Date().toISOString() }))
-    navigate(`/social/${platform}`)
-  }
-
-  if (!meta) return <p className="text-text-secondary">Unknown platform.</p>
-
-  return (
-    <div className="max-w-2xl space-y-4">
-      <Card className="overflow-hidden">
-        <div className="h-1" style={{ background: meta.color }} />
-        <div className="flex items-center gap-3 px-5 py-4 border-b border-border">
-          <span className={`w-8 h-8 rounded-xl flex items-center justify-center text-xs font-bold ${meta.bg} ${meta.text}`}>{meta.abbr}</span>
-          <span className="font-semibold text-text">New {meta.label} post</span>
-        </div>
-
-        <div className="p-5 space-y-4">
-          {/* Copy */}
-          <div>
-            <div className="flex items-center justify-between mb-1.5">
-              <label className="text-xs font-medium text-text-secondary">Caption / copy *</label>
-              <span className={`text-xs ${overLimit ? 'text-red-500 font-medium' : 'text-text-tertiary'}`}>{charCount} / {meta.maxChars}</span>
-            </div>
-            <Textarea
-              placeholder={`Write your ${meta.label} caption here...`}
-              value={form.copy}
-              onChange={e => set('copy', e.target.value)}
-              rows={5}
-              error={errors.copy}
-            />
-          </div>
-
-          {/* Hashtags */}
-          <Input label="Hashtags" placeholder="#marketing #brand #growth" value={form.hashtags} onChange={e => set('hashtags', e.target.value)} hint="Separate with spaces" />
-
-          {/* Media */}
-          <div>
-            <p className="text-xs font-medium text-text-secondary mb-1.5">Media</p>
-            {mediaUrls.length > 0 && (
-              <div className="flex gap-2 flex-wrap mb-2">
-                {mediaUrls.map((url,i) => (
-                  <div key={i} className="relative">
-                    <PostImage src={url} alt="" className="w-16 h-16 rounded-xl object-cover border border-border"/>
-                    <button onClick={() => setMediaUrls(u => u.filter((_,j)=>j!==i))} className="absolute -top-1 -right-1 w-4 h-4 bg-red-600 text-white flex items-center justify-center text-[10px] leading-none">×</button>
-                  </div>
-                ))}
-              </div>
-            )}
-            <button onClick={() => fileRef.current?.click()}
-              className="w-full border-2 border-dashed border-border hover:border-amber-400 rounded-xl py-3 text-xs text-text-secondary hover:text-amber-600 transition-colors flex items-center justify-center gap-2">
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-              Add image
-            </button>
-            <input ref={fileRef} type="file" accept="image/*" multiple className="hidden" onChange={e => handleFiles(e.target.files)} />
-          </div>
-
-          {/* Campaign */}
-          <Select label="Attach to campaign" value={form.campaignId} onChange={e => set('campaignId', e.target.value)}>
-            <option value="">No campaign</option>
-            {state.campaigns.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </Select>
-
-          {/* Schedule */}
-          <div className="grid grid-cols-2 gap-3">
-            <Input label="Schedule date" type="date" value={form.scheduledAt} onChange={e => set('scheduledAt', e.target.value)} />
-            <Input label="Schedule time" type="time" value={form.scheduledTime} onChange={e => set('scheduledTime', e.target.value)} />
-          </div>
-
-          {/* Actions */}
-          <div className="flex gap-2 pt-1">
-            <Button variant="secondary" onClick={() => navigate(`/social/${platform}`)}>Cancel</Button>
-            <Button variant="outline" onClick={() => save('draft')}>Save draft</Button>
-            {form.scheduledAt ? (
-              <Button className="flex-1 justify-center" onClick={() => save('schedule')}>Schedule post</Button>
-            ) : (
-              <Button className="flex-1 justify-center" onClick={() => save('publish')}>Publish now</Button>
-            )}
-          </div>
-        </div>
-      </Card>
-    </div>
-  )
-}
-

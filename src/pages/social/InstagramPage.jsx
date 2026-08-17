@@ -335,7 +335,7 @@ export function InstagramPage() {
         ))}
       </div>
 
-      {screen === 'posts'    && <PostsList posts={mergedPosts} dispatch={dispatch} state={state} onCreateClick={() => setScreen('create')} updatePostStatus={updatePostStatus} webhookUrl={webhookUrl} regenWebhookUrl={state.webhooks?.instagramScheduleRegen || ''} />}
+      {screen === 'posts'    && <PostsList posts={mergedPosts} dispatch={dispatch} state={state} onCreateClick={() => setScreen('create')} updatePostStatus={updatePostStatus} webhookUrl={webhookUrl} regenWebhookUrl="" />}
       {screen === 'create'   && (
         <div className="space-y-4 max-w-2xl">
           <QuickCreatePanel platform="instagram" tones={TONES} workspaceId={activeWorkspaceId} accessToken={accessToken}
@@ -1502,9 +1502,7 @@ function PostDetail({ post, state, webhookUrl, regenWebhookUrl, supabaseUrl, ano
 
   async function handleRegenImage() {
     if (!activeRegenUrl) {
-      setRegenError(post._fromSupabase
-        ? 'Configure the Schedule Regen webhook in Settings → Integrations.'
-        : 'Configure the Instagram webhook in Settings → Integrations.')
+      setRegenError('Configure the Instagram webhook in Settings → Integrations.')
       return
     }
     setRegenLoading(true); setRegenError(''); setStagedImage(null)
@@ -1664,6 +1662,14 @@ function PostDetail({ post, state, webhookUrl, regenWebhookUrl, supabaseUrl, ano
                     Discard
                   </button>
                 </div>
+              ) : !activeRegenUrl ? (
+                /* No workflow answers the regen path for a plan-generated
+                   post — the slot it used was never deployed. Creative Studio
+                   is where a picture actually gets remade, so say that rather
+                   than offering a button whose only outcome is an error. */
+                <p className="text-xs text-center text-[#b34d7a] leading-relaxed px-2">
+                  To change this picture, open it in Creative Studio — that's where images are made and edited.
+                </p>
               ) : (
                 <button onClick={handleRegenImage} disabled={regenLoading}
                   className="w-full flex items-center justify-center gap-2.5 py-3 rounded-2xl text-sm font-bold text-white disabled:opacity-50 transition-all active:scale-95"

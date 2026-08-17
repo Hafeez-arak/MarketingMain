@@ -40,7 +40,6 @@ export const AppContext = createContext(null)
 // note on WEBHOOK_PATHS.
 export const WEBHOOK_SLOTS = [
   'instagram',
-  'instagramSchedule', 'instagramScheduleRegen',
   'instagramReels',
   'campaignPlanner', 'instagramPlanGen',
   'elongateIdea', 'captionStudio', 'draftCopy', 'mediaOptions',

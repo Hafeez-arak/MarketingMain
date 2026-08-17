@@ -2,17 +2,14 @@ import { useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useApp } from '../../store/app'
 import { useAuth } from '../../store/auth'
-import { Button } from '../ui/index'
 import { timeAgo } from '../../lib/utils'
 
 const titles = {
-  '/': 'Dashboard', '/brand-brain': 'Brand Brain', '/campaigns': 'Campaigns', '/campaigns/plan': 'Plan Campaign', '/campaigns/new': 'New Campaign',
-  '/schedule': 'Content Calendar', '/email': 'Email Flows', '/email/new': 'New Email Flow',
-  '/analytics': 'Analytics', '/media': 'Media Library', '/social': 'Social Media',
+  '/': 'Dashboard', '/brand-brain': 'Brand Brain', '/campaigns': 'Campaigns', '/campaigns/plan': 'Plan Campaign',
+  '/schedule': 'Content Calendar', '/email': 'Email Flows',
+  '/analytics': 'Analytics', '/insights': 'What We Learned', '/media': 'Media Library', '/social': 'Social Media',
   '/social/instagram': 'Instagram',
   '/social/tiktok': 'TikTok',
-  '/social/instagram/new': 'New Instagram Post',
-  '/social/tiktok/new': 'New TikTok Post',
   '/settings': 'Settings', '/integrations': 'Integrations', '/team': 'Team & Access',
 }
 
@@ -20,11 +17,7 @@ const titles = {
 // pointed at their logical parent — more reliable than browser history,
 // which breaks if the page was opened directly or refreshed mid-flow.
 const BACK_TARGETS = {
-  '/campaigns/new':        '/campaigns',
-  '/campaigns/plan':       '/campaigns',
-  '/email/new':            '/email',
-  '/social/instagram/new': '/social/instagram',
-  '/social/tiktok/new':    '/social/tiktok',
+  '/campaigns/plan': '/campaigns',
 }
 
 export function Topbar() {
@@ -39,21 +32,6 @@ export function Topbar() {
   const title      = isPostEditor ? 'Edit Post' : (titles[location.pathname] || 'Arak Content Studio')
   const backTarget = isPostEditor ? '/campaigns/plan' : BACK_TARGETS[location.pathname]
   const unread = state.notifications.filter(n => !n.read).length
-
-  function getCta() {
-    const p = location.pathname
-    if (p === '/campaigns') return <Button size="sm" onClick={() => navigate('/campaigns/new')}><Plus/>New Campaign</Button>
-    if (p === '/email')     return <Button size="sm" onClick={() => navigate('/email/new')}><Plus/>New Flow</Button>
-    // Instagram has its own "Create Post" flow built into the page (real
-    // generation, not a placeholder) — this global shortcut duplicated it.
-    // Other social pages (no real create flow yet) still get a shortcut,
-    // routed to THEIR OWN /new page rather than a hardcoded Instagram one.
-    const platformMatch = p.match(/^\/social\/([a-z]+)$/)
-    if (platformMatch && platformMatch[1] !== 'instagram') {
-      return <Button size="sm" onClick={() => navigate(`/social/${platformMatch[1]}/new`)}><Plus/>New Post</Button>
-    }
-    return null
-  }
 
   return (
     <header className="h-14 bg-white border-b border-border flex items-center pl-5 pr-4 gap-4 flex-shrink-0">
@@ -70,8 +48,6 @@ export function Topbar() {
         <h1 className="font-semibold text-text text-sm leading-none truncate tracking-tight">{title}</h1>
       </div>
       <div className="flex items-center gap-2 flex-shrink-0">
-        {getCta()}
-
         {/* Date. No border or fill — it's ambient information, and boxing it
             gave it the same visual weight as the two real controls beside it. */}
         <div className="hidden lg:flex items-center gap-1.5 pr-1 text-xs text-text-tertiary tabular-nums">
@@ -145,7 +121,4 @@ export function Topbar() {
       </div>
     </header>
   )
-}
-function Plus() {
-  return <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
 }
