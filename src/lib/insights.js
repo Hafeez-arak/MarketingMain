@@ -126,6 +126,54 @@ export async function requestInsightsReview(webhookUrl, workspaceId) {
   } catch (err) { return { error: err.message } }
 }
 
+// The names in whatever section this brand keeps its rivals in.
+//
+// Read from the directory rather than asked for, because every workspace
+// names that section itself — the seed calls it "Competitor Watch", but a
+// renamed one should keep working. Matched on the section title/key, and the
+// first in-prompt column is the row's name by the same convention
+// buildDirectoryIndex uses.
+export function competitorNamesFrom(schema, directory) {
+  const sections = (schema?.sections || []).filter(
+    s => s.kind === 'directory' && s.enabled !== false && /competitor|rival/i.test(`${s.key} ${s.title}`),
+  )
+  const names = []
+  for (const section of sections) {
+    const cols = (schema.columns || []).filter(
+      c => c.section_key === section.key && c.enabled !== false && c.in_prompt !== false,
+    )
+    if (!cols.length) continue
+    for (const row of directory?.rowsBySection?.[section.key] || []) {
+      const name = String(row.data?.[cols[0].key] || '').trim()
+      if (name) names.push(name)
+    }
+  }
+  return [...new Set(names)]
+}
+
+// One Tavily search pass plus one Claude call. Writes brand_memory rows as
+// `proposed`, exactly like the review — research lands on the same page and
+// goes through the same approval, rather than getting a silo of its own.
+export async function requestBrandResearch(webhookUrl, payload) {
+  if (!webhookUrl) return { error: 'Brand research webhook not configured. Go to Settings → Integrations.' }
+  if (!payload?.workspace_id) return { error: 'No active workspace.' }
+  try {
+    const res = await fetch(webhookUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+    if (!res.ok) return { error: `Research webhook returned ${res.status}` }
+    const data = await res.json()
+    const row = Array.isArray(data) ? data[0] : data
+    if (!row || row.ok !== true) return { error: (row && row.error) || 'The research returned nothing usable.' }
+    return {
+      ok: true, skipped: !!row.skipped, reason: row.reason || '',
+      proposed: row.proposed || 0, note: row.note || '', warning: row.warning || '',
+    }
+  } catch (err) { return { error: err.message } }
+}
+
 // ─── Aggregation ───────────────────────────────────────────────────────────
 
 const ENGAGEMENT_METRICS = ['likes', 'comments', 'shares', 'saves']

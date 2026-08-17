@@ -49,7 +49,7 @@ export const WEBHOOK_SLOTS = [
   'creativeGenerate', 'creativeEdit', 'creativeVideo', 'creativeCompose',
   'creativeEnhance', 'creativeVideoEdit', 'creativeStitch', 'creativeCancel',
   'falBalance',
-  'insightsReview',
+  'insightsReview', 'brandResearch',
 ]
 
 export const DEFAULT_WEBHOOKS = defaultWebhooks(WEBHOOK_SLOTS)

@@ -8092,6 +8092,298 @@ def build_insights_review() -> dict:
     }
 
 
+BRAND_RESEARCH_STICKY = """## Brand Research
+
+**Zero secrets in this file.** Needs `ANTHROPIC_API_KEY`, `TAVILY_API_KEY`, `SUPABASE_URL`, `SUPABASE_KEY`.
+
+Searches the live web for what is moving in this brand's market and what its competitors are doing, and proposes rules into `brand_memory` with `status = 'proposed'`. Same landing place as the Insights review — research does not get its own silo, and nothing steers generation until a human approves it.
+
+Webhook path: `/arak-brand-research`. Body: `{ workspace_id, brand_name, brand_descriptor, instructions, competitors[], market }`.
+
+**Text and search only.** No image or video node — this workflow cannot spend money on media.
+
+**The queries are built from the Brand Brain, not hardcoded.** The old LinkedIn workflow searched a fixed `"architectural lighting industry trends 2026 Saudi Arabia"` string, which was wrong for every brand that was not Arak. The caller sends the research slice of its own brand context (`buildContext(task: 'research')`) and the queries are assembled from the brand's own descriptor and competitor list.
+
+**It refuses to run on an empty brain.** Without a descriptor there is nothing to search FOR, and a generic query would return generic results that a model would then dress up as insight about this specific brand.
+
+**Existing rules go into the prompt**, in every status including retired, so a weekly run does not re-propose what someone already turned down.
+
+This is the one learning source that works on day one — it needs no posting history, which is exactly what a brand with ten ideas and no analytics does not have."""
+
+
+BRAND_RESEARCH_JS = r"""
+const http = this.helpers.httpRequest;
+
+async function req(opts){
+  const res = await http({ ...opts, returnFullResponse: true, ignoreHttpStatusErrors: true });
+  const status = res.statusCode;
+  if (status >= 200 && status < 300) return res.body;
+  const b = res.body;
+  const msg = (b && typeof b === 'object') ? (b.error || b.message || JSON.stringify(b).slice(0, 300))
+            : (typeof b === 'string' && b) ? b.slice(0, 300)
+            : `HTTP ${status}`;
+  throw new Error(`${opts.__label || 'Request'} ${status}: ${msg}`);
+}
+
+const raw  = ($input.first() && $input.first().json) || {};
+const body = raw.body || {};
+const SUPA_URL = String($env.SUPABASE_URL || '').replace(/\/+$/, '');
+const SUPA_KEY = $env.SUPABASE_KEY;
+const TAVILY   = $env.TAVILY_API_KEY;
+const sHeaders = { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}`, 'Content-Type': 'application/json' };
+
+const wsId = String(body.workspace_id || '').trim();
+if (!wsId) throw new Error('workspace_id is required.');
+
+const brandName  = String(body.brand_name || '').trim();
+const descriptor = String(body.brand_descriptor || '').trim();
+const market     = String(body.market || 'Saudi Arabia').trim();
+const competitors = (Array.isArray(body.competitors) ? body.competitors : [])
+  .map(c => String(c || '').trim()).filter(Boolean).slice(0, 6);
+const instructions = String(body.instructions || '').trim();
+
+// Refuse rather than search for nothing. A query built from an empty brain is
+// just the market's name, and the results would be generic trend copy that a
+// model would then attribute to THIS brand.
+if (!descriptor) {
+  return [{ json: { ok: true, skipped: true, proceed: false, workspace_id: wsId,
+    reason: 'This brand has no one-line descriptor yet, so there is nothing specific to research. Add one in Brand Brain first.' } }];
+}
+if (!TAVILY) {
+  return [{ json: { ok: true, skipped: true, proceed: false, workspace_id: wsId,
+    reason: 'TAVILY_API_KEY is not set on this n8n instance, so the web search cannot run.' } }];
+}
+
+const year = new Date().getFullYear();
+
+// A good descriptor usually already says where the brand operates ("an
+// at-home spa in Riyadh, Saudi Arabia"), and appending the market anyway
+// produced "... in Riyadh, Saudi Arabia — trends 2026 Saudi Arabia". Search
+// engines tolerate that; it still reads as a worse query than the one a
+// person would type, and these strings end up quoted in the prompt.
+const marketSuffix = (market && !descriptor.toLowerCase().includes(market.toLowerCase()))
+  ? ` in ${market}` : '';
+
+// Two kinds of question, kept separate because they produce different kinds
+// of rule: what is moving in the market, and what the named rivals are doing.
+const queries = [
+  { scope: 'trend', q: `${descriptor}${marketSuffix} — customer trends and demand ${year}` },
+  { scope: 'trend', q: `social media content trends ${year} for ${descriptor}${marketSuffix}` },
+];
+if (competitors.length) {
+  queries.push({ scope: 'competitor', q: `${competitors.join(' OR ')} ${market} — recent marketing, offers and social media activity` });
+}
+
+// Searched in sequence rather than in parallel: three calls is not worth a
+// concurrency bug, and a rate-limited provider answering 429 to two of three
+// would silently narrow the research without saying so.
+const findings = [];
+const searchErrors = [];
+for (const { scope, q } of queries) {
+  try {
+    const r = await req({
+      __label: 'Tavily', method: 'POST', url: 'https://api.tavily.com/search',
+      body: { api_key: TAVILY, query: q, max_results: 5, search_depth: 'basic',
+              include_answer: true, topic: 'general' },
+      json: true,
+    });
+    findings.push({
+      scope, query: q,
+      answer: String(r?.answer || '').slice(0, 1200),
+      results: (r?.results || []).slice(0, 5).map(x => ({
+        title: String(x.title || '').slice(0, 200),
+        url: String(x.url || ''),
+        content: String(x.content || '').slice(0, 600),
+      })),
+    });
+  } catch (e) { searchErrors.push(`${q}: ${String(e.message || e).slice(0, 160)}`); }
+}
+
+if (!findings.length) {
+  return [{ json: { ok: true, skipped: true, proceed: false, workspace_id: wsId,
+    reason: `Every search failed. ${searchErrors.join(' · ')}`.slice(0, 500) } }];
+}
+
+// Same workspace filter as everywhere else: this runs on the service key, so
+// the filter IS the isolation.
+const existing = await req({
+  __label: 'Supabase', method: 'GET',
+  url: `${SUPA_URL}/rest/v1/brand_memory?workspace_id=eq.${wsId}&select=rule,scope,status&limit=200`,
+  headers: sHeaders, json: true,
+});
+
+const lines = [];
+for (const f of findings) {
+  lines.push(`— SEARCH (${f.scope}): ${f.query}`);
+  if (f.answer) lines.push(`Summary: ${f.answer}`);
+  for (const r of f.results) lines.push(`  * ${r.title} (${r.url})\n    ${r.content}`);
+  lines.push('');
+}
+
+lines.push('RULES THAT ALREADY EXIST — do not repeat or rephrase any of these:');
+if (existing.length) for (const r of existing) lines.push(`- [${r.status}] (${r.scope}) ${r.rule}`);
+else lines.push('- (none yet)');
+
+const prompt = `You are a marketing strategist reviewing live web research for one brand, to propose a small number of concrete rules that will improve the content it produces.
+
+THE BRAND: ${brandName || 'this brand'} — ${descriptor}
+MARKET: ${market}
+${competitors.length ? `KNOWN COMPETITORS: ${competitors.join(', ')}` : ''}
+
+${instructions ? `WHAT THE BRAND SAYS ABOUT ITSELF:\n${instructions}\n` : ''}
+WEB RESEARCH:
+${lines.join('\n')}
+
+Propose AT MOST 4 rules. Fewer is better; propose none at all if the research says nothing this brand can act on.
+
+Each rule must be:
+- ONE imperative sentence a planner or copywriter could follow directly. It is injected verbatim into future prompts, so it must make sense with no other context.
+- Specific to THIS brand and market. "Post more video" is true of every brand on earth and is worth nothing here.
+- Grounded in something that actually appears in the research above. Never invent a statistic, a competitor, or a trend.
+- Genuinely new — not a restatement of a rule already listed, in any status.
+
+Set "scope" to "trend" for something moving in the market, or "competitor" for something a named rival is doing.
+
+Return ONLY valid JSON, no markdown:
+{"rules":[{"rule":"one imperative sentence","detail":"what in the research supports this, in plain language, and how strong that evidence is","scope":"trend|competitor","sources":["url"],"confidence":<0-1>}]}
+
+Return {"rules":[]} if the research does not support anything specific.`;
+
+return [{ json: { ok: true, proceed: true, skipped: false, workspace_id: wsId, prompt,
+                  searched: queries.length, found: findings.length,
+                  warning: searchErrors.length ? searchErrors.join(' · ') : undefined } }];
+"""
+
+
+BRAND_RESEARCH_SAVE_JS = r"""
+const http = this.helpers.httpRequest;
+
+const SUPA_URL = String($env.SUPABASE_URL || '').replace(/\/+$/, '');
+const SUPA_KEY = $env.SUPABASE_KEY;
+const sHeaders = { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}`, 'Content-Type': 'application/json' };
+
+const gathered = $('Research: Search').first().json;
+const wsId = gathered.workspace_id;
+
+const res = $input.first().json;
+const text = (res.content || []).filter(b => b.type === 'text').map(b => b.text).join('').trim();
+
+let parsed = null;
+try {
+  const cleaned = text.replace(/^```(?:json)?/i, '').replace(/```$/, '').trim();
+  parsed = JSON.parse(cleaned.slice(cleaned.indexOf('{'), cleaned.lastIndexOf('}') + 1));
+} catch (e) {
+  throw new Error(`Could not parse the research: ${String(e.message || e).slice(0, 200)}`);
+}
+
+// Validated against brand_memory's CHECK constraints. This workflow may only
+// ever produce trend/competitor rules — a model returning 'plan' here would
+// otherwise write a row claiming the planner's authority off the back of a
+// web search.
+const SCOPES = ['trend', 'competitor'];
+
+const rows = (Array.isArray(parsed.rules) ? parsed.rules : [])
+  .filter(r => r && String(r.rule || '').trim())
+  .slice(0, 4)
+  .map(r => ({
+    workspace_id: wsId,
+    rule: String(r.rule).trim().slice(0, 500),
+    detail: String(r.detail || '').trim().slice(0, 2000),
+    scope: SCOPES.includes(r.scope) ? r.scope : 'trend',
+    source: 'research',
+    status: 'proposed',
+    evidence: {
+      sources: (Array.isArray(r.sources) ? r.sources : []).map(u => String(u).slice(0, 300)).slice(0, 5),
+      searches: gathered.searched || null,
+    },
+    confidence: (typeof r.confidence === 'number' && r.confidence >= 0 && r.confidence <= 1) ? r.confidence : null,
+  }));
+
+if (!rows.length) return [{ json: { ok: true, proposed: 0, note: 'The research found nothing worth proposing.' } }];
+
+await http({
+  method: 'POST', url: `${SUPA_URL}/rest/v1/brand_memory`,
+  headers: { ...sHeaders, Prefer: 'return=minimal' },
+  body: rows, json: true,
+});
+
+return [{ json: { ok: true, proposed: rows.length, rules: rows.map(r => r.rule),
+                  warning: gathered.warning } }];
+"""
+
+
+def build_brand_research() -> dict:
+    """
+    Webhook -> Research: Search (Code: builds brand-specific queries, calls
+    Tavily, assembles the prompt) -> Enough to work with? (IF) -> Call Claude
+    -> Research: Save Proposals -> Respond.
+
+    Same shape as Insights Review, and deliberately so: both end in
+    `brand_memory` rows marked 'proposed', reviewed on the same page. Research
+    is not a separate kind of knowledge with a separate home.
+
+    The Tavily calls live INSIDE the Code node rather than as their own HTTP
+    nodes. Three searches with per-query error tolerance is a loop, and as
+    separate nodes it would be three near-identical nodes plus a merge — with
+    a partial failure silently narrowing the research instead of reporting it.
+
+    Text and search only: no image or video node anywhere in this graph.
+    """
+    nodes = [
+        _sticky(BRAND_RESEARCH_STICKY, height=520, width=520, x=0, y=-340),
+        _webhook("arak-brand-research", "responseNode", x=0, y=200),
+        _code("Research: Search", BRAND_RESEARCH_JS, x=220, y=200),
+        _if_bool_equals("Enough to work with?", "research-proceed", "={{ $json.proceed }}", x=440, y=200),
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "https://api.anthropic.com/v1/messages",
+                "sendHeaders": True,
+                "headerParameters": {
+                    "parameters": [
+                        {"name": "x-api-key", "value": "={{ $env.ANTHROPIC_API_KEY }}"},
+                        {"name": "anthropic-version", "value": "2023-06-01"},
+                        {"name": "content-type", "value": "application/json"},
+                    ]
+                },
+                "sendBody": True,
+                "specifyBody": "json",
+                "jsonBody": "={{ JSON.stringify({ model: \"claude-sonnet-5\", max_tokens: 2000, messages: [{ role: \"user\", content: $json.prompt }] }) }}",
+                "options": {},
+            },
+            "id": nid(),
+            "name": "Call Claude",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.2,
+            "position": [660, 120],
+            "retryOnFail": True,
+            "maxTries": 3,
+            "waitBetweenTries": 3000,
+        },
+        _code("Research: Save Proposals", BRAND_RESEARCH_SAVE_JS, x=880, y=120),
+        _respond_json("Respond", "={{ JSON.stringify($json) }}", x=1100, y=120),
+        _respond_json("Respond: Skipped", "={{ JSON.stringify($json) }}", x=660, y=300),
+    ]
+    connections = {
+        "Webhook": {"main": [[{"node": "Research: Search", "type": "main", "index": 0}]]},
+        "Research: Search": {"main": [[{"node": "Enough to work with?", "type": "main", "index": 0}]]},
+        "Enough to work with?": {"main": [
+            [{"node": "Call Claude", "type": "main", "index": 0}],
+            [{"node": "Respond: Skipped", "type": "main", "index": 0}],
+        ]},
+        "Call Claude": {"main": [[{"node": "Research: Save Proposals", "type": "main", "index": 0}]]},
+        "Research: Save Proposals": {"main": [[{"node": "Respond", "type": "main", "index": 0}]]},
+    }
+    return {
+        "name": "Arak Lighting – Brand Research",
+        "nodes": nodes,
+        "connections": connections,
+        "active": False,
+        "settings": {"executionOrder": "v1"},
+        "tags": [],
+    }
+
+
 def build_creative_enhance() -> dict:
     """
     Webhook (responseMode=lastNode) -> Enhance Prompt (single Code node).
@@ -8146,6 +8438,7 @@ if __name__ == "__main__":
         build_fal_balance(),
         build_creative_enhance(),
         build_insights_review(),
+        build_brand_research(),
     ]
 
     for wf in workflows:

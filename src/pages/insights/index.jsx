@@ -4,10 +4,12 @@ import { useApp } from '../../store/app'
 import { useAuth } from '../../store/auth'
 import { Card, PageHeader, SectionHead, Button, Empty, Spinner, Input, Select } from '../../components/ui/index'
 import {
-  fetchBrandMemory, updateBrandMemory, deleteBrandMemory,
+  fetchBrandMemory, updateBrandMemory, deleteBrandMemory, buildContext,
 } from '../../lib/brandContext'
+import { fetchBrandSchema, fetchDirectoryRows } from '../../lib/brandSchema'
 import {
   fetchIdeaEvents, fetchIdeasForInsights, fetchPerformance, requestInsightsReview,
+  requestBrandResearch, competitorNamesFrom,
   summariseDecisions, summarisePerformance,
   REJECT_REASON_LABELS, WEAK_SAMPLE, MEMORY_SCOPES, SCOPE_LABELS,
 } from '../../lib/insights'
@@ -123,6 +125,8 @@ export function Insights() {
   const [busy, setBusy] = useState(false)
   const [reviewing, setReviewing] = useState(false)
   const [reviewNote, setReviewNote] = useState('')
+  const [researching, setResearching] = useState(false)
+  const [researchNote, setResearchNote] = useState('')
   const [events, setEvents] = useState([])
   const [ideas, setIdeas] = useState([])
   const [perf, setPerf] = useState({ metrics: [], posts: [] })
@@ -193,6 +197,45 @@ export function Insights() {
     setReviewNote(res.proposed
       ? `Proposed ${res.proposed} rule${res.proposed === 1 ? '' : 's'} — review them below.`
       : (res.note || 'The review found nothing worth proposing.'))
+    reload()
+  }
+
+  // Searches the live web for this brand's market and rivals, then proposes
+  // rules from what it finds. The only learning source that works before
+  // there is any posting history — which is exactly the position both real
+  // brands are in.
+  //
+  // The query is built from the Brand Brain here, in the browser, through the
+  // same buildContext every other call uses. Assembling it inside n8n would
+  // mean a second copy of the flattening logic, which is the drift
+  // brandContext.js exists to prevent.
+  async function runResearch() {
+    setResearching(true); setResearchNote('')
+    const [schema, dirRows] = await Promise.all([
+      fetchBrandSchema(activeWorkspaceId, accessToken),
+      fetchDirectoryRows(activeWorkspaceId, accessToken),
+    ])
+    const rowsBySection = {}
+    for (const r of dirRows) (rowsBySection[r.section_key] ||= []).push(r)
+    const directory = { rowsBySection, assets: [] }
+    const ctx = buildContext(state.brandProfile, schema, directory, memory, { task: 'research' })
+
+    const res = await requestBrandResearch(state.webhooks?.brandResearch, {
+      workspace_id: activeWorkspaceId,
+      brand_name: ctx.brandName,
+      brand_descriptor: ctx.brandDescriptor,
+      instructions: ctx.instructions,
+      competitors: competitorNamesFrom(schema, directory),
+    })
+    setResearching(false)
+    if (res.error) { setResearchNote(res.error); return }
+    if (res.skipped) { setResearchNote(res.reason || 'Nothing to research yet.'); return }
+    setResearchNote([
+      res.proposed
+        ? `Proposed ${res.proposed} rule${res.proposed === 1 ? '' : 's'} from the web — review them below.`
+        : (res.note || 'The research found nothing worth proposing.'),
+      res.warning ? `Some searches failed: ${res.warning}` : '',
+    ].filter(Boolean).join(' '))
     reload()
   }
 
@@ -340,12 +383,22 @@ export function Insights() {
           title="Proposed rules"
           subtitle="Suggestions waiting on you. Approving one adds it to the Brand Brain and it starts steering generation."
           action={
-            <Button size="sm" variant="secondary" disabled={reviewing || busy} onClick={runReview}>
-              {reviewing ? 'Reviewing…' : 'Run review'}
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button size="sm" variant="secondary" disabled={researching || reviewing || busy} onClick={runResearch}>
+                {researching ? 'Searching…' : 'Run research'}
+              </Button>
+              <Button size="sm" variant="secondary" disabled={reviewing || researching || busy} onClick={runReview}>
+                {reviewing ? 'Reviewing…' : 'Run review'}
+              </Button>
+            </div>
           }
         />
         <div className="p-5">
+          {researchNote && (
+            <p className="text-[11px] text-text-secondary bg-surface-subtle border border-border rounded-lg px-3 py-2 mb-3 leading-relaxed">
+              {researchNote}
+            </p>
+          )}
           {reviewNote && (
             <p className="text-[11px] text-text-secondary bg-surface-subtle border border-border rounded-lg px-3 py-2 mb-3 leading-relaxed">
               {reviewNote}
@@ -361,8 +414,10 @@ export function Insights() {
             <p className="text-xs text-text-tertiary leading-relaxed">
               Nothing proposed. <strong className="font-semibold text-text-secondary">Run review</strong> reads
               the two sections above and suggests rules from them — it declines to run until there is
-              enough history to say anything honest. You can also write rules by hand under Learned
-              Guidance in <Link to="/brand-brain" className="underline">Brand Brain</Link>.
+              enough history to say anything honest. <strong className="font-semibold text-text-secondary">Run
+              research</strong> searches the web for this brand's market and competitors instead, so it works
+              before there is any history at all. You can also write rules by hand under Learned Guidance
+              in <Link to="/brand-brain" className="underline">Brand Brain</Link>.
             </p>
           )}
         </div>
