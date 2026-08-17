@@ -7765,6 +7765,333 @@ def build_creative_video_edit() -> dict:
     )
 
 
+INSIGHTS_REVIEW_STICKY = """## Insights Review
+
+**Zero secrets in this file.** Needs `ANTHROPIC_API_KEY`, `SUPABASE_URL`, `SUPABASE_KEY`.
+
+Reads what this brand has already decided and what its posts actually did, and proposes short rules into `brand_memory` with `status = 'proposed'`. Nothing it writes reaches a prompt until a human approves it on the Insights page — an unreviewed inference must never start steering a brand's output on its own.
+
+Webhook path: `/arak-insights-review`. Body: `{ workspace_id }`.
+
+**Text only.** One Claude Sonnet call, no image or video generation — this workflow cannot spend money on media.
+
+**It refuses to run on thin data.** Below the thresholds in Gather it returns `skipped` WITHOUT calling Claude. That is the point: asked to find patterns in four decisions and one post, a model will find them, and they will be noise wearing the costume of a finding. Cheaper and more honest to say "not enough history yet".
+
+**It is told what already exists** — active, proposed AND retired rules alike. Without the retired ones it would cheerfully re-propose every suggestion a human has already turned down, every single run.
+
+Sample size travels with each rule into `evidence`, so the page can mark a thin conclusion as thin rather than presenting it with the same confidence as a well-evidenced one."""
+
+
+INSIGHTS_REVIEW_GATHER_JS = r"""
+const http = this.helpers.httpRequest;
+
+async function req(opts){
+  const res = await http({ ...opts, returnFullResponse: true, ignoreHttpStatusErrors: true });
+  const status = res.statusCode;
+  if (status >= 200 && status < 300) return res.body;
+  const b = res.body;
+  const msg = (b && typeof b === 'object') ? (b.error || b.message || JSON.stringify(b).slice(0, 400))
+            : (typeof b === 'string' && b) ? b.slice(0, 400)
+            : `HTTP ${status}`;
+  throw new Error(`Supabase ${status}: ${msg}`);
+}
+
+const raw  = ($input.first() && $input.first().json) || {};
+const body = raw.body || {};
+const SUPA_URL = String($env.SUPABASE_URL || '').replace(/\/+$/, '');
+const SUPA_KEY = $env.SUPABASE_KEY;
+const sHeaders = { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}`, 'Content-Type': 'application/json' };
+
+const wsId = String(body.workspace_id || '').trim();
+if (!wsId) throw new Error('workspace_id is required.');
+
+// Every read is scoped to the one workspace. This runs with the service key,
+// so RLS is not a backstop here -- the filter IS the isolation, and without
+// it one brand's rules would be proposed from another brand's history.
+const q = (table, sel, extra) =>
+  `${SUPA_URL}/rest/v1/${table}?workspace_id=eq.${wsId}&select=${sel}${extra || ''}`;
+
+const [events, ideas, metrics, posts, existing] = await Promise.all([
+  req({ method:'GET', url:q('idea_events', 'event,reason,idea_id,before,after,created_at', '&order=created_at.desc&limit=500'), headers:sHeaders, json:true }),
+  req({ method:'GET', url:q('plan_ideas', 'id,status,reject_reason,content_pillar,occasion,format,media_type,platform,scheduled_date,topic,title', '&order=created_at.desc&limit=500'), headers:sHeaders, json:true }),
+  req({ method:'GET', url:q('post_analytics', 'post_id,post_table,platform,metric_date,likes,comments,shares,saves,views,impressions,reach,clicks,metrics_present', '&order=metric_date.desc&limit=2000'), headers:sHeaders, json:true }),
+  req({ method:'GET', url:q('instagram_generated_posts', 'id,plan_idea_id', '&limit=2000'), headers:sHeaders, json:true }),
+  req({ method:'GET', url:q('brand_memory', 'rule,scope,status', '&limit=200'), headers:sHeaders, json:true }),
+]);
+
+// ── Decisions ────────────────────────────────────────────────────────────
+// plan_ideas carries status and reject_reason directly, and idea_events
+// carries the same decisions as a log. Both are counted: a workspace that
+// was being used before the log existed still has its rejections recorded
+// on the ideas themselves, and ignoring those would call real history empty.
+const rejectReasons = {};
+let approved = 0, rejected = 0;
+for (const i of ideas){
+  if (i.status === 'approved') approved++;
+  else if (i.status === 'rejected'){
+    rejected++;
+    const k = i.reject_reason || 'unspecified';
+    rejectReasons[k] = (rejectReasons[k] || 0) + 1;
+  }
+}
+const eventTotals = {};
+for (const e of events) eventTotals[e.event] = (eventTotals[e.event] || 0) + 1;
+
+// Which fields a human rewrote by hand -- the most direct statement there is
+// about where generation falls short.
+const editedFields = {};
+for (const e of events){
+  if (e.event !== 'edited') continue;
+  const b = e.before || {}, a = e.after || {};
+  for (const k of new Set([...Object.keys(b), ...Object.keys(a)])){
+    if (String(b[k] ?? '') === String(a[k] ?? '')) continue;
+    editedFields[k] = (editedFields[k] || 0) + 1;
+  }
+}
+
+const pillarCounts = {};
+for (const i of ideas){
+  const p = String(i.content_pillar || '').trim();
+  if (p) pillarCounts[p] = (pillarCounts[p] || 0) + 1;
+}
+
+// ── Performance ──────────────────────────────────────────────────────────
+const METRICS = ['likes','comments','shares','saves'];
+function engagement(row){
+  const present = Array.isArray(row.metrics_present) ? row.metrics_present : null;
+  let t = 0;
+  for (const m of METRICS){
+    if (present && !present.includes(m)) continue;
+    t += Number(row[m]) || 0;
+  }
+  return t;
+}
+const ideaById = {};
+for (const i of ideas) ideaById[i.id] = i;
+const ideaByPost = {};
+for (const p of posts) if (p.plan_idea_id && ideaById[p.plan_idea_id]) ideaByPost[p.id] = ideaById[p.plan_idea_id];
+
+// One post gains a metrics row per sync; the latest is its standing.
+const latest = {};
+for (const m of metrics){
+  if (m.post_table !== 'instagram_generated_posts' || !m.post_id) continue;
+  const seen = latest[m.post_id];
+  if (!seen || String(m.metric_date) > String(seen.metric_date)) latest[m.post_id] = m;
+}
+const groups = { pillar:{}, format:{}, weekday:{} };
+const push = (g, k, v) => { if (!k) return; (groups[g][k] = groups[g][k] || []).push(v); };
+const DAYS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+for (const postId of Object.keys(latest)){
+  const row = latest[postId];
+  const idea = ideaByPost[postId];
+  if (!idea) continue;
+  const e = engagement(row);
+  push('pillar', String(idea.content_pillar || '').trim(), e);
+  push('format', String(idea.format || idea.media_type || '').trim(), e);
+  if (idea.scheduled_date){
+    const d = new Date(`${idea.scheduled_date}T00:00:00`);
+    if (!isNaN(d.valueOf())) push('weekday', DAYS[d.getDay()], e);
+  }
+}
+const summarise = g => Object.keys(groups[g]).map(k => ({
+  key: k, n: groups[g][k].length,
+  avg: Math.round((groups[g][k].reduce((a,b)=>a+b,0) / groups[g][k].length) * 10) / 10,
+})).sort((a,b) => b.avg - a.avg);
+
+const postsMeasured = Object.keys(latest).length;
+const decisions = approved + rejected + (eventTotals.rejected || 0) + (eventTotals.edited || 0);
+
+// ── The refusal ──────────────────────────────────────────────────────────
+// A model asked to find patterns in four decisions WILL find them. Returning
+// early costs nothing and keeps invented rules out of the brand's memory.
+const MIN_DECISIONS = 8;
+const MIN_POSTS = 5;
+if (decisions < MIN_DECISIONS && postsMeasured < MIN_POSTS){
+  return [{ json: {
+    ok: true, skipped: true, proceed: false, workspace_id: wsId,
+    reason: `Not enough history yet: ${decisions} decision(s) and ${postsMeasured} measured post(s). ` +
+            `Needs ${MIN_DECISIONS} decisions or ${MIN_POSTS} measured posts before a review is worth running.`,
+    counts: { decisions, posts_measured: postsMeasured },
+  }}];
+}
+
+const lines = [];
+lines.push(`DECISIONS (${decisions} recorded)`);
+lines.push(`Approved: ${approved} | Rejected: ${rejected}`);
+if (Object.keys(rejectReasons).length)
+  lines.push(`Reject reasons: ${Object.entries(rejectReasons).map(([k,v]) => `${k} x${v}`).join(', ')}`);
+if (eventTotals.redrafted) lines.push(`Copy re-drafted ${eventTotals.redrafted} time(s) -- a brief that needed another pass.`);
+if (Object.keys(editedFields).length)
+  lines.push(`Fields a human rewrote: ${Object.entries(editedFields).sort((a,b)=>b[1]-a[1]).map(([k,v]) => `${k} x${v}`).join(', ')}`);
+if (Object.keys(pillarCounts).length)
+  lines.push(`Content pillars used so far: ${Object.entries(pillarCounts).sort((a,b)=>b[1]-a[1]).map(([k,v]) => `${k} x${v}`).join(', ')}`);
+
+lines.push('');
+lines.push(`PERFORMANCE (${postsMeasured} post(s) with analytics)`);
+for (const [label, g] of [['pillar','pillar'], ['format','format'], ['weekday','weekday']]){
+  const rows = summarise(g);
+  if (rows.length) lines.push(`By ${label}: ${rows.map(r => `${r.key} ${r.avg} avg over ${r.n} post(s)`).join(' | ')}`);
+}
+
+lines.push('');
+lines.push('RULES THAT ALREADY EXIST -- do not repeat or rephrase any of these:');
+if (existing.length) for (const r of existing) lines.push(`- [${r.status}] (${r.scope}) ${r.rule}`);
+else lines.push('- (none yet)');
+
+const prompt = `You are reviewing how one brand's social content has been performing and being received, to propose a small number of concrete rules that will improve what gets generated next.
+
+${lines.join('\n')}
+
+Propose AT MOST 4 rules. Fewer is better; propose none at all if the evidence does not support any.
+
+Each rule must be:
+- ONE imperative sentence a copywriter or art director could follow directly. It is injected verbatim into future prompts, so it must make sense with no other context.
+- Grounded in a number that appears above. Never invent a statistic.
+- Genuinely new -- not a restatement of a rule already listed, in any status.
+
+Where the evidence is thin, either say so in the detail or do not propose the rule. A pattern over fewer than 5 posts is a coincidence, not a finding, and proposing it as one wastes a person's attention.
+
+Return ONLY valid JSON, no markdown:
+{"rules":[{"rule":"one imperative sentence","detail":"why, in plain language, including how weak the evidence is","scope":"plan|caption|image|timing|competitor|trend|global","source":"rejections|edits|analytics","sample_size":<integer number of ideas or posts this rests on>,"confidence":<0-1>}]}
+
+Return {"rules":[]} if nothing is well enough evidenced.`;
+
+return [{ json: { ok: true, proceed: true, skipped: false, workspace_id: wsId, prompt,
+                  counts: { decisions, posts_measured: postsMeasured } } }];
+"""
+
+
+INSIGHTS_REVIEW_SAVE_JS = r"""
+const http = this.helpers.httpRequest;
+
+const SUPA_URL = String($env.SUPABASE_URL || '').replace(/\/+$/, '');
+const SUPA_KEY = $env.SUPABASE_KEY;
+const sHeaders = { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}`, 'Content-Type': 'application/json' };
+
+const gathered = $('Insights: Gather').first().json;
+const wsId = gathered.workspace_id;
+
+const res = $input.first().json;
+const text = (res.content || []).filter(b => b.type === 'text').map(b => b.text).join('').trim();
+
+// Same defensive parse every Claude-reading node in this file uses: the model
+// occasionally wraps JSON in a fence despite being told not to.
+let parsed = null;
+try {
+  const cleaned = text.replace(/^```(?:json)?/i, '').replace(/```$/, '').trim();
+  parsed = JSON.parse(cleaned.slice(cleaned.indexOf('{'), cleaned.lastIndexOf('}') + 1));
+} catch (e) {
+  throw new Error(`Could not parse the review: ${String(e.message || e).slice(0, 200)}`);
+}
+
+const SCOPES  = ['plan','caption','image','timing','competitor','trend','global'];
+const SOURCES = ['rejections','edits','analytics'];
+
+// Validated against the CHECK constraints on brand_memory rather than trusted:
+// one out-of-vocabulary scope would fail the whole insert, losing the good
+// rules alongside the bad one.
+const rows = (Array.isArray(parsed.rules) ? parsed.rules : [])
+  .filter(r => r && String(r.rule || '').trim())
+  .slice(0, 4)
+  .map(r => ({
+    workspace_id: wsId,
+    rule: String(r.rule).trim().slice(0, 500),
+    detail: String(r.detail || '').trim().slice(0, 2000),
+    scope: SCOPES.includes(r.scope) ? r.scope : 'global',
+    source: SOURCES.includes(r.source) ? r.source : 'analytics',
+    status: 'proposed',
+    evidence: {
+      sample_size: Number(r.sample_size) || null,
+      decisions: gathered.counts?.decisions ?? null,
+      posts_measured: gathered.counts?.posts_measured ?? null,
+    },
+    confidence: (typeof r.confidence === 'number' && r.confidence >= 0 && r.confidence <= 1) ? r.confidence : null,
+  }));
+
+if (!rows.length) return [{ json: { ok: true, proposed: 0, note: 'The review found nothing worth proposing.' } }];
+
+await http({
+  method: 'POST', url: `${SUPA_URL}/rest/v1/brand_memory`,
+  headers: { ...sHeaders, Prefer: 'return=minimal' },
+  body: rows, json: true,
+});
+
+return [{ json: { ok: true, proposed: rows.length, rules: rows.map(r => r.rule) } }];
+"""
+
+
+def build_insights_review() -> dict:
+    """
+    Webhook -> Insights: Gather (Code, reads Supabase) -> Enough history?
+    (IF) -> Call Claude -> Insights: Save Proposals (Code, writes
+    brand_memory).
+
+    The IF is the point of the graph, not decoration: on the false branch it
+    responds with `skipped` and never reaches the Claude node, so a review
+    over four decisions costs nothing. Both branches terminate in a Respond
+    node because the webhook uses responseNode — on a branching graph
+    `lastNode` would answer with whichever node happened to run last.
+
+    Text only. There is deliberately no image or video node here; the whole
+    workflow can do nothing more expensive than one Sonnet call.
+    """
+    nodes = [
+        _sticky(INSIGHTS_REVIEW_STICKY, height=460, width=500, x=0, y=-300),
+        _webhook("arak-insights-review", "responseNode", x=0, y=200),
+        _code("Insights: Gather", INSIGHTS_REVIEW_GATHER_JS, x=220, y=200),
+        _if_bool_equals("Enough history?", "insights-proceed", "={{ $json.proceed }}", x=440, y=200),
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "https://api.anthropic.com/v1/messages",
+                "sendHeaders": True,
+                "headerParameters": {
+                    "parameters": [
+                        {"name": "x-api-key", "value": "={{ $env.ANTHROPIC_API_KEY }}"},
+                        {"name": "anthropic-version", "value": "2023-06-01"},
+                        {"name": "content-type", "value": "application/json"},
+                    ]
+                },
+                "sendBody": True,
+                "specifyBody": "json",
+                # Sonnet, not Opus: this is summarising a page of numbers into
+                # four sentences, not planning a month of content.
+                "jsonBody": "={{ JSON.stringify({ model: \"claude-sonnet-5\", max_tokens: 2000, messages: [{ role: \"user\", content: $json.prompt }] }) }}",
+                "options": {},
+            },
+            "id": nid(),
+            "name": "Call Claude",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.2,
+            "position": [660, 120],
+            "retryOnFail": True,
+            "maxTries": 3,
+            "waitBetweenTries": 3000,
+        },
+        _code("Insights: Save Proposals", INSIGHTS_REVIEW_SAVE_JS, x=880, y=120),
+        _respond_json("Respond", "={{ JSON.stringify($json) }}", x=1100, y=120),
+        _respond_json("Respond: Skipped", "={{ JSON.stringify($json) }}", x=660, y=300),
+    ]
+    connections = {
+        "Webhook": {"main": [[{"node": "Insights: Gather", "type": "main", "index": 0}]]},
+        "Insights: Gather": {"main": [[{"node": "Enough history?", "type": "main", "index": 0}]]},
+        "Enough history?": {"main": [
+            [{"node": "Call Claude", "type": "main", "index": 0}],
+            [{"node": "Respond: Skipped", "type": "main", "index": 0}],
+        ]},
+        "Call Claude": {"main": [[{"node": "Insights: Save Proposals", "type": "main", "index": 0}]]},
+        "Insights: Save Proposals": {"main": [[{"node": "Respond", "type": "main", "index": 0}]]},
+    }
+    return {
+        "name": "Arak Lighting – Insights Review",
+        "nodes": nodes,
+        "connections": connections,
+        "active": False,
+        "settings": {"executionOrder": "v1"},
+        "tags": [],
+    }
+
+
 def build_creative_enhance() -> dict:
     """
     Webhook (responseMode=lastNode) -> Enhance Prompt (single Code node).
@@ -7818,6 +8145,7 @@ if __name__ == "__main__":
         build_creative_cancel(),
         build_fal_balance(),
         build_creative_enhance(),
+        build_insights_review(),
     ]
 
     for wf in workflows:

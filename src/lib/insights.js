@@ -102,6 +102,30 @@ export async function fetchPerformance(workspaceId, accessToken) {
   return { metrics, posts }
 }
 
+// ─── Triggering a review ───────────────────────────────────────────────────
+// One Claude Sonnet call over the summaries above. It writes brand_memory
+// rows as `proposed` — never `active` — so nothing it infers reaches a prompt
+// before a human has agreed to it on this page.
+export async function requestInsightsReview(webhookUrl, workspaceId) {
+  if (!webhookUrl) return { error: 'Insights review webhook not configured. Go to Settings → Integrations.' }
+  if (!workspaceId) return { error: 'No active workspace.' }
+  try {
+    const res = await fetch(webhookUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ workspace_id: workspaceId }),
+    })
+    if (!res.ok) return { error: `Review webhook returned ${res.status}` }
+    const data = await res.json()
+    const row = Array.isArray(data) ? data[0] : data
+    if (!row || row.ok !== true) return { error: (row && row.error) || 'The review returned nothing usable.' }
+    // `skipped` is a successful outcome, not a failure: the workflow declined
+    // to infer rules from too little history, and the caller should say so
+    // rather than reporting an error.
+    return { ok: true, skipped: !!row.skipped, reason: row.reason || '', proposed: row.proposed || 0, note: row.note || '' }
+  } catch (err) { return { error: err.message } }
+}
+
 // ─── Aggregation ───────────────────────────────────────────────────────────
 
 const ENGAGEMENT_METRICS = ['likes', 'comments', 'shares', 'saves']

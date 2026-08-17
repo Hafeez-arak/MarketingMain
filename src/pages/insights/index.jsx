@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { useApp } from '../../store/app'
 import { useAuth } from '../../store/auth'
 import { Card, PageHeader, SectionHead, Button, Empty, Spinner, Input, Select } from '../../components/ui/index'
 import {
   fetchBrandMemory, updateBrandMemory, deleteBrandMemory,
 } from '../../lib/brandContext'
 import {
-  fetchIdeaEvents, fetchIdeasForInsights, fetchPerformance,
+  fetchIdeaEvents, fetchIdeasForInsights, fetchPerformance, requestInsightsReview,
   summariseDecisions, summarisePerformance,
   REJECT_REASON_LABELS, WEAK_SAMPLE, MEMORY_SCOPES, SCOPE_LABELS,
 } from '../../lib/insights'
@@ -117,8 +118,11 @@ function ProposedRule({ rule, onActivate, onDismiss, busy }) {
 
 export function Insights() {
   const { activeWorkspaceId, activeWorkspace, accessToken } = useAuth()
+  const { state } = useApp()
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
+  const [reviewing, setReviewing] = useState(false)
+  const [reviewNote, setReviewNote] = useState('')
   const [events, setEvents] = useState([])
   const [ideas, setIdeas] = useState([])
   const [perf, setPerf] = useState({ metrics: [], posts: [] })
@@ -175,6 +179,20 @@ export function Insights() {
       status: 'retired', reviewed_at: new Date().toISOString(),
     })
     setBusy(false)
+    reload()
+  }
+
+  // One Sonnet call over the two sections above. Text only — this workflow
+  // has no image or video node, so the worst it can cost is a few cents.
+  async function runReview() {
+    setReviewing(true); setReviewNote('')
+    const res = await requestInsightsReview(state.webhooks?.insightsReview, activeWorkspaceId)
+    setReviewing(false)
+    if (res.error) { setReviewNote(res.error); return }
+    if (res.skipped) { setReviewNote(res.reason || 'Not enough history to review yet.'); return }
+    setReviewNote(res.proposed
+      ? `Proposed ${res.proposed} rule${res.proposed === 1 ? '' : 's'} — review them below.`
+      : (res.note || 'The review found nothing worth proposing.'))
     reload()
   }
 
@@ -321,8 +339,18 @@ export function Insights() {
         <SectionHead
           title="Proposed rules"
           subtitle="Suggestions waiting on you. Approving one adds it to the Brand Brain and it starts steering generation."
+          action={
+            <Button size="sm" variant="secondary" disabled={reviewing || busy} onClick={runReview}>
+              {reviewing ? 'Reviewing…' : 'Run review'}
+            </Button>
+          }
         />
         <div className="p-5">
+          {reviewNote && (
+            <p className="text-[11px] text-text-secondary bg-surface-subtle border border-border rounded-lg px-3 py-2 mb-3 leading-relaxed">
+              {reviewNote}
+            </p>
+          )}
           {proposed.length ? (
             <div className="space-y-2.5">
               {proposed.map(r => (
@@ -331,10 +359,10 @@ export function Insights() {
             </div>
           ) : (
             <p className="text-xs text-text-tertiary leading-relaxed">
-              Nothing proposed. Automatic review — which reads the two sections above and suggests
-              rules from them — is not built yet; for now, write rules by hand under Learned
-              Guidance in <Link to="/brand-brain" className="underline">Brand Brain</Link> and they
-              will appear below.
+              Nothing proposed. <strong className="font-semibold text-text-secondary">Run review</strong> reads
+              the two sections above and suggests rules from them — it declines to run until there is
+              enough history to say anything honest. You can also write rules by hand under Learned
+              Guidance in <Link to="/brand-brain" className="underline">Brand Brain</Link>.
             </p>
           )}
         </div>

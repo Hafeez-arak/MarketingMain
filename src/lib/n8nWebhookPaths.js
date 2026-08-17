@@ -34,4 +34,5 @@ export const WEBHOOK_PATHS = {
   publishPost:      'arak-publish-post',
   zernioSync:       'arak-zernio-sync',
   zernioDashboard:  'arak-zernio-dashboard',
+  insightsReview:   'arak-insights-review',
 }
