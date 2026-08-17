@@ -2498,8 +2498,14 @@ def _code(name: str, js: str, x: int, y: int, run_once_for_each_item: bool = Fal
 # configured the secret on both sides (n8n's .env and Vercel's project env).
 # Throwing (rather than branching to an explicit 401 response) works
 # uniformly across every responseMode used in this file: an unhandled Code
-# node error stops the workflow before any downstream node runs, and n8n
-# sends its own error response to the caller either way.
+# node error stops the workflow before any downstream node runs, no matter
+# which responseMode the workflow uses. What the CALLER sees varies by mode,
+# confirmed live 2026-08-17 against arak-fal-balance (responseMode=responseNode):
+# a rejected call gets HTTP 200 with an EMPTY body, not a 401/500 — n8n does
+# not auto-generate an error response when the workflow dies before its
+# Respond node runs. The security property (no downstream/paid node executes)
+# holds regardless; only the rejection's shape on the wire is unpolished. A
+# caller has to notice "200 but no data" rather than a clean rejected status.
 _WEBHOOK_GUARD_JS = """
 const expected = String($env.N8N_WEBHOOK_SECRET || '').trim();
 if (expected) {

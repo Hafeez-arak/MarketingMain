@@ -158,15 +158,22 @@ proxy's sign-in check entirely. To close that:
 1. Pick a random string and set it as `N8N_WEBHOOK_SECRET` in **both** places —
    this container's `.env` (see "Updating secrets" below) and the deployed
    app's Vercel project env vars.
-2. Restart n8n (`docker compose restart n8n`) and redeploy the app so both
-   sides pick up the new value.
+2. Recreate the container (`docker compose up -d` — `restart` does **not**
+   reload an edited `.env`, see "Updating secrets" below) and redeploy the
+   app so both sides pick up the new value.
 
-A caller that skips the proxy now gets a failed workflow execution instead of
-a free run — the guard throws before any paid node executes, so n8n returns
-an error response either way, whichever `responseMode` the workflow uses. A
-mismatch between the two sides (secret set in one place but not the other, or
-set to different values) fails closed: every request through the proxy starts
-being rejected too, so re-check both `.env` files after rotating it.
+A caller that skips the proxy now gets a dead-end instead of a free run — the
+guard throws before any paid node executes, so nothing downstream ever runs.
+Confirmed live 2026-08-17 against `arak-fal-balance`: what the caller actually
+sees is HTTP 200 with an **empty body**, not a clean 401 — n8n doesn't
+generate an error response when the workflow dies before its Respond node
+runs, for `responseMode=responseNode` at least. The security property holds
+either way (no paid node executes); only the rejection looks like "200 but no
+data" rather than an obvious failure, worth knowing when debugging why a
+legitimate call is returning nothing. A mismatch between the two sides
+(secret set in n8n's `.env` but not Vercel's project env, or set to different
+values) fails closed the same way: every request through the proxy starts
+getting rejected too, so re-check both after rotating it.
 
 The URL **does** still change every time the tunnel restarts — that's the cost
 of a quick tunnel — but for the deployed app that is now invisible. The tunnel can also die on its
@@ -196,8 +203,13 @@ picked), and gets you a stable hostname plus a login wall in front of it.
 
 ## Updating secrets
 
-Edit `.env`, then `docker compose restart n8n` — env var changes only
-take effect on restart, not live.
+Edit `.env`, then `docker compose up -d` — **not** `docker compose restart`,
+confirmed live 2026-08-17: `restart` just restarts the existing container
+process with its already-loaded environment, so an edited `.env` has no
+effect until the container is recreated. `up -d` detects the change and
+recreates it (`Container arak-marketing-n8n Recreated` in the output is the
+signal it actually worked); the named volume — credentials, executions,
+imported workflows — survives either way.
 
 ## Stopping / removing
 
