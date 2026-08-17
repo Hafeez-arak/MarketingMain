@@ -20,6 +20,7 @@ import { ContentPlans } from './pages/campaigns/ContentPlans'
 import { Schedule }                from './pages/schedule/index'
 import { EmailFlows, NewEmailFlow }from './pages/email/index'
 import { Analytics }               from './pages/analytics/index'
+import { Insights }                from './pages/insights/index'
 import { MediaLibrary }            from './pages/media/index'
 import { SocialOverview, SocialPlatform, NewPost } from './pages/social/index'
 import { InstagramPage } from './pages/social/InstagramPage'
@@ -107,6 +108,7 @@ function ProtectedApp() {
             <Route path="/email"                 element={<EmailFlows />} />
             <Route path="/email/new"             element={<NewEmailFlow />} />
             <Route path="/analytics"             element={<Analytics />} />
+            <Route path="/insights"              element={<Insights />} />
             <Route path="/media"                 element={<MediaLibrary />} />
             <Route path="/social"                element={<SocialOverview />} />
             <Route path="/social/approvals"      element={<PostApprovals />} />
