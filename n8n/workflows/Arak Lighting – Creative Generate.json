@@ -35,6 +35,19 @@
     },
     {
       "parameters": {
+        "jsCode": "const expected = String($env.N8N_WEBHOOK_SECRET || '').trim();\nif (expected) {\n  const headers = ($input.first().json || {}).headers || {};\n  const got = String(headers['x-webhook-secret'] || headers['X-Webhook-Secret'] || '').trim();\n  if (got !== expected) {\n    throw new Error('Unauthorized: missing or invalid webhook secret');\n  }\n}\nreturn $input.all();"
+      },
+      "id": "f4c46717-c6fe-5b46-b9de-36d187673b7e",
+      "name": "Webhook Secret Guard",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        130,
+        300
+      ]
+    },
+    {
+      "parameters": {
         "respondWith": "json",
         "responseBody": "={{ JSON.stringify({ status: 'accepted', session_id: $json.body.session_id }) }}",
         "options": {}
@@ -225,7 +238,7 @@
       "main": [
         [
           {
-            "node": "Respond: Accepted",
+            "node": "Webhook Secret Guard",
             "type": "main",
             "index": 0
           }
@@ -296,6 +309,17 @@
         [
           {
             "node": "Supabase: Mark Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook Secret Guard": {
+      "main": [
+        [
+          {
+            "node": "Respond: Accepted",
             "type": "main",
             "index": 0
           }

@@ -35,6 +35,19 @@
     },
     {
       "parameters": {
+        "jsCode": "const expected = String($env.N8N_WEBHOOK_SECRET || '').trim();\nif (expected) {\n  const headers = ($input.first().json || {}).headers || {};\n  const got = String(headers['x-webhook-secret'] || headers['X-Webhook-Secret'] || '').trim();\n  if (got !== expected) {\n    throw new Error('Unauthorized: missing or invalid webhook secret');\n  }\n}\nreturn $input.all();"
+      },
+      "id": "bb0e3f44-80f3-5a27-8edc-6b076a8bf7fa",
+      "name": "Webhook Secret Guard",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        130,
+        220
+      ]
+    },
+    {
+      "parameters": {
         "jsCode": "\nconst http = this.helpers.httpRequest;\n\nasync function req(opts){\n  const res = await http({ ...opts, returnFullResponse: true, ignoreHttpStatusErrors: true });\n  const status = res.statusCode;\n  if (status >= 200 && status < 300) return res.body;\n  const b = res.body;\n  const msg = (b && typeof b === 'object') ? (b.error || b.message || JSON.stringify(b).slice(0, 400))\n            : (typeof b === 'string' && b) ? b.slice(0, 400)\n            : `HTTP ${status}`;\n  throw new Error(`Zernio ${status}: ${msg}`);\n}\n\nfunction qs(params){\n  const parts = [];\n  for (const [k, v] of Object.entries(params)) {\n    if (v !== undefined && v !== null && v !== '') parts.push(`${k}=${encodeURIComponent(v)}`);\n  }\n  return parts.length ? '?' + parts.join('&') : '';\n}\n\nconst body = ($input.first().json.body) || {};\nconst ZERNIO = $env.ZERNIO_API_KEY;\nconst ZBASE  = 'https://zernio.com/api/v1';\nconst zHeaders = { Authorization: `Bearer ${ZERNIO}`, 'Content-Type': 'application/json' };\n\nconst platform  = body.platform || '';\nconst accountId = body.account_id || '';\nconst days = Number(body.days) || 30;\nconst toDate   = new Date().toISOString().slice(0, 10);\nconst fromDate = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);\n\ntry {\n  if (!ZERNIO) throw new Error('ZERNIO_API_KEY is not set on this n8n instance.');\n\n  const safe = p => p.catch(e => ({ _error: (e && e.message) ? e.message : String(e) }));\n\n  const [overview, bestTime, frequency, decay, daily, followers] = await Promise.all([\n    safe(req({ method:'GET', url:`${ZBASE}/analytics${qs({ platform, accountId, fromDate, toDate, limit:100, source:'all' })}`, headers:zHeaders, json:true })),\n    safe(req({ method:'GET', url:`${ZBASE}/analytics/best-time${qs({ platform, accountId })}`, headers:zHeaders, json:true })),\n    safe(req({ method:'GET', url:`${ZBASE}/analytics/posting-frequency${qs({ platform, accountId })}`, headers:zHeaders, json:true })),\n    safe(req({ method:'GET', url:`${ZBASE}/analytics/content-decay${qs({ platform, accountId })}`, headers:zHeaders, json:true })),\n    safe(req({ method:'GET', url:`${ZBASE}/analytics/daily-metrics${qs({ platform, accountId, fromDate, toDate })}`, headers:zHeaders, json:true })),\n    safe(req({ method:'GET', url:`${ZBASE}/accounts/follower-stats${qs({ accountIds: accountId, fromDate, toDate })}`, headers:zHeaders, json:true })),\n  ]);\n\n  return [{ json: { ok: true, fromDate, toDate, platform, overview, bestTime, frequency, decay, daily, followers } }];\n} catch (err) {\n  return [{ json: { ok: false, error: (err && err.message) ? err.message : String(err) } }];\n}\n"
       },
       "id": "2192a95e-c186-582c-8565-947d691a8840",
@@ -49,6 +62,17 @@
   ],
   "connections": {
     "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Webhook Secret Guard",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook Secret Guard": {
       "main": [
         [
           {

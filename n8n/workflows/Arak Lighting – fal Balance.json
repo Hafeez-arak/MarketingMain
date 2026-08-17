@@ -35,6 +35,19 @@
     },
     {
       "parameters": {
+        "jsCode": "const expected = String($env.N8N_WEBHOOK_SECRET || '').trim();\nif (expected) {\n  const headers = ($input.first().json || {}).headers || {};\n  const got = String(headers['x-webhook-secret'] || headers['X-Webhook-Secret'] || '').trim();\n  if (got !== expected) {\n    throw new Error('Unauthorized: missing or invalid webhook secret');\n  }\n}\nreturn $input.all();"
+      },
+      "id": "f7e9f5e3-08f5-5e8c-aa03-21aebd4f0139",
+      "name": "Webhook Secret Guard",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        130,
+        300
+      ]
+    },
+    {
+      "parameters": {
         "jsCode": "\nconst http = this.helpers.httpRequest;\nconst prepareBinaryData = this.helpers.prepareBinaryData;\nconst FAL = $env.FAL_KEY;\n\n// Pull the provider's ACTUAL message out of whatever shape n8n wrapped it in.\n// Verified necessary 2026-08-09: an exhausted fal balance reached the card as\n// the useless \"Request failed with status code 403\", when fal had actually\n// replied {\"detail\":\"User is locked. Reason: Exhausted balance.\"}. Those two\n// strings lead to completely different actions, so this walks every container\n// the body might hide in — including `response.body` and `cause`, which the\n// older unwrapper (still used by the other workflows) misses — and only falls\n// back to n8n's generic text when nothing real is found.\nfunction errText(e){\n  const candidates = [\n    e && e.response && e.response.data,\n    e && e.response && e.response.body,\n    e && e.error,\n    e && e.cause && e.cause.response && e.cause.response.data,\n    e && e.cause && e.cause.error,\n    e && e.cause,\n    e && e.description,\n  ];\n  for (const c of candidates) {\n    if (!c) continue;\n    if (typeof c === 'string' && c.trim()) return c.slice(0, 400);\n    if (Buffer.isBuffer(c)) return c.toString('utf8', 0, 300);\n    if (typeof c === 'object') {\n      if (c.detail) return (typeof c.detail === 'string' ? c.detail : JSON.stringify(c.detail)).slice(0, 400);\n      if (c.error && c.error.message) return String(c.error.message).slice(0, 400);\n      if (c.message && c.message !== (e && e.message)) return String(c.message).slice(0, 400);\n      const s = JSON.stringify(c);\n      if (s && s !== '{}' && s !== 'null') return s.slice(0, 400);\n    }\n  }\n  return (e && e.message) || String(e);\n}\n\nfunction bodyText(body, status){\n  if (body == null) return 'HTTP ' + status;\n  if (Buffer.isBuffer(body)) return 'HTTP ' + status + ': ' + body.toString('utf8', 0, 300);\n  if (typeof body === 'string') return 'HTTP ' + status + ': ' + body.slice(0, 400);\n  if (typeof body === 'object') {\n    if (body.detail) return (typeof body.detail === 'string' ? body.detail : JSON.stringify(body.detail)).slice(0, 400);\n    if (body.error && body.error.message) return String(body.error.message).slice(0, 400);\n    if (body.message) return String(body.message).slice(0, 400);\n    return 'HTTP ' + status + ': ' + JSON.stringify(body).slice(0, 400);\n  }\n  return 'HTTP ' + status;\n}\n\n// Don't let n8n throw on a non-2xx at all — ask for the full response and\n// judge the status here. Measured 2026-08-09: when n8n raises the error\n// itself, the provider's body is NOT reachable from the thrown object by any\n// path (errText below was tried and still yielded \"Request failed with status\n// code 403\"), so an exhausted balance and a rejected prompt were\n// indistinguishable on the card. Reading the body directly is the only way to\n// get the real reason out. errText stays as the fallback for older n8n builds\n// that ignore ignoreHttpStatusErrors and throw regardless.\n// returnFullResponse changes how a BINARY body comes back. Measured against\n// this n8n build, 2026-08-10, fetching the same JPEG both ways:\n//   encoding:'arraybuffer'                       -> real Buffer (isBuffer true)\n//   encoding:'arraybuffer' + returnFullResponse  -> {type:'Buffer', data:[...]}\n// i.e. the JSON-serialised form, whose .length is undefined. Since req() sets\n// returnFullResponse on every call to read error bodies, every image and video\n// download in these workflows was silently getting that object instead of\n// bytes — \"Downloaded file is not a real image (undefined bytes)\". It went\n// unnoticed because fal's balance was empty the whole time this code existed,\n// so the download line had never once been reached with a real response.\nfunction reviveBinary(b){\n  if (!b || typeof b !== 'object') return b;\n  if (typeof Buffer !== 'undefined' && Buffer.isBuffer(b)) return b;\n  if (b.type === 'Buffer' && Array.isArray(b.data)) return Buffer.from(b.data);\n  if (b instanceof ArrayBuffer) return Buffer.from(new Uint8Array(b));\n  if (ArrayBuffer.isView(b)) return Buffer.from(b.buffer, b.byteOffset, b.byteLength);\n  return b;\n}\n\nasync function req(opts){\n  let full;\n  try {\n    full = await http(Object.assign({}, opts, { returnFullResponse: true, ignoreHttpStatusErrors: true }));\n  } catch (e) {\n    throw new Error(errText(e));\n  }\n  const status = (full && (full.statusCode || full.status)) || 200;\n  const body = (full && full.body !== undefined) ? full.body : full;\n  if (status >= 400) throw new Error(bodyText(body, status));\n  return reviveBinary(body);\n}\n\n// A byte-count threshold is not enough — a corrupted buffer can be LARGER\n// than the real file (a JSON-stringified Buffer is ~7x bigger), which is how\n// a broken image once saved silently with no error anywhere. Check the actual\n// file signature instead.\nfunction looksLikeImage(buf){\n  if (!buf || buf.length < 12) return false;\n  // Same fix as the other looksLikeImage in this file: PNG's 0x89 lead byte\n  // cannot survive an 'ascii' string compare (Node masks the high bit off\n  // every byte for that encoding), so this always failed a genuine PNG.\n  const head = buf.toString('ascii', 0, 12);\n  return (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4E && buf[3] === 0x47)\n      || (buf[0] === 0xFF && buf[1] === 0xD8)\n      || (head.startsWith('RIFF') && head.indexOf('WEBP') !== -1);\n}\n\n// gpt-image-2's named buckets have no 4:5, which used to mean the GPT\n// candidate came back 3:4 while the Gemini one came back a true 4:5 — two\n// different shapes in a side-by-side that exists to compare models, and the\n// GPT one not post-ready. The prompt even claimed it would be \"cropped to\n// 4:5\" and no crop was ever performed anywhere in the pipeline.\n//\n// The endpoint also accepts explicit dimensions, which removes the problem at\n// the source rather than trimming after the fact: 1024x1280 is exactly 4:5,\n// both edges multiples of 16, and 1.31MP sits inside the documented\n// 655,360–8,294,400 pixel range. Every other ratio has an exact bucket\n// already, so only 4:5 needs this.\nconst GPT_SIZE = {\n  '1:1': 'square_hd', '3:4': 'portrait_4_3',\n  '9:16': 'portrait_16_9', '16:9': 'landscape_16_9',\n  '1.91:1': 'landscape_16_9', '4:3': 'landscape_4_3', '3:2': 'landscape_4_3',\n};\nconst GPT_EXACT = {\n  '4:5': { width: 1024, height: 1280 },\n};\n\n// FAL is already declared by _CREATIVE_REQ_JS above.\n\nasync function run() {\n  try {\n    const res = await req({ method: 'GET', url: 'https://rest.alpha.fal.ai/billing/user_balance',\n      headers: { Authorization: 'Key ' + FAL } });\n    // The endpoint answers with a bare number, not an object.\n    const n = typeof res === 'number' ? res : parseFloat(String(res));\n    if (!Number.isFinite(n)) return { balance: null, error: 'fal returned no usable balance.' };\n    return { balance: n, currency: 'USD' };\n  } catch (e) {\n    // null, never 0 — \"we could not ask\" and \"you have nothing left\" must not\n    // look the same to whatever renders this.\n    return { balance: null, error: String(e && e.message || e) };\n  }\n}\n\nreturn [{ json: await run() }];\n"
       },
       "id": "721e0f34-8222-5180-9b07-95763567f71a",
@@ -67,7 +80,7 @@
       "main": [
         [
           {
-            "node": "Read Balance",
+            "node": "Webhook Secret Guard",
             "type": "main",
             "index": 0
           }
@@ -79,6 +92,17 @@
         [
           {
             "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook Secret Guard": {
+      "main": [
+        [
+          {
+            "node": "Read Balance",
             "type": "main",
             "index": 0
           }

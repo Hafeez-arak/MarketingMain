@@ -148,6 +148,26 @@ optional shared secret server-side. `npx vite build && grep trycloudflare
 dist/assets/*.js` should find nothing; if it does, something started reading
 that env var in client code again.
 
+**Turning on the shared secret.** The proxy has sent `x-webhook-secret` since
+it was built, and every workflow now checks it (a "Webhook Secret Guard" Code
+node right after the trigger — see `gen_workflows.py`'s `_inject_webhook_guard`)
+— but until `N8N_WEBHOOK_SECRET` is actually set, the guard is a no-op and the
+raw tunnel URL is still enough to reach a workflow directly, skipping the
+proxy's sign-in check entirely. To close that:
+
+1. Pick a random string and set it as `N8N_WEBHOOK_SECRET` in **both** places —
+   this container's `.env` (see "Updating secrets" below) and the deployed
+   app's Vercel project env vars.
+2. Restart n8n (`docker compose restart n8n`) and redeploy the app so both
+   sides pick up the new value.
+
+A caller that skips the proxy now gets a failed workflow execution instead of
+a free run — the guard throws before any paid node executes, so n8n returns
+an error response either way, whichever `responseMode` the workflow uses. A
+mismatch between the two sides (secret set in one place but not the other, or
+set to different values) fails closed: every request through the proxy starts
+being rejected too, so re-check both `.env` files after rotating it.
+
 The URL **does** still change every time the tunnel restarts — that's the cost
 of a quick tunnel — but for the deployed app that is now invisible. The tunnel can also die on its
 own mid-session, not just on `Ctrl+C`: a network blip can leave `cloudflared`

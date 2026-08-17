@@ -35,6 +35,19 @@
     },
     {
       "parameters": {
+        "jsCode": "const expected = String($env.N8N_WEBHOOK_SECRET || '').trim();\nif (expected) {\n  const headers = ($input.first().json || {}).headers || {};\n  const got = String(headers['x-webhook-secret'] || headers['X-Webhook-Secret'] || '').trim();\n  if (got !== expected) {\n    throw new Error('Unauthorized: missing or invalid webhook secret');\n  }\n}\nreturn $input.all();"
+      },
+      "id": "f876266e-e8d3-51ad-9353-e9c1e69726d9",
+      "name": "Webhook Secret Guard",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        130,
+        300
+      ]
+    },
+    {
+      "parameters": {
         "jsCode": "\nconst body = ($input.first().json.body) || {};\nconst ideas = Array.isArray(body.ideas) ? body.ideas : [];\nif (!ideas.length) throw new Error('No ideas in payload');\nreturn [{ json: {\n  plan_id:          body.plan_id || null,\n  instructions:     body.instructions || '',\n  // Who this brand actually is. Carried alongside the instructions blob\n  // rather than baked into it, because the persona line sits above the\n  // brand context in the cached prefix and has to be interpolated there.\n  brand_name:       body.brand_name || '',\n  brand_descriptor: body.brand_descriptor || '',\n  workspace_id:     body.workspace_id || null,\n  caption_language: body.caption_language || 'both',\n  ideas,\n  count: ideas.length,\n} }];\n"
       },
       "id": "dab013c7-68c5-5f53-bf71-29f20304c927",
@@ -303,7 +316,7 @@
       "main": [
         [
           {
-            "node": "Prepare Batch",
+            "node": "Webhook Secret Guard",
             "type": "main",
             "index": 0
           }
@@ -422,6 +435,17 @@
         [
           {
             "node": "Mark Completed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook Secret Guard": {
+      "main": [
+        [
+          {
+            "node": "Prepare Batch",
             "type": "main",
             "index": 0
           }
