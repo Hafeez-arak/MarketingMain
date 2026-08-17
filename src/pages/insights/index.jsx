@@ -7,6 +7,7 @@ import {
   fetchBrandMemory, updateBrandMemory, deleteBrandMemory, buildContext,
 } from '../../lib/brandContext'
 import { fetchBrandSchema, fetchDirectoryRows } from '../../lib/brandSchema'
+import { useBrandProfileSync } from '../../lib/brandBrain'
 import {
   fetchIdeaEvents, fetchIdeasForInsights, fetchPerformance, requestInsightsReview,
   requestBrandResearch, competitorNamesFrom,
@@ -120,7 +121,13 @@ function ProposedRule({ rule, onActivate, onDismiss, busy }) {
 
 export function Insights() {
   const { activeWorkspaceId, activeWorkspace, accessToken } = useAuth()
-  const { state } = useApp()
+  const { state, dispatch } = useApp()
+  // The research query is built from the brand profile, and nothing else on
+  // this page needs it — so without this the profile is simply absent when you
+  // land here directly, buildContext returns an empty descriptor, and the
+  // workflow correctly refuses to research a brand it was told nothing about.
+  // Same sync the planner and the Instagram page use; it no-ops once loaded.
+  useBrandProfileSync(state, dispatch)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [reviewing, setReviewing] = useState(false)
