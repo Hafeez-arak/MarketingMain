@@ -6,7 +6,7 @@ import { Card, Button, Empty, Spinner, ConfirmDialog, IconBadge, PageHeader } fr
 import { Icon } from '../../components/ui/icons'
 import { formatDate } from '../../lib/utils'
 import { fetchPlans, fetchPlanWithIdeas, deletePlan } from '../../lib/contentPlans'
-import { dbIdeaToDraft, momentsInRange } from '../../lib/campaignPlan'
+import { momentsInRange, planDraftFromPlan } from '../../lib/campaignPlan'
 
 const STATUS_STYLE = {
   draft:    'bg-stone-100 text-stone-600',
@@ -44,18 +44,7 @@ export function ContentPlans() {
     setOpening(plan.id)
     const { ideas } = await fetchPlanWithIdeas(activeWorkspaceId, accessToken, plan.id)
     setOpening(null)
-    dispatch(actions.setCampaignPlanDraft({
-      // Always open on the review screen so the ideas are visible and editable —
-      // even for an already-approved plan (the old 'done' step hid every idea
-      // behind a bare summary card).
-      step: 'review',
-      month: plan.month || '', goal: plan.goal || '', goalCategory: plan.goal_category || '',
-      platforms: plan.platforms || ['instagram'],
-      startDate: plan.start_date || '', endDate: plan.end_date || '',
-      approxCount: '', includeHolidays: true,
-      contentMixTarget: plan.content_mix_target || '',
-      name: plan.name || '', ideas: ideas.map(dbIdeaToDraft), planId: plan.id,
-    }))
+    dispatch(actions.setCampaignPlanDraft(planDraftFromPlan(plan, ideas)))
     navigate('/campaigns/plan')
   }
 

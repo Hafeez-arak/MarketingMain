@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
-import { useApp } from '../../store/app'
+import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useApp, actions } from '../../store/app'
 import { useAuth } from '../../store/auth'
 import { Button, Card, ConfirmDialog, Modal, SectionHead, Select, Spinner, Textarea, Empty } from '../../components/ui/index'
 import { BranchChat, BranchPill } from '../../components/studio/BranchChat'
@@ -36,7 +36,9 @@ import {
   requestEnhance, requestGenerate, requestVideo, requestStitch, requestVideoEdit, selectVersion,
   touchSession, updateVersion, uploadToStudio,
 } from '../../lib/creativeStudio'
-import { fetchIdeaForStudio } from '../../lib/studioBridge'
+import { fetchIdeaForStudio, fetchPlanForIdea } from '../../lib/studioBridge'
+import { fetchPlanWithIdeas } from '../../lib/contentPlans'
+import { planDraftFromPlan } from '../../lib/campaignPlan'
 import { UseThisSheet } from '../../components/studio/UseThisSheet'
 
 // ─── Creative Studio ───────────────────────────────────────────────────────
@@ -221,10 +223,11 @@ function ThreadSkeleton() {
 }
 
 export function CreativeStudio() {
-  const { state } = useApp()
+  const { state, dispatch } = useApp()
   const { activeWorkspaceId, accessToken } = useAuth()
   const webhooks = state.webhooks || {}
   const [searchParams] = useSearchParams()
+  const navigate = useNavigate()
 
   const [sessions, setSessions] = useState([])
   const [session, setSession] = useState(null)
@@ -418,6 +421,48 @@ export function CreativeStudio() {
     })
     return () => { alive = false }
   }, [searchParams, accessToken])
+
+  // ── The way back ────────────────────────────────────────────────────────
+  // A session opened from a plan keeps `plan_idea_id` forever, so the link
+  // home is a property of the session rather than of how you arrived. That is
+  // the whole point: come back to this thread next week, from the sidebar,
+  // with no ?ideaId in the URL, and it still knows which board it belongs to.
+  //
+  // Resolved from the session (not from planBrief) for exactly that reason —
+  // planBrief only exists on the trip in.
+  // Cached per idea rather than held as one current value, and the bar reads
+  // through the session. Holding a single `planLink` meant clearing it when a
+  // session without a plan was opened — which is both a synchronous setState
+  // in an effect and a staleness bug in waiting: until the clear lands, a
+  // standalone session renders the previous session's plan.
+  const [planLinks, setPlanLinks] = useState({})
+  const [returning, setReturning] = useState(false)
+  const planLink = session?.plan_idea_id ? planLinks[session.plan_idea_id] || null : null
+  useEffect(() => {
+    const ideaId = session?.plan_idea_id
+    if (!ideaId || !accessToken || !activeWorkspaceId) return
+    let alive = true
+    fetchPlanForIdea(activeWorkspaceId, accessToken, ideaId).then(link => {
+      if (alive && link) setPlanLinks(prev => ({ ...prev, [ideaId]: link }))
+    })
+    return () => { alive = false }
+  }, [session?.plan_idea_id, accessToken, activeWorkspaceId])
+
+  // Hand the planner the same draft the plan list would, then go there. The
+  // planner takes no id in its URL — it reads the store — so "navigate back"
+  // has to mean "write the draft, then navigate", and planDraftFromPlan is
+  // the shared shape so the two entry points cannot drift.
+  async function returnToPlan() {
+    if (!planLink?.planId) return
+    setReturning(true)
+    const { plan, ideas } = await fetchPlanWithIdeas(activeWorkspaceId, accessToken, planLink.planId)
+    setReturning(false)
+    // A plan that has since been deleted, or belongs to another workspace,
+    // resolves to nothing. Say so rather than navigating to an empty board.
+    if (!plan) { setError('That plan is no longer available in this workspace.'); return }
+    dispatch(actions.setCampaignPlanDraft(planDraftFromPlan(plan, ideas)))
+    navigate('/campaigns/plan')
+  }
 
   const branches = useMemo(() => buildBranches(versions), [versions])
   const anyPending = versions.some(v => v.status === 'pending')
@@ -1667,6 +1712,25 @@ export function CreativeStudio() {
             </div>
           )}
 
+          {/* The way home. Shown for as long as the session belongs to a plan
+              — not just on the trip in — so reopening this thread weeks later
+              still gets you back to the board it was made for. */}
+          {session && planLink && (
+            <div className="max-w-2xl border border-violet-200 bg-violet-50 px-4 py-2.5 flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-[11px] font-semibold text-violet-800 truncate">
+                  Part of {planLink.planName}
+                </p>
+                {planLink.ideaTitle && (
+                  <p className="text-[11px] text-violet-700 mt-0.5 truncate">For: {planLink.ideaTitle}</p>
+                )}
+              </div>
+              <Button size="sm" variant="secondary" disabled={returning} onClick={returnToPlan}>
+                {returning ? <><Spinner size="sm" /> Opening…</> : '← Back to plan'}
+              </Button>
+            </div>
+          )}
+
           {!session && planBrief && (
             <div className="max-w-2xl border border-violet-200 bg-violet-50 px-4 py-2.5">
               <p className="text-[11px] font-semibold text-violet-800">
@@ -2186,6 +2250,9 @@ export function CreativeStudio() {
         // Sending marks the asset final, which is what Save does — so the
         // thread's badges stay honest without a refetch.
         onSent={() => { if (useThisFor) refresh(session?.id) }}
+        // Only passed when there is a board to go back to, which is what makes
+        // the sheet show "Back to the plan" instead of a bare "Done".
+        onBackToPlan={planLink ? returnToPlan : undefined}
       />
     </div>
   )

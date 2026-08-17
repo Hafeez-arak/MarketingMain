@@ -121,6 +121,35 @@ export async function fetchSessionsForIdeas(accessToken, ideaIds) {
   } catch { return [] }
 }
 
+// The plan a session belongs to — the return leg of the round trip.
+//
+// A creative_session stores plan_idea_id and nothing about the plan above it,
+// because the idea is the thing it was made for. But "take me back" means the
+// BOARD, not the idea, so the plan has to be resolved through the idea. One
+// embedded select rather than two round trips.
+//
+// Scoped to the workspace as well as the id: the session is opened from the
+// current workspace, and an idea id that resolves into another company's plan
+// must not become a navigable link out of this one.
+export async function fetchPlanForIdea(workspaceId, accessToken, ideaId) {
+  if (!workspaceId || !ideaId) return null
+  try {
+    const res = await fetch(
+      `${SUPABASE_URL}/rest/v1/plan_ideas?id=eq.${ideaId}&workspace_id=eq.${workspaceId}` +
+      `&select=id,title,topic,plan_id,content_plans(id,name,month)&limit=1`,
+      { headers: authHeaders(accessToken) },
+    )
+    if (!res.ok) return null
+    const row = (await res.json())[0]
+    if (!row?.plan_id) return null
+    return {
+      planId: row.plan_id,
+      planName: row.content_plans?.name || 'this plan',
+      ideaTitle: row.title || row.topic || '',
+    }
+  } catch { return null }
+}
+
 // Newest non-archived session for one idea, or null.
 export async function findSessionForIdea(accessToken, ideaId) {
   if (!ideaId) return null

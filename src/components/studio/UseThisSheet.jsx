@@ -33,7 +33,7 @@ const NATIVE_RATIO = { instagram: ['4:5', '1:1', '9:16', '1.91:1'], tiktok: ['9:
 // here — Studio has already loaded the schema, directory and memory for its
 // generate panel, and a second loader would fetch the same rows again just to
 // draft one caption.
-export function UseThisSheet({ open, onClose, version, session, workspaceId, accessToken, webhooks, brandContextFor, onSent }) {
+export function UseThisSheet({ open, onClose, version, session, workspaceId, accessToken, webhooks, brandContextFor, onSent, onBackToPlan }) {
   const briefPlatforms = session?.brief?.platforms?.filter(p => SENDABLE_PLATFORMS.includes(p))
   const [targets, setTargets] = useState(briefPlatforms?.length ? briefPlatforms : ['instagram'])
   const [caption, setCaption] = useState(session?.brief?.caption || '')
@@ -197,7 +197,22 @@ export function UseThisSheet({ open, onClose, version, session, workspaceId, acc
                 <p className="text-[11px] text-amber-700 mt-1">The post is in Approvals — you can retry from there.</p>
               </div>
             )}
-            <div className="flex justify-end pt-1"><Button onClick={onClose}>Done</Button></div>
+            {/* The round trip closes here. This sheet is the last step of the
+                detour a plan idea took through the Studio, so finishing it
+                should put her back on the board with the rest of the month
+                still to do — not leave her in the Studio to find her own way
+                back. Plain "Done" stays for standalone assets, which have no
+                board to return to. */}
+            <div className="flex justify-end gap-2 pt-1">
+              {done.plan && onBackToPlan ? (
+                <>
+                  <Button variant="secondary" onClick={onClose}>Stay here</Button>
+                  <Button onClick={() => { onClose?.(); onBackToPlan() }}>← Back to the plan</Button>
+                </>
+              ) : (
+                <Button onClick={onClose}>Done</Button>
+              )}
+            </div>
           </div>
         ) : fromPlan ? (
           /* From a plan — one decision, not five. The caption and the

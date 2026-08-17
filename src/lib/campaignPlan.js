@@ -23,6 +23,29 @@ export function momentsInRange(startDate, endDate) {
 }
 
 
+// The planner draft that opens a saved plan on its review board.
+//
+// The planner does not take a plan id in the URL — it reads whatever draft is
+// in the app store and re-hydrates from Supabase when that draft carries a
+// planId. So "open this plan" is really "write this draft, then navigate",
+// and every place that wants to land someone on a plan has to build the same
+// object. This is that object, in one place: the plan list opens plans from
+// here, and so does the return trip out of Creative Studio.
+//
+// Always 'review'. Whoever is being sent to a plan wants to see its ideas —
+// dropping them on the setup form would hide the very board they came for.
+export function planDraftFromPlan(plan, ideas) {
+  return {
+    step: 'review',
+    month: plan.month || '', goal: plan.goal || '', goalCategory: plan.goal_category || '',
+    platforms: plan.platforms || ['instagram'],
+    startDate: plan.start_date || '', endDate: plan.end_date || '',
+    approxCount: '', includeHolidays: true,
+    contentMixTarget: plan.content_mix_target || '',
+    name: plan.name || '', ideas: (ideas || []).map(dbIdeaToDraft), planId: plan.id,
+  }
+}
+
 // Map a persisted plan_ideas row into the shape the UI/draft uses.
 export function dbIdeaToDraft(row) {
   return {
