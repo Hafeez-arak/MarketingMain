@@ -43,6 +43,11 @@ export function planDraftFromPlan(plan, ideas) {
     approxCount: '', includeHolidays: true,
     contentMixTarget: plan.content_mix_target || '',
     name: plan.name || '', ideas: (ideas || []).map(dbIdeaToDraft), planId: plan.id,
+    // Setup was never filled out in this session — it happened whenever the
+    // plan was first created. The review board's "Back" button uses this to
+    // send you to the plan list instead of a blank setup form that has
+    // nothing to do with how this plan actually came to be.
+    openedFromPlanList: true,
   }
 }
 

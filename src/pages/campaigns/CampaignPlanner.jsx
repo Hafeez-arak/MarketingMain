@@ -918,7 +918,7 @@ export function CampaignPlanner() {
   const [moreLoading,   setMoreLoading]   = useState(false)
   const [moreError,     setMoreError]     = useState('')
 
-  const { step, month, goal, goalCategory, platforms, startDate, endDate, approxCount, includeHolidays, brandBrainSections, featuredProductIds, seedPosts, name, ideas, planId, pushResult, manualResult, postingDays, defaultTime, aiAssist, contentMixTarget } = draft
+  const { step, month, goal, goalCategory, platforms, startDate, endDate, approxCount, includeHolidays, brandBrainSections, featuredProductIds, seedPosts, name, ideas, planId, pushResult, manualResult, postingDays, defaultTime, aiAssist, contentMixTarget, openedFromPlanList } = draft
 
   // What the plan call will actually be given, for the preview panel. Same
   // builder as the payload — see contextFor below.
@@ -2058,7 +2058,11 @@ export function CampaignPlanner() {
 
           <div className="sticky bottom-0 -mx-1 px-1 pb-1">
             <div className="flex items-center gap-3 bg-white/95 backdrop-blur-sm border border-border rounded-2xl shadow-dropdown px-5 py-3.5">
-              <Button variant="secondary" onClick={() => update({ step: 'setup' })}>Back</Button>
+              {/* A plan opened from the list (or returned to from Studio) never
+                  had its setup step filled out in this session — stepping
+                  "back" to setup would drop you on a blank form unrelated to
+                  this plan. Send those back to where they came from instead. */}
+              <Button variant="secondary" onClick={() => openedFromPlanList ? navigate('/campaigns/plans') : update({ step: 'setup' })}>Back</Button>
               <Button onClick={() => update({ step: 'media' })} disabled={approvedCount === 0}>
                 Next — make the pictures ({approvedCount} approved)
               </Button>
