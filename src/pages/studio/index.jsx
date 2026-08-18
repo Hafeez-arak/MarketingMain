@@ -314,7 +314,7 @@ export function CreativeStudio() {
   // null means "no figure to show" — either the webhook isn't configured or
   // the lookup failed. Deliberately not 0: a balance of zero and a balance we
   // couldn't read must never render the same, since one of them means "stop".
-  const [falBalance, setFalBalance] = useState(20.37)
+  const [falBalance, setFalBalance] = useState(null)
 
   const [videoTarget, setVideoTarget] = useState(null)      // the still being animated
   // Set only by the 🔄 re-render action: the exact prompt/duration/
