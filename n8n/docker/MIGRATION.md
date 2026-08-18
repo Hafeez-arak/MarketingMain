@@ -499,16 +499,70 @@ PATCHes `app_config` on every start is a churning hostname that ngrok removes.
 
 ## Deploying workflow changes afterwards
 
-Unchanged, and still the only correct route — never hand-edit workflow JSON:
+**`redeploy.sh` is local-only.** Every command in it is `docker exec` against a
+container on the machine it runs on. There is no remote mode, and adding one
+would mean exposing n8n's API to the internet. So a deploy is now two halves on
+two machines, and git is what joins them.
+
+### On the Mac (or wherever you edit)
+
+Never hand-edit workflow JSON — `gen_workflows.py` is the source of truth, and
+the generated JSON is committed precisely so the box does not need Python.
 
 ```bash
-python3 n8n/gen_workflows.py
-./n8n/redeploy.sh "Arak Lighting – Creative Compose"
+python3 n8n/gen_workflows.py          # rewrites n8n/workflows/*.json
+git add -A && git commit -m "..." && git push
 ```
 
-`redeploy.sh` looks up the existing id and injects it before importing, which is
-what stops a second copy appearing on the same webhook path. It restarts n8n at
-the end so activation takes effect.
+Regenerating and committing in the *same* commit is the whole contract. Push the
+generator without its JSON and the box deploys the old workflow while every
+check passes.
+
+### On the 24/7 box
+
+```bash
+cd /path/to/Marketing
+git pull
+./n8n/redeploy.sh --all                       # or name specific workflows
+```
+
+`--all` covers everything in `workflows/`, which is what you want after pulling
+a change you did not personally make. Naming workflows individually is faster
+when you know exactly what changed.
+
+`redeploy.sh` looks up each workflow's existing id and injects it before
+importing — that is what stops a second copy appearing on the same webhook path
+— then publishes and restarts n8n so activation takes effect. Expect ~15s where
+webhooks 404 during that restart.
+
+### The staleness guard
+
+Before deploying anything, `redeploy.sh` re-runs the generator into a scratch
+directory and diffs the result against the committed JSON. If they differ it
+**refuses to deploy** and tells you to regenerate.
+
+That exists for one specific failure: someone edits `gen_workflows.py`, commits
+without regenerating, and pushes. The box pulls, deploys stale JSON, and
+everything reports success — workflow published, webhook answering, and none of
+the change actually in it. The check is skipped where `python3` is absent (the
+box does not need it), so it protects the machine that edits as much as the one
+that deploys.
+
+### Verifying a deploy landed
+
+An unsigned POST is free — the secret guard kills it before any node runs — so
+this is a safe way to confirm every webhook is registered:
+
+```bash
+curl -s -o /dev/null -w "%{http_code}\n" -X POST "$NEW/webhook/arak-draft-copy" -d '{}'
+```
+
+**`404` means not registered. Anything else means it is.** Do not check for
+`200` specifically: the guard's rejection surfaces as `200` with an empty body
+on `responseMode=responseNode` workflows and as `500` on `responseMode=lastNode`
+ones (7 of the 21 — Caption Studio, Elongate Idea, Media Options, Creative
+Enhance, Publish Post, Zernio Sync, Zernio Dashboard). Both are the same
+rejection; only the shape on the wire differs.
 
 ---
 

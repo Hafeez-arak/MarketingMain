@@ -19,11 +19,74 @@
 #
 # Also note: `healthz` returns 200 well before webhooks are registered, so the
 # only honest readiness check is polling the webhook itself.
+#
+# RUNS LOCALLY ONLY. Everything below is `docker exec` against a container on
+# THIS machine — there is no remote mode and adding one would mean exposing
+# n8n's API. Since the move to the 24/7 box, deploying a workflow change means
+# running this ON that box after a git pull. See docker/MIGRATION.md.
+#
+#   ./n8n/redeploy.sh --all        # everything in workflows/ (after a pull)
+#   ./n8n/redeploy.sh "Name" ...   # just these
 set -euo pipefail
 
 CONTAINER=arak-marketing-n8n
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-[ $# -ge 1 ] || { echo "usage: $0 <workflow name> [...]" >&2; exit 1; }
+
+if [ "${1:-}" = "--all" ]; then
+  shift
+  # Read into an array, not `set -- $(ls ...)`: every workflow name contains
+  # spaces ("Arak Lighting – Draft Copy"), so word-splitting a command
+  # substitution would turn 21 names into ~70 fragments and fail on the first.
+  ALL=()
+  while IFS= read -r f; do
+    ALL+=("$(basename "$f" .json)")
+  done < <(find "$HERE/workflows" -maxdepth 1 -name '*.json' | sort)
+  [ ${#ALL[@]} -gt 0 ] || { echo "no workflow JSON found in $HERE/workflows" >&2; exit 1; }
+  set -- "${ALL[@]}"
+  echo "deploying all $# workflow(s)"
+fi
+
+[ $# -ge 1 ] || { echo "usage: $0 --all | <workflow name> [...]" >&2; exit 1; }
+
+# ── Is the committed JSON actually what the generator produces? ─────────────
+# The trap this catches: someone edits gen_workflows.py, commits, and pushes
+# WITHOUT re-running the generator. The box then pulls, deploys the stale JSON,
+# and every check passes — the workflow is published, the webhook answers, and
+# none of the change is in it. Exactly the "reports success while shipping
+# nothing" failure this script already exists to prevent, just one step
+# earlier in the chain.
+#
+# Skipped when python3 is absent (the box does not need it — the JSON is
+# committed) and never fatal on its own; it only refuses to deploy something
+# it can prove is stale.
+if command -v python3 >/dev/null 2>&1 && [ -f "$HERE/gen_workflows.py" ]; then
+  CHECK=$(mktemp -d)
+  # The generator writes to a path derived from its OWN location, not from cwd
+  # (`os.path.dirname(os.path.abspath(__file__))`). So it has to be COPIED into
+  # the scratch dir and run from there — invoking it in place would regenerate
+  # over the real workflows/ and silently "fix" the staleness this is meant to
+  # detect, which is worse than not checking at all.
+  cp "$HERE/gen_workflows.py" "$CHECK/" 2>/dev/null
+  if python3 "$CHECK/gen_workflows.py" >/dev/null 2>&1 && [ -d "$CHECK/workflows" ]; then
+    STALE=""
+    for NAME in "$@"; do
+      if [ -f "$CHECK/workflows/$NAME.json" ] && ! diff -q "$HERE/workflows/$NAME.json" "$CHECK/workflows/$NAME.json" >/dev/null 2>&1; then
+        STALE="$STALE  • $NAME"$'\n'
+      fi
+    done
+    rm -rf "$CHECK"
+    if [ -n "$STALE" ]; then
+      echo "✋ The committed JSON does not match gen_workflows.py for:" >&2
+      printf '%s' "$STALE" >&2
+      echo "   Someone changed the generator without regenerating. Run:" >&2
+      echo "     python3 n8n/gen_workflows.py   # then commit the JSON it writes" >&2
+      echo "   Deploying now would publish the OLD workflow and look successful." >&2
+      exit 1
+    fi
+  else
+    rm -rf "$CHECK"
+  fi
+fi
 
 STAGE="/tmp/redeploy-$(date +%s)"
 docker exec "$CONTAINER" mkdir -p "$STAGE"
