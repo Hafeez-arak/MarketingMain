@@ -53,7 +53,32 @@ function devExportSink() {
 // Here the host comes from VITE_N8N_BASE_URL in .env — a local developer
 // already has it, and keeping dev off the Supabase-backed config avoids
 // needing a service-role key on anyone's laptop.
+//
+// The workflows now reject any call missing x-webhook-secret once
+// N8N_WEBHOOK_SECRET is set on the n8n side (a "Webhook Secret Guard" node
+// runs first in every Creative Studio workflow) — this proxy didn't send it,
+// so every local call silently died inside that guard before reaching the
+// Respond node. n8n then closes the connection with an empty 200 rather than
+// an error body, which is indistinguishable on this end from "worked, nothing
+// to report" — res.json() on the client throws on the empty body, every
+// caller's catch swallows it, and the symptom is just... nothing rendering.
+// No fal balance, no generation, no error message pointing at why.
+//
+// The secret itself is read from n8n/docker/.env — the same file n8n reads —
+// rather than duplicated into the root .env, so there is exactly one place
+// this value lives and the two can't drift out of sync with each other.
+function readN8nWebhookSecret() {
+  try {
+    const text = fs.readFileSync(path.join(process.cwd(), 'n8n/docker/.env'), 'utf8')
+    const line = text.split('\n').find(l => l.startsWith('N8N_WEBHOOK_SECRET='))
+    return line ? line.slice('N8N_WEBHOOK_SECRET='.length).trim() : ''
+  } catch {
+    return ''
+  }
+}
+
 function devN8nProxy(baseUrl) {
+  const secret = readN8nWebhookSecret()
   return {
     name: 'arak-dev-n8n-proxy',
     apply: 'serve',
@@ -72,7 +97,10 @@ function devN8nProxy(baseUrl) {
           try {
             const upstream = await fetch(`${base}/webhook/${path}`, {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
+              headers: {
+                'Content-Type': 'application/json',
+                ...(secret ? { 'x-webhook-secret': secret } : {}),
+              },
               body: Buffer.concat(chunks),
             })
             const text = await upstream.text()

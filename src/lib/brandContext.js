@@ -182,12 +182,42 @@ export function getBrandIdentity(profile) {
 }
 
 // ─── Memory → prompt text ──────────────────────────────────────────────────
+
+// A learned rule has always carried a `scope` — it is chosen when a rule is
+// added by hand and written by the research workflows that propose them — but
+// nothing ever read it, so a rule about captions was sent to the image-prompt
+// rewriter too. "Include a booking phone number in every caption" reaching a
+// model that draws pictures is at best noise and at worst text baked into the
+// artwork. The scope is now the default task tagging, so it means what it
+// looks like it means.
+//
+// `image` covers video as well: a rule about how the brand's pictures should
+// look applies to the frames of a clip. `competitor` and `trend` are market
+// observations — they belong to deciding WHAT to post, not to drawing it.
+export const SCOPE_TASKS = {
+  global:     [],                              // every task
+  plan:       ['plan'],
+  timing:     ['plan'],
+  caption:    ['caption'],
+  image:      ['image', 'video'],
+  competitor: ['plan', 'research', 'chat'],
+  trend:      ['plan', 'research', 'chat'],
+}
+
+// Explicit tags win; the scope is only the fallback. That ordering is what
+// lets someone widen or narrow one rule from the Brand Brain without having
+// to reclassify it under a scope that no longer describes it.
+export function memoryTasks(rule) {
+  if (rule?.tasks?.length) return rule.tasks
+  return SCOPE_TASKS[rule?.scope] || []
+}
+
 // Only `rule` is ever sent. `detail` and `evidence` exist so a human can
 // audit why a rule is there without paying for that context every run, and
 // only 'active' rows are injected — an unreviewed machine inference must not
 // quietly start steering the brand's output.
 function buildMemoryBlock(memory, task) {
-  const active = (memory || []).filter(m => m.status === 'active' && matchesTask(m.tasks, task))
+  const active = (memory || []).filter(m => m.status === 'active' && matchesTask(memoryTasks(m), task))
   if (!active.length) return ''
   const lines = active.map(m => `- ${String(m.rule || '').trim()}`).filter(l => l.length > 2)
   if (!lines.length) return ''
@@ -254,8 +284,15 @@ export function buildContext(profile, schema, directory, memory, options = {}) {
   if (voiceText) blocks.push({ key: 'voice', label: 'Brand Voice & Identity', text: voiceText })
 
   // 2) Assets — reuse the existing formatter for the asset summary only.
+  //    Scoped like everything else: the asset section carries `tasks` in the
+  //    schema exactly as a directory does, and skipping that check here was
+  //    the one way a section could still be sent to a task it was tagged out
+  //    of.
   const legacyBlocks = buildSectionBlocks(profile, { schema, rowsBySection: directory?.rowsBySection, assets: directory?.assets })
-  if (legacyBlocks.assets) blocks.push({ key: 'assets', label: 'Asset Library', text: legacyBlocks.assets })
+  const assetSection = (schema?.sections || []).find(s => s.kind === 'assets')
+  if (legacyBlocks.assets && matchesTask(assetSection?.tasks, task)) {
+    blocks.push({ key: 'assets', label: assetSection?.title || 'Asset Library', text: legacyBlocks.assets })
+  }
 
   // 3) Directories — index when large, full when small, plus detail for any
   //    specifically featured rows.
@@ -287,11 +324,19 @@ export function buildContext(profile, schema, directory, memory, options = {}) {
 
   // Callers that already expose a section picker (the planner) pass their
   // selection through; everything else gets every block.
-  const visible = blocks.filter(b => {
-    if (muted.has(b.key)) return false
-    if (allowedSections && !allowedSections.includes(b.key) && b.key !== 'memory') return false
-    return true
-  })
+  //
+  // WHY a block is withheld matters, not just that it is: the panel offers a
+  // per-generation mute checkbox, and a block dropped by an upstream section
+  // picker has to be shown as locked rather than as unchecked. Reporting both
+  // as a bare `muted` flag meant the panel read its own checkbox back as
+  // "locked upstream" and disabled it — so unchecking a block made it
+  // impossible to check again without reloading the page.
+  const mutedBy = b => {
+    if (muted.has(b.key)) return 'user'
+    if (allowedSections && !allowedSections.includes(b.key) && b.key !== 'memory') return 'section'
+    return null
+  }
+  const visible = blocks.filter(b => !mutedBy(b))
 
   const identityLine = brandName
     ? `BRAND: ${brandName}${brandDescriptor ? ` — ${brandDescriptor}` : ''}`
@@ -305,8 +350,8 @@ export function buildContext(profile, schema, directory, memory, options = {}) {
     identityLine,
     // Every block considered, each flagged — this is what the panel renders,
     // so a muted block is still visible as something being withheld rather
-    // than silently absent.
-    blocks: blocks.map(b => ({ ...b, muted: !visible.includes(b) })),
+    // than silently absent. `mutedBy` says which lever withheld it.
+    blocks: blocks.map(b => ({ ...b, muted: !visible.includes(b), mutedBy: mutedBy(b) })),
     instructions,
     task,
   }

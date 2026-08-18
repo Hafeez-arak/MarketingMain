@@ -26,6 +26,7 @@ import {
 import { aspectLabel } from '../../lib/postFormats'
 import { uploadReferenceImage } from '../../lib/referenceImages'
 import { buildContext, fetchBrandMemory } from '../../lib/brandContext'
+import { useBrandProfileSync } from '../../lib/brandBrain'
 import { BrandContextPanel, BrandConflictNotice } from '../../components/BrandContextPanel'
 import { fetchBrandSchema, fetchDirectoryRows } from '../../lib/brandSchema'
 import { fetchBrandAssets } from '../../lib/brandAssets'
@@ -228,6 +229,15 @@ export function CreativeStudio() {
   const webhooks = state.webhooks || {}
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
+
+  // Studio read `state.brandProfile` but never loaded it, so on a fresh visit
+  // — the normal case, since nobody opens Settings before making a picture —
+  // the profile was null and every field-backed block silently vanished: no
+  // BRAND line, no palette, no logo rules, no AI image style defaults, no
+  // Arabic-on-images note. What survived was whatever came from Studio's own
+  // fetches below (directories and learned rules), which is why the context
+  // panel showed competitors and nothing that describes how the brand looks.
+  useBrandProfileSync(state, dispatch)
 
   const [sessions, setSessions] = useState([])
   const [session, setSession] = useState(null)
@@ -637,15 +647,20 @@ export function CreativeStudio() {
   const [mutedBlocks, setMutedBlocks] = useState([])
   const [conflicts, setConflicts] = useState([])
 
+  // Both video intents read the 'video' slice. A field tagged video-only —
+  // motion, pacing, how long a shot may hold — was previously never sent,
+  // because this asked for 'image' whatever was on screen.
+  const brandTask = intent === 'image' ? 'image' : 'video'
+
   const brandCtx = useMemo(
     () => buildContext(state.brandProfile, brandSchema, brandDirectory, brandMemory, {
-      task: 'image', mutedKeys: mutedBlocks,
+      task: brandTask, mutedKeys: mutedBlocks,
       // Studio has no plan idea to inherit a selection from — the prompt box
       // is the whole brief. Naming a service or fixture in it is what pulls
       // that row's real detail out of the index.
       matchText: [prompt, refNotes],
     }),
-    [state.brandProfile, brandSchema, brandDirectory, brandMemory, mutedBlocks, prompt, refNotes],
+    [state.brandProfile, brandSchema, brandDirectory, brandMemory, brandTask, mutedBlocks, prompt, refNotes],
   )
   const brandInstructions = brandCtx.instructions
 
@@ -1871,7 +1886,7 @@ export function CreativeStudio() {
 
                 <BrandContextPanel
                   context={brandCtx}
-                  task="image"
+                  task={brandTask}
                   mutedKeys={mutedBlocks}
                   onToggleBlock={key => setMutedBlocks(m =>
                     m.includes(key) ? m.filter(k => k !== key) : [...m, key])}

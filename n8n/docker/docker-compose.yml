@@ -30,6 +30,21 @@ services:
     restart: unless-stopped
     ports:
       - "5680:5678"
+    # Resolve names through public resolvers rather than Docker Desktop's
+    # embedded forwarder at 127.0.0.11.
+    #
+    # Observed 2026-08-17: a generate round lost one of its two candidates to
+    # "getaddrinfo ENOTFOUND fal.run" while the other candidate resolved the
+    # same domain in the same second. The embedded resolver forwards to
+    # whatever the host's resolver list was when the VM last read it, and it
+    # drops a lookup after a network change (a VPN, a wifi hop) until that
+    # list is re-read. Naming resolvers here takes that stale hop out of the
+    # path. The workflows also retry a failed lookup now — belt and braces,
+    # since only one of the two is inside this repo's control on any given
+    # machine.
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
     env_file:
       - .env
     environment:

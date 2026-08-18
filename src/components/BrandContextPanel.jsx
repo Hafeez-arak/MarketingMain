@@ -64,7 +64,12 @@ export function BrandContextPanel({ context, mutedKeys = [], onToggleBlock, task
             // re-enabled from here — that switch lives in the section chips,
             // and offering two controls for one outcome would let them
             // disagree on screen.
-            const togglable = canMute && !block.muted
+            //
+            // Keyed on WHY it is withheld, not on whether it is: this used to
+            // read `!block.muted`, which is also true of a block the user just
+            // unchecked here — so the checkbox disabled itself on the way down
+            // and there was no way back up.
+            const togglable = canMute && block.mutedBy !== 'section'
             return (
               <div key={block.key} className={`rounded-lg border p-2 ${muted ? 'border-border bg-surface-subtle opacity-60' : 'border-border bg-white'}`}>
                 <label className="flex items-start gap-2 cursor-pointer">
@@ -78,8 +83,11 @@ export function BrandContextPanel({ context, mutedKeys = [], onToggleBlock, task
                   <span className="flex-1 min-w-0">
                     <span className="block text-[11px] font-semibold text-text-primary">
                       {block.label}
-                      {block.muted && (
+                      {block.mutedBy === 'section' && (
                         <span className="ml-1.5 font-normal text-text-secondary">— not selected above, not being sent</span>
+                      )}
+                      {block.mutedBy === 'user' && (
+                        <span className="ml-1.5 font-normal text-text-secondary">— muted for this generation</span>
                       )}
                     </span>
                     <span className={`block text-[10px] text-text-secondary whitespace-pre-wrap leading-relaxed ${muted ? 'line-through' : ''}`}>

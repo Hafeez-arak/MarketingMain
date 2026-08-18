@@ -11,7 +11,8 @@ import {
   ASSET_KINDS, fetchBrandAssets, uploadBrandAsset, updateBrandAsset, deleteBrandAsset,
 } from '../../lib/brandAssets'
 import {
-  TASKS, TASK_LABELS, fetchBrandMemory, createBrandMemory, updateBrandMemory, deleteBrandMemory,
+  TASKS, TASK_LABELS, memoryTasks,
+  fetchBrandMemory, createBrandMemory, updateBrandMemory, deleteBrandMemory,
 } from '../../lib/brandContext'
 import {
   fetchBrandSchema, fetchDirectoryRows, getFieldValue, setFieldValue, sortFieldsBySection,
@@ -245,6 +246,37 @@ function SectionEditorModal({ section, onSave, onDelete, onClose }) {
             onChange={e => set('enabled', e.target.checked)} />
           <span className="font-medium text-text">Show this section</span>
         </label>
+
+        {/* A section carries the same task scoping its fields do, and the
+            prompt builder has always honoured it — but nothing here could set
+            it, so every section a person created was sent to every kind of
+            generation for good. That is how a competitor table ends up inside
+            an image prompt. */}
+        <div>
+          <label className="text-[11px] font-semibold text-text-tertiary uppercase tracking-wide">
+            Only send it to
+          </label>
+          <div className="flex flex-wrap gap-1.5 mt-1.5">
+            {TASKS.map(t => {
+              const tags = draft.tasks || []
+              const on = tags.includes(t)
+              return (
+                <button key={t} type="button"
+                  onClick={() => set('tasks', on ? tags.filter(x => x !== t) : [...tags, t])}
+                  className={`text-[11px] font-medium px-2.5 py-1 rounded-lg border transition-colors ${
+                    on ? 'bg-sage-50 border-sage-300 text-sage-700'
+                       : 'border-border text-text-secondary hover:border-sage-200'}`}>
+                  {TASK_LABELS[t] || t}
+                </button>
+              )
+            })}
+          </div>
+          <p className="text-[10px] text-text-tertiary mt-1.5 leading-relaxed">
+            {(draft.tasks || []).length
+              ? 'Sent only to the tasks selected above. Fields inside this section inherit it.'
+              : 'Nothing selected — sent to every kind of generation, including image and video prompts.'}
+          </p>
+        </div>
 
         <div className="flex items-center justify-between pt-1">
           {!isNew ? (
@@ -944,7 +976,7 @@ function AssetLibrary({ section, structureMode, onEditSection }) {
 // something the system inferred and no human has agreed to yet; letting those
 // steer output automatically would mean the brand's voice drifting on the
 // strength of an unreviewed guess.
-function LearnedGuidance({ rules, onAdd, onSetStatus, onDelete, busy }) {
+function LearnedGuidance({ rules, onAdd, onSetStatus, onSetTasks, onDelete, busy }) {
   const [text, setText] = useState('')
   const [scope, setScope] = useState('global')
 
@@ -959,36 +991,74 @@ function LearnedGuidance({ rules, onAdd, onSetStatus, onDelete, busy }) {
     setText('')
   }
 
-  const Row = ({ r }) => (
-    <div className="flex items-start gap-2 rounded-xl border border-border bg-white px-3 py-2">
-      <span className="flex-1 min-w-0">
-        <span className="block text-xs text-text leading-relaxed">{r.rule}</span>
-        <span className="block text-[10px] text-text-tertiary mt-0.5">
-          {r.scope} · from {r.source}
-          {r.evidence?.sample_size ? ` · ${r.evidence.sample_size} posts` : ''}
+  const Row = ({ r }) => {
+    // What this rule is actually sent to right now — its own tags if it has
+    // any, otherwise the default its scope implies. Shown rather than
+    // described, because "scope: competitor" told nobody that the rule was
+    // being read by the image-prompt rewriter.
+    const effective = memoryTasks(r)
+    const derived   = !r.tasks?.length
+
+    function toggleTask(t) {
+      // An empty list means "every task", so the first click has to start
+      // from the full set — otherwise turning one task off would turn all the
+      // others off with it.
+      const base = effective.length ? effective : TASKS
+      const next = base.includes(t) ? base.filter(x => x !== t) : [...base, t]
+      // Back to everything selected is stored as "no restriction", so a task
+      // added to the product later is included rather than silently excluded.
+      onSetTasks?.(r, next.length === TASKS.length ? [] : next)
+    }
+
+    return (
+      <div className="flex items-start gap-2 rounded-xl border border-border bg-white px-3 py-2">
+        <span className="flex-1 min-w-0">
+          <span className="block text-xs text-text leading-relaxed">{r.rule}</span>
+          <span className="block text-[10px] text-text-tertiary mt-0.5">
+            {r.scope} · from {r.source}
+            {r.evidence?.sample_size ? ` · ${r.evidence.sample_size} posts` : ''}
+          </span>
+          {r.detail && <span className="block text-[10px] text-text-tertiary mt-1 leading-relaxed">{r.detail}</span>}
+          <span className="flex flex-wrap items-center gap-1 mt-1.5">
+            <span className="text-[10px] text-text-tertiary mr-0.5">
+              {derived ? `Sent to (from "${r.scope}"):` : 'Sent to:'}
+            </span>
+            {TASKS.map(t => {
+              const on = !effective.length || effective.includes(t)
+              return (
+                <button key={t} type="button" disabled={busy} onClick={() => toggleTask(t)}
+                  title={on ? `Stop sending this rule to ${TASK_LABELS[t]}` : `Also send this rule to ${TASK_LABELS[t]}`}
+                  className={`text-[10px] font-medium px-1.5 py-0.5 rounded-md border transition-colors ${
+                    on ? (derived ? 'bg-surface-subtle border-border text-text-secondary'
+                                  : 'bg-sage-50 border-sage-300 text-sage-700')
+                       : 'border-border text-text-tertiary line-through hover:border-sage-200'}`}>
+                  {TASK_LABELS[t] || t}
+                </button>
+              )
+            })}
+          </span>
         </span>
-        {r.detail && <span className="block text-[10px] text-text-tertiary mt-1 leading-relaxed">{r.detail}</span>}
-      </span>
-      <span className="flex items-center gap-1 shrink-0">
-        {r.status !== 'active' && (
-          <button type="button" disabled={busy} onClick={() => onSetStatus(r, 'active')}
-            className="text-[11px] font-semibold px-2 py-1 rounded-lg border border-sage-200 text-sage-700 hover:bg-sage-50">
-            Activate
+        <span className="flex items-center gap-1 shrink-0">
+          {r.status !== 'active' && (
+            <button type="button" disabled={busy} onClick={() => onSetStatus(r, 'active')}
+              className="text-[11px] font-semibold px-2 py-1 rounded-lg border border-sage-200 text-sage-700 hover:bg-sage-50">
+              Activate
+            </button>
+          )}
+          {r.status === 'active' && (
+            <button type="button" disabled={busy} onClick={() => onSetStatus(r, 'retired')}
+              className="text-[11px] font-semibold px-2 py-1 rounded-lg border border-border text-text-secondary hover:bg-surface-subtle">
+              Retire
+            </button>
+          )}
+          <button type="button" disabled={busy} onClick={() => onDelete(r)}
+            className="text-[11px] font-semibold px-2 py-1 rounded-lg border border-border text-text-tertiary hover:text-red-500 hover:border-red-200">
+            Delete
           </button>
-        )}
-        {r.status === 'active' && (
-          <button type="button" disabled={busy} onClick={() => onSetStatus(r, 'retired')}
-            className="text-[11px] font-semibold px-2 py-1 rounded-lg border border-border text-text-secondary hover:bg-surface-subtle">
-            Retire
-          </button>
-        )}
-        <button type="button" disabled={busy} onClick={() => onDelete(r)}
-          className="text-[11px] font-semibold px-2 py-1 rounded-lg border border-border text-text-tertiary hover:text-red-500 hover:border-red-200">
-          Delete
-        </button>
-      </span>
-    </div>
-  )
+        </span>
+      </div>
+    )
+  }
 
   return (
     <Card id={slug('learned_guidance')} className="scroll-mt-24">
@@ -1226,6 +1296,17 @@ export function BrandBrain() {
     setMemory(m => m.map(r => r.id === rule.id ? res.row : r))
   }
 
+  // Which generations a rule reaches. Same PATCH as the status buttons — the
+  // only difference is that an empty array means "all of them", which is why
+  // the chips send [] rather than every task listed out.
+  async function setMemoryTasks(rule, tasks) {
+    setMemoryBusy(true)
+    const res = await updateBrandMemory(accessToken, rule.id, { tasks })
+    setMemoryBusy(false)
+    if (res.error) { setError(res.error); return }
+    setMemory(m => m.map(r => r.id === rule.id ? res.row : r))
+  }
+
   async function removeMemory(rule) {
     setMemoryBusy(true)
     const res = await deleteBrandMemory(accessToken, rule.id)
@@ -1335,6 +1416,7 @@ export function BrandBrain() {
       const patch = {
         title: draft.title, description: draft.description || '',
         icon: draft.icon || '', enabled: draft.enabled !== false,
+        tasks: draft.tasks || [],
       }
       const result = await sectionsApi.update(accessToken, draft.id, patch)
       if (result.error) { setError(result.error); return }
@@ -1344,6 +1426,7 @@ export function BrandBrain() {
       const result = await sectionsApi.create(activeWorkspaceId, accessToken, {
         key, title: draft.title, description: draft.description || '',
         kind: draft.kind || 'fields', icon: draft.icon || '',
+        tasks: draft.tasks || [],
         sort_order: nextSortOrder(schema.sections), enabled: true,
       })
       if (result.error) { setError(result.error); return }
@@ -1612,6 +1695,7 @@ export function BrandBrain() {
               busy={memoryBusy}
               onAdd={addMemory}
               onSetStatus={setMemoryStatus}
+              onSetTasks={setMemoryTasks}
               onDelete={removeMemory}
             />
 

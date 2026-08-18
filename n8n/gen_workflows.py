@@ -260,7 +260,37 @@ GENERATE_POST_JS_TEMPLATE = r"""
 const PLATFORM = '__PLATFORM__';   // 'instagram'
 const BUCKET   = '__BUCKET__';     // supabase storage bucket
 __BRAND_PERSONA_JS__
-const http = this.helpers.httpRequest;
+const rawHttp = this.helpers.httpRequest;
+
+// Retry a lookup that never left the machine.
+//
+// Observed 2026-08-17: one candidate in a two-candidate generate round died
+// with "getaddrinfo ENOTFOUND fal.run" while the OTHER candidate — same node,
+// same host, same second — reached fal and returned an image, and the balance
+// call to the same domain succeeded either side of it. Docker's embedded
+// resolver (127.0.0.11) drops a lookup occasionally; nothing was wrong with
+// fal, the key, or the prompt. The visible cost was half a paid round lost to
+// a blip the user then has to notice and re-run by hand.
+//
+// ONLY name resolution is retried, deliberately. A DNS failure proves the
+// request never reached the provider, so re-sending it cannot start a second
+// paid job. A connection reset or a timeout carries no such proof — the model
+// may already be rendering — so those still fail once, loudly, exactly as
+// before.
+const http = async (opts) => {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await rawHttp(opts);
+    } catch (e) {
+      const code = (e && (e.code || (e.cause && e.cause.code))) || '';
+      const msg  = String((e && e.message) || '');
+      const isDns = code === 'ENOTFOUND' || code === 'EAI_AGAIN'
+        || /getaddrinfo\s+(ENOTFOUND|EAI_AGAIN)/.test(msg);
+      if (!isDns || attempt >= 2) throw e;
+      await new Promise(r => setTimeout(r, 400 * (attempt + 1)));
+    }
+  }
+};
 const prepareBinaryData = this.helpers.prepareBinaryData;
 
 // n8n's httpRequest helper throws its OWN generic "Request failed with
@@ -833,7 +863,37 @@ Turns a manually-typed idea's thin topic/tone into a full brief (angle, objectiv
 # ============================================================
 
 CAPTION_STUDIO_JS = _with_brand(r"""
-const http = this.helpers.httpRequest;
+const rawHttp = this.helpers.httpRequest;
+
+// Retry a lookup that never left the machine.
+//
+// Observed 2026-08-17: one candidate in a two-candidate generate round died
+// with "getaddrinfo ENOTFOUND fal.run" while the OTHER candidate — same node,
+// same host, same second — reached fal and returned an image, and the balance
+// call to the same domain succeeded either side of it. Docker's embedded
+// resolver (127.0.0.11) drops a lookup occasionally; nothing was wrong with
+// fal, the key, or the prompt. The visible cost was half a paid round lost to
+// a blip the user then has to notice and re-run by hand.
+//
+// ONLY name resolution is retried, deliberately. A DNS failure proves the
+// request never reached the provider, so re-sending it cannot start a second
+// paid job. A connection reset or a timeout carries no such proof — the model
+// may already be rendering — so those still fail once, loudly, exactly as
+// before.
+const http = async (opts) => {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await rawHttp(opts);
+    } catch (e) {
+      const code = (e && (e.code || (e.cause && e.cause.code))) || '';
+      const msg  = String((e && e.message) || '');
+      const isDns = code === 'ENOTFOUND' || code === 'EAI_AGAIN'
+        || /getaddrinfo\s+(ENOTFOUND|EAI_AGAIN)/.test(msg);
+      if (!isDns || attempt >= 2) throw e;
+      await new Promise(r => setTimeout(r, 400 * (attempt + 1)));
+    }
+  }
+};
 const ANTHROPIC = $env.ANTHROPIC_API_KEY;
 
 // Surface the REAL upstream error (billing/rate-limit/bad-key) instead of
@@ -980,7 +1040,37 @@ try {
 """)
 
 ELONGATE_IDEA_JS = _with_brand(r"""
-const http = this.helpers.httpRequest;
+const rawHttp = this.helpers.httpRequest;
+
+// Retry a lookup that never left the machine.
+//
+// Observed 2026-08-17: one candidate in a two-candidate generate round died
+// with "getaddrinfo ENOTFOUND fal.run" while the OTHER candidate — same node,
+// same host, same second — reached fal and returned an image, and the balance
+// call to the same domain succeeded either side of it. Docker's embedded
+// resolver (127.0.0.11) drops a lookup occasionally; nothing was wrong with
+// fal, the key, or the prompt. The visible cost was half a paid round lost to
+// a blip the user then has to notice and re-run by hand.
+//
+// ONLY name resolution is retried, deliberately. A DNS failure proves the
+// request never reached the provider, so re-sending it cannot start a second
+// paid job. A connection reset or a timeout carries no such proof — the model
+// may already be rendering — so those still fail once, loudly, exactly as
+// before.
+const http = async (opts) => {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await rawHttp(opts);
+    } catch (e) {
+      const code = (e && (e.code || (e.cause && e.cause.code))) || '';
+      const msg  = String((e && e.message) || '');
+      const isDns = code === 'ENOTFOUND' || code === 'EAI_AGAIN'
+        || /getaddrinfo\s+(ENOTFOUND|EAI_AGAIN)/.test(msg);
+      if (!isDns || attempt >= 2) throw e;
+      await new Promise(r => setTimeout(r, 400 * (attempt + 1)));
+    }
+  }
+};
 const ANTHROPIC = $env.ANTHROPIC_API_KEY;
 
 async function req(opts){
@@ -1081,7 +1171,37 @@ Writes straight to `plan_ideas` (caption_options, media_prompt_options, draft_st
 # Code-node JavaScript body (Draft Copy)
 # ============================================================
 DRAFT_COPY_JS = _with_brand(r"""
-const http = this.helpers.httpRequest;
+const rawHttp = this.helpers.httpRequest;
+
+// Retry a lookup that never left the machine.
+//
+// Observed 2026-08-17: one candidate in a two-candidate generate round died
+// with "getaddrinfo ENOTFOUND fal.run" while the OTHER candidate — same node,
+// same host, same second — reached fal and returned an image, and the balance
+// call to the same domain succeeded either side of it. Docker's embedded
+// resolver (127.0.0.11) drops a lookup occasionally; nothing was wrong with
+// fal, the key, or the prompt. The visible cost was half a paid round lost to
+// a blip the user then has to notice and re-run by hand.
+//
+// ONLY name resolution is retried, deliberately. A DNS failure proves the
+// request never reached the provider, so re-sending it cannot start a second
+// paid job. A connection reset or a timeout carries no such proof — the model
+// may already be rendering — so those still fail once, loudly, exactly as
+// before.
+const http = async (opts) => {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await rawHttp(opts);
+    } catch (e) {
+      const code = (e && (e.code || (e.cause && e.cause.code))) || '';
+      const msg  = String((e && e.message) || '');
+      const isDns = code === 'ENOTFOUND' || code === 'EAI_AGAIN'
+        || /getaddrinfo\s+(ENOTFOUND|EAI_AGAIN)/.test(msg);
+      if (!isDns || attempt >= 2) throw e;
+      await new Promise(r => setTimeout(r, 400 * (attempt + 1)));
+    }
+  }
+};
 const ANTHROPIC = $env.ANTHROPIC_API_KEY;
 
 async function req(opts){
@@ -1208,8 +1328,37 @@ Returns fal.ai's own (temporary) URLs directly — no Supabase Storage upload ha
 # Code-node JavaScript body (Media Options)
 # ============================================================
 MEDIA_OPTIONS_JS = r"""
-const http = this.helpers.httpRequest;
-const FAL = $env.FAL_KEY;
+const rawHttp = this.helpers.httpRequest;
+
+// Retry a lookup that never left the machine — see Creative Generate for the
+// full story. Kept here too since this workflow makes its own outbound calls
+// and can hit the same blip.
+const http = async (opts) => {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await rawHttp(opts);
+    } catch (e) {
+      const code = (e && (e.code || (e.cause && e.cause.code))) || '';
+      const msg  = String((e && e.message) || '');
+      const isDns = code === 'ENOTFOUND' || code === 'EAI_AGAIN'
+        || /getaddrinfo\s+(ENOTFOUND|EAI_AGAIN)/.test(msg);
+      if (!isDns || attempt >= 2) throw e;
+      await new Promise(r => setTimeout(r, 400 * (attempt + 1)));
+    }
+  }
+};
+// Replicate, not fal — this is the only provider actually keyed up for the
+// team (IMAGE_PROVIDER=replicate everywhere else). This workflow used to call
+// fal directly and unconditionally, with no provider switch at all, and the
+// endpoint it called ('fal-ai/flux-2/pro', a slash instead of fal's real
+// hyphenated id 'fal-ai/flux-2-pro') 404'd as "Path /pro not found" on every
+// single call — so every "generate media options" click from the planner had
+// been producing zero images for anyone, silently, since whenever that typo
+// shipped. Rather than also fix the fal call, this now runs the same
+// Replicate flux-schnell/flux-dev path the rest of the app already pays for
+// and has proven working, so there is one image provider in active use, not
+// two.
+const REPLICATE = $env.REPLICATE_API_TOKEN;
 
 async function req(opts){
   try { return await http(opts); }
@@ -1252,13 +1401,11 @@ const STYLE_MAP = {
 const brandTail = String(body.brand_name || '').trim();
 const basePrompt = `${prompt}, ${STYLE_MAP[style] || STYLE_MAP.photorealistic}${brandTail ? ', ' + brandTail : ''}, ultra high detail`;
 
-// fal.ai's aspect_ratio-style image_size buckets — closest match per the
-// idea's chosen orientation, not just a platform default.
-function imageSizeFor(ar){
-  if (ar === '9:16') return 'portrait_16_9';
-  if (ar === '4:5' || ar === '3:4') return 'portrait_4_3';
-  if (ar === '1.91:1' || ar === '16:9') return 'landscape_16_9';
-  return 'square_hd';
+// Replicate's flux models take an aspect_ratio string, not a named bucket —
+// same '1.91:1' -> '3:2' fold Generate Post uses, since Replicate has no
+// 1.91:1 preset either.
+function aspectRatioFor(ar){
+  return ar === '1.91:1' ? '3:2' : (ar || '1:1');
 }
 
 // Small, genuinely-different variations per candidate rather than N
@@ -1273,13 +1420,33 @@ const VARIATIONS = [
 
 async function genOne(variation){
   const finalPrompt = basePrompt + variation;
-  const endpoint = useI2I ? 'fal-ai/flux-2/pro/image-to-image' : 'fal-ai/flux-2/pro';
-  const reqBody = { prompt: finalPrompt, image_size: imageSizeFor(aspectRatio) };
-  if (useI2I) { reqBody.image_url = refs[0]; reqBody.strength = 0.72; }
-  const r = await req({ method:'POST', url:`https://fal.run/${endpoint}`,
-    headers:{ Authorization:`Key ${FAL}`, 'Content-Type':'application/json' }, body: reqBody, json:true });
-  const url = (r.images && r.images[0] && r.images[0].url) || (r.image && r.image.url);
-  if (!url) throw new Error('fal returned no image');
+  const model = useI2I ? 'black-forest-labs/flux-dev' : 'black-forest-labs/flux-schnell';
+  const input = { prompt: finalPrompt, aspect_ratio: aspectRatioFor(aspectRatio), output_format:'webp', output_quality:90, num_outputs:1 };
+  if (useI2I){ input.image = refs[0]; input.prompt_strength = 0.72; input.num_inference_steps = 24; }
+  else { input.num_inference_steps = 4; input.go_fast = true; }
+  // Poll from t=0 rather than Prefer:wait — same reasoning as Generate Post:
+  // a flux-dev cold start routinely exceeds the 60s sync-wait ceiling, and
+  // this is 2-4 of these running in parallel per click.
+  const start = await req({ method:'POST',
+    url:`https://api.replicate.com/v1/models/${model}/predictions`,
+    headers:{ Authorization:`Bearer ${REPLICATE}`, 'Content-Type':'application/json' },
+    body:{ input }, json:true });
+  const predId = start.id;
+  const getUrl = (start.urls && start.urls.get) || (predId ? `https://api.replicate.com/v1/predictions/${predId}` : null);
+  let status = start.status, out = start.output, err = start.error;
+  if (!getUrl && !out) throw new Error('Replicate did not return a prediction: ' + JSON.stringify(start).slice(0, 250));
+  let tries = 0;
+  while ((status === 'starting' || status === 'processing' || !status) && getUrl && tries < 120){
+    await new Promise(s => setTimeout(s, 2000));
+    const g = await req({ method:'GET', url:getUrl, headers:{ Authorization:`Bearer ${REPLICATE}` }, json:true });
+    status = g.status; out = g.output; err = g.error; tries++;
+    if (status === 'succeeded' || status === 'failed' || status === 'canceled') break;
+  }
+  if (status === 'failed' || status === 'canceled') {
+    throw new Error('Replicate generation ' + status + ': ' + (err || 'no detail') + ' (prediction ' + predId + ')');
+  }
+  const url = Array.isArray(out) ? out[0] : out;
+  if (!url) throw new Error('Replicate timed out after ~' + (tries * 2) + 's, last status "' + status + '" (prediction ' + predId + ')');
   return url;
 }
 
@@ -1315,7 +1482,37 @@ Uses each idea's already-picked cover_image_url (chosen via Media Options during
 # Code-node JavaScript body (Video Render)
 # ============================================================
 VIDEO_RENDER_JS = r"""
-const http = this.helpers.httpRequest;
+const rawHttp = this.helpers.httpRequest;
+
+// Retry a lookup that never left the machine.
+//
+// Observed 2026-08-17: one candidate in a two-candidate generate round died
+// with "getaddrinfo ENOTFOUND fal.run" while the OTHER candidate — same node,
+// same host, same second — reached fal and returned an image, and the balance
+// call to the same domain succeeded either side of it. Docker's embedded
+// resolver (127.0.0.11) drops a lookup occasionally; nothing was wrong with
+// fal, the key, or the prompt. The visible cost was half a paid round lost to
+// a blip the user then has to notice and re-run by hand.
+//
+// ONLY name resolution is retried, deliberately. A DNS failure proves the
+// request never reached the provider, so re-sending it cannot start a second
+// paid job. A connection reset or a timeout carries no such proof — the model
+// may already be rendering — so those still fail once, loudly, exactly as
+// before.
+const http = async (opts) => {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await rawHttp(opts);
+    } catch (e) {
+      const code = (e && (e.code || (e.cause && e.cause.code))) || '';
+      const msg  = String((e && e.message) || '');
+      const isDns = code === 'ENOTFOUND' || code === 'EAI_AGAIN'
+        || /getaddrinfo\s+(ENOTFOUND|EAI_AGAIN)/.test(msg);
+      if (!isDns || attempt >= 2) throw e;
+      await new Promise(r => setTimeout(r, 400 * (attempt + 1)));
+    }
+  }
+};
 const prepareBinaryData = this.helpers.prepareBinaryData;
 const FAL = $env.FAL_KEY;
 const MODEL = 'fal-ai/ltx-2/image-to-video/fast';
@@ -1421,7 +1618,37 @@ Synchronous (`lastNode`): Zernio accepts-and-queues, so the call is fast and the
 Zernio is an ADAPTER here, deliberately: `zernio_post_id` sits next to our own row rather than replacing it, so switching providers later (Ayrshare's SDK is wire-compatible) means editing this one workflow, not the schema or the UI."""
 
 ZERNIO_PUBLISH_JS = r"""
-const http = this.helpers.httpRequest;
+const rawHttp = this.helpers.httpRequest;
+
+// Retry a lookup that never left the machine.
+//
+// Observed 2026-08-17: one candidate in a two-candidate generate round died
+// with "getaddrinfo ENOTFOUND fal.run" while the OTHER candidate — same node,
+// same host, same second — reached fal and returned an image, and the balance
+// call to the same domain succeeded either side of it. Docker's embedded
+// resolver (127.0.0.11) drops a lookup occasionally; nothing was wrong with
+// fal, the key, or the prompt. The visible cost was half a paid round lost to
+// a blip the user then has to notice and re-run by hand.
+//
+// ONLY name resolution is retried, deliberately. A DNS failure proves the
+// request never reached the provider, so re-sending it cannot start a second
+// paid job. A connection reset or a timeout carries no such proof — the model
+// may already be rendering — so those still fail once, loudly, exactly as
+// before.
+const http = async (opts) => {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await rawHttp(opts);
+    } catch (e) {
+      const code = (e && (e.code || (e.cause && e.cause.code))) || '';
+      const msg  = String((e && e.message) || '');
+      const isDns = code === 'ENOTFOUND' || code === 'EAI_AGAIN'
+        || /getaddrinfo\s+(ENOTFOUND|EAI_AGAIN)/.test(msg);
+      if (!isDns || attempt >= 2) throw e;
+      await new Promise(r => setTimeout(r, 400 * (attempt + 1)));
+    }
+  }
+};
 
 // n8n's thrown-error shape for non-2xx responses varies by version (the
 // body ends up under different keys depending on how the client wraps
@@ -1865,7 +2092,37 @@ Runs on a daily schedule AND on an on-demand webhook (`arak-zernio-sync`) so a "
 **`metrics_present`** records which metrics the platform actually reported, so a real 0 stays distinguishable from "this platform doesn't measure saves" — without it, averaging `saves` across platforms silently counts a non-reporting post as zero-saves."""
 
 ZERNIO_SYNC_JS = r"""
-const http = this.helpers.httpRequest;
+const rawHttp = this.helpers.httpRequest;
+
+// Retry a lookup that never left the machine.
+//
+// Observed 2026-08-17: one candidate in a two-candidate generate round died
+// with "getaddrinfo ENOTFOUND fal.run" while the OTHER candidate — same node,
+// same host, same second — reached fal and returned an image, and the balance
+// call to the same domain succeeded either side of it. Docker's embedded
+// resolver (127.0.0.11) drops a lookup occasionally; nothing was wrong with
+// fal, the key, or the prompt. The visible cost was half a paid round lost to
+// a blip the user then has to notice and re-run by hand.
+//
+// ONLY name resolution is retried, deliberately. A DNS failure proves the
+// request never reached the provider, so re-sending it cannot start a second
+// paid job. A connection reset or a timeout carries no such proof — the model
+// may already be rendering — so those still fail once, loudly, exactly as
+// before.
+const http = async (opts) => {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await rawHttp(opts);
+    } catch (e) {
+      const code = (e && (e.code || (e.cause && e.cause.code))) || '';
+      const msg  = String((e && e.message) || '');
+      const isDns = code === 'ENOTFOUND' || code === 'EAI_AGAIN'
+        || /getaddrinfo\s+(ENOTFOUND|EAI_AGAIN)/.test(msg);
+      if (!isDns || attempt >= 2) throw e;
+      await new Promise(r => setTimeout(r, 400 * (attempt + 1)));
+    }
+  }
+};
 
 // See the matching comment in the Publish workflow: n8n's thrown-error
 // shape for non-2xx responses is unreliable across versions, so read the
@@ -2057,7 +2314,37 @@ On-demand only — no schedule, no writes to Supabase. Zernio already computes t
 A failure in any ONE branch (e.g. an add-on not enabled) is caught individually and reported as `{_error}` on that key rather than failing the whole response — the dashboard should render what it can, not go blank because one widget's source 402'd."""
 
 ZERNIO_DASHBOARD_JS = r"""
-const http = this.helpers.httpRequest;
+const rawHttp = this.helpers.httpRequest;
+
+// Retry a lookup that never left the machine.
+//
+// Observed 2026-08-17: one candidate in a two-candidate generate round died
+// with "getaddrinfo ENOTFOUND fal.run" while the OTHER candidate — same node,
+// same host, same second — reached fal and returned an image, and the balance
+// call to the same domain succeeded either side of it. Docker's embedded
+// resolver (127.0.0.11) drops a lookup occasionally; nothing was wrong with
+// fal, the key, or the prompt. The visible cost was half a paid round lost to
+// a blip the user then has to notice and re-run by hand.
+//
+// ONLY name resolution is retried, deliberately. A DNS failure proves the
+// request never reached the provider, so re-sending it cannot start a second
+// paid job. A connection reset or a timeout carries no such proof — the model
+// may already be rendering — so those still fail once, loudly, exactly as
+// before.
+const http = async (opts) => {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await rawHttp(opts);
+    } catch (e) {
+      const code = (e && (e.code || (e.cause && e.cause.code))) || '';
+      const msg  = String((e && e.message) || '');
+      const isDns = code === 'ENOTFOUND' || code === 'EAI_AGAIN'
+        || /getaddrinfo\s+(ENOTFOUND|EAI_AGAIN)/.test(msg);
+      if (!isDns || attempt >= 2) throw e;
+      await new Promise(r => setTimeout(r, 400 * (attempt + 1)));
+    }
+  }
+};
 
 async function req(opts){
   const res = await http({ ...opts, returnFullResponse: true, ignoreHttpStatusErrors: true });
@@ -5300,7 +5587,37 @@ def build_instagram_manual_generation() -> dict:
 # and an exhausted balance — the last of which actually happened here. Dig the
 # real message out of every shape the error can take.
 _CREATIVE_REQ_JS = r"""
-const http = this.helpers.httpRequest;
+const rawHttp = this.helpers.httpRequest;
+
+// Retry a lookup that never left the machine.
+//
+// Observed 2026-08-17: one candidate in a two-candidate generate round died
+// with "getaddrinfo ENOTFOUND fal.run" while the OTHER candidate — same node,
+// same host, same second — reached fal and returned an image, and the balance
+// call to the same domain succeeded either side of it. Docker's embedded
+// resolver (127.0.0.11) drops a lookup occasionally; nothing was wrong with
+// fal, the key, or the prompt. The visible cost was half a paid round lost to
+// a blip the user then has to notice and re-run by hand.
+//
+// ONLY name resolution is retried, deliberately. A DNS failure proves the
+// request never reached the provider, so re-sending it cannot start a second
+// paid job. A connection reset or a timeout carries no such proof — the model
+// may already be rendering — so those still fail once, loudly, exactly as
+// before.
+const http = async (opts) => {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await rawHttp(opts);
+    } catch (e) {
+      const code = (e && (e.code || (e.cause && e.cause.code))) || '';
+      const msg  = String((e && e.message) || '');
+      const isDns = code === 'ENOTFOUND' || code === 'EAI_AGAIN'
+        || /getaddrinfo\s+(ENOTFOUND|EAI_AGAIN)/.test(msg);
+      if (!isDns || attempt >= 2) throw e;
+      await new Promise(r => setTimeout(r, 400 * (attempt + 1)));
+    }
+  }
+};
 const prepareBinaryData = this.helpers.prepareBinaryData;
 const FAL = $env.FAL_KEY;
 
@@ -7843,7 +8160,37 @@ Sample size travels with each rule into `evidence`, so the page can mark a thin 
 
 
 INSIGHTS_REVIEW_GATHER_JS = r"""
-const http = this.helpers.httpRequest;
+const rawHttp = this.helpers.httpRequest;
+
+// Retry a lookup that never left the machine.
+//
+// Observed 2026-08-17: one candidate in a two-candidate generate round died
+// with "getaddrinfo ENOTFOUND fal.run" while the OTHER candidate — same node,
+// same host, same second — reached fal and returned an image, and the balance
+// call to the same domain succeeded either side of it. Docker's embedded
+// resolver (127.0.0.11) drops a lookup occasionally; nothing was wrong with
+// fal, the key, or the prompt. The visible cost was half a paid round lost to
+// a blip the user then has to notice and re-run by hand.
+//
+// ONLY name resolution is retried, deliberately. A DNS failure proves the
+// request never reached the provider, so re-sending it cannot start a second
+// paid job. A connection reset or a timeout carries no such proof — the model
+// may already be rendering — so those still fail once, loudly, exactly as
+// before.
+const http = async (opts) => {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await rawHttp(opts);
+    } catch (e) {
+      const code = (e && (e.code || (e.cause && e.cause.code))) || '';
+      const msg  = String((e && e.message) || '');
+      const isDns = code === 'ENOTFOUND' || code === 'EAI_AGAIN'
+        || /getaddrinfo\s+(ENOTFOUND|EAI_AGAIN)/.test(msg);
+      if (!isDns || attempt >= 2) throw e;
+      await new Promise(r => setTimeout(r, 400 * (attempt + 1)));
+    }
+  }
+};
 
 async function req(opts){
   const res = await http({ ...opts, returnFullResponse: true, ignoreHttpStatusErrors: true });
@@ -8022,7 +8369,37 @@ return [{ json: { ok: true, proceed: true, skipped: false, workspace_id: wsId, p
 
 
 INSIGHTS_REVIEW_SAVE_JS = r"""
-const http = this.helpers.httpRequest;
+const rawHttp = this.helpers.httpRequest;
+
+// Retry a lookup that never left the machine.
+//
+// Observed 2026-08-17: one candidate in a two-candidate generate round died
+// with "getaddrinfo ENOTFOUND fal.run" while the OTHER candidate — same node,
+// same host, same second — reached fal and returned an image, and the balance
+// call to the same domain succeeded either side of it. Docker's embedded
+// resolver (127.0.0.11) drops a lookup occasionally; nothing was wrong with
+// fal, the key, or the prompt. The visible cost was half a paid round lost to
+// a blip the user then has to notice and re-run by hand.
+//
+// ONLY name resolution is retried, deliberately. A DNS failure proves the
+// request never reached the provider, so re-sending it cannot start a second
+// paid job. A connection reset or a timeout carries no such proof — the model
+// may already be rendering — so those still fail once, loudly, exactly as
+// before.
+const http = async (opts) => {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await rawHttp(opts);
+    } catch (e) {
+      const code = (e && (e.code || (e.cause && e.cause.code))) || '';
+      const msg  = String((e && e.message) || '');
+      const isDns = code === 'ENOTFOUND' || code === 'EAI_AGAIN'
+        || /getaddrinfo\s+(ENOTFOUND|EAI_AGAIN)/.test(msg);
+      if (!isDns || attempt >= 2) throw e;
+      await new Promise(r => setTimeout(r, 400 * (attempt + 1)));
+    }
+  }
+};
 
 const SUPA_URL = String($env.SUPABASE_URL || '').replace(/\/+$/, '');
 const SUPA_KEY = $env.SUPABASE_KEY;
@@ -8172,7 +8549,37 @@ This is the one learning source that works on day one — it needs no posting hi
 
 
 BRAND_RESEARCH_JS = r"""
-const http = this.helpers.httpRequest;
+const rawHttp = this.helpers.httpRequest;
+
+// Retry a lookup that never left the machine.
+//
+// Observed 2026-08-17: one candidate in a two-candidate generate round died
+// with "getaddrinfo ENOTFOUND fal.run" while the OTHER candidate — same node,
+// same host, same second — reached fal and returned an image, and the balance
+// call to the same domain succeeded either side of it. Docker's embedded
+// resolver (127.0.0.11) drops a lookup occasionally; nothing was wrong with
+// fal, the key, or the prompt. The visible cost was half a paid round lost to
+// a blip the user then has to notice and re-run by hand.
+//
+// ONLY name resolution is retried, deliberately. A DNS failure proves the
+// request never reached the provider, so re-sending it cannot start a second
+// paid job. A connection reset or a timeout carries no such proof — the model
+// may already be rendering — so those still fail once, loudly, exactly as
+// before.
+const http = async (opts) => {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await rawHttp(opts);
+    } catch (e) {
+      const code = (e && (e.code || (e.cause && e.cause.code))) || '';
+      const msg  = String((e && e.message) || '');
+      const isDns = code === 'ENOTFOUND' || code === 'EAI_AGAIN'
+        || /getaddrinfo\s+(ENOTFOUND|EAI_AGAIN)/.test(msg);
+      if (!isDns || attempt >= 2) throw e;
+      await new Promise(r => setTimeout(r, 400 * (attempt + 1)));
+    }
+  }
+};
 
 async function req(opts){
   const res = await http({ ...opts, returnFullResponse: true, ignoreHttpStatusErrors: true });
@@ -8316,7 +8723,37 @@ return [{ json: { ok: true, proceed: true, skipped: false, workspace_id: wsId, p
 
 
 BRAND_RESEARCH_SAVE_JS = r"""
-const http = this.helpers.httpRequest;
+const rawHttp = this.helpers.httpRequest;
+
+// Retry a lookup that never left the machine.
+//
+// Observed 2026-08-17: one candidate in a two-candidate generate round died
+// with "getaddrinfo ENOTFOUND fal.run" while the OTHER candidate — same node,
+// same host, same second — reached fal and returned an image, and the balance
+// call to the same domain succeeded either side of it. Docker's embedded
+// resolver (127.0.0.11) drops a lookup occasionally; nothing was wrong with
+// fal, the key, or the prompt. The visible cost was half a paid round lost to
+// a blip the user then has to notice and re-run by hand.
+//
+// ONLY name resolution is retried, deliberately. A DNS failure proves the
+// request never reached the provider, so re-sending it cannot start a second
+// paid job. A connection reset or a timeout carries no such proof — the model
+// may already be rendering — so those still fail once, loudly, exactly as
+// before.
+const http = async (opts) => {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await rawHttp(opts);
+    } catch (e) {
+      const code = (e && (e.code || (e.cause && e.cause.code))) || '';
+      const msg  = String((e && e.message) || '');
+      const isDns = code === 'ENOTFOUND' || code === 'EAI_AGAIN'
+        || /getaddrinfo\s+(ENOTFOUND|EAI_AGAIN)/.test(msg);
+      if (!isDns || attempt >= 2) throw e;
+      await new Promise(r => setTimeout(r, 400 * (attempt + 1)));
+    }
+  }
+};
 
 const SUPA_URL = String($env.SUPABASE_URL || '').replace(/\/+$/, '');
 const SUPA_KEY = $env.SUPABASE_KEY;
