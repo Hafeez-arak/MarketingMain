@@ -504,11 +504,20 @@ export function Approvals() {
   // and expects the caller to write it. Must replicate that PATCH here or
   // caption edits silently vanish on close, exactly like the ReferencePicker
   // bug fixed earlier.
+  // PostDetail hands back only the id, so the target table has to be resolved
+  // from the post it was opened on — `handleDelete` below already does exactly
+  // that via post._table. Writing to a hardcoded TABLES.instagram instead is
+  // harmless only while Instagram is the sole platform; the moment a TikTok or
+  // Snapchat post is editable it PATCHes a row id in the wrong table, which
+  // either 404s silently or, worse, hits an unrelated row that happens to
+  // share the id. Resolve, and refuse to guess if the ids don't line up.
   async function handleCaptionUpdated(postId, newCopy, originalCopy) {
+    const target = (selectedPost && selectedPost.id === postId) ? selectedPost : null
     setSelectedPost(prev => (prev && prev.id === postId) ? { ...prev, copy: newCopy } : prev)
-    logEditFeedback(activeWorkspaceId, accessToken, { platform: 'instagram', postId, field: 'caption', original: originalCopy, edited: newCopy })
+    if (!target?._table) return
+    logEditFeedback(activeWorkspaceId, accessToken, { platform: target.platform, postId, field: 'caption', original: originalCopy, edited: newCopy })
     if (!accessToken) return
-    await fetch(`${SUPABASE_URL}/rest/v1/${TABLES.instagram}?id=eq.${postId}`, {
+    await fetch(`${SUPABASE_URL}/rest/v1/${target._table}?id=eq.${postId}`, {
       method: 'PATCH',
       headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json', Prefer: 'return=minimal' },
       body: JSON.stringify({ caption: newCopy, updated_at: new Date().toISOString() }),

@@ -2402,7 +2402,7 @@ CAMPAIGN_PLANNER_STICKY = r"""## Arak Campaign Planner
 
 Turns a stated goal + date range into a full slate of dated, platform-specific post ideas — Ramadan/Eid/National Day awareness, posting-day/time cadence enforcement, cross-month anti-repetition (recurring series vs one-off history), target content-mix steering, featured-product coverage. Returns ideas only — never writes to Supabase itself; the app inserts them into plan_ideas after this responds.
 
-Model: Opus 4.8 with adaptive thinking — this is the one call in the whole pipeline that genuinely needs the extra reasoning (whole-month coherence, holiday judgment), unlike per-post Sonnet calls."""
+Model: Opus 5 with adaptive thinking — this is the one call in the whole pipeline that genuinely needs the extra reasoning (whole-month coherence, holiday judgment), unlike per-post Sonnet calls. Priced the same as the Opus 4.8 it replaces, so staying on Opus here costs nothing. `max_tokens` is 32000, not 16000: it budgets thinking and response text together, and a truncated plan surfaces as a JSON parse error rather than an obviously-short plan."""
 
 BUILD_PROMPT_JS = _with_brand(r"""const input = $input.first().json.body;
 
@@ -3406,7 +3406,22 @@ def build_campaign_planner() -> dict:
                 },
                 "sendBody": True,
                 "specifyBody": "json",
-                "jsonBody": "={{ JSON.stringify({ model: \"claude-opus-4-8\", max_tokens: 16000, thinking: { type: \"adaptive\" }, messages: [{ role: \"user\", content: [ { type: \"text\", text: $json.prompt_cached, cache_control: { type: \"ephemeral\" } }, { type: \"text\", text: $json.prompt_variable } ] }] }) }}",
+                # Opus 5, not Sonnet: this is one call per MONTHLY plan, so its
+                # spend is rounding error next to the per-post Sonnet calls and
+                # the image/video generation it triggers — and it is the one
+                # genuinely reasoning-heavy job here (whole-month coherence,
+                # occasion judgement, pillar variety). A weak plan wastes every
+                # downstream render. Opus 5 is priced identically to the 4.8 it
+                # replaces ($5/$25 per MTok), so the upgrade costs nothing.
+                #
+                # max_tokens 16000 -> 32000 for two compounding reasons: on
+                # Opus 5 thinking is on by default and max_tokens caps thinking
+                # PLUS response text together, and Opus 5 writes longer output
+                # than 4.8 did. At 16000 the plan JSON could truncate mid-array
+                # — which fails as a JSON parse error downstream, not as an
+                # obviously-truncated plan. Check stop_reason is not
+                # "max_tokens" if plans ever come back unparseable.
+                "jsonBody": "={{ JSON.stringify({ model: \"claude-opus-5\", max_tokens: 32000, thinking: { type: \"adaptive\" }, messages: [{ role: \"user\", content: [ { type: \"text\", text: $json.prompt_cached, cache_control: { type: \"ephemeral\" } }, { type: \"text\", text: $json.prompt_variable } ] }] }) }}",
                 "options": {},
             },
             "id": nid(),
