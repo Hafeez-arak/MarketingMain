@@ -70,17 +70,22 @@ Webhook workflows are safe in parallel (nothing calls the new box until you
 publish its URL). These two are not. **Leave them inactive on the new box until
 cutover.** Step 5 does this.
 
-### 0.3 The tunnel URL changes on every restart
+### 0.3 One URL controls production, and the Mac's changes constantly
 
-Production reaches n8n through `app_config.n8n_base_url` in Supabase, currently
-a `*.trycloudflare.com` quick tunnel. Quick tunnels get a **new random
-hostname** every time `cloudflared` restarts.
+Production reaches n8n through `app_config.n8n_base_url` in Supabase. Whatever
+that column says is where every AI feature goes — no Vercel redeploy is involved,
+which is what makes cutover a single command in Step 8.
 
-`start-tunnel.sh` handles this by PATCHing the new URL into `app_config` the
-moment Cloudflare assigns it — no Vercel redeploy needed. But that also means
-**any machine running the script takes over production**. During migration the
-new box must run it with `--no-publish` (added for exactly this) until you
-deliberately cut over.
+The Mac serves a `*.trycloudflare.com` **quick tunnel**, whose hostname is random
+and **changes every time `cloudflared` restarts**. `start-tunnel.sh` compensates
+by PATCHing each new URL into `app_config` as Cloudflare assigns it — which also
+means **running that script on any machine takes over production.** Do not run it
+on the new box.
+
+The new box uses ngrok instead, on a permanently assigned hostname (Step 6). That
+removes the churn entirely: `app_config` is written once, at cutover, and never
+again. Until you run that one PATCH, the new instance is invisible to users no
+matter how much you test against it.
 
 ---
 
@@ -248,24 +253,82 @@ docker exec arak-marketing-n8n n8n list:workflow --active=false
 
 ---
 
-## Step 6 — Start the tunnel WITHOUT taking over production
+## Step 6 — Expose it on a permanent URL (ngrok)
 
-`cloudflared` is not in Ubuntu's repositories — install the binary directly:
+**This is the one step that differs from how the Mac has been running**, and it is
+a deliberate upgrade rather than a like-for-like port.
+
+The Mac uses a Cloudflare *quick* tunnel, whose hostname is random and changes on
+every restart. That is why `start-tunnel.sh` exists at all: it writes the new URL
+into `app_config.n8n_base_url` each time so the app can follow it. On a machine
+meant to run for years, that churn is the weakest part of the system — every
+restart is a window where calls fail, and nothing detects it.
+
+ngrok's free plan includes **one permanently assigned domain** that does not
+change or expire. With it, `app_config.n8n_base_url` is set once at cutover and
+never touched again, and a tunnel restart becomes a true non-event: same
+hostname, no republish, no gap. `start-tunnel.sh` and its `--no-publish` flag are
+then only needed for the Mac.
+
+### 6.1 Account and domain
+
+1. Create a free account at ngrok.com.
+2. **Dashboard → Domains** — the free plan grants one. It looks like
+   `some-words-here.ngrok-free.app`. Copy it.
+3. **Dashboard → Your Authtoken** — copy that too. Treat it like the other
+   secrets: it is what lets a machine claim your domain.
+
+### 6.2 Install and authenticate
 
 ```bash
-curl -fsSL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o /tmp/cloudflared
-sudo install -m 755 /tmp/cloudflared /usr/local/bin/cloudflared
-cloudflared --version
+curl -sSL https://ngrok-agent.s3.amazonaws.com/ngrok.asc \
+  | sudo tee /etc/apt/trusted.gpg.d/ngrok.asc >/dev/null
+echo "deb https://ngrok-agent.s3.amazonaws.com bookworm main" \
+  | sudo tee /etc/apt/sources.list.d/ngrok.list
+sudo apt update && sudo apt install -y ngrok
+ngrok version
 ```
-
-Then, from `n8n/docker`:
 
 ```bash
-./start-tunnel.sh --no-publish
+ngrok config add-authtoken <YOUR_AUTHTOKEN>
 ```
 
-It prints a `https://<random>.trycloudflare.com` URL and explicitly does **not**
-point the app at it. Copy that URL — call it `$NEW`.
+### 6.3 Point it at the container
+
+The container publishes on host port **5680** (see `docker-compose.yml`).
+
+```bash
+ngrok http 5680 --url=https://YOUR-DOMAIN.ngrok-free.app
+```
+
+Leave it running for now. That URL is `$NEW` for Step 7 — and unlike the
+Cloudflare one, it is the URL forever.
+
+> **This does not touch production.** Nothing points at ngrok until you run the
+> PATCH in Step 8. There is no `--no-publish` equivalent to remember, because
+> ngrok has no publishing step at all — which is precisely the simplification.
+
+### Does this fit the free plan?
+
+Yes, with a lot of room, because of how the system is shaped:
+
+| Limit | Free plan | This workload |
+|---|---|---|
+| Requests | 4,000 / min | one call per deliberate user action |
+| Outbound data | 1 GB / month | small JSON in, small JSON out |
+| Endpoints / agents | 3 | 1 |
+| Session timeout | none | — |
+
+The reason the data cap is comfortable is that **the tunnel never carries media.**
+Images and video move n8n → fal → Supabase Storage directly; the tunnel sees only
+the webhook request and its JSON reply. Nor does anything poll through it: the
+Creative Studio progress poller reads Supabase every 4s, not n8n — n8n owns
+writing results back to the table, which is also why closing the tab
+mid-generation loses nothing.
+
+The one way to break this would be a future workflow that returns image or video
+**bytes** in its webhook response instead of a URL. Don't do that; return the
+Storage URL, as every workflow does today.
 
 ---
 
@@ -275,7 +338,7 @@ Run these from the new box, against `$NEW`. **This is the step that decides
 whether the migration is safe.**
 
 ```bash
-NEW=https://<the-url-from-step-6>
+NEW=https://YOUR-DOMAIN.ngrok-free.app   # the permanent one from Step 6
 SEC=$(grep '^N8N_WEBHOOK_SECRET=' .env | cut -d= -f2-)
 ```
 
@@ -371,39 +434,66 @@ Supabase write in one go.
 
 ## Keeping it alive
 
-**Restart the tunnel automatically.** The container restarts itself; the tunnel
-does not. Because a new URL must be republished, run the publishing version
-under a supervisor. In WSL:
+The container restarts itself (`restart: unless-stopped`). The ngrok agent does
+not, so put it under systemd. Because the hostname is permanent, this unit has
+no publishing logic and no URL to chase — it just reconnects.
 
 ```bash
-sudo tee /etc/systemd/system/arak-tunnel.service >/dev/null <<'UNIT'
+sudo tee /etc/systemd/system/arak-ngrok.service >/dev/null <<'UNIT'
 [Unit]
-Description=ARAK n8n Cloudflare tunnel
-After=docker.service
+Description=ARAK n8n ngrok tunnel
+After=docker.service network-online.target
 Requires=docker.service
 
 [Service]
 Type=simple
 User=YOUR_WSL_USER
-WorkingDirectory=/path/to/Marketing/n8n/docker
-ExecStart=/path/to/Marketing/n8n/docker/start-tunnel.sh
+ExecStart=/usr/local/bin/ngrok http 5680 --url=https://YOUR-DOMAIN.ngrok-free.app --log=stdout
 Restart=always
 RestartSec=10
 
 [Install]
 WantedBy=multi-user.target
 UNIT
-sudo systemctl daemon-reload && sudo systemctl enable --now arak-tunnel
+sudo systemctl daemon-reload && sudo systemctl enable --now arak-ngrok
+systemctl status arak-ngrok --no-pager
 ```
 
-Note: **no** `--no-publish` here. Once migrated, republishing on every restart
-is exactly what you want — it is what makes a tunnel restart a non-event.
+Check `which ngrok` and correct the `ExecStart` path if apt installed it to
+`/usr/bin/ngrok`.
 
-**The remaining weak point.** Between a tunnel dropping and the new URL landing
-in `app_config`, calls fail. Nothing detects it. If this becomes a problem, the
-real fix is a Cloudflare **named tunnel** on a domain you control — a permanent
-hostname, set `app_config` once, never again. Worth revisiting if you ever put
-`arak-sa.com` (or any domain) on Cloudflare.
+### What can still take it down
+
+Being straight about this, because "it won't go down" would not be true of any
+setup:
+
+- **Windows is now the weak link, not the tunnel.** Once the URL is permanent,
+  the realistic cause of an outage is the host: an automatic Windows Update
+  reboot, WSL not starting on boot, or the Docker daemon not coming up. Set
+  Windows Update to a fixed maintenance window with automatic restarts off, and
+  actually test a full reboot before trusting the box — reboot it once and
+  confirm the container and tunnel both come back with nobody logged in.
+- **The ngrok agent dying** — handled by `Restart=always` above, and harmless
+  now that the hostname survives a restart.
+- **An ngrok service outage.** Real, but the same class of risk as Cloudflare,
+  and unavoidable with any tunnel.
+- **The free plan is a developer tier**, not an SLA'd product. It fits this
+  workload comfortably today, but if usage grows past ~1 GB/month of webhook
+  traffic, endpoints are cut off until the billing cycle resets. Watch it in the
+  ngrok dashboard occasionally rather than assuming.
+- **Losing the authtoken** would mean a new domain and one `app_config` update.
+  Keep it with the other secrets.
+
+The upgrade path, if it ever matters: a Cloudflare **named** tunnel on a domain
+you control is free and has no bandwidth cap. It needs that domain's nameservers
+moved to Cloudflare — which for `arak-sa.com` would also move its MX records, so
+it is a real change to weigh against company email, not a quick swap.
+
+### The Cloudflare quick tunnel, for reference
+
+`start-tunnel.sh` (and its `--no-publish` flag) stays in the repo for the Mac and
+for local testing. It is no longer part of the 24/7 setup — the whole reason it
+PATCHes `app_config` on every start is a churning hostname that ngrok removes.
 
 ---
 
