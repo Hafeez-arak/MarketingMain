@@ -15,6 +15,25 @@
 
 set -euo pipefail
 
+# ── --no-publish ───────────────────────────────────────────────────────────
+# Bring the tunnel up WITHOUT pointing the deployed app at it.
+#
+# Exists for the migration case (see MIGRATION.md): while a second instance is
+# being stood up on another machine, both it and this one can reach the same
+# Supabase. Publishing from the new box before it is verified would silently
+# move every user onto an unproven instance, and publishing from the old one
+# afterwards would drag them back. With this flag the new instance is fully
+# testable over its own URL while production carries on untouched, and cutover
+# becomes one deliberate PATCH rather than a race between two scripts.
+PUBLISH=1
+for arg in "$@"; do
+  case "$arg" in
+    --no-publish) PUBLISH=0 ;;
+    -h|--help) echo "usage: $0 [--no-publish]"; exit 0 ;;
+    *) echo "unknown option: $arg" >&2; echo "usage: $0 [--no-publish]" >&2; exit 1 ;;
+  esac
+done
+
 if ! docker ps --filter "name=arak-marketing-n8n" --filter "status=running" --format '{{.Names}}' | grep -q arak-marketing-n8n; then
   echo "arak-marketing-n8n container isn't running. Start it first:" >&2
   echo "  cd n8n/docker && docker compose up -d" >&2
@@ -43,6 +62,16 @@ echo
 # already uses. It never leaves this machine.
 publish_url() {
   local url="$1"
+  if [ "$PUBLISH" = "0" ]; then
+    echo
+    echo "▲ --no-publish: NOT pointing the app here. Tunnel is up at:"
+    echo "    $url"
+    echo "  Production still points wherever app_config.n8n_base_url says."
+    echo "  Test this instance directly against the URL above; cut over only"
+    echo "  when it passes (MIGRATION.md has the PATCH command)."
+    echo
+    return
+  fi
   local env_file="$(dirname "$0")/.env"
   local sb_url sb_key
   sb_url=$(grep -E '^SUPABASE_URL=' "$env_file" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'")
