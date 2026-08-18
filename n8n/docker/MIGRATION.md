@@ -6,6 +6,29 @@ untouched until the new one is proven.
 
 Written 2026-08-18 against n8n 2.33.3, 21 workflows.
 
+> ## ✅ Migration complete — 2026-08-18
+>
+> Production runs on the 24/7 box, reached at a permanent `*.ngrok-free.dev`
+> address held in `app_config.n8n_base_url`. Verified from outside: **20/20
+> webhooks registered**, the secret guard rejecting unsigned calls and passing
+> signed ones, and the three retired Instagram paths returning 404.
+>
+> **The Mac is stood down.** Its container is stopped and its cloudflared tunnel
+> killed, which is what ended the double-scheduler overlap in §0.2. No damage
+> came of that overlap — there were no `pending` video rows at any point during
+> it, so the two reconcilers never had anything to race over.
+>
+> The steps below are kept as the record of how this was done, and as the
+> procedure for rebuilding the box or standing up another one.
+>
+> **Two standing rules now that the Mac is not production:**
+> 1. Never run `start-tunnel.sh` here without `--no-publish` — it rewrites
+>    `app_config.n8n_base_url` and takes production back.
+> 2. Restarting the Mac's container for local work is fine, but leave
+>    `Zernio Sync` and `Creative Video Reconcile` **inactive** on it. They are
+>    schedule-triggered (Reconcile every 2 minutes) and would double-process the
+>    same Supabase rows all over again.
+
 **Read [Step 0](#step-0--the-three-things-that-will-bite-you) before running
 anything.** Two of the three are silent failures — they look like success.
 

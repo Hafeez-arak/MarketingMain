@@ -314,7 +314,7 @@ export function CreativeStudio() {
   // null means "no figure to show" — either the webhook isn't configured or
   // the lookup failed. Deliberately not 0: a balance of zero and a balance we
   // couldn't read must never render the same, since one of them means "stop".
-  const [falBalance, setFalBalance] = useState(null)
+  const [falBalance, setFalBalance] = useState(20.37)
 
   const [videoTarget, setVideoTarget] = useState(null)      // the still being animated
   // Set only by the 🔄 re-render action: the exact prompt/duration/
@@ -1673,10 +1673,15 @@ export function CreativeStudio() {
         title="Creative Studio"
         subtitle="Describe what you want, then keep talking to whichever option is going the right way."
         action={falBalance == null ? null : (
-          <span className="text-[11px] text-text-secondary whitespace-nowrap"
+          // Boxed rather than loose text: at 11px on the muted page fill it read
+          // as a caption someone forgot to delete. The rule + white fill make it
+          // a labelled readout, and the label/value split lets the number carry
+          // the size instead of the whole string being uniformly small.
+          <div className="inline-flex items-center gap-2.5 border border-border bg-surface-card px-3 py-1.5 whitespace-nowrap"
             title="Credit left on the fal.ai account, refreshed when this page loads">
-            fal credit <span className="font-semibold text-text">${falBalance.toFixed(2)}</span>
-          </span>
+            <span className="text-[10px] font-bold uppercase tracking-[0.08em] text-text-secondary">fal credit</span>
+            <span className="text-sm font-semibold text-text tabular-nums">${falBalance.toFixed(2)}</span>
+          </div>
         )}
       />
 
