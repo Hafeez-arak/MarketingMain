@@ -48,36 +48,6 @@ function SupabaseConfig() {
 // ─── Workflow Webhooks ─────────────────────────────────────────────────────
 const WORKFLOW_CONFIGS = [
   {
-    platform: 'instagram',
-    label: 'Instagram Workflow',
-    placeholder: 'https://your-instance.app.n8n.cloud/webhook/arak-instagram',
-    description: 'Triggers AI content generation — captions, images, style switching.',
-    icon: (
-      <div className="w-8 h-8 flex items-center justify-center flex-shrink-0"
-        style={{ background: '#E1306C' }}>
-        <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24">
-          <rect x="2" y="2" width="20" height="20" rx="5"/>
-          <path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/>
-          <line x1="17.5" y1="6.5" x2="17.51" y2="6.5"/>
-        </svg>
-      </div>
-    ),
-  },
-  {
-    platform: 'instagramReels',
-    label: 'Instagram Reels Webhook',
-    placeholder: 'https://your-instance.app.n8n.cloud/webhook/arak-instagram-reels',
-    description: 'Triggers the Reels workflow — FLUX cover image + Wan 2.5 I2V video generation.',
-    icon: (
-      <div className="w-8 h-8 flex items-center justify-center flex-shrink-0"
-        style={{ background: '#E1306C' }}>
-        <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24">
-          <polygon points="5 3 19 12 5 21 5 3"/>
-        </svg>
-      </div>
-    ),
-  },
-  {
     platform: 'campaignPlanner',
     label: 'Campaign Planner Workflow',
     placeholder: 'https://your-instance.app.n8n.cloud/webhook/arak-campaign-planner',
@@ -87,17 +57,6 @@ const WORKFLOW_CONFIGS = [
         <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24">
           <path d="M12 3v3m0 12v3m9-9h-3M6 12H3m15.36-6.36l-2.12 2.12M8.76 15.24l-2.12 2.12m12.72 0l-2.12-2.12M8.76 8.76L6.64 6.64"/>
         </svg>
-      </div>
-    ),
-  },
-  {
-    platform: 'instagramPlanGen',
-    label: 'Instagram Plan Generation',
-    placeholder: 'https://your-instance.app.n8n.cloud/webhook/arak-ig-plan-generation',
-    description: 'When a plan is approved, generates each approved Instagram idea (caption + image) into pending_review, ready to review before scheduling.',
-    icon: (
-      <div className="w-8 h-8 flex items-center justify-center flex-shrink-0" style={{ background: '#E1306C' }}>
-        <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><rect x="2" y="2" width="20" height="20" rx="5"/><circle cx="12" cy="12" r="4"/><circle cx="17.5" cy="6.5" r="1"/></svg>
       </div>
     ),
   },

@@ -1,14 +1,16 @@
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './supabaseClient'
 import { describeWebhookFailure } from './n8nWebhooks'
+import { tableForPlatform } from './studioBridge'
+import { markIdeasDrafting, fetchIdeaDrafts, updateIdea } from './contentPlans'
 
 // ─── Campaign Planner ───────────────────────────────────────────────────────
 // Turns a single stated goal into a set of dated, platform-specific post
-// ideas, then drops each one into the SAME schedule table (instagram_schedule)
-// that manual scheduling already writes to. Nothing
-// downstream needs to change — whatever already turns a "pending" schedule
-// row into a finished post keeps working exactly as before. This module only
-// decides WHAT to post and WHEN; it never talks to the generation webhooks
-// directly.
+// ideas. This module decides WHAT to post and WHEN; it does not write post
+// rows — publishIdeasAsPosts in studioBridge does that, at finalize.
+//
+// It no longer writes to instagram_schedule either. That table backed the old
+// manual-scheduling path, and writeCampaignPosts (its only writer here) was
+// dead code by the time the Instagram generation workflows were retired.
 
 const INSTAGRAM_TONE_FALLBACK = 'professional'
 
@@ -178,22 +180,30 @@ export async function requestVideoRender(webhookUrl, payload) {
 }
 
 // Batch-trigger every approved video-format idea's render, all at once —
-// "Finalize" pulls together every outstanding video render in a single
-// action. Real sequencing constraint: Generate Post uploads each idea's
-// cover image ASYNCHRONOUSLY (the initial requestPlanContentGeneration
-// call only means "accepted", not "done") — firing video-render
-// immediately after would race an empty cover_image_url. Each idea polls
-// its OWN post row (up to ~2 min) until a cover appears, then fires.
-// Never awaited by the caller — this runs in the background; the UI
-// doesn't block on video rendering to consider Finalize done.
+// "Finalize" pulls together every outstanding video render in a single action.
+//
+// The poll below is kept even though the race that motivated it is gone. It
+// existed because Generate Post uploaded each cover image asynchronously, so
+// firing a render immediately after finalize could catch an empty
+// cover_image_url. Finalize now writes the post row itself, cover included,
+// before this runs — so in the normal case the first poll finds the cover and
+// returns straight away. What it still buys is the case where the cover is
+// mid-upload from Studio; the cost when it isn't is one 5s tick.
+//
+// Never awaited by the caller — this runs in the background; the UI doesn't
+// block on video rendering to consider Finalize done.
 export async function triggerVideoRenders({ webhooks, videoIdeas, accessToken }) {
   const videoRenderUrl = webhooks?.videoRender
   if (!videoRenderUrl || !videoIdeas?.length) return
-  const TABLES = { instagram: 'instagram_generated_posts' }
   const headers = { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${accessToken || SUPABASE_ANON_KEY}` }
 
   async function waitForCoverThenRender(idea) {
-    const table = TABLES[idea.platform] || TABLES.instagram
+    // Resolved through studioBridge rather than a local map. This used to
+    // hardcode instagram_generated_posts, which is now frozen history — a
+    // hardcoded lookup would poll a table the row can never appear in, wait
+    // out the full two minutes, and give up silently with no render and no
+    // error. tableForPlatform is the one place that mapping lives.
+    const table = tableForPlatform(idea.platform) || 'generated_posts'
     const deadline = Date.now() + 2 * 60 * 1000
     let coverUrl = ''
     while (Date.now() < deadline && !coverUrl) {
@@ -214,134 +224,107 @@ export async function triggerVideoRenders({ webhooks, videoIdeas, accessToken })
   Promise.allSettled(videoIdeas.map(waitForCoverThenRender))
 }
 
-// Fire the approved plan's ideas at the per-platform Plan Generation
-// webhooks. Each webhook responds immediately ("accepted") and then generates
-// every idea in the background (caption + image) into the *_generated_posts
-// tables with status 'pending_review' — so the browser never waits on a long
-// batch, and posts appear in the review list as they finish. Ideas are split
-// Instagram is the only platform with a generation pipeline.
-export async function requestPlanContentGeneration({ webhooks, planId, instructions, ideas, workspaceId, captionLanguage, brand_name, brand_descriptor }) {
-  const byPlatform = { instagram: [] }
-  for (const idea of ideas) {
-    byPlatform.instagram.push({
-      plan_idea_id:         idea.id,
-      title:                idea.title || idea.topic || '',
-      topic:                idea.angle ? `${idea.topic} — ${idea.angle}` : idea.topic,
-      angle:                idea.angle || '',
-      tone:                 idea.tone || '',
-      style:                idea.suggestedStyle || idea.style || 'photorealistic',
-      // aspectRatio is the human-editable, authoritative field (postFormats
-      // system) — suggestedAspectRatio is AI telemetry only and must not
-      // win over it.
-      aspect_ratio:         idea.aspectRatio || idea.suggestedAspectRatio || '1:1',
-      design_tip:           idea.designTip || '',
-      // Freeform human direction for the visual — passed straight to the
-      // image step so it overrides/augments the generic design_tip.
-      image_idea:           idea.imageIdea || '',
-      // What KIND of post to make: caption_only / image_only / caption_image /
-      // carousel / text_image — decided at plan time, drives the whole flow.
-      post_kind:            idea.postKind || 'caption_image',
-      slide_count:          idea.slideCount || 1,       // carousel: how many slides
-      image_text:           idea.imageText || '',        // text_image: words to feature
-      // 'generate' → AI makes the image (references guide it, image-to-image);
-      // 'use_reference' → skip AI, reference_image_urls ARE the post image(s).
-      image_mode:           idea.imageMode || 'generate',
-      occasion:             idea.occasion || '',
-      content_pillar:       idea.pillar || '',
-      objective:            idea.objective || '',
-      cta:                  idea.cta || '',
-      // Human-set at plan time — overrides the AI's own hashtag/first-comment
-      // choice at generation time when present (empty string means "AI decides").
-      hashtags:             idea.hashtags || '',
-      first_comment:        idea.firstComment || '',
-      scheduled_date:       idea.date || null,
-      publish_time:         idea.time || idea.publishTime || '10:00',
-      reference_image_urls: idea.references || [],
-      // Already picked (or hand-edited) during review, if this idea went
-      // through Draft Copy / Media Options — Generate Post commits these
-      // instead of generating fresh ones. Empty for ideas approved without
-      // that review flow, so the engine's existing full-generation path is
-      // unaffected for those.
-      caption_ar:           idea.captionAr || '',
-      caption_en:           idea.captionEn || '',
-      media_prompt:         idea.mediaPrompt || '',
-      preview_image_url:    idea.previewImageUrl || '',
-      // Routing signal only, never persisted to the DB row — which field
-      // the uploaded preview image lands in (cover_image_url for video,
-      // image_url/image_urls for everything else). See Aggregate Uploaded
-      // Images in gen_workflows.py.
-      media_type:           idea.mediaType || 'image',
-    })
-  }
+// ─── Guaranteeing copy before a plan is finalised ──────────────────────────
+// This replaced requestPlanContentGeneration, which fired the plan's approved
+// ideas at the Instagram Plan Generation workflow and let n8n write both the
+// caption AND the image into a post row in the background.
+//
+// That workflow is gone. Creative Studio is the only thing that makes an
+// image now, and the post row is written directly by publishIdeasAsPosts from
+// what the idea already carries. Which leaves exactly one gap: the old path
+// guaranteed a caption existed, because it wrote one. Nothing else did.
+//
+// So this closes that gap and nothing else. An approved idea reaches finalize
+// with a caption already on it in the normal case — Draft Copy runs at review
+// time and the reviewer picks one, which writes caption_en/caption_ar onto
+// plan_ideas. This handles the ideas that slipped through: approved without a
+// caption ever being chosen, or drafted while the reviewer was elsewhere.
+//
+// Deliberately auto-selects the first option rather than blocking finalize and
+// sending someone back to the board. A caption nobody chose is still reviewable
+// — every post lands in Approvals as pending_review, with the words right
+// there next to the picture, which is the check that actually matters. An
+// empty caption is not reviewable in the same way; it is a hole that only
+// shows up at publish time.
+export async function ensureCaptions({ draftCopyUrl, ideas, accessToken, buildPayload, timeoutMs = 90000, pollMs = 4000 }) {
+  const list = ideas || []
+  const wantsCopy = i => i.wantsCaption !== false
+  const hasCopy   = i => !!((i.captionEn || '').trim() || (i.captionAr || '').trim())
 
-  const targets = [
-    { platform: 'instagram', url: webhooks?.instagramPlanGen, ideas: byPlatform.instagram },
-  ].filter(t => t.ideas.length > 0)
+  // An idea that deliberately has no caption (image-only post) is not missing
+  // one — leave it alone rather than drafting words nobody asked for.
+  const missing = list.filter(i => wantsCopy(i) && !hasCopy(i))
+  if (!missing.length) return { ideas: list, errors: [] }
 
-  if (targets.length === 0) return { error: 'No approved ideas to generate.' }
+  const errors = []
+  const resolved = new Map()   // idea id -> { captionEn, captionAr }
 
-  const results = []
-  for (const t of targets) {
-    if (!t.url) { results.push({ platform: t.platform, ok: false, error: `No ${t.platform} Plan Generation webhook configured (Settings → Integrations).` }); continue }
-    try {
-      const res = await fetch(t.url, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          plan_id: planId, instructions: instructions || '',
-          workspace_id: workspaceId || null,
-          caption_language: captionLanguage || 'both',
-          // Who the posts are actually for. Prepare Batch fans these out to
-          // every idea, so the persona line in the cached prefix names this
-          // brand instead of a hardcoded one.
-          brand_name: brand_name || '',
-          brand_descriptor: brand_descriptor || '',
-          ideas: t.ideas,
-        }),
-      })
-      results.push({ platform: t.platform, count: t.ideas.length, ok: res.ok, error: res.ok ? null : `Webhook returned ${res.status}` })
-    } catch (err) {
-      results.push({ platform: t.platform, ok: false, error: err.message })
+  // First pass, free: some of these already have drafted options sitting
+  // unpicked from review. No webhook needed, no waiting — take option one.
+  const stillMissing = []
+  for (const idea of missing) {
+    const opt = (idea.captionOptions || [])[0]
+    if (opt && (opt.caption_en || opt.caption_ar)) {
+      resolved.set(idea.id, { captionEn: opt.caption_en || '', captionAr: opt.caption_ar || '' })
+    } else {
+      stillMissing.push(idea)
     }
   }
-  const failed = results.filter(r => !r.ok)
-  return { ok: failed.length === 0, results, failedCount: failed.length }
+
+  // Second pass: actually draft the rest.
+  if (stillMissing.length) {
+    if (!draftCopyUrl) {
+      // Named individually rather than as a count — "3 ideas have no caption"
+      // sends someone hunting through a month of cards to find which three.
+      for (const i of stillMissing) errors.push(`${i.title || i.topic || 'Untitled idea'}: no caption, and the Draft Copy webhook isn't configured (Settings → Integrations).`)
+      return { ideas: applyCaptions(list, resolved), errors }
+    }
+
+    const ids = stillMissing.map(i => i.id)
+    await markIdeasDrafting(accessToken, ids)
+    await Promise.allSettled(stillMissing.map(idea => requestDraftCopy(draftCopyUrl, buildPayload(idea))))
+
+    // Poll plan_ideas rather than trusting the webhook's response: Draft Copy
+    // answers "accepted" immediately and writes caption_options later, which
+    // is the whole reason the board polls too.
+    const deadline = Date.now() + timeoutMs
+    const pending = new Set(ids)
+    while (pending.size && Date.now() < deadline) {
+      await new Promise(r => setTimeout(r, pollMs))
+      const rows = await fetchIdeaDrafts(accessToken, [...pending])
+      for (const row of rows) {
+        // 'drafting' is the only non-terminal state, and markIdeasDrafting set
+        // every one of these to it before firing — so a row that has left it
+        // has finished, whatever it finished with. Anything else here is
+        // terminal, including 'ready' with no usable option: waiting longer
+        // cannot produce one, and treating that as "keep polling" would spin
+        // out the whole timeout before reporting a failure already known.
+        if (row.draft_status === 'drafting') continue
+        const opt = (row.caption_options || [])[0]
+        if (opt && (opt.caption_en || opt.caption_ar)) {
+          resolved.set(row.id, { captionEn: opt.caption_en || '', captionAr: opt.caption_ar || '' })
+        }
+        pending.delete(row.id)
+      }
+    }
+
+    for (const idea of stillMissing) {
+      if (!resolved.has(idea.id)) {
+        errors.push(`${idea.title || idea.topic || 'Untitled idea'}: couldn't write a caption for this one.`)
+      }
+    }
+  }
+
+  // Persist, so the caption survives a reload and the board shows what was
+  // actually used — the post row is written from these same values below.
+  await Promise.allSettled([...resolved.entries()].map(([id, c]) =>
+    updateIdea(accessToken, id, { caption_en: c.captionEn, caption_ar: c.captionAr })
+  ))
+
+  return { ideas: applyCaptions(list, resolved), errors }
 }
 
-// Write the (human-reviewed) plan into Supabase, one row per post, tagged
-// with the campaign id. Returns per-row results so a partial failure doesn't
-// silently lose posts — the caller can show exactly which ones need retrying.
-export async function writeCampaignPosts(workspaceId, accessToken, campaignId, posts, instructions) {
-  if (!workspaceId) return { error: 'No active workspace. Try signing out and back in.' }
-  const headers = {
-    apikey: SUPABASE_ANON_KEY,
-    Authorization: `Bearer ${accessToken || SUPABASE_ANON_KEY}`,
-    'Content-Type': 'application/json',
-  }
-  const results = []
-
-  for (const post of posts) {
-    const body = {
-      workspace_id:   workspaceId,
-      scheduled_date: post.date,
-      topic:          post.angle ? `${post.topic} — ${post.angle}` : post.topic,
-      tone:           post.tone || INSTAGRAM_TONE_FALLBACK,
-      visual_mode:    'lighting',
-      style:          post.suggestedStyle       || 'photorealistic',
-      aspect_ratio:   post.suggestedAspectRatio || '1:1',
-      notes:          post.designTip ? `Generated from Campaign Automation. Design tip: ${post.designTip}` : 'Generated from Campaign Automation',
-      instructions:   instructions || null,
-      campaign_id:    campaignId,
-      upload_type:    'generate',
-      reference_image_urls: post.references || [],
-      status:         'pending',
-    }
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/instagram_schedule`, {
-      method: 'POST', headers: { ...headers, Prefer: 'return=representation' },
-      body: JSON.stringify(body),
-    })
-    results.push({ post, ok: res.ok, error: res.ok ? null : await res.text() })
-  }
-
-  const failed = results.filter(r => !r.ok)
-  return { ok: failed.length === 0, results, failedCount: failed.length }
+function applyCaptions(ideas, resolved) {
+  if (!resolved.size) return ideas
+  return ideas.map(i => resolved.has(i.id) ? { ...i, ...resolved.get(i.id) } : i)
 }

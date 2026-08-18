@@ -39,9 +39,7 @@ export const AppContext = createContext(null)
 // Settings. Slots with no deployed workflow still resolve to '' — see the
 // note on WEBHOOK_PATHS.
 export const WEBHOOK_SLOTS = [
-  'instagram',
-  'instagramReels',
-  'campaignPlanner', 'instagramPlanGen',
+  'campaignPlanner',
   'elongateIdea', 'captionStudio', 'draftCopy', 'mediaOptions',
   'videoRender',
   'publishPost', 'zernioSync', 'zernioDashboard',

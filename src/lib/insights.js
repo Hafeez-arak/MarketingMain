@@ -1,4 +1,5 @@
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './supabaseClient'
+import { POST_TABLES } from './scheduledPosts'
 
 // ─── Insights ──────────────────────────────────────────────────────────────
 // Reads the two logs the rest of the loop writes — idea_events (what people
@@ -14,6 +15,10 @@ import { SUPABASE_URL, SUPABASE_ANON_KEY } from './supabaseClient'
 // EVERY query below carries its own workspace_id filter. RLS on these tables
 // is per-USER, and the operators belong to all three workspaces — so RLS
 // alone would happily return every brand's rows at once.
+
+// post_analytics.post_table is a discriminator, not a foreign key, so a metric
+// row can name a table that no longer exists or never mattered here.
+const KNOWN_POST_TABLES = new Set(POST_TABLES)
 
 function authHeaders(accessToken) {
   return { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${accessToken || SUPABASE_ANON_KEY}` }
@@ -86,20 +91,29 @@ export async function fetchIdeasForInsights(workspaceId, accessToken, limit = 10
 // two sides are fetched separately and stitched below.
 export async function fetchPerformance(workspaceId, accessToken) {
   if (!workspaceId) return { metrics: [], posts: [] }
-  const [metrics, posts] = await Promise.all([
+  const [metrics, ...postSets] = await Promise.all([
     getJson(
       `${SUPABASE_URL}/rest/v1/post_analytics?workspace_id=eq.${workspaceId}` +
       `&select=post_id,post_table,platform,metric_date,impressions,reach,likes,comments,` +
       `shares,saves,clicks,views,metrics_present&order=metric_date.desc&limit=2000`,
       accessToken,
     ),
-    getJson(
-      `${SUPABASE_URL}/rest/v1/instagram_generated_posts?workspace_id=eq.${workspaceId}` +
+    // Both post tables, not just Instagram's. Instagram used to be the only
+    // platform with a generation pipeline, so its table was the only place a
+    // measurable post could exist. That stopped being true when Creative
+    // Studio became the sole generation path: new Instagram posts are written
+    // to generated_posts alongside TikTok and Snapchat, and
+    // instagram_generated_posts is frozen history. Reading only the frozen
+    // table would leave this page slowly going stale — still showing numbers,
+    // just never any new ones, which is the kind of wrong that does not look
+    // wrong.
+    ...POST_TABLES.map(table => getJson(
+      `${SUPABASE_URL}/rest/v1/${table}?workspace_id=eq.${workspaceId}` +
       `&select=id,plan_idea_id,published_at&limit=2000`,
       accessToken,
-    ),
+    )),
   ])
-  return { metrics, posts }
+  return { metrics, posts: postSets.flat() }
 }
 
 // ─── Triggering a review ───────────────────────────────────────────────────
@@ -272,8 +286,14 @@ export function summarisePerformance({ metrics, posts }, ideas) {
   // its current standing, and summing them would count the same likes once
   // per sync.
   const latestByPost = new Map()
+  // Any KNOWN post table, not just Instagram's. The point of this guard is to
+  // drop metric rows pointing at a table this page does not understand (a
+  // dropped platform's leftovers, say) — not to be Instagram-only. Since
+  // Instagram posts now land in generated_posts, keeping the old equality
+  // check here would discard every new post's numbers while still returning a
+  // confident-looking summary built from the frozen history alone.
   for (const m of metrics) {
-    if (m.post_table !== 'instagram_generated_posts' || !m.post_id) continue
+    if (!KNOWN_POST_TABLES.has(m.post_table) || !m.post_id) continue
     const seen = latestByPost.get(m.post_id)
     if (!seen || String(m.metric_date) > String(seen.metric_date)) latestByPost.set(m.post_id, m)
   }

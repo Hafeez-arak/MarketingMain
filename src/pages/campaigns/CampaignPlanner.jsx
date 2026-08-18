@@ -11,7 +11,7 @@ import {
 import { buildContext, fetchBrandMemory, logIdeaEvent, logIdeaEvents, ideaSnapshot } from '../../lib/brandContext'
 import { fetchBrandSchema, fetchDirectoryRows } from '../../lib/brandSchema'
 import { fetchBrandAssets } from '../../lib/brandAssets'
-import { requestCampaignPlan, requestPlanContentGeneration, elongateIdea, requestDraftCopy, triggerVideoRenders } from '../../lib/campaignPlanner'
+import { requestCampaignPlan, ensureCaptions, elongateIdea, requestDraftCopy, triggerVideoRenders } from '../../lib/campaignPlanner'
 import {
   formatsFor, defaultFormat, aspectRatiosFor, defaultAspectRatio, slideRange, aspectLabel,
   stylesFor, derivePostKind,
@@ -20,7 +20,7 @@ import { momentsInRange, dbIdeaToDraft } from '../../lib/campaignPlan'
 import { ReferencePicker } from '../../components/ReferencePicker'
 import {
   createPlan, insertIdeas, updateIdea, setAllIdeaStatus, deleteIdea, updatePlan, markIdeasProcessing,
-  fetchPastIdeas, fetchPlanWithIdeas, markIdeasDrafting, fetchIdeaDrafts,
+  markIdeasGenerated, fetchPastIdeas, fetchPlanWithIdeas, markIdeasDrafting, fetchIdeaDrafts,
 } from '../../lib/contentPlans'
 import { IdeaDraftPanel } from '../../components/IdeaDraftPanel'
 import { BrandContextPanel } from '../../components/BrandContextPanel'
@@ -172,9 +172,10 @@ const DEFAULT_DRAFT = {
   // its own images + generate-vs-use-image choice — set now or refined later
   // on the board (same field, same picker, just a different moment).
   seedPosts: [],            // { text, platform, format, references: [], imageMode: 'generate' }
-  name: '', ideas: [], planId: null, pushResult: null,
-  // What the manual half of finalize did, when there was one. Separate from
-  // pushResult because the two halves succeed and fail independently.
+  name: '', ideas: [], planId: null,
+  // What finalize wrote: how many post rows exist, plus anything that needed
+  // saying (a caption that couldn't be drafted, a row that wouldn't save).
+  // There is no second, asynchronous half to report on any more.
   manualResult: null,
 }
 
@@ -918,7 +919,7 @@ export function CampaignPlanner() {
   const [moreLoading,   setMoreLoading]   = useState(false)
   const [moreError,     setMoreError]     = useState('')
 
-  const { step, month, goal, goalCategory, platforms, startDate, endDate, approxCount, includeHolidays, brandBrainSections, featuredProductIds, seedPosts, name, ideas, planId, pushResult, manualResult, postingDays, defaultTime, aiAssist, contentMixTarget, openedFromPlanList } = draft
+  const { step, month, goal, goalCategory, platforms, startDate, endDate, approxCount, includeHolidays, brandBrainSections, featuredProductIds, seedPosts, name, ideas, planId, manualResult, postingDays, defaultTime, aiAssist, contentMixTarget, openedFromPlanList } = draft
 
   // What the plan call will actually be given, for the preview panel. Same
   // builder as the payload — see contextFor below.
@@ -1498,86 +1499,94 @@ export function CampaignPlanner() {
     setTimeout(() => setAutoEditId(null), 400)
   }
 
-  // Finalising a plan turns approved ideas into real post rows — and there are
-  // two genuinely different ways for that to happen, which is why this
-  // partitions rather than doing one thing.
+  // Finalising a plan turns approved ideas into real post rows.
   //
-  //   copy_mode 'own' → the words are already written. The row is written HERE,
-  //                     directly, with no webhook. This is what makes a fully
-  //                     manual plan possible with no n8n configured at all.
-  //   copy_mode 'ai'  → the idea is a brief. It goes to the Plan Generation
-  //                     webhooks exactly as it always has.
+  // This used to partition on copy_mode: 'own' ideas were written here
+  // directly, while 'ai' ideas were fired at the Instagram Plan Generation
+  // workflow, which wrote caption AND image into a post row in the background.
+  // That workflow is retired — Creative Studio is the only thing that makes an
+  // image now — so BOTH halves take the same, single path: the row is written
+  // here, from what the idea already carries.
   //
-  // A plan can hold both, and a mixed plan must not fail on one side because
-  // the other is unconfigured — so the AI half is only attempted when there is
-  // an AI half.
+  // copy_mode still means something, just not about which path runs. It is the
+  // difference between words a person typed and words a model drafted, and it
+  // decides provenance on the row (see sourceForIdea) rather than routing.
+  //
+  // The one thing the old AI path did that nothing else did was GUARANTEE a
+  // caption existed. ensureCaptions now does exactly that and nothing more.
   async function finalizePlan() {
     const approved = ideas.filter(i => i.status === 'approved')
     if (approved.length === 0) { setError('Approve at least one idea before finalizing the plan.'); return }
     setError(''); setBusy(true)
 
-    const ownIdeas = approved.filter(i => i.copyMode === 'own')
-    const aiIdeas  = approved.filter(i => i.copyMode !== 'own')
+    // Mark the briefed ones 'processing' before any of the waiting starts —
+    // durable and instant, so Post Approvals shows real state on reload rather
+    // than only while this tab stays open. An idea whose words were typed by
+    // hand is never marked: nothing is being generated for it.
+    await markIdeasProcessing(accessToken, planId, { copyMode: 'ai' })
 
-    // ── The operator's own posts ──
-    // Written first, and deliberately so: it is the half that cannot fail for
-    // configuration reasons, and if the AI half then fails these are already
-    // safe rather than lost with it.
-    let manualPosts = []
-    let manualWarnings = []
-    if (ownIdeas.length) {
-      const res = await publishIdeasAsPosts(activeWorkspaceId, accessToken, planId, ownIdeas)
-      if (res.error) { setBusy(false); setError(`Your posts couldn't be saved: ${res.error}`); return }
-      manualPosts = res.posts || []
-      manualWarnings = res.errors || []
+    // ── Make sure every idea that wants a caption has one ──
+    const captionLanguage = state.brandProfile?.captionLanguage || 'both'
+    const { ideas: readyIdeas, errors: captionErrors } = await ensureCaptions({
+      draftCopyUrl: state.webhooks?.draftCopy,
+      ideas: approved,
+      accessToken,
+      buildPayload: idea => {
+        // Per idea, not per batch — same reasoning as draftIdeas above: a
+        // large brand directory reaches the prompt as a bare name index, so
+        // what the featured service actually is only arrives if THIS idea's
+        // brief is what selects it.
+        const ctx = contextFor('caption', { matchText: [idea.topic, idea.title, idea.angle, idea.imageIdea] })
+        return {
+          plan_idea_id: idea.id, platform: idea.platform, topic: idea.topic, angle: idea.angle || '',
+          tone: idea.tone || '', objective: idea.objective || '', cta: idea.cta || '',
+          occasion: idea.occasion || '', content_pillar: idea.pillar || '',
+          format: idea.postFormat, aspect_ratio: idea.aspectRatio, media_type: idea.mediaType,
+          wants_caption: idea.wantsCaption, image_idea: idea.imageIdea || '',
+          caption_language: captionLanguage, instructions: ctx.instructions,
+          brand_name: ctx.brand_name, brand_descriptor: ctx.brand_descriptor,
+        }
+      },
+    })
+
+    // ── Write the rows ──
+    const res = await publishIdeasAsPosts(activeWorkspaceId, accessToken, planId, readyIdeas)
+    if (res.error) {
+      // Nothing was written — put the ideas back to a state that offers Retry
+      // instead of leaving them spinning on a batch that already gave up.
+      await markIdeasGenerated(accessToken, readyIdeas.map(i => i.id), { status: 'failed', error: res.error })
+      setBusy(false); setError(`The posts couldn't be saved: ${res.error}`); return
     }
+    const posts = res.posts || []
 
-    // ── The briefed ones ──
-    let pushResult = null
-    if (aiIdeas.length) {
-      const brandCtx = contextFor('caption')
-      const instructions = brandCtx.instructions
-      // Mark them 'processing' BEFORE firing the webhook — durable and instant,
-      // so Post Approvals shows real state even on reload, not just while this
-      // tab stays open waiting for n8n's background generation. Scoped to the
-      // AI half so a manual post is never left waiting on a workflow that will
-      // never run for it.
-      await markIdeasProcessing(accessToken, planId, { copyMode: 'ai' })
+    // Clear 'processing' for the ideas that actually produced a row, and fail
+    // the ones that didn't. Nothing else does this now that the background
+    // workflow is gone (see markIdeasGenerated).
+    const wroteRow = new Set(posts.map(p => p.ideaId))
+    await markIdeasGenerated(accessToken, [...wroteRow])
+    const noRow = readyIdeas.filter(i => !wroteRow.has(i.id)).map(i => i.id)
+    if (noRow.length) await markIdeasGenerated(accessToken, noRow, { status: 'failed', error: 'No post row was written for this idea.' })
+    // A caption that couldn't be written is a warning, not a failure: the row
+    // exists, it is in Approvals, and someone can type the words there. Losing
+    // the whole finalize over it would throw away every row that did work.
+    const warnings = [...captionErrors, ...(res.errors || [])]
 
-      pushResult = await requestPlanContentGeneration({
-        webhooks: state.webhooks, planId, instructions, ideas: aiIdeas,
-        brand_name: brandCtx.brand_name, brand_descriptor: brandCtx.brand_descriptor,
-        workspaceId: activeWorkspaceId,
-        captionLanguage: state.brandProfile?.captionLanguage || 'both',
-      })
-      if (pushResult.error) {
-        setBusy(false)
-        // Said plainly rather than swallowed: the manual posts really are
-        // saved, and telling someone the whole finalize failed would send them
-        // to re-do work that is already done.
-        setError(manualPosts.length
-          ? `${manualPosts.length} of your own post${manualPosts.length === 1 ? '' : 's'} saved, but the AI-written ones failed: ${pushResult.error}`
-          : pushResult.error)
-        return
-      }
-    }
+    // 'active', not 'generating' — by the time this returns, every row exists.
+    // There is no background batch left to advance a progress state.
+    await updatePlan(accessToken, planId, { status: 'active' })
 
-    // 'generating' only when something actually is. A fully manual plan is
-    // finished the moment its rows exist, and leaving it 'generating' would
-    // show a progress state that nothing will ever advance.
-    await updatePlan(accessToken, planId, { status: aiIdeas.length ? 'generating' : 'active' })
-
-    // Batch-render every approved video-format idea at once — runs in the
-    // background (never awaited here), each polling for its own cover
-    // image to finish uploading before firing. See triggerVideoRenders.
-    // Manual ideas are excluded: their video is already made (Studio or
-    // upload), so rendering one would replace the operator's own footage.
+    // Video renders still run in the background, each polling for its own
+    // cover image before firing. Only for ideas whose video does not already
+    // exist — an idea with its own footage (Studio or upload) would have it
+    // replaced.
     triggerVideoRenders({
-      webhooks: state.webhooks, videoIdeas: aiIdeas.filter(i => i.mediaType === 'video'), accessToken,
+      webhooks: state.webhooks,
+      videoIdeas: readyIdeas.filter(i => i.mediaType === 'video' && i.copyMode !== 'own' && !i.previewVideoUrl),
+      accessToken,
     })
 
     setBusy(false)
-    update({ step: 'done', pushResult, manualResult: { count: manualPosts.length, warnings: manualWarnings } })
+    update({ step: 'done', manualResult: { count: posts.length, warnings } })
   }
 
   const brandReady = state.brandProfile && !isBrandProfileEmpty(state.brandProfile)
@@ -2199,26 +2208,22 @@ export function CampaignPlanner() {
             <svg className="w-7 h-7 text-sage-600" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
           </div>
           <div>
-            {/* The heading has to be true for a fully manual plan too — there
-                is nothing generating, and saying so would leave someone
-                watching Approvals for posts that already arrived complete. */}
+            {/* No "generating now" state any more. There is no background
+                batch left to wait on — every post row exists by the time this
+                screen renders, so promising more would send someone off to
+                watch Approvals for arrivals that already happened. */}
             <h2 className="text-lg font-bold text-text tracking-tight">
-              {pushResult ? 'Plan approved — generating content now.' : 'Plan approved — your posts are ready to review.'}
+              Plan approved — your posts are ready to review.
             </h2>
             <p className="text-sm text-text-secondary mt-1 max-w-md mx-auto">
-              <span className="font-semibold text-text">{approvedCount} idea{approvedCount === 1 ? '' : 's'}</span> approved for <span className="font-semibold text-text">{name}</span>.
+              <span className="font-semibold text-text">{approvedCount} idea{approvedCount === 1 ? '' : 's'}</span> approved for <span className="font-semibold text-text">{name}</span>
               {manualResult?.count > 0 && (
-                <> <span className="font-semibold text-text">{manualResult.count} written by you</span> {manualResult.count === 1 ? 'is' : 'are'} already sitting in Post Approvals, exactly as you typed {manualResult.count === 1 ? 'it' : 'them'}.</>
-              )}
-              {pushResult && pushResult.failedCount === 0
-                ? ' The rest are being generated now (caption + image for each). This takes a few minutes — open Post Approvals and watch them appear as they\'re ready, where you can approve, reject, or regenerate each before scheduling.'
-                : pushResult
-                  ? ` ${pushResult.results.filter(r => r.ok).map(r => `${r.count} ${r.platform}`).join(', ') || '0'} sent to generate; some platforms failed — ${pushResult.results.filter(r => !r.ok).map(r => r.error).join(' ')}`
-                  : ' Nothing was sent to AI — open Post Approvals to check them over and schedule.'}
+                <>, and <span className="font-semibold text-text">{manualResult.count} post{manualResult.count === 1 ? '' : 's'}</span> {manualResult.count === 1 ? 'is' : 'are'} waiting in Post Approvals</>
+              )}. Check the caption against the picture there, then approve and schedule.
             </p>
             {manualResult?.warnings?.length > 0 && (
               <p className="text-xs text-red-600 mt-2 max-w-md mx-auto">
-                Some didn't save: {manualResult.warnings.join(' · ')}
+                Needs a look: {manualResult.warnings.join(' · ')}
               </p>
             )}
           </div>

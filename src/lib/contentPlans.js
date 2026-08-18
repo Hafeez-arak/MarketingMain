@@ -265,6 +265,26 @@ export async function markIdeasProcessing(accessToken, planId, { copyMode } = {}
   } catch (err) { return { error: err.message } }
 }
 
+// The other end of markIdeasProcessing, and the reason it needs one.
+//
+// 'processing' used to be cleared by the Instagram Plan Generation workflow
+// when it finished writing the post row. That workflow is gone and finalize
+// writes the row itself — so without this, every finalized idea would sit at
+// generation_status='processing' forever and Approvals would show a spinner
+// (then a "stale" warning) next to a post that has been sitting there,
+// finished, the whole time.
+export async function markIdeasGenerated(accessToken, ideaIds, { status = 'completed', error = '' } = {}) {
+  if (!ideaIds?.length) return { ok: true }
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/plan_ideas?id=in.(${ideaIds.join(',')})`, {
+      method: 'PATCH',
+      headers: { ...authHeaders(accessToken), 'Content-Type': 'application/json', Prefer: 'return=minimal' },
+      body: JSON.stringify({ generation_status: status, generation_error: error }),
+    })
+    return { ok: res.ok }
+  } catch (err) { return { error: err.message } }
+}
+
 export async function markIdeaProcessing(accessToken, ideaId) {
   try {
     await fetch(`${SUPABASE_URL}/rest/v1/plan_ideas?id=eq.${ideaId}`, {
