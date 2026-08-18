@@ -3460,6 +3460,27 @@ For each: asks fal for that request's real status.
 Rows from before this fix existed have no `pendingRequest` and are skipped —
 nothing to reconcile against.
 
+### Images too, since 2026-08-18 — but only to clear them
+
+The name still says "Video" on purpose: renaming the workflow would stop
+`redeploy.sh` matching it by name, so the next deploy would import a SECOND
+copy on the same 2-minute schedule instead of updating this one. Not worth it.
+
+Images are swept on the same tick but cannot be recovered, and the difference
+is worth understanding before trusting it. Video goes through `queue.fal.run`,
+so a request id exists and the result can be fetched later. Image generation
+and editing call `fal.run` DIRECTLY and synchronously — no request id is ever
+recorded, so once the owning workflow dies there is nothing left to ask fal
+about and no way to get the picture back.
+
+So for `media_type = 'image'`: after 15 minutes the row is marked `failed`
+with an honest "this was interrupted, press Retry". No fal call is made. 15
+minutes because n8n caps a Code node at `N8N_RUNNERS_TASK_TIMEOUT` (600s), so
+anything still pending past that plus margin is orphaned rather than slow.
+
+Added after a row sat `pending` for 25 hours with nothing in the system that
+would ever clear it.
+
 Needs env: FAL_KEY, SUPABASE_URL, SUPABASE_KEY."""
 
 CREATIVE_VIDEO_RECONCILE_JS = _CREATIVE_REQ_JS + r"""
@@ -3481,10 +3502,22 @@ async function patchRow(id, patch) {
 const STALE_MS = 3 * 60 * 1000;   // let the primary workflow's own poll finish first
 const GIVEUP_MS = 20 * 60 * 1000; // fal's queue doesn't hold a result forever either
 
+// Images are a different problem with a different answer, so they get their own
+// deadline. Image generation is SYNCHRONOUS — Creative Generate and Creative
+// Edit call fal.run directly, not queue.fal.run — so no request id is ever
+// recorded and there is nothing to ask fal about afterwards. A stuck image
+// therefore cannot be RECOVERED the way a stuck video can; it can only be
+// stopped from spinning. 15 minutes because n8n caps a Code node at
+// N8N_RUNNERS_TASK_TIMEOUT (600s, set in docker-compose.yml), so a row still
+// pending past that plus margin is certainly orphaned, not slow.
+const IMAGE_GIVEUP_MS = 15 * 60 * 1000;
+
 async function run() {
+  // Both media types in one sweep. `media_type` is selected now because the
+  // loop branches on it — before this it was implied by the filter.
   const rows = await req({ method: 'GET',
-    url: SUP + '/rest/v1/creative_versions?media_type=eq.video&status=eq.pending'
-      + '&select=id,session_id,created_at,overlay_state,provider,clip_role&order=created_at.asc&limit=25',
+    url: SUP + '/rest/v1/creative_versions?status=eq.pending'
+      + '&select=id,session_id,created_at,overlay_state,provider,clip_role,media_type&order=created_at.asc&limit=25',
     headers: { apikey: KEY, Authorization: 'Bearer ' + KEY }, json: true });
 
   const now = Date.now();
@@ -3499,6 +3532,27 @@ async function run() {
     // reconcile them against. They are provider 'manual'; a stitch row also
     // carries clip_role.
     if (row.provider === 'manual' || row.clip_role) continue;
+
+    // ── Images: clear the spinner, never claim to recover ────────────────
+    // Handled before the pendingRequest logic below because an image never
+    // has one — the generate/edit calls are synchronous, so there is no queued
+    // request to look up and no way to get the picture back. If the workflow
+    // that owned this row died, whatever fal may have produced is gone with
+    // it. The only honest thing left is to say so and let the operator retry,
+    // rather than leave a card spinning forever with no explanation (this is
+    // what left one row pending for 25 hours before this branch existed).
+    //
+    // No fal call is made here at all, which also makes this the free, safe
+    // way to prove the sweep is alive: insert a >15min pending image row and
+    // watch it flip to failed.
+    if (row.media_type === 'image') {
+      if (age > IMAGE_GIVEUP_MS) {
+        await patchRow(row.id, { status: 'failed',
+          error: 'This image never finished — the render was interrupted and cannot be recovered. Press Retry.' });
+        results.push({ id: row.id, outcome: 'failed-image-orphaned' });
+      }
+      continue;
+    }
 
     const pr = row.overlay_state && row.overlay_state.pendingRequest;
     if (!pr || !pr.requestId || !pr.model) {
