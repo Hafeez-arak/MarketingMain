@@ -12,11 +12,13 @@
 // n8n/workflows/ answers arak-instagram-schedule[-regen], so there
 // is nothing to point them at. Giving them a derived URL anyway would turn
 // today's honest "not configured yet" into a 404 at call time.
+//
+// The three Instagram generation slots (arak-instagram, arak-instagram-reels,
+// arak-ig-plan-generation) are gone for the same reason: their workflows were
+// retired when Creative Studio became the only generation path. Do not add
+// them back without a workflow to answer them.
 export const WEBHOOK_PATHS = {
-  instagram:        'arak-instagram',
-  instagramReels:   'arak-instagram-reels',
   campaignPlanner:  'arak-campaign-planner',
-  instagramPlanGen: 'arak-ig-plan-generation',
   elongateIdea:     'arak-elongate-idea',
   captionStudio:    'arak-caption-studio',
   draftCopy:        'arak-draft-copy',

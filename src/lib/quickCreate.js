@@ -1,5 +1,6 @@
-import { createPlan, insertIdeas, markIdeasDrafting, markIdeasProcessing } from './contentPlans'
-import { requestDraftCopy, requestPlanContentGeneration, triggerVideoRenders } from './campaignPlanner'
+import { createPlan, insertIdeas, markIdeasDrafting, markIdeasProcessing, markIdeasGenerated } from './contentPlans'
+import { requestDraftCopy, ensureCaptions, triggerVideoRenders } from './campaignPlanner'
+import { publishIdeasAsPosts } from './studioBridge'
 import { dbIdeaToDraft } from './campaignPlan'
 import { derivePostKind, slideRange } from './postFormats'
 
@@ -64,11 +65,32 @@ export async function createQuickPost({
 // just for one idea instead of a batch of approved ones.
 export async function finalizeQuickPost({ webhooks, planId, idea, instructions, workspaceId, captionLanguage, accessToken }) {
   await markIdeasProcessing(accessToken, planId)
-  const result = await requestPlanContentGeneration({
-    webhooks, planId, instructions, ideas: [idea], workspaceId, captionLanguage,
+
+  // Normally a no-op here: Quick Create's whole review step is picking a
+  // caption, so by the time Finalize is pressed the idea has one. It matters
+  // for the case where someone drafts, never picks, and commits anyway.
+  const { ideas: [readyIdea], errors } = await ensureCaptions({
+    draftCopyUrl: webhooks?.draftCopy,
+    ideas: [idea],
+    accessToken,
+    buildPayload: i => ({
+      plan_idea_id: i.id, platform: i.platform, topic: i.topic, angle: i.angle || '',
+      tone: i.tone || '', format: i.postFormat, aspect_ratio: i.aspectRatio,
+      media_type: i.mediaType, wants_caption: i.wantsCaption, image_idea: i.imageIdea || '',
+      caption_language: captionLanguage, instructions,
+    }),
   })
-  if (!result.error && idea.mediaType === 'video') {
-    triggerVideoRenders({ webhooks, videoIdeas: [idea], accessToken })
+
+  const result = await publishIdeasAsPosts(workspaceId, accessToken, planId, [readyIdea])
+  const failure = result.error || errors[0] || (result.errors || [])[0]
+  // Clear the 'processing' flag set above — nothing else will, now that the
+  // background generation workflow is retired.
+  await markIdeasGenerated(accessToken, [readyIdea.id],
+    failure ? { status: 'failed', error: failure } : {})
+  if (failure) return { error: failure }
+
+  if (readyIdea.mediaType === 'video' && !readyIdea.previewVideoUrl) {
+    triggerVideoRenders({ webhooks, videoIdeas: [readyIdea], accessToken })
   }
-  return result
+  return { ok: true, posts: result.posts || [] }
 }

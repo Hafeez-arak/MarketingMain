@@ -73,9 +73,38 @@ row. Verified by importing Creative Stitch twice and counting one workflow.
    so re-importing those files creates one final duplicate — the new,
    stable-id copy — alongside the stale one. Check for leftovers with
    `n8n list:workflow` and look for repeated names.
-2. **There is a known leftover right now:** `Arak Lighting – Creative
+2. ~~**There is a known leftover right now:** `Arak Lighting – Creative
    Video` exists twice (`NRLhBMQ0fDGhgCaW` and `bOZLNnrFOxH3X3kQ`), from
-   before the fix. Both claim `arak-creative-video`. Worth clearing.
+   before the fix. Both claim `arak-creative-video`.~~
+   **Resolved.** Re-checked against the live container while retiring the
+   Instagram workflows: `n8n list:workflow | cut -d'|' -f2 | sort | uniq -d`
+   returns nothing, and only one `Creative Video` remains
+   (`bHkwGzsUMdkYg7Zx` — neither of the two ids above, so the volume was
+   wiped and reimported at some point since this was written).
+
+**Live vs repo, as of the Instagram retirement.** 26 workflows in the
+container, 21 in `n8n/workflows/`. The five extra are all deliberately
+retired and left INACTIVE rather than deleted (this CLI still has no
+`delete:workflow`):
+
+| Workflow | Why it is still here |
+|---|---|
+| Instagram Content Generation v2 | retired — Creative Studio is the only generation path |
+| Instagram Manual Generation | retired, same |
+| Instagram Reels (Manual) | retired, same |
+| LinkedIn Manual Generation | LinkedIn was removed in `20260819_remove_linkedin.sql`; already inactive |
+| Linkedin Content Generation v2 | same |
+
+The three Instagram paths were checked by name after the restart and all
+return 404 (`arak-ig-plan-generation`, `arak-instagram`,
+`arak-instagram-reels`), while `arak-draft-copy` and
+`arak-campaign-planner` still return 200. The LinkedIn pair is inactive by
+the same mechanism — their JSON is no longer in the repo, so the exact
+paths were not re-derived to test by name.
+
+Deactivating writes to the database but does NOT unregister the in-memory
+webhook, so a restart is required — `n8n update:workflow --active=false`
+says so itself, and `redeploy.sh` restarts for the same reason.
 
 To clear leftovers, the wipe is still the only CLI-clean route — nothing
 valuable lives in this instance (secrets are in `.env`, not the n8n UI):

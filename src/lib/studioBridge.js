@@ -352,13 +352,16 @@ export async function saveIdeaPlatforms(accessToken, ideaId, platforms, primaryP
 // tables that Approvals already reads and the publish workflow already knows
 // how to send.
 //
-// Two tables, not one, because that is what exists: Instagram has its own
-// (with real data and workflows depending on it), and generated_posts is the
-// shared superset for everything else. The split is
-// contained here — no caller should ever need to know which table a platform
-// lives in.
+// One table now. Instagram had its own only because it had its own generation
+// workflows; those are gone and Creative Studio is the single generation path,
+// so every platform writes to generated_posts.
+//
+// instagram_generated_posts still exists and is still read — 21 historical
+// rows, surfaced through the scheduled_posts view — but nothing writes to it
+// any more. It is frozen, not live. Do not add it back here: a row written
+// there would land in a table no publish or analytics path follows forward.
 const PLATFORM_TABLE = {
-  instagram: 'instagram_generated_posts',
+  instagram: 'generated_posts',
   tiktok:    'generated_posts',
   snapchat:  'generated_posts',
 }
@@ -472,11 +475,11 @@ export async function sendVersionToPosts(workspaceId, accessToken, {
       ...(scheduledAt ? { scheduled_publish_at: scheduledAt } : {}),
       ...(ideaId ? { plan_idea_id: ideaId } : {}),
     }
-    // Columns that only exist on the shared table.
-    if (table === 'generated_posts') {
-      base.platform = platform
-      base.media_type = media.video_url ? 'video' : 'image'
-    }
+    // Unconditional now that every platform shares one table. `platform` is
+    // NOT NULL there, so guarding this behind a table check would be a
+    // constraint violation waiting to happen rather than a safety net.
+    base.platform = platform
+    base.media_type = media.video_url ? 'video' : 'image'
 
     try {
       const existing = await findPostForIdea(accessToken, table, ideaId)
@@ -579,12 +582,11 @@ export async function publishIdeasAsPosts(workspaceId, accessToken, planId, idea
     // caption_ar carries the Arabic when the brand posts bilingually.
     const caption = idea.captionEn || idea.captionAr || ''
 
-    // instagram_generated_posts declares topic, caption and image_url NOT NULL
-    // with no default, so an INSERT has to carry all three even when empty —
-    // which is why media is spread unconditionally on the insert path below.
-    // An UPDATE is the opposite case: writing image_url:'' over a row that
-    // already has a picture would erase it, and the loss would only surface at
-    // publish time. Same reasoning as the hasCopy guard in sendVersionToPosts.
+    // Media is spread unconditionally on the INSERT path below so a new row
+    // always carries every media column explicitly, empty or not. An UPDATE is
+    // the opposite case: writing image_url:'' over a row that already has a
+    // picture would erase it, and the loss would only surface at publish time.
+    // Same reasoning as the hasCopy guard in sendVersionToPosts.
     const hasMedia = !!(media.image_url || media.video_url)
 
     for (const platform of targets) {
@@ -604,19 +606,20 @@ export async function publishIdeasAsPosts(workspaceId, accessToken, planId, idea
         publish_time: idea.time || '',
         plan_id: planId || null,
         plan_idea_id: idea.id,
-        // 'manual' is the honest provenance — a human wrote this and no model
-        // touched the copy.
-        source: 'manual',
+        // Provenance, per idea rather than fixed. This path used to run only
+        // for hand-written ideas, so 'manual' was always true; it now writes
+        // every finalized idea, including ones a model drafted, and calling
+        // those 'manual' would quietly lie to Insights about which posts a
+        // human actually wrote.
+        source: idea.copyMode === 'own' ? 'manual' : 'plan',
         // Still pending_review rather than approved. Writing your own caption
         // is not the same as having checked it against the picture that ended
         // up attached, and Approvals is where that check already happens for
         // every other kind of post.
         status: 'pending_review',
       }
-      if (table === 'generated_posts') {
-        base.platform = platform
-        base.media_type = media.video_url ? 'video' : 'image'
-      }
+      base.platform = platform
+      base.media_type = media.video_url ? 'video' : 'image'
 
       try {
         // Same duplicate guard as the Studio path: an idea that already has a

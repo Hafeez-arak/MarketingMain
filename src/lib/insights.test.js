@@ -120,10 +120,24 @@ describe('summarisePerformance', () => {
     expect(byPlatform.find(b => b.key === 'instagram').avgEngagement).toBe(40)
   })
 
-  it('ignores metric rows from a post_table other than instagram_generated_posts', () => {
+  it('ignores metric rows from a post_table it does not know', () => {
     const metrics = [metric({ post_table: 'some_other_table' })]
     const { postsWithMetrics } = summarisePerformance({ metrics, posts: [] }, [])
     expect(postsWithMetrics).toBe(0)
+  })
+
+  // Instagram posts moved to generated_posts when Creative Studio became the
+  // only generation path. If this regresses to an instagram_generated_posts
+  // equality check, Insights keeps rendering happily off the frozen history
+  // and silently ignores every post made since — so pin both tables.
+  it('counts metrics from generated_posts, not just the frozen Instagram table', () => {
+    const metrics = [
+      metric({ post_id: 'p1', post_table: 'instagram_generated_posts', likes: 10 }),
+      metric({ post_id: 'p2', post_table: 'generated_posts', likes: 30 }),
+    ]
+    const { postsWithMetrics, byPlatform } = summarisePerformance({ metrics, posts: [] }, [])
+    expect(postsWithMetrics).toBe(2)
+    expect(byPlatform.find(b => b.key === 'instagram').avgEngagement).toBe(20)
   })
 
   it('traces engagement to pillar/format/weekday only when the post maps to a known idea', () => {

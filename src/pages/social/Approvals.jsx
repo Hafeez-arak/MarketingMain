@@ -9,33 +9,36 @@ import { logEditFeedback } from '../../lib/brandBrain'
 import { fetchBrandProfile } from '../../lib/brandBrain'
 import { buildContext, fetchBrandMemory } from '../../lib/brandContext'
 import { fetchBrandSchema, fetchDirectoryRows } from '../../lib/brandSchema'
-import { fetchApprovalsData, markIdeaProcessing } from '../../lib/contentPlans'
-import { requestPlanContentGeneration } from '../../lib/campaignPlanner'
+import { fetchApprovalsData, markIdeaProcessing, markIdeasGenerated } from '../../lib/contentPlans'
+import { ensureCaptions } from '../../lib/campaignPlanner'
+import { publishIdeasAsPosts } from '../../lib/studioBridge'
 import { publishPost, syncZernio } from '../../lib/zernio'
 import { fetchScheduledPosts } from '../../lib/scheduledPosts'
 import { dbIdeaToDraft } from '../../lib/campaignPlan'
 import { InstagramPostDetail } from './InstagramPage'
 
 // ─── Post Approvals ──────────────────────────────────────────────────────
-// One place to review everything the Plan Generation workflows produce —
-// Instagram posts, grouped by the monthly plan they came
-// from. Every approved idea has a durable generation_status (processing /
-// completed / failed) tracked on plan_ideas — see 20260723_generation_status
-// migration — so a card here is never just "missing" if generation is still
-// running or if it failed; it shows the real state, with a Retry action on
-// failure. Posts not from a plan (source != 'plan') get their own "Manual
-// posts" group at the bottom since they have no plan to group under.
+// One place to review every post the app produces, grouped by the monthly
+// plan it came from. Every approved idea has a durable generation_status
+// (processing / completed / failed) tracked on plan_ideas — see
+// 20260723_generation_status — so a card here is never just "missing"; it
+// shows the real state, with a Retry action on failure. Posts not from a plan
+// (source != 'plan') get their own "Manual posts" group at the bottom since
+// they have no plan to group under.
+//
+// 'processing' is a much shorter window than it used to be. It once covered a
+// whole background batch in n8n writing captions and images; now finalize
+// writes the post row itself, and the flag only spans the caption draft.
 
 const TABLES = {
   instagram: 'instagram_generated_posts',
 }
 
-// A "processing" idea has no guaranteed path back to 'failed' — n8n's own
-// try/catch only covers the Generate Post Code node itself; anything that
-// hangs or errors in a later node (upload, insert, or the webhook request
-// never reaching n8n at all) leaves generation_status stuck at 'processing'
-// forever, with no error and no Retry button. Treat it as stale once it's
-// run well past the "usually takes under a minute" copy in ProcessingCard.
+// A "processing" idea can still get stranded: finalize marks it before
+// drafting, and a tab closed mid-draft (or a Draft Copy webhook that never
+// answers) leaves generation_status at 'processing' with no error and no
+// Retry button. Treat it as stale once it has run well past the time a
+// caption draft actually takes.
 const STALE_PROCESSING_MS = 90 * 1000
 
 // image_urls (carousel) preferred; fall back to the single image_url.
@@ -141,7 +144,7 @@ function ProcessingCard({ idea }) {
             </span>
           </div>
           <p className="text-sm text-text leading-relaxed">{idea.title || idea.topic || 'Untitled idea'}</p>
-          <p className="text-[11px] text-text-tertiary mt-1">Caption + image are being generated now — this usually takes under a minute.</p>
+          <p className="text-[11px] text-text-tertiary mt-1">Writing the caption — this usually takes a few seconds.</p>
         </div>
       </div>
     </Card>
@@ -467,14 +470,39 @@ export function Approvals() {
           captionEn: post.captionEn || draft.captionEn,
           previewImageUrl: post.imageUrl || draft.previewImageUrl }
       : draft
-    const result = await requestPlanContentGeneration({
-      webhooks: state.webhooks, planId: idea.plan_id, instructions, ideas: [ideaForRetry],
-      workspaceId: activeWorkspaceId, captionLanguage: profile?.captionLanguage || 'both',
-      brand_name: brandCtx.brandName, brand_descriptor: brandCtx.brandDescriptor,
+    // Retry is now "make sure it has words, then write the row" — the two
+    // things the retired Plan Generation workflow did in the background. If
+    // the earlier attempt already produced a caption, ensureCaptions is a
+    // no-op and this is purely a re-attempt at the row write.
+    const captionLanguage = profile?.captionLanguage || 'both'
+    const { ideas: [readyIdea], errors: captionErrors } = await ensureCaptions({
+      draftCopyUrl: state.webhooks?.draftCopy,
+      ideas: [ideaForRetry],
+      accessToken,
+      buildPayload: i => ({
+        plan_idea_id: i.id, platform: i.platform, topic: i.topic, angle: i.angle || '',
+        tone: i.tone || '', objective: i.objective || '', cta: i.cta || '',
+        occasion: i.occasion || '', content_pillar: i.pillar || '',
+        format: i.postFormat, aspect_ratio: i.aspectRatio, media_type: i.mediaType,
+        wants_caption: i.wantsCaption, image_idea: i.imageIdea || '',
+        caption_language: captionLanguage, instructions,
+        brand_name: brandCtx.brandName, brand_descriptor: brandCtx.brandDescriptor,
+      }),
     })
+
+    const result = await publishIdeasAsPosts(activeWorkspaceId, accessToken, idea.plan_id, [readyIdea])
     setRetryingId(null)
-    if (result.error) {
-      setIdeas(prev => prev.map(i => i.id === idea.id ? { ...i, generation_status: 'failed', generation_error: result.error } : i))
+    const failure = result.error || captionErrors[0] || (result.errors || [])[0]
+    // Persisted, not just held in local state: generation_status lives on
+    // plan_ideas precisely so a reload shows the truth, and the workflow that
+    // used to write it is gone.
+    await markIdeasGenerated(accessToken, [idea.id],
+      failure ? { status: 'failed', error: failure } : {})
+    if (failure) {
+      setIdeas(prev => prev.map(i => i.id === idea.id ? { ...i, generation_status: 'failed', generation_error: failure } : i))
+    } else {
+      setIdeas(prev => prev.map(i => i.id === idea.id ? { ...i, generation_status: 'completed', generation_error: '' } : i))
+      fetchAll()
     }
   }
 
@@ -620,11 +648,15 @@ export function Approvals() {
         </div>
       )}
 
+      {/* webhookUrl/regenWebhookUrl are empty by design: the Instagram
+          generation workflows are retired, so no endpoint answers a regen.
+          PostDetail already handles the empty case by pointing at Creative
+          Studio rather than offering a button that can only error. */}
       {selectedPost && selectedPost.platform === 'instagram' && (
         <InstagramPostDetail
           post={selectedPost}
           state={state}
-          webhookUrl={state.webhooks?.instagram || ''}
+          webhookUrl=""
           regenWebhookUrl=""
           supabaseUrl={SUPABASE_URL}
           anonKey={accessToken || ''}
