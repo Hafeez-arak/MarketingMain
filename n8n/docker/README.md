@@ -12,11 +12,49 @@ rebuilding this one never touches that one or anything else running).
 cd n8n/docker
 cp .env.example .env
 # fill in real values in .env: ANTHROPIC_API_KEY, REPLICATE_API_TOKEN,
-# SUPABASE_KEY (service role, not anon), FAL_KEY, TAVILY_API_KEY
+# SUPABASE_KEY (service role, not anon), FAL_KEY, TAVILY_API_KEY,
+# META_IG_TOKEN + META_IG_USER_ID (see "Instagram credentials" below)
 docker compose up -d
 ```
 
 n8n is now at http://localhost:5680.
+
+## Instagram credentials
+
+Publishing and analytics run on Meta's official Graph API, so two variables in
+`.env` decide whether anything can post at all:
+
+```
+META_IG_TOKEN=EAAG...
+META_IG_USER_ID=17841436113014751
+```
+
+Documented here rather than only in `.env.example`, because that file is
+covered by the repo's `.env*` ignore rule and therefore does not exist on a
+fresh clone — including on the 24/7 box, which is where these actually have to
+be set.
+
+`META_IG_USER_ID` is the Instagram **business account** id — not the @handle
+and not the Facebook Page id. Read it off the Page:
+
+```
+GET /me/accounts?fields=instagram_business_account{id,username}
+```
+
+**The token expires, and that is the failure to plan for.** A long-lived user
+token lasts 60 days; when it dies, every publish stops with a Graph error 190
+and the only symptom in the app is posts moving to `failed`. Nothing renews it
+for you. For a tool that is supposed to run unattended, the right credential is
+a **System User** token from Meta Business Manager, which carries the same
+scopes and never expires — set that up before the current token's expiry rather
+than after.
+
+Scopes required: `instagram_basic`, `instagram_content_publish`,
+`instagram_manage_insights`, `pages_show_list`, `pages_read_engagement`,
+`read_insights`.
+
+The `ZERNIO_API_KEY` beside these is the dormant fallback. Its three workflows
+still deploy, but nothing in the app calls them.
 
 **`N8N_BLOCK_ENV_ACCESS_IN_NODE=false` is required** (already set in
 `docker-compose.yml`) — this n8n version blocks `$env` access from inside

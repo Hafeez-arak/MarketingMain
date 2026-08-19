@@ -246,10 +246,50 @@ const WORKFLOW_CONFIGS = [
     ),
   },
   {
+    platform: 'metaPublish',
+    label: 'Publish Post (Instagram)',
+    placeholder: 'https://your-instance.app.n8n.cloud/webhook/arak-meta-publish',
+    description: "Publishes an approved post to Instagram through Meta's official Graph API. The access token lives in n8n, never in this app. This same workflow also runs a 5-minute cron that sends scheduled posts when they come due — the Graph API cannot schedule, so we hold the slot ourselves.",
+    icon: (
+      <div className="w-8 h-8 flex items-center justify-center flex-shrink-0" style={{ background: '#e0687a' }}>
+        <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24">
+          <rect x="2" y="2" width="20" height="20" rx="5"/><circle cx="12" cy="12" r="4"/><line x1="17.5" y1="6.5" x2="17.5" y2="6.5"/>
+        </svg>
+      </div>
+    ),
+  },
+  {
+    platform: 'metaSync',
+    label: 'Instagram Insights Sync',
+    placeholder: 'https://your-instance.app.n8n.cloud/webhook/arak-meta-sync',
+    description: 'Records today\'s reach, likes, saves and follower count for every published post. Runs daily on its own; this URL is what the "Refresh" buttons hit. Instagram reports lifetime totals and keeps no history for us, so a day this does not run is a permanent gap in every trend chart.',
+    icon: (
+      <div className="w-8 h-8 flex items-center justify-center flex-shrink-0" style={{ background: '#0d9488' }}>
+        <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24">
+          <polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/>
+          <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+        </svg>
+      </div>
+    ),
+  },
+  {
+    platform: 'metaDashboard',
+    label: 'Instagram Dashboard (rich analytics)',
+    placeholder: 'https://your-instance.app.n8n.cloud/webhook/arak-meta-dashboard',
+    description: 'What the Analytics page loads: per-post reach and engagement read live from Instagram, plus best time to post, posting frequency, content decay and follower history derived from the rows the Insights Sync has collected.',
+    icon: (
+      <div className="w-8 h-8 flex items-center justify-center flex-shrink-0" style={{ background: '#f59e0b' }}>
+        <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24">
+          <line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/>
+        </svg>
+      </div>
+    ),
+  },
+  {
     platform: 'publishPost',
-    label: 'Publish Post (Zernio)',
+    label: 'Publish Post (Zernio) — dormant',
     placeholder: 'https://your-instance.app.n8n.cloud/webhook/arak-publish-post',
-    description: 'Publishes or schedules an approved post to its platform through Zernio. The Zernio API key lives in n8n, never in this app — the browser only ever calls this webhook.',
+    description: 'The previous publishing route, kept deployed but no longer called by this app — Instagram publishing moved to Meta\'s official Graph API. Left in place as a fallback until the Meta path has proven itself; nothing in the UI triggers it.',
     icon: (
       <div className="w-8 h-8 flex items-center justify-center flex-shrink-0" style={{ background: '#8b5cf6' }}>
         <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24">
@@ -260,7 +300,7 @@ const WORKFLOW_CONFIGS = [
   },
   {
     platform: 'zernioSync',
-    label: 'Zernio Sync (accounts + analytics)',
+    label: 'Zernio Sync (accounts + analytics) — dormant',
     placeholder: 'https://your-instance.app.n8n.cloud/webhook/arak-zernio-sync',
     description: 'Pulls state back from Zernio: which accounts are connected, and per-day metrics for everything published. Runs daily on its own; this URL is what the "Refresh" buttons hit for an on-demand sync.',
     icon: (
@@ -274,7 +314,7 @@ const WORKFLOW_CONFIGS = [
   },
   {
     platform: 'zernioDashboard',
-    label: 'Zernio Dashboard (rich analytics)',
+    label: 'Zernio Dashboard (rich analytics) — dormant',
     placeholder: 'https://your-instance.app.n8n.cloud/webhook/arak-zernio-dashboard',
     description: 'Live, on-demand proxy for the fuller Zernio widgets — best time to post, posting frequency vs engagement, content decay, daily rollups, follower history. Nothing here is stored; the Analytics page fetches it fresh on load.',
     icon: (

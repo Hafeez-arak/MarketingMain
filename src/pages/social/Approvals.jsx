@@ -12,7 +12,7 @@ import { fetchBrandSchema, fetchDirectoryRows } from '../../lib/brandSchema'
 import { fetchApprovalsData, markIdeaProcessing, markIdeasGenerated } from '../../lib/contentPlans'
 import { ensureCaptions } from '../../lib/campaignPlanner'
 import { publishIdeasAsPosts } from '../../lib/studioBridge'
-import { publishPost, syncZernio } from '../../lib/zernio'
+import { publishPost, syncMetaInsights } from '../../lib/meta'
 import { fetchScheduledPosts } from '../../lib/scheduledPosts'
 import { dbIdeaToDraft } from '../../lib/campaignPlan'
 import { InstagramPostDetail } from './InstagramPage'
@@ -401,11 +401,16 @@ export function Approvals() {
   async function handleApprove(post) { await updateStatus(post, 'pending_publish') }
   async function handleReject(post)  { await updateStatus(post, 'rejected') }
 
-  // Publish or schedule through Zernio (via n8n — the API key never reaches
-  // the browser). `when` is a datetime-local string ('' = publish now).
+  // Publish or schedule through Instagram's Graph API (via n8n — the access
+  // token never reaches the browser). `when` is a datetime-local string
+  // ('' = publish now).
+  //
+  // Scheduling does NOT hand the post to Instagram early: the Graph API has no
+  // scheduling, so a future `when` books the slot in our own row and the
+  // publish workflow's 5-minute cron sends it when it comes due.
   async function handlePublish(post, when) {
     setPublishingId(post.id)
-    const result = await publishPost(state.webhooks?.publishPost, {
+    const result = await publishPost(state.webhooks?.metaPublish, {
       postId: post.id, postTable: post._table, workspaceId: activeWorkspaceId,
       platform: post.platform,
       caption: post.captionAr && post.captionEn
@@ -506,11 +511,15 @@ export function Approvals() {
     }
   }
 
-  // Pull fresh publish state + metrics from Zernio on demand — the same
-  // workflow the daily schedule runs, so there's one sync path, not two.
+  // Pull fresh metrics from Instagram on demand — the same workflow the daily
+  // schedule runs, so there's one sync path, not two.
+  //
+  // Not merely a cache refresh: Instagram reports lifetime totals and keeps no
+  // history for us, so this call is what records today's point on every time
+  // series the Analytics page draws.
   async function handleSync() {
     setSyncing(true); setSyncNote('')
-    const result = await syncZernio(state.webhooks?.zernioSync, activeWorkspaceId)
+    const result = await syncMetaInsights(state.webhooks?.metaSync, activeWorkspaceId)
     setSyncing(false)
     setSyncNote(result.error
       ? result.error

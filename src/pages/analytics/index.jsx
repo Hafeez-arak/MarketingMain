@@ -8,19 +8,24 @@ import { useApp } from '../../store/app'
 import { useAuth } from '../../store/auth'
 import { Card, Button, PlatformPill, Empty, Spinner, PostImage, IconBadge, PillSelect, PageHeader } from '../../components/ui/index'
 import { Icon } from '../../components/ui/icons'
-import { fetchSocialAccounts, syncZernio, fetchZernioDashboard } from '../../lib/zernio'
+import { fetchSocialAccounts, syncMetaInsights, fetchMetaDashboard } from '../../lib/meta'
 import { BestTimeHeatmap, MetricToggle } from './charts'
 
 // ─── Analytics ───────────────────────────────────────────────────────────
-// Live proxy of Zernio's own analytics — the browser never talks to Zernio
-// directly (see src/lib/zernio.js), but the numbers themselves are fetched
-// fresh on every load rather than pre-synced into Supabase. Zernio already
-// aggregates all of this (best time to post, posting-frequency curves,
-// content decay, daily rollups) server-side; re-deriving it from our own
-// post_analytics rows would mean re-implementing their stats engine for no
-// benefit, and would only ever cover posts published through OUR pipeline —
-// this covers everything on the connected account, same as Zernio's own
-// dashboard does.
+// Instagram's own numbers, proxied through n8n — the browser never holds the
+// Meta access token (see src/lib/meta.js). The per-post figures are fetched
+// live on every load rather than read from Supabase, so this covers
+// EVERYTHING on the connected account, not only what we published.
+//
+// The page shape is unchanged from when Zernio served it, but where the data
+// comes from is not, and the difference shows up in one place worth knowing
+// about. Zernio pre-aggregated the time-shaped widgets — best time to post,
+// posting frequency, content decay, follower history — as endpoints you asked
+// for. Meta has no equivalent: it reports lifetime totals per post and keeps
+// no history for us at all. Those sections are therefore derived from rows the
+// Insights Sync workflow accumulates daily, which means they start the day the
+// sync does and a missed day is a permanent gap. Nothing on this page can
+// backfill one.
 
 const fmt = n => n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M`
   : n >= 1_000 ? `${(n / 1_000).toFixed(1)}k`
@@ -37,7 +42,9 @@ const METRIC_OPTIONS = [
   { key: 'clicks', label: 'Clicks' },
 ]
 const LINE_COLORS = { likes: '#e0687a', comments: '#657b81', shares: '#a3bf97', saves: '#c9a35e', views: '#7d98a1', impressions: '#4c5e61', reach: '#325130', clicks: '#9ea3aa' }
-const DEFAULT_LINE_METRICS = ['likes', 'comments', 'views', 'impressions']
+// `impressions` deliberately absent: Instagram has not reported it since
+// Graph v22, so defaulting a line to it draws a flat zero on first load.
+const DEFAULT_LINE_METRICS = ['likes', 'comments', 'views', 'reach']
 const METRIC_TONE = { likes: 'rose', comments: 'steel', shares: 'sage', saves: 'steel', views: 'steel', impressions: 'steel', reach: 'sage', clicks: 'steel' }
 const metricIcon = key => ({
   likes: Icon.heart, comments: Icon.message, shares: Icon.trending, saves: Icon.document,
@@ -158,10 +165,16 @@ export function Analytics() {
 
   const loadDashboard = useCallback(async () => {
     setDashLoading(true)
-    const result = await fetchZernioDashboard(state.webhooks?.zernioDashboard, { platform, accountId: selectedAccount, days })
+    // workspaceId is new against the Zernio call and not optional: the daily,
+    // decay and follower sections are read out of OUR tables, which are
+    // workspace-scoped. Without it those three come back empty rather than
+    // wrong, which is the right failure but still a blank chart.
+    const result = await fetchMetaDashboard(state.webhooks?.metaDashboard, {
+      platform, accountId: selectedAccount, days, workspaceId: activeWorkspaceId,
+    })
     setDashLoading(false)
     return result
-  }, [state.webhooks?.zernioDashboard, platform, selectedAccount, days])
+  }, [state.webhooks?.metaDashboard, platform, selectedAccount, days, activeWorkspaceId])
 
   useEffect(() => {
     let cancelled = false
@@ -174,7 +187,7 @@ export function Analytics() {
 
   async function handleSync() {
     setSyncing(true); setNote('')
-    const result = await syncZernio(state.webhooks?.zernioSync, activeWorkspaceId)
+    const result = await syncMetaInsights(state.webhooks?.metaSync, activeWorkspaceId)
     setSyncing(false)
     setNote(result.error || result.analytics_skipped
       || `Synced ${result.accounts_synced ?? 0} account(s), ${result.rows_written ?? 0} metric row(s).`)
@@ -195,6 +208,20 @@ export function Analytics() {
   // doesn't blank the whole page. But `overview` failing to load must not
   // be silently read as "zero posts": those are different states the user
   // needs to tell apart, so surface it explicitly instead of falling back.
+  // Which metric switches to show at all. Instagram reports neither
+  // impressions (removed in Graph v22, superseded by views) nor any per-media
+  // click metric, so those two can only ever read 0 — and a permanently-zero
+  // toggle on a dashboard reads as a broken integration rather than as a
+  // measurement the platform does not take. The workflow says what it can
+  // fill; absent that, show everything, which is the old behaviour.
+  const supported = dash?.metricsSupported
+  const metricOptions = useMemo(
+    () => (Array.isArray(supported) && supported.length
+      ? METRIC_OPTIONS.filter(m => supported.includes(m.key))
+      : METRIC_OPTIONS),
+    [supported],
+  )
+
   const overviewError = dash?.overview?._error || null
   const posts = dash?.overview?.posts || []
   const overviewMeta = dash?.overview?.overview || {}
@@ -297,7 +324,7 @@ export function Analytics() {
             <div className="flex-1">
               <h3 className="font-semibold text-text mb-1">No connected accounts yet</h3>
               <p className="text-sm text-text-secondary mb-3">
-                Connect your accounts in the Zernio dashboard, then hit Refresh — they'll appear here with real reach, engagement and follower data.
+                Once the Instagram account is wired up in n8n, hit Refresh — it'll appear here with real reach, engagement and follower data.
               </p>
               <Button onClick={() => navigate('/integrations')}>Set up integrations</Button>
             </div>
@@ -436,11 +463,11 @@ export function Analytics() {
 
                   {/* Metric per platform / Metric over time — shared metric selector */}
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                    <ChartCard title={`${METRIC_OPTIONS.find(m => m.key === barMetric)?.label} per platform`}
+                    <ChartCard title={`${metricOptions.find(m => m.key === barMetric)?.label} per platform`}
                       total={fmt(metricPerPlatform.reduce((s, r) => s + r.value, 0))}
                       icon={metricIcon(barMetric)} tone={METRIC_TONE[barMetric]}
                       right={<PillSelect value={barMetric} onChange={e => setBarMetric(e.target.value)} className="w-28">
-                        {METRIC_OPTIONS.map(m => <option key={m.key} value={m.key}>{m.label}</option>)}
+                        {metricOptions.map(m => <option key={m.key} value={m.key}>{m.label}</option>)}
                       </PillSelect>}>
                       <ResponsiveContainer width="100%" height={200}>
                         <BarChart data={metricPerPlatform}>
@@ -452,7 +479,7 @@ export function Analytics() {
                         </BarChart>
                       </ResponsiveContainer>
                     </ChartCard>
-                    <ChartCard title={`${METRIC_OPTIONS.find(m => m.key === barMetric)?.label} over time`} subtitle="Per week"
+                    <ChartCard title={`${metricOptions.find(m => m.key === barMetric)?.label} over time`} subtitle="Per week"
                       icon={metricIcon(barMetric)} tone={METRIC_TONE[barMetric]}>
                       <ResponsiveContainer width="100%" height={200}>
                         <BarChart data={metricOverTime}>
@@ -486,7 +513,7 @@ export function Analytics() {
                             <XAxis dataKey="weekLabel" tick={axisTick} tickLine={false} axisLine={{ stroke: '#e0e5e6' }} />
                             <YAxis tick={axisTick} tickLine={false} axisLine={false} allowDecimals={false} width={28} />
                             <Tooltip />
-                            {METRIC_OPTIONS.filter(m => lineMetrics.has(m.key)).map(m => (
+                            {metricOptions.filter(m => lineMetrics.has(m.key)).map(m => (
                               <Line key={m.key} type="monotone" dataKey={m.key} name={m.label} stroke={LINE_COLORS[m.key]}
                                 strokeWidth={2.5} dot={false} activeDot={{ r: 4 }} />
                             ))}
@@ -494,7 +521,7 @@ export function Analytics() {
                         </ResponsiveContainer>
                       </div>
                       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-2 gap-x-6 gap-y-5 lg:w-56 lg:flex-shrink-0 lg:border-l lg:border-border lg:pl-6">
-                        {METRIC_OPTIONS.map(m => (
+                        {metricOptions.map(m => (
                           <MetricToggle key={m.key} active={lineMetrics.has(m.key)} color={LINE_COLORS[m.key]}
                             icon={metricIcon(m.key)} label={m.label} value={fmt(totals[m.key])}
                             onClick={() => toggleLineMetric(m.key)} />

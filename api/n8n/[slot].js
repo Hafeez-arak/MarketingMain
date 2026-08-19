@@ -112,12 +112,27 @@ export default async function handler(req, res) {
     })
   }
 
+  // Every workflow now runs a Webhook Secret Guard first, so forwarding an
+  // unsigned call is not "unauthenticated but maybe fine" — it is a request
+  // that WILL die inside that guard and report success. Refuse here instead,
+  // where the reason can be named. Found 2026-08-19: this variable was never
+  // added to the Vercel project, so every AI feature in production had been
+  // silently returning nothing since the guard shipped, while the same calls
+  // worked locally (the dev proxy reads the secret from n8n/docker/.env).
+  if (!WEBHOOK_SECRET) {
+    return res.status(503).json({
+      error: 'N8N_WEBHOOK_SECRET is not set on this deployment, so n8n would ' +
+             'reject the call. Set it to the same value as n8n/docker/.env on ' +
+             'the box and redeploy.',
+    })
+  }
+
   try {
     const upstream = await fetch(`${base}/webhook/${path}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        ...(WEBHOOK_SECRET ? { 'x-webhook-secret': WEBHOOK_SECRET } : {}),
+        'x-webhook-secret': WEBHOOK_SECRET,
       },
       // req.body is already parsed by Vercel when the content-type is JSON.
       body: JSON.stringify(req.body ?? {}),
@@ -126,6 +141,22 @@ export default async function handler(req, res) {
     // Pass the body through untouched — callers parse n8n's own JSON shape,
     // and several of them surface the raw text on failure.
     const text = await upstream.text()
+
+    // n8n has no built-in error response for a workflow that dies before its
+    // Respond node: the caller gets HTTP 200 with an EMPTY BODY (verified live,
+    // see the PR #17 docs correction). A wrong secret therefore arrives here
+    // looking exactly like success, res.json() throws on the empty string, and
+    // every caller's catch swallows it — the symptom is a spinner that never
+    // resolves and no error anywhere. Name it instead. No workflow answers with
+    // an empty body on purpose; all of them end in a Respond node.
+    if (upstream.ok && !text.trim()) {
+      return res.status(502).json({
+        error: 'n8n accepted the request but ran nothing — the workflow stopped ' +
+               'at its Webhook Secret Guard. N8N_WEBHOOK_SECRET here does not ' +
+               'match the one in n8n/docker/.env on the box.',
+      })
+    }
+
     const type = upstream.headers.get('content-type') || 'application/json'
     res.status(upstream.status)
     res.setHeader('Content-Type', type)

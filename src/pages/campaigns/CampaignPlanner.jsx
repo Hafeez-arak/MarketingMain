@@ -20,7 +20,7 @@ import { momentsInRange, dbIdeaToDraft } from '../../lib/campaignPlan'
 import { ReferencePicker } from '../../components/ReferencePicker'
 import {
   createPlan, insertIdeas, updateIdea, setAllIdeaStatus, deleteIdea, updatePlan, markIdeasProcessing,
-  markIdeasGenerated, fetchPastIdeas, fetchPlanWithIdeas, markIdeasDrafting, fetchIdeaDrafts,
+  markIdeasGenerated, fetchPastIdeas, fetchPlanWithIdeas, markIdeasDrafting, fetchIdeaDrafts, markIdeaDraftFailed,
 } from '../../lib/contentPlans'
 import { IdeaDraftPanel } from '../../components/IdeaDraftPanel'
 import { BrandContextPanel } from '../../components/BrandContextPanel'
@@ -983,7 +983,7 @@ export function CampaignPlanner() {
     await markIdeasDrafting(accessToken, newIds)
     const captionLanguage = state.brandProfile?.captionLanguage || 'both'
     const targets = allIdeas.filter(i => newIds.includes(i.id))
-    Promise.allSettled(targets.map(idea => {
+    const results = await Promise.allSettled(targets.map(idea => {
       // Per idea, not per batch: a large directory reaches the prompt as a
       // bare name index, so the one thing that makes a caption specific —
       // what the featured service or fixture actually is — only arrives if
@@ -1000,6 +1000,30 @@ export function CampaignPlanner() {
         brand_name: brandCtx.brand_name, brand_descriptor: brandCtx.brand_descriptor,
       })
     }))
+
+    // The call is fire-and-forget in the sense that nobody AWAITS the draft —
+    // it lands in plan_ideas and the poll below picks it up. It is not
+    // fire-and-forget about whether the request was accepted. A refused call
+    // (webhook unconfigured, proxy 401/502/503, n8n rejecting the shared
+    // secret) means no workflow is running and none ever will, so the row is
+    // written 'failed' now rather than left spinning until someone reloads and
+    // starts the same wait again.
+    const failures = results
+      .map((r, i) => ({ idea: targets[i], error: r.status === 'rejected' ? String(r.reason?.message || r.reason) : (r.value?.ok ? '' : r.value?.error || 'The Draft Copy webhook refused the request.') }))
+      .filter(f => f.error)
+    if (!failures.length) return
+    await Promise.allSettled(failures.map(f => markIdeaDraftFailed(accessToken, f.idea.id, f.error)))
+    const byId = new Map(failures.map(f => [f.idea.id, f.error]))
+    // Against the CURRENT draft, not this closure's `ideas` — a webhook call
+    // takes seconds, and the reviewer may have edited or added a card while it
+    // was in flight. Cards that left 'drafting' in the meantime are left alone.
+    dispatch(actions.setCampaignPlanDraft(prev => ({
+      ...DEFAULT_DRAFT, ...(prev || {}),
+      ideas: (prev?.ideas || []).map(i =>
+        byId.has(i.id) && i.draftStatus === 'drafting'
+          ? { ...i, draftStatus: 'failed', draftError: byId.get(i.id) }
+          : i),
+    })))
   }
 
   // A redraft is a rejection of the copy without a rejection of the idea —
@@ -1033,8 +1057,15 @@ export function CampaignPlanner() {
           if (i.draftStatus !== 'drafting') return i
           const row = rows.find(r => r.id === i.id)
           if (!row) return i
-          const staleMs = i.draftedAt ? now - new Date(i.draftedAt).getTime() : 0
+          // No drafted_at means nothing recorded when the wait began, so the
+          // age is unknowable — treat the row itself as the clock and time it
+          // out too, rather than waiting forever on a card that can never
+          // satisfy the check. (Rows written before drafted_at existed.)
+          const staleMs = i.draftedAt ? now - new Date(i.draftedAt).getTime() : Infinity
           if (row.draft_status === 'drafting' && staleMs > 5 * 60 * 1000) {
+            // Write the verdict down. Local-only, this decision died with the
+            // tab and the next page load resumed the same doomed spinner.
+            markIdeaDraftFailed(accessToken, i.id, 'Drafting timed out — no result came back from the workflow.')
             return { ...i, draftStatus: 'failed', draftError: 'Drafting timed out — try again.' }
           }
           if (row.draft_status === 'ready' || row.draft_status === 'failed') {

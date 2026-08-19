@@ -33,6 +33,14 @@ export const WEBHOOK_PATHS = {
   creativeStitch:   'arak-creative-stitch',
   creativeCancel:   'arak-creative-cancel',
   falBalance:       'arak-fal-balance',
+  // Meta Graph API — the live publishing + analytics path.
+  metaPublish:      'arak-meta-publish',
+  metaSync:         'arak-meta-sync',
+  metaDashboard:    'arak-meta-dashboard',
+  // Zernio — dormant. The workflows are still deployed and these slots still
+  // resolve, but nothing in the app calls them any more (see src/lib/meta.js).
+  // Kept rather than deleted so a rollback is a change of import, not a
+  // redeploy of three workflows.
   publishPost:      'arak-publish-post',
   zernioSync:       'arak-zernio-sync',
   zernioDashboard:  'arak-zernio-dashboard',

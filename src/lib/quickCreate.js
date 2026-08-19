@@ -1,4 +1,4 @@
-import { createPlan, insertIdeas, markIdeasDrafting, markIdeasProcessing, markIdeasGenerated } from './contentPlans'
+import { createPlan, insertIdeas, markIdeasDrafting, markIdeasProcessing, markIdeasGenerated, markIdeaDraftFailed } from './contentPlans'
 import { requestDraftCopy, ensureCaptions, triggerVideoRenders } from './campaignPlanner'
 import { publishIdeasAsPosts } from './studioBridge'
 import { dbIdeaToDraft } from './campaignPlan'
@@ -47,14 +47,21 @@ export async function createQuickPost({
   if (draftCopyUrl) {
     await markIdeasDrafting(accessToken, [idea.id])
     idea = { ...idea, draftStatus: 'drafting', draftedAt: new Date().toISOString() }
-    // Fire-and-forget, same as the plan board — the caller polls for the
-    // result rather than waiting on this request.
-    requestDraftCopy(draftCopyUrl, {
+    // Nobody awaits the DRAFT — the caller polls plan_ideas for that. But the
+    // request being refused is worth waiting the one round trip to learn: no
+    // workflow is then running, and an unrecorded refusal leaves the row
+    // 'drafting' in the database for good.
+    const fired = await requestDraftCopy(draftCopyUrl, {
       plan_idea_id: idea.id, platform, topic: idea.topic, angle: '', tone,
       format: postFormat, aspect_ratio: aspectRatio, media_type: mediaType,
       wants_caption: wantsCaption, image_idea: imageIdea,
       caption_language: captionLanguage, instructions,
     })
+    if (!fired?.ok) {
+      const message = fired?.error || 'The Draft Copy webhook refused the request.'
+      await markIdeaDraftFailed(accessToken, idea.id, message)
+      idea = { ...idea, draftStatus: 'failed', draftError: message }
+    }
   }
 
   return { ok: true, plan: planRes.plan, idea }

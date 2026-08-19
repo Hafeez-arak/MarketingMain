@@ -41,7 +41,6 @@ export function Schedule() {
   const [platform, setPlatform]     = useState('all')
   const [selectedDay, setSelectedDay] = useState(null)
   const [dragging, setDragging]     = useState(null)
-  const [confirmMove, setConfirmMove] = useState(null)       // { post, dateKey, time }
   const [notice, setNotice]         = useState(null)         // { tone, text }
   const [platformPicker, setPlatformPicker] = useState(false)
 
@@ -99,12 +98,15 @@ export function Schedule() {
       setNotice({ tone: 'error', text: moveKindFor(post).reason })
       return
     }
-    // A post Zernio already holds cannot just be updated: the move cancels the
-    // booked slot and books a new one at the platform. That is a real outward
-    // action and a drag is easy to do by accident, so it gets one confirmation.
-    // A draft that Zernio has never seen moves immediately — nothing external
-    // happens and an undo is just another drag.
-    if (kind === 'zernio') { setConfirmMove({ post, dateKey, time: resolved }); return }
+    // Every movable post now moves on the drop, including scheduled ones.
+    // This used to stop and confirm, because under Zernio a scheduled move was
+    // a real outward action — cancel the booked post at the platform, create a
+    // new one — that could leave the post scheduled nowhere if the second half
+    // failed. Instagram's Graph API cannot schedule, so we hold the slot
+    // ourselves and a move is one claimed UPDATE: nothing leaves the building,
+    // nothing can half-succeed, and an undo is just another drag. A dialog
+    // warning about a cancel-and-rebook that no longer happens would be
+    // teaching the wrong mental model, not adding safety.
     void runMove(post, dateKey, resolved)
   }
 
@@ -118,8 +120,8 @@ export function Schedule() {
           ? `${res.error}`
           : `Could not move that post: ${res.error}`,
       })
-    } else if (res?.movedVia === 'zernio') {
-      setNotice({ tone: 'ok', text: `Rebooked at Zernio for ${formatBrandDateTime(res.scheduledPublishAt)} — the old slot was cancelled.` })
+    } else if (res?.movedVia === 'workflow') {
+      setNotice({ tone: 'ok', text: `Rescheduled for ${formatBrandDateTime(res.scheduledPublishAt)}.` })
     } else {
       setNotice({ tone: 'ok', text: `Moved to ${formatBrandDateTime(res.scheduledPublishAt)}.` })
     }
@@ -291,17 +293,6 @@ export function Schedule() {
           }} />
       )}
 
-      {confirmMove && (
-        <ConfirmReschedule
-          {...confirmMove}
-          onCancel={() => setConfirmMove(null)}
-          onConfirm={async () => {
-            const { post, dateKey, time } = confirmMove
-            setConfirmMove(null)
-            await runMove(post, dateKey, time)
-          }} />
-      )}
-
       {platformPicker && (
         <PlatformPicker
           onClose={() => setPlatformPicker(false)}
@@ -414,8 +405,8 @@ function DayPanel({ dateKey, entries, crowded, pendingId, onClose, onMove, onUns
                           className="text-[11px] px-2 py-1 border border-border text-text-secondary hover:bg-surface-subtle disabled:opacity-40">
                           Unschedule
                         </button>
-                        {plan.kind === 'zernio' && (
-                          <span className="text-[10px] text-text-tertiary">Zernio holds this slot</span>
+                        {plan.kind === 'remote' && (
+                          <span className="text-[10px] text-text-tertiary">Queued to publish at this time</span>
                         )}
                         {plan.kind === 'blocked' && (
                           <span className="text-[10px] text-text-tertiary">{plan.reason}</span>
@@ -433,57 +424,6 @@ function DayPanel({ dateKey, entries, crowded, pendingId, onClose, onMove, onUns
   )
 }
 
-// ─── Reschedule confirmation ───────────────────────────────────────────────
-// Only shown for posts Zernio already holds. It spells out both halves of what
-// is about to happen at the platform, because "moved a card on a calendar" and
-// "cancelled a booked post and booked a new one" are not the same mental model
-// and the drag looks identical either way.
-function ConfirmReschedule({ post, dateKey, time, onCancel, onConfirm }) {
-  const pc = platformColor(post.platform)
-  const from = post.scheduled_publish_at ? formatBrandDateTime(post.scheduled_publish_at) : 'unscheduled'
-  const toLabel = `${new Date(`${dateKey}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })}, ${formatBrandTime(time)} ${BRAND_TIMEZONE_LABEL}`
-
-  return (
-    <div className="fixed inset-0 z-[10000] flex items-center justify-center p-4"
-      style={{ background: 'rgba(28,35,33,0.45)' }}
-      onClick={e => { if (e.target === e.currentTarget) onCancel() }}>
-      <div className="bg-white border border-border shadow-dropdown w-full max-w-md overflow-hidden animate-fade-scale">
-        <div className="px-5 py-4 border-b border-border bg-surface-subtle">
-          <p className="eyebrow text-text-tertiary mb-1">Reschedule at {pc.label}</p>
-          <h3 className="font-semibold text-sm text-text">This post is already booked with Zernio</h3>
-        </div>
-        <div className="p-5 space-y-4">
-          <div className="text-xs space-y-1.5">
-            <div className="flex justify-between gap-4">
-              <span className="text-text-tertiary">Currently</span>
-              <span className="font-semibold text-text tabular-nums">{from}</span>
-            </div>
-            <div className="flex justify-between gap-4">
-              <span className="text-text-tertiary">Move to</span>
-              <span className="font-semibold text-amber-800 tabular-nums">{toLabel}</span>
-            </div>
-          </div>
-          <p className="text-xs text-text-secondary leading-relaxed">
-            Zernio's copy is the one that actually fires, so moving it means cancelling
-            the booked post and creating a new one. The old slot is cancelled first — if
-            the new booking then fails, the post ends up unscheduled rather than going
-            out twice.
-          </p>
-          <div className="flex gap-3">
-            <button onClick={onCancel}
-              className="flex-1 py-2.5 border border-border text-sm font-medium text-text-secondary hover:bg-surface-subtle transition-colors">
-              Keep current time
-            </button>
-            <button onClick={onConfirm}
-              className="flex-1 py-2.5 text-sm font-bold text-white bg-amber-700 hover:bg-amber-800 transition-colors">
-              Cancel &amp; rebook
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  )
-}
 
 // ─── Platform picker ───────────────────────────────────────────────────────
 const NEW_POST_PLATFORMS = [

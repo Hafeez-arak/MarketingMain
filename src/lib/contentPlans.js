@@ -229,6 +229,30 @@ export async function markIdeasDrafting(accessToken, ideaIds) {
   } catch (err) { return { error: err.message } }
 }
 
+// The other end of markIdeasDrafting, for the cases n8n will never answer.
+//
+// 'drafting' is written here, in the browser, but only ever cleared by the
+// Draft Copy workflow PATCHing the row. So anything that stops the request
+// from reaching that workflow — a rejected webhook call, a workflow that dies
+// before its Supabase node — leaves the row 'drafting' in the DATABASE
+// forever, and every later page load starts a spinner for a job nobody is
+// running. Found 2026-08-19 with rows still 'drafting' three days later:
+// the board's own 5-minute timeout only ever patched React state, so it
+// looked handled while the row underneath it never changed.
+//
+// Whoever notices the failure writes it down, so the card comes back as
+// 'failed' with a Retry instead of a spinner.
+export async function markIdeaDraftFailed(accessToken, ideaId, message) {
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/plan_ideas?id=eq.${ideaId}&draft_status=eq.drafting`, {
+      method: 'PATCH',
+      headers: { ...authHeaders(accessToken), 'Content-Type': 'application/json', Prefer: 'return=minimal' },
+      body: JSON.stringify({ draft_status: 'failed', draft_error: String(message || 'Drafting failed.').slice(0, 500) }),
+    })
+    return { ok: res.ok }
+  } catch (err) { return { error: err.message } }
+}
+
 // Poll target for the plan board — just the fields that change while a
 // draft is in flight, for just the ideas currently 'drafting'.
 export async function fetchIdeaDrafts(accessToken, ideaIds) {

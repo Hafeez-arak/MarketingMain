@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Modal, Button, Input, Textarea, Spinner } from '../ui/index'
 import { sendVersionToPosts, markIdeaMediaReady, SENDABLE_PLATFORMS } from '../../lib/studioBridge'
 import { requestCaptionStudio } from '../../lib/campaignPlanner'
-import { publishPost } from '../../lib/zernio'
+import { publishPost } from '../../lib/meta'
 import { BrandContextPanel } from '../BrandContextPanel'
 
 // ─── "Use this →" ───────────────────────────────────────────────────────────
@@ -151,7 +151,7 @@ export function UseThisSheet({ open, onClose, version, session, workspaceId, acc
     const failures = []
     if (mode === 'now' || mode === 'schedule') {
       for (const p of res.posts) {
-        const out = await publishPost(webhooks?.publishPost, {
+        const out = await publishPost(webhooks?.metaPublish, {
           postId: p.id, postTable: p.table, workspaceId, platform: p.platform,
           caption, hashtags,
           imageUrl: version.image_url || '', videoUrl: version.video_url || '',

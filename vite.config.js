@@ -104,6 +104,17 @@ function devN8nProxy(baseUrl) {
               body: Buffer.concat(chunks),
             })
             const text = await upstream.text()
+            // Same empty-200 trap the Vercel proxy names — see the comment in
+            // api/n8n/[slot].js. Kept in both so a laptop with a stale
+            // n8n/docker/.env fails the same, legible way production does.
+            if (upstream.ok && !text.trim()) {
+              res.statusCode = 502
+              return res.end(JSON.stringify({
+                error: 'n8n accepted the request but ran nothing — the workflow ' +
+                       'stopped at its Webhook Secret Guard. N8N_WEBHOOK_SECRET in ' +
+                       'n8n/docker/.env does not match the running n8n.',
+              }))
+            }
             res.statusCode = upstream.status
             res.end(text)
           } catch (err) {

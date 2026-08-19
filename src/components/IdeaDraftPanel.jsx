@@ -73,9 +73,18 @@ export function IdeaDraftPanel({ idea, accessToken, workspaceId, mediaOptionsUrl
   if (idea.draftStatus === 'not_started' || !idea.draftStatus) return null
 
   if (idea.draftStatus === 'drafting') {
+    // Retry is offered here, not only on 'failed'. A draft that never comes
+    // back does not become 'failed' on its own — nothing but the workflow
+    // itself writes that — so without this the only exit from a stalled card
+    // was to delete it. A normal draft takes seconds; a spinner the reviewer
+    // has had time to read is already worth being able to abandon.
     return (
       <div className="mt-2 pl-8 flex items-center gap-2 text-[11px] text-text-tertiary">
         <Spinner size="sm" /> Writing caption + media prompt options…
+        <button onClick={onRedraft} disabled={redrafting}
+          className="font-semibold text-amber-700 hover:text-amber-800 disabled:opacity-50">
+          {redrafting ? '…' : '↻ Try again'}
+        </button>
       </div>
     )
   }

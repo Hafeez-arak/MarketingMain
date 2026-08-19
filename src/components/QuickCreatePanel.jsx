@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { Card, Button, Textarea, Select, Spinner, Toggle } from './ui/index'
 import { formatsFor, defaultFormat, aspectRatiosFor, defaultAspectRatio, slideRange, aspectLabel } from '../lib/postFormats'
 import { createQuickPost, finalizeQuickPost } from '../lib/quickCreate'
-import { fetchIdeaDrafts } from '../lib/contentPlans'
+import { fetchIdeaDrafts, markIdeaDraftFailed } from '../lib/contentPlans'
 import { IdeaDraftPanel } from './IdeaDraftPanel'
 
 // One post, generated now, through the same engine the monthly planner
@@ -62,8 +62,12 @@ export function QuickCreatePanel({ platform, tones, workspaceId, accessToken, we
       const rows = await fetchIdeaDrafts(accessToken, [idea.id])
       const row = rows[0]
       if (!row) return
-      const staleMs = idea.draftedAt ? Date.now() - new Date(idea.draftedAt).getTime() : 0
+      const staleMs = idea.draftedAt ? Date.now() - new Date(idea.draftedAt).getTime() : Infinity
       if (row.draft_status === 'drafting' && staleMs > 5 * 60 * 1000) {
+        // Persisted, not just held in this component: the row is what the
+        // board and every later page load read, and left 'drafting' there it
+        // spins forever for a workflow that already failed to answer.
+        markIdeaDraftFailed(accessToken, idea.id, 'Drafting timed out — no result came back from the workflow.')
         setIdea(i => ({ ...i, draftStatus: 'failed', draftError: 'Drafting timed out — try again.' }))
         return
       }

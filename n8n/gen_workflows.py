@@ -6052,6 +6052,1401 @@ def build_creative_enhance() -> dict:
     }
 
 
+
+# ════════════════════════════════════════════════════════════════════════
+# Meta Graph API — the active publishing + analytics path
+#
+# These three replace the Zernio trio above. The Zernio builders are left
+# exactly as they are and still generate: the company's requirement was to
+# move onto Meta's official developer API, not to delete the fallback
+# before the replacement has proven itself in production.
+# ════════════════════════════════════════════════════════════════════════
+
+META_PUBLISH_STICKY = r"""## Arak – Publish Post (Meta Graph API)
+
+**Zero secrets in this file.** Needs `META_IG_TOKEN`, `META_IG_USER_ID`, `SUPABASE_URL`, `SUPABASE_KEY`.
+
+Publishes ONE approved post straight to Instagram through Meta's own Graph API — an official developer-portal app and our own access token, with no third party in between. This is the ACTIVE publishing path. The Zernio workflows are left in place, unchanged and untriggered.
+
+### The two triggers do different jobs
+
+**Webhook** (`arak-meta-publish`) — a human pressed Publish, or moved/cancelled a post. Same request and response shape as the Zernio publish workflow, deliberately, so the browser call sites did not have to change.
+
+**Every 5 Minutes** — the scheduler, which has no Zernio equivalent and is the biggest single consequence of moving to Meta: **the Instagram Graph API cannot schedule.** Meta publishes now or not at all, and a media container expires after 24h, so handing a post to the platform early is simply not on offer.
+
+So we hold the schedule ourselves. `scheduled_publish_at` in Supabase is the only copy, this tick publishes whatever is due, and — the part that is a straight *improvement* — rescheduling is now one UPDATE. Under Zernio the slot lived at Zernio, our column was a copy, and when the two disagreed Zernio won and the post fired at the old time; that is the entire reason moving a post needed a cancel-then-recreate dance. There is no second copy here to desync from.
+
+### Publishing is two steps, and the first one lies
+
+`POST /{ig-user}/media` creates a *container* and returns an id immediately — **even for media Meta will later reject.** Verified 2026-08-19: a WEBP url, which Meta's own docs list as unsupported, came back with a perfectly ordinary id. The id is an acknowledgement, not a success. `status_code` is the only real answer, so every publish polls the container to `FINISHED` before calling `media_publish`.
+
+`meta_container_id` is written to the row *before* the publish call, because the gap between "container ready" and "media_publish returned" is the one window where a crash leaves real ambiguity. Containers live 24h at Meta, so persisting the id turns "did that go out?" into a question with an answer.
+
+### Also handled here
+
+- **Carousels** — each slide is its own `is_carousel_item` container, awaited, then one CAROUSEL parent. Cap 10.
+- **Video** — becomes a REELS container with `share_to_feed`; Instagram retired standalone feed video. Transcodes take minutes, so it gets an 8-minute poll budget against the stills' 2.
+- **Quota** — read live from `content_publishing_limit` (100/24h on the test account; it varies). Checked *before* claiming, so a quota-blocked post stays `scheduled` and gets swept again later instead of being burned to `failed` for a condition that clears by itself.
+- **Stuck rows** — anything in `publishing` for over 20 minutes is moved to `failed` with an explanation. Never retried automatically: its container may already have been published, and a blind retry is how you double-post.
+- **The claim guard** — carried over from the Zernio node, and it matters *more* here: a publish is now several round trips wide rather than one, and the 5-minute tick is a genuine second caller that can collide with a hand-publish."""
+
+META_SYNC_STICKY = r"""## Arak – Meta Insights Sync
+
+**Zero secrets in this file.** Needs `META_IG_TOKEN`, `META_IG_USER_ID`, `SUPABASE_URL`, `SUPABASE_KEY`.
+
+Pulls Instagram's own numbers back into `post_analytics` and `account_analytics`. Replaces the Zernio Sync workflow, which is left in place and untriggered.
+
+### Why this must run every day, even when nothing was published
+
+Instagram reports **lifetime totals** for a post. It has no per-day breakdown and none can be requested. So the daily series the "engagement accumulation" chart reads is one *we* build by snapshotting once a day — which means **a missed day is a hole in the curve that can never be backfilled.** Zernio served that series from its own store, so a missed sync there was merely late; here it is lost.
+
+### Two API constraints that shape the code
+
+**Metrics are per media type, and one bad metric kills the whole call.** Meta rejects the entire `/insights` request if a single requested metric is invalid for that media's type, so the metric list is chosen from `media_product_type` and falls back to a core five rather than returning nothing.
+
+**Account insights need two calls, not one.** `follower_count` is a time series; everything else *requires* `metric_type=total_value`, and mixing them is a flat `#100` error naming the offender. Verified live 2026-08-19.
+
+### What Instagram does not measure
+
+`impressions` was removed in v22 (superseded by `views`), and there is no per-media click metric — `profile_visits` is a different thing, and filing it under clicks would quietly turn "someone tapped a link" into "someone looked at the profile". Both stay 0 **and stay out of `metrics_present`**, which is exactly the distinction that column exists to preserve: not measured is not the same as measured zero.
+
+Follower counts come off the profile field rather than the `follower_count` insight metric, which returns an empty series on small accounts — confirmed against the test account, which has 1 follower and gets `data: []`. A chart that silently blanks below some follower threshold is worse than one that is merely flat."""
+
+META_DASHBOARD_STICKY = r"""## Arak – Meta Dashboard
+
+**Zero secrets in this file.** Needs `META_IG_TOKEN`, `META_IG_USER_ID`, `SUPABASE_URL`, `SUPABASE_KEY`.
+
+Serves the Analytics page. Returns the **same response shape** the Zernio Dashboard workflow did — `overview`, `daily`, `bestTime`, `frequency`, `decay`, `followers` — so the page's charts kept working without being rewritten.
+
+### The difference that matters
+
+Zernio *pre-aggregated* all of this: best-time-to-post, posting-frequency curves, content decay and daily rollups were endpoints you simply asked for. **Meta has none of them.** Every one of those sections is derived here, from two sources:
+
+- **Live Graph** — the media in range, with `insights.metric(...)` field expansion so a 30-day window costs one request per page of 50 rather than one per post. Best-time and frequency are computed from these.
+- **Our own tables** — `account_analytics` for the daily series and follower history, `post_analytics` for engagement accumulation. Meta retains no history for us, so anything time-shaped can only come from what the sync workflow has accumulated.
+
+### Two places this is deliberately more honest than its predecessor
+
+**Decay buckets are days, not hours.** Zernio recorded continuously and could bucket by hour. We snapshot daily, so an hourly curve would be interpolation dressed up as measurement.
+
+**`metricsSupported` is returned explicitly**, so the page can hide the Impressions and Clicks toggles. Instagram cannot fill them, and a switch that can only ever read 0 looks like a broken integration rather than an absent measurement.
+
+Bucketing is done in **Asia/Riyadh**, not the server's UTC — "Sunday 9pm Riyadh" is Sunday 6pm UTC, and bucketing on UTC would shift a third of the week's posts into the wrong heatmap cell.
+
+Each section is wrapped in `safe()`: a failure is contained to its own key and the page renders the rest around the hole, rather than one rate-limited call blanking nine charts."""
+
+
+META_PUBLISH_JS = r"""const rawHttp = this.helpers.httpRequest;
+
+// Retry a lookup that never left the machine. Copied deliberately from the
+// Zernio publish node rather than shared: n8n Code nodes have no import, and
+// a helper that only half-exists in one of two publishing paths is worse than
+// the duplication. See that node for the full incident writeup — Docker's
+// embedded resolver drops a lookup occasionally, and ONLY name resolution is
+// retried because a DNS failure proves the request never reached the provider.
+// A reset or a timeout carries no such proof, and re-sending one of those is
+// exactly how you publish the same photo twice.
+const http = async (opts) => {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await rawHttp(opts);
+    } catch (e) {
+      const code = (e && (e.code || (e.cause && e.cause.code))) || '';
+      const msg  = String((e && e.message) || '');
+      const isDns = code === 'ENOTFOUND' || code === 'EAI_AGAIN'
+        || /getaddrinfo\s+(ENOTFOUND|EAI_AGAIN)/.test(msg);
+      if (!isDns || attempt >= 2) throw e;
+      await new Promise(r => setTimeout(r, 400 * (attempt + 1)));
+    }
+  }
+};
+
+const SUPA_URL = String($env.SUPABASE_URL || '').replace(/\/+$/, '');
+const SUPA_KEY = $env.SUPABASE_KEY;
+const sHeaders = { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}`, 'Content-Type': 'application/json' };
+
+// ── Meta Graph API ──────────────────────────────────────────────────────
+// Pinned to v23.0, NOT the v20.0 the original hand-off snippet used. v20 is
+// old enough that it still serves the `impressions` metric, which Meta
+// removed in v22 — so a v20 pin would have the insights sync reading a
+// number Meta no longer computes, and silently reporting stale or zero
+// engagement. v27.0 does not exist yet (verified: it 404s on the user node).
+const GRAPH   = 'https://graph.facebook.com/v23.0';
+const IG_TOKEN = $env.META_IG_TOKEN;
+const IG_USER  = $env.META_IG_USER_ID;
+
+// Meta answers with 200 + an `error` object about as often as it answers with
+// a 4xx, and n8n's thrown-error shape for non-2xx varies by version (the body
+// lands under different keys depending on how the client wraps axios), which
+// is how this class of bug surfaces as a useless "Request failed with status
+// code 400". So: never let the client throw, read the parsed body ourselves,
+// and treat a body-level `error` as a failure regardless of status.
+async function graph(method, path, params = {}){
+  const qs = new URLSearchParams({ ...params, access_token: IG_TOKEN }).toString();
+  const opts = method === 'GET'
+    ? { method: 'GET', url: `${GRAPH}/${path}?${qs}` }
+    : { method: 'POST', url: `${GRAPH}/${path}`, body: qs,
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' } };
+  const res = await http({ ...opts, returnFullResponse: true, ignoreHttpStatusErrors: true, json: true });
+  const b = res.body && typeof res.body === 'string' ? JSON.parse(res.body) : res.body;
+  if (b && b.error){
+    const e = b.error;
+    // error_user_msg is the human sentence Meta writes for the person who
+    // owns the account ("The image aspect ratio is not supported"); `message`
+    // is the developer one. Prefer the former when present — it is what an
+    // operator can actually act on without opening the Graph API reference.
+    const detail = e.error_user_msg || e.message || JSON.stringify(e).slice(0, 300);
+    const sub = e.error_subcode ? ` (subcode ${e.error_subcode})` : '';
+    throw new Error(`Instagram ${e.code || res.statusCode}${sub}: ${detail}`);
+  }
+  if (res.statusCode < 200 || res.statusCode >= 300){
+    throw new Error(`Instagram HTTP ${res.statusCode}: ${JSON.stringify(b).slice(0, 300)}`);
+  }
+  return b;
+}
+
+// Instagram's publish API documents JPEG as the only supported still format,
+// and every image in this pipeline is stored as WEBP (kept everywhere else
+// for size). Rather than re-encoding our storage, route just the outbound
+// URL through images.weserv.nl, a free no-auth image CDN that converts on the
+// fly.
+//
+// Kept even though a WEBP container was observed reaching FINISHED against
+// v23.0 on 2026-08-19 — Meta appears to accept it now, but FINISHED only
+// proves Meta could DOWNLOAD the file, not that the published render is
+// correct, and the cost of being wrong is a broken post on a live grid. PNG
+// is converted for the same reason: also undocumented, also not worth
+// discovering the hard way.
+function toPublishable(u){
+  if (!u || !/\.(webp|png)(\?|#|$)/i.test(u)) return u;
+  return `https://images.weserv.nl/?url=${encodeURIComponent(u)}&output=jpg`;
+}
+
+// Bilingual captions are stored as one string, Arabic block + "\n\n—\n\n" +
+// English block. Because the string OPENS with Arabic, a renderer that treats
+// it as a single bidi paragraph — Instagram's does; it does not treat blank
+// lines as paragraph breaks — resolves the whole thing at RTL embedding
+// level, and neutral characters in the English half (a trailing ".", the "+"
+// in "45+") visually jump to the wrong side of their line. Wrapping each
+// block in a Unicode directional isolate forces it to resolve independently.
+const LRI = '⁦', RLI = '⁧', PDI = '⁩';
+const isArabicScript = s => /[؀-ۿݐ-ݿ]/.test(s);
+function isolateBilingual(text){
+  const SEP = '\n\n—\n\n';
+  const idx = text.indexOf(SEP);
+  if (idx === -1) return text;
+  const first  = text.slice(0, idx);
+  const second = text.slice(idx + SEP.length);
+  const wrap = s => s ? (isArabicScript(s) ? RLI : LRI) + s + PDI : s;
+  return wrap(first) + SEP + wrap(second);
+}
+
+const ALLOWED_TABLES = ['instagram_generated_posts','generated_posts'];
+const CAPTION_MAX = 2200;   // Instagram's hard limit, enforced at publish.
+
+async function patchRow(table, id, fields){
+  if (!id || !ALLOWED_TABLES.includes(table)) return;
+  try {
+    await http({ method:'PATCH', url:`${SUPA_URL}/rest/v1/${table}?id=eq.${id}`,
+      headers:{ ...sHeaders, Prefer:'return=minimal' }, body: fields, json:true });
+  } catch (e) { /* never let bookkeeping mask the real publish result */ }
+}
+
+// ── Wall clock -> absolute instant ──────────────────────────────────────
+// `scheduled_publish_at` is timestamptz — an absolute instant — while the UI
+// sends a naive wall time plus the zone to read it in. Writing the naive
+// string straight into the column makes Postgres resolve it in the SESSION
+// zone (UTC on Supabase), so 7 PM Riyadh lands as 7 PM UTC: three hours late.
+// That bug was fixed once on the Zernio path; the conversion lives here for
+// the same reason it lived there — this node is the last thing between any
+// caller and the column, so a cron or a future bulk runner cannot reintroduce
+// it by forgetting to convert.
+function offsetMsAt(utcMs, tz){
+  const p = {};
+  for (const { type, value } of new Intl.DateTimeFormat('en-US', {
+    timeZone: tz, hourCycle: 'h23',
+    year:'numeric', month:'2-digit', day:'2-digit',
+    hour:'2-digit', minute:'2-digit', second:'2-digit',
+  }).formatToParts(utcMs)) p[type] = value;
+  const asIfUtc = Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute, +p.second);
+  return asIfUtc - Math.floor(utcMs / 1000) * 1000;
+}
+function wallToUtcISO(wall, tz){
+  const s = String(wall || '').trim();
+  if (!s) return null;
+  if (/(Z|[+-]\d{2}:?\d{2})$/.test(s)){
+    const ms = Date.parse(s);
+    return Number.isFinite(ms) ? new Date(ms).toISOString() : null;
+  }
+  const m = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{1,2}):(\d{2})(?::(\d{2}))?$/.exec(s);
+  if (!m) return null;
+  const guess = Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +(m[6] || 0));
+  let utcMs = guess - offsetMsAt(guess, tz);
+  const refined = guess - offsetMsAt(utcMs, tz);   // second pass matters across DST
+  if (refined !== utcMs) utcMs = refined;
+  return new Date(utcMs).toISOString();
+}
+
+// ── Claim a post for publishing, atomically ─────────────────────────────
+// Identical in spirit to the Zernio node's guard, and for the identical
+// reason: a read-then-check cannot work, because two callers both read
+// "not published" before either writes. So the claim IS the check — PATCH
+// filtered on the states it is legal to publish FROM, asking for the row
+// back. Postgres serialises the two updates, exactly one caller sees a row,
+// and whoever gets the row owns the publish.
+//
+// It matters MORE here than it did with Zernio. Instagram publishing is two
+// round trips (create container, then publish it) with a media download by
+// Meta in between, so the window in which a second caller can arrive is
+// seconds wide rather than milliseconds. And the cron sweeper below means
+// there is now genuinely a second caller: a 5-minute tick can collide with
+// someone hitting Publish by hand on the same post.
+//
+// `from` is the set of legal starting states, and differs by caller:
+//   hand publish  — not_published, failed
+//   reschedule    — + scheduled  (moving a post we hold the slot for)
+//   cron sweeper  — scheduled ONLY (its whole job is due scheduled posts)
+// 'publishing' is never legal. A row in flight is someone else's, and
+// re-entering it is the exact bug this closes.
+async function claimPost(table, id, from, force){
+  if (!id) return { ok: true, claimed: false, row: {} };
+  if (force === true) return { ok: true, claimed: true, forced: true, row: {} };
+  const rows = await http({
+    method:'PATCH',
+    url:`${SUPA_URL}/rest/v1/${table}?id=eq.${id}&publish_status=in.(${from.join(',')})`,
+    headers:{ ...sHeaders, Prefer:'return=representation' },
+    body:{ publish_status:'publishing', publish_error:'',
+           // Stamped here so a row stuck in 'publishing' can be AGED by the
+           // reconciler below. updated_at cannot serve — any unrelated edit
+           // touches it, so a post wedged for an hour can look one second old.
+           publish_started_at: new Date().toISOString() },
+    json:true });
+  if (Array.isArray(rows) && rows.length) return { ok: true, claimed: true, row: rows[0] || {} };
+
+  let current = {};
+  try {
+    const got = await http({ method:'GET',
+      url:`${SUPA_URL}/rest/v1/${table}?id=eq.${id}&select=publish_status,zernio_post_id,platform_post_url,meta_container_id`,
+      headers:sHeaders, json:true });
+    current = (Array.isArray(got) && got[0]) || {};
+  } catch (e) { /* the refusal stands either way */ }
+  return { ok: false, claimed: false, current };
+}
+
+// ── The two-step container dance ────────────────────────────────────────
+// Instagram cannot publish in one call: Meta has to fetch the media off a
+// public URL first, so you create a CONTAINER, wait for Meta to finish
+// downloading it, and only then publish the container.
+//
+// The trap — verified against the live API on 2026-08-19 — is that creating
+// a container ALWAYS returns an id immediately, even for media Meta will
+// later reject. A WEBP url (which Meta's own docs list as unsupported) came
+// back with a perfectly normal id. So the id is an acknowledgement, not a
+// success, and code that publishes straight off it is trusting a receipt for
+// a package that has not arrived. status_code is the only real answer.
+async function createContainer(params){
+  const out = await graph('POST', `${IG_USER}/media`, params);
+  const id = out && out.id;
+  if (!id) throw new Error(`Instagram accepted the container request but returned no id: ${JSON.stringify(out).slice(0, 300)}`);
+  return id;
+}
+
+// FINISHED -> publishable. IN_PROGRESS -> keep waiting. ERROR/EXPIRED ->
+// stop, and surface Meta's own reason, which is where the genuinely useful
+// diagnostics live (aspect ratio, file size, unreachable URL, bad codec).
+async function waitForContainer(containerId, timeoutMs){
+  const deadline = Date.now() + timeoutMs;
+  let delay = 2000, last = '';
+  while (Date.now() < deadline){
+    const s = await graph('GET', containerId, { fields: 'status_code,status' });
+    const code = String((s && s.status_code) || '');
+    last = String((s && s.status) || code);
+    if (code === 'FINISHED') return true;
+    if (code === 'ERROR' || code === 'EXPIRED'){
+      throw new Error(`Instagram could not process the media (${code}): ${last}`);
+    }
+    await new Promise(r => setTimeout(r, delay));
+    delay = Math.min(delay * 1.5, 10000);   // back off; video takes minutes
+  }
+  throw new Error(`Instagram was still processing the media after ${Math.round(timeoutMs / 1000)}s — last status: ${last}. The container stays valid for 24h, so the post can be retried.`);
+}
+
+// Publishing is capped per rolling 24h (100 on the test account, read live
+// rather than assumed — it varies). Checked BEFORE claiming so a quota-blocked
+// post stays 'scheduled' and gets swept again later, instead of being burned
+// to 'failed' for a condition that clears on its own.
+async function quotaBlocked(){
+  try {
+    const r = await graph('GET', `${IG_USER}/content_publishing_limit`, { fields: 'config,quota_usage' });
+    const row = (r && r.data && r.data[0]) || {};
+    const used = Number(row.quota_usage || 0);
+    const cap  = Number((row.config && row.config.quota_total) || 0);
+    if (cap && used >= cap) return `Instagram's publishing quota is used up (${used}/${cap} in the last 24h). This post stays scheduled and will go out once the window rolls over.`;
+    return '';
+  } catch (e) {
+    // A quota check that fails is not a reason to refuse to publish — Meta
+    // enforces the real limit anyway, and its error would be clearer.
+    return '';
+  }
+}
+
+// Assemble and push one post. Returns { mediaId, permalink, containerId }.
+async function publishMedia({ caption, imageUrl, imageUrls, videoUrl, coverImageUrl, altText, onContainer }){
+  const urls = (Array.isArray(imageUrls) && imageUrls.length ? imageUrls : [imageUrl])
+    .filter(Boolean).map(toPublishable);
+
+  let containerId, timeout;
+
+  if (videoUrl){
+    // A video posted to a business account's feed is a Reel — Instagram
+    // retired standalone feed video, and REELS is the only media_type the
+    // API accepts for one. share_to_feed puts it on the grid as well as the
+    // Reels tab, which is what "post a video" means to everyone using this.
+    const params = { media_type: 'REELS', video_url: videoUrl, share_to_feed: 'true' };
+    if (caption) params.caption = caption;
+    if (coverImageUrl) params.cover_url = toPublishable(coverImageUrl);
+    containerId = await createContainer(params);
+    timeout = 8 * 60 * 1000;   // Meta transcodes; minutes, not seconds
+  } else if (urls.length > 1){
+    // Carousel: every slide is its own container created with
+    // is_carousel_item, then ONE parent container ties them together. The
+    // children carry no caption — only the parent does.
+    const children = [];
+    for (const u of urls.slice(0, 10)){          // Instagram's cap is 10
+      children.push(await createContainer({ image_url: u, is_carousel_item: 'true' }));
+    }
+    // Wait for the slides BEFORE building the parent. A parent built over a
+    // child Meta has not finished downloading fails as an opaque parent-level
+    // error that says nothing about which slide was the problem.
+    for (const c of children) await waitForContainer(c, 90 * 1000);
+    const params = { media_type: 'CAROUSEL', children: children.join(',') };
+    if (caption) params.caption = caption;
+    containerId = await createContainer(params);
+    timeout = 2 * 60 * 1000;
+  } else if (urls.length === 1){
+    const params = { image_url: urls[0] };
+    if (caption) params.caption = caption;
+    if (altText) params.alt_text = String(altText).slice(0, 1000);
+    containerId = await createContainer(params);
+    timeout = 2 * 60 * 1000;
+  } else {
+    // Instagram has no text-only post. Reaching here with a caption and no
+    // media is a caller bug, and saying so beats Meta's generic complaint.
+    throw new Error('Instagram cannot publish a caption with no media — every post needs at least one image or a video.');
+  }
+
+  // Recorded BEFORE the publish call, because the gap between "container is
+  // ready" and "media_publish returned" is the one window where a crash
+  // leaves real ambiguity. The container survives 24h at Meta, so persisting
+  // its id is what turns "did that go out?" into a question with an answer.
+  if (onContainer) await onContainer(containerId);
+
+  await waitForContainer(containerId, timeout);
+
+  const published = await graph('POST', `${IG_USER}/media_publish`, { creation_id: containerId });
+  const mediaId = published && published.id;
+  if (!mediaId) throw new Error(`Instagram published the container but returned no media id: ${JSON.stringify(published).slice(0, 300)}`);
+
+  // permalink is what fills platform_post_url — the "View post" link in the
+  // UI. Best-effort: the post is already live, and failing the whole publish
+  // because a follow-up read timed out would be absurd.
+  let permalink = '', timestamp = '';
+  try {
+    const media = await graph('GET', mediaId, { fields: 'permalink,timestamp' });
+    permalink = (media && media.permalink) || '';
+    timestamp = (media && media.timestamp) || '';
+  } catch (e) { /* non-fatal */ }
+
+  return { mediaId, permalink, timestamp, containerId };
+}
+
+// ── One post, end to end ────────────────────────────────────────────────
+// `from` is the claim's legal starting states — see claimPost.
+async function runOne(job, from){
+  const table = job.post_table || 'generated_posts';
+  const postId = job.post_id || '';
+  if (!ALLOWED_TABLES.includes(table)) throw new Error(`Unknown post_table: ${table}`);
+
+  const caption  = isolateBilingual(String(job.caption || '').trim());
+  const hashtags = String(job.hashtags || '').trim();
+  const content  = [caption, hashtags].filter(Boolean).join('\n\n');
+
+  const blocked = await quotaBlocked();
+  if (blocked) return { ok: false, post_id: postId, skipped: true, quota: true, error: blocked };
+
+  const claim = await claimPost(table, postId, from, job.force === true);
+  if (!claim.ok){
+    // RETURN, never throw. The caller's catch writes publish_status='failed',
+    // and reaching it here would stamp 'failed' onto a post that is in fact
+    // live — turning a harmless double-click into corrupted state.
+    const cur = claim.current || {};
+    const st = cur.publish_status || 'in flight';
+    return { ok: false, skipped: true, post_id: postId, publish_status: st,
+             zernio_post_id: cur.zernio_post_id || '',
+             platform_post_url: cur.platform_post_url || '',
+             error: `Already ${st} — refusing to publish this post a second time. Send force:true to override.` };
+  }
+
+  try {
+    // Validated after the claim, and thrown rather than returned, so it lands
+    // in this function's own catch: the row is marked 'failed' with the reason
+    // and the CALLER carries on.
+    //
+    // Both halves of that matter. Returning early instead would leave a
+    // scheduled post sitting in 'scheduled' with a caption that can never
+    // publish, so the cron would pick it up again every five minutes forever
+    // and nothing would ever say why. Throwing before the claim was worse
+    // still: it escaped runOne entirely and aborted the whole sweep, so one
+    // over-long caption stopped every other post due that tick from going out.
+    //
+    // Refused rather than truncated, on purpose: these captions are bilingual,
+    // and a blind cut at 2200 lands mid-sentence in whichever language happens
+    // to come second.
+    if (content.length > CAPTION_MAX){
+      throw new Error(`Caption + hashtags are ${content.length} characters; Instagram's limit is ${CAPTION_MAX}. Shorten it by ${content.length - CAPTION_MAX} and publish again.`);
+    }
+
+    const out = await publishMedia({
+      caption: content,
+      imageUrl: job.image_url || '',
+      imageUrls: job.image_urls,
+      videoUrl: job.video_url || '',
+      coverImageUrl: job.cover_image_url || '',
+      altText: job.alt_text || '',
+      onContainer: cid => patchRow(table, postId, { meta_container_id: cid }),
+    });
+
+    await patchRow(table, postId, {
+      // The Instagram MEDIA id, in the column Zernio's id used to occupy —
+      // see the migration header for why it was not renamed.
+      zernio_post_id: out.mediaId,
+      zernio_account_id: IG_USER,
+      publish_provider: 'meta',
+      publish_status: 'published',
+      published_at: out.timestamp || new Date().toISOString(),
+      platform_post_url: out.permalink,
+      publish_error: '',
+      meta_container_id: '',
+      scheduled_publish_at: null,
+    });
+
+    return { ok: true, post_id: postId, platform: job.platform || 'instagram',
+             zernio_post_id: out.mediaId, publish_status: 'published',
+             account_id: IG_USER, platform_post_url: out.permalink };
+  } catch (err){
+    const message = (err && err.message) ? err.message : String(err);
+    await patchRow(table, postId, { publish_status: 'failed', publish_error: message });
+    return { ok: false, post_id: postId, error: message };
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// Entry. Fired by EITHER the webhook (a body) or the 5-minute schedule
+// trigger (no body) — both shapes have to be tolerated, same as the Zernio
+// sync node.
+// ════════════════════════════════════════════════════════════════════════
+const raw  = ($input.first() && $input.first().json) || {};
+const body = raw.body || {};
+const isCron = !raw.body;
+
+try {
+  if (!IG_TOKEN) throw new Error('META_IG_TOKEN is not set on this n8n instance.');
+  if (!IG_USER)  throw new Error('META_IG_USER_ID is not set on this n8n instance.');
+
+  // ══════════════════════════════════════════════════════════════════════
+  // CRON: sweep everything due, then unwedge anything stuck.
+  //
+  // This is the part with no Zernio equivalent, and the reason it exists is
+  // simple: the Instagram Graph API has NO scheduling. Meta publishes now or
+  // not at all, and a media container expires after 24h, so "hand it to the
+  // platform early" is not available the way it was with Zernio.
+  //
+  // Which is a straight improvement in one respect — WE own the slot now.
+  // Under Zernio a scheduled post lived at Zernio, our column was a copy,
+  // and if the two disagreed Zernio won and the post fired at the old time.
+  // That is the entire reason rescheduling needed a cancel-then-recreate
+  // dance. Here a reschedule is one UPDATE, and it cannot desync, because
+  // there is no second copy to desync from.
+  // ══════════════════════════════════════════════════════════════════════
+  if (isCron){
+    const nowISO = new Date().toISOString();
+    const results = [];
+
+    // Stop before n8n does. The task runner kills a Code node at
+    // N8N_RUNNERS_TASK_TIMEOUT (600s on this instance, see docker-compose),
+    // and this loop publishes sequentially with an 8-minute poll budget per
+    // Reel — so two slow videos in one tick would be executed straight through
+    // that ceiling. Being killed mid-publish is the worst available outcome:
+    // it strands a row in 'publishing' that nothing can claim until the
+    // reconciler ages it out 20 minutes later.
+    //
+    // 7 minutes leaves room for the in-flight post to finish and for the
+    // reconciler pass below to run. Anything not reached is simply still due
+    // on the next tick five minutes from now, which is what a queue is for.
+    const sweepDeadline = Date.now() + 7 * 60 * 1000;
+    let outOfTime = false;
+
+    for (const table of ALLOWED_TABLES){
+      let due = [];
+      try {
+        due = await http({ method:'GET',
+          url:`${SUPA_URL}/rest/v1/${table}?select=id,workspace_id,platform,caption,hashtags,image_url,image_urls,video_url,cover_image_url,alt_text`
+              + `&publish_status=eq.scheduled&scheduled_publish_at=lte.${nowISO}`
+              + `&order=scheduled_publish_at.asc&limit=25`,
+          headers:sHeaders, json:true });
+      } catch (e) { continue; }   // a table that doesn't exist here is fine
+
+      for (const row of (due || [])){
+        if (Date.now() > sweepDeadline){ outOfTime = true; break; }
+        // Sequential, not parallel. Instagram rate-limits publishing, Meta
+        // has to download each file, and a burst of parallel publishes is
+        // both slower in practice and far harder to reason about when one
+        // of them fails halfway.
+        const r = await runOne({
+          post_id: row.id, post_table: table, workspace_id: row.workspace_id,
+          platform: row.platform || 'instagram',
+          caption: row.caption || '', hashtags: row.hashtags || '',
+          image_url: row.image_url || '', image_urls: row.image_urls,
+          video_url: row.video_url || '', cover_image_url: row.cover_image_url || '',
+          alt_text: row.alt_text || '',
+        }, ['scheduled']);
+        results.push(r);
+        // Quota is account-wide: once it bites, every remaining post in this
+        // tick will hit it too. Stop rather than grind through them.
+        if (r.quota) break;
+      }
+      if (outOfTime) break;
+    }
+
+    // ── Unwedge rows stuck in 'publishing' ──────────────────────────────
+    // A run that dies between the claim and the write-back leaves a row in
+    // 'publishing' forever: nothing else will touch it, because 'publishing'
+    // is not a legal state to claim from. Under Zernio the only cure was a
+    // human sending force:true.
+    //
+    // 20 minutes is comfortably past the worst legitimate case (an 8-minute
+    // Reel transcode plus retries), so anything older is genuinely dead. It
+    // is moved to 'failed', never retried automatically — meta_container_id
+    // may name a container that was already published, and a blind retry is
+    // how you double-post. Failed is visible in the UI and one click from a
+    // human decision, which is the right owner for that call.
+    const cutoff = new Date(Date.now() - 20 * 60 * 1000).toISOString();
+    let unwedged = 0;
+    for (const table of ALLOWED_TABLES){
+      try {
+        const stuck = await http({ method:'PATCH',
+          url:`${SUPA_URL}/rest/v1/${table}?publish_status=eq.publishing&publish_started_at=lt.${cutoff}`,
+          headers:{ ...sHeaders, Prefer:'return=representation' },
+          body:{ publish_status:'failed',
+                 publish_error:'Publishing was interrupted and never finished. Check the Instagram account before republishing — if the post is already live, mark it published instead of sending it again.' },
+          json:true });
+        unwedged += (Array.isArray(stuck) ? stuck.length : 0);
+      } catch (e) { /* non-fatal */ }
+    }
+
+    return [{ json: { ok: true, mode: 'sweep', due: results.length,
+                      published: results.filter(r => r.ok).length,
+                      failed: results.filter(r => !r.ok && !r.skipped).length,
+                      skipped: results.filter(r => r.skipped).length,
+                      // Surfaced rather than swallowed: a tick that keeps
+                      // running out of time is the signal that the 5-minute
+                      // cadence no longer fits the queue.
+                      out_of_time: outOfTime || undefined,
+                      unwedged, results: results.slice(0, 25) } }];
+  }
+
+  // ══════════════════════════════════════════════════════════════════════
+  // WEBHOOK
+  // ══════════════════════════════════════════════════════════════════════
+  const table  = body.post_table || 'generated_posts';
+  const postId = body.post_id || '';
+  if (!ALLOWED_TABLES.includes(table)) throw new Error(`Unknown post_table: ${table}`);
+
+  const isReschedule = body.reschedule === true;
+
+  // ---- cancel-only: give the slot back, keep the post ----
+  // Under Zernio this had to call out and delete a post the provider held.
+  // Here the slot only ever existed in our own row, so the cancel is the
+  // update. Kept as its own branch and its own request shape so the browser
+  // call sites do not have to change.
+  if (isReschedule && body.cancel_only === true){
+    const c = await claimPost(table, postId, ['not_published','failed','scheduled'], false);
+    if (!c.ok){
+      const cur = c.current || {};
+      return [{ json: { ok:false, skipped:true, post_id:postId,
+        publish_status: cur.publish_status || 'in flight',
+        error: `Cannot unschedule a post that is ${cur.publish_status || 'in flight'}.` } }];
+    }
+    await patchRow(table, postId, { publish_status:'not_published', publish_error:'',
+                                    scheduled_publish_at:null, publish_started_at:null });
+    return [{ json: { ok:true, post_id:postId, publish_status:'not_published', cancelled:true } }];
+  }
+
+  // ---- schedule: book the slot, publish nothing ----
+  // No Meta call at all. The 5-minute sweeper above is what eventually
+  // publishes this, which is the whole architecture in one line.
+  const scheduledFor = body.scheduled_for || '';
+  if (scheduledFor){
+    const tz = body.timezone || 'Asia/Riyadh';
+    const whenISO = wallToUtcISO(scheduledFor, tz);
+    if (!whenISO){
+      throw new Error(`Unparseable scheduled_for: ${JSON.stringify(scheduledFor)} (expected 'YYYY-MM-DDTHH:MM' read in ${tz}).`);
+    }
+    const from = isReschedule ? ['not_published','failed','scheduled'] : ['not_published','failed'];
+    const c = await claimPost(table, postId, from, body.force === true);
+    if (!c.ok){
+      const cur = c.current || {};
+      const st = cur.publish_status || 'in flight';
+      return [{ json: { ok:false, skipped:true, post_id:postId, publish_status:st,
+        error: `Cannot schedule a post that is ${st}.` } }];
+    }
+    await patchRow(table, postId, {
+      publish_status: 'scheduled', publish_error: '',
+      scheduled_publish_at: whenISO, publish_started_at: null,
+      publish_provider: 'meta', zernio_account_id: IG_USER,
+    });
+    return [{ json: { ok:true, post_id:postId, platform: body.platform || 'instagram',
+                      publish_status:'scheduled', scheduled_publish_at: whenISO,
+                      account_id: IG_USER } }];
+  }
+
+  // ---- publish now ----
+  const from = isReschedule ? ['not_published','failed','scheduled'] : ['not_published','failed'];
+  const result = await runOne(body, from);
+  return [{ json: result }];
+
+} catch (err) {
+  const message = (err && err.message) ? err.message : String(err);
+  // Only stamp the row when we know which row, and only from the webhook
+  // path — a cron-level failure is about the sweep, not about any one post.
+  if (!isCron && body.post_id && ALLOWED_TABLES.includes(body.post_table || '')){
+    await patchRow(body.post_table, body.post_id, { publish_status:'failed', publish_error: message });
+  }
+  return [{ json: { ok: false, post_id: body.post_id || '', error: message } }];
+}"""
+
+
+META_SYNC_JS = r"""const rawHttp = this.helpers.httpRequest;
+
+// DNS-only retry — see the Meta publish node for the full reasoning. A name
+// lookup that fails never reached Meta, so re-sending it is free; anything
+// else might have landed and is not retried.
+const http = async (opts) => {
+  for (let attempt = 0; ; attempt++) {
+    try { return await rawHttp(opts); }
+    catch (e) {
+      const code = (e && (e.code || (e.cause && e.cause.code))) || '';
+      const msg  = String((e && e.message) || '');
+      const isDns = code === 'ENOTFOUND' || code === 'EAI_AGAIN'
+        || /getaddrinfo\s+(ENOTFOUND|EAI_AGAIN)/.test(msg);
+      if (!isDns || attempt >= 2) throw e;
+      await new Promise(r => setTimeout(r, 400 * (attempt + 1)));
+    }
+  }
+};
+
+const SUPA_URL = String($env.SUPABASE_URL || '').replace(/\/+$/, '');
+const SUPA_KEY = $env.SUPABASE_KEY;
+const sHeaders = { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}`, 'Content-Type': 'application/json' };
+
+const GRAPH    = 'https://graph.facebook.com/v23.0';
+const IG_TOKEN = $env.META_IG_TOKEN;
+const IG_USER  = $env.META_IG_USER_ID;
+const BRAND_TZ = 'Asia/Riyadh';
+
+async function graph(path, params = {}){
+  const qs = new URLSearchParams({ ...params, access_token: IG_TOKEN }).toString();
+  const res = await http({ method:'GET', url:`${GRAPH}/${path}?${qs}`,
+    returnFullResponse:true, ignoreHttpStatusErrors:true, json:true });
+  const b = res.body && typeof res.body === 'string' ? JSON.parse(res.body) : res.body;
+  if (b && b.error){
+    const e = b.error;
+    throw new Error(`Instagram ${e.code || res.statusCode}: ${e.error_user_msg || e.message || JSON.stringify(e).slice(0,300)}`);
+  }
+  if (res.statusCode < 200 || res.statusCode >= 300){
+    throw new Error(`Instagram HTTP ${res.statusCode}: ${JSON.stringify(b).slice(0,300)}`);
+  }
+  return b;
+}
+
+const POST_TABLES = ['instagram_generated_posts','generated_posts'];
+
+// ── What Instagram actually measures, per media type ────────────────────
+// Meta rejects the ENTIRE insights call if a single requested metric is not
+// valid for that media's type, so these lists cannot be one union — they
+// have to be chosen per media_product_type.
+//
+// Verified against the live API on 2026-08-19 (v23.0, FEED IMAGE): reach,
+// likes, comments, saved, shares, total_interactions, views, profile_visits,
+// profile_activity and follows all answer; `impressions` and `plays` are
+// gone — Meta removed impressions in v22 and now serves `views` in its
+// place, and `navigation`/`replies` are Story-only.
+//
+// CORE is the fallback for a type we guessed wrong about: the five metrics
+// every surface reports. Better a thinner row than no row.
+const METRICS_BY_TYPE = {
+  REELS: ['reach','likes','comments','saved','shares','views','total_interactions'],
+  STORY: ['reach','views','replies','shares','profile_visits','follows','navigation'],
+  FEED:  ['reach','likes','comments','saved','shares','views','total_interactions','profile_visits','follows'],
+};
+const CORE = ['reach','likes','comments','saved','shares'];
+
+// Instagram's metric names -> our post_analytics columns.
+//
+// `impressions` and `clicks` are deliberately unmapped. Instagram no longer
+// reports impressions at all (v22 removed it in favour of views), and there
+// is no per-media click metric — profile_visits is a different thing and
+// filing it under clicks would quietly turn "someone tapped a link" into
+// "someone looked at the profile". They stay 0 AND stay out of
+// metrics_present, which is exactly the distinction that column exists to
+// preserve: not measured is not the same as measured zero.
+const METRIC_TO_COLUMN = {
+  reach: 'reach', likes: 'likes', comments: 'comments',
+  saved: 'saves', shares: 'shares', views: 'views',
+};
+
+function today(){ return new Date().toISOString().slice(0, 10); }
+
+// Fetch insights for one media, degrading rather than failing. A post whose
+// type we mis-guessed still yields the core five instead of nothing.
+async function mediaInsights(mediaId, productType, mediaType){
+  const key = productType === 'REELS' ? 'REELS'
+            : productType === 'STORY' ? 'STORY'
+            : 'FEED';
+  for (const set of [METRICS_BY_TYPE[key], CORE]){
+    try {
+      const r = await graph(`${mediaId}/insights`, { metric: set.join(',') });
+      const out = {};
+      for (const m of ((r && r.data) || [])){
+        const v = m.values && m.values[0];
+        out[m.name] = (v && typeof v.value === 'number') ? v.value : 0;
+      }
+      if (Object.keys(out).length) return out;
+    } catch (e) { /* try the narrower set */ }
+  }
+  return {};
+}
+
+const raw  = ($input.first() && $input.first().json) || {};
+const body = raw.body || {};
+
+try {
+  if (!IG_TOKEN) throw new Error('META_IG_TOKEN is not set on this n8n instance.');
+  if (!IG_USER)  throw new Error('META_IG_USER_ID is not set on this n8n instance.');
+
+  // ══ 1) the account itself ════════════════════════════════════════════
+  const profile = await graph(IG_USER, {
+    fields: 'id,username,name,profile_picture_url,followers_count,follows_count,media_count',
+  });
+
+  // Which workspaces should see this account? Meta, like Zernio, has no
+  // notion of our workspaces — one token is one Instagram account. Mirror it
+  // into whichever workspace asked (webhook), or into every workspace that
+  // already has a stake: an existing social_accounts row, or a post already
+  // published through Meta. The second source matters on a fresh install,
+  // where the first publish happens before any account row exists and the
+  // sync would otherwise have nowhere to write.
+  let workspaceIds = [];
+  if (body.workspace_id){
+    workspaceIds = [body.workspace_id];
+  } else {
+    const seen = new Set();
+    try {
+      const rows = await http({ method:'GET', url:`${SUPA_URL}/rest/v1/social_accounts?select=workspace_id`, headers:sHeaders, json:true });
+      for (const r of (rows || [])) if (r.workspace_id) seen.add(r.workspace_id);
+    } catch (e) { /* fall through to posts */ }
+    for (const t of POST_TABLES){
+      try {
+        const rows = await http({ method:'GET',
+          url:`${SUPA_URL}/rest/v1/${t}?select=workspace_id&publish_provider=eq.meta&zernio_post_id=neq.&limit=500`,
+          headers:sHeaders, json:true });
+        for (const r of (rows || [])) if (r.workspace_id) seen.add(r.workspace_id);
+      } catch (e) { /* table may not exist */ }
+    }
+    workspaceIds = [...seen];
+  }
+
+  let accountsSynced = 0;
+  for (const wsId of workspaceIds){
+    try {
+      await http({ method:'POST', url:`${SUPA_URL}/rest/v1/social_accounts?on_conflict=workspace_id,zernio_account_id`,
+        headers:{ ...sHeaders, Prefer:'resolution=merge-duplicates,return=minimal' },
+        body:{ workspace_id: wsId, zernio_account_id: IG_USER, platform: 'instagram',
+               publish_provider: 'meta',
+               username: profile.username || '', display_name: profile.name || '',
+               profile_picture: profile.profile_picture_url || '',
+               profile_url: profile.username ? `https://www.instagram.com/${profile.username}/` : '',
+               is_active: true, needs_reconnection: false,
+               followers_count: profile.followers_count || 0,
+               last_synced_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+        json:true });
+      accountsSynced++;
+    } catch (e) { /* one bad row must not abort the sync */ }
+  }
+
+  // ══ 2) account-level daily row ═══════════════════════════════════════
+  // Two calls, not one, and that is a hard API constraint rather than a
+  // style choice: Instagram splits account insights into a time series
+  // (follower_count) and aggregates that REQUIRE metric_type=total_value
+  // (everything else), and mixing them in one request is an outright #100
+  // error naming the offending metric. Verified live on 2026-08-19.
+  const acct = {};
+  const TOTAL_VALUE = ['reach','views','profile_views','accounts_engaged','total_interactions','likes','comments','saves','shares','website_clicks'];
+  try {
+    const r = await graph(`${IG_USER}/insights`, {
+      metric: TOTAL_VALUE.join(','), period: 'day', metric_type: 'total_value',
+    });
+    for (const m of ((r && r.data) || [])){
+      acct[m.name] = (m.total_value && typeof m.total_value.value === 'number') ? m.total_value.value : 0;
+    }
+  } catch (e) { /* a bad day of account insights must not lose the post rows */ }
+
+  const acctPresent = Object.keys(acct).map(k => k === 'website_clicks' ? 'clicks'
+    : k === 'profile_views' ? 'profile_views' : k).filter(Boolean);
+
+  let accountRows = 0;
+  for (const wsId of workspaceIds){
+    try {
+      await http({ method:'POST', url:`${SUPA_URL}/rest/v1/account_analytics?on_conflict=workspace_id,account_id,metric_date`,
+        headers:{ ...sHeaders, Prefer:'resolution=merge-duplicates,return=minimal' },
+        body:{ workspace_id: wsId, account_id: IG_USER, platform:'instagram', publish_provider:'meta',
+               metric_date: today(),
+               // Straight off the profile, NOT the follower_count insight
+               // metric — that one returns an empty series on small accounts
+               // (confirmed: the test account has 1 follower and gets
+               // `data: []`), which would leave the follower chart blank for
+               // a brand-new account rather than merely flat.
+               followers_count: profile.followers_count || 0,
+               follows_count: profile.follows_count || 0,
+               media_count: profile.media_count || 0,
+               reach: acct.reach || 0, views: acct.views || 0,
+               profile_views: acct.profile_views || 0,
+               accounts_engaged: acct.accounts_engaged || 0,
+               total_interactions: acct.total_interactions || 0,
+               likes: acct.likes || 0, comments: acct.comments || 0,
+               saves: acct.saves || 0, shares: acct.shares || 0,
+               clicks: acct.website_clicks || 0,
+               metrics_present: ['followers_count','follows_count','media_count'].concat(acctPresent),
+               synced_at: new Date().toISOString() },
+        json:true });
+      accountRows++;
+    } catch (e) { /* non-fatal */ }
+  }
+
+  // ══ 3) per-post metrics ══════════════════════════════════════════════
+  // Every post we published through Meta. `zernio_post_id` holds the
+  // Instagram media id on these rows — see the migration header.
+  const wsFilter = body.workspace_id ? `&workspace_id=eq.${body.workspace_id}` : '';
+  const targets = [];
+  for (const table of POST_TABLES){
+    try {
+      const rows = await http({ method:'GET',
+        url:`${SUPA_URL}/rest/v1/${table}?select=id,workspace_id,zernio_post_id,zernio_account_id,publish_status,platform`
+            + `&zernio_post_id=neq.&publish_provider=eq.meta&publish_status=eq.published${wsFilter}&limit=500`,
+        headers:sHeaders, json:true });
+      for (const r of (rows || [])) if (r.zernio_post_id) targets.push({ ...r, post_table: table });
+    } catch (e) { /* a missing table is fine */ }
+  }
+
+  let rowsWritten = 0;
+  const errors = [];
+
+  for (const t of targets){
+    try {
+      // media_product_type decides which metrics are even askable, so it has
+      // to be read before the insights call rather than assumed.
+      const media = await graph(t.zernio_post_id, {
+        fields: 'id,media_type,media_product_type,timestamp,permalink,like_count,comments_count',
+      });
+      const ins = await mediaInsights(t.zernio_post_id, media.media_product_type, media.media_type);
+
+      const row = { impressions:0, reach:0, likes:0, comments:0, shares:0, saves:0, clicks:0, views:0 };
+      const present = [];
+      for (const [metric, column] of Object.entries(METRIC_TO_COLUMN)){
+        if (ins[metric] === undefined) continue;
+        row[column] = ins[metric] || 0;
+        present.push(column);
+      }
+      // like_count / comments_count come off the media node itself and are
+      // populated even when the insights call degraded to CORE — prefer a
+      // real number over a zero we merely failed to fetch.
+      if (typeof media.like_count === 'number' && !present.includes('likes')){ row.likes = media.like_count; present.push('likes'); }
+      if (typeof media.comments_count === 'number' && !present.includes('comments')){ row.comments = media.comments_count; present.push('comments'); }
+
+      await http({ method:'POST', url:`${SUPA_URL}/rest/v1/post_analytics?on_conflict=zernio_post_id,platform,metric_date`,
+        headers:{ ...sHeaders, Prefer:'resolution=merge-duplicates,return=minimal' },
+        body:{ workspace_id: t.workspace_id, zernio_post_id: t.zernio_post_id,
+               platform: t.platform || 'instagram', platform_post_id: t.zernio_post_id,
+               post_table: t.post_table, post_id: t.id,
+               zernio_account_id: t.zernio_account_id || IG_USER,
+               publish_provider: 'meta',
+               // One row per day, overwritten within the day. Instagram
+               // reports LIFETIME totals — it has no per-day breakdown for a
+               // post — so the daily series that the engagement-accumulation
+               // chart reads is one we build by snapshotting, not one Meta
+               // hands us. That is also why this sync has to run daily even
+               // when nothing was published: a missed day is a hole in the
+               // curve that can never be backfilled.
+               metric_date: today(),
+               ...row,
+               metrics_present: [...new Set(present)],
+               synced_at: new Date().toISOString() },
+        json:true });
+      rowsWritten++;
+
+      // Keep platform_post_url honest — a post published before the permalink
+      // read succeeded would otherwise never get its link.
+      if (media.permalink){
+        try {
+          await http({ method:'PATCH', url:`${SUPA_URL}/rest/v1/${t.post_table}?id=eq.${t.id}&platform_post_url=eq.`,
+            headers:{ ...sHeaders, Prefer:'return=minimal' },
+            body:{ platform_post_url: media.permalink }, json:true });
+        } catch (e) { /* non-fatal */ }
+      }
+    } catch (e) {
+      errors.push({ media_id: t.zernio_post_id, error: (e && e.message) || String(e) });
+    }
+  }
+
+  return [{ json: { ok: true, account: profile.username || IG_USER,
+                    followers: profile.followers_count || 0,
+                    accounts_synced: accountsSynced, account_rows: accountRows,
+                    posts_checked: targets.length, rows_written: rowsWritten,
+                    errors: errors.slice(0, 10) } }];
+} catch (err) {
+  return [{ json: { ok: false, error: (err && err.message) ? err.message : String(err) } }];
+}"""
+
+
+META_DASHBOARD_JS = r"""const rawHttp = this.helpers.httpRequest;
+
+const http = async (opts) => {
+  for (let attempt = 0; ; attempt++) {
+    try { return await rawHttp(opts); }
+    catch (e) {
+      const code = (e && (e.code || (e.cause && e.cause.code))) || '';
+      const msg  = String((e && e.message) || '');
+      const isDns = code === 'ENOTFOUND' || code === 'EAI_AGAIN'
+        || /getaddrinfo\s+(ENOTFOUND|EAI_AGAIN)/.test(msg);
+      if (!isDns || attempt >= 2) throw e;
+      await new Promise(r => setTimeout(r, 400 * (attempt + 1)));
+    }
+  }
+};
+
+const SUPA_URL = String($env.SUPABASE_URL || '').replace(/\/+$/, '');
+const SUPA_KEY = $env.SUPABASE_KEY;
+const sHeaders = { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}`, 'Content-Type': 'application/json' };
+
+const GRAPH    = 'https://graph.facebook.com/v23.0';
+const IG_TOKEN = $env.META_IG_TOKEN;
+const IG_USER  = $env.META_IG_USER_ID;
+const BRAND_TZ = 'Asia/Riyadh';
+
+async function graph(pathOrUrl, params = {}){
+  const url = /^https?:\/\//.test(pathOrUrl)
+    ? pathOrUrl + (pathOrUrl.includes('access_token') ? '' : `&access_token=${encodeURIComponent(IG_TOKEN)}`)
+    : `${GRAPH}/${pathOrUrl}?${new URLSearchParams({ ...params, access_token: IG_TOKEN })}`;
+  const res = await http({ method:'GET', url, returnFullResponse:true, ignoreHttpStatusErrors:true, json:true });
+  const b = res.body && typeof res.body === 'string' ? JSON.parse(res.body) : res.body;
+  if (b && b.error){
+    const e = b.error;
+    throw new Error(`Instagram ${e.code || res.statusCode}: ${e.error_user_msg || e.message || JSON.stringify(e).slice(0,300)}`);
+  }
+  if (res.statusCode < 200 || res.statusCode >= 300) throw new Error(`Instagram HTTP ${res.statusCode}`);
+  return b;
+}
+
+// Each section is computed independently and a failure is CONTAINED to its
+// own key, mirroring the Zernio dashboard's contract — the Analytics page
+// already reads `_error` per section and renders the rest of the page around
+// a hole. One rate-limited call must not blank nine charts.
+async function safe(fn){
+  try { return await fn(); }
+  catch (e) { return { _error: (e && e.message) ? e.message : String(e) }; }
+}
+
+// ── Brand-time calendar helpers ─────────────────────────────────────────
+// Every bucket a human reads — which day a post landed on, which hour slot
+// performs best — has to be computed in the BRAND's zone, not the server's.
+// n8n runs in UTC, so "Sunday 9pm Riyadh" is Sunday 6pm UTC, and bucketing
+// on UTC would shift a third of the week's posts into the wrong day cell.
+function brandParts(iso){
+  const p = {};
+  for (const { type, value } of new Intl.DateTimeFormat('en-US', {
+    timeZone: BRAND_TZ, hourCycle:'h23', weekday:'short',
+    year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit',
+  }).formatToParts(new Date(iso))) p[type] = value;
+  // 0 = Monday, matching BestTimeHeatmap's DAY_LABELS and the day_of_week
+  // convention the Zernio slots used.
+  const dow = { Mon:0, Tue:1, Wed:2, Thu:3, Fri:4, Sat:5, Sun:6 }[p.weekday];
+  return { date: `${p.year}-${p.month}-${p.day}`, hour: Number(p.hour), dow };
+}
+
+function isoWeek(dateStr){
+  const d = new Date(`${dateStr}T00:00:00Z`);
+  const dow = (d.getUTCDay() + 6) % 7;
+  d.setUTCDate(d.getUTCDate() - dow);
+  return d.toISOString().slice(0, 10);
+}
+
+const ZERO = { impressions:0, reach:0, likes:0, comments:0, shares:0, saves:0, clicks:0, views:0 };
+const interactionsOf = a => (a.likes||0) + (a.comments||0) + (a.shares||0) + (a.saves||0);
+function rateOf(a){
+  const denom = a.reach || a.impressions || 0;
+  return denom ? (interactionsOf(a) / denom) * 100 : 0;
+}
+
+const raw  = ($input.first() && $input.first().json) || {};
+const body = raw.body || {};
+const days = Math.max(1, Math.min(365, Number(body.days) || 30));
+const workspaceId = body.workspace_id || '';
+
+const toDate   = new Date();
+const fromDate = new Date(toDate.getTime() - (days - 1) * 86400000);
+const fromISO  = fromDate.toISOString().slice(0, 10);
+const toISO    = toDate.toISOString().slice(0, 10);
+
+try {
+  if (!IG_TOKEN) throw new Error('META_IG_TOKEN is not set on this n8n instance.');
+  if (!IG_USER)  throw new Error('META_IG_USER_ID is not set on this n8n instance.');
+
+  // ══ Media in range, with insights inline ═════════════════════════════
+  // `insights.metric(...)` is field EXPANSION, not a second endpoint: it
+  // returns each media's metrics inside the media node, so a 30-day window
+  // costs one request per page of 50 rather than one per post. The metric
+  // list is the intersection that every media_product_type answers — a page
+  // mixes Reels and feed posts, and Meta rejects the whole page if one
+  // requested metric is invalid for any single item in it.
+  const FIELDS = 'id,timestamp,permalink,media_type,media_product_type,'
+    + 'thumbnail_url,media_url,caption,like_count,comments_count,'
+    + 'insights.metric(reach,likes,comments,saved,shares,views)';
+
+  const media = [];
+  let url = `${GRAPH}/${IG_USER}/media?fields=${encodeURIComponent(FIELDS)}&limit=50&access_token=${encodeURIComponent(IG_TOKEN)}`;
+  let guard = 0;
+  while (url && guard++ < 10){
+    const page = await graph(url);
+    let ranOut = false;
+    for (const m of ((page && page.data) || [])){
+      const ts = m.timestamp || '';
+      // /media comes back newest-first, so the first item older than the
+      // window means every remaining item is too — stop paging rather than
+      // walking the account's whole history every dashboard load.
+      if (ts && ts.slice(0, 10) < fromISO){ ranOut = true; break; }
+      media.push(m);
+    }
+    if (ranOut || media.length >= 300) break;
+    url = (page && page.paging && page.paging.next) || '';
+  }
+
+  const posts = media.map(m => {
+    const a = { ...ZERO };
+    const present = [];
+    for (const row of ((m.insights && m.insights.data) || [])){
+      const v = (row.values && row.values[0] && row.values[0].value) || 0;
+      const col = { reach:'reach', likes:'likes', comments:'comments', saved:'saves', shares:'shares', views:'views' }[row.name];
+      if (col){ a[col] = v; present.push(col); }
+    }
+    // The media node's own counters are populated even when insights are
+    // still warming up on a fresh post — prefer a real number to a zero.
+    if (typeof m.like_count === 'number' && !present.includes('likes')) a.likes = m.like_count;
+    if (typeof m.comments_count === 'number' && !present.includes('comments')) a.comments = m.comments_count;
+    return {
+      id: m.id,
+      platform: 'instagram',
+      publishedAt: m.timestamp || '',
+      permalink: m.permalink || '',
+      platformPostUrl: m.permalink || '',
+      // thumbnail_url exists only for video; a still's own media_url is the
+      // thumbnail. Verified live — the image rows come back with no
+      // thumbnail_url at all rather than with an empty one.
+      thumbnailUrl: m.thumbnail_url || m.media_url || '',
+      mediaType: m.media_type || '',
+      productType: m.media_product_type || '',
+      caption: (m.caption || '').slice(0, 300),
+      analytics: { ...a, engagementRate: rateOf(a) },
+    };
+  });
+
+  const totals = posts.reduce((acc, p) => {
+    for (const k of Object.keys(ZERO)) acc[k] += p.analytics[k] || 0;
+    return acc;
+  }, { ...ZERO });
+
+  // ══ Sections ═════════════════════════════════════════════════════════
+
+  const overview = await safe(async () => {
+    const profile = await graph(IG_USER, {
+      fields: 'id,username,name,profile_picture_url,followers_count,follows_count,media_count',
+    });
+    return {
+      posts,
+      overview: { totalPosts: posts.length, lastSync: new Date().toISOString(), totals },
+      accounts: [{
+        _id: IG_USER, platform: 'instagram',
+        username: profile.username || '', displayName: profile.name || '',
+        profilePicture: profile.profile_picture_url || '',
+        profileUrl: profile.username ? `https://www.instagram.com/${profile.username}/` : '',
+        followersCount: profile.followers_count || 0,
+        isActive: true, needsReconnection: false,
+      }],
+      hasAnalyticsAccess: true,
+    };
+  });
+
+  // Daily rollups come from OUR account_analytics table, not from Meta.
+  // Instagram's /insights answers "how many in this window", not "how many
+  // each day within it" — there is no per-day breakdown to ask for. The
+  // series exists only because the sync workflow snapshots it daily, which
+  // also means it starts the day the sync does and cannot be backfilled.
+  const daily = await safe(async () => {
+    if (!workspaceId) return { dailyData: [], platformBreakdown: [{ platform:'instagram', ...totals }] };
+    const rows = await http({ method:'GET',
+      url:`${SUPA_URL}/rest/v1/account_analytics?workspace_id=eq.${workspaceId}&account_id=eq.${IG_USER}`
+          + `&metric_date=gte.${fromISO}&metric_date=lte.${toISO}&order=metric_date.asc`,
+      headers:sHeaders, json:true });
+    return {
+      dailyData: (rows || []).map(r => ({
+        date: r.metric_date,
+        metrics: { impressions:0, reach:r.reach||0, likes:r.likes||0, comments:r.comments||0,
+                   shares:r.shares||0, saves:r.saves||0, clicks:r.clicks||0, views:r.views||0 },
+      })),
+      platformBreakdown: [{ platform:'instagram', ...totals }],
+    };
+  });
+
+  // Best time to post: bucket published media into (brand weekday, brand
+  // hour) and average their engagement rate. Zernio computed this over the
+  // whole account history server-side; here it is derived from the same
+  // window the rest of the page shows, which is a narrower claim but an
+  // honest one.
+  const bestTime = await safe(async () => {
+    const grid = new Map();
+    for (const p of posts){
+      if (!p.publishedAt) continue;
+      const { dow, hour } = brandParts(p.publishedAt);
+      if (dow === undefined) continue;
+      const key = `${dow}-${hour}`;
+      const cur = grid.get(key) || { day_of_week: dow, hour, sum: 0, n: 0 };
+      cur.sum += p.analytics.engagementRate || 0;
+      cur.n += 1;
+      grid.set(key, cur);
+    }
+    return { slots: [...grid.values()].map(s => ({
+      day_of_week: s.day_of_week, hour: s.hour,
+      avg_engagement: s.n ? s.sum / s.n : 0, posts: s.n,
+    })) };
+  });
+
+  // Posting frequency vs engagement: group the window into brand-time weeks,
+  // count posts per week, then average engagement across weeks that shared a
+  // cadence. With a short window this is a handful of points — which is the
+  // honest amount of signal a month of posting contains.
+  const frequency = await safe(async () => {
+    const weeks = new Map();
+    for (const p of posts){
+      if (!p.publishedAt) continue;
+      const wk = isoWeek(brandParts(p.publishedAt).date);
+      const cur = weeks.get(wk) || { n: 0, sum: 0 };
+      cur.n += 1; cur.sum += p.analytics.engagementRate || 0;
+      weeks.set(wk, cur);
+    }
+    const byCadence = new Map();
+    for (const w of weeks.values()){
+      const cur = byCadence.get(w.n) || { posts_per_week: w.n, sum: 0, n: 0 };
+      cur.sum += w.sum / w.n; cur.n += 1;
+      byCadence.set(w.n, cur);
+    }
+    return { frequency: [...byCadence.values()]
+      .sort((a, b) => a.posts_per_week - b.posts_per_week)
+      .map(c => ({ platform:'instagram', posts_per_week: c.posts_per_week,
+                   avg_engagement_rate: c.n ? c.sum / c.n : 0 })) };
+  });
+
+  // Engagement accumulation, from our own post_analytics snapshots.
+  //
+  // Buckets are DAYS, not hours. Zernio's version had hour-granularity
+  // buckets because it recorded continuously; we snapshot once a day, so an
+  // hourly curve would be interpolation dressed up as measurement. Labelling
+  // them by day is the same chart telling the truth about its resolution.
+  const decay = await safe(async () => {
+    if (!workspaceId) return { buckets: [] };
+    const rows = await http({ method:'GET',
+      url:`${SUPA_URL}/rest/v1/post_analytics?workspace_id=eq.${workspaceId}&publish_provider=eq.meta`
+          + `&select=zernio_post_id,metric_date,likes,comments,shares,saves&order=metric_date.asc&limit=2000`,
+      headers:sHeaders, json:true });
+
+    const publishedOn = new Map(posts.map(p => [p.id, brandParts(p.publishedAt).date]));
+    const series = new Map();
+    for (const r of (rows || [])){
+      if (!series.has(r.zernio_post_id)) series.set(r.zernio_post_id, []);
+      series.get(r.zernio_post_id).push(r);
+    }
+
+    const EDGES = [
+      { order:0, label:'Day 0',  max:0 },
+      { order:1, label:'Day 1',  max:1 },
+      { order:2, label:'Day 2',  max:2 },
+      { order:3, label:'Day 3',  max:3 },
+      { order:4, label:'Week 1', max:7 },
+      { order:5, label:'Week 2', max:14 },
+      { order:6, label:'Month 1',max:30 },
+    ];
+    const acc = new Map(EDGES.map(e => [e.order, { ...e, sum:0, n:0 }]));
+
+    for (const [mediaId, list] of series){
+      const start = publishedOn.get(mediaId);
+      if (!start || list.length < 2) continue;   // one point is not a curve
+      const final = interactionsOf(list[list.length - 1]);
+      if (!final) continue;                       // nothing accumulated; a 0/0 curve is noise
+      const startMs = Date.parse(`${start}T00:00:00Z`);
+      // Best value seen by the end of each bucket, so a bucket with no
+      // snapshot inherits the last one rather than reading as a dip.
+      for (const e of EDGES){
+        let best = null;
+        for (const r of list){
+          const age = Math.round((Date.parse(`${r.metric_date}T00:00:00Z`) - startMs) / 86400000);
+          if (age <= e.max) best = r;
+        }
+        if (!best) continue;
+        const cur = acc.get(e.order);
+        cur.sum += (interactionsOf(best) / final) * 100;
+        cur.n += 1;
+      }
+    }
+    return { buckets: [...acc.values()].filter(b => b.n > 0)
+      .map(b => ({ bucket_order: b.order, bucket_label: b.label,
+                   avg_pct_of_final: b.n ? b.sum / b.n : 0, posts: b.n })) };
+  });
+
+  const followers = await safe(async () => {
+    if (!workspaceId) return { stats: {} };
+    const rows = await http({ method:'GET',
+      url:`${SUPA_URL}/rest/v1/account_analytics?workspace_id=eq.${workspaceId}&account_id=eq.${IG_USER}`
+          + `&select=metric_date,followers_count&metric_date=gte.${fromISO}&order=metric_date.asc`,
+      headers:sHeaders, json:true });
+    return { stats: { [IG_USER]: (rows || []).map(r => ({ date: r.metric_date, followers: r.followers_count || 0 })) } };
+  });
+
+  return [{ json: {
+    ok: true, provider: 'meta',
+    fromDate: fromISO, toDate: toISO,
+    // Which metric toggles are worth showing. Instagram reports neither
+    // impressions (removed in v22, superseded by views) nor any per-media
+    // click metric, so those two switches can only ever read 0 — and a
+    // permanent zero on a dashboard reads as a broken integration rather
+    // than as an absent measurement.
+    metricsSupported: ['reach','likes','comments','shares','saves','views'],
+    overview, daily, bestTime, frequency, decay, followers,
+  } }];
+} catch (err) {
+  return [{ json: { ok: false, error: (err && err.message) ? err.message : String(err) } }];
+}"""
+
+
+def build_meta_publish() -> dict:
+    """
+    TWO entry points into ONE Code node:
+      Every 5 Minutes (schedule sweep) ─┐
+      Webhook (arak-meta-publish) ──────┴─> Meta: Publish
+
+    One workflow rather than a scheduled copy and a manual copy, for the same
+    reason Zernio Sync is one workflow: two copies of publishing logic drift,
+    and publishing is the last place you want silent drift. The Code node
+    tolerates both input shapes via `raw.body` — a webhook call has one, the
+    cron does not, and that absence is what selects the sweep branch.
+
+    The cron exists because the Instagram Graph API has no scheduling at all.
+    See the sticky note.
+    """
+    nodes = [
+        _sticky(META_PUBLISH_STICKY, height=760, width=520, x=0, y=-560),
+        {
+            "parameters": {"rule": {"interval": [{"field": "minutes", "minutesInterval": 5}]}},
+            "id": nid(),
+            "name": "Every 5 Minutes",
+            "type": "n8n-nodes-base.scheduleTrigger",
+            "typeVersion": 1.2,
+            "position": [0, 140],
+        },
+        _webhook("arak-meta-publish", "lastNode", x=0, y=320),
+        _code("Meta: Publish", META_PUBLISH_JS, x=260, y=230),
+    ]
+    connections = {
+        "Every 5 Minutes": {"main": [[{"node": "Meta: Publish", "type": "main", "index": 0}]]},
+        "Webhook": {"main": [[{"node": "Meta: Publish", "type": "main", "index": 0}]]},
+    }
+    return {
+        "name": "Arak Lighting – Publish Post (Meta)",
+        "nodes": nodes,
+        "connections": connections,
+        "active": False,
+        "settings": {"executionOrder": "v1"},
+        "tags": [],
+    }
+
+
+def build_meta_sync() -> dict:
+    """
+    Daily 06:00 ─┐
+    Webhook ─────┴─> Meta: Sync Insights
+
+    Same two-trigger shape as Zernio Sync, and the daily leg is load-bearing
+    rather than a convenience: Instagram reports lifetime totals only, so the
+    per-day series every time-shaped chart reads exists solely because this
+    snapshots it. A day missed here is a day that cannot be recovered.
+    """
+    nodes = [
+        _sticky(META_SYNC_STICKY, height=620, width=520, x=0, y=-440),
+        {
+            "parameters": {"rule": {"interval": [{"triggerAtHour": 6}]}},
+            "id": nid(),
+            "name": "Daily 06:00",
+            "type": "n8n-nodes-base.scheduleTrigger",
+            "typeVersion": 1.2,
+            "position": [0, 140],
+        },
+        _webhook("arak-meta-sync", "lastNode", x=0, y=320),
+        _code("Meta: Sync Insights", META_SYNC_JS, x=260, y=230),
+    ]
+    connections = {
+        "Daily 06:00": {"main": [[{"node": "Meta: Sync Insights", "type": "main", "index": 0}]]},
+        "Webhook": {"main": [[{"node": "Meta: Sync Insights", "type": "main", "index": 0}]]},
+    }
+    return {
+        "name": "Arak Lighting – Meta Insights Sync",
+        "nodes": nodes,
+        "connections": connections,
+        "active": False,
+        "settings": {"executionOrder": "v1"},
+        "tags": [],
+    }
+
+
+def build_meta_dashboard() -> dict:
+    """
+    Webhook (responseMode=lastNode) -> Meta: Dashboard. Synchronous, same as
+    its Zernio predecessor — the Analytics page is waiting on this to render,
+    not firing it and moving on.
+    """
+    nodes = [
+        _sticky(META_DASHBOARD_STICKY, height=560, width=520, x=0, y=-400),
+        _webhook("arak-meta-dashboard", "lastNode", x=0, y=220),
+        _code("Meta: Dashboard", META_DASHBOARD_JS, x=260, y=220),
+    ]
+    connections = {
+        "Webhook": {"main": [[{"node": "Meta: Dashboard", "type": "main", "index": 0}]]},
+    }
+    return {
+        "name": "Arak Lighting – Meta Dashboard",
+        "nodes": nodes,
+        "connections": connections,
+        "active": False,
+        "settings": {"executionOrder": "v1"},
+        "tags": [],
+    }
+
 if __name__ == "__main__":
     out_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "workflows")
     os.makedirs(out_dir, exist_ok=True)
@@ -6066,6 +7461,9 @@ if __name__ == "__main__":
         build_zernio_publish(),
         build_zernio_sync(),
         build_zernio_dashboard(),
+        build_meta_publish(),
+        build_meta_sync(),
+        build_meta_dashboard(),
         build_creative_generate(),
         build_creative_edit(),
         build_creative_video(),

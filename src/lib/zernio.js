@@ -1,7 +1,14 @@
-import { SUPABASE_URL, SUPABASE_ANON_KEY } from './supabaseClient'
 import { BRAND_TIMEZONE } from './brandTime'
 
-// ─── Zernio (publishing + analytics) ─────────────────────────────────────
+// ─── Zernio (publishing + analytics) — DORMANT ───────────────────────────
+// Nothing imports the three webhook callers below any more. Instagram
+// publishing and insights moved to Meta's own Graph API in August 2026 (see
+// src/lib/meta.js and the three `Meta *` workflows); this module is kept
+// intact, and its workflows still generate and deploy, as a fallback that
+// has not been dismantled before its replacement has proven itself.
+//
+// If you are here because publishing broke: the live path is meta.js.
+// ─────────────────────────────────────────────────────────────────────────
 // The browser NEVER calls zernio.com directly and never sees the Zernio
 // API key — that key lives only in n8n's environment (same as every other
 // provider secret in this project). The two functions below hit our own
@@ -103,50 +110,16 @@ export async function fetchZernioDashboard(webhookUrl, { platform = '', accountI
   }
 }
 
-// ── Reads (straight Supabase — no secret involved, RLS-scoped like every
-// other table in this app) ──────────────────────────────────────────────
-
-export async function fetchSocialAccounts(workspaceId, accessToken) {
-  if (!workspaceId) return []
-  try {
-    const res = await fetch(
-      `${SUPABASE_URL}/rest/v1/social_accounts?workspace_id=eq.${workspaceId}&select=*&order=platform.asc`,
-      { headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${accessToken || SUPABASE_ANON_KEY}` } },
-    )
-    return res.ok ? await res.json() : []
-  } catch { return [] }
-}
-
-// Latest metric row per (zernio_post_id, platform) — the running totals,
-// not the whole daily time series (see fetchPostAnalyticsTimeline for
-// that). Done client-side with a Map rather than a second query shape,
-// since post_analytics is small per workspace (dozens to low hundreds of
-// rows) and this avoids a Postgres DISTINCT ON round-trip for now.
-export async function fetchLatestAnalytics(workspaceId, accessToken) {
-  if (!workspaceId) return []
-  try {
-    const res = await fetch(
-      `${SUPABASE_URL}/rest/v1/post_analytics?workspace_id=eq.${workspaceId}&select=*&order=metric_date.desc&limit=1000`,
-      { headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${accessToken || SUPABASE_ANON_KEY}` } },
-    )
-    if (!res.ok) return []
-    const rows = await res.json()
-    const latest = new Map()
-    for (const r of rows) {
-      const key = `${r.zernio_post_id}::${r.platform}`
-      if (!latest.has(key)) latest.set(key, r) // rows already ordered newest-first
-    }
-    return [...latest.values()]
-  } catch { return [] }
-}
-
-export async function fetchPostAnalyticsTimeline(workspaceId, accessToken, zernioPostId) {
-  if (!workspaceId || !zernioPostId) return []
-  try {
-    const res = await fetch(
-      `${SUPABASE_URL}/rest/v1/post_analytics?workspace_id=eq.${workspaceId}&zernio_post_id=eq.${zernioPostId}&select=*&order=metric_date.asc`,
-      { headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${accessToken || SUPABASE_ANON_KEY}` } },
-    )
-    return res.ok ? await res.json() : []
-  } catch { return [] }
-}
+// ── Reads ────────────────────────────────────────────────────────────────
+// These three used to be defined here, which was only ever true by accident:
+// they read OUR tables (social_accounts, post_analytics), not Zernio's API,
+// and nothing about them is provider-specific. They moved to
+// socialAnalytics.js when Meta became the active publisher, so that path does
+// not have to import a module named after the provider it replaced.
+// Re-exported rather than deleted so this module's public surface is
+// unchanged for anything still pointing at it.
+export {
+  fetchSocialAccounts,
+  fetchLatestAnalytics,
+  fetchPostAnalyticsTimeline,
+} from './socialAnalytics'

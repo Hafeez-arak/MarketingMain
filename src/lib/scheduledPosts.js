@@ -1,6 +1,6 @@
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './supabaseClient'
 import { brandWallToUtcISO, brandWallString, formatBrandDateTime } from './brandTime'
-import { publishPost } from './zernio'
+import { publishPost } from './meta'
 
 // ─── Posts, across all three tables ────────────────────────────────────────
 // Reads go through the scheduled_posts view (20260813_scheduled_posts_view.sql);
@@ -85,16 +85,28 @@ export async function patchPost(accessToken, postTable, postId, patch) {
 
 // ─── Moving a post to a different time ─────────────────────────────────────
 //
-// Who owns "when this goes out" depends entirely on whether Zernio has seen it
-// yet, and that is the only thing that makes rescheduling non-trivial:
+// Who owns "when this goes out" is the whole question, and moving to Meta
+// changed the answer. Under Zernio a scheduled post lived AT Zernio; our
+// column was a copy, and when the two disagreed Zernio won and the post fired
+// at the old time — hence the cancel-the-old-then-create-a-new dance.
 //
-//   not_published / failed  — nobody but us. Update the row, done.
-//   scheduled               — Zernio owns it. Our column is a copy, and if the
-//                             two disagree Zernio wins and the post fires at
-//                             the OLD time. So the move must go through Zernio:
-//                             cancel the old post, create a new one.
-//   publishing              — mid-flight at the platform. Refuse. This is the
-//                             window where a cancel races the publish itself.
+// The Instagram Graph API cannot schedule at all, so we hold the slot
+// outright: `scheduled_publish_at` is the only copy that exists, and there is
+// nothing left to desync from.
+//
+// That does NOT make a scheduled move a plain UPDATE, and this is the part
+// worth being careful about. The publish workflow's cron sweeps every five
+// minutes and claims due rows by flipping 'scheduled' -> 'publishing'. A
+// browser PATCH cannot see that claim, so a drag landing in the same instant
+// would rewrite the time of a post already going out — and the post would go
+// out anyway, at neither the old time nor the new one. Routing the move
+// through the workflow makes it take the same atomic claim the sweeper does,
+// so exactly one of them wins.
+//
+//   not_published / failed  — nobody else can touch it. Update the row, done.
+//   scheduled               — ours, but the sweeper is a live second writer.
+//                             Go through the workflow so the claim arbitrates.
+//   publishing              — mid-flight at Instagram. Refuse.
 //   published               — already out. Nothing to move.
 //
 // `movePost` below is the single entry point; this function just names the
@@ -104,7 +116,7 @@ export function moveKindFor(post) {
   const status = post?.publish_status || 'not_published'
   if (status === 'published')  return { kind: 'blocked', reason: 'Already published — this post has gone out.' }
   if (status === 'publishing') return { kind: 'blocked', reason: 'Publishing right now — wait for it to finish before moving it.' }
-  if (status === 'scheduled')  return { kind: 'zernio',  reason: 'Scheduled at Zernio — moving it cancels the old slot and books the new one.' }
+  if (status === 'scheduled')  return { kind: 'remote',  reason: 'Scheduled — moving it re-books the slot.' }
   return { kind: 'local', reason: '' }
 }
 
@@ -120,7 +132,7 @@ export function canMove(post) {
 // mean converting twice and getting to disagree with itself once. The single
 // conversion lives in brandTime.js.
 //
-// `webhooks` is only consulted on the Zernio path; a purely local move needs
+// `webhooks` is only consulted on the workflow path; a purely local move needs
 // no webhook configured, and requiring one would block rescheduling drafts.
 export async function movePost({ accessToken, post, dateKey, time, webhooks, workspaceId }) {
   const plan = moveKindFor(post)
@@ -137,12 +149,12 @@ export async function movePost({ accessToken, post, dateKey, time, webhooks, wor
     return res.error ? res : { ok: true, post: res.post, movedVia: 'local', scheduledPublishAt: whenISO }
   }
 
-  // ── Through Zernio: cancel the old, book the new ────────────────────────
-  // Deliberately NOT patching our row first. If the row said the new time and
-  // the Zernio call then failed, the calendar would show a time the platform
-  // never agreed to — the exact split-brain this whole path exists to avoid.
-  // The workflow owns the write, and only after Zernio has confirmed.
-  const result = await publishPost(webhooks?.publishPost, {
+  // ── Through the publish workflow, so the claim arbitrates ───────────────
+  // Deliberately NOT patching our row first. The workflow owns every
+  // publish_status transition — that is what lets its atomic claim mean
+  // anything — and a browser write that moved the time before the claim was
+  // taken would be the one writer the guard cannot see.
+  const result = await publishPost(webhooks?.metaPublish, {
     postId: post.id, postTable: post.post_table, workspaceId,
     platform: post.platform,
     accountId: post.zernio_account_id || undefined,
@@ -166,14 +178,15 @@ export async function movePost({ accessToken, post, dateKey, time, webhooks, wor
     }
   }
   return {
-    ok: true, movedVia: 'zernio', scheduledPublishAt: whenISO,
+    ok: true, movedVia: 'workflow', scheduledPublishAt: whenISO,
     zernioPostId: result.zernio_post_id || '',
     label: formatBrandDateTime(whenISO),
   }
 }
 
-// Clear a post's slot without deleting the post itself. Same ownership rules:
-// if Zernio holds it, the cancel has to happen there or it still goes out.
+// Clear a post's slot without deleting the post itself. Same ownership rules
+// as a move: a scheduled row has the cron as a second writer, so the cancel
+// goes through the workflow and takes the claim rather than racing it.
 export async function unschedulePost({ accessToken, post, webhooks, workspaceId }) {
   const plan = moveKindFor(post)
   if (plan.kind === 'blocked') return { error: plan.reason }
@@ -186,14 +199,14 @@ export async function unschedulePost({ accessToken, post, webhooks, workspaceId 
   }
 
   // There is no "cancel only" webhook, and adding one would be a second place
-  // that knows how to talk to Zernio. Reuse the reschedule path's cancel by
-  // asking the workflow to move it nowhere — see cancel_only in the workflow.
+  // that knows how to move publish state. Reuse the reschedule path by asking
+  // the workflow to move it nowhere — see cancel_only in the workflow.
   const result = await cancelScheduled({ webhooks, post, workspaceId })
   return result
 }
 
 async function cancelScheduled({ webhooks, post, workspaceId }) {
-  const url = webhooks?.publishPost
+  const url = webhooks?.metaPublish
   if (!url) return { error: 'Publish webhook not configured — set it in Settings → Integrations.' }
   try {
     const res = await fetch(url, {
