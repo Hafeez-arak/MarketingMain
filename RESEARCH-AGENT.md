@@ -700,9 +700,15 @@ list; it simply stops being a place you *start* something.
    audited when wrong. Browser side in `src/lib/research.js`
    (`competitorRowsFrom`, `isSnapshotable`, `setHandleByHand`). 33 tests.
    **Not yet deployed to the n8n box.**
-3. **Stage 0 in isolation** — Graph + Supabase gather and the metric/delta
-   computation, tested through `workflowHarness.js` with both stubbed. Highest
-   risk, most testable, needs no model at all.
+3. ~~**Stage 0 in isolation**~~ — **done 2026-08-20.** Workflow
+   `Arak Lighting – Research Run` (`arak-research-run`): claims a run,
+   snapshots every VERIFIED handle via `business_discovery`, computes cadence,
+   format mix, engagement per 1k and week-over-week deltas in code, and writes
+   the report document §8 specifies with the model-authored sections empty.
+   Async — answers with a run id and keeps working. No model call at all, so
+   there is already a competitor board with real numbers before stage 1
+   exists. 23 tests, including a mutation check that the hidden-likes rule
+   actually bites.
 4. **Stages 1–5** as one n8n workflow, async, with the failure writes.
 5. **The page** — brief rendering + run history + agenda (with handle
    correction), reusing `ProposedRule`. Insights' two buttons become one link

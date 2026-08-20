@@ -7846,18 +7846,34 @@ let resolved = 0, suggested = 0, notFound = 0;
 for (const item of work) {
   const record = { name: item.name, agenda_id: item.agenda_id };
   try {
-    const query = [item.name, item.positioning, 'Saudi Arabia instagram'].filter(Boolean).join(' ');
-    let results = [];
-    try {
-      const r = await req({
-        __label: 'Tavily', method: 'POST', url: 'https://api.tavily.com/search',
-        body: { api_key: TAVILY, query, max_results: 6, search_depth: 'basic', topic: 'general' },
-        json: true,
-      });
-      results = (r && r.results) || [];
-    } catch (e) { record.search_error = String(e.message || e).slice(0, 160); }
+    // Search the NAME, not the name plus a hundred-character positioning
+    // sentence. Observed live 2026-08-20: with the full positioning appended,
+    // three of four rivals came back with ZERO instagram.com URLs — the one
+    // distinctive token was buried under generic industry words ("lighting",
+    // "architectural", "Riyadh") that match half the market. The positioning
+    // still earns its keep in SCORING, where it is compared against the
+    // account's own bio rather than used to fetch.
+    const search = async (query) => {
+      try {
+        const r = await req({
+          __label: 'Tavily', method: 'POST', url: 'https://api.tavily.com/search',
+          body: { api_key: TAVILY, query, max_results: 6, search_depth: 'basic', topic: 'general' },
+          json: true,
+        });
+        return (r && r.results) || [];
+      } catch (e) { record.search_error = String(e.message || e).slice(0, 160); return []; }
+    };
 
-    const candidates = handlesFromSearch(results).slice(0, 4);
+    let candidates = handlesFromSearch(await search(`"${item.name}" instagram`)).slice(0, 4);
+    // One fallback, and only when the first found nothing at all: a rival is
+    // sometimes known publicly by a name its directory row does not use. Not
+    // run otherwise, so the common case still costs exactly one search.
+    if (!candidates.length) {
+      const hint = String(item.positioning || '').split(/[^A-Za-z0-9]+/).filter(w => w.length > 3).slice(0, 4).join(' ');
+      const alt = [item.name, hint, 'Saudi Arabia instagram'].filter(Boolean).join(' ');
+      candidates = handlesFromSearch(await search(alt)).slice(0, 4);
+      record.used_fallback = true;
+    }
     record.candidates = candidates;
 
     let best = null;
@@ -8466,6 +8482,521 @@ def build_zernio_connect() -> dict:
     }
 
 
+RESEARCH_RUN_STICKY = """## Research Run — Stage 0 (gather)
+
+**Zero secrets in this file.** Needs `META_IG_TOKEN`, `META_IG_USER_ID`, `SUPABASE_URL`, `SUPABASE_KEY`.
+
+Webhook path: `/arak-research-run`. Body: `{ workspace_id, trigger?, period_days? }`.
+
+The evidence half of the weekly review. Stages 1-5 (plan / search / reflect / synthesise) land on top of this later — this stage makes no model call at all, and produces a competitor board with real numbers before any model is involved.
+
+**Every number here is computed in code.** Asking a model to subtract last week's post count from this week's is asking it to be occasionally wrong about the number the reader will trust most. The model, when it arrives, receives deltas as given facts.
+
+**It only snapshots a VERIFIED handle** — `ig_status in ('resolved','human_set')`. A handle alone is never permission to collect numbers: the resolve step deliberately stores weak candidates as suggestions, and reading `ig_handle` without the status is exactly how a guess reaches the board.
+
+**Async.** The run row is inserted `running` and the webhook answers immediately with its id; the browser polls. Every path out — including the failure path — writes a terminal status, because a run left `running` is a spinner nobody can close.
+
+**Single-flight** is a partial unique index in the database, not a check here. A second press returns the RUNNING run's id rather than starting a second agent on the same period.
+
+**Refuses to invent a baseline.** The first run for a brand reports `baseline: true` and no movements. A delta needs two snapshots and there is only one."""
+
+
+RESEARCH_RUN_OPEN_JS = r"""
+const rawHttp = this.helpers.httpRequest;
+
+const http = async (opts) => {
+  for (let attempt = 0; ; attempt++) {
+    try { return await rawHttp(opts); }
+    catch (e) {
+      const code = (e && (e.code || (e.cause && e.cause.code))) || '';
+      const msg  = String((e && e.message) || '');
+      const isDns = code === 'ENOTFOUND' || code === 'EAI_AGAIN'
+        || /getaddrinfo\s+(ENOTFOUND|EAI_AGAIN)/.test(msg);
+      if (!isDns || attempt >= 2) throw e;
+      await new Promise(r => setTimeout(r, 400 * (attempt + 1)));
+    }
+  }
+};
+
+const raw  = ($input.first() && $input.first().json) || {};
+const body = raw.body || raw;
+const SUPA_URL = String($env.SUPABASE_URL || '').replace(/\/+$/, '');
+const SUPA_KEY = $env.SUPABASE_KEY;
+const sHeaders = { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}`, 'Content-Type': 'application/json' };
+
+const wsId = String(body.workspace_id || '').trim();
+if (!wsId) throw new Error('workspace_id is required.');
+
+const trigger = ['manual', 'scheduled', 'chat'].includes(body.trigger) ? body.trigger : 'manual';
+const periodDays = Math.min(90, Math.max(1, Number(body.period_days) || 7));
+
+const now = new Date();
+const periodEnd = new Date(now);
+const periodStart = new Date(now.getTime() - periodDays * 86400000);
+const asDate = d => d.toISOString().slice(0, 10);
+
+// Sweep first. A run whose workflow died between the insert and the terminal
+// write holds the single-flight index open forever, and every later press
+// would come back "already running" pointing at a run that finished nothing.
+// Twenty minutes is generous for a stage that makes at most a few dozen HTTP
+// calls — same reasoning as the creative reconcile sweep.
+const staleBefore = new Date(now.getTime() - 20 * 60000).toISOString();
+await http({
+  method: 'PATCH',
+  url: `${SUPA_URL}/rest/v1/research_runs?workspace_id=eq.${wsId}&status=eq.running&started_at=lt.${staleBefore}`,
+  headers: sHeaders,
+  body: { status: 'failed', error: 'Timed out — the run stopped writing and was swept.', finished_at: now.toISOString() },
+  json: true, returnFullResponse: true, ignoreHttpStatusErrors: true,
+});
+
+// Claim the run. Single-flight is a partial unique index on
+// (workspace_id) WHERE status = 'running', so the DATABASE refuses the second
+// caller rather than a check-then-insert here that two tabs could both pass.
+const ins = await http({
+  method: 'POST', url: `${SUPA_URL}/rest/v1/research_runs`,
+  headers: { ...sHeaders, Prefer: 'return=representation' },
+  body: {
+    workspace_id: wsId, trigger, status: 'running', stage: 'gather',
+    period_start: asDate(periodStart), period_end: asDate(periodEnd),
+  },
+  json: true, returnFullResponse: true, ignoreHttpStatusErrors: true,
+});
+
+if (ins.statusCode === 409) {
+  // Not an error, and not a second run: hand back the one already going so a
+  // double-click attaches to it instead of failing at the user.
+  const live = await http({
+    method: 'GET',
+    url: `${SUPA_URL}/rest/v1/research_runs?workspace_id=eq.${wsId}&status=eq.running`
+       + `&select=id,started_at,stage&order=started_at.desc&limit=1`,
+    headers: sHeaders, json: true,
+  });
+  const row = (live || [])[0];
+  return [{ json: { ok: true, proceed: false, already_running: true, workspace_id: wsId,
+    run_id: row ? row.id : null,
+    reason: 'A research run is already going for this brand. Watch that one rather than starting a second.' } }];
+}
+if (ins.statusCode < 200 || ins.statusCode >= 300) {
+  const b = ins.body || {};
+  throw new Error(`Could not open the run: ${b.message || b.error || `HTTP ${ins.statusCode}`}`);
+}
+
+const run = Array.isArray(ins.body) ? ins.body[0] : ins.body;
+return [{ json: {
+  ok: true, proceed: true, already_running: false,
+  workspace_id: wsId, run_id: run.id, trigger,
+  period_start: periodStart.toISOString(), period_end: periodEnd.toISOString(),
+  period_days: periodDays,
+} }];
+"""
+
+
+RESEARCH_RUN_GATHER_JS = r"""
+const rawHttp = this.helpers.httpRequest;
+
+const http = async (opts) => {
+  for (let attempt = 0; ; attempt++) {
+    try { return await rawHttp(opts); }
+    catch (e) {
+      const code = (e && (e.code || (e.cause && e.cause.code))) || '';
+      const msg  = String((e && e.message) || '');
+      const isDns = code === 'ENOTFOUND' || code === 'EAI_AGAIN'
+        || /getaddrinfo\s+(ENOTFOUND|EAI_AGAIN)/.test(msg);
+      if (!isDns || attempt >= 2) throw e;
+      await new Promise(r => setTimeout(r, 400 * (attempt + 1)));
+    }
+  }
+};
+
+async function req(opts){
+  const res = await http({ ...opts, returnFullResponse: true, ignoreHttpStatusErrors: true });
+  if (res.statusCode >= 200 && res.statusCode < 300) return res.body;
+  const b = res.body;
+  const msg = (b && typeof b === 'object') ? (b.error || b.message || JSON.stringify(b).slice(0, 300))
+            : (typeof b === 'string' && b) ? b.slice(0, 300) : `HTTP ${res.statusCode}`;
+  throw new Error(`${opts.__label || 'Request'} ${res.statusCode}: ${msg}`);
+}
+
+const inp = ($input.first() && $input.first().json) || {};
+const wsId  = inp.workspace_id;
+const runId = inp.run_id;
+
+const SUPA_URL = String($env.SUPABASE_URL || '').replace(/\/+$/, '');
+const SUPA_KEY = $env.SUPABASE_KEY;
+const sHeaders = { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}`, 'Content-Type': 'application/json' };
+
+const GRAPH    = 'https://graph.facebook.com/v23.0';
+const IG_TOKEN = $env.META_IG_TOKEN;
+const IG_USER  = $env.META_IG_USER_ID;
+
+const periodStart = new Date(inp.period_start);
+const periodEnd   = new Date(inp.period_end);
+const periodDays  = Number(inp.period_days) || 7;
+
+// Every exit from here writes a terminal status. A run left 'running' is a
+// spinner nobody can close, and the sweep in the previous node only catches
+// it twenty minutes later — draft_status taught this expensively.
+async function finish(patch) {
+  await http({
+    method: 'PATCH', url: `${SUPA_URL}/rest/v1/research_runs?id=eq.${runId}&workspace_id=eq.${wsId}`,
+    headers: sHeaders, body: { finished_at: new Date().toISOString(), ...patch },
+    json: true, returnFullResponse: true, ignoreHttpStatusErrors: true,
+  });
+}
+
+// ─── Metrics, computed here and never by a model ─────────────────────────
+
+const round = (n, p = 2) => (n == null || !isFinite(n)) ? null : Math.round(n * 10 ** p) / 10 ** p;
+
+function metricsFor(media, followers) {
+  const inPeriod = (media || []).filter(m => {
+    const t = new Date(m.timestamp);
+    return !isNaN(t) && t >= periodStart && t <= periodEnd;
+  });
+
+  const formatCounts = {};
+  for (const m of inPeriod) {
+    const k = m.media_type || 'UNKNOWN';
+    formatCounts[k] = (formatCounts[k] || 0) + 1;
+  }
+  const formatMix = {};
+  for (const [k, v] of Object.entries(formatCounts)) formatMix[k] = round(v / inPeriod.length, 3);
+
+  // Instagram lets an account hide its like counts, and business_discovery
+  // then omits like_count entirely. A missing count is NOT a zero: averaging
+  // it in would quietly punish exactly the accounts that hid it. So cadence
+  // counts every post while the engagement averages count only the posts that
+  // actually reported — which is why the schema keeps posts_in_period and
+  // sample_size as separate columns.
+  const measurable = inPeriod.filter(m => m.like_count != null || m.comments_count != null);
+  const engagementOf = m => (Number(m.like_count) || 0) + (Number(m.comments_count) || 0);
+  const totalEngagement = measurable.reduce((a, m) => a + engagementOf(m), 0);
+  const avgEngagement = measurable.length ? totalEngagement / measurable.length : null;
+
+  const postHours = {};
+  for (const m of inPeriod) {
+    const t = new Date(m.timestamp);
+    if (isNaN(t)) continue;
+    const k = `${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][t.getUTCDay()]}-${String(t.getUTCHours()).padStart(2, '0')}`;
+    postHours[k] = (postHours[k] || 0) + 1;
+  }
+
+  const topPosts = [...measurable]
+    .sort((a, b) => engagementOf(b) - engagementOf(a))
+    .slice(0, 3)
+    .map(m => ({
+      permalink: m.permalink || '', likes: m.like_count ?? null, comments: m.comments_count ?? null,
+      media_type: m.media_type || '', timestamp: m.timestamp || '',
+      hook: String(m.caption || '').split('\n')[0].slice(0, 160),
+    }));
+
+  return {
+    posts_in_period: inPeriod.length,
+    posts_per_week: periodDays > 0 ? round(inPeriod.length * 7 / periodDays) : null,
+    format_mix: formatMix,
+    avg_engagement: round(avgEngagement),
+    // The only number comparable across accounts of different sizes, and so
+    // the only one the report is allowed to rank on. Null rather than zero
+    // when we do not know the follower count — a ratio over an unknown
+    // denominator is not a small number, it is not a number.
+    engagement_per_1k: (avgEngagement != null && followers > 0)
+      ? round((avgEngagement / followers) * 1000) : null,
+    top_posts: topPosts,
+    post_hours: postHours,
+    sample_size: measurable.length,
+    likes_hidden: inPeriod.length - measurable.length,
+    // media.limit caps what we can see. If every post we got back falls inside
+    // the period, there may be more we never saw and the cadence is a floor,
+    // not a count.
+    truncated: (media || []).length >= 50 && inPeriod.length === (media || []).length,
+  };
+}
+
+async function discover(handle) {
+  const fields = `business_discovery.username(${handle})`
+    + `{id,username,name,biography,website,followers_count,follows_count,media_count,`
+    + `media.limit(50){id,caption,media_type,permalink,timestamp,like_count,comments_count}}`;
+  const url = `${GRAPH}/${IG_USER}?fields=${encodeURIComponent(fields)}`
+            + `&access_token=${encodeURIComponent(IG_TOKEN)}`;
+  const res = await http({ method: 'GET', url, returnFullResponse: true, ignoreHttpStatusErrors: true, json: true });
+  if (res.statusCode < 200 || res.statusCode >= 300) {
+    const b = res.body || {};
+    return { ok: false, error: String((b.error && b.error.message) || `HTTP ${res.statusCode}`).slice(0, 200) };
+  }
+  const bd = res.body && res.body.business_discovery;
+  if (!bd) return { ok: false, error: 'no business_discovery payload' };
+  return { ok: true, acct: bd };
+}
+
+// ─── The pass ────────────────────────────────────────────────────────────
+
+try {
+  if (!IG_TOKEN || !IG_USER) {
+    await finish({ status: 'failed', error: 'META_IG_TOKEN / META_IG_USER_ID are not set on this n8n instance.' });
+    return [{ json: { ok: false, run_id: runId, error: 'META_IG_TOKEN / META_IG_USER_ID are not set on this n8n instance.' } }];
+  }
+
+  // Only VERIFIED handles. This filter is the whole reason the resolve step
+  // stores weak candidates separately, and reading ig_handle without checking
+  // ig_status is precisely how a guess would reach the numbers.
+  const watch = await req({
+    __label: 'Supabase', method: 'GET',
+    url: `${SUPA_URL}/rest/v1/research_agenda?workspace_id=eq.${wsId}&kind=eq.competitor`
+       + `&status=neq.retired&ig_status=in.(resolved,human_set)`
+       + `&select=id,subject,ig_handle&limit=100`,
+    headers: sHeaders, json: true,
+  });
+
+  // Our own account, so every comparison is against us rather than against an
+  // average of rivals.
+  const selfRows = await req({
+    __label: 'Supabase', method: 'GET',
+    url: `${SUPA_URL}/rest/v1/social_accounts?workspace_id=eq.${wsId}&platform=eq.instagram`
+       + `&is_active=eq.true&select=username,followers_count&limit=1`,
+    headers: sHeaders, json: true,
+  });
+  const selfHandle = ((selfRows || [])[0] || {}).username || '';
+
+  const targets = [
+    ...watch.map(w => ({ agenda_id: w.id, name: w.subject, handle: w.ig_handle, is_self: false })),
+    ...(selfHandle ? [{ agenda_id: null, name: 'Us', handle: selfHandle, is_self: true }] : []),
+  ];
+
+  if (!targets.length) {
+    await finish({ status: 'complete', stage: 'gather', report: {
+      headline: 'No competitor has a verified Instagram handle yet, so there is nothing to measure.',
+      baseline: true, quiet_week: true, movements: [], competitor_board: [], market: [], gaps: [],
+      proposed_rules: [], proposed_ideas: [], agenda_changes: [], unanswered: [], sources: [],
+    } });
+    return [{ json: { ok: true, run_id: runId, snapshots: 0,
+      note: 'No verified handles to measure. Run handle resolution first.' } }];
+  }
+
+  // Sequential. A dozen accounts is not worth a concurrency bug, and a
+  // rate-limited Graph answering 429 to half of them would silently narrow
+  // the board without saying so.
+  const snapshots = [];
+  const failures = [];
+  // Things that make a number less trustworthy than it looks. These reach the
+  // report rather than being dropped: a cadence that is really a floor, read
+  // next week as a fall, is a movement the report would state with total
+  // confidence and be wrong about.
+  const caveats = [];
+  for (const t of targets) {
+    const got = await discover(t.handle);
+    if (!got.ok) {
+      failures.push({ name: t.name, handle: t.handle, error: got.error });
+      snapshots.push({
+        run_id: runId, workspace_id: wsId, agenda_id: t.agenda_id,
+        competitor_name: t.name, ig_handle: t.handle, is_self: t.is_self,
+        data_source: 'web_only', captured_at: new Date().toISOString(),
+      });
+      continue;
+    }
+    const a = got.acct;
+    const followers = Number(a.followers_count) || 0;
+    const m = metricsFor((a.media && a.media.data) || [], followers);
+    if (m.truncated) {
+      caveats.push(`${t.name}: every one of the 50 posts Instagram returned falls inside this period, `
+        + `so their cadence is a floor rather than a count — there may be posts we cannot see.`);
+    }
+    if (m.likes_hidden) {
+      caveats.push(`${t.name}: ${m.likes_hidden} of ${m.posts_in_period} posts hide their like count, `
+        + `so the engagement average rests on ${m.sample_size} post${m.sample_size === 1 ? '' : 's'}.`);
+    }
+    snapshots.push({
+      run_id: runId, workspace_id: wsId, agenda_id: t.agenda_id,
+      competitor_name: t.name, ig_handle: a.username || t.handle, is_self: t.is_self,
+      data_source: 'instagram',
+      followers, follows: Number(a.follows_count) || null, media_count: Number(a.media_count) || null,
+      posts_in_period: m.posts_in_period, posts_per_week: m.posts_per_week,
+      format_mix: m.format_mix, avg_engagement: m.avg_engagement,
+      engagement_per_1k: m.engagement_per_1k, top_posts: m.top_posts,
+      post_hours: m.post_hours, sample_size: m.sample_size,
+      captured_at: new Date().toISOString(),
+    });
+  }
+
+  for (const s of snapshots) {
+    await req({
+      __label: 'Supabase', method: 'POST', url: `${SUPA_URL}/rest/v1/competitor_snapshots`,
+      headers: sHeaders, body: s, json: true,
+    });
+  }
+
+  // ─── Deltas ────────────────────────────────────────────────────────────
+  // Read back the PREVIOUS snapshot per competitor and subtract. This is why
+  // competitor_snapshots exists at all: without a stored prior row, "their
+  // posting went 3 to 7 a week" would be a model recalling something it never
+  // saw.
+  const prior = await req({
+    __label: 'Supabase', method: 'GET',
+    url: `${SUPA_URL}/rest/v1/competitor_snapshots?workspace_id=eq.${wsId}&run_id=neq.${runId}`
+       + `&data_source=eq.instagram&select=competitor_name,captured_at,followers,posts_per_week,`
+       + `engagement_per_1k,format_mix&order=captured_at.desc&limit=500`,
+    headers: sHeaders, json: true,
+  });
+  const prevByName = new Map();
+  for (const p of prior || []) {
+    const k = String(p.competitor_name || '').toLowerCase();
+    if (!prevByName.has(k)) prevByName.set(k, p);   // ordered desc, so first is latest
+  }
+
+  const videoShare = mix => {
+    const v = Number((mix || {}).VIDEO || 0) + Number((mix || {}).REELS || 0);
+    return isFinite(v) ? round(v, 3) : null;
+  };
+
+  const movements = [];
+  const pushMove = (name, metric, from, to, unit) => {
+    if (from == null || to == null) return;
+    if (from === 0 && to === 0) return;
+    const abs = Math.abs(to - from);
+    const rel = from !== 0 ? abs / Math.abs(from) : 1;
+    // A floor, so a rounding wobble does not get reported as news.
+    if (rel < 0.15) return;
+    movements.push({
+      what: `${name}: ${metric}`, metric, competitor: name,
+      from: round(from), to: round(to), unit,
+      change_pct: round(rel * 100, 1),
+      direction: to > from ? 'up' : 'down',
+      significance: rel >= 0.5 ? 'high' : rel >= 0.25 ? 'medium' : 'low',
+      evidence_source: 'instagram',
+    });
+  };
+
+  let comparable = 0;
+  for (const s of snapshots) {
+    if (s.data_source !== 'instagram') continue;
+    const prev = prevByName.get(String(s.competitor_name).toLowerCase());
+    if (!prev) continue;
+    comparable += 1;
+    pushMove(s.competitor_name, 'followers', Number(prev.followers), s.followers, 'followers');
+    pushMove(s.competitor_name, 'posts per week', Number(prev.posts_per_week), s.posts_per_week, 'posts/week');
+    pushMove(s.competitor_name, 'engagement per 1k followers', Number(prev.engagement_per_1k), s.engagement_per_1k, 'per 1k');
+    pushMove(s.competitor_name, 'share of posts that are video', videoShare(prev.format_mix), videoShare(s.format_mix), 'share');
+  }
+  movements.sort((a, b) => (b.change_pct || 0) - (a.change_pct || 0));
+
+  // ─── The board ─────────────────────────────────────────────────────────
+  // `vs_us` stays null unless our own account clears a floor. Arak's connected
+  // account has ONE follower, so a ratio against it would render as -99.9%
+  // and read as a finding — which is worse than rendering nothing.
+  const MIN_SELF_BASELINE = 50;
+  const self = snapshots.find(s => s.is_self && s.data_source === 'instagram');
+  // Two floors, not one. The follower floor keeps a 1-follower test account
+  // from producing a -99.9% that reads as a finding. The engagement floor is
+  // a separate hazard: our own account can clear 50 followers while still
+  // getting zero likes, and dividing by that zero yields Infinity, which
+  // round() turns into null and the template renders as "+null%" on every
+  // card. Observed as a near-miss live on 2026-08-20 — @lightingaaa really
+  // does have 2 posts at 0 engagement, and only the follower floor caught it.
+  const selfComparable = !!self && Number(self.followers) >= MIN_SELF_BASELINE
+                         && Number(self.engagement_per_1k) > 0;
+
+  const board = snapshots.filter(s => !s.is_self).map(s => {
+    const prev = prevByName.get(String(s.competitor_name).toLowerCase());
+    return {
+      name: s.competitor_name, handle: s.ig_handle, data: s.data_source,
+      followers: s.followers ?? null,
+      followers_delta: prev && s.followers != null ? s.followers - Number(prev.followers) : null,
+      posts_per_week: s.posts_per_week ?? null,
+      posts_per_week_prev: prev ? round(Number(prev.posts_per_week)) : null,
+      format_mix: s.format_mix || {},
+      engagement_per_1k: s.engagement_per_1k ?? null,
+      vs_us: (selfComparable && s.engagement_per_1k != null)
+        ? `${s.engagement_per_1k >= self.engagement_per_1k ? '+' : ''}` +
+          `${round(((s.engagement_per_1k - self.engagement_per_1k) / self.engagement_per_1k) * 100, 1)}%`
+        : null,
+      vs_us_note: selfComparable ? null : 'No comparable account of ours is connected yet.',
+      sample_size: s.sample_size ?? null,
+      top_posts: s.top_posts || [],
+    };
+  });
+
+  const baseline = comparable === 0;
+  const report = {
+    headline: baseline
+      ? `First measurement of ${board.length} competitor${board.length === 1 ? '' : 's'} — nothing to compare against yet.`
+      : movements.length
+        ? `${movements.length} measurable change${movements.length === 1 ? '' : 's'} across ${comparable} competitor${comparable === 1 ? '' : 's'}.`
+        : 'Nothing moved measurably this week.',
+    baseline,
+    quiet_week: !baseline && movements.length === 0,
+    period: { start: inp.period_start, end: inp.period_end, days: periodDays },
+    movements, competitor_board: board,
+    market: [], gaps: [], proposed_rules: [], proposed_ideas: [], agenda_changes: [],
+    unanswered: [
+      ...failures.map(f => `Could not read ${f.name} (@${f.handle}): ${f.error}`),
+      ...caveats,
+    ],
+    sources: [],
+    stage_reached: 'gather',
+  };
+
+  await finish({ status: 'complete', stage: 'gather', report });
+
+  return [{ json: { ok: true, run_id: runId, snapshots: snapshots.length,
+    measured: snapshots.filter(s => s.data_source === 'instagram').length,
+    failed: failures.length, movements: movements.length, baseline } }];
+
+} catch (e) {
+  const msg = String((e && e.message) || e).slice(0, 500);
+  await finish({ status: 'failed', error: msg });
+  return [{ json: { ok: false, run_id: runId, error: msg } }];
+}
+"""
+
+
+def build_research_run() -> dict:
+    """
+    Webhook -> Run: Open (Code) -> Started? (IF)
+            -> Run: Gather (Code) -> Respond
+                                  \\-> Respond: Already Running
+
+    Stage 0 of the weekly review, and for now the whole of it. Stages 1-5 hang
+    off the end of Gather later; nothing here needs rework when they do,
+    because the report document it writes is already the shape §8 specifies —
+    just with the model-authored sections empty.
+
+    Two Code nodes, connected in sequence rather than through `$('...')`, for
+    the same reason as Research Resolve: the harness supplies $input and $env
+    but not the node graph.
+
+    The failure write lives INSIDE Gather's try/catch rather than on an n8n
+    error branch. An error output that is itself misconfigured leaves the run
+    'running' forever, which is the exact failure this is guarding against —
+    so it does not depend on wiring being right.
+    """
+    nodes = [
+        _sticky(RESEARCH_RUN_STICKY, height=560, width=520, x=0, y=-380),
+        _webhook("arak-research-run", "responseNode", x=0, y=200),
+        _code("Run: Open", RESEARCH_RUN_OPEN_JS, x=220, y=200),
+        _if_bool_equals("Started?", "run-proceed", "={{ $json.proceed }}", x=440, y=200),
+        _code("Run: Gather", RESEARCH_RUN_GATHER_JS, x=660, y=120),
+        _respond_json("Respond", "={{ JSON.stringify($json) }}", x=880, y=120),
+        _respond_json("Respond: Already Running", "={{ JSON.stringify($json) }}", x=660, y=300),
+    ]
+    connections = {
+        "Webhook": {"main": [[{"node": "Run: Open", "type": "main", "index": 0}]]},
+        "Run: Open": {"main": [[{"node": "Started?", "type": "main", "index": 0}]]},
+        "Started?": {"main": [
+            [{"node": "Run: Gather", "type": "main", "index": 0}],
+            [{"node": "Respond: Already Running", "type": "main", "index": 0}],
+        ]},
+        "Run: Gather": {"main": [[{"node": "Respond", "type": "main", "index": 0}]]},
+    }
+    return {
+        "name": "Arak Lighting – Research Run",
+        "nodes": nodes,
+        "connections": connections,
+        "active": False,
+        "settings": {"executionOrder": "v1"},
+        "tags": [],
+    }
+
+
+
 if __name__ == "__main__":
     out_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "workflows")
     os.makedirs(out_dir, exist_ok=True)
@@ -8497,6 +9028,7 @@ if __name__ == "__main__":
         build_insights_review(),
         build_brand_research(),
         build_research_resolve(),
+        build_research_run(),
     ]
 
     for wf in workflows:

@@ -1,0 +1,209 @@
+{
+  "name": "Arak Lighting – Research Run",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Research Run — Stage 0 (gather)\n\n**Zero secrets in this file.** Needs `META_IG_TOKEN`, `META_IG_USER_ID`, `SUPABASE_URL`, `SUPABASE_KEY`.\n\nWebhook path: `/arak-research-run`. Body: `{ workspace_id, trigger?, period_days? }`.\n\nThe evidence half of the weekly review. Stages 1-5 (plan / search / reflect / synthesise) land on top of this later — this stage makes no model call at all, and produces a competitor board with real numbers before any model is involved.\n\n**Every number here is computed in code.** Asking a model to subtract last week's post count from this week's is asking it to be occasionally wrong about the number the reader will trust most. The model, when it arrives, receives deltas as given facts.\n\n**It only snapshots a VERIFIED handle** — `ig_status in ('resolved','human_set')`. A handle alone is never permission to collect numbers: the resolve step deliberately stores weak candidates as suggestions, and reading `ig_handle` without the status is exactly how a guess reaches the board.\n\n**Async.** The run row is inserted `running` and the webhook answers immediately with its id; the browser polls. Every path out — including the failure path — writes a terminal status, because a run left `running` is a spinner nobody can close.\n\n**Single-flight** is a partial unique index in the database, not a check here. A second press returns the RUNNING run's id rather than starting a second agent on the same period.\n\n**Refuses to invent a baseline.** The first run for a brand reports `baseline: true` and no movements. A delta needs two snapshots and there is only one.",
+        "height": 560,
+        "width": 520
+      },
+      "id": "bb39efae-bfe7-5a64-aaa7-77946d547280",
+      "name": "Note: Overview",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        -380
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "arak-research-run",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "b52faf7a-cb53-56b1-9c17-cf94113b0d74",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        200
+      ],
+      "webhookId": "arak-research-run"
+    },
+    {
+      "parameters": {
+        "jsCode": "const expected = String($env.N8N_WEBHOOK_SECRET || '').trim();\nif (expected) {\n  const headers = ($input.first().json || {}).headers || {};\n  const got = String(headers['x-webhook-secret'] || headers['X-Webhook-Secret'] || '').trim();\n  if (got !== expected) {\n    throw new Error('Unauthorized: missing or invalid webhook secret');\n  }\n}\nreturn $input.all();"
+      },
+      "id": "5035841f-2057-5c48-b6e0-e5cd2d04d9c5",
+      "name": "Webhook Secret Guard",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        130,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst rawHttp = this.helpers.httpRequest;\n\nconst http = async (opts) => {\n  for (let attempt = 0; ; attempt++) {\n    try { return await rawHttp(opts); }\n    catch (e) {\n      const code = (e && (e.code || (e.cause && e.cause.code))) || '';\n      const msg  = String((e && e.message) || '');\n      const isDns = code === 'ENOTFOUND' || code === 'EAI_AGAIN'\n        || /getaddrinfo\\s+(ENOTFOUND|EAI_AGAIN)/.test(msg);\n      if (!isDns || attempt >= 2) throw e;\n      await new Promise(r => setTimeout(r, 400 * (attempt + 1)));\n    }\n  }\n};\n\nconst raw  = ($input.first() && $input.first().json) || {};\nconst body = raw.body || raw;\nconst SUPA_URL = String($env.SUPABASE_URL || '').replace(/\\/+$/, '');\nconst SUPA_KEY = $env.SUPABASE_KEY;\nconst sHeaders = { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}`, 'Content-Type': 'application/json' };\n\nconst wsId = String(body.workspace_id || '').trim();\nif (!wsId) throw new Error('workspace_id is required.');\n\nconst trigger = ['manual', 'scheduled', 'chat'].includes(body.trigger) ? body.trigger : 'manual';\nconst periodDays = Math.min(90, Math.max(1, Number(body.period_days) || 7));\n\nconst now = new Date();\nconst periodEnd = new Date(now);\nconst periodStart = new Date(now.getTime() - periodDays * 86400000);\nconst asDate = d => d.toISOString().slice(0, 10);\n\n// Sweep first. A run whose workflow died between the insert and the terminal\n// write holds the single-flight index open forever, and every later press\n// would come back \"already running\" pointing at a run that finished nothing.\n// Twenty minutes is generous for a stage that makes at most a few dozen HTTP\n// calls — same reasoning as the creative reconcile sweep.\nconst staleBefore = new Date(now.getTime() - 20 * 60000).toISOString();\nawait http({\n  method: 'PATCH',\n  url: `${SUPA_URL}/rest/v1/research_runs?workspace_id=eq.${wsId}&status=eq.running&started_at=lt.${staleBefore}`,\n  headers: sHeaders,\n  body: { status: 'failed', error: 'Timed out — the run stopped writing and was swept.', finished_at: now.toISOString() },\n  json: true, returnFullResponse: true, ignoreHttpStatusErrors: true,\n});\n\n// Claim the run. Single-flight is a partial unique index on\n// (workspace_id) WHERE status = 'running', so the DATABASE refuses the second\n// caller rather than a check-then-insert here that two tabs could both pass.\nconst ins = await http({\n  method: 'POST', url: `${SUPA_URL}/rest/v1/research_runs`,\n  headers: { ...sHeaders, Prefer: 'return=representation' },\n  body: {\n    workspace_id: wsId, trigger, status: 'running', stage: 'gather',\n    period_start: asDate(periodStart), period_end: asDate(periodEnd),\n  },\n  json: true, returnFullResponse: true, ignoreHttpStatusErrors: true,\n});\n\nif (ins.statusCode === 409) {\n  // Not an error, and not a second run: hand back the one already going so a\n  // double-click attaches to it instead of failing at the user.\n  const live = await http({\n    method: 'GET',\n    url: `${SUPA_URL}/rest/v1/research_runs?workspace_id=eq.${wsId}&status=eq.running`\n       + `&select=id,started_at,stage&order=started_at.desc&limit=1`,\n    headers: sHeaders, json: true,\n  });\n  const row = (live || [])[0];\n  return [{ json: { ok: true, proceed: false, already_running: true, workspace_id: wsId,\n    run_id: row ? row.id : null,\n    reason: 'A research run is already going for this brand. Watch that one rather than starting a second.' } }];\n}\nif (ins.statusCode < 200 || ins.statusCode >= 300) {\n  const b = ins.body || {};\n  throw new Error(`Could not open the run: ${b.message || b.error || `HTTP ${ins.statusCode}`}`);\n}\n\nconst run = Array.isArray(ins.body) ? ins.body[0] : ins.body;\nreturn [{ json: {\n  ok: true, proceed: true, already_running: false,\n  workspace_id: wsId, run_id: run.id, trigger,\n  period_start: periodStart.toISOString(), period_end: periodEnd.toISOString(),\n  period_days: periodDays,\n} }];\n"
+      },
+      "id": "58ac20ee-aa91-568a-acf8-dc41fa45e70e",
+      "name": "Run: Open",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "run-proceed",
+              "leftValue": "={{ $json.proceed }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "f7477f8d-a010-5825-bb70-6d2f098c0bbb",
+      "name": "Started?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        440,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst rawHttp = this.helpers.httpRequest;\n\nconst http = async (opts) => {\n  for (let attempt = 0; ; attempt++) {\n    try { return await rawHttp(opts); }\n    catch (e) {\n      const code = (e && (e.code || (e.cause && e.cause.code))) || '';\n      const msg  = String((e && e.message) || '');\n      const isDns = code === 'ENOTFOUND' || code === 'EAI_AGAIN'\n        || /getaddrinfo\\s+(ENOTFOUND|EAI_AGAIN)/.test(msg);\n      if (!isDns || attempt >= 2) throw e;\n      await new Promise(r => setTimeout(r, 400 * (attempt + 1)));\n    }\n  }\n};\n\nasync function req(opts){\n  const res = await http({ ...opts, returnFullResponse: true, ignoreHttpStatusErrors: true });\n  if (res.statusCode >= 200 && res.statusCode < 300) return res.body;\n  const b = res.body;\n  const msg = (b && typeof b === 'object') ? (b.error || b.message || JSON.stringify(b).slice(0, 300))\n            : (typeof b === 'string' && b) ? b.slice(0, 300) : `HTTP ${res.statusCode}`;\n  throw new Error(`${opts.__label || 'Request'} ${res.statusCode}: ${msg}`);\n}\n\nconst inp = ($input.first() && $input.first().json) || {};\nconst wsId  = inp.workspace_id;\nconst runId = inp.run_id;\n\nconst SUPA_URL = String($env.SUPABASE_URL || '').replace(/\\/+$/, '');\nconst SUPA_KEY = $env.SUPABASE_KEY;\nconst sHeaders = { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}`, 'Content-Type': 'application/json' };\n\nconst GRAPH    = 'https://graph.facebook.com/v23.0';\nconst IG_TOKEN = $env.META_IG_TOKEN;\nconst IG_USER  = $env.META_IG_USER_ID;\n\nconst periodStart = new Date(inp.period_start);\nconst periodEnd   = new Date(inp.period_end);\nconst periodDays  = Number(inp.period_days) || 7;\n\n// Every exit from here writes a terminal status. A run left 'running' is a\n// spinner nobody can close, and the sweep in the previous node only catches\n// it twenty minutes later — draft_status taught this expensively.\nasync function finish(patch) {\n  await http({\n    method: 'PATCH', url: `${SUPA_URL}/rest/v1/research_runs?id=eq.${runId}&workspace_id=eq.${wsId}`,\n    headers: sHeaders, body: { finished_at: new Date().toISOString(), ...patch },\n    json: true, returnFullResponse: true, ignoreHttpStatusErrors: true,\n  });\n}\n\n// ─── Metrics, computed here and never by a model ─────────────────────────\n\nconst round = (n, p = 2) => (n == null || !isFinite(n)) ? null : Math.round(n * 10 ** p) / 10 ** p;\n\nfunction metricsFor(media, followers) {\n  const inPeriod = (media || []).filter(m => {\n    const t = new Date(m.timestamp);\n    return !isNaN(t) && t >= periodStart && t <= periodEnd;\n  });\n\n  const formatCounts = {};\n  for (const m of inPeriod) {\n    const k = m.media_type || 'UNKNOWN';\n    formatCounts[k] = (formatCounts[k] || 0) + 1;\n  }\n  const formatMix = {};\n  for (const [k, v] of Object.entries(formatCounts)) formatMix[k] = round(v / inPeriod.length, 3);\n\n  // Instagram lets an account hide its like counts, and business_discovery\n  // then omits like_count entirely. A missing count is NOT a zero: averaging\n  // it in would quietly punish exactly the accounts that hid it. So cadence\n  // counts every post while the engagement averages count only the posts that\n  // actually reported — which is why the schema keeps posts_in_period and\n  // sample_size as separate columns.\n  const measurable = inPeriod.filter(m => m.like_count != null || m.comments_count != null);\n  const engagementOf = m => (Number(m.like_count) || 0) + (Number(m.comments_count) || 0);\n  const totalEngagement = measurable.reduce((a, m) => a + engagementOf(m), 0);\n  const avgEngagement = measurable.length ? totalEngagement / measurable.length : null;\n\n  const postHours = {};\n  for (const m of inPeriod) {\n    const t = new Date(m.timestamp);\n    if (isNaN(t)) continue;\n    const k = `${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][t.getUTCDay()]}-${String(t.getUTCHours()).padStart(2, '0')}`;\n    postHours[k] = (postHours[k] || 0) + 1;\n  }\n\n  const topPosts = [...measurable]\n    .sort((a, b) => engagementOf(b) - engagementOf(a))\n    .slice(0, 3)\n    .map(m => ({\n      permalink: m.permalink || '', likes: m.like_count ?? null, comments: m.comments_count ?? null,\n      media_type: m.media_type || '', timestamp: m.timestamp || '',\n      hook: String(m.caption || '').split('\\n')[0].slice(0, 160),\n    }));\n\n  return {\n    posts_in_period: inPeriod.length,\n    posts_per_week: periodDays > 0 ? round(inPeriod.length * 7 / periodDays) : null,\n    format_mix: formatMix,\n    avg_engagement: round(avgEngagement),\n    // The only number comparable across accounts of different sizes, and so\n    // the only one the report is allowed to rank on. Null rather than zero\n    // when we do not know the follower count — a ratio over an unknown\n    // denominator is not a small number, it is not a number.\n    engagement_per_1k: (avgEngagement != null && followers > 0)\n      ? round((avgEngagement / followers) * 1000) : null,\n    top_posts: topPosts,\n    post_hours: postHours,\n    sample_size: measurable.length,\n    likes_hidden: inPeriod.length - measurable.length,\n    // media.limit caps what we can see. If every post we got back falls inside\n    // the period, there may be more we never saw and the cadence is a floor,\n    // not a count.\n    truncated: (media || []).length >= 50 && inPeriod.length === (media || []).length,\n  };\n}\n\nasync function discover(handle) {\n  const fields = `business_discovery.username(${handle})`\n    + `{id,username,name,biography,website,followers_count,follows_count,media_count,`\n    + `media.limit(50){id,caption,media_type,permalink,timestamp,like_count,comments_count}}`;\n  const url = `${GRAPH}/${IG_USER}?fields=${encodeURIComponent(fields)}`\n            + `&access_token=${encodeURIComponent(IG_TOKEN)}`;\n  const res = await http({ method: 'GET', url, returnFullResponse: true, ignoreHttpStatusErrors: true, json: true });\n  if (res.statusCode < 200 || res.statusCode >= 300) {\n    const b = res.body || {};\n    return { ok: false, error: String((b.error && b.error.message) || `HTTP ${res.statusCode}`).slice(0, 200) };\n  }\n  const bd = res.body && res.body.business_discovery;\n  if (!bd) return { ok: false, error: 'no business_discovery payload' };\n  return { ok: true, acct: bd };\n}\n\n// ─── The pass ────────────────────────────────────────────────────────────\n\ntry {\n  if (!IG_TOKEN || !IG_USER) {\n    await finish({ status: 'failed', error: 'META_IG_TOKEN / META_IG_USER_ID are not set on this n8n instance.' });\n    return [{ json: { ok: false, run_id: runId, error: 'META_IG_TOKEN / META_IG_USER_ID are not set on this n8n instance.' } }];\n  }\n\n  // Only VERIFIED handles. This filter is the whole reason the resolve step\n  // stores weak candidates separately, and reading ig_handle without checking\n  // ig_status is precisely how a guess would reach the numbers.\n  const watch = await req({\n    __label: 'Supabase', method: 'GET',\n    url: `${SUPA_URL}/rest/v1/research_agenda?workspace_id=eq.${wsId}&kind=eq.competitor`\n       + `&status=neq.retired&ig_status=in.(resolved,human_set)`\n       + `&select=id,subject,ig_handle&limit=100`,\n    headers: sHeaders, json: true,\n  });\n\n  // Our own account, so every comparison is against us rather than against an\n  // average of rivals.\n  const selfRows = await req({\n    __label: 'Supabase', method: 'GET',\n    url: `${SUPA_URL}/rest/v1/social_accounts?workspace_id=eq.${wsId}&platform=eq.instagram`\n       + `&is_active=eq.true&select=username,followers_count&limit=1`,\n    headers: sHeaders, json: true,\n  });\n  const selfHandle = ((selfRows || [])[0] || {}).username || '';\n\n  const targets = [\n    ...watch.map(w => ({ agenda_id: w.id, name: w.subject, handle: w.ig_handle, is_self: false })),\n    ...(selfHandle ? [{ agenda_id: null, name: 'Us', handle: selfHandle, is_self: true }] : []),\n  ];\n\n  if (!targets.length) {\n    await finish({ status: 'complete', stage: 'gather', report: {\n      headline: 'No competitor has a verified Instagram handle yet, so there is nothing to measure.',\n      baseline: true, quiet_week: true, movements: [], competitor_board: [], market: [], gaps: [],\n      proposed_rules: [], proposed_ideas: [], agenda_changes: [], unanswered: [], sources: [],\n    } });\n    return [{ json: { ok: true, run_id: runId, snapshots: 0,\n      note: 'No verified handles to measure. Run handle resolution first.' } }];\n  }\n\n  // Sequential. A dozen accounts is not worth a concurrency bug, and a\n  // rate-limited Graph answering 429 to half of them would silently narrow\n  // the board without saying so.\n  const snapshots = [];\n  const failures = [];\n  // Things that make a number less trustworthy than it looks. These reach the\n  // report rather than being dropped: a cadence that is really a floor, read\n  // next week as a fall, is a movement the report would state with total\n  // confidence and be wrong about.\n  const caveats = [];\n  for (const t of targets) {\n    const got = await discover(t.handle);\n    if (!got.ok) {\n      failures.push({ name: t.name, handle: t.handle, error: got.error });\n      snapshots.push({\n        run_id: runId, workspace_id: wsId, agenda_id: t.agenda_id,\n        competitor_name: t.name, ig_handle: t.handle, is_self: t.is_self,\n        data_source: 'web_only', captured_at: new Date().toISOString(),\n      });\n      continue;\n    }\n    const a = got.acct;\n    const followers = Number(a.followers_count) || 0;\n    const m = metricsFor((a.media && a.media.data) || [], followers);\n    if (m.truncated) {\n      caveats.push(`${t.name}: every one of the 50 posts Instagram returned falls inside this period, `\n        + `so their cadence is a floor rather than a count — there may be posts we cannot see.`);\n    }\n    if (m.likes_hidden) {\n      caveats.push(`${t.name}: ${m.likes_hidden} of ${m.posts_in_period} posts hide their like count, `\n        + `so the engagement average rests on ${m.sample_size} post${m.sample_size === 1 ? '' : 's'}.`);\n    }\n    snapshots.push({\n      run_id: runId, workspace_id: wsId, agenda_id: t.agenda_id,\n      competitor_name: t.name, ig_handle: a.username || t.handle, is_self: t.is_self,\n      data_source: 'instagram',\n      followers, follows: Number(a.follows_count) || null, media_count: Number(a.media_count) || null,\n      posts_in_period: m.posts_in_period, posts_per_week: m.posts_per_week,\n      format_mix: m.format_mix, avg_engagement: m.avg_engagement,\n      engagement_per_1k: m.engagement_per_1k, top_posts: m.top_posts,\n      post_hours: m.post_hours, sample_size: m.sample_size,\n      captured_at: new Date().toISOString(),\n    });\n  }\n\n  for (const s of snapshots) {\n    await req({\n      __label: 'Supabase', method: 'POST', url: `${SUPA_URL}/rest/v1/competitor_snapshots`,\n      headers: sHeaders, body: s, json: true,\n    });\n  }\n\n  // ─── Deltas ────────────────────────────────────────────────────────────\n  // Read back the PREVIOUS snapshot per competitor and subtract. This is why\n  // competitor_snapshots exists at all: without a stored prior row, \"their\n  // posting went 3 to 7 a week\" would be a model recalling something it never\n  // saw.\n  const prior = await req({\n    __label: 'Supabase', method: 'GET',\n    url: `${SUPA_URL}/rest/v1/competitor_snapshots?workspace_id=eq.${wsId}&run_id=neq.${runId}`\n       + `&data_source=eq.instagram&select=competitor_name,captured_at,followers,posts_per_week,`\n       + `engagement_per_1k,format_mix&order=captured_at.desc&limit=500`,\n    headers: sHeaders, json: true,\n  });\n  const prevByName = new Map();\n  for (const p of prior || []) {\n    const k = String(p.competitor_name || '').toLowerCase();\n    if (!prevByName.has(k)) prevByName.set(k, p);   // ordered desc, so first is latest\n  }\n\n  const videoShare = mix => {\n    const v = Number((mix || {}).VIDEO || 0) + Number((mix || {}).REELS || 0);\n    return isFinite(v) ? round(v, 3) : null;\n  };\n\n  const movements = [];\n  const pushMove = (name, metric, from, to, unit) => {\n    if (from == null || to == null) return;\n    if (from === 0 && to === 0) return;\n    const abs = Math.abs(to - from);\n    const rel = from !== 0 ? abs / Math.abs(from) : 1;\n    // A floor, so a rounding wobble does not get reported as news.\n    if (rel < 0.15) return;\n    movements.push({\n      what: `${name}: ${metric}`, metric, competitor: name,\n      from: round(from), to: round(to), unit,\n      change_pct: round(rel * 100, 1),\n      direction: to > from ? 'up' : 'down',\n      significance: rel >= 0.5 ? 'high' : rel >= 0.25 ? 'medium' : 'low',\n      evidence_source: 'instagram',\n    });\n  };\n\n  let comparable = 0;\n  for (const s of snapshots) {\n    if (s.data_source !== 'instagram') continue;\n    const prev = prevByName.get(String(s.competitor_name).toLowerCase());\n    if (!prev) continue;\n    comparable += 1;\n    pushMove(s.competitor_name, 'followers', Number(prev.followers), s.followers, 'followers');\n    pushMove(s.competitor_name, 'posts per week', Number(prev.posts_per_week), s.posts_per_week, 'posts/week');\n    pushMove(s.competitor_name, 'engagement per 1k followers', Number(prev.engagement_per_1k), s.engagement_per_1k, 'per 1k');\n    pushMove(s.competitor_name, 'share of posts that are video', videoShare(prev.format_mix), videoShare(s.format_mix), 'share');\n  }\n  movements.sort((a, b) => (b.change_pct || 0) - (a.change_pct || 0));\n\n  // ─── The board ─────────────────────────────────────────────────────────\n  // `vs_us` stays null unless our own account clears a floor. Arak's connected\n  // account has ONE follower, so a ratio against it would render as -99.9%\n  // and read as a finding — which is worse than rendering nothing.\n  const MIN_SELF_BASELINE = 50;\n  const self = snapshots.find(s => s.is_self && s.data_source === 'instagram');\n  // Two floors, not one. The follower floor keeps a 1-follower test account\n  // from producing a -99.9% that reads as a finding. The engagement floor is\n  // a separate hazard: our own account can clear 50 followers while still\n  // getting zero likes, and dividing by that zero yields Infinity, which\n  // round() turns into null and the template renders as \"+null%\" on every\n  // card. Observed as a near-miss live on 2026-08-20 — @lightingaaa really\n  // does have 2 posts at 0 engagement, and only the follower floor caught it.\n  const selfComparable = !!self && Number(self.followers) >= MIN_SELF_BASELINE\n                         && Number(self.engagement_per_1k) > 0;\n\n  const board = snapshots.filter(s => !s.is_self).map(s => {\n    const prev = prevByName.get(String(s.competitor_name).toLowerCase());\n    return {\n      name: s.competitor_name, handle: s.ig_handle, data: s.data_source,\n      followers: s.followers ?? null,\n      followers_delta: prev && s.followers != null ? s.followers - Number(prev.followers) : null,\n      posts_per_week: s.posts_per_week ?? null,\n      posts_per_week_prev: prev ? round(Number(prev.posts_per_week)) : null,\n      format_mix: s.format_mix || {},\n      engagement_per_1k: s.engagement_per_1k ?? null,\n      vs_us: (selfComparable && s.engagement_per_1k != null)\n        ? `${s.engagement_per_1k >= self.engagement_per_1k ? '+' : ''}` +\n          `${round(((s.engagement_per_1k - self.engagement_per_1k) / self.engagement_per_1k) * 100, 1)}%`\n        : null,\n      vs_us_note: selfComparable ? null : 'No comparable account of ours is connected yet.',\n      sample_size: s.sample_size ?? null,\n      top_posts: s.top_posts || [],\n    };\n  });\n\n  const baseline = comparable === 0;\n  const report = {\n    headline: baseline\n      ? `First measurement of ${board.length} competitor${board.length === 1 ? '' : 's'} — nothing to compare against yet.`\n      : movements.length\n        ? `${movements.length} measurable change${movements.length === 1 ? '' : 's'} across ${comparable} competitor${comparable === 1 ? '' : 's'}.`\n        : 'Nothing moved measurably this week.',\n    baseline,\n    quiet_week: !baseline && movements.length === 0,\n    period: { start: inp.period_start, end: inp.period_end, days: periodDays },\n    movements, competitor_board: board,\n    market: [], gaps: [], proposed_rules: [], proposed_ideas: [], agenda_changes: [],\n    unanswered: [\n      ...failures.map(f => `Could not read ${f.name} (@${f.handle}): ${f.error}`),\n      ...caveats,\n    ],\n    sources: [],\n    stage_reached: 'gather',\n  };\n\n  await finish({ status: 'complete', stage: 'gather', report });\n\n  return [{ json: { ok: true, run_id: runId, snapshots: snapshots.length,\n    measured: snapshots.filter(s => s.data_source === 'instagram').length,\n    failed: failures.length, movements: movements.length, baseline } }];\n\n} catch (e) {\n  const msg = String((e && e.message) || e).slice(0, 500);\n  await finish({ status: 'failed', error: msg });\n  return [{ json: { ok: false, run_id: runId, error: msg } }];\n}\n"
+      },
+      "id": "a0b7d98e-78ee-5acf-9f32-effa4f1b693f",
+      "name": "Run: Gather",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "bdf8f5b7-e39b-5e47-8ce5-c35dc59032c9",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        880,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "f9507e83-4acf-5dc3-9fd1-3b7fe738a8d4",
+      "name": "Respond: Already Running",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        660,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Webhook Secret Guard",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run: Open": {
+      "main": [
+        [
+          {
+            "node": "Started?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Started?": {
+      "main": [
+        [
+          {
+            "node": "Run: Gather",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond: Already Running",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run: Gather": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook Secret Guard": {
+      "main": [
+        [
+          {
+            "node": "Run: Open",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [],
+  "id": "pAJ5feFzuFdiXBMh"
+}

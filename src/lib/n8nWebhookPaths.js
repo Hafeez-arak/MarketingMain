@@ -53,4 +53,7 @@ export const WEBHOOK_PATHS = {
   // Instagram handles — the step the whole competitor board depends on, since
   // the Brand Brain holds zero handles today.
   researchResolve:  'arak-research-resolve',
+  // The weekly review itself. ASYNC: this answers with a run id immediately
+  // and keeps working — the browser polls research_runs, it never waits.
+  researchRun:      'arak-research-run',
 }

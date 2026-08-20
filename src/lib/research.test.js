@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   competitorRowsFrom, isSnapshotable, cleanHandle, summariseResolve,
+  isStaleRun, runStatusLabel, RUN_STALE_MS,
 } from './research'
 
 // ─── Research agenda helpers ───────────────────────────────────────────────
@@ -128,5 +129,41 @@ describe('summariseResolve', () => {
   it('passes a skip reason through unchanged', () => {
     expect(summariseResolve({ ok: true, skipped: true, reason: 'No competitors listed.' }))
       .toBe('No competitors listed.')
+  })
+})
+
+describe('run status', () => {
+  const ago = ms => new Date(Date.now() - ms).toISOString()
+
+  it('does not call a run stale while it is plausibly still working', () => {
+    expect(isStaleRun({ status: 'running', started_at: ago(60_000) })).toBe(false)
+  })
+
+  it('calls a run stale once it is past any plausible duration', () => {
+    expect(isStaleRun({ status: 'running', started_at: ago(RUN_STALE_MS + 1000) })).toBe(true)
+  })
+
+  it('never calls a finished run stale, however old', () => {
+    expect(isStaleRun({ status: 'complete', started_at: ago(RUN_STALE_MS * 100) })).toBe(false)
+  })
+
+  it('tells the user a dead run is dead instead of spinning forever', () => {
+    const msg = runStatusLabel({ status: 'running', started_at: ago(RUN_STALE_MS + 1000) })
+    expect(msg).toMatch(/stopped responding/i)
+  })
+
+  it('says a quiet period was quiet rather than showing an empty report', () => {
+    expect(runStatusLabel({ status: 'complete', report: { quiet_week: true } }))
+      .toMatch(/nothing moved measurably/i)
+  })
+
+  it('says the first run is a baseline rather than implying nothing happened', () => {
+    expect(runStatusLabel({ status: 'complete', report: { baseline: true, quiet_week: false } }))
+      .toMatch(/no comparison possible yet/i)
+  })
+
+  it('surfaces the failure message on a failed run', () => {
+    expect(runStatusLabel({ status: 'failed', error: 'META_IG_TOKEN is not set.' }))
+      .toBe('META_IG_TOKEN is not set.')
   })
 })
