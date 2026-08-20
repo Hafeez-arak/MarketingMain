@@ -10,6 +10,7 @@ const titles = {
   '/analytics': 'Analytics', '/insights': 'What We Learned', '/media': 'Media Library', '/social': 'Social Media',
   '/social/instagram': 'Instagram',
   '/social/tiktok': 'TikTok',
+  '/social/snapchat': 'Snapchat',
   '/settings': 'Settings', '/integrations': 'Integrations', '/team': 'Team & Access',
 }
 
