@@ -112,6 +112,36 @@ export async function completeSelection(workspaceId, platform, { tempToken, step
   return { accounts: res.accounts || [], account: res.account || null }
 }
 
+// ── TikTok creator info ───────────────────────────────────────────────────
+// Called before a TikTok post can be composed, not as an enhancement. TikTok
+// requires `privacy_level` on every post and it must be one of the levels THIS
+// creator is allowed to use — so until this returns, the composer genuinely
+// does not know what to offer. A private account cannot post publicly, and
+// defaulting to the most public value is how you learn that expensively.
+//
+// workspaceId is passed because the workflow re-checks that the account
+// belongs to this workspace before reading its configuration, the same guard
+// disconnect uses and for the same reason: account_id comes from a browser.
+//
+// An empty privacyLevels list is information, not a failure — it means TikTok
+// is currently refusing this account, which the panel renders as "needs
+// reconnecting" rather than as an error.
+export async function fetchCreatorInfo(workspaceId, accountId, mediaType = 'video') {
+  const res = await call({
+    action: 'creator_info', workspace_id: workspaceId,
+    account_id: accountId, media_type: mediaType,
+  })
+  if (res.error) return { error: res.error, privacyLevels: [] }
+  return {
+    privacyLevels: res.privacyLevels || [],
+    nickname: res.nickname || '',
+    maxVideoSeconds: res.maxVideoSeconds || null,
+    commentDisabled: res.commentDisabled === true,
+    duetDisabled: res.duetDisabled === true,
+    stitchDisabled: res.stitchDisabled === true,
+  }
+}
+
 // Disconnecting is destructive at the provider — the account has to authorise
 // again to come back — so callers should confirm first. The workflow checks
 // that the account really belongs to this workspace before deleting anything;

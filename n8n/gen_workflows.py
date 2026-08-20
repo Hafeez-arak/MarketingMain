@@ -8159,6 +8159,60 @@ try {
     return [{ json: { ok:true, disconnected:accountId } }];
   }
 
+  // ---- TikTok creator info ----
+  //
+  // Not optional and not cosmetic. TikTok requires `privacy_level` on every
+  // post, drawn from the levels THIS creator is allowed to use — a private
+  // account cannot post publicly, and sending a level it does not allow fails
+  // the post. So the composer has to ask before it can offer the choice.
+  //
+  // Two paths, tried in order, because Zernio's own docs disagree with
+  // themselves: the platform guide documents
+  // /accounts/{id}/tiktok/creator-info while the API reference documents
+  // /accounts/{id}/tiktok-creator-info. Rather than guess and ship a feature
+  // that 404s, try one and fall back. Whichever answers, the shape is the
+  // same. Collapse this to one call once it is known which is real.
+  if (action === 'creator_info'){
+    const accountId = String(body.account_id || '').trim();
+    const mediaType = String(body.media_type || 'video').trim();
+    if (!accountId) throw new Error('account_id is required.');
+    const profileId = await ensureProfile();
+
+    // Same ownership check as disconnect: account_id comes from a browser and
+    // this reads another tenant's posting configuration otherwise.
+    const accounts = await listAccounts(profileId);
+    if (!accounts.some(a => String(a._id) === accountId)){
+      throw new Error('That account does not belong to this workspace.');
+    }
+
+    const paths = [
+      `${ZBASE}/accounts/${encodeURIComponent(accountId)}/tiktok/creator-info?mediaType=${encodeURIComponent(mediaType)}`,
+      `${ZBASE}/accounts/${encodeURIComponent(accountId)}/tiktok-creator-info?mediaType=${encodeURIComponent(mediaType)}`,
+    ];
+    let info = null, lastErr = null;
+    for (const url of paths){
+      try { info = await req({ method:'GET', url, headers:zHeaders, json:true }); break; }
+      catch (e) { lastErr = e; if (e.status !== 404) throw e; }
+    }
+    if (!info) throw lastErr || new Error('Could not read TikTok creator info.');
+
+    // Zernio has wrapped this differently across versions; take the first
+    // shape that is actually an array rather than assuming one.
+    const data = info.creatorInfo || info.data || info;
+    const levels = data.privacy_level_options || data.privacyLevelOptions
+                || data.privacyLevels || [];
+    return [{ json: { ok:true,
+      privacyLevels: Array.isArray(levels) ? levels : [],
+      nickname: data.creator_nickname || data.nickname || '',
+      // Surfaced so the composer can warn before TikTok refuses: these are
+      // per-day posting caps, not per-post limits.
+      maxVideoSeconds: Number(data.max_video_post_duration_sec || 0) || null,
+      commentDisabled: data.comment_disabled === true,
+      duetDisabled:    data.duet_disabled === true,
+      stitchDisabled:  data.stitch_disabled === true,
+    } }];
+  }
+
   throw new Error(`Unknown action: ${action || '(none)'}`);
 } catch (err) {
   // Deliberately ok:false with HTTP 200 rather than a thrown node error.

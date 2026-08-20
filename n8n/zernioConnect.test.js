@@ -243,6 +243,78 @@ describe('disconnect', () => {
   })
 })
 
+// ── TikTok creator info ──────────────────────────────────────────────────
+describe('creator_info', () => {
+  const TT = { _id: 'acc_tt', platform: 'tiktok', profileId: PROFILE }
+
+  function withCreatorInfo({ firstPathStatus = 200, levels = ['PUBLIC_TO_EVERYONE', 'SELF_ONLY'] } = {}) {
+    const seen = { urls: [] }
+    const routes = [
+      ['tiktok/creator-info', async ({ url }) => {
+        seen.urls.push(url)
+        if (firstPathStatus !== 200) return { statusCode: firstPathStatus, body: { error: 'not here' } }
+        return { statusCode: 200, body: { creatorInfo: { privacy_level_options: levels, creator_nickname: 'Arak' } } }
+      }],
+      ['tiktok-creator-info', async ({ url }) => {
+        seen.urls.push(url)
+        return { statusCode: 200, body: { data: { privacy_level_options: levels } } }
+      }],
+      ['/api/v1/accounts', async () => ({ statusCode: 200, body: { accounts: [TT] } })],
+    ]
+    return { routes, seen }
+  }
+
+  const pgWith = () => db({ workspace: { id: WS, name: 'Arak', zernio_profile_id: PROFILE } })
+
+  it('returns the creator\'s allowed privacy levels', async () => {
+    const { routes } = withCreatorInfo()
+    const { out } = await run(
+      { action: 'creator_info', workspace_id: WS, account_id: 'acc_tt' },
+      { postgrest: pgWith(), routes })
+
+    expect(out.ok).toBe(true)
+    expect(out.privacyLevels).toEqual(['PUBLIC_TO_EVERYONE', 'SELF_ONLY'])
+  })
+
+  // Zernio's platform guide and API reference document DIFFERENT paths for
+  // this endpoint. Rather than guess and ship a feature that 404s, the
+  // workflow tries one and falls back — this proves the fallback works.
+  it('falls back to the second documented path when the first 404s', async () => {
+    const { routes, seen } = withCreatorInfo({ firstPathStatus: 404 })
+    const { out } = await run(
+      { action: 'creator_info', workspace_id: WS, account_id: 'acc_tt' },
+      { postgrest: pgWith(), routes })
+
+    expect(out.ok).toBe(true)
+    expect(out.privacyLevels).toHaveLength(2)
+    expect(seen.urls).toHaveLength(2)
+  })
+
+  // Same tenancy guard as disconnect: without it, knowing another workspace's
+  // account id would read that account's posting configuration.
+  it('refuses an account belonging to another workspace', async () => {
+    const { routes } = withCreatorInfo()
+    const { out } = await run(
+      { action: 'creator_info', workspace_id: WS, account_id: 'acc_not_mine' },
+      { postgrest: pgWith(), routes })
+
+    expect(out.ok).toBe(false)
+    expect(out.error).toMatch(/does not belong/i)
+  })
+
+  // An account TikTok is refusing returns an empty list, which the composer
+  // renders as "needs reconnecting". That is information, not a failure.
+  it('reports an empty level list rather than an error', async () => {
+    const { routes } = withCreatorInfo({ levels: [] })
+    const { out } = await run(
+      { action: 'creator_info', workspace_id: WS, account_id: 'acc_tt' },
+      { postgrest: pgWith(), routes })
+
+    expect(out.ok).toBe(true)
+    expect(out.privacyLevels).toEqual([])
+  })
+})
+
 // ── Failure shape ────────────────────────────────────────────────────────
 describe('errors', () => {
   // responseMode=lastNode turns a thrown node error into HTTP 200 with an
