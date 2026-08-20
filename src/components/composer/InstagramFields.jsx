@@ -1,7 +1,8 @@
 import { useRef, useState } from 'react'
-import { Toggle } from '../ui/index'
+import { Toggle, Spinner } from '../ui/index'
 import { optionsFor, setOption, composedCaption, captionStats } from '../../lib/composerState'
 import { limitsFor } from '../../lib/postFormats'
+import { searchInstagramAudio, supportsCatalogAudio } from '../../lib/zernioConnect'
 
 // ─── Instagram: the fields only Instagram has, and the preview ─────────────
 // Every field here maps to something in Zernio's platformSpecificData. The
@@ -182,7 +183,154 @@ function ThumbnailScrubber({ video, value, onChange }) {
   )
 }
 
-export function InstagramPanel({ state, setState, caps }) {
+// ── Catalog audio ─────────────────────────────────────────────────────────
+// Meta exposes only the audio it has CLEARED for third-party publishing, so
+// this catalog is a subset of what the Instagram app shows — the trending
+// sound of a given week usually is not in it. Saying that here is kinder than
+// letting someone search fruitlessly for a track that was never reachable.
+//
+// Two failure modes are called out rather than swallowed: an account connected
+// without Facebook access cannot use catalog audio at all (a reconnect, not a
+// different search), and a track can vanish between scheduling and publish, in
+// which case the post fails rather than going out with audio nobody chose.
+function CatalogAudio({ workspaceId, accountId, canUse, value, onChange }) {
+  const [query, setQuery]     = useState('')
+  const [results, setResults] = useState([])
+  const [loading, setLoading] = useState(false)
+  const [error, setError]     = useState('')
+  const [needsReconnect, setNeedsReconnect] = useState(false)
+  const [open, setOpen]       = useState(false)
+  const previewRef = useRef(null)
+
+  const search = async (q) => {
+    if (!accountId) return
+    setLoading(true); setError(''); setNeedsReconnect(false)
+    const res = await searchInstagramAudio(workspaceId, accountId, { query: q })
+    setLoading(false)
+    if (res.error) { setError(res.error); setNeedsReconnect(res.needsReconnect); return }
+    setResults(res.audio)
+  }
+
+  if (!canUse) {
+    return (
+      <>
+        <FieldLabel>Audio</FieldLabel>
+        <p className="text-xs text-text-tertiary">
+          This account was connected without Facebook access, which Instagram requires
+          for catalog audio. Reconnect it on the Instagram page to enable this — the
+          Reel will otherwise use the video&rsquo;s own sound.
+        </p>
+      </>
+    )
+  }
+
+  if (value?.audioId) {
+    return (
+      <>
+        <FieldLabel>Audio</FieldLabel>
+        <div className="flex items-center gap-3 p-3 border border-amber-600 bg-amber-50">
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-medium text-text truncate">{value.title || value.audioId}</p>
+            {value.artist && <p className="text-xs text-text-secondary truncate">{value.artist}</p>}
+          </div>
+          <button type="button" onClick={() => onChange(null)}
+            className="text-xs text-text-tertiary hover:text-text">Remove</button>
+        </div>
+        <div className="mt-2">
+          <label className="block text-xs text-text-secondary mb-1">
+            Original video sound: {value.videoVolume ?? 100}%
+          </label>
+          <input type="range" min={0} max={100} step={10}
+            value={value.videoVolume ?? 100}
+            onChange={e => onChange({ ...value, videoVolume: Number(e.target.value) })}
+            className="w-full max-w-[220px] accent-amber-600" />
+          <p className="text-xs text-text-tertiary mt-0.5">
+            Set to 0 to mute the video and hear only the track.
+          </p>
+        </div>
+      </>
+    )
+  }
+
+  return (
+    <>
+      <FieldLabel hint="(optional)">Audio</FieldLabel>
+
+      {!open ? (
+        <button type="button"
+          onClick={() => { setOpen(true); search('') }}
+          className="px-3 py-2 text-sm border border-border hover:bg-surface-subtle">
+          Add a track
+        </button>
+      ) : (
+        <>
+          <div className="flex gap-2 mb-2">
+            <input value={query} onChange={e => setQuery(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); search(query) } }}
+              placeholder="Search cleared audio, or leave blank for trending"
+              className="flex-1 border border-border px-3 py-2 text-sm focus:outline-none focus:border-amber-600" />
+            <button type="button" onClick={() => search(query)}
+              className="px-3 py-2 text-sm border border-border hover:bg-surface-subtle">Search</button>
+          </div>
+
+          <p className="text-xs text-text-tertiary mb-2">
+            Instagram only allows a subset of its library to be attached by API, so
+            trending sounds from the app are often missing here. Anything baked into
+            the video in Creative Studio has no such restriction.
+          </p>
+
+          {loading && <div className="py-3"><Spinner size="sm" /></div>}
+
+          {error && (
+            <p className={`text-sm ${needsReconnect ? 'text-amber-700' : 'text-red-600'}`}>{error}</p>
+          )}
+
+          {!loading && !error && results.length === 0 && (
+            <p className="text-sm text-text-secondary">Nothing came back for that.</p>
+          )}
+
+          <div className="max-h-56 overflow-y-auto divide-y divide-border">
+            {results.map(a => (
+              <div key={a.audioId} className="flex items-center gap-2 py-2">
+                {a.previewUrl && (
+                  <button type="button"
+                    onClick={() => {
+                      if (previewRef.current) previewRef.current.pause()
+                      const el = new Audio(a.previewUrl)
+                      previewRef.current = el
+                      el.play().catch(() => { /* preview URLs expire; silence is fine */ })
+                    }}
+                    className="w-7 h-7 shrink-0 border border-border text-xs hover:bg-surface-subtle"
+                    aria-label={`Preview ${a.title}`}>▶</button>
+                )}
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm text-text truncate">{a.title || a.audioId}</p>
+                  <p className="text-xs text-text-tertiary truncate">
+                    {[a.artist, a.duration ? `${Math.round(a.duration)}s` : ''].filter(Boolean).join(' · ')}
+                  </p>
+                </div>
+                <button type="button"
+                  onClick={() => {
+                    if (previewRef.current) previewRef.current.pause()
+                    onChange({
+                      audioId: a.audioId, title: a.title, artist: a.artist,
+                      audioVolume: 100, videoVolume: 0,
+                    })
+                    setOpen(false)
+                  }}
+                  className="px-2 py-1 text-xs border border-border hover:bg-surface-subtle shrink-0">
+                  Use
+                </button>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </>
+  )
+}
+
+export function InstagramPanel({ state, setState, caps, account, workspaceId }) {
   const opts = optionsFor(state)
   const [slide, setSlide] = useState(0)
   const set = (key, value) => setState(s => setOption(s, key, value))
@@ -228,6 +376,30 @@ export function InstagramPanel({ state, setState, caps }) {
         <Section>
           <ThumbnailScrubber video={video} value={opts.thumbOffset}
             onChange={v => set('thumbOffset', v)} />
+        </Section>
+      )}
+
+      {caps.audioName && (
+        <Section>
+          <FieldLabel hint="what the &lsquo;original audio&rsquo; link is called">Name this audio</FieldLabel>
+          <input value={opts.audioName} onChange={e => set('audioName', e.target.value)}
+            placeholder="Arak Lighting — Showroom walkthrough"
+            className="w-full border border-border px-3 py-2 text-sm bg-white text-text focus:outline-none focus:border-amber-600" />
+          <p className="text-xs text-text-tertiary mt-1">
+            Instagram lets this be set once. People who tap it see every Reel using
+            the same original audio, so a consistent name is worth having.
+          </p>
+        </Section>
+      )}
+
+      {caps.catalogAudio && (
+        <Section>
+          <CatalogAudio
+            workspaceId={workspaceId}
+            accountId={state.accountIds[0]}
+            canUse={supportsCatalogAudio(account)}
+            value={opts.audioConfiguration}
+            onChange={v => set('audioConfiguration', v)} />
         </Section>
       )}
 

@@ -129,6 +129,7 @@ export function ComposerHost({ platform, campaigns = [], onDone, label = 'Create
         platform={platform}
         accounts={accounts}
         campaigns={campaigns}
+        workspaceId={activeWorkspaceId}
         busy={busy}
         onClose={close}
         onSaveDraft={saveDraft}

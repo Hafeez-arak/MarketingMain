@@ -112,6 +112,40 @@ export async function completeSelection(workspaceId, platform, { tempToken, step
   return { accounts: res.accounts || [], account: res.account || null }
 }
 
+// ── Instagram catalog audio ───────────────────────────────────────────────
+// Searches the audio Meta has CLEARED for third-party publishing. That is a
+// subset of what the Instagram app shows — the trending sound of a given week
+// usually is not in it — and saying so in the UI is kinder than letting
+// someone search for a track that was never reachable.
+//
+// Omitting `query` returns trending, which is the better default for a picker
+// that opens with nothing typed.
+//
+// `needsReconnect` is a distinct outcome rather than a generic error because
+// the fix is different: the account was connected without Facebook access,
+// which Instagram requires for catalog audio, and no amount of retrying or
+// rephrasing the search will change that.
+export async function searchInstagramAudio(workspaceId, accountId, { query = '', audioType = 'music' } = {}) {
+  const res = await call({
+    action: 'audio_search', workspace_id: workspaceId,
+    account_id: accountId, q: query, audio_type: audioType,
+  })
+  if (res.error) return { error: res.error, needsReconnect: res.needsReconnect === true, audio: [] }
+  return { audio: res.audio || [], trending: res.trending === true }
+}
+
+// Can this account attach catalog audio at all? Answered from the connection
+// method we recorded, before the composer offers the picker — the alternative
+// is offering it to every account and letting Instagram refuse half of them
+// after the Reel is already composed.
+//
+// A null login_method means the row predates our recording it, which is read
+// as "no". That is the safe direction: a missing button is a question someone
+// asks, an unusable button is a Reel that fails at publish.
+export function supportsCatalogAudio(account) {
+  return account?.platform === 'instagram' && account?.login_method === 'facebook_login'
+}
+
 // ── TikTok creator info ───────────────────────────────────────────────────
 // Called before a TikTok post can be composed, not as an enhancement. TikTok
 // requires `privacy_level` on every post and it must be one of the levels THIS

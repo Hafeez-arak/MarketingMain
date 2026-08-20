@@ -83,6 +83,55 @@ describe('composer options reaching Zernio', () => {
   })
 })
 
+describe('Instagram audio', () => {
+  const reel = {
+    ...base, platform: 'instagram',
+    image_url: '', video_url: 'https://cdn.test/v.mp4',
+  }
+
+  it('passes a catalog track through on a Reel', async () => {
+    const { routes, sent } = zernio()
+    await run({
+      ...reel,
+      platform_specific_data: {
+        audioName: 'Arak — Showroom',
+        audioConfiguration: { audioId: 'aud_1', audioVolume: 100, videoVolume: 0 },
+      },
+    }, { postgrest: db(), routes })
+
+    const psd = sent[0].platforms[0].platformSpecificData
+    expect(psd.audioConfiguration).toMatchObject({ audioId: 'aud_1', videoVolume: 0 })
+    expect(psd.audioName).toBe('Arak — Showroom')
+  })
+
+  // Instagram rejects catalog audio on anything but a Reel at container
+  // creation. Refusing here means a hand-made request gets a sentence, and the
+  // post row is not left claimed by a call that could never succeed.
+  it('refuses catalog audio on a non-Reel', async () => {
+    const { routes, sent } = zernio()
+    const { out } = await run({
+      ...base, platform: 'instagram',
+      platform_specific_data: { audioConfiguration: { audioId: 'aud_1' } },
+    }, { postgrest: db(), routes })
+
+    expect(out.ok).toBe(false)
+    expect(String(out.error)).toMatch(/only be attached to a Reel/i)
+    expect(sent).toHaveLength(0)
+  })
+
+  it('refuses an audio configuration with no audioId', async () => {
+    const { routes, sent } = zernio()
+    const { out } = await run({
+      ...reel,
+      platform_specific_data: { audioConfiguration: { audioVolume: 50 } },
+    }, { postgrest: db(), routes })
+
+    expect(out.ok).toBe(false)
+    expect(String(out.error)).toMatch(/audioId/i)
+    expect(sent).toHaveLength(0)
+  })
+})
+
 describe('TikTok', () => {
   const ttAccounts = [{ _id: 'acc_tt', platform: 'tiktok', isActive: true }]
   const ttBase = {

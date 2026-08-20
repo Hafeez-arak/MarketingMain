@@ -1316,7 +1316,13 @@ try {
   // only known keys survive, so a caller cannot inject arbitrary fields into
   // the provider call.
   const IG_KEYS = ['contentType','firstComment','collaborators','userTags',
-                   'shareToFeed','thumbOffset','instagramThumbnail','isAiGenerated','altText'];
+                   'shareToFeed','thumbOffset','instagramThumbnail','isAiGenerated','altText',
+                   // Audio. `audioName` renames the video's OWN audio and works on
+                   // any connection; `audioConfiguration` attaches a catalog track
+                   // and requires the account to have been connected through
+                   // Facebook Login. They are independent — a Reel can have either,
+                   // both or neither.
+                   'audioName','audioConfiguration'];
   const TT_KEYS = ['privacy_level','allow_comment','allow_duet','allow_stitch',
                    'video_cover_timestamp_ms','video_cover_image_url','media_type',
                    'photo_cover_index','description','auto_add_music','video_made_with_ai',
@@ -1328,6 +1334,20 @@ try {
   };
 
   const psd = pick(body.platform_specific_data, IG_KEYS);
+
+  // Catalog audio is Reels only — Stories, images and carousels reject it at
+  // container creation. The composer only offers it on a Reel, but this is a
+  // webhook: refusing here means a hand-made request gets a sentence rather
+  // than an opaque provider rejection, and the row is not left claimed.
+  if (psd.audioConfiguration){
+    const isReel = !psd.contentType && !!videoUrl;
+    if (!isReel){
+      throw new Error('Catalog audio can only be attached to a Reel (a single video post).');
+    }
+    if (!psd.audioConfiguration.audioId){
+      throw new Error('Catalog audio needs an audioId.');
+    }
+  }
 
   const target = { platform, accountId };
   if (Object.keys(psd).length) target.platformSpecificData = psd;
@@ -8001,6 +8021,12 @@ const CONNECTABLE = ['instagram', 'tiktok'];
 // are the ones we actually offer. Everything else finishes at the callback.
 const NEEDS_SELECTION = ['instagram'];
 
+// Which Instagram connection to request. Named rather than inlined because
+// three places depend on agreeing about it: the connect URL, the row we
+// mirror into social_accounts, and the composer deciding whether to offer the
+// audio picker at all.
+const LOGIN_METHOD_IG = 'facebook_login';
+
 // ── Get-or-create this workspace's Zernio profile ───────────────────────
 //
 // Idempotent and race-safe WITHOUT a read-then-create, which two tabs would
@@ -8067,6 +8093,15 @@ async function mirrorAccounts(profileId, accounts){
     needs_reconnection: a.needsReconnection === true,
     followers_count:    Number(a.followersCount || 0) || 0,
     publish_provider:   'zernio',
+    // Instagram only, and only what we can actually observe. Zernio reports
+    // the method it connected with; absent that, an Instagram row we created
+    // is one WE connected, so it carries the method we asked for. Anything
+    // else stays null, which the composer reads as "no catalog audio" — the
+    // safe direction, since offering audio an account cannot use produces a
+    // Reel that fails at publish rather than a missing button.
+    ...(String(a.platform || '') === 'instagram'
+        ? { login_method: String(a.loginMethod || a.login_method || LOGIN_METHOD_IG) }
+        : {}),
     last_synced_at:     new Date().toISOString(),
     updated_at:         new Date().toISOString(),
   })).filter(r => r.zernio_account_id);
@@ -8123,6 +8158,20 @@ try {
     const headless  = NEEDS_SELECTION.includes(platform);
     const qs = new URLSearchParams({ profileId, redirect_url: redirectUrl });
     if (headless) qs.set('headless', 'true');
+
+    // Instagram connects one of two ways and we deliberately ask for the
+    // Facebook one. Publishing, analytics, comments and the inbox are
+    // identical either way — but catalog audio is NOT: attaching a track to a
+    // Reel on an Instagram-Login account fails with
+    // `instagram_audio_requires_facebook_login`, and the Meta Ads add-on can
+    // ride on this same connection rather than needing a separate Facebook
+    // account. Omitting the param would silently give us the default and take
+    // both away.
+    //
+    // This is also what makes the Page-selection step real rather than
+    // speculative: Instagram Login connects the account directly with no
+    // picker, Facebook Login authorises through the linked Page and needs one.
+    if (platform === 'instagram') qs.set('loginMethod', LOGIN_METHOD_IG);
 
     const res = await req({ method:'GET',
       url:`${ZBASE}/connect/${encodeURIComponent(platform)}?${qs.toString()}`,
@@ -8259,6 +8308,74 @@ try {
       duetDisabled:    data.duet_disabled === true,
       stitchDisabled:  data.stitch_disabled === true,
     } }];
+  }
+
+  // ---- Instagram catalog audio search ----
+  //
+  // Wraps GET /accounts/{id}/instagram/audio. Meta exposes only the audio it
+  // has CLEARED for third-party publishing, so this catalog is a subset of
+  // what the Instagram app shows — the trending sound of the week is usually
+  // not in it. That is Meta's restriction, not Zernio's and not ours; the
+  // composer says so rather than letting someone hunt for a track that was
+  // never reachable.
+  //
+  // Omitting `q` returns trending, which is the more useful default for a
+  // picker that opens with nothing typed.
+  if (action === 'audio_search'){
+    const accountId = String(body.account_id || '').trim();
+    const q         = String(body.q || '').trim();
+    const audioType = String(body.audio_type || 'music').trim();
+    if (!accountId) throw new Error('account_id is required.');
+    const profileId = await ensureProfile();
+
+    // Same tenancy guard as disconnect and creator_info: account_id arrives
+    // from a browser, and this reads against another workspace's account
+    // otherwise.
+    const accounts = await listAccounts(profileId);
+    const account  = accounts.find(a => String(a._id) === accountId);
+    if (!account){
+      throw new Error('That account does not belong to this workspace.');
+    }
+
+    const qs = new URLSearchParams({ audioType });
+    if (q) qs.set('q', q);
+
+    let res;
+    try {
+      res = await req({ method:'GET',
+        url:`${ZBASE}/accounts/${encodeURIComponent(accountId)}/instagram/audio?${qs.toString()}`,
+        headers:zHeaders, json:true });
+    } catch (e) {
+      // The one failure worth naming, because it is a CONNECTION problem
+      // rather than a search problem and the fix is a reconnect, not a
+      // different query. Instagram-Login accounts cannot touch catalog audio
+      // at all.
+      const raw = JSON.stringify((e && e.body) || '') + ' ' + String((e && e.message) || '');
+      if (/instagram_audio_requires_facebook_login/i.test(raw)){
+        return [{ json: { ok:false, needsReconnect:true,
+          error: 'This account was connected without Facebook access, which Instagram requires for catalog audio. Reconnect it to enable audio.' } }];
+      }
+      throw e;
+    }
+
+    // Zernio has wrapped list responses differently across versions; take the
+    // first shape that is actually an array rather than assuming one.
+    const items = (res && (res.audio || res.audios || res.items || res.results || res.data)) || [];
+    const list  = Array.isArray(items) ? items : [];
+
+    return [{ json: { ok:true, trending: !q, audio: list.map(a => ({
+      audioId:  String(a.audioId || a.id || a._id || ''),
+      title:    String(a.title || a.name || ''),
+      artist:   String(a.artist || a.artistName || a.creator || ''),
+      // Seconds. Zernio reports milliseconds on some shapes and seconds on
+      // others; normalise here so the picker does not have to guess which.
+      duration: Number(a.durationSeconds || (a.durationMs ? a.durationMs / 1000 : 0) || a.duration || 0) || null,
+      // Preview only, and short-lived — Zernio's own docs put the expiry at
+      // roughly a day and a half. Never stored on a post row: a saved draft
+      // must re-fetch rather than hold a dead URL.
+      previewUrl: String(a.downloadUrl || a.previewUrl || ''),
+      coverUrl:   String(a.coverUrl || a.thumbnailUrl || ''),
+    })).filter(a => a.audioId) } }];
   }
 
   throw new Error(`Unknown action: ${action || '(none)'}`);

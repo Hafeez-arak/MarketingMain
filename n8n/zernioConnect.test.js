@@ -315,6 +315,84 @@ describe('creator_info', () => {
   })
 })
 
+// ── Instagram catalog audio ──────────────────────────────────────────────
+describe('audio_search', () => {
+  const IG = { _id: 'acc_ig', platform: 'instagram', profileId: PROFILE }
+  const pgWith = () => db({ workspace: { id: WS, name: 'Arak', zernio_profile_id: PROFILE } })
+
+  function withAudio({ status = 200, body = null } = {}) {
+    const seen = { urls: [] }
+    const routes = [
+      ['/instagram/audio', async ({ url }) => {
+        seen.urls.push(url)
+        if (status !== 200) return { statusCode: status, body }
+        return {
+          statusCode: 200,
+          body: { audio: [
+            { audioId: 'aud_1', title: 'Slow Dust', artist: 'Nadir', durationMs: 31000, downloadUrl: 'https://cdn.test/p.mp3' },
+            { title: 'No id — dropped' },
+          ] },
+        }
+      }],
+      ['/api/v1/accounts', async () => ({ statusCode: 200, body: { accounts: [IG] } })],
+    ]
+    return { routes, seen }
+  }
+
+  it('returns normalised tracks and drops entries with no audioId', async () => {
+    const { routes } = withAudio()
+    const { out } = await run(
+      { action: 'audio_search', workspace_id: WS, account_id: 'acc_ig', q: 'dust' },
+      { postgrest: pgWith(), routes })
+
+    expect(out.ok).toBe(true)
+    expect(out.audio).toHaveLength(1)
+    // durationMs normalised to seconds, so the picker does not have to guess
+    // which unit a given Zernio response used.
+    expect(out.audio[0]).toMatchObject({ audioId: 'aud_1', title: 'Slow Dust', duration: 31 })
+  })
+
+  // Omitting the query is how the picker opens: trending is a better default
+  // than an empty list.
+  it('treats a blank query as a trending request', async () => {
+    const { routes, seen } = withAudio()
+    const { out } = await run(
+      { action: 'audio_search', workspace_id: WS, account_id: 'acc_ig' },
+      { postgrest: pgWith(), routes })
+
+    expect(out.trending).toBe(true)
+    expect(seen.urls[0]).not.toContain('q=')
+  })
+
+  // The failure that is a CONNECTION problem rather than a search problem. It
+  // gets its own flag because the fix is a reconnect, and no amount of
+  // retrying or rephrasing changes it.
+  it('reports an Instagram-Login account as needing a reconnect, not as an error', async () => {
+    const { routes } = withAudio({
+      status: 400,
+      body: { error: 'bad request', code: 'instagram_audio_requires_facebook_login' },
+    })
+    const { out } = await run(
+      { action: 'audio_search', workspace_id: WS, account_id: 'acc_ig' },
+      { postgrest: pgWith(), routes })
+
+    expect(out.ok).toBe(false)
+    expect(out.needsReconnect).toBe(true)
+    expect(out.error).toMatch(/reconnect/i)
+  })
+
+  it('refuses an account belonging to another workspace', async () => {
+    const { routes, seen } = withAudio()
+    const { out } = await run(
+      { action: 'audio_search', workspace_id: WS, account_id: 'acc_elsewhere' },
+      { postgrest: pgWith(), routes })
+
+    expect(out.ok).toBe(false)
+    expect(out.error).toMatch(/does not belong/i)
+    expect(seen.urls).toHaveLength(0)
+  })
+})
+
 // ── Failure shape ────────────────────────────────────────────────────────
 describe('errors', () => {
   // responseMode=lastNode turns a thrown node error into HTTP 200 with an

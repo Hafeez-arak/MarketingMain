@@ -233,6 +233,42 @@ describe('payload shaping', () => {
     expect(platformSpecificData(emptyComposer('instagram')).isAiGenerated).toBe(true)
   })
 
+  // Two independent things that are easy to conflate: audioName renames the
+  // video's OWN audio, audioConfiguration attaches a catalog track. A Reel can
+  // have either, both or neither.
+  it('sends audioName and audioConfiguration on a Reel', () => {
+    let s = { ...emptyComposer('instagram'), format: 'reel' }
+    s = setOption(s, 'audioName', 'Arak — Showroom walkthrough')
+    s = setOption(s, 'audioConfiguration', { audioId: 'aud_1', audioVolume: 100, videoVolume: 0 })
+    const data = platformSpecificData(s)
+
+    expect(data.audioName).toBe('Arak — Showroom walkthrough')
+    expect(data.audioConfiguration.audioId).toBe('aud_1')
+  })
+
+  // Catalog audio is Reels only — Stories, images and carousels reject it at
+  // container creation, so sending it is a failed post rather than a no-op.
+  it('withholds audio from a feed post and a Story', () => {
+    for (const format of ['feed_image', 'carousel', 'story']) {
+      let s = { ...emptyComposer('instagram'), format }
+      s = setOption(s, 'audioName', 'x')
+      s = setOption(s, 'audioConfiguration', { audioId: 'aud_1' })
+      const data = platformSpecificData(s)
+
+      expect(data, format).not.toHaveProperty('audioConfiguration')
+      expect(data, format).not.toHaveProperty('audioName')
+    }
+  })
+
+  // A half-built object would reach the API and be rejected, so "opened the
+  // picker but chose nothing" must not send anything.
+  it('does not send an audio configuration with no audioId', () => {
+    let s = { ...emptyComposer('instagram'), format: 'reel' }
+    s = setOption(s, 'audioConfiguration', { audioVolume: 100 })
+
+    expect(platformSpecificData(s)).not.toHaveProperty('audioConfiguration')
+  })
+
   it('builds tiktokSettings with the mandatory consent flags', () => {
     let s = { ...emptyComposer('tiktok'), format: 'video' }
     s = setOption(s, 'privacy_level', 'FOLLOWER_OF_CREATOR')

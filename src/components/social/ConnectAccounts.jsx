@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Button, Modal, Spinner, ConfirmDialog, Avatar } from '../ui/index'
 import { PLATFORM_META, isLivePlatform } from '../../lib/utils'
-import { tokenAge, TOKEN_LIFETIME_DAYS } from '../../lib/zernioConnect'
+import { tokenAge, TOKEN_LIFETIME_DAYS, supportsCatalogAudio } from '../../lib/zernioConnect'
 import { useConnectFlow, useDisconnect } from '../../lib/useConnectedAccounts'
 
 // ─── Connected accounts, for one platform ──────────────────────────────────
@@ -21,6 +21,23 @@ function TokenNotice({ account }) {
   )
 }
 
+// Instagram accounts connected before we started asking for Facebook access
+// cannot attach catalog audio to Reels — Instagram refuses with
+// `instagram_audio_requires_facebook_login`. Everything else about them works
+// identically, so this is an invitation rather than a warning: publishing,
+// analytics and comments are unaffected, and reconnecting is opt-in per
+// account rather than forced.
+function AudioUpgradeNotice({ account }) {
+  if (account.platform !== 'instagram') return null
+  if (supportsCatalogAudio(account)) return null
+  if (account.needs_reconnection === true || account.is_active === false) return null
+  return (
+    <p className="text-xs text-text-tertiary mt-0.5">
+      Reconnect to enable catalog audio on Reels. Everything else keeps working as it is.
+    </p>
+  )
+}
+
 function AccountRow({ account, onDisconnect, disconnecting }) {
   const needsReconnect = account.needs_reconnection === true || account.is_active === false
   return (
@@ -34,7 +51,7 @@ function AccountRow({ account, onDisconnect, disconnecting }) {
         </p>
         {needsReconnect
           ? <p className="text-xs text-red-600 mt-0.5">Needs reconnecting — publishing will fail until it is.</p>
-          : <TokenNotice account={account} />}
+          : <><TokenNotice account={account} /><AudioUpgradeNotice account={account} /></>}
       </div>
       <Button variant="ghost" size="xs" disabled={disconnecting}
         onClick={() => onDisconnect(account)}>

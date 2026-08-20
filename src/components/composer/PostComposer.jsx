@@ -166,7 +166,7 @@ function ScheduleRow({ value, onChange }) {
 }
 
 export function PostComposer({
-  open, platform = 'instagram', accounts = [], campaigns = [],
+  open, platform = 'instagram', accounts = [], campaigns = [], workspaceId,
   initial, onClose, onSaveDraft, onSchedule, onPublish, busy = false,
   captionAssist,
 }) {
@@ -312,7 +312,9 @@ export function PostComposer({
             </Section>
 
             {state.platform === 'instagram' && (
-              <InstagramPanel state={state} setState={setState} caps={caps} />
+              <InstagramPanel state={state} setState={setState} caps={caps}
+                account={platformAccounts.find(a => a.zernio_account_id === state.accountIds[0])}
+                workspaceId={workspaceId} />
             )}
             {state.platform === 'tiktok' && (
               <TikTokPanel state={state} setState={setState} caps={caps}

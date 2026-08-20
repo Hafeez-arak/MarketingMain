@@ -93,6 +93,14 @@ export function defaultOptionsFor(platform) {
       altText: '',
       shareToFeed: true,
       thumbOffset: null,
+      // Renames the video's OWN audio — the "original audio" label people tap
+      // through to. Independent of audioConfiguration, works on any
+      // connection, and costs nothing.
+      audioName: '',
+      // A catalog track: { audioId, audioVolume, videoVolume }. Null rather
+      // than an empty object so "no track chosen" is unambiguous — an object
+      // with a blank audioId would reach the API and be rejected.
+      audioConfiguration: null,
       // Everything this app publishes comes out of Creative Studio, so the
       // honest default is on. Both platforms down-rank AI media they detect
       // as undisclosed, which makes this a ranking safeguard rather than
@@ -179,6 +187,13 @@ export function capabilities(state) {
       // Reel-only controls.
       shareToFeed:   isReel,
       thumbOffset:   isReel,
+      // audioName applies to any Reel. Catalog audio is Reels-only too, but
+      // ALSO depends on how the chosen account was connected — which this
+      // function cannot see, since it takes no account. The panel gates the
+      // picker on supportsCatalogAudio(account) as well; this is the format
+      // half of the answer, not the whole of it.
+      audioName:     isReel,
+      catalogAudio:  isReel,
       carousel:      isCarousel,
       aiDisclosure:  true,
     }
@@ -305,6 +320,12 @@ export function platformSpecificData(state) {
       ...(caps.userTags && opts.userTags?.length ? { userTags: opts.userTags } : {}),
       ...(caps.shareToFeed ? { shareToFeed: opts.shareToFeed !== false } : {}),
       ...(caps.thumbOffset && opts.thumbOffset != null ? { thumbOffset: opts.thumbOffset } : {}),
+      ...(caps.audioName && opts.audioName ? { audioName: opts.audioName } : {}),
+      // Only when a track was actually chosen. Sending a half-built object is
+      // a rejected post, and sending it on a non-Reel is rejected at container
+      // creation — hence gating on both the format and a real audioId.
+      ...(caps.catalogAudio && opts.audioConfiguration?.audioId
+        ? { audioConfiguration: opts.audioConfiguration } : {}),
       ...(opts.isAiGenerated ? { isAiGenerated: true } : {}),
     }
   }
