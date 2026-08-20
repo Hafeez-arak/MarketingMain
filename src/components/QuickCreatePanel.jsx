@@ -23,6 +23,7 @@ export function QuickCreatePanel({ platform, tones, workspaceId, accessToken, we
 
   const [plan, setPlan] = useState(null)   // { id, ... }
   const [idea, setIdea] = useState(null)   // draft-shaped idea, once created
+  const [redrafting, setRedrafting] = useState(false)
   const [finalizing, setFinalizing] = useState(false)
   const [finalizeError, setFinalizeError] = useState('')
   const [done, setDone] = useState(false)
@@ -82,6 +83,13 @@ export function QuickCreatePanel({ platform, tones, workspaceId, accessToken, we
   }, [idea, accessToken])
 
   async function handleRedraft() {
+    // Without this guard, a rapid double-click (or a click while a genuinely
+    // in-flight draft is still running — IdeaDraftPanel offers Retry during
+    // 'drafting' on purpose, see its own comment) fires a second Draft Copy
+    // call for the same idea id with no de-dupe: two n8n runs race writes to
+    // the same plan_ideas row, and the AI call is billed twice.
+    if (redrafting) return
+    setRedrafting(true)
     setError('')
     const res = await createQuickPost({
       workspaceId, accessToken, platform, topic: idea.topic, tone: idea.tone,
@@ -89,6 +97,7 @@ export function QuickCreatePanel({ platform, tones, workspaceId, accessToken, we
       wantsCaption: idea.wantsCaption, imageIdea: idea.imageIdea,
       webhooks, instructions, captionLanguage,
     })
+    setRedrafting(false)
     // Redrafting a quick post just re-runs Draft Copy on the SAME idea
     // row (not a new plan) — reuse the existing idea id, only refresh its
     // draft status/options.
@@ -138,7 +147,7 @@ export function QuickCreatePanel({ platform, tones, workspaceId, accessToken, we
         </div>
         <IdeaDraftPanel idea={idea} accessToken={accessToken} workspaceId={workspaceId}
           mediaOptionsUrl={webhooks?.mediaOptions} onIdeaChange={setIdea}
-          onRedraft={handleRedraft} redrafting={false} />
+          onRedraft={handleRedraft} redrafting={redrafting} />
         {finalizeError && <p className="text-xs text-red-600">{finalizeError}</p>}
         <div className="flex items-center gap-3 pt-2 border-t border-border">
           <Button variant="secondary" onClick={reset}>Cancel</Button>

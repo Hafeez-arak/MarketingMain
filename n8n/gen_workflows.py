@@ -6249,8 +6249,17 @@ const IG_USER  = $env.META_IG_USER_ID;
 // is how this class of bug surfaces as a useless "Request failed with status
 // code 400". So: never let the client throw, read the parsed body ourselves,
 // and treat a body-level `error` as a failure regardless of status.
+// n8n's Code node sandbox does not expose URLSearchParams (or other
+// browser/Node globals not on its curated global list) — confirmed live
+// 2026-08-20, every graph() call failed with "URLSearchParams is not
+// defined" until this was hand-rolled. Every value passed through here is a
+// primitive (ids, metric names, the access token, a comma-joined list), so
+// this needs none of URLSearchParams' array/nested-object handling.
+function qsEncode(obj){
+  return Object.entries(obj).map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&');
+}
 async function graph(method, path, params = {}){
-  const qs = new URLSearchParams({ ...params, access_token: IG_TOKEN }).toString();
+  const qs = qsEncode({ ...params, access_token: IG_TOKEN });
   const opts = method === 'GET'
     ? { method: 'GET', url: `${GRAPH}/${path}?${qs}` }
     : { method: 'POST', url: `${GRAPH}/${path}`, body: qs,
@@ -6822,8 +6831,13 @@ const IG_TOKEN = $env.META_IG_TOKEN;
 const IG_USER  = $env.META_IG_USER_ID;
 const BRAND_TZ = 'Asia/Riyadh';
 
+// n8n's Code node sandbox does not expose URLSearchParams — see the same
+// fix's comment in the Publish workflow's graph().
+function qsEncode(obj){
+  return Object.entries(obj).map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&');
+}
 async function graph(path, params = {}){
-  const qs = new URLSearchParams({ ...params, access_token: IG_TOKEN }).toString();
+  const qs = qsEncode({ ...params, access_token: IG_TOKEN });
   const res = await http({ method:'GET', url:`${GRAPH}/${path}?${qs}`,
     returnFullResponse:true, ignoreHttpStatusErrors:true, json:true });
   const b = res.body && typeof res.body === 'string' ? JSON.parse(res.body) : res.body;
@@ -7111,10 +7125,15 @@ const IG_TOKEN = $env.META_IG_TOKEN;
 const IG_USER  = $env.META_IG_USER_ID;
 const BRAND_TZ = 'Asia/Riyadh';
 
+// n8n's Code node sandbox does not expose URLSearchParams — see the same
+// fix's comment in the Publish workflow's graph().
+function qsEncode(obj){
+  return Object.entries(obj).map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&');
+}
 async function graph(pathOrUrl, params = {}){
   const url = /^https?:\/\//.test(pathOrUrl)
     ? pathOrUrl + (pathOrUrl.includes('access_token') ? '' : `&access_token=${encodeURIComponent(IG_TOKEN)}`)
-    : `${GRAPH}/${pathOrUrl}?${new URLSearchParams({ ...params, access_token: IG_TOKEN })}`;
+    : `${GRAPH}/${pathOrUrl}?${qsEncode({ ...params, access_token: IG_TOKEN })}`;
   const res = await http({ method:'GET', url, returnFullResponse:true, ignoreHttpStatusErrors:true, json:true });
   const b = res.body && typeof res.body === 'string' ? JSON.parse(res.body) : res.body;
   if (b && b.error){
@@ -7717,11 +7736,19 @@ const TAVILY   = $env.TAVILY_API_KEY;
 
 const norm = s => String(s || '').toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '');
 
+// Regex, not `new URL()` — n8n's Code node sandbox does not expose
+// URLSearchParams (confirmed live 2026-08-20, see the Meta workflows' fix),
+// and URL is the same family of global. This function is a silent-failure
+// risk if it guesses wrong: it was wrapped in try/catch, so an unavailable
+// URL constructor would not crash — it would just make every domain
+// comparison return '' and quietly defeat the verification this whole
+// workflow exists for. Matches www-stripped lowercase hostname for the
+// http(s) URLs this only ever receives (a website field or a Tavily result).
 const domainOf = (url) => {
   const u = String(url || '').trim();
   if (!u) return '';
-  try { return new URL(/^https?:/i.test(u) ? u : `https://${u}`).hostname.replace(/^www\./i, '').toLowerCase(); }
-  catch { return ''; }
+  const m = (/^https?:\/\//i.test(u) ? u : `https://${u}`).match(/^https?:\/\/([^\/\s:?#]+)/i);
+  return m ? m[1].replace(/^www\./i, '').toLowerCase() : '';
 };
 
 // Words that carry no identifying weight in this market. "Lighting" is in
@@ -8005,6 +8032,26 @@ const ZBASE    = 'https://zernio.com/api/v1';
 const zHeaders = { Authorization: `Bearer ${ZERNIO}`, 'Content-Type': 'application/json' };
 const sHeaders = { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}`, 'Content-Type': 'application/json' };
 
+// n8n's Code node sandbox does not expose URLSearchParams — confirmed live
+// 2026-08-20 against arak-meta-dashboard, where every graph() call failed with
+// "URLSearchParams is not defined". Same fix as the Meta workflows'.
+//
+// This one is worth spelling out because the failure would have been total and
+// silent-looking: `connect_url` and `audio_search` are the only two actions
+// that build a query string, and they are the entire OAuth entry point. A
+// ReferenceError here means the connect button throws for every platform, and
+// the catch below turns it into a generic ok:false — so it would have read as
+// "Zernio is broken" rather than "this global does not exist".
+//
+// Every value passed through here is a primitive (ids, a redirect URL, a
+// search term), so none of URLSearchParams' array/nested-object handling is
+// needed.
+function qsEncode(obj){
+  return Object.entries(obj)
+    .filter(([, v]) => v !== undefined && v !== null && v !== '')
+    .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&');
+}
+
 const action      = String(body.action || '').trim();
 const workspaceId = String(body.workspace_id || '').trim();
 const platform    = String(body.platform || '').trim().toLowerCase();
@@ -8156,8 +8203,8 @@ try {
 
     const profileId = await ensureProfile();
     const headless  = NEEDS_SELECTION.includes(platform);
-    const qs = new URLSearchParams({ profileId, redirect_url: redirectUrl });
-    if (headless) qs.set('headless', 'true');
+    const params = { profileId, redirect_url: redirectUrl };
+    if (headless) params.headless = 'true';
 
     // Instagram connects one of two ways and we deliberately ask for the
     // Facebook one. Publishing, analytics, comments and the inbox are
@@ -8171,10 +8218,10 @@ try {
     // This is also what makes the Page-selection step real rather than
     // speculative: Instagram Login connects the account directly with no
     // picker, Facebook Login authorises through the linked Page and needs one.
-    if (platform === 'instagram') qs.set('loginMethod', LOGIN_METHOD_IG);
+    if (platform === 'instagram') params.loginMethod = LOGIN_METHOD_IG;
 
     const res = await req({ method:'GET',
-      url:`${ZBASE}/connect/${encodeURIComponent(platform)}?${qs.toString()}`,
+      url:`${ZBASE}/connect/${encodeURIComponent(platform)}?${qsEncode(params)}`,
       headers:zHeaders, json:true });
 
     const authUrl = String((res && (res.authUrl || res.url)) || '');
@@ -8337,13 +8384,12 @@ try {
       throw new Error('That account does not belong to this workspace.');
     }
 
-    const qs = new URLSearchParams({ audioType });
-    if (q) qs.set('q', q);
+    const params = { audioType, q };
 
     let res;
     try {
       res = await req({ method:'GET',
-        url:`${ZBASE}/accounts/${encodeURIComponent(accountId)}/instagram/audio?${qs.toString()}`,
+        url:`${ZBASE}/accounts/${encodeURIComponent(accountId)}/instagram/audio?${qsEncode(params)}`,
         headers:zHeaders, json:true });
     } catch (e) {
       // The one failure worth naming, because it is a CONNECTION problem
