@@ -4,6 +4,8 @@ import { useNavigate } from 'react-router-dom'
 import { useApp, actions } from '../../store/app'
 import { useAuth } from '../../store/auth'
 import { ComposerHost } from '../../components/composer/ComposerHost'
+import { ConnectAccounts } from '../../components/social/ConnectAccounts'
+import { useConnectedAccounts } from '../../lib/useConnectedAccounts'
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from '../../lib/supabaseClient'
 import { Card, Button, Badge, Textarea, Spinner, PostImage } from '../../components/ui/index'
 import { formatDateTime } from '../../lib/utils'
@@ -138,6 +140,7 @@ function useSupabasePosts(supabaseUrl, anonKey, workspaceId) {
 export function InstagramPage() {
   const { state, dispatch } = useApp()
   const { activeWorkspaceId, accessToken } = useAuth()
+  const igAccounts = useConnectedAccounts('instagram')
   useBrandProfileSync(state, dispatch)
   const localPosts  = state.posts.filter(p => p.platform === 'instagram')
   const supabaseUrl = SUPABASE_URL
@@ -208,6 +211,27 @@ export function InstagramPage() {
             onDone={fetchRemotePosts} label="Create Post" />
         </div>
       </div>
+
+      {/* Accounts.
+          This page is bespoke rather than the generic SocialPlatform one, so
+          it did not inherit the connect UI every other platform page gets —
+          which left Instagram, the platform this app is mostly about, with no
+          way to connect an account anywhere in the product. The composer's
+          own "Connect one on the Instagram page first" pointed straight here,
+          at nothing. */}
+      <Card className="p-5">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-semibold text-text">Connected accounts</h3>
+          {igAccounts.accounts.length > 0 && (
+            <span className="text-xs text-text-tertiary">
+              {igAccounts.accounts.length} connected
+            </span>
+          )}
+        </div>
+        <ConnectAccounts platform="instagram" accounts={igAccounts.accounts}
+          loading={igAccounts.loading} error={igAccounts.error}
+          refresh={igAccounts.refresh} />
+      </Card>
 
       {/* Stats */}
       <div className="grid grid-cols-4 gap-3">

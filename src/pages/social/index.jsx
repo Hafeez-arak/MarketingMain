@@ -51,11 +51,22 @@ function PlatformCard({ platformKey, meta, posts, accounts, loading, onOpen }) {
             : ''}
         </p>
 
+        {/* Two actions, because a card that only says "Open" gives someone
+            with nothing connected no idea what to do next. The Connect button
+            navigates to the platform page rather than starting OAuth here —
+            the flow needs a page to come back to, and one implementation of
+            it is enough. */}
         <div className="flex gap-2" onClick={e => e.stopPropagation()}>
           <Button variant="secondary" size="sm" className="flex-1 justify-center"
             disabled={!live} onClick={onOpen}>
             {live ? 'Open' : 'Coming soon'}
           </Button>
+          {live && !connected && (
+            <Button variant="primary" size="sm" className="flex-1 justify-center"
+              onClick={onOpen}>
+              Connect
+            </Button>
+          )}
         </div>
       </div>
     </Card>
