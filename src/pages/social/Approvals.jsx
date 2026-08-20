@@ -19,6 +19,7 @@ import { defaultWebhookUrl } from '../../lib/n8nWebhooks'
 import { fetchScheduledPosts } from '../../lib/scheduledPosts'
 import { dbIdeaToDraft } from '../../lib/campaignPlan'
 import { InstagramPostDetail } from './InstagramPage'
+import { ComposerHost } from '../../components/composer/ComposerHost'
 
 // ─── Post Approvals ──────────────────────────────────────────────────────
 // One place to review every post the app produces, grouped by the monthly
@@ -81,6 +82,13 @@ function normalizePost(row, platform) {
     videoUrl: row.video_url || '',
     coverImageUrl: row.cover_image_url || '',
     _fromSupabase: true,
+    // The untouched view row. Everything above is renamed for this screen's
+    // own shape, but composerFromPost() reads the DATABASE names — handing it
+    // the normalised object would silently load a post with no media, no
+    // format and no options, which looks like a composer bug rather than a
+    // mismatch. Kept whole rather than mapped back field by field, since the
+    // view is the authority on what a post is.
+    _raw: row,
   }
   return { ...base, copy: row.caption, contentRoute: 'scheduled' }
 }
@@ -193,7 +201,7 @@ const PUBLISH_META = {
   failed:     { label: '✕ Publish failed', cls: 'bg-red-50 text-red-600' },
 }
 
-function PublishBar({ post, onPublish, busy }) {
+function PublishBar({ post, onPublish, busy, onOpenComposer }) {
   const [when, setWhen] = useState('')
   const status = post.publishStatus || 'not_published'
   const meta = PUBLISH_META[status]
@@ -220,7 +228,28 @@ function PublishBar({ post, onPublish, busy }) {
       {status === 'failed' && (
         <p className="text-[10px] text-red-600 leading-relaxed">{post.publishError || 'Publishing failed.'}</p>
       )}
+      {/* TikTok cannot publish from here, and that is the platform's rule
+          rather than a gap. Every TikTok post needs a privacy level drawn
+          from the creator account's own allowed list plus two consent flags
+          TikTok requires per post and which are deliberately never stored —
+          none of which an approval card can collect. So it offers the one
+          place that can. */}
+      {post.platform === 'tiktok' && !post.platformOptions?.tiktok?.privacy_level ? (
+        <div className="flex items-center gap-2 flex-wrap">
+          <button onClick={() => onOpenComposer?.(post)}
+            className="text-[11px] font-semibold px-2.5 py-1 rounded-lg border border-amber-300 text-amber-800 bg-amber-50 hover:bg-amber-100 transition-colors">
+            ↗ Finish in composer
+          </button>
+          <span className="text-[10px] text-text-tertiary">
+            TikTok needs a privacy level and a per-post consent confirmation.
+          </span>
+        </div>
+      ) : (
       <div className="flex items-center gap-2 flex-wrap">
+        <button onClick={() => onOpenComposer?.(post)}
+          className="text-[11px] font-semibold px-2.5 py-1 rounded-lg border border-border text-text-secondary hover:bg-surface-subtle transition-colors">
+          ✎ Edit
+        </button>
         <button onClick={() => onPublish(post, '')} disabled={busy}
           className="text-[11px] font-semibold px-2.5 py-1 rounded-lg border border-amber-300 text-amber-800 bg-amber-50 hover:bg-amber-100 transition-colors disabled:opacity-50">
           {busy ? 'Working…' : status === 'failed' ? '↻ Retry publish' : '↗ Publish now'}
@@ -237,11 +266,12 @@ function PublishBar({ post, onPublish, busy }) {
           🗓 Schedule
         </button>
       </div>
+      )}
     </div>
   )
 }
 
-function PostCard({ post, onOpen, onApprove, onReject, onPublish, publishing }) {
+function PostCard({ post, onOpen, onApprove, onReject, onPublish, publishing, onOpenComposer }) {
   const platformMeta = { label: 'Instagram', color: 'bg-pink-50 text-pink-600' }
   return (
     <Card className="overflow-hidden cursor-pointer hover:shadow-md hover:-translate-y-0.5 transition-all duration-150" onClick={() => onOpen(post)}>
@@ -291,7 +321,7 @@ function PostCard({ post, onOpen, onApprove, onReject, onPublish, publishing }) 
           ) : post.status === 'pending_publish' ? (
             // Approved — publishing is the next step, so the controls for it
             // live right here rather than behind opening the post.
-            <PublishBar post={post} onPublish={onPublish} busy={publishing} />
+            <PublishBar post={post} onPublish={onPublish} busy={publishing} onOpenComposer={onOpenComposer} />
           ) : (
             <p className="text-[10px] text-text-tertiary mt-1 opacity-60">Click to open full view</p>
           )}
@@ -311,6 +341,9 @@ export function Approvals() {
   const [retryingId,     setRetryingId]     = useState(null)
   const [expandedKeys,   setExpandedKeys]   = useState({})
   const [publishingId,   setPublishingId]   = useState(null)
+  // The post currently open in the composer, or null. Set from a card's Edit /
+  // Finish action; cleared when the composer closes.
+  const [composerPost,   setComposerPost]   = useState(null)
   const [publishError,   setPublishError]   = useState(null)
   const [syncing,        setSyncing]        = useState(false)
   const [syncNote,       setSyncNote]       = useState('')
@@ -427,11 +460,11 @@ export function Approvals() {
     // rejection is correct but arrives as "TikTok requires a privacy level",
     // which does not tell anyone where to go.
     if (post.platform === 'tiktok' && !post.platformOptions?.tiktok?.privacy_level) {
-      setPublishError({
-        id: post.id,
-        message: 'TikTok posts need a privacy level and a per-post consent confirmation, ' +
-                 'which TikTok requires every time. Open this post from the TikTok page to finish and publish it.',
-      })
+      // The card offers "Finish in composer" for exactly this case, so this is
+      // now a backstop rather than the user-facing path — but it stays, since
+      // handlePublish is reachable from anywhere and the workflow's own
+      // refusal does not say where to go.
+      setComposerPost(post)
       return
     }
 
@@ -697,6 +730,7 @@ export function Approvals() {
                       if (item.type === 'idea' && item.effectiveStatus === 'processing') return <ProcessingCard key={item.key} idea={item.idea} />
                       if (item.type === 'idea' && item.effectiveStatus === 'failed') return <FailedCard key={item.key} idea={item.idea} post={item.post} onRetry={handleRetry} retrying={retryingId === item.idea.id} />
                       return <PostCard key={item.key} post={item.post} onOpen={setSelectedPost}
+                        onOpenComposer={setComposerPost}
                         onApprove={handleApprove} onReject={handleReject}
                         onPublish={handlePublish} publishing={publishingId === item.post.id} />
                     })}
@@ -727,6 +761,25 @@ export function Approvals() {
           onDelete={handleDelete}
         />
       )}
+
+      {/* The composer, opened from a card rather than from its own button.
+          This is what closes the loop between the generation half of the app
+          and the publishing half: a post produced by a plan can be reviewed,
+          adjusted and sent through exactly the same path as one composed by
+          hand — and, for TikTok, is the only place its required privacy level
+          and per-post consent can be collected at all.
+
+          Keyed by post id so switching between two posts remounts rather than
+          leaving the previous one's caption in the fields. */}
+      <ComposerHost
+        key={composerPost?.id || 'none'}
+        trigger={false}
+        platform={composerPost?.platform || 'instagram'}
+        campaigns={state.campaigns}
+        openPost={composerPost?._raw || composerPost}
+        onOpenPostHandled={() => setComposerPost(null)}
+        onDone={fetchAll}
+      />
     </div>
   )
 }
