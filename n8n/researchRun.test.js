@@ -355,3 +355,42 @@ describe('Run: Gather — caveats that keep a number honest', () => {
     expect(report.unanswered.join(' ')).toMatch(/rests on 1 post\b/i)
   })
 })
+
+describe('Run: Gather — vs_us cannot divide by zero', () => {
+  const withSelf = async (selfFollowers, selfLikes) => {
+    const pg = new StubPostgrest({
+      research_agenda: [watchRow()],
+      research_runs: [runRow()],
+      social_accounts: [{ workspace_id: WS, platform: 'instagram', is_active: true, username: 'lightingaaa' }],
+    })
+    await runCodeNode(GATHER, {
+      env: ENV, input: gatherInput(), postgrest: pg,
+      routes: graph({
+        technolight: { followers_count: 10000, media_count: 1, media: { data: [post({ like_count: 100, comments_count: 10 })] } },
+        lightingaaa: { followers_count: selfFollowers, media_count: 1,
+                       media: { data: [post({ like_count: selfLikes, comments_count: 0 })] } },
+      }),
+    })
+    return pg.tables.research_runs[0].report.competitor_board[0]
+  }
+
+  it('refuses to compare against an account with real reach but zero engagement', async () => {
+    // The near-miss found live: @lightingaaa genuinely posts at 0 engagement.
+    // Today only the FOLLOWER floor saves us; the moment it passes 50 followers
+    // while still getting no likes, (3.87 - 0) / 0 is Infinity, round() turns
+    // that into null, and every card renders the string "+null%".
+    const card = await withSelf(5000, 0)
+    expect(card.vs_us).toBeNull()
+    expect(card.vs_us_note).toMatch(/no comparable account/i)
+  })
+
+  it('never renders a non-finite comparison', async () => {
+    const card = await withSelf(5000, 0)
+    expect(String(card.vs_us)).not.toMatch(/null%|Infinity|NaN/)
+  })
+
+  it('still compares normally once our account has real engagement', async () => {
+    const card = await withSelf(5000, 25)
+    expect(card.vs_us).toBe('+120%')
+  })
+})

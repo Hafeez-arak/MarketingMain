@@ -32,10 +32,15 @@ const WS = 'ws1'
 // business_discovery returns; anything not in it answers the way Meta answers
 // for a handle that does not exist or is not a professional account.
 function world({ searchHits = [], accounts = {}, searchFails = false } = {}) {
+  const queries = []
   const routes = [
-    ['api.tavily.com/search', async () => {
+    ['api.tavily.com/search', async ({ body }) => {
       if (searchFails) return { statusCode: 500, body: { error: 'rate limited' } }
-      return { statusCode: 200, body: { results: searchHits } }
+      queries.push(String((body || {}).query || ''))
+      // `searchHits` may be a plain array (same answer to anything) or a
+      // function of the query, which is what makes the fallback observable.
+      const hits = typeof searchHits === 'function' ? searchHits(String((body || {}).query || '')) : searchHits
+      return { statusCode: 200, body: { results: hits || [] } }
     }],
     ['graph.facebook.com', async ({ url }) => {
       // encodeURIComponent leaves ( and ) alone, so the handle arrives in
@@ -50,6 +55,7 @@ function world({ searchHits = [], accounts = {}, searchFails = false } = {}) {
       return { statusCode: 200, body: { business_discovery: { id: `ig_${handle}`, username: handle, ...acct } } }
     }],
   ]
+  routes.queries = queries
   return routes
 }
 
@@ -273,5 +279,44 @@ describe('Resolve: Find Handles', () => {
     const patches = pg.log.filter(c => c.method === 'PATCH')
     expect(patches).toHaveLength(1)
     expect(patches[0].query).toContain(`workspace_id=eq.${WS}`)
+  })
+})
+
+describe('Resolve: Find Handles — what it actually searches for', () => {
+  const workFor = (over = {}) => ({
+    workspace_id: WS,
+    work: [{ agenda_id: 'a1', name: 'Alnasser Lighting',
+             positioning: 'Riyadh-HQ professional lighting since 1976 — decorative, retail, tunnel and architectural lighting across KSA.',
+             website: '', ...over }],
+  })
+
+  it('searches the name, not the name buried under its positioning', async () => {
+    // Observed live 2026-08-20: with the full positioning appended, three of
+    // four rivals returned zero instagram.com URLs at all. The distinctive
+    // token drowns in generic industry words.
+    const routes = world({ searchHits: [hit('https://www.instagram.com/alnasserlighting/')],
+      accounts: { alnasserlighting: { name: 'Alnasser Lighting', biography: 'Riyadh', website: '', followers_count: 8000 } } })
+    await find(workFor(), { research_agenda: [agendaRow({ subject: 'Alnasser Lighting' })] }, routes)
+    expect(routes.queries[0]).toBe('"Alnasser Lighting" instagram')
+    expect(routes.queries[0]).not.toMatch(/1976|decorative|tunnel/)
+  })
+
+  it('does not pay for a second search when the first one found candidates', async () => {
+    const routes = world({ searchHits: [hit('https://www.instagram.com/alnasserlighting/')],
+      accounts: { alnasserlighting: { name: 'Alnasser Lighting', biography: '', website: '', followers_count: 8000 } } })
+    await find(workFor(), { research_agenda: [agendaRow({ subject: 'Alnasser Lighting' })] }, routes)
+    expect(routes.queries).toHaveLength(1)
+  })
+
+  it('falls back to a positioning-flavoured query only when the name alone finds nothing', async () => {
+    const routes = world({
+      searchHits: q => q.startsWith('"') ? [] : [hit('https://www.instagram.com/alnasser_lighting/')],
+      accounts: { alnasser_lighting: { name: 'Alnasser Lighting', biography: 'Riyadh lighting', website: '', followers_count: 8000 } },
+    })
+    const { out } = await find(workFor(), { research_agenda: [agendaRow({ subject: 'Alnasser Lighting' })] }, routes)
+    expect(routes.queries).toHaveLength(2)
+    expect(routes.queries[1]).toMatch(/Riyadh|professional|lighting/)
+    expect(out.outcomes[0].used_fallback).toBe(true)
+    expect(out.resolved).toBe(1)
   })
 })

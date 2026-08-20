@@ -7846,18 +7846,34 @@ let resolved = 0, suggested = 0, notFound = 0;
 for (const item of work) {
   const record = { name: item.name, agenda_id: item.agenda_id };
   try {
-    const query = [item.name, item.positioning, 'Saudi Arabia instagram'].filter(Boolean).join(' ');
-    let results = [];
-    try {
-      const r = await req({
-        __label: 'Tavily', method: 'POST', url: 'https://api.tavily.com/search',
-        body: { api_key: TAVILY, query, max_results: 6, search_depth: 'basic', topic: 'general' },
-        json: true,
-      });
-      results = (r && r.results) || [];
-    } catch (e) { record.search_error = String(e.message || e).slice(0, 160); }
+    // Search the NAME, not the name plus a hundred-character positioning
+    // sentence. Observed live 2026-08-20: with the full positioning appended,
+    // three of four rivals came back with ZERO instagram.com URLs — the one
+    // distinctive token was buried under generic industry words ("lighting",
+    // "architectural", "Riyadh") that match half the market. The positioning
+    // still earns its keep in SCORING, where it is compared against the
+    // account's own bio rather than used to fetch.
+    const search = async (query) => {
+      try {
+        const r = await req({
+          __label: 'Tavily', method: 'POST', url: 'https://api.tavily.com/search',
+          body: { api_key: TAVILY, query, max_results: 6, search_depth: 'basic', topic: 'general' },
+          json: true,
+        });
+        return (r && r.results) || [];
+      } catch (e) { record.search_error = String(e.message || e).slice(0, 160); return []; }
+    };
 
-    const candidates = handlesFromSearch(results).slice(0, 4);
+    let candidates = handlesFromSearch(await search(`"${item.name}" instagram`)).slice(0, 4);
+    // One fallback, and only when the first found nothing at all: a rival is
+    // sometimes known publicly by a name its directory row does not use. Not
+    // run otherwise, so the common case still costs exactly one search.
+    if (!candidates.length) {
+      const hint = String(item.positioning || '').split(/[^A-Za-z0-9]+/).filter(w => w.length > 3).slice(0, 4).join(' ');
+      const alt = [item.name, hint, 'Saudi Arabia instagram'].filter(Boolean).join(' ');
+      candidates = handlesFromSearch(await search(alt)).slice(0, 4);
+      record.used_fallback = true;
+    }
     record.candidates = candidates;
 
     let best = null;
@@ -8868,8 +8884,15 @@ try {
   // and read as a finding — which is worse than rendering nothing.
   const MIN_SELF_BASELINE = 50;
   const self = snapshots.find(s => s.is_self && s.data_source === 'instagram');
+  // Two floors, not one. The follower floor keeps a 1-follower test account
+  // from producing a -99.9% that reads as a finding. The engagement floor is
+  // a separate hazard: our own account can clear 50 followers while still
+  // getting zero likes, and dividing by that zero yields Infinity, which
+  // round() turns into null and the template renders as "+null%" on every
+  // card. Observed as a near-miss live on 2026-08-20 — @lightingaaa really
+  // does have 2 posts at 0 engagement, and only the follower floor caught it.
   const selfComparable = !!self && Number(self.followers) >= MIN_SELF_BASELINE
-                         && self.engagement_per_1k != null;
+                         && Number(self.engagement_per_1k) > 0;
 
   const board = snapshots.filter(s => !s.is_self).map(s => {
     const prev = prevByName.get(String(s.competitor_name).toLowerCase());
