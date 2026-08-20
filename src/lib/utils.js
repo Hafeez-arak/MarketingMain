@@ -10,10 +10,26 @@ export function timeAgo(iso) {
   const h = Math.floor(m/60)
   if (h<24) return `${h}h ago`; return `${Math.floor(h/24)}d ago`
 }
+// `status: 'beta'` means the platform is shown but cannot be connected or
+// published to. Snapchat is listed rather than omitted because a platform the
+// team is waiting on should be visible and labelled, not a gap everyone has
+// to remember the reason for. Every screen that renders a platform must
+// honour the flag — see the guards in src/pages/social/.
 export const PLATFORM_META = {
   instagram:{ label:'Instagram', abbr:'IG', color:'#E1306C', bg:'bg-pink-50',  text:'text-pink-600',  border:'border-pink-200',  maxChars:2200 },
   tiktok:   { label:'TikTok',    abbr:'TT', color:'#010101', bg:'bg-stone-100',text:'text-stone-700', border:'border-stone-300', maxChars:2200 },
+  snapchat: { label:'Snapchat',  abbr:'SC', color:'#FFFC00', bg:'bg-yellow-50',text:'text-yellow-700',border:'border-yellow-200',maxChars:250, status:'beta' },
 }
+
+// The platforms that can actually be connected and published to today.
+// Prefer this over Object.keys(PLATFORM_META) anywhere the answer feeds a
+// network call, so that adding the next beta platform doesn't quietly wire
+// it up to a publish path that will reject it.
+export const LIVE_PLATFORMS = Object.entries(PLATFORM_META)
+  .filter(([, m]) => m.status !== 'beta')
+  .map(([key]) => key)
+
+export const isLivePlatform = platform => PLATFORM_META[platform]?.status !== 'beta'
 export const STATUS_META = {
   draft:           { label:'Draft',     classes:'bg-stone-100 text-stone-600' },
   scheduled:       { label:'Scheduled', classes:'bg-sky-50 text-sky-700 ring-1 ring-sky-200' },
