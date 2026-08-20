@@ -4,6 +4,7 @@ import { Card, Button, Badge, Empty, PostImage } from '../../components/ui/index
 import { PLATFORM_META, formatDateTime } from '../../lib/utils'
 import { useConnectedAccounts } from '../../lib/useConnectedAccounts'
 import { ConnectAccounts } from '../../components/social/ConnectAccounts'
+import { ComposerHost } from '../../components/composer/ComposerHost'
 
 // ─── TikTok ────────────────────────────────────────────────────────────────
 // Its own page rather than the generic SocialPlatform fallback, because TikTok
@@ -11,8 +12,7 @@ import { ConnectAccounts } from '../../components/social/ConnectAccounts'
 // only real format, and every post carries required privacy and consent
 // settings that Instagram has no equivalent of.
 //
-// The composer that collects those lands in the next phase; this page is the
-// account + post surface it will open from.
+// The composer collects those; this page is where it opens from.
 
 const META = PLATFORM_META.tiktok
 
@@ -38,6 +38,9 @@ export function TikTokPage() {
                 {posts.length} post{posts.length === 1 ? '' : 's'} · {connected ? 'Connected' : 'Not connected'}
               </p>
             </div>
+          </div>
+          <div>
+            <ComposerHost platform="tiktok" campaigns={state.campaigns} label="Create post" />
           </div>
         </div>
 

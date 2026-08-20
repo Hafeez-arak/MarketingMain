@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
 import { useApp, actions } from '../../store/app'
 import { useAuth } from '../../store/auth'
+import { ComposerHost } from '../../components/composer/ComposerHost'
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from '../../lib/supabaseClient'
 import { Card, Button, Badge, Textarea, Spinner, PostImage } from '../../components/ui/index'
 import { formatDateTime } from '../../lib/utils'
@@ -198,10 +199,13 @@ export function InstagramPage() {
               {lastFetchedAt ? `Synced ${lastFetchedAt.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}` : 'Sync'}
             </button>
           )}
-          <Button onClick={() => setScreen('create')}>
-            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
-            Create Post
-          </Button>
+          {/* Two different things, deliberately kept apart. This composes a
+              post from media that already exists and publishes it; the
+              "Generate with AI" tab below asks the model to invent one. Both
+              were called "Create Post", which left no way to reach the
+              publishing half at all. */}
+          <ComposerHost platform="instagram" campaigns={state.campaigns}
+            onDone={fetchRemotePosts} label="Create Post" />
         </div>
       </div>
 
@@ -222,7 +226,7 @@ export function InstagramPage() {
 
       {/* Tab bar */}
       <div className="flex w-fit">
-        {[{ key: 'posts', label: 'Posts' }, { key: 'create', label: 'Create Post' }].map(t => (
+        {[{ key: 'posts', label: 'Posts' }, { key: 'create', label: 'Generate with AI' }].map(t => (
           <button key={t.key} onClick={() => setScreen(t.key)}
             /* Active uses Instagram's own magenta, matching this page's other
                primary affordances rather than the app accent. */

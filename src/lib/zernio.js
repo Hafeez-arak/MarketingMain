@@ -1,13 +1,21 @@
 import { BRAND_TIMEZONE } from './brandTime'
 
-// ─── Zernio (publishing + analytics) — DORMANT ───────────────────────────
-// Nothing imports the three webhook callers below any more. Instagram
-// publishing and insights moved to Meta's own Graph API in August 2026 (see
-// src/lib/meta.js and the three `Meta *` workflows); this module is kept
-// intact, and its workflows still generate and deploy, as a fallback that
-// has not been dismantled before its replacement has proven itself.
+// ─── Zernio (publishing + analytics) — the primary path ──────────────────
+// Live again, and now for three platforms rather than one. Instagram
+// publishing moved to Meta's Graph API in August 2026 and this module went
+// dormant; it comes back because Meta can only ever reach Instagram, and
+// running Instagram through one provider while TikTok goes through another
+// means two payload shapes, two failure vocabularies and two sets of bugs
+// behind a single Publish button.
 //
-// If you are here because publishing broke: the live path is meta.js.
+// meta.js is NOT deleted — it is the proven path and stays one function call
+// away, which is what makes a Zernio outage a one-line change in
+// publishPost.js rather than a redeploy. That this reversal is cheap is
+// entirely because the previous migration dismantled nothing; keep it that
+// way in whichever direction the next one goes.
+//
+// Callers should go through src/lib/publishPost.js rather than here, so the
+// provider choice lives in one place.
 // ─────────────────────────────────────────────────────────────────────────
 // The browser NEVER calls zernio.com directly and never sees the Zernio
 // API key — that key lives only in n8n's environment (same as every other
@@ -38,6 +46,7 @@ const POST_TABLES = ['instagram_generated_posts', 'generated_posts']
 export async function publishPost(webhookUrl, {
   postId, postTable, workspaceId, platform, accountId,
   caption, hashtags, imageUrl, imageUrls, videoUrl, coverImageUrl, altText,
+  platformSpecificData, tiktokSettings,
   scheduledFor, timezone, force = false, reschedule = false,
 }) {
   if (!webhookUrl) return { error: 'Publish webhook not configured — set it in Settings → Integrations.' }
@@ -52,6 +61,19 @@ export async function publishPost(webhookUrl, {
         caption: caption || '', hashtags: hashtags || '',
         image_url: imageUrl || '', image_urls: imageUrls || undefined,
         video_url: videoUrl || '', cover_image_url: coverImageUrl || '', alt_text: altText || '',
+        // The composer's per-platform options, already narrowed to the fields
+        // the chosen format may legally carry (see composerState.js — a
+        // firstComment on a Story is a rejection, not a no-op). The workflow
+        // sanitises them again against a key allowlist, because a webhook is
+        // reachable without going through the browser.
+        //
+        // snake_case on the wire like every other field here; the workflow
+        // maps them onto Zernio's own camelCase names. TikTok's settings are
+        // separate because Zernio puts them at the TOP level of the request
+        // rather than inside platformSpecificData — a quirk unique to TikTok,
+        // and one that fails silently if you get it wrong.
+        platform_specific_data: platformSpecificData || undefined,
+        tiktok_settings: tiktokSettings || undefined,
         // A schedule is a wall-clock time plus the zone to read it in, and the
         // zone is the BRAND's, never the browser's. This used to send
         // Intl.DateTimeFormat().resolvedOptions().timeZone, so scheduling from

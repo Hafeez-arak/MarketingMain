@@ -1303,9 +1303,57 @@ try {
     throw new Error('Nothing to publish — the post has neither caption text nor media.');
   }
 
-  const payload = { platforms: [{ platform, accountId }] };
+  // ── Per-platform options from the composer ────────────────────────────
+  //
+  // These arrive already shaped by src/lib/composerState.js, which is also
+  // what decides which fields a given format may carry (firstComment is a
+  // rejection on a Story, duet/stitch a rejection on a photo carousel). This
+  // node passes them through rather than re-deriving them: two places
+  // computing the same rule is two places to fix when a platform changes one,
+  // and the browser is where the user can actually be told.
+  //
+  // Still SANITISED here, because a webhook is reachable without the browser:
+  // only known keys survive, so a caller cannot inject arbitrary fields into
+  // the provider call.
+  const IG_KEYS = ['contentType','firstComment','collaborators','userTags',
+                   'shareToFeed','thumbOffset','instagramThumbnail','isAiGenerated','altText'];
+  const TT_KEYS = ['privacy_level','allow_comment','allow_duet','allow_stitch',
+                   'video_cover_timestamp_ms','video_cover_image_url','media_type',
+                   'photo_cover_index','description','auto_add_music','video_made_with_ai',
+                   'content_preview_confirmed','express_consent_given'];
+  const pick = (src, keys) => {
+    const out = {};
+    for (const k of keys){ if (src && src[k] !== undefined && src[k] !== null) out[k] = src[k]; }
+    return out;
+  };
+
+  const psd = pick(body.platform_specific_data, IG_KEYS);
+
+  const target = { platform, accountId };
+  if (Object.keys(psd).length) target.platformSpecificData = psd;
+
+  const payload = { platforms: [target] };
   if (content) payload.content = content;
   if (mediaItems.length) payload.mediaItems = mediaItems;
+
+  // TikTok's settings go at the TOP level of the body, NOT inside
+  // platformSpecificData. Zernio's docs call this out as unique to TikTok, and
+  // getting it wrong is not an error — the block is ignored and the post
+  // publishes with TikTok's defaults instead of the ones that were chosen,
+  // which for privacy_level means a post that may be more public than asked.
+  if (platform === 'tiktok'){
+    const tt = pick(body.tiktok_settings, TT_KEYS);
+    if (!tt.privacy_level){
+      throw new Error('TikTok requires a privacy level, and it must be one the creator account allows.');
+    }
+    // Re-asserted rather than trusted from the caller. TikTok requires both to
+    // be true as a condition of API access; a request that reaches this
+    // workflow without them is one the browser did not send.
+    if (tt.content_preview_confirmed !== true || tt.express_consent_given !== true){
+      throw new Error('TikTok requires the content and consent declaration to be confirmed for every post.');
+    }
+    payload.tiktokSettings = tt;
+  }
 
   // scheduledFor vs publishNow are mutually exclusive in intent; prefer an
   // explicit schedule when one is given.
