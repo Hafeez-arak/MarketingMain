@@ -7668,11 +7668,19 @@ const TAVILY   = $env.TAVILY_API_KEY;
 
 const norm = s => String(s || '').toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '');
 
+// Regex, not `new URL()` — n8n's Code node sandbox does not expose
+// URLSearchParams (confirmed live 2026-08-20, see the Meta workflows' fix),
+// and URL is the same family of global. This function is a silent-failure
+// risk if it guesses wrong: it was wrapped in try/catch, so an unavailable
+// URL constructor would not crash — it would just make every domain
+// comparison return '' and quietly defeat the verification this whole
+// workflow exists for. Matches www-stripped lowercase hostname for the
+// http(s) URLs this only ever receives (a website field or a Tavily result).
 const domainOf = (url) => {
   const u = String(url || '').trim();
   if (!u) return '';
-  try { return new URL(/^https?:/i.test(u) ? u : `https://${u}`).hostname.replace(/^www\./i, '').toLowerCase(); }
-  catch { return ''; }
+  const m = (/^https?:\/\//i.test(u) ? u : `https://${u}`).match(/^https?:\/\/([^\/\s:?#]+)/i);
+  return m ? m[1].replace(/^www\./i, '').toLowerCase() : '';
 };
 
 // Words that carry no identifying weight in this market. "Lighting" is in
