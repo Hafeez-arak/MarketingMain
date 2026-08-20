@@ -7447,6 +7447,760 @@ def build_meta_dashboard() -> dict:
         "tags": [],
     }
 
+RESEARCH_RESOLVE_STICKY = """## Research: Resolve Handles
+
+**Zero secrets in this file.** Needs `META_IG_TOKEN`, `META_IG_USER_ID`, `TAVILY_API_KEY`, `SUPABASE_URL`, `SUPABASE_KEY`.
+
+Seeds `research_agenda` from the competitors the caller sends, then finds and **verifies** each one's Instagram handle.
+
+Webhook path: `/arak-research-resolve`. Body: `{ workspace_id, competitors[{name, positioning, website, source_row_id}], force? }`.
+
+**Why this exists at all.** Checked against the live database 2026-08-20: across all three workspaces there are twelve competitor rows and **zero Instagram handles**. Two rows carry a `watch_url` and both are company websites. So the "parse a handle out of the directory" plan resolves nothing, and the whole Instagram side of the research agent is inert until something goes and finds them.
+
+**Verification is the point, not search.** Finding *an* account called something like the rival is easy. `Ozee` and `Ozeyl` are two different companies in one workspace, and a confident week of numbers attached to the wrong one is the kind of wrong that does not look wrong. So a candidate is scored against the rival's own website domain, name and bio, and only a score at or above the threshold is marked `resolved`.
+
+**Below the threshold it stops.** A weak candidate is stored as a *suggestion* with `ig_status = 'unresolved'` for a human to accept or replace. Nothing downstream may read `ig_handle` alone — the snapshot step filters on `ig_status in ('resolved','human_set')`, which is what keeps a guess out of the numbers.
+
+**`human_set` is never overwritten.** A handle a person typed outranks anything this finds, on every later run.
+
+**Writes nothing to the Brand Brain.** Agenda rows only. A resolved handle is research metadata — discovered, scored, timestamped — not a statement the company makes about itself. See RESEARCH-AGENT.md §5a."""
+
+
+RESEARCH_RESOLVE_SEED_JS = r"""
+const rawHttp = this.helpers.httpRequest;
+
+// Retry a lookup that never left the machine — see Creative Generate for the
+// full argument. Only name resolution is retried: a DNS failure proves the
+// request never reached the provider, so re-sending cannot double anything.
+const http = async (opts) => {
+  for (let attempt = 0; ; attempt++) {
+    try { return await rawHttp(opts); }
+    catch (e) {
+      const code = (e && (e.code || (e.cause && e.cause.code))) || '';
+      const msg  = String((e && e.message) || '');
+      const isDns = code === 'ENOTFOUND' || code === 'EAI_AGAIN'
+        || /getaddrinfo\s+(ENOTFOUND|EAI_AGAIN)/.test(msg);
+      if (!isDns || attempt >= 2) throw e;
+      await new Promise(r => setTimeout(r, 400 * (attempt + 1)));
+    }
+  }
+};
+
+async function req(opts){
+  const res = await http({ ...opts, returnFullResponse: true, ignoreHttpStatusErrors: true });
+  const status = res.statusCode;
+  if (status >= 200 && status < 300) return res.body;
+  const b = res.body;
+  const msg = (b && typeof b === 'object') ? (b.error || b.message || JSON.stringify(b).slice(0, 300))
+            : (typeof b === 'string' && b) ? b.slice(0, 300)
+            : `HTTP ${status}`;
+  throw new Error(`${opts.__label || 'Request'} ${status}: ${msg}`);
+}
+
+const raw  = ($input.first() && $input.first().json) || {};
+const body = raw.body || raw;
+const SUPA_URL = String($env.SUPABASE_URL || '').replace(/\/+$/, '');
+const SUPA_KEY = $env.SUPABASE_KEY;
+const sHeaders = { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}`, 'Content-Type': 'application/json' };
+
+const wsId = String(body.workspace_id || '').trim();
+if (!wsId) throw new Error('workspace_id is required.');
+const force = body.force === true;
+
+// The caller sends the competitor list, assembled in the browser through the
+// same buildContext/directory read every other call uses. Assembling it here
+// would mean a second copy of the flattening logic, which is the drift
+// brandContext.js exists to prevent.
+const sent = (Array.isArray(body.competitors) ? body.competitors : [])
+  .map(c => ({
+    name: String((c && c.name) || '').trim(),
+    positioning: String((c && c.positioning) || '').trim(),
+    website: String((c && c.website) || '').trim(),
+    source_row_id: (c && c.source_row_id) || null,
+  }))
+  .filter(c => c.name);
+
+// Same workspace filter as everywhere else: this runs on the service key, so
+// the filter IS the isolation.
+const existing = await req({
+  __label: 'Supabase', method: 'GET',
+  url: `${SUPA_URL}/rest/v1/research_agenda?workspace_id=eq.${wsId}&kind=eq.competitor`
+     + `&select=id,subject,status,ig_handle,ig_status,ig_confidence,source_row_id&limit=500`,
+  headers: sHeaders, json: true,
+});
+
+const key = s => String(s || '').trim().toLowerCase();
+const byName = new Map(existing.map(r => [key(r.subject), r]));
+
+// Seed the ones we have never seen. A competitor that came from the Brand
+// Brain is 'active' immediately — a human already decided it matters by
+// typing it there. Only an agent-discovered rival arrives as 'proposed'.
+const seeded = [];
+for (const c of sent) {
+  if (byName.has(key(c.name))) continue;
+  const row = {
+    workspace_id: wsId, kind: 'competitor', subject: c.name,
+    why: c.positioning || '', status: 'active',
+    created_by: 'human', source_row_id: c.source_row_id || null,
+  };
+  const ins = await req({
+    __label: 'Supabase', method: 'POST',
+    url: `${SUPA_URL}/rest/v1/research_agenda`,
+    headers: { ...sHeaders, Prefer: 'return=representation' },
+    body: row, json: true,
+  });
+  const created = Array.isArray(ins) ? ins[0] : ins;
+  if (created) { byName.set(key(c.name), created); seeded.push(c.name); }
+}
+
+// What still needs a handle. `human_set` is excluded unconditionally — a
+// handle a person typed outranks anything this can find, and re-resolving it
+// every week would be a slow way to overwrite their correction. `resolved` is
+// excluded too unless the caller explicitly asked to re-verify.
+const sentByName = new Map(sent.map(c => [key(c.name), c]));
+const work = [];
+for (const [k, row] of byName) {
+  if (row.status === 'retired') continue;
+  if (row.ig_status === 'human_set') continue;
+  if (row.ig_status === 'resolved' && !force) continue;
+  const c = sentByName.get(k) || {};
+  work.push({
+    agenda_id: row.id,
+    name: row.subject,
+    positioning: c.positioning || row.why || '',
+    website: c.website || '',
+  });
+}
+
+if (!work.length) {
+  return [{ json: { ok: true, proceed: false, skipped: true, workspace_id: wsId,
+    seeded: seeded.length, resolved: 0,
+    reason: existing.length || sent.length
+      ? 'Every competitor already has a handle, or was set by hand. Nothing to resolve.'
+      : 'This brand has no competitors listed yet, so there is nothing to look up. Add some in Brand Brain first.' } }];
+}
+
+if (!$env.TAVILY_API_KEY) {
+  return [{ json: { ok: true, proceed: false, skipped: true, workspace_id: wsId, seeded: seeded.length, resolved: 0,
+    reason: 'TAVILY_API_KEY is not set on this n8n instance, so the handle search cannot run.' } }];
+}
+if (!$env.META_IG_TOKEN || !$env.META_IG_USER_ID) {
+  return [{ json: { ok: true, proceed: false, skipped: true, workspace_id: wsId, seeded: seeded.length, resolved: 0,
+    reason: 'META_IG_TOKEN / META_IG_USER_ID are not set, so a candidate handle cannot be verified. Refusing to guess.' } }];
+}
+
+// Bounded. Twelve rivals across three brands today; the cap is here so a
+// directory that grows to eighty cannot turn one button into eighty searches
+// plus eighty Graph calls without anyone deciding that.
+const MAX_PER_RUN = 12;
+return [{ json: { ok: true, proceed: true, workspace_id: wsId, seeded: seeded.length,
+                  work: work.slice(0, MAX_PER_RUN), deferred: Math.max(0, work.length - MAX_PER_RUN) } }];
+"""
+
+
+RESEARCH_RESOLVE_FIND_JS = r"""
+const rawHttp = this.helpers.httpRequest;
+
+const http = async (opts) => {
+  for (let attempt = 0; ; attempt++) {
+    try { return await rawHttp(opts); }
+    catch (e) {
+      const code = (e && (e.code || (e.cause && e.cause.code))) || '';
+      const msg  = String((e && e.message) || '');
+      const isDns = code === 'ENOTFOUND' || code === 'EAI_AGAIN'
+        || /getaddrinfo\s+(ENOTFOUND|EAI_AGAIN)/.test(msg);
+      if (!isDns || attempt >= 2) throw e;
+      await new Promise(r => setTimeout(r, 400 * (attempt + 1)));
+    }
+  }
+};
+
+async function req(opts){
+  const res = await http({ ...opts, returnFullResponse: true, ignoreHttpStatusErrors: true });
+  const status = res.statusCode;
+  if (status >= 200 && status < 300) return res.body;
+  const b = res.body;
+  const msg = (b && typeof b === 'object') ? (b.error || b.message || JSON.stringify(b).slice(0, 300))
+            : (typeof b === 'string' && b) ? b.slice(0, 300)
+            : `HTTP ${status}`;
+  throw new Error(`${opts.__label || 'Request'} ${status}: ${msg}`);
+}
+
+const inp = ($input.first() && $input.first().json) || {};
+const wsId = inp.workspace_id;
+const work = Array.isArray(inp.work) ? inp.work : [];
+
+const SUPA_URL = String($env.SUPABASE_URL || '').replace(/\/+$/, '');
+const SUPA_KEY = $env.SUPABASE_KEY;
+const sHeaders = { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}`, 'Content-Type': 'application/json' };
+
+// Pinned to v23.0, the same version the publish and sync workflows use. A
+// research call drifting to a different version than the publishing path is
+// how you end up debugging two different Graph behaviours at once.
+const GRAPH    = 'https://graph.facebook.com/v23.0';
+const IG_TOKEN = $env.META_IG_TOKEN;
+const IG_USER  = $env.META_IG_USER_ID;
+const TAVILY   = $env.TAVILY_API_KEY;
+
+// ─── Matching ────────────────────────────────────────────────────────────
+// Everything below is deliberately arithmetic rather than a model call. The
+// question "is this the right account" has to be answerable the same way
+// twice, and has to be auditable when it is wrong.
+
+const norm = s => String(s || '').toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '');
+
+const domainOf = (url) => {
+  const u = String(url || '').trim();
+  if (!u) return '';
+  try { return new URL(/^https?:/i.test(u) ? u : `https://${u}`).hostname.replace(/^www\./i, '').toLowerCase(); }
+  catch { return ''; }
+};
+
+// Words that carry no identifying weight in this market. "Lighting" is in
+// half the rival names in the Arak workspace, so a bio containing it is not
+// evidence of anything.
+const STOP = new Set(['the','and','for','co','ltd','llc','inc','group','company','est',
+                      'trading','est','al','lighting','lights','light','design','studio','app','store']);
+const tokensOf = name => String(name || '').toLowerCase().split(/[^a-z0-9]+/i)
+  .filter(t => t.length >= 3 && !STOP.has(t));
+
+// A candidate must clear this to be trusted with a week of numbers. Below it
+// the handle is kept only as a suggestion for a human — see the sticky note.
+const RESOLVE_AT = 0.7;
+const SUGGEST_AT = 0.3;
+
+function scoreCandidate(comp, acct) {
+  const reasons = [];
+  let score = 0;
+
+  const cName = norm(comp.name);
+  const aUser = norm(acct.username);
+  const aName = norm(acct.name);
+  const cDom  = domainOf(comp.website);
+  const aDom  = domainOf(acct.website);
+
+  // The strongest signal there is, and conclusive on its own: an account
+  // whose bio links to the rival's own domain is the rival's account.
+  if (cDom && aDom && cDom === aDom) { score += 0.7; reasons.push(`bio links to ${aDom}`); }
+
+  if (cName && (cName === aUser || cName === aName)) { score += 0.5; reasons.push('name matches exactly'); }
+  else if (cName && aUser && (aUser.includes(cName) || cName.includes(aUser))) { score += 0.25; reasons.push('handle contains the name'); }
+  else if (cName && aName && aName.includes(cName)) { score += 0.25; reasons.push('display name contains the name'); }
+
+  const toks = tokensOf(comp.name);
+  if (toks.length) {
+    const hay = `${acct.username} ${acct.name} ${acct.biography}`.toLowerCase();
+    const hits = toks.filter(t => hay.includes(t));
+    if (hits.length) { score += 0.25 * (hits.length / toks.length); reasons.push(`mentions ${hits.join(', ')}`); }
+  }
+
+  // Size as a tie-breaker, not as evidence. A real brand's account is rarely
+  // tiny; a squatter's usually is.
+  const followers = Number(acct.followers_count || 0);
+  if (followers >= 1000) { score += 0.1; reasons.push(`${followers} followers`); }
+  else if (followers < 100) { score -= 0.3; reasons.push(`only ${followers} followers — probably not the real account`); }
+
+  return { score: Math.max(0, Math.min(1, Math.round(score * 100) / 100)), reasons };
+}
+
+// ─── Candidate discovery ─────────────────────────────────────────────────
+
+function handlesFromSearch(results) {
+  const out = [];
+  for (const r of results) {
+    const hay = `${r.url || ''} ${r.content || ''}`;
+    const re = /instagram\.com\/([A-Za-z0-9._]{2,30})/g;
+    let m;
+    while ((m = re.exec(hay))) {
+      const h = m[1].toLowerCase();
+      // Instagram's own section paths, not accounts.
+      if (['p','reel','reels','explore','stories','tv','accounts','about','directory','tags'].includes(h)) continue;
+      if (!out.includes(h)) out.push(h);
+    }
+  }
+  return out;
+}
+
+async function lookup(handle) {
+  const fields = `business_discovery.username(${handle})`
+    + `{id,username,name,biography,website,followers_count,follows_count,media_count}`;
+  const url = `${GRAPH}/${IG_USER}?fields=${encodeURIComponent(fields)}`
+            + `&access_token=${encodeURIComponent(IG_TOKEN)}`;
+  const res = await http({ method: 'GET', url, returnFullResponse: true, ignoreHttpStatusErrors: true, json: true });
+  if (res.statusCode < 200 || res.statusCode >= 300) {
+    // A handle that does not exist, is personal, or is private answers with
+    // an error here. That is a rejected candidate, never a failed run — most
+    // guesses SHOULD come back like this.
+    const b = res.body || {};
+    const err = (b.error && (b.error.message || b.error.type)) || `HTTP ${res.statusCode}`;
+    return { ok: false, error: String(err).slice(0, 200) };
+  }
+  const bd = res.body && res.body.business_discovery;
+  if (!bd || !bd.username) return { ok: false, error: 'no business_discovery payload' };
+  return { ok: true, acct: bd };
+}
+
+// ─── The pass ────────────────────────────────────────────────────────────
+// Sequential rather than parallel: a dozen rivals is not worth a concurrency
+// bug, and a rate-limited Graph answering 429 to half of them would silently
+// narrow the result without saying so.
+
+const outcomes = [];
+let resolved = 0, suggested = 0, notFound = 0;
+
+for (const item of work) {
+  const record = { name: item.name, agenda_id: item.agenda_id };
+  try {
+    const query = [item.name, item.positioning, 'Saudi Arabia instagram'].filter(Boolean).join(' ');
+    let results = [];
+    try {
+      const r = await req({
+        __label: 'Tavily', method: 'POST', url: 'https://api.tavily.com/search',
+        body: { api_key: TAVILY, query, max_results: 6, search_depth: 'basic', topic: 'general' },
+        json: true,
+      });
+      results = (r && r.results) || [];
+    } catch (e) { record.search_error = String(e.message || e).slice(0, 160); }
+
+    const candidates = handlesFromSearch(results).slice(0, 4);
+    record.candidates = candidates;
+
+    let best = null;
+    for (const h of candidates) {
+      const got = await lookup(h);
+      if (!got.ok) continue;
+      const { score, reasons } = scoreCandidate(item, got.acct);
+      if (!best || score > best.score) best = { handle: got.acct.username || h, id: got.acct.id, score, reasons };
+      // A domain-backed match cannot be beaten; stop paying for more lookups.
+      if (score >= 0.95) break;
+    }
+
+    let patch;
+    if (best && best.score >= RESOLVE_AT) {
+      patch = { ig_handle: best.handle, ig_user_id: best.id || '', ig_confidence: best.score,
+                ig_status: 'resolved', ig_verified_at: new Date().toISOString() };
+      resolved += 1;
+      record.result = 'resolved'; record.handle = best.handle;
+      record.confidence = best.score; record.why = best.reasons;
+    } else if (best && best.score >= SUGGEST_AT) {
+      // Stored, but NOT verified. Downstream reads ig_status, never
+      // ig_handle on its own — that separation is what keeps a guess out of
+      // the snapshots while still giving a human something to accept.
+      patch = { ig_handle: best.handle, ig_user_id: '', ig_confidence: best.score,
+                ig_status: 'unresolved', ig_verified_at: null };
+      suggested += 1;
+      record.result = 'suggested'; record.handle = best.handle;
+      record.confidence = best.score; record.why = best.reasons;
+    } else {
+      patch = { ig_handle: '', ig_user_id: '', ig_confidence: best ? best.score : null,
+                ig_status: 'not_found', ig_verified_at: null };
+      notFound += 1;
+      record.result = 'not_found';
+      if (best) { record.confidence = best.score; record.why = best.reasons; }
+    }
+
+    await req({
+      __label: 'Supabase', method: 'PATCH',
+      url: `${SUPA_URL}/rest/v1/research_agenda?id=eq.${item.agenda_id}&workspace_id=eq.${wsId}`,
+      headers: sHeaders, body: patch, json: true,
+    });
+  } catch (e) {
+    // One rival's failure must not cost the other eleven their results.
+    record.result = 'error';
+    record.error = String((e && e.message) || e).slice(0, 200);
+  }
+  outcomes.push(record);
+}
+
+return [{ json: {
+  ok: true, skipped: false, workspace_id: wsId,
+  seeded: inp.seeded || 0, deferred: inp.deferred || 0,
+  resolved, suggested, not_found: notFound,
+  outcomes,
+} }];
+"""
+
+
+def build_research_resolve() -> dict:
+    """
+    Webhook -> Resolve: Seed Agenda (Code) -> Anything to resolve? (IF)
+            -> Resolve: Find Handles (Code) -> Respond
+                                            \\-> Respond: Skipped
+
+    Two Code nodes rather than one, and connected in sequence rather than
+    through `$('...')`, so each is independently runnable under
+    workflowHarness.js — the harness supplies $input and $env but not the node
+    graph, so a node that reaches sideways for another node's output is a node
+    that cannot be tested.
+
+    No model call anywhere in this graph. Matching a rival to an account is
+    arithmetic over a website domain, a name and a bio; asking a model to do
+    it would make the same question answerable two different ways on two runs
+    and unauditable when it is wrong.
+    """
+    nodes = [
+        _sticky(RESEARCH_RESOLVE_STICKY, height=560, width=520, x=0, y=-380),
+        _webhook("arak-research-resolve", "responseNode", x=0, y=200),
+        _code("Resolve: Seed Agenda", RESEARCH_RESOLVE_SEED_JS, x=220, y=200),
+        _if_bool_equals("Anything to resolve?", "resolve-proceed", "={{ $json.proceed }}", x=440, y=200),
+        _code("Resolve: Find Handles", RESEARCH_RESOLVE_FIND_JS, x=660, y=120),
+        _respond_json("Respond", "={{ JSON.stringify($json) }}", x=880, y=120),
+        _respond_json("Respond: Skipped", "={{ JSON.stringify($json) }}", x=660, y=300),
+    ]
+    connections = {
+        "Webhook": {"main": [[{"node": "Resolve: Seed Agenda", "type": "main", "index": 0}]]},
+        "Resolve: Seed Agenda": {"main": [[{"node": "Anything to resolve?", "type": "main", "index": 0}]]},
+        "Anything to resolve?": {"main": [
+            [{"node": "Resolve: Find Handles", "type": "main", "index": 0}],
+            [{"node": "Respond: Skipped", "type": "main", "index": 0}],
+        ]},
+        "Resolve: Find Handles": {"main": [[{"node": "Respond", "type": "main", "index": 0}]]},
+    }
+    return {
+        "name": "Arak Lighting – Research Resolve",
+        "nodes": nodes,
+        "connections": connections,
+        "active": False,
+        "settings": {"executionOrder": "v1"},
+        "tags": [],
+    }
+
+
+
+ZERNIO_CONNECT_STICKY = r"""## Arak – Zernio Connect
+
+**Zero secrets in this file.** Needs `ZERNIO_API_KEY`, `SUPABASE_URL`, `SUPABASE_KEY`.
+
+Per-workspace OAuth. This is what lets a workspace connect its OWN Instagram/TikTok through a normal OAuth redirect, instead of someone adding every account by hand on zernio.com under one shared team.
+
+**How the tenancy works.** Zernio puts a `profile` between the API team and the connected accounts — one profile per customer. This workflow creates one per workspace on first use and stores the id in `workspaces.zernio_profile_id`; from then on every `/connect` and `/accounts` call is scoped by `profileId`, so a workspace can only ever see and post as its own accounts. The Zernio key never leaves n8n, exactly like every other provider here.
+
+**Actions** (one webhook, dispatched on `action`):
+
+| action | does |
+|---|---|
+| `accounts` | list this workspace's connected accounts, mirror into `social_accounts` |
+| `connect_url` | start OAuth — returns `authUrl` for the browser to visit |
+| `selection_options` | headless step 2: list the pages/profiles a just-authorised user can pick |
+| `selection_complete` | headless step 3: commit the pick, finishing the connection |
+| `disconnect` | drop the account at Zernio and locally |
+
+**Why `selection_*` exist.** Instagram and Snapchat need a SECOND choice after OAuth (which page / which public profile). Zernio will host that picker itself, but then the user hops to a Zernio-branded screen mid-flow. Passing `headless=true` hands us a `tempToken` and lets the picker live in our own UI instead.
+
+**Snapchat is deliberately not reachable here** — `LIVE_PLATFORMS` in src/lib/utils.js gates it out in the browser and the guard below refuses it server-side, so a hand-made request cannot start a flow the app has no screen to finish."""
+
+ZERNIO_CONNECT_JS = r"""
+const rawHttp = this.helpers.httpRequest;
+
+// Same DNS-blip retry as the publish workflow: Docker's embedded resolver
+// (127.0.0.11) drops a lookup occasionally, and a name that never resolved
+// proves the request never reached Zernio — so re-sending cannot double
+// anything. Connection resets and timeouts still fail once, loudly.
+const http = async (opts) => {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await rawHttp(opts);
+    } catch (e) {
+      const code = (e && (e.code || (e.cause && e.cause.code))) || '';
+      const msg  = String((e && e.message) || '');
+      const isDns = code === 'ENOTFOUND' || code === 'EAI_AGAIN'
+        || /getaddrinfo\s+(ENOTFOUND|EAI_AGAIN)/.test(msg);
+      if (!isDns || attempt >= 2) throw e;
+      await new Promise(r => setTimeout(r, 400 * (attempt + 1)));
+    }
+  }
+};
+
+// n8n's thrown-error shape for non-2xx varies by version, which is how you
+// end up staring at "Request failed with status code 409" with no idea which
+// of the six calls below produced it. Read the parsed body ourselves instead,
+// and keep the status — the 409 path genuinely needs to inspect it.
+async function req(opts){
+  const res = await http({ ...opts, returnFullResponse: true, ignoreHttpStatusErrors: true });
+  const status = res.statusCode;
+  if (status >= 200 && status < 300) return res.body;
+  const b = res.body;
+  const msg = (b && typeof b === 'object') ? (b.error || b.message || JSON.stringify(b).slice(0, 400))
+            : (typeof b === 'string' && b) ? b.slice(0, 400)
+            : `HTTP ${status}`;
+  const err = new Error(`Zernio ${status}: ${msg}`);
+  err.status = status;
+  err.body = b;
+  throw err;
+}
+
+const body = ($input.first().json.body) || {};
+const ZERNIO   = $env.ZERNIO_API_KEY;
+const SUPA_URL = String($env.SUPABASE_URL || '').replace(/\/+$/, '');
+const SUPA_KEY = $env.SUPABASE_KEY;
+const ZBASE    = 'https://zernio.com/api/v1';
+const zHeaders = { Authorization: `Bearer ${ZERNIO}`, 'Content-Type': 'application/json' };
+const sHeaders = { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}`, 'Content-Type': 'application/json' };
+
+const action      = String(body.action || '').trim();
+const workspaceId = String(body.workspace_id || '').trim();
+const platform    = String(body.platform || '').trim().toLowerCase();
+
+// Mirrors LIVE_PLATFORMS in src/lib/utils.js. Snapchat is in the app's
+// platform list as status:'beta' — visible, labelled, not connectable — and
+// this is the server-side half of that: the UI hides the button, this refuses
+// the call, so a hand-made request cannot open a flow with no screen to
+// finish it. Add a platform here only when the app can complete its OAuth.
+const CONNECTABLE = ['instagram', 'tiktok'];
+
+// Platforms whose OAuth is followed by a SECOND choice (which Facebook page
+// backs this Instagram account). Zernio's docs list six such platforms; these
+// are the ones we actually offer. Everything else finishes at the callback.
+const NEEDS_SELECTION = ['instagram'];
+
+// ── Get-or-create this workspace's Zernio profile ───────────────────────
+//
+// Idempotent and race-safe WITHOUT a read-then-create, which two tabs would
+// both pass before either wrote. Two things make that work:
+//
+//   1. The profile name is DERIVED from the workspace id, not chosen. Zernio
+//      enforces name uniqueness per team, so a second create for the same
+//      workspace is refused by Zernio rather than silently making a twin.
+//   2. That refusal is a 409 carrying `details.existingProfileId` — the id we
+//      would have got had we won. So the loser of a race gets the same answer
+//      as the winner and nobody is left holding an orphan profile.
+//
+// The Supabase write is then last-writer-wins over an identical value, which
+// is harmless. Compare claimPost() in the publish workflow: that one needs a
+// real atomic claim because its outcomes DIFFER per caller; here they cannot.
+async function ensureProfile(){
+  if (!workspaceId) throw new Error('workspace_id is required.');
+
+  const rows = await http({ method:'GET',
+    url:`${SUPA_URL}/rest/v1/workspaces?id=eq.${workspaceId}&select=id,name,zernio_profile_id`,
+    headers:sHeaders, json:true });
+  const ws = (Array.isArray(rows) && rows[0]) || null;
+  if (!ws) throw new Error(`No such workspace: ${workspaceId}`);
+  if (ws.zernio_profile_id) return ws.zernio_profile_id;
+
+  // Prefixed and full-length on purpose. A bare uuid is indistinguishable
+  // from any other id in Zernio's own dashboard, and a truncated one stops
+  // being unique across enough workspaces to matter.
+  const name = `arak_ws_${workspaceId}`;
+  let profileId = '';
+  try {
+    const created = await req({ method:'POST', url:`${ZBASE}/profiles`, headers:zHeaders,
+      body:{ name, description: String(ws.name || 'Arak workspace').slice(0, 200) }, json:true });
+    profileId = String((created && created.profile && created.profile._id) || '');
+  } catch (e) {
+    const existing = e && e.body && e.body.details && e.body.details.existingProfileId;
+    if (e && e.status === 409 && existing) profileId = String(existing);
+    else throw e;
+  }
+  if (!profileId) throw new Error('Zernio created a profile but returned no id.');
+
+  await http({ method:'PATCH', url:`${SUPA_URL}/rest/v1/workspaces?id=eq.${workspaceId}`,
+    headers:{ ...sHeaders, Prefer:'return=minimal' },
+    body:{ zernio_profile_id: profileId }, json:true });
+
+  return profileId;
+}
+
+// Mirror Zernio's account list into social_accounts so every screen can list
+// connected accounts without the key ever reaching a browser. Upsert on
+// (workspace_id, zernio_account_id) — see the migration's unique index.
+async function mirrorAccounts(profileId, accounts){
+  if (!workspaceId || !accounts.length) return;
+  const rows = accounts.map(a => ({
+    workspace_id:       workspaceId,
+    zernio_account_id:  String(a._id || ''),
+    zernio_profile_id:  profileId,
+    platform:           String(a.platform || ''),
+    username:           String(a.username || a.name || ''),
+    display_name:       String(a.displayName || a.name || ''),
+    profile_picture:    String(a.profilePicture || a.avatarUrl || ''),
+    profile_url:        String(a.profileUrl || ''),
+    is_active:          a.isActive !== false,
+    needs_reconnection: a.needsReconnection === true,
+    followers_count:    Number(a.followersCount || 0) || 0,
+    publish_provider:   'zernio',
+    last_synced_at:     new Date().toISOString(),
+    updated_at:         new Date().toISOString(),
+  })).filter(r => r.zernio_account_id);
+  if (!rows.length) return;
+
+  // connected_at is deliberately ABSENT from this payload. It records when
+  // OAuth was actually granted, which is what makes "reconnect, this token is
+  // 58 days old" answerable — Instagram's long-lived tokens die at 60. This is
+  // an upsert with merge-duplicates, so any column named here is overwritten
+  // on every merge: including connected_at would reset that clock on every
+  // page load and quietly hide every token that was about to expire. Omitting
+  // it lets the column's `default now()` fire on INSERT only, which is exactly
+  // the semantics wanted — a value that is written once and never again.
+  await http({ method:'POST',
+    url:`${SUPA_URL}/rest/v1/social_accounts?on_conflict=workspace_id,zernio_account_id`,
+    headers:{ ...sHeaders, Prefer:'resolution=merge-duplicates,return=minimal' },
+    body: rows,
+    json:true });
+}
+
+async function listAccounts(profileId){
+  const list = await req({ method:'GET',
+    url:`${ZBASE}/accounts?profileId=${encodeURIComponent(profileId)}`,
+    headers:zHeaders, json:true });
+  const accounts = (list && list.accounts) || [];
+  // Belt and braces. profileId is a server-side filter and Zernio honours it,
+  // but this list decides which accounts a workspace may post as — so it is
+  // re-checked here rather than trusted. A filter regression upstream would
+  // otherwise become a cross-tenant publish.
+  return accounts.filter(a => !a.profileId || String(a.profileId) === String(profileId));
+}
+
+try {
+  if (!ZERNIO) throw new Error('ZERNIO_API_KEY is not set on this n8n instance.');
+  if (!SUPA_URL || !SUPA_KEY) throw new Error('SUPABASE_URL / SUPABASE_KEY are not set on this n8n instance.');
+
+  // ---- list this workspace's connected accounts ----
+  if (action === 'accounts'){
+    const profileId = await ensureProfile();
+    const accounts  = await listAccounts(profileId);
+    await mirrorAccounts(profileId, accounts);
+    return [{ json: { ok:true, profile_id:profileId, accounts } }];
+  }
+
+  // ---- start OAuth ----
+  if (action === 'connect_url'){
+    if (!CONNECTABLE.includes(platform)){
+      throw new Error(`${platform || 'That platform'} cannot be connected yet.`);
+    }
+    const redirectUrl = String(body.redirect_url || '').trim();
+    if (!redirectUrl) throw new Error('redirect_url is required.');
+
+    const profileId = await ensureProfile();
+    const headless  = NEEDS_SELECTION.includes(platform);
+    const qs = new URLSearchParams({ profileId, redirect_url: redirectUrl });
+    if (headless) qs.set('headless', 'true');
+
+    const res = await req({ method:'GET',
+      url:`${ZBASE}/connect/${encodeURIComponent(platform)}?${qs.toString()}`,
+      headers:zHeaders, json:true });
+
+    const authUrl = String((res && (res.authUrl || res.url)) || '');
+    if (!authUrl) throw new Error('Zernio returned no authorisation URL.');
+    return [{ json: { ok:true, profile_id:profileId, auth_url:authUrl,
+                      state:(res && res.state) || '', headless } }];
+  }
+
+  // ---- headless step 2: what can this user pick? ----
+  if (action === 'selection_options'){
+    const tempToken = String(body.temp_token || '').trim();
+    const step      = String(body.step || '').trim();
+    if (!tempToken) throw new Error('temp_token is required.');
+    if (!CONNECTABLE.includes(platform)) throw new Error(`${platform || 'That platform'} cannot be connected yet.`);
+
+    // `step` comes back from Zernio's own callback and names the endpoint to
+    // call. Passed through rather than hardcoded per platform, so a platform
+    // that grows a second selection stage does not need this node changed.
+    const path = step || `connect/${platform}/pages`;
+    const res  = await req({ method:'GET',
+      url:`${ZBASE}/${path.replace(/^\/+/, '')}?tempToken=${encodeURIComponent(tempToken)}`,
+      headers:zHeaders, json:true });
+
+    const options = (res && (res.pages || res.profiles || res.options || res.accounts)) || [];
+    return [{ json: { ok:true, options } }];
+  }
+
+  // ---- headless step 3: commit the pick ----
+  if (action === 'selection_complete'){
+    const tempToken = String(body.temp_token || '').trim();
+    const selection = body.selection;
+    const step      = String(body.step || '').trim();
+    if (!tempToken)  throw new Error('temp_token is required.');
+    if (!selection)  throw new Error('selection is required.');
+    if (!CONNECTABLE.includes(platform)) throw new Error(`${platform || 'That platform'} cannot be connected yet.`);
+
+    const path = step || `connect/${platform}/pages`;
+    const res  = await req({ method:'POST', url:`${ZBASE}/${path.replace(/^\/+/, '')}`,
+      headers:zHeaders, body:{ tempToken, ...(typeof selection === 'object' ? selection : { id: selection }) },
+      json:true });
+
+    // Re-list rather than trusting the selection response to describe the new
+    // account: this is the moment social_accounts must become correct, and one
+    // authoritative read is cheaper to reason about than merging two shapes.
+    const profileId = await ensureProfile();
+    const accounts  = await listAccounts(profileId);
+    await mirrorAccounts(profileId, accounts);
+
+    return [{ json: { ok:true, profile_id:profileId, accounts,
+                      account:(res && res.account) || null } }];
+  }
+
+  // ---- disconnect ----
+  if (action === 'disconnect'){
+    const accountId = String(body.account_id || '').trim();
+    if (!accountId) throw new Error('account_id is required.');
+    const profileId = await ensureProfile();
+
+    // Ownership check BEFORE the delete. account_id arrives from a browser,
+    // and DELETE /accounts/{id} is scoped to the API TEAM, not to a profile —
+    // so without this, a caller who knew another workspace's account id could
+    // disconnect it. Confirming the id appears in THIS profile's list is what
+    // makes the delete tenant-safe.
+    const accounts = await listAccounts(profileId);
+    if (!accounts.some(a => String(a._id) === accountId)){
+      throw new Error('That account does not belong to this workspace.');
+    }
+
+    await req({ method:'DELETE', url:`${ZBASE}/accounts/${encodeURIComponent(accountId)}`,
+      headers:zHeaders, json:true });
+
+    // Local row goes only after Zernio confirms. The other order leaves an
+    // account live at the provider that the UI swears is gone — and the next
+    // list refresh would resurrect the row anyway.
+    await http({ method:'DELETE',
+      url:`${SUPA_URL}/rest/v1/social_accounts?workspace_id=eq.${workspaceId}&zernio_account_id=eq.${encodeURIComponent(accountId)}`,
+      headers:{ ...sHeaders, Prefer:'return=minimal' }, json:true });
+
+    return [{ json: { ok:true, disconnected:accountId } }];
+  }
+
+  throw new Error(`Unknown action: ${action || '(none)'}`);
+} catch (err) {
+  // Deliberately ok:false with HTTP 200 rather than a thrown node error.
+  // responseMode=lastNode means a throw reaches the browser as an empty body
+  // (see the Webhook Secret Guard note), and "Connect failed" with no reason
+  // is the single most annoying thing this screen could do.
+  return [{ json: { ok:false, error: String((err && err.message) || err) } }];
+}
+"""
+
+
+def build_zernio_connect() -> dict:
+    """
+    Webhook (responseMode=lastNode) -> Zernio: Connect (single Code node whose
+    return value IS the HTTP response).
+
+    One workflow with an `action` switch rather than five workflows, because
+    all five share the profile get-or-create and four of them share the
+    account mirror — split apart, that logic would be copy-pasted five ways
+    and would drift the first time Zernio changed a field name.
+
+    Synchronous for the same reason as Publish Post: somebody is watching a
+    Connect button and needs a real answer or a real error.
+    """
+    nodes = [
+        _sticky(ZERNIO_CONNECT_STICKY, height=560, width=520, x=0, y=-360),
+        _webhook("arak-zernio-connect", "lastNode", x=0, y=220),
+        _code("Zernio: Connect", ZERNIO_CONNECT_JS, x=240, y=220),
+    ]
+    connections = {
+        "Webhook": {"main": [[{"node": "Zernio: Connect", "type": "main", "index": 0}]]},
+    }
+    return {
+        "name": "Arak Lighting – Zernio Connect",
+        "nodes": nodes,
+        "connections": connections,
+        "active": False,
+        "settings": {"executionOrder": "v1"},
+        "tags": [],
+    }
+
+
 if __name__ == "__main__":
     out_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "workflows")
     os.makedirs(out_dir, exist_ok=True)
@@ -7461,6 +8215,7 @@ if __name__ == "__main__":
         build_zernio_publish(),
         build_zernio_sync(),
         build_zernio_dashboard(),
+        build_zernio_connect(),
         build_meta_publish(),
         build_meta_sync(),
         build_meta_dashboard(),
@@ -7476,6 +8231,7 @@ if __name__ == "__main__":
         build_creative_enhance(),
         build_insights_review(),
         build_brand_research(),
+        build_research_resolve(),
     ]
 
     for wf in workflows:
