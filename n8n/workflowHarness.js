@@ -91,13 +91,40 @@ export class StubPostgrest {
 
     if (method === 'POST') {
       const conflict = (u.searchParams.get('on_conflict') || '').split(',').filter(Boolean)
-      if (conflict.length) {
-        const existing = rows.find(r => conflict.every(c => String(r[c] ?? '') === String(body[c] ?? '')))
-        if (existing) { Object.assign(existing, body); return { statusCode: 200, body: [existing] } }
+      // A POST body may be one row or MANY: PostgREST bulk-upserts an array in
+      // a single call, which is how the Zernio account sync writes every
+      // connected account at once. Treating an array as one row silently
+      // stored a single garbage record whose columns were all undefined, and
+      // the assertion that caught it looked like a workflow bug rather than a
+      // stub one.
+      const incoming = Array.isArray(body) ? body : [body]
+      const written = []
+      for (const one of incoming) {
+        if (conflict.length) {
+          const existing = rows.find(r => conflict.every(c => String(r[c] ?? '') === String(one[c] ?? '')))
+          // Merge, never replace: a merge-duplicates upsert leaves columns the
+          // payload omits untouched. social_accounts.connected_at depends on
+          // exactly that — it is written by the column default on insert and
+          // must survive every later refresh.
+          if (existing) { Object.assign(existing, one); written.push(existing); continue }
+        }
+        rows.push({ ...one })
+        written.push(one)
       }
-      rows.push({ ...body })
-      return { statusCode: 201, body: [body] }
+      return { statusCode: written.length === incoming.length ? 201 : 200, body: written }
     }
+
+    if (method === 'DELETE') {
+      // Filtered delete, returning what went. Workflows use this to drop a row
+      // only AFTER the provider has confirmed the same deletion, so a stub that
+      // refused the verb made a correct two-phase disconnect look like a
+      // failure.
+      const hit = rows.filter(r => this._match(r, params))
+      this.tables[table] = rows.filter(r => !hit.includes(r))
+      const prefer = String(headers?.Prefer || '')
+      return { statusCode: 200, body: prefer.includes('return=representation') ? hit.map(r => ({ ...r })) : [] }
+    }
+
     return { statusCode: 405, body: { error: 'method not allowed' } }
   }
 }

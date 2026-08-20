@@ -110,6 +110,20 @@ create index if not exists generated_posts_tags_idx
 alter table public.social_accounts
   add column if not exists connected_at timestamptz;
 
+-- Default set as a SEPARATE statement, not on the ADD COLUMN, and this is
+-- the whole point of the column. The sync upserts with merge-duplicates, so
+-- every column the workflow names is rewritten on each refresh; the workflow
+-- therefore omits connected_at entirely and lets this default fire on INSERT
+-- alone. Written once, never again — which is what "how old is this token?"
+-- needs to stay a real answer.
+--
+-- Existing rows keep NULL rather than being backfilled to now(): they were
+-- connected at some unknown past time, and stamping today onto them would
+-- claim every historical account was just reconnected, hiding exactly the
+-- near-expiry tokens this exists to surface. NULL means unknown, honestly.
+alter table public.social_accounts
+  alter column connected_at set default now();
+
 -- Which Zernio profile this account hangs off. Denormalised from
 -- workspaces.zernio_profile_id on purpose: the account.connected webhook
 -- arrives carrying { accountId, profileId } and nothing else, so the handler

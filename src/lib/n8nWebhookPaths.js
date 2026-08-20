@@ -37,10 +37,13 @@ export const WEBHOOK_PATHS = {
   metaPublish:      'arak-meta-publish',
   metaSync:         'arak-meta-sync',
   metaDashboard:    'arak-meta-dashboard',
-  // Zernio — dormant. The workflows are still deployed and these slots still
-  // resolve, but nothing in the app calls them any more (see src/lib/meta.js).
-  // Kept rather than deleted so a rollback is a change of import, not a
-  // redeploy of three workflows.
+  // Zernio. `zernioConnect` is live and has no Meta counterpart: it is what
+  // gives each workspace its own OAuth'd accounts, and Instagram is only one
+  // of the platforms behind it. The other three were dormant while Instagram
+  // publishing ran on Meta's Graph API, and are being brought back as Zernio
+  // becomes the primary publisher across Instagram and TikTok — meta.js stays
+  // wired as the fallback rather than being deleted.
+  zernioConnect:    'arak-zernio-connect',
   publishPost:      'arak-publish-post',
   zernioSync:       'arak-zernio-sync',
   zernioDashboard:  'arak-zernio-dashboard',
