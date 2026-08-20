@@ -24,6 +24,8 @@ import { Insights }                from './pages/insights/index'
 import { MediaLibrary }            from './pages/media/index'
 import { SocialOverview, SocialPlatform } from './pages/social/index'
 import { InstagramPage } from './pages/social/InstagramPage'
+import { TikTokPage } from './pages/social/TikTokPage'
+import { SnapchatPage } from './pages/social/SnapchatPage'
 import { Approvals as PostApprovals } from './pages/social/Approvals'
 import { Settings, Integrations } from './pages/settings/index'
 import { Access } from './pages/settings/Access'
@@ -111,7 +113,12 @@ function ProtectedApp() {
             <Route path="/social"                element={<SocialOverview />} />
             <Route path="/social/approvals"      element={<PostApprovals />} />
             <Route path="/social/instagram"      element={<InstagramPage />} />
-            <Route path="/social/tiktok"         element={<SocialPlatform />} />
+            <Route path="/social/tiktok"         element={<TikTokPage />} />
+            <Route path="/social/snapchat"       element={<SnapchatPage />} />
+            {/* Fallback for any platform in PLATFORM_META without its own page
+                yet. React Router ranks static segments above dynamic ones, so
+                the three above still win regardless of order. */}
+            <Route path="/social/:platform"      element={<SocialPlatform />} />
             <Route path="/settings"             element={<Settings />} />
             <Route path="/integrations"          element={<Integrations />} />
             <Route path="/team"                  element={<Access />} />
