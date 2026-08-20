@@ -193,3 +193,80 @@ export function summariseResolve(res) {
     ? `${sentence} No competitor has a verified handle yet, so the Instagram side of the report will stay empty until one does.`
     : sentence
 }
+
+// ─── Runs ──────────────────────────────────────────────────────────────────
+// The weekly review is minutes long, so the browser never waits on it: the
+// webhook inserts the run row, answers with its id, and keeps working. The
+// page polls the row. Every terminal path in the workflow writes a status,
+// and a run that died mid-flight is swept on the next attempt — a run left
+// `running` is a spinner nobody can close.
+
+export const RUN_STALE_MS = 20 * 60 * 1000
+
+export async function fetchRuns(workspaceId, accessToken, limit = 20) {
+  if (!workspaceId) return []
+  try {
+    const res = await fetch(
+      `${SUPABASE_URL}/rest/v1/research_runs?workspace_id=eq.${workspaceId}` +
+      `&select=*&order=started_at.desc&limit=${limit}`,
+      { headers: authHeaders(accessToken) },
+    )
+    if (!res.ok) return []
+    return await res.json()
+  } catch { return [] }
+}
+
+export async function fetchRun(accessToken, runId) {
+  if (!runId) return null
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/research_runs?id=eq.${runId}&select=*`,
+      { headers: authHeaders(accessToken) })
+    if (!res.ok) return null
+    const [row] = await res.json()
+    return row || null
+  } catch { return null }
+}
+
+// A run still `running` long past any plausible duration is dead, and the UI
+// must say so rather than spinning forever. The workflow sweeps these on the
+// next attempt; this is what the page shows in the meantime.
+export function isStaleRun(run) {
+  return run?.status === 'running' &&
+    Date.now() - new Date(run.started_at).getTime() > RUN_STALE_MS
+}
+
+export function runStatusLabel(run) {
+  if (!run) return ''
+  if (run.status === 'failed') return run.error || 'The run failed.'
+  if (run.status === 'running') {
+    return isStaleRun(run)
+      ? 'This run stopped responding. Starting a new one will clear it.'
+      : `Working… (${run.stage || 'starting'})`
+  }
+  const r = run.report || {}
+  if (r.baseline) return 'First measurement — no comparison possible yet.'
+  if (r.quiet_week) return 'Nothing moved measurably this period.'
+  return r.headline || 'Complete.'
+}
+
+export async function requestResearchRun(webhookUrl, payload) {
+  if (!webhookUrl) return { error: 'Research run webhook not configured. Go to Settings → Integrations.' }
+  if (!payload?.workspace_id) return { error: 'No active workspace.' }
+  try {
+    const res = await fetch(webhookUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+    if (!res.ok) return { error: `Run webhook returned ${res.status}` }
+    const data = await res.json()
+    const row = Array.isArray(data) ? data[0] : data
+    if (!row || row.ok !== true) return { error: (row && row.error) || 'The run returned nothing usable.' }
+    // `already_running` is a successful outcome, not a collision to report as
+    // an error: the caller should watch that run rather than start a second.
+    return {
+      ok: true, runId: row.run_id, alreadyRunning: !!row.already_running,
+      reason: row.reason || '',
+    }
+  } catch (err) { return { error: err.message } }
+}
