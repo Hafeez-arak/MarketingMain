@@ -8494,7 +8494,13 @@ The evidence half of the weekly review. Stages 1-5 (plan / search / reflect / sy
 
 **It only snapshots a VERIFIED handle** — `ig_status in ('resolved','human_set')`. A handle alone is never permission to collect numbers: the resolve step deliberately stores weak candidates as suggestions, and reading `ig_handle` without the status is exactly how a guess reaches the board.
 
-**Async.** The run row is inserted `running` and the webhook answers immediately with its id; the browser polls. Every path out — including the failure path — writes a terminal status, because a run left `running` is a spinner nobody can close.
+**Async, properly.** The webhook responds the moment the run row exists — before Gather, before the model — and execution continues down the chain. A browser holding a fetch across a three-minute investigation would time out and n8n would answer into a closed socket. The browser polls `research_runs` instead.
+
+**Stages.** Gather (no model) measures and computes; Investigate runs plan → bounded tool loop → reflect → synthesise. Investigate NEVER discards Gather's work: if the model is unreachable, the key is missing, or the report will not parse, the run still completes with the measured numbers and a note saying what was lost.
+
+**Bounded.** 12 tool calls, plus 4 more only for the reflection pass, and a turn cap on top. A weekly cron pointed at an unbounded loop is how a cheap job quietly becomes an expensive one.
+
+**Citations are checked.** Every URL a tool returned is remembered, and the model's sources are filtered against that set before anything is stored. A rule whose sources do not survive is not offered at all.
 
 **Single-flight** is a partial unique index in the database, not a check here. A second press returns the RUNNING run's id rather than starting a second agent on the same period.
 
@@ -8763,12 +8769,25 @@ try {
   ];
 
   if (!targets.length) {
-    await finish({ status: 'complete', stage: 'gather', report: {
+    // Not a dead end. Market and trend research needs no rival at all, and a
+    // brand with nothing verified yet is exactly the one that needs it most —
+    // so this carries on to the investigation stages with an empty board.
+    const emptyReport = {
       headline: 'No competitor has a verified Instagram handle yet, so there is nothing to measure.',
-      baseline: true, quiet_week: true, movements: [], competitor_board: [], market: [], gaps: [],
-      proposed_rules: [], proposed_ideas: [], agenda_changes: [], unanswered: [], sources: [],
-    } });
-    return [{ json: { ok: true, run_id: runId, snapshots: 0,
+      baseline: true, quiet_week: false, period: { start: inp.period_start, end: inp.period_end, days: periodDays },
+      movements: [], competitor_board: [], market: [], gaps: [],
+      proposed_rules: [], proposed_ideas: [], agenda_changes: [],
+      unanswered: ['No competitor has a verified Instagram handle, so nothing could be measured.'],
+      sources: [], stage_reached: 'gather',
+    };
+    await http({
+      method: 'PATCH', url: `${SUPA_URL}/rest/v1/research_runs?id=eq.${runId}&workspace_id=eq.${wsId}`,
+      headers: sHeaders, body: { stage: 'investigate', report: emptyReport },
+      json: true, returnFullResponse: true, ignoreHttpStatusErrors: true,
+    });
+    return [{ json: { ok: true, run_id: runId, workspace_id: wsId, proceed: true,
+      period_start: inp.period_start, period_end: inp.period_end, period_days: periodDays,
+      snapshots: 0, measured: 0, failed: 0, movements: 0, baseline: true, report: emptyReport,
       note: 'No verified handles to measure. Run handle resolution first.' } }];
   }
 
@@ -8934,16 +8953,425 @@ try {
     stage_reached: 'gather',
   };
 
-  await finish({ status: 'complete', stage: 'gather', report });
+  // Deliberately NOT complete: the investigation stages run after this and
+  // own the terminal write. The partial report is stored anyway, so a run that
+  // dies during investigation still leaves a readable competitor board behind
+  // rather than nothing at all.
+  await http({
+    method: 'PATCH', url: `${SUPA_URL}/rest/v1/research_runs?id=eq.${runId}&workspace_id=eq.${wsId}`,
+    headers: sHeaders, body: { stage: 'investigate', report },
+    json: true, returnFullResponse: true, ignoreHttpStatusErrors: true,
+  });
 
-  return [{ json: { ok: true, run_id: runId, snapshots: snapshots.length,
+  return [{ json: { ok: true, run_id: runId, workspace_id: wsId, proceed: true,
+    period_start: inp.period_start, period_end: inp.period_end, period_days: periodDays,
+    snapshots: snapshots.length,
     measured: snapshots.filter(s => s.data_source === 'instagram').length,
-    failed: failures.length, movements: movements.length, baseline } }];
+    failed: failures.length, movements: movements.length, baseline, report } }];
 
 } catch (e) {
   const msg = String((e && e.message) || e).slice(0, 500);
   await finish({ status: 'failed', error: msg });
   return [{ json: { ok: false, run_id: runId, error: msg } }];
+}
+"""
+
+
+RESEARCH_INVESTIGATE_JS = r"""
+const rawHttp = this.helpers.httpRequest;
+
+const http = async (opts) => {
+  for (let attempt = 0; ; attempt++) {
+    try { return await rawHttp(opts); }
+    catch (e) {
+      const code = (e && (e.code || (e.cause && e.cause.code))) || '';
+      const msg  = String((e && e.message) || '');
+      const isDns = code === 'ENOTFOUND' || code === 'EAI_AGAIN'
+        || /getaddrinfo\s+(ENOTFOUND|EAI_AGAIN)/.test(msg);
+      if (!isDns || attempt >= 2) throw e;
+      await new Promise(r => setTimeout(r, 400 * (attempt + 1)));
+    }
+  }
+};
+
+async function req(opts){
+  const res = await http({ ...opts, returnFullResponse: true, ignoreHttpStatusErrors: true });
+  if (res.statusCode >= 200 && res.statusCode < 300) return res.body;
+  const b = res.body;
+  const msg = (b && typeof b === 'object') ? (b.error || b.message || JSON.stringify(b).slice(0, 300))
+            : (typeof b === 'string' && b) ? b.slice(0, 300) : `HTTP ${res.statusCode}`;
+  throw new Error(`${opts.__label || 'Request'} ${res.statusCode}: ${msg}`);
+}
+
+const inp   = ($input.first() && $input.first().json) || {};
+const wsId  = inp.workspace_id;
+const runId = inp.run_id;
+const gathered = inp.report || {};
+
+const SUPA_URL = String($env.SUPABASE_URL || '').replace(/\/+$/, '');
+const SUPA_KEY = $env.SUPABASE_KEY;
+const sHeaders = { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}`, 'Content-Type': 'application/json' };
+const TAVILY   = $env.TAVILY_API_KEY;
+const ANTHROPIC = $env.ANTHROPIC_API_KEY;
+const MODEL = 'claude-sonnet-5';
+
+// Bounds, not suggestions. A weekly cron pointed at an unbounded tool loop is
+// how a $0.30 job quietly becomes a $40 one, and nobody notices until the
+// month closes.
+const MAX_TOOL_CALLS   = 12;
+const MAX_REFLECT_CALLS = 4;
+const MAX_TURNS        = 16;
+
+async function finish(patch) {
+  await http({
+    method: 'PATCH', url: `${SUPA_URL}/rest/v1/research_runs?id=eq.${runId}&workspace_id=eq.${wsId}`,
+    headers: sHeaders, body: { finished_at: new Date().toISOString(), ...patch },
+    json: true, returnFullResponse: true, ignoreHttpStatusErrors: true,
+  });
+}
+
+// The gathered board is still worth reading on its own, so every failure here
+// completes the run with what Stage 0 produced rather than throwing it away.
+// A failed investigation must not cost the user their numbers.
+async function bailOut(note) {
+  const report = { ...gathered, unanswered: [...(gathered.unanswered || []), note], stage_reached: 'gather' };
+  await finish({ status: 'complete', stage: 'gather', report });
+  return [{ json: { ok: true, run_id: runId, investigated: false, note } }];
+}
+
+try {
+  if (!ANTHROPIC) return await bailOut('ANTHROPIC_API_KEY is not set, so only the measured numbers are in this report.');
+  if (!TAVILY)    return await bailOut('TAVILY_API_KEY is not set, so no market research could run this week.');
+
+  // ─── What this brand is, and what it keeps asking ──────────────────────
+  // The caller sends its brand context when there is a browser to assemble it
+  // (same buildContext every other call uses). A SCHEDULED run has no browser,
+  // so identity falls back to reading brand_profile directly — a fallback that
+  // exists because the cron genuinely cannot provide it, not as a shortcut.
+  let brandName  = String(inp.brand_name || '').trim();
+  let descriptor = String(inp.brand_descriptor || '').trim();
+  let instructions = String(inp.instructions || '').trim();
+  if (!descriptor) {
+    const prof = await req({
+      __label: 'Supabase', method: 'GET',
+      url: `${SUPA_URL}/rest/v1/brand_profile?workspace_id=eq.${wsId}`
+         + `&select=brand_name,brand_descriptor,positioning,market_context&limit=1`,
+      headers: sHeaders, json: true,
+    });
+    const p = (prof || [])[0] || {};
+    brandName  = brandName  || String(p.brand_name || '').trim();
+    descriptor = String(p.brand_descriptor || p.positioning || '').trim();
+    instructions = instructions || String(p.market_context || '').trim();
+  }
+  if (!descriptor) {
+    return await bailOut('This brand has no descriptor yet, so there was nothing specific to research. Add one in Brand Brain.');
+  }
+
+  const [agenda, memory] = await Promise.all([
+    req({ __label: 'Supabase', method: 'GET',
+      url: `${SUPA_URL}/rest/v1/research_agenda?workspace_id=eq.${wsId}&status=eq.active`
+         + `&select=id,kind,subject,why&limit=100`, headers: sHeaders, json: true }),
+    req({ __label: 'Supabase', method: 'GET',
+      url: `${SUPA_URL}/rest/v1/brand_memory?workspace_id=eq.${wsId}&select=rule,scope,status&limit=200`,
+      headers: sHeaders, json: true }),
+  ]);
+
+  const questions = (agenda || []).filter(a => a.kind === 'question');
+  const watchlist = (agenda || []).filter(a => a.kind === 'competitor');
+
+  // ─── Tools ─────────────────────────────────────────────────────────────
+  // Only two, and both reach outside. Everything the model always needs —
+  // identity, the delta table, existing rules — is in the brief instead: a
+  // tool call to fetch data we would fetch every single time is a round trip
+  // bought for nothing.
+  const TOOLS = [
+    { name: 'web_search',
+      description: 'Search the live web. Use for market trends, competitor announcements, campaigns and offers. Returns titles, URLs and snippets.',
+      input_schema: { type: 'object', properties: {
+        query: { type: 'string', description: 'A specific search query. Name the brand, market or trend outright.' },
+        agenda_id: { type: 'string', description: 'The agenda question this is meant to answer, when it maps to one.' },
+      }, required: ['query'] } },
+    { name: 'fetch_page',
+      description: 'Read one page in full. Use after a search turns up something worth reading properly, such as a competitor launch or a market report.',
+      input_schema: { type: 'object', properties: { url: { type: 'string' } }, required: ['url'] } },
+  ];
+
+  // Every URL any tool actually returned. The model's citations are checked
+  // against this set before anything is stored — a source it never saw is a
+  // source it invented, and this whole report exists to be checkable.
+  const seenUrls = new Set();
+  let searches = 0;
+
+  async function runTool(name, input) {
+    if (name === 'web_search') {
+      searches += 1;
+      try {
+        const r = await req({ __label: 'Tavily', method: 'POST', url: 'https://api.tavily.com/search',
+          body: { api_key: TAVILY, query: String(input.query || ''), max_results: 5,
+                  search_depth: 'basic', include_answer: true, topic: 'general' }, json: true });
+        for (const x of (r && r.results) || []) if (x.url) seenUrls.add(String(x.url));
+        return JSON.stringify({
+          answer: String((r && r.answer) || '').slice(0, 1000),
+          results: ((r && r.results) || []).slice(0, 5).map(x => ({
+            title: String(x.title || '').slice(0, 200), url: String(x.url || ''),
+            content: String(x.content || '').slice(0, 700),
+          })),
+        });
+      } catch (e) { return JSON.stringify({ error: String(e.message || e).slice(0, 200) }); }
+    }
+    if (name === 'fetch_page') {
+      const url = String(input.url || '');
+      try {
+        const r = await req({ __label: 'Tavily', method: 'POST', url: 'https://api.tavily.com/extract',
+          body: { api_key: TAVILY, urls: [url] }, json: true });
+        const first = ((r && r.results) || [])[0] || {};
+        if (first.raw_content) seenUrls.add(url);
+        return JSON.stringify({ url, content: String(first.raw_content || '').slice(0, 6000) });
+      } catch (e) { return JSON.stringify({ url, error: String(e.message || e).slice(0, 200) }); }
+    }
+    return JSON.stringify({ error: `unknown tool ${name}` });
+  }
+
+  // ─── The brief ─────────────────────────────────────────────────────────
+  const lines = [];
+  lines.push(`THE BRAND: ${brandName || 'this brand'} — ${descriptor}`);
+  if (instructions) lines.push(`\nWHAT THE BRAND SAYS ABOUT ITSELF:\n${instructions}`);
+
+  lines.push(`\nPERIOD UNDER REVIEW: ${(gathered.period || {}).start || ''} to ${(gathered.period || {}).end || ''}`);
+
+  lines.push('\nWHAT WE MEASURED ON INSTAGRAM THIS PERIOD (hard numbers, already verified — treat as fact):');
+  if ((gathered.competitor_board || []).length) {
+    for (const c of gathered.competitor_board) {
+      lines.push(`- ${c.name} (@${c.handle}): ${c.followers ?? '?'} followers`
+        + `${c.followers_delta != null ? ` (${c.followers_delta >= 0 ? '+' : ''}${c.followers_delta} since last run)` : ''}`
+        + `, ${c.posts_per_week ?? '?'} posts/week`
+        + `${c.posts_per_week_prev != null ? ` (was ${c.posts_per_week_prev})` : ''}`
+        + `, engagement per 1k: ${c.engagement_per_1k ?? 'unknown'}`
+        + `, formats: ${JSON.stringify(c.format_mix || {})}`
+        + `, based on ${c.sample_size ?? 0} measurable posts`);
+      for (const t of (c.top_posts || []).slice(0, 2)) {
+        lines.push(`    top post (${t.likes ?? '?'} likes): "${String(t.hook || '').slice(0, 120)}" ${t.permalink || ''}`);
+      }
+    }
+  } else {
+    lines.push('- (nothing measurable: no competitor has a verified Instagram handle yet)');
+  }
+
+  if ((gathered.movements || []).length) {
+    lines.push('\nWHAT CHANGED SINCE LAST RUN (computed, not estimated):');
+    for (const m of gathered.movements) {
+      lines.push(`- ${m.competitor}: ${m.metric} ${m.from} → ${m.to} (${m.direction}, ${m.change_pct}%)`);
+    }
+  } else if (gathered.baseline) {
+    lines.push('\nWHAT CHANGED SINCE LAST RUN: nothing — this is the first measurement, so there is no comparison.');
+  } else {
+    lines.push('\nWHAT CHANGED SINCE LAST RUN: nothing moved by more than a rounding wobble.');
+  }
+
+  lines.push('\nSTANDING QUESTIONS THIS BRAND KEEPS ASKING (answer these first, and cite):');
+  if (questions.length) for (const q of questions) lines.push(`- [${q.id}] ${q.subject}${q.why ? ` — why it matters: ${q.why}` : ''}`);
+  else lines.push('- (none set yet — propose two or three worth asking every week)');
+
+  if (watchlist.length) lines.push(`\nRIVALS ON THE WATCHLIST: ${watchlist.map(w => w.subject).join(', ')}`);
+
+  lines.push('\nRULES THAT ALREADY EXIST — do not repeat or rephrase any of these, in any status:');
+  if ((memory || []).length) for (const r of memory) lines.push(`- [${r.status}] (${r.scope}) ${r.rule}`);
+  else lines.push('- (none yet)');
+
+  const brief = `You are a marketing strategist running this brand's weekly review. You have live web search, and you already have hard Instagram numbers that were measured for you.
+
+${lines.join('\n')}
+
+Your job now is the part the numbers cannot do: find out what is happening in this brand's market and among its named rivals, and say what it means for THIS brand.
+
+Search deliberately. Answer the standing questions above first. Then follow anything the measurements raise — a rival whose posting tripled is worth a search asking what they launched.
+
+Rules you must follow:
+- Never state a fact you did not read in a search result or a fetched page. If you did not find it, say you did not find it.
+- Never invent a statistic, a competitor, a campaign or a date.
+- "Post more video" is true of every brand on earth. If a finding would be equally true for a bakery, it is not a finding.
+- An empty week is a real and expected outcome. Say so rather than manufacturing news.
+
+Begin by searching. Do not write your report yet — you will be asked for it.`;
+
+  // ─── The loop ──────────────────────────────────────────────────────────
+  const messages = [{ role: 'user', content: brief }];
+  let toolCalls = 0, turns = 0, tokensIn = 0, tokensOut = 0;
+
+  async function callModel(body) {
+    const res = await req({
+      __label: 'Anthropic', method: 'POST', url: 'https://api.anthropic.com/v1/messages',
+      headers: { 'x-api-key': ANTHROPIC, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+      body, json: true,
+    });
+    tokensIn  += Number((res.usage || {}).input_tokens)  || 0;
+    tokensOut += Number((res.usage || {}).output_tokens) || 0;
+    return res;
+  }
+
+  async function pump(budget) {
+    while (toolCalls < budget && turns < MAX_TURNS) {
+      turns += 1;
+      const res = await callModel({ model: MODEL, max_tokens: 2000, tools: TOOLS, messages });
+      messages.push({ role: 'assistant', content: res.content });
+      if (res.stop_reason !== 'tool_use') return res;
+      const results = [];
+      for (const block of (res.content || []).filter(b => b.type === 'tool_use')) {
+        toolCalls += 1;
+        const out = toolCalls > budget
+          ? JSON.stringify({ error: 'Search budget for this run is spent. Work with what you have.' })
+          : await runTool(block.name, block.input);
+        results.push({ type: 'tool_result', tool_use_id: block.id, content: out });
+      }
+      messages.push({ role: 'user', content: results });
+    }
+    return null;
+  }
+
+  await pump(MAX_TOOL_CALLS);
+
+  // Reflect. The step every cheap implementation skips, and the one that stops
+  // the report asserting things nothing behind it supports. It may spend a
+  // little more search budget, once.
+  messages.push({ role: 'user', content:
+    `Before writing anything: which of the standing questions above have you NOT actually answered from a source, and which claims are you about to make that no page you read supports? Fix what is fixable with at most a few more searches. If a question cannot be answered this week, that is fine — you will report it as unanswered.` });
+  await pump(MAX_TOOL_CALLS + MAX_REFLECT_CALLS);
+
+  // Synthesise. No tools on this call, so the model cannot wander off mid-report.
+  messages.push({ role: 'user', content:
+    `Now write the report. Return ONLY valid JSON, no markdown fence:
+
+{"market":[{"finding":"...","detail":"...","agenda_id":"the [id] it answers, or null","sources":[{"url":"...","title":"...","quote":"the sentence that supports this"}],"confidence":0.0,"novelty":"new|continuing|changed|resolved"}],
+ "gaps":[{"gap":"something rivals are doing that we are not, or the reverse","basis":"instagram|web","our_position":"what our own numbers say, or 'unknown'","suggested_response":"..."}],
+ "proposed_rules":[{"rule":"ONE imperative sentence, injected verbatim into future prompts, sensible with no other context","detail":"what supports it and how strong that is","scope":"trend|competitor","sources":["url"],"confidence":0.0}],
+ "proposed_ideas":[{"topic":"...","title":"...","content_pillar":"...","format":"reel|carousel|image|story","rationale":"the finding this comes from"}],
+ "agenda_changes":[{"action":"add|retire","subject":"...","why":"..."}],
+ "unanswered":["a standing question you could not answer, and why"],
+ "headline":"one sentence: what actually changed this week",
+ "quiet_week":true}
+
+At most 4 proposed_rules and 3 proposed_ideas. Fewer is better. Empty arrays everywhere are a valid and honest answer — set quiet_week true and say so in the headline.
+Every market finding and every proposed rule must carry at least one source URL you actually retrieved.` });
+
+  const finalRes = await callModel({ model: MODEL, max_tokens: 4000, messages });
+  const text = (finalRes.content || []).filter(b => b.type === 'text').map(b => b.text).join('').trim();
+
+  let parsed = null;
+  try {
+    parsed = JSON.parse(text.replace(/^```(?:json)?/i, '').replace(/```$/, '').trim());
+  } catch (e) {
+    return await bailOut(`The investigation ran but its report could not be parsed, so only the measured numbers are here. (${String(e.message || e).slice(0, 120)})`);
+  }
+
+  // ─── Citation check ────────────────────────────────────────────────────
+  // A URL the model never retrieved is a URL it made up. Strip those, and say
+  // so when stripping empties a finding — silently keeping an uncited claim is
+  // how a research report becomes a confident-sounding guess.
+  let stripped = 0, uncited = 0;
+  const cleanSources = (arr) => {
+    const out = [];
+    for (const raw of arr || []) {
+      const src = typeof raw === 'string' ? { url: raw } : (raw || {});
+      if (src.url && seenUrls.has(String(src.url))) out.push(src); else stripped += 1;
+    }
+    return out;
+  };
+
+  const market = (parsed.market || []).map(f => {
+    const sources = cleanSources(f.sources);
+    if (!sources.length) uncited += 1;
+    return { ...f, sources, cited: sources.length > 0 };
+  });
+  const proposedRules = (parsed.proposed_rules || [])
+    .map(r => ({ ...r, sources: cleanSources(r.sources) }))
+    // A rule steers every future generation. One with no surviving source has
+    // nothing behind it, so it is not offered at all.
+    .filter(r => r.sources.length > 0)
+    .slice(0, 4);
+
+  // ─── Persist ───────────────────────────────────────────────────────────
+  const findingRows = [
+    ...market.map(f => ({
+      run_id: runId, workspace_id: wsId, agenda_id: f.agenda_id || null, kind: 'trend',
+      headline: String(f.finding || '').slice(0, 500), detail: String(f.detail || ''),
+      sources: f.sources, evidence: {}, confidence: Number(f.confidence) || null,
+      novelty: ['new', 'continuing', 'changed', 'resolved'].includes(f.novelty) ? f.novelty : 'new',
+    })),
+    ...(parsed.gaps || []).map(g => ({
+      run_id: runId, workspace_id: wsId, agenda_id: null, kind: 'gap',
+      headline: String(g.gap || '').slice(0, 500), detail: String(g.suggested_response || ''),
+      sources: [], evidence: { basis: g.basis || '', our_position: g.our_position || '' },
+      confidence: null, novelty: 'new',
+    })),
+  ];
+  for (const row of findingRows) {
+    await req({ __label: 'Supabase', method: 'POST', url: `${SUPA_URL}/rest/v1/research_findings`,
+      headers: sHeaders, body: row, json: true });
+  }
+
+  // Rules land as 'proposed', exactly like every other kind of learning, and a
+  // human approves them on the same page. The agent has no path to 'active'.
+  for (const r of proposedRules) {
+    await req({ __label: 'Supabase', method: 'POST', url: `${SUPA_URL}/rest/v1/brand_memory`,
+      headers: sHeaders, body: {
+        workspace_id: wsId, scope: ['trend', 'competitor'].includes(r.scope) ? r.scope : 'trend',
+        rule: String(r.rule || '').slice(0, 500), detail: String(r.detail || ''),
+        evidence: { sources: r.sources, run_id: runId },
+        source: 'research', status: 'proposed', confidence: Number(r.confidence) || null,
+      }, json: true });
+  }
+
+  // Agenda changes are PROPOSED too — never applied. The agent may not quietly
+  // stop watching something a human asked it to watch.
+  for (const c of (parsed.agenda_changes || []).slice(0, 4)) {
+    if (c.action !== 'add' || !c.subject) continue;
+    await http({ method: 'POST', url: `${SUPA_URL}/rest/v1/research_agenda`,
+      headers: sHeaders, body: {
+        workspace_id: wsId, kind: 'question', subject: String(c.subject).slice(0, 300),
+        why: String(c.why || ''), status: 'proposed', created_by: 'agent',
+      }, json: true, returnFullResponse: true, ignoreHttpStatusErrors: true });
+  }
+
+  const quiet = !!parsed.quiet_week && !market.length && !(parsed.gaps || []).length;
+  const report = {
+    ...gathered,
+    headline: String(parsed.headline || gathered.headline || '').slice(0, 400),
+    quiet_week: quiet,
+    market, gaps: parsed.gaps || [],
+    proposed_rules: proposedRules, proposed_ideas: (parsed.proposed_ideas || []).slice(0, 3),
+    agenda_changes: parsed.agenda_changes || [],
+    unanswered: [
+      ...(gathered.unanswered || []),
+      ...(parsed.unanswered || []).map(String),
+      ...(uncited ? [`${uncited} finding${uncited === 1 ? '' : 's'} could not be traced to a page that was actually retrieved, and ${uncited === 1 ? 'is' : 'are'} marked uncited.`] : []),
+    ],
+    sources: [...seenUrls],
+    stage_reached: 'synthesise',
+  };
+
+  await finish({
+    status: 'complete', stage: 'synthesise', report,
+    model: MODEL, tokens_in: tokensIn, tokens_out: tokensOut,
+    searches, tool_calls: toolCalls,
+    // Sonnet list pricing at time of writing. Approximate on purpose — this is
+    // for noticing a run that cost ten times the usual, not for accounting.
+    cost_estimate: Math.round(((tokensIn / 1e6) * 3 + (tokensOut / 1e6) * 15) * 10000) / 10000,
+  });
+
+  return [{ json: { ok: true, run_id: runId, investigated: true,
+    findings: market.length, gaps: (parsed.gaps || []).length,
+    proposed_rules: proposedRules.length, proposed_ideas: (parsed.proposed_ideas || []).length,
+    searches, tool_calls: toolCalls, sources_stripped: stripped, quiet_week: quiet } }];
+
+} catch (e) {
+  const msg = String((e && e.message) || e).slice(0, 500);
+  // Even here the measured numbers survive: the run completes with the Stage 0
+  // report plus a note, rather than failing and discarding it.
+  try { return await bailOut(`The investigation failed (${msg}), so only the measured numbers are in this report.`); }
+  catch (_) {
+    await finish({ status: 'failed', error: msg });
+    return [{ json: { ok: false, run_id: runId, error: msg } }];
+  }
 }
 """
 
@@ -8969,22 +9397,29 @@ def build_research_run() -> dict:
     so it does not depend on wiring being right.
     """
     nodes = [
-        _sticky(RESEARCH_RUN_STICKY, height=560, width=520, x=0, y=-380),
+        _sticky(RESEARCH_RUN_STICKY, height=620, width=520, x=0, y=-440),
         _webhook("arak-research-run", "responseNode", x=0, y=200),
         _code("Run: Open", RESEARCH_RUN_OPEN_JS, x=220, y=200),
         _if_bool_equals("Started?", "run-proceed", "={{ $json.proceed }}", x=440, y=200),
-        _code("Run: Gather", RESEARCH_RUN_GATHER_JS, x=660, y=120),
-        _respond_json("Respond", "={{ JSON.stringify($json) }}", x=880, y=120),
+        # Responds BEFORE the work, not after. The investigation is minutes
+        # long; a browser holding a fetch open across it would time out and
+        # n8n would answer into a closed socket. Execution carries on down the
+        # chain after this node, which is what makes the run genuinely async
+        # rather than merely slow.
+        _respond_json("Respond: Started", "={{ JSON.stringify($json) }}", x=660, y=120),
+        _code("Run: Gather", RESEARCH_RUN_GATHER_JS, x=880, y=120),
+        _code("Run: Investigate", RESEARCH_INVESTIGATE_JS, x=1100, y=120),
         _respond_json("Respond: Already Running", "={{ JSON.stringify($json) }}", x=660, y=300),
     ]
     connections = {
         "Webhook": {"main": [[{"node": "Run: Open", "type": "main", "index": 0}]]},
         "Run: Open": {"main": [[{"node": "Started?", "type": "main", "index": 0}]]},
         "Started?": {"main": [
-            [{"node": "Run: Gather", "type": "main", "index": 0}],
+            [{"node": "Respond: Started", "type": "main", "index": 0}],
             [{"node": "Respond: Already Running", "type": "main", "index": 0}],
         ]},
-        "Run: Gather": {"main": [[{"node": "Respond", "type": "main", "index": 0}]]},
+        "Respond: Started": {"main": [[{"node": "Run: Gather", "type": "main", "index": 0}]]},
+        "Run: Gather": {"main": [[{"node": "Run: Investigate", "type": "main", "index": 0}]]},
     }
     return {
         "name": "Arak Lighting – Research Run",
