@@ -413,8 +413,15 @@ export function Approvals() {
     const result = await publishPost(state.webhooks?.metaPublish, {
       postId: post.id, postTable: post._table, workspaceId: activeWorkspaceId,
       platform: post.platform,
+      // The em-dash separator (not a plain blank line) is what
+      // isolateBilingual() in the Meta publish workflow looks for to apply
+      // Unicode directional isolation per language — see CaptionStudio.jsx's
+      // own `pick()`, which this mirrors. Without it, Arabic + English text
+      // in one caption is sent unisolated and Instagram renders the RTL/LTR
+      // boundary wrong (trailing punctuation and standalone digits/"+" jump
+      // to the wrong side).
       caption: post.captionAr && post.captionEn
-        ? [post.captionAr, post.captionEn].filter(Boolean).join('\n\n')
+        ? [post.captionAr, post.captionEn].filter(Boolean).join('\n\n—\n\n')
         : (post.copy || post.captionEn || post.captionAr || ''),
       hashtags: post.hashtags || '',
       imageUrl: post.imageUrl || '',
