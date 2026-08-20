@@ -13,6 +13,9 @@ import { fetchApprovalsData, markIdeaProcessing, markIdeasGenerated } from '../.
 import { ensureCaptions } from '../../lib/campaignPlanner'
 import { publishIdeasAsPosts } from '../../lib/studioBridge'
 import { publishPost, syncMetaInsights } from '../../lib/meta'
+import { publishPost as publishViaZernio } from '../../lib/zernio'
+import { providerFor, PROVIDERS } from '../../lib/publishPost'
+import { defaultWebhookUrl } from '../../lib/n8nWebhooks'
 import { fetchScheduledPosts } from '../../lib/scheduledPosts'
 import { dbIdeaToDraft } from '../../lib/campaignPlan'
 import { InstagramPostDetail } from './InstagramPage'
@@ -66,6 +69,10 @@ function normalizePost(row, platform) {
     generatedByWorkflow: row.source !== 'manual', createdAt: row.created_at,
     // Zernio publish state — distinct from `status` (the review decision).
     zernioPostId: row.zernio_post_id || '',
+    zernioAccountId: row.zernio_account_id || '',
+    // The per-platform block chosen last time this post was composed. Carried
+    // so publishing from here sends the same options the composer would.
+    platformOptions: row.platform_options || {},
     publishStatus: row.publish_status || 'not_published',
     publishError: row.publish_error || '',
     publishedAt: row.published_at || null,
@@ -409,10 +416,40 @@ export function Approvals() {
   // scheduling, so a future `when` books the slot in our own row and the
   // publish workflow's 5-minute cron sends it when it comes due.
   async function handlePublish(post, when) {
+    // TikTok cannot be published from this screen, and that is the platform's
+    // rule rather than a gap here. Every TikTok post needs a privacy level
+    // drawn from the creator account's own allowed list, plus two consent
+    // flags TikTok requires per post and which are deliberately never stored.
+    // None of that can be collected from an approval card, so the composer on
+    // the TikTok page is where it has to happen.
+    //
+    // Said here rather than letting the workflow refuse it: the workflow's
+    // rejection is correct but arrives as "TikTok requires a privacy level",
+    // which does not tell anyone where to go.
+    if (post.platform === 'tiktok' && !post.platformOptions?.tiktok?.privacy_level) {
+      setPublishError({
+        id: post.id,
+        message: 'TikTok posts need a privacy level and a per-post consent confirmation, ' +
+                 'which TikTok requires every time. Open this post from the TikTok page to finish and publish it.',
+      })
+      return
+    }
+
     setPublishingId(post.id)
-    const result = await publishPost(state.webhooks?.metaPublish, {
+    // Provider-aware rather than hardcoded to Meta. Meta reaches Instagram and
+    // nothing else, so a TikTok post sent through the old call had no chance
+    // of working. Zernio is primary now and serves all three; meta.js stays
+    // wired behind providerFor() as the fallback.
+    const provider   = providerFor(post.platform)
+    const publishVia = provider === PROVIDERS.META ? publishPost : publishViaZernio
+    const webhook    = provider === PROVIDERS.META
+      ? (state.webhooks?.metaPublish || defaultWebhookUrl('metaPublish'))
+      : (state.webhooks?.publishPost || defaultWebhookUrl('publishPost'))
+
+    const result = await publishVia(webhook, {
       postId: post.id, postTable: post._table, workspaceId: activeWorkspaceId,
       platform: post.platform,
+      accountId: post.zernioAccountId || undefined,
       caption: post.captionAr && post.captionEn
         ? [post.captionAr, post.captionEn].filter(Boolean).join('\n\n')
         : (post.copy || post.captionEn || post.captionAr || ''),
@@ -421,6 +458,10 @@ export function Approvals() {
       imageUrls: (post.mediaUrls || []).length > 1 ? post.mediaUrls : undefined,
       videoUrl: post.videoUrl || '',
       coverImageUrl: post.coverImageUrl || '',
+      // Whatever was chosen last time this post passed through the composer.
+      // Absent on a freshly generated post, which is correct — the defaults
+      // then apply.
+      platformSpecificData: post.platformOptions?.[post.platform] || undefined,
       // No timezone passed: publishPost applies the brand's. `when` is the raw
       // datetime-local value, which is a wall clock with no zone of its own —
       // and the label beside the input says KSA, so KSA is what it means.

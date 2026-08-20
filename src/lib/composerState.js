@@ -31,6 +31,55 @@ export function emptyComposer(platform = 'instagram') {
   }
 }
 
+// ── Opening a generated post in the composer ──────────────────────────────
+// The bridge between the generation half of the app and the publishing half.
+// A post produced by Creative Studio or a content plan is a database row; this
+// turns one into composer state so it can be reviewed, adjusted and sent
+// through exactly the same path as something composed by hand.
+//
+// Deliberately a CONVERSION rather than a second publish path. The alternative
+// — teaching the Approvals screen to build its own provider payload — is how
+// the two halves drift, and it already produced one publish call that only
+// understood Instagram.
+export function composerFromPost(row, { platform = row?.platform } = {}) {
+  if (!row) return emptyComposer(platform)
+
+  const images = Array.isArray(row.image_urls) && row.image_urls.length
+    ? row.image_urls
+    : [row.image_url].filter(Boolean)
+  const video = row.video_url || ''
+
+  // Metadata is genuinely unknown for a stored row — the generator records a
+  // URL, not a duration or a byte count. Left null so validation checks only
+  // what it knows rather than inventing a failure. See PLATFORM_LIMITS.
+  const media = video
+    ? [{ url: video, type: 'video', mimeType: '', bytes: null, seconds: null }]
+    : images.map(url => ({ url, type: 'image', mimeType: '', bytes: null, seconds: null }))
+
+  return {
+    ...emptyComposer(platform),
+    format: row.format || defaultFormat(platform),
+    campaignId: row.campaign_id || '',
+    // The row's caption already has hashtags folded in by the generator, so
+    // they are NOT split back out — doing so and letting the composer rejoin
+    // them is how a tag block ends up duplicated.
+    caption: row.caption || '',
+    hashtags: '',
+    media,
+    coverImageUrl: row.cover_image_url || '',
+    tags: row.tags || [],
+    scheduledFor: row.scheduled_date
+      ? `${row.scheduled_date}T${(row.publish_time || '09:00').slice(0, 5)}`
+      : '',
+    // Whatever was chosen last time this post was composed. Empty for a
+    // freshly generated post, which is correct: nobody has chosen anything yet
+    // and the defaults apply.
+    options: row.platform_options || {},
+    postId: row.id,
+    postTable: row.post_table || 'generated_posts',
+  }
+}
+
 // Defaults per platform. Applied when a platform is first touched rather than
 // up front, so `options` only ever carries platforms the user actually chose —
 // an empty object is a meaningful "nothing configured", and pre-filling every

@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   emptyComposer, setPlatform, setOption, optionsFor, captionStats,
   composedCaption, capabilities, validateComposer, platformSpecificData, tiktokSettings,
+  composerFromPost,
 } from './composerState'
 
 // The composer's rules, without React. These are the parts that decide whether
@@ -156,6 +157,55 @@ describe('validation', () => {
     const v = validateComposer(s)
     expect(v.ok).toBe(true)
     expect(v.warnings.join(' ')).toMatch(/publishes as a normal post/i)
+  })
+})
+
+describe('opening a generated post in the composer', () => {
+  const row = {
+    id: 'p1', post_table: 'generated_posts', platform: 'instagram',
+    caption: 'Warm light\n\n#arak', format: 'carousel',
+    image_urls: ['https://cdn.test/1.jpg', 'https://cdn.test/2.jpg'],
+    scheduled_date: '2026-09-01', publish_time: '19:00',
+    platform_options: { instagram: { firstComment: 'Specs below' } },
+  }
+
+  it('carries the caption, media order and schedule across', () => {
+    const s = composerFromPost(row)
+
+    expect(s.platform).toBe('instagram')
+    expect(s.format).toBe('carousel')
+    expect(s.media.map(m => m.url)).toEqual(['https://cdn.test/1.jpg', 'https://cdn.test/2.jpg'])
+    expect(s.scheduledFor).toBe('2026-09-01T19:00')
+    expect(s.postId).toBe('p1')
+  })
+
+  // The generator folds hashtags into the caption already. Splitting them back
+  // out so the composer can rejoin them is how a tag block gets duplicated.
+  it('leaves hashtags inside the caption rather than splitting them out', () => {
+    const s = composerFromPost(row)
+
+    expect(s.caption).toBe('Warm light\n\n#arak')
+    expect(s.hashtags).toBe('')
+    expect(composedCaption(s)).toBe('Warm light\n\n#arak')
+  })
+
+  it('restores options chosen the last time it was composed', () => {
+    expect(optionsFor(composerFromPost(row)).firstComment).toBe('Specs below')
+  })
+
+  // A stored row records URLs, not durations or byte counts. Leaving them null
+  // keeps validation checking only what it knows instead of inventing a
+  // failure for a video that is probably fine.
+  it('leaves unknown media metadata null rather than guessing', () => {
+    const s = composerFromPost({ ...row, image_urls: [], video_url: 'https://cdn.test/v.mp4' })
+
+    expect(s.media[0]).toMatchObject({ type: 'video', seconds: null, bytes: null })
+    expect(validateComposer({ ...s, accountIds: ['a'] }).errors.join(' ')).not.toMatch(/seconds/)
+  })
+
+  it('gives a freshly generated post the platform defaults', () => {
+    const s = composerFromPost({ ...row, platform_options: null })
+    expect(optionsFor(s).isAiGenerated).toBe(true)
   })
 })
 
