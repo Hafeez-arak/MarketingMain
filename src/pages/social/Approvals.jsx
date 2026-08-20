@@ -708,7 +708,14 @@ export function Approvals() {
         <Card>
           <Empty
             icon={<svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>}
-            title={statusFilter === 'pending_review' ? 'Nothing to review' : `No ${STATUS_TABS.find(t => t.key === statusFilter)?.label.toLowerCase()} posts`}
+            /* The All tab has no adjective to interpolate, so the generic
+               branch produced "No all posts". Named rather than patched with
+               a replace(), since the next tab added would hit this too. */
+            title={
+              statusFilter === 'pending_review' ? 'Nothing to review'
+              : statusFilter === 'all' ? 'No posts yet'
+              : `No ${STATUS_TABS.find(t => t.key === statusFilter)?.label.toLowerCase()} posts`
+            }
             description="Approve a plan from Campaigns → Plan with AI and generated posts will show up here as they're ready."
           />
         </Card>

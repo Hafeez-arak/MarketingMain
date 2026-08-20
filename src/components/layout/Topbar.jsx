@@ -11,6 +11,7 @@ const titles = {
   '/social/instagram': 'Instagram',
   '/social/tiktok': 'TikTok',
   '/social/snapchat': 'Snapchat',
+  '/social/approvals': 'Post Approvals',
   '/settings': 'Settings', '/integrations': 'Integrations', '/team': 'Team & Access',
 }
 
