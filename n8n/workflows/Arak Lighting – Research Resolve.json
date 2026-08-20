@@ -1,0 +1,209 @@
+{
+  "name": "Arak Lighting – Research Resolve",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Research: Resolve Handles\n\n**Zero secrets in this file.** Needs `META_IG_TOKEN`, `META_IG_USER_ID`, `TAVILY_API_KEY`, `SUPABASE_URL`, `SUPABASE_KEY`.\n\nSeeds `research_agenda` from the competitors the caller sends, then finds and **verifies** each one's Instagram handle.\n\nWebhook path: `/arak-research-resolve`. Body: `{ workspace_id, competitors[{name, positioning, website, source_row_id}], force? }`.\n\n**Why this exists at all.** Checked against the live database 2026-08-20: across all three workspaces there are twelve competitor rows and **zero Instagram handles**. Two rows carry a `watch_url` and both are company websites. So the \"parse a handle out of the directory\" plan resolves nothing, and the whole Instagram side of the research agent is inert until something goes and finds them.\n\n**Verification is the point, not search.** Finding *an* account called something like the rival is easy. `Ozee` and `Ozeyl` are two different companies in one workspace, and a confident week of numbers attached to the wrong one is the kind of wrong that does not look wrong. So a candidate is scored against the rival's own website domain, name and bio, and only a score at or above the threshold is marked `resolved`.\n\n**Below the threshold it stops.** A weak candidate is stored as a *suggestion* with `ig_status = 'unresolved'` for a human to accept or replace. Nothing downstream may read `ig_handle` alone — the snapshot step filters on `ig_status in ('resolved','human_set')`, which is what keeps a guess out of the numbers.\n\n**`human_set` is never overwritten.** A handle a person typed outranks anything this finds, on every later run.\n\n**Writes nothing to the Brand Brain.** Agenda rows only. A resolved handle is research metadata — discovered, scored, timestamped — not a statement the company makes about itself. See RESEARCH-AGENT.md §5a.",
+        "height": 560,
+        "width": 520
+      },
+      "id": "ed88f66a-aea4-5a97-bf7a-bb8151031eee",
+      "name": "Note: Overview",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        -380
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "arak-research-resolve",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "144bcbff-160f-568f-bb1c-1203690db0c1",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        200
+      ],
+      "webhookId": "arak-research-resolve"
+    },
+    {
+      "parameters": {
+        "jsCode": "const expected = String($env.N8N_WEBHOOK_SECRET || '').trim();\nif (expected) {\n  const headers = ($input.first().json || {}).headers || {};\n  const got = String(headers['x-webhook-secret'] || headers['X-Webhook-Secret'] || '').trim();\n  if (got !== expected) {\n    throw new Error('Unauthorized: missing or invalid webhook secret');\n  }\n}\nreturn $input.all();"
+      },
+      "id": "81986349-6f03-5c3c-bc8f-434844805bf5",
+      "name": "Webhook Secret Guard",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        130,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst rawHttp = this.helpers.httpRequest;\n\n// Retry a lookup that never left the machine — see Creative Generate for the\n// full argument. Only name resolution is retried: a DNS failure proves the\n// request never reached the provider, so re-sending cannot double anything.\nconst http = async (opts) => {\n  for (let attempt = 0; ; attempt++) {\n    try { return await rawHttp(opts); }\n    catch (e) {\n      const code = (e && (e.code || (e.cause && e.cause.code))) || '';\n      const msg  = String((e && e.message) || '');\n      const isDns = code === 'ENOTFOUND' || code === 'EAI_AGAIN'\n        || /getaddrinfo\\s+(ENOTFOUND|EAI_AGAIN)/.test(msg);\n      if (!isDns || attempt >= 2) throw e;\n      await new Promise(r => setTimeout(r, 400 * (attempt + 1)));\n    }\n  }\n};\n\nasync function req(opts){\n  const res = await http({ ...opts, returnFullResponse: true, ignoreHttpStatusErrors: true });\n  const status = res.statusCode;\n  if (status >= 200 && status < 300) return res.body;\n  const b = res.body;\n  const msg = (b && typeof b === 'object') ? (b.error || b.message || JSON.stringify(b).slice(0, 300))\n            : (typeof b === 'string' && b) ? b.slice(0, 300)\n            : `HTTP ${status}`;\n  throw new Error(`${opts.__label || 'Request'} ${status}: ${msg}`);\n}\n\nconst raw  = ($input.first() && $input.first().json) || {};\nconst body = raw.body || raw;\nconst SUPA_URL = String($env.SUPABASE_URL || '').replace(/\\/+$/, '');\nconst SUPA_KEY = $env.SUPABASE_KEY;\nconst sHeaders = { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}`, 'Content-Type': 'application/json' };\n\nconst wsId = String(body.workspace_id || '').trim();\nif (!wsId) throw new Error('workspace_id is required.');\nconst force = body.force === true;\n\n// The caller sends the competitor list, assembled in the browser through the\n// same buildContext/directory read every other call uses. Assembling it here\n// would mean a second copy of the flattening logic, which is the drift\n// brandContext.js exists to prevent.\nconst sent = (Array.isArray(body.competitors) ? body.competitors : [])\n  .map(c => ({\n    name: String((c && c.name) || '').trim(),\n    positioning: String((c && c.positioning) || '').trim(),\n    website: String((c && c.website) || '').trim(),\n    source_row_id: (c && c.source_row_id) || null,\n  }))\n  .filter(c => c.name);\n\n// Same workspace filter as everywhere else: this runs on the service key, so\n// the filter IS the isolation.\nconst existing = await req({\n  __label: 'Supabase', method: 'GET',\n  url: `${SUPA_URL}/rest/v1/research_agenda?workspace_id=eq.${wsId}&kind=eq.competitor`\n     + `&select=id,subject,status,ig_handle,ig_status,ig_confidence,source_row_id&limit=500`,\n  headers: sHeaders, json: true,\n});\n\nconst key = s => String(s || '').trim().toLowerCase();\nconst byName = new Map(existing.map(r => [key(r.subject), r]));\n\n// Seed the ones we have never seen. A competitor that came from the Brand\n// Brain is 'active' immediately — a human already decided it matters by\n// typing it there. Only an agent-discovered rival arrives as 'proposed'.\nconst seeded = [];\nfor (const c of sent) {\n  if (byName.has(key(c.name))) continue;\n  const row = {\n    workspace_id: wsId, kind: 'competitor', subject: c.name,\n    why: c.positioning || '', status: 'active',\n    created_by: 'human', source_row_id: c.source_row_id || null,\n  };\n  const ins = await req({\n    __label: 'Supabase', method: 'POST',\n    url: `${SUPA_URL}/rest/v1/research_agenda`,\n    headers: { ...sHeaders, Prefer: 'return=representation' },\n    body: row, json: true,\n  });\n  const created = Array.isArray(ins) ? ins[0] : ins;\n  if (created) { byName.set(key(c.name), created); seeded.push(c.name); }\n}\n\n// What still needs a handle. `human_set` is excluded unconditionally — a\n// handle a person typed outranks anything this can find, and re-resolving it\n// every week would be a slow way to overwrite their correction. `resolved` is\n// excluded too unless the caller explicitly asked to re-verify.\nconst sentByName = new Map(sent.map(c => [key(c.name), c]));\nconst work = [];\nfor (const [k, row] of byName) {\n  if (row.status === 'retired') continue;\n  if (row.ig_status === 'human_set') continue;\n  if (row.ig_status === 'resolved' && !force) continue;\n  const c = sentByName.get(k) || {};\n  work.push({\n    agenda_id: row.id,\n    name: row.subject,\n    positioning: c.positioning || row.why || '',\n    website: c.website || '',\n  });\n}\n\nif (!work.length) {\n  return [{ json: { ok: true, proceed: false, skipped: true, workspace_id: wsId,\n    seeded: seeded.length, resolved: 0,\n    reason: existing.length || sent.length\n      ? 'Every competitor already has a handle, or was set by hand. Nothing to resolve.'\n      : 'This brand has no competitors listed yet, so there is nothing to look up. Add some in Brand Brain first.' } }];\n}\n\nif (!$env.TAVILY_API_KEY) {\n  return [{ json: { ok: true, proceed: false, skipped: true, workspace_id: wsId, seeded: seeded.length, resolved: 0,\n    reason: 'TAVILY_API_KEY is not set on this n8n instance, so the handle search cannot run.' } }];\n}\nif (!$env.META_IG_TOKEN || !$env.META_IG_USER_ID) {\n  return [{ json: { ok: true, proceed: false, skipped: true, workspace_id: wsId, seeded: seeded.length, resolved: 0,\n    reason: 'META_IG_TOKEN / META_IG_USER_ID are not set, so a candidate handle cannot be verified. Refusing to guess.' } }];\n}\n\n// Bounded. Twelve rivals across three brands today; the cap is here so a\n// directory that grows to eighty cannot turn one button into eighty searches\n// plus eighty Graph calls without anyone deciding that.\nconst MAX_PER_RUN = 12;\nreturn [{ json: { ok: true, proceed: true, workspace_id: wsId, seeded: seeded.length,\n                  work: work.slice(0, MAX_PER_RUN), deferred: Math.max(0, work.length - MAX_PER_RUN) } }];\n"
+      },
+      "id": "5f5134e9-c156-50b9-823c-adaa4ba39648",
+      "name": "Resolve: Seed Agenda",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "resolve-proceed",
+              "leftValue": "={{ $json.proceed }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "4d956ec5-1963-5a71-b6ba-a783cfab0745",
+      "name": "Anything to resolve?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        440,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst rawHttp = this.helpers.httpRequest;\n\nconst http = async (opts) => {\n  for (let attempt = 0; ; attempt++) {\n    try { return await rawHttp(opts); }\n    catch (e) {\n      const code = (e && (e.code || (e.cause && e.cause.code))) || '';\n      const msg  = String((e && e.message) || '');\n      const isDns = code === 'ENOTFOUND' || code === 'EAI_AGAIN'\n        || /getaddrinfo\\s+(ENOTFOUND|EAI_AGAIN)/.test(msg);\n      if (!isDns || attempt >= 2) throw e;\n      await new Promise(r => setTimeout(r, 400 * (attempt + 1)));\n    }\n  }\n};\n\nasync function req(opts){\n  const res = await http({ ...opts, returnFullResponse: true, ignoreHttpStatusErrors: true });\n  const status = res.statusCode;\n  if (status >= 200 && status < 300) return res.body;\n  const b = res.body;\n  const msg = (b && typeof b === 'object') ? (b.error || b.message || JSON.stringify(b).slice(0, 300))\n            : (typeof b === 'string' && b) ? b.slice(0, 300)\n            : `HTTP ${status}`;\n  throw new Error(`${opts.__label || 'Request'} ${status}: ${msg}`);\n}\n\nconst inp = ($input.first() && $input.first().json) || {};\nconst wsId = inp.workspace_id;\nconst work = Array.isArray(inp.work) ? inp.work : [];\n\nconst SUPA_URL = String($env.SUPABASE_URL || '').replace(/\\/+$/, '');\nconst SUPA_KEY = $env.SUPABASE_KEY;\nconst sHeaders = { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}`, 'Content-Type': 'application/json' };\n\n// Pinned to v23.0, the same version the publish and sync workflows use. A\n// research call drifting to a different version than the publishing path is\n// how you end up debugging two different Graph behaviours at once.\nconst GRAPH    = 'https://graph.facebook.com/v23.0';\nconst IG_TOKEN = $env.META_IG_TOKEN;\nconst IG_USER  = $env.META_IG_USER_ID;\nconst TAVILY   = $env.TAVILY_API_KEY;\n\n// ─── Matching ────────────────────────────────────────────────────────────\n// Everything below is deliberately arithmetic rather than a model call. The\n// question \"is this the right account\" has to be answerable the same way\n// twice, and has to be auditable when it is wrong.\n\nconst norm = s => String(s || '').toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '');\n\nconst domainOf = (url) => {\n  const u = String(url || '').trim();\n  if (!u) return '';\n  try { return new URL(/^https?:/i.test(u) ? u : `https://${u}`).hostname.replace(/^www\\./i, '').toLowerCase(); }\n  catch { return ''; }\n};\n\n// Words that carry no identifying weight in this market. \"Lighting\" is in\n// half the rival names in the Arak workspace, so a bio containing it is not\n// evidence of anything.\nconst STOP = new Set(['the','and','for','co','ltd','llc','inc','group','company','est',\n                      'trading','est','al','lighting','lights','light','design','studio','app','store']);\nconst tokensOf = name => String(name || '').toLowerCase().split(/[^a-z0-9]+/i)\n  .filter(t => t.length >= 3 && !STOP.has(t));\n\n// A candidate must clear this to be trusted with a week of numbers. Below it\n// the handle is kept only as a suggestion for a human — see the sticky note.\nconst RESOLVE_AT = 0.7;\nconst SUGGEST_AT = 0.3;\n\nfunction scoreCandidate(comp, acct) {\n  const reasons = [];\n  let score = 0;\n\n  const cName = norm(comp.name);\n  const aUser = norm(acct.username);\n  const aName = norm(acct.name);\n  const cDom  = domainOf(comp.website);\n  const aDom  = domainOf(acct.website);\n\n  // The strongest signal there is, and conclusive on its own: an account\n  // whose bio links to the rival's own domain is the rival's account.\n  if (cDom && aDom && cDom === aDom) { score += 0.7; reasons.push(`bio links to ${aDom}`); }\n\n  if (cName && (cName === aUser || cName === aName)) { score += 0.5; reasons.push('name matches exactly'); }\n  else if (cName && aUser && (aUser.includes(cName) || cName.includes(aUser))) { score += 0.25; reasons.push('handle contains the name'); }\n  else if (cName && aName && aName.includes(cName)) { score += 0.25; reasons.push('display name contains the name'); }\n\n  const toks = tokensOf(comp.name);\n  if (toks.length) {\n    const hay = `${acct.username} ${acct.name} ${acct.biography}`.toLowerCase();\n    const hits = toks.filter(t => hay.includes(t));\n    if (hits.length) { score += 0.25 * (hits.length / toks.length); reasons.push(`mentions ${hits.join(', ')}`); }\n  }\n\n  // Size as a tie-breaker, not as evidence. A real brand's account is rarely\n  // tiny; a squatter's usually is.\n  const followers = Number(acct.followers_count || 0);\n  if (followers >= 1000) { score += 0.1; reasons.push(`${followers} followers`); }\n  else if (followers < 100) { score -= 0.3; reasons.push(`only ${followers} followers — probably not the real account`); }\n\n  return { score: Math.max(0, Math.min(1, Math.round(score * 100) / 100)), reasons };\n}\n\n// ─── Candidate discovery ─────────────────────────────────────────────────\n\nfunction handlesFromSearch(results) {\n  const out = [];\n  for (const r of results) {\n    const hay = `${r.url || ''} ${r.content || ''}`;\n    const re = /instagram\\.com\\/([A-Za-z0-9._]{2,30})/g;\n    let m;\n    while ((m = re.exec(hay))) {\n      const h = m[1].toLowerCase();\n      // Instagram's own section paths, not accounts.\n      if (['p','reel','reels','explore','stories','tv','accounts','about','directory','tags'].includes(h)) continue;\n      if (!out.includes(h)) out.push(h);\n    }\n  }\n  return out;\n}\n\nasync function lookup(handle) {\n  const fields = `business_discovery.username(${handle})`\n    + `{id,username,name,biography,website,followers_count,follows_count,media_count}`;\n  const url = `${GRAPH}/${IG_USER}?fields=${encodeURIComponent(fields)}`\n            + `&access_token=${encodeURIComponent(IG_TOKEN)}`;\n  const res = await http({ method: 'GET', url, returnFullResponse: true, ignoreHttpStatusErrors: true, json: true });\n  if (res.statusCode < 200 || res.statusCode >= 300) {\n    // A handle that does not exist, is personal, or is private answers with\n    // an error here. That is a rejected candidate, never a failed run — most\n    // guesses SHOULD come back like this.\n    const b = res.body || {};\n    const err = (b.error && (b.error.message || b.error.type)) || `HTTP ${res.statusCode}`;\n    return { ok: false, error: String(err).slice(0, 200) };\n  }\n  const bd = res.body && res.body.business_discovery;\n  if (!bd || !bd.username) return { ok: false, error: 'no business_discovery payload' };\n  return { ok: true, acct: bd };\n}\n\n// ─── The pass ────────────────────────────────────────────────────────────\n// Sequential rather than parallel: a dozen rivals is not worth a concurrency\n// bug, and a rate-limited Graph answering 429 to half of them would silently\n// narrow the result without saying so.\n\nconst outcomes = [];\nlet resolved = 0, suggested = 0, notFound = 0;\n\nfor (const item of work) {\n  const record = { name: item.name, agenda_id: item.agenda_id };\n  try {\n    const query = [item.name, item.positioning, 'Saudi Arabia instagram'].filter(Boolean).join(' ');\n    let results = [];\n    try {\n      const r = await req({\n        __label: 'Tavily', method: 'POST', url: 'https://api.tavily.com/search',\n        body: { api_key: TAVILY, query, max_results: 6, search_depth: 'basic', topic: 'general' },\n        json: true,\n      });\n      results = (r && r.results) || [];\n    } catch (e) { record.search_error = String(e.message || e).slice(0, 160); }\n\n    const candidates = handlesFromSearch(results).slice(0, 4);\n    record.candidates = candidates;\n\n    let best = null;\n    for (const h of candidates) {\n      const got = await lookup(h);\n      if (!got.ok) continue;\n      const { score, reasons } = scoreCandidate(item, got.acct);\n      if (!best || score > best.score) best = { handle: got.acct.username || h, id: got.acct.id, score, reasons };\n      // A domain-backed match cannot be beaten; stop paying for more lookups.\n      if (score >= 0.95) break;\n    }\n\n    let patch;\n    if (best && best.score >= RESOLVE_AT) {\n      patch = { ig_handle: best.handle, ig_user_id: best.id || '', ig_confidence: best.score,\n                ig_status: 'resolved', ig_verified_at: new Date().toISOString() };\n      resolved += 1;\n      record.result = 'resolved'; record.handle = best.handle;\n      record.confidence = best.score; record.why = best.reasons;\n    } else if (best && best.score >= SUGGEST_AT) {\n      // Stored, but NOT verified. Downstream reads ig_status, never\n      // ig_handle on its own — that separation is what keeps a guess out of\n      // the snapshots while still giving a human something to accept.\n      patch = { ig_handle: best.handle, ig_user_id: '', ig_confidence: best.score,\n                ig_status: 'unresolved', ig_verified_at: null };\n      suggested += 1;\n      record.result = 'suggested'; record.handle = best.handle;\n      record.confidence = best.score; record.why = best.reasons;\n    } else {\n      patch = { ig_handle: '', ig_user_id: '', ig_confidence: best ? best.score : null,\n                ig_status: 'not_found', ig_verified_at: null };\n      notFound += 1;\n      record.result = 'not_found';\n      if (best) { record.confidence = best.score; record.why = best.reasons; }\n    }\n\n    await req({\n      __label: 'Supabase', method: 'PATCH',\n      url: `${SUPA_URL}/rest/v1/research_agenda?id=eq.${item.agenda_id}&workspace_id=eq.${wsId}`,\n      headers: sHeaders, body: patch, json: true,\n    });\n  } catch (e) {\n    // One rival's failure must not cost the other eleven their results.\n    record.result = 'error';\n    record.error = String((e && e.message) || e).slice(0, 200);\n  }\n  outcomes.push(record);\n}\n\nreturn [{ json: {\n  ok: true, skipped: false, workspace_id: wsId,\n  seeded: inp.seeded || 0, deferred: inp.deferred || 0,\n  resolved, suggested, not_found: notFound,\n  outcomes,\n} }];\n"
+      },
+      "id": "59818ea5-796f-5c62-9ac8-4a2d27171ad3",
+      "name": "Resolve: Find Handles",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "160a9e71-e998-57db-8183-0bd12570d771",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        880,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "647cd3b1-b32f-565e-949f-ed46268a1705",
+      "name": "Respond: Skipped",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        660,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Webhook Secret Guard",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resolve: Seed Agenda": {
+      "main": [
+        [
+          {
+            "node": "Anything to resolve?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Anything to resolve?": {
+      "main": [
+        [
+          {
+            "node": "Resolve: Find Handles",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond: Skipped",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resolve: Find Handles": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook Secret Guard": {
+      "main": [
+        [
+          {
+            "node": "Resolve: Seed Agenda",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [],
+  "id": "IAiUC3KLHJkALtaJ"
+}

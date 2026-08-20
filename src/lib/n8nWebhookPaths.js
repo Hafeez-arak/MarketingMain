@@ -46,4 +46,8 @@ export const WEBHOOK_PATHS = {
   zernioDashboard:  'arak-zernio-dashboard',
   insightsReview:   'arak-insights-review',
   brandResearch:    'arak-brand-research',
+  // Research agent. `researchResolve` finds and verifies competitors'
+  // Instagram handles — the step the whole competitor board depends on, since
+  // the Brand Brain holds zero handles today.
+  researchResolve:  'arak-research-resolve',
 }
