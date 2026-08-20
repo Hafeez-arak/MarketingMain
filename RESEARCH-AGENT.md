@@ -709,7 +709,22 @@ list; it simply stops being a place you *start* something.
    there is already a competitor board with real numbers before stage 1
    exists. 23 tests, including a mutation check that the hidden-likes rule
    actually bites.
-4. **Stages 1–5** as one n8n workflow, async, with the failure writes.
+4. ~~**Stages 1–5**~~ — **done 2026-08-20.** `Run: Investigate` on the same
+   workflow: plan → bounded tool loop (`web_search`, `fetch_page`) → reflect →
+   synthesise, then persists findings, proposed rules and proposed agenda
+   questions. Properly async now — the webhook responds the moment the run row
+   exists and execution continues down the chain.
+
+   Two properties it is built around, both mutation-tested:
+   - **The measured numbers survive anything.** No key, unreachable model,
+     unparseable output, an exception — the run still completes with Stage 0's
+     board plus a note saying what was lost. A failed investigation never
+     costs the user their numbers.
+   - **Citations are checked, not trusted.** Every URL a tool returned is
+     remembered; the model's sources are filtered against that set. A finding
+     that loses all its sources is marked uncited and said out loud; a
+     proposed *rule* that loses all its sources is not offered at all, because
+     a rule steers every future generation.
 5. **The page** — brief rendering + run history + agenda (with handle
    correction), reusing `ProposedRule`. Insights' two buttons become one link
    here in the same change, so there is never a window with three research

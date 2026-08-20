@@ -113,12 +113,15 @@ describe('Run: Gather — what it will and will not measure', () => {
     expect(decodeURIComponent(read.query)).toContain('ig_status=in.(resolved,human_set)')
   })
 
-  it('completes with an honest empty report when nothing is verified yet', async () => {
+  it('hands off to the investigation even when nothing is verified yet', async () => {
+    // Not a dead end: market and trend research needs no rival at all, and a
+    // brand with nothing verified is the one that needs it most.
     const pg = new StubPostgrest({ research_agenda: [], research_runs: [runRow()] })
     const { out } = await runCodeNode(GATHER, { env: ENV, input: gatherInput(), postgrest: pg, routes: graph({}) })
     expect(out.ok).toBe(true)
-    expect(pg.tables.research_runs[0].status).toBe('complete')   // never left running
-    expect(pg.tables.research_runs[0].report.quiet_week).toBe(true)
+    expect(out.proceed).toBe(true)
+    expect(pg.tables.research_runs[0].stage).toBe('investigate')
+    expect(pg.tables.research_runs[0].report.unanswered[0]).toMatch(/no competitor has a verified/i)
   })
 
   it('records a competitor it could not read as web_only, and still finishes', async () => {
@@ -126,7 +129,7 @@ describe('Run: Gather — what it will and will not measure', () => {
     const { out } = await runCodeNode(GATHER, { env: ENV, input: gatherInput(), postgrest: pg, routes: graph({}) })
     expect(out.ok).toBe(true)
     expect(pg.tables.competitor_snapshots[0].data_source).toBe('web_only')
-    expect(pg.tables.research_runs[0].status).toBe('complete')
+    expect(pg.tables.research_runs[0].stage).toBe('investigate')
     expect(pg.tables.research_runs[0].report.unanswered[0]).toMatch(/could not read technolight/i)
   })
 
@@ -392,5 +395,182 @@ describe('Run: Gather — vs_us cannot divide by zero', () => {
   it('still compares normally once our account has real engagement', async () => {
     const card = await withSelf(5000, 25)
     expect(card.vs_us).toBe('+120%')
+  })
+})
+
+// ─── Run: Investigate ──────────────────────────────────────────────────────
+// The model stages. Two properties matter more than anything the model says:
+// the measured numbers must survive whatever goes wrong here, and a citation
+// the model did not actually retrieve must never reach the database.
+
+const INVESTIGATE = loadCodeNode('Arak Lighting – Research Run', 'Run: Investigate')
+
+const INV_ENV = { ...ENV, ANTHROPIC_API_KEY: 'stub-anthropic', TAVILY_API_KEY: 'stub-tavily' }
+
+const GATHERED = {
+  headline: 'First measurement of 1 competitor.',
+  baseline: true, quiet_week: false,
+  period: { start: '2026-08-13', end: '2026-08-20', days: 7 },
+  movements: [],
+  competitor_board: [{ name: 'Huda Lighting', handle: 'hudalighting', followers: 16662,
+    posts_per_week: 2, engagement_per_1k: 3.87, format_mix: { VIDEO: 0.5 }, sample_size: 2, top_posts: [] }],
+  market: [], gaps: [], proposed_rules: [], proposed_ideas: [], agenda_changes: [],
+  unanswered: [], sources: [], stage_reached: 'gather',
+}
+
+const invInput = (over = {}) => ({
+  workspace_id: WS, run_id: RUN, report: GATHERED,
+  brand_name: 'Arak Lighting', brand_descriptor: 'an architectural lighting supplier in Riyadh',
+  ...over,
+})
+
+// A scripted Anthropic: each element is one response, returned in order.
+function anthropic(script) {
+  let i = 0
+  return ['api.anthropic.com', async () => {
+    const r = script[Math.min(i++, script.length - 1)]
+    return { statusCode: 200, body: { ...r, usage: { input_tokens: 100, output_tokens: 50 } } }
+  }]
+}
+const say = obj => ({ stop_reason: 'end_turn', content: [{ type: 'text', text: JSON.stringify(obj) }] })
+const useTool = (name, input, id = 't1') => ({ stop_reason: 'tool_use', content: [{ type: 'tool_use', id, name, input }] })
+
+function tavily(results) {
+  return ['api.tavily.com', async () => ({ statusCode: 200, body: { answer: 'stub', results } })]
+}
+
+const invTables = (over = {}) => ({
+  research_runs: [{ id: RUN, workspace_id: WS, status: 'running', stage: 'investigate' }],
+  research_agenda: [{ id: 'q1', workspace_id: WS, kind: 'question', status: 'active', subject: 'Are rivals leaning into Reels?', why: '' }],
+  brand_memory: [],
+  ...over,
+})
+
+describe('Run: Investigate — the numbers survive whatever happens', () => {
+  it('completes with the measured report when the model key is missing', async () => {
+    const pg = new StubPostgrest(invTables())
+    const { out } = await runCodeNode(INVESTIGATE, {
+      env: { ...INV_ENV, ANTHROPIC_API_KEY: '' }, input: invInput(), postgrest: pg, routes: [],
+    })
+    expect(out.ok).toBe(true)
+    expect(out.investigated).toBe(false)
+    const run = pg.tables.research_runs[0]
+    expect(run.status).toBe('complete')
+    expect(run.report.competitor_board).toHaveLength(1)   // Stage 0's work kept
+    expect(run.report.unanswered.join(' ')).toMatch(/ANTHROPIC_API_KEY is not set/)
+  })
+
+  it('completes with the measured report when the model returns unparseable output', async () => {
+    const pg = new StubPostgrest(invTables())
+    const { out } = await runCodeNode(INVESTIGATE, {
+      env: INV_ENV, input: invInput(), postgrest: pg,
+      routes: [anthropic([{ stop_reason: 'end_turn', content: [{ type: 'text', text: 'I am afraid I cannot do that.' }] }]), tavily([])],
+    })
+    expect(out.ok).toBe(true)
+    expect(pg.tables.research_runs[0].status).toBe('complete')
+    expect(pg.tables.research_runs[0].report.competitor_board).toHaveLength(1)
+    expect(pg.tables.research_runs[0].report.unanswered.join(' ')).toMatch(/could not be parsed/i)
+  })
+
+  it('refuses to research a brand with no descriptor rather than searching for nothing', async () => {
+    const pg = new StubPostgrest({ ...invTables(), brand_profile: [{ workspace_id: WS }] })
+    const { out } = await runCodeNode(INVESTIGATE, {
+      env: INV_ENV, input: invInput({ brand_descriptor: '' }), postgrest: pg, routes: [],
+    })
+    expect(out.ok).toBe(true)
+    expect(pg.tables.research_runs[0].report.unanswered.join(' ')).toMatch(/no descriptor/i)
+  })
+})
+
+describe('Run: Investigate — citations are checked, not trusted', () => {
+  const REAL = 'https://example.com/real-article'
+  const FAKE = 'https://example.com/never-retrieved'
+
+  const runWith = async (reportObj) => {
+    const pg = new StubPostgrest(invTables())
+    const { out } = await runCodeNode(INVESTIGATE, {
+      env: INV_ENV, input: invInput(), postgrest: pg,
+      routes: [
+        anthropic([useTool('web_search', { query: 'lighting trends' }), say(reportObj)]),
+        tavily([{ title: 'Real', url: REAL, content: 'something true' }]),
+      ],
+    })
+    return { pg, out }
+  }
+
+  it('strips a source URL the model never actually retrieved', async () => {
+    const { pg } = await runWith({
+      headline: 'x', quiet_week: false,
+      market: [{ finding: 'A real one', sources: [{ url: REAL }, { url: FAKE }], confidence: 0.6 }],
+    })
+    const finding = pg.tables.research_findings[0]
+    expect(finding.sources.map(s => s.url)).toEqual([REAL])
+  })
+
+  it('does NOT propose a rule whose only source was invented', async () => {
+    // A rule steers every future generation. One with nothing behind it must
+    // not even be offered for approval.
+    const { pg } = await runWith({
+      headline: 'x', quiet_week: false, market: [],
+      proposed_rules: [{ rule: 'Do a thing', scope: 'trend', sources: [FAKE], confidence: 0.9 }],
+    })
+    expect(pg.tables.brand_memory || []).toHaveLength(0)
+  })
+
+  it('keeps a rule whose source is real, and only ever as proposed', async () => {
+    const { pg } = await runWith({
+      headline: 'x', quiet_week: false, market: [],
+      proposed_rules: [{ rule: 'Lead Riyadh launches with a Reel', scope: 'trend', sources: [REAL], confidence: 0.7 }],
+    })
+    expect(pg.tables.brand_memory).toHaveLength(1)
+    expect(pg.tables.brand_memory[0]).toMatchObject({ status: 'proposed', source: 'research', scope: 'trend' })
+  })
+
+  it('says out loud when a finding could not be traced to anything retrieved', async () => {
+    const { pg } = await runWith({
+      headline: 'x', quiet_week: false,
+      market: [{ finding: 'Unsupported claim', sources: [FAKE], confidence: 0.9 }],
+    })
+    expect(pg.tables.research_runs[0].report.unanswered.join(' ')).toMatch(/could not be traced/i)
+  })
+})
+
+describe('Run: Investigate — bounds and boundaries', () => {
+  it('stops calling tools once the budget is spent', async () => {
+    const pg = new StubPostgrest(invTables())
+    // A model that would loop forever if nothing stopped it.
+    const { out } = await runCodeNode(INVESTIGATE, {
+      env: INV_ENV, input: invInput(), postgrest: pg,
+      routes: [anthropic([useTool('web_search', { query: 'again' })]), tavily([])],
+    })
+    expect(out.ok).toBe(true)
+    expect(out.investigated === true || out.investigated === false).toBe(true)
+    const searchCalls = pg.log.length
+    expect(searchCalls).toBeLessThan(200)   // it terminated at all
+  })
+
+  it('proposes an agenda change rather than applying it', async () => {
+    const pg = new StubPostgrest(invTables())
+    await runCodeNode(INVESTIGATE, {
+      env: INV_ENV, input: invInput(), postgrest: pg,
+      routes: [
+        anthropic([say({ headline: 'x', quiet_week: true, market: [],
+          agenda_changes: [{ action: 'add', subject: 'Track Ramadan campaign timing', why: 'seasonal' }] })]),
+        tavily([]),
+      ],
+    })
+    const added = pg.tables.research_agenda.find(a => a.subject === 'Track Ramadan campaign timing')
+    expect(added).toMatchObject({ status: 'proposed', created_by: 'agent', kind: 'question' })
+  })
+
+  it('never writes to Brand Brain content', async () => {
+    const pg = new StubPostgrest(invTables())
+    await runCodeNode(INVESTIGATE, {
+      env: INV_ENV, input: invInput(), postgrest: pg,
+      routes: [anthropic([say({ headline: 'x', quiet_week: true, market: [] })]), tavily([])],
+    })
+    const forbidden = pg.log.filter(c => c.method !== 'GET' &&
+      /^(brand_profile|brand_fields|brand_sections|brand_directory)/.test(c.table))
+    expect(forbidden).toEqual([])
   })
 })
