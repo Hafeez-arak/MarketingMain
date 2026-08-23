@@ -209,6 +209,88 @@ describe('connect_url', () => {
   })
 })
 
+// ── Headless page selection (the flow that hung on the first live connect) ──
+describe('selection', () => {
+  const PAGE = { id: 'pg_1', name: 'Arak Lighting', username: 'arak', category: 'Brand' }
+  const pgWith = () => db({ workspace: { id: WS, name: 'Arak', zernio_profile_id: PROFILE } })
+
+  // Captures the exact request Zernio received, because the bug was entirely in
+  // the request: wrong endpoint, wrong place for the token.
+  function withSelect({ pages = [PAGE], onPost = () => ({ statusCode: 200, body: { redirect_url: 'x' } }) } = {}) {
+    const seen = { get: null, post: null }
+    const routes = [
+      ['/connect/facebook/select-page', async ({ method, url, headers, body }) => {
+        if (method === 'POST') { seen.post = { url, headers, body }; return onPost() }
+        seen.get = { url, headers }
+        return { statusCode: 200, body: { pages } }
+      }],
+      ['/api/v1/accounts', async () => ({ statusCode: 200, body: { accounts: [] } })],
+    ]
+    return { routes, seen }
+  }
+
+  const cb = {
+    action: 'selection_options', workspace_id: WS, platform: 'instagram',
+    temp_token: 'tt_1', connect_token: 'ct_1', profile_id: PROFILE,
+  }
+
+  // Instagram connects THROUGH Facebook — the endpoint is facebook/select-page,
+  // not anything with 'instagram' in it. Using the callback's step value
+  // ('select_account') as a path is what hit a route that does not exist and
+  // left the picker spinning.
+  it('lists pages from the facebook/select-page endpoint', async () => {
+    const { routes, seen } = withSelect()
+    const { out } = await run(cb, { postgrest: pgWith(), routes })
+
+    expect(out.ok).toBe(true)
+    expect(out.options).toHaveLength(1)
+    expect(seen.get.url).toContain('/connect/facebook/select-page')
+  })
+
+  // The short-lived connect token authenticates as a HEADER, not a query
+  // param. Sent as a query param (the old assumption) it authorised nothing.
+  it('sends the connect token as the X-Connect-Token header', async () => {
+    const { routes, seen } = withSelect()
+    await run(cb, { postgrest: pgWith(), routes })
+
+    expect(seen.get.headers['X-Connect-Token']).toBe('ct_1')
+    expect(seen.get.url).not.toContain('ct_1')
+  })
+
+  it('refuses without the connect token rather than calling a route that will reject it', async () => {
+    const { routes, seen } = withSelect()
+    const { out } = await run({ ...cb, connect_token: '' }, { postgrest: pgWith(), routes })
+
+    expect(out.ok).toBe(false)
+    expect(out.error).toMatch(/connect_token/)
+    expect(seen.get).toBeNull()
+  })
+
+  // The profile in the callback must match the one this workspace holds, or a
+  // crossed browser wire would attach an account to the wrong tenant.
+  it('refuses a callback whose profile is not this workspace\'s', async () => {
+    const { routes, seen } = withSelect()
+    const { out } = await run({ ...cb, profile_id: 'someone_elses_profile' },
+      { postgrest: pgWith(), routes })
+
+    expect(out.ok).toBe(false)
+    expect(out.error).toMatch(/different workspace/i)
+    expect(seen.get).toBeNull()
+  })
+
+  it('completes by POSTing the chosen pageId, then re-lists accounts', async () => {
+    const { routes, seen } = withSelect()
+    const { out } = await run(
+      { ...cb, action: 'selection_complete', selection: PAGE },
+      { postgrest: pgWith(), routes })
+
+    expect(out.ok).toBe(true)
+    expect(seen.post.body.pageId).toBe('pg_1')
+    expect(seen.post.body.profileId).toBe(PROFILE)
+    expect(seen.post.headers['X-Connect-Token']).toBe('ct_1')
+  })
+})
+
 // ── Disconnect ───────────────────────────────────────────────────────────
 describe('disconnect', () => {
   const MINE = { _id: 'acc_mine', platform: 'instagram', profileId: PROFILE }

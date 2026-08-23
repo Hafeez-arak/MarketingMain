@@ -8246,48 +8246,77 @@ try {
                       state:(res && res.state) || '', headless } }];
   }
 
-  // ---- headless step 2: what can this user pick? ----
-  if (action === 'selection_options'){
-    const tempToken = String(body.temp_token || '').trim();
-    const step      = String(body.step || '').trim();
-    if (!tempToken) throw new Error('temp_token is required.');
+  // ---- headless selection (step 2 + 3) ----
+  //
+  // The shape here is Zernio's, verified against a live Instagram connect on
+  // 2026-08-23 — and it is NOT what the guide's prose implied, which is why
+  // the first attempt hung on a spinner:
+  //
+  //   • Instagram connects THROUGH Facebook, so the endpoint family is
+  //     `connect/facebook/select-page`, not `connect/instagram/...`. The
+  //     callback's step value ('select_account') is a discriminator, not a
+  //     path — using it as one hit a route that does not exist.
+  //   • The short-lived connect token rides in an `X-Connect-Token` HEADER,
+  //     alongside the API-key Bearer. tempToken and profileId are query params
+  //     on the GET and body fields on the POST. Sending the connect token as a
+  //     query param (the old code's assumption) authorised nothing.
+  //   • Completion is POST with `pageId`, the id of the chosen page.
+  //
+  // Mapped by platform so LinkedIn (connect/linkedin/select-organization) and
+  // the rest slot in without touching the call sites.
+  const SELECTION = {
+    instagram: { path: 'connect/facebook/select-page', listKey: 'pages', idKey: 'pageId' },
+  };
+
+  if (action === 'selection_options' || action === 'selection_complete'){
     if (!CONNECTABLE.includes(platform)) throw new Error(`${platform || 'That platform'} cannot be connected yet.`);
+    const spec = SELECTION[platform];
+    if (!spec) throw new Error(`No selection step is defined for ${platform}.`);
 
-    // `step` comes back from Zernio's own callback and names the endpoint to
-    // call. Passed through rather than hardcoded per platform, so a platform
-    // that grows a second selection stage does not need this node changed.
-    const path = step || `connect/${platform}/pages`;
-    const res  = await req({ method:'GET',
-      url:`${ZBASE}/${path.replace(/^\/+/, '')}?tempToken=${encodeURIComponent(tempToken)}`,
-      headers:zHeaders, json:true });
+    const tempToken   = String(body.temp_token || '').trim();
+    const connectToken= String(body.connect_token || '').trim();
+    const cbProfileId = String(body.profile_id || '').trim();
+    if (!tempToken)    throw new Error('temp_token is required.');
+    if (!connectToken) throw new Error('connect_token is required.');
 
-    const options = (res && (res.pages || res.profiles || res.options || res.accounts)) || [];
-    return [{ json: { ok:true, options } }];
-  }
+    // The profile from the callback must be THIS workspace's. Zernio issued the
+    // connect flow against a profileId; if it does not match the one we hold
+    // for this workspace, the browser has crossed a wire and completing the
+    // selection would attach an account to the wrong tenant.
+    const profileId = await ensureProfile();
+    if (cbProfileId && cbProfileId !== profileId){
+      throw new Error('This connection was started for a different workspace. Start again from this one.');
+    }
 
-  // ---- headless step 3: commit the pick ----
-  if (action === 'selection_complete'){
-    const tempToken = String(body.temp_token || '').trim();
+    // Both calls carry the connect token as a header, next to the API key.
+    const selHeaders = { ...zHeaders, 'X-Connect-Token': connectToken };
+
+    if (action === 'selection_options'){
+      const qs = qsEncode({ profileId, tempToken });
+      const res = await req({ method:'GET', url:`${ZBASE}/${spec.path}?${qs}`,
+        headers:selHeaders, json:true });
+      const options = (res && (res[spec.listKey] || res.options || res.accounts)) || [];
+      return [{ json: { ok:true, options } }];
+    }
+
+    // selection_complete
     const selection = body.selection;
-    const step      = String(body.step || '').trim();
-    if (!tempToken)  throw new Error('temp_token is required.');
-    if (!selection)  throw new Error('selection is required.');
-    if (!CONNECTABLE.includes(platform)) throw new Error(`${platform || 'That platform'} cannot be connected yet.`);
+    if (!selection) throw new Error('selection is required.');
+    const chosenId = String((selection && (selection.id || selection._id || selection.pageId)) || selection || '').trim();
+    if (!chosenId) throw new Error('The chosen option has no id.');
 
-    const path = step || `connect/${platform}/pages`;
-    const res  = await req({ method:'POST', url:`${ZBASE}/${path.replace(/^\/+/, '')}`,
-      headers:zHeaders, body:{ tempToken, ...(typeof selection === 'object' ? selection : { id: selection }) },
+    await req({ method:'POST', url:`${ZBASE}/${spec.path}`, headers:selHeaders,
+      body:{ profileId, [spec.idKey]: chosenId, tempToken,
+             ...(body.user_profile ? { userProfile: body.user_profile } : {}) },
       json:true });
 
-    // Re-list rather than trusting the selection response to describe the new
+    // Re-list rather than trusting the completion response to describe the new
     // account: this is the moment social_accounts must become correct, and one
     // authoritative read is cheaper to reason about than merging two shapes.
-    const profileId = await ensureProfile();
-    const accounts  = await listAccounts(profileId);
+    const accounts = await listAccounts(profileId);
     await mirrorAccounts(profileId, accounts);
 
-    return [{ json: { ok:true, profile_id:profileId, accounts,
-                      account:(res && res.account) || null } }];
+    return [{ json: { ok:true, profile_id:profileId, accounts } }];
   }
 
   // ---- disconnect ----

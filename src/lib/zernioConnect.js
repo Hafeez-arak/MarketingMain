@@ -75,38 +75,61 @@ export async function startConnect(workspaceId, platform) {
   return { authUrl: res.auth_url, headless: res.headless === true, state: res.state || '' }
 }
 
-// Step 2 (Instagram only, for now): after OAuth, Zernio sends the browser back
-// with a tempToken and the user still has to choose WHICH page/account. Read
-// those off the callback URL.
+// Step 2: after OAuth, Zernio sends the browser back to redirect_url with the
+// tokens needed to finish. Read them all off the URL.
 //
-// `userProfile` arrives URL-encoded JSON. It is decoded defensively: a
-// malformed value should degrade to "no profile shown", not throw and strand
-// the user on a blank callback screen with a valid token they can't use.
+// The real callback (verified live 2026-08-23) carries FOUR things that matter:
+// `tempToken` (a Facebook access token), `connect_token` (Zernio's short-lived
+// 15-minute headless token — the one the select-page endpoints authenticate
+// with), `profileId`, and `step`. It does NOT always carry `userProfile`, so
+// that is optional. An earlier version read only tempToken and step, which is
+// why the picker hung: the completion endpoints reject a call without the
+// connect token.
+//
+// `userProfile`, when present, is URL-encoded JSON. Decoded defensively: a
+// malformed value should degrade to "no profile passed", not throw and strand
+// the user on a callback screen holding valid tokens they cannot use.
 export function readConnectCallback(search = window.location.search) {
   const q = new URLSearchParams(search)
-  const tempToken = q.get('tempToken') || ''
-  if (!tempToken) return null
+  const tempToken   = q.get('tempToken') || ''
+  const connectToken = q.get('connect_token') || ''
+  // A callback is a callback only if it carries the tokens to finish one.
+  // ?connected=1 alone (the post-completion landing) must not reopen the picker.
+  if (!tempToken || !connectToken) return null
   let userProfile = null
   try {
     const raw = q.get('userProfile')
     if (raw) userProfile = JSON.parse(decodeURIComponent(raw))
   } catch { /* a missing name is survivable; a thrown callback is not */ }
-  return { tempToken, step: q.get('step') || '', userProfile }
+  return {
+    tempToken,
+    connectToken,
+    profileId: q.get('profileId') || '',
+    step: q.get('step') || '',
+    platform: q.get('platform') || '',
+    userProfile,
+  }
 }
 
-export async function fetchSelectionOptions(workspaceId, platform, { tempToken, step }) {
+export async function fetchSelectionOptions(workspaceId, platform, cb) {
   const res = await call({
     action: 'selection_options',
-    workspace_id: workspaceId, platform, temp_token: tempToken, step,
+    workspace_id: workspaceId, platform,
+    temp_token: cb.tempToken, connect_token: cb.connectToken,
+    profile_id: cb.profileId, step: cb.step,
   })
   if (res.error) return { error: res.error, options: [] }
   return { options: res.options || [] }
 }
 
-export async function completeSelection(workspaceId, platform, { tempToken, step, selection }) {
+export async function completeSelection(workspaceId, platform, { cb, selection }) {
   const res = await call({
     action: 'selection_complete',
-    workspace_id: workspaceId, platform, temp_token: tempToken, step, selection,
+    workspace_id: workspaceId, platform,
+    temp_token: cb.tempToken, connect_token: cb.connectToken,
+    profile_id: cb.profileId, step: cb.step,
+    user_profile: cb.userProfile || undefined,
+    selection,
   })
   if (res.error) return { error: res.error }
   return { accounts: res.accounts || [], account: res.account || null }

@@ -12,21 +12,46 @@ describe('readConnectCallback', () => {
     expect(readConnectCallback('?connected=1')).toBeNull()
   })
 
-  it('reads the temp token and decodes the user profile', () => {
-    const profile = encodeURIComponent(JSON.stringify({ name: 'Arak Lighting' }))
-    const got = readConnectCallback(`?tempToken=tt_1&step=connect/instagram/pages&userProfile=${profile}`)
+  // The tokens are BOTH required. A callback carrying only tempToken (the old
+  // assumption) cannot finish the selection — the select-page endpoints
+  // authenticate with connect_token — so treating it as a callback is what
+  // left the picker spinning. Without both, it is not a callback.
+  it('returns null without the connect token', () => {
+    expect(readConnectCallback('?tempToken=tt_1&step=select_account')).toBeNull()
+  })
+
+  it('reads both tokens plus the profile id, step and platform', () => {
+    const got = readConnectCallback(
+      '?tempToken=tt_1&connect_token=ct_1&profileId=prof_9&step=select_account&platform=instagram')
 
     expect(got.tempToken).toBe('tt_1')
-    expect(got.step).toBe('connect/instagram/pages')
+    expect(got.connectToken).toBe('ct_1')
+    expect(got.profileId).toBe('prof_9')
+    expect(got.step).toBe('select_account')
+    expect(got.platform).toBe('instagram')
+  })
+
+  it('decodes userProfile when present', () => {
+    const profile = encodeURIComponent(JSON.stringify({ name: 'Arak Lighting' }))
+    const got = readConnectCallback(`?tempToken=tt_1&connect_token=ct_1&userProfile=${profile}`)
     expect(got.userProfile).toEqual({ name: 'Arak Lighting' })
   })
 
-  // A malformed userProfile must degrade to "no name shown", never throw: the
-  // token is still good and the user can still finish connecting.
-  it('survives a malformed userProfile and keeps the token', () => {
-    const got = readConnectCallback('?tempToken=tt_2&userProfile=%7Bnot-json')
+  // The real Instagram callback carried no userProfile at all, so its absence
+  // is normal, not an error.
+  it('treats a missing userProfile as null, not a failure', () => {
+    const got = readConnectCallback('?tempToken=tt_1&connect_token=ct_1')
+    expect(got.tempToken).toBe('tt_1')
+    expect(got.userProfile).toBeNull()
+  })
+
+  // A malformed userProfile must degrade to null, never throw: the tokens are
+  // still good and the user can still finish connecting.
+  it('survives a malformed userProfile and keeps the tokens', () => {
+    const got = readConnectCallback('?tempToken=tt_2&connect_token=ct_2&userProfile=%7Bnot-json')
 
     expect(got.tempToken).toBe('tt_2')
+    expect(got.connectToken).toBe('ct_2')
     expect(got.userProfile).toBeNull()
   })
 })

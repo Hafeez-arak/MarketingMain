@@ -65,35 +65,67 @@ function AccountRow({ account, onDisconnect, disconnecting }) {
 // Facebook pages the account can publish as; until one is chosen the
 // connection does not exist. Rendering it here rather than sending the user to
 // Zernio's own hosted picker is the whole reason the flow asks for headless.
-function SelectionModal({ open, platform, options, busy, onPick, onCancel }) {
+// The Instagram second step: choose which Facebook Page (and the Instagram
+// account behind it) to publish as.
+//
+// `loading` and `loaded` are separate on purpose. "Fetching" and "fetched but
+// nothing eligible" are different states, and collapsing them into one
+// spinner is what left the first live connect spinning with no way out. While
+// fetching → spinner; loaded and empty → an explanation; loaded with options →
+// the list; finishing → a spinner on the chosen row.
+function SelectionModal({ open, platform, options, loading, finishing, onPick, onCancel }) {
   const label = PLATFORM_META[platform]?.label || platform
   return (
-    <Modal open={open} onClose={onCancel} title={`Finish connecting ${label}`}>
+    <Modal open={open} onClose={onCancel} title={`Finish connecting ${label}`} width="max-w-md">
       <p className="text-sm text-text-secondary mb-4">
         {platform === 'instagram'
-          ? 'Choose which Instagram account to publish as. It has to be a professional (Business or Creator) account linked to a Facebook Page.'
+          ? 'Choose which account to publish as. It must be a professional (Business or Creator) Instagram account linked to a Facebook Page.'
           : 'Choose which profile to publish as.'}
       </p>
-      {busy && <div className="py-6 flex justify-center"><Spinner /></div>}
-      {!busy && options.length === 0 && (
-        <p className="text-sm text-text-secondary">
-          No eligible accounts came back. Instagram only exposes professional accounts
-          linked to a Facebook Page — a personal account will not appear here.
-        </p>
+
+      {loading && (
+        <div className="py-10 flex flex-col items-center gap-2 text-text-secondary">
+          <Spinner />
+          <span className="text-xs">Loading your accounts…</span>
+        </div>
       )}
-      {!busy && options.map(opt => {
-        const id   = opt.id || opt._id || opt.pageId || opt.value
-        const name = opt.name || opt.username || opt.label || id
-        return (
-          <button key={id} onClick={() => onPick(opt)}
-            className="w-full text-left flex items-center gap-3 p-3 border border-border hover:bg-surface-subtle transition-colors mb-2">
-            {opt.picture
-              ? <img src={opt.picture} alt="" className="w-8 h-8 rounded-full object-cover" />
-              : <Avatar name={name} size="sm" />}
-            <span className="text-sm font-medium text-text">{name}</span>
-          </button>
-        )
-      })}
+
+      {!loading && options.length === 0 && (
+        <div className="py-6 px-4 border border-border bg-surface-subtle/50 text-center">
+          <p className="text-sm text-text mb-1">No eligible accounts came back.</p>
+          <p className="text-xs text-text-secondary">
+            Instagram only exposes professional (Business or Creator) accounts that
+            are linked to a Facebook Page. A personal account will not appear here —
+            convert it in the Instagram app, then reconnect.
+          </p>
+        </div>
+      )}
+
+      {!loading && options.length > 0 && (
+        <div className="space-y-2 max-h-[50vh] overflow-y-auto">
+          {options.map(opt => {
+            const id   = opt.id || opt._id || opt.pageId || opt.value
+            const name = opt.name || opt.username || opt.label || id
+            const sub  = opt.username && opt.username !== name ? `@${opt.username}`
+                       : opt.category || ''
+            return (
+              <button key={id} onClick={() => onPick(opt)} disabled={finishing}
+                className="w-full text-left flex items-center gap-3 p-3 border border-border hover:border-amber-600 hover:bg-amber-50 transition-colors disabled:opacity-50">
+                {opt.picture
+                  ? <img src={opt.picture} alt="" className="w-9 h-9 rounded-full object-cover shrink-0" />
+                  : <Avatar name={name} size="sm" />}
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium text-text truncate">{name}</p>
+                  {sub && <p className="text-xs text-text-tertiary truncate">{sub}</p>}
+                </div>
+                {finishing
+                  ? <Spinner size="sm" />
+                  : <span className="text-text-tertiary text-lg leading-none">›</span>}
+              </button>
+            )
+          })}
+        </div>
+      )}
     </Modal>
   )
 }
@@ -155,7 +187,8 @@ export function ConnectAccounts({ platform, accounts, loading, error, refresh, c
         open={flow.phase === 'selecting' || flow.phase === 'finishing'}
         platform={platform}
         options={flow.options}
-        busy={flow.phase === 'finishing' || (flow.phase === 'selecting' && flow.options.length === 0 && !flow.error)}
+        loading={!flow.loaded && flow.phase === 'selecting'}
+        finishing={flow.phase === 'finishing'}
         onPick={flow.finish}
         onCancel={flow.cancel}
       />

@@ -76,6 +76,11 @@ export function useConnectFlow(platform, { onConnected } = {}) {
   const [phase, setPhase]     = useState('idle')   // idle | starting | selecting | finishing
   const [error, setError]     = useState('')
   const [options, setOptions] = useState([])
+  // Distinct from "options is empty" — `loaded` means the list HAS come back,
+  // which is what lets the modal tell "still fetching" apart from "fetched,
+  // nothing eligible". Conflating them is what made an empty result spin
+  // forever instead of saying so.
+  const [loaded, setLoaded]   = useState(false)
   const callback              = useRef(null)
 
   const start = useCallback(async () => {
@@ -95,7 +100,7 @@ export function useConnectFlow(platform, { onConnected } = {}) {
     const cb = callback.current
     if (!cb) return
     setPhase('finishing')
-    const res = await completeSelection(activeWorkspaceId, platform, { ...cb, selection })
+    const res = await completeSelection(activeWorkspaceId, platform, { cb, selection })
     if (res.error) { setError(res.error); setPhase('selecting'); return }
     setPhase('idle')
     setOptions([])
@@ -115,10 +120,15 @@ export function useConnectFlow(platform, { onConnected } = {}) {
     let cancelled = false
     ;(async () => {
       setPhase('selecting')
+      setLoaded(false)
       const res = await fetchSelectionOptions(activeWorkspaceId, platform, cb)
       if (cancelled) return
-      if (res.error) { setError(res.error); setPhase('idle'); return }
+      // A failed fetch closes the picker with a reason rather than leaving it
+      // to spin — the deadlock that hid the first live bug behind an endless
+      // spinner. On error the modal closes and the reason shows on the page.
+      if (res.error) { setError(res.error); setLoaded(true); setPhase('idle'); return }
       setOptions(res.options)
+      setLoaded(true)
       // Zernio can legitimately return exactly one choice (one Facebook page
       // backs the account). Asking someone to "choose" from a list of one is
       // pure ceremony, so that case completes itself.
@@ -131,11 +141,12 @@ export function useConnectFlow(platform, { onConnected } = {}) {
   const cancel = useCallback(() => {
     setPhase('idle')
     setOptions([])
+    setLoaded(false)
     setError('')
     window.history.replaceState({}, '', window.location.pathname)
   }, [])
 
-  return { phase, error, options, start, finish, cancel }
+  return { phase, error, options, loaded, start, finish, cancel }
 }
 
 // Disconnect, with the workspace id supplied for the caller. Kept out of
