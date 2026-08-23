@@ -80,15 +80,16 @@ export async function startConnect(workspaceId, platform) {
 //
 // The real callback (verified live 2026-08-23) carries FOUR things that matter:
 // `tempToken` (a Facebook access token), `connect_token` (Zernio's short-lived
-// 15-minute headless token — the one the select-page endpoints authenticate
-// with), `profileId`, and `step`. It does NOT always carry `userProfile`, so
-// that is optional. An earlier version read only tempToken and step, which is
-// why the picker hung: the completion endpoints reject a call without the
-// connect token.
+// 15-minute headless token — the one the select-account endpoints authenticate
+// with), `profileId`, and `step`. An earlier version read only tempToken and
+// step, which is why the picker hung: the completion endpoints reject a call
+// without the connect token.
 //
-// `userProfile`, when present, is URL-encoded JSON. Decoded defensively: a
-// malformed value should degrade to "no profile passed", not throw and strand
-// the user on a callback screen holding valid tokens they cannot use.
+// `userProfile` is read but NOT forwarded. Only Zernio's Facebook connect
+// endpoint takes one, and that endpoint connects a Facebook account; the
+// Instagram one does not accept the field. It stays parsed because the
+// callback can carry it and a malformed value must degrade to null rather
+// than throw and strand the user holding valid tokens they cannot use.
 export function readConnectCallback(search = window.location.search) {
   const q = new URLSearchParams(search)
   const tempToken   = q.get('tempToken') || ''
@@ -128,7 +129,6 @@ export async function completeSelection(workspaceId, platform, { cb, selection }
     workspace_id: workspaceId, platform,
     temp_token: cb.tempToken, connect_token: cb.connectToken,
     profile_id: cb.profileId, step: cb.step,
-    user_profile: cb.userProfile || undefined,
     selection,
   })
   if (res.error) return { error: res.error }

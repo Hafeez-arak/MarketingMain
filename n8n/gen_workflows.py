@@ -8248,24 +8248,54 @@ try {
 
   // ---- headless selection (step 2 + 3) ----
   //
-  // The shape here is Zernio's, verified against a live Instagram connect on
-  // 2026-08-23 — and it is NOT what the guide's prose implied, which is why
-  // the first attempt hung on a spinner:
+  // Endpoint, auth and body are Zernio's own, taken from its OpenAPI spec
+  // (docs.zernio.com/api/openapi) after two wrong guesses shipped:
   //
-  //   • Instagram connects THROUGH Facebook, so the endpoint family is
-  //     `connect/facebook/select-page`, not `connect/instagram/...`. The
-  //     callback's step value ('select_account') is a discriminator, not a
-  //     path — using it as one hit a route that does not exist.
+  //   • The endpoint is `connect/instagram/select-account`. Instagram DOES
+  //     authorise through Facebook, but `connect/facebook/select-page` is the
+  //     endpoint for connecting a FACEBOOK account — its POST creates a
+  //     `platform: facebook` account and its schema requires a `userProfile`
+  //     object our callback never carries, which is where the live connect
+  //     died on `Zernio 400: Invalid input: expected object, received
+  //     undefined`. Its GET happened to answer (it lists every Page the token
+  //     manages), so the picker filled in and only the final click failed.
+  //     select-account is the Instagram half of the same OAuth: same tokens,
+  //     `required: [profileId, pageId, tempToken]`, no userProfile, and it
+  //     returns only Pages that have a linked Instagram professional account.
+  //   • The callback's step value ('select_account') is a discriminator, not
+  //     a path. Using it as one hit a route that does not exist.
   //   • The short-lived connect token rides in an `X-Connect-Token` HEADER,
   //     alongside the API-key Bearer. tempToken and profileId are query params
   //     on the GET and body fields on the POST. Sending the connect token as a
-  //     query param (the old code's assumption) authorised nothing.
-  //   • Completion is POST with `pageId`, the id of the chosen page.
+  //     query param (an earlier assumption) authorised nothing.
   //
   // Mapped by platform so LinkedIn (connect/linkedin/select-organization) and
-  // the rest slot in without touching the call sites.
+  // the rest slot in without touching the call sites. `normalize` exists
+  // because each platform's list has its own shape and the picker should not
+  // have to know them: for Instagram the row the user reads is the linked
+  // Instagram account, while the id that must be POSTed is the PAGE's.
   const SELECTION = {
-    instagram: { path: 'connect/facebook/select-page', listKey: 'pages', idKey: 'pageId' },
+    instagram: {
+      path: 'connect/instagram/select-account',
+      listKey: 'pages',
+      idKey: 'pageId',
+      normalize: (p) => {
+        // Spec says snake_case; accept the camelCase spelling too rather than
+        // silently rendering a nameless row if Zernio ever changes it.
+        const ig = p.instagram_business_account || p.instagramBusinessAccount || {};
+        return {
+          id:       String(p.id || p.pageId || ''),
+          name:     String(ig.username || p.name || ''),
+          username: String(ig.username || ''),
+          // The Page name is the subtitle, not the title: someone picking here
+          // is choosing an Instagram account, and @handle is what they know it
+          // by. The Page is the thing they will forget they linked.
+          category: String(p.name || ''),
+          picture:  String(ig.profile_picture_url || ig.profilePictureUrl || ''),
+          instagram_account_id: String(ig.id || ''),
+        };
+      },
+    },
   };
 
   if (action === 'selection_options' || action === 'selection_complete'){
@@ -8295,7 +8325,16 @@ try {
       const qs = qsEncode({ profileId, tempToken });
       const res = await req({ method:'GET', url:`${ZBASE}/${spec.path}?${qs}`,
         headers:selHeaders, json:true });
-      const options = (res && (res[spec.listKey] || res.options || res.accounts)) || [];
+      const list = (res && (res[spec.listKey] || res.options || res.accounts)) || [];
+      // Deliberately NOT filtered to pages that carry an instagram_business_
+      // account. Zernio says it only returns eligible ones; if that ever stops
+      // being true, or the field is spelled differently, a filter here would
+      // empty the picker and tell the user they have no professional account —
+      // a lie that ends the flow. Showing the row instead means the worst case
+      // is Zernio refusing the completion with a reason.
+      const options = (Array.isArray(list) ? list : [])
+        .map(o => (spec.normalize ? spec.normalize(o || {}) : o))
+        .filter(o => o && o.id);
       return [{ json: { ok:true, options } }];
     }
 
@@ -8305,10 +8344,11 @@ try {
     const chosenId = String((selection && (selection.id || selection._id || selection.pageId)) || selection || '').trim();
     if (!chosenId) throw new Error('The chosen option has no id.');
 
+    // Exactly the three fields the spec marks required. `userProfile` is NOT
+    // sent: select-account does not accept it, and the endpoint that does
+    // (facebook/select-page) is the one that connects a Facebook account.
     await req({ method:'POST', url:`${ZBASE}/${spec.path}`, headers:selHeaders,
-      body:{ profileId, [spec.idKey]: chosenId, tempToken,
-             ...(body.user_profile ? { userProfile: body.user_profile } : {}) },
-      json:true });
+      body:{ profileId, [spec.idKey]: chosenId, tempToken }, json:true });
 
     // Re-list rather than trusting the completion response to describe the new
     // account: this is the moment social_accounts must become correct, and one

@@ -211,18 +211,43 @@ describe('connect_url', () => {
 
 // ── Headless page selection (the flow that hung on the first live connect) ──
 describe('selection', () => {
-  const PAGE = { id: 'pg_1', name: 'Arak Lighting', username: 'arak', category: 'Brand' }
+  // The shape Zernio's spec documents for connect/instagram/select-account:
+  // a Facebook Page carrying the Instagram account linked to it.
+  const PAGE = {
+    id: 'pg_1',
+    name: 'Lighting Arak',
+    access_token: 'page_tok',
+    instagram_business_account: {
+      id: 'ig_1', username: 'arak', profile_picture_url: 'https://cdn/ig.jpg',
+    },
+  }
   const pgWith = () => db({ workspace: { id: WS, name: 'Arak', zernio_profile_id: PROFILE } })
 
-  // Captures the exact request Zernio received, because the bug was entirely in
-  // the request: wrong endpoint, wrong place for the token.
-  function withSelect({ pages = [PAGE], onPost = () => ({ statusCode: 200, body: { redirect_url: 'x' } }) } = {}) {
-    const seen = { get: null, post: null }
+  // Captures the exact request Zernio received, because both bugs here were
+  // entirely in the request: wrong endpoint, wrong place for the token.
+  //
+  // The Facebook route is stubbed too, and every test asserts it stayed
+  // untouched. facebook/select-page is not a 404 — its GET answers with the
+  // same-looking page list, which is exactly why the wrong endpoint survived
+  // to the final click. A test that only checked the Instagram route would
+  // have passed against the broken code.
+  function withSelect({ pages = [PAGE], onPost = () => ({ statusCode: 200, body: { account: { accountId: 'acc_1' } } }) } = {}) {
+    const seen = { get: null, post: null, facebook: [] }
     const routes = [
-      ['/connect/facebook/select-page', async ({ method, url, headers, body }) => {
+      ['/connect/instagram/select-account', async ({ method, url, headers, body }) => {
         if (method === 'POST') { seen.post = { url, headers, body }; return onPost() }
         seen.get = { url, headers }
         return { statusCode: 200, body: { pages } }
+      }],
+      ['/connect/facebook/select-page', async ({ method, url }) => {
+        seen.facebook.push({ method, url })
+        // What the live API actually did to us: 400 on the POST because its
+        // schema requires a userProfile object the Instagram callback never
+        // carries.
+        if (method === 'POST') {
+          return { statusCode: 400, body: { error: 'Invalid input: expected object, received undefined' } }
+        }
+        return { statusCode: 200, body: { pages: [{ id: 'pg_1', name: 'Lighting Arak', category: 'Lighting shop' }] } }
       }],
       ['/api/v1/accounts', async () => ({ statusCode: 200, body: { accounts: [] } })],
     ]
@@ -234,17 +259,33 @@ describe('selection', () => {
     temp_token: 'tt_1', connect_token: 'ct_1', profile_id: PROFILE,
   }
 
-  // Instagram connects THROUGH Facebook — the endpoint is facebook/select-page,
-  // not anything with 'instagram' in it. Using the callback's step value
-  // ('select_account') as a path is what hit a route that does not exist and
-  // left the picker spinning.
-  it('lists pages from the facebook/select-page endpoint', async () => {
+  // Instagram authorises THROUGH Facebook, but the endpoint is Instagram's own
+  // — connect/instagram/select-account. facebook/select-page connects a
+  // FACEBOOK account and requires a userProfile object our callback never
+  // carries, which is what produced "Zernio 400: Invalid input: expected
+  // object, received undefined" on the first live completion.
+  it('lists pages from the instagram/select-account endpoint, never the facebook one', async () => {
     const { routes, seen } = withSelect()
     const { out } = await run(cb, { postgrest: pgWith(), routes })
 
     expect(out.ok).toBe(true)
     expect(out.options).toHaveLength(1)
-    expect(seen.get.url).toContain('/connect/facebook/select-page')
+    expect(seen.get.url).toContain('/connect/instagram/select-account')
+    expect(seen.facebook).toEqual([])
+  })
+
+  // The row names the Instagram account, because that is what the person is
+  // choosing; the Page is the subtitle. The id stays the PAGE's — that is what
+  // the completion POST takes.
+  it('shows the linked Instagram handle and keeps the page id for completion', async () => {
+    const { routes } = withSelect()
+    const { out } = await run(cb, { postgrest: pgWith(), routes })
+
+    expect(out.options[0]).toMatchObject({
+      id: 'pg_1', name: 'arak', username: 'arak',
+      category: 'Lighting Arak', picture: 'https://cdn/ig.jpg',
+      instagram_account_id: 'ig_1',
+    })
   })
 
   // The short-lived connect token authenticates as a HEADER, not a query
@@ -281,13 +322,42 @@ describe('selection', () => {
   it('completes by POSTing the chosen pageId, then re-lists accounts', async () => {
     const { routes, seen } = withSelect()
     const { out } = await run(
-      { ...cb, action: 'selection_complete', selection: PAGE },
+      { ...cb, action: 'selection_complete', selection: { id: 'pg_1', name: 'arak' } },
       { postgrest: pgWith(), routes })
 
     expect(out.ok).toBe(true)
+    expect(seen.post.url).toContain('/connect/instagram/select-account')
     expect(seen.post.body.pageId).toBe('pg_1')
     expect(seen.post.body.profileId).toBe(PROFILE)
     expect(seen.post.headers['X-Connect-Token']).toBe('ct_1')
+    expect(seen.facebook).toEqual([])
+  })
+
+  // Exactly the three fields the spec marks required, and nothing else. A
+  // userProfile here is the signature of the Facebook endpoint's schema, which
+  // is the wrong flow — sending one would mean we had drifted back to it.
+  it('sends only profileId, pageId and tempToken — no userProfile', async () => {
+    const { routes, seen } = withSelect()
+    await run({ ...cb, action: 'selection_complete', selection: { id: 'pg_1' },
+                user_profile: { id: 'u_1', name: 'Someone' } },
+      { postgrest: pgWith(), routes })
+
+    expect(Object.keys(seen.post.body).sort()).toEqual(['pageId', 'profileId', 'tempToken'])
+  })
+
+  // Zernio refusing the completion has to reach the person as a reason. The
+  // picker stays open on this path, so a silent failure is a button that does
+  // nothing at all.
+  it('surfaces a refused completion with Zernio\'s own reason', async () => {
+    const { routes } = withSelect({
+      onPost: () => ({ statusCode: 400, body: { error: 'Selected page has no linked Instagram professional account' } }),
+    })
+    const { out } = await run(
+      { ...cb, action: 'selection_complete', selection: { id: 'pg_1' } },
+      { postgrest: pgWith(), routes })
+
+    expect(out.ok).toBe(false)
+    expect(out.error).toMatch(/no linked Instagram professional account/)
   })
 })
 
