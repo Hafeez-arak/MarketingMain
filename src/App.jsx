@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { Routes, Route, useLocation } from 'react-router-dom'
+import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { AppProvider } from './store/appStore'
 import { useApp, actions } from './store/app'
 import { AuthProvider } from './store/AuthContext'
@@ -14,8 +14,7 @@ import { Signup } from './pages/auth/Signup'
 import { Onboarding } from './pages/auth/Onboarding'
 
 import Dashboard from './pages/Dashboard'
-import { Campaigns }              from './pages/campaigns/index'
-import { CampaignPlanner, CampaignPostEditor } from './pages/campaigns/CampaignPlanner'
+import { CampaignPlanner } from './pages/campaigns/CampaignPlanner'
 import { ContentPlans } from './pages/campaigns/ContentPlans'
 import { Schedule }                from './pages/schedule/index'
 import { EmailFlows }             from './pages/email/index'
@@ -101,10 +100,16 @@ function ProtectedApp() {
             <Route path="/"                      element={<Dashboard />} />
             <Route path="/brand-brain"           element={<BrandBrain />} />
             <Route path="/studio"                element={<CreativeStudio />} />
-            <Route path="/campaigns"             element={<Campaigns />} />
-            <Route path="/campaigns/plans"       element={<ContentPlans />} />
+            {/* Two routes, not four. `/campaigns` was a menu whose only job
+                was to offer "Plan with AI" or "Content Plans" — but the plans
+                list already carries a "New monthly plan" button, so the menu
+                was a click between you and a page that could do both. The
+                per-post editor route was a tombstone: ideas have been edited
+                inline since the modal landed, and nothing linked to it.
+                `/campaigns/plans` still resolves, for links already sent. */}
+            <Route path="/campaigns"             element={<ContentPlans />} />
+            <Route path="/campaigns/plans"       element={<Navigate to="/campaigns" replace />} />
             <Route path="/campaigns/plan"        element={<CampaignPlanner />} />
-            <Route path="/campaigns/plan/post/:rowId" element={<CampaignPostEditor />} />
             <Route path="/schedule"              element={<Schedule />} />
             <Route path="/email"                 element={<EmailFlows />} />
             <Route path="/analytics"             element={<Analytics />} />

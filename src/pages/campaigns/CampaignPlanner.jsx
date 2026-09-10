@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import { useApp, actions } from '../../store/app'
 import { useAuth } from '../../store/auth'
-import { Card, Button, Input, Textarea, Select, Spinner, Toggle, Empty, Modal } from '../../components/ui/index'
+import { Card, Button, Input, Textarea, Select, Spinner, Toggle, Modal } from '../../components/ui/index'
 import { uid, formatDate } from '../../lib/utils'
 import {
   isBrandProfileEmpty, useBrandProfileSync,
@@ -16,6 +16,9 @@ import {
   formatsFor, defaultFormat, aspectRatiosFor, defaultAspectRatio, slideRange, aspectLabel,
   stylesFor, derivePostKind,
 } from '../../lib/postFormats'
+import {
+  formatTime, groupByWeek, monthOptions, buildCalendarCells, normalizeAiIdea,
+} from './planModel'
 import { momentsInRange, dbIdeaToDraft } from '../../lib/campaignPlan'
 import { ReferencePicker } from '../../components/ReferencePicker'
 import {
@@ -69,83 +72,6 @@ const WEEKDAYS = [
   { value: 'wed', label: 'Wed' }, { value: 'thu', label: 'Thu' },
   { value: 'fri', label: 'Fri', weekend: true }, { value: 'sat', label: 'Sat', weekend: true },
 ]
-
-const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December']
-const MONTH_ABBR  = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-
-// Client-side mirror of the seasonal moments the n8n planner knows about — used
-// only to preview what falls in a chosen month before generating. Kept light;
-// the workflow remains the source of truth for the actual plan.
-// ── Week grouping for the review list ──
-function parseYMD(s) { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d) }
-function startOfWeek(d) {
-  const x = new Date(d); x.setHours(0, 0, 0, 0)
-  const day = (x.getDay() + 6) % 7 // Monday-based
-  x.setDate(x.getDate() - day)
-  return x
-}
-const fmtDay = d => `${MONTH_ABBR[d.getMonth()]} ${d.getDate()}`
-// '19:30' -> '7:30 PM'
-function formatTime(hhmm) {
-  const [h, m] = (hhmm || '').split(':').map(Number)
-  if (Number.isNaN(h) || Number.isNaN(m)) return ''
-  const period = h >= 12 ? 'PM' : 'AM'
-  const h12 = h % 12 === 0 ? 12 : h % 12
-  return `${h12}:${String(m).padStart(2, '0')} ${period}`
-}
-function groupByWeek(ideas) {
-  const groups = new Map()
-  const undated = []
-  ideas.forEach(i => {
-    if (!i.date) { undated.push(i); return }
-    const ws = startOfWeek(parseYMD(i.date))
-    const key = ws.getTime()
-    if (!groups.has(key)) groups.set(key, { start: ws, ideas: [] })
-    groups.get(key).ideas.push(i)
-  })
-  const ordered = [...groups.entries()].sort((a, b) => a[0] - b[0]).map(([key, g]) => {
-    const end = new Date(g.start); end.setDate(end.getDate() + 6)
-    const label = `${fmtDay(g.start)} – ${g.start.getMonth() === end.getMonth() ? end.getDate() : fmtDay(end)}`
-    return { key: String(key), label, ideas: g.ideas }
-  })
-  if (undated.length) ordered.push({ key: 'undated', label: 'Unscheduled', ideas: undated })
-  return ordered
-}
-
-// Next 6 months as selectable options, each carrying its date range.
-function monthOptions() {
-  const out = []
-  const now = new Date()
-  for (let i = 0; i < 6; i++) {
-    const d = new Date(now.getFullYear(), now.getMonth() + i, 1)
-    const y = d.getFullYear(), m = d.getMonth()
-    const ym = `${y}-${String(m + 1).padStart(2, '0')}`
-    const start = `${ym}-01`
-    const end = `${y}-${String(m + 1).padStart(2, '0')}-${String(new Date(y, m + 1, 0).getDate()).padStart(2, '0')}`
-    out.push({ value: ym, label: `${MONTH_NAMES[m]} ${y}`, start, end })
-  }
-  return out
-}
-
-
-// AI-planner-produced ideas only carry the legacy `format`/`suggestedAspectRatio`
-// (see requestCampaignPlan's normalizer in campaignPlanner.js) — translate
-// those into the new format/aspectRatio/mediaType/postKind fields before
-// they're ever saved, the same way a human-entered seed post already does.
-function normalizeAiIdea(p) {
-  const legacyFormat = p.format || 'post'
-  const postFormat = legacyFormat === 'carousel' ? 'carousel'
-    : (legacyFormat === 'reel' && p.platform === 'instagram') ? 'reel'
-    : defaultFormat(p.platform)
-  const mediaType = formatsFor(p.platform).find(f => f.id === postFormat)?.media || 'image'
-  const validRatios = aspectRatiosFor(p.platform, postFormat)
-  const aspectRatio = validRatios.includes(p.suggestedAspectRatio) ? p.suggestedAspectRatio : defaultAspectRatio(p.platform, postFormat)
-  const slideCount = postFormat === 'carousel' ? (slideRange(p.platform, postFormat)?.default || 3) : 1
-  return {
-    ...p, postFormat, aspectRatio, mediaType, slideCount, wantsCaption: true,
-    postKind: derivePostKind({ platform: p.platform, format: postFormat, wantsCaption: true, slideCount }),
-  }
-}
 
 const DEFAULT_DRAFT = {
   step: 'setup', // 'setup' | 'review' | 'media' | 'done'
@@ -736,23 +662,6 @@ function GenerateMoreModal({ defaultCount, loading, error, onClose, onGenerate }
 // A navigation aid, not a second approve/reject surface: clicking a day just
 // filters the existing card list to that day (see dayFilter in the main
 // component) so all approve/edit/delete logic stays in one place (IdeaCard).
-function buildCalendarCells(startDate, endDate) {
-  if (!startDate || !endDate) return []
-  const start = parseYMD(startDate)
-  const end = parseYMD(endDate)
-  const gridStart = new Date(start); gridStart.setDate(gridStart.getDate() - gridStart.getDay())
-  const gridEnd = new Date(end); gridEnd.setDate(gridEnd.getDate() + (6 - gridEnd.getDay()))
-  const cells = []
-  const cur = new Date(gridStart)
-  while (cur <= gridEnd) {
-    const y = cur.getFullYear(), m = cur.getMonth(), d = cur.getDate()
-    const key = `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`
-    cells.push({ key, date: new Date(cur), inRange: key >= startDate && key <= endDate })
-    cur.setDate(cur.getDate() + 1)
-  }
-  return cells
-}
-
 function CalendarView({ ideas, startDate, endDate, selectedDay, onDayClick }) {
   const cells = buildCalendarCells(startDate, endDate)
   const byDate = new Map()
@@ -2102,7 +2011,7 @@ export function CampaignPlanner() {
                   had its setup step filled out in this session — stepping
                   "back" to setup would drop you on a blank form unrelated to
                   this plan. Send those back to where they came from instead. */}
-              <Button variant="secondary" onClick={() => openedFromPlanList ? navigate('/campaigns/plans') : update({ step: 'setup' })}>Back</Button>
+              <Button variant="secondary" onClick={() => openedFromPlanList ? navigate('/campaigns') : update({ step: 'setup' })}>Back</Button>
               <Button onClick={() => update({ step: 'media' })} disabled={approvedCount === 0}>
                 Next — make the pictures ({approvedCount} approved)
               </Button>
@@ -2260,7 +2169,7 @@ export function CampaignPlanner() {
           </div>
           <div className="flex items-center justify-center gap-3 pt-2 flex-wrap">
             <Button onClick={() => navigate('/social/approvals')}>Open Post Approvals</Button>
-            <Button variant="secondary" onClick={() => navigate('/campaigns/plans')}>View all plans</Button>
+            <Button variant="secondary" onClick={() => navigate('/campaigns')}>View all plans</Button>
             <Button variant="secondary" onClick={() => { clear(); navigate('/campaigns/plan') }}>Plan another month</Button>
           </div>
         </Card>
@@ -2289,25 +2198,6 @@ export function CampaignPlanner() {
           format={seedPosts[pickingSeedIdx]?.postFormat}
         />
       )}
-    </div>
-  )
-}
-
-// ─── Kept for route compatibility; the per-post editor is now an inline modal
-// on each idea card, so this simply routes back to the plan. ────────────────
-export function CampaignPostEditor() {
-  const navigate = useNavigate()
-  useParams()
-  return (
-    <div className="max-w-2xl">
-      <Card className="p-6">
-        <Empty
-          icon={<svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>}
-          title="Edit ideas from the plan"
-          description="Ideas are now edited inline — open a plan and click Edit on any idea."
-          action={<Button onClick={() => navigate('/campaigns/plan')}>Back to planner</Button>}
-        />
-      </Card>
     </div>
   )
 }

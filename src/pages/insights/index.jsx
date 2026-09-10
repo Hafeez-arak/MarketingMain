@@ -274,7 +274,7 @@ export function Insights() {
           <Empty
             title="Nothing recorded yet"
             description="This page fills itself from two places: decisions you make on a plan's ideas, and analytics from posts that have gone out. Approve or reject some ideas in the planner and they will start showing up here."
-            action={<Link to="/campaigns/plans"><Button size="sm">Go to content plans</Button></Link>}
+            action={<Link to="/campaigns"><Button size="sm">Go to content plans</Button></Link>}
           />
         </Card>
       )}
