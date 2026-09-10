@@ -4,7 +4,7 @@ import { useApp, actions } from '../../store/app'
 import { useAuth } from '../../store/auth'
 import { Card, Button, Empty, Spinner, ConfirmDialog, IconBadge, PageHeader } from '../../components/ui/index'
 import { Icon } from '../../components/ui/icons'
-import { formatDate } from '../../lib/utils'
+import { formatDate, PLATFORM_META } from '../../lib/utils'
 import { fetchPlans, fetchPlanWithIdeas, deletePlan } from '../../lib/contentPlans'
 import { momentsInRange, planDraftFromPlan } from '../../lib/campaignPlan'
 
@@ -94,15 +94,19 @@ export function ContentPlans() {
               {plan.goal && <p className="text-xs text-text-secondary leading-relaxed line-clamp-2 mb-3">{plan.goal}</p>}
 
               <div className="flex items-center gap-1.5 flex-wrap mb-3">
-                {/* Plans written before LinkedIn was dropped still carry
-                    ['instagram','linkedin'], and every entry now renders the
-                    same label — so those rows showed "INSTAGRAM INSTAGRAM".
-                    Filter the stored array rather than trusting it: the row is
-                    history, and rewriting it to match today's platform list
-                    would edit what the plan actually asked for. */}
-                {(plan.platforms || []).filter(p => p === 'instagram').map(p => (
+                {/* Labelled from PLATFORM_META rather than hardcoded. This
+                    read `.filter(p => p === 'instagram')` and printed the
+                    literal "Instagram" — written when Instagram was the only
+                    platform, and correct then. It is not now: a plan targeting
+                    TikTok or LinkedIn rendered no chip at all, so the card
+                    silently claimed the plan had no platforms.
+
+                    A stored platform we no longer recognise still shows, under
+                    its own key. The row is history — a plan really did ask for
+                    it — and hiding it would quietly rewrite what was asked. */}
+                {(plan.platforms || []).map(p => (
                   <span key={p} className="text-[10px] font-bold uppercase tracking-[0.08em] px-1.5 py-0.5 leading-[1.4] bg-surface-subtle border border-border text-text-secondary">
-                    Instagram
+                    {PLATFORM_META[p]?.label || p}
                   </span>
                 ))}
                 {moments.map((m, i) => (
