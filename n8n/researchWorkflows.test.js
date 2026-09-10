@@ -320,3 +320,83 @@ describe('Resolve: Find Handles — what it actually searches for', () => {
     expect(out.resolved).toBe(1)
   })
 })
+
+// ─── When Instagram will not answer at all ─────────────────────────────────
+// Observed live 2026-09-10: every Graph call returned `code 200, "API access
+// blocked"` — a Business-Manager-level restriction that sits ABOVE token
+// validation, so even debug_token answered with it. A merely expired token is
+// code 190; a malformed one never decrypts at all.
+//
+// The old code could not tell that apart from "this handle does not exist",
+// so it wrote ig_status:'not_found' over every rival and reported ok:true.
+// Four competitors were recorded as having no Instagram, by an app that had
+// never been allowed to look — and nothing about the stored row says so
+// afterwards.
+function blockedGraph(error) {
+  return [
+    ['api.tavily.com/search', async () => ({
+      statusCode: 200,
+      body: { results: [hit('https://instagram.com/technolight', 'Technolight')] },
+    })],
+    ['graph.facebook.com', async () => ({ statusCode: 400, body: { error } })],
+  ]
+}
+
+describe('Resolve: when the lookup itself is unavailable', () => {
+  const work = [{ agenda_id: 'a1', name: 'Technolight', positioning: 'Architectural lighting' }]
+  const tables = () => ({ research_agenda: [agendaRow()] })
+
+  it('refuses the run when the app is blocked, rather than reporting not_found', async () => {
+    const { out, pg } = await find(
+      { workspace_id: WS, work },
+      tables(),
+      blockedGraph({ message: 'API access blocked.', type: 'OAuthException', code: 200 }),
+    )
+    expect(out.ok).toBe(false)
+    expect(String(out.error)).toMatch(/unavailable/i)
+    // The row must be untouched. A 'not_found' written here is indistinguishable
+    // afterwards from a genuine "this brand is not on Instagram".
+    expect(pg.tables.research_agenda[0].ig_status).toBe('unresolved')
+  })
+
+  it('refuses the run on an expired token too', async () => {
+    const { out, pg } = await find(
+      { workspace_id: WS, work },
+      tables(),
+      blockedGraph({ message: 'Session has expired', type: 'OAuthException', code: 190 }),
+    )
+    expect(out.ok).toBe(false)
+    expect(pg.tables.research_agenda[0].ig_status).toBe('unresolved')
+  })
+
+  // One rival's failure must not cost the other eleven their results — but an
+  // infrastructure failure is not one rival's failure, it is every rival's.
+  it('stops the whole pass rather than burning through the remaining rivals', async () => {
+    const many = [
+      { agenda_id: 'a1', name: 'Technolight' },
+      { agenda_id: 'a2', name: 'Huda Lighting' },
+      { agenda_id: 'a3', name: 'Alfanar Lighting' },
+    ]
+    const { out, pg } = await find(
+      { workspace_id: WS, work: many },
+      { research_agenda: [agendaRow(), agendaRow({ id: 'a2' }), agendaRow({ id: 'a3' })] },
+      blockedGraph({ message: 'API access blocked.', type: 'OAuthException', code: 200 }),
+    )
+    expect(out.ok).toBe(false)
+    expect(pg.tables.research_agenda.every(r => r.ig_status === 'unresolved')).toBe(true)
+  })
+
+  // The other direction, and the reason the classifier is not simply "any
+  // error stops the run": a handle that genuinely does not exist is Meta code
+  // 100, it is the common case, and most guesses SHOULD come back like this.
+  it('still treats an unknown handle as a rejected candidate', async () => {
+    const { out, pg } = await find(
+      { workspace_id: WS, work },
+      tables(),
+      blockedGraph({ message: 'Unknown username', type: 'OAuthException', code: 100 }),
+    )
+    expect(out.ok).toBe(true)
+    expect(out.not_found).toBe(1)
+    expect(pg.tables.research_agenda[0].ig_status).toBe('not_found')
+  })
+})
