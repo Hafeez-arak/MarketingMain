@@ -249,6 +249,19 @@ export function buildBoard(snapshots, prior) {
       posts_per_week_prev: p ? round(p.posts_per_week) : null,
       format_mix: s.format_mix || {},
       engagement_per_1k: s.engagement_per_1k ?? null,
+      // Lifetime post count, carried so a zero-in-period reading can be told
+      // apart from a dead account. The agent flagged this itself on the first
+      // live run: Technolight showed "0 posts/wk, n=0" while holding 768
+      // lifetime posts, and it warned that a future reader would take that for
+      // a dormant account. It is the same null-vs-zero mistake as everywhere
+      // else in this file, one level up — the number was right and the label
+      // was wrong.
+      media_count: s.media_count ?? null,
+      activity: s.data_source !== 'instagram'
+        ? 'not measurable — web evidence only'
+        : (s.posts_in_period > 0
+            ? `${s.posts_in_period} post${s.posts_in_period === 1 ? '' : 's'} this period`
+            : 'no NEW posts this period (the account itself is live)'),
       vs_us: (comparable && s.engagement_per_1k != null)
         ? `${s.engagement_per_1k >= self.engagement_per_1k ? '+' : ''}` +
           `${round(((s.engagement_per_1k - self.engagement_per_1k) / self.engagement_per_1k) * 100, 1)}%`

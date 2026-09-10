@@ -360,3 +360,34 @@ describe('a blocked token is not three private competitors', () => {
     expect(looksLikeCredentialsFailure(null, 0)).toBe(false)
   })
 })
+
+describe('zero posts this week is not a dead account', () => {
+  // The agent raised this against its own board on the first live run:
+  // Technolight read "0 posts/wk, n=0" while holding 768 lifetime posts, and
+  // it warned a future reader would take that for a dormant account. Same
+  // null-vs-zero confusion as everywhere else here, one level up — the number
+  // was right and the label was wrong.
+  it('says the account is live even when the week is empty', () => {
+    const [card] = buildBoard([{
+      competitor_name: 'Technolight', data_source: 'instagram',
+      followers: 1522, media_count: 768, posts_in_period: 0, sample_size: 0,
+    }], [])
+    expect(card.media_count).toBe(768)
+    expect(card.activity).toMatch(/no NEW posts this period/i)
+    expect(card.activity).toMatch(/account itself is live/i)
+  })
+
+  it('counts the posts when there are some', () => {
+    const [card] = buildBoard([{
+      competitor_name: 'Huda', data_source: 'instagram', posts_in_period: 3,
+    }], [])
+    expect(card.activity).toBe('3 posts this period')
+  })
+
+  it('a web-only rival is described as unmeasurable, not as silent', () => {
+    // The distinction that matters most: "we could not look" and "they did
+    // not post" are different facts and only one is about the competitor.
+    const [card] = buildBoard([{ competitor_name: 'Arclight', data_source: 'web_only' }], [])
+    expect(card.activity).toMatch(/not measurable/i)
+  })
+})
