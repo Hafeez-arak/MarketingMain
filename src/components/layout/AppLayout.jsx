@@ -1,6 +1,7 @@
 import { useLocation } from 'react-router-dom'
 import { Sidebar } from './Sidebar'
 import { Topbar } from './Topbar'
+import { AssistantDrawer } from '../AssistantDrawer'
 export function AppLayout({ children }) {
   const location = useLocation()
   return (
@@ -16,6 +17,10 @@ export function AppLayout({ children }) {
           <div key={location.pathname} className="p-6 page-enter">{children}</div>
         </main>
       </div>
+      {/* Mounted at the layout, not per page, so the conversation survives
+          navigation. AGENT.md §5a: continuing a thread across screens is the
+          difference between an assistant and a search box. */}
+      <AssistantDrawer />
     </div>
   )
 }

@@ -7,7 +7,7 @@ import { timeAgo } from '../../lib/utils'
 const titles = {
   '/': 'Dashboard', '/brand-brain': 'Brand Brain', '/campaigns': 'Content Plans', '/campaigns/plan': 'Plan Campaign',
   '/schedule': 'Content Calendar', '/email': 'Email Flows',
-  '/analytics': 'Analytics', '/insights': 'What We Learned', '/media': 'Media Library', '/social': 'Social Media',
+  '/analytics': 'Analytics', '/agent': 'Assistant', '/insights': 'What We Learned', '/media': 'Media Library', '/social': 'Social Media',
   '/social/instagram': 'Instagram',
   '/social/tiktok': 'TikTok',
   '/social/snapchat': 'Snapchat',

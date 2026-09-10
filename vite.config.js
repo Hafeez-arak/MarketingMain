@@ -195,13 +195,86 @@ function devZernioApi(env) {
   }
 }
 
+// ─── Dev-only: run the agent's Vercel functions in the Vite server ─────────
+// Same problem devN8nProxy solves, one layer up: in production Vercel runs
+// api/agent/*.js, the Vite dev server does not, so without this every agent
+// call 404s locally and the feature looks broken for reasons unrelated to the
+// code under test.
+//
+// This does not proxy anywhere — it IMPORTS the real handler and calls it, so
+// what runs on a laptop is the same file that runs in production rather than a
+// stand-in that can drift from it. Vite's SSR module loader is used so an edit
+// to any agent module is picked up without restarting.
+//
+// Two adapters are needed. Vercel hands a handler `res.status().json()`, which
+// plain Node's ServerResponse does not have, and it parses the JSON body onto
+// `req.body`, which Vite does not. The handler already falls back to reading
+// the stream itself, so only the response side is shimmed here.
+function devAgentApi(env) {
+  // The functions read process.env, not import.meta.env — they are Node code.
+  // Copied across here so one .env drives both halves of the app, which is the
+  // same reason the n8n secret is read from n8n/docker/.env rather than
+  // duplicated: one place per value.
+  for (const key of [
+    'ANTHROPIC_API_KEY', 'SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'SUPABASE_ANON_KEY',
+    'VITE_SUPABASE_URL', 'VITE_SUPABASE_ANON_KEY',
+  ]) {
+    if (env[key] && !process.env[key]) process.env[key] = env[key]
+  }
+
+  return {
+    name: 'arak-dev-agent-api',
+    apply: 'serve',
+    configureServer(server) {
+      server.middlewares.use('/api/agent', async (req, res) => {
+        const route = (req.url || '').split('?')[0].replace(/^\/+/, '') || 'chat'
+        // Only the routes that exist, matched exactly. A dev server that
+        // imports whatever path a request names is a file-read primitive.
+        if (!/^[a-z][a-z0-9-]*$/.test(route)) {
+          res.statusCode = 400
+          return res.end(JSON.stringify({ error: 'Bad agent route.' }))
+        }
+
+        // The Vercel response shape, over a plain Node response.
+        res.status = code => { res.statusCode = code; return res }
+        res.json = body => {
+          if (!res.headersSent) res.setHeader('Content-Type', 'application/json')
+          res.end(JSON.stringify(body))
+          return res
+        }
+
+        try {
+          const mod = await server.ssrLoadModule(`/api/agent/${route}.js`)
+          await mod.default(req, res)
+        } catch (err) {
+          // Named loudly rather than swallowed. A missing key or a bad import
+          // here otherwise looks exactly like "the agent silently does
+          // nothing", which this project has already paid for once.
+          server.config.logger.error(`[dev agent] /api/agent/${route}: ${err?.message || err}`)
+          if (!res.headersSent) {
+            res.statusCode = 500
+            res.setHeader('Content-Type', 'application/json')
+          }
+          if (!res.writableEnded) res.end(JSON.stringify({ error: String(err?.message || err) }))
+        }
+      })
+    },
+  }
+}
+
 // https://vite.dev/config/
 // A config function, not a plain object, so loadEnv can read .env here in
 // Node — the dev proxy needs VITE_N8N_BASE_URL before any client code exists.
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
   return {
-    plugins: [react(), devExportSink(), devN8nProxy(env.VITE_N8N_BASE_URL), devZernioApi(env)],
+    plugins: [
+      react(),
+      devExportSink(),
+      devN8nProxy(env.VITE_N8N_BASE_URL),
+      devZernioApi(env),
+      devAgentApi(env),
+    ],
     server: {
       port: process.env.PORT ? Number(process.env.PORT) : 5173,
     },

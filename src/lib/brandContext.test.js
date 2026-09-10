@@ -26,7 +26,7 @@ describe('matchesTask', () => {
 
 // ─── matchFeaturedRows ──────────────────────────────────────────────────────
 
-function directorySchema({ threshold = 15 } = {}) {
+function directorySchema() {
   return {
     sections: [
       { key: 'services', kind: 'directory', title: 'Services', enabled: true },
