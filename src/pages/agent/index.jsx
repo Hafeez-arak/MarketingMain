@@ -5,6 +5,7 @@ import { Card, PageHeader, SectionHead, Button, Spinner, Empty } from '../../com
 import { useAgentChat } from '../../lib/useAgentChat'
 import { describePage, suggestionsFor } from '../../lib/pageContext'
 import { startResearchRun, fetchRuns } from '../../lib/agentRun'
+import { AgentSteering } from '../../components/AgentSteering'
 
 // ─── /agent — the assistant, full page ─────────────────────────────────────
 // The same agent, the same tools and the SAME conversation as the drawer —
@@ -133,6 +134,8 @@ export default function AgentPage() {
           </ul>
         )}
       </Card>
+
+      <AgentSteering />
 
       <Card className="p-4">
         {turns.length === 0 ? (
