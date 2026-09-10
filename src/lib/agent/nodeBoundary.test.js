@@ -38,7 +38,9 @@ function importUnderNode(relPath) {
     `import(${JSON.stringify(path.join(repoRoot, relPath))})` +
     `.then(m => { process.stdout.write(Object.keys(m).sort().join(',')) })` +
     `.catch(e => { process.stderr.write(String(e && e.message || e)); process.exit(1) })`
-  return execFileSync(process.execPath, ['--input-type=module', '-e', script], {
+  // globalThis.process because this file lives under src/, where the lint
+  // config assumes a browser. Spawning Node is the entire point here.
+  return execFileSync(globalThis.process.execPath, ['--input-type=module', '-e', script], {
     cwd: repoRoot,
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -62,6 +64,7 @@ describe('the agent runs in Node, not in a bundle', () => {
     'src/lib/agent/gather.js',
     'src/lib/agent/brief.js',
     'src/lib/agent/writeTools.js',
+    'src/lib/agent/resolve.js',
     'api/agent/_supabase.js',
     'api/agent/_context.js',
     'api/agent/_provider.js',
@@ -75,6 +78,7 @@ describe('the agent runs in Node, not in a bundle', () => {
     // matters.
     'api/agent/chat.js',
     'api/agent/run.js',
+    'api/agent/resolve.js',
   ]
 
   for (const rel of serverReachable) {

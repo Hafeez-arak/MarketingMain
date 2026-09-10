@@ -73,7 +73,10 @@ export async function askAgent({
       if (!eventLine || !dataLine) continue
 
       const event = eventLine.slice(7).trim()
-      let data = {}
+      let data
+      // A frame we cannot parse is skipped rather than defaulted: an empty
+      // object here would be dispatched as a real event with every field
+      // undefined, which reads downstream as an answer with no text.
       try { data = JSON.parse(dataLine.slice(6)) } catch { continue }
 
       if (event === 'thread') outThread = data.thread_id || outThread

@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './supabaseClient'
-import { buildInstructionsString, buildSectionBlocks } from './brandBrain'
 import { fetchBrandSchema, fetchDirectoryRows } from './brandSchema'
 import { fetchBrandAssets } from './brandAssets'
 

@@ -3,7 +3,7 @@ import { useAuth } from '../store/auth'
 import { Card, SectionHead, Button } from './ui/index'
 import {
   fetchAgenda, setHandleByHand, setAgendaStatus, addAgendaRow,
-  deleteAgendaRow, watchlistReadiness,
+  deleteAgendaRow, watchlistReadiness, resolveHandles,
 } from '../lib/agentAgenda'
 
 // ─── What the agent watches, and what it is told to ask ────────────────────
@@ -109,6 +109,8 @@ export function AgentSteering() {
   const [reload, setReload] = useState(0)
   const [newQuestion, setNewQuestion] = useState('')
   const [newCompetitor, setNewCompetitor] = useState('')
+  const [finding, setFinding] = useState(false)
+  const [findNote, setFindNote] = useState('')
 
   const refresh = useCallback(() => setReload(n => n + 1), [])
 
@@ -134,10 +136,33 @@ export function AgentSteering() {
     refresh()
   }
 
+  const findHandles = async () => {
+    setFinding(true)
+    setFindNote('')
+    const out = await resolveHandles({ workspaceId: activeWorkspaceId, accessToken })
+    setFindNote(
+      out.ok
+        ? `Checked ${out.checked}: ${out.resolved} verified, ${out.suggested} to confirm, ${out.not_found} not found.` +
+          (out.note ? ` ${out.note}` : '')
+        : out.error || 'Could not search.',
+    )
+    setFinding(false)
+    refresh()
+  }
+
   return (
     <div className="grid gap-4 md:grid-cols-2">
       <Card className="p-4">
-        <SectionHead title="Competitors it watches" subtitle={readiness.note} />
+        <SectionHead
+          title="Competitors it watches"
+          subtitle={readiness.note}
+          action={
+            <Button size="sm" variant="ghost" onClick={findHandles} disabled={finding}>
+              {finding ? 'Searching…' : 'Find handles'}
+            </Button>
+          }
+        />
+        {findNote ? <p className="mt-1 text-xs text-slate-600">{findNote}</p> : null}
         <ul className="mt-2">
           {agenda.competitors.map(row => (
             <HandleRow key={row.id} row={row} accessToken={accessToken} onChanged={refresh} />

@@ -126,3 +126,24 @@ export function watchlistReadiness(competitors) {
         : `${measurable.length} of ${rows.length} can be measured on Instagram. The rest appear on web evidence only.`,
   }
 }
+
+/**
+ * Ask the agent to go and find the handles it does not have.
+ *
+ * Never touches a hand-set handle — `human_set` exists precisely so a person's
+ * correction survives every later discovery pass.
+ */
+export async function resolveHandles({ workspaceId, accessToken, force = false }) {
+  try {
+    const res = await fetch('/api/agent/resolve', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+      body: JSON.stringify({ workspace_id: workspaceId, force }),
+    })
+    const body = await res.json().catch(() => ({}))
+    if (!res.ok) return { ok: false, error: body?.error || `Resolve returned ${res.status}.` }
+    return body
+  } catch (err) {
+    return { ok: false, error: String(err?.message || err) }
+  }
+}
