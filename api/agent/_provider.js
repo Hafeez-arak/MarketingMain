@@ -52,7 +52,7 @@ export async function budgetFor(workspaceId, now = new Date()) {
 export async function callModel({
   workspaceId, job, surface, stage = '', runId = null, chatId = null,
   identity, brand, tools = [], messages = [], maxTokens = 8_000, effort = 'high',
-  estimateUsd = 0, onText = null,
+  estimateUsd = 0, onText = null, outputFormat = null,
 }) {
   if (!client) {
     // Named, not swallowed. A missing key here previously looked exactly like
@@ -72,7 +72,7 @@ export async function callModel({
     return { ok: false, refused: true, error: decision.reason, budget: decision }
   }
 
-  const params = buildRequest({ model, identity, brand, tools, messages, maxTokens, effort })
+  const params = buildRequest({ model, identity, brand, tools, messages, maxTokens, effort, outputFormat })
 
   let response = null
   let error = ''

@@ -55,6 +55,7 @@ export function volatileFragment(text) {
  */
 export function buildRequest({
   model, identity, brand, tools = [], messages = [], maxTokens = 8_000, effort = 'high',
+  outputFormat = null,
 }) {
   // Two system blocks, one breakpoint, and the breakpoint on the LAST stable
   // block rather than the first. Caching is a prefix match: marking the end of
@@ -71,7 +72,11 @@ export function buildRequest({
     // Adaptive thinking with an effort dial, rather than a fixed token budget:
     // the budget form is rejected outright by the models this app uses.
     thinking: { type: 'adaptive' },
-    output_config: { effort },
+    // `format` sits INSIDE output_config alongside effort — the top-level
+    // `output_format` parameter is deprecated. Present only when a caller asks
+    // for it: an empty `format` key would change the bytes of every request and
+    // is one more thing that can be wrong.
+    output_config: outputFormat ? { effort, format: outputFormat } : { effort },
     system,
     // Tools are sorted by name so that a refactor which merely reorders the
     // tool belt cannot silently invalidate every cached prefix in production.

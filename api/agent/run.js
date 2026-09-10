@@ -1,5 +1,6 @@
 import { callerId, callerMayUseWorkspace, db, isConfigured } from './_supabase.js'
 import { gather, patchRun } from './_gather.js'
+import { investigate } from './_investigate.js'
 import { periodFor } from '../../src/lib/agent/gather.js'
 
 // ─── POST /api/agent/run ───────────────────────────────────────────────────
@@ -146,14 +147,24 @@ export default async function handler(req, res) {
       return
     }
 
-    // Stages 1–4 are not built yet. Until they are, gather IS the run, so it
-    // writes the terminal status itself — leaving the row 'running' would hand
-    // the browser a spinner only the sweep could close, twenty minutes later.
-    // When investigation lands, this is where it is invoked instead, and the
-    // terminal write moves to stage 5.
+    // ── Stages 1–4 ──
+    // The numbers are committed. Everything from here is a bonus, and
+    // investigate() never throws — a failure returns the gathered report with a
+    // note saying what was lost, because a failed investigation must never cost
+    // the user their numbers.
+    const deep = await investigate({ workspaceId, runId, gathered: out.report })
+
+    // ── Stage 5: persist ──
+    // Code only. The terminal status is written here and on every path,
+    // including the failure one: the browser opened the spinner and only the
+    // server can close it.
+    await persist(workspaceId, runId, deep.report)
     await patchRun(workspaceId, runId, {
       status: 'complete',
-      stage: 'gather',
+      stage: deep.ok ? 'synthesise' : 'gather',
+      report: deep.report,
+      error: deep.ok ? '' : String(deep.error || '').slice(0, 500),
+      cost_estimate: Number((deep.cost || 0).toFixed(4)),
       finished_at: new Date().toISOString(),
     })
 
@@ -164,10 +175,13 @@ export default async function handler(req, res) {
       snapshots: out.snapshots,
       measured: out.measured,
       failed: out.failed,
-      baseline: out.report?.baseline,
-      quiet_week: out.report?.quiet_week,
-      headline: out.report?.headline || '',
-      note: out.note || 'Stages 1–4 (plan, search, reflect, synthesise) are not built yet — this is the measured half only.',
+      baseline: deep.report?.baseline,
+      quiet_week: deep.report?.quiet_week,
+      headline: deep.report?.headline || '',
+      investigated: deep.ok,
+      cost_usd: Number((deep.cost || 0).toFixed(4)),
+      proposed_rules: (deep.report?.proposed_rules || []).length,
+      note: deep.ok ? (out.note || '') : `The measured numbers are complete. ${deep.error}`,
     })
   } catch (err) {
     // Every terminal path writes a status. A crashed invocation that writes
@@ -180,5 +194,70 @@ export default async function handler(req, res) {
       }).catch(() => {})
     }
     res.status(500).json({ ok: false, run_id: runId || null, error: message })
+  }
+}
+
+/**
+ * Stage 5 — findings and proposals land where a human already reviews things.
+ *
+ * Everything lands as `proposed`. There is no path to `active` and no path to
+ * publish, and that is enforced by there being no code here that writes one —
+ * not by the model choosing well.
+ *
+ * Failures are logged, never thrown: the run is already complete by this
+ * point, and losing the terminal status because one insert failed would trade
+ * a missing proposal for a spinner nobody can close.
+ */
+async function persist(workspaceId, runId, report) {
+  const findings = [
+    ...(report?.market || []).map(m => ({
+      kind: 'trend', headline: m.finding, detail: '',
+      sources: m.sources || [], confidence: m.confidence ?? null,
+      novelty: m.novelty || 'new',
+    })),
+    ...(report?.gaps || []).map(g => ({
+      kind: 'gap', headline: g.gap, detail: g.suggested_response || '',
+      sources: [], evidence: { our_position: g.our_position, basis: g.basis },
+      confidence: null, novelty: 'new',
+    })),
+  ]
+
+  for (const f of findings) {
+    await db('research_findings', {
+      method: 'POST',
+      body: { run_id: runId, workspace_id: workspaceId, evidence: {}, ...f },
+      prefer: 'return=minimal',
+    }).catch(err => console.error('[agent/run] finding:', err.message))
+  }
+
+  for (const r of report?.proposed_rules || []) {
+    await db('brand_memory', {
+      method: 'POST',
+      body: {
+        workspace_id: workspaceId,
+        rule: r.rule, detail: r.detail || '',
+        scope: r.scope || 'trend',
+        // 'proposed', always. The agent can fill your review queue; it cannot
+        // steer a single caption without a person saying yes first.
+        status: 'proposed',
+        source: 'research',
+        confidence: r.confidence ?? null,
+        evidence: { sources: r.sources || [], run_id: runId },
+      },
+      prefer: 'return=minimal',
+    }).catch(err => console.error('[agent/run] rule:', err.message))
+  }
+
+  for (const a of report?.agenda_changes || []) {
+    if (a.action !== 'add') continue   // retiring is a human decision
+    await db('research_agenda', {
+      method: 'POST',
+      body: {
+        workspace_id: workspaceId, kind: 'question',
+        subject: a.subject, why: a.why || '',
+        status: 'proposed', created_by: 'agent',
+      },
+      prefer: 'return=minimal',
+    }).catch(err => console.error('[agent/run] agenda:', err.message))
   }
 }
