@@ -21,6 +21,7 @@ import { Schedule }                from './pages/schedule/index'
 import { EmailFlows }             from './pages/email/index'
 import { Analytics }               from './pages/analytics/index'
 import { Insights }                from './pages/insights/index'
+import AgentPage                  from './pages/agent/index'
 import { MediaLibrary }            from './pages/media/index'
 import { SocialOverview, SocialPlatform } from './pages/social/index'
 import { InstagramPage } from './pages/social/InstagramPage'
@@ -109,6 +110,7 @@ function ProtectedApp() {
             <Route path="/email"                 element={<EmailFlows />} />
             <Route path="/analytics"             element={<Analytics />} />
             <Route path="/insights"              element={<Insights />} />
+            <Route path="/agent"                 element={<AgentPage />} />
             <Route path="/media"                 element={<MediaLibrary />} />
             <Route path="/social"                element={<SocialOverview />} />
             <Route path="/social/approvals"      element={<PostApprovals />} />
