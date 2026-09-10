@@ -37,13 +37,13 @@ export const WEBHOOK_PATHS = {
   metaPublish:      'arak-meta-publish',
   metaSync:         'arak-meta-sync',
   metaDashboard:    'arak-meta-dashboard',
-  // Zernio. `zernioConnect` is live and has no Meta counterpart: it is what
-  // gives each workspace its own OAuth'd accounts, and Instagram is only one
-  // of the platforms behind it. The other three were dormant while Instagram
-  // publishing ran on Meta's Graph API, and are being brought back as Zernio
-  // becomes the primary publisher across Instagram and TikTok — meta.js stays
-  // wired as the fallback rather than being deleted.
-  zernioConnect:    'arak-zernio-connect',
+  // Zernio. `zernioConnect` is deliberately ABSENT: per-workspace OAuth moved
+  // to api/zernio/[action].js on 2026-09-10 and the workflow is retired.
+  // Leaving the slot here would keep arak-zernio-connect reachable through
+  // this proxy, and that workflow takes workspace_id straight off the request
+  // body without checking membership — so any signed-in user could list or
+  // disconnect any other workspace's accounts. Removing the slot is what
+  // closes that without needing access to the n8n box.
   publishPost:      'arak-publish-post',
   zernioSync:       'arak-zernio-sync',
   zernioDashboard:  'arak-zernio-dashboard',

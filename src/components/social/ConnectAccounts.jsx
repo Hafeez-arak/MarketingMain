@@ -48,6 +48,15 @@ function AccountRow({ account, onDisconnect, disconnecting }) {
       <div className="min-w-0 flex-1">
         <p className="text-sm font-semibold text-text truncate">
           {account.username ? `@${account.username}` : (account.display_name || 'Connected account')}
+          {/* LinkedIn is the one platform where an account's identity is not
+              implied by its handle: the same person's personal profile and the
+              company page they administer both connect here, and posting as
+              the wrong one is not recoverable after the fact. */}
+          {account.account_type === 'organization' && (
+            <span className="ml-2 text-[10px] font-bold uppercase tracking-[0.08em] bg-sky-50 text-sky-700 px-1.5 py-0.5">
+              Company page
+            </span>
+          )}
         </p>
         {needsReconnect
           ? <p className="text-xs text-red-600 mt-0.5">Needs reconnecting — publishing will fail until it is.</p>
@@ -73,15 +82,37 @@ function AccountRow({ account, onDisconnect, disconnecting }) {
 // spinner is what left the first live connect spinning with no way out. While
 // fetching → spinner; loaded and empty → an explanation; loaded with options →
 // the list; finishing → a spinner on the chosen row.
+const SELECTION_INTRO = {
+  instagram: 'Choose which account to publish as. It must be a professional (Business or Creator) Instagram account linked to a Facebook Page.',
+  linkedin:  'Choose what to publish as: your own profile, or a company page you administer.',
+}
+
+const NOTHING_ELIGIBLE = {
+  instagram: 'Instagram only exposes professional (Business or Creator) accounts that are linked to a Facebook Page. A personal account will not appear here — convert it in the Instagram app, then reconnect.',
+  linkedin:  'LinkedIn returned neither your profile nor any company page. That usually means the authorisation was granted without the posting permissions — start again and accept all of them.',
+}
+
 function SelectionModal({ open, platform, options, loading, finishing, onPick, onCancel }) {
   const label = PLATFORM_META[platform]?.label || platform
+  // LinkedIn always offers the personal profile, so a list of exactly that
+  // means no company page came back. Saying so is the difference between "pick
+  // one" and "the page you were expecting is missing, and here is why".
+  const onlyPersonal = platform === 'linkedin'
+    && options.length === 1 && options[0]?.kind === 'personal'
+
   return (
     <Modal open={open} onClose={onCancel} title={`Finish connecting ${label}`} width="max-w-md">
       <p className="text-sm text-text-secondary mb-4">
-        {platform === 'instagram'
-          ? 'Choose which account to publish as. It must be a professional (Business or Creator) Instagram account linked to a Facebook Page.'
-          : 'Choose which profile to publish as.'}
+        {SELECTION_INTRO[platform] || 'Choose which profile to publish as.'}
       </p>
+
+      {onlyPersonal && (
+        <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 p-3 mb-3">
+          No company page came back — only your personal profile. LinkedIn lists a
+          page here only if you are one of its admins. Connect your profile if that
+          is what you meant, or get admin access to the page and start again.
+        </p>
+      )}
 
       {loading && (
         <div className="py-10 flex flex-col items-center gap-2 text-text-secondary">
@@ -94,9 +125,7 @@ function SelectionModal({ open, platform, options, loading, finishing, onPick, o
         <div className="py-6 px-4 border border-border bg-surface-subtle/50 text-center">
           <p className="text-sm text-text mb-1">No eligible accounts came back.</p>
           <p className="text-xs text-text-secondary">
-            Instagram only exposes professional (Business or Creator) accounts that
-            are linked to a Facebook Page. A personal account will not appear here —
-            convert it in the Instagram app, then reconnect.
+            {NOTHING_ELIGIBLE[platform] || `${label} returned nothing this workspace can publish as.`}
           </p>
         </div>
       )}
@@ -104,10 +133,13 @@ function SelectionModal({ open, platform, options, loading, finishing, onPick, o
       {!loading && options.length > 0 && (
         <div className="space-y-2 max-h-[50vh] overflow-y-auto">
           {options.map(opt => {
-            const id   = opt.id || opt._id || opt.pageId || opt.value
-            const name = opt.name || opt.username || opt.label || id
-            const sub  = opt.username && opt.username !== name ? `@${opt.username}`
-                       : opt.category || ''
+            // One shape, guaranteed by the server: every platform's list is
+            // normalised in api/zernio/_zernio.js before it reaches here, so
+            // this does not have to know that Instagram calls them pages and
+            // LinkedIn calls them organizations.
+            const id   = opt.id
+            const name = opt.name || opt.username || id
+            const sub  = opt.subtitle || (opt.username && opt.username !== name ? `@${opt.username}` : '')
             return (
               <button key={id} onClick={() => onPick(opt)} disabled={finishing}
                 className="w-full text-left flex items-center gap-3 p-3 border border-border hover:border-amber-600 hover:bg-amber-50 transition-colors disabled:opacity-50">
@@ -147,10 +179,28 @@ export function ConnectAccounts({ platform, accounts, loading, error, refresh, c
 
   const problem = error || flow.error || disconnectError
 
+  // Zernio replaces rather than adds for Instagram: one Instagram account per
+  // profile, and picking a different identity purges the previous account's
+  // conversations, external posts and stats. A button that says "Connect
+  // another Instagram account" is therefore promising something that cannot
+  // happen — what it actually does is swap.
+  const oneOnly = platform === 'instagram'
+
   return (
     <>
       {problem && (
         <p className="text-sm text-red-600 mb-3">{problem}</p>
+      )}
+
+      {/* The other half of the round trip. Success used to be silent: the URL
+          carried `connected=tiktok&username=…` and nothing read it, so a
+          finished connection looked the same as a button that did nothing. */}
+      {!problem && flow.notice && (
+        <div className="flex items-start gap-2 mb-3 text-sm text-sage-700 bg-sage-100 border border-sage-200 px-3 py-2">
+          <span className="flex-1">{flow.notice}</span>
+          <button onClick={flow.dismissNotice}
+            className="text-xs text-sage-700/70 hover:text-sage-700 shrink-0">Dismiss</button>
+        </div>
       )}
 
       {loading && accounts.length === 0 && (
@@ -179,8 +229,16 @@ export function ConnectAccounts({ platform, accounts, loading, error, refresh, c
           onClick={flow.start}>
           {flow.phase === 'starting'
             ? 'Opening…'
-            : accounts.length ? `Connect another ${meta.label} account` : `Connect ${meta.label}`}
+            : !accounts.length ? `Connect ${meta.label}`
+            : oneOnly ? `Replace the connected ${meta.label} account`
+            : `Connect another ${meta.label} account`}
         </Button>
+        {oneOnly && accounts.length > 0 && (
+          <p className="text-xs text-text-tertiary mt-1.5">
+            Instagram allows one account per workspace. Connecting a different one
+            replaces this account and discards its conversations and stats here.
+          </p>
+        )}
       </div>
 
       <SelectionModal

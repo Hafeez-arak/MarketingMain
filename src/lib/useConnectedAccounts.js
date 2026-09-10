@@ -3,6 +3,7 @@ import { useAuth } from '../store/auth'
 import {
   fetchConnectedAccounts, startConnect, disconnectAccount,
   readConnectCallback, fetchSelectionOptions, completeSelection,
+  explainOAuthError,
 } from './zernioConnect'
 
 // ─── The one place a screen asks "what is actually connected?" ─────────────
@@ -66,15 +67,24 @@ export function useConnectedAccounts(platform = '') {
 }
 
 // ─── Driving the OAuth round trip ─────────────────────────────────────────
-// Three states, because Instagram genuinely has three steps: idle, waiting on
-// the redirect, and back-from-OAuth-but-still-needing-a-page-chosen. TikTok
-// skips the third. Modelling them explicitly beats a single `busy` boolean,
-// which cannot distinguish "we are about to leave this page" from "we are back
-// and waiting for you to pick something".
+// Four states, because the flow genuinely has four: idle, about-to-leave,
+// back-and-choosing, and committing the choice. TikTok skips the middle two —
+// its OAuth identifies exactly one creator, so Zernio finishes the connection
+// at the callback. Modelling them explicitly beats a single `busy` boolean,
+// which cannot distinguish "we are leaving this page" from "we are back and
+// waiting for you to pick something".
+//
+// Separately from the phase, the hop back may be carrying NEWS: a connection
+// that finished on its own, or one that failed at the provider. Both used to
+// arrive as an unread query string on a page that rendered as if nothing had
+// happened.
 export function useConnectFlow(platform, { onConnected } = {}) {
   const { activeWorkspaceId } = useAuth()
   const [phase, setPhase]     = useState('idle')   // idle | starting | selecting | finishing
   const [error, setError]     = useState('')
+  // A completed connection, reported rather than left to be inferred from a
+  // row appearing in a list the user may not have been looking at.
+  const [notice, setNotice]   = useState('')
   const [options, setOptions] = useState([])
   // Distinct from "options is empty" — `loaded` means the list HAS come back,
   // which is what lets the modal tell "still fetching" apart from "fetched,
@@ -104,18 +114,48 @@ export function useConnectFlow(platform, { onConnected } = {}) {
     if (res.error) { setError(res.error); setPhase('selecting'); return }
     setPhase('idle')
     setOptions([])
-    // Strip the callback params so a refresh doesn't reopen the picker with a
-    // token that has already been spent.
-    window.history.replaceState({}, '', window.location.pathname)
+    setNotice(`Connected ${selection?.name ? `${selection.name} ` : ''}successfully.`)
+    clearCallbackParams()
     onConnected?.(res.accounts || [])
   }, [activeWorkspaceId, platform, onConnected])
 
-  // Pick up a return from Zernio. Runs once on mount: the tempToken is in the
-  // URL only on the hop back, and re-reading it after the user has moved on
-  // would relaunch a picker for a flow they already finished.
+  // Pick up a return from Zernio. Runs on mount, because the callback params
+  // are in the URL only on the hop back and re-reading them after the user has
+  // moved on would relaunch a flow they already finished.
+  //
+  // All three outcomes are handled. Previously only the middle one was, so a
+  // refusal at the provider and a connection that completed on its own both
+  // came back to a screen that rendered exactly as it had before the user left
+  // — which is indistinguishable from the button having done nothing.
   useEffect(() => {
     const cb = readConnectCallback()
     if (!cb || !activeWorkspaceId) return
+    // The callback lands on /social/<platform>, so a mismatch means this hook
+    // belongs to a different platform's panel on the same page. Ignore it and
+    // let the right one handle it, rather than both racing for the token.
+    if (cb.platform && cb.platform !== platform) return
+
+    // Both terminal branches defer their state write a tick. A setState in an
+    // effect BODY runs synchronously during commit — a cascading render, and
+    // one React now flags. Same deferral the account list uses for its first
+    // fetch.
+    if (cb.kind === 'error') {
+      const message = explainOAuthError(cb)
+      queueMicrotask(() => setError(message))
+      clearCallbackParams()
+      return
+    }
+
+    // Standard mode (TikTok): Zernio already created the account. There is
+    // nothing to finish, but the list has to be refreshed — it was fetched on
+    // mount, possibly before the account existed — and the user told.
+    if (cb.kind === 'connected') {
+      const message = cb.username ? `Connected @${cb.username}.` : 'Account connected.'
+      queueMicrotask(() => { setNotice(message); onConnected?.([]) })
+      clearCallbackParams()
+      return
+    }
+
     callback.current = cb
     let cancelled = false
     ;(async () => {
@@ -129,10 +169,17 @@ export function useConnectFlow(platform, { onConnected } = {}) {
       if (res.error) { setError(res.error); setLoaded(true); setPhase('idle'); return }
       setOptions(res.options)
       setLoaded(true)
-      // Zernio can legitimately return exactly one choice (one Facebook page
-      // backs the account). Asking someone to "choose" from a list of one is
-      // pure ceremony, so that case completes itself.
-      if (res.options.length === 1) finish(res.options[0])
+      // Zernio can legitimately return exactly one choice — one Facebook Page
+      // backs the account — and asking someone to "choose" from a list of one
+      // is pure ceremony.
+      //
+      // Except for a personal identity. LinkedIn always offers the signed-in
+      // person's own profile alongside any company pages they administer, so
+      // "one option" there means "no company pages came back", and silently
+      // connecting somebody's personal LinkedIn because their page admin
+      // rights were missing is not a choice to make on their behalf.
+      const only = res.options.length === 1 ? res.options[0] : null
+      if (only && only.kind !== 'personal') finish(only)
     })()
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -143,10 +190,20 @@ export function useConnectFlow(platform, { onConnected } = {}) {
     setOptions([])
     setLoaded(false)
     setError('')
-    window.history.replaceState({}, '', window.location.pathname)
+    clearCallbackParams()
   }, [])
 
-  return { phase, error, options, loaded, start, finish, cancel }
+  const dismissNotice = useCallback(() => setNotice(''), [])
+
+  return { phase, error, notice, options, loaded, start, finish, cancel, dismissNotice }
+}
+
+// Strip the callback params so a reload cannot replay a spent token, reopen a
+// picker for a finished flow, or re-show an error the user has already read.
+// The path is kept, so the user stays on the platform page they landed on.
+function clearCallbackParams() {
+  if (typeof window === 'undefined') return
+  window.history.replaceState({}, '', window.location.pathname)
 }
 
 // Disconnect, with the workspace id supplied for the caller. Kept out of

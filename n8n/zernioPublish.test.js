@@ -19,23 +19,30 @@ const WS = '11111111-1111-1111-1111-111111111111'
 
 // Captures the body Zernio was actually sent, which is the point of every
 // assertion below.
+const PROFILE = '6a93f477bd1e9a40e2928cbc'
+
 function zernio({ accounts = [{ _id: 'acc_1', platform: 'instagram', isActive: true }] } = {}) {
   const sent = []
+  const accountUrls = []
   const routes = [
-    ['/api/v1/accounts', async () => ({ statusCode: 200, body: { accounts } })],
+    ['/api/v1/accounts', async ({ url }) => {
+      accountUrls.push(url)
+      return { statusCode: 200, body: { accounts } }
+    }],
     ['/api/v1/posts', async ({ body }) => {
       sent.push(body)
       return { statusCode: 200, body: { post: { _id: 'zpost_1' }, _id: 'zpost_1' } }
     }],
   ]
-  return { routes, sent }
+  return { routes, sent, accountUrls }
 }
 
-function db() {
+function db({ profileId = PROFILE } = {}) {
   return new StubPostgrest({
     generated_posts: [{
       id: 'p1', workspace_id: WS, publish_status: 'not_published', zernio_post_id: '',
     }],
+    workspaces: [{ id: WS, name: 'Arak Lighting', zernio_profile_id: profileId }],
   })
 }
 
@@ -178,6 +185,66 @@ describe('TikTok', () => {
 
     expect(out.ok).toBe(false)
     expect(String(out.error)).toMatch(/consent/i)
+    expect(sent).toHaveLength(0)
+  })
+})
+
+// ─── Resolving which account to post as ────────────────────────────────────
+// Only reached when the caller does NOT name an account_id, which is the
+// path the composer takes for a plain scheduled post. Every other test here
+// passes account_id explicitly, so this was the one branch with no coverage —
+// and it was the branch that listed EVERY account the Zernio API key can see,
+// across every tenant, and posted as the first one matching the platform.
+describe('account resolution when the caller names no account', () => {
+  const noAccount = { ...base }
+  delete noAccount.account_id
+
+  it('scopes the account list to this workspace Zernio profile', async () => {
+    const { routes, accountUrls } = zernio()
+    const out = await run({ ...noAccount, platform: 'instagram' }, { postgrest: db(), routes })
+
+    expect(out.out.ok).toBe(true)
+    // The whole fix in one assertion: an unscoped GET /accounts is what let a
+    // post go out on another brand's feed.
+    expect(accountUrls[0]).toContain(`profileId=${PROFILE}`)
+  })
+
+  // Zernio POPULATES the reference — `{ _id, name }`, not the string the field
+  // name promises. Stringifying it is what made the connect flow discard every
+  // account it was handed; the same shape reaches this workflow.
+  it('keeps an account whose profileId arrives as a populated object', async () => {
+    const { routes, sent } = zernio({ accounts: [
+      { _id: 'acc_1', platform: 'instagram', isActive: true,
+        profileId: { _id: PROFILE, name: 'arak_ws_x' } },
+    ] })
+    const out = await run({ ...noAccount, platform: 'instagram' }, { postgrest: db(), routes })
+
+    expect(out.out.ok).toBe(true)
+    expect(sent).toHaveLength(1)
+  })
+
+  it('refuses an account belonging to another workspace profile', async () => {
+    const { routes, sent } = zernio({ accounts: [
+      { _id: 'acc_other', platform: 'instagram', isActive: true,
+        profileId: { _id: 'a-different-profile' } },
+    ] })
+    const out = await run({ ...noAccount, platform: 'instagram' }, { postgrest: db(), routes })
+
+    expect(out.out.ok).toBe(false)
+    expect(out.out.error).toMatch(/No connected instagram account in this workspace/)
+    expect(sent).toHaveLength(0)
+  })
+
+  // No profile means this workspace has never connected anything. Falling back
+  // to the unscoped list here would resolve to somebody else's account and
+  // publish as it, which is precisely the failure the profile prevents.
+  it('refuses rather than falling back when the workspace has no profile', async () => {
+    const { routes, sent } = zernio()
+    const out = await run({ ...noAccount, platform: 'instagram' },
+      { postgrest: db({ profileId: null }), routes })
+
+    expect(out.out.ok).toBe(false)
+    expect(out.out.error).toMatch(/no connected accounts yet/i)
     expect(sent).toHaveLength(0)
   })
 })

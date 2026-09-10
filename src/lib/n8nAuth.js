@@ -8,8 +8,9 @@ import { supabase } from './supabaseClient'
 // public, "anyone who knows the URL" became "anyone", and a plain curl could
 // start a video render.
 //
-// So every call to the proxy now carries the caller's Supabase access token
-// and the function verifies it (see api/n8n/[slot].js).
+// So every call to these routes now carries the caller's Supabase access token
+// and the function verifies it (see api/n8n/[slot].js and
+// api/zernio/[action].js).
 //
 // This is installed as a fetch wrapper rather than added to each call site.
 // There are nineteen of them across campaignPlanner, creativeStudio, zernio
@@ -18,11 +19,17 @@ import { supabase } from './supabaseClient'
 // would silently ship unauthenticated. Wrapping the transport means a new
 // call site is covered by existing code rather than by whoever writes it.
 //
-// Deliberately narrow: it only touches same-origin requests whose path starts
-// with /api/n8n/, and it never overwrites an Authorization header a caller
-// set itself. Everything else — Supabase REST, storage, image loads — passes
-// through untouched.
-const PREFIX = '/api/n8n/'
+// Deliberately narrow: it only touches same-origin requests to this app's own
+// authenticated API routes, and it never overwrites an Authorization header a
+// caller set itself. Everything else — Supabase REST, storage, image loads —
+// passes through untouched.
+//
+// /api/zernio/ is here for the same reason /api/n8n/ is, with one difference
+// worth stating: those routes do not merely cost money, they connect and
+// disconnect real social accounts. They verify the token AND check that the
+// caller is a member of the workspace named in the body, so an unsigned call
+// cannot reach another tenant's accounts.
+const PREFIXES = ['/api/n8n/', '/api/zernio/']
 
 function isProxyCall(input) {
   try {
@@ -32,9 +39,10 @@ function isProxyCall(input) {
     if (!url) return false
     // Relative URLs are this app's own origin, which is the normal case since
     // defaultWebhookUrl() returns a bare path.
-    if (url.startsWith(PREFIX)) return true
+    if (PREFIXES.some(p => url.startsWith(p))) return true
     const parsed = new URL(url, window.location.origin)
-    return parsed.origin === window.location.origin && parsed.pathname.startsWith(PREFIX)
+    return parsed.origin === window.location.origin
+      && PREFIXES.some(p => parsed.pathname.startsWith(p))
   } catch { return false }
 }
 

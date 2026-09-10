@@ -1129,6 +1129,32 @@ async function cancelZernioPost(zernioPostId){
 const postId      = body.post_id || '';
 const postTable   = body.post_table || 'instagram_generated_posts';
 const workspaceId = body.workspace_id || null;
+
+// ── Whose accounts are these? ───────────────────────────────────────────
+// Zernio puts a `profile` between the API team and the connected accounts —
+// one per workspace, id held in workspaces.zernio_profile_id. Without
+// scoping by it, GET /accounts returns EVERY account the API key can see,
+// across every workspace, and the "first active account for this platform"
+// below would happily publish one brand's post to another brand's feed.
+//
+// The reference arrives POPULATED — `{ _id, name }`, not the string the
+// field name promises — which is the same shape mismatch that made the
+// connect flow discard every account it was handed. Read it, do not
+// stringify it.
+function profileIdOf(v){
+  if (!v) return '';
+  if (typeof v === 'string') return v.trim();
+  if (typeof v === 'object') return String(v._id || v.id || '').trim();
+  return String(v).trim();
+}
+
+async function workspaceProfileId(wsId){
+  if (!wsId) return '';
+  const rows = await http({ method:'GET',
+    url:`${SUPA_URL}/rest/v1/workspaces?id=eq.${wsId}&select=zernio_profile_id`,
+    headers:{ apikey:SUPA_KEY, Authorization:`Bearer ${SUPA_KEY}` }, json:true });
+  return String((Array.isArray(rows) && rows[0] && rows[0].zernio_profile_id) || '');
+}
 const platform    = body.platform || 'instagram';
 // Moving an already-scheduled post to a new time, rather than a first publish.
 const isReschedule = body.reschedule === true;
@@ -1241,13 +1267,25 @@ try {
   // ---- 1) resolve which connected account to post as ----
   let accountId = body.account_id || '';
   if (!accountId){
-    const list = await req({ method:'GET', url:`${ZBASE}/accounts`, headers:zHeaders, json:true });
-    const accounts = (list && list.accounts) || [];
+    // No profile means this workspace has never connected anything. Falling
+    // back to the unscoped list here would resolve to SOME OTHER workspace's
+    // account and publish as it — so this refuses instead, which is the whole
+    // point of the profile.
+    const profileId = await workspaceProfileId(workspaceId);
+    if (!profileId){
+      throw new Error(`This workspace has no connected accounts yet. Connect ${platform} in Social first.`);
+    }
+    const list = await req({ method:'GET',
+      url:`${ZBASE}/accounts?profileId=${encodeURIComponent(profileId)}`,
+      headers:zHeaders, json:true });
+    const accounts = ((list && list.accounts) || [])
+      .filter(a => a && typeof a === 'object')
+      .filter(a => { const got = profileIdOf(a.profileId); return !got || got === profileId; });
     const match = accounts.find(a =>
       a.platform === platform && a.isActive !== false && a.needsReconnection !== true);
     if (!match){
       const connected = accounts.map(a => a.platform).join(', ') || 'none';
-      throw new Error(`No connected ${platform} account in Zernio (connected: ${connected}). Connect one in the Zernio dashboard first.`);
+      throw new Error(`No connected ${platform} account in this workspace (connected: ${connected}). Connect one in Social first.`);
     }
     accountId = match._id;
 
@@ -1582,26 +1620,54 @@ try {
   const wsFilter = body.workspace_id ? `&workspace_id=eq.${body.workspace_id}` : '';
 
   // ══ 1) accounts ══════════════════════════════════════════════════════
-  const list = await req({ method:'GET', url:`${ZBASE}/accounts`, headers:zHeaders, json:true });
-  const accounts = (list && list.accounts) || [];
-  const hasAnalyticsAccess = !!(list && list.hasAnalyticsAccess);
-
-  // Zernio has no notion of our workspaces — one API key is one Zernio
-  // account. Mirror its accounts into whichever workspace asked (webhook)
-  // or every workspace that already has rows (schedule). Without a
-  // workspace we can't write anything RLS-scoped, so skip rather than
-  // guess.
-  let workspaceIds = [];
-  if (body.workspace_id){
-    workspaceIds = [body.workspace_id];
-  } else {
-    const existing = await req({ method:'GET', url:`${SUPA_URL}/rest/v1/social_accounts?select=workspace_id`, headers:sHeaders, json:true });
-    workspaceIds = [...new Set((existing || []).map(r => r.workspace_id).filter(Boolean))];
+  //
+  // ONE LIST PER WORKSPACE, scoped by that workspace's Zernio profile.
+  //
+  // This used to fetch GET /accounts once — every account the API key can
+  // see, across every tenant — and write all of them into every workspace
+  // that had rows. With one workspace connected that looked correct. With
+  // three, each brand's Social screen would list the other two brands'
+  // accounts as its own, and the composer would offer them as publish
+  // targets. The profile is what Zernio provides to prevent exactly that,
+  // and this now uses it.
+  //
+  // The populated-reference trap applies here too: `a.profileId` arrives as
+  // `{ _id, name }`, so it is read rather than stringified. Stringifying it
+  // is what made the connect flow discard every account it was given.
+  function profileIdOf(v){
+    if (!v) return '';
+    if (typeof v === 'string') return v.trim();
+    if (typeof v === 'object') return String(v._id || v.id || '').trim();
+    return String(v).trim();
   }
 
+  // Whichever workspace asked (webhook), or every workspace that has a Zernio
+  // profile (schedule). A workspace with no profile has never connected
+  // anything, so there is nothing to mirror and nothing to guess.
+  const wsRows = await req({ method:'GET',
+    url:`${SUPA_URL}/rest/v1/workspaces?select=id,zernio_profile_id&zernio_profile_id=not.is.null`
+        + (body.workspace_id ? `&id=eq.${body.workspace_id}` : ''),
+    headers:sHeaders, json:true });
+  const workspaces = (wsRows || []).filter(w => w && w.zernio_profile_id);
+
+  let hasAnalyticsAccess = false;
+  let accounts = [];
   let accountsSynced = 0;
-  for (const wsId of workspaceIds){
-    for (const a of accounts){
+
+  for (const ws of workspaces){
+    const wsId = ws.id;
+    const profileId = String(ws.zernio_profile_id);
+    const list = await req({ method:'GET',
+      url:`${ZBASE}/accounts?profileId=${encodeURIComponent(profileId)}`,
+      headers:zHeaders, json:true });
+    hasAnalyticsAccess = hasAnalyticsAccess || !!(list && list.hasAnalyticsAccess);
+
+    const mine = ((list && list.accounts) || [])
+      .filter(a => a && typeof a === 'object')
+      .filter(a => { const got = profileIdOf(a.profileId); return !got || got === profileId; });
+    accounts = accounts.concat(mine);
+
+    for (const a of mine){
       try {
         await req({ method:'POST', url:`${SUPA_URL}/rest/v1/social_accounts?on_conflict=workspace_id,zernio_account_id`,
           headers:{ ...sHeaders, Prefer:'resolution=merge-duplicates,return=minimal' },
@@ -7978,577 +8044,22 @@ def build_research_resolve() -> dict:
 
 
 
-ZERNIO_CONNECT_STICKY = r"""## Arak – Zernio Connect
-
-**Zero secrets in this file.** Needs `ZERNIO_API_KEY`, `SUPABASE_URL`, `SUPABASE_KEY`.
-
-Per-workspace OAuth. This is what lets a workspace connect its OWN Instagram/TikTok through a normal OAuth redirect, instead of someone adding every account by hand on zernio.com under one shared team.
-
-**How the tenancy works.** Zernio puts a `profile` between the API team and the connected accounts — one profile per customer. This workflow creates one per workspace on first use and stores the id in `workspaces.zernio_profile_id`; from then on every `/connect` and `/accounts` call is scoped by `profileId`, so a workspace can only ever see and post as its own accounts. The Zernio key never leaves n8n, exactly like every other provider here.
-
-**Actions** (one webhook, dispatched on `action`):
-
-| action | does |
-|---|---|
-| `accounts` | list this workspace's connected accounts, mirror into `social_accounts` |
-| `connect_url` | start OAuth — returns `authUrl` for the browser to visit |
-| `selection_options` | headless step 2: list the pages/profiles a just-authorised user can pick |
-| `selection_complete` | headless step 3: commit the pick, finishing the connection |
-| `disconnect` | drop the account at Zernio and locally |
-
-**Why `selection_*` exist.** Instagram and Snapchat need a SECOND choice after OAuth (which page / which public profile). Zernio will host that picker itself, but then the user hops to a Zernio-branded screen mid-flow. Passing `headless=true` hands us a `tempToken` and lets the picker live in our own UI instead.
-
-**Snapchat is deliberately not reachable here** — `LIVE_PLATFORMS` in src/lib/utils.js gates it out in the browser and the guard below refuses it server-side, so a hand-made request cannot start a flow the app has no screen to finish."""
-
-ZERNIO_CONNECT_JS = r"""
-const rawHttp = this.helpers.httpRequest;
-
-// Same DNS-blip retry as the publish workflow: Docker's embedded resolver
-// (127.0.0.11) drops a lookup occasionally, and a name that never resolved
-// proves the request never reached Zernio — so re-sending cannot double
-// anything. Connection resets and timeouts still fail once, loudly.
-const http = async (opts) => {
-  for (let attempt = 0; ; attempt++) {
-    try {
-      return await rawHttp(opts);
-    } catch (e) {
-      const code = (e && (e.code || (e.cause && e.cause.code))) || '';
-      const msg  = String((e && e.message) || '');
-      const isDns = code === 'ENOTFOUND' || code === 'EAI_AGAIN'
-        || /getaddrinfo\s+(ENOTFOUND|EAI_AGAIN)/.test(msg);
-      if (!isDns || attempt >= 2) throw e;
-      await new Promise(r => setTimeout(r, 400 * (attempt + 1)));
-    }
-  }
-};
-
-// n8n's thrown-error shape for non-2xx varies by version, which is how you
-// end up staring at "Request failed with status code 409" with no idea which
-// of the six calls below produced it. Read the parsed body ourselves instead,
-// and keep the status — the 409 path genuinely needs to inspect it.
-async function req(opts){
-  const res = await http({ ...opts, returnFullResponse: true, ignoreHttpStatusErrors: true });
-  const status = res.statusCode;
-  if (status >= 200 && status < 300) return res.body;
-  const b = res.body;
-  const msg = (b && typeof b === 'object') ? (b.error || b.message || JSON.stringify(b).slice(0, 400))
-            : (typeof b === 'string' && b) ? b.slice(0, 400)
-            : `HTTP ${status}`;
-  const err = new Error(`Zernio ${status}: ${msg}`);
-  err.status = status;
-  err.body = b;
-  throw err;
-}
-
-const body = ($input.first().json.body) || {};
-const ZERNIO   = $env.ZERNIO_API_KEY;
-const SUPA_URL = String($env.SUPABASE_URL || '').replace(/\/+$/, '');
-const SUPA_KEY = $env.SUPABASE_KEY;
-const ZBASE    = 'https://zernio.com/api/v1';
-const zHeaders = { Authorization: `Bearer ${ZERNIO}`, 'Content-Type': 'application/json' };
-const sHeaders = { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}`, 'Content-Type': 'application/json' };
-
-// n8n's Code node sandbox does not expose URLSearchParams — confirmed live
-// 2026-08-20 against arak-meta-dashboard, where every graph() call failed with
-// "URLSearchParams is not defined". Same fix as the Meta workflows'.
-//
-// This one is worth spelling out because the failure would have been total and
-// silent-looking: `connect_url` and `audio_search` are the only two actions
-// that build a query string, and they are the entire OAuth entry point. A
-// ReferenceError here means the connect button throws for every platform, and
-// the catch below turns it into a generic ok:false — so it would have read as
-// "Zernio is broken" rather than "this global does not exist".
-//
-// Every value passed through here is a primitive (ids, a redirect URL, a
-// search term), so none of URLSearchParams' array/nested-object handling is
-// needed.
-function qsEncode(obj){
-  return Object.entries(obj)
-    .filter(([, v]) => v !== undefined && v !== null && v !== '')
-    .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&');
-}
-
-const action      = String(body.action || '').trim();
-const workspaceId = String(body.workspace_id || '').trim();
-const platform    = String(body.platform || '').trim().toLowerCase();
-
-// Mirrors LIVE_PLATFORMS in src/lib/utils.js. Snapchat is in the app's
-// platform list as status:'beta' — visible, labelled, not connectable — and
-// this is the server-side half of that: the UI hides the button, this refuses
-// the call, so a hand-made request cannot open a flow with no screen to
-// finish it. Add a platform here only when the app can complete its OAuth.
-const CONNECTABLE = ['instagram', 'tiktok'];
-
-// Platforms whose OAuth is followed by a SECOND choice (which Facebook page
-// backs this Instagram account). Zernio's docs list six such platforms; these
-// are the ones we actually offer. Everything else finishes at the callback.
-const NEEDS_SELECTION = ['instagram'];
-
-// Which Instagram connection to request. Named rather than inlined because
-// three places depend on agreeing about it: the connect URL, the row we
-// mirror into social_accounts, and the composer deciding whether to offer the
-// audio picker at all.
-const LOGIN_METHOD_IG = 'facebook_login';
-
-// ── Get-or-create this workspace's Zernio profile ───────────────────────
-//
-// Idempotent and race-safe WITHOUT a read-then-create, which two tabs would
-// both pass before either wrote. Two things make that work:
-//
-//   1. The profile name is DERIVED from the workspace id, not chosen. Zernio
-//      enforces name uniqueness per team, so a second create for the same
-//      workspace is refused by Zernio rather than silently making a twin.
-//   2. That refusal is a 409 carrying `details.existingProfileId` — the id we
-//      would have got had we won. So the loser of a race gets the same answer
-//      as the winner and nobody is left holding an orphan profile.
-//
-// The Supabase write is then last-writer-wins over an identical value, which
-// is harmless. Compare claimPost() in the publish workflow: that one needs a
-// real atomic claim because its outcomes DIFFER per caller; here they cannot.
-async function ensureProfile(){
-  if (!workspaceId) throw new Error('workspace_id is required.');
-
-  const rows = await http({ method:'GET',
-    url:`${SUPA_URL}/rest/v1/workspaces?id=eq.${workspaceId}&select=id,name,zernio_profile_id`,
-    headers:sHeaders, json:true });
-  const ws = (Array.isArray(rows) && rows[0]) || null;
-  if (!ws) throw new Error(`No such workspace: ${workspaceId}`);
-  if (ws.zernio_profile_id) return ws.zernio_profile_id;
-
-  // Prefixed and full-length on purpose. A bare uuid is indistinguishable
-  // from any other id in Zernio's own dashboard, and a truncated one stops
-  // being unique across enough workspaces to matter.
-  const name = `arak_ws_${workspaceId}`;
-  let profileId = '';
-  try {
-    const created = await req({ method:'POST', url:`${ZBASE}/profiles`, headers:zHeaders,
-      body:{ name, description: String(ws.name || 'Arak workspace').slice(0, 200) }, json:true });
-    profileId = String((created && created.profile && created.profile._id) || '');
-  } catch (e) {
-    const existing = e && e.body && e.body.details && e.body.details.existingProfileId;
-    if (e && e.status === 409 && existing) profileId = String(existing);
-    else throw e;
-  }
-  if (!profileId) throw new Error('Zernio created a profile but returned no id.');
-
-  await http({ method:'PATCH', url:`${SUPA_URL}/rest/v1/workspaces?id=eq.${workspaceId}`,
-    headers:{ ...sHeaders, Prefer:'return=minimal' },
-    body:{ zernio_profile_id: profileId }, json:true });
-
-  return profileId;
-}
-
-// Mirror Zernio's account list into social_accounts so every screen can list
-// connected accounts without the key ever reaching a browser. Upsert on
-// (workspace_id, zernio_account_id) — see the migration's unique index.
-async function mirrorAccounts(profileId, accounts){
-  if (!workspaceId || !accounts.length) return;
-  const rows = accounts.map(a => ({
-    workspace_id:       workspaceId,
-    zernio_account_id:  String(a._id || ''),
-    zernio_profile_id:  profileId,
-    platform:           String(a.platform || ''),
-    username:           String(a.username || a.name || ''),
-    display_name:       String(a.displayName || a.name || ''),
-    profile_picture:    String(a.profilePicture || a.avatarUrl || ''),
-    profile_url:        String(a.profileUrl || ''),
-    is_active:          a.isActive !== false,
-    needs_reconnection: a.needsReconnection === true,
-    followers_count:    Number(a.followersCount || 0) || 0,
-    publish_provider:   'zernio',
-    // Instagram only, and only what we can actually observe. Zernio reports
-    // the method it connected with; absent that, an Instagram row we created
-    // is one WE connected, so it carries the method we asked for. Anything
-    // else stays null, which the composer reads as "no catalog audio" — the
-    // safe direction, since offering audio an account cannot use produces a
-    // Reel that fails at publish rather than a missing button.
-    ...(String(a.platform || '') === 'instagram'
-        ? { login_method: String(a.loginMethod || a.login_method || LOGIN_METHOD_IG) }
-        : {}),
-    last_synced_at:     new Date().toISOString(),
-    updated_at:         new Date().toISOString(),
-  })).filter(r => r.zernio_account_id);
-  if (!rows.length) return;
-
-  // connected_at is deliberately ABSENT from this payload. It records when
-  // OAuth was actually granted, which is what makes "reconnect, this token is
-  // 58 days old" answerable — Instagram's long-lived tokens die at 60. This is
-  // an upsert with merge-duplicates, so any column named here is overwritten
-  // on every merge: including connected_at would reset that clock on every
-  // page load and quietly hide every token that was about to expire. Omitting
-  // it lets the column's `default now()` fire on INSERT only, which is exactly
-  // the semantics wanted — a value that is written once and never again.
-  await http({ method:'POST',
-    url:`${SUPA_URL}/rest/v1/social_accounts?on_conflict=workspace_id,zernio_account_id`,
-    headers:{ ...sHeaders, Prefer:'resolution=merge-duplicates,return=minimal' },
-    body: rows,
-    json:true });
-}
-
-async function listAccounts(profileId){
-  const list = await req({ method:'GET',
-    url:`${ZBASE}/accounts?profileId=${encodeURIComponent(profileId)}`,
-    headers:zHeaders, json:true });
-  const accounts = (list && list.accounts) || [];
-  // Belt and braces. profileId is a server-side filter and Zernio honours it,
-  // but this list decides which accounts a workspace may post as — so it is
-  // re-checked here rather than trusted. A filter regression upstream would
-  // otherwise become a cross-tenant publish.
-  return accounts.filter(a => !a.profileId || String(a.profileId) === String(profileId));
-}
-
-try {
-  if (!ZERNIO) throw new Error('ZERNIO_API_KEY is not set on this n8n instance.');
-  if (!SUPA_URL || !SUPA_KEY) throw new Error('SUPABASE_URL / SUPABASE_KEY are not set on this n8n instance.');
-
-  // ---- list this workspace's connected accounts ----
-  if (action === 'accounts'){
-    const profileId = await ensureProfile();
-    const accounts  = await listAccounts(profileId);
-    await mirrorAccounts(profileId, accounts);
-    return [{ json: { ok:true, profile_id:profileId, accounts } }];
-  }
-
-  // ---- start OAuth ----
-  if (action === 'connect_url'){
-    if (!CONNECTABLE.includes(platform)){
-      throw new Error(`${platform || 'That platform'} cannot be connected yet.`);
-    }
-    const redirectUrl = String(body.redirect_url || '').trim();
-    if (!redirectUrl) throw new Error('redirect_url is required.');
-
-    const profileId = await ensureProfile();
-    const headless  = NEEDS_SELECTION.includes(platform);
-    const params = { profileId, redirect_url: redirectUrl };
-    if (headless) params.headless = 'true';
-
-    // Instagram connects one of two ways and we deliberately ask for the
-    // Facebook one. Publishing, analytics, comments and the inbox are
-    // identical either way — but catalog audio is NOT: attaching a track to a
-    // Reel on an Instagram-Login account fails with
-    // `instagram_audio_requires_facebook_login`, and the Meta Ads add-on can
-    // ride on this same connection rather than needing a separate Facebook
-    // account. Omitting the param would silently give us the default and take
-    // both away.
-    //
-    // This is also what makes the Page-selection step real rather than
-    // speculative: Instagram Login connects the account directly with no
-    // picker, Facebook Login authorises through the linked Page and needs one.
-    if (platform === 'instagram') params.loginMethod = LOGIN_METHOD_IG;
-
-    const res = await req({ method:'GET',
-      url:`${ZBASE}/connect/${encodeURIComponent(platform)}?${qsEncode(params)}`,
-      headers:zHeaders, json:true });
-
-    const authUrl = String((res && (res.authUrl || res.url)) || '');
-    if (!authUrl) throw new Error('Zernio returned no authorisation URL.');
-    return [{ json: { ok:true, profile_id:profileId, auth_url:authUrl,
-                      state:(res && res.state) || '', headless } }];
-  }
-
-  // ---- headless selection (step 2 + 3) ----
-  //
-  // Endpoint, auth and body are Zernio's own, taken from its OpenAPI spec
-  // (docs.zernio.com/api/openapi) after two wrong guesses shipped:
-  //
-  //   • The endpoint is `connect/instagram/select-account`. Instagram DOES
-  //     authorise through Facebook, but `connect/facebook/select-page` is the
-  //     endpoint for connecting a FACEBOOK account — its POST creates a
-  //     `platform: facebook` account and its schema requires a `userProfile`
-  //     object our callback never carries, which is where the live connect
-  //     died on `Zernio 400: Invalid input: expected object, received
-  //     undefined`. Its GET happened to answer (it lists every Page the token
-  //     manages), so the picker filled in and only the final click failed.
-  //     select-account is the Instagram half of the same OAuth: same tokens,
-  //     `required: [profileId, pageId, tempToken]`, no userProfile, and it
-  //     returns only Pages that have a linked Instagram professional account.
-  //   • The callback's step value ('select_account') is a discriminator, not
-  //     a path. Using it as one hit a route that does not exist.
-  //   • The short-lived connect token rides in an `X-Connect-Token` HEADER,
-  //     alongside the API-key Bearer. tempToken and profileId are query params
-  //     on the GET and body fields on the POST. Sending the connect token as a
-  //     query param (an earlier assumption) authorised nothing.
-  //
-  // Mapped by platform so LinkedIn (connect/linkedin/select-organization) and
-  // the rest slot in without touching the call sites. `normalize` exists
-  // because each platform's list has its own shape and the picker should not
-  // have to know them: for Instagram the row the user reads is the linked
-  // Instagram account, while the id that must be POSTed is the PAGE's.
-  const SELECTION = {
-    instagram: {
-      path: 'connect/instagram/select-account',
-      listKey: 'pages',
-      idKey: 'pageId',
-      normalize: (p) => {
-        // Spec says snake_case; accept the camelCase spelling too rather than
-        // silently rendering a nameless row if Zernio ever changes it.
-        const ig = p.instagram_business_account || p.instagramBusinessAccount || {};
-        return {
-          id:       String(p.id || p.pageId || ''),
-          name:     String(ig.username || p.name || ''),
-          username: String(ig.username || ''),
-          // The Page name is the subtitle, not the title: someone picking here
-          // is choosing an Instagram account, and @handle is what they know it
-          // by. The Page is the thing they will forget they linked.
-          category: String(p.name || ''),
-          picture:  String(ig.profile_picture_url || ig.profilePictureUrl || ''),
-          instagram_account_id: String(ig.id || ''),
-        };
-      },
-    },
-  };
-
-  if (action === 'selection_options' || action === 'selection_complete'){
-    if (!CONNECTABLE.includes(platform)) throw new Error(`${platform || 'That platform'} cannot be connected yet.`);
-    const spec = SELECTION[platform];
-    if (!spec) throw new Error(`No selection step is defined for ${platform}.`);
-
-    const tempToken   = String(body.temp_token || '').trim();
-    const connectToken= String(body.connect_token || '').trim();
-    const cbProfileId = String(body.profile_id || '').trim();
-    if (!tempToken)    throw new Error('temp_token is required.');
-    if (!connectToken) throw new Error('connect_token is required.');
-
-    // The profile from the callback must be THIS workspace's. Zernio issued the
-    // connect flow against a profileId; if it does not match the one we hold
-    // for this workspace, the browser has crossed a wire and completing the
-    // selection would attach an account to the wrong tenant.
-    const profileId = await ensureProfile();
-    if (cbProfileId && cbProfileId !== profileId){
-      throw new Error('This connection was started for a different workspace. Start again from this one.');
-    }
-
-    // Both calls carry the connect token as a header, next to the API key.
-    const selHeaders = { ...zHeaders, 'X-Connect-Token': connectToken };
-
-    if (action === 'selection_options'){
-      const qs = qsEncode({ profileId, tempToken });
-      const res = await req({ method:'GET', url:`${ZBASE}/${spec.path}?${qs}`,
-        headers:selHeaders, json:true });
-      const list = (res && (res[spec.listKey] || res.options || res.accounts)) || [];
-      // Deliberately NOT filtered to pages that carry an instagram_business_
-      // account. Zernio says it only returns eligible ones; if that ever stops
-      // being true, or the field is spelled differently, a filter here would
-      // empty the picker and tell the user they have no professional account —
-      // a lie that ends the flow. Showing the row instead means the worst case
-      // is Zernio refusing the completion with a reason.
-      const options = (Array.isArray(list) ? list : [])
-        .map(o => (spec.normalize ? spec.normalize(o || {}) : o))
-        .filter(o => o && o.id);
-      return [{ json: { ok:true, options } }];
-    }
-
-    // selection_complete
-    const selection = body.selection;
-    if (!selection) throw new Error('selection is required.');
-    const chosenId = String((selection && (selection.id || selection._id || selection.pageId)) || selection || '').trim();
-    if (!chosenId) throw new Error('The chosen option has no id.');
-
-    // Exactly the three fields the spec marks required. `userProfile` is NOT
-    // sent: select-account does not accept it, and the endpoint that does
-    // (facebook/select-page) is the one that connects a Facebook account.
-    await req({ method:'POST', url:`${ZBASE}/${spec.path}`, headers:selHeaders,
-      body:{ profileId, [spec.idKey]: chosenId, tempToken }, json:true });
-
-    // Re-list rather than trusting the completion response to describe the new
-    // account: this is the moment social_accounts must become correct, and one
-    // authoritative read is cheaper to reason about than merging two shapes.
-    const accounts = await listAccounts(profileId);
-    await mirrorAccounts(profileId, accounts);
-
-    return [{ json: { ok:true, profile_id:profileId, accounts } }];
-  }
-
-  // ---- disconnect ----
-  if (action === 'disconnect'){
-    const accountId = String(body.account_id || '').trim();
-    if (!accountId) throw new Error('account_id is required.');
-    const profileId = await ensureProfile();
-
-    // Ownership check BEFORE the delete. account_id arrives from a browser,
-    // and DELETE /accounts/{id} is scoped to the API TEAM, not to a profile —
-    // so without this, a caller who knew another workspace's account id could
-    // disconnect it. Confirming the id appears in THIS profile's list is what
-    // makes the delete tenant-safe.
-    const accounts = await listAccounts(profileId);
-    if (!accounts.some(a => String(a._id) === accountId)){
-      throw new Error('That account does not belong to this workspace.');
-    }
-
-    await req({ method:'DELETE', url:`${ZBASE}/accounts/${encodeURIComponent(accountId)}`,
-      headers:zHeaders, json:true });
-
-    // Local row goes only after Zernio confirms. The other order leaves an
-    // account live at the provider that the UI swears is gone — and the next
-    // list refresh would resurrect the row anyway.
-    await http({ method:'DELETE',
-      url:`${SUPA_URL}/rest/v1/social_accounts?workspace_id=eq.${workspaceId}&zernio_account_id=eq.${encodeURIComponent(accountId)}`,
-      headers:{ ...sHeaders, Prefer:'return=minimal' }, json:true });
-
-    return [{ json: { ok:true, disconnected:accountId } }];
-  }
-
-  // ---- TikTok creator info ----
-  //
-  // Not optional and not cosmetic. TikTok requires `privacy_level` on every
-  // post, drawn from the levels THIS creator is allowed to use — a private
-  // account cannot post publicly, and sending a level it does not allow fails
-  // the post. So the composer has to ask before it can offer the choice.
-  //
-  // Two paths, tried in order, because Zernio's own docs disagree with
-  // themselves: the platform guide documents
-  // /accounts/{id}/tiktok/creator-info while the API reference documents
-  // /accounts/{id}/tiktok-creator-info. Rather than guess and ship a feature
-  // that 404s, try one and fall back. Whichever answers, the shape is the
-  // same. Collapse this to one call once it is known which is real.
-  if (action === 'creator_info'){
-    const accountId = String(body.account_id || '').trim();
-    const mediaType = String(body.media_type || 'video').trim();
-    if (!accountId) throw new Error('account_id is required.');
-    const profileId = await ensureProfile();
-
-    // Same ownership check as disconnect: account_id comes from a browser and
-    // this reads another tenant's posting configuration otherwise.
-    const accounts = await listAccounts(profileId);
-    if (!accounts.some(a => String(a._id) === accountId)){
-      throw new Error('That account does not belong to this workspace.');
-    }
-
-    const paths = [
-      `${ZBASE}/accounts/${encodeURIComponent(accountId)}/tiktok/creator-info?mediaType=${encodeURIComponent(mediaType)}`,
-      `${ZBASE}/accounts/${encodeURIComponent(accountId)}/tiktok-creator-info?mediaType=${encodeURIComponent(mediaType)}`,
-    ];
-    let info = null, lastErr = null;
-    for (const url of paths){
-      try { info = await req({ method:'GET', url, headers:zHeaders, json:true }); break; }
-      catch (e) { lastErr = e; if (e.status !== 404) throw e; }
-    }
-    if (!info) throw lastErr || new Error('Could not read TikTok creator info.');
-
-    // Zernio has wrapped this differently across versions; take the first
-    // shape that is actually an array rather than assuming one.
-    const data = info.creatorInfo || info.data || info;
-    const levels = data.privacy_level_options || data.privacyLevelOptions
-                || data.privacyLevels || [];
-    return [{ json: { ok:true,
-      privacyLevels: Array.isArray(levels) ? levels : [],
-      nickname: data.creator_nickname || data.nickname || '',
-      // Surfaced so the composer can warn before TikTok refuses: these are
-      // per-day posting caps, not per-post limits.
-      maxVideoSeconds: Number(data.max_video_post_duration_sec || 0) || null,
-      commentDisabled: data.comment_disabled === true,
-      duetDisabled:    data.duet_disabled === true,
-      stitchDisabled:  data.stitch_disabled === true,
-    } }];
-  }
-
-  // ---- Instagram catalog audio search ----
-  //
-  // Wraps GET /accounts/{id}/instagram/audio. Meta exposes only the audio it
-  // has CLEARED for third-party publishing, so this catalog is a subset of
-  // what the Instagram app shows — the trending sound of the week is usually
-  // not in it. That is Meta's restriction, not Zernio's and not ours; the
-  // composer says so rather than letting someone hunt for a track that was
-  // never reachable.
-  //
-  // Omitting `q` returns trending, which is the more useful default for a
-  // picker that opens with nothing typed.
-  if (action === 'audio_search'){
-    const accountId = String(body.account_id || '').trim();
-    const q         = String(body.q || '').trim();
-    const audioType = String(body.audio_type || 'music').trim();
-    if (!accountId) throw new Error('account_id is required.');
-    const profileId = await ensureProfile();
-
-    // Same tenancy guard as disconnect and creator_info: account_id arrives
-    // from a browser, and this reads against another workspace's account
-    // otherwise.
-    const accounts = await listAccounts(profileId);
-    const account  = accounts.find(a => String(a._id) === accountId);
-    if (!account){
-      throw new Error('That account does not belong to this workspace.');
-    }
-
-    const params = { audioType, q };
-
-    let res;
-    try {
-      res = await req({ method:'GET',
-        url:`${ZBASE}/accounts/${encodeURIComponent(accountId)}/instagram/audio?${qsEncode(params)}`,
-        headers:zHeaders, json:true });
-    } catch (e) {
-      // The one failure worth naming, because it is a CONNECTION problem
-      // rather than a search problem and the fix is a reconnect, not a
-      // different query. Instagram-Login accounts cannot touch catalog audio
-      // at all.
-      const raw = JSON.stringify((e && e.body) || '') + ' ' + String((e && e.message) || '');
-      if (/instagram_audio_requires_facebook_login/i.test(raw)){
-        return [{ json: { ok:false, needsReconnect:true,
-          error: 'This account was connected without Facebook access, which Instagram requires for catalog audio. Reconnect it to enable audio.' } }];
-      }
-      throw e;
-    }
-
-    // Zernio has wrapped list responses differently across versions; take the
-    // first shape that is actually an array rather than assuming one.
-    const items = (res && (res.audio || res.audios || res.items || res.results || res.data)) || [];
-    const list  = Array.isArray(items) ? items : [];
-
-    return [{ json: { ok:true, trending: !q, audio: list.map(a => ({
-      audioId:  String(a.audioId || a.id || a._id || ''),
-      title:    String(a.title || a.name || ''),
-      artist:   String(a.artist || a.artistName || a.creator || ''),
-      // Seconds. Zernio reports milliseconds on some shapes and seconds on
-      // others; normalise here so the picker does not have to guess which.
-      duration: Number(a.durationSeconds || (a.durationMs ? a.durationMs / 1000 : 0) || a.duration || 0) || null,
-      // Preview only, and short-lived — Zernio's own docs put the expiry at
-      // roughly a day and a half. Never stored on a post row: a saved draft
-      // must re-fetch rather than hold a dead URL.
-      previewUrl: String(a.downloadUrl || a.previewUrl || ''),
-      coverUrl:   String(a.coverUrl || a.thumbnailUrl || ''),
-    })).filter(a => a.audioId) } }];
-  }
-
-  throw new Error(`Unknown action: ${action || '(none)'}`);
-} catch (err) {
-  // Deliberately ok:false with HTTP 200 rather than a thrown node error.
-  // responseMode=lastNode means a throw reaches the browser as an empty body
-  // (see the Webhook Secret Guard note), and "Connect failed" with no reason
-  // is the single most annoying thing this screen could do.
-  return [{ json: { ok:false, error: String((err && err.message) || err) } }];
-}
-"""
-
-
-def build_zernio_connect() -> dict:
-    """
-    Webhook (responseMode=lastNode) -> Zernio: Connect (single Code node whose
-    return value IS the HTTP response).
-
-    One workflow with an `action` switch rather than five workflows, because
-    all five share the profile get-or-create and four of them share the
-    account mirror — split apart, that logic would be copy-pasted five ways
-    and would drift the first time Zernio changed a field name.
-
-    Synchronous for the same reason as Publish Post: somebody is watching a
-    Connect button and needs a real answer or a real error.
-    """
-    nodes = [
-        _sticky(ZERNIO_CONNECT_STICKY, height=560, width=520, x=0, y=-360),
-        _webhook("arak-zernio-connect", "lastNode", x=0, y=220),
-        _code("Zernio: Connect", ZERNIO_CONNECT_JS, x=240, y=220),
-    ]
-    connections = {
-        "Webhook": {"main": [[{"node": "Zernio: Connect", "type": "main", "index": 0}]]},
-    }
-    return {
-        "name": "Arak Lighting – Zernio Connect",
-        "nodes": nodes,
-        "connections": connections,
-        "active": False,
-        "settings": {"executionOrder": "v1"},
-        "tags": [],
-    }
+# ─── Zernio Connect: retired 2026-09-10 ────────────────────────────────────
+# Per-workspace OAuth moved to api/zernio/[action].js — a Vercel function in
+# this repo, unit-tested against captured Zernio responses.
+#
+# It is REMOVED rather than left generating, for two reasons. The workflow
+# carried a tenancy filter that stringified Zernio's populated `profileId`
+# reference and therefore discarded every account it was ever handed, which
+# is the bug the move exists to fix — leaving that here would keep a broken
+# implementation one config line away from being live again. And it took
+# `workspace_id` straight off the request body with no membership check, so
+# any signed-in user could list or disconnect any workspace's accounts.
+#
+# `zernioConnect` is gone from WEBHOOK_PATHS, so the proxy no longer forwards
+# to it. The workflow itself may still be published on the box: deactivate
+# 'Arak Lighting – Zernio Connect' there, or rename its webhook path to
+# retired-arak-zernio-connect, the way the LinkedIn workflows were retired.
 
 
 RESEARCH_RUN_STICKY = """## Research Run — Stage 0 (gather)
@@ -9515,7 +9026,6 @@ if __name__ == "__main__":
         build_zernio_publish(),
         build_zernio_sync(),
         build_zernio_dashboard(),
-        build_zernio_connect(),
         build_meta_publish(),
         build_meta_sync(),
         build_meta_dashboard(),
