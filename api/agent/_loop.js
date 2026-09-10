@@ -1,6 +1,6 @@
 import { callModel } from './_provider.js'
 import { runTool } from './_tools.js'
-import { toolDefs } from '../../src/lib/agent/tools.js'
+import { toolDefs, toolsFor } from '../../src/lib/agent/tools.js'
 import {
   loopBudget, loopCheck, toolUsesIn, textIn, toolResultBlock, urlsFrom,
 } from '../../src/lib/agent/loop.js'
@@ -29,10 +29,14 @@ import {
  */
 export async function runAgent({
   workspaceId, job = 'chat', surface = 'chat', stage = '', runId = null, chatId = null,
-  identity, brand, messages = [], tools = null, onText = null, onEvent = null,
+  identity, brand, messages = [], tools = null, writes = false,
+  onText = null, onEvent = null,
 }) {
   const budget = loopBudget(surface)
-  const defs = tools || toolDefs()
+  // Writes are opt-in. A tool the model can see is a tool it will eventually
+  // reach for, and an assistant that files a proposal every time it has an
+  // opinion is one whose review queue nobody opens.
+  const defs = tools || toolDefs(toolsFor({ writes }))
   const convo = [...messages]
 
   let turns = 0

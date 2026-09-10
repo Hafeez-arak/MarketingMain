@@ -204,8 +204,25 @@ export const READ_TOOLS = [
   },
 ]
 
-/** Every tool the agent can currently call. Metered and write tools land here later. */
+import { WRITE_TOOLS } from './writeTools.js'
+
+export { WRITE_TOOLS }
+
+/**
+ * Every tool the agent can call. Reads always; writes only where a surface
+ * asks for them.
+ *
+ * Writes are OPT-IN per surface rather than always present, because a tool the
+ * model can see is a tool it will eventually reach for. The research run wants
+ * them — proposing is the point of the run. A chat turn answering "why did this
+ * flop?" does not, and offering them there invites an assistant that files a
+ * proposal every time it has an opinion.
+ */
 export const ALL_TOOLS = [...READ_TOOLS]
+
+export function toolsFor({ writes = false } = {}) {
+  return writes ? [...READ_TOOLS, ...WRITE_TOOLS] : [...READ_TOOLS]
+}
 
 /**
  * The Anthropic-shaped definitions — name, description, input_schema and

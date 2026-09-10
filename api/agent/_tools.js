@@ -1,6 +1,7 @@
 import { db } from './_supabase.js'
 import { loadBrandContext } from './_context.js'
-import { findTool, isFree } from '../../src/lib/agent/tools.js'
+import { findTool, isFree, ALL_TOOLS, WRITE_TOOLS } from '../../src/lib/agent/tools.js'
+import { WRITE_EXECUTORS, checkOwnership, isWriteTool } from './_writeTools.js'
 import { ourPerformance, competitorBoard } from '../../src/lib/agent/aggregate.js'
 
 // ─── Running a tool ────────────────────────────────────────────────────────
@@ -284,7 +285,24 @@ export async function runTool(workspaceId, name, args = {}) {
     // are worth their cost.
     return { ok: false, error: 'No workspace in session.', free: true }
   }
-  const def = findTool(name)
+
+  // ── Writes ──
+  // Separated because they need a check reads do not: a write tool takes ids
+  // the MODEL supplied, and an id from another tenant would attach a row to a
+  // workspace the caller cannot see. See _writeTools.js.
+  if (isWriteTool(name)) {
+    try {
+      const bad = await checkOwnership(workspaceId, name, args || {})
+      if (bad) return { ok: false, error: bad, free: true }
+      const result = await WRITE_EXECUTORS[name](workspaceId, args || {})
+      if (result?.error) return { ok: false, error: result.error, free: true }
+      return { ok: true, result, free: true }
+    } catch (err) {
+      return { ok: false, error: err?.message || String(err), free: true }
+    }
+  }
+
+  const def = findTool(name, [...ALL_TOOLS, ...WRITE_TOOLS])
   const exec = EXECUTORS[name]
   if (!def || !exec) {
     // Named back to the model rather than thrown. A model that asked for a

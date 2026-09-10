@@ -145,6 +145,13 @@ export default async function handler(req, res) {
     const result = await runAgent({
       workspaceId, job: 'chat', surface: 'chat', chatId,
       identity: IDENTITY, brand, messages,
+      // Writes on, because "draft me a carousel for Thursday" and "add that as
+      // a rule" are the natural asks here and an assistant that can only talk
+      // is a search box. Everything still lands as a proposal or a draft, and
+      // the identity prompt tells it to write only when asked — an assistant
+      // that files a proposal every time it has an opinion is one whose review
+      // queue nobody opens.
+      writes: true,
       onText: delta => send(res, 'text', { delta }),
       onEvent: event => send(res, 'step', event),
     })

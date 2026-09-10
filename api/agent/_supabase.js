@@ -70,6 +70,36 @@ export async function callerMayUseWorkspace(req, workspaceId) {
   }
 }
 
+// ─── Retrying, and the one case where retrying is wrong ────────────────────
+// A research run makes dozens of round trips and a single transient blip
+// should not cost the whole thing. Observed live: a read timed out with
+// ETIMEDOUT partway through a smoke test that had already written rows.
+//
+// But a blind retry on every method is a bug factory. The distinction that
+// matters is whether the server may have already ACTED on the request:
+//
+//   • No HTTP response at all (DNS failure, connection reset, timeout) — the
+//     request almost certainly never completed. Safe to retry any method.
+//   • An HTTP 5xx or 429 — the server answered, which means it received the
+//     request and may well have processed it. Retrying a POST here is how one
+//     proposed rule becomes three. So only reads are retried on a status.
+//
+// The alternative — retrying writes on 5xx and deduplicating afterwards — is
+// what the unique indexes on competitor_snapshots and research_runs already do
+// for the cases that matter, and it is not worth extending to every table.
+
+const RETRY_ATTEMPTS = 3
+const RETRYABLE_CODES = new Set(['ETIMEDOUT', 'ECONNRESET', 'ENOTFOUND', 'EAI_AGAIN', 'ECONNREFUSED', 'UND_ERR_CONNECT_TIMEOUT'])
+
+/** Did this throw because the request never reached the server? */
+function isConnectionError(err) {
+  const code = err?.cause?.code || err?.code || ''
+  if (RETRYABLE_CODES.has(code)) return true
+  return /fetch failed|network|socket hang up|timeout/i.test(String(err?.message || ''))
+}
+
+const sleep = ms => new Promise(r => setTimeout(r, ms))
+
 /** PostgREST with the service key. Only reachable after a membership check. */
 export async function db(path, { method = 'GET', body, prefer } = {}) {
   if (!SUPABASE_URL || !SERVICE_KEY) {
@@ -81,12 +111,36 @@ export async function db(path, { method = 'GET', body, prefer } = {}) {
     'Content-Type': 'application/json',
   }
   if (prefer) headers.Prefer = prefer
-  const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
-    method, headers, body: body === undefined ? undefined : JSON.stringify(body),
-  })
-  const text = await res.text()
-  if (!res.ok) throw new Error(`Supabase ${res.status}: ${text.slice(0, 300)}`)
-  return text ? JSON.parse(text) : null
+
+  // GET and DELETE are idempotent; PATCH here always sets absolute values
+  // rather than incrementing, so repeating one lands the same row twice with
+  // the same result. POST is the only one that creates.
+  const isRead = method === 'GET'
+
+  let lastError = null
+  for (let attempt = 0; attempt < RETRY_ATTEMPTS; attempt++) {
+    if (attempt) await sleep(250 * 2 ** (attempt - 1))
+    try {
+      const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+        method, headers, body: body === undefined ? undefined : JSON.stringify(body),
+      })
+      const text = await res.text()
+      if (res.ok) return text ? JSON.parse(text) : null
+
+      // A 4xx is our fault and will fail identically next time — retrying it
+      // just delays a clear error. 429 is the exception: it is a rate limit,
+      // not a bad request.
+      const worthRetrying = isRead && (res.status >= 500 || res.status === 429)
+      lastError = new Error(`Supabase ${res.status}: ${text.slice(0, 300)}`)
+      if (!worthRetrying) throw lastError
+    } catch (err) {
+      lastError = err
+      // Rethrow immediately unless this is a connection failure — in which
+      // case the server never saw it and any method is safe to repeat.
+      if (!isConnectionError(err)) throw err
+    }
+  }
+  throw lastError
 }
 
 export const isConfigured = Boolean(SUPABASE_URL && SERVICE_KEY)
