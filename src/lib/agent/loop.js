@@ -165,3 +165,25 @@ export function checkCitations(claimed, allowed) {
   const ok = list.filter(s => allowed.has(typeof s === 'string' ? s : s?.url))
   return { sources: ok, uncited: ok.length === 0 && list.length > 0 }
 }
+
+/**
+ * Every URL the SERVER-SIDE tools actually returned, across a whole response.
+ *
+ * The same allow-list as urlsFrom, one level up: server tools execute inside
+ * the API, so their results arrive as content blocks rather than as our own
+ * tool results. Lives here rather than beside either caller because both the
+ * lens runner and the synthesiser need it, and importing one from the other
+ * makes a cycle.
+ *
+ * Server-tool errors do not throw — they come back as a result block whose
+ * content is an error OBJECT rather than a list — so this walks the structure
+ * and picks up anything URL-shaped instead of assuming a shape.
+ */
+export function urlsFromResponse(response, found = new Set()) {
+  for (const block of response?.content || []) {
+    if (block?.type === 'web_search_tool_result' || block?.type === 'web_fetch_tool_result') {
+      urlsFrom(block.content, found)
+    }
+  }
+  return found
+}

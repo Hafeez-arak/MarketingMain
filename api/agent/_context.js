@@ -121,6 +121,10 @@ export async function loadBrandContext(workspaceId, task = 'chat') {
 
   return {
     ctx,
+    // The shaped profile, not the raw row. The lenses need targetPersonas and
+    // customFields to ground their prompts, and buildContext consumes the
+    // profile without exposing it.
+    profile,
     schema,
     directory,
     memory: memory || [],
