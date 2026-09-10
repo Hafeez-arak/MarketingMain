@@ -47,11 +47,12 @@ export async function budgetFor(workspaceId, now = new Date()) {
  * @param {string} args.workspaceId  from the VERIFIED session, never from a model
  * @param {string} args.job          a key in JOBS — decides the model
  * @param {string} args.surface      run | chat | review — for the ledger
+ * @param {(text:string)=>void} [args.onText]  called with each text delta
  */
 export async function callModel({
   workspaceId, job, surface, stage = '', runId = null, chatId = null,
   identity, brand, tools = [], messages = [], maxTokens = 8_000, effort = 'high',
-  estimateUsd = 0,
+  estimateUsd = 0, onText = null,
 }) {
   if (!client) {
     // Named, not swallowed. A missing key here previously looked exactly like
@@ -80,6 +81,23 @@ export async function callModel({
     // turn with a large max_tokens can otherwise exceed the SDK's HTTP timeout,
     // and a timeout here bills for the generation and returns nothing.
     const stream = client.messages.stream(params)
+
+    // The chat surface passes onText so the browser can type the answer out as
+    // it arrives. Everything else ignores it and waits for the final message —
+    // which is why this stays ONE function rather than growing a streaming
+    // twin. A second call path would be spend nobody can see, and a cap that
+    // can be bypassed by writing a new file is not a cap.
+    if (typeof onText === 'function') {
+      stream.on('text', delta => {
+        // A throw inside a consumer's handler must not abort a generation that
+        // is already being paid for. The answer still lands in finalMessage()
+        // and still gets persisted; only the live typing stops.
+        try { onText(delta) } catch (err) {
+          console.error('[agent] onText handler threw:', err?.message || err)
+        }
+      })
+    }
+
     response = await stream.finalMessage()
   } catch (err) {
     error = err?.message || String(err)
