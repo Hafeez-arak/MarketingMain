@@ -14,6 +14,8 @@
 // Pure functions over rows. No network, no model, no clock except what is
 // passed in.
 
+import { computeMovements, buildBoard, priorByName } from './gather.js'
+
 /**
  * A number, or null if there genuinely is not one.
  *
@@ -183,86 +185,10 @@ export function engagementPer1k(avgEngagement, followers) {
 }
 
 /**
- * Week-over-week movement for one competitor, from their two most recent
- * snapshots.
- *
- * Returns `baseline: true` when there is only one snapshot. That is a real
- * state and it must not be dressed up: the first run for any rival has nothing
- * to compare against, and inventing a movement from a single point is exactly
- * the manufactured insight the identity prompt forbids.
+ * Split a flat snapshot list into the latest row per competitor and everything
+ * older, which is the shape both the board and the movements need.
  */
-export function deltaFor(snapshots) {
-  const series = [...(snapshots || [])].sort((a, b) =>
-    String(b?.captured_at || '').localeCompare(String(a?.captured_at || '')))
-  const current = series[0] || null
-  const previous = series[1] || null
-  if (!current) return null
-
-  const base = {
-    competitor_name: current.competitor_name,
-    ig_handle: current.ig_handle || '',
-    // The report must say this on every card: 'web_only' means the hard
-    // numbers below are absent, not zero.
-    data_source: current.data_source || 'web_only',
-    followers: current.followers ?? null,
-    posts_per_week: current.posts_per_week ?? null,
-    format_mix: current.format_mix || {},
-    avg_engagement: current.avg_engagement ?? null,
-    engagement_per_1k: current.engagement_per_1k ?? null,
-    sample_size: current.sample_size ?? null,
-    captured_at: current.captured_at || null,
-  }
-
-  if (!previous) {
-    return { ...base, baseline: true, movements: [] }
-  }
-
-  const movements = []
-  const track = [
-    ['followers', 'followers', 0],
-    ['posts_per_week', 'posting cadence', 2],
-    ['engagement_per_1k', 'engagement per 1k followers', 2],
-  ]
-  for (const [field, label, places] of track) {
-    const now = num(current[field])
-    const then = num(previous[field])
-    // Both sides must be real measurements. A rival we could not read this
-    // week has null, and comparing null against last week's 4.2 would report
-    // a collapse that never happened — the single most damaging kind of wrong
-    // this report can produce, because it reads as a finding.
-    if (now === null || then === null) continue
-    const change = round(now - then, places)
-    if (change === 0 || change === null) continue
-    movements.push({
-      metric: field,
-      label,
-      from: round(then, places),
-      to: round(now, places),
-      change,
-      // Percent is omitted rather than faked when the previous value was 0.
-      // "Up infinity percent" is how a report loses a reader.
-      percent: then === 0 ? null : round(((now - then) / Math.abs(then)) * 100, 1),
-    })
-  }
-
-  return {
-    ...base,
-    baseline: false,
-    previous_captured_at: previous.captured_at || null,
-    movements,
-  }
-}
-
-/**
- * The competitor board: one row per rival, deltas computed, ordered so the
- * biggest movers lead.
- *
- * `quiet_week` is a first-class result, not an error. Every tool in this
- * category is built to manufacture four exciting insights per run; this one is
- * required to say when nothing happened, because the weeks where something did
- * happen only mean anything if the quiet ones were reported honestly.
- */
-export function competitorBoard(snapshots) {
+export function splitSeries(snapshots) {
   const byName = new Map()
   for (const snap of snapshots || []) {
     const key = String(snap?.competitor_name || '').toLowerCase()
@@ -271,18 +197,48 @@ export function competitorBoard(snapshots) {
     byName.get(key).push(snap)
   }
 
-  const board = [...byName.values()].map(deltaFor).filter(Boolean)
-  const movers = board.filter(row => row.movements?.length)
+  const current = []
+  const older = []
+  for (const rows of byName.values()) {
+    const series = [...rows].sort((a, b) =>
+      String(b?.captured_at || '').localeCompare(String(a?.captured_at || '')))
+    current.push(series[0])
+    older.push(...series.slice(1))
+  }
+  return { current, older }
+}
 
-  board.sort((a, b) => (b.movements?.length || 0) - (a.movements?.length || 0) ||
-    (b.engagement_per_1k ?? -1) - (a.engagement_per_1k ?? -1))
+/**
+ * The competitor board for the chat tool, built from stored snapshots.
+ *
+ * Delegates to gather.js rather than computing its own movements. There was
+ * briefly a second implementation here with its own idea of what counts as a
+ * change, which meant the weekly brief and the answer to "what are competitors
+ * doing?" could disagree about the same two rows in the same database. One
+ * implementation, and it is the one that carries the 15% significance floor —
+ * without a floor a rounding wobble gets reported as news.
+ *
+ * `quiet_week` is a first-class result, not an error. Every tool in this
+ * category is built to manufacture four exciting insights per run; this one is
+ * required to say when nothing happened, because the weeks where something did
+ * happen only mean anything if the quiet ones were reported honestly.
+ */
+export function competitorBoard(snapshots) {
+  const { current, older } = splitSeries(snapshots)
+  const prior = priorByName(older)
+  const { movements, comparable } = computeMovements(current, prior)
+  const board = buildBoard(current, prior)
 
   return {
     competitors: board,
-    with_instagram: board.filter(r => r.data_source === 'instagram').length,
-    baseline: board.length > 0 && board.every(r => r.baseline),
-    quiet_week: board.length > 0 && movers.length === 0,
-    note: board.length === 0
+    movements,
+    with_instagram: current.filter(r => r?.data_source === 'instagram').length,
+    // Distinct states. "Nothing to compare against yet" is not "we compared
+    // and nothing changed", and reporting the first as the second would make
+    // week one read as a dull week rather than the start of the series.
+    baseline: current.length > 0 && comparable === 0,
+    quiet_week: current.length > 0 && comparable > 0 && movements.length === 0,
+    note: current.length === 0
       ? 'No competitor snapshots exist for this workspace yet — the handles have not been resolved or no run has gathered them.'
       : '',
   }

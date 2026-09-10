@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useAuth } from '../../store/auth'
-import { Card, PageHeader, Button, Spinner, Empty } from '../../components/ui/index'
+import { Card, PageHeader, SectionHead, Button, Spinner, Empty } from '../../components/ui/index'
 import { askAgent } from '../../lib/agentChat'
+import { startResearchRun, fetchRuns } from '../../lib/agentRun'
 
 // ─── /agent — the assistant, first surface ─────────────────────────────────
 // AGENT.md §5 describes a drawer that opens on every page and knows what you
@@ -42,7 +43,34 @@ export default function AgentPage() {
   const [turns, setTurns] = useState([])
   const [busy, setBusy] = useState(false)
   const [threadId, setThreadId] = useState('')
+  const [runs, setRuns] = useState([])
+  const [running, setRunning] = useState(false)
+  const [runNote, setRunNote] = useState('')
   const bottom = useRef(null)
+
+  const loadRuns = useCallback(async () => {
+    if (!activeWorkspaceId || !accessToken) return
+    setRuns(await fetchRuns(activeWorkspaceId, accessToken))
+  }, [activeWorkspaceId, accessToken])
+
+  useEffect(() => { loadRuns() }, [loadRuns])
+
+  const runResearch = useCallback(async () => {
+    if (running) return
+    setRunning(true)
+    setRunNote('')
+    const out = await startResearchRun({ workspaceId: activeWorkspaceId, accessToken })
+    // "Already running" is a success, not a failure — a second press attaches
+    // to the run already going rather than starting a second agent on the same
+    // period and doubling the bill.
+    setRunNote(
+      out.already_running ? out.reason
+        : out.ok ? `${out.headline || 'Run complete.'} (${out.measured} measured, ${out.failed} unreadable)`
+        : out.error || 'The run failed.',
+    )
+    setRunning(false)
+    loadRuns()
+  }, [running, activeWorkspaceId, accessToken, loadRuns])
 
   useEffect(() => {
     bottom.current?.scrollIntoView({ behavior: 'smooth' })
@@ -139,7 +167,44 @@ export default function AgentPage() {
             New conversation
           </Button>
         ) : null}
+        <Button variant="secondary" onClick={runResearch} disabled={running}>
+          {running ? 'Measuring…' : 'Run research'}
+        </Button>
       </PageHeader>
+
+      <Card className="p-4">
+        <SectionHead
+          title="Weekly research"
+          subtitle="Measures every competitor with a verified Instagram handle. No model is involved — these numbers are computed in code."
+        />
+        {runNote ? (
+          <p className="mt-2 text-sm text-slate-700">{runNote}</p>
+        ) : null}
+        {runs.length === 0 ? (
+          <p className="mt-2 text-sm text-slate-500">No run has been started for this brand yet.</p>
+        ) : (
+          <ul className="mt-3 space-y-1.5">
+            {runs.map(r => (
+              <li key={r.id} className="text-sm flex items-baseline gap-2">
+                <span
+                  className={
+                    r.status === 'complete' ? 'text-emerald-600'
+                      : r.status === 'failed' ? 'text-red-600' : 'text-amber-600'
+                  }
+                >
+                  ●
+                </span>
+                <span className="text-slate-500 text-xs w-36 shrink-0">
+                  {new Date(r.started_at).toLocaleString()}
+                </span>
+                <span className="text-slate-700">
+                  {r.error || r.report?.headline || `${r.status} · ${r.stage || ''}`}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Card>
 
       <Card className="p-4">
         {turns.length === 0 ? (

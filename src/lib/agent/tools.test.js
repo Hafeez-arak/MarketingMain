@@ -3,8 +3,7 @@ import {
   READ_TOOLS, ALL_TOOLS, toolDefs, findTool, isFree, toolsExposingWorkspace, FREE,
 } from './tools'
 import {
-  engagementOf, performanceBy, ourPerformance,
-  engagementPer1k, deltaFor, competitorBoard,
+  engagementOf, performanceBy, ourPerformance, engagementPer1k,
 } from './aggregate'
 
 describe('the tool belt cannot be talked across workspaces', () => {
@@ -164,114 +163,5 @@ describe('competitor comparison ranks on the only comparable number', () => {
     expect(engagementPer1k(50, 0)).toBeNull()
     expect(engagementPer1k(50, null)).toBeNull()
     expect(engagementPer1k(null, 1000)).toBeNull()
-  })
-})
-
-describe('deltas are a subtraction over stored rows', () => {
-  const base = {
-    competitor_name: 'Technolight', ig_handle: 'technolight', data_source: 'instagram',
-  }
-
-  it('one snapshot is a baseline and says so', () => {
-    // Inventing a movement from a single point is exactly the manufactured
-    // insight the identity prompt forbids.
-    const out = deltaFor([{ ...base, followers: 1000, posts_per_week: 3, captured_at: '2026-09-01' }])
-    expect(out.baseline).toBe(true)
-    expect(out.movements).toEqual([])
-  })
-
-  it('two snapshots produce real movement', () => {
-    const out = deltaFor([
-      { ...base, followers: 1200, posts_per_week: 7, engagement_per_1k: 4, captured_at: '2026-09-08' },
-      { ...base, followers: 1000, posts_per_week: 3, engagement_per_1k: 6, captured_at: '2026-09-01' },
-    ])
-    expect(out.baseline).toBe(false)
-    const cadence = out.movements.find(m => m.metric === 'posts_per_week')
-    expect(cadence).toMatchObject({ from: 3, to: 7, change: 4 })
-    // The headline case from AGENT.md: cadence up, engagement down.
-    const eng = out.movements.find(m => m.metric === 'engagement_per_1k')
-    expect(eng.change).toBe(-2)
-  })
-
-  it('does not report a percent change from zero', () => {
-    // "Up infinity percent" is how a report loses a reader.
-    const out = deltaFor([
-      { ...base, posts_per_week: 5, captured_at: '2026-09-08' },
-      { ...base, posts_per_week: 0, captured_at: '2026-09-01' },
-    ])
-    expect(out.movements[0].percent).toBeNull()
-    expect(out.movements[0].change).toBe(5)
-  })
-
-  it('a metric we could not read this week is not a collapse', () => {
-    // The most damaging wrong this report can produce, because it reads as a
-    // finding: a rival whose account went private has null engagement, and
-    // comparing null against last week's 6 would announce that their
-    // engagement fell to zero.
-    const out = deltaFor([
-      { ...base, data_source: 'web_only', engagement_per_1k: null, captured_at: '2026-09-08' },
-      { ...base, engagement_per_1k: 6, captured_at: '2026-09-01' },
-    ])
-    expect(out.movements.find(m => m.metric === 'engagement_per_1k')).toBeUndefined()
-  })
-
-  it('unchanged metrics are not listed as movements', () => {
-    const out = deltaFor([
-      { ...base, followers: 1000, captured_at: '2026-09-08' },
-      { ...base, followers: 1000, captured_at: '2026-09-01' },
-    ])
-    expect(out.movements).toEqual([])
-  })
-})
-
-describe('a quiet week is a reportable answer', () => {
-  it('says nothing moved when nothing moved', () => {
-    // The behaviour that separates this from every tool built to manufacture
-    // four exciting insights per run.
-    const board = competitorBoard([
-      { competitor_name: 'A', data_source: 'instagram', followers: 100, captured_at: '2026-09-08' },
-      { competitor_name: 'A', data_source: 'instagram', followers: 100, captured_at: '2026-09-01' },
-    ])
-    expect(board.quiet_week).toBe(true)
-    expect(board.baseline).toBe(false)
-  })
-
-  it('a first run is a baseline, not a quiet week', () => {
-    // Distinct states: "nothing to compare against yet" is not "we compared
-    // and nothing changed", and reporting the first as the second would make
-    // week one look like a dull week rather than the start of the series.
-    const board = competitorBoard([
-      { competitor_name: 'A', data_source: 'instagram', followers: 100, captured_at: '2026-09-01' },
-    ])
-    expect(board.baseline).toBe(true)
-    expect(board.quiet_week).toBe(true)
-  })
-
-  it('an empty board explains itself rather than looking like a quiet week', () => {
-    const board = competitorBoard([])
-    expect(board.competitors).toEqual([])
-    expect(board.quiet_week).toBe(false)
-    expect(board.note).toMatch(/no competitor snapshots/i)
-  })
-
-  it('counts how many rivals rest on Instagram evidence rather than the web', () => {
-    // "Instagram findings prove; web findings explain" — the report has to be
-    // able to say which, on every card.
-    const board = competitorBoard([
-      { competitor_name: 'A', data_source: 'instagram', followers: 10, captured_at: '2026-09-01' },
-      { competitor_name: 'B', data_source: 'web_only', captured_at: '2026-09-01' },
-    ])
-    expect(board.with_instagram).toBe(1)
-    expect(board.competitors).toHaveLength(2)
-  })
-
-  it('biggest movers lead the board', () => {
-    const board = competitorBoard([
-      { competitor_name: 'Still', data_source: 'instagram', followers: 100, captured_at: '2026-09-08' },
-      { competitor_name: 'Still', data_source: 'instagram', followers: 100, captured_at: '2026-09-01' },
-      { competitor_name: 'Mover', data_source: 'instagram', followers: 900, captured_at: '2026-09-08' },
-      { competitor_name: 'Mover', data_source: 'instagram', followers: 100, captured_at: '2026-09-01' },
-    ])
-    expect(board.competitors[0].competitor_name).toBe('Mover')
   })
 })

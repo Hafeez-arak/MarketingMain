@@ -59,14 +59,18 @@ describe('the agent runs in Node, not in a bundle', () => {
     'src/lib/agent/tools.js',
     'src/lib/agent/aggregate.js',
     'src/lib/agent/loop.js',
+    'src/lib/agent/gather.js',
     'api/agent/_supabase.js',
     'api/agent/_context.js',
     'api/agent/_provider.js',
     'api/agent/_tools.js',
     'api/agent/_loop.js',
-    // The endpoint itself. Vercel imports this file directly, so if it cannot
-    // load under Node the route is a 500 before any of the above matters.
+    'api/agent/_gather.js',
+    // The endpoints themselves. Vercel imports these files directly, so if one
+    // cannot load under Node the route is a 500 before any of the above
+    // matters.
     'api/agent/chat.js',
+    'api/agent/run.js',
   ]
 
   for (const rel of serverReachable) {
