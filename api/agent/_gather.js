@@ -1,6 +1,7 @@
 import { db } from './_supabase.js'
 import {
   discoveryFields, metricsFor, caveatsFor, gatherReport, emptyReport,
+  looksLikeCredentialsFailure, credentialsNote,
 } from '../../src/lib/agent/gather.js'
 
 // ─── Stage 0, the IO half ──────────────────────────────────────────────────
@@ -158,7 +159,17 @@ export async function gather(workspaceId, runId, period) {
     `engagement_per_1k,format_mix&order=captured_at.desc&limit=500`,
   )
 
-  const report = gatherReport({ snapshots: rows, prior: prior || [], period, failures, caveats })
+  // A credentials failure is not a competitor failure, and the two are
+  // indistinguishable in a per-rival list. Said first, and said plainly.
+  const credentialsProblem = looksLikeCredentialsFailure(failures, targets.length)
+  const report = gatherReport({
+    snapshots: rows,
+    prior: prior || [],
+    period,
+    failures,
+    caveats: credentialsProblem ? [credentialsNote(failures), ...caveats] : caveats,
+  })
+  if (credentialsProblem) report.credentials_problem = true
 
   // Deliberately NOT 'complete': the investigation stages run after this and
   // own the terminal write. The partial report is stored anyway, so a run that
@@ -166,9 +177,16 @@ export async function gather(workspaceId, runId, period) {
   // rather than nothing at all.
   await patchRun(workspaceId, runId, { stage: 'investigate', report })
 
+  if (credentialsProblem) {
+    // Otherwise the headline reads "First measurement of 2 competitors", which
+    // is actively misleading when zero of them were measured.
+    report.headline = 'Nothing could be measured — Instagram refused every request.'
+  }
+
   return {
     ok: true,
     report,
+    credentials_problem: credentialsProblem,
     snapshots: rows.length,
     measured: rows.filter(r => r.data_source === 'instagram').length,
     failed: failures.length,

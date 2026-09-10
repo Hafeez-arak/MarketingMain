@@ -4,6 +4,7 @@ import {
   movement, MOVEMENT_FLOOR, priorByName, computeMovements,
   buildBoard, selfIsComparable, MIN_SELF_BASELINE,
   gatherReport, emptyReport, periodFor,
+  looksLikeCredentialsFailure, credentialsNote,
 } from './gather'
 import { competitorBoard, splitSeries } from './aggregate'
 
@@ -308,5 +309,54 @@ describe('the chat tool and the weekly brief agree', () => {
     ])
     expect(out.with_instagram).toBe(1)
     expect(out.competitors).toHaveLength(2)
+  })
+})
+
+describe('a blocked token is not three private competitors', () => {
+  // These are indistinguishable in a per-rival failure list and are completely
+  // different problems. Three "could not read X" lines read as three rivals
+  // having gone private; the same three lines when the app is blocked mean
+  // nothing was ever going to be measured and someone needs to open a
+  // dashboard. Observed live 2026-09-10: a well-formed token returning "API
+  // access blocked" on every call, including debug_token.
+
+  const authFail = name => ({ name, handle: name.toLowerCase(), error: 'API access blocked.' })
+
+  it('spots it when every read failed the same credentials-shaped way', () => {
+    const failures = [authFail('Technolight'), authFail('Huda'), authFail('Us')]
+    expect(looksLikeCredentialsFailure(failures, 3)).toBe(true)
+    expect(credentialsNote(failures)).toMatch(/credentials or app-permissions problem/i)
+    expect(credentialsNote(failures)).toMatch(/not a problem with these competitors/i)
+  })
+
+  it('recognises the other auth wordings too', () => {
+    for (const error of [
+      'Error validating access token: Session has expired',
+      'The access token is invalid',
+      '(#10) Application does not have permission for this action',
+      'Unsupported get request',
+    ]) {
+      expect(looksLikeCredentialsFailure([{ error }], 1), error).toBe(true)
+    }
+  })
+
+  it('does NOT fire when only some rivals failed', () => {
+    // One rival erroring while others succeed is genuinely that rival's
+    // problem, and calling it a token failure sends someone to the wrong
+    // dashboard entirely.
+    expect(looksLikeCredentialsFailure([authFail('Technolight')], 3)).toBe(false)
+  })
+
+  it('does NOT fire on ordinary per-account failures', () => {
+    const failures = [
+      { name: 'A', error: 'no business_discovery payload' },
+      { name: 'B', error: 'no business_discovery payload' },
+    ]
+    expect(looksLikeCredentialsFailure(failures, 2)).toBe(false)
+  })
+
+  it('does not fire when nothing failed at all', () => {
+    expect(looksLikeCredentialsFailure([], 3)).toBe(false)
+    expect(looksLikeCredentialsFailure(null, 0)).toBe(false)
   })
 })

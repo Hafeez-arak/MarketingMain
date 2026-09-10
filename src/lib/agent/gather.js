@@ -327,3 +327,39 @@ export function periodFor(days = 7, now = new Date()) {
     days,
   }
 }
+
+// ─── Telling a credentials problem from a competitor problem ───────────────
+// These look identical in the per-rival failure list and are completely
+// different problems. "Could not read Technolight" three times over reads as
+// three rivals having gone private; the same three lines when the token is
+// blocked mean nothing was ever going to be measured and the person needs to
+// go and fix an app setting.
+//
+// Observed live 2026-09-10: a well-formed token returning "API access blocked"
+// (OAuthException 200) on every call including debug_token — an app-level
+// block, not a scope or a competitor issue.
+
+const AUTH_SHAPED = /API access blocked|OAuthException|access token|token (?:is )?(?:invalid|expired)|session has expired|permission|not authorized|unsupported get request/i
+
+/**
+ * Did every Instagram read fail for the same, credentials-shaped reason?
+ *
+ * Requires ALL of them to have failed: one rival erroring while others succeed
+ * is genuinely that rival's problem, and misreporting it as a token failure
+ * would send someone to the wrong dashboard.
+ */
+export function looksLikeCredentialsFailure(failures, attempted) {
+  const list = failures || []
+  if (!attempted || list.length < attempted) return false
+  if (!list.length) return false
+  return list.every(f => AUTH_SHAPED.test(String(f?.error || '')))
+}
+
+/** The sentence to put at the TOP of `unanswered` when that is what happened. */
+export function credentialsNote(failures) {
+  const message = String(failures?.[0]?.error || 'the Instagram API refused every request')
+  return `No competitor could be measured because Instagram refused every request ` +
+         `("${message}"). This is a credentials or app-permissions problem, not a ` +
+         `problem with these competitors — check the Meta app's status and the ` +
+         `META_IG_TOKEN. Nothing in this brief rests on Instagram evidence.`
+}
