@@ -56,9 +56,12 @@ describe('the agent runs in Node, not in a bundle', () => {
     'src/lib/agent/cost.js',
     'src/lib/agent/budget.js',
     'src/lib/agent/prompt.js',
+    'src/lib/agent/tools.js',
+    'src/lib/agent/aggregate.js',
     'api/agent/_supabase.js',
     'api/agent/_context.js',
     'api/agent/_provider.js',
+    'api/agent/_tools.js',
   ]
 
   for (const rel of serverReachable) {
