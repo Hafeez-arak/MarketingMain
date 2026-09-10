@@ -18,6 +18,11 @@ export function timeAgo(iso) {
 export const PLATFORM_META = {
   instagram:{ label:'Instagram', abbr:'IG', color:'#E1306C', bg:'bg-pink-50',  text:'text-pink-600',  border:'border-pink-200',  maxChars:2200 },
   tiktok:   { label:'TikTok',    abbr:'TT', color:'#010101', bg:'bg-stone-100',text:'text-stone-700', border:'border-stone-300', maxChars:2200 },
+  // LinkedIn's own limit is 3000 characters for a post body. It was removed
+  // from this app entirely on 2026-08-16 (tables dropped, workflows retired)
+  // and is back as a real platform rather than an un-hiding — see
+  // supabase/migrations/20260910_linkedin_platform.sql.
+  linkedin: { label:'LinkedIn',  abbr:'LI', color:'#0A66C2', bg:'bg-sky-50',   text:'text-sky-700',   border:'border-sky-200',   maxChars:3000 },
   snapchat: { label:'Snapchat',  abbr:'SC', color:'#FFFC00', bg:'bg-yellow-50',text:'text-yellow-700',border:'border-yellow-200',maxChars:250, status:'beta' },
 }
 

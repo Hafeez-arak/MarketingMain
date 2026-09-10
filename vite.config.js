@@ -127,13 +127,81 @@ function devN8nProxy(baseUrl) {
   }
 }
 
+// ─── Dev-only: run the /api/zernio functions in-process ────────────────────
+// api/zernio/[action].js is a Vercel function and the Vite dev server does not
+// run those, so without this every Connect button 404s locally and the app
+// looks broken in a way that has nothing to do with the code under test.
+//
+// This IMPORTS the real handler rather than proxying to a deployed copy, which
+// matters more here than it did for n8n: the whole reason per-workspace OAuth
+// moved off n8n was to make it iterable, and iterating against production
+// would give that back. What runs locally is the same module that ships.
+//
+// Secrets come from the two files a developer already has. SUPABASE_KEY in
+// n8n/docker/.env is the service-role key (it is what the workflows write
+// with), so it stands in for SUPABASE_SERVICE_ROLE_KEY here — same value, one
+// place, no third copy to drift.
+function readEnvFile(file) {
+  try {
+    const out = {}
+    for (const line of fs.readFileSync(path.join(process.cwd(), file), 'utf8').split('\n')) {
+      const m = /^([A-Z0-9_]+)=(.*)$/.exec(line.trim())
+      if (m) out[m[1]] = m[2].trim()
+    }
+    return out
+  } catch {
+    return {}
+  }
+}
+
+function devZernioApi(env) {
+  return {
+    name: 'arak-dev-zernio-api',
+    apply: 'serve',
+    configureServer(server) {
+      const n8nEnv = readEnvFile('n8n/docker/.env')
+      process.env.SUPABASE_URL ||= env.SUPABASE_URL || env.VITE_SUPABASE_URL || n8nEnv.SUPABASE_URL || ''
+      process.env.SUPABASE_ANON_KEY ||= env.VITE_SUPABASE_ANON_KEY || ''
+      process.env.SUPABASE_SERVICE_ROLE_KEY ||= env.SUPABASE_SERVICE_ROLE_KEY || n8nEnv.SUPABASE_KEY || ''
+      process.env.ZERNIO_API_KEY ||= env.ZERNIO_API_KEY || n8nEnv.ZERNIO_API_KEY || ''
+
+      server.middlewares.use('/api/zernio', async (req, res) => {
+        const action = (req.url || '').split('?')[0].replace(/^\//, '')
+        const chunks = []
+        req.on('data', c => chunks.push(c))
+        req.on('end', async () => {
+          let body = {}
+          try { body = JSON.parse(Buffer.concat(chunks).toString() || '{}') } catch { /* handler sees {} */ }
+          // The shims Vercel's Node runtime provides. Narrow on purpose: if
+          // the handler starts needing more of the response API, that should
+          // be a visible failure here rather than a silent difference between
+          // dev and production.
+          const shim = {
+            status(code) { res.statusCode = code; return shim },
+            json(payload) { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify(payload)) },
+            setHeader: (k, v) => res.setHeader(k, v),
+          }
+          try {
+            const mod = await server.ssrLoadModule('/api/zernio/[action].js')
+            await mod.default({ method: req.method, query: { action }, headers: req.headers, body }, shim)
+          } catch (err) {
+            res.statusCode = 500
+            res.setHeader('Content-Type', 'application/json')
+            res.end(JSON.stringify({ ok: false, error: `Dev handler crashed: ${err.message}` }))
+          }
+        })
+      })
+    },
+  }
+}
+
 // https://vite.dev/config/
 // A config function, not a plain object, so loadEnv can read .env here in
 // Node — the dev proxy needs VITE_N8N_BASE_URL before any client code exists.
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
   return {
-    plugins: [react(), devExportSink(), devN8nProxy(env.VITE_N8N_BASE_URL)],
+    plugins: [react(), devExportSink(), devN8nProxy(env.VITE_N8N_BASE_URL), devZernioApi(env)],
     server: {
       port: process.env.PORT ? Number(process.env.PORT) : 5173,
     },
