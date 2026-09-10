@@ -7882,6 +7882,37 @@ function handlesFromSearch(results) {
   return out;
 }
 
+
+// ─── Did WE fail, or did the handle? ─────────────────────────────────────
+// Meta answers both with a non-2xx, and conflating them is how a blocked app
+// became "this competitor has no Instagram" — written into research_agenda as
+// ig_status:'not_found', with the run reporting ok:true.
+//
+// Observed live 2026-09-10: every Graph call, including debug_token itself,
+// returned `code 200, "API access blocked"` — a Business-Manager-level
+// restriction that sits ABOVE token validation (a merely expired token is
+// code 190, and a malformed one never decrypts). Four competitors were
+// verified as not existing, by an app that had not been allowed to look.
+//
+// So the default is INFRASTRUCTURE, and only a code we recognise as being
+// about the handle counts as a rejected candidate. That direction is
+// deliberate: a candidate misread as infrastructure stops the run with a
+// reason on screen, which someone investigates; infrastructure misread as a
+// candidate writes a confident falsehood to the database and is invisible.
+//
+// Code 100 is Meta's "unknown or invalid username" for business_discovery —
+// a handle that does not exist, is personal, or is private. That is the
+// common case and most guesses SHOULD come back like this.
+const CANDIDATE_ERROR_CODES = [100, 803];
+
+function metaFailureKind(body, statusCode) {
+  const err = (body && body.error) || {};
+  const code = Number(err.code);
+  if (CANDIDATE_ERROR_CODES.indexOf(code) !== -1) return 'candidate';
+  if (statusCode >= 400 && statusCode < 500 && !Number.isFinite(code)) return 'candidate';
+  return 'infrastructure';
+}
+
 async function lookup(handle) {
   const fields = `business_discovery.username(${handle})`
     + `{id,username,name,biography,website,followers_count,follows_count,media_count}`;
@@ -7889,15 +7920,12 @@ async function lookup(handle) {
             + `&access_token=${encodeURIComponent(IG_TOKEN)}`;
   const res = await http({ method: 'GET', url, returnFullResponse: true, ignoreHttpStatusErrors: true, json: true });
   if (res.statusCode < 200 || res.statusCode >= 300) {
-    // A handle that does not exist, is personal, or is private answers with
-    // an error here. That is a rejected candidate, never a failed run — most
-    // guesses SHOULD come back like this.
     const b = res.body || {};
     const err = (b.error && (b.error.message || b.error.type)) || `HTTP ${res.statusCode}`;
-    return { ok: false, error: String(err).slice(0, 200) };
+    return { ok: false, kind: metaFailureKind(b, res.statusCode), error: String(err).slice(0, 200) };
   }
   const bd = res.body && res.body.business_discovery;
-  if (!bd || !bd.username) return { ok: false, error: 'no business_discovery payload' };
+  if (!bd || !bd.username) return { ok: false, kind: 'candidate', error: 'no business_discovery payload' };
   return { ok: true, acct: bd };
 }
 
@@ -7908,6 +7936,12 @@ async function lookup(handle) {
 
 const outcomes = [];
 let resolved = 0, suggested = 0, notFound = 0;
+
+// Wrapped so an infrastructure stop leaves through the RETURN, not as a
+// thrown node error. This workflow answers with responseMode=lastNode, and a
+// throw there reaches the caller as HTTP 200 with an empty body — the failure
+// mode this whole change exists to remove, reintroduced one level up.
+try {
 
 for (const item of work) {
   const record = { name: item.name, agenda_id: item.agenda_id };
@@ -7945,6 +7979,16 @@ for (const item of work) {
     let best = null;
     for (const h of candidates) {
       const got = await lookup(h);
+      // An infrastructure failure means we never got to look. Aborting the
+      // whole run is the point: continuing would write ig_status:'not_found'
+      // over every remaining rival on the strength of a lookup that never
+      // happened, and those rows are indistinguishable afterwards from a
+      // genuine "this brand is not on Instagram".
+      if (!got.ok && got.kind === 'infrastructure') {
+        const stop = new Error(`Instagram lookup is unavailable, so no handle could be verified: ${got.error}`);
+        stop.__infrastructure = true;
+        throw stop;
+      }
       if (!got.ok) continue;
       const { score, reasons } = scoreCandidate(item, got.acct);
       if (!best || score > best.score) best = { handle: got.acct.username || h, id: got.acct.id, score, reasons };
@@ -7982,11 +8026,29 @@ for (const item of work) {
       headers: sHeaders, body: patch, json: true,
     });
   } catch (e) {
-    // One rival's failure must not cost the other eleven their results.
+    // One rival's failure must not cost the other eleven their results — but
+    // an infrastructure failure is not one rival's failure, it is every
+    // rival's, and swallowing it here is what let a blocked app write eleven
+    // more confident falsehoods. Re-thrown to the run's own handler.
+    if (e && e.__infrastructure) throw e;
     record.result = 'error';
     record.error = String((e && e.message) || e).slice(0, 200);
   }
   outcomes.push(record);
+}
+
+} catch (e) {
+  if (!(e && e.__infrastructure)) throw e;
+  // Deliberately reports what DID get done before the stop. Two rivals
+  // resolved and then Instagram going dark is a different situation from
+  // nothing working at all, and the difference is worth seeing.
+  return [{ json: {
+    ok: false, skipped: false, workspace_id: wsId, unavailable: true,
+    seeded: inp.seeded || 0, deferred: inp.deferred || 0,
+    resolved, suggested, not_found: notFound,
+    error: String((e && e.message) || e).slice(0, 300),
+    outcomes,
+  } }];
 }
 
 return [{ json: {
@@ -8298,6 +8360,37 @@ function metricsFor(media, followers) {
   };
 }
 
+
+// ─── Did WE fail, or did the handle? ─────────────────────────────────────
+// Meta answers both with a non-2xx, and conflating them is how a blocked app
+// became "this competitor has no Instagram" — written into research_agenda as
+// ig_status:'not_found', with the run reporting ok:true.
+//
+// Observed live 2026-09-10: every Graph call, including debug_token itself,
+// returned `code 200, "API access blocked"` — a Business-Manager-level
+// restriction that sits ABOVE token validation (a merely expired token is
+// code 190, and a malformed one never decrypts). Four competitors were
+// verified as not existing, by an app that had not been allowed to look.
+//
+// So the default is INFRASTRUCTURE, and only a code we recognise as being
+// about the handle counts as a rejected candidate. That direction is
+// deliberate: a candidate misread as infrastructure stops the run with a
+// reason on screen, which someone investigates; infrastructure misread as a
+// candidate writes a confident falsehood to the database and is invisible.
+//
+// Code 100 is Meta's "unknown or invalid username" for business_discovery —
+// a handle that does not exist, is personal, or is private. That is the
+// common case and most guesses SHOULD come back like this.
+const CANDIDATE_ERROR_CODES = [100, 803];
+
+function metaFailureKind(body, statusCode) {
+  const err = (body && body.error) || {};
+  const code = Number(err.code);
+  if (CANDIDATE_ERROR_CODES.indexOf(code) !== -1) return 'candidate';
+  if (statusCode >= 400 && statusCode < 500 && !Number.isFinite(code)) return 'candidate';
+  return 'infrastructure';
+}
+
 async function discover(handle) {
   const fields = `business_discovery.username(${handle})`
     + `{id,username,name,biography,website,followers_count,follows_count,media_count,`
@@ -8307,10 +8400,16 @@ async function discover(handle) {
   const res = await http({ method: 'GET', url, returnFullResponse: true, ignoreHttpStatusErrors: true, json: true });
   if (res.statusCode < 200 || res.statusCode >= 300) {
     const b = res.body || {};
-    return { ok: false, error: String((b.error && b.error.message) || `HTTP ${res.statusCode}`).slice(0, 200) };
+    const kind = metaFailureKind(b, res.statusCode);
+    return { ok: false, kind,
+      // The run degrades to web_only either way — but "Instagram is
+      // unreachable" and "this rival has no Instagram" produce the same
+      // web_only snapshot, and only one of them is worth acting on.
+      error: (kind === 'infrastructure' ? 'Instagram unavailable: ' : '')
+        + String((b.error && b.error.message) || `HTTP ${res.statusCode}`).slice(0, 200) };
   }
   const bd = res.body && res.body.business_discovery;
-  if (!bd) return { ok: false, error: 'no business_discovery payload' };
+  if (!bd) return { ok: false, kind: 'candidate', error: 'no business_discovery payload' };
   return { ok: true, acct: bd };
 }
 
