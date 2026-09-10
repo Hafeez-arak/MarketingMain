@@ -1,15 +1,16 @@
-import { defaultWebhookUrl, describeWebhookFailure } from './n8nWebhooks'
 import { isLivePlatform, PLATFORM_META } from './utils'
 
 // ─── Per-workspace account connection ──────────────────────────────────────
-// Everything here talks to ONE n8n workflow (Arak Lighting – Zernio Connect)
-// which does the real Zernio calls server-side. The browser never sees the
-// Zernio API key, same as every other provider in this project.
+// Everything here talks to /api/zernio/<action>, this app's own serverless
+// routes. The browser never sees the Zernio API key, same as every other
+// provider in this project.
 //
-// What this replaces: `dispatch(actions.connectAccount(platform))`, which set
-// a boolean in local React state. The overview page said "Connected", nothing
-// had been connected, and the first publish attempt was where you found out.
-// These calls either really connect an account or return a reason.
+// It used to talk to an n8n workflow. That moved for two reasons: deploying a
+// workflow change means a git pull and a redeploy script on the WSL2 box,
+// which is the wrong loop for something as fiddly as OAuth; and the workflow's
+// logic could only be exercised against a real connected account, which is how
+// a filter that discarded EVERY account survived two rounds of review. See
+// api/zernio/_zernio.js.
 //
 // The tenancy model, briefly, because it is the whole point: Zernio puts a
 // `profile` between the API team and the connected accounts. Each workspace
@@ -17,42 +18,47 @@ import { isLivePlatform, PLATFORM_META } from './utils'
 // and every call below is scoped by it — so a workspace can only see, post as,
 // and disconnect its own accounts, and nobody has to touch zernio.com.
 
-async function call(payload) {
-  const url = defaultWebhookUrl('zernioConnect')
-  if (!url) return { error: 'Zernio Connect webhook is not configured.' }
+async function call(action, payload) {
   try {
-    const res = await fetch(url, {
+    const res = await fetch(`/api/zernio/${action}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     })
-    if (!res.ok) return { error: await describeWebhookFailure(res) }
-    const data = await res.json().catch(() => ({}))
-    // The workflow answers ok:false rather than throwing, because
-    // responseMode=lastNode turns a thrown node error into HTTP 200 with an
-    // empty body — so a failure has to arrive as data or not at all.
-    if (data.ok === false) return { error: data.error || 'That did not work.' }
+    const data = await res.json().catch(() => null)
+    if (!data) {
+      return { error: `The server returned ${res.status} with nothing in it.` }
+    }
+    // Every route answers with a reason rather than a bare status, so the
+    // status itself is never what gets shown.
+    if (data.ok === false || !res.ok) return { error: data.error || `Request failed (${res.status}).` }
     return data
   } catch (err) {
-    return { error: err.message }
+    return { error: `Could not reach the server: ${err.message}` }
   }
 }
 
-// List this workspace's connected accounts, refreshing our local mirror on the
-// way through. Returns [] rather than an error when nothing is connected yet —
-// "no accounts" is a normal state for a new workspace, not a failure.
+// List this workspace's connected accounts. Returns [] rather than an error
+// when nothing is connected yet — "no accounts" is a normal state for a new
+// workspace, not a failure.
 export async function fetchConnectedAccounts(workspaceId) {
-  const res = await call({ action: 'accounts', workspace_id: workspaceId })
+  const res = await call('accounts', { workspace_id: workspaceId })
   if (res.error) return { error: res.error, accounts: [] }
   return { accounts: res.accounts || [], profileId: res.profile_id || '' }
 }
 
 // Where the OAuth round trip comes back to. Built from the CURRENT origin
-// rather than an env var so that preview deployments, localhost and
-// production each return to themselves — an env var would send every
-// preview's callback to production, where the tempToken means nothing.
+// rather than an env var so that preview deployments, localhost and production
+// each return to themselves — an env var would send every preview's callback
+// to production, where the tokens mean nothing.
+//
+// No query string of our own. Zernio appends its result params with the URL
+// API, which preserves an existing query — but its success param is literally
+// `connected=<platform>`, and the old callback URL ended in `?connected=1`.
+// The two collided into `?connected=1&connected=instagram`, so the one param
+// that says which platform just connected was shadowed by a constant.
 export function connectCallbackUrl(platform) {
-  return `${window.location.origin}/social/${platform}?connected=1`
+  return `${window.location.origin}/social/${platform}`
 }
 
 // Step 1: ask Zernio for an authorisation URL and hand it to the browser.
@@ -65,8 +71,7 @@ export async function startConnect(workspaceId, platform) {
     const label = PLATFORM_META[platform]?.label || platform
     return { error: `${label} is not available yet.` }
   }
-  const res = await call({
-    action: 'connect_url',
+  const res = await call('connect_url', {
     workspace_id: workspaceId,
     platform,
     redirect_url: connectCallbackUrl(platform),
@@ -75,64 +80,175 @@ export async function startConnect(workspaceId, platform) {
   return { authUrl: res.auth_url, headless: res.headless === true, state: res.state || '' }
 }
 
-// Step 2: after OAuth, Zernio sends the browser back to redirect_url with the
-// tokens needed to finish. Read them all off the URL.
+// ─── Reading the hop back ──────────────────────────────────────────────────
 //
-// The real callback (verified live 2026-08-23) carries FOUR things that matter:
-// `tempToken` (a Facebook access token), `connect_token` (Zernio's short-lived
-// 15-minute headless token — the one the select-account endpoints authenticate
-// with), `profileId`, and `step`. An earlier version read only tempToken and
-// step, which is why the picker hung: the completion endpoints reject a call
-// without the connect token.
+// Zernio returns the browser to redirect_url in one of three states, and the
+// previous version recognised only one of them:
 //
-// `userProfile` is read but NOT forwarded. Only Zernio's Facebook connect
-// endpoint takes one, and that endpoint connects a Facebook account; the
-// Instagram one does not accept the field. It stays parsed because the
-// callback can carry it and a malformed value must degrade to null rather
-// than throw and strand the user holding valid tokens they cannot use.
+//   error      OAuth was denied, or the account was ineligible. `error` and
+//              `platform` are always present; error_message, is_user_fixable,
+//              reason and dashboard_url are conditional. NOTHING read these,
+//              so a refused connection came back to a page that looked exactly
+//              as it had before the user left it. That is the "it opens the
+//              OAuth screen and then it just stays as it is" symptom, and it
+//              was indistinguishable from the account-list bug behind it.
+//
+//   selection  headless mode, second choice still to make. Instagram carries
+//              its tokens inline (tempToken + connect_token); LinkedIn's org
+//              list is too big for a URL, so it carries a pendingDataToken and
+//              the payload is fetched server-side — which is strictly better,
+//              since the LinkedIn access token never enters the browser.
+//
+//   connected  standard mode, already done. TikTok lands here. Nothing to
+//              finish, but the list must be refreshed and the user told which
+//              account arrived, rather than left to infer it from a row
+//              appearing.
+//
+// Anything else is not a callback and returns null — a plain visit to
+// /social/instagram must not open a picker.
 export function readConnectCallback(search = window.location.search) {
   const q = new URLSearchParams(search)
-  const tempToken   = q.get('tempToken') || ''
-  const connectToken = q.get('connect_token') || ''
-  // A callback is a callback only if it carries the tokens to finish one.
-  // ?connected=1 alone (the post-completion landing) must not reopen the picker.
-  if (!tempToken || !connectToken) return null
-  let userProfile = null
-  try {
-    const raw = q.get('userProfile')
-    if (raw) userProfile = JSON.parse(decodeURIComponent(raw))
-  } catch { /* a missing name is survivable; a thrown callback is not */ }
-  return {
-    tempToken,
-    connectToken,
-    profileId: q.get('profileId') || '',
-    step: q.get('step') || '',
-    platform: q.get('platform') || '',
-    userProfile,
+  const platform = (q.get('platform') || '').toLowerCase()
+
+  const error = q.get('error') || ''
+  if (error) {
+    return {
+      kind: 'error',
+      platform,
+      error,
+      errorMessage: q.get('error_message') || '',
+      // Zernio documents these as conditional, so they are read as optional
+      // rather than relied on. `is_user_fixable` decides whether the screen
+      // offers "try again" or tells someone to go fix something first.
+      isUserFixable: q.get('is_user_fixable') === 'true',
+      reason: q.get('reason') || '',
+      dashboardUrl: q.get('dashboard_url') || '',
+    }
   }
+
+  const tempToken = q.get('tempToken') || ''
+  const connectToken = q.get('connect_token') || ''
+  const pendingDataToken = q.get('pendingDataToken') || ''
+
+  // Either token makes this a selection callback. Which fields a given
+  // platform actually needs is the server's question — Instagram wants both
+  // tokens, LinkedIn wants the pending-data pointer — and answering it here
+  // would put the same knowledge in two places for them to drift apart in.
+  //
+  // Note what changed: an earlier version required tempToken AND connect_token
+  // and returned null otherwise, so a callback missing one of them rendered as
+  // nothing at all. Recognising it and letting the server say exactly which
+  // field is absent is worse-looking and far more useful — silence is the
+  // failure mode this whole rebuild is about.
+  if (pendingDataToken || tempToken) {
+    return {
+      kind: 'selection',
+      platform,
+      tempToken,
+      connectToken,
+      pendingDataToken,
+      profileId: q.get('profileId') || '',
+      step: q.get('step') || '',
+      userProfile: parseUserProfile(q.get('userProfile')),
+    }
+  }
+
+  const connected = q.get('connected') || ''
+  if (connected) {
+    return {
+      kind: 'connected',
+      platform: platform || connected.toLowerCase(),
+      accountId: q.get('accountId') || '',
+      username: q.get('username') || '',
+      profileId: q.get('profileId') || '',
+    }
+  }
+
+  return null
 }
 
+// A malformed value must degrade to null rather than throw and strand someone
+// holding tokens they cannot use. Only Snapchat's completion endpoint still
+// needs this off the URL; LinkedIn's arrives with the pending data instead.
+function parseUserProfile(raw) {
+  if (!raw) return null
+  try { return JSON.parse(decodeURIComponent(raw)) } catch { return null }
+}
+
+// ─── What a failed round trip means ────────────────────────────────────────
+// Zernio's list is documented as non-exhaustive and may grow at any time, so
+// an unrecognised code falls through to a generic sentence carrying whatever
+// error_message came with it — never matched exhaustively, never swallowed.
+const OAUTH_ERRORS = {
+  oauth_denied: 'You cancelled the authorisation, or the platform refused it.',
+  personal_account_not_supported:
+    'That is a personal account. Instagram only publishes from a professional (Business or Creator) account linked to a Facebook Page — convert it in the Instagram app, then try again.',
+  no_facebook_pages:
+    'That Facebook login manages no Page with a linked Instagram professional account, so there was nothing to connect.',
+  facebook_pages_error: 'Facebook would not list your Pages. Try again in a moment.',
+  no_snapchat_public_profiles:
+    'That Snapchat login has no Public Profile, and Snapchat requires one to publish.',
+  invalid_state: 'The connection took too long and expired. Start it again.',
+  invalid_callback: 'The platform sent back something we could not read. Start again.',
+  token_exchange_failed: 'The platform accepted the login but refused to issue a token. Start again.',
+  connection_failed: 'The platform refused the connection. Start again.',
+  reconnect_account_mismatch:
+    'That is a different account from the one being reconnected. Sign in as the same account, or disconnect the old one first.',
+  account_limit_exceeded: 'The Zernio plan has no room for another connected account.',
+  profile_limit_exceeded: 'The Zernio plan has no room for another workspace profile.',
+  payment_required: 'Zernio refused this because the plan does not cover it — check billing at zernio.com.',
+  access_denied: 'This Zernio API key has no access to that profile.',
+  platform_requires_destination:
+    'That platform needs a page or profile chosen after login, and this app has no screen for it yet.',
+  connection_cancelled: 'The window was closed before the connection finished. Start again.',
+  unsupported_platform: 'Zernio does not support connecting that platform this way.',
+  internal_error: 'Zernio hit an internal error. Try again in a moment.',
+}
+
+export function explainOAuthError(cb) {
+  const label = PLATFORM_META[cb?.platform]?.label || cb?.platform || 'That platform'
+  const known = OAUTH_ERRORS[String(cb?.error || '').toLowerCase()]
+  if (known) return known
+  const detail = cb?.errorMessage ? ` (${cb.errorMessage})` : ''
+  return `${label} did not finish connecting: ${cb?.error || 'unknown error'}${detail}.`
+}
+
+// ─── The second step, where a platform has one ─────────────────────────────
+
 export async function fetchSelectionOptions(workspaceId, platform, cb) {
-  const res = await call({
-    action: 'selection_options',
-    workspace_id: workspaceId, platform,
-    temp_token: cb.tempToken, connect_token: cb.connectToken,
-    profile_id: cb.profileId, step: cb.step,
+  const res = await call('selection_options', {
+    workspace_id: workspaceId,
+    platform: platform || cb.platform,
+    ...selectionPayload(cb),
   })
   if (res.error) return { error: res.error, options: [] }
   return { options: res.options || [] }
 }
 
 export async function completeSelection(workspaceId, platform, { cb, selection }) {
-  const res = await call({
-    action: 'selection_complete',
-    workspace_id: workspaceId, platform,
-    temp_token: cb.tempToken, connect_token: cb.connectToken,
-    profile_id: cb.profileId, step: cb.step,
+  const res = await call('selection_complete', {
+    workspace_id: workspaceId,
+    platform: platform || cb.platform,
+    ...selectionPayload(cb),
     selection,
   })
   if (res.error) return { error: res.error }
-  return { accounts: res.accounts || [], account: res.account || null }
+  return { accounts: res.accounts || [] }
+}
+
+// Whatever the callback happened to carry, forwarded verbatim. The server
+// decides which of these a given platform actually needs — the browser knowing
+// that Instagram wants tokens and LinkedIn wants a pending-data token would be
+// the same knowledge in two places, and the two would drift.
+function selectionPayload(cb) {
+  return {
+    temp_token: cb.tempToken || '',
+    connect_token: cb.connectToken || '',
+    pending_data_token: cb.pendingDataToken || '',
+    profile_id: cb.profileId || '',
+    step: cb.step || '',
+    user_profile: cb.userProfile || null,
+  }
 }
 
 // ── Instagram catalog audio ───────────────────────────────────────────────
@@ -149,11 +265,11 @@ export async function completeSelection(workspaceId, platform, { cb, selection }
 // which Instagram requires for catalog audio, and no amount of retrying or
 // rephrasing the search will change that.
 export async function searchInstagramAudio(workspaceId, accountId, { query = '', audioType = 'music' } = {}) {
-  const res = await call({
-    action: 'audio_search', workspace_id: workspaceId,
-    account_id: accountId, q: query, audio_type: audioType,
+  const res = await call('audio_search', {
+    workspace_id: workspaceId, account_id: accountId, q: query, audio_type: audioType,
   })
   if (res.error) return { error: res.error, needsReconnect: res.needsReconnect === true, audio: [] }
+  if (res.ok === false) return { error: res.error, needsReconnect: res.needsReconnect === true, audio: [] }
   return { audio: res.audio || [], trending: res.trending === true }
 }
 
@@ -176,17 +292,12 @@ export function supportsCatalogAudio(account) {
 // does not know what to offer. A private account cannot post publicly, and
 // defaulting to the most public value is how you learn that expensively.
 //
-// workspaceId is passed because the workflow re-checks that the account
-// belongs to this workspace before reading its configuration, the same guard
-// disconnect uses and for the same reason: account_id comes from a browser.
-//
 // An empty privacyLevels list is information, not a failure — it means TikTok
 // is currently refusing this account, which the panel renders as "needs
 // reconnecting" rather than as an error.
 export async function fetchCreatorInfo(workspaceId, accountId, mediaType = 'video') {
-  const res = await call({
-    action: 'creator_info', workspace_id: workspaceId,
-    account_id: accountId, media_type: mediaType,
+  const res = await call('creator_info', {
+    workspace_id: workspaceId, account_id: accountId, media_type: mediaType,
   })
   if (res.error) return { error: res.error, privacyLevels: [] }
   return {
@@ -200,13 +311,11 @@ export async function fetchCreatorInfo(workspaceId, accountId, mediaType = 'vide
 }
 
 // Disconnecting is destructive at the provider — the account has to authorise
-// again to come back — so callers should confirm first. The workflow checks
-// that the account really belongs to this workspace before deleting anything;
-// that check is server-side on purpose, since account_id comes from a browser.
+// again to come back — so callers should confirm first. The server checks that
+// the account really belongs to this workspace before deleting anything; that
+// check is server-side on purpose, since account_id comes from a browser.
 export async function disconnectAccount(workspaceId, accountId) {
-  const res = await call({
-    action: 'disconnect', workspace_id: workspaceId, account_id: accountId,
-  })
+  const res = await call('disconnect', { workspace_id: workspaceId, account_id: accountId })
   if (res.error) return { error: res.error }
   return { ok: true }
 }

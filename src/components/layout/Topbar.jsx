@@ -5,12 +5,13 @@ import { useAuth } from '../../store/auth'
 import { timeAgo } from '../../lib/utils'
 
 const titles = {
-  '/': 'Dashboard', '/brand-brain': 'Brand Brain', '/campaigns': 'Campaigns', '/campaigns/plan': 'Plan Campaign',
+  '/': 'Dashboard', '/brand-brain': 'Brand Brain', '/campaigns': 'Content Plans', '/campaigns/plan': 'Plan Campaign',
   '/schedule': 'Content Calendar', '/email': 'Email Flows',
   '/analytics': 'Analytics', '/agent': 'Assistant', '/insights': 'What We Learned', '/media': 'Media Library', '/social': 'Social Media',
   '/social/instagram': 'Instagram',
   '/social/tiktok': 'TikTok',
   '/social/snapchat': 'Snapchat',
+  '/social/linkedin': 'LinkedIn',
   '/social/approvals': 'Post Approvals',
   '/settings': 'Settings', '/integrations': 'Integrations', '/team': 'Team & Access',
 }
@@ -30,9 +31,8 @@ export function Topbar() {
   const [showNotifs, setShowNotifs] = useState(false)
   const [showAccount, setShowAccount] = useState(false)
 
-  const isPostEditor = location.pathname.startsWith('/campaigns/plan/post/')
-  const title      = isPostEditor ? 'Edit Post' : (titles[location.pathname] || 'Arak Content Studio')
-  const backTarget = isPostEditor ? '/campaigns/plan' : BACK_TARGETS[location.pathname]
+  const title      = titles[location.pathname] || 'Arak Content Studio'
+  const backTarget = BACK_TARGETS[location.pathname]
   const unread = state.notifications.filter(n => !n.read).length
 
   return (
