@@ -3,6 +3,7 @@ import {
   discoveryFields, metricsFor, caveatsFor, gatherReport, emptyReport,
   looksLikeCredentialsFailure, credentialsNote,
 } from '../../src/lib/agent/gather.js'
+import { tokenHealth, worthSurfacing } from '../../src/lib/agent/tokenHealth.js'
 
 // ─── Stage 0, the IO half ──────────────────────────────────────────────────
 // Ported from the n8n Gather node. The arithmetic lives in
@@ -40,6 +41,36 @@ export async function discover(handle) {
     return { ok: true, acct: body.business_discovery }
   } catch (err) {
     return { ok: false, error: String(err?.message || err).slice(0, 200) }
+  }
+}
+
+/**
+ * Ask Meta how long this token has left.
+ *
+ * Cheap, and it answers a question nothing else can: data access lapses ~90
+ * days after authorisation and the token keeps reporting itself valid, so the
+ * only warning available is this one — asked for deliberately, ahead of time.
+ */
+export async function checkTokenHealth() {
+  if (!TOKEN() || !IG_USER()) return tokenHealth(null)
+  try {
+    const res = await fetch(
+      `${GRAPH}/debug_token?input_token=${encodeURIComponent(TOKEN())}` +
+      `&access_token=${encodeURIComponent(TOKEN())}`,
+    )
+    const body = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      return {
+        status: 'invalid', ok: false,
+        headline: `Meta refused to introspect the token: ${body?.error?.message || res.status}`,
+        action: 'Check the app\'s status in the Meta dashboard.',
+      }
+    }
+    return tokenHealth(body?.data)
+  } catch (err) {
+    // Not fatal and not reported as a token problem — a network blip is not a
+    // credentials failure, and saying so would send someone to the wrong page.
+    return { status: 'unknown', ok: true, headline: '', action: '', error: String(err?.message || err) }
   }
 }
 
@@ -162,6 +193,14 @@ export async function gather(workspaceId, runId, period) {
   // A credentials failure is not a competitor failure, and the two are
   // indistinguishable in a per-rival list. Said first, and said plainly.
   const credentialsProblem = looksLikeCredentialsFailure(failures, targets.length)
+
+  // Asked once per run. The deadline that matters is the one nothing else will
+  // announce: when data access lapses, these reads start returning nothing
+  // while the token still calls itself valid.
+  const health = await checkTokenHealth()
+  if (worthSurfacing(health) && health.headline) {
+    caveats.push(`${health.headline}${health.action ? ` ${health.action}` : ''}`)
+  }
   const report = gatherReport({
     snapshots: rows,
     prior: prior || [],
@@ -187,6 +226,7 @@ export async function gather(workspaceId, runId, period) {
     ok: true,
     report,
     credentials_problem: credentialsProblem,
+    token_health: health,
     snapshots: rows.length,
     measured: rows.filter(r => r.data_source === 'instagram').length,
     failed: failures.length,

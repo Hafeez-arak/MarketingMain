@@ -65,6 +65,7 @@ describe('the agent runs in Node, not in a bundle', () => {
     'src/lib/agent/brief.js',
     'src/lib/agent/writeTools.js',
     'src/lib/agent/resolve.js',
+    'src/lib/agent/tokenHealth.js',
     'api/agent/_supabase.js',
     'api/agent/_context.js',
     'api/agent/_provider.js',
