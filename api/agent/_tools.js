@@ -1,6 +1,7 @@
 import { db } from './_supabase.js'
 import { loadBrandContext } from './_context.js'
-import { findTool, isFree, ALL_TOOLS, WRITE_TOOLS } from '../../src/lib/agent/tools.js'
+import { findTool, isFree, ALL_TOOLS, WRITE_TOOLS, WEB_TOOLS } from '../../src/lib/agent/tools.js'
+import { searchWeb, readPage } from './_web.js'
 import { WRITE_EXECUTORS, checkOwnership, isWriteTool } from './_writeTools.js'
 import { ourPerformance, competitorBoard } from '../../src/lib/agent/aggregate.js'
 
@@ -302,7 +303,27 @@ export async function runTool(workspaceId, name, args = {}) {
     }
   }
 
-  const def = findTool(name, [...ALL_TOOLS, ...WRITE_TOOLS])
+  // ── The open web ──
+  // Metered, and reported as such: these draw down a free tier, so a caller
+  // that cannot tell them from a Supabase read cannot pace itself.
+  if (name === 'read_page' || name === 'search_web') {
+    const out = name === 'read_page'
+      ? await readPage(args?.url)
+      : await searchWeb(args?.query, { limit: Math.min(Number(args?.limit) || 5, 10) })
+    if (!out.ok) return { ok: false, error: out.error, free: false }
+    return {
+      ok: true,
+      free: false,
+      result: name === 'read_page'
+        ? { ...out.page, served_by: out.used }
+        : { results: out.results, served_by: out.used },
+      // Surfaced so a run can report that it fell back rather than leaving it
+      // to be discovered on a bill.
+      notes: out.notes || [],
+    }
+  }
+
+  const def = findTool(name, [...ALL_TOOLS, ...WRITE_TOOLS, ...WEB_TOOLS])
   const exec = EXECUTORS[name]
   if (!def || !exec) {
     // Named back to the model rather than thrown. A model that asked for a

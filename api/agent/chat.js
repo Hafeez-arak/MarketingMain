@@ -152,6 +152,10 @@ export default async function handler(req, res) {
       // that files a proposal every time it has an opinion is one whose review
       // queue nobody opens.
       writes: true,
+      // The open web too: "what is that competitor saying on their site?" is a
+      // natural chat question, and metered tools are bounded by the same loop
+      // budget as everything else.
+      web: true,
       onText: delta => send(res, 'text', { delta }),
       onEvent: event => send(res, 'step', event),
     })

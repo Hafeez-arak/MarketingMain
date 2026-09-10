@@ -68,6 +68,7 @@ describe('the agent runs in Node, not in a bundle', () => {
     'src/lib/agent/tokenHealth.js',
     'src/lib/agent/lenses.js',
     'src/lib/agent/lensPrompts.js',
+    'src/lib/agent/web.js',
     'api/agent/_supabase.js',
     'api/agent/_context.js',
     'api/agent/_provider.js',
@@ -77,6 +78,7 @@ describe('the agent runs in Node, not in a bundle', () => {
     'api/agent/_gather.js',
     'api/agent/_investigate.js',
     'api/agent/_lenses.js',
+    'api/agent/_web.js',
     // The endpoints themselves. Vercel imports these files directly, so if one
     // cannot load under Node the route is a 500 before any of the above
     // matters.

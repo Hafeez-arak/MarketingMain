@@ -209,6 +209,52 @@ import { WRITE_TOOLS } from './writeTools.js'
 export { WRITE_TOOLS }
 
 /**
+ * The open web. METERED — these draw down a paid or free-tier quota, unlike
+ * every read above, which is a Supabase query. That is what the cost class is
+ * for, and a caller that cannot tell them apart cannot pace itself.
+ *
+ * Distinct from the model's own server-side search: that is for open-ended
+ * discovery and the model drives it. These are for when we already know WHICH
+ * page we want — a competitor's pricing page, a tender listing, a review page
+ * — which server-side fetch cannot reach for a URL it has not already seen.
+ */
+export const WEB_TOOLS = [
+  {
+    name: 'read_page',
+    cost: METERED,
+    description:
+      'Read one specific web page and get its text back as markdown. Use this when you know ' +
+      'the exact URL you want. Long pages are truncated. If the page cannot be read you get ' +
+      'an error rather than an empty result — do not treat a failure as "nothing there".',
+    input_schema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        url: { type: 'string', description: 'The full URL, including https://' },
+      },
+      required: ['url'],
+    },
+  },
+  {
+    name: 'search_web',
+    cost: METERED,
+    description:
+      'Search the open web for titles, URLs and snippets. Use it to FIND pages worth reading, ' +
+      'then read_page the ones that matter. A specific query — a company name plus what you ' +
+      'want to know — beats a general one.',
+    input_schema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        query: { type: 'string' },
+        limit: { type: 'integer', description: 'How many results. Default 5, max 10.' },
+      },
+      required: ['query'],
+    },
+  },
+]
+
+/**
  * Every tool the agent can call. Reads always; writes only where a surface
  * asks for them.
  *
@@ -220,8 +266,12 @@ export { WRITE_TOOLS }
  */
 export const ALL_TOOLS = [...READ_TOOLS]
 
-export function toolsFor({ writes = false } = {}) {
-  return writes ? [...READ_TOOLS, ...WRITE_TOOLS] : [...READ_TOOLS]
+export function toolsFor({ writes = false, web = false } = {}) {
+  return [
+    ...READ_TOOLS,
+    ...(web ? WEB_TOOLS : []),
+    ...(writes ? WRITE_TOOLS : []),
+  ]
 }
 
 /**

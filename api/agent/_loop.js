@@ -29,14 +29,14 @@ import {
  */
 export async function runAgent({
   workspaceId, job = 'chat', surface = 'chat', stage = '', runId = null, chatId = null,
-  identity, brand, messages = [], tools = null, writes = false,
+  identity, brand, messages = [], tools = null, writes = false, web = false,
   onText = null, onEvent = null,
 }) {
   const budget = loopBudget(surface)
   // Writes are opt-in. A tool the model can see is a tool it will eventually
   // reach for, and an assistant that files a proposal every time it has an
   // opinion is one whose review queue nobody opens.
-  const defs = tools || toolDefs(toolsFor({ writes }))
+  const defs = tools || toolDefs(toolsFor({ writes, web }))
   const convo = [...messages]
 
   let turns = 0
