@@ -50,6 +50,16 @@ export function useAgentChat() {
     setTurns([])
   }, [activeWorkspaceId])
 
+  // Reopening a past conversation. The thread id goes into the SAME module
+  // scope the live conversation uses, so the next question continues the
+  // reopened thread on both surfaces — the drawer does not stay pointed at
+  // yesterday's while the page shows last week's.
+  const openThread = useCallback((threadId, priorTurns) => {
+    if (!threadId) return
+    sharedThread = { workspaceId: activeWorkspaceId, threadId }
+    setTurns(priorTurns || [])
+  }, [activeWorkspaceId])
+
   const stop = useCallback(() => {
     // Aborts the browser's read. The server keeps going and still persists the
     // answer — it has already been paid for, so throwing it away would mean
@@ -141,7 +151,7 @@ export function useAgentChat() {
   }, [busy, activeWorkspaceId, accessToken])
 
   return {
-    turns, busy, ask, reset, stop,
+    turns, busy, ask, reset, stop, openThread,
     threadId: threadFor(activeWorkspaceId),
     ready: Boolean(activeWorkspaceId && accessToken),
   }

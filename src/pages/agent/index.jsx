@@ -6,6 +6,7 @@ import { useAgentChat } from '../../lib/useAgentChat'
 import { describePage, suggestionsFor } from '../../lib/pageContext'
 import { startResearchRun, fetchRuns } from '../../lib/agentRun'
 import { AgentSteering } from '../../components/AgentSteering'
+import PastConversations from '../../components/PastConversations'
 
 // ─── /agent — the assistant, full page ─────────────────────────────────────
 // The same agent, the same tools and the SAME conversation as the drawer —
@@ -36,7 +37,7 @@ function ToolTrace({ steps }) {
 export default function AgentPage() {
   const location = useLocation()
   const { activeWorkspaceId, activeWorkspace, accessToken } = useAuth()
-  const { turns, busy, ask, reset, stop, ready } = useAgentChat()
+  const { turns, busy, ask, reset, stop, ready, threadId, openThread } = useAgentChat()
   const [question, setQuestion] = useState('')
   const [runs, setRuns] = useState([])
   const [running, setRunning] = useState(false)
@@ -188,6 +189,10 @@ export default function AgentPage() {
           onSubmit={e => { e.preventDefault(); send() }}
           className="mt-4 flex gap-2 border-t border-slate-100 pt-3"
         >
+          {/* Beside the composer rather than up in the page header: this is a
+              thing you reach for while reading a conversation, not a page-level
+              action, and the header already carries the two that are. */}
+          <PastConversations activeThreadId={threadId} onOpen={openThread} />
           <input
             value={question}
             onChange={e => setQuestion(e.target.value)}
