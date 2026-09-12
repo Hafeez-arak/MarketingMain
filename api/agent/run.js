@@ -1,7 +1,8 @@
-import { callerId, callerMayUseWorkspace, db, isConfigured } from './_supabase.js'
+import { db, isConfigured } from './_supabase.js'
 import { gather, patchRun } from './_gather.js'
-import { investigate } from './_investigate.js'
+import { planLenses } from './_investigate.js'
 import { periodFor } from '../../src/lib/agent/gather.js'
+import { authorise } from './_serviceAuth.js'
 
 // ─── POST /api/agent/run ───────────────────────────────────────────────────
 // The weekly research run. AGENT.md §6, RESEARCH-AGENT.md §4.
@@ -53,20 +54,18 @@ export default async function handler(req, res) {
     return
   }
 
-  // Same gate as chat, for the same reason: a workspace_id in a request body
-  // is not evidence of anything, and everything past here spends money and
-  // writes rows.
-  const userId = await callerId(req)
-  if (!userId) {
-    res.status(401).json({ error: 'Sign in to start a research run.' })
-    return
-  }
-  if (!(await callerMayUseWorkspace(req, workspaceId))) {
-    res.status(403).json({ error: 'You do not have access to this workspace.' })
+  // A workspace_id in a request body is not evidence of anything, and
+  // everything past here spends money and writes rows. Either a signed-in
+  // operator pressing the button, or n8n holding the shared secret — and an
+  // unset secret closes the service door rather than opening it.
+  const auth = await authorise(req, workspaceId)
+  if (!auth.ok) {
+    res.status(auth.status).json({ error: auth.error })
     return
   }
 
   const trigger = ['manual', 'scheduled', 'chat'].includes(body.trigger) ? body.trigger : 'manual'
+  const cadence = body.cadence === 'monthly' ? 'monthly' : 'weekly'
   const periodDays = Math.min(90, Math.max(1, Number(body.period_days) || 7))
   const now = new Date()
   const period = periodFor(periodDays, now)
@@ -147,41 +146,44 @@ export default async function handler(req, res) {
       return
     }
 
-    // ── Stages 1–4 ──
-    // The numbers are committed. Everything from here is a bonus, and
-    // investigate() never throws — a failure returns the gathered report with a
-    // note saying what was lost, because a failed investigation must never cost
-    // the user their numbers.
-    const deep = await investigate({ workspaceId, runId, gathered: out.report })
-
-    // ── Stage 5: persist ──
-    // Code only. The terminal status is written here and on every path,
-    // including the failure one: the browser opened the spinner and only the
-    // server can close it.
-    await persist(workspaceId, runId, deep.report)
+    // ── And that is where this invocation stops ──
+    // It used to continue straight into six lenses and a synthesis, all
+    // awaited here. On Vercel Hobby the function ceiling is 300 SECONDS AND
+    // CANNOT BE RAISED, and a single lens was measured at 380s twice — so the
+    // platform killed the invocation mid-run, writing no status and no error,
+    // and leaving a spinner only the server can close.
+    //
+    // The lenses and the synthesis are now their own routes, driven by n8n
+    // (see n8n/agentRun.workflow.json). This route's contract is the one that
+    // always mattered anyway: by the time a caller has a run_id, the measured
+    // numbers are already committed.
+    const gatheredReport = out.report
     await patchRun(workspaceId, runId, {
-      status: 'complete',
-      stage: deep.ok ? 'synthesise' : 'gather',
-      report: deep.report,
-      error: deep.ok ? '' : String(deep.error || '').slice(0, 500),
-      cost_estimate: Number((deep.cost || 0).toFixed(4)),
-      finished_at: new Date().toISOString(),
+      stage: 'lenses',
+      report: gatheredReport,
     })
+
+    // The lenses this run intends to execute, named here so the driver does
+    // not have to know how motion and cadence decide them — and so a run
+    // resumed tomorrow runs the same six it started with.
+    const plan = await planLenses(workspaceId, runId, cadence)
 
     res.status(200).json({
       ok: true,
       run_id: runId,
       already_running: false,
+      stage: 'lenses',
       snapshots: out.snapshots,
       measured: out.measured,
       failed: out.failed,
-      baseline: deep.report?.baseline,
-      quiet_week: deep.report?.quiet_week,
-      headline: deep.report?.headline || '',
-      investigated: deep.ok,
-      cost_usd: Number((deep.cost || 0).toFixed(4)),
-      proposed_rules: (deep.report?.proposed_rules || []).length,
-      note: deep.ok ? (out.note || '') : `The measured numbers are complete. ${deep.error}`,
+      baseline: gatheredReport?.baseline,
+      quiet_week: gatheredReport?.quiet_week,
+      // What the driver should call next, and with what. Returned rather than
+      // hardcoded in the workflow so adding a lens is a code change here, not
+      // an edit in n8n's UI that nothing tests.
+      next: { route: '/api/agent/lens', lenses: plan.lenses },
+      then: { route: '/api/agent/synthesise' },
+      note: out.note || '',
     })
   } catch (err) {
     // Every terminal path writes a status. A crashed invocation that writes
@@ -194,70 +196,5 @@ export default async function handler(req, res) {
       }).catch(() => {})
     }
     res.status(500).json({ ok: false, run_id: runId || null, error: message })
-  }
-}
-
-/**
- * Stage 5 — findings and proposals land where a human already reviews things.
- *
- * Everything lands as `proposed`. There is no path to `active` and no path to
- * publish, and that is enforced by there being no code here that writes one —
- * not by the model choosing well.
- *
- * Failures are logged, never thrown: the run is already complete by this
- * point, and losing the terminal status because one insert failed would trade
- * a missing proposal for a spinner nobody can close.
- */
-async function persist(workspaceId, runId, report) {
-  const findings = [
-    ...(report?.market || []).map(m => ({
-      kind: 'trend', headline: m.finding, detail: '',
-      sources: m.sources || [], confidence: m.confidence ?? null,
-      novelty: m.novelty || 'new',
-    })),
-    ...(report?.gaps || []).map(g => ({
-      kind: 'gap', headline: g.gap, detail: g.suggested_response || '',
-      sources: [], evidence: { our_position: g.our_position, basis: g.basis },
-      confidence: null, novelty: 'new',
-    })),
-  ]
-
-  for (const f of findings) {
-    await db('research_findings', {
-      method: 'POST',
-      body: { run_id: runId, workspace_id: workspaceId, evidence: {}, ...f },
-      prefer: 'return=minimal',
-    }).catch(err => console.error('[agent/run] finding:', err.message))
-  }
-
-  for (const r of report?.proposed_rules || []) {
-    await db('brand_memory', {
-      method: 'POST',
-      body: {
-        workspace_id: workspaceId,
-        rule: r.rule, detail: r.detail || '',
-        scope: r.scope || 'trend',
-        // 'proposed', always. The agent can fill your review queue; it cannot
-        // steer a single caption without a person saying yes first.
-        status: 'proposed',
-        source: 'research',
-        confidence: r.confidence ?? null,
-        evidence: { sources: r.sources || [], run_id: runId },
-      },
-      prefer: 'return=minimal',
-    }).catch(err => console.error('[agent/run] rule:', err.message))
-  }
-
-  for (const a of report?.agenda_changes || []) {
-    if (a.action !== 'add') continue   // retiring is a human decision
-    await db('research_agenda', {
-      method: 'POST',
-      body: {
-        workspace_id: workspaceId, kind: 'question',
-        subject: a.subject, why: a.why || '',
-        status: 'proposed', created_by: 'agent',
-      },
-      prefer: 'return=minimal',
-    }).catch(err => console.error('[agent/run] agenda:', err.message))
   }
 }

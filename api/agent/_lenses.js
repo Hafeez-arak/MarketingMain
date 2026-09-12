@@ -2,6 +2,7 @@ import { callModel } from './_provider.js'
 import { db } from './_supabase.js'
 import { textIn, urlsFromResponse } from '../../src/lib/agent/loop.js'
 import { lensByKey, makeFinding } from '../../src/lib/agent/lenses.js'
+import { findingsFromEvents, mergeCalendarResult } from '../../src/lib/agent/calendar.js'
 
 // ─── Running a lens ────────────────────────────────────────────────────────
 // Each lens is one bounded model call with web search, asked one question and
@@ -92,7 +93,7 @@ const webTools = uses => (uses > 0
  * @returns {Promise<{lens,ok,findings,sources,cost,error}>}
  */
 export async function runLens({
-  workspaceId, runId, lensKey, prompt, identity, brand,
+  workspaceId, runId, lensKey, prompt, identity, brand, deadline = null,
 }) {
   const lens = lensByKey(lensKey)
   if (!lens) return { lens: lensKey, ok: false, findings: [], sources: [], cost: 0, error: 'Unknown lens.' }
@@ -112,10 +113,19 @@ export async function runLens({
       maxTokens: lens.budget.maxTokens || 8_000,
       effort: lens.budget.effort || 'medium',
       outputFormat: FINDINGS_SCHEMA,
+      // On Vercel Hobby the function ceiling is 300s and cannot be raised, and
+      // this lens was measured at 380s. Stopping ourselves lets us report what
+      // happened; being stopped by the platform writes nothing at all.
+      deadline,
     })
 
     if (out.refused) return { lens: lensKey, ok: false, findings: [], sources: [], cost: out.cost || 0, error: out.error }
-    if (!out.ok) return { lens: lensKey, ok: false, findings: [], sources: [], cost: out.cost || 0, error: out.error }
+    if (!out.ok) {
+      return {
+        lens: lensKey, ok: false, findings: [], sources: [], cost: out.cost || 0,
+        error: out.error, timedOut: Boolean(out.timedOut),
+      }
+    }
 
     urlsFromResponse(out.response, allowed)
 
@@ -145,6 +155,45 @@ export async function runLens({
       cost: 0, error: String(err?.message || err).slice(0, 300),
     }
   }
+}
+
+/**
+ * CALENDAR — computed first, reasoned about second.
+ *
+ * The one hybrid lens, and the shape is the whole fix. The dates are turned
+ * into findings BEFORE the model is called, so they are already safe when the
+ * call happens. If the model then fails, refuses, runs out of searches or
+ * returns an empty array, the confirmed dates are still in the brief.
+ *
+ * This is the stage-0 principle applied one level down: gather() commits
+ * measured numbers before any model token is spent so that a failed
+ * investigation cannot cost the user their numbers. The same argument holds
+ * for a date that was computed from the Hijri calendar — losing it because a
+ * language model had a bad minute is not a tradeoff anyone would choose.
+ *
+ * A computed date carries confidence 1 and no sources. That is correct rather
+ * than sloppy: its provenance is an arithmetic conversion, not a page someone
+ * read, and the citation filter must not treat it as an unsupported claim.
+ */
+export async function runCalendarLens({
+  workspaceId, runId, calendar, prompt, identity, brand, deadline = null,
+}) {
+  // Safe before the model is involved. Both steps are pure and live in
+  // calendar.js, because the half that must survive a model failure is the
+  // half that most needs testing without a network.
+  const computed = findingsFromEvents(calendar?.events || [])
+    .map(f => makeFinding('calendar', f))
+
+  const modelOut = await runLens({
+    workspaceId, runId, lensKey: 'calendar', prompt, identity, brand, deadline,
+  })
+
+  return mergeCalendarResult({
+    computed,
+    modelOut,
+    note: calendar?.note || '',
+    calendarSources: calendar?.sources || [],
+  })
 }
 
 /**

@@ -99,12 +99,22 @@ export const LENSES = [
     question: 'What is coming in the next 2–8 weeks that changes what we should be saying?',
     perishability: PERISHABLE,
     cadence: 'weekly',
-    // Four searches, not the two it started with. The first live run exposed why:
-    // a date lookup FEELS like something a model already knows, so it answered
-    // from memory, produced no citations, and every calendar finding was
-    // correctly dropped by the source filter — silently killing the most
-    // valuable lens in the set. Cheap is right; free is not.
-    budget: { searches: 4, maxTokens: 4_000, effort: 'low' },
+    // Raising this from 2 to 4 was the previous attempt at the same problem and
+    // it did not work: the model spent all four (two on an identical query),
+    // hit max_uses_exceeded seven times, and returned nothing at all — throwing
+    // away the dates it had already confirmed. The budget was never the bug.
+    //
+    // Dates are now computed in calendar.js before this lens runs, so these
+    // searches are no longer spent on lookups. They go to the one part of
+    // "what is coming" that no API answers: trade shows, exhibitions and
+    // industry cycles. Six is enough for that and, unlike before, the lens
+    // returns its dates whether or not a single search succeeds.
+    //
+    // Effort rises from low to medium for the same reason. The old job was
+    // recall, which low handles; the new job is judgement about what a
+    // particular brand should do with a date, which it does not — and the
+    // duplicate query was itself a symptom of a model given no room to plan.
+    budget: { searches: 6, maxTokens: 8_000, effort: 'medium' },
     // Every brand has a calendar. There is no business for which "what is
     // coming" is not a question, which is why this one is never disabled.
     universal: true,

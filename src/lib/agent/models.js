@@ -59,6 +59,11 @@ export const JOBS = {
   reflect:     'claude-sonnet-5', // what is still unanswered
   extract:     'claude-sonnet-5', // pulling shaped data out of fetched pages
   title:       'claude-sonnet-5', // naming a chat thread
+  // Compacting the agent's memory. Sonnet rather than a third, cheaper tier:
+  // this runs roughly ten times a month, so the saving would be pennies, and
+  // the job is genuinely lossy — deciding what the agent never sees again is
+  // not where to buy a quality cliff. See the Haiku note at the top.
+  remember:    'claude-sonnet-5',
 }
 
 /**
