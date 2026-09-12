@@ -30,4 +30,6 @@ export const Icon = {
   // A clock turning backwards — "what came before", as distinct from `clock`,
   // which is used for a time still to come.
   clockRewind:<svg className={p} fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><path d="M3.5 9.5A9 9 0 1 1 3 13"/><polyline points="2 5 3.5 9.5 8 8"/><polyline points="12 7.5 12 12 15 15"/></svg>,
+  pencil:     <svg className={p} fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>,
+  trash:      <svg className={p} fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>,
 }

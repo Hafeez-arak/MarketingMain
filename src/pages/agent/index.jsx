@@ -192,7 +192,7 @@ export default function AgentPage() {
           {/* Beside the composer rather than up in the page header: this is a
               thing you reach for while reading a conversation, not a page-level
               action, and the header already carries the two that are. */}
-          <PastConversations activeThreadId={threadId} onOpen={openThread} />
+          <PastConversations activeThreadId={threadId} onOpen={openThread} onDeleteActive={reset} />
           <input
             value={question}
             onChange={e => setQuestion(e.target.value)}

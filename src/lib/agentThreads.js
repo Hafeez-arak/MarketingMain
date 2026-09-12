@@ -66,6 +66,53 @@ export async function fetchThreadTurns(chatId, workspaceId, accessToken) {
 }
 
 /**
+ * Give a thread a name of your own.
+ *
+ * `updated_at` is deliberately NOT touched. It orders this list by when the
+ * conversation last MOVED, and renaming is not a thing the conversation did —
+ * bumping it would shuffle a thread to the top for a change of label.
+ */
+export async function renameThread(chatId, workspaceId, accessToken, title) {
+  if (!chatId || !workspaceId) return false
+  const url = `${SUPABASE_URL}/rest/v1/research_chats?id=eq.${chatId}` +
+    `&workspace_id=eq.${workspaceId}`
+  try {
+    const res = await fetch(url, {
+      method: 'PATCH',
+      headers: { ...headers(accessToken), 'Content-Type': 'application/json', Prefer: 'return=minimal' },
+      body: JSON.stringify({ title: String(title || '').slice(0, 200) }),
+    })
+    return res.ok
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Delete a thread, and with it every message in it — research_messages
+ * cascades from this row. There is no undo, which is why the caller asks
+ * first.
+ *
+ * The workspace_id filter is not belt-and-braces here the way it is on a read.
+ * RLS scopes by membership and the operators belong to every workspace, so an
+ * id alone would happily delete another brand's conversation.
+ */
+export async function deleteThread(chatId, workspaceId, accessToken) {
+  if (!chatId || !workspaceId) return false
+  const url = `${SUPABASE_URL}/rest/v1/research_chats?id=eq.${chatId}` +
+    `&workspace_id=eq.${workspaceId}`
+  try {
+    const res = await fetch(url, {
+      method: 'DELETE',
+      headers: { ...headers(accessToken), Prefer: 'return=minimal' },
+    })
+    return res.ok
+  } catch {
+    return false
+  }
+}
+
+/**
  * "2d", "3h", "5m" — how long ago, in one or two characters.
  *
  * Deliberately coarse. The exact timestamp is not what anyone is scanning a
