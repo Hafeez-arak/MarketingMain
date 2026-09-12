@@ -4,6 +4,7 @@ import { useAuth } from '../store/auth'
 import { useAgentChat } from '../lib/useAgentChat'
 import { describePage, describeContextLabel, suggestionsFor } from '../lib/pageContext'
 import { Spinner } from './ui/index'
+import PastConversations from './PastConversations'
 
 // ─── The assistant, on every page ──────────────────────────────────────────
 // AGENT.md §5a. A drawer that opens anywhere and knows what you are looking
@@ -38,8 +39,11 @@ export function AssistantDrawer() {
   const location = useLocation()
   const { activeWorkspaceId, activeWorkspace } = useAuth()
   const [open, setOpen] = useState(false)
+  // Whether the earlier-conversations popup is up. Tracked only so this
+  // drawer can stand down from Escape while it is — see below.
+  const [historyOpen, setHistoryOpen] = useState(false)
   const [question, setQuestion] = useState('')
-  const { turns, busy, ask, reset, stop, ready } = useAgentChat()
+  const { turns, busy, ask, reset, stop, ready, threadId, openThread } = useAgentChat()
   const bottom = useRef(null)
   const input = useRef(null)
 
@@ -60,13 +64,17 @@ export function AssistantDrawer() {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault()
         setOpen(v => !v)
-      } else if (e.key === 'Escape' && open) {
+      } else if (e.key === 'Escape' && open && !historyOpen) {
+        // Yielded while the popup is up. That listens for Escape on document
+        // and this one listens on window, so both would fire and a single
+        // press would close the popup AND the drawer behind it. The popup is
+        // the thing in front; it gets the key.
         setOpen(false)
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [open])
+  }, [open, historyOpen])
 
   const send = useCallback((text) => {
     const q = text ?? question
@@ -177,6 +185,15 @@ export function AssistantDrawer() {
               onSubmit={e => { e.preventDefault(); send() }}
               className="p-3 border-t border-slate-100 flex gap-2"
             >
+              {/* The same way back the /agent page has. The popup portals to
+                  the body rather than into this panel, so it is the same size
+                  here as it is there — the 448px is no constraint on it. */}
+              <PastConversations
+                activeThreadId={threadId}
+                onOpen={openThread}
+                onDeleteActive={reset}
+                onOpenChange={setHistoryOpen}
+              />
               <input
                 ref={input}
                 value={question}

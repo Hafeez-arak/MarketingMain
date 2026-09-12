@@ -154,8 +154,15 @@ function ThreadRow({ chat, active, opening, busy, onPick, onRename, onDelete }) 
  * @param {string}   props.activeThreadId  the conversation on screen right now
  * @param {Function} props.onOpen          (threadId, turns) => void
  * @param {Function} props.onDeleteActive  called when the thread on screen is the one deleted
+ * @param {Function} [props.onOpenChange]  told when the popup opens and closes
+ *
+ * `onOpenChange` exists for the drawer. The drawer closes itself on Escape
+ * from a window listener and the Modal closes itself from a document one, so
+ * with both mounted a single press would dismiss this popup AND the drawer
+ * behind it. The drawer uses this to hold its own Escape while the popup has
+ * it.
  */
-export default function PastConversations({ activeThreadId, onOpen, onDeleteActive }) {
+export default function PastConversations({ activeThreadId, onOpen, onDeleteActive, onOpenChange }) {
   const { activeWorkspaceId, accessToken } = useAuth()
   const [open, setOpen] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -164,22 +171,27 @@ export default function PastConversations({ activeThreadId, onOpen, onDeleteActi
 
   // Fetched on open rather than on mount: this is a list nobody looks at most
   // sessions, and a query per page load to render nothing is a query wasted.
+  const setOpenBoth = useCallback((next) => {
+    setOpen(next)
+    onOpenChange?.(next)
+  }, [onOpenChange])
+
   const show = useCallback(async () => {
-    setOpen(true)
+    setOpenBoth(true)
     setLoading(true)
     const rows = await fetchThreads(activeWorkspaceId, accessToken)
     setChats(rows)
     setLoading(false)
-  }, [activeWorkspaceId, accessToken])
+  }, [activeWorkspaceId, accessToken, setOpenBoth])
 
   const pick = useCallback(async (chat) => {
-    if (chat.id === activeThreadId) { setOpen(false); return }
+    if (chat.id === activeThreadId) { setOpenBoth(false); return }
     setOpening(chat.id)
     const turns = await fetchThreadTurns(chat.id, activeWorkspaceId, accessToken)
     setOpening('')
-    setOpen(false)
+    setOpenBoth(false)
     onOpen(chat.id, turns)
-  }, [activeThreadId, activeWorkspaceId, accessToken, onOpen])
+  }, [activeThreadId, activeWorkspaceId, accessToken, onOpen, setOpenBoth])
 
   const rename = useCallback(async (chat, title) => {
     const ok = await renameThread(chat.id, activeWorkspaceId, accessToken, title)
@@ -212,7 +224,7 @@ export default function PastConversations({ activeThreadId, onOpen, onDeleteActi
         {Icon.clockRewind}
       </button>
 
-      <Modal open={open} onClose={() => setOpen(false)} title="Earlier conversations">
+      <Modal open={open} onClose={() => setOpenBoth(false)} title="Earlier conversations">
         {loading ? (
           <div className="py-10 flex justify-center"><Spinner /></div>
         ) : chats.length === 0 ? (
