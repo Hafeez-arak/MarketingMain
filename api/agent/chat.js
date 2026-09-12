@@ -2,6 +2,7 @@ import { callerId, callerMayUseWorkspace, db, isConfigured } from './_supabase.j
 import { loadBrandContext, IDENTITY, prefixRisk } from './_context.js'
 import { runAgent } from './_loop.js'
 import { contextPreamble } from '../../src/lib/agent/prompt.js'
+import { rememberChat } from './_memory.js'
 
 // ─── POST /api/agent/chat ──────────────────────────────────────────────────
 // The assistant answering now. AGENT.md §5a.
@@ -120,7 +121,13 @@ export default async function handler(req, res) {
       `&order=created_at.asc&limit=40&select=role,content`,
     )
 
-    const { brand } = await loadBrandContext(workspaceId, 'chat')
+    // `brand` now carries the agent's memory digest — what it has already
+    // proposed, what this team has told it, what it established. It sits in
+    // the CACHED block because it changes on a slow cadence.
+    //
+    // `recallTail` is the volatile half: notes newer than the last compaction.
+    // It goes on the user turn below, never here.
+    const { brand, recallTail } = await loadBrandContext(workspaceId, 'chat')
 
     // The cache guard. Prompt caching fails silently — a prefix that stops
     // being byte-identical still answers correctly, at roughly ten times the
@@ -130,7 +137,7 @@ export default async function handler(req, res) {
 
     // The page descriptor is the volatile TAIL of the user turn — never the
     // system prompt, which is the whole point of putting it here.
-    const preamble = contextPreamble(context)
+    const preamble = [contextPreamble(context), recallTail].filter(Boolean).join('\n\n')
     const messages = [
       ...(history || []).map(m => ({ role: m.role, content: m.content })),
       { role: 'user', content: preamble ? `${preamble}\n\n${question}` : question },
@@ -184,6 +191,16 @@ export default async function handler(req, res) {
         body: { updated_at: new Date().toISOString() },
         prefer: 'return=minimal',
       })
+
+      // ── Learn from the conversation ──
+      // Every sixth turn, not every turn: a model call per message would
+      // roughly double the cost of chat to record something on maybe one turn
+      // in ten. The person already has their answer streamed by now, so this
+      // costs them no waiting, and it can never fail the response — a memory
+      // that did not get written is a smaller problem than an answer that did
+      // not arrive.
+      const turnCount = ((history || []).filter(m => m.role === 'assistant').length) + 1
+      await rememberChat(workspaceId, chatId, { turnCount }).catch(() => {})
     }
 
     send(res, 'done', {

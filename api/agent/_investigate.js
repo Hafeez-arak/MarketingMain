@@ -7,6 +7,8 @@ import { lensesFor, motionOf, lensSummary, rankFindings } from '../../src/lib/ag
 import { LENS_PROMPTS } from '../../src/lib/agent/lensPrompts.js'
 import { runLens, runOurselvesLens, runCalendarLens, markStage } from './_lenses.js'
 import { gatherCalendar } from './_calendar.js'
+import { priorIdeas } from './_memory.js'
+import { partitionRepeats } from '../../src/lib/agent/memory.js'
 
 // Re-exported: the resolver imported it from here before it moved to loop.js.
 export { urlsFromResponse }
@@ -49,12 +51,15 @@ export async function investigate({ workspaceId, runId, gathered, cadence = 'wee
   let cost = 0
 
   try {
-    const [{ brand, ctx, profile }, agenda, priorRuns, competitorRows] = await Promise.all([
+    const [{ brand, ctx, profile }, agenda, priorRuns, competitorRows, alreadySaid] = await Promise.all([
       loadBrandContext(workspaceId, 'research'),
       db(`research_agenda?workspace_id=eq.${workspaceId}&kind=eq.question&status=eq.active&select=subject,why`),
       db(`research_runs?workspace_id=eq.${workspaceId}&id=neq.${runId}&status=eq.complete` +
          `&order=started_at.desc&limit=3&select=report`),
       db(`research_agenda?workspace_id=eq.${workspaceId}&kind=eq.competitor&status=neq.retired&select=subject`),
+      // Every idea this brand has ever been given. Used twice below: once to
+      // tell the synthesiser, and once to check what it returns.
+      priorIdeas(workspaceId),
     ])
 
     // How this brand sells decides which lenses lead. Inferred from the Brand
@@ -154,6 +159,19 @@ export async function investigate({ workspaceId, runId, gathered, cadence = 'wee
             agenda?.length
               ? `Standing questions a person asked you to watch:\n${agenda.map(a => `- ${a.subject}`).join('\n')}`
               : '',
+            // Half one of the anti-repetition guarantee: tell it. Half two is
+            // the code check below, because telling a model not to repeat
+            // itself reliably produces a rephrasing rather than silence.
+            alreadySaid?.length
+              ? [
+                  'IDEAS YOU HAVE ALREADY PROPOSED TO THIS BRAND. Do not propose any of',
+                  'these again, and do not propose a reworded version — a check in code',
+                  'will catch it and drop it before anyone reads this. If one of them is',
+                  'still genuinely the right answer, say so explicitly as a repeat and',
+                  'say what has changed since.',
+                  ...alreadySaid.slice(0, 60).map(n => `- ${n.body}`),
+                ].join('\n')
+              : '',
             (priorRuns || []).length
               ? `Previous headlines:\n${priorRuns.map(r => `- ${r.report?.headline || ''}`).filter(Boolean).join('\n')}`
               : '',
@@ -180,6 +198,32 @@ export async function investigate({ workspaceId, runId, gathered, cadence = 'wee
     report.lenses = summary
     report.findings = findings
     report.sales_motion = { motion, explicit }
+
+    // ── Anti-repetition, enforced ──
+    // The prompt above asked. This decides. A guarantee held only by a prompt
+    // is not a guarantee, and "do not repeat yourself" is exactly the kind of
+    // instruction a model satisfies by rewording.
+    //
+    // Repeats are MOVED, not deleted: "we suggested this three weeks ago and
+    // nothing happened" is more useful to a person than the idea silently
+    // vanishing, which looks identical to the agent never having had it.
+    if (alreadySaid?.length) {
+      const { fresh, repeats } = partitionRepeats(report.proposed_ideas || [], alreadySaid)
+      report.proposed_ideas = fresh
+      if (repeats.length) {
+        report.repeated_ideas = repeats.map(r => ({
+          idea: r.body,
+          previously: r.matched?.body || '',
+          first_proposed: r.matched?.created_at || null,
+          times_proposed: Number(r.matched?.seen_count) || 1,
+        }))
+        report.unanswered = [
+          ...(report.unanswered || []),
+          `${repeats.length} idea${repeats.length === 1 ? ' was' : 's were'} dropped for repeating ` +
+          'something already proposed. They are listed under repeated_ideas.',
+        ]
+      }
+    }
 
     // Named plainly so a reader can tell "checked and quiet" from "never ran".
     const failed = summary.filter(s => !s.ran)

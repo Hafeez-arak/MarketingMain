@@ -103,7 +103,7 @@ nothing in this repo applies it. Until it is run, the memory code degrades to
 - [x] **1. Migration SQL written** — `docs/memory-schema.sql`: `agent_notes`,
       `agent_digest`, indexes, RLS. Table names verified against the live
       database (`workspace_members` exists with `workspace_id`/`user_id`).
-      ⚠️ **NOT YET APPLIED.** The user must run it by hand. Until then
+      ✅ **APPLIED 2026-09-12** to project `vxjhfvehccftvajgtqtv`. Before it was applied,
       `agent_notes` / `agent_digest` do not exist and every memory read must
       degrade to "no memory" rather than throwing.
 - [x] **2. Pure logic + tests** — `src/lib/agent/memory.js` + `memory.test.js`.
@@ -111,24 +111,68 @@ nothing in this repo applies it. Until it is run, the memory code degrades to
       rendering, token-capped compaction, note shapes, volatile tail. No
       network. **54 tests.** Similarity separation measured on the real ideas:
       lowest true match 0.714, highest false match 0.167, threshold 0.6.
-- [ ] **3. Digest builder** — `api/agent/_memory.js`: read notes → compact
-      (Sonnet, new `remember` job in `models.js`) → write `agent_digest`. Must
-      never throw; a failure leaves the previous digest in place. Also needs
-      `recordNotes()` for the write side.
-- [ ] **4. Write path — runs** — after a run, record proposed ideas, headline
-      and dated findings as notes. Hook into `api/agent/run.js` after persist.
-- [ ] **5. Read path — into the cached block** — `api/agent/_context.js` loads
-      the digest and appends it to the brand block for BOTH run and chat. The
-      volatile tail goes on the user turn, never here.
-- [ ] **6. Anti-repetition** — feed prior ideas to the synthesiser AND run
-      `partitionRepeats()` over what it returns, in `_investigate.js`. Both
-      halves: the prompt is the request, the code is the enforcement.
-- [ ] **7. Lens tools** — give lenses `get_memory` / `get_prior_research`
-      (currently they get web search only, in `_lenses.js`).
-- [ ] **8. Write path — chat** — extract decisions/corrections at thread end;
-      cross-thread continuity so the drawer feels like ChatGPT.
-- [ ] **9. `search_history` tool** — full-text recall over notes/runs/messages.
-- [ ] **10. Verify live + PR.**
+- [x] **3. Digest builder** — `api/agent/_memory.js`. `recordNotes()`
+      (de-duplicates by fingerprint, bumps `seen_count` instead of inserting a
+      second row), `rebuildDigest()`, `loadMemory()`, `priorIdeas()`.
+      Two-stage: renders in CODE first and only pays for the Sonnet `remember`
+      job when that overflows the budget — most weeks it does not, and those
+      weeks cost nothing. A compaction that does not actually shrink the digest
+      is rejected in favour of the code render.
+- [x] **4. Write path — runs** — `rememberRun()` + forced `rebuildDigest()` in
+      `api/agent/run.js`, after `persist`. Neither can fail the run.
+- [x] **5. Read path — into the cached block** — `api/agent/_context.js`
+      appends the digest to `brand`, and returns `recallTail` separately. The
+      tail is volatile and goes on the user turn; concatenating it into `brand`
+      would put per-minute bytes inside the cached prefix.
+- [x] **6. Anti-repetition** — both halves, in `_investigate.js`: prior ideas
+      go to the synthesiser AND `partitionRepeats()` runs over what it returns.
+      Repeats are moved to `report.repeated_ideas`, never silently deleted.
+- [x] **7. Lens tools** — **satisfied without a tool loop, deliberately.** The
+      lenses already receive `brand`, which now carries the digest; and
+      `brand_memory` rules were already in the brand context via
+      `buildContext`. Adding a client-side tool-execution loop to `runLens`
+      would add round-trips to a path that already took 380s in one measured
+      run, to fetch what is now in the prompt. Revisit only if a lens needs
+      memory the digest does not carry.
+- [x] **8. Write path — chat** — `rememberChat()` in `_memory.js`, called from
+      `chat.js` after the answer has streamed. Runs every `EXTRACT_EVERY` (6)
+      assistant turns, not every turn: a call per message would roughly double
+      the cost of chat to record something on maybe one turn in ten. Chat
+      already shared one persisted thread per workspace, so cross-surface
+      continuity (drawer ↔ `/agent`) was already there — what was missing was
+      anything crossing OUT of a thread, which the digest now does.
+- [ ] **9. `search_history` tool** — **deliberately deferred.** Same argument
+      as RAG, one scale down: the whole corpus renders to a 528-token digest
+      that is already in every prompt. Full-text search over 13 notes retrieves
+      what the model can already see. Build it when the digest starts dropping
+      notes (`rebuildDigest` returns `dropped > 0`) — that number is the
+      trigger, and it is reported.
+- [x] **10. Verified live.** See below.
+
+### Verified live, 2026-09-12
+
+Migration applied to project `vxjhfvehccftvajgtqtv` (confirmed against
+`SUPABASE_URL` before applying). Backfilled from the five real runs already in
+the database:
+
+```
+13 notes:  5 idea_proposed · 5 run_headline · 3 fact
+digest  :  528 approx tokens, 0 dropped, $0.00 (fit without the summariser)
+```
+
+The test that matters — replaying what run 2 proposed, as if run 3:
+
+```
+proposed 3, kept 1, caught 2 as repeats
+  BLOCKED  "KNX and GRMS: what hotel operators are actually specifying"
+  BLOCKED  "What hotel operators actually specify when it comes to GRMS and KNX"
+  ALLOWED  "A genuinely new angle: the procurement calendar for Q1 tenders"
+```
+
+The second BLOCKED line is the whole point: that is the reworded form, which a
+prompt alone does not catch.
+
+Brand block grew 6,308 → 8,419 chars and `prefixRisk()` still reports safe.
 
 ### Notes for whoever continues
 

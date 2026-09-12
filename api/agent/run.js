@@ -2,6 +2,7 @@ import { callerId, callerMayUseWorkspace, db, isConfigured } from './_supabase.j
 import { gather, patchRun } from './_gather.js'
 import { investigate } from './_investigate.js'
 import { periodFor } from '../../src/lib/agent/gather.js'
+import { rememberRun, rebuildDigest } from './_memory.js'
 
 // ─── POST /api/agent/run ───────────────────────────────────────────────────
 // The weekly research run. AGENT.md §6, RESEARCH-AGENT.md §4.
@@ -159,6 +160,15 @@ export default async function handler(req, res) {
     // including the failure one: the browser opened the spinner and only the
     // server can close it.
     await persist(workspaceId, runId, deep.report)
+
+    // ── Remember it ──
+    // After persist, and never allowed to fail the run: an agent with no
+    // memory is the agent we had last week, which worked. A run that dies
+    // because a summariser timed out is strictly worse than that. Both calls
+    // swallow their own errors, including the 404 that PostgREST returns until
+    // docs/memory-schema.sql has been applied by hand.
+    await rememberRun(workspaceId, deep.report, runId)
+    await rebuildDigest(workspaceId, { force: true })
     await patchRun(workspaceId, runId, {
       status: 'complete',
       stage: deep.ok ? 'synthesise' : 'gather',

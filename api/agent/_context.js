@@ -2,6 +2,7 @@ import { buildContext } from '../../src/lib/brandContextCore.js'
 import { rowToProfile } from '../../src/lib/brandBrainCore.js'
 import { volatileFragment } from '../../src/lib/agent/prompt.js'
 import { db } from './_supabase.js'
+import { loadMemory } from './_memory.js'
 
 // ─── What the agent knows about this workspace ─────────────────────────────
 // AGENT.md §3, layer 1. This module has exactly one job: turn a workspace id
@@ -119,6 +120,20 @@ export async function loadBrandContext(workspaceId, task = 'chat') {
 
   const ctx = buildContext(profile, schema, directory, memory || [], { task })
 
+  const base = ctx.instructions
+    || 'BRAND: (nothing has been written in the Brand Brain for this workspace yet.)'
+
+  // ── The agent's own memory, appended to the stable block ──
+  // What it already proposed, what it was told, what it established. This
+  // belongs in the CACHED prefix rather than the user turn: it is large-ish
+  // and it changes on a slow cadence, which is precisely what caching is for.
+  //
+  // `recall.tail` is deliberately NOT concatenated here. That is the volatile
+  // half — notes newer than the last compaction — and it rides on the user
+  // turn instead. Folding it in would put bytes that change every few minutes
+  // inside the prefix and quietly re-bill the whole thing on every call.
+  const recall = await loadMemory(workspaceId)
+
   return {
     ctx,
     // The shaped profile, not the raw row. The lenses need targetPersonas and
@@ -131,7 +146,10 @@ export async function loadBrandContext(workspaceId, task = 'chat') {
     // The prompt's stable second block. buildContext output is a function of
     // rows a human edits, so it is stable between edits — which is exactly the
     // property prompt caching needs.
-    brand: ctx.instructions || `BRAND: (nothing has been written in the Brand Brain for this workspace yet.)`,
+    brand: recall.digest ? `${base}\n\n${recall.digest}` : base,
+    // Volatile. Caller puts this on the user turn, or drops it.
+    recallTail: recall.tail,
+    recallBuiltAt: recall.builtAt,
   }
 }
 
