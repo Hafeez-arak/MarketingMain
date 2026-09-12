@@ -1,3 +1,5 @@
+import { daysUntil } from './calendar.js'
+
 // ─── The lenses ────────────────────────────────────────────────────────────
 // A marketing person answers a handful of recurring questions. The run used to
 // answer one of them — "what did competitors post" — because Instagram was the
@@ -272,12 +274,23 @@ export function makeFinding(lensKey, raw = {}) {
   }
 }
 
-/** Days until a finding goes stale, or null when it never does. */
+/**
+ * Days until a finding goes stale, or null when it never does.
+ *
+ * Date-only arithmetic, midnight to midnight, and that is not a detail.
+ * Subtracting the current TIME OF DAY from a date-only deadline makes the
+ * answer drift through the day: the brief rendered "Saudi National Day is 11
+ * days away" from the stored calendar number directly above a badge reading
+ * "in 10 days", because this ran at 15:57 and 10.3 rounds down. Same date,
+ * same page, two answers.
+ *
+ * `daysUntil` in calendar.js has always done it correctly. This defers to it
+ * rather than keeping a second implementation, because the two must agree and
+ * the only way to guarantee that is for there to be one of them.
+ */
 export function daysLeft(finding, now = new Date()) {
   if (!finding?.perishable_until) return null
-  const when = new Date(finding.perishable_until)
-  if (Number.isNaN(when.getTime())) return null
-  return Math.round((when.getTime() - now.getTime()) / 86_400_000)
+  return daysUntil(String(finding.perishable_until).slice(0, 10), now)
 }
 
 /**

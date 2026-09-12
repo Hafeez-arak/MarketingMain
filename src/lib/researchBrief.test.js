@@ -66,6 +66,38 @@ describe('saying how long is left in words', () => {
   })
 })
 
+describe('a date-only deadline must not drift through the day', () => {
+  // Caught by looking at the rendered page, not by a test. The brief showed
+  // "Saudi National Day is 11 days away" — the number the calendar computed
+  // and stored — directly above a badge reading "in 10 days", because the
+  // label subtracted the current time of day from a midnight deadline and
+  // 10.3 rounds down. Same date, same page, two answers.
+  //
+  // It was worse than an inconsistency: the same finding read 11 in the
+  // morning and 10 in the afternoon.
+
+  const finding = f('national day', { perishable_until: '2026-09-23' })
+
+  it('answers the same at every hour of the day', () => {
+    const hours = ['00:01', '09:00', '15:57', '23:59']
+      .map(t => deadlineLabel(finding, new Date(`2026-09-12T${t}:00Z`)))
+    expect(new Set(hours).size).toBe(1)
+    expect(hours[0]).toBe('in 11 days')
+  })
+
+  it('agrees with the number the calendar module computed and stored', () => {
+    // The two used to be separate implementations. They are now one, and this
+    // is the test that says they must stay one.
+    expect(deadlineLabel(finding, new Date('2026-09-12T15:57:00Z'))).toBe('in 11 days')
+  })
+
+  it('does not flip a same-day deadline to yesterday by the afternoon', () => {
+    const today = f('x', { perishable_until: '2026-09-12' })
+    expect(deadlineLabel(today, new Date('2026-09-12T23:00:00Z'))).toBe('today')
+    expect(urgencyOf(today, new Date('2026-09-12T23:00:00Z'))).toBe('now')
+  })
+})
+
 describe('a lens that found nothing and a lens that broke are not the same fact', () => {
   // This is the single most important thing the page has to get right. Both
   // produce an empty section, and a reader who cannot tell them apart will
