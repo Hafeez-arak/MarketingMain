@@ -234,6 +234,24 @@ export function lensesFor({ motion = DEFAULT_MOTION, only = null, cadence = 'wee
       LENSES.indexOf(a) - LENSES.indexOf(b))
 }
 
+/**
+ * Which standing questions belong in a run of this cadence.
+ *
+ * `research_agenda.cadence` has existed since the table did and nothing read
+ * it, so a question a person marked monthly was asked every single week —
+ * spending searches re-answering something whose answer moves quarterly, which
+ * is the exact waste the lens cadences exist to avoid.
+ *
+ * Same rule as the lenses: a monthly run is a SUPERSET of a weekly one, so it
+ * asks everything. Returned as a PostgREST fragment rather than applied here
+ * because the filter belongs in the query — pulling every row back to drop
+ * half of them in JavaScript is the kind of thing that is fine at six rows and
+ * quietly is not at six hundred.
+ */
+export function agendaFilterFor(cadence = 'weekly') {
+  return cadence === 'monthly' ? '' : '&cadence=eq.weekly'
+}
+
 /** Total searches a run may make, so a cap can be checked before spending. */
 export function searchBudgetFor(lenses) {
   return (lenses || []).reduce((n, l) => n + (l.budget?.searches || 0), 0)

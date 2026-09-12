@@ -1,10 +1,13 @@
 import { describe, it, expect } from 'vitest'
 import {
   LENSES, lensByKey, lensesFor, searchBudgetFor, motionOf, MOTIONS,
-  makeFinding, daysLeft, rankFindings, lensSummary,
+  makeFinding, daysLeft, rankFindings, lensSummary, agendaFilterFor,
   PERISHABLE, SLOW,
 } from './lenses'
-import { openingsPrompt, demandPrompt, categoryPrompt, rivalsPrompt, LENS_PROMPTS } from './lensPrompts'
+import {
+  openingsPrompt, demandPrompt, categoryPrompt, rivalsPrompt, craftPrompt, LENS_PROMPTS,
+} from './lensPrompts'
+import { SYNTHESISE_PROMPT } from './brief'
 import { volatileFragment } from './prompt'
 
 // The three real workspaces. Any framework that only works for one is wrong,
@@ -345,6 +348,104 @@ describe('the calendar lens makes no model call at all', () => {
     const p = openingsPrompt({ brandName: 'X' }, { motion: 'specification' })
     expect(p).toMatch(/trade shows, exhibitions/i)
     expect(p).toMatch(/procurement or budget cycles/i)
+  })
+})
+
+describe('the standing questions actually steer the search', () => {
+  // AGENT.md §5b calls research_agenda the steering wheel: the list a person
+  // edits to say what they want watched. It was loaded every run and handed
+  // ONLY to synthesis — which reads what the lenses already found and has no
+  // search tool. So "watch for tunnel-lighting tenders" could change how the
+  // week was written up and could never change what was looked for. The one
+  // thing the feature exists for was the one thing it could not do.
+
+  const AGENDA = [
+    { subject: 'Is anyone pushing tunnel lighting in the Kingdom?', why: 'We have stock' },
+    { subject: 'When is the next Big 5 Saudi?' },
+  ]
+  // Local to this block: the fixture in the grounding suite below is scoped
+  // to its own describe, and reaching across would couple two unrelated tests.
+  const facts = b => ({
+    brandName: 'X',
+    descriptor: b.customFields.brand_descriptor,
+    audience: b.targetPersonas,
+    geography: 'Riyadh, Saudi Arabia',
+  })
+
+  it('reaches every lens that searches', () => {
+    const built = [
+      openingsPrompt(facts(ARAK), { motion: 'specification', agenda: AGENDA }),
+      demandPrompt(facts(ARAK), { competitors: [], agenda: AGENDA }),
+      categoryPrompt(facts(ARAK), { agenda: AGENDA }),
+      rivalsPrompt(facts(ARAK), { agenda: AGENDA }),
+      craftPrompt(facts(ARAK), { agenda: AGENDA }),
+    ]
+    for (const p of built) {
+      expect(p).toMatch(/STANDING QUESTIONS/)
+      expect(p).toMatch(/tunnel lighting/)
+    }
+  })
+
+  it('carries the reason a question was asked, which is what judges the answer', () => {
+    expect(openingsPrompt(facts(ARAK), { motion: 'specification', agenda: AGENDA }))
+      .toMatch(/why it matters: We have stock/)
+  })
+
+  it('tells a lens to ignore the questions that are not its job', () => {
+    // Every lens sees every question, because asking a person to tag each one
+    // with a lens key means teaching them a concept they have no reason to
+    // know. The filtering is the model's job, and it has to be told so — or
+    // five lenses spend real searches on one calendar question.
+    const p = craftPrompt(facts(ARAK), { agenda: AGENDA })
+    expect(p).toMatch(/ignore them/i)
+    expect(p).toMatch(/they come first/i)
+  })
+
+  it('says nothing at all when nobody has asked for anything', () => {
+    // Today every workspace has zero active standing questions, so an empty
+    // agenda is the common case and must not leave a dangling header.
+    const p = openingsPrompt(facts(ARAK), { motion: 'specification', agenda: [] })
+    expect(p).not.toMatch(/STANDING QUESTIONS/)
+    expect(openingsPrompt(facts(ARAK), { motion: 'specification' })).not.toMatch(/STANDING QUESTIONS/)
+  })
+
+  it('skips malformed rows rather than rendering a blank bullet', () => {
+    const p = demandPrompt(facts(ARAK), { competitors: [], agenda: [{ why: 'no subject' }, null] })
+    expect(p).not.toMatch(/STANDING QUESTIONS/)
+  })
+
+  it('caps the list, because an agenda is not a budget', () => {
+    const many = Array.from({ length: 25 }, (_, i) => ({ subject: `question ${i}` }))
+    const p = categoryPrompt(facts(ARAK), { agenda: many })
+    expect(p).toMatch(/question 9/)
+    expect(p).not.toMatch(/question 10\b/)
+  })
+
+  it('a monthly question is not asked every week', () => {
+    // research_agenda.cadence has existed since the table did and nothing read
+    // it, so a question marked monthly was asked weekly anyway — spending
+    // searches re-answering something whose answer moves quarterly.
+    expect(agendaFilterFor('weekly')).toBe('&cadence=eq.weekly')
+  })
+
+  it('a monthly run asks everything, weekly questions included', () => {
+    // Same rule the lens set follows: monthly is a superset, not a swap.
+    expect(agendaFilterFor('monthly')).toBe('')
+  })
+
+  it('defaults to the narrower set when the cadence is missing or junk', () => {
+    // Erring narrow costs a question one week. Erring wide spends real money
+    // every week on questions someone deliberately marked monthly.
+    expect(agendaFilterFor()).toBe('&cadence=eq.weekly')
+    expect(agendaFilterFor('nonsense')).toBe('&cadence=eq.weekly')
+  })
+
+  it('the brief still owes an answer for every question asked', () => {
+    // Half two: reaching the lenses is not enough. A watch list that silently
+    // stops being watched is worse than none, so synthesis must name the ones
+    // it could not answer.
+    expect(SYNTHESISE_PROMPT).toMatch(/STANDING QUESTIONS ARE A PROMISE/)
+    expect(SYNTHESISE_PROMPT).toMatch(/unanswered/)
   })
 })
 
