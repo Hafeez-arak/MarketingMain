@@ -57,6 +57,44 @@ function who({ brandName, descriptor, audience, geography }) {
 // schema already has a confidence field. Anything under the model's internal
 // bar became silence — and a reader can discount a 0.35, but cannot discount
 // nothing. Silence is also indistinguishable from never having looked.
+/**
+ * The standing questions a person asked the agent to keep watching.
+ *
+ * ── WHY THIS EXISTS ──
+ *
+ * `research_agenda` is described in AGENT.md §5b as the steering wheel: the
+ * list of things a person wants watched, editable by them, in the place they
+ * are already looking. It was not connected to anything that steers.
+ *
+ * The questions were loaded, and handed only to SYNTHESIS — which reads what
+ * the lenses already found and has no search tool. So asking the agent to
+ * "watch for tunnel-lighting tenders" could change how the week was written up
+ * and could never change what was looked for. The one thing the feature is for
+ * was the one thing it could not do.
+ *
+ * Now every searching lens receives them. Which lens should answer which
+ * question is left to the lens rather than to a schema column, because the
+ * alternative is asking a person to tag each question with a lens key — a
+ * concept they have no reason to know about, and one more thing to get wrong.
+ * The instruction below is explicit that ignoring the ones that do not fit is
+ * the correct behaviour, so five lenses seeing a calendar question costs a few
+ * tokens rather than five wasted searches.
+ */
+function standing(agenda = []) {
+  const rows = (agenda || []).filter(a => a && a.subject)
+  if (!rows.length) return ''
+  return [
+    '',
+    'STANDING QUESTIONS — a person on this team asked you to keep watching these.',
+    'If any of them fall inside the question YOU are being asked, they come first: spend',
+    'your searches there before exploring generally, and say what you found even if the',
+    'answer is "no change since last time". If none of them fit your question, ignore them',
+    'entirely — another lens is asking something they do fit, and a forced answer is worse',
+    'than no answer.',
+    ...rows.slice(0, 10).map(a => `- ${a.subject}${a.why ? ` (why it matters: ${a.why})` : ''}`),
+  ].join('\n')
+}
+
 const CLOSING = [
   '',
   'Rules:',
@@ -101,7 +139,7 @@ const CLOSING = [
  * that is a tender; for a local service it is a new neighbourhood, a rival
  * closing, or an event needing suppliers. Same question, different target.
  */
-export function openingsPrompt(brand, { motion }) {
+export function openingsPrompt(brand, { motion, agenda = [] }) {
   const byMotion = {
     specification: [
       '- New projects, tenders or contract awards where this brand\'s category is in scope.',
@@ -148,6 +186,7 @@ export function openingsPrompt(brand, { motion }) {
     'conferences this brand\'s buyers attend, and the procurement or budget cycles that',
     'decide when they can actually commit. No API lists these, so they are a genuine search',
     'problem and they belong here with the rest of the demand picture.',
+    standing(agenda),
     CLOSING,
   ].join('\n')
 }
@@ -159,7 +198,7 @@ export function openingsPrompt(brand, { motion }) {
  * stated by the customer, about someone who is not us. That is market research
  * the customer performed for free.
  */
-export function demandPrompt(brand, { competitors = [] }) {
+export function demandPrompt(brand, { competitors = [], agenda = [] }) {
   return [
     who(brand),
     '',
@@ -194,6 +233,7 @@ export function demandPrompt(brand, { competitors = [] }) {
     '',
     'A finding here should usually carry a suggested_action that is a piece of content: if',
     'buyers keep asking something, answering it publicly is the action.',
+    standing(agenda),
     CLOSING,
   ].filter(Boolean).join('\n')
 }
@@ -210,7 +250,7 @@ export function demandPrompt(brand, { competitors = [] }) {
  * Standards, regulation and procurement policy move whether or not a rival
  * posts, and for a specification business they decide what can be sold at all.
  */
-export function categoryPrompt(brand) {
+export function categoryPrompt(brand, { agenda = [] } = {}) {
   // No `Market:` line: `who()` already carries geography, and it is now
   // resolved for every lens rather than only this one. Two lines saying the
   // same thing in one prompt is how a model starts weighting it twice.
@@ -238,6 +278,7 @@ export function categoryPrompt(brand) {
     '',
     'Say plainly how established each one is. "Announced, with a date" and "being discussed',
     'in the trade press" are different things and should not read the same.',
+    standing(agenda),
     CLOSING,
   ].filter(Boolean).join('\n')
 }
@@ -249,7 +290,7 @@ export function categoryPrompt(brand) {
  * frequency is a lagging, low-value signal; offers, pricing, launches and
  * hiring are what precede a move rather than report one.
  */
-export function rivalsPrompt(brand, { competitors = [], board = [], movements = [] }) {
+export function rivalsPrompt(brand, { competitors = [], board = [], movements = [], agenda = [] }) {
   const measured = board.length
     ? board.map(c =>
         `- ${c.name}${c.handle ? ` (@${c.handle})` : ''}: ${c.followers ?? '?'} followers, ` +
@@ -284,6 +325,7 @@ export function rivalsPrompt(brand, { competitors = [], board = [], movements = 
     '',
     'If the numbers above raise a question, chase THAT rather than researching generally.',
     'A competitor whose posting doubled is worth asking about; one that did not move is not.',
+    standing(agenda),
     CLOSING,
   ].join('\n')
 }
@@ -295,7 +337,7 @@ export function rivalsPrompt(brand, { competitors = [], board = [], movements = 
  * because the answer moves quarterly. Running it every week would pay
  * repeatedly for the same answer.
  */
-export function craftPrompt(brand, { platforms = [] }) {
+export function craftPrompt(brand, { platforms = [], agenda = [] }) {
   return [
     who(brand),
     platforms.length ? `Platforms in use: ${platforms.join(', ')}` : '',
@@ -310,6 +352,7 @@ export function craftPrompt(brand, { platforms = [] }) {
     'regardless of whether it applies here. A finding is only worth reporting if it would',
     'plausibly change what this specific brand does next month. If nothing has meaningfully',
     'changed, return nothing — that is the usual and correct answer.',
+    standing(agenda),
     CLOSING,
   ].join('\n')
 }

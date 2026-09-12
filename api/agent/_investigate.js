@@ -3,7 +3,9 @@ import { db } from './_supabase.js'
 import { loadBrandContext, IDENTITY } from './_context.js'
 import { textIn, urlsFromResponse } from '../../src/lib/agent/loop.js'
 import { BRIEF_SCHEMA, SYNTHESISE_PROMPT, mergeBrief } from '../../src/lib/agent/brief.js'
-import { lensesFor, motionOf, lensSummary, rankFindings } from '../../src/lib/agent/lenses.js'
+import {
+  lensesFor, motionOf, lensSummary, rankFindings, agendaFilterFor,
+} from '../../src/lib/agent/lenses.js'
 import { LENS_PROMPTS } from '../../src/lib/agent/lensPrompts.js'
 import { runLens, runOurselvesLens, runCalendarLens, markStage } from './_lenses.js'
 import { gatherCalendar } from './_calendar.js'
@@ -69,7 +71,8 @@ export async function loadRunContext(workspaceId, runId, cadence = 'weekly') {
   const [{ brand, ctx, profile }, agenda, priorRuns, competitorRows, alreadySaid, runRows] =
     await Promise.all([
       loadBrandContext(workspaceId, 'research'),
-      db(`research_agenda?workspace_id=eq.${workspaceId}&kind=eq.question&status=eq.active&select=subject,why`),
+      db(`research_agenda?workspace_id=eq.${workspaceId}&kind=eq.question&status=eq.active` +
+         `${agendaFilterFor(cadence)}&select=subject,why`),
       db(`research_runs?workspace_id=eq.${workspaceId}&id=neq.${runId}&status=eq.complete` +
          `&order=started_at.desc&limit=3&select=report`),
       db(`research_agenda?workspace_id=eq.${workspaceId}&kind=eq.competitor&status=neq.retired&select=subject`),
@@ -132,28 +135,33 @@ export async function planLenses(workspaceId, runId, cadence = 'weekly') {
  * every lens's — the calendar's dates cost an API round trip, and fetching
  * them to run the demand lens would be waste repeated on every call.
  */
-async function argsForLens(key, { brandFacts, motion, competitors, gathered, profile, ctx }) {
+async function argsForLens(key, { brandFacts, motion, competitors, gathered, profile, ctx, agenda = [] }) {
   if (key === 'calendar') {
     // No `args`: this lens has no prompt because it makes no model call. What
     // it needs is the computed calendar itself, which is the whole lens now.
     const window = lookahead(8)
     return { args: null, calendar: await gatherCalendar({ profile, ctx, window }) }
   }
-  if (key === 'openings') return { args: [brandFacts, { motion }] }
-  if (key === 'demand') return { args: [brandFacts, { competitors }] }
+  // `agenda` — the standing questions a person asked to have watched — goes to
+  // every lens that searches. It used to reach synthesis only, which reads what
+  // the lenses already found and cannot look anything up, so a standing question
+  // could change the write-up and never change what was searched for.
+  if (key === 'openings') return { args: [brandFacts, { motion, agenda }] }
+  if (key === 'demand') return { args: [brandFacts, { competitors, agenda }] }
   // The market it researches rides in brandFacts like every other brand fact,
   // resolved once in loadRunContext rather than a second time here.
-  if (key === 'category') return { args: [brandFacts] }
+  if (key === 'category') return { args: [brandFacts, { agenda }] }
   if (key === 'rivals') {
     return {
       args: [brandFacts, {
         competitors,
+        agenda,
         board: gathered?.competitor_board || [],
         movements: gathered?.movements || [],
       }],
     }
   }
-  if (key === 'craft') return { args: [brandFacts, { platforms: ['instagram'] }] }
+  if (key === 'craft') return { args: [brandFacts, { platforms: ['instagram'], agenda }] }
   return { args: null }
 }
 
