@@ -178,11 +178,17 @@ export default async function handler(req, res) {
       failed: out.failed,
       baseline: gatheredReport?.baseline,
       quiet_week: gatheredReport?.quiet_week,
+      // Echoed back so the driver passes the SAME cadence to every later
+      // route instead of each one defaulting on its own. This is not
+      // cosmetic: the lens route refuses a lens the run does not include, so
+      // a monthly run whose lens calls defaulted to weekly would be rejected
+      // lens by lens with "this run does not include a rivals lens".
+      cadence,
       // What the driver should call next, and with what. Returned rather than
       // hardcoded in the workflow so adding a lens is a code change here, not
       // an edit in n8n's UI that nothing tests.
-      next: { route: '/api/agent/lens', lenses: plan.lenses },
-      then: { route: '/api/agent/synthesise' },
+      next: { route: '/api/agent/lens', lenses: plan.lenses, cadence },
+      then: { route: '/api/agent/synthesise', cadence },
       note: out.note || '',
     })
   } catch (err) {

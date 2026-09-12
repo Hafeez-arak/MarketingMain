@@ -4,12 +4,13 @@
 // lighting, spas or tailoring. Every specific — the industry, the city, the
 // buyer, the season — arrives from the Brand Brain at call time.
 //
-// Two rules hold across all six:
+// Two rules hold across all of them:
 //
-//   1. An empty answer is a correct answer. Every prompt says so explicitly,
-//      because a model asked to research something will otherwise find
-//      something, and a brief padded with weak findings is worse than a short
-//      one — it trains the reader to skim.
+//   1. Report what you found, with an honest confidence, and let the reader
+//      judge. This REPLACED "an empty answer is a correct answer" on
+//      2026-09-12 — see the note above CLOSING. The old rule was written to
+//      stop padding and instead produced four lenses that read 99 relevant
+//      pages and reported nothing.
 //
 //   2. No invented dates. `perishable_until` drives the "act now" section, so
 //      a hallucinated deadline does not just add noise, it outranks real work.
@@ -32,11 +33,42 @@ function who({ brandName, descriptor, audience, geography }) {
   ].filter(Boolean).join('\n')
 }
 
+// ── THE INSTRUCTION THAT COST US EVERY FINDING ──
+//
+// This used to say: "Return an empty findings array if you found nothing worth
+// reporting. That is a correct and common answer. Do not pad."
+//
+// It was obeyed, and it was catastrophic. On 2026-09-12 four of five lenses
+// returned NOTHING while between them reading 99 pages from MEED, Construction
+// Week, MEP Middle East, Arab News and half a dozen job boards. The searching
+// was never the problem.
+//
+// Proven by A/B on the same week, same lens, same sources — only these lines
+// changed:
+//
+//   before   0 findings, 37 sources read
+//   after    3 findings, 20 sources read
+//
+// One of the three was a 300-key Waldorf Astoria conversion sitting in DESIGN
+// phase: a live specification window, in the sources the whole time, thrown
+// away by this instruction.
+//
+// The mistake was asking for a BINARY report/don't-report decision when the
+// schema already has a confidence field. Anything under the model's internal
+// bar became silence — and a reader can discount a 0.35, but cannot discount
+// nothing. Silence is also indistinguishable from never having looked.
 const CLOSING = [
   '',
   'Rules:',
-  '- Return an empty findings array if you found nothing worth reporting. That is a',
-  '  correct and common answer. Do not pad.',
+  '- REPORT WHAT YOU FOUND. Do not decide on the reader\'s behalf whether something',
+  '  clears a bar — that is what the confidence score is for. A thing you are 40%',
+  '  sure of is a finding at confidence 0.4, and the person reading this can judge',
+  '  it. Silence they cannot judge, and it looks identical to you not having looked.',
+  '- An empty findings array is allowed but should be RARE. Prefer a low-confidence',
+  '  finding over silence.',
+  '- If nothing genuinely NEW appeared, describe the current STATE instead — what is',
+  '  already running, who is active, what stage things are at. A standing picture is',
+  '  worth more than an empty array.',
   '- Every finding needs a source you actually read. No source, no finding.',
   '- Only set perishable_until when a real date exists. Never invent one.',
   '- suggested_action must be something the brand can actually do this month.',
@@ -49,76 +81,18 @@ const CLOSING = [
   '  found nothing. Report what you have and note what you could not reach.',
 ].join('\n')
 
-/**
- * CALENDAR — what is coming.
- *
- * Restructured after the first live runs, and the rewrite is worth explaining
- * because the old shape failed in a way that looked like success.
- *
- * It used to ask a model "what is coming in the next 8 weeks?" and require it
- * to verify every date by searching. On 2026-09-12 that cost $0.28, ran 49
- * seconds, issued four searches — two of them the SAME query — then hit
- * max_uses_exceeded seven times and returned an EMPTY findings array, having
- * already confirmed Saudi National Day in its first three searches. It threw
- * that away because this prompt told it "if you cannot confirm a date, leave
- * it out", and it had run out of budget partway through verifying.
- *
- * Dates are now computed before this prompt is ever built — see
- * src/lib/agent/calendar.js — and arrive here as GIVEN FACTS, the same
- * treatment stage 0 gives measured Instagram numbers. That leaves the model
- * the two jobs that actually need a model:
- *
- *   1. What should THIS brand do about a date everyone already knows.
- *   2. Trade shows and industry events, which no API lists and which are
- *      therefore a genuine search problem — now with the entire budget
- *      instead of competing with lookups it should never have been doing.
- */
-export function calendarPrompt(brand, { from, to, events = [], country = '' }) {
-  const known = events.length
-    ? events.map(e => {
-        const when = e.window_open
-          ? `PREPARATION WINDOW IS OPEN — ${e.days_until} days away`
-          : `${e.days_until} days away, preparation should start ${e.act_by}`
-        return [
-          `- ${e.name} — ${e.date}${e.ends_on ? ` to ${e.ends_on}` : ''} (${when})`,
-          e.hijri ? `  Hijri: ${e.hijri}` : '',
-          e.note ? `  ${e.note}` : '',
-        ].filter(Boolean).join('\n')
-      }).join('\n')
-    : '(nothing dated falls in this window — which is a normal and common answer)'
-
-  return [
-    who(brand),
-    country ? `Country whose calendar applies: ${country}` : '',
-    '',
-    'CONFIRMED DATES — these were computed from the Hijri calendar and public holiday',
-    'records, not researched. They are given facts. Do not re-verify them, do not search',
-    'to confirm them, and do not contradict them.',
-    '',
-    known,
-    '',
-    `Your job has two parts, for the window ${from} to ${to}.`,
-    '',
-    'PART ONE — what this brand should DO about the dates above.',
-    'Everyone has a calendar, so the date itself is not the finding. The finding is what',
-    'this specific brand, selling this specific thing to these specific people, should be',
-    'publishing or offering in the weeks BEFORE it, and why that beats what they would',
-    'have posted otherwise. A date with a generic "post about it" action is worth less',
-    'than no finding at all. If a date genuinely does not matter to this brand — and many',
-    'will not — say nothing about it rather than manufacturing a reason.',
-    '',
-    'PART TWO — the dates nobody publishes in a calendar.',
-    'Search for these; they are the only thing here worth spending searches on:',
-    '- Trade shows, exhibitions and conferences this brand\'s BUYERS attend.',
-    '- Industry cycles: budget years, procurement windows, project phases.',
-    '- Seasonal patterns specific to this business — weather, school terms, wedding or',
-    '  travel seasons — where they change what the customer wants.',
-    '',
-    'For anything you find by searching, cite it. For the confirmed dates above you do',
-    'not need a source — they already have one.',
-    CLOSING,
-  ].filter(Boolean).join('\n')
-}
+// CALENDAR has no prompt. It makes no model call at all.
+//
+// It used to. The model was asked two things on top of the computed dates:
+// what this brand should DO about each one, and which trade shows are coming.
+// Both moved on 2026-09-12 — the judgement into synthesis, which already reads
+// every finding and has the brand context; the trade shows into the openings
+// lens, which is already searching this market for exactly that.
+//
+// What is left is arithmetic against free APIs, so it is free. The run that
+// forced this is the argument for it: the model half hit its 150s budget and
+// was stopped, producing nothing, while the computed half produced the only
+// real finding in the entire brief.
 
 /**
  * OPENINGS — what just changed that we can move into.
@@ -153,9 +127,7 @@ export function openingsPrompt(brand, { motion }) {
   return [
     who(brand),
     '',
-    'Find things that have RECENTLY appeared in this brand\'s market that they could act on.',
-    'Recent means the last few weeks. Something that has been true for a year is not an',
-    'opening, however relevant.',
+    'Find things in this brand\'s market that they could act on.',
     '',
     'Look for:',
     ...(byMotion[motion] || byMotion.local_service),
@@ -163,6 +135,19 @@ export function openingsPrompt(brand, { motion }) {
     'An opening is only useful if it is still open. Set perishable_until to when the window',
     'closes — a tender deadline, an event date, an opening week. If you cannot establish a',
     'date, say so in the detail rather than guessing one.',
+    '',
+    'Prefer the last few weeks, but something older still counts if the window to act on it',
+    'is STILL OPEN. Say how old it is and let the date speak. A project that entered design',
+    'three months ago and has not yet specified is a better opportunity than one announced',
+    'yesterday and already awarded.',
+    '',
+    'A project whose window has CLOSED is still worth one line — say so plainly and say what',
+    'to watch instead. Knowing not to chase something is worth as much as knowing to chase it.',
+    '',
+    'Also cover the dated events this market runs on: trade shows, exhibitions and',
+    'conferences this brand\'s buyers attend, and the procurement or budget cycles that',
+    'decide when they can actually commit. No API lists these, so they are a genuine search',
+    'problem and they belong here with the rest of the demand picture.',
     CLOSING,
   ].join('\n')
 }
@@ -177,26 +162,84 @@ export function openingsPrompt(brand, { motion }) {
 export function demandPrompt(brand, { competitors = [] }) {
   return [
     who(brand),
-    competitors.length ? `Known competitors: ${competitors.slice(0, 8).join(', ')}` : '',
     '',
-    'Find out what this brand\'s customers are actually asking for, worrying about, and',
-    'complaining about.',
+    'Find out what the people who actually specify, approve and buy from this brand care',
+    'about RIGHT NOW.',
     '',
-    'The most valuable material is negative: complaints and unanswered questions about',
-    'COMPETITORS. Each one is an unmet need stated by the customer about someone who is',
-    'not us — that is a positioning opportunity and often a post.',
+    'Not the general public — the specific roles named above. For each, the useful question',
+    'is what is making their job harder this quarter, and what they are being asked to',
+    'deliver that they were not asked for last year.',
     '',
-    'Look at review sites, forums, public comments, and any place this audience discusses',
-    'the category. Prioritise:',
-    '- Recurring questions nobody answers well.',
-    '- The specific fear that stops someone buying (trust, risk, timing, price).',
-    '- Complaints about competitors that this brand does not have that problem with.',
-    '- The words customers use, which are rarely the words the industry uses.',
+    'Look for:',
+    '- What they are publicly asking, arguing about, or complaining about. Professional',
+    '  forums, LinkedIn, industry press, association material, conference programmes.',
+    '- The requirement that keeps appearing in briefs — the thing suppliers now have to',
+    '  answer for that used to be optional.',
+    '- The fear that stalls a decision: risk, lead time, compliance, after-sales support.',
+    '- The words THEY use, which are rarely the words the industry uses.',
+    '- Where they are losing time, since that is what a supplier can remove.',
     '',
-    'A finding here should usually carry a suggested_action that is a piece of content:',
-    'if customers keep asking something, answering it publicly is the action.',
+    // Competitors are an input here, not the subject. The previous version of
+    // this prompt made rival complaints the PRIMARY material, which quietly
+    // made a buyer-understanding question depend on rivals being active — and
+    // these rivals are SMEs who mostly are not.
+    competitors.length
+      ? [
+          `If complaints about a specific supplier surface (${competitors.slice(0, 6).join(', ')}), they`,
+          'are useful evidence of an unmet need — but they are one source among many here, not',
+          'the point of the question. Do not go looking for them if the buyers themselves are',
+          'telling you something more directly.',
+        ].join('\n')
+      : '',
+    '',
+    'A finding here should usually carry a suggested_action that is a piece of content: if',
+    'buyers keep asking something, answering it publicly is the action.',
     CLOSING,
-  ].join('\n')
+  ].filter(Boolean).join('\n')
+}
+
+/**
+ * CATEGORY — what is changing around us.
+ *
+ * New in the 2026-09-12 rebalance, and the clearest gap in the old set: nothing
+ * asked what was happening to the CATEGORY. Five of six lenses were anchored to
+ * competitors, which for a market of SMEs who post irregularly meant the honest
+ * answer most weeks was "nothing moved" — not because the market was still, but
+ * because we were only looking at the part of it that was.
+ *
+ * Standards, regulation and procurement policy move whether or not a rival
+ * posts, and for a specification business they decide what can be sold at all.
+ */
+export function categoryPrompt(brand) {
+  // No `Market:` line: `who()` already carries geography, and it is now
+  // resolved for every lens rather than only this one. Two lines saying the
+  // same thing in one prompt is how a model starts weighting it twice.
+  return [
+    who(brand),
+    '',
+    'Find what is changing in this brand\'s INDUSTRY — not in their competitors, and not',
+    'in their own accounts. The forces that apply to everyone selling this category.',
+    '',
+    'Look for:',
+    '- Regulation, standards and codes: new requirements, tightening thresholds,',
+    '  certification that is becoming mandatory, deadlines already announced.',
+    '- Government and institutional programmes that change what buyers must specify —',
+    '  national strategies, efficiency mandates, procurement rules.',
+    '- Technology shifts that change what is possible or expected, and how fast the',
+    '  market is actually adopting them rather than how fast vendors say it is.',
+    '- Supply, pricing and lead-time conditions that affect whether a project can',
+    '  proceed at all.',
+    '- Which way demand in this category is moving, and on what evidence.',
+    '',
+    'The test for a finding here is: does this change what this brand should be SAYING or',
+    'OFFERING in the next quarter? A trend that is real but changes nothing for them is',
+    'not worth a line. A requirement arriving in eighteen months that they could own the',
+    'conversation about now, is.',
+    '',
+    'Say plainly how established each one is. "Announced, with a date" and "being discussed',
+    'in the trade press" are different things and should not read the same.',
+    CLOSING,
+  ].filter(Boolean).join('\n')
 }
 
 /**
@@ -272,9 +315,12 @@ export function craftPrompt(brand, { platforms = [] }) {
 }
 
 export const LENS_PROMPTS = {
-  calendar: calendarPrompt,
+  // No `calendar` entry: that lens makes no model call any more. Its dates are
+  // computed, the "what should we do about it" judgement moved to synthesis,
+  // and its trade-show hunt moved into openings.
   openings: openingsPrompt,
   demand: demandPrompt,
+  category: categoryPrompt,
   rivals: rivalsPrompt,
   craft: craftPrompt,
 }

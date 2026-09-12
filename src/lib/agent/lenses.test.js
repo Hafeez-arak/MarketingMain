@@ -4,7 +4,7 @@ import {
   makeFinding, daysLeft, rankFindings, lensSummary,
   PERISHABLE, SLOW,
 } from './lenses'
-import { calendarPrompt, openingsPrompt, demandPrompt, rivalsPrompt, LENS_PROMPTS } from './lensPrompts'
+import { openingsPrompt, demandPrompt, categoryPrompt, rivalsPrompt, LENS_PROMPTS } from './lensPrompts'
 import { volatileFragment } from './prompt'
 
 // The three real workspaces. Any framework that only works for one is wrong,
@@ -40,9 +40,26 @@ describe('the lens set is general, not lighting-shaped', () => {
     }
   })
 
-  it('covers the six questions and no more', () => {
+  it('covers the seven questions and no more', () => {
     expect(LENSES.map(l => l.key).sort())
-      .toEqual(['calendar', 'craft', 'demand', 'openings', 'ourselves', 'rivals'])
+      .toEqual(['calendar', 'category', 'craft', 'demand', 'openings', 'ourselves', 'rivals'])
+  })
+
+  it('the weekly run is about GROWTH, not about watching competitors', () => {
+    // The 2026-09-12 rebalance. Five of six lenses used to be anchored to
+    // competitors, and those competitors are SMEs — on the run that prompted
+    // this, one of them had posted nothing at all. A set shaped that way can
+    // only ever answer "nothing moved", which is what it did, four weeks
+    // running.
+    const weekly = lensesFor({ cadence: 'weekly' }).map(l => l.key)
+    expect(weekly).toContain('openings')    // who is about to buy
+    expect(weekly).toContain('demand')      // what buyers want
+    expect(weekly).toContain('category')    // what is changing around us
+    expect(weekly).not.toContain('rivals')  // demoted to monthly
+  })
+
+  it('still checks rivals, just not every week', () => {
+    expect(lensesFor({ cadence: 'monthly' }).map(l => l.key)).toContain('rivals')
   })
 })
 
@@ -204,17 +221,27 @@ describe('the prompts are grounded in the brand, not in an industry', () => {
     geography: 'Riyadh, Saudi Arabia',
   })
 
-  it('every lens has a prompt builder', () => {
+  it('every lens that calls a model has a prompt builder', () => {
     for (const l of LENSES) {
-      if (l.key === 'ourselves') continue   // computed, no prompt
+      // A lens with no search budget makes no model call, so it needs no
+      // prompt. Two are computed: `ourselves` reads our own tables, and
+      // `calendar` computes its dates from free APIs.
+      if (l.budget.searches === 0) continue
       expect(LENS_PROMPTS[l.key], l.key).toBeTypeOf('function')
+    }
+  })
+
+  it('the computed lenses cost nothing and have no prompt', () => {
+    for (const key of ['ourselves', 'calendar']) {
+      expect(lensByKey(key).budget.searches, key).toBe(0)
+      expect(LENS_PROMPTS[key], key).toBeUndefined()
     }
   })
 
   it('the same builder produces different prompts for different brands', () => {
     // The generality claim, made concrete: one function, three businesses.
-    const a = calendarPrompt(facts(ARAK), { from: '2026-09-10', to: '2026-11-05' })
-    const b = calendarPrompt(facts(AQEEQ), { from: '2026-09-10', to: '2026-11-05' })
+    const a = categoryPrompt(facts(ARAK), {})
+    const b = categoryPrompt(facts(AQEEQ), {})
     expect(a).not.toBe(b)
     expect(a).toContain('architectural lighting')
     expect(b).toContain('at-home spa')
@@ -232,7 +259,7 @@ describe('the prompts are grounded in the brand, not in an industry', () => {
     // Without this a model asked to research something will find something,
     // and a padded brief teaches the reader to skim.
     for (const build of [
-      () => calendarPrompt(facts(ARAK), { from: 'a', to: 'b' }),
+      () => categoryPrompt(facts(ARAK), {}),
       () => openingsPrompt(facts(ARAK), { motion: 'specification' }),
       () => demandPrompt(facts(AQEEQ), { competitors: ['A'] }),
       () => rivalsPrompt(facts(ALO), { competitors: [], board: [], movements: [] }),
@@ -244,7 +271,7 @@ describe('the prompts are grounded in the brand, not in an industry', () => {
   it('every prompt forbids inventing a deadline', () => {
     // perishable_until drives the "act now" section, so a hallucinated date
     // does not merely add noise — it outranks real work.
-    expect(calendarPrompt(facts(ARAK), { from: 'a', to: 'b' })).toMatch(/never invent/i)
+    expect(categoryPrompt(facts(ARAK), {})).toMatch(/never invent/i)
     expect(openingsPrompt(facts(ARAK), { motion: 'specification' })).toMatch(/never invent|guessing/i)
   })
 
@@ -262,7 +289,7 @@ describe('the prompts are grounded in the brand, not in an industry', () => {
     // A prompt builder is exactly where a "today is" line gets added without
     // thinking, and caching fails silently when it happens.
     for (const text of [
-      calendarPrompt(facts(ARAK), { from: '2026-09-10', to: '2026-11-05' }),
+      categoryPrompt(facts(ARAK), {}),
       openingsPrompt(facts(AQEEQ), { motion: 'local_service' }),
       demandPrompt(facts(ALO), { competitors: ['A', 'B'] }),
     ]) {
@@ -271,61 +298,53 @@ describe('the prompts are grounded in the brand, not in an industry', () => {
   })
 })
 
-describe('the calendar lens does not look dates up any more', () => {
-  // This describe block used to assert the opposite — that the prompt demanded
-  // a search for every date — and both of its assertions were removed on
-  // purpose. That instruction was the bug.
+describe('the calendar lens makes no model call at all', () => {
+  // This block has now been rewritten twice, and the direction of travel is
+  // the point.
   //
-  // Live run, 2026-09-12: the lens spent 4 searches (two on an identical
-  // query), hit max_uses_exceeded seven times, then returned {"findings":[]}
-  // having already confirmed Saudi National Day. It discarded that work
+  // It first asserted that the prompt demanded a search for every date. That
+  // instruction was the bug: on 2026-09-12 the lens spent 4 searches (two on
+  // an identical query), hit max_uses_exceeded seven times, then returned
+  // {"findings":[]} having already confirmed Saudi National Day — discarded,
   // because the prompt said "if you cannot confirm a date, leave it out" and
-  // it had run out of budget mid-verification. $0.28 and 49 seconds for
-  // nothing, and the run looked successful.
+  // the budget ran out mid-verification. $0.28 for nothing, reported as success.
   //
-  // Dates now arrive computed. The prompt's job changed, so these assertions
-  // changed with it.
+  // Then the dates were computed and handed over as given facts, leaving the
+  // model two jobs: judge what the brand should DO, and hunt trade shows. On
+  // the very next run the model half hit its 150s wall-clock budget and was
+  // stopped, producing nothing, while the free computed half produced the only
+  // real finding in the brief.
+  //
+  // So both jobs moved — judgement to synthesis, trade shows to openings — and
+  // the model call is gone. These assertions are what stops it coming back.
 
-  const facts2 = { brandName: 'X', descriptor: 'y', audience: 'z' }
-  const events = [{
-    name: 'Saudi National Day', date: '2026-09-23', days_until: 11,
-    act_by: '2026-09-02', window_open: true, kind: 'national', note: 'Civic moment.',
-  }]
-
-  it('hands the dates over as given facts rather than asking for them', () => {
-    const p = calendarPrompt(facts2, { from: '2026-09-10', to: '2026-11-05', events, country: 'SA' })
-    expect(p).toMatch(/CONFIRMED DATES/)
-    expect(p).toMatch(/Saudi National Day/)
-    expect(p).toMatch(/2026-09-23/)
-    expect(p).toMatch(/given facts/i)
+  it('has no prompt builder, because it has no prompt', () => {
+    expect(LENS_PROMPTS.calendar).toBeUndefined()
   })
 
-  it('tells the model not to spend searches re-verifying them', () => {
-    // The whole saving. Re-verifying a computed date is how the budget got
-    // burned before anything useful was asked.
-    const p = calendarPrompt(facts2, { from: '2026-09-10', to: '2026-11-05', events, country: 'SA' })
-    expect(p).toMatch(/do not search\s*\n?\s*to confirm them/i)
+  it('is budgeted at zero searches and zero tokens', () => {
+    const budget = lensByKey('calendar').budget
+    expect(budget.searches).toBe(0)
+    expect(budget.maxTokens).toBe(0)
   })
 
-  it('points the searches at what no API answers', () => {
-    const p = calendarPrompt(facts2, { from: '2026-09-10', to: '2026-11-05', events })
-    expect(p).toMatch(/Trade shows, exhibitions and conferences/)
+  it('still runs every week — it is free, and it is the most reliable lens there is', () => {
+    // Zero budget must never be read as "disabled". This lens produced the
+    // only finding in the 2026-09-12 brief.
+    expect(lensesFor({ cadence: 'weekly' }).map(l => l.key)).toContain('calendar')
+    expect(lensByKey('calendar').universal).toBe(true)
   })
 
-  it('names the country when one was resolved', () => {
-    expect(calendarPrompt(facts2, { from: 'a', to: 'b', events, country: 'SA' }))
-      .toMatch(/Country whose calendar applies: SA/)
+  it('leads the brief, because a date is the most perishable thing in it', () => {
+    expect(lensByKey('calendar').perishability).toBe(PERISHABLE)
   })
 
-  it('still reads as a prompt when nothing is coming', () => {
-    // An empty calendar is common and must not produce a dangling header.
-    const p = calendarPrompt(facts2, { from: 'a', to: 'b', events: [] })
-    expect(p).toMatch(/nothing dated falls in this window/i)
-  })
-
-  it('surfaces an open preparation window in words, not just a date', () => {
-    expect(calendarPrompt(facts2, { from: 'a', to: 'b', events }))
-      .toMatch(/PREPARATION WINDOW IS OPEN/)
+  it('hands its trade-show job to a lens that actually searches', () => {
+    // The half that genuinely needed a model did not get deleted, it moved.
+    // If it had been deleted, nothing would look for Big 5 or LEAP again.
+    const p = openingsPrompt({ brandName: 'X' }, { motion: 'specification' })
+    expect(p).toMatch(/trade shows, exhibitions/i)
+    expect(p).toMatch(/procurement or budget cycles/i)
   })
 })
 
@@ -334,20 +353,51 @@ describe('no lens may throw away work it already did', () => {
     // The instruction whose absence cost a whole lens. Asserted on the shared
     // closing so a new lens cannot be added without it.
     for (const p of [
-      calendarPrompt({ brandName: 'X' }, { from: 'a', to: 'b', events: [] }),
       openingsPrompt({ brandName: 'X' }, { motion: 'local_service' }),
       demandPrompt({ brandName: 'X' }, { competitors: [] }),
+      categoryPrompt({ brandName: 'X' }, {}),
+      rivalsPrompt({ brandName: 'X' }, {}),
     ]) {
       expect(p).toMatch(/IF YOU RUN OUT OF SEARCHES, REPORT WHAT YOU ALREADY CONFIRMED/)
       expect(p).toMatch(/never repeat a query/i)
     }
   })
 
-  it('gives the calendar room to plan rather than recall', () => {
-    // effort:'low' was a recall budget. The duplicate query was a symptom of
-    // a model given no room to plan its four searches.
-    const budget = lensByKey('calendar').budget
-    expect(budget.effort).not.toBe('low')
-    expect(budget.searches).toBeGreaterThanOrEqual(4)
+  it('gives every SEARCHING lens room to plan rather than recall', () => {
+    // effort:'low' is a recall budget, and the duplicate query that started
+    // all of this was a symptom of a model given no room to plan. Craft is
+    // exempt: it is a monthly scepticism check, not a hunt.
+    for (const l of LENSES) {
+      if (l.budget.searches === 0 || l.key === 'craft') continue
+      expect(l.budget.effort, l.key).not.toBe('low')
+      expect(l.budget.searches, l.key).toBeGreaterThanOrEqual(4)
+    }
+  })
+
+  it('REPORTS what it found instead of deciding the reader cannot handle it', () => {
+    // The instruction that cost every finding. It used to read "return an
+    // empty findings array if you found nothing worth reporting", and it was
+    // obeyed: four lenses read 99 pages between them — MEED, Construction
+    // Week, MEP Middle East, Arab News — and reported nothing at all.
+    //
+    // A/B on the same week, same lens, same sources, only the closing changed:
+    //   before  0 findings from 37 sources
+    //   after   3 findings from 20 sources, one of them a 300-key Waldorf
+    //           Astoria conversion sitting in DESIGN phase — a live
+    //           specification window, thrown away by an instruction.
+    //
+    // The mistake was asking for a binary report/don't-report call when the
+    // schema already has a confidence field. A reader can discount a 0.35;
+    // they cannot discount silence, and silence is indistinguishable from
+    // never having looked.
+    for (const p of [
+      openingsPrompt({ brandName: 'X' }, { motion: 'specification' }),
+      demandPrompt({ brandName: 'X' }, { competitors: [] }),
+      categoryPrompt({ brandName: 'X' }, {}),
+    ]) {
+      expect(p).toMatch(/REPORT WHAT YOU FOUND/)
+      expect(p).toMatch(/that is what the confidence score is for/i)
+      expect(p).not.toMatch(/correct and common answer/i)
+    }
   })
 })

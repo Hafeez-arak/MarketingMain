@@ -91,16 +91,21 @@ summariser that silently eats a real constraint is otherwise unrecoverable.
 
 ## Schema (migrations are applied BY HAND — see memory `campai-console-noise-and-migrations`)
 
-SQL lives in `docs/memory-schema.sql`. It must be run against Supabase manually;
-nothing in this repo applies it. Until it is run, the memory code degrades to
-"no memory" rather than erroring — verify that, it is the whole safety story.
+SQL lives in `supabase/migrations/` alongside every other migration:
+
+- `20260912_agent_memory.sql` — `agent_notes`, `agent_digest`
+- `20260912_research_lens_results.sql` — one row per (run_id, lens)
+
+Both were **applied 2026-09-12**. Nothing in this repo applies them; they are
+run by hand. Until they are, the memory code degrades to "no memory" rather
+than erroring — that is the whole safety story, and it is verified.
 
 ---
 
 ## Progress
 
 - [x] **0. Plan + handoff file** — this document.
-- [x] **1. Migration SQL written** — `docs/memory-schema.sql`: `agent_notes`,
+- [x] **1. Migration SQL written** — `supabase/migrations/20260912_agent_memory.sql`: `agent_notes`,
       `agent_digest`, indexes, RLS. Table names verified against the live
       database (`workspace_members` exists with `workspace_id`/`user_id`).
       ✅ **APPLIED 2026-09-12** to project `vxjhfvehccftvajgtqtv`. Before it was applied,
@@ -302,3 +307,134 @@ have added a second result for the same lens.
   allowed value, `'research'` is. Same for `generated_posts.source`.
 - Do NOT add `workspace_id` as a tool parameter. The executor injects it from
   the verified session; `tools.test.js` asserts no tool exposes it.
+
+---
+
+# Part three: the lens rebalance
+
+**Decided and built 2026-09-12**, same branch. Part two made the run *fit*.
+This part is about it finding anything.
+
+## The problem
+
+The 2026-09-12 run completed cleanly, cost $0.44, and reported almost nothing:
+four of five lenses returned zero findings. The obvious reading was that the
+searching was broken.
+
+**It was not.** Probed against `research_lens_results.sources`:
+
+```
+demand    36 sources read -> 0 findings
+openings  37 sources read -> 0 findings
+rivals    26 sources read -> 0 findings
+```
+
+99 pages, from MEED, Construction Week, MEP Middle East, Arab News, Bayt,
+Glassdoor and the competitors' own sites. The lenses read the right things and
+then said nothing about them.
+
+## The cause, proven by A/B
+
+The shared `CLOSING` block told every lens:
+
+> "Return an empty findings array if you found nothing worth reporting. That is
+> a correct and common answer. Do not pad."
+
+It was written to stop padding. It was obeyed literally. A/B on the same week,
+same lens, same sources, with only those lines changed:
+
+```
+before   0 findings, 37 sources
+after    3 findings, 20 sources
+```
+
+One of the three was a **300-key Waldorf Astoria conversion sitting in DESIGN
+phase** — a live specification window, in the sources the whole time, discarded
+by an instruction.
+
+The mistake was asking for a binary report/don't-report decision when the
+schema already carries `confidence`. Anything under the model's private bar
+became silence, and **a reader can discount a 0.35; they cannot discount
+nothing.** Silence is also indistinguishable from never having looked.
+
+## What changed
+
+| | before | after |
+|---|---|---|
+| `CLOSING` | "empty is a correct and common answer" | "REPORT WHAT YOU FOUND — that is what the confidence score is for" |
+| `calendar` | computed dates + a model call | **computed only, no model call, $0** |
+| `openings` | 6 searches, "recent only" | 8 searches, window-still-open logic, absorbs trade shows |
+| `demand` | complaints about competitors | **buyers directly** — relabelled "Buyers" |
+| `category` | did not exist | **new** — regulation, standards, procurement policy |
+| `rivals` | weekly | **monthly** |
+| market | `customFields.geography`, empty everywhere | `marketOf()` resolves from prose, reaches every lens |
+
+Weekly is now **5 lenses / 20 searches / 3 model calls**; monthly is 7 / 28 / 5.
+
+### Why the calendar lost its model call
+
+It was a hybrid: computed dates, then a model asked what the brand should DO
+about them and which trade shows were coming. On the run that prompted this,
+that half hit its 150s budget, was **stopped, billed $0 and produced nothing**,
+while the free computed half produced the only real finding in the brief. Twice
+in two runs is a shape, not bad luck. Both jobs moved:
+
+- *"what should we do about this date"* → **synthesis**, which already reads
+  every finding with the brand context in front of it and was doing this
+  unprompted. `SYNTHESISE_PROMPT` now says so explicitly, and says the computed
+  `suggested_action` is a placeholder to replace.
+- *"which trade shows"* → **openings**, which already searches this market for
+  dated events.
+
+`mergeCalendarResult` was deleted with it. The guarantee it defended —
+*computed dates survive a model failure* — is now structural rather than
+defended: there is no model call left to fail. The tests assert the structure.
+
+### The bug this nearly shipped
+
+Demoting `rivals` to monthly silently meant **never**. The n8n driver hardcoded
+`cadence: 'weekly'` on the run call and sent **no cadence at all** to
+`/api/agent/lens` and `/api/agent/synthesise`, each of which defaults to weekly
+on its own. Three independent defaults.
+
+Worse, it would not have failed loudly: `/api/agent/lens` refuses a lens the run
+does not include, so a monthly run would have been rejected one lens at a time
+with *"this run does not include a rivals lens"* — an error pointing at the lens
+set rather than at the plumbing.
+
+Fixed: `/api/agent/run` returns the cadence it used, the driver carries it to
+every later call, and "Which brands" runs the monthly set on the first Monday of
+each month. `n8n/agentRunWorkflow.test.js` is new and guards all of it —
+dangling `$('node')` refs included, since n8n returns `undefined` for a missing
+node rather than throwing.
+
+## Verified
+
+```
+tests                                    723 passing (31 files)
+lint                                     clean except the known researchRun.test.js error
+plain-node import of every changed file  7/7 OK
+weekly plan (Arak)                       openings, calendar, demand, ourselves, category
+monthly plan (Arak)                      + rivals, craft
+calendar via the real runSingleLens      2.1s, $0, 1 finding, status ok
+  (was 151s, timed out, $0, nothing)
+rivals on a weekly run                   correctly refused
+lens='category' insert                   no CHECK constraint blocks it
+throwaway probe run                      deleted, lens rows cascaded
+```
+
+**Not yet run end to end against live models** — the same caveat as part two. A
+full run costs real money; the wiring is verified, the model output of the three
+rewritten prompts is not, beyond the openings A/B.
+
+## Still to do
+
+- Everything in part two's "Still to do" is unchanged: `AGENT_RUN_SECRET` in
+  both Vercel and n8n, `AGENT_BASE_URL` in n8n, import and activate the
+  workflow. **No run has ever had `trigger='scheduled'`** — the cron has never
+  fired.
+- Re-import `n8n/agentRun.workflow.json`: one node was renamed
+  (`Wait for all six` → `Wait for every lens`) and four now carry cadence.
+- Profile a real monthly run — seven lenses has never been executed.
+- `research_agenda` standing questions still never reach a lens; they are only
+  shown to synthesis, which has no search tool. That is the next real gap.

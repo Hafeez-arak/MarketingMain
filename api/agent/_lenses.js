@@ -2,7 +2,7 @@ import { callModel } from './_provider.js'
 import { db } from './_supabase.js'
 import { textIn, urlsFromResponse } from '../../src/lib/agent/loop.js'
 import { lensByKey, makeFinding } from '../../src/lib/agent/lenses.js'
-import { findingsFromEvents, mergeCalendarResult } from '../../src/lib/agent/calendar.js'
+import { findingsFromEvents } from '../../src/lib/agent/calendar.js'
 
 // ─── Running a lens ────────────────────────────────────────────────────────
 // Each lens is one bounded model call with web search, asked one question and
@@ -158,42 +158,60 @@ export async function runLens({
 }
 
 /**
- * CALENDAR — computed first, reasoned about second.
+ * CALENDAR — arithmetic, and no model at all.
  *
- * The one hybrid lens, and the shape is the whole fix. The dates are turned
- * into findings BEFORE the model is called, so they are already safe when the
- * call happens. If the model then fails, refuses, runs out of searches or
- * returns an empty array, the confirmed dates are still in the brief.
+ * This was a hybrid: computed dates, then a model call asked to say what the
+ * brand should DO about each one and which trade shows were coming. The
+ * computed half was written first precisely so it would survive the model half
+ * failing — and on 2026-09-12 it had to. The model half hit its 150s budget,
+ * was stopped, billed nothing and produced nothing, while the free computed
+ * half produced the only real finding in the entire brief.
  *
- * This is the stage-0 principle applied one level down: gather() commits
- * measured numbers before any model token is spent so that a failed
- * investigation cannot cost the user their numbers. The same argument holds
- * for a date that was computed from the Hijri calendar — losing it because a
- * language model had a bad minute is not a tradeoff anyone would choose.
+ * That happened often enough to stop calling it a bad minute. So both of the
+ * model's jobs moved to where they are already being done:
+ *
+ *   "what should we do about this date"  ->  synthesis, which reads every
+ *       finding with the full brand context in front of it and was already
+ *       doing this unprompted — the National Day judgement in that same brief
+ *       came out of synthesis, not out of this lens.
+ *   "which trade shows are coming"       ->  the openings lens, which is
+ *       already searching this market for dated events and has a proven hit.
+ *
+ * What is left is arithmetic over free APIs. A lens whose only valuable half
+ * is free should not carry a bill, and the guarantee that used to need
+ * defending — computed dates survive a model failure — is now structural,
+ * because there is no model call left to fail.
  *
  * A computed date carries confidence 1 and no sources. That is correct rather
  * than sloppy: its provenance is an arithmetic conversion, not a page someone
  * read, and the citation filter must not treat it as an unsupported claim.
+ *
+ * Synchronous on purpose — there is nothing left here to await.
  */
-export async function runCalendarLens({
-  workspaceId, runId, calendar, prompt, identity, brand, deadline = null,
-}) {
-  // Safe before the model is involved. Both steps are pure and live in
-  // calendar.js, because the half that must survive a model failure is the
-  // half that most needs testing without a network.
-  const computed = findingsFromEvents(calendar?.events || [])
-    .map(f => makeFinding('calendar', f))
+export function runCalendarLens({ calendar }) {
+  try {
+    const findings = findingsFromEvents(calendar?.events || [])
+      .map(f => makeFinding('calendar', f))
 
-  const modelOut = await runLens({
-    workspaceId, runId, lensKey: 'calendar', prompt, identity, brand, deadline,
-  })
-
-  return mergeCalendarResult({
-    computed,
-    modelOut,
-    note: calendar?.note || '',
-    calendarSources: calendar?.sources || [],
-  })
+    return {
+      lens: 'calendar',
+      // True even with no events. A window containing no dated moment is a
+      // real answer, and "checked and quiet" must never look like "failed" —
+      // that distinction is the whole reason lensSummary exists.
+      ok: true,
+      findings,
+      sources: [...new Set(calendar?.sources || [])],
+      cost: 0,
+      error: '',
+      note: calendar?.note || '',
+    }
+  } catch (err) {
+    return {
+      lens: 'calendar', ok: false, findings: [], sources: [], cost: 0,
+      note: calendar?.note || '',
+      error: String(err?.message || err).slice(0, 300),
+    }
+  }
 }
 
 /**
