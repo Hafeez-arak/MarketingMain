@@ -4,13 +4,10 @@ import { useApp } from '../../store/app'
 import { useAuth } from '../../store/auth'
 import { Card, PageHeader, SectionHead, Button, Empty, Spinner, Input, Select } from '../../components/ui/index'
 import {
-  fetchBrandMemory, updateBrandMemory, deleteBrandMemory, buildContext,
+  fetchBrandMemory, updateBrandMemory, deleteBrandMemory,
 } from '../../lib/brandContext'
-import { fetchBrandSchema, fetchDirectoryRows } from '../../lib/brandSchema'
-import { useBrandProfileSync } from '../../lib/brandBrain'
 import {
   fetchIdeaEvents, fetchIdeasForInsights, fetchPerformance, requestInsightsReview,
-  requestBrandResearch, competitorNamesFrom,
   summariseDecisions, summarisePerformance,
   REJECT_REASON_LABELS, WEAK_SAMPLE, MEMORY_SCOPES, SCOPE_LABELS,
 } from '../../lib/insights'
@@ -121,19 +118,15 @@ function ProposedRule({ rule, onActivate, onDismiss, busy }) {
 
 export function Insights() {
   const { activeWorkspaceId, activeWorkspace, accessToken } = useAuth()
-  const { state, dispatch } = useApp()
-  // The research query is built from the brand profile, and nothing else on
-  // this page needs it — so without this the profile is simply absent when you
-  // land here directly, buildContext returns an empty descriptor, and the
-  // workflow correctly refuses to research a brand it was told nothing about.
-  // Same sync the planner and the Instagram page use; it no-ops once loaded.
-  useBrandProfileSync(state, dispatch)
+  // `state` is still read for the insights-review webhook URL. The brand
+  // profile sync that used to sit here went with "Run research": its own
+  // comment said the research query was the only thing on this page that
+  // needed the profile, and that button is now a link to /insights/research.
+  const { state } = useApp()
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [reviewing, setReviewing] = useState(false)
   const [reviewNote, setReviewNote] = useState('')
-  const [researching, setResearching] = useState(false)
-  const [researchNote, setResearchNote] = useState('')
   const [events, setEvents] = useState([])
   const [ideas, setIdeas] = useState([])
   const [perf, setPerf] = useState({ metrics: [], posts: [] })
@@ -216,35 +209,6 @@ export function Insights() {
   // same buildContext every other call uses. Assembling it inside n8n would
   // mean a second copy of the flattening logic, which is the drift
   // brandContext.js exists to prevent.
-  async function runResearch() {
-    setResearching(true); setResearchNote('')
-    const [schema, dirRows] = await Promise.all([
-      fetchBrandSchema(activeWorkspaceId, accessToken),
-      fetchDirectoryRows(activeWorkspaceId, accessToken),
-    ])
-    const rowsBySection = {}
-    for (const r of dirRows) (rowsBySection[r.section_key] ||= []).push(r)
-    const directory = { rowsBySection, assets: [] }
-    const ctx = buildContext(state.brandProfile, schema, directory, memory, { task: 'research' })
-
-    const res = await requestBrandResearch(state.webhooks?.brandResearch, {
-      workspace_id: activeWorkspaceId,
-      brand_name: ctx.brandName,
-      brand_descriptor: ctx.brandDescriptor,
-      instructions: ctx.instructions,
-      competitors: competitorNamesFrom(schema, directory),
-    })
-    setResearching(false)
-    if (res.error) { setResearchNote(res.error); return }
-    if (res.skipped) { setResearchNote(res.reason || 'Nothing to research yet.'); return }
-    setResearchNote([
-      res.proposed
-        ? `Proposed ${res.proposed} rule${res.proposed === 1 ? '' : 's'} from the web — review them below.`
-        : (res.note || 'The research found nothing worth proposing.'),
-      res.warning ? `Some searches failed: ${res.warning}` : '',
-    ].filter(Boolean).join(' '))
-    reload()
-  }
 
   async function remove(rule) {
     setBusy(true)
@@ -391,21 +355,25 @@ export function Insights() {
           subtitle="Suggestions waiting on you. Approving one adds it to the Brand Brain and it starts steering generation."
           action={
             <div className="flex items-center gap-2">
-              <Button size="sm" variant="secondary" disabled={researching || reviewing || busy} onClick={runResearch}>
-                {researching ? 'Searching…' : 'Run research'}
-              </Button>
-              <Button size="sm" variant="secondary" disabled={reviewing || researching || busy} onClick={runReview}>
+              {/* "Run research" is now a link, not a button. The one-shot
+                  brand-research workflow it fired wrote `proposed` rows into
+                  this same table from a second code path — three paths writing
+                  one table is exactly the drift buildContext exists to prevent,
+                  and the agent's run supersedes it with evidence attached.
+                  "Run review" stays for now: its replacement is the agent's
+                  `ourselves` lens, which cannot say anything until a real
+                  Instagram account is connected. Removing a working button in
+                  favour of one that returns nothing would be tidy and wrong. */}
+              <Link to="/insights/research">
+                <Button size="sm" variant="secondary">Research</Button>
+              </Link>
+              <Button size="sm" variant="secondary" disabled={reviewing || busy} onClick={runReview}>
                 {reviewing ? 'Reviewing…' : 'Run review'}
               </Button>
             </div>
           }
         />
         <div className="p-5">
-          {researchNote && (
-            <p className="text-[11px] text-text-secondary bg-surface-subtle border border-border rounded-lg px-3 py-2 mb-3 leading-relaxed">
-              {researchNote}
-            </p>
-          )}
           {reviewNote && (
             <p className="text-[11px] text-text-secondary bg-surface-subtle border border-border rounded-lg px-3 py-2 mb-3 leading-relaxed">
               {reviewNote}
