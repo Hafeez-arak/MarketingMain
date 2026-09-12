@@ -5,7 +5,8 @@ import { textIn, urlsFromResponse } from '../../src/lib/agent/loop.js'
 import { BRIEF_SCHEMA, SYNTHESISE_PROMPT, mergeBrief } from '../../src/lib/agent/brief.js'
 import { lensesFor, motionOf, lensSummary, rankFindings } from '../../src/lib/agent/lenses.js'
 import { LENS_PROMPTS } from '../../src/lib/agent/lensPrompts.js'
-import { runLens, runOurselvesLens, markStage } from './_lenses.js'
+import { runLens, runOurselvesLens, runCalendarLens, markStage } from './_lenses.js'
+import { gatherCalendar } from './_calendar.js'
 
 // Re-exported: the resolver imported it from here before it moved to loop.js.
 export { urlsFromResponse }
@@ -71,8 +72,17 @@ export async function investigate({ workspaceId, runId, gathered, cadence = 'wee
     const lenses = lensesFor({ motion, cadence })
     const window = lookahead(8)
 
+    // Dates are computed before any lens runs, not researched by one. Free,
+    // sub-second, and it cannot come back wrong — see api/agent/_calendar.js
+    // for why this stopped being the model's job.
+    const calendar = await gatherCalendar({ profile, ctx, window })
+
     const argsFor = {
-      calendar: () => [brandFacts, window],
+      calendar: () => [brandFacts, {
+        ...window,
+        events: calendar.events,
+        country: calendar.country || '',
+      }],
       openings: () => [brandFacts, { motion }],
       demand:   () => [brandFacts, { competitors }],
       rivals:   () => [brandFacts, {
@@ -93,6 +103,14 @@ export async function investigate({ workspaceId, runId, gathered, cadence = 'wee
       const args = argsFor[lens.key]
       if (!build || !args) {
         return { lens: lens.key, ok: false, findings: [], sources: [], cost: 0, error: 'No prompt for this lens.' }
+      }
+      // Calendar is the one hybrid: its dates are already computed, so it gets
+      // a runner that keeps them even when the model call fails.
+      if (lens.key === 'calendar') {
+        return runCalendarLens({
+          workspaceId, runId, calendar,
+          prompt: build(...args()), identity: IDENTITY, brand,
+        })
       }
       return runLens({
         workspaceId, runId, lensKey: lens.key,
@@ -170,6 +188,16 @@ export async function investigate({ workspaceId, runId, gathered, cadence = 'wee
         ...(report.unanswered || []),
         ...failed.map(f => `The ${f.label} lens failed and was not answered: ${f.error}`),
       ]
+    }
+
+    // The calendar can succeed while still being built on a guess — it infers
+    // the country from brand prose when no geography field is set, which is
+    // currently every workspace. That is worth one line in the brief, because
+    // the wrong country produces a confident calendar for the wrong place and
+    // nothing else in the run would reveal it.
+    const calendarNotes = results.map(r => r.note).filter(Boolean)
+    if (calendarNotes.length) {
+      report.unanswered = [...(report.unanswered || []), ...calendarNotes]
     }
 
     return { ok: true, report, cost, sources: [...allowedUrls], lenses: summary }

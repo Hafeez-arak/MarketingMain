@@ -40,44 +40,84 @@ const CLOSING = [
   '- Every finding needs a source you actually read. No source, no finding.',
   '- Only set perishable_until when a real date exists. Never invent one.',
   '- suggested_action must be something the brand can actually do this month.',
+  '- Plan your searches before you spend them, and never repeat a query you have',
+  '  already run. Your search budget is small and a duplicate query buys nothing.',
+  '- IF YOU RUN OUT OF SEARCHES, REPORT WHAT YOU ALREADY CONFIRMED. A finding you',
+  '  verified with your third search is not made worthless by your seventh failing.',
+  '  Returning nothing because you could not finish is the single most expensive',
+  '  mistake you can make here — it discards real work and looks identical to having',
+  '  found nothing. Report what you have and note what you could not reach.',
 ].join('\n')
 
 /**
  * CALENDAR — what is coming.
  *
- * The highest value-to-cost lens in the set, because most of its answer is a
- * lookup rather than a search, and because every business on earth has a
- * calendar. The date range is passed in rather than computed here so the
- * prompt stays cache-stable.
+ * Restructured after the first live runs, and the rewrite is worth explaining
+ * because the old shape failed in a way that looked like success.
+ *
+ * It used to ask a model "what is coming in the next 8 weeks?" and require it
+ * to verify every date by searching. On 2026-09-12 that cost $0.28, ran 49
+ * seconds, issued four searches — two of them the SAME query — then hit
+ * max_uses_exceeded seven times and returned an EMPTY findings array, having
+ * already confirmed Saudi National Day in its first three searches. It threw
+ * that away because this prompt told it "if you cannot confirm a date, leave
+ * it out", and it had run out of budget partway through verifying.
+ *
+ * Dates are now computed before this prompt is ever built — see
+ * src/lib/agent/calendar.js — and arrive here as GIVEN FACTS, the same
+ * treatment stage 0 gives measured Instagram numbers. That leaves the model
+ * the two jobs that actually need a model:
+ *
+ *   1. What should THIS brand do about a date everyone already knows.
+ *   2. Trade shows and industry events, which no API lists and which are
+ *      therefore a genuine search problem — now with the entire budget
+ *      instead of competing with lookups it should never have been doing.
  */
-export function calendarPrompt(brand, { from, to }) {
+export function calendarPrompt(brand, { from, to, events = [], country = '' }) {
+  const known = events.length
+    ? events.map(e => {
+        const when = e.window_open
+          ? `PREPARATION WINDOW IS OPEN — ${e.days_until} days away`
+          : `${e.days_until} days away, preparation should start ${e.act_by}`
+        return [
+          `- ${e.name} — ${e.date}${e.ends_on ? ` to ${e.ends_on}` : ''} (${when})`,
+          e.hijri ? `  Hijri: ${e.hijri}` : '',
+          e.note ? `  ${e.note}` : '',
+        ].filter(Boolean).join('\n')
+      }).join('\n')
+    : '(nothing dated falls in this window — which is a normal and common answer)'
+
   return [
     who(brand),
+    country ? `Country whose calendar applies: ${country}` : '',
     '',
-    `Identify what is coming between ${from} and ${to} that should change what this brand`,
-    'publishes or offers.',
+    'CONFIRMED DATES — these were computed from the Hijri calendar and public holiday',
+    'records, not researched. They are given facts. Do not re-verify them, do not search',
+    'to confirm them, and do not contradict them.',
     '',
-    'Consider, and only where genuinely relevant to THIS brand and THIS audience:',
-    '- Religious and cultural dates (Ramadan, Eid, Hajj) and the preparation window',
-    '  BEFORE each one, which is usually when the buying happens.',
-    '- National and civic dates for the country they operate in.',
-    '- Seasonal patterns: weather, school terms, wedding and travel seasons.',
-    '- Local events, exhibitions and trade shows their buyers attend.',
+    known,
+    '',
+    `Your job has two parts, for the window ${from} to ${to}.`,
+    '',
+    'PART ONE — what this brand should DO about the dates above.',
+    'Everyone has a calendar, so the date itself is not the finding. The finding is what',
+    'this specific brand, selling this specific thing to these specific people, should be',
+    'publishing or offering in the weeks BEFORE it, and why that beats what they would',
+    'have posted otherwise. A date with a generic "post about it" action is worth less',
+    'than no finding at all. If a date genuinely does not matter to this brand — and many',
+    'will not — say nothing about it rather than manufacturing a reason.',
+    '',
+    'PART TWO — the dates nobody publishes in a calendar.',
+    'Search for these; they are the only thing here worth spending searches on:',
+    '- Trade shows, exhibitions and conferences this brand\'s BUYERS attend.',
     '- Industry cycles: budget years, procurement windows, project phases.',
+    '- Seasonal patterns specific to this business — weather, school terms, wedding or',
+    '  travel seasons — where they change what the customer wants.',
     '',
-    'For each, the useful output is not the date itself — everyone has a calendar. It is',
-    'the LEAD TIME: when this brand must start publishing to be ready, and what the buyer',
-    'is doing in the weeks before. Set perishable_until to the date the opportunity closes,',
-    'not the date of the event.',
-    '',
-    'VERIFY EVERY DATE WITH A SEARCH before reporting it, and cite what you found.',
-    'This matters more here than anywhere else: you know roughly when Ramadan and the',
-    'national holidays fall, so it is tempting to answer from memory — but a finding with',
-    'no source is dropped before anyone reads it, and an exhibition you half-remember on',
-    'the wrong week sends a month of content out at the wrong time. Search first. If you',
-    'cannot confirm a date, leave it out rather than reporting it unconfirmed.',
+    'For anything you find by searching, cite it. For the confirmed dates above you do',
+    'not need a source — they already have one.',
     CLOSING,
-  ].join('\n')
+  ].filter(Boolean).join('\n')
 }
 
 /**

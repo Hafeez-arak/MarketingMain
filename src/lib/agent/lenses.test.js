@@ -123,11 +123,19 @@ describe('cadence keeps a monthly question off a weekly bill', () => {
       .toBeLessThan(searchBudgetFor(lensesFor({ cadence: 'monthly' })))
   })
 
-  it('the free lenses really are free', () => {
-    // Calendar is mostly a lookup and Ourselves reads our own tables. Two of
-    // six costing almost nothing is what makes six affordable.
+  it('the free lens really is free', () => {
+    // Ourselves reads our own tables and never calls a model at all.
     expect(lensByKey('ourselves').budget.searches).toBe(0)
-    expect(lensByKey('calendar').budget.searches).toBeLessThanOrEqual(4)
+  })
+
+  it('keeps the whole weekly search budget within reach of the cost target', () => {
+    // The guard that actually protects the ~$1-2/run target. It used to be
+    // spelled as a per-lens cap on calendar, which stopped meaning anything
+    // once calendar's lookups moved out of the model entirely: its dates now
+    // cost $0.00 and zero searches, and its search budget buys trade-show
+    // research instead. Capping the total is the honest version of the same
+    // intent.
+    expect(searchBudgetFor(lensesFor({ cadence: 'weekly' }))).toBeLessThanOrEqual(24)
   })
 })
 
@@ -263,23 +271,83 @@ describe('the prompts are grounded in the brand, not in an industry', () => {
   })
 })
 
-describe('the calendar lens must not answer from memory', () => {
-  it('demands a search for every date', () => {
-    // The first live run failed exactly here. A date lookup feels like
-    // something the model already knows, so it answered without searching,
-    // produced no citations, and the source filter correctly dropped every
-    // finding — silently killing the most valuable lens in the set.
-    const p = calendarPrompt(
-      { brandName: 'X', descriptor: 'y', audience: 'z', geography: 'Riyadh' },
-      { from: '2026-09-10', to: '2026-11-05' },
-    )
-    expect(p).toMatch(/VERIFY EVERY DATE WITH A SEARCH/)
-    expect(p).toMatch(/leave it out rather than reporting it unconfirmed/i)
+describe('the calendar lens does not look dates up any more', () => {
+  // This describe block used to assert the opposite — that the prompt demanded
+  // a search for every date — and both of its assertions were removed on
+  // purpose. That instruction was the bug.
+  //
+  // Live run, 2026-09-12: the lens spent 4 searches (two on an identical
+  // query), hit max_uses_exceeded seven times, then returned {"findings":[]}
+  // having already confirmed Saudi National Day. It discarded that work
+  // because the prompt said "if you cannot confirm a date, leave it out" and
+  // it had run out of budget mid-verification. $0.28 and 49 seconds for
+  // nothing, and the run looked successful.
+  //
+  // Dates now arrive computed. The prompt's job changed, so these assertions
+  // changed with it.
+
+  const facts2 = { brandName: 'X', descriptor: 'y', audience: 'z' }
+  const events = [{
+    name: 'Saudi National Day', date: '2026-09-23', days_until: 11,
+    act_by: '2026-09-02', window_open: true, kind: 'national', note: 'Civic moment.',
+  }]
+
+  it('hands the dates over as given facts rather than asking for them', () => {
+    const p = calendarPrompt(facts2, { from: '2026-09-10', to: '2026-11-05', events, country: 'SA' })
+    expect(p).toMatch(/CONFIRMED DATES/)
+    expect(p).toMatch(/Saudi National Day/)
+    expect(p).toMatch(/2026-09-23/)
+    expect(p).toMatch(/given facts/i)
   })
 
-  it('has the budget to actually do it', () => {
-    // Two searches could not verify a religious date, two national dates and
-    // an exhibition. The instruction and the budget have to agree.
-    expect(lensByKey('calendar').budget.searches).toBeGreaterThanOrEqual(4)
+  it('tells the model not to spend searches re-verifying them', () => {
+    // The whole saving. Re-verifying a computed date is how the budget got
+    // burned before anything useful was asked.
+    const p = calendarPrompt(facts2, { from: '2026-09-10', to: '2026-11-05', events, country: 'SA' })
+    expect(p).toMatch(/do not search\s*\n?\s*to confirm them/i)
+  })
+
+  it('points the searches at what no API answers', () => {
+    const p = calendarPrompt(facts2, { from: '2026-09-10', to: '2026-11-05', events })
+    expect(p).toMatch(/Trade shows, exhibitions and conferences/)
+  })
+
+  it('names the country when one was resolved', () => {
+    expect(calendarPrompt(facts2, { from: 'a', to: 'b', events, country: 'SA' }))
+      .toMatch(/Country whose calendar applies: SA/)
+  })
+
+  it('still reads as a prompt when nothing is coming', () => {
+    // An empty calendar is common and must not produce a dangling header.
+    const p = calendarPrompt(facts2, { from: 'a', to: 'b', events: [] })
+    expect(p).toMatch(/nothing dated falls in this window/i)
+  })
+
+  it('surfaces an open preparation window in words, not just a date', () => {
+    expect(calendarPrompt(facts2, { from: 'a', to: 'b', events }))
+      .toMatch(/PREPARATION WINDOW IS OPEN/)
+  })
+})
+
+describe('no lens may throw away work it already did', () => {
+  it('tells every lens what to do when the search budget runs out', () => {
+    // The instruction whose absence cost a whole lens. Asserted on the shared
+    // closing so a new lens cannot be added without it.
+    for (const p of [
+      calendarPrompt({ brandName: 'X' }, { from: 'a', to: 'b', events: [] }),
+      openingsPrompt({ brandName: 'X' }, { motion: 'local_service' }),
+      demandPrompt({ brandName: 'X' }, { competitors: [] }),
+    ]) {
+      expect(p).toMatch(/IF YOU RUN OUT OF SEARCHES, REPORT WHAT YOU ALREADY CONFIRMED/)
+      expect(p).toMatch(/never repeat a query/i)
+    }
+  })
+
+  it('gives the calendar room to plan rather than recall', () => {
+    // effort:'low' was a recall budget. The duplicate query was a symptom of
+    // a model given no room to plan its four searches.
+    const budget = lensByKey('calendar').budget
+    expect(budget.effort).not.toBe('low')
+    expect(budget.searches).toBeGreaterThanOrEqual(4)
   })
 })
