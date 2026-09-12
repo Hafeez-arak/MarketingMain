@@ -174,6 +174,116 @@ prompt alone does not catch.
 
 Brand block grew 6,308 → 8,419 chars and `prefixRisk()` still reports safe.
 
+---
+
+# Part two: splitting the run so it fits on Hobby
+
+**Decided 2026-09-12.** Separate from the memory work above; same branch.
+
+## The problem
+
+`api/agent/run.js` awaits everything in ONE HTTP request: gather → six lenses
+→ synthesis → persist → memory. Vercel kills the function at the ceiling,
+mid-run, and the browser's spinner never closes because only the server closes
+it (`draft-status-is-one-way`).
+
+**The project is on Vercel Hobby: 300s, and it CANNOT be raised.** Pro would
+allow 800s; Hobby does not. Confirmed against the plan table in the
+`vercel:vercel-functions` skill.
+
+Measured, and the variance is the finding: a single calendar lens took **49s,
+then 380s, then 380s**. A full six-lens run has never been profiled end to end
+because it costs real money. So:
+
+- Splitting per phase is necessary but **not sufficient** — one lens alone
+  exceeded 300s twice.
+- Therefore every lens also needs a **wall-clock budget**, so the run is
+  bounded by construction rather than by hope. This is the part that holds on
+  any platform and at any plan tier.
+
+## The shape
+
+Three routes, each short. n8n drives them — it is already up 24/7 on a
+permanent ngrok URL (`n8n-runs-off-mac`), and using it here ALSO fixes the
+missing weekly schedule, which has no `crons` entry anywhere.
+
+```
+n8n weekly trigger
+  ├─ POST /api/agent/run          stage 0 only → run_id     target <60s
+  ├─ POST /api/agent/lens   ×6    one lens each, parallel   budgeted
+  └─ POST /api/agent/synthesise   brief + persist + memory  target <120s
+```
+
+**Logic stays in TypeScript.** n8n orchestrates and retries; it does not think.
+Moving the logic into Code nodes would discard 680 tests, the provider seam
+that guarantees the ledger, and the workspace-isolation tests — and the
+2026-09-09 pivot deliberately went the other way. n8n calling the *existing*
+`/api/agent/run` would fix nothing, because the Vercel function is what times
+out.
+
+## Decisions
+
+| Decision | Answer | Why |
+|---|---|---|
+| Where lens results live | New table `research_lens_results`, one row per (run_id, lens) | Six parallel lenses writing into one jsonb column is a read-modify-write race. Separate rows cannot race at all. |
+| Auth for n8n | Bearer `AGENT_RUN_SECRET`, timing-safe compare, **required** | These routes currently need a user JWT via `callerId`. n8n has none. Must never default to open when the env var is unset. |
+| Lens time budget | Wall-clock deadline per lens, returns what it has | A lens already never throws; making it also never overrun makes the whole run predictable. Essential on Hobby. |
+| Resumability | `/lens` is idempotent per (run_id, lens); `/synthesise` works with whatever lenses landed | A timed-out lens should cost one retry, not the run. `lensSummary` already reports which ran. |
+
+## Progress — part two
+
+- [x] **A. Migration** — `research_lens_results`. ✅ applied to
+      `vxjhfvehccftvajgtqtv` 2026-09-12.
+- [x] **B. Pure logic + tests** — `src/lib/agent/phases.js` + `phases.test.js`,
+      **31 tests**.
+- [x] **C. Deadline in `callModel`** — `deadline` (absolute epoch ms) aborts the
+      stream via AbortController; refuses to START a call with under 15s left,
+      since that buys an aborted generation that still bills. The ledger is
+      written on the timeout path too. `timedOut` travels with the result so a
+      caller can tell "stopped by us" from "broke".
+- [x] **D. `run.js` stops after stage 0** and returns `next.lenses`.
+- [x] **E. `api/agent/lens.js`** — one lens, idempotent per (run_id, lens).
+- [x] **F. `api/agent/synthesise.js`** — 409 + the names of outstanding lenses
+      while any are pending; every other path writes a terminal status.
+- [x] **G. Service auth** — `api/agent/_serviceAuth.js`. Bearer
+      `AGENT_RUN_SECRET`, timing-safe, and an UNSET secret denies.
+- [x] **H. n8n workflow** — `n8n/agentRun.workflow.json`. 11 nodes, no dangling
+      refs. Needs `AGENT_BASE_URL` and `AGENT_RUN_SECRET` in n8n's environment.
+- [x] **I. Verified** — see below. **Not yet run end to end against live
+      models**, because a full six-lens run costs real money; the mechanism is
+      verified, the loop is not.
+
+### Verified, part two
+
+```
+every new module loads under plain Node        OK  (6/6)
+service auth: correct secret                   200 as=service
+service auth: wrong / prefix / missing / bare  401  (all four denied)
+loadRunContext against the live run            motion=specification, 5 lenses
+brand block                                    8,419 chars, carries memory
+budgets vs the 300s Hobby ceiling              gather 120s · lens 150s · synth 180s
+upsert by (run_id, lens)                       wrote twice -> 1 row  idempotent
+```
+
+**Bug the probe caught:** the first upsert appended instead of replacing.
+PostgREST resolves `merge-duplicates` against the PRIMARY KEY, which here is a
+generated uuid that never collides — the (run_id, lens) uniqueness has to be
+named explicitly as `?on_conflict=run_id,lens`. Without it every retry would
+have added a second result for the same lens.
+
+### Still to do
+
+- Set `AGENT_RUN_SECRET` in **both** Vercel and n8n (same value), and
+  `AGENT_BASE_URL` in n8n.
+- Import `n8n/agentRun.workflow.json` and activate it.
+- The browser's "run now" button now only starts stage 0. The page polls
+  `research_runs`, so it will sit at `stage=lenses` forever unless n8n is
+  driving. Either activate the workflow, or add a client-side driver.
+- Profile a real end-to-end run and tune `PHASE_BUDGET_MS` against
+  `research_lens_results.duration_ms`, which is recorded for exactly this.
+
+---
+
 ### Notes for whoever continues
 
 - Run tests: `npx vitest run` from the worktree root. **680 passing** after part 2.

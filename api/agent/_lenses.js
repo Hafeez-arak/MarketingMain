@@ -93,7 +93,7 @@ const webTools = uses => (uses > 0
  * @returns {Promise<{lens,ok,findings,sources,cost,error}>}
  */
 export async function runLens({
-  workspaceId, runId, lensKey, prompt, identity, brand,
+  workspaceId, runId, lensKey, prompt, identity, brand, deadline = null,
 }) {
   const lens = lensByKey(lensKey)
   if (!lens) return { lens: lensKey, ok: false, findings: [], sources: [], cost: 0, error: 'Unknown lens.' }
@@ -113,10 +113,19 @@ export async function runLens({
       maxTokens: lens.budget.maxTokens || 8_000,
       effort: lens.budget.effort || 'medium',
       outputFormat: FINDINGS_SCHEMA,
+      // On Vercel Hobby the function ceiling is 300s and cannot be raised, and
+      // this lens was measured at 380s. Stopping ourselves lets us report what
+      // happened; being stopped by the platform writes nothing at all.
+      deadline,
     })
 
     if (out.refused) return { lens: lensKey, ok: false, findings: [], sources: [], cost: out.cost || 0, error: out.error }
-    if (!out.ok) return { lens: lensKey, ok: false, findings: [], sources: [], cost: out.cost || 0, error: out.error }
+    if (!out.ok) {
+      return {
+        lens: lensKey, ok: false, findings: [], sources: [], cost: out.cost || 0,
+        error: out.error, timedOut: Boolean(out.timedOut),
+      }
+    }
 
     urlsFromResponse(out.response, allowed)
 
@@ -167,7 +176,7 @@ export async function runLens({
  * read, and the citation filter must not treat it as an unsupported claim.
  */
 export async function runCalendarLens({
-  workspaceId, runId, calendar, prompt, identity, brand,
+  workspaceId, runId, calendar, prompt, identity, brand, deadline = null,
 }) {
   // Safe before the model is involved. Both steps are pure and live in
   // calendar.js, because the half that must survive a model failure is the
@@ -176,7 +185,7 @@ export async function runCalendarLens({
     .map(f => makeFinding('calendar', f))
 
   const modelOut = await runLens({
-    workspaceId, runId, lensKey: 'calendar', prompt, identity, brand,
+    workspaceId, runId, lensKey: 'calendar', prompt, identity, brand, deadline,
   })
 
   return mergeCalendarResult({

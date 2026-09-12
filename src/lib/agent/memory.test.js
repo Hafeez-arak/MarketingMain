@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   NOTE_KINDS, KIND_TTL_DAYS, KIND_WEIGHT, REPEAT_AT, DIGEST_TOKEN_BUDGET,
-  fingerprint, tokensOf, similarity, isRepeat, partitionRepeats,
+  fingerprint, similarity, isRepeat, partitionRepeats,
   makeNote, isExpired, notesFromRun,
   approxTokens, rankNotes, renderDigest, freshTail, digestIsStale,
 } from './memory'

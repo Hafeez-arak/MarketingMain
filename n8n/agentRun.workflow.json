@@ -1,0 +1,195 @@
+{
+  "name": "Agent — weekly research run",
+  "settings": { "executionOrder": "v1" },
+  "nodes": [
+    {
+      "id": "trigger_weekly",
+      "name": "Monday 06:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-620, 300],
+      "parameters": {
+        "rule": {
+          "interval": [
+            { "field": "cronExpression", "expression": "0 6 * * 1" }
+          ]
+        }
+      }
+    },
+    {
+      "id": "trigger_manual",
+      "name": "Run now",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [-620, 480],
+      "parameters": {}
+    },
+    {
+      "id": "workspaces",
+      "name": "Which brands",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-400, 380],
+      "parameters": {
+        "jsCode": "// One item per brand. Listed here rather than fetched so a brand can be\n// paused for a week by editing one line, without a deploy.\n//\n// Arak only for now: the other two workspaces have no verified Instagram\n// handles, so a run would measure nothing and spend money saying so.\nreturn [\n  { json: { workspace_id: '00000000-0000-0000-0000-000000000001', name: 'Arak Lighting' } },\n];"
+      }
+    },
+    {
+      "id": "start_run",
+      "name": "POST /api/agent/run",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-180, 380],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.AGENT_BASE_URL }}/api/agent/run",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $env.AGENT_RUN_SECRET }}" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ workspace_id: $json.workspace_id, trigger: 'scheduled', cadence: 'weekly' }) }}",
+        "options": { "timeout": 180000, "response": { "response": { "neverError": true } } }
+      },
+      "notes": "Stage 0 only. Returns in well under a minute with the measured numbers already committed, plus `next.lenses` — the list this run intends to execute."
+    },
+    {
+      "id": "check_started",
+      "name": "Did it start?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [40, 380],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "version": 2 },
+          "combinator": "and",
+          "conditions": [
+            {
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "true", "singleValue": true }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "fan_out",
+      "name": "One item per lens",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [260, 280],
+      "parameters": {
+        "jsCode": "// The route tells us which lenses this run wants. Read from the response\n// rather than hardcoded here, so adding a lens is a code change in the repo\n// — which is tested — and not an edit in this UI, which is not.\nconst out = [];\nfor (const item of $input.all()) {\n  const runId = item.json.run_id;\n  const ws = item.json.workspace_id || $('Which brands').first().json.workspace_id;\n  for (const lens of (item.json.next?.lenses || [])) {\n    out.push({ json: { workspace_id: ws, run_id: runId, lens } });\n  }\n}\nreturn out;"
+      }
+    },
+    {
+      "id": "run_lens",
+      "name": "POST /api/agent/lens",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [480, 280],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.AGENT_BASE_URL }}/api/agent/lens",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $env.AGENT_RUN_SECRET }}" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ workspace_id: $json.workspace_id, run_id: $json.run_id, lens: $json.lens }) }}",
+        "options": {
+          "timeout": 280000,
+          "batching": { "batch": { "batchSize": 3, "batchInterval": 1000 } },
+          "response": { "response": { "neverError": true } }
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000,
+      "alwaysOutputData": true,
+      "notes": "One lens per request, bounded server-side by a 150s wall-clock budget. Idempotent per (run_id, lens), so a retry replaces its own row rather than adding a second result. batchSize 3 keeps six lenses from opening six concurrent model calls at once."
+    },
+    {
+      "id": "collect",
+      "name": "Wait for all six",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [700, 280],
+      "parameters": {
+        "jsCode": "// Runs once, after every lens item has come back. Emits a single item so\n// synthesise is called once per run rather than once per lens.\nconst items = $input.all();\nconst first = items[0]?.json || {};\nconst runId = first.run_id || $('One item per lens').first().json.run_id;\nconst ws = $('One item per lens').first().json.workspace_id;\n\nconst failed = items.filter(i => i.json?.lens_ok === false).map(i => i.json.lens);\nconst timedOut = items.filter(i => i.json?.timed_out).map(i => i.json.lens);\n\nreturn [{ json: { workspace_id: ws, run_id: runId, lenses: items.length, failed, timed_out: timedOut } }];"
+      },
+      "executeOnce": false
+    },
+    {
+      "id": "synthesise",
+      "name": "POST /api/agent/synthesise",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [920, 280],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.AGENT_BASE_URL }}/api/agent/synthesise",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $env.AGENT_RUN_SECRET }}" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ workspace_id: $json.workspace_id, run_id: $json.run_id }) }}",
+        "options": { "timeout": 280000, "response": { "response": { "neverError": true } } }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 15000,
+      "notes": "Answers 409 with the names of any lenses still outstanding — which is why this retries. A 409 is a wait, not a failure, and deliberately does not mark the run failed."
+    },
+    {
+      "id": "report",
+      "name": "What happened",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1140, 280],
+      "parameters": {
+        "jsCode": "// The line a person reads if they check on this. Deliberately says when the\n// CLOCK was the limit rather than the market — a run that quietly lost two\n// lenses to a timeout looks exactly like a quiet week otherwise.\nconst r = $json;\nconst prev = $('Wait for all six').first().json;\nconst bits = [\n  r.ok ? 'Run complete.' : `Run did not complete: ${r.error || 'unknown'}`,\n  r.headline ? `\"${r.headline}\"` : '',\n  `${prev.lenses} lenses ran` + (prev.failed?.length ? `, ${prev.failed.length} failed (${prev.failed.join(', ')})` : ''),\n  prev.timed_out?.length ? `${prev.timed_out.length} ran out of time (${prev.timed_out.join(', ')}) — a limit of the run, not a finding about the market` : '',\n  r.proposed_ideas != null ? `${r.proposed_ideas} new ideas` : '',\n  r.repeated_ideas ? `${r.repeated_ideas} dropped as repeats of earlier ones` : '',\n  r.cost_usd != null ? `$${r.cost_usd}` : '',\n].filter(Boolean);\nreturn [{ json: { summary: bits.join(' · '), ...r } }];"
+      }
+    },
+    {
+      "id": "failed_start",
+      "name": "Could not start",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [260, 500],
+      "parameters": {},
+      "notes": "Stage 0 failed — usually Meta credentials. The run row already carries the reason; nothing further to do here."
+    }
+  ],
+  "connections": {
+    "Monday 06:00": { "main": [[{ "node": "Which brands", "type": "main", "index": 0 }]] },
+    "Run now": { "main": [[{ "node": "Which brands", "type": "main", "index": 0 }]] },
+    "Which brands": { "main": [[{ "node": "POST /api/agent/run", "type": "main", "index": 0 }]] },
+    "POST /api/agent/run": { "main": [[{ "node": "Did it start?", "type": "main", "index": 0 }]] },
+    "Did it start?": {
+      "main": [
+        [{ "node": "One item per lens", "type": "main", "index": 0 }],
+        [{ "node": "Could not start", "type": "main", "index": 0 }]
+      ]
+    },
+    "One item per lens": { "main": [[{ "node": "POST /api/agent/lens", "type": "main", "index": 0 }]] },
+    "POST /api/agent/lens": { "main": [[{ "node": "Wait for all six", "type": "main", "index": 0 }]] },
+    "Wait for all six": { "main": [[{ "node": "POST /api/agent/synthesise", "type": "main", "index": 0 }]] },
+    "POST /api/agent/synthesise": { "main": [[{ "node": "What happened", "type": "main", "index": 0 }]] }
+  },
+  "pinData": {}
+}

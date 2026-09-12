@@ -394,6 +394,10 @@ export function mergeCalendarResult({ computed = [], modelOut = {}, note = '', c
     findings: computed,
     sources: [...new Set(calendarSources)],
     cost: modelOut.cost || 0,
+    // Carried through even when the dates survived, so the wall-clock budgets
+    // can later be tuned against measurements rather than guesses. Note this
+    // does NOT make the lens a failure — the computed half still stands.
+    timed_out: Boolean(modelOut.timedOut),
   }
 
   if (!modelOut.ok) {
