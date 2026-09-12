@@ -91,16 +91,21 @@ summariser that silently eats a real constraint is otherwise unrecoverable.
 
 ## Schema (migrations are applied BY HAND — see memory `campai-console-noise-and-migrations`)
 
-SQL lives in `docs/memory-schema.sql`. It must be run against Supabase manually;
-nothing in this repo applies it. Until it is run, the memory code degrades to
-"no memory" rather than erroring — verify that, it is the whole safety story.
+SQL lives in `supabase/migrations/` alongside every other migration:
+
+- `20260912_agent_memory.sql` — `agent_notes`, `agent_digest`
+- `20260912_research_lens_results.sql` — one row per (run_id, lens)
+
+Both were **applied 2026-09-12**. Nothing in this repo applies them; they are
+run by hand. Until they are, the memory code degrades to "no memory" rather
+than erroring — that is the whole safety story, and it is verified.
 
 ---
 
 ## Progress
 
 - [x] **0. Plan + handoff file** — this document.
-- [x] **1. Migration SQL written** — `docs/memory-schema.sql`: `agent_notes`,
+- [x] **1. Migration SQL written** — `supabase/migrations/20260912_agent_memory.sql`: `agent_notes`,
       `agent_digest`, indexes, RLS. Table names verified against the live
       database (`workspace_members` exists with `workspace_id`/`user_id`).
       ✅ **APPLIED 2026-09-12** to project `vxjhfvehccftvajgtqtv`. Before it was applied,
