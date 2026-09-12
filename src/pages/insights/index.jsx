@@ -6,6 +6,8 @@ import { Card, PageHeader, SectionHead, Button, Empty, Spinner, Input, Select } 
 import {
   fetchBrandMemory, updateBrandMemory, deleteBrandMemory,
 } from '../../lib/brandContext'
+import { fetchRuns } from '../../lib/agentRun'
+import { summarise, learningLine, ageLabel } from '../../lib/learnedSummary'
 import {
   fetchIdeaEvents, fetchIdeasForInsights, fetchPerformance, requestInsightsReview,
   summariseDecisions, summarisePerformance,
@@ -74,6 +76,20 @@ function BreakdownTable({ title, rows, empty }) {
   )
 }
 
+// Like Stat, but for the summary grid: the hint is a sentence rather than a
+// sample size, and it is never allowed to be absent — a number with nothing
+// qualifying it is exactly the kind of confident, unreadable figure this app
+// is organised against.
+function SummaryStat({ label, value, hint }) {
+  return (
+    <div className="bg-white px-4 py-3">
+      <p className="text-[10px] font-semibold text-text-tertiary uppercase tracking-wide">{label}</p>
+      <p className="text-lg font-bold text-text mt-0.5 tabular-nums">{value}</p>
+      <p className="text-[10px] text-text-tertiary mt-0.5 leading-relaxed">{hint}</p>
+    </div>
+  )
+}
+
 function Stat({ label, value, hint }) {
   return (
     <div className="px-5 py-4">
@@ -131,6 +147,8 @@ export function Insights() {
   const [ideas, setIdeas] = useState([])
   const [perf, setPerf] = useState({ metrics: [], posts: [] })
   const [memory, setMemory] = useState([])
+  const [runs, setRuns] = useState([])
+  const [loadError, setLoadError] = useState('')
   const [scopeFilter, setScopeFilter] = useState('all')
 
   // Bumped to re-run the loader after a rule is approved or retired. State is
@@ -148,9 +166,25 @@ export function Insights() {
       fetchIdeasForInsights(activeWorkspaceId, accessToken),
       fetchPerformance(activeWorkspaceId, accessToken),
       fetchBrandMemory(activeWorkspaceId, accessToken, { status: 'all' }),
-    ]).then(([e, i, p, m]) => {
+      // The page is called What We Learned and until now showed nothing the
+      // research agent learned — which, on a brand with one measured post, is
+      // nearly everything there is to know.
+      fetchRuns(activeWorkspaceId, accessToken, 1),
+    ]).then(([e, i, p, m, r]) => {
       if (!alive) return
-      setEvents(e); setIdeas(i); setPerf(p); setMemory(m)
+      setEvents(e); setIdeas(i); setPerf(p); setMemory(m); setRuns(r || [])
+      setLoading(false)
+    }).catch(err => {
+      // Without this the page is blank FOREVER on any network failure: the
+      // spinner is only cleared inside .then, and a rejected Promise.all never
+      // reaches it. Seen for real — the browser lost its connection and the
+      // page rendered an empty rectangle with nothing to explain it.
+      //
+      // Same rule the run has server-side: every terminal path writes a state.
+      // Failing loudly beats a spinner only a page reload can close.
+      if (!alive) return
+      console.error('[insights] load:', err)
+      setLoadError(String(err?.message || err))
       setLoading(false)
     })
     return () => { alive = false }
@@ -158,6 +192,10 @@ export function Insights() {
 
   const decisions = useMemo(() => summariseDecisions(events, ideas), [events, ideas])
   const performance = useMemo(() => summarisePerformance(perf, ideas), [perf, ideas])
+  const summary = useMemo(
+    () => summarise({ run: runs[0] || null, memory, performance, decisions }),
+    [runs, memory, performance, decisions],
+  )
 
   const proposed = memory.filter(r => r.status === 'proposed')
   const active = memory.filter(r => r.status === 'active')
@@ -221,17 +259,117 @@ export function Insights() {
     return <div className="p-8 flex justify-center"><Spinner /></div>
   }
 
+  if (loadError) {
+    return (
+      <Card className="p-6">
+        <Empty
+          title="Could not load this page"
+          description={`${loadError}. This is a connection problem rather than a missing-data one — nothing has been lost.`}
+          action={<Button onClick={() => { setLoadError(''); setLoading(true); reload() }}>Try again</Button>}
+        />
+      </Card>
+    )
+  }
+
   const noHistory = !events.length && !performance.postsWithMetrics
 
   return (
     <div className="space-y-5">
       <PageHeader
         title="Insights"
-        subtitle={`What ${activeWorkspace?.name || 'this brand'} has decided, what its posts did, and the rules those suggest.`}
+        subtitle={`What ${activeWorkspace?.name || 'this brand'} knows: what the market is doing, what our own posts did, and the rules those suggest.`}
       >
+        <Link to="/insights/research"><Button variant="ghost" size="sm">Research brief</Button></Link>
         <Button variant="secondary" size="sm" disabled={busy}
           onClick={() => { setLoading(true); reload() }}>Refresh</Button>
       </PageHeader>
+
+      {/* ── 0. Where we stand ──
+          The summary this page never had. It leads with ONE instruction rather
+          than a digest, because a screen of true facts with nothing to do about
+          them is a report, and reports get skimmed. Everything below it is the
+          evidence for this card. */}
+      <Card className="p-5">
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <p className="text-[11px] font-semibold text-text-tertiary uppercase tracking-wide">
+              Where we stand
+            </p>
+            {summary.next ? (
+              <>
+                <p className="text-base font-semibold text-text mt-1.5 leading-snug">{summary.next.text}</p>
+                {summary.next.detail && (
+                  <p className="text-xs text-text-secondary mt-1.5 leading-relaxed">{summary.next.detail}</p>
+                )}
+              </>
+            ) : (
+              /* A real state, and one this page must be able to say. Inventing
+                 an urgent action every week is how people learn to ignore the
+                 weeks something genuinely is urgent. */
+              <p className="text-base font-semibold text-text mt-1.5 leading-snug">
+                Nothing needs you right now. Research is current, nothing is waiting for review,
+                and no deadline is close.
+              </p>
+            )}
+          </div>
+          {summary.next && (
+            <Link to={summary.next.to} className="shrink-0">
+              <Button size="sm">{summary.next.action}</Button>
+            </Link>
+          )}
+        </div>
+
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-px bg-border mt-4 border-t border-border">
+          <SummaryStat
+            label="Steering generation"
+            value={summary.learned.active}
+            hint={learningLine(summary)}
+          />
+          <SummaryStat
+            label="Waiting on review"
+            value={summary.learned.proposed}
+            hint={summary.learned.proposed ? 'Approve one and it starts steering captions.' : 'Nothing pending.'}
+          />
+          <SummaryStat
+            label="Market"
+            value={summary.market.hasRun ? (summary.market.actNow || '—') : '—'}
+            hint={
+              !summary.market.hasRun ? 'No research has run yet.'
+                : summary.market.actNow ? `dated action${summary.market.actNow === 1 ? '' : 's'} · researched ${ageLabel(summary.market.ageDays)}`
+                  : `nothing dated · researched ${ageLabel(summary.market.ageDays)}`
+            }
+          />
+          <SummaryStat
+            label="Our own posts"
+            value={summary.ourWork.postsMeasured}
+            hint={summary.ourWork.usable
+              ? 'enough history to draw on'
+              : 'too few to conclude anything from — the tables below say so too'}
+          />
+        </div>
+
+        {summary.market.headline && (
+          <p className="text-xs text-text-secondary mt-4 leading-relaxed border-t border-border pt-3">
+            <span className="font-semibold text-text">Last research: </span>{summary.market.headline}
+          </p>
+        )}
+
+        {summary.blocking.length > 0 && (
+          <div className="mt-3 border-t border-border pt-3">
+            <p className="text-[11px] font-semibold text-text-tertiary uppercase tracking-wide">
+              Holding it back
+            </p>
+            <ul className="mt-2 space-y-1.5">
+              {summary.blocking.map(g => (
+                <li key={g.key} className="text-xs text-text-secondary leading-relaxed">
+                  {g.what}{' '}
+                  <Link to={g.to} className="text-sage-700 underline underline-offset-2">{g.fix}</Link>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </Card>
 
       {noHistory && (
         <Card>

@@ -4,7 +4,9 @@ import { useAuth } from '../../store/auth'
 import { Card, PageHeader, SectionHead, Button, Spinner, Empty } from '../../components/ui/index'
 import { useAgentChat } from '../../lib/useAgentChat'
 import { describePage, suggestionsFor } from '../../lib/pageContext'
-import { startResearchRun, fetchRuns } from '../../lib/agentRun'
+import { startResearchRun, fetchRuns, fetchLensResults } from '../../lib/agentRun'
+import { RunProgress } from '../../components/RunProgress'
+import { isLive } from '../../lib/agent/progress'
 import { AgentSteering } from '../../components/AgentSteering'
 import PastConversations from '../../components/PastConversations'
 
@@ -40,6 +42,7 @@ export default function AgentPage() {
   const { turns, busy, ask, reset, stop, ready, threadId, openThread } = useAgentChat()
   const [question, setQuestion] = useState('')
   const [runs, setRuns] = useState([])
+  const [lensRows, setLensRows] = useState([])
   const [running, setRunning] = useState(false)
   const [runNote, setRunNote] = useState('')
   const bottom = useRef(null)
@@ -58,13 +61,30 @@ export default function AgentPage() {
   useEffect(() => {
     if (!activeWorkspaceId || !accessToken) return undefined
     let cancelled = false
-    fetchRuns(activeWorkspaceId, accessToken).then(rows => {
+    fetchRuns(activeWorkspaceId, accessToken).then(async rows => {
       // Guarded so a slow response cannot land after the page has gone, or
       // after the person has switched to another brand.
-      if (!cancelled) setRuns(rows)
+      if (cancelled) return
+      setRuns(rows)
+      const latest = rows?.[0]
+      if (!latest) { setLensRows([]); return }
+      const lr = await fetchLensResults(activeWorkspaceId, latest.id, accessToken)
+      if (!cancelled) setLensRows(lr)
     })
     return () => { cancelled = true }
   }, [activeWorkspaceId, accessToken, reload])
+
+  // A run in flight is the one thing on this page that changes without the
+  // person doing anything, so it is the one thing worth polling for — and only
+  // while it is actually live. Polling a finished run forever is how a page
+  // quietly costs a database a request every ten seconds all day.
+  const latestRun = runs[0] || null
+  const watching = isLive(latestRun)
+  useEffect(() => {
+    if (!watching) return undefined
+    const t = setInterval(() => setReload(n => n + 1), 8_000)
+    return () => clearInterval(t)
+  }, [watching])
 
   const runResearch = useCallback(async () => {
     if (running) return
@@ -107,6 +127,12 @@ export default function AgentPage() {
           {running ? 'Measuring…' : 'Run research'}
         </Button>
       </PageHeader>
+
+      {/* Above the weekly research, deliberately: while a run is going this is
+          the only thing on the page that is changing, and afterwards it is the
+          fastest way to see whether the brief below is built on five answers
+          or on two. */}
+      <RunProgress run={latestRun} lensRows={lensRows} />
 
       <Card className="p-4">
         <SectionHead

@@ -42,3 +42,26 @@ export async function fetchRuns(workspaceId, accessToken, limit = 5) {
     return []
   }
 }
+
+/**
+ * The per-lens results for one run, so a person can watch it happen.
+ *
+ * Read straight from Postgres rather than from n8n. Every lens upserts its row
+ * the moment it finishes — duration, cost, findings, error — so the run
+ * already narrates itself where the browser can see it. n8n is only the thing
+ * pressing the buttons.
+ */
+export async function fetchLensResults(workspaceId, runId, accessToken) {
+  if (!workspaceId || !runId) return []
+  const url = `${SUPABASE_URL}/rest/v1/research_lens_results?workspace_id=eq.${workspaceId}` +
+    `&run_id=eq.${runId}&select=lens,status,findings,duration_ms,cost_usd,timed_out,error,note`
+  try {
+    const res = await fetch(url, {
+      headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${accessToken || SUPABASE_ANON_KEY}` },
+    })
+    if (!res.ok) return []
+    return await res.json()
+  } catch {
+    return []
+  }
+}
