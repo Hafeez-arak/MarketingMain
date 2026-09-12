@@ -1,38 +1,30 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
-import { useAuth } from '../../store/auth'
-import { Card, PageHeader, SectionHead, Button, Empty, Spinner, Badge } from '../../components/ui/index'
+import { useMemo } from 'react'
+import { Card, SectionHead, Button, Empty, Badge, PillSelect } from '../../components/ui/index'
 import { AgentSteering } from '../../components/AgentSteering'
-import { startResearchRun, fetchRuns } from '../../lib/agentRun'
-import { fetchBrandMemory, updateBrandMemory, deleteBrandMemory } from '../../lib/brandContext'
+import { RunProgress } from '../../components/RunProgress'
 import {
   partitionByClock, deadlineLabel, urgencyOf, lensStates, lensHeadline,
-  emptiness, setupGaps, pct, compact, signed,
+  emptiness, pct, compact, signed,
 } from '../../lib/researchBrief'
 
-// ─── /insights/research — the brief someone actually reads ─────────────────
-// RESEARCH-AGENT.md §11, AGENT.md build step 4. The run has produced a full
-// report since 2026-08-20 and until now nothing rendered one: `/agent` shows a
-// single line per run — the headline — while the movements, the gaps, the
-// dated actions and the proposed ideas sat in a jsonb column no screen opened.
+// ─── The Research tab — what is happening out there, and what to do ────────
+// The outward, perishable half of this page. A brief expires: National Day
+// passes, a tender closes, a standard comes into force. Everything durable —
+// the rules, our own performance, the decisions we made — is the other tab.
 //
-// ── THE ORDER IS THE ARGUMENT ──
+// Two things that used to be here have moved, and both moves were about the
+// same thing:
 //
-// This is not a report to read top to bottom. It is a queue, and the sections
-// are ordered by how long you have:
+//   the setup gaps   -> the page-level summary above the tabs, because they
+//                       hold BOTH halves back, not just this one.
+//   proposed RULES   -> the rule book on the What We Learned tab. They were
+//                       rendered here by a second component with its own
+//                       behaviour, which is the drift RESEARCH-AGENT.md §8b
+//                       ("no new approval surface") exists to prevent.
 //
-//   1. ACT — findings with a live deadline, soonest first.
-//   2. What it means for us — the gaps.
-//   3. Proposals — rules and ideas, each with an approve action.
-//   4. Standing observations — true, undated, informs planning.
-//   5. The board — measured competitor numbers.
-//   6. What each lens did, INCLUDING the ones that found nothing.
-//   7. What it could not answer.
-//
-// Section 6 is the one that is easy to leave out and must not be. A lens that
-// looked and found nothing and a lens that broke produce an identical empty
-// section, and a reader who cannot tell them apart will either distrust a
-// genuinely quiet week or trust a run that did not finish.
+// Ideas stay, because an idea is output of this particular run and is read
+// next to the finding that produced it — unlike a rule, which is a standing
+// instruction that outlives the run entirely.
 
 const fmtDate = iso => {
   if (!iso) return ''
@@ -166,153 +158,51 @@ function CompetitorCard({ c }) {
   )
 }
 
-function ProposedRuleCard({ rule, onApprove, onDismiss, busy }) {
-  return (
-    <div className="rounded-xl border border-border bg-white p-3">
-      <p className="text-xs font-medium text-text">{rule.rule}</p>
-      <p className="text-[10px] text-text-tertiary mt-1.5">
-        {rule.scope || 'trend'}
-        {rule.confidence != null ? ` · confidence ${pct(rule.confidence)}` : ''}
-      </p>
-      {rule.detail && <p className="text-[11px] text-text-secondary mt-2 leading-relaxed">{rule.detail}</p>}
-      <Sources sources={rule.evidence?.sources || rule.sources} />
-      <div className="flex items-center gap-2 mt-3">
-        <Button size="sm" disabled={busy} onClick={() => onApprove(rule)}>Approve</Button>
-        <Button size="sm" variant="ghost" disabled={busy} onClick={() => onDismiss(rule)}>Dismiss</Button>
-      </div>
-    </div>
-  )
-}
-
-export default function Research() {
-  const { activeWorkspaceId, activeWorkspace, accessToken } = useAuth()
-  const [runs, setRuns] = useState([])
-  const [selectedId, setSelectedId] = useState(null)
-  const [rules, setRules] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [running, setRunning] = useState(false)
-  const [busy, setBusy] = useState(false)
-  const [note, setNote] = useState('')
-
-  // One clock for the whole render. Recomputing `new Date()` per card would
-  // let two findings a millisecond apart disagree about what "today" means,
-  // and it is the sort of thing that only ever shows up at midnight.
-  const now = useMemo(() => new Date(), [])
-
-  // Returns the rows rather than setting them, so the effect below can drop a
-  // response that landed after the reader switched brands. A fetch that
-  // resolves into a component showing a different workspace is how one brand's
-  // competitors appear under another's name.
-  const fetchAll = useCallback(async () => {
-    if (!activeWorkspaceId) return null
-    const [rows, memory] = await Promise.all([
-      fetchRuns(activeWorkspaceId, accessToken, 12),
-      // 'proposed' explicitly: fetchBrandMemory defaults to 'active', which is
-      // the opposite of what an approval queue wants.
-      fetchBrandMemory(activeWorkspaceId, accessToken, { status: 'proposed' }).catch(() => []),
-    ])
-    return { rows, rules: (memory || []).filter(m => m.source === 'research') }
-  }, [activeWorkspaceId, accessToken])
-
-  const load = useCallback(async () => {
-    const out = await fetchAll()
-    if (!out) return
-    setRuns(out.rows)
-    setRules(out.rules)
-    setLoading(false)
-  }, [fetchAll])
-
-  useEffect(() => {
-    let cancelled = false
-    fetchAll().then(out => {
-      if (cancelled || !out) return
-      setRuns(out.rows)
-      setRules(out.rules)
-      setLoading(false)
-    })
-    return () => { cancelled = true }
-  }, [fetchAll])
-
-  // A run in flight is the one case where the page has to keep looking: the
-  // browser opened the spinner and only the server can close it.
-  const selected = useMemo(
-    () => runs.find(r => r.id === selectedId) || runs[0] || null,
-    [runs, selectedId],
-  )
-  const live = selected?.status === 'running'
-  useEffect(() => {
-    if (!live) return undefined
-    const t = setInterval(load, 10_000)
-    return () => clearInterval(t)
-  }, [live, load])
-
-  const run = useCallback(async () => {
-    if (running) return
-    setRunning(true); setNote('')
-    const out = await startResearchRun({ workspaceId: activeWorkspaceId, accessToken })
-    setNote(
-      out.already_running ? out.reason
-        : out.ok ? 'Measuring — the numbers are committed. The investigation continues in the background.'
-          : out.error || 'The run failed to start.',
-    )
-    setRunning(false)
-    load()
-  }, [running, activeWorkspaceId, accessToken, load])
-
-  const approve = useCallback(async rule => {
-    setBusy(true)
-    await updateBrandMemory(accessToken, rule.id, { status: 'active' }).catch(() => {})
-    setBusy(false); load()
-  }, [load, accessToken])
-
-  const dismiss = useCallback(async rule => {
-    setBusy(true)
-    await deleteBrandMemory(accessToken, rule.id).catch(() => {})
-    setBusy(false); load()
-  }, [load, accessToken])
-
-  // Memoised rather than recomputed inline: `selected?.report || {}` builds a
-  // NEW empty object on every render when a run has no report, which changes
-  // the identity of every dependency below it and defeats all four useMemos.
-  const report = useMemo(() => selected?.report || {}, [selected])
+export function ResearchTab({
+  run, runs, lensRows, selectedId, onSelectRun, onRun, running, now,
+}) {
+  const report = useMemo(() => run?.report || {}, [run])
   const { act, standing, passed } = useMemo(
-    () => partitionByClock(report.findings || [], now),
-    [report, now],
+    () => partitionByClock(report.findings || [], now), [report, now],
   )
   const states = useMemo(() => lensStates(report), [report])
   const empty = useMemo(() => emptiness(report), [report])
-  const gaps = useMemo(
-    () => setupGaps(report, { hasOwnAccount: Boolean(report.competitor_board?.some(c => c.is_us)) }),
-    [report],
-  )
 
-  if (!activeWorkspaceId) {
-    return <Empty title="No workspace selected" description="Pick a brand to see its research." />
+  if (!runs.length) {
+    return (
+      <Empty
+        title="No research has been run for this brand yet"
+        description="A run measures every competitor with a verified Instagram handle, then investigates what changed. The numbers are computed in code, never by a model."
+        action={<Button onClick={onRun} disabled={running}>Run research</Button>}
+      />
+    )
   }
-  if (loading) return <div className="py-16 flex justify-center"><Spinner /></div>
 
   return (
     <div className="space-y-4">
-      <PageHeader
-        title="Research"
-        subtitle={`What is happening around ${activeWorkspace?.name || 'this brand'}, and what to do about it.`}
-      >
-        <Link to="/insights"><Button variant="ghost">Insights</Button></Link>
-        <Button variant="secondary" onClick={run} disabled={running || live}>
-          {running ? 'Starting…' : live ? 'Running…' : 'Run research'}
-        </Button>
-      </PageHeader>
+      {/* Live first, because while a run is going it is the only thing on this
+          page that is changing. Afterwards it is the fastest way to see
+          whether the brief below rests on five answers or on two. */}
+      <RunProgress run={run} lensRows={lensRows} now={now} />
 
-      {note && <Card className="p-3"><p className="text-sm text-text-secondary">{note}</p></Card>}
+      {/* The brief selector. This replaces a list of past runs at the BOTTOM of
+          the page — reading an older brief meant scrolling past the current
+          one to find it. Picking a date here swaps the whole brief below. */}
+      {runs.length > 1 && (
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] text-text-tertiary uppercase tracking-wide">Brief</span>
+          <PillSelect value={selectedId || runs[0].id} onChange={e => onSelectRun(e.target.value)}>
+            {runs.map(r => (
+              <option key={r.id} value={r.id}>
+                {new Date(r.started_at).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}
+                {' — '}
+                {(r.error || r.report?.headline || r.status).slice(0, 70)}
+              </option>
+            ))}
+          </PillSelect>
+        </div>
+      )}
 
-      {!runs.length ? (
-        <Empty
-          title="No research has been run for this brand yet"
-          description="A run measures every competitor with a verified Instagram handle, then investigates what changed. The numbers are computed in code, never by a model."
-          action={<Button onClick={run} disabled={running}>Run research</Button>}
-        />
-      ) : (
-        <>
           {/* ── The headline, and how the run actually went ── */}
           <Card className="p-5">
             <div className="flex items-start justify-between gap-4">
@@ -322,39 +212,21 @@ export default function Research() {
                   {report.baseline ? ' · first measurement, nothing to compare against yet' : ''}
                 </p>
                 <p className="text-base font-semibold text-text mt-1.5 leading-snug">
-                  {selected.error || report.headline || 'No headline.'}
+                  {run.error || report.headline || 'No headline.'}
                 </p>
               </div>
               {/* Badge renders STATUS_META's own label when the status is one
                   it knows, so the run's vocabulary is mapped onto it rather
                   than passed through — 'complete' is not a key, 'completed' is. */}
               <Badge status={
-                selected.status === 'complete' ? 'completed'
-                  : selected.status === 'failed' ? 'failed' : 'pending'
+                run.status === 'complete' ? 'completed'
+                  : run.status === 'failed' ? 'failed' : 'pending'
               } />
             </div>
             {lensHeadline(states) && (
               <p className="text-xs text-text-tertiary mt-3">{lensHeadline(states)}</p>
             )}
           </Card>
-
-          {/* ── Setup gaps: the run already found these, buried in unanswered ── */}
-          {gaps.length > 0 && (
-            <Card className="p-4 border-amber-200 bg-amber-50/40">
-              <SectionHead
-                title="This run was working with one hand tied"
-                subtitle="Each of these is costing the findings below some accuracy, and each is a field someone can set."
-              />
-              <ul className="mt-3 space-y-2">
-                {gaps.map(g => (
-                  <li key={g.key} className="text-xs text-text-secondary leading-relaxed">
-                    <span className="text-text">{g.what}</span>{' '}
-                    <Link to={g.to} className="text-sage-700 underline underline-offset-2">{g.fix}</Link>
-                  </li>
-                ))}
-              </ul>
-            </Card>
-          )}
 
           {empty.empty ? (
             <Card className="p-5">
@@ -407,42 +279,36 @@ export default function Research() {
             </Card>
           )}
 
-          {/* ── 3. Proposals ── */}
-          {(rules.length > 0 || (report.proposed_ideas || []).length > 0) && (
+          {/* ── 3. Ideas this run proposed ──
+              RULES are NOT here. They live once, in the rule book on the other
+              tab, behind the one approval surface RESEARCH-AGENT.md §8b asked
+              for. Showing them in both places meant two components and two
+              behaviours drifting apart, which is exactly what it warned
+              against. Ideas stay because they are output of this run rather
+              than a standing rule, and they are read alongside the finding
+              that produced them. */}
+          {(report.proposed_ideas || []).length > 0 && (
             <Card className="p-4">
               <SectionHead
-                title="Proposed"
-                subtitle="Nothing here is active. A rule steers every future caption, so it takes a person to say yes."
+                title="Ideas from this run"
+                subtitle="Suggested content, tied to what was found. Rules are reviewed under What We Learned."
               />
-              {rules.length > 0 && (
-                <div className="mt-3 space-y-2">
-                  <p className="text-[11px] font-semibold text-text-tertiary uppercase tracking-wide">Rules</p>
-                  {rules.map(r => (
-                    <ProposedRuleCard key={r.id} rule={r} onApprove={approve} onDismiss={dismiss} busy={busy} />
-                  ))}
-                </div>
-              )}
-              {(report.proposed_ideas || []).length > 0 && (
-                <div className="mt-4 space-y-2">
-                  <p className="text-[11px] font-semibold text-text-tertiary uppercase tracking-wide">Ideas</p>
-                  {report.proposed_ideas.map((idea, i) => (
-                    <div key={i} className="rounded-xl border border-border bg-white p-3">
-                      <p className="text-xs font-semibold text-text">{idea.title || idea.angle}</p>
-                      {idea.angle && idea.title && (
-                        <p className="text-[11px] text-text-secondary mt-1.5 leading-relaxed">{idea.angle}</p>
-                      )}
-                      {idea.rationale && (
-                        <p className="text-[11px] text-text-tertiary mt-2 leading-relaxed">{idea.rationale}</p>
-                      )}
-                      {idea.suggested_format && (
-                        <p className="text-[10px] text-text-tertiary mt-1.5">{idea.suggested_format}</p>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-              {/* Repeats are shown, never silently dropped — an agent that
-                  quietly discards its own output is one you cannot calibrate. */}
+              <div className="mt-3 space-y-2">
+                {report.proposed_ideas.map((idea, i) => (
+                  <div key={i} className="rounded-xl border border-border bg-white p-3">
+                    <p className="text-xs font-semibold text-text">{idea.title || idea.angle}</p>
+                    {idea.angle && idea.title && (
+                      <p className="text-[11px] text-text-secondary mt-1.5 leading-relaxed">{idea.angle}</p>
+                    )}
+                    {idea.rationale && (
+                      <p className="text-[11px] text-text-tertiary mt-2 leading-relaxed">{idea.rationale}</p>
+                    )}
+                    {idea.suggested_format && (
+                      <p className="text-[10px] text-text-tertiary mt-1.5">{idea.suggested_format}</p>
+                    )}
+                  </div>
+                ))}
+              </div>
               {(report.repeated_ideas || []).length > 0 && (
                 <p className="text-[11px] text-text-tertiary mt-3">
                   {report.repeated_ideas.length} idea{report.repeated_ideas.length === 1 ? '' : 's'} dropped
@@ -568,40 +434,6 @@ export default function Research() {
               </div>
             </Card>
           )}
-        </>
-      )}
-
-      {/* ── Run history ── */}
-      {runs.length > 1 && (
-        <Card className="p-4">
-          <SectionHead title="Past runs" />
-          <ul className="mt-3 space-y-1">
-            {runs.map(r => (
-              <li key={r.id}>
-                <button
-                  onClick={() => setSelectedId(r.id)}
-                  className={`w-full text-left text-xs px-2 py-1.5 rounded flex items-baseline gap-2 hover:bg-surface-subtle ${
-                    r.id === selected?.id ? 'bg-surface-subtle' : ''
-                  }`}
-                >
-                  <span className={
-                    r.status === 'complete' ? 'text-emerald-600'
-                      : r.status === 'failed' ? 'text-red-500' : 'text-amber-500'
-                  }>●</span>
-                  <span className="text-text-tertiary w-28 shrink-0">
-                    {new Date(r.started_at).toLocaleDateString(undefined, {
-                      day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
-                    })}
-                  </span>
-                  <span className="text-text-secondary truncate">
-                    {r.error || r.report?.headline || `${r.status} · ${r.stage || ''}`}
-                  </span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        </Card>
-      )}
 
       <AgentSteering />
     </div>

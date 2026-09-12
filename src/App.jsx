@@ -20,7 +20,6 @@ import { Schedule }                from './pages/schedule/index'
 import { EmailFlows }             from './pages/email/index'
 import { Analytics }               from './pages/analytics/index'
 import { Insights }                from './pages/insights/index'
-import Research                    from './pages/insights/Research'
 import AgentPage                  from './pages/agent/index'
 import { MediaLibrary }            from './pages/media/index'
 import { SocialOverview, SocialPlatform } from './pages/social/index'
@@ -116,9 +115,11 @@ function ProtectedApp() {
             <Route path="/email"                 element={<EmailFlows />} />
             <Route path="/analytics"             element={<Analytics />} />
             <Route path="/insights"              element={<Insights />} />
-            {/* The brief the weekly run has been writing since 2026-08-20 and
-                which, until this route existed, nothing rendered. */}
-            <Route path="/insights/research"     element={<Research />} />
+            {/* Research and "What We Learned" were two pages that each carried
+                a copy of the watchlist, the run history, the run button and the
+                proposed rules. They are one page with two halves now; the old
+                path still resolves, for links already sent. */}
+            <Route path="/insights/research"     element={<Navigate to="/insights" replace />} />
             <Route path="/agent"                 element={<AgentPage />} />
             <Route path="/media"                 element={<MediaLibrary />} />
             <Route path="/social"                element={<SocialOverview />} />
