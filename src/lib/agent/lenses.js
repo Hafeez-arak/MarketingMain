@@ -1,7 +1,11 @@
-// ─── The six lenses ────────────────────────────────────────────────────────
-// A marketing person answers six recurring questions. The run used to answer
-// one of them — "what did competitors post" — because Instagram was the only
-// input and everything downstream hung off it.
+// ─── The lenses ────────────────────────────────────────────────────────────
+// A marketing person answers a handful of recurring questions. The run used to
+// answer one of them — "what did competitors post" — because Instagram was the
+// only input and everything downstream hung off it.
+//
+// There are seven now, not six, and the count is deliberately not in this
+// heading any more: it changed once and the heading did not, which is how a
+// file starts lying about itself. `LENSES` below is the list.
 //
 // A lens is a fixed KIND of question with a variable TARGET. Nothing about
 // lighting, spas or tailoring is hardcoded anywhere in this file: the target
@@ -99,51 +103,69 @@ export const LENSES = [
     question: 'What is coming in the next 2–8 weeks that changes what we should be saying?',
     perishability: PERISHABLE,
     cadence: 'weekly',
-    // Raising this from 2 to 4 was the previous attempt at the same problem and
-    // it did not work: the model spent all four (two on an identical query),
-    // hit max_uses_exceeded seven times, and returned nothing at all — throwing
-    // away the dates it had already confirmed. The budget was never the bug.
+    // ZERO. This lens makes no model call at all any more.
     //
-    // Dates are now computed in calendar.js before this lens runs, so these
-    // searches are no longer spent on lookups. They go to the one part of
-    // "what is coming" that no API answers: trade shows, exhibitions and
-    // industry cycles. Six is enough for that and, unlike before, the lens
-    // returns its dates whether or not a single search succeeds.
+    // Its dates are computed from free APIs — Aladhan for the Hijri calendar,
+    // Nager.Date and a built-in Gulf table for public holidays. The model used
+    // to be asked two extra things on top: what this brand should DO about a
+    // date, and which trade shows are coming. Both moved:
     //
-    // Effort rises from low to medium for the same reason. The old job was
-    // recall, which low handles; the new job is judgement about what a
-    // particular brand should do with a date, which it does not — and the
-    // duplicate query was itself a symptom of a model given no room to plan.
-    budget: { searches: 6, maxTokens: 8_000, effort: 'medium' },
+    //   "what should we do about it"  ->  synthesis, which already reads every
+    //                                     finding and has the brand context,
+    //                                     so it costs nothing extra there.
+    //   "which trade shows"           ->  the openings lens, which is already
+    //                                     searching this market for events.
+    //
+    // That saved ~$0.17 a week for output that, on the run of 2026-09-12, was
+    // literally nothing: the model half hit its 150s budget and was stopped
+    // while the free computed half produced the only real finding in the brief.
+    // A lens whose valuable half is free should not carry a bill.
+    budget: { searches: 0, maxTokens: 0, effort: 'low' },
     // Every brand has a calendar. There is no business for which "what is
     // coming" is not a question, which is why this one is never disabled.
     universal: true,
   },
   {
     key: 'openings',
-    label: 'Openings',
-    question: 'What just appeared in the market that we could target?',
+    label: 'Projects & openings',
+    question: 'Who is about to need what we sell, and can we still reach them?',
     perishability: PERISHABLE,
     cadence: 'weekly',
-    budget: { searches: 6, maxTokens: 8_000, effort: 'medium' },
+    // The anchor of the weekly run, and the only lens with a proven hit: on
+    // 2026-09-12 it surfaced a 300-key Waldorf Astoria conversion sitting in
+    // DESIGN phase — a live specification window — plus a smart-city
+    // masterplan and a project whose window had already closed.
+    //
+    // The demand side is where a specification business grows. Competitors are
+    // an input to that, not the subject of it.
+    budget: { searches: 8, maxTokens: 10_000, effort: 'medium' },
     universal: true,
   },
   {
     key: 'demand',
-    label: 'Demand',
-    question: 'What are people asking for, and what are they unhappy about?',
+    label: 'Buyers',
+    question: 'What do the people who specify and buy from us actually care about right now?',
     perishability: DURABLE,
     cadence: 'weekly',
-    budget: { searches: 5, maxTokens: 8_000, effort: 'medium' },
+    // Rewritten, not just relabelled. It used to ask "what do people complain
+    // about regarding COMPETITORS", which anchored a buyer-understanding
+    // question to rivals who, being SMEs, mostly do nothing in a given week.
+    // It now asks about our buyers directly.
+    budget: { searches: 6, maxTokens: 8_000, effort: 'medium' },
     universal: true,
   },
   {
-    key: 'rivals',
-    label: 'Rivals',
-    question: 'What are competitors doing, and does it matter?',
-    perishability: DURABLE,
+    key: 'category',
+    label: 'Category',
+    question: 'What is changing in our industry that we should have a view on?',
+    perishability: SLOW,
     cadence: 'weekly',
-    budget: { searches: 5, maxTokens: 8_000, effort: 'medium' },
+    // New. Nothing in the old set asked what was happening to the CATEGORY —
+    // standards, regulation, technology, procurement policy. For a Saudi
+    // specification business that is where the largest forces live (Vision
+    // 2030 mandates, efficiency codes, smart-building requirements), and none
+    // of it depends on a competitor posting anything.
+    budget: { searches: 6, maxTokens: 8_000, effort: 'medium' },
     universal: true,
   },
   {
@@ -156,6 +178,20 @@ export const LENSES = [
     // a lens anyway so the brief can report it as checked-and-quiet rather
     // than silently absent.
     budget: { searches: 0, maxTokens: 0, effort: 'low' },
+    universal: true,
+  },
+  {
+    key: 'rivals',
+    label: 'Rivals',
+    question: 'What are competitors doing, and does it matter?',
+    perishability: DURABLE,
+    // MONTHLY, demoted from weekly on 2026-09-12. The competitors here are
+    // SMEs: on the run that prompted this, Technolight had posted nothing at
+    // all in the period. Asking every Monday what they did buys the same
+    // answer four times and costs ~$0.25 each time. Monthly is the honest
+    // cadence for a signal that moves this slowly.
+    cadence: 'monthly',
+    budget: { searches: 5, maxTokens: 8_000, effort: 'medium' },
     universal: true,
   },
   {

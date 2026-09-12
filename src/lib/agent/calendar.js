@@ -18,16 +18,28 @@
 // recall them will sometimes be wrong in a way nobody catches until a month of
 // content has gone out on the wrong week.
 //
-// So: this module computes what is coming. The model is then asked the only
-// question that actually needs a model — what should THIS brand do about it.
+// So: this module computes what is coming, and the lens that wraps it makes no
+// model call at all.
+//
+// It briefly made one. After the dates were computed, the model was still
+// asked two things on top: what this brand should DO about each date, and
+// which trade shows were coming. On the very next run that half hit its 150s
+// wall-clock budget, was stopped, billed nothing and produced nothing — while
+// the free computed half produced the only real finding in the whole brief.
+// Twice in two runs is a shape, not bad luck. Both jobs moved:
+//
+//   "what should we do about it"  ->  synthesis, which already reads every
+//       finding with the full brand context in front of it, and which was
+//       doing this unprompted anyway.
+//   "which trade shows are coming"  ->  the openings lens, which is already
+//       searching this market for dated events and has a proven hit.
 //
 // ── WHAT IS DELIBERATELY NOT HERE ──
 //
 // Trade shows and industry exhibitions. There is no API for "when is Big 5
 // Saudi 2026", the answer changes yearly, and it is genuinely a search
-// problem. Those stay with the model — but now as its ONLY search job, with
-// the whole budget, instead of competing with date lookups it should never
-// have been doing.
+// problem — so it belongs with a lens that searches, not with a lookup table
+// that would be silently wrong a year from now.
 
 /**
  * Islamic observances, by Hijri month and day.
@@ -150,6 +162,25 @@ export const COUNTRY_NAMES = {
   canada: 'CA', australia: 'AU', germany: 'DE', france: 'FR', spain: 'ES',
   italy: 'IT', netherlands: 'NL', india: 'IN', pakistan: 'PK',
   turkey: 'TR', türkiye: 'TR', malaysia: 'MY', indonesia: 'ID', singapore: 'SG',
+}
+
+/**
+ * Display names for the codes above.
+ *
+ * `countryOf` answers in ISO codes because that is what the holiday APIs take.
+ * A prompt is read by a model, not by an API, and "Market: SA" is a worse
+ * sentence than "Market: Saudi Arabia" — terse enough to be mistaken for a
+ * ticker or an abbreviation of something else. Every code COUNTRY_NAMES can
+ * produce has an entry here, and a test enforces that so adding a country to
+ * one table without the other fails loudly.
+ */
+export const COUNTRY_LABELS = {
+  SA: 'Saudi Arabia', AE: 'United Arab Emirates', QA: 'Qatar', KW: 'Kuwait',
+  BH: 'Bahrain', OM: 'Oman', EG: 'Egypt', JO: 'Jordan', LB: 'Lebanon',
+  GB: 'United Kingdom', US: 'United States', CA: 'Canada', AU: 'Australia',
+  DE: 'Germany', FR: 'France', ES: 'Spain', IT: 'Italy', NL: 'Netherlands',
+  IN: 'India', PK: 'Pakistan', TR: 'Türkiye', MY: 'Malaysia',
+  ID: 'Indonesia', SG: 'Singapore',
 }
 
 /** Cities that pin a country even when the country itself is never named. */
@@ -370,61 +401,6 @@ export function findingsFromEvents(events = []) {
 }
 
 /**
- * Combine the computed half with whatever the model returned.
- *
- * THE GUARANTEE THIS FUNCTION EXISTS TO MAKE: computed dates are never lost.
- * Not when the model refuses, not when it runs out of searches, not when its
- * JSON fails to parse, not when the API is down.
- *
- * That is the same argument stage 0 makes one level up — gather() commits
- * measured numbers before any model token is spent so a failed investigation
- * cannot cost the user their numbers. A date converted from the Hijri calendar
- * deserves the same protection, and the lens that preceded this one proved why
- * by throwing away a confirmed Saudi National Day because its seventh search
- * failed.
- *
- * `ok` follows the dates, not the model: a lens that returned real dates and
- * lost only its commentary has not failed, and reporting it as failed would
- * put "the Calendar lens failed" in a brief that visibly contains calendar
- * findings.
- */
-export function mergeCalendarResult({ computed = [], modelOut = {}, note = '', calendarSources = [] } = {}) {
-  const base = {
-    lens: 'calendar',
-    findings: computed,
-    sources: [...new Set(calendarSources)],
-    cost: modelOut.cost || 0,
-    // Carried through even when the dates survived, so the wall-clock budgets
-    // can later be tuned against measurements rather than guesses. Note this
-    // does NOT make the lens a failure — the computed half still stands.
-    timed_out: Boolean(modelOut.timedOut),
-  }
-
-  if (!modelOut.ok) {
-    return {
-      ...base,
-      ok: computed.length > 0,
-      error: computed.length ? '' : (modelOut.error || 'The calendar lens produced nothing.'),
-      note: [
-        note,
-        `The calendar's reasoning step failed (${modelOut.error || 'unknown error'}), so this ` +
-        'lens reports the confirmed dates without brand-specific actions.',
-      ].filter(Boolean).join(' '),
-    }
-  }
-
-  return {
-    ...base,
-    // Computed dates lead: they are certain, and the model's additions are not.
-    findings: [...computed, ...(modelOut.findings || [])],
-    sources: [...new Set([...calendarSources, ...(modelOut.sources || [])])],
-    ok: true,
-    error: '',
-    note,
-  }
-}
-
-/**
  * A one-line note about what the calendar could not establish.
  *
  * Silent when everything worked. A note that appears every week is a note
@@ -445,4 +421,33 @@ export function calendarNote({ country = null, countrySource = '', failures = []
   }
   for (const f of failures) notes.push(f)
   return notes.join(' ')
+}
+
+/**
+ * The market a lens should research, as a phrase a prompt can use.
+ *
+ * Every lens asks a question about somewhere — which projects, whose buyers,
+ * which regulator — and until now only the calendar knew where that was. The
+ * others were handed `customFields.geography`, which is empty on all three
+ * live workspaces, so they researched an unnamed market and it showed: the
+ * searches that came back were about the category in general rather than
+ * about the country the brand actually sells in.
+ *
+ * Same fallback chain as `countryOf` (explicit field, then the brand's own
+ * prose) and the same honesty about which one answered, so a brief can say it
+ * guessed. Returns an empty label rather than defaulting to anywhere —
+ * defaulting to Saudi Arabia here would be exactly the domain-lock this system
+ * is built to avoid.
+ *
+ * @returns {{label: string, code: string|null, source: string}}
+ */
+export function marketOf({ profile = {}, ctx = {} } = {}) {
+  // An explicit free-text geography is a person's own words for their market.
+  // Prefer it verbatim: "Riyadh and the Eastern Province" says more than "SA".
+  const written = String(profile?.customFields?.geography || '').trim()
+  if (written) return { label: written, code: countryOf({ profile, ctx }).code, source: 'custom field geography' }
+
+  const { code, source } = countryOf({ profile, ctx })
+  if (!code) return { label: '', code: null, source: '' }
+  return { label: COUNTRY_LABELS[code] || code, code, source }
 }

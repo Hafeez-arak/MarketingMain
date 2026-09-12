@@ -3,10 +3,21 @@ import {
   OBSERVANCES, FIXED_NATIONAL_DAYS, COUNTRY_NAMES,
   countryOf, fromAladhanDate, isoFor, daysUntil, inWindow,
   withLeadTime, rankEvents, hijriMonthsBetween, calendarNote,
-  findingsFromEvents, mergeCalendarResult,
+  findingsFromEvents, marketOf, COUNTRY_LABELS,
 } from './calendar'
+import { runCalendarLens } from '../../../api/agent/_lenses.js'
 
 const NOW = new Date('2026-09-12T09:00:00Z')
+
+// One fully-shaped event, as withLeadTime() emits them. Shared by the guarantee
+// block below so those tests read as assertions about the lens rather than
+// about fixture construction.
+const EVENT = {
+  name: 'Saudi National Day', kind: 'national', date: '2026-09-23',
+  act_by: '2026-09-02', days_until: 11, days_until_act_by: -10,
+  window_open: true, passed: false, source: 'built-in',
+  note: 'The largest civic moment of the Saudi year.',
+}
 
 describe('reading the country out of a brand', () => {
   // This matters more than it looks. Every live workspace has
@@ -233,89 +244,109 @@ describe('a computed date is a finding in its own right', () => {
   })
 })
 
-describe('THE GUARANTEE: computed dates survive a model failure', () => {
-  // The property this whole rewrite exists to establish. The lens that came
-  // before threw away a confirmed Saudi National Day because its seventh
-  // search failed, and the run reported success.
+describe('THE GUARANTEE: the calendar cannot lose its dates', () => {
+  // The property this rewrite exists to establish, and the way it is held has
+  // changed. It used to be DEFENDED: the computed half ran first, and
+  // mergeCalendarResult made sure a model failure could not take the dates
+  // down with it. That defence was needed because the lens that came before
+  // threw away a confirmed Saudi National Day when its seventh search failed,
+  // and reported success.
+  //
+  // It is now STRUCTURAL. There is no model call in this lens at all, so there
+  // is nothing left that can fail and take the dates with it. These tests
+  // assert the structure rather than the defence, because a defence nobody can
+  // breach is better expressed as an absence.
 
-  const computed = [{ headline: 'Saudi National Day is 11 days away.', confidence: 1 }]
-
-  it('keeps the dates when the model refuses', () => {
-    const out = mergeCalendarResult({
-      computed, modelOut: { ok: false, error: 'The model declined (refusal).', cost: 0.01 },
-    })
-    expect(out.findings).toEqual(computed)
-  })
-
-  it('keeps the dates when the model returns unparseable JSON', () => {
-    const out = mergeCalendarResult({
-      computed, modelOut: { ok: false, error: 'Findings did not parse: Unexpected token' },
-    })
+  it('produces its findings from arithmetic alone — no model, no network', () => {
+    const out = runCalendarLens({ calendar: { events: [EVENT], sources: [], note: '' } })
+    expect(out.ok).toBe(true)
     expect(out.findings).toHaveLength(1)
+    expect(out.findings[0].confidence).toBe(1)
+    expect(out.cost).toBe(0)
   })
 
-  it('keeps the dates when the model returns nothing at all', () => {
-    // The exact 2026-09-12 failure: ok, but an empty findings array.
-    const out = mergeCalendarResult({ computed, modelOut: { ok: true, findings: [] } })
-    expect(out.findings).toEqual(computed)
-    expect(out.ok).toBe(true)
+  it('is synchronous, which is the proof there is nothing to await', () => {
+    // A Promise here would mean something asynchronous crept back in — a model
+    // call, a fetch, a retry. The type is the guardrail.
+    expect(runCalendarLens({ calendar: { events: [] } })).not.toBeInstanceOf(Promise)
   })
 
-  it('does NOT report the lens as failed when it returned real dates', () => {
-    // Otherwise the brief says "the Calendar lens failed" directly above a
-    // list of calendar findings.
-    const out = mergeCalendarResult({ computed, modelOut: { ok: false, error: 'boom' } })
+  it('reports a quiet window as checked-and-quiet, never as failed', () => {
+    // A window with no dated moment in it is a real answer. If this came back
+    // ok:false the brief would say "the Calendar lens failed" on every quiet
+    // week, and a reader who sees that twice stops believing the other five.
+    const out = runCalendarLens({ calendar: { events: [], sources: [], note: '' } })
     expect(out.ok).toBe(true)
+    expect(out.findings).toEqual([])
     expect(out.error).toBe('')
   })
 
-  it('DOES report a failure when there is genuinely nothing to show', () => {
-    const out = mergeCalendarResult({ computed: [], modelOut: { ok: false, error: 'boom' } })
-    expect(out.ok).toBe(false)
-    expect(out.error).toBe('boom')
-  })
-
-  it('explains in the note that only the reasoning half was lost', () => {
-    const out = mergeCalendarResult({ computed, modelOut: { ok: false, error: 'timeout' } })
-    expect(out.note).toMatch(/reasoning step failed/)
-    expect(out.note).toMatch(/timeout/)
-  })
-
-  it('keeps an existing note alongside the failure note', () => {
-    const out = mergeCalendarResult({
-      computed, modelOut: { ok: false, error: 'timeout' }, note: 'Assumed SA from the description.',
+  it('carries the calendar note through so a guessed country is still said out loud', () => {
+    const out = runCalendarLens({
+      calendar: { events: [EVENT], sources: [], note: 'Assumed SA from the description.' },
     })
     expect(out.note).toMatch(/Assumed SA/)
-    expect(out.note).toMatch(/reasoning step failed/)
   })
 
-  it('puts computed dates before model findings when both worked', () => {
-    // Certain things first; the model's additions are not certain.
-    const out = mergeCalendarResult({
-      computed, modelOut: { ok: true, findings: [{ headline: 'A trade show.' }], sources: ['https://x.com'] },
+  it('de-duplicates its sources', () => {
+    const out = runCalendarLens({
+      calendar: { events: [EVENT], sources: ['https://a.com', 'https://a.com'], note: '' },
     })
-    expect(out.findings[0].confidence).toBe(1)
-    expect(out.findings).toHaveLength(2)
-  })
-
-  it('merges sources from both halves without duplicating', () => {
-    const out = mergeCalendarResult({
-      computed,
-      modelOut: { ok: true, findings: [], sources: ['https://a.com', 'https://b.com'] },
-      calendarSources: ['https://a.com'],
-    })
-    expect(out.sources.sort()).toEqual(['https://a.com', 'https://b.com'])
-  })
-
-  it('still charges for a failed model call', () => {
-    // The ledger must record spend that happened, whatever the outcome.
-    expect(mergeCalendarResult({ computed, modelOut: { ok: false, error: 'x', cost: 0.04 } }).cost).toBe(0.04)
+    expect(out.sources).toEqual(['https://a.com'])
   })
 
   it('survives being handed nothing at all', () => {
-    const out = mergeCalendarResult()
-    expect(out.ok).toBe(false)
+    const out = runCalendarLens({})
+    expect(out.ok).toBe(true)
     expect(out.findings).toEqual([])
+  })
+})
+
+describe('naming the market every lens researches', () => {
+  // Before this existed, only the calendar knew where a brand sold. Every
+  // other lens was handed `customFields.geography`, which is empty on all
+  // three live workspaces, so they researched an unnamed market — and it
+  // showed: 99 pages came back about the category in general rather than
+  // about the country the brand actually operates in.
+
+  it('prefers what a person actually wrote, verbatim', () => {
+    // "Riyadh and the Eastern Province" says more than "SA" ever will, so a
+    // written geography is never flattened to a country code.
+    const out = marketOf({ profile: { customFields: { geography: 'Riyadh and the Eastern Province' } } })
+    expect(out.label).toBe('Riyadh and the Eastern Province')
+    expect(out.source).toMatch(/custom field/)
+  })
+
+  it('falls back to the brand\'s own prose, and says that is what it did', () => {
+    const out = marketOf({ ctx: { brandDescriptor: "Saudi Arabia's leading lighting company" } })
+    expect(out.label).toBe('Saudi Arabia')
+    expect(out.source).toBe('brand description')
+  })
+
+  it('answers with a readable name, not an ISO code', () => {
+    // A prompt is read by a model, not by a holiday API. "Market: SA" is
+    // terse enough to be mistaken for something else entirely.
+    expect(marketOf({ ctx: { brandDescriptor: 'a spa in Dubai' } }).label)
+      .toBe('United Arab Emirates')
+  })
+
+  it('returns nothing rather than defaulting to anywhere', () => {
+    // Defaulting to Saudi Arabia here would be the exact domain-lock this
+    // whole system is built to avoid. An unknown market must be reported.
+    const out = marketOf({ profile: { customFields: {} }, ctx: {} })
+    expect(out.label).toBe('')
+    expect(out.code).toBeNull()
+  })
+
+  it('survives being handed nothing at all', () => {
+    expect(marketOf().label).toBe('')
+  })
+
+  it('has a label for every country it can possibly resolve', () => {
+    // Adding a country to one table and not the other would silently degrade
+    // to an ISO code in a prompt, which is the kind of thing nobody notices.
+    const codes = [...new Set(Object.values(COUNTRY_NAMES))]
+    expect(codes.filter(c => !COUNTRY_LABELS[c])).toEqual([])
   })
 })
 

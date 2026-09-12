@@ -7,6 +7,7 @@ import { lensesFor, motionOf, lensSummary, rankFindings } from '../../src/lib/ag
 import { LENS_PROMPTS } from '../../src/lib/agent/lensPrompts.js'
 import { runLens, runOurselvesLens, runCalendarLens, markStage } from './_lenses.js'
 import { gatherCalendar } from './_calendar.js'
+import { marketOf } from '../../src/lib/agent/calendar.js'
 import { priorIdeas } from './_memory.js'
 import { partitionRepeats } from '../../src/lib/agent/memory.js'
 import {
@@ -16,7 +17,7 @@ import {
 // Re-exported: the resolver imported it from here before it moved to loop.js.
 export { urlsFromResponse }
 
-// ─── Stages 1–4, as six lenses across three HTTP requests ──────────────────
+// ─── Stages 1–4, as independent lenses across three HTTP requests ──────────
 // AGENT.md §6, restructured twice.
 //
 // FIRST restructure: the old shape was serial — instagram → plan → search →
@@ -83,11 +84,18 @@ export async function loadRunContext(workspaceId, runId, cadence = 'weekly') {
   const { motion, explicit } = motionOf(profile || {})
   const competitors = (competitorRows || []).map(r => r.subject).filter(Boolean)
 
+  // Every lens asks a question about somewhere. `customFields.geography` is
+  // the obvious source and is empty on all three live workspaces, so a lens
+  // trusting it researched an unnamed market — and that showed in the results:
+  // searches came back about the category in general rather than about the
+  // country this brand actually sells in. marketOf falls back to the brand's
+  // own prose the same way the calendar has always had to.
+  const market = marketOf({ profile, ctx })
   const brandFacts = {
     brandName: ctx?.brandName || '',
     descriptor: ctx?.brandDescriptor || '',
     audience: (profile?.targetPersonas || '').split('\n').slice(0, 4).join('; '),
-    geography: profile?.customFields?.geography || '',
+    geography: market.label,
   }
 
   return {
@@ -110,7 +118,8 @@ export async function planLenses(workspaceId, runId, cadence = 'weekly') {
     return { lenses: lenses.map(l => l.key), motion, explicit }
   } catch (err) {
     // A run whose plan cannot be read is still a run whose numbers are
-    // committed. The driver gets the default six and finds out per lens.
+    // committed. The driver gets the default set for this cadence and finds
+    // out per lens.
     console.error('[agent/run] planLenses:', err?.message || err)
     return { lenses: lensesFor({ cadence }).map(l => l.key), motion: '', explicit: false }
   }
@@ -120,20 +129,21 @@ export async function planLenses(workspaceId, runId, cadence = 'weekly') {
  * Build the argument list for one lens.
  *
  * Split out so /api/agent/lens can construct exactly one prompt rather than
- * all six — the calendar's dates cost an API round trip, and fetching them to
- * run the demand lens would be waste repeated on every call.
+ * every lens's — the calendar's dates cost an API round trip, and fetching
+ * them to run the demand lens would be waste repeated on every call.
  */
 async function argsForLens(key, { brandFacts, motion, competitors, gathered, profile, ctx }) {
   if (key === 'calendar') {
+    // No `args`: this lens has no prompt because it makes no model call. What
+    // it needs is the computed calendar itself, which is the whole lens now.
     const window = lookahead(8)
-    const calendar = await gatherCalendar({ profile, ctx, window })
-    return {
-      args: [brandFacts, { ...window, events: calendar.events, country: calendar.country || '' }],
-      calendar,
-    }
+    return { args: null, calendar: await gatherCalendar({ profile, ctx, window }) }
   }
   if (key === 'openings') return { args: [brandFacts, { motion }] }
   if (key === 'demand') return { args: [brandFacts, { competitors }] }
+  // The market it researches rides in brandFacts like every other brand fact,
+  // resolved once in loadRunContext rather than a second time here.
+  if (key === 'category') return { args: [brandFacts] }
   if (key === 'rivals') {
     return {
       args: [brandFacts, {
@@ -167,18 +177,19 @@ export async function runSingleLens({ workspaceId, runId, lensKey, cadence = 'we
       return { ok: false, status: 400, error: `This run does not include a "${lensKey}" lens.` }
     }
 
+    // The two computed lenses first, because neither has a prompt and asking
+    // LENS_PROMPTS for one would report "no prompt for this lens" on the two
+    // lenses that are the most reliable things in the run.
     if (lensKey === 'ourselves') {
       result = await runOurselvesLens({ gathered: ctxBundle.gathered })
+    } else if (lensKey === 'calendar') {
+      const { calendar } = await argsForLens('calendar', ctxBundle)
+      result = runCalendarLens({ calendar })
     } else {
       const build = LENS_PROMPTS[lensKey]
-      const { args, calendar } = await argsForLens(lensKey, ctxBundle)
+      const { args } = await argsForLens(lensKey, ctxBundle)
       if (!build || !args) {
         result = { lens: lensKey, ok: false, findings: [], sources: [], cost: 0, error: 'No prompt for this lens.' }
-      } else if (lensKey === 'calendar') {
-        result = await runCalendarLens({
-          workspaceId, runId, calendar,
-          prompt: build(...args), identity: IDENTITY, brand: ctxBundle.brand, deadline: limit,
-        })
       } else {
         result = await runLens({
           workspaceId, runId, lensKey,
