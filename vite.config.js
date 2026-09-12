@@ -215,9 +215,27 @@ function devAgentApi(env) {
   // Copied across here so one .env drives both halves of the app, which is the
   // same reason the n8n secret is read from n8n/docker/.env rather than
   // duplicated: one place per value.
+  // Every key api/agent/* reads, which is not the same as every key it needs
+  // to boot. This list was short by four and the failure was invisible in the
+  // worst way: `META_IG_TOKEN` sat in .env, never reached the handler, and
+  // stage 0 answered "META_IG_TOKEN / META_IG_USER_ID are not set on this
+  // deployment" — which reads like a production misconfiguration rather than a
+  // dev-server allowlist. The run could not get past gather on a laptop, so a
+  // full run had never once been executed end to end locally.
+  //
+  // Keep in step with: grep -rho 'process\.env\.[A-Z0-9_]*' api/agent/
   for (const key of [
-    'ANTHROPIC_API_KEY', 'SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'SUPABASE_ANON_KEY',
+    'ANTHROPIC_API_KEY',
+    'SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'SUPABASE_ANON_KEY',
     'VITE_SUPABASE_URL', 'VITE_SUPABASE_ANON_KEY',
+    // Stage 0 measures competitors through the Graph API. Without these the
+    // run fails before a single model token is spent.
+    'META_IG_TOKEN', 'META_IG_USER_ID',
+    // The web providers behind the resolver and the ad-hoc tools.
+    'FIRECRAWL_API_KEY', 'TAVILY_API_KEY',
+    // Lets the service-auth path be exercised locally rather than only in
+    // production, which is where it would otherwise first be tested.
+    'AGENT_RUN_SECRET',
   ]) {
     if (env[key] && !process.env[key]) process.env[key] = env[key]
   }
