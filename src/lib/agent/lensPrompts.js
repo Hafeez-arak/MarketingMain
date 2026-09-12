@@ -58,6 +58,40 @@ function who({ brandName, descriptor, audience, geography }) {
 // bar became silence — and a reader can discount a 0.35, but cannot discount
 // nothing. Silence is also indistinguishable from never having looked.
 /**
+ * Search the market's own language, not only English.
+ *
+ * ── WHY ──
+ *
+ * Fixing the instruction that made four lenses report nothing exposed what was
+ * underneath it: all 99 pages they had read were in English. For Saudi Arabia
+ * that is a ceiling rather than a preference. Tender portals, municipal
+ * announcements, contract awards and much of the trade press publish in Arabic
+ * first and in English late, partially, or never — so an English-only search
+ * sees a market weeks after it moved, and sees the government half of it
+ * barely at all. That government half is exactly where a specification
+ * business finds work.
+ *
+ * Deliberately NOT a list of Saudi websites. Naming etimad.sa or a set of Gulf
+ * trade publications would work for one brand and rot for every other, and it
+ * would put a country into a file whose entire claim is that it names no
+ * industry and no place. The language comes from the brand's own market, the
+ * same way every other specific here does.
+ */
+function localLanguage(language) {
+  if (!language) return ''
+  return [
+    '',
+    `SEARCH IN ${language.toUpperCase()} AS WELL AS ENGLISH.`,
+    `Run some of your searches with ${language} terms. Government, municipal and official`,
+    'sources in this market publish there first and in English late, partially, or never —',
+    'and those are the sources that carry tenders, awards, permits and policy. An',
+    'English-only pass sees this market after it has already moved.',
+    'Quote sources in their original language and say what they mean; do not silently',
+    'translate a quote into something the page does not say.',
+  ].join('\n')
+}
+
+/**
  * The standing questions a person asked the agent to keep watching.
  *
  * ── WHY THIS EXISTS ──
@@ -139,7 +173,7 @@ const CLOSING = [
  * that is a tender; for a local service it is a new neighbourhood, a rival
  * closing, or an event needing suppliers. Same question, different target.
  */
-export function openingsPrompt(brand, { motion, agenda = [] }) {
+export function openingsPrompt(brand, { motion, agenda = [], language = '' }) {
   const byMotion = {
     specification: [
       '- New projects, tenders or contract awards where this brand\'s category is in scope.',
@@ -187,6 +221,7 @@ export function openingsPrompt(brand, { motion, agenda = [] }) {
     'decide when they can actually commit. No API lists these, so they are a genuine search',
     'problem and they belong here with the rest of the demand picture.',
     standing(agenda),
+    localLanguage(language),
     CLOSING,
   ].join('\n')
 }
@@ -198,7 +233,7 @@ export function openingsPrompt(brand, { motion, agenda = [] }) {
  * stated by the customer, about someone who is not us. That is market research
  * the customer performed for free.
  */
-export function demandPrompt(brand, { competitors = [], agenda = [] }) {
+export function demandPrompt(brand, { competitors = [], agenda = [], language = '' }) {
   return [
     who(brand),
     '',
@@ -234,6 +269,7 @@ export function demandPrompt(brand, { competitors = [], agenda = [] }) {
     'A finding here should usually carry a suggested_action that is a piece of content: if',
     'buyers keep asking something, answering it publicly is the action.',
     standing(agenda),
+    localLanguage(language),
     CLOSING,
   ].filter(Boolean).join('\n')
 }
@@ -250,7 +286,7 @@ export function demandPrompt(brand, { competitors = [], agenda = [] }) {
  * Standards, regulation and procurement policy move whether or not a rival
  * posts, and for a specification business they decide what can be sold at all.
  */
-export function categoryPrompt(brand, { agenda = [] } = {}) {
+export function categoryPrompt(brand, { agenda = [], language = '' } = {}) {
   // No `Market:` line: `who()` already carries geography, and it is now
   // resolved for every lens rather than only this one. Two lines saying the
   // same thing in one prompt is how a model starts weighting it twice.
@@ -279,6 +315,7 @@ export function categoryPrompt(brand, { agenda = [] } = {}) {
     'Say plainly how established each one is. "Announced, with a date" and "being discussed',
     'in the trade press" are different things and should not read the same.',
     standing(agenda),
+    localLanguage(language),
     CLOSING,
   ].filter(Boolean).join('\n')
 }
@@ -290,7 +327,7 @@ export function categoryPrompt(brand, { agenda = [] } = {}) {
  * frequency is a lagging, low-value signal; offers, pricing, launches and
  * hiring are what precede a move rather than report one.
  */
-export function rivalsPrompt(brand, { competitors = [], board = [], movements = [], agenda = [] }) {
+export function rivalsPrompt(brand, { competitors = [], board = [], movements = [], agenda = [], language = '' }) {
   const measured = board.length
     ? board.map(c =>
         `- ${c.name}${c.handle ? ` (@${c.handle})` : ''}: ${c.followers ?? '?'} followers, ` +
@@ -326,6 +363,7 @@ export function rivalsPrompt(brand, { competitors = [], board = [], movements = 
     'If the numbers above raise a question, chase THAT rather than researching generally.',
     'A competitor whose posting doubled is worth asking about; one that did not move is not.',
     standing(agenda),
+    localLanguage(language),
     CLOSING,
   ].join('\n')
 }
@@ -337,7 +375,7 @@ export function rivalsPrompt(brand, { competitors = [], board = [], movements = 
  * because the answer moves quarterly. Running it every week would pay
  * repeatedly for the same answer.
  */
-export function craftPrompt(brand, { platforms = [], agenda = [] }) {
+export function craftPrompt(brand, { platforms = [], agenda = [], language = '' }) {
   return [
     who(brand),
     platforms.length ? `Platforms in use: ${platforms.join(', ')}` : '',
@@ -353,6 +391,7 @@ export function craftPrompt(brand, { platforms = [], agenda = [] }) {
     'plausibly change what this specific brand does next month. If nothing has meaningfully',
     'changed, return nothing — that is the usual and correct answer.',
     standing(agenda),
+    localLanguage(language),
     CLOSING,
   ].join('\n')
 }

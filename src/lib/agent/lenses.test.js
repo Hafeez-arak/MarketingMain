@@ -449,6 +449,64 @@ describe('the standing questions actually steer the search', () => {
   })
 })
 
+describe('the market is searched in its own language, not only in English', () => {
+  // Fixing the instruction that made four lenses report nothing exposed what
+  // was underneath it: all 99 pages they had read were in English. For Saudi
+  // Arabia that is a ceiling, not a preference — tender portals, municipal
+  // announcements and contract awards publish in Arabic first and in English
+  // late, partially, or never. That is precisely the government half of the
+  // market where a specification business finds work.
+
+  const facts = () => ({ brandName: 'X', descriptor: 'lighting', geography: 'Saudi Arabia' })
+
+  it('tells every searching lens to use the local language too', () => {
+    for (const p of [
+      openingsPrompt(facts(), { motion: 'specification', language: 'Arabic' }),
+      demandPrompt(facts(), { competitors: [], language: 'Arabic' }),
+      categoryPrompt(facts(), { language: 'Arabic' }),
+      rivalsPrompt(facts(), { language: 'Arabic' }),
+      craftPrompt(facts(), { language: 'Arabic' }),
+    ]) {
+      expect(p).toMatch(/SEARCH IN ARABIC AS WELL AS ENGLISH/)
+    }
+  })
+
+  it('says WHY, because a rule without a reason gets traded away under budget pressure', () => {
+    const p = openingsPrompt(facts(), { motion: 'specification', language: 'Arabic' })
+    expect(p).toMatch(/publish there first/i)
+    expect(p).toMatch(/tenders, awards, permits and policy/i)
+  })
+
+  it('forbids silently translating a quote into something the page does not say', () => {
+    // Citations are checked against the URLs a tool actually returned. A quote
+    // quietly rendered into English is unverifiable against its own source.
+    expect(categoryPrompt(facts(), { language: 'Arabic' })).toMatch(/do not silently\s*\n?\s*translate/i)
+  })
+
+  it('says nothing when the market already speaks English', () => {
+    // An instruction telling an English-speaking model to search in English is
+    // noise, and noise in a prompt is not free.
+    const p = openingsPrompt(facts(), { motion: 'specification', language: '' })
+    expect(p).not.toMatch(/AS WELL AS ENGLISH/)
+    expect(openingsPrompt(facts(), { motion: 'specification' })).not.toMatch(/AS WELL AS ENGLISH/)
+  })
+
+  it('names no country and no website, so it still works for a fourth brand', () => {
+    // The whole claim of this file is that it hardcodes no industry and no
+    // place. A list of Saudi tender portals would work for one workspace and
+    // rot for every other.
+    //
+    // The brand fixture here is deliberately NOT Saudi: the first version of
+    // this test used the Saudi facts and passed "Saudi Arabia" straight into
+    // the prompt through `who()`, so it was asserting against its own input
+    // rather than against the template.
+    const turkish = { brandName: 'X', descriptor: 'lighting', geography: 'Türkiye' }
+    const p = openingsPrompt(turkish, { motion: 'specification', language: 'Turkish' })
+    expect(p).toMatch(/SEARCH IN TURKISH/)
+    expect(p).not.toMatch(/etimad|saudi|arabic|\.sa\b/i)
+  })
+})
+
 describe('no lens may throw away work it already did', () => {
   it('tells every lens what to do when the search budget runs out', () => {
     // The instruction whose absence cost a whole lens. Asserted on the shared
