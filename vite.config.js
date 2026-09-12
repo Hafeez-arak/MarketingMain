@@ -278,5 +278,16 @@ export default defineConfig(({ mode }) => {
     server: {
       port: process.env.PORT ? Number(process.env.PORT) : 5173,
     },
+    test: {
+      // Git worktrees live under .claude/worktrees/, and vitest's default
+      // include walks into them — so running the suite from this checkout ran
+      // every OTHER branch's copy of it too. Measured 2026-09-12: 132 test
+      // files and 2,963 tests, against 32 and 765 actually in this tree.
+      //
+      // That is not merely slow. A failing test on an abandoned branch fails
+      // the suite here, in a file that does not appear in `git status` and
+      // whose path looks like an ordinary source path in the output.
+      exclude: ['**/node_modules/**', '**/dist/**', '.claude/**'],
+    },
   }
 })

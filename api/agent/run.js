@@ -157,16 +157,22 @@ export default async function handler(req, res) {
     // (see n8n/agentRun.workflow.json). This route's contract is the one that
     // always mattered anyway: by the time a caller has a run_id, the measured
     // numbers are already committed.
-    const gatheredReport = out.report
-    await patchRun(workspaceId, runId, {
-      stage: 'lenses',
-      report: gatheredReport,
-    })
-
     // The lenses this run intends to execute, named here so the driver does
     // not have to know how motion and cadence decide them — and so a run
     // resumed tomorrow runs the same six it started with.
     const plan = await planLenses(workspaceId, runId, cadence)
+
+    const gatheredReport = out.report
+    await patchRun(workspaceId, runId, {
+      stage: 'lenses',
+      // The plan is WRITTEN DOWN, not just handed to the driver. Without it a
+      // reader watching a run in progress can only see the lenses that have
+      // already finished — so a run is indistinguishable from a finished one
+      // until the next result lands, and there is no way to say "two of five
+      // done". Anything watching had to re-derive the set from cadence and
+      // motion and would be wrong on a monthly run.
+      report: { ...gatheredReport, planned_lenses: plan.lenses, cadence },
+    })
 
     res.status(200).json({
       ok: true,

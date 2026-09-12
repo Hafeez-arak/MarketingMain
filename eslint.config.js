@@ -5,7 +5,12 @@ import reactRefresh from 'eslint-plugin-react-refresh'
 import { defineConfig, globalIgnores } from 'eslint/config'
 
 export default defineConfig([
-  globalIgnores(['dist']),
+  // `.claude/worktrees/` holds full checkouts of other branches, and eslint
+  // walks into them by default — so `npx eslint .` here reported errors from
+  // four branches at once, in files that do not appear in `git status` and
+  // whose paths read like ordinary source paths. Same reason vite.config.js
+  // excludes them from the test run.
+  globalIgnores(['dist', '.claude/**']),
   // Build config runs in Node, not the browser, so it gets Node's globals —
   // `process.env` in vite.config.js is correct there and was only an error
   // because every file was being linted as browser code.

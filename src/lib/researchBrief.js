@@ -22,6 +22,7 @@
 // reader actually wants — what has a clock on it, and everything else.
 
 import { rankFindings, daysLeft, lensByKey } from './agent/lenses'
+import { num } from './agent/num'
 
 /** A run that is still going. Anything else is terminal. */
 export const isRunning = run => run?.status === 'running'
@@ -194,21 +195,6 @@ export function setupGaps(report = {}, { hasOwnAccount = true } = {}) {
     })
   }
   return gaps
-}
-
-/**
- * A real number, or null.
- *
- * `Number(null)` is `0` and `Number('')` is `0`, and `Number.isFinite(0)` is
- * `true` — so the obvious guard reports a missing follower count as zero
- * followers. This codebase has been bitten by that three times, which is why
- * the conversion is a named function with its own test rather than an inline
- * `Number(x)` at each call site.
- */
-function num(n) {
-  if (n === null || n === undefined || n === '') return null
-  const v = Number(n)
-  return Number.isFinite(v) ? v : null
 }
 
 /** Percentage, rounded, for confidence and share values that arrive 0–1. */
