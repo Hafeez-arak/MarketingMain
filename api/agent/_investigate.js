@@ -100,10 +100,14 @@ export async function loadRunContext(workspaceId, runId, cadence = 'weekly') {
     audience: (profile?.targetPersonas || '').split('\n').slice(0, 4).join('; '),
     geography: market.label,
   }
+  // Kept out of brandFacts: it is not a fact about the brand, it is an
+  // instruction about how to search for one. `who()` renders brandFacts
+  // verbatim and a language line there would read as something the brand does.
+  const language = market.language || ''
 
   return {
     brand, ctx, profile, gathered, agenda: agenda || [], priorRuns: priorRuns || [],
-    competitors, alreadySaid: alreadySaid || [], motion, explicit, brandFacts,
+    competitors, alreadySaid: alreadySaid || [], motion, explicit, brandFacts, language,
     lenses: lensesFor({ motion, cadence }),
   }
 }
@@ -135,7 +139,7 @@ export async function planLenses(workspaceId, runId, cadence = 'weekly') {
  * every lens's — the calendar's dates cost an API round trip, and fetching
  * them to run the demand lens would be waste repeated on every call.
  */
-async function argsForLens(key, { brandFacts, motion, competitors, gathered, profile, ctx, agenda = [] }) {
+async function argsForLens(key, { brandFacts, motion, competitors, gathered, profile, ctx, agenda = [], language = '' }) {
   if (key === 'calendar') {
     // No `args`: this lens has no prompt because it makes no model call. What
     // it needs is the computed calendar itself, which is the whole lens now.
@@ -146,22 +150,23 @@ async function argsForLens(key, { brandFacts, motion, competitors, gathered, pro
   // every lens that searches. It used to reach synthesis only, which reads what
   // the lenses already found and cannot look anything up, so a standing question
   // could change the write-up and never change what was searched for.
-  if (key === 'openings') return { args: [brandFacts, { motion, agenda }] }
-  if (key === 'demand') return { args: [brandFacts, { competitors, agenda }] }
+  if (key === 'openings') return { args: [brandFacts, { motion, agenda, language }] }
+  if (key === 'demand') return { args: [brandFacts, { competitors, agenda, language }] }
   // The market it researches rides in brandFacts like every other brand fact,
   // resolved once in loadRunContext rather than a second time here.
-  if (key === 'category') return { args: [brandFacts, { agenda }] }
+  if (key === 'category') return { args: [brandFacts, { agenda, language }] }
   if (key === 'rivals') {
     return {
       args: [brandFacts, {
         competitors,
         agenda,
+        language,
         board: gathered?.competitor_board || [],
         movements: gathered?.movements || [],
       }],
     }
   }
-  if (key === 'craft') return { args: [brandFacts, { platforms: ['instagram'], agenda }] }
+  if (key === 'craft') return { args: [brandFacts, { platforms: ['instagram'], agenda, language }] }
   return { args: null }
 }
 

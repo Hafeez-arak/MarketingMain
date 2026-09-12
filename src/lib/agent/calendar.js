@@ -183,6 +183,30 @@ export const COUNTRY_LABELS = {
   ID: 'Indonesia', SG: 'Singapore',
 }
 
+/**
+ * The language a market's own institutions publish in.
+ *
+ * ── WHY A LENS NEEDS THIS ──
+ *
+ * The 2026-09-12 run read 99 pages and reported nothing, and fixing the
+ * instruction that caused the silence exposed what was underneath it: every
+ * one of those 99 pages was in English. For a Saudi market that is a real
+ * ceiling, not a preference. Government tender portals, municipal
+ * announcements, contract awards and much of the trade press are published in
+ * Arabic first and in English late, partially, or never — so an
+ * English-only search sees the market weeks after it moved, if at all.
+ *
+ * Only listed where it is NOT English, because the useful signal is "also
+ * search in this other language" and an entry saying English would render a
+ * line telling an English-speaking model to search in English.
+ */
+export const LOCAL_LANGUAGES = {
+  SA: 'Arabic', AE: 'Arabic', QA: 'Arabic', KW: 'Arabic', BH: 'Arabic',
+  OM: 'Arabic', EG: 'Arabic', JO: 'Arabic', LB: 'Arabic',
+  DE: 'German', FR: 'French', ES: 'Spanish', IT: 'Italian', NL: 'Dutch',
+  TR: 'Turkish', ID: 'Indonesian', MY: 'Malay', PK: 'Urdu',
+}
+
 /** Cities that pin a country even when the country itself is never named. */
 const CITY_HINTS = {
   riyadh: 'SA', jeddah: 'SA', dammam: 'SA', khobar: 'SA', mecca: 'SA', makkah: 'SA',
@@ -445,9 +469,15 @@ export function marketOf({ profile = {}, ctx = {} } = {}) {
   // An explicit free-text geography is a person's own words for their market.
   // Prefer it verbatim: "Riyadh and the Eastern Province" says more than "SA".
   const written = String(profile?.customFields?.geography || '').trim()
-  if (written) return { label: written, code: countryOf({ profile, ctx }).code, source: 'custom field geography' }
+  if (written) {
+    // A written geography names the market better than a code ever will, but
+    // the country is still resolved underneath it — the language depends on
+    // the country, not on how someone phrased "Riyadh and the Eastern Province".
+    const { code } = countryOf({ profile, ctx })
+    return { label: written, code, language: LOCAL_LANGUAGES[code] || '', source: 'custom field geography' }
+  }
 
   const { code, source } = countryOf({ profile, ctx })
-  if (!code) return { label: '', code: null, source: '' }
-  return { label: COUNTRY_LABELS[code] || code, code, source }
+  if (!code) return { label: '', code: null, language: '', source: '' }
+  return { label: COUNTRY_LABELS[code] || code, code, language: LOCAL_LANGUAGES[code] || '', source }
 }
