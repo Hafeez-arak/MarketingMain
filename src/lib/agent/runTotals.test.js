@@ -54,10 +54,16 @@ describe('runTotals', () => {
     expect(() => runTotals(null)).not.toThrow()
   })
 
-  it('does not invent a search count', () => {
-    // The provider reports searches in usage.server_tool_use and agent_usage
-    // has nowhere to keep them. A plausible number derived from source URLs
-    // would be worse than an absent one.
-    expect(runTotals(REAL).searches).toBeUndefined()
+  it('sums the searches the run actually made', () => {
+    // The second real cost of a run, invisible until agent_usage gained a
+    // column for it. A lens burning its whole budget to answer nothing looked
+    // identical on the ledger to one that found its answer in two.
+    const t = runTotals([{ model: 'm', searches: 7 }, { model: 'm', searches: 6 }, { model: 'm' }])
+    expect(t.searches).toBe(13)
+  })
+
+  it('reads 0 searches for rows written before the column existed', () => {
+    // Honest for them: nobody was counting.
+    expect(runTotals(REAL).searches).toBe(0)
   })
 })

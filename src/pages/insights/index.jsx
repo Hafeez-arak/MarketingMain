@@ -4,6 +4,7 @@ import { useApp } from '../../store/app'
 import { useAuth } from '../../store/auth'
 import { Card, PageHeader, Button, Empty, Spinner } from '../../components/ui/index'
 import { fetchBrandMemory, updateBrandMemory, deleteBrandMemory } from '../../lib/brandContext'
+import { runHealth, scheduleNeverRan } from '../../lib/agent/runHealth'
 import {
   fetchIdeaEvents, fetchIdeasForInsights, fetchPerformance, requestInsightsReview,
   summariseDecisions, summarisePerformance,
@@ -112,6 +113,11 @@ export function Insights() {
     return () => { alive = false }
   }, [activeWorkspaceId, accessToken, tick, selectedId])
 
+  // Computed from the run list the page already loads, so this costs no
+  // query — the reason it can sit on every visit rather than behind a check.
+  const health = useMemo(() => runHealth(runs, now), [runs, now])
+  const neverScheduled = useMemo(() => scheduleNeverRan(runs), [runs])
+
   const selected = useMemo(
     () => runs.find(r => r.id === selectedId) || runs[0] || null, [runs, selectedId],
   )
@@ -208,6 +214,36 @@ export function Insights() {
       </PageHeader>
 
       {runNote && <Card className="p-3"><p className="text-sm text-text-secondary">{runNote}</p></Card>}
+
+      {/* ── Is this actually running? ──
+          Above everything, because it invalidates everything below it. A page
+          showing last month's brief with no warning is indistinguishable from
+          a page showing this week's, and the difference is the entire value of
+          a weekly agent. */}
+      {health && (
+        <Card className={`p-4 border ${
+          health.level === 'failed' ? 'border-red-200 bg-red-50/50'
+            : health.level === 'stuck' ? 'border-amber-200 bg-amber-50/50'
+              : 'border-amber-200 bg-amber-50/40'}`}>
+          <p className="text-sm font-semibold text-text">{health.headline}</p>
+          {health.detail && (
+            <p className="text-xs text-text-secondary mt-1.5 leading-relaxed">{health.detail}</p>
+          )}
+          <p className="text-xs text-text-tertiary mt-2">{health.action}</p>
+        </Card>
+      )}
+
+      {/* Separate from staleness because it is a different diagnosis with a
+          different fix: the schedule was never imported, rather than imported
+          and broken. Only shown once there is enough history to mean it. */}
+      {neverScheduled && !health && (
+        <Card className="p-3 border border-border">
+          <p className="text-xs text-text-secondary leading-relaxed">
+            Every run here was started by hand — the weekly schedule has never triggered one.
+            If it is meant to be running, check the workflow is imported and active.
+          </p>
+        </Card>
+      )}
 
       {/* ── Where we stand ──
           Above the tabs on purpose. The question a person arrives with is

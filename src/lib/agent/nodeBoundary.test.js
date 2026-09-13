@@ -64,6 +64,7 @@ describe('the agent runs in Node, not in a bundle', () => {
     'src/lib/agent/discover.js',
     'src/lib/agent/agendaDedup.js',
     'src/lib/agent/novelty.js',
+    'src/lib/agent/runHealth.js',
     'src/lib/agent/loop.js',
     'src/lib/agent/gather.js',
     'src/lib/agent/brief.js',

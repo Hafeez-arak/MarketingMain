@@ -30,6 +30,12 @@ export function normaliseUsage(usage = {}) {
     tokens_cache_read:  n(usage.cache_read_input_tokens),
     tokens_cache_write: n(usage.cache_creation_input_tokens),
     tokens_out:         n(usage.output_tokens),
+    // The second real cost of a run, and the only one that was invisible.
+    // Every lens declares a search budget and nothing confirmed what it spent,
+    // so a lens burning its whole allowance to answer nothing — which is what
+    // `openings` did on 2026-09-12 — looked identical on the ledger to one
+    // that found its answer in two.
+    searches:           n(usage.server_tool_use?.web_search_requests),
   }
 }
 
@@ -107,10 +113,9 @@ export function cacheHitRate(usage) {
  * naming Sonnet would make the cost look inexplicable to anyone reading the
  * row later.
  *
- * `searches` is deliberately NOT computed here. The provider reports web
- * search counts in `usage.server_tool_use`, and `agent_usage` has no column to
- * keep them in — so the only honest options are a migration or silence, and a
- * plausible-looking number derived from source URLs is neither.
+ * `searches` comes from the ledger too, now that agent_usage has somewhere to
+ * keep it (20260913_agent_usage_searches.sql). Rows written before that
+ * migration carry 0, which is honest for them — nobody was counting.
  */
 export function runTotals(rows = [], { rank = ['claude-opus-5', 'claude-sonnet-5', 'claude-haiku-4-5-20251001'] } = {}) {
   const list = (rows || []).filter(Boolean)
@@ -131,6 +136,7 @@ export function runTotals(rows = [], { rank = ['claude-opus-5', 'claude-sonnet-5
     tokens_in: list.reduce((n, r) => n + num(r.tokens_in) + num(r.tokens_cache_read) + num(r.tokens_cache_write), 0),
     tokens_out: list.reduce((n, r) => n + num(r.tokens_out), 0),
     cost_usd: Number(list.reduce((n, r) => n + num(r.cost_usd), 0).toFixed(4)),
+    searches: list.reduce((n, r) => n + num(r.searches), 0),
     model,
   }
 }

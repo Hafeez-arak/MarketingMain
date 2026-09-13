@@ -114,7 +114,7 @@ export default async function handler(req, res) {
     try {
       const usage = await db(
         `agent_usage?run_id=eq.${runId}&workspace_id=eq.${workspaceId}` +
-        `&select=model,cost_usd,tokens_in,tokens_out,tokens_cache_read,tokens_cache_write`,
+        `&select=model,cost_usd,tokens_in,tokens_out,tokens_cache_read,tokens_cache_write,searches`,
       )
       totals = runTotals(usage || [])
     } catch (err) {
@@ -132,6 +132,7 @@ export default async function handler(req, res) {
       ...(totals ? {
         tokens_in: totals.tokens_in,
         tokens_out: totals.tokens_out,
+        searches: totals.searches,
         model: totals.model,
       } : {}),
       finished_at: new Date().toISOString(),
