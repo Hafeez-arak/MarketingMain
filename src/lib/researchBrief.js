@@ -135,7 +135,11 @@ export function emptiness(report = {}) {
     (report.market || []).length ||
     (report.gaps || []).length ||
     (report.findings || []).length ||
-    (report.proposed_ideas || []).length
+    (report.proposed_ideas || []).length ||
+    // Our own measured week is content in its own right. Without this, a brand
+    // with real TikTok numbers and no market news would be told the run
+    // produced nothing, on a page that is displaying its numbers.
+    (report.own_performance?.measured_count || 0)
 
   if (hasContent) return { empty: false, reason: '' }
   if (failed.length) {
@@ -194,7 +198,43 @@ export function setupGaps(report = {}, { hasOwnAccount = true } = {}) {
       to: '/integrations',
     })
   }
+
+  // Per-platform gaps. These are the ones that silently cost the most: a
+  // channel publishing without analytics looks identical, on every screen in
+  // this app, to a channel nobody posts to.
+  for (const p of report?.own_performance?.platforms || []) {
+    if (p.state === 'unmeasured') {
+      gaps.push({
+        key: `analytics_${p.platform}`,
+        what: `${p.posts} post${p.posts === 1 ? '' : 's'} went out on ${p.label} with no analytics synced, so that channel cannot be judged.`,
+        fix: `Check the analytics sync for ${p.label}.`,
+        to: '/integrations',
+      })
+    } else if (p.connected && p.needs_reconnection) {
+      gaps.push({
+        key: `reconnect_${p.platform}`,
+        what: `The ${p.label} account is flagged as needing reconnection — publishing and measurement may both be failing.`,
+        fix: `Reconnect ${p.label}.`,
+        to: '/integrations',
+      })
+    }
+  }
   return gaps
+}
+
+/**
+ * Our own channels, ordered the way a person should read them.
+ *
+ * Measured first — those are the rows with an answer on them. Connected but
+ * silent or unsynced next, because those are actionable. Unconnected last:
+ * worth showing, since a dark channel is a marketing fact, but never at the
+ * top of a page whose job is to report the week that happened.
+ */
+export function ownChannelRows(report = {}) {
+  const rank = { measured: 0, unmeasured: 1, silent: 2, not_connected: 3 }
+  return [...(report?.own_performance?.platforms || [])]
+    .sort((a, b) => (rank[a.state] ?? 9) - (rank[b.state] ?? 9)
+      || (b.avg_engagement ?? -1) - (a.avg_engagement ?? -1))
 }
 
 /** Percentage, rounded, for confidence and share values that arrive 0–1. */

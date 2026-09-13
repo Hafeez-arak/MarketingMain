@@ -3,7 +3,7 @@ import { useAuth } from '../store/auth'
 import { Card, SectionHead, Button } from './ui/index'
 import {
   fetchAgenda, setHandleByHand, setAgendaStatus, addAgendaRow,
-  deleteAgendaRow, watchlistReadiness, resolveHandles,
+  deleteAgendaRow, watchlistReadiness, resolveHandles, discoverCompetitors,
 } from '../lib/agentAgenda'
 
 // ─── What the agent watches, and what it is told to ask ────────────────────
@@ -30,6 +30,10 @@ function HandleRow({ row, accessToken, onChanged }) {
 
   const measurable = row.ig_status === 'resolved' || row.ig_status === 'human_set'
   const weak = row.ig_status === 'unresolved' && row.ig_handle
+  // A rival the agent proposed and nobody has accepted yet. It is NOT measured
+  // while in this state — gather filters on status=active — so the accept
+  // button below is the only thing that puts it on the board.
+  const pending = row.status === 'proposed'
 
   const save = async () => {
     setSaving(true)
@@ -97,6 +101,27 @@ function HandleRow({ row, accessToken, onChanged }) {
               or hand-set handle.
             </div>
           ) : null}
+          {/* Without this the discover step could propose a rival that nobody
+              could ever accept, and it would sit unmeasured forever. */}
+          {pending ? (
+            <div className="mt-1.5 flex items-center gap-2 text-[11px]">
+              <span className="text-slate-500">
+                {row.created_by === 'agent' ? 'The agent suggests watching this.' : 'Not yet accepted.'}
+              </span>
+              <button
+                onClick={async () => { await setAgendaStatus(accessToken, row.id, 'active'); onChanged() }}
+                className="text-emerald-600 hover:underline"
+              >
+                accept
+              </button>
+              <button
+                onClick={async () => { await setAgendaStatus(accessToken, row.id, 'retired'); onChanged() }}
+                className="text-slate-400 hover:text-slate-700"
+              >
+                dismiss
+              </button>
+            </div>
+          ) : null}
         </div>
       </div>
     </li>
@@ -136,6 +161,24 @@ export function AgentSteering() {
     refresh()
   }
 
+  // Finding WHO to watch, which is a different question from finding their
+  // Instagram account. Alo Kheyatah has no competitor list at all, so for that
+  // workspace this is the first useful thing the agent can do.
+  const findRivals = async () => {
+    setFinding(true)
+    setFindNote('')
+    const out = await discoverCompetitors({ workspaceId: activeWorkspaceId, accessToken })
+    setFindNote(
+      out.ok
+        ? (out.proposed
+          ? `Proposed ${out.proposed} to accept below${out.already_watching ? `, ${out.already_watching} already watched` : ''}.`
+          : out.note || 'Nothing new found.')
+        : out.error || 'Could not search.',
+    )
+    setFinding(false)
+    refresh()
+  }
+
   const findHandles = async () => {
     setFinding(true)
     setFindNote('')
@@ -157,9 +200,14 @@ export function AgentSteering() {
           title="Competitors it watches"
           subtitle={readiness.note}
           action={
-            <Button size="sm" variant="ghost" onClick={findHandles} disabled={finding}>
-              {finding ? 'Searching…' : 'Find handles'}
-            </Button>
+            <span className="flex gap-1">
+              <Button size="sm" variant="ghost" onClick={findRivals} disabled={finding}>
+                {finding ? 'Searching…' : 'Find rivals'}
+              </Button>
+              <Button size="sm" variant="ghost" onClick={findHandles} disabled={finding}>
+                Find handles
+              </Button>
+            </span>
           }
         />
         {findNote ? <p className="mt-1 text-xs text-slate-600">{findNote}</p> : null}

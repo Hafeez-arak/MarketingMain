@@ -3,6 +3,7 @@ import { db } from './_supabase.js'
 import { textIn, urlsFromResponse } from '../../src/lib/agent/loop.js'
 import { lensByKey, makeFinding } from '../../src/lib/agent/lenses.js'
 import { findingsFromEvents } from '../../src/lib/agent/calendar.js'
+import { ownChannelFindings } from '../../src/lib/agent/ownChannels.js'
 
 // ─── Running a lens ────────────────────────────────────────────────────────
 // Each lens is one bounded model call with web search, asked one question and
@@ -217,22 +218,35 @@ export function runCalendarLens({ calendar }) {
 /**
  * The one lens that makes no model call.
  *
- * Our own numbers are computed, not researched, so this reads the same tables
- * the get_our_performance tool does and turns them into findings directly. It
- * is listed as a lens rather than left implicit so the brief can report it as
- * checked-and-quiet instead of silently absent — a lens that found nothing and
- * a lens that never ran must never look the same.
+ * Our own numbers are computed, not researched, so this reads what stage 0
+ * already measured and turns it into findings directly. It is listed as a lens
+ * rather than left implicit so the brief can report it as checked-and-quiet
+ * instead of silently absent — a lens that found nothing and a lens that never
+ * ran must never look the same.
+ *
+ * TWO SOURCES, AND THEY ARE NOT THE SAME KIND OF FACT:
+ *
+ *   `movements` come from business_discovery — our Instagram account read the
+ *   same way a rival's is, which is what makes the competitor board comparable
+ *   at all. Follower counts and cadence, Instagram only, forever.
+ *
+ *   `own_performance` comes from our own published posts and their analytics
+ *   rows, on EVERY platform we publish to. This is the half that was missing:
+ *   the agent measured our Instagram profile but never once looked at how our
+ *   own TikTok or LinkedIn posts actually did, though the rows were sitting in
+ *   post_analytics the whole time.
  */
 export async function runOurselvesLens({ gathered }) {
   try {
     const board = gathered?.competitor_board || []
     const movements = (gathered?.movements || []).filter(m => m.competitor === 'Us')
+    const own = gathered?.own_performance || null
     const findings = []
 
     for (const m of movements) {
       findings.push(makeFinding('ourselves', {
         headline: `Our ${m.metric} moved ${m.from} → ${m.to} (${m.change_pct}%).`,
-        detail: `Measured, not estimated. Significance: ${m.significance}.`,
+        detail: `Measured, not estimated. Significance: ${m.significance}. Instagram profile data.`,
         confidence: 1,
         novelty: 'changed',
         evidence: m,
@@ -242,13 +256,22 @@ export async function runOurselvesLens({ gathered }) {
       }))
     }
 
-    const measurable = board.filter(c => c.data === 'instagram').length
-    if (!movements.length && measurable === 0) {
-      // Explicitly a quiet result rather than an empty one.
-      return { lens: 'ourselves', ok: true, findings: [], sources: [], cost: 0, error: '' }
+    for (const raw of ownChannelFindings(own)) {
+      findings.push(makeFinding('ourselves', raw))
     }
 
-    return { lens: 'ourselves', ok: true, findings, sources: [], cost: 0, error: '' }
+    const measurable = board.filter(c => c.data === 'instagram').length
+    if (!findings.length && measurable === 0) {
+      // Explicitly a quiet result rather than an empty one. `note` carries the
+      // reason, so the brief can say WHY it is quiet rather than leaving a
+      // reader to assume the lens broke.
+      return {
+        lens: 'ourselves', ok: true, findings: [], sources: [], cost: 0, error: '',
+        note: own?.note || '',
+      }
+    }
+
+    return { lens: 'ourselves', ok: true, findings, sources: [], cost: 0, error: '', note: own?.note || '' }
   } catch (err) {
     return { lens: 'ourselves', ok: false, findings: [], sources: [], cost: 0, error: String(err?.message || err) }
   }

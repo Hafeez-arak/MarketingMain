@@ -12,9 +12,11 @@ import { gatherCalendar } from './_calendar.js'
 import { marketOf } from '../../src/lib/agent/calendar.js'
 import { priorIdeas } from './_memory.js'
 import { partitionRepeats } from '../../src/lib/agent/memory.js'
+import { freshQuestions } from '../../src/lib/agent/agendaDedup.js'
 import {
   deadlineFor, resultsFromRows, timingNote, pendingLenses, timedOutResult,
 } from '../../src/lib/agent/phases.js'
+import { LIVE_PLATFORMS } from '../../src/lib/utils.js'
 
 // Re-exported: the resolver imported it from here before it moved to loop.js.
 export { urlsFromResponse }
@@ -166,7 +168,27 @@ async function argsForLens(key, { brandFacts, motion, competitors, gathered, pro
       }],
     }
   }
-  if (key === 'craft') return { args: [brandFacts, { platforms: ['instagram'], agenda, language }] }
+  if (key === 'craft') {
+    // Was `['instagram']`, hardcoded. That made the one lens whose entire job
+    // is "which formats and platforms are working" research a single platform
+    // regardless of where the brand actually publishes — so a brand posting
+    // mostly to TikTok got advice about Reels.
+    //
+    // Falls back to the full live set rather than to Instagram when stage 0
+    // found nothing connected: a brand with no accounts yet is deciding where
+    // to start, and narrowing that question to one platform pre-empts the
+    // decision it most needs help with.
+    const connected = (gathered?.own_performance?.platforms || [])
+      .filter(p => p.connected)
+      .map(p => p.platform)
+    return {
+      args: [brandFacts, {
+        platforms: connected.length ? connected : LIVE_PLATFORMS,
+        agenda,
+        language,
+      }],
+    }
+  }
   return { args: null }
 }
 
@@ -487,8 +509,19 @@ export async function persistReport(workspaceId, runId, report) {
     }).catch(err => console.error('[agent/synthesise] rule:', err.message))
   }
 
-  for (const a of report?.agenda_changes || []) {
-    if (a.action !== 'add') continue   // retiring is a human decision
+  // Every question already on the agenda, in EVERY status. Retired matters
+  // most: a question someone explicitly turned down must not come back next
+  // week, which is the reason dismissal keeps the row rather than deleting it.
+  const priorQuestions = await db(
+    `research_agenda?workspace_id=eq.${workspaceId}&kind=eq.question&select=subject&limit=300`,
+  ).catch(() => [])
+
+  const { fresh: freshAgenda } = freshQuestions(
+    (report?.agenda_changes || []).filter(a => a.action === 'add'),  // retiring is a human decision
+    priorQuestions || [],
+  )
+
+  for (const a of freshAgenda) {
     await db('research_agenda', {
       method: 'POST',
       body: {

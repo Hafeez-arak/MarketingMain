@@ -4,6 +4,7 @@ import {
   looksLikeCredentialsFailure, credentialsNote,
 } from '../../src/lib/agent/gather.js'
 import { tokenHealth, worthSurfacing } from '../../src/lib/agent/tokenHealth.js'
+import { ownChannels, priorPeriod } from '../../src/lib/agent/ownChannels.js'
 
 // ─── Stage 0, the IO half ──────────────────────────────────────────────────
 // Ported from the n8n Gather node. The arithmetic lives in
@@ -75,6 +76,96 @@ export async function checkTokenHealth() {
 }
 
 /**
+ * Every social account this workspace has connected, on any platform.
+ *
+ * Deliberately unfiltered. The old read here ended in `platform=eq.instagram`,
+ * which was the single line that made the whole agent Instagram-only: the
+ * TikTok and LinkedIn rows were sitting in the same table the whole time and
+ * nothing ever selected them.
+ */
+async function connectedAccounts(workspaceId) {
+  return db(
+    `social_accounts?workspace_id=eq.${workspaceId}&is_active=eq.true` +
+    `&select=platform,username,followers_count,needs_reconnection,is_active&limit=50`,
+  ).catch(() => [])
+}
+
+/**
+ * How our own posts did, on every platform we publish to.
+ *
+ * This is the half of the run that needs no Meta credentials and no verified
+ * competitor handle, which is exactly why it is its own function called on
+ * every path through `gather`. A brand with no Graph token and no rivals
+ * resolved should still be told how its own week went — that was previously
+ * the one thing it could not get, because the two were tangled together.
+ *
+ * Never throws. Stage 0's contract is that the measured numbers survive
+ * anything; a failure here returns an empty shape with the reason attached,
+ * and the run carries on.
+ */
+export async function gatherOwnChannels(workspaceId, period) {
+  const prior = priorPeriod(period)
+  try {
+    const accounts = await connectedAccounts(workspaceId)
+
+    // Both windows in one read. `published_at` is the column that decides
+    // which week a post belongs to, but it is null for anything that never
+    // went out, so the window is widened by the fallback column rather than
+    // filtered in SQL — postsIn() does the precise bucketing in code where it
+    // is testable.
+    const from = prior?.start || period?.start
+    const posts = await db(
+      `generated_posts?workspace_id=eq.${workspaceId}` +
+      `&or=(published_at.gte.${from},scheduled_date.gte.${String(from).slice(0, 10)})` +
+      `&select=id,platform,topic,format,media_type,post_kind,status,publish_status,` +
+      `published_at,scheduled_date,platform_post_url&limit=500`,
+    ).catch(() => [])
+
+    // ── The frozen Instagram table ──
+    //
+    // Checked live on 2026-09-13: `generated_posts` holds ZERO rows, every one
+    // of this company's 21 real posts is still in `instagram_generated_posts`,
+    // and all 14 post_analytics rows point at that table. Reading only the new
+    // table would report "we have never published anything" to a brand that
+    // has — the exact kind of confident wrong number this agent is built to
+    // avoid.
+    //
+    // Read-only and additive. Nothing writes here, the new table stays the
+    // single write target, and the day the legacy rows are migrated or age out
+    // of the window this simply returns nothing. The Zernio sync already reads
+    // both tables for the same reason, so this is the established shape rather
+    // than a new exception.
+    //
+    // The columns differ — it has no `platform`, `format` or `media_type`,
+    // because it predates a world with more than one platform — so the rows
+    // are normalised here into the shape ownChannels expects.
+    const legacy = await db(
+      `instagram_generated_posts?workspace_id=eq.${workspaceId}` +
+      `&or=(published_at.gte.${from},scheduled_date.gte.${String(from).slice(0, 10)})` +
+      `&select=id,topic,post_kind,status,publish_status,published_at,scheduled_date,platform_post_url&limit=500`,
+    ).catch(() => [])
+
+    const all = [
+      ...(posts || []),
+      ...(legacy || []).map(p => ({ ...p, platform: 'instagram', format: '', media_type: '' })),
+    ]
+
+    const ids = all.map(p => p.id).filter(Boolean)
+    const analytics = ids.length
+      ? await db(
+          `post_analytics?workspace_id=eq.${workspaceId}&post_id=in.(${ids.join(',')})` +
+          `&select=post_id,platform,metric_date,likes,comments,shares,saves,reach,views&limit=2000`,
+        ).catch(() => [])
+      : []
+
+    return ownChannels({ accounts: accounts || [], posts: all, analytics: analytics || [], period, prior })
+  } catch (err) {
+    const empty = ownChannels({ accounts: [], posts: [], analytics: [], period, prior })
+    return { ...empty, error: String(err?.message || err).slice(0, 200) }
+  }
+}
+
+/**
  * Run stage 0 for one workspace and commit the result.
  *
  * @param {string} workspaceId  VERIFIED
@@ -82,14 +173,23 @@ export async function checkTokenHealth() {
  * @param {object} period       from periodFor()
  */
 export async function gather(workspaceId, runId, period) {
+  // First, and outside every early return below. Our own numbers do not depend
+  // on Meta credentials or on any rival being resolved, so they must not be
+  // lost when either of those is missing.
+  const own = await gatherOwnChannels(workspaceId, period)
   if (!TOKEN() || !IG_USER()) {
     // Named rather than swallowed, and NOT fatal to the run row — the caller
-    // decides. A brand with no Meta credentials can still get market research;
-    // it just cannot get measured competitor numbers.
+    // decides. A brand with no Meta credentials can still get market research
+    // AND its own per-platform numbers; it just cannot get measured
+    // COMPETITOR numbers, because business_discovery is the only source of
+    // those and it is Meta's.
+    const report = emptyReport(period, own)
+    await patchRun(workspaceId, runId, { stage: 'investigate', report }).catch(() => {})
     return {
       ok: false,
       error: 'META_IG_TOKEN / META_IG_USER_ID are not set on this deployment, so no competitor numbers could be measured.',
-      report: emptyReport(period),
+      report,
+      own_performance: own,
       snapshots: 0, measured: 0, failed: 0,
     }
   }
@@ -99,9 +199,19 @@ export async function gather(workspaceId, runId, period) {
   // ig_status is precisely how a guess would reach the numbers. Two similarly
   // named companies in one workspace, and a confident week of figures attached
   // to the wrong one is the kind of wrong that does not look wrong.
+  // `status=eq.active`, not `neq.retired`. Those differ on exactly one value —
+  // 'proposed' — and that value is the whole point of the approval gate.
+  //
+  // It read `neq.retired` when every competitor row was human-typed and
+  // therefore active, so the two filters agreed by accident. They stopped
+  // agreeing the moment the discover step could propose a rival: a company the
+  // agent found, that nobody had accepted, would have been measured and
+  // reported as a tracked competitor on the strength of its own suggestion.
+  // The standing-questions read has always required 'active'; this now matches
+  // it, so one rule governs the whole watchlist.
   const watch = await db(
     `research_agenda?workspace_id=eq.${workspaceId}&kind=eq.competitor` +
-    `&status=neq.retired&ig_status=in.(resolved,human_set)` +
+    `&status=eq.active&ig_status=in.(resolved,human_set)` +
     `&select=id,subject,ig_handle&limit=100`,
   )
 
@@ -122,10 +232,10 @@ export async function gather(workspaceId, runId, period) {
     // Not a dead end. Market and trend research needs no rival at all, and a
     // brand with nothing verified yet is exactly the one that needs it most —
     // so this carries on to the investigation stages with an empty board.
-    const report = emptyReport(period)
+    const report = emptyReport(period, own)
     await patchRun(workspaceId, runId, { stage: 'investigate', report })
     return {
-      ok: true, report, snapshots: 0, measured: 0, failed: 0,
+      ok: true, report, own_performance: own, snapshots: 0, measured: 0, failed: 0,
       note: 'No verified handles to measure. Run handle resolution first.',
     }
   }
@@ -207,6 +317,7 @@ export async function gather(workspaceId, runId, period) {
     period,
     failures,
     caveats: credentialsProblem ? [credentialsNote(failures), ...caveats] : caveats,
+    own,
   })
   if (credentialsProblem) report.credentials_problem = true
 
@@ -218,13 +329,18 @@ export async function gather(workspaceId, runId, period) {
 
   if (credentialsProblem) {
     // Otherwise the headline reads "First measurement of 2 competitors", which
-    // is actively misleading when zero of them were measured.
-    report.headline = 'Nothing could be measured — Instagram refused every request.'
+    // is actively misleading when zero of them were measured. Our own channels
+    // are unaffected by a Graph refusal on TikTok and LinkedIn, so the headline
+    // says what was lost rather than implying the whole run was.
+    report.headline = own?.measured_count
+      ? `Instagram refused every competitor request, but our own ${own.measured_count} measured channel${own.measured_count === 1 ? '' : 's'} still reported.`
+      : 'Nothing could be measured — Instagram refused every request.'
   }
 
   return {
     ok: true,
     report,
+    own_performance: own,
     credentials_problem: credentialsProblem,
     token_health: health,
     snapshots: rows.length,
