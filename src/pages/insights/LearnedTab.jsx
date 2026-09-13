@@ -240,7 +240,7 @@ export function LearnedTab({
       <Card>
         <SectionHead
           title="Proposed rules"
-          subtitle="Suggestions waiting on you. Approving one adds it to the Brand Brain and it starts steering generation."
+          subtitle="Suggestions waiting on you. Approving one adds a rule on TOP of the Brand Brain — it never edits what you wrote about the company."
           action={
             <div className="flex items-center gap-2">
               {/* "Run research" is now a link, not a button. The one-shot

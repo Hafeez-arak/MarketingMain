@@ -112,18 +112,39 @@ export function deleteAgendaRow(accessToken, id) {
  * and it is invisible unless something says it.
  */
 export function watchlistReadiness(competitors) {
-  const rows = competitors || []
-  const measurable = rows.filter(c => c.ig_status === 'resolved' || c.ig_status === 'human_set')
+  const rows = (competitors || []).filter(c => c?.status !== 'retired')
+  // TWO gates, not one, and the summary has to honour both or it promises a
+  // number the run will not produce.
+  //
+  //   status    — has a person accepted watching this company at all?
+  //   ig_status — do we have an account we are willing to attribute to them?
+  //
+  // Counting a `proposed` rival as measurable because its handle resolved was
+  // the bug this filter exists to prevent: gather requires status=active, so
+  // the board would silently be one company short of what this line claimed.
+  const accepted = rows.filter(c => c.status === 'active')
+  const pending = rows.filter(c => c.status === 'proposed')
+  const measurable = accepted.filter(c => c.ig_status === 'resolved' || c.ig_status === 'human_set')
+
+  const pendingNote = pending.length
+    ? ` ${pending.length} suggested rival${pending.length === 1 ? '' : 's'} awaiting your accept — not watched until then.`
+    : ''
+
   return {
     total: rows.length,
+    accepted: accepted.length,
+    pending: pending.length,
     measurable: measurable.length,
-    unresolved: rows.filter(c => c.ig_status === 'unresolved' && c.ig_handle).length,
-    notFound: rows.filter(c => c.ig_status === 'not_found' || (!c.ig_handle && c.ig_status !== 'human_set')).length,
-    note: rows.length === 0
+    unresolved: accepted.filter(c => c.ig_status === 'unresolved' && c.ig_handle).length,
+    notFound: accepted.filter(c => c.ig_status === 'not_found' || (!c.ig_handle && c.ig_status !== 'human_set')).length,
+    note: (rows.length === 0
       ? 'No competitors are being watched yet.'
-      : measurable.length === 0
-        ? 'No competitor has a usable handle, so a run can only produce web findings.'
-        : `${measurable.length} of ${rows.length} can be measured on Instagram. The rest appear on web evidence only.`,
+      : accepted.length === 0
+        ? 'No competitor has been accepted onto the watchlist yet.'
+        : measurable.length === 0
+          ? 'No accepted competitor has a usable handle, so a run can only produce web findings.'
+          : `${measurable.length} of ${accepted.length} can be measured on Instagram. The rest appear on web evidence only.`
+    ) + pendingNote,
   }
 }
 
@@ -142,6 +163,29 @@ export async function resolveHandles({ workspaceId, accessToken, force = false }
     })
     const body = await res.json().catch(() => ({}))
     if (!res.ok) return { ok: false, error: body?.error || `Resolve returned ${res.status}.` }
+    return body
+  } catch (err) {
+    return { ok: false, error: String(err?.message || err) }
+  }
+}
+
+/**
+ * Ask the agent to find rivals nobody has listed.
+ *
+ * Distinct from resolveHandles and the order matters: this finds WHO to watch,
+ * that finds their Instagram account. Running the second on a watchlist nobody
+ * has accepted yet would attach a week of numbers to companies we may not want
+ * to track, so everything this proposes waits for a person first.
+ */
+export async function discoverCompetitors({ workspaceId, accessToken }) {
+  try {
+    const res = await fetch('/api/agent/discover', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+      body: JSON.stringify({ workspace_id: workspaceId }),
+    })
+    const body = await res.json().catch(() => ({}))
+    if (!res.ok) return { ok: false, error: body?.error || `Discover returned ${res.status}.` }
     return body
   } catch (err) {
     return { ok: false, error: String(err?.message || err) }

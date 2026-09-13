@@ -279,7 +279,7 @@ export function buildBoard(snapshots, prior) {
  * `stage_reached: 'gather'` is how a reader tells a full brief from the
  * measured half left behind by a run that died during investigation.
  */
-export function gatherReport({ snapshots, prior, period, failures = [], caveats = [] }) {
+export function gatherReport({ snapshots, prior, period, failures = [], caveats = [], own = null }) {
   const { movements, comparable } = computeMovements(snapshots, prior)
   const board = buildBoard(snapshots, prior)
   const baseline = comparable === 0
@@ -298,6 +298,12 @@ export function gatherReport({ snapshots, prior, period, failures = [], caveats 
     period,
     movements,
     competitor_board: board,
+    // Our own week, per platform. Separate from `competitor_board` on purpose:
+    // that board is Instagram-only because business_discovery is the only
+    // public source of a rival's numbers, while this covers every platform we
+    // publish to. Merging them into one list would invite a comparison between
+    // a measured TikTok of ours and a rival TikTok nobody can measure.
+    own_performance: own,
     market: [], gaps: [], proposed_rules: [], proposed_ideas: [], agenda_changes: [],
     // Failures and caveats reach the report rather than being dropped. A
     // cadence that is really a floor, read next week as a fall, is a movement
@@ -311,14 +317,26 @@ export function gatherReport({ snapshots, prior, period, failures = [], caveats 
   }
 }
 
-/** The report used when nothing has a verified handle — not a failure, just empty. */
-export function emptyReport(period) {
+/**
+ * The report used when no RIVAL could be measured — not a failure, just empty
+ * on that one axis.
+ *
+ * It takes our own performance because "nothing to measure" stopped being true
+ * the moment our own channels became readable without Meta. A brand with three
+ * connected accounts and no resolved competitor has a real week to report on,
+ * and a headline saying there is nothing to measure would send someone away
+ * from a page that has their own numbers on it.
+ */
+export function emptyReport(period, own = null) {
+  const measured = own?.measured_count || 0
   return {
-    headline: 'No competitor has a verified Instagram handle yet, so there is nothing to measure.',
+    headline: measured
+      ? `No competitor has a verified Instagram handle yet, but our own ${measured} measured channel${measured === 1 ? '' : 's'} reported.`
+      : 'No competitor has a verified Instagram handle yet, so there is nothing to measure.',
     baseline: true, quiet_week: false, period,
-    movements: [], competitor_board: [], market: [], gaps: [],
+    movements: [], competitor_board: [], own_performance: own, market: [], gaps: [],
     proposed_rules: [], proposed_ideas: [], agenda_changes: [],
-    unanswered: ['No competitor has a verified Instagram handle, so nothing could be measured.'],
+    unanswered: ['No competitor has a verified Instagram handle, so no rival could be measured.'],
     sources: [], stage_reached: 'gather',
   }
 }

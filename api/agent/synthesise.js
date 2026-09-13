@@ -2,6 +2,7 @@ import { db, isConfigured } from './_supabase.js'
 import { authorise } from './_serviceAuth.js'
 import { synthesiseRun, persistReport } from './_investigate.js'
 import { patchRun } from './_gather.js'
+import { runTotals } from '../../src/lib/agent/cost.js'
 import { rememberRun, rebuildDigest } from './_memory.js'
 import { deadlineFor } from '../../src/lib/agent/phases.js'
 
@@ -102,12 +103,38 @@ export default async function handler(req, res) {
     await rememberRun(workspaceId, deep.report, runId)
     await rebuildDigest(workspaceId, { force: true })
 
+    // The summary columns, filled from the ledger.
+    //
+    // tokens_in, tokens_out and model have existed since this table did and
+    // nothing ever wrote them, so every completed run reported 0 tokens beside
+    // a real dollar cost. agent_usage has the truth per call; this rolls it up.
+    // Never allowed to fail the run — a telemetry read that 500s must not cost
+    // someone their brief.
+    let totals = null
+    try {
+      const usage = await db(
+        `agent_usage?run_id=eq.${runId}&workspace_id=eq.${workspaceId}` +
+        `&select=model,cost_usd,tokens_in,tokens_out,tokens_cache_read,tokens_cache_write,searches`,
+      )
+      totals = runTotals(usage || [])
+    } catch (err) {
+      console.error('[agent/synthesise] usage roll-up:', err?.message || err)
+    }
+
     await patchRun(workspaceId, runId, {
       status: 'complete',
       stage: deep.ok ? 'synthesise' : 'gather',
       report: deep.report,
       error: deep.ok ? '' : String(deep.error || '').slice(0, 500),
-      cost_estimate: Number((deep.cost || 0).toFixed(4)),
+      // The ledger wins when it is readable. `deep.cost` only counts what THIS
+      // invocation spent, and the lenses ran in five earlier invocations.
+      cost_estimate: totals ? totals.cost_usd : Number((deep.cost || 0).toFixed(4)),
+      ...(totals ? {
+        tokens_in: totals.tokens_in,
+        tokens_out: totals.tokens_out,
+        searches: totals.searches,
+        model: totals.model,
+      } : {}),
       finished_at: new Date().toISOString(),
     })
 

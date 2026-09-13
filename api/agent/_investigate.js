@@ -12,9 +12,12 @@ import { gatherCalendar } from './_calendar.js'
 import { marketOf } from '../../src/lib/agent/calendar.js'
 import { priorIdeas } from './_memory.js'
 import { partitionRepeats } from '../../src/lib/agent/memory.js'
+import { freshQuestions } from '../../src/lib/agent/agendaDedup.js'
+import { applyNovelty, priorFindingsFrom, repetitionNote } from '../../src/lib/agent/novelty.js'
 import {
   deadlineFor, resultsFromRows, timingNote, pendingLenses, timedOutResult,
 } from '../../src/lib/agent/phases.js'
+import { LIVE_PLATFORMS } from '../../src/lib/utils.js'
 
 // Re-exported: the resolver imported it from here before it moved to loop.js.
 export { urlsFromResponse }
@@ -73,8 +76,14 @@ export async function loadRunContext(workspaceId, runId, cadence = 'weekly') {
       loadBrandContext(workspaceId, 'research'),
       db(`research_agenda?workspace_id=eq.${workspaceId}&kind=eq.question&status=eq.active` +
          `${agendaFilterFor(cadence)}&select=subject,why`),
+      // `started_at` so a repeat can be dated — "we have said this for three
+      // weeks" is the sentence a person acts on, and "continuing" is not.
+      // Six runs rather than three: at a weekly cadence three is barely a
+      // month, and a finding that returns every six weeks would read as new
+      // every single time. Only the HEADLINES ever reach the model; the rest
+      // of each report is read in code.
       db(`research_runs?workspace_id=eq.${workspaceId}&id=neq.${runId}&status=eq.complete` +
-         `&order=started_at.desc&limit=3&select=report`),
+         `&order=started_at.desc&limit=6&select=report,started_at`),
       db(`research_agenda?workspace_id=eq.${workspaceId}&kind=eq.competitor&status=neq.retired&select=subject`),
       priorIdeas(workspaceId),
       db(`research_runs?id=eq.${runId}&workspace_id=eq.${workspaceId}&select=report,stage,status&limit=1`),
@@ -166,7 +175,27 @@ async function argsForLens(key, { brandFacts, motion, competitors, gathered, pro
       }],
     }
   }
-  if (key === 'craft') return { args: [brandFacts, { platforms: ['instagram'], agenda, language }] }
+  if (key === 'craft') {
+    // Was `['instagram']`, hardcoded. That made the one lens whose entire job
+    // is "which formats and platforms are working" research a single platform
+    // regardless of where the brand actually publishes — so a brand posting
+    // mostly to TikTok got advice about Reels.
+    //
+    // Falls back to the full live set rather than to Instagram when stage 0
+    // found nothing connected: a brand with no accounts yet is deciding where
+    // to start, and narrowing that question to one platform pre-empts the
+    // decision it most needs help with.
+    const connected = (gathered?.own_performance?.platforms || [])
+      .filter(p => p.connected)
+      .map(p => p.platform)
+    return {
+      args: [brandFacts, {
+        platforms: connected.length ? connected : LIVE_PLATFORMS,
+        agenda,
+        language,
+      }],
+    }
+  }
   return { args: null }
 }
 
@@ -296,7 +325,16 @@ export async function synthesiseRun({ workspaceId, runId, cadence = 'weekly', de
       for (const u of r.sources || []) allowedUrls.add(u)
     }
 
-    const findings = rankFindings(results.flatMap(r => r.findings || []))
+    // Novelty, decided here rather than accepted from the model.
+    //
+    // No lens is given prior findings, so every 'continuing' a searching
+    // lens returned was a word chosen with no evidence available to choose
+    // it. Measured over the seven real runs: in one run the model called
+    // four findings continuing and all four were new, while the single
+    // genuine repeat scored 1.00. See novelty.js.
+    const seenBefore = priorFindingsFrom(priorRuns)
+    const findings = rankFindings(
+      applyNovelty(results.flatMap(r => r.findings || []), seenBefore))
     const summary = lensSummary(results)
 
     await markStage(workspaceId, runId, 'synthesise')
@@ -365,6 +403,10 @@ export async function synthesiseRun({ workspaceId, runId, cadence = 'weekly', de
     report.lenses = summary
     report.findings = findings
     report.sales_motion = { motion, explicit }
+    // A run that is entirely repeats is telling you something no single
+    // finding can: either the market is still, or the standing questions
+    // have stopped earning their search budget.
+    report.repetition = repetitionNote(findings)
 
     // ── Anti-repetition, enforced ──
     // The prompt above asked. This decides. A guarantee held only by a prompt
@@ -487,8 +529,19 @@ export async function persistReport(workspaceId, runId, report) {
     }).catch(err => console.error('[agent/synthesise] rule:', err.message))
   }
 
-  for (const a of report?.agenda_changes || []) {
-    if (a.action !== 'add') continue   // retiring is a human decision
+  // Every question already on the agenda, in EVERY status. Retired matters
+  // most: a question someone explicitly turned down must not come back next
+  // week, which is the reason dismissal keeps the row rather than deleting it.
+  const priorQuestions = await db(
+    `research_agenda?workspace_id=eq.${workspaceId}&kind=eq.question&select=subject&limit=300`,
+  ).catch(() => [])
+
+  const { fresh: freshAgenda } = freshQuestions(
+    (report?.agenda_changes || []).filter(a => a.action === 'add'),  // retiring is a human decision
+    priorQuestions || [],
+  )
+
+  for (const a of freshAgenda) {
     await db('research_agenda', {
       method: 'POST',
       body: {

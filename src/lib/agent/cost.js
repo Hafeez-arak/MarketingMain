@@ -30,6 +30,12 @@ export function normaliseUsage(usage = {}) {
     tokens_cache_read:  n(usage.cache_read_input_tokens),
     tokens_cache_write: n(usage.cache_creation_input_tokens),
     tokens_out:         n(usage.output_tokens),
+    // The second real cost of a run, and the only one that was invisible.
+    // Every lens declares a search budget and nothing confirmed what it spent,
+    // so a lens burning its whole allowance to answer nothing — which is what
+    // `openings` did on 2026-09-12 — looked identical on the ledger to one
+    // that found its answer in two.
+    searches:           n(usage.server_tool_use?.web_search_requests),
   }
 }
 
@@ -91,4 +97,46 @@ export function cacheHitRate(usage) {
   const prefix = u.tokens_in + u.tokens_cache_read
   if (prefix === 0) return 0
   return u.tokens_cache_read / prefix
+}
+
+/**
+ * Roll every ledger row for one run up into the summary columns on
+ * `research_runs`.
+ *
+ * Those columns — tokens_in, tokens_out, model — have existed since the table
+ * did and nothing ever wrote them, so every completed run reports 0 tokens
+ * against a real bill. `agent_usage` is the authority and has the true
+ * figures per call; this is the arithmetic that gets them onto the run.
+ *
+ * `model` is the most expensive model the run actually used, not the last one
+ * or the first. A run is Sonnet for its lenses and Opus for synthesis, and
+ * naming Sonnet would make the cost look inexplicable to anyone reading the
+ * row later.
+ *
+ * `searches` comes from the ledger too, now that agent_usage has somewhere to
+ * keep it (20260913_agent_usage_searches.sql). Rows written before that
+ * migration carry 0, which is honest for them — nobody was counting.
+ */
+export function runTotals(rows = [], { rank = ['claude-opus-5', 'claude-sonnet-5', 'claude-haiku-4-5-20251001'] } = {}) {
+  const list = (rows || []).filter(Boolean)
+  const num = v => (Number.isFinite(Number(v)) ? Number(v) : 0)
+
+  let model = ''
+  let bestRank = Infinity
+  for (const r of list) {
+    const i = rank.indexOf(r.model)
+    // An unknown model still beats no model at all, but never outranks a
+    // known one — a typo in the ledger should not rename the run.
+    const score = i === -1 ? rank.length : i
+    if (r.model && score < bestRank) { bestRank = score; model = r.model }
+  }
+
+  return {
+    calls: list.length,
+    tokens_in: list.reduce((n, r) => n + num(r.tokens_in) + num(r.tokens_cache_read) + num(r.tokens_cache_write), 0),
+    tokens_out: list.reduce((n, r) => n + num(r.tokens_out), 0),
+    cost_usd: Number(list.reduce((n, r) => n + num(r.cost_usd), 0).toFixed(4)),
+    searches: list.reduce((n, r) => n + num(r.searches), 0),
+    model,
+  }
 }
