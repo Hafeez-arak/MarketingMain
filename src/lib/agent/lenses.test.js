@@ -345,9 +345,13 @@ describe('the calendar lens makes no model call at all', () => {
   it('hands its trade-show job to a lens that actually searches', () => {
     // The half that genuinely needed a model did not get deleted, it moved.
     // If it had been deleted, nothing would look for Big 5 or LEAP again.
+    // Asserted on the RESPONSIBILITY, not on the punctuation. The first
+    // version matched "trade shows, exhibitions" and broke when the sentence
+    // was reworded, which tested the comma rather than the behaviour.
     const p = openingsPrompt({ brandName: 'X' }, { motion: 'specification' })
-    expect(p).toMatch(/trade shows, exhibitions/i)
-    expect(p).toMatch(/procurement or budget cycles/i)
+    expect(p).toMatch(/trade shows/i)
+    expect(p).toMatch(/exhibitions/i)
+    expect(p).toMatch(/procurement or budget\s+cycles/i)
   })
 })
 
@@ -558,5 +562,72 @@ describe('no lens may throw away work it already did', () => {
       expect(p).toMatch(/that is what the confidence score is for/i)
       expect(p).not.toMatch(/correct and common answer/i)
     }
+  })
+})
+
+describe('openings reports the project even when it cannot reach the date', () => {
+  // The lens that mattered most returned nothing. On 2026-09-12 it read 63
+  // sources — tendersontime, globaltenders, tendersarabia, tenderimpulse's
+  // Saudi lighting tenders, The Avenues Riyadh, 45 hotels in the pipeline —
+  // and reported ZERO findings, status ok, no error, no timeout.
+  //
+  // The cause was not the closing instruction (demand and category share it
+  // and both produced findings that run). It was that this prompt opened with
+  // "An opening is only useful if it is still open" and required
+  // perishable_until to be the window's closing date — making a VERIFIABLE
+  // DATE a precondition for reporting anything.
+  //
+  // Which is fatal here specifically: tender portals put deadlines behind a
+  // login, so the date is the single hardest thing in this lens to establish.
+  // It found the work and discarded it for want of a closing date — the
+  // calendar bug again, one lens over.
+
+  const p = () => openingsPrompt({ brandName: 'X', descriptor: 'lighting' }, { motion: 'specification' })
+
+  it('no longer makes "still open" a precondition for reporting', () => {
+    expect(p()).not.toMatch(/only useful if it is still open/i)
+  })
+
+  it('says a project found is a finding, and its date a separate question', () => {
+    expect(p()).toMatch(/IS a finding/)
+    expect(p()).toMatch(/SEPARATE question and never a reason to leave it out/i)
+  })
+
+  it('names the paywall, so an unreachable deadline reads as a source limit', () => {
+    // Naming the actual obstacle matters more than loosening the rule: the
+    // model has to know that a missing date is expected here, not a failure
+    // on its part.
+    expect(p()).toMatch(/behind a login/i)
+    expect(p()).toMatch(/fact about the source, not a reason to discard/i)
+  })
+
+  it('offers all three timing states, not just the open one', () => {
+    for (const state of ['OPEN', 'CLOSED', 'TIMING UNCONFIRMED']) {
+      expect(p(), state).toContain(state)
+    }
+  })
+
+  it('tells it NOT to invent a perishable_until for an undated project', () => {
+    // The loosening must not leak into the act-now queue. A guessed deadline
+    // does not merely add noise, it outranks real dated work.
+    expect(p()).toMatch(/Do NOT set\s*\n?\s*perishable_until/)
+  })
+
+  it('ranks the jobs instead of listing them flat', () => {
+    // Eight equal jobs against eight searches meant one search each and
+    // nothing left to verify with. Design-stage projects are worth more than
+    // the rest combined, and the prompt now says so.
+    expect(p()).toMatch(/order of value/i)
+    expect(p()).toMatch(/1\. Projects entering DESIGN/)
+    expect(p()).toMatch(/single most valuable thing you can find/i)
+  })
+
+  it('makes the trade-show half explicitly second to the projects', () => {
+    // Both belong here, but they are different searches. Without a stated
+    // priority the budget splits evenly and neither finishes.
+    const text = p()
+    expect(text).toMatch(/Projects come FIRST/)
+    expect(text).toMatch(/correct trade and not a failure/)
+    expect(text.indexOf('SECOND')).toBeGreaterThan(text.indexOf('1. Projects entering DESIGN'))
   })
 })

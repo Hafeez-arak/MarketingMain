@@ -174,52 +174,88 @@ const CLOSING = [
  * closing, or an event needing suppliers. Same question, different target.
  */
 export function openingsPrompt(brand, { motion, agenda = [], language = '' }) {
+  // Ranked, not listed. The previous version gave three equal bullets and the
+  // model spread its searches evenly across them; design-stage projects are
+  // worth more than everything else here combined, because they are the only
+  // ones where a product can still be specified.
   const byMotion = {
     specification: [
-      '- New projects, tenders or contract awards where this brand\'s category is in scope.',
-      '- Projects entering DESIGN stage — the moment a product can still be specified.',
-      '  After tender it is usually too late, so an early-stage project is worth more',
-      '  than a larger one already out to bid.',
-      '- Consultants, contractors or developers newly active in their market.',
+      '1. Projects entering DESIGN or early procurement — the moment this category can',
+      '   still be specified, and the single most valuable thing you can find. After a',
+      '   tender is awarded it is too late, so an early-stage project beats a larger',
+      '   one already decided.',
+      '2. Live tenders and contract awards where this category is in scope — INCLUDING',
+      '   ones you can only see as a listing on a tender portal.',
+      '3. Consultants, contractors or developers newly active in this market. They carry',
+      '   the specification decision across many projects at once.',
     ],
     local_service: [
-      '- New residential, retail or commercial developments completing in their area —',
-      '  a concentration of their customer with no incumbent supplier.',
-      '- Events, openings or gatherings that create sudden demand for what they sell.',
-      '- Competitors closing, pausing, or visibly failing to serve an area.',
-      '- Partners with the same customer and a different service, worth approaching.',
+      '1. New residential, retail or commercial developments completing in their area —',
+      '   a concentration of their customer with no incumbent supplier.',
+      '2. Events, openings or gatherings that create sudden demand for what they sell.',
+      '3. Competitors closing, pausing, or visibly failing to serve an area.',
+      '4. Partners with the same customer and a different service, worth approaching.',
     ],
     product: [
-      '- Retailers, marketplaces or stockists newly open to their category.',
-      '- Creators or communities newly discussing the category.',
-      '- Supply or regulatory changes that open or close a segment.',
+      '1. Retailers, marketplaces or stockists newly open to their category.',
+      '2. Creators or communities newly discussing the category.',
+      '3. Supply or regulatory changes that open or close a segment.',
     ],
   }
 
   return [
     who(brand),
     '',
-    'Find things in this brand\'s market that they could act on.',
+    'One question: WHO IS ABOUT TO NEED WHAT THIS BRAND SELLS, and can we still reach them.',
     '',
-    'Look for:',
+    'Look for, in this order of value:',
     ...(byMotion[motion] || byMotion.local_service),
     '',
-    'An opening is only useful if it is still open. Set perishable_until to when the window',
-    'closes — a tender deadline, an event date, an opening week. If you cannot establish a',
-    'date, say so in the detail rather than guessing one.',
+    // ── THE INSTRUCTION THIS LENS KEPT FAILING ON ──
+    //
+    // It used to open with "An opening is only useful if it is still open" and
+    // require perishable_until to be the window's closing date. Combined with
+    // CLOSING's "never invent a date", that made a VERIFIABLE DATE a
+    // precondition for reporting anything at all.
+    //
+    // Which is fatal here specifically, because the dates in this lens are the
+    // hardest thing in the whole system to verify: tender portals put the
+    // deadline behind a login. On 2026-09-12 the lens read 63 sources —
+    // tendersontime, globaltenders, tendersarabia, tenderimpulse's Saudi
+    // lighting tenders, The Avenues Riyadh, 45 hotels in the pipeline — and
+    // reported ZERO findings, with no error and no timeout. It found the work
+    // and discarded it for want of a closing date.
+    //
+    // That is the calendar bug again, one lens over: a verification
+    // requirement the model cannot satisfy makes it throw away what it already
+    // established. The fix is the same shape — separate the thing from its
+    // date, and let confidence carry the uncertainty.
+    'HOW TO REPORT TIMING. Read this carefully; it is where this lens has gone wrong before.',
     '',
-    'Prefer the last few weeks, but something older still counts if the window to act on it',
-    'is STILL OPEN. Say how old it is and let the date speak. A project that entered design',
-    'three months ago and has not yet specified is a better opportunity than one announced',
-    'yesterday and already awarded.',
+    'A project or tender you found IS a finding. Whether you could establish its dates is a',
+    'SEPARATE question and never a reason to leave it out. Tender portals and project',
+    'databases routinely put the detail behind a login, so the deadline is often simply',
+    'unreachable — that is a fact about the source, not a reason to discard the project.',
     '',
-    'A project whose window has CLOSED is still worth one line — say so plainly and say what',
-    'to watch instead. Knowing not to chase something is worth as much as knowing to chase it.',
+    'Report one of three states, explicitly, in the detail:',
+    '- OPEN — you established a date and it has not passed. Set perishable_until to it.',
+    '- CLOSED — you established a date and it has passed. Say so in one line and say what to',
+    '  watch instead. Knowing not to chase something is worth as much as knowing to chase it.',
+    '- TIMING UNCONFIRMED — you found the project but could not reach the date. Report it,',
+    '  say where you saw it and what the listing said, and lower the confidence. Do NOT set',
+    '  perishable_until.',
     '',
-    'Also cover the dated events this market runs on: trade shows, exhibitions and',
-    'conferences this brand\'s buyers attend, and the procurement or budget cycles that',
-    'decide when they can actually commit. No API lists these, so they are a genuine search',
-    'problem and they belong here with the rest of the demand picture.',
+    'TIMING UNCONFIRMED is a normal, expected and useful answer. A named project with an',
+    'unknown deadline is something a salesperson can act on this week — they can call the',
+    'consultant, or open the portal themselves. Silence is not actionable by anyone.',
+    '',
+    'Prefer the last few weeks, but older still counts when the work has not been awarded.',
+    'Say how old it is and let the reader judge.',
+    '',
+    'SECOND, and only with whatever searches are left: the dated events this market runs on',
+    '— trade shows and exhibitions this brand\'s buyers attend, and the procurement or budget',
+    'cycles that decide when they can commit. Projects come FIRST. If you spend everything on',
+    'projects and report no events at all, that is the correct trade and not a failure.',
     standing(agenda),
     localLanguage(language),
     CLOSING,
