@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import { Card, SectionHead, Button, Empty, Badge, PillSelect } from '../../components/ui/index'
 import { AgentSteering } from '../../components/AgentSteering'
+import { SendIdeasToPlan } from '../../components/SendIdeasToPlan'
 import { RunProgress } from '../../components/RunProgress'
 import {
   partitionByClock, deadlineLabel, urgencyOf, lensStates, lensHeadline,
@@ -379,6 +380,7 @@ export function ResearchTab({
                   </div>
                 ))}
               </div>
+              <SendIdeasToPlan ideas={report.proposed_ideas} />
               {(report.repeated_ideas || []).length > 0 && (
                 <p className="text-[11px] text-text-tertiary mt-3">
                   {report.repeated_ideas.length} idea{report.repeated_ideas.length === 1 ? '' : 's'} dropped

@@ -1,4 +1,5 @@
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './supabaseClient'
+import { promotable, promotionNote } from './researchIdeas'
 
 // ─── Content Plans ──────────────────────────────────────────────────────────
 // The monthly planning layer. A plan is created up front, its ideas are
@@ -342,4 +343,58 @@ export async function deleteIdea(accessToken, ideaId) {
     await fetch(`${SUPABASE_URL}/rest/v1/plan_ideas?id=eq.${ideaId}`, { method: 'DELETE', headers: authHeaders(accessToken) })
     return { ok: true }
   } catch (err) { return { error: err.message } }
+}
+
+// ── Promoting a research idea ────────────────────────────────────────────
+// Lives here rather than beside the mapping in researchIdeas.js, so that file
+// stays pure — no supabaseClient import, no `import.meta.env`, importable by
+// anything including a plain Node process. The network half belongs with the
+// other plan_ideas writes anyway.
+
+/**
+ * Put research ideas into a plan.
+ *
+ * Reads the destination FIRST, because the duplicate check has to run against
+ * what is actually in the plan rather than what this page believed a minute
+ * ago. Two people with the brief open would otherwise both send the same idea.
+ *
+ * Workspace-scoped on the read as well as the write, like every other query in
+ * this file: a plan id on its own says nothing about who owns it.
+ */
+export async function sendIdeasToPlan({ workspaceId, accessToken, planId, planName = '', ideas, platform = 'instagram' }) {
+  if (!workspaceId) return { error: 'No active workspace.' }
+  if (!planId) return { error: 'Choose a plan first.' }
+  if (!ideas?.length) return { error: 'Nothing to send.' }
+
+  try {
+    const res = await fetch(
+      `${SUPABASE_URL}/rest/v1/plan_ideas?plan_id=eq.${planId}&workspace_id=eq.${workspaceId}` +
+      `&select=id,title,topic,position`,
+      { headers: authHeaders(accessToken) },
+    )
+    if (!res.ok) return { error: `Could not read that plan (${res.status}).` }
+    const existing = await res.json()
+
+    const { rows, skipped } = promotable(ideas, existing, { workspaceId, planId, platform })
+    if (!rows.length) {
+      return { ok: true, sent: 0, skipped: skipped.length, note: promotionNote({ sent: 0, skipped: skipped.length, planName }) }
+    }
+
+    const write = await fetch(`${SUPABASE_URL}/rest/v1/plan_ideas`, {
+      method: 'POST',
+      headers: { ...authHeaders(accessToken), 'Content-Type': 'application/json', Prefer: 'return=representation' },
+      body: JSON.stringify(rows),
+    })
+    if (!write.ok) return { error: (await write.text()).slice(0, 300) }
+    const written = await write.json()
+
+    return {
+      ok: true,
+      sent: written.length,
+      skipped: skipped.length,
+      note: promotionNote({ sent: written.length, skipped: skipped.length, planName }),
+    }
+  } catch (err) {
+    return { error: String(err?.message || err) }
+  }
 }

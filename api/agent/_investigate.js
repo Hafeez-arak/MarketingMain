@@ -12,6 +12,7 @@ import { gatherCalendar } from './_calendar.js'
 import { marketOf } from '../../src/lib/agent/calendar.js'
 import { priorIdeas } from './_memory.js'
 import { partitionRepeats } from '../../src/lib/agent/memory.js'
+import { freshQuestions } from '../../src/lib/agent/agendaDedup.js'
 import {
   deadlineFor, resultsFromRows, timingNote, pendingLenses, timedOutResult,
 } from '../../src/lib/agent/phases.js'
@@ -508,8 +509,19 @@ export async function persistReport(workspaceId, runId, report) {
     }).catch(err => console.error('[agent/synthesise] rule:', err.message))
   }
 
-  for (const a of report?.agenda_changes || []) {
-    if (a.action !== 'add') continue   // retiring is a human decision
+  // Every question already on the agenda, in EVERY status. Retired matters
+  // most: a question someone explicitly turned down must not come back next
+  // week, which is the reason dismissal keeps the row rather than deleting it.
+  const priorQuestions = await db(
+    `research_agenda?workspace_id=eq.${workspaceId}&kind=eq.question&select=subject&limit=300`,
+  ).catch(() => [])
+
+  const { fresh: freshAgenda } = freshQuestions(
+    (report?.agenda_changes || []).filter(a => a.action === 'add'),  // retiring is a human decision
+    priorQuestions || [],
+  )
+
+  for (const a of freshAgenda) {
     await db('research_agenda', {
       method: 'POST',
       body: {
