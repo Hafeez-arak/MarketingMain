@@ -15,6 +15,7 @@ import { partitionRepeats } from '../../src/lib/agent/memory.js'
 import {
   deadlineFor, resultsFromRows, timingNote, pendingLenses, timedOutResult,
 } from '../../src/lib/agent/phases.js'
+import { LIVE_PLATFORMS } from '../../src/lib/utils.js'
 
 // Re-exported: the resolver imported it from here before it moved to loop.js.
 export { urlsFromResponse }
@@ -166,7 +167,27 @@ async function argsForLens(key, { brandFacts, motion, competitors, gathered, pro
       }],
     }
   }
-  if (key === 'craft') return { args: [brandFacts, { platforms: ['instagram'], agenda, language }] }
+  if (key === 'craft') {
+    // Was `['instagram']`, hardcoded. That made the one lens whose entire job
+    // is "which formats and platforms are working" research a single platform
+    // regardless of where the brand actually publishes — so a brand posting
+    // mostly to TikTok got advice about Reels.
+    //
+    // Falls back to the full live set rather than to Instagram when stage 0
+    // found nothing connected: a brand with no accounts yet is deciding where
+    // to start, and narrowing that question to one platform pre-empts the
+    // decision it most needs help with.
+    const connected = (gathered?.own_performance?.platforms || [])
+      .filter(p => p.connected)
+      .map(p => p.platform)
+    return {
+      args: [brandFacts, {
+        platforms: connected.length ? connected : LIVE_PLATFORMS,
+        agenda,
+        language,
+      }],
+    }
+  }
   return { args: null }
 }
 

@@ -4,7 +4,7 @@ import { AgentSteering } from '../../components/AgentSteering'
 import { RunProgress } from '../../components/RunProgress'
 import {
   partitionByClock, deadlineLabel, urgencyOf, lensStates, lensHeadline,
-  emptiness, pct, compact, signed,
+  emptiness, pct, compact, signed, ownChannelRows,
 } from '../../lib/researchBrief'
 
 // ─── The Research tab — what is happening out there, and what to do ────────
@@ -111,6 +111,75 @@ function ActCard({ finding, now }) {
   )
 }
 
+const CHANNEL_TONE = {
+  measured: 'border-border bg-white',
+  unmeasured: 'border-amber-200 bg-amber-50/40',
+  silent: 'border-border bg-slate-50/60',
+  not_connected: 'border-dashed border-border bg-transparent',
+}
+
+/**
+ * One of our own channels.
+ *
+ * Deliberately a different card from CompetitorCard, though the numbers rhyme.
+ * Ours are per-POST engagement from our own analytics on any platform; theirs
+ * are per-PROFILE figures from business_discovery and exist on Instagram only.
+ * One card serving both would quietly imply the two are the same measurement,
+ * which is the confusion this whole section has to avoid.
+ */
+function ChannelCard({ p }) {
+  const dim = p.state === 'not_connected'
+  return (
+    <div className={`rounded-xl border p-3.5 ${CHANNEL_TONE[p.state] || CHANNEL_TONE.measured}`}>
+      <div className="flex items-baseline justify-between gap-2">
+        <p className={`text-sm font-semibold truncate ${dim ? 'text-text-tertiary' : 'text-text'}`}>{p.label}</p>
+        {p.username && <span className="text-[11px] text-text-tertiary shrink-0">@{p.username}</span>}
+      </div>
+
+      {p.state !== 'measured' ? (
+        <p className="text-[11px] text-text-tertiary mt-2 leading-relaxed">{p.note}</p>
+      ) : (
+        <>
+          <div className="grid grid-cols-3 gap-2 mt-3">
+            <div>
+              <p className="text-[10px] text-text-tertiary uppercase tracking-wide">Posts</p>
+              <p className="text-sm font-semibold tabular-nums">{p.posts}</p>
+              {/* Never shown without it. "We published 6" beside an average
+                  computed from 2 is a true-sounding overstatement. */}
+              <p className="text-[10px] text-text-tertiary tabular-nums">{p.measured} measured</p>
+            </div>
+            <div>
+              <p className="text-[10px] text-text-tertiary uppercase tracking-wide">Eng/post</p>
+              <p className="text-sm font-semibold tabular-nums">{p.avg_engagement ?? '—'}</p>
+              {p.avg_engagement_prev != null && (
+                <p className="text-[10px] text-text-tertiary tabular-nums">was {p.avg_engagement_prev}</p>
+              )}
+            </div>
+            <div>
+              <p className="text-[10px] text-text-tertiary uppercase tracking-wide">Week</p>
+              <p className={`text-sm font-semibold tabular-nums ${
+                p.change ? (p.change.direction === 'up' ? 'text-emerald-600' : 'text-red-600') : ''}`}>
+                {p.change ? `${p.change.direction === 'up' ? '+' : '−'}${p.change.change_pct}%` : '—'}
+              </p>
+              {!p.change && <p className="text-[10px] text-text-tertiary">no call yet</p>}
+            </div>
+          </div>
+          {p.weak && (
+            <p className="text-[11px] text-amber-700 mt-2">
+              Thin sample — directional, not conclusive.
+            </p>
+          )}
+          {p.best_post && (
+            <p className="text-[11px] text-text-secondary mt-2 leading-relaxed">
+              Best: {p.best_post.topic || 'untitled'} · {p.best_post.engagement} interactions
+            </p>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
 function CompetitorCard({ c }) {
   const measured = c.data === 'instagram'
   return (
@@ -167,6 +236,7 @@ export function ResearchTab({
   )
   const states = useMemo(() => lensStates(report), [report])
   const empty = useMemo(() => emptiness(report), [report])
+  const channels = useMemo(() => ownChannelRows(report), [report])
 
   if (!runs.length) {
     return (
@@ -352,6 +422,26 @@ export function ResearchTab({
                   </div>
                 ))}
               </div>
+            </Card>
+          )}
+
+          {/* ── 4b. Our own channels ──
+              Above the competitor board on purpose. Our own week is the thing
+              we can actually act on, and it is measured on every platform we
+              publish to rather than on the one platform rivals happen to be
+              readable on. */}
+          {channels.length > 0 && (
+            <Card className="p-4">
+              <SectionHead
+                title="Our channels"
+                subtitle="Our own posts, measured from our own analytics. Every platform we publish to."
+              />
+              <div className="mt-3 grid gap-2.5 sm:grid-cols-2">
+                {channels.map(p => <ChannelCard key={p.platform} p={p} />)}
+              </div>
+              {report.own_performance?.note && (
+                <p className="text-[11px] text-text-tertiary mt-3">{report.own_performance.note}</p>
+              )}
             </Card>
           )}
 

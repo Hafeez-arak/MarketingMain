@@ -60,6 +60,7 @@ describe('the agent runs in Node, not in a bundle', () => {
     'src/lib/agent/prompt.js',
     'src/lib/agent/tools.js',
     'src/lib/agent/aggregate.js',
+    'src/lib/agent/ownChannels.js',
     'src/lib/agent/loop.js',
     'src/lib/agent/gather.js',
     'src/lib/agent/brief.js',
@@ -69,6 +70,11 @@ describe('the agent runs in Node, not in a bundle', () => {
     'src/lib/agent/lenses.js',
     'src/lib/agent/lensPrompts.js',
     'src/lib/agent/web.js',
+    // Reached by ownChannels.js and _investigate.js for LIVE_PLATFORMS. It is a
+    // browser-utility module by location and a pure one by content — zero
+    // imports — so it loads under Node, and this line is what keeps it that
+    // way if anyone ever adds a React import to it.
+    'src/lib/utils.js',
     'api/agent/_supabase.js',
     'api/agent/_context.js',
     'api/agent/_provider.js',
