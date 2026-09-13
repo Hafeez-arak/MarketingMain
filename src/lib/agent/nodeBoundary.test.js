@@ -61,6 +61,7 @@ describe('the agent runs in Node, not in a bundle', () => {
     'src/lib/agent/tools.js',
     'src/lib/agent/aggregate.js',
     'src/lib/agent/ownChannels.js',
+    'src/lib/agent/discover.js',
     'src/lib/agent/loop.js',
     'src/lib/agent/gather.js',
     'src/lib/agent/brief.js',
@@ -91,6 +92,7 @@ describe('the agent runs in Node, not in a bundle', () => {
     'api/agent/chat.js',
     'api/agent/run.js',
     'api/agent/resolve.js',
+    'api/agent/discover.js',
   ]
 
   for (const rel of serverReachable) {

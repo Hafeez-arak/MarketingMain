@@ -3,7 +3,7 @@ import { useAuth } from '../store/auth'
 import { Card, SectionHead, Button } from './ui/index'
 import {
   fetchAgenda, setHandleByHand, setAgendaStatus, addAgendaRow,
-  deleteAgendaRow, watchlistReadiness, resolveHandles,
+  deleteAgendaRow, watchlistReadiness, resolveHandles, discoverCompetitors,
 } from '../lib/agentAgenda'
 
 // ─── What the agent watches, and what it is told to ask ────────────────────
@@ -136,6 +136,24 @@ export function AgentSteering() {
     refresh()
   }
 
+  // Finding WHO to watch, which is a different question from finding their
+  // Instagram account. Alo Kheyatah has no competitor list at all, so for that
+  // workspace this is the first useful thing the agent can do.
+  const findRivals = async () => {
+    setFinding(true)
+    setFindNote('')
+    const out = await discoverCompetitors({ workspaceId: activeWorkspaceId, accessToken })
+    setFindNote(
+      out.ok
+        ? (out.proposed
+          ? `Proposed ${out.proposed} to accept below${out.already_watching ? `, ${out.already_watching} already watched` : ''}.`
+          : out.note || 'Nothing new found.')
+        : out.error || 'Could not search.',
+    )
+    setFinding(false)
+    refresh()
+  }
+
   const findHandles = async () => {
     setFinding(true)
     setFindNote('')
@@ -157,9 +175,14 @@ export function AgentSteering() {
           title="Competitors it watches"
           subtitle={readiness.note}
           action={
-            <Button size="sm" variant="ghost" onClick={findHandles} disabled={finding}>
-              {finding ? 'Searching…' : 'Find handles'}
-            </Button>
+            <span className="flex gap-1">
+              <Button size="sm" variant="ghost" onClick={findRivals} disabled={finding}>
+                {finding ? 'Searching…' : 'Find rivals'}
+              </Button>
+              <Button size="sm" variant="ghost" onClick={findHandles} disabled={finding}>
+                Find handles
+              </Button>
+            </span>
           }
         />
         {findNote ? <p className="mt-1 text-xs text-slate-600">{findNote}</p> : null}

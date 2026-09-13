@@ -147,3 +147,26 @@ export async function resolveHandles({ workspaceId, accessToken, force = false }
     return { ok: false, error: String(err?.message || err) }
   }
 }
+
+/**
+ * Ask the agent to find rivals nobody has listed.
+ *
+ * Distinct from resolveHandles and the order matters: this finds WHO to watch,
+ * that finds their Instagram account. Running the second on a watchlist nobody
+ * has accepted yet would attach a week of numbers to companies we may not want
+ * to track, so everything this proposes waits for a person first.
+ */
+export async function discoverCompetitors({ workspaceId, accessToken }) {
+  try {
+    const res = await fetch('/api/agent/discover', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+      body: JSON.stringify({ workspace_id: workspaceId }),
+    })
+    const body = await res.json().catch(() => ({}))
+    if (!res.ok) return { ok: false, error: body?.error || `Discover returned ${res.status}.` }
+    return body
+  } catch (err) {
+    return { ok: false, error: String(err?.message || err) }
+  }
+}
