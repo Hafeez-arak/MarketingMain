@@ -7,6 +7,7 @@ import {
   partitionByClock, deadlineLabel, urgencyOf, lensStates, lensHeadline,
   emptiness, pct, compact, signed, ownChannelRows,
 } from '../../lib/researchBrief'
+import { noveltyLabel } from '../../lib/agent/novelty'
 
 // ─── The Research tab — what is happening out there, and what to do ────────
 // The outward, perishable half of this page. A brief expires: National Day
@@ -105,7 +106,7 @@ function ActCard({ finding, now }) {
       <div className="flex items-center gap-2 mt-2 text-[10px] opacity-70">
         <span className="uppercase tracking-wide">{finding.lens}</span>
         {finding.confidence != null && <span>· confidence {pct(finding.confidence)}</span>}
-        {finding.novelty && <span>· {finding.novelty}</span>}
+        {finding.novelty && <span>· {noveltyLabel(finding, now)}</span>}
       </div>
       <Sources sources={finding.sources} />
     </div>
@@ -294,6 +295,13 @@ export function ResearchTab({
                   : run.status === 'failed' ? 'failed' : 'pending'
               } />
             </div>
+            {/* How much of this run is new. A brief that is entirely repeats
+                is saying something no single finding says — either the market
+                is still, or the standing questions have stopped earning their
+                search budget. */}
+            {report.repetition && (
+              <p className="text-xs text-amber-700 mt-3">{report.repetition}</p>
+            )}
             {lensHeadline(states) && (
               <p className="text-xs text-text-tertiary mt-3">{lensHeadline(states)}</p>
             )}

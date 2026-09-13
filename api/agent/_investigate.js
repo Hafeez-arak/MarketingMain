@@ -13,6 +13,7 @@ import { marketOf } from '../../src/lib/agent/calendar.js'
 import { priorIdeas } from './_memory.js'
 import { partitionRepeats } from '../../src/lib/agent/memory.js'
 import { freshQuestions } from '../../src/lib/agent/agendaDedup.js'
+import { applyNovelty, priorFindingsFrom, repetitionNote } from '../../src/lib/agent/novelty.js'
 import {
   deadlineFor, resultsFromRows, timingNote, pendingLenses, timedOutResult,
 } from '../../src/lib/agent/phases.js'
@@ -75,8 +76,14 @@ export async function loadRunContext(workspaceId, runId, cadence = 'weekly') {
       loadBrandContext(workspaceId, 'research'),
       db(`research_agenda?workspace_id=eq.${workspaceId}&kind=eq.question&status=eq.active` +
          `${agendaFilterFor(cadence)}&select=subject,why`),
+      // `started_at` so a repeat can be dated — "we have said this for three
+      // weeks" is the sentence a person acts on, and "continuing" is not.
+      // Six runs rather than three: at a weekly cadence three is barely a
+      // month, and a finding that returns every six weeks would read as new
+      // every single time. Only the HEADLINES ever reach the model; the rest
+      // of each report is read in code.
       db(`research_runs?workspace_id=eq.${workspaceId}&id=neq.${runId}&status=eq.complete` +
-         `&order=started_at.desc&limit=3&select=report`),
+         `&order=started_at.desc&limit=6&select=report,started_at`),
       db(`research_agenda?workspace_id=eq.${workspaceId}&kind=eq.competitor&status=neq.retired&select=subject`),
       priorIdeas(workspaceId),
       db(`research_runs?id=eq.${runId}&workspace_id=eq.${workspaceId}&select=report,stage,status&limit=1`),
@@ -318,7 +325,16 @@ export async function synthesiseRun({ workspaceId, runId, cadence = 'weekly', de
       for (const u of r.sources || []) allowedUrls.add(u)
     }
 
-    const findings = rankFindings(results.flatMap(r => r.findings || []))
+    // Novelty, decided here rather than accepted from the model.
+    //
+    // No lens is given prior findings, so every 'continuing' a searching
+    // lens returned was a word chosen with no evidence available to choose
+    // it. Measured over the seven real runs: in one run the model called
+    // four findings continuing and all four were new, while the single
+    // genuine repeat scored 1.00. See novelty.js.
+    const seenBefore = priorFindingsFrom(priorRuns)
+    const findings = rankFindings(
+      applyNovelty(results.flatMap(r => r.findings || []), seenBefore))
     const summary = lensSummary(results)
 
     await markStage(workspaceId, runId, 'synthesise')
@@ -387,6 +403,10 @@ export async function synthesiseRun({ workspaceId, runId, cadence = 'weekly', de
     report.lenses = summary
     report.findings = findings
     report.sales_motion = { motion, explicit }
+    // A run that is entirely repeats is telling you something no single
+    // finding can: either the market is still, or the standing questions
+    // have stopped earning their search budget.
+    report.repetition = repetitionNote(findings)
 
     // ── Anti-repetition, enforced ──
     // The prompt above asked. This decides. A guarantee held only by a prompt
