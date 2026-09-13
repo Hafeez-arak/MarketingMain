@@ -199,9 +199,19 @@ export async function gather(workspaceId, runId, period) {
   // ig_status is precisely how a guess would reach the numbers. Two similarly
   // named companies in one workspace, and a confident week of figures attached
   // to the wrong one is the kind of wrong that does not look wrong.
+  // `status=eq.active`, not `neq.retired`. Those differ on exactly one value —
+  // 'proposed' — and that value is the whole point of the approval gate.
+  //
+  // It read `neq.retired` when every competitor row was human-typed and
+  // therefore active, so the two filters agreed by accident. They stopped
+  // agreeing the moment the discover step could propose a rival: a company the
+  // agent found, that nobody had accepted, would have been measured and
+  // reported as a tracked competitor on the strength of its own suggestion.
+  // The standing-questions read has always required 'active'; this now matches
+  // it, so one rule governs the whole watchlist.
   const watch = await db(
     `research_agenda?workspace_id=eq.${workspaceId}&kind=eq.competitor` +
-    `&status=neq.retired&ig_status=in.(resolved,human_set)` +
+    `&status=eq.active&ig_status=in.(resolved,human_set)` +
     `&select=id,subject,ig_handle&limit=100`,
   )
 

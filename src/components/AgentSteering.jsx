@@ -30,6 +30,10 @@ function HandleRow({ row, accessToken, onChanged }) {
 
   const measurable = row.ig_status === 'resolved' || row.ig_status === 'human_set'
   const weak = row.ig_status === 'unresolved' && row.ig_handle
+  // A rival the agent proposed and nobody has accepted yet. It is NOT measured
+  // while in this state — gather filters on status=active — so the accept
+  // button below is the only thing that puts it on the board.
+  const pending = row.status === 'proposed'
 
   const save = async () => {
     setSaving(true)
@@ -95,6 +99,27 @@ function HandleRow({ row, accessToken, onChanged }) {
             <div className="mt-1 text-[11px] text-amber-700">
               Not measured until someone confirms it — the pipeline only trusts a verified
               or hand-set handle.
+            </div>
+          ) : null}
+          {/* Without this the discover step could propose a rival that nobody
+              could ever accept, and it would sit unmeasured forever. */}
+          {pending ? (
+            <div className="mt-1.5 flex items-center gap-2 text-[11px]">
+              <span className="text-slate-500">
+                {row.created_by === 'agent' ? 'The agent suggests watching this.' : 'Not yet accepted.'}
+              </span>
+              <button
+                onClick={async () => { await setAgendaStatus(accessToken, row.id, 'active'); onChanged() }}
+                className="text-emerald-600 hover:underline"
+              >
+                accept
+              </button>
+              <button
+                onClick={async () => { await setAgendaStatus(accessToken, row.id, 'retired'); onChanged() }}
+                className="text-slate-400 hover:text-slate-700"
+              >
+                dismiss
+              </button>
             </div>
           ) : null}
         </div>
