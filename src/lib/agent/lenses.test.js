@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   LENSES, lensByKey, lensesFor, searchBudgetFor, motionOf, MOTIONS,
   makeFinding, daysLeft, rankFindings, lensSummary, agendaFilterFor,
+  isTechnicalOnly, FOR_WHOM,
   PERISHABLE, SLOW,
 } from './lenses'
 import {
@@ -197,6 +198,64 @@ describe('a finding knows when it stops mattering', () => {
 
   it('a nonsense date is treated as no date', () => {
     expect(daysLeft(makeFinding('a', { perishable_until: 'soon' }))).toBeNull()
+  })
+})
+
+describe('a finding knows whose problem it is', () => {
+  // The case this whole field exists for. A SASO certification deadline is a
+  // technical subject AND the strongest post available — "we are already
+  // compliant, here is what specifiers must check" — and the failure mode is
+  // filing it under its subject so marketing never sees the angle.
+  const SASO = {
+    headline: 'Mandatory SASO certification for low-voltage lighting from 1 December 2026.',
+    perishable_until: '2026-12-01',
+  }
+
+  it('belongs to marketing unless something says otherwise', () => {
+    expect(makeFinding('demand', SASO).for_whom).toBe('marketing')
+  })
+
+  it('keeps a publishable finding in the marketing flow however technical it sounds', () => {
+    const f = makeFinding('demand', {
+      ...SASO,
+      for_whom: 'both',
+      suggested_action: 'Post the compliance checklist for specifiers.',
+      technical_note: 'Confirm every SKU has a valid certificate before November.',
+    })
+    expect(f.for_whom).toBe('both')
+    expect(isTechnicalOnly(f)).toBe(false)
+    expect(f.technical_note).toBe('Confirm every SKU has a valid certificate before November.')
+  })
+
+  it('refuses a technical label that carries no reason', () => {
+    // THE GUARD. The moment there is a bucket labelled "not marketing's
+    // problem", anything hard to turn into an action drifts into it, and the
+    // brief thins out weekly while still reporting the same finding count.
+    // A bare "technical" is a shrug, and a shrug goes back in front of a
+    // person who can judge it.
+    const f = makeFinding('demand', { ...SASO, for_whom: 'technical' })
+    expect(f.for_whom).toBe('marketing')
+    expect(isTechnicalOnly(f)).toBe(false)
+  })
+
+  it('accepts a technical label that explains itself', () => {
+    const f = makeFinding('demand', {
+      ...SASO,
+      for_whom: 'technical',
+      technical_note: 'Lab retest of the 40 affected SKUs. Nothing to publish — the rule is identical for every importer.',
+    })
+    expect(isTechnicalOnly(f)).toBe(true)
+  })
+
+  it('never hangs a technical note on a purely marketing finding', () => {
+    // Otherwise every card grows an empty "for the technical team" line.
+    const f = makeFinding('craft', { headline: 'Carousels outperform stills.', technical_note: 'stray' })
+    expect(f.technical_note).toBe('')
+  })
+
+  it('treats an unknown audience as marketing rather than dropping the finding', () => {
+    expect(makeFinding('demand', { ...SASO, for_whom: 'legal' }).for_whom).toBe('marketing')
+    expect(FOR_WHOM).toEqual(['marketing', 'both', 'technical'])
   })
 })
 

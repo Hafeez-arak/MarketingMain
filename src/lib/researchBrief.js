@@ -21,11 +21,42 @@
 // sorts that way; this file splits the same list into the two sections a
 // reader actually wants — what has a clock on it, and everything else.
 
-import { rankFindings, daysLeft, lensByKey } from './agent/lenses'
+import { rankFindings, daysLeft, lensByKey, isTechnicalOnly } from './agent/lenses'
 import { num } from './agent/num'
 
 /** A run that is still going. Anything else is terminal. */
 export const isRunning = run => run?.status === 'running'
+
+/**
+ * Split findings by who acts on them, before anything else looks at them.
+ *
+ * ── WHY THIS RUNS FIRST ──
+ *
+ * The page's one ordering rule is the clock, and it is the right rule for a
+ * reader who is deciding what to publish. It is the wrong rule for a finding
+ * that reader cannot publish anything about: a certification deadline with no
+ * marketing angle is both extremely dated and completely unactionable here, so
+ * the clock sorts it straight to the top of "Do this" where it is the first
+ * thing seen and the first thing skipped. Two or three of those teach a person
+ * that the top of the page is not worth reading.
+ *
+ * So audience is decided before the clock, and only the marketing side is
+ * ranked by urgency. The technical side is kept in full — it was expensive to
+ * find and it is genuinely useful to somebody — just not in the queue of
+ * things to do this week.
+ *
+ * Note what does NOT come out here: `both`. A finding with a publishable angle
+ * stays in the marketing flow no matter how technical its subject, which is
+ * the entire reason the field is called for_whom and not "category".
+ */
+export function splitByAudience(findings = [], now = new Date()) {
+  const marketing = []
+  const technical = []
+  for (const f of findings || []) (isTechnicalOnly(f) ? technical : marketing).push(f)
+  // Ranked even though it is not a queue: within a collapsed fold the dated
+  // items are still the ones worth reading first.
+  return { marketing, technical: rankFindings(technical, now) }
+}
 
 /**
  * Split findings into the ones with a live deadline and the rest.
