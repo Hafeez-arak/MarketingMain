@@ -118,6 +118,22 @@ export function qs(obj) {
 //
 // Normalising here, once, is what makes those screens correct without
 // touching them.
+/**
+ * A follower count, or null when nobody has actually counted.
+ *
+ * Zero is a legitimate follower count and must survive; null, undefined and ''
+ * are absences and must NOT become zero. That rules out `||`, which cannot
+ * tell the two apart — see the note at the call site for what that cost.
+ */
+export function followerCountOf(account, fromProfile = {}) {
+  for (const value of [account?.followersCount, fromProfile?.followersCount]) {
+    if (value === null || value === undefined || value === '') continue
+    const n = Number(value)
+    if (Number.isFinite(n)) return n
+  }
+  return null
+}
+
 export function normalizeAccount(raw, { connectedAt = null } = {}) {
   const a = raw || {}
   const meta = a.metadata || {}
@@ -131,7 +147,28 @@ export function normalizeAccount(raw, { connectedAt = null } = {}) {
     profile_url: String(a.profileUrl || fromProfile.profileUrl || ''),
     is_active: a.isActive !== false && a.enabled !== false,
     needs_reconnection: a.needsReconnection === true,
-    followers_count: Number(a.followersCount || fromProfile.followersCount || 0) || 0,
+    // ── null is "nobody has counted", NOT "they have none" ──
+    //
+    // This was `Number(a.followersCount || fromProfile.followersCount || 0) || 0`,
+    // which turns every falsy value into 0 — and Zernio sends null.
+    //
+    // Verified live 2026-09-14 against the freshly connected account:
+    // `followersCount: null`, and `followersLastUpdated` equal to the moment
+    // of connection rather than of any sync. The dedicated endpoint agrees and
+    // is more explicit — GET /v1/accounts/follower-stats returns
+    // `currentFollowers: 0` with `dataPoints: 0` and an EMPTY series, which is
+    // a default computed over no observations, not an observation of zero.
+    //
+    // So the account's follower count is unknown, and the `|| 0` rendered that
+    // unknown as a confident zero all the way to the assistant, which reported
+    // "0 followers" about an account that previously recorded 1. That is the
+    // exact null-to-zero collapse `num()` in aggregate.js exists to prevent,
+    // and it is worse here because this value is STORED — the lie persists
+    // after the truth becomes available.
+    //
+    // The column is nullable (default 0, no NOT NULL), so null round-trips.
+    // Readers must treat it as unknown; ownChannels already does, via num().
+    followers_count: followerCountOf(a, fromProfile),
     zernio_profile_id: profileIdOf(a.profileId),
     // Instagram only, and defaulted rather than left null. `connect_url`
     // always asks for loginMethod=facebook_login and Zernio's Instagram

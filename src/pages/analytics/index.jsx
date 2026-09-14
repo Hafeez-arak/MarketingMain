@@ -195,7 +195,15 @@ export function Analytics() {
                       )}
                       {a.username && <p className="text-xs text-text-tertiary truncate">@{a.username}</p>}
                     </div>
-                    <div className="text-sm text-text-secondary">{fmt(a.followers_count || 0)} followers</div>
+                    {/* null is "not counted yet", not zero. Zernio leaves
+                        followersCount null until a follower snapshot lands,
+                        and printing that as "0 followers" is a number the
+                        page invented. */}
+                    <div className="text-sm text-text-secondary">
+                      {a.followers_count === null || a.followers_count === undefined
+                        ? <span title="Zernio has not recorded a follower snapshot for this account yet.">— followers</span>
+                        : `${fmt(a.followers_count)} followers`}
+                    </div>
                     {a.needs_reconnection
                       ? <span className="text-[10px] font-semibold px-1.5 py-0.5 bg-red-50 text-red-600 uppercase tracking-[0.08em]">Reconnect needed</span>
                       : <span className="text-[10px] font-semibold px-1.5 py-0.5 bg-sage-100 text-sage-800 uppercase tracking-[0.08em]">Connected</span>}

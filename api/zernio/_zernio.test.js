@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
-  profileIdOf, ownedByProfile, normalizeAccount, qs,
+  profileIdOf, ownedByProfile, normalizeAccount, qs, followerCountOf,
   createZernio, ZernioError, CONNECT_SPECS, explainZernioError,
 } from './_zernio.js'
 
@@ -80,6 +80,68 @@ describe('ownedByProfile', () => {
 
   it('survives a null in the list', () => {
     expect(ownedByProfile([null, LIVE_TIKTOK], PROFILE)).toHaveLength(1)
+  })
+})
+
+// ─── "Nobody counted" must not arrive as "they have none" ──────────────────
+//
+// Live shapes, 2026-09-14. Zernio sends `followersCount: null` on a freshly
+// connected account, and GET /v1/accounts/follower-stats agrees more loudly:
+// `currentFollowers: 0` alongside `dataPoints: 0` and an empty series — a
+// default computed over no observations, not an observation.
+//
+// The old expression was
+// `Number(a.followersCount || fromProfile.followersCount || 0) || 0`, which
+// cannot tell an absent value from a real zero. It stored 0, and the assistant
+// reported "0 followers" about an account that had previously recorded 1.
+
+describe('followerCountOf', () => {
+  it('returns null when Zernio has not counted', () => {
+    expect(followerCountOf({ followersCount: null })).toBeNull()
+    expect(followerCountOf({})).toBeNull()
+    expect(followerCountOf({ followersCount: '' })).toBeNull()
+  })
+
+  it('keeps a real zero, which is a legitimate count', () => {
+    // The distinction the function exists for: an account genuinely at zero
+    // followers is MEASURED, and must not read as unmeasured.
+    expect(followerCountOf({ followersCount: 0 })).toBe(0)
+  })
+
+  it('reads a real number', () => {
+    expect(followerCountOf({ followersCount: 17233 })).toBe(17233)
+    expect(followerCountOf({ followersCount: '1521' })).toBe(1521)
+  })
+
+  it('falls back to profileData only when the top level is absent', () => {
+    expect(followerCountOf({ followersCount: null }, { followersCount: 42 })).toBe(42)
+    // A top-level zero is an answer, so the fallback must not override it.
+    expect(followerCountOf({ followersCount: 0 }, { followersCount: 42 })).toBe(0)
+  })
+
+  it('ignores a value that is not a number', () => {
+    expect(followerCountOf({ followersCount: 'lots' })).toBeNull()
+  })
+})
+
+describe('normalizeAccount follower count', () => {
+  const LIVE_NULL = {
+    _id: '6aa7a97e726ebfe037e8f4ef',
+    platform: 'instagram',
+    username: 'lightingaaa',
+    displayName: 'Lighting Arak',
+    isActive: true,
+    enabled: true,
+    followersCount: null,
+    followersLastUpdated: '2026-09-14T07:59:58.746Z',
+  }
+
+  it('stores null rather than a manufactured zero', () => {
+    expect(normalizeAccount(LIVE_NULL).followers_count).toBeNull()
+  })
+
+  it('still stores a genuine zero', () => {
+    expect(normalizeAccount({ ...LIVE_NULL, followersCount: 0 }).followers_count).toBe(0)
   })
 })
 
