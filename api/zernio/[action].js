@@ -1,6 +1,7 @@
 import {
   createZernio, normalizeAccount, ownedByProfile, profileIdOf,
   CONNECT_SPECS, CONNECTABLE, explainZernioError, ZernioError, qs, analyticsPlan, retryRateLimited,
+  syncAccountPosts,
 } from './_zernio.js'
 import { mayDisconnect, protectionReason } from '../../src/lib/platformSafety.js'
 
@@ -31,7 +32,7 @@ const ZERNIO_KEY   = process.env.ZERNIO_API_KEY || ''
 
 const ACTIONS = new Set([
   'accounts', 'connect_url', 'selection_options', 'selection_complete',
-  'disconnect', 'creator_info', 'audio_search', 'analytics',
+  'disconnect', 'creator_info', 'audio_search', 'analytics', 'sync',
 ])
 
 // ─── Supabase ──────────────────────────────────────────────────────────────
@@ -63,9 +64,12 @@ async function supa(path, { token, method = 'GET', body, prefer } = {}) {
   try { return text ? JSON.parse(text) : null } catch { return null }
 }
 
-async function authenticate(req) {
+function bearerOf(req) {
   const header = req.headers?.authorization || req.headers?.Authorization || ''
-  const token = header.startsWith('Bearer ') ? header.slice(7).trim() : ''
+  return header.startsWith('Bearer ') ? header.slice(7).trim() : ''
+}
+
+async function authenticate(token) {
   if (!token) return null
   try {
     const res = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
@@ -203,23 +207,26 @@ async function mirrorAccounts({ workspaceId, profileId, accounts }) {
   const notMine = keep.length
     ? `&zernio_account_id=not.in.(${keep.map(id => `"${id}"`).join(',')})`
     : ''
-  try {
-    await supa(
-      `social_accounts?workspace_id=eq.${workspaceId}`
-      + `&zernio_profile_id=eq.${encodeURIComponent(profileId)}${notMine}`,
-      { token: SERVICE_KEY, method: 'DELETE', prefer: 'return=minimal' },
-    )
-  } catch { /* pruning is housekeeping; never let it block the live list */ }
+  //
+  // The prune and the upsert touch disjoint rows — the prune deletes only ids
+  // NOT in `keep`, the upsert writes only ids IN it — so they run together.
+  // One after the other they were two more Supabase round trips stacked on
+  // every account list, which every page asks for when it opens.
+  const prune = supa(
+    `social_accounts?workspace_id=eq.${workspaceId}`
+    + `&zernio_profile_id=eq.${encodeURIComponent(profileId)}${notMine}`,
+    { token: SERVICE_KEY, method: 'DELETE', prefer: 'return=minimal' },
+  ).catch(() => { /* pruning is housekeeping; never let it block the live list */ })
 
-  if (!rows.length) return {}
+  if (!rows.length) { await prune; return {} }
 
-  const written = await supa(
-    'social_accounts?on_conflict=workspace_id,zernio_account_id',
-    {
+  const [written] = await Promise.all([
+    supa('social_accounts?on_conflict=workspace_id,zernio_account_id', {
       token: SERVICE_KEY, method: 'POST', body: rows,
       prefer: 'resolution=merge-duplicates,return=representation',
-    },
-  )
+    }),
+    prune,
+  ])
   const out = {}
   for (const r of written || []) out[String(r.zernio_account_id)] = r.connected_at
   return out
@@ -265,6 +272,24 @@ async function isAccountProtected({ workspaceId, accountId }) {
   } catch {
     return true
   }
+}
+
+// Every read in a plan, each failing on its own: a rate limit on best-time
+// must not blank the follower chart. A failed read comes back as { _error }.
+async function readPlan(z, plan) {
+  const results = await Promise.all(plan.requests.map(r =>
+    retryRateLimited(() => z.request(r.path, { query: r.query }))
+      .catch(err => ({ _error: explainZernioError(err) }))))
+  return { plan, results }
+}
+
+// Whether a plan built from the browser's hint makes the same reads as one
+// built from the verified account. For LinkedIn the account type decides it:
+// a company page gets the page reads, a personal profile does not.
+function samePlanShape(hint, actual) {
+  if (hint.platform !== actual.platform) return false
+  if (actual.platform !== 'linkedin') return true
+  return (hint.accountType === 'personal') === (actual.accountType === 'personal')
 }
 
 // ─── Actions ───────────────────────────────────────────────────────────────
@@ -393,17 +418,25 @@ const handlers = {
   // with one component — but served from here, where the account is first
   // proven to be this workspace's. The workflow takes account_id on trust.
   //
-  // Each read fails on its own: a rate limit on best-time must not blank the
-  // follower chart. A failed read comes back as { _error } in its slot.
+  // The reads start alongside the ownership check instead of after it, planned
+  // from the platform the browser says the account is on. Nothing is returned
+  // until the check passes, so a foreign account's numbers would be fetched
+  // and thrown away with a 403, never shown. It is worth it because the check
+  // is a full Zernio account list, which used to stand in front of every tab
+  // load. The hint only chooses WHICH reads to make; if it is wrong, they are
+  // made again from the verified account.
   async analytics(z, { ws, profileId, body }) {
     const accountId = String(body.account_id || '').trim()
     if (!accountId) return fail('account_id is required.', 400)
+
+    const hint = { platform: String(body.platform || '').toLowerCase(), accountType: body.account_type || null }
+    const early = hint.platform ? readPlan(z, analyticsPlan({ ...hint, accountId, days: body.days })) : null
     const account = await requireOwnedAccount(z, { workspaceId: ws.id, profileId, accountId })
 
-    const plan = analyticsPlan({ platform: account.platform, accountId, days: body.days })
-    const results = await Promise.all(plan.requests.map(r =>
-      retryRateLimited(() => z.request(r.path, { query: r.query }))
-        .catch(err => ({ _error: explainZernioError(err) }))))
+    const actual = { platform: account.platform, accountType: account.account_type || null }
+    const { plan, results } = early && samePlanShape(hint, actual)
+      ? await early
+      : await readPlan(z, analyticsPlan({ ...actual, accountId, days: body.days }))
 
     return {
       account,
@@ -414,6 +447,30 @@ const handlers = {
       insightsFrom: plan.insightsFrom,
       metricsSupported: plan.metricsSupported,
       ...Object.fromEntries(plan.requests.map((r, i) => [r.key, results[i]])),
+    }
+  },
+
+  // "Refresh from Zernio". The account list is re-read and mirrored (follower
+  // counts, dead tokens), then each account's posts are fetched from the
+  // platform now rather than on Zernio's ~90-minute cycle — see
+  // syncAccountPosts. `account_id` narrows it to one account, for a platform
+  // page's Analytics tab; without it every account in the workspace is asked.
+  //
+  // post_analytics, the stored copy the assistant reads, is still written by
+  // the n8n Zernio Sync. The browser fires that alongside this rather than
+  // through it: it takes far longer, and a page must not wait on it to show
+  // the numbers this already refreshed.
+  async sync(z, { ws, profileId, body }) {
+    const accounts = await listAccounts(z, { workspaceId: ws.id, profileId })
+    const only = String(body.account_id || '').trim()
+    if (only && !accounts.some(a => a.zernio_account_id === only)) {
+      return fail('That account does not belong to this workspace.', 403)
+    }
+    const targets = only ? accounts.filter(a => a.zernio_account_id === only) : accounts
+    return {
+      accounts,
+      synced: await syncAccountPosts(z, targets),
+      synced_at: new Date().toISOString(),
     }
   },
 
@@ -535,7 +592,21 @@ export default async function handler(req, res) {
     })
   }
 
-  const user = await authenticate(req)
+  const body = req.body && typeof req.body === 'object' ? req.body : {}
+  const workspaceId = String(body.workspace_id || '').trim()
+  const token = bearerOf(req)
+
+  // Sign-in and membership are checked at the same time rather than in turn:
+  // both are Supabase round trips, and in sequence they were two of the four
+  // stacked in front of every account list. The workspace read uses the
+  // caller's own token, so an invalid token reads nothing — and its result is
+  // discarded anyway when the sign-in check fails.
+  const [user, wsRead] = await Promise.all([
+    authenticate(token),
+    token
+      ? loadWorkspace(workspaceId, token).then(ws => ({ ws }), error => ({ error }))
+      : Promise.resolve({ ws: null }),
+  ])
   if (!user) {
     return res.status(401).json({
       ok: false,
@@ -543,11 +614,9 @@ export default async function handler(req, res) {
     })
   }
 
-  const body = req.body && typeof req.body === 'object' ? req.body : {}
-  const workspaceId = String(body.workspace_id || '').trim()
-
   try {
-    const ws = await loadWorkspace(workspaceId, user.token)
+    if (wsRead.error) throw wsRead.error
+    const ws = wsRead.ws
     if (!ws) {
       return res.status(403).json({ ok: false, error: 'You do not have access to that workspace.' })
     }

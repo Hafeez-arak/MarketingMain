@@ -181,6 +181,12 @@ export function AnalyticsDashboard({ dash, days, accountId = '', onRetry, perPla
     [supported],
   )
 
+  // The post table follows the same rule as the toggles. `shown` keeps a
+  // column unless the server said the platform cannot fill it; `listed`
+  // shows one only when the server said it can — for clicks, which only
+  // LinkedIn reports, and which would otherwise be a column of zeros.
+  const shown = key => !Array.isArray(supported) || !supported.length || supported.includes(key)
+  const listed = key => Array.isArray(supported) && supported.includes(key)
   const overviewError = dash?.overview?._error || null
   const posts = dash?.overview?.posts || EMPTY
   const overviewMeta = dash?.overview?.overview || {}
@@ -568,9 +574,10 @@ export function AnalyticsDashboard({ dash, days, accountId = '', onRetry, perPla
                     <th className="text-left px-5 py-2.5 text-[11px] font-medium uppercase tracking-wide text-text-tertiary">Post</th>
                     <th className="text-right px-5 py-2.5 text-[11px] font-medium uppercase tracking-wide text-text-tertiary">Likes</th>
                     <th className="text-right px-5 py-2.5 text-[11px] font-medium uppercase tracking-wide text-text-tertiary">Comments</th>
-                    <th className="text-right px-5 py-2.5 text-[11px] font-medium uppercase tracking-wide text-text-tertiary">Views</th>
-                    <th className="text-right px-5 py-2.5 text-[11px] font-medium uppercase tracking-wide text-text-tertiary">Impr.</th>
-                    <th className="text-right px-5 py-2.5 text-[11px] font-medium uppercase tracking-wide text-text-tertiary">Reach</th>
+                    {shown('views') && <th className="text-right px-5 py-2.5 text-[11px] font-medium uppercase tracking-wide text-text-tertiary">Views</th>}
+                    {shown('impressions') && <th className="text-right px-5 py-2.5 text-[11px] font-medium uppercase tracking-wide text-text-tertiary">Impr.</th>}
+                    {shown('reach') && <th className="text-right px-5 py-2.5 text-[11px] font-medium uppercase tracking-wide text-text-tertiary">Reach</th>}
+                    {listed('clicks') && <th className="text-right px-5 py-2.5 text-[11px] font-medium uppercase tracking-wide text-text-tertiary">Clicks</th>}
                     <th className="text-right px-5 py-2.5 text-[11px] font-medium uppercase tracking-wide text-text-tertiary">ER</th>
                   </tr>
                 </thead>
@@ -595,9 +602,10 @@ export function AnalyticsDashboard({ dash, days, accountId = '', onRetry, perPla
                       </td>
                       <td className="px-5 py-3 text-right text-text">{fmt(p.analytics?.likes)}</td>
                       <td className="px-5 py-3 text-right text-text">{fmt(p.analytics?.comments)}</td>
-                      <td className="px-5 py-3 text-right text-text">{fmt(p.analytics?.views)}</td>
-                      <td className="px-5 py-3 text-right text-text">{fmt(p.analytics?.impressions)}</td>
-                      <td className="px-5 py-3 text-right text-text-tertiary">{p.analytics?.reach ? fmt(p.analytics.reach) : '–'}</td>
+                      {shown('views') && <td className="px-5 py-3 text-right text-text">{fmt(p.analytics?.views)}</td>}
+                      {shown('impressions') && <td className="px-5 py-3 text-right text-text">{fmt(p.analytics?.impressions)}</td>}
+                      {shown('reach') && <td className="px-5 py-3 text-right text-text-tertiary">{p.analytics?.reach ? fmt(p.analytics.reach) : '–'}</td>}
+                      {listed('clicks') && <td className="px-5 py-3 text-right text-text">{fmt(p.analytics?.clicks)}</td>}
                       <td className="px-5 py-3 text-right font-medium text-text">
                         {p._er === null ? <span className="text-text-tertiary">—</span> : `${p._er.toFixed(0)}%`}
                       </td>

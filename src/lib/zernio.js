@@ -102,27 +102,6 @@ export async function syncZernio(webhookUrl, workspaceId) {
   }
 }
 
-// Live proxy read — hits Zernio's own analytics-add-on endpoints (best
-// time to post, posting-frequency, content-decay, daily rollups, follower
-// history) through n8n and returns them as-is. Nothing here is stored in
-// Supabase; it's fetched fresh on every dashboard load, same as Zernio's
-// own dashboard does.
-export async function fetchZernioDashboard(webhookUrl, { platform = '', accountId = '', days = 30 } = {}) {
-  if (!webhookUrl) return { error: 'Zernio Dashboard webhook not configured — set it in Settings → Integrations.' }
-  try {
-    const res = await fetch(webhookUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ platform: platform || undefined, account_id: accountId || undefined, days }),
-    })
-    const data = await res.json().catch(() => ({}))
-    if (!res.ok || data.ok === false) return { error: data.error || `Dashboard fetch failed (${res.status}).` }
-    return data
-  } catch (err) {
-    return { error: err.message }
-  }
-}
-
 // ── Reads ────────────────────────────────────────────────────────────────
 // These three used to be defined here, which was only ever true by accident:
 // they read OUR tables (social_accounts, post_analytics), not Zernio's API,

@@ -52,7 +52,7 @@ export async function readAccounts(workspaceId, { activeOnly = false } = {}) {
   return db(
     `social_accounts?${ws(workspaceId)}${filter}&order=platform.asc&limit=50` +
     `&select=id,platform,username,display_name,is_active,needs_reconnection,followers_count,` +
-    `last_synced_at,connected_at,publish_provider,login_method,zernio_account_id,` +
+    `last_synced_at,connected_at,publish_provider,login_method,account_type,zernio_account_id,` +
     // The profile id is how _zernioLive addresses Zernio for this workspace.
     // It is read from the row rather than accepted as an argument — a profile
     // id the model could supply would be another brand's numbers, and the API

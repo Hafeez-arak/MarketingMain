@@ -321,10 +321,46 @@ export async function disconnectAccount(workspaceId, accountId) {
 }
 
 // One account's analytics — posts, daily metrics, best time, follower history
-// and, for Instagram, account-wide insights. Returns the response as-is (the
-// shape AnalyticsDashboard reads), or { error } when the whole call failed.
-export async function fetchAccountAnalytics(workspaceId, accountId, days = 30) {
-  return call('analytics', { workspace_id: workspaceId, account_id: accountId, days })
+// and the account-wide numbers its platform has: Instagram's insights, or a
+// LinkedIn company page's totals. Returns the response as-is (the shape
+// AnalyticsDashboard reads), or { error } when the whole call failed.
+//
+// `platform` and `accountType` are hints that let the server start the reads
+// before it has finished checking the account; it re-plans if they are wrong,
+// and never trusts them for which account is read.
+export async function fetchAccountAnalytics(workspaceId, accountId, days = 30, { platform = '', accountType = null } = {}) {
+  return call('analytics', {
+    workspace_id: workspaceId, account_id: accountId, days,
+    platform: platform || undefined, account_type: accountType || undefined,
+  })
+}
+
+// Refresh: Zernio re-reads the account (or every account, without an id) from
+// the platform now, instead of on its ~90-minute cycle, and returns the fresh
+// account list. See syncAccountPosts in api/zernio/_zernio.js.
+export async function syncAccounts(workspaceId, accountId = '') {
+  const res = await call('sync', { workspace_id: workspaceId, account_id: accountId || undefined })
+  if (res.error) return { error: res.error }
+  return { accounts: res.accounts || [], synced: res.synced || [], syncedAt: res.synced_at || '' }
+}
+
+// One sentence per account about what a refresh actually did. A debounced
+// press is said to be one, rather than reported as a refresh that happened —
+// the "I clicked it and nothing changed" this exists to explain.
+export function describeSync(synced) {
+  const list = Array.isArray(synced) ? synced : []
+  if (!list.length) return 'Nothing is connected, so there was nothing to refresh.'
+  return list.map(r => {
+    const label = PLATFORM_META[r.platform]?.label || r.platform || 'An account'
+    const who = r.name ? `${label} (${r.name})` : label
+    if (r.needs_reconnection) return `${who} needs reconnecting before it can refresh.`
+    if (!r.ok) return `${who} did not refresh: ${String(r.error || 'unknown error').replace(/\.+$/, '')}.`
+    if (r.skipped) return `${who} was refreshed moments ago, so this shows that refresh.`
+    const n = r.recent_posts
+    return Number.isFinite(n)
+      ? `${who}: re-read ${n} recent post${n === 1 ? '' : 's'} from ${label}.`
+      : `${who}: re-read from ${label}.`
+  }).join(' ')
 }
 
 // ── Token age ─────────────────────────────────────────────────────────────

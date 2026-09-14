@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
-  readConnectCallback, explainOAuthError, tokenAge, TOKEN_LIFETIME_DAYS,
+  readConnectCallback, explainOAuthError, tokenAge, TOKEN_LIFETIME_DAYS, describeSync,
 } from './zernioConnect'
 
 // The pieces of zernioConnect.js that are pure logic rather than a fetch
@@ -167,5 +167,42 @@ describe('tokenAge', () => {
   it('treats a missing connected_at as unknown rather than fresh', () => {
     expect(tokenAge({ connected_at: null }))
       .toMatchObject({ known: false, days: null, expiringSoon: false, expired: false })
+  })
+})
+
+// What the Refresh button says it did. The complaint it answers was "clicking
+// refresh does nothing" — so a press Zernio debounced must say so, and a
+// refresh that failed must not read like one that worked.
+describe('describeSync', () => {
+  const page = { platform: 'linkedin', name: 'ARAK Lighting', account_id: 'li1' }
+
+  it('names how many posts were re-read from the platform', () => {
+    expect(describeSync([{ ...page, ok: true, skipped: false, recent_posts: 3 }]))
+      .toBe('LinkedIn (ARAK Lighting): re-read 3 recent posts from LinkedIn.')
+  })
+
+  it('says a debounced press was already refreshed, not that it refreshed', () => {
+    expect(describeSync([{ ...page, ok: true, skipped: true, recent_posts: 3 }]))
+      .toMatch(/refreshed moments ago/)
+  })
+
+  it('tells someone to reconnect rather than quoting a status', () => {
+    expect(describeSync([{ ...page, ok: false, needs_reconnection: true }]))
+      .toBe('LinkedIn (ARAK Lighting) needs reconnecting before it can refresh.')
+  })
+
+  it('reports a failure as a failure, without doubling its full stop', () => {
+    expect(describeSync([{ ...page, ok: false, error: 'Rate limit exceeded.' }]))
+      .toBe('LinkedIn (ARAK Lighting) did not refresh: Rate limit exceeded.')
+  })
+
+  it('covers every account, and says when there were none', () => {
+    const both = describeSync([
+      { ...page, ok: true, recent_posts: 1 },
+      { platform: 'instagram', name: '', ok: true, skipped: true },
+    ])
+    expect(both).toMatch(/re-read 1 recent post from LinkedIn\./)
+    expect(both).toMatch(/Instagram was refreshed moments ago/)
+    expect(describeSync([])).toMatch(/nothing to refresh/)
   })
 })
