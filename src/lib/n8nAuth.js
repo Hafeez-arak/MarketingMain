@@ -13,9 +13,9 @@ import { supabase } from './supabaseClient'
 // api/zernio/[action].js).
 //
 // This is installed as a fetch wrapper rather than added to each call site.
-// There are nineteen of them across campaignPlanner, creativeStudio, zernio
-// and quickCreate, and a check that has to be remembered nineteen times is a
-// check that will eventually be forgotten in the twentieth — the next caller
+// There are many of them across campaignPlanner, creativeStudio and zernio,
+// and a check that has to be remembered at every call site is a check that
+// will eventually be forgotten at the next one — the next caller
 // would silently ship unauthenticated. Wrapping the transport means a new
 // call site is covered by existing code rather than by whoever writes it.
 //

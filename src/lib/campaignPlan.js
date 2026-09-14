@@ -2,7 +2,7 @@ import { defaultFormat, defaultAspectRatio } from './postFormats'
 
 // ─── Plan-level helpers, shared by more than the planner page ──────────────
 // These used to live in pages/campaigns/CampaignPlanner.jsx and be imported
-// out of it by ContentPlans, Approvals and lib/quickCreate. A page module that
+// out of it by ContentPlans and Approvals. A page module that
 // also exports plain functions defeats Fast Refresh (React can't tell whether
 // a changed export is a component, so it falls back to a full reload), and
 // importing a page from lib/ is a dependency pointing the wrong way.

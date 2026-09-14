@@ -1,18 +1,16 @@
 import { useState, useRef, useEffect } from 'react'
 import { createPortal } from 'react-dom'
-import { useNavigate } from 'react-router-dom'
 import { useApp, actions } from '../../store/app'
 import { useAuth } from '../../store/auth'
 import { ComposerHost } from '../../components/composer/ComposerHost'
 import { ConnectAccounts } from '../../components/social/ConnectAccounts'
 import { useConnectedAccounts } from '../../lib/useConnectedAccounts'
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from '../../lib/supabaseClient'
-import { Card, Button, Badge, Textarea, Spinner, PostImage } from '../../components/ui/index'
+import { Card, Badge, Spinner, PostImage } from '../../components/ui/index'
 import { formatDateTime } from '../../lib/utils'
-import { buildInstructionsString, useBrandProfileSync, logEditFeedback } from '../../lib/brandBrain'
+import { useBrandProfileSync, logEditFeedback } from '../../lib/brandBrain'
 import { useBrandContext } from '../../lib/brandContext'
 import { CaptionStudio } from '../../components/CaptionStudio'
-import { QuickCreatePanel } from '../../components/QuickCreatePanel'
 import { fetchScheduledPosts } from '../../lib/scheduledPosts'
 
 // ─── Constants ─────────────────────────────────────────────────────────────
@@ -38,14 +36,6 @@ const CUSTOM_POST_TYPES = [
 
 const IMAGE_STYLES = LIGHTING_STYLES
 
-const TONES = [
-  { value: 'professional',  label: 'Professional' },
-  { value: 'inspirational', label: 'Inspirational' },
-  { value: 'educational',   label: 'Educational' },
-  { value: 'casual',        label: 'Casual & Friendly' },
-  { value: 'promotional',   label: 'Promotional' },
-]
-
 
 // ─── Main Page ─────────────────────────────────────────────────────────────
 // ─── Supabase generated posts hook ────────────────────────────────────────
@@ -69,7 +59,7 @@ function useSupabasePosts(supabaseUrl, anonKey, workspaceId) {
       // straight off instagram_generated_posts. That table is frozen history
       // now — new Instagram posts are written to generated_posts — so reading
       // it directly would show the 21 old rows and silently omit everything
-      // made since, including posts created from this page's own Create tab.
+      // made since, including posts from this page's own Create Post composer.
       // The view unions both and is security_invoker, so RLS still applies.
       const [schedRows, manualRes] = await Promise.all([
         fetchScheduledPosts(workspaceId, anonKey, { platform: 'instagram', limit: 100 }),
@@ -90,7 +80,14 @@ function useSupabasePosts(supabaseUrl, anonKey, workspaceId) {
         scheduledAt:         r.scheduled_date || null,
         campaignId:          r.campaign_id,
         mediaUrls:           (r.image_urls && r.image_urls.length > 0) ? r.image_urls : [r.image_url].filter(Boolean),
-        status:              r.status,
+        // A post that has been sent to Zernio reports where it really is, not
+        // the review status it was saved with — otherwise a post that went out
+        // keeps saying "Pending Review" and offers to publish a second time.
+        status:              r.publish_status === 'published' ? 'published'
+                           : r.publish_status === 'scheduled' ? 'scheduled'
+                           : r.status,
+        publishStatus:       r.publish_status || 'not_published',
+        publishError:        r.publish_error || '',
         source:              r.source || source,
         // Drives the "✦ AI Generated" badge, so it has to be a fact rather
         // than an assumption. A post written by hand (copy_mode='own' on the
@@ -104,6 +101,9 @@ function useSupabasePosts(supabaseUrl, anonKey, workspaceId) {
         // an edit or delete reaches the right one now that generated posts
         // are split across two.
         _table:              r.post_table || (source === 'manual' ? 'instagram_manual_posts' : 'generated_posts'),
+        // The untouched row, for the composer: composerFromPost() reads the
+        // database names, not this screen's renamed ones.
+        _raw:                r,
       })
 
       setRemotePosts([
@@ -172,8 +172,6 @@ export function InstagramPage() {
     return () => clearInterval(interval)
   }, [supabaseUrl, anonKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const [screen,   setScreen]   = useState('posts')
-
   return (
     <div className="max-w-7xl space-y-5">
       {/* Header */}
@@ -189,7 +187,7 @@ export function InstagramPage() {
           </div>
           <div>
             <h2 className="font-bold text-text text-base tracking-tight">Instagram</h2>
-            <p className="text-xs text-text-secondary">{mergedPosts.length} post{mergedPosts.length !== 1 ? 's' : ''} · AI content generation</p>
+            <p className="text-xs text-text-secondary">{mergedPosts.length} post{mergedPosts.length !== 1 ? 's' : ''}</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -202,11 +200,6 @@ export function InstagramPage() {
               {lastFetchedAt ? `Synced ${lastFetchedAt.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}` : 'Sync'}
             </button>
           )}
-          {/* Two different things, deliberately kept apart. This composes a
-              post from media that already exists and publishes it; the
-              "Generate with AI" tab below asks the model to invent one. Both
-              were called "Create Post", which left no way to reach the
-              publishing half at all. */}
           <ComposerHost platform="instagram" campaigns={state.campaigns}
             onDone={fetchRemotePosts} label="Create Post" />
         </div>
@@ -248,28 +241,7 @@ export function InstagramPage() {
         ))}
       </div>
 
-      {/* Tab bar */}
-      <div className="flex w-fit">
-        {[{ key: 'posts', label: 'Posts' }, { key: 'create', label: 'Generate with AI' }].map(t => (
-          <button key={t.key} onClick={() => setScreen(t.key)}
-            /* Active uses Instagram's own magenta, matching this page's other
-               primary affordances rather than the app accent. */
-            className={`px-3 py-1.5 border -ml-px first:ml-0 text-xs font-semibold transition-colors ${screen === t.key ? 'bg-[#E1306C] text-white border-[#E1306C] relative z-10' : 'bg-white text-text-secondary border-border hover:text-text hover:bg-surface-subtle'}`}>
-            {t.label}
-          </button>
-        ))}
-      </div>
-
-      {screen === 'posts'    && <PostsList posts={mergedPosts} dispatch={dispatch} state={state} onCreateClick={() => setScreen('create')} updatePostStatus={updatePostStatus} webhookUrl="" regenWebhookUrl="" />}
-      {screen === 'create'   && (
-        <div className="space-y-4 max-w-2xl">
-          <QuickCreatePanel platform="instagram" tones={TONES} workspaceId={activeWorkspaceId} accessToken={accessToken}
-            webhooks={state.webhooks} instructions={buildInstructionsString(state.brandProfile, state.instagramInstructions)}
-            captionLanguage={state.brandProfile?.captionLanguage || 'both'}
-            onDone={() => { setScreen('posts'); fetchRemotePosts() }} />
-          <InstructionsAccordion state={state} />
-        </div>
-      )}
+      <PostsList posts={mergedPosts} dispatch={dispatch} state={state} updatePostStatus={updatePostStatus} onRefresh={fetchRemotePosts} webhookUrl="" regenWebhookUrl="" />
     </div>
   )
 }
@@ -284,7 +256,7 @@ function mediaFileName(topic) {
 
 
 // ─── Post Detail Modal ─────────────────────────────────────────────────────
-function PostDetail({ post, state, webhookUrl, regenWebhookUrl, supabaseUrl, anonKey, onClose, onStatusChange, onImageUpdated, onCaptionUpdated, onDelete }) {
+function PostDetail({ post, state, webhookUrl, regenWebhookUrl, supabaseUrl, anonKey, onClose, onStatusChange, onPublish, onImageUpdated, onCaptionUpdated, onDelete }) {
   const { activeWorkspaceId, accessToken } = useAuth()
   // The rewrite panel used to be handed buildInstructionsString(profile) —
   // the flattened profile and nothing else, with no brand identity line, no
@@ -415,6 +387,16 @@ function PostDetail({ post, state, webhookUrl, regenWebhookUrl, supabaseUrl, ano
   }
 
   const arParts     = (post.aspectRatio || '1:1').split(':').map(Number)
+  // Already handed to Zernio: publishing, live, or booked for later. None of
+  // these may be sent again from here — that is a double post.
+  const sentToZernio = ['publishing', 'published', 'scheduled'].includes(post.publishStatus)
+  const statusLabel =
+    post.publishStatus === 'publishing' ? '● Publishing…' :
+    post.publishStatus === 'failed'     ? '✕ Publish failed' :
+    post.status === 'published'         ? '✓ Published' :
+    post.status === 'scheduled'         ? '⏰ Scheduled' :
+    post.status === 'draft'             ? '✎ Draft' : '● Pending Review'
+
   const arCss       = `${arParts[0]}/${arParts[1]}`
   const isPortrait  = arParts[1] > arParts[0]
   const isSquare    = arParts[0] === arParts[1]
@@ -434,9 +416,9 @@ function PostDetail({ post, state, webhookUrl, regenWebhookUrl, supabaseUrl, ano
               post.status === 'pending_publish' ? 'bg-amber-100 text-amber-700' :
               post.status === 'published'       ? 'bg-green-100 text-green-700' :
                                                   'bg-blue-100 text-blue-700'}`}>
-              {post.status === 'pending_publish' ? '● Pending Review' : post.status === 'published' ? '✓ Published' : '⏰ Scheduled'}
+              {statusLabel}
             </span>
-            {post._fromSupabase      && <span className="text-xs bg-emerald-50 text-emerald-600 border border-emerald-200 px-1.5 py-0.5 leading-[1.4] font-medium">📅 Monthly Schedule</span>}
+            {post.source === 'plan'  && <span className="text-xs bg-emerald-50 text-emerald-600 border border-emerald-200 px-1.5 py-0.5 leading-[1.4] font-medium">📅 Monthly Schedule</span>}
             {post.generatedByWorkflow && <span className="text-xs bg-purple-50 text-purple-600 border border-purple-200 px-1.5 py-0.5 leading-[1.4] font-medium">✦ AI Generated</span>}
             {styleMeta && <span className="text-xs bg-stone-100 text-stone-600 px-1.5 py-0.5 leading-[1.4]">{styleMeta.icon} {styleMeta.label}</span>}
             {campaign  && <span className="text-xs bg-amber-50 text-amber-600 border border-amber-100 px-1.5 py-0.5 leading-[1.4] font-medium">{campaign.name}</span>}
@@ -712,9 +694,13 @@ function PostDetail({ post, state, webhookUrl, regenWebhookUrl, supabaseUrl, ano
 
             {/* ── Action bar ─────────────────────────────────────────── */}
             <div className="px-8 py-6 border-t border-border bg-stone-50/60 flex gap-3 flex-shrink-0">
-              {post.status !== 'published' && (
+              {/* Approving used to only flip the row's status to 'published'
+                  — nothing was ever sent, yet the post then read as live. With
+                  onPublish it opens the composer on this post instead, the
+                  same path Post now takes: row updated in place, then Zernio. */}
+              {!sentToZernio && post.status !== 'published' && (
                 <button
-                  onClick={() => { onStatusChange(post, 'published'); setApproved(true) }}
+                  onClick={() => { if (onPublish) { onPublish(post); return } onStatusChange(post, 'published'); setApproved(true) }}
                   className="flex-1 flex items-center justify-center gap-2.5 py-3.5 rounded-2xl text-sm font-bold text-white transition-all active:scale-95"
                   style={{
                     background: approved ? '#16a34a' : '#E1306C',
@@ -724,14 +710,14 @@ function PostDetail({ post, state, webhookUrl, regenWebhookUrl, supabaseUrl, ano
                     : <><svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg> Approve & Publish</>}
                 </button>
               )}
-              {post.status === 'published' && (
+              {(sentToZernio || post.status === 'published') && (
                 <div className="flex-1 flex items-center justify-center gap-2.5 py-3.5 rounded-2xl text-sm font-bold bg-green-50 text-green-700 border-2 border-green-200">
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
-                  Published
+                  {post.publishStatus === 'publishing' ? 'Publishing…' : post.status === 'scheduled' ? 'Scheduled' : 'Published'}
                 </div>
               )}
-              {post.status !== 'scheduled' && post.status !== 'published' && (
-                <button onClick={() => onStatusChange(post, 'scheduled')}
+              {!sentToZernio && post.status !== 'scheduled' && post.status !== 'published' && (
+                <button onClick={() => onPublish ? onPublish(post) : onStatusChange(post, 'scheduled')}
                   className="px-6 py-3.5 rounded-2xl text-sm font-semibold border-2 border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors">
                   Schedule
                 </button>
@@ -782,9 +768,10 @@ function PostDetail({ post, state, webhookUrl, regenWebhookUrl, supabaseUrl, ano
 export { PostDetail as InstagramPostDetail }
 
 // ─── Posts List ────────────────────────────────────────────────────────────
-function PostsList({ posts, dispatch, state, onCreateClick, updatePostStatus, webhookUrl, regenWebhookUrl }) {
+function PostsList({ posts, dispatch, state, updatePostStatus, onRefresh, webhookUrl, regenWebhookUrl }) {
   const [filter,       setFilter]       = useState('all')
   const [selectedPost, setSelectedPost] = useState(null)
+  const [composerPost, setComposerPost] = useState(null)
 
   const { activeWorkspaceId, accessToken } = useAuth()
   const supabaseUrl = SUPABASE_URL
@@ -863,6 +850,7 @@ function PostsList({ posts, dispatch, state, onCreateClick, updatePostStatus, we
 
   const FILTERS = [
     { key: 'all',             label: 'All',       count: posts.length },
+    { key: 'draft',           label: 'Drafts',    count: posts.filter(p => p.status === 'draft').length },
     { key: 'pending_publish', label: 'Pending',   count: posts.filter(p => p.status === 'pending_publish').length },
     { key: 'scheduled',       label: 'Scheduled', count: posts.filter(p => p.status === 'scheduled').length },
     { key: 'published',       label: 'Published', count: posts.filter(p => p.status === 'published').length },
@@ -906,14 +894,7 @@ function PostsList({ posts, dispatch, state, onCreateClick, updatePostStatus, we
             </svg>
           </div>
           <p className="font-medium text-text mb-1">No {filter !== 'all' ? FILTERS.find(f=>f.key===filter)?.label.toLowerCase()+' ' : ''}posts yet</p>
-          {/* Named the wrong company on every workspace but the original one.
-              Falls back to no name rather than a placeholder: an empty state
-              that names nobody reads fine, one that names the wrong brand
-              does not. */}
-          <p className="text-sm text-text-secondary mb-4">
-            Generate your first AI-powered post{state.brandProfile?.customFields?.brand_name ? ` for ${state.brandProfile.customFields.brand_name}` : ''}.
-          </p>
-          <Button onClick={onCreateClick}>Create Post</Button>
+          <p className="text-sm text-text-secondary">Use Create Post above to compose and publish one.</p>
         </Card>
       ) : (
         <div className="grid grid-cols-1 gap-3">
@@ -946,7 +927,7 @@ function PostsList({ posts, dispatch, state, onCreateClick, updatePostStatus, we
                       <div className="flex items-center gap-1.5 flex-wrap">
                         <Badge status={p.status === 'pending_publish' ? 'pending' : p.status} />
                         {p.generatedByWorkflow && <span className="text-[10px] bg-purple-50 text-purple-600 px-1.5 py-0.5 leading-[1.4] font-medium">AI</span>}
-                        {p._fromSupabase && <span className="text-[10px] bg-green-50 text-green-600 px-1.5 py-0.5 leading-[1.4] font-medium">📅 Scheduled</span>}
+                        {p.source === 'plan' && <span className="text-[10px] bg-green-50 text-green-600 px-1.5 py-0.5 leading-[1.4] font-medium">📅 Monthly Schedule</span>}
                         {customMeta && <span className="text-[10px] bg-surface-subtle text-text-secondary px-1.5 py-0.5 leading-[1.4]">{customMeta.icon} {customMeta.label}</span>}
                         {!customMeta && styleMeta && <span className="text-[10px] bg-surface-subtle text-text-secondary px-1.5 py-0.5 leading-[1.4]">{styleMeta.icon} {styleMeta.label}</span>}
                         {campaign && <span className="text-[10px] bg-amber-50 text-amber-600 px-1.5 py-0.5 leading-[1.4] font-medium">{campaign.name}</span>}
@@ -979,59 +960,25 @@ function PostsList({ posts, dispatch, state, onCreateClick, updatePostStatus, we
           anonKey={anonKey}
           onClose={() => setSelectedPost(null)}
           onStatusChange={handleStatusChange}
+          onPublish={post => { setSelectedPost(null); setComposerPost(post) }}
           onImageUpdated={handleImageUpdated}
           onCaptionUpdated={handleCaptionUpdated}
           onDelete={handleDelete}
         />
       )}
+
+      {/* Publishing a saved post goes through the composer, prefilled, so a
+          draft reaches Zernio exactly the way Post now does. */}
+      <ComposerHost
+        key={composerPost?.id || 'none'}
+        trigger={false}
+        platform="instagram"
+        campaigns={state.campaigns}
+        openPost={composerPost?._raw || null}
+        onOpenPostHandled={() => setComposerPost(null)}
+        onDone={onRefresh}
+      />
     </div>
   )
 }
 
-
-// ─── Instructions Accordion ────────────────────────────────────────────────
-function InstructionsAccordion({ state }) {
-  const { dispatch } = useApp()
-  const navigate = useNavigate()
-  const [open,         setOpen]         = useState(false)
-  const [instructions, setInstructions] = useState(state.instagramInstructions || '')
-  const [saved,        setSaved]        = useState(false)
-  function handleSave() {
-    dispatch({ type: 'SET_INSTAGRAM_INSTRUCTIONS', payload: instructions })
-    setSaved(true); setTimeout(() => setSaved(false), 2000)
-  }
-  return (
-    <Card className="overflow-hidden">
-      <button onClick={() => setOpen(o => !o)}
-        className="w-full flex items-center justify-between px-5 py-4 text-left hover:bg-surface-subtle transition-colors">
-        <div className="flex items-center gap-2.5">
-          <div className="w-7 h-7 rounded-lg bg-purple-100 flex items-center justify-center">
-            <svg className="w-3.5 h-3.5 text-purple-600" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-              <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
-            </svg>
-          </div>
-          <div>
-            <p className="text-sm font-medium text-text">Instagram-Specific Notes</p>
-            <p className="text-xs text-text-secondary">{state.instagramInstructions ? '✓ Notes saved' : 'Optional — layers on top of your Brand Brain profile'}</p>
-          </div>
-        </div>
-        <svg className={`w-4 h-4 text-text-tertiary transition-transform ${open ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>
-      </button>
-      {open && (
-        <div className="px-5 pb-5 border-t border-border pt-4 space-y-3 fade-up">
-          <p className="text-xs text-text-tertiary">
-            Your core brand voice, dos/don'ts, and audience now live in one place —{' '}
-            <button type="button" onClick={() => navigate('/brand-brain')} className="text-purple-600 hover:text-purple-700 underline font-medium">Brand Brain</button>.
-            Use this field only for things specific to Instagram, e.g. Reels-style hooks or emoji usage.
-          </p>
-          <Textarea
-            placeholder={"Examples:\n• Reels hooks should be punchy, under 6 words\n• Carousel posts: keep each slide to one idea"}
-            value={instructions} onChange={e => setInstructions(e.target.value)} rows={5} />
-          <Button onClick={handleSave} variant={saved ? 'secondary' : 'primary'} className="w-full justify-center">
-            {saved ? '✓ Saved' : 'Save Instagram Notes'}
-          </Button>
-        </div>
-      )}
-    </Card>
-  )
-}
