@@ -80,7 +80,14 @@ function useSupabasePosts(supabaseUrl, anonKey, workspaceId) {
         scheduledAt:         r.scheduled_date || null,
         campaignId:          r.campaign_id,
         mediaUrls:           (r.image_urls && r.image_urls.length > 0) ? r.image_urls : [r.image_url].filter(Boolean),
-        status:              r.status,
+        // A post that has been sent to Zernio reports where it really is, not
+        // the review status it was saved with — otherwise a post that went out
+        // keeps saying "Pending Review" and offers to publish a second time.
+        status:              r.publish_status === 'published' ? 'published'
+                           : r.publish_status === 'scheduled' ? 'scheduled'
+                           : r.status,
+        publishStatus:       r.publish_status || 'not_published',
+        publishError:        r.publish_error || '',
         source:              r.source || source,
         // Drives the "✦ AI Generated" badge, so it has to be a fact rather
         // than an assumption. A post written by hand (copy_mode='own' on the
@@ -94,6 +101,9 @@ function useSupabasePosts(supabaseUrl, anonKey, workspaceId) {
         // an edit or delete reaches the right one now that generated posts
         // are split across two.
         _table:              r.post_table || (source === 'manual' ? 'instagram_manual_posts' : 'generated_posts'),
+        // The untouched row, for the composer: composerFromPost() reads the
+        // database names, not this screen's renamed ones.
+        _raw:                r,
       })
 
       setRemotePosts([
@@ -231,7 +241,7 @@ export function InstagramPage() {
         ))}
       </div>
 
-      <PostsList posts={mergedPosts} dispatch={dispatch} state={state} updatePostStatus={updatePostStatus} webhookUrl="" regenWebhookUrl="" />
+      <PostsList posts={mergedPosts} dispatch={dispatch} state={state} updatePostStatus={updatePostStatus} onRefresh={fetchRemotePosts} webhookUrl="" regenWebhookUrl="" />
     </div>
   )
 }
@@ -246,7 +256,7 @@ function mediaFileName(topic) {
 
 
 // ─── Post Detail Modal ─────────────────────────────────────────────────────
-function PostDetail({ post, state, webhookUrl, regenWebhookUrl, supabaseUrl, anonKey, onClose, onStatusChange, onImageUpdated, onCaptionUpdated, onDelete }) {
+function PostDetail({ post, state, webhookUrl, regenWebhookUrl, supabaseUrl, anonKey, onClose, onStatusChange, onPublish, onImageUpdated, onCaptionUpdated, onDelete }) {
   const { activeWorkspaceId, accessToken } = useAuth()
   // The rewrite panel used to be handed buildInstructionsString(profile) —
   // the flattened profile and nothing else, with no brand identity line, no
@@ -377,6 +387,16 @@ function PostDetail({ post, state, webhookUrl, regenWebhookUrl, supabaseUrl, ano
   }
 
   const arParts     = (post.aspectRatio || '1:1').split(':').map(Number)
+  // Already handed to Zernio: publishing, live, or booked for later. None of
+  // these may be sent again from here — that is a double post.
+  const sentToZernio = ['publishing', 'published', 'scheduled'].includes(post.publishStatus)
+  const statusLabel =
+    post.publishStatus === 'publishing' ? '● Publishing…' :
+    post.publishStatus === 'failed'     ? '✕ Publish failed' :
+    post.status === 'published'         ? '✓ Published' :
+    post.status === 'scheduled'         ? '⏰ Scheduled' :
+    post.status === 'draft'             ? '✎ Draft' : '● Pending Review'
+
   const arCss       = `${arParts[0]}/${arParts[1]}`
   const isPortrait  = arParts[1] > arParts[0]
   const isSquare    = arParts[0] === arParts[1]
@@ -396,9 +416,9 @@ function PostDetail({ post, state, webhookUrl, regenWebhookUrl, supabaseUrl, ano
               post.status === 'pending_publish' ? 'bg-amber-100 text-amber-700' :
               post.status === 'published'       ? 'bg-green-100 text-green-700' :
                                                   'bg-blue-100 text-blue-700'}`}>
-              {post.status === 'pending_publish' ? '● Pending Review' : post.status === 'published' ? '✓ Published' : '⏰ Scheduled'}
+              {statusLabel}
             </span>
-            {post._fromSupabase      && <span className="text-xs bg-emerald-50 text-emerald-600 border border-emerald-200 px-1.5 py-0.5 leading-[1.4] font-medium">📅 Monthly Schedule</span>}
+            {post.source === 'plan'  && <span className="text-xs bg-emerald-50 text-emerald-600 border border-emerald-200 px-1.5 py-0.5 leading-[1.4] font-medium">📅 Monthly Schedule</span>}
             {post.generatedByWorkflow && <span className="text-xs bg-purple-50 text-purple-600 border border-purple-200 px-1.5 py-0.5 leading-[1.4] font-medium">✦ AI Generated</span>}
             {styleMeta && <span className="text-xs bg-stone-100 text-stone-600 px-1.5 py-0.5 leading-[1.4]">{styleMeta.icon} {styleMeta.label}</span>}
             {campaign  && <span className="text-xs bg-amber-50 text-amber-600 border border-amber-100 px-1.5 py-0.5 leading-[1.4] font-medium">{campaign.name}</span>}
@@ -674,9 +694,13 @@ function PostDetail({ post, state, webhookUrl, regenWebhookUrl, supabaseUrl, ano
 
             {/* ── Action bar ─────────────────────────────────────────── */}
             <div className="px-8 py-6 border-t border-border bg-stone-50/60 flex gap-3 flex-shrink-0">
-              {post.status !== 'published' && (
+              {/* Approving used to only flip the row's status to 'published'
+                  — nothing was ever sent, yet the post then read as live. With
+                  onPublish it opens the composer on this post instead, the
+                  same path Post now takes: row updated in place, then Zernio. */}
+              {!sentToZernio && post.status !== 'published' && (
                 <button
-                  onClick={() => { onStatusChange(post, 'published'); setApproved(true) }}
+                  onClick={() => { if (onPublish) { onPublish(post); return } onStatusChange(post, 'published'); setApproved(true) }}
                   className="flex-1 flex items-center justify-center gap-2.5 py-3.5 rounded-2xl text-sm font-bold text-white transition-all active:scale-95"
                   style={{
                     background: approved ? '#16a34a' : '#E1306C',
@@ -686,14 +710,14 @@ function PostDetail({ post, state, webhookUrl, regenWebhookUrl, supabaseUrl, ano
                     : <><svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg> Approve & Publish</>}
                 </button>
               )}
-              {post.status === 'published' && (
+              {(sentToZernio || post.status === 'published') && (
                 <div className="flex-1 flex items-center justify-center gap-2.5 py-3.5 rounded-2xl text-sm font-bold bg-green-50 text-green-700 border-2 border-green-200">
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
-                  Published
+                  {post.publishStatus === 'publishing' ? 'Publishing…' : post.status === 'scheduled' ? 'Scheduled' : 'Published'}
                 </div>
               )}
-              {post.status !== 'scheduled' && post.status !== 'published' && (
-                <button onClick={() => onStatusChange(post, 'scheduled')}
+              {!sentToZernio && post.status !== 'scheduled' && post.status !== 'published' && (
+                <button onClick={() => onPublish ? onPublish(post) : onStatusChange(post, 'scheduled')}
                   className="px-6 py-3.5 rounded-2xl text-sm font-semibold border-2 border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors">
                   Schedule
                 </button>
@@ -744,9 +768,10 @@ function PostDetail({ post, state, webhookUrl, regenWebhookUrl, supabaseUrl, ano
 export { PostDetail as InstagramPostDetail }
 
 // ─── Posts List ────────────────────────────────────────────────────────────
-function PostsList({ posts, dispatch, state, updatePostStatus, webhookUrl, regenWebhookUrl }) {
+function PostsList({ posts, dispatch, state, updatePostStatus, onRefresh, webhookUrl, regenWebhookUrl }) {
   const [filter,       setFilter]       = useState('all')
   const [selectedPost, setSelectedPost] = useState(null)
+  const [composerPost, setComposerPost] = useState(null)
 
   const { activeWorkspaceId, accessToken } = useAuth()
   const supabaseUrl = SUPABASE_URL
@@ -825,6 +850,7 @@ function PostsList({ posts, dispatch, state, updatePostStatus, webhookUrl, regen
 
   const FILTERS = [
     { key: 'all',             label: 'All',       count: posts.length },
+    { key: 'draft',           label: 'Drafts',    count: posts.filter(p => p.status === 'draft').length },
     { key: 'pending_publish', label: 'Pending',   count: posts.filter(p => p.status === 'pending_publish').length },
     { key: 'scheduled',       label: 'Scheduled', count: posts.filter(p => p.status === 'scheduled').length },
     { key: 'published',       label: 'Published', count: posts.filter(p => p.status === 'published').length },
@@ -901,7 +927,7 @@ function PostsList({ posts, dispatch, state, updatePostStatus, webhookUrl, regen
                       <div className="flex items-center gap-1.5 flex-wrap">
                         <Badge status={p.status === 'pending_publish' ? 'pending' : p.status} />
                         {p.generatedByWorkflow && <span className="text-[10px] bg-purple-50 text-purple-600 px-1.5 py-0.5 leading-[1.4] font-medium">AI</span>}
-                        {p._fromSupabase && <span className="text-[10px] bg-green-50 text-green-600 px-1.5 py-0.5 leading-[1.4] font-medium">📅 Scheduled</span>}
+                        {p.source === 'plan' && <span className="text-[10px] bg-green-50 text-green-600 px-1.5 py-0.5 leading-[1.4] font-medium">📅 Monthly Schedule</span>}
                         {customMeta && <span className="text-[10px] bg-surface-subtle text-text-secondary px-1.5 py-0.5 leading-[1.4]">{customMeta.icon} {customMeta.label}</span>}
                         {!customMeta && styleMeta && <span className="text-[10px] bg-surface-subtle text-text-secondary px-1.5 py-0.5 leading-[1.4]">{styleMeta.icon} {styleMeta.label}</span>}
                         {campaign && <span className="text-[10px] bg-amber-50 text-amber-600 px-1.5 py-0.5 leading-[1.4] font-medium">{campaign.name}</span>}
@@ -934,11 +960,24 @@ function PostsList({ posts, dispatch, state, updatePostStatus, webhookUrl, regen
           anonKey={anonKey}
           onClose={() => setSelectedPost(null)}
           onStatusChange={handleStatusChange}
+          onPublish={post => { setSelectedPost(null); setComposerPost(post) }}
           onImageUpdated={handleImageUpdated}
           onCaptionUpdated={handleCaptionUpdated}
           onDelete={handleDelete}
         />
       )}
+
+      {/* Publishing a saved post goes through the composer, prefilled, so a
+          draft reaches Zernio exactly the way Post now does. */}
+      <ComposerHost
+        key={composerPost?.id || 'none'}
+        trigger={false}
+        platform="instagram"
+        campaigns={state.campaigns}
+        openPost={composerPost?._raw || null}
+        onOpenPostHandled={() => setComposerPost(null)}
+        onDone={onRefresh}
+      />
     </div>
   )
 }

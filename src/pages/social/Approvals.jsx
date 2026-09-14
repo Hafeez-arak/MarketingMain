@@ -745,6 +745,7 @@ export function Approvals() {
           anonKey={accessToken || ''}
           onClose={() => setSelectedPost(null)}
           onStatusChange={handleStatusChange}
+          onPublish={post => { setSelectedPost(null); setComposerPost(post) }}
           onImageUpdated={() => {}}
           onCaptionUpdated={handleCaptionUpdated}
           onDelete={handleDelete}
