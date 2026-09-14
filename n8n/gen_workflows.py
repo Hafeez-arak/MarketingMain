@@ -1354,15 +1354,22 @@ try {
     // (workspace_id, zernio_account_id) — see the migration's unique index.
     if (workspaceId){
       try {
+        const accRow = { workspace_id: workspaceId, zernio_account_id: match._id, platform: match.platform,
+                 username: match.username || '', display_name: match.displayName || '',
+                 profile_picture: match.profilePicture || '',
+                 is_active: match.isActive !== false, needs_reconnection: match.needsReconnection === true,
+                 last_synced_at: new Date().toISOString(),
+                 updated_at: new Date().toISOString() };
+        // Only what Zernio actually reported, matching the daily sync above.
+        // It sends followersCount: null until its first snapshot and
+        // profileUrl: null for an Instagram account connected through Facebook
+        // login. OMITTING the key leaves whatever is already stored; writing
+        // `0` or `''` overwrote a real follower count on every publish.
+        if (typeof match.followersCount === 'number') accRow.followers_count = match.followersCount;
+        if (match.profileUrl) accRow.profile_url = match.profileUrl;
         await http({ method:'POST', url:`${SUPA_URL}/rest/v1/social_accounts?on_conflict=workspace_id,zernio_account_id`,
           headers:{ apikey:SUPA_KEY, Authorization:`Bearer ${SUPA_KEY}`, 'Content-Type':'application/json', Prefer:'resolution=merge-duplicates,return=minimal' },
-          body:{ workspace_id: workspaceId, zernio_account_id: match._id, platform: match.platform,
-                 username: match.username || '', display_name: match.displayName || '',
-                 profile_picture: match.profilePicture || '', profile_url: match.profileUrl || '',
-                 is_active: match.isActive !== false, needs_reconnection: match.needsReconnection === true,
-                 followers_count: match.followersCount || 0, last_synced_at: new Date().toISOString(),
-                 updated_at: new Date().toISOString() },
-          json:true });
+          body: accRow, json:true });
       } catch (e) { /* caching is best-effort; publishing must not fail on it */ }
     }
   }

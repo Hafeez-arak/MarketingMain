@@ -8,7 +8,7 @@ import {
   MEMORY_SOURCES, AGENT_MEMORY_SOURCE, POST_SOURCES, AGENT_POST_SOURCE,
   POST_PLATFORMS, MEMORY_SCOPES,
 } from './writeTools'
-import { toolsFor, toolsExposingWorkspace, toolDefs, READ_TOOLS } from './tools'
+import { toolsFor, toolsExposingWorkspace, toolDefs, READ_TOOLS, PROVIDER_TOOLS } from './tools'
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..')
 
@@ -60,8 +60,17 @@ describe('writes are opt-in per surface', () => {
   it('the default belt is reads only', () => {
     // A tool the model can see is a tool it will eventually reach for. Chat
     // answering "why did this flop?" should not be filing proposals.
+    //
+    // "Reads only" is the guarantee, and it is about WRITES, not about cost:
+    // the default belt is the Supabase reads plus PROVIDER_TOOLS, which asks
+    // our own publishing provider how our own account is doing. That one is
+    // metered rather than free, and still read-only — it cannot change a row
+    // anywhere. Asserting no write tool appears is the property worth pinning;
+    // asserting the exact list would fail every time a read is added, which
+    // teaches people to update the expectation without reading it.
     const names = toolsFor().map(t => t.name)
-    expect(names).toEqual(READ_TOOLS.map(t => t.name))
+    expect(names).toEqual([...READ_TOOLS, ...PROVIDER_TOOLS].map(t => t.name))
+    for (const write of WRITE_TOOLS) expect(names).not.toContain(write.name)
     expect(names).not.toContain('propose_rule')
   })
 
