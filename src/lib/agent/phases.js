@@ -45,9 +45,14 @@ export const PHASE_BUDGET_MS = {
   // Stage 0 is measured in seconds and must not be budgeted tightly — it is
   // the part whose output everything else is a bonus on top of.
   gather: 120_000,
-  // One lens. Deliberately well under the ceiling: the route also has to load
-  // context, write a result row, and answer.
-  lens: 150_000,
+  // One lens. Under the ceiling with room to load context, write a result row,
+  // start the brief if it was the last lens, and answer.
+  //
+  // Was 150s. On 2026-09-14 (run 43eaa9c3) openings was stopped at 146s having
+  // not yet returned a single token, while the same lens took 51s two days
+  // earlier: searching tender portals is slow and uneven, and 150s was cutting
+  // off a lens that would have answered. 225s still leaves the 45s margin.
+  lens: 225_000,
   // Synthesis reads every lens result and writes the brief someone acts on.
   synthesise: 180_000,
 }

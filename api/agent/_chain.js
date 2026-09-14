@@ -1,42 +1,43 @@
+import { db } from './_supabase.js'
 import { patchRun } from './_gather.js'
 import { pendingLenses } from '../../src/lib/agent/phases.js'
 
 // ─── A run that drives itself ──────────────────────────────────────────────
 //
 // A run is three routes: /run (the numbers), one /lens per lens, then
-// /synthesise (the brief). Something has to call them in order. Until now that
-// something was ONLY the n8n workflow in n8n/agentRun.workflow.json, and that
-// workflow starts from its Monday schedule or a click inside n8n — nothing
-// else.
+// /synthesise (the brief). The n8n workflow in n8n/agentRun.workflow.json
+// drives the Monday run. A run started anywhere else (the Run button, the
+// assistant) has nothing else to drive it, so it drives itself:
 //
-// So the Run button in the app, which calls /run directly, started a run that
-// nobody would ever finish. Run a1cf0bf9 on 2026-09-14 is the case: stage 0
-// committed at 14:54, the row said `stage: lenses`, and it sat there for hours
-// with zero lens results, because no driver existed for it.
+//   /run ──┬─▶ lens A ─┐
+//          ├─▶ lens B ─┤  whichever lens finishes LAST claims the brief
+//          └─▶ lens C ─┴─▶ /synthesise
 //
-// Now each step starts the next one itself, server to server:
+// ── WHY A FAN-OUT AND NOT A LINE ──
 //
-//   /run  → first lens → next lens → … → last lens → /synthesise
+// The first version (#50) was a line: each lens started the next. The first
+// live run, 43eaa9c3 on 2026-09-14, got four lenses in and then Vercel refused
+// the fifth with 508 INFINITE_LOOP_DETECTED: browser → run → openings →
+// calendar → demand → ourselves → category was six requests nested inside
+// each other on one deployment, and Vercel treats that as a runaway loop.
 //
-// n8n's Monday run still drives its own lenses (it sends trigger 'scheduled'
-// and is left alone), so nothing runs twice.
+// Fanned out, the deepest path is browser → run → lens → synthesise: three,
+// whatever the number of lenses. It is also the shape the n8n workflow already
+// uses (a batch of lenses, then one synthesise), so both drivers run the same
+// plan the same way.
 //
 // ── WHY "DISPATCH" WAITS A FEW SECONDS AND THEN LETS GO ──
 //
-// A lens takes minutes. The step that started it cannot wait for it: every
-// invocation lives under the same 300s ceiling, and a chain of waits would add
-// up past it. So the request is sent, given a few seconds to be refused
-// outright (a 401, a 409, a bad deploy), and then abandoned. Vercel does not
-// cancel a function because its caller hung up — that is opt-in, and this
-// project does not opt in — which is observed, not assumed: a run driven from
-// a browser tab that was reloaded mid-run still had every lens complete
-// server-side (2026-09-12).
+// A lens takes minutes and every invocation lives under the same 300s ceiling,
+// so a caller cannot wait for one. The request is sent, given a few seconds to
+// be refused outright (a 401, a 409, a 508), and then abandoned. Vercel does
+// not cancel a function because its caller hung up — observed: run 43eaa9c3's
+// lenses all ran to completion after their callers had long since let go.
 //
 // ── THE RULE ──
 //
-// A chain that breaks must say so. If the next step cannot be started, the
-// run is marked failed with the reason, right then. The failure this file
-// fixes was a run that said "running" for hours while nothing ran.
+// A driver that breaks must say so. A lens that cannot be started, or a brief
+// that cannot be started, marks the run failed with the reason, right then.
 
 export const DISPATCH_WAIT_MS = 4000
 
@@ -52,12 +53,6 @@ export function shouldDrive({ trigger, drive } = {}) {
   return trigger !== 'scheduled'
 }
 
-/** What runs after these results: the first lens still missing, or the brief. */
-export function nextStep(planned = [], done = []) {
-  const pending = pendingLenses(planned, done)
-  return pending.length ? { route: 'lens', lens: pending[0] } : { route: 'synthesise' }
-}
-
 const LOCAL_HOST = /^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i
 
 /**
@@ -67,14 +62,14 @@ const LOCAL_HOST = /^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i
  * The secret must never follow a Host header. A request's Host is whatever the
  * caller wrote, and a route that sent AGENT_RUN_SECRET to "the host you called
  * me on" would hand it to anyone who asked with a forged header. So the secret
- * only goes to an address that came from the platform (VERCEL_URL) or
- * to localhost; any other address gets the caller's own sign-in token
- * forwarded, which proves nothing the caller could not already prove.
+ * only goes to an address that came from the platform (VERCEL_URL) or to
+ * localhost; any other address gets the caller's own sign-in token forwarded,
+ * which proves nothing the caller could not already prove.
  */
 export function chainTarget(req, env = process.env) {
   // VERCEL_URL is THIS deployment's own address, set by the platform. Not the
   // production domain: that could be a newer deploy than the step that is
-  // calling it, and a chain must run one version of the code end to end.
+  // calling it, and a run must use one version of the code end to end.
   // Deployment URLs on this project are not behind Vercel's protection —
   // checked 2026-09-14, an unsigned POST to one gets our own 401 JSON back.
   if (env.VERCEL_URL) {
@@ -130,41 +125,117 @@ export async function dispatch(url, body, { authorization = '', fetchImpl = fetc
   }
 }
 
-/**
- * Start whatever comes after `done`, or fail the run saying why not.
- *
- * @returns {Promise<{ok: boolean, step: object, error?: string}>}
- */
-export async function advance(req, { workspaceId, runId, cadence = 'weekly', planned = [], done = [] }, deps = {}) {
+function contextFor(req, deps) {
   const env = deps.env || process.env
-  const patch = deps.patch || patchRun
-  const step = nextStep(planned, done)
-
-  const fail = async error => {
-    await Promise.resolve(patch(workspaceId, runId, {
-      status: 'failed', error: String(error).slice(0, 500), finished_at: new Date().toISOString(),
-    })).catch(() => {})
-    return { ok: false, step, error }
-  }
-
   const { base, trusted } = chainTarget(req, env)
-  if (!base) return fail('The run could not work out its own address, so the next step was never started.')
-
   const authorization = chainAuth({
     trusted,
     incoming: req?.headers?.authorization || req?.headers?.Authorization,
     secret: env.AGENT_RUN_SECRET,
   })
-  const body = step.route === 'lens'
-    ? { workspace_id: workspaceId, run_id: runId, lens: step.lens, cadence, chain: true }
-    : { workspace_id: workspaceId, run_id: runId, cadence }
+  return { base, authorization }
+}
 
-  const out = await dispatch(`${base}/api/agent/${step.route}`, body, {
+async function failRun(workspaceId, runId, error, deps) {
+  const patch = deps.patch || patchRun
+  await Promise.resolve(patch(workspaceId, runId, {
+    status: 'failed', error: String(error).slice(0, 500), finished_at: new Date().toISOString(),
+  })).catch(() => {})
+}
+
+/**
+ * Move the run to `synthesise` if, and only if, it is still at `lenses`.
+ *
+ * Two lenses can finish in the same second and both see nothing pending. The
+ * conditional PATCH is what makes exactly one of them start the brief: the
+ * database applies the first, and the second's `stage=eq.lenses` no longer
+ * matches, so it gets no row back.
+ */
+export async function claimSynthesis(workspaceId, runId, deps = {}) {
+  const query = deps.db || db
+  const rows = await query(
+    `research_runs?id=eq.${encodeURIComponent(runId)}&workspace_id=eq.${encodeURIComponent(workspaceId)}` +
+    '&status=eq.running&stage=eq.lenses',
+    { method: 'PATCH', body: { stage: 'synthesise' }, prefer: 'return=representation' },
+  )
+  return Array.isArray(rows) && rows.length > 0
+}
+
+/**
+ * Called by a lens once its own row is written: start the brief if no lens is
+ * left, and do nothing if some are.
+ *
+ * @returns {Promise<{ok: boolean, step: string, pending?: string[], error?: string}>}
+ */
+export async function finishIfDone(req, { workspaceId, runId, cadence = 'weekly', planned = [], done = [] }, deps = {}) {
+  const pending = pendingLenses(planned, done)
+  if (pending.length) return { ok: true, step: 'waiting', pending }
+
+  let claimed
+  try {
+    claimed = await claimSynthesis(workspaceId, runId, deps)
+  } catch (err) {
+    const error = `Every lens finished, but the brief could not be claimed: ${String(err?.message || err).slice(0, 200)}`
+    await failRun(workspaceId, runId, error, deps)
+    return { ok: false, step: 'synthesise', error }
+  }
+  // Another lens got there first, or the run already ended. Either way the
+  // brief is not ours to start.
+  if (!claimed) return { ok: true, step: 'claimed_elsewhere' }
+
+  const { base, authorization } = contextFor(req, deps)
+  if (!base) {
+    const error = 'Every lens finished, but the run could not work out its own address to start the brief.'
+    await failRun(workspaceId, runId, error, deps)
+    return { ok: false, step: 'synthesise', error }
+  }
+  const out = await dispatch(`${base}/api/agent/synthesise`, { workspace_id: workspaceId, run_id: runId, cadence }, {
     authorization, fetchImpl: deps.fetchImpl, waitMs: deps.waitMs,
   })
   if (!out.dispatched) {
-    const what = step.route === 'lens' ? `the ${step.lens} lens` : 'the brief'
-    return fail(`Could not start ${what}: ${out.error}`)
+    const error = `Could not start the brief: ${out.error}`
+    await failRun(workspaceId, runId, error, deps)
+    return { ok: false, step: 'synthesise', error }
   }
-  return { ok: true, step }
+  return { ok: true, step: 'synthesise' }
+}
+
+/**
+ * Called by /run once the numbers are committed: start every planned lens at
+ * once.
+ *
+ * If any lens cannot be started the run is failed, naming which. Lenses that
+ * did start will still finish and write their rows, but none of them can
+ * claim the brief of a failed run.
+ *
+ * @returns {Promise<{ok: boolean, started: string[], error?: string}>}
+ */
+export async function startLenses(req, { workspaceId, runId, cadence = 'weekly', planned = [] }, deps = {}) {
+  if (!planned.length) {
+    const out = await finishIfDone(req, { workspaceId, runId, cadence, planned, done: [] }, deps)
+    return { ok: out.ok, started: [], error: out.error }
+  }
+
+  const { base, authorization } = contextFor(req, deps)
+  if (!base) {
+    const error = 'The run could not work out its own address, so no lens was started.'
+    await failRun(workspaceId, runId, error, deps)
+    return { ok: false, started: [], error }
+  }
+
+  const results = await Promise.all(planned.map(async lens => ({
+    lens,
+    ...(await dispatch(`${base}/api/agent/lens`,
+      { workspace_id: workspaceId, run_id: runId, lens, cadence, chain: true },
+      { authorization, fetchImpl: deps.fetchImpl, waitMs: deps.waitMs })),
+  })))
+
+  const refused = results.filter(r => !r.dispatched)
+  const started = results.filter(r => r.dispatched).map(r => r.lens)
+  if (refused.length) {
+    const error = `Could not start ${refused.map(r => `the ${r.lens} lens (${r.error})`).join(', ')}.`
+    await failRun(workspaceId, runId, error, deps)
+    return { ok: false, started, error }
+  }
+  return { ok: true, started }
 }

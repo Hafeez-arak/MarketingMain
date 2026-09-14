@@ -3,7 +3,7 @@ import { gather, patchRun } from './_gather.js'
 import { planLenses } from './_investigate.js'
 import { periodFor } from '../../src/lib/agent/gather.js'
 import { authorise } from './_serviceAuth.js'
-import { shouldDrive, advance } from './_chain.js'
+import { shouldDrive, startLenses } from './_chain.js'
 
 // ─── POST /api/agent/run ───────────────────────────────────────────────────
 // The weekly research run. AGENT.md §6, RESEARCH-AGENT.md §4.
@@ -180,9 +180,11 @@ export default async function handler(req, res) {
     })
 
     if (driving) {
-      const chain = await advance(req, { workspaceId, runId, cadence, planned: plan.lenses, done: [] })
+      // Every lens at once. Each one, when it lands, starts the brief if it
+      // was the last — see _chain.js for why this is not a line of lenses.
+      const chain = await startLenses(req, { workspaceId, runId, cadence, planned: plan.lenses })
       if (!chain.ok) {
-        // advance() has already marked the run failed, with this reason.
+        // startLenses() has already marked the run failed, with this reason.
         res.status(200).json({ ok: false, run_id: runId, error: chain.error })
         return
       }

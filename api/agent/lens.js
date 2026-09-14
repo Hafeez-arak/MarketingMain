@@ -2,7 +2,7 @@ import { db, isConfigured } from './_supabase.js'
 import { authorise } from './_serviceAuth.js'
 import { runSingleLens } from './_investigate.js'
 import { deadlineFor } from '../../src/lib/agent/phases.js'
-import { advance } from './_chain.js'
+import { finishIfDone } from './_chain.js'
 import { patchRun } from './_gather.js'
 
 // ─── POST /api/agent/lens ──────────────────────────────────────────────────
@@ -52,8 +52,8 @@ export default async function handler(req, res) {
   const runId = String(body.run_id || '').trim()
   const lens = String(body.lens || '').trim()
   const cadence = body.cadence === 'monthly' ? 'monthly' : 'weekly'
-  // Set when /run started this lens rather than n8n: finishing it means
-  // starting whatever comes next, because nothing else will.
+  // Set when /run started this lens rather than n8n: if it is the last lens
+  // to land, it starts the brief, because nothing else will.
   const chain = body.chain === true
 
   if (!workspaceId || !runId || !lens) {
@@ -104,8 +104,8 @@ export default async function handler(req, res) {
     })
 
     if (!out.ok) {
-      // No result row was written, so a chained run would pick this same lens
-      // again forever. End it instead, saying which lens and why.
+      // No result row was written, so this lens would stay pending forever and
+      // the brief would never start. End the run instead, saying which and why.
       if (chain) {
         await patchRun(workspaceId, runId, {
           status: 'failed', error: `The ${lens} lens could not run: ${out.error}`.slice(0, 500),
@@ -124,10 +124,10 @@ export default async function handler(req, res) {
         `research_lens_results?run_id=eq.${encodeURIComponent(runId)}&workspace_id=eq.${encodeURIComponent(workspaceId)}&select=lens`,
       ).catch(() => [])
       const planned = Array.isArray(run.planned) ? run.planned : []
-      const result = await advance(req, {
+      const result = await finishIfDone(req, {
         workspaceId, runId, cadence, planned,
         // This lens's row was just written; named here too, so a read that
-        // lagged the write cannot send the chain round to the same lens.
+        // lagged the write cannot leave it looking pending.
         done: [...(done || []), { lens }],
       })
       next = result.step

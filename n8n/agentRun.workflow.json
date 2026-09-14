@@ -177,7 +177,7 @@
       "maxTries": 2,
       "waitBetweenTries": 5000,
       "alwaysOutputData": true,
-      "notes": "One lens per request, bounded server-side by a 150s wall-clock budget. Idempotent per (run_id, lens), so a retry replaces its own row rather than adding a second result. batchSize 3 stops the whole lens set opening that many concurrent model calls at once — the set is five on a weekly run and seven on a monthly one, so it is deliberately not a number tied to either."
+      "notes": "One lens per request, bounded server-side by a 225s wall-clock budget (PHASE_BUDGET_MS.lens in src/lib/agent/phases.js). Idempotent per (run_id, lens), so a retry replaces its own row rather than adding a second result. batchSize 3 stops the whole lens set opening that many concurrent model calls at once — the set is five on a weekly run and seven on a monthly one, so it is deliberately not a number tied to either."
     },
     {
       "id": "synthesise",
