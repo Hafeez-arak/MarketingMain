@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   parseYMD, startOfWeek, formatTime, groupByWeek, monthOptions,
-  buildCalendarCells, normalizeAiIdea,
+  buildCalendarCells, normalizeAiIdea, distributeDates,
 } from './planModel'
 
 // None of this was reachable from a test while it lived inside a 1,490-line
@@ -209,5 +209,47 @@ describe('normalizeAiIdea', () => {
     expect(out.date).toBe('2026-03-02')
     expect(out.wantsCaption).toBe(true)
     expect(out.postKind).toBeTruthy()
+  })
+})
+
+describe('distributeDates', () => {
+  const range = { startDate: '2026-10-01', endDate: '2026-10-31' }
+
+  it('spreads four undated posts about a week apart', () => {
+    const out = distributeDates([{}, {}, {}, {}], range)
+    const days = out.map(p => Number(p.date.slice(8)))
+    expect(days).toEqual([4, 12, 20, 28])
+  })
+
+  it('never moves a post that already has a date', () => {
+    const out = distributeDates([{ date: '2026-10-23' }, {}, {}], range)
+    expect(out[0].date).toBe('2026-10-23')
+    expect(out[1].date).not.toBe('2026-10-23')
+    expect(out[2].date).not.toBe('2026-10-23')
+  })
+
+  it('keeps every date inside the range, in order', () => {
+    const out = distributeDates(Array.from({ length: 9 }, () => ({})), range)
+    const dates = out.map(p => p.date)
+    expect(dates.every(d => d >= range.startDate && d <= range.endDate)).toBe(true)
+    expect([...dates].sort()).toEqual(dates)
+    expect(new Set(dates).size).toBe(9)
+  })
+
+  it('only uses the posting days when some are given', () => {
+    // Oct 2026: the 1st is a Thursday.
+    const out = distributeDates([{}, {}, {}], { ...range, postingDays: ['sun', 'tue'] })
+    for (const p of out) expect([0, 2]).toContain(parseYMD(p.date).getDay())
+  })
+
+  it('shares days rather than dropping posts when there are more posts than days', () => {
+    const out = distributeDates([{}, {}, {}], { startDate: '2026-10-01', endDate: '2026-10-02' })
+    expect(out).toHaveLength(3)
+    expect(out.every(p => p.date >= '2026-10-01' && p.date <= '2026-10-02')).toBe(true)
+  })
+
+  it('leaves posts untouched without a usable range', () => {
+    const posts = [{}, { date: '2026-10-05' }]
+    expect(distributeDates(posts, { startDate: '', endDate: '' })).toEqual(posts)
   })
 })

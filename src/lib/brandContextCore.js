@@ -327,9 +327,15 @@ export function buildContext(profile, schema, directory, memory, options = {}) {
   // as a bare `muted` flag meant the panel read its own checkbox back as
   // "locked upstream" and disabled it — so unchecking a block made it
   // impossible to check again without reloading the page.
+  //
+  // A `<section>__featured` block belongs to its section, not beside it. The
+  // picker only ever lists the section key, so testing the block's own key
+  // withheld the matched row's detail from every planner call that selected
+  // the directory — the one block that says what the post's service actually is.
   const mutedBy = b => {
     if (muted.has(b.key)) return 'user'
-    if (allowedSections && !allowedSections.includes(b.key) && b.key !== 'memory') return 'section'
+    const sectionKey = b.key.endsWith('__featured') ? b.key.slice(0, -'__featured'.length) : b.key
+    if (allowedSections && !allowedSections.includes(sectionKey) && b.key !== 'memory') return 'section'
     return null
   }
   const visible = blocks.filter(b => !mutedBy(b))

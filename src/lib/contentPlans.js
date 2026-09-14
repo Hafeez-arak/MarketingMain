@@ -78,6 +78,68 @@ export async function fetchPastIdeas(workspaceId, accessToken, excludePlanId, li
   } catch { return [] }
 }
 
+// Everything the AI planner should know beyond the Brand Brain, in one read:
+//
+//   research      the newest completed research run's headline, findings and
+//                 proposed ideas — evidence for what is worth posting now
+//   agentMemory   the research agent's own digest, which already lists every
+//                 idea it has proposed, so the planner is not the only part of
+//                 the app unaware of them
+//   recentPosts   what has actually been made lately, beyond the plan_ideas
+//                 history — a post written in Studio never had an idea row
+//
+// All best-effort. A plan must still be buildable on a workspace that has
+// never run research, and one failed read only costs that one section.
+// Workspace-scoped on every query, as always: RLS is per user, not per brand.
+const RESEARCH_MAX_AGE_DAYS = 45
+
+export async function fetchPlannerMemory(workspaceId, accessToken) {
+  const empty = { research: null, agentMemory: '', recentPosts: [] }
+  if (!workspaceId) return empty
+  const headers = authHeaders(accessToken)
+  const getJson = async url => {
+    try {
+      const res = await fetch(url, { headers })
+      return res.ok ? await res.json() : []
+    } catch { return [] }
+  }
+  const since = new Date(Date.now() - RESEARCH_MAX_AGE_DAYS * 86400000).toISOString()
+  const [runs, digests, posts] = await Promise.all([
+    getJson(`${SUPABASE_URL}/rest/v1/research_runs?workspace_id=eq.${workspaceId}&status=eq.complete` +
+      `&started_at=gte.${since}&select=started_at,report&order=started_at.desc&limit=1`),
+    getJson(`${SUPABASE_URL}/rest/v1/agent_digest?workspace_id=eq.${workspaceId}&select=digest&limit=1`),
+    getJson(`${SUPABASE_URL}/rest/v1/scheduled_posts?workspace_id=eq.${workspaceId}` +
+      `&select=platform,topic,caption,caption_en,scheduled_date,status&order=created_at.desc&limit=40`),
+  ])
+
+  const report = runs?.[0]?.report || null
+  const clip = (v, n) => String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, n)
+  const research = report ? {
+    date: String(runs[0].started_at || '').slice(0, 10),
+    headline: clip(report.headline, 400),
+    // Findings are long-form and cite sources; the planner needs the claim,
+    // not the essay, so each is clipped to a sentence or two.
+    findings: (Array.isArray(report.market) ? report.market : [])
+      .map(f => clip(f?.finding || f?.detail || f, 300)).filter(Boolean).slice(0, 6),
+    ideas: (Array.isArray(report.proposed_ideas) ? report.proposed_ideas : [])
+      .map(i => ({ title: clip(i?.title, 160), angle: clip(i?.angle, 400), rationale: clip(i?.rationale, 300) }))
+      .filter(i => i.title).slice(0, 10),
+  } : null
+
+  return {
+    research: research && (research.headline || research.findings.length || research.ideas.length) ? research : null,
+    agentMemory: String(digests?.[0]?.digest || '').slice(0, 6000),
+    recentPosts: (posts || [])
+      .map(p => ({
+        platform: p.platform || '',
+        date: p.scheduled_date || '',
+        topic: clip(p.topic, 160),
+        caption: clip(p.caption_en || p.caption, 200),
+      }))
+      .filter(p => p.topic || p.caption),
+  }
+}
+
 export async function createPlan(workspaceId, accessToken, plan) {
   if (!workspaceId) return { error: 'No active workspace. Try signing out and back in.' }
   try {

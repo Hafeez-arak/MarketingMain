@@ -470,7 +470,8 @@ export function CreativeStudio() {
     // A plan that has since been deleted, or belongs to another workspace,
     // resolves to nothing. Say so rather than navigating to an empty board.
     if (!plan) { setError('That plan is no longer available in this workspace.'); return }
-    dispatch(actions.setCampaignPlanDraft(planDraftFromPlan(plan, ideas)))
+    // Back to the pictures step, where the trip into the Studio started.
+    dispatch(actions.setCampaignPlanDraft(planDraftFromPlan(plan, ideas, { step: 'media' })))
     navigate('/campaigns/plan')
   }
 

@@ -2,32 +2,42 @@ import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useApp, actions } from '../../store/app'
 import { useAuth } from '../../store/auth'
-import { Card, Button, Input, Textarea, Select, Spinner, Toggle } from '../../components/ui/index'
+import { Card, Button, Input, Textarea, Select, Spinner, Toggle, PostImage } from '../../components/ui/index'
 import { uid, formatDate } from '../../lib/utils'
-import {
-  isBrandProfileEmpty, useBrandProfileSync,
-  getBrandBrainSections, DEFAULT_BRAND_BRAIN_SECTIONS,
-} from '../../lib/brandBrain'
+import { isBrandProfileEmpty, useBrandProfileSync, getBrandBrainSections } from '../../lib/brandBrain'
 import { buildContext, fetchBrandMemory, logIdeaEvent, logIdeaEvents, ideaSnapshot } from '../../lib/brandContext'
 import { fetchBrandSchema, fetchDirectoryRows } from '../../lib/brandSchema'
 import { fetchBrandAssets } from '../../lib/brandAssets'
-import { requestCampaignPlan, ensureCaptions, elongateIdea, requestDraftCopy, triggerVideoRenders } from '../../lib/campaignPlanner'
+import { requestCampaignPlan, elongateIdea, requestDraftCopy, triggerVideoRenders } from '../../lib/campaignPlanner'
 import {
   formatsFor, defaultFormat, aspectRatiosFor, defaultAspectRatio, slideRange, aspectLabel,
   derivePostKind,
 } from '../../lib/postFormats'
-import { groupByWeek, monthOptions, normalizeAiIdea } from './planModel'
-import { GOALS, PLATFORMS, WEEKDAYS, DEFAULT_DRAFT } from './planConstants'
+import { groupByWeek, monthOptions, normalizeAiIdea, distributeDates, formatTime, DEFAULT_POST_TIME } from './planModel'
+import { GOALS, WEEKDAYS, DEFAULT_DRAFT, isUntouchedSelection } from './planConstants'
 import { IdeaCard } from './IdeaCard'
+import { CaptionCard } from './CaptionCard'
 import { GenerateMoreModal, CalendarView } from './plannerParts'
 import { momentsInRange, dbIdeaToDraft } from '../../lib/campaignPlan'
 import { ReferencePicker } from '../../components/ReferencePicker'
 import {
   createPlan, insertIdeas, updateIdea, setAllIdeaStatus, deleteIdea, updatePlan, markIdeasProcessing,
   markIdeasGenerated, fetchPastIdeas, fetchPlanWithIdeas, markIdeasDrafting, fetchIdeaDrafts, markIdeaDraftFailed,
+  fetchPlannerMemory,
 } from '../../lib/contentPlans'
 import { BrandContextPanel } from '../../components/BrandContextPanel'
 import { openStudioForIdea, fetchSessionsForIdeas, resetIdeaMedia, publishIdeasAsPosts } from '../../lib/studioBridge'
+
+// The five stages, in order. `media` is the pictures step and `captions` the
+// words written against them — captions come after the picture on purpose, so
+// they can describe what is actually in it.
+const STEPS = [
+  { key: 'setup',    label: 'Setup' },
+  { key: 'review',   label: 'Review ideas' },
+  { key: 'media',    label: 'Pictures' },
+  { key: 'captions', label: 'Captions' },
+  { key: 'done',     label: 'Done' },
+]
 
 function useDraft() {
   const { state, dispatch } = useApp()
@@ -35,16 +45,33 @@ function useDraft() {
   // draft missing newer fields (e.g. ideas, planId) can't leave them undefined.
   const draft = { ...DEFAULT_DRAFT, ...(state.campaignPlanDraft || {}) }
   // Patches merge against the CURRENT draft, not the one this render captured.
-  // handleGeneratePlan sets step:'review' and then kicks off drafting, which
-  // updates `ideas` — two dispatches from one render. Spreading the captured
-  // `draft` here made the second one carry step:'setup' along with it and undo
-  // the first, which is why a plan could be created successfully and still
-  // leave the user sitting on the form. See the reducer for the full story.
+  // Two dispatches from one render (set the step, then update ideas) would
+  // otherwise have the second carry the old step along and undo the first.
   const update = patch => dispatch(actions.setCampaignPlanDraft(
     prev => ({ ...DEFAULT_DRAFT, ...(prev || {}), ...patch }),
   ))
   const clear  = () => dispatch(actions.setCampaignPlanDraft(null))
   return { draft, update, clear, state, dispatch }
+}
+
+// The finished picture a caption should be written from. Never a video — the
+// clip is not sent to the model — and at most two images for a carousel. The
+// workflow enforces the same limits; they are applied here too so the payload
+// says what will actually be looked at.
+function captionImagesFor(idea) {
+  if (idea.mediaType === 'video') return []
+  if (idea.previewImageUrl) return [idea.previewImageUrl]
+  if (idea.imageMode === 'use_reference') return (idea.references || []).filter(Boolean).slice(0, 2)
+  return []
+}
+
+// What stands in for the post on a card: the accepted Studio picture, or the
+// image the operator attached. Reading only previewImageUrl showed a blank
+// placeholder next to "✓ Your image" for every attached picture.
+function thumbFor(idea) {
+  if (idea.previewImageUrl) return idea.previewImageUrl
+  if (idea.imageMode === 'use_reference') return (idea.references || [])[0] || ''
+  return ''
 }
 
 // ─── Main planner ───────────────────────────────────────────────────────────
@@ -59,17 +86,14 @@ export function CampaignPlanner() {
   const [error,   setError]   = useState('')
   const [busy,    setBusy]    = useState(false)
 
-  // Directory data behind the Brand Brain section toggles — fetched once so
-  // the setup step can show live counts and plan generation can pull from it.
-  // Which directories exist is per-brand now (Arak has Suppliers, Aqeeq has a
-  // Service Menu, Alo Kheyatah has Alterations), so this loads the workspace's
-  // own schema rather than four fixed tables.
+  // Directory data behind the Brand Brain section picker — fetched once so the
+  // hidden picker can show live counts and generation can pull from it. Which
+  // directories exist is per-brand (Arak has Suppliers, Aqeeq a Service Menu,
+  // Alo Kheyatah Alterations), so this loads the workspace's own schema.
   const [directory, setDirectory] = useState({
     schema: { sections: [], fields: [], columns: [] }, rowsBySection: {}, assets: [],
   })
-  // Active learned rules for this brand. Fetched alongside the schema because
-  // every context build needs them, and an extra round-trip per generation
-  // would be paid on a list that changes maybe weekly.
+  // Active learned rules for this brand — every context build needs them.
   const [brandMemory, setBrandMemory] = useState([])
   useEffect(() => {
     if (!activeWorkspaceId) return
@@ -85,35 +109,21 @@ export function CampaignPlanner() {
       for (const r of rows) (rowsBySection[r.section_key] ||= []).push(r)
       setDirectory({ schema, rowsBySection, assets })
       setBrandMemory(memory)
-      // Turn the workspace's own directories on by default. For Aqeeq and Alo
-      // Kheyatah the service menu IS the subject matter, and leaving it off
-      // meant the planner never saw what the company actually sells. Only
-      // applied while the selection is still the untouched default, so a
-      // deliberate de-selection is never overridden.
+      // What the AI reads by default: the brand's voice plus every directory it
+      // has. For Aqeeq and Alo Kheyatah the service menu IS the subject matter.
+      // Only applied while nobody has changed the selection, so a deliberate
+      // choice in the hidden picker is never overridden.
       const dirKeys = (schema.sections || [])
         .filter(sec => sec.kind === 'directory' && sec.enabled !== false)
         .map(sec => sec.key)
-      if (dirKeys.length) {
-        // Dispatched directly rather than through update(), which takes a
-        // plain patch — this needs to read the CURRENT selection to decide
-        // whether it is still untouched.
-        dispatch(actions.setCampaignPlanDraft(prev => {
-          const base = { ...DEFAULT_DRAFT, ...(prev || {}) }
-          const sel = base.brandBrainSections || []
-          const untouched = sel.length === DEFAULT_BRAND_BRAIN_SECTIONS.length &&
-            DEFAULT_BRAND_BRAIN_SECTIONS.every(k => sel.includes(k))
-          if (!untouched) return base
-          return { ...base, brandBrainSections: [...sel, ...dirKeys] }
-        }))
-      }
+      dispatch(actions.setCampaignPlanDraft(prev => {
+        const base = { ...DEFAULT_DRAFT, ...(prev || {}) }
+        if (!isUntouchedSelection(base.brandBrainSections || [])) return base
+        return { ...base, brandBrainSections: ['voice', ...dirKeys] }
+      }))
     })
     return () => { alive = false }
   }, [activeWorkspaceId, accessToken])
-
-  // One place the whole page gets its AI context from. Returns the payload
-  // fields every webhook expects — the flattened instructions plus the brand's
-  // own identity, which used to be hardcoded to a lighting company inside the
-  // n8n prompts regardless of which brand was posting.
 
   function contextFor(task, extra = {}) {
     const ctx = buildContext(state.brandProfile, directory.schema, directory, brandMemory, {
@@ -129,8 +139,7 @@ export function CampaignPlanner() {
   }
 
   // Rows the planner can be told to build the month around. Any directory
-  // qualifies — Arak features fixtures, Aqeeq features services, Alo Kheyatah
-  // features alteration types. A row's first column is its display name.
+  // qualifies. A row's first column is its display name.
   const featurableItems = []
   for (const section of directory.schema.sections) {
     if (section.kind !== 'directory' || section.enabled === false) continue
@@ -146,51 +155,40 @@ export function CampaignPlanner() {
   // Review-step view controls (client-side only).
   const [statusFilter,   setStatusFilter]   = useState('all')   // all | undecided | approved | rejected
   const [seasonalOnly,   setSeasonalOnly]   = useState(false)
-  const [platformFilter, setPlatformFilter] = useState('all')
   const [autoEditId,     setAutoEditId]     = useState(null)     // idea to auto-open in the edit modal
   const [viewMode,       setViewMode]       = useState('list')   // 'list' | 'calendar'
   const [dayFilter,      setDayFilter]      = useState(null)     // 'YYYY-MM-DD' — set by clicking a calendar day
   function pickCalendarDay(dateKey) { setDayFilter(dateKey); setViewMode('list') }
 
-  // Per-seed-post image picker (Stage-1 brief) — which seed row is being
-  // edited, and the in-progress mode choice for that row's picker (mirrors
-  // the same controlled-mode pattern IdeaCard uses for its own picker).
+  // Which seed post's image picker is open on the setup step.
   const [pickingSeedIdx, setPickingSeedIdx] = useState(null)
-  const [seedPickerMode, setSeedPickerMode] = useState('generate')
+  // The Brand Brain picker is tucked away: the defaults are right for almost
+  // every plan, and a row of chips plus a context dump was the most confusing
+  // thing on the page.
+  const [showBrainPicker, setShowBrainPicker] = useState(false)
 
   // "Generate more ideas" — AI top-up on top of the existing plan.
   const [showMoreModal, setShowMoreModal] = useState(false)
   const [moreLoading,   setMoreLoading]   = useState(false)
   const [moreError,     setMoreError]     = useState('')
 
-  const { step, month, goal, goalCategory, platforms, startDate, endDate, approxCount, includeHolidays, brandBrainSections, featuredProductIds, seedPosts, name, ideas, planId, manualResult, postingDays, defaultTime, aiAssist, contentMixTarget, openedFromPlanList } = draft
+  const { step, month, goal, goalCategory, platforms, startDate, endDate, approxCount, includeHolidays, brandBrainSections, featuredProductIds, seedPosts, name, ideas, planId, manualResult, postingDays, aiAssist, contentMixTarget, openedFromPlanList } = draft
 
-  // What the plan call will actually be given, for the preview panel. Same
-  // builder as the payload — see contextFor below.
-  // Not memoised: it is string assembly over a few dozen fields on a setup
-  // form, and memoising it here defeated the compiler's own optimisation.
+  // What the plan call will actually be given, for the preview panel inside the
+  // hidden Brand Brain picker. Same builder as the payload.
   const setupContext = buildContext(state.brandProfile, directory.schema, directory, brandMemory, {
     task: 'plan', sections: brandBrainSections,
   })
-  // The caption-task slice, for the review board's panel. Separate from
-  // setupContext because the two calls genuinely take different slices once
-  // fields are task-tagged — showing the plan context over a board of drafted
-  // captions would misreport what wrote them.
-  const draftContext = buildContext(state.brandProfile, directory.schema, directory, brandMemory, {
-    task: 'caption', sections: brandBrainSections,
-  })
   const activeRuleCount = brandMemory.filter(r => r.status === 'active').length
   const months = monthOptions()
+  const captionLanguage = state.brandProfile?.captionLanguage || 'both'
 
   // Supabase is the source of truth for a saved plan's ideas — the draft
-  // persisted in localStorage can go stale (another tab, another day, an
-  // idea generated by n8n after this tab last touched it). The instant a
-  // planId is present — whether restored from localStorage on a fresh
-  // mount, or freshly set after this tab created the plan — pull the real
-  // rows once and let them win over whatever the draft was holding, except
-  // for cards added locally that haven't been saved yet ('new_' ids), which
-  // the DB can't know about. Guarded by ref so it fires once per planId,
-  // not on every render.
+  // persisted in localStorage can go stale (another tab, another day, the
+  // Studio marking a picture ready). The instant a planId is present, pull the
+  // real rows once and let them win, except for cards added locally that
+  // haven't been saved yet ('new_' ids). Guarded by ref so it fires once per
+  // planId, not on every render.
   const syncedPlanIdRef = useRef(null)
   useEffect(() => {
     if (!planId || !accessToken || !activeWorkspaceId) return
@@ -200,10 +198,8 @@ export function CampaignPlanner() {
       // Lookup failed rather than answered — a dropped request must never be
       // read as "not yours" and cost someone their in-progress board.
       if (!ok) { syncedPlanIdRef.current = null; return }
-      // Answered, and the plan isn't this company's. The board must not show
-      // it, and — more importantly — must not keep its planId around, or the
-      // next "+ Add idea" would write this company's idea into the other
-      // company's plan. Start clean instead.
+      // Answered, and the plan isn't this company's. Start clean rather than
+      // keep a planId the next write would land in someone else's plan.
       if (!plan) { syncedPlanIdRef.current = null; clear(); return }
       if (!dbIdeas) return
       const dbDraftIdeas = dbIdeas.map(dbIdeaToDraft)
@@ -212,26 +208,28 @@ export function CampaignPlanner() {
     })
   }, [planId, accessToken, activeWorkspaceId])
 
-  // Fire arak-draft-copy for a batch of freshly-created ideas — ONE call per
-  // idea (no cross-idea batching), so a slow/failed draft never blocks the
-  // rest of the board. `allIdeas` is the full, just-computed ideas array
-  // (not the `ideas` closure — avoids the stale-state problem of firing
-  // multiple update() calls in a loop right after another update()).
-  // Best-effort: if the webhook isn't configured, ideas simply stay
-  // 'not_started' rather than getting stuck marked 'drafting' forever.
-  async function draftIdeas(allIdeas, newIds) {
+  // ── Captions ─────────────────────────────────────────────────────────────
+  // Fire arak-draft-copy for a set of ideas — ONE call per idea, so a slow or
+  // failed draft never blocks the rest. Captions only, and from the picture:
+  // by the time this runs every approved idea has had its picture step.
+  //
+  // The call is fire-and-forget in the sense that nobody awaits the draft — it
+  // lands in plan_ideas and the poll below picks it up. It is not
+  // fire-and-forget about whether the request was accepted: a refused call
+  // means no workflow is running, so the row is written 'failed' now rather
+  // than left spinning (see markIdeaDraftFailed).
+  async function draftCaptions(allIdeas, ids) {
     const draftCopyUrl = state.webhooks?.draftCopy
-    if (!newIds.length || !draftCopyUrl) return
+    if (!ids.length) return
+    if (!draftCopyUrl) { setError('Draft Copy webhook not configured (Settings → Integrations).'); return }
     const nowIso = new Date().toISOString()
-    update({ ideas: allIdeas.map(i => newIds.includes(i.id) ? { ...i, draftStatus: 'drafting', draftedAt: nowIso, draftError: '' } : i) })
-    await markIdeasDrafting(accessToken, newIds)
-    const captionLanguage = state.brandProfile?.captionLanguage || 'both'
-    const targets = allIdeas.filter(i => newIds.includes(i.id))
+    update({ ideas: allIdeas.map(i => ids.includes(i.id) ? { ...i, draftStatus: 'drafting', draftedAt: nowIso, draftError: '', captionOptions: [] } : i) })
+    await markIdeasDrafting(accessToken, ids)
+    const targets = allIdeas.filter(i => ids.includes(i.id))
     const results = await Promise.allSettled(targets.map(idea => {
       // Per idea, not per batch: a large directory reaches the prompt as a
-      // bare name index, so the one thing that makes a caption specific —
-      // what the featured service or fixture actually is — only arrives if
-      // this idea's own brief is what selects it.
+      // bare name index, so what the featured service actually is only
+      // arrives if this idea's own brief is what selects it.
       const brandCtx = contextFor('caption', {
         matchText: [idea.topic, idea.title, idea.angle, idea.imageIdea],
       })
@@ -242,25 +240,19 @@ export function CampaignPlanner() {
         wants_caption: idea.wantsCaption, image_idea: idea.imageIdea,
         caption_language: captionLanguage, instructions: brandCtx.instructions,
         brand_name: brandCtx.brand_name, brand_descriptor: brandCtx.brand_descriptor,
+        caption_only: true,
+        image_urls: captionImagesFor(idea),
       })
     }))
 
-    // The call is fire-and-forget in the sense that nobody AWAITS the draft —
-    // it lands in plan_ideas and the poll below picks it up. It is not
-    // fire-and-forget about whether the request was accepted. A refused call
-    // (webhook unconfigured, proxy 401/502/503, n8n rejecting the shared
-    // secret) means no workflow is running and none ever will, so the row is
-    // written 'failed' now rather than left spinning until someone reloads and
-    // starts the same wait again.
     const failures = results
       .map((r, i) => ({ idea: targets[i], error: r.status === 'rejected' ? String(r.reason?.message || r.reason) : (r.value?.ok ? '' : r.value?.error || 'The Draft Copy webhook refused the request.') }))
       .filter(f => f.error)
     if (!failures.length) return
     await Promise.allSettled(failures.map(f => markIdeaDraftFailed(accessToken, f.idea.id, f.error)))
     const byId = new Map(failures.map(f => [f.idea.id, f.error]))
-    // Against the CURRENT draft, not this closure's `ideas` — a webhook call
-    // takes seconds, and the reviewer may have edited or added a card while it
-    // was in flight. Cards that left 'drafting' in the meantime are left alone.
+    // Against the CURRENT draft — the reviewer may have picked or edited
+    // something while the call was in flight.
     dispatch(actions.setCampaignPlanDraft(prev => ({
       ...DEFAULT_DRAFT, ...(prev || {}),
       ideas: (prev?.ideas || []).map(i =>
@@ -270,25 +262,25 @@ export function CampaignPlanner() {
     })))
   }
 
-  // A redraft is a rejection of the copy without a rejection of the idea —
-  // the reviewer read what the model wrote and asked for another take. Worth
-  // recording separately from the first draft, which draftIdeas also serves:
-  // the interesting number is how often a given kind of idea needs a second
-  // pass, and that is invisible if both look the same in the log.
-  function redraftIdea(target) {
+  // A redraft is a rejection of the copy without a rejection of the idea.
+  // Logged separately from the first draft: how often a kind of post needs a
+  // second pass is invisible if both look the same in the log.
+  const [redraftingId, setRedraftingId] = useState(null)
+  async function redraftCaptions(target) {
+    setRedraftingId(target.id)
     logIdeaEvent(activeWorkspaceId, accessToken, {
       planId, ideaId: target.id, event: 'redrafted',
       reason: target.draftStatus === 'failed' ? 'retry after failure' : 'asked for another take',
       before: ideaSnapshot(target),
     })
-    return draftIdeas(ideas, [target.id])
+    const cleared = ideas.map(i => i.id === target.id ? { ...i, captionEn: '', captionAr: '' } : i)
+    await draftCaptions(cleared, [target.id])
+    setRedraftingId(null)
   }
 
   // Poll plan_ideas for cards currently 'drafting' — 4s while any are in
-  // flight, stopped otherwise. Merge rule: a poll result only overwrites a
-  // card's option/selection fields while that card is STILL locally
-  // 'drafting' — once the reviewer has picked or edited something, a
-  // late-arriving poll must never clobber it.
+  // flight, stopped otherwise. A poll only overwrites a card while that card is
+  // STILL locally 'drafting', so a late result never clobbers a choice.
   useEffect(() => {
     const draftingIds = ideas.filter(i => i.draftStatus === 'drafting').map(i => i.id)
     if (!draftingIds.length) return
@@ -301,21 +293,19 @@ export function CampaignPlanner() {
           if (i.draftStatus !== 'drafting') return i
           const row = rows.find(r => r.id === i.id)
           if (!row) return i
-          // No drafted_at means nothing recorded when the wait began, so the
-          // age is unknowable — treat the row itself as the clock and time it
-          // out too, rather than waiting forever on a card that can never
-          // satisfy the check. (Rows written before drafted_at existed.)
+          // No drafted_at means the age is unknowable — time it out too rather
+          // than wait forever on a card that can never satisfy the check.
           const staleMs = i.draftedAt ? now - new Date(i.draftedAt).getTime() : Infinity
           if (row.draft_status === 'drafting' && staleMs > 5 * 60 * 1000) {
-            // Write the verdict down. Local-only, this decision died with the
-            // tab and the next page load resumed the same doomed spinner.
+            // Written down, not just patched locally — a local-only verdict
+            // died with the tab and the next load resumed the same spinner.
             markIdeaDraftFailed(accessToken, i.id, 'Drafting timed out — no result came back from the workflow.')
             return { ...i, draftStatus: 'failed', draftError: 'Drafting timed out — try again.' }
           }
           if (row.draft_status === 'ready' || row.draft_status === 'failed') {
             return {
               ...i, draftStatus: row.draft_status, draftError: row.draft_error || '',
-              captionOptions: row.caption_options || [], mediaPromptOptions: row.media_prompt_options || [],
+              captionOptions: row.caption_options || [],
             }
           }
           return i
@@ -329,12 +319,12 @@ export function CampaignPlanner() {
   const toggleProduct  = id => update({ featuredProductIds: featuredProductIds.includes(id) ? featuredProductIds.filter(x => x !== id) : [...featuredProductIds, id] })
   const toggleDay      = d  => update({ postingDays: postingDays.includes(d) ? postingDays.filter(x => x !== d) : [...postingDays, d] })
 
-  // ── Seed posts (specific posts the user already wants, optionally with images) ──
+  // ── Seed posts (specific posts the user already wants, optionally with an image) ──
   const addSeed = () => {
     const p = platforms[0] || 'instagram'
     const fmt = defaultFormat(p)
     update({ seedPosts: [...seedPosts, {
-      text: '', platform: p, date: '', references: [], imageMode: 'generate',
+      text: '', platform: p, date: '', references: [],
       postFormat: fmt, aspectRatio: defaultAspectRatio(p, fmt), slideCount: slideRange(p, fmt)?.default || 1,
       // 'ai' preserves what this box has always meant — a topic to write from.
       // Opting into 'own' is what turns the text into the post itself.
@@ -343,9 +333,8 @@ export function CampaignPlanner() {
   }
   const updateSeed = (i, patch)  => update({ seedPosts: seedPosts.map((s, idx) => idx === i ? { ...s, ...patch } : s) })
   const removeSeed = i           => update({ seedPosts: seedPosts.filter((_, idx) => idx !== i) })
-  function openSeedImagePicker(i) { setSeedPickerMode(seedPosts[i].imageMode || 'generate'); setPickingSeedIdx(i) }
   function saveSeedImages(urls) {
-    updateSeed(pickingSeedIdx, { references: urls, imageMode: seedPickerMode })
+    updateSeed(pickingSeedIdx, { references: urls })
     setPickingSeedIdx(null)
     return { ok: true }
   }
@@ -358,55 +347,49 @@ export function CampaignPlanner() {
 
   function validateSetup() {
     if (!month) return 'Pick which month this plan is for.'
-    if (platforms.length === 0) return 'Select at least one platform.'
     const hasSeeds = seedPosts.some(s => s.text.trim())
-    if (!aiAssist && !hasSeeds) return 'Add at least one post, or turn on "Also let AI propose additional posts."'
+    if (!aiAssist && !hasSeeds) return 'Add at least one post, or turn on "Also let AI suggest more posts."'
     return ''
   }
+
+  const defaultGoal = () =>
+    `A well-rounded month of brand content for ${activeWorkspace?.name || 'this brand'} — a mix of service and product highlights, educational content, and the seasonal/cultural moments falling in this month, all in the brand's own voice.`
 
   async function handleGeneratePlan() {
     const v = validateSetup()
     if (v) { setError(v); return }
     // The AI planner webhook is only needed when AI-assist is actually on —
-    // a fully manual, curated-posts-only plan never calls it.
+    // a plan of only your own posts never calls it.
     if (aiAssist && !webhookUrl) { setError('Campaign Planner webhook not configured (Settings → Integrations).'); return }
     setError(''); setLoading(true)
 
-    // Individually curated posts — the primary planning surface. These are
-    // inserted directly as real ideas, no AI involved.
-    const cleanSeeds = seedPosts
-      .filter(s => s.text.trim())
-      .map(s => ({
-        text: s.text.trim(), platform: s.platform, format: s.postFormat || defaultFormat(s.platform), date: s.date || null,
-        image_mode: s.imageMode || 'generate', reference_image_urls: s.references || [],
-      }))
-    const seedIdeas = seedPosts.filter(s => s.text.trim()).map(s => {
+    const filledSeeds = seedPosts.filter(s => s.text.trim())
+    // An attached image IS the post's picture. Without one, the picture is
+    // made in the Studio on the pictures step.
+    const seedImageMode = s => (s.references || []).length ? 'use_reference' : 'studio'
+    const cleanSeeds = filledSeeds.map(s => ({
+      text: s.text.trim(), platform: s.platform, format: s.postFormat || defaultFormat(s.platform), date: s.date || null,
+      image_mode: seedImageMode(s), reference_image_urls: s.references || [],
+    }))
+    const seedIdeas = filledSeeds.map(s => {
       const postFormat = s.postFormat || defaultFormat(s.platform)
       const mediaType = formatsFor(s.platform).find(f => f.id === postFormat)?.media || 'image'
       const ownCopy = s.copyMode === 'own'
-      // A manual seed's text is BOTH the caption and the title/topic. The
-      // title is what the board, the week groups and the media stage label
-      // their cards with, so leaving it empty would produce a month of
-      // "Untitled idea"; truncating keeps a long caption from becoming the
-      // heading. topic still carries the full text — cross-month history and
-      // the mix bar read it.
+      // A manual seed's text is BOTH the caption and the title. The title is
+      // what every card labels itself with, so a long caption is truncated
+      // there; topic still carries the full text for history and the mix bar.
       const title = ownCopy && s.text.trim().length > 80
         ? `${s.text.trim().slice(0, 77)}…`
         : s.text.trim()
       return {
-        platform: s.platform, date: s.date, title, topic: s.text,
+        platform: s.platform, date: s.date, time: DEFAULT_POST_TIME, title, topic: s.text,
         tone: 'professional',
-        rationale: ownCopy
-          ? 'You wrote this post yourself — it goes out exactly as typed.'
-          : 'You added this as a specific post you wanted.',
-        imageMode: s.imageMode, references: s.references,
+        rationale: ownCopy ? '' : 'You added this as a specific post you wanted.',
+        imageMode: seedImageMode(s), references: s.references,
         postFormat, aspectRatio: s.aspectRatio || defaultAspectRatio(s.platform, postFormat), mediaType,
         slideCount: s.slideCount || slideRange(s.platform, postFormat)?.default || 1,
         wantsCaption: true,
         postKind: derivePostKind({ platform: s.platform, format: postFormat, wantsCaption: true, slideCount: s.slideCount }),
-        // The text is the post. captionEn is where the manual editor reads and
-        // writes; publishIdeasAsPosts falls back to captionAr for an
-        // Arabic-only post, so an Arabic seed is not lost either.
         copyMode: ownCopy ? 'own' : 'ai',
         captionEn: ownCopy ? s.text.trim() : '',
       }
@@ -417,27 +400,28 @@ export function CampaignPlanner() {
     let effectiveGoal = ''
     if (aiAssist) {
       const brandCtx = contextFor('plan')
-      const instructions = brandCtx.instructions
-      effectiveGoal = goal.trim() ||
-        `A well-rounded month of brand content for ${activeWorkspace?.name || 'this brand'} — a mix of service and product highlights, educational content, and the seasonal/cultural moments falling in this month, all in the brand's own voice.`
-      // Stage-1 brief material: the rows to feature with their full context,
-      // not just ids, so the planner can build a coherent month around them.
-      // Columns flagged out of the prompt (prices) stay out here too.
+      effectiveGoal = goal.trim() || defaultGoal()
+      // The rows to feature with their full context, not just ids. Columns
+      // flagged out of the prompt (prices) stay out here too.
       featuredProducts = featurableItems
         .filter(item => featuredProductIds.includes(item.id))
         .map(item => {
           const out = { name: item.name, catalogue: item.sectionTitle }
           for (const c of item.cols.slice(1)) {
             if (c.in_prompt === false) continue
-            const v = String(item.data[c.key] || '').trim()
-            if (v) out[c.key] = v
+            const val = String(item.data[c.key] || '').trim()
+            if (val) out[c.key] = val
           }
           return out
         })
 
-      // Cross-month anti-repetition: this is a BRAND NEW plan (no planId yet),
-      // so "past" here means every idea from every OTHER plan in the workspace.
-      const pastIdeas = await fetchPastIdeas(activeWorkspaceId, accessToken, null)
+      // What the planner plans against beyond the Brand Brain: every idea from
+      // other plans (anti-repetition), the latest research, the research
+      // agent's memory, and the posts actually made lately.
+      const [pastIdeas, memory] = await Promise.all([
+        fetchPastIdeas(activeWorkspaceId, accessToken, null),
+        fetchPlannerMemory(activeWorkspaceId, accessToken),
+      ])
 
       const result = await requestCampaignPlan(webhookUrl, {
         goal: effectiveGoal,
@@ -448,75 +432,70 @@ export function CampaignPlanner() {
         approx_post_count: approxCount ? Number(approxCount) : null,
         include_holidays: includeHolidays,
         brand_brain_sections: brandBrainSections,
-        instructions: instructions || null,
+        instructions: brandCtx.instructions || null,
         brand_name: brandCtx.brand_name,
         brand_descriptor: brandCtx.brand_descriptor,
         featured_products: featuredProducts,
         seed_posts: cleanSeeds,
         content_mix_target: contentMixTarget || null,
         past_ideas: pastIdeas,
+        research: memory.research,
+        agent_memory: memory.agentMemory,
+        recent_posts: memory.recentPosts,
         posting_days: postingDays,
-        posting_time: defaultTime,
+        posting_time: DEFAULT_POST_TIME,
       })
       if (result.error) { setLoading(false); setError(result.error); return }
       aiPosts = result.posts.map(normalizeAiIdea)
     }
 
-    // Persist the plan + its ideas so approval state is real, not ephemeral.
     const planRes = await createPlan(activeWorkspaceId, accessToken, {
       name: name || `${months.find(m => m.value === month)?.label || 'Monthly'} Content Plan`,
       month, start_date: startDate, end_date: endDate,
       goal: effectiveGoal, goal_category: goalCategory || '', platforms, status: 'draft',
       featured_products: featuredProducts.map(p => p.name),
-      posting_days: postingDays, default_time: defaultTime,
+      posting_days: postingDays, default_time: DEFAULT_POST_TIME,
       content_mix_target: contentMixTarget || null,
     })
     if (planRes.error) { setLoading(false); setError(`Plan couldn't be saved: ${planRes.error}`); return }
 
-    // Your curated posts come first on the board; any AI-proposed posts
-    // (only present if AI-assist was on) follow after them.
-    const allIdeas = [...seedIdeas, ...aiPosts]
+    // Your posts first, AI suggestions after. Anything without a date is
+    // spread evenly through the month, around the ones that have one.
+    const allIdeas = distributeDates([...seedIdeas, ...aiPosts], { startDate, endDate, postingDays })
+      .map(i => ({ ...i, time: i.time || DEFAULT_POST_TIME }))
 
     const ideasRes = await insertIdeas(activeWorkspaceId, accessToken, planRes.plan.id, allIdeas)
     setLoading(false)
     if (ideasRes.error) { setError(`Ideas generated but couldn't be saved: ${ideasRes.error}`); return }
 
-    const createdIdeas = ideasRes.rows.map(dbIdeaToDraft)
-    // This plan was just created in this tab — the ideas array above is
-    // already fresh, no need for the mount-sync effect to re-fetch it (and
-    // if it did, it would race draftIdeas' own optimistic 'drafting' update
-    // below with a stale DB read from before that PATCH lands).
+    // Created in this tab — the ideas are already fresh, so the mount-sync
+    // effect does not need to re-fetch them.
     syncedPlanIdRef.current = planRes.plan.id
     update({
       planId: planRes.plan.id,
-      ideas: createdIdeas,
+      ideas: ideasRes.rows.map(dbIdeaToDraft),
       name: planRes.plan.name,
       step: 'review',
     })
-    // Draft Copy proposes caption options for the reviewer to pick from. An
-    // idea whose caption is already written has nothing to propose and no
-    // reviewer decision left to make, so it is left out entirely — drafting it
-    // would spend a webhook call to offer alternatives to words the operator
-    // deliberately chose.
-    draftIdeas(createdIdeas, createdIdeas.filter(i => i.copyMode !== 'own').map(i => i.id))
+    // No captions here. They are written on the captions step, from the
+    // picture each post actually ends up with.
   }
 
-  // Top up the existing plan with more AI ideas — same webhook, but with the
-  // plan's current ideas (any status) sent as `existing_ideas` so the n8n
-  // workflow's prompt can steer away from repeating them.
+  // Top up the existing plan with more AI ideas — same webhook, with the
+  // plan's current ideas sent so the workflow steers away from repeating them.
   async function handleGenerateMore({ count, focus }) {
     if (!webhookUrl) { setMoreError('Campaign Planner webhook not configured (Settings → Integrations).'); return }
     setMoreError(''); setMoreLoading(true)
 
     const brandCtx = contextFor('plan')
-    const instructions = brandCtx.instructions
-    const effectiveGoal = focus.trim() || goal.trim() ||
-      `A well-rounded month of brand content for ${activeWorkspace?.name || 'this brand'} — a mix of service and product highlights, educational content, and the seasonal/cultural moments falling in this month, all in the brand's own voice.`
+    const effectiveGoal = focus.trim() || goal.trim() || defaultGoal()
     const existingIdeas = ideas.slice(-60).map(i => ({
       platform: i.platform, date: i.date, topic: i.topic || i.title, pillar: i.pillar,
     }))
-    // Cross-month history — OTHER plans, this one is already covered by existingIdeas above.
-    const pastIdeas = await fetchPastIdeas(activeWorkspaceId, accessToken, planId)
+    const [pastIdeas, memory] = await Promise.all([
+      fetchPastIdeas(activeWorkspaceId, accessToken, planId),
+      fetchPlannerMemory(activeWorkspaceId, accessToken),
+    ])
 
     const result = await requestCampaignPlan(webhookUrl, {
       goal: effectiveGoal,
@@ -527,25 +506,26 @@ export function CampaignPlanner() {
       approx_post_count: count,
       include_holidays: includeHolidays,
       brand_brain_sections: brandBrainSections,
-      instructions: instructions || null,
+      instructions: brandCtx.instructions || null,
       brand_name: brandCtx.brand_name,
       brand_descriptor: brandCtx.brand_descriptor,
       existing_ideas: existingIdeas,
       past_ideas: pastIdeas,
+      research: memory.research,
+      agent_memory: memory.agentMemory,
+      recent_posts: memory.recentPosts,
       posting_days: postingDays,
-      posting_time: defaultTime,
+      posting_time: DEFAULT_POST_TIME,
     })
     if (result.error) { setMoreLoading(false); setMoreError(result.error); return }
 
-    const ideasRes = await insertIdeas(activeWorkspaceId, accessToken, planId, result.posts.map(normalizeAiIdea), ideas.length)
+    const more = result.posts.map(normalizeAiIdea).map(i => ({ ...i, time: i.time || DEFAULT_POST_TIME }))
+    const ideasRes = await insertIdeas(activeWorkspaceId, accessToken, planId, more, ideas.length)
     setMoreLoading(false)
     if (ideasRes.error) { setMoreError(`Generated but couldn't be saved: ${ideasRes.error}`); return }
 
-    const createdIdeas = ideasRes.rows.map(dbIdeaToDraft)
-    const nextIdeas = [...ideas, ...createdIdeas]
-    update({ ideas: nextIdeas })
+    update({ ideas: [...ideas, ...ideasRes.rows.map(dbIdeaToDraft)] })
     setShowMoreModal(false)
-    draftIdeas(nextIdeas, createdIdeas.map(i => i.id))
   }
 
   function onIdeaChange(updated) {
@@ -553,9 +533,8 @@ export function CampaignPlanner() {
   }
 
   // ── Creative Studio sessions opened from this plan ──────────────────────
-  // One call for the whole board rather than a lookup per card. Keyed by
-  // plan_idea_id; only the newest session per idea is kept, which is what
-  // "Reopen Studio" should land on.
+  // One call for the whole board rather than a lookup per card; only the
+  // newest session per idea is kept, which is what "Back to Studio" lands on.
   const [studioSessions, setStudioSessions] = useState({})
   const savedIdeaIds = ideas.filter(i => !i.isNew && !String(i.id).startsWith('new_')).map(i => i.id)
   const savedIdsKey = savedIdeaIds.join(',')
@@ -565,71 +544,82 @@ export function CampaignPlanner() {
     fetchSessionsForIdeas(accessToken, savedIdsKey.split(',')).then(rows => {
       if (!alive) return
       const byIdea = {}
-      // Rows arrive newest-first, so the first one wins per idea.
       for (const r of rows) if (!byIdea[r.plan_idea_id]) byIdea[r.plan_idea_id] = r
       setStudioSessions(byIdea)
     })
     return () => { alive = false }
   }, [savedIdsKey, accessToken])
 
-  // Open (or reopen) Creative Studio for one idea.
-  //
-  // Two different destinations on purpose. An idea that already has a session
-  // goes straight to it (?session=), because it has versions to show. An idea
-  // that doesn't goes to ?ideaId=, where the studio pre-fills its own composer
-  // and creates the session at the first generation — its normal path. Sending
-  // a brand-new idea to ?session= would open an empty session, which the
-  // studio renders as "Nothing here yet" with no way to prompt.
-  // The media stage works on approved ideas only — a rejected idea has no
-  // picture to make, and a still-proposed one hasn't earned the Studio time.
+  // The pictures and captions steps work on approved ideas only.
   const approvedIdeas = ideas.filter(i => i.status === 'approved')
-  // An idea using its own uploaded image already HAS its picture — it was
-  // attached at plan time. Counting only Studio-accepted media would show
-  // "0 of 4 ready" to someone who supplied all four themselves, and push them
-  // into a Studio they have no reason to open.
+  // An idea using its own image already HAS its picture — it was attached, not
+  // made, so counting only Studio-accepted media would show "0 of 4 ready".
   const hasOwnMedia = i => i.imageMode === 'use_reference' && (i.references || []).length > 0
-  const mediaReadyCount = approvedIdeas.filter(i => i.mediaStatus === 'ready' || hasOwnMedia(i)).length
-  // Which side of the finalize partition each approved idea falls on. Drives
-  // the button's label and the copy around it.
-  const ownCopyCount = approvedIdeas.filter(i => i.copyMode === 'own').length
-  const aiCopyCount  = approvedIdeas.length - ownCopyCount
+  const hasMedia = i => i.mediaStatus === 'ready' || hasOwnMedia(i)
+  const mediaReadyCount = approvedIdeas.filter(hasMedia).length
+
+  // Captions: a post is ready when it needs no caption, carries your own, or
+  // has one chosen from the options.
+  const needsAiCaption = i => i.wantsCaption !== false && i.copyMode !== 'own'
+  const hasCaption = i => !!((i.captionEn || '').trim() || (i.captionAr || '').trim())
+  const captionReady = i => i.wantsCaption === false || hasCaption(i)
+  const captionsMissing = approvedIdeas.filter(i => !captionReady(i))
+  const captionsDrafting = approvedIdeas.some(i => i.draftStatus === 'drafting')
+
+  // Arriving on the captions step writes the options for every post that still
+  // needs them — once per idea per visit, never for your own words, and never
+  // over options already there (those get "↻ New options" instead).
+  const autoDraftedRef = useRef(new Set())
+  const approvedDraftKey = approvedIdeas.map(i => `${i.id}:${i.draftStatus}`).join(',')
+  useEffect(() => {
+    if (step !== 'captions' || !accessToken) return
+    const todo = approvedIdeas.filter(i =>
+      needsAiCaption(i) && !hasCaption(i) && !autoDraftedRef.current.has(i.id) &&
+      (i.draftStatus === 'not_started' || !i.draftStatus || (i.draftStatus === 'ready' && !(i.captionOptions || []).length)))
+    if (!todo.length) return
+    todo.forEach(i => autoDraftedRef.current.add(i.id))
+    draftCaptions(ideas, todo.map(i => i.id))
+  }, [step, accessToken, approvedDraftKey])
 
   // Start one over. Clears the accepted version but keeps the Studio session
-  // and the last thumbnail — what was tried before is useful context for the
-  // next attempt, and throwing the session away would abandon work already
-  // paid for.
+  // and the last thumbnail — what was tried before is useful context.
   async function redoMedia(idea) {
     const res = await resetIdeaMedia(accessToken, idea.id)
     if (res.error) { setError(res.error); return }
     onIdeaChange({ ...idea, mediaStatus: 'none', mediaVersionId: null })
   }
 
-  // ── Attaching your own picture at the media stage ────────────────────────
-  // The same ReferencePicker the setup step and the idea card already use
-  // (brand-asset library + upload), pinned to 'use_reference' — at this stage
-  // the question is only "which image IS this post", never "what should guide
-  // a generation".
+  // A new picture makes caption options written for the old one stale. The
+  // chosen caption is left alone — it may well still fit, and it is the
+  // reviewer's to change.
+  const staleCaptionPatch = idea => needsAiCaption(idea) && !hasCaption(idea) && (idea.captionOptions || []).length
+    ? { db: { caption_options: [], draft_status: 'not_started' }, local: { captionOptions: [], draftStatus: 'not_started' } }
+    : { db: {}, local: {} }
+
+  // ── Attaching your own picture ───────────────────────────────────────────
   const [mediaPickIdea, setMediaPickIdea] = useState(null)
-  function openMediaPicker(idea) { setMediaPickIdea(idea) }
   async function saveMediaImages(urls) {
     const idea = mediaPickIdea
     if (!idea) return { ok: true }
     // Clearing every image is a real choice — it puts the idea back to having
-    // no picture, rather than leaving image_mode claiming one that isn't there.
-    const mode = urls.length ? 'use_reference' : 'generate'
-    const result = await updateIdea(accessToken, idea.id, { reference_image_urls: urls, image_mode: mode })
+    // its picture made in the Studio, rather than claiming one that isn't there.
+    const mode = urls.length ? 'use_reference' : 'studio'
+    const stale = staleCaptionPatch(idea)
+    const result = await updateIdea(accessToken, idea.id, { reference_image_urls: urls, image_mode: mode, ...stale.db })
     if (result.error) return { error: result.error }
-    onIdeaChange({ ...idea, references: urls, imageMode: mode })
+    autoDraftedRef.current.delete(idea.id)
+    onIdeaChange({ ...idea, references: urls, imageMode: mode, ...stale.local })
     setMediaPickIdea(null)
     return { ok: true }
   }
 
+  // Open (or reopen) Creative Studio for one idea. An idea with a session goes
+  // straight to it; one without goes to ?ideaId=, where the Studio pre-fills
+  // its composer and creates the session at the first generation. The Studio's
+  // "Back to plan" returns to the pictures step.
   async function openStudio(idea) {
     const result = await openStudioForIdea(accessToken, idea)
     if (result.error) { setError(result.error); return }
-    // openStudioForIdea flips the idea to image_mode='studio' so plan
-    // generation stops paying fal for an image nobody will use. Reflect it
-    // locally rather than refetching the whole board for one field.
     onIdeaChange({ ...idea, imageMode: 'studio', mediaStatus: idea.mediaStatus === 'ready' ? 'ready' : 'in_studio' })
     if (result.session) {
       setStudioSessions(prev => ({ ...prev, [idea.id]: result.session }))
@@ -638,68 +628,46 @@ export function CampaignPlanner() {
       navigate(`/studio?ideaId=${idea.id}`)
     }
   }
+
   async function onIdeaRemove(idea) {
     update({ ideas: ideas.filter(i => i.id !== idea.id) })
-    // isNew ideas never made it to the database (see addIdea/onIdeaCreate) —
-    // nothing to delete server-side, and deleteIdea would just no-op on a
-    // fake temp id anyway.
+    // isNew ideas never made it to the database — nothing to delete.
     if (idea.isNew) return
-    // Logged BEFORE the delete, and with the full snapshot: this row is about
-    // to stop existing, so the event is the only remaining record of what was
-    // thrown away. A silently deleted idea reads to every later report as one
-    // that was never suggested, which is the opposite of what happened.
+    // Logged BEFORE the delete: the event is the only remaining record of what
+    // was thrown away.
     logIdeaEvent(activeWorkspaceId, accessToken, {
       planId, ideaId: idea.id, event: 'deleted', before: ideaSnapshot(idea),
     })
     await deleteIdea(accessToken, idea.id)
   }
 
-  // Copies a fully-briefed idea onto the OTHER platform — same topic/angle/
-  // objective/cta/image direction, with tone/style/format remapped to that
-  // platform's own vocabulary (see postFormats.js crosswalk* helpers).
-  // Deliberately does NOT copy reference images: they were picked/cropped
-  // for the original platform's aspect ratio, which the other platform
-  // doesn't share. Not auto-elongated — this idea already has a full brief,
-  // unlike a bare "+ Add idea" draft.
-  //
-  // Both ideas end up sharing a group_id — the original is patched with a
-  // fresh one if it didn't already have one — so cross-platform siblings can
-  // be told apart from genuine repeats (anti-repetition history, Step 5's
-  // collapsed multi-platform card) without being conflated.
-
-  // Called once the "+ Add idea" editor's Save is clicked — this is the
-  // only point a manually-added idea actually gets written to the database.
+  // Called once the "+ Add idea" editor's Save is clicked — the only point a
+  // manually-added idea is written to the database.
   async function onIdeaCreate(tempIdea, patch) {
     const merged = { ...tempIdea, ...patch }
     const res = await insertIdeas(activeWorkspaceId, accessToken, planId, [{
-      platform: merged.platform, date: merged.date, time: merged.time, title: merged.topic || 'New idea',
+      platform: merged.platform, date: merged.date, time: merged.time || DEFAULT_POST_TIME, title: merged.topic || 'New idea',
       topic: merged.topic, angle: merged.angle, tone: merged.tone,
       suggestedStyle: merged.suggestedStyle, imageIdea: merged.imageIdea,
       objective: merged.objective, cta: merged.cta,
       hashtags: merged.hashtags, firstComment: merged.firstComment, series: merged.series,
       postFormat: merged.postFormat, aspectRatio: merged.aspectRatio, mediaType: merged.mediaType,
       wantsCaption: merged.wantsCaption,
-      postKind: merged.postKind, slideCount: merged.slideCount, imageText: merged.imageText,
+      postKind: merged.postKind, slideCount: merged.slideCount,
       copyMode: merged.copyMode, captionEn: merged.captionEn, captionAr: merged.captionAr,
     }], ideas.length)
     if (res.error || !res.rows?.[0]) return { error: res.error || 'Could not save idea.' }
     let created = dbIdeaToDraft(res.rows[0])
 
-    // A manually-typed idea only has a thin topic/tone — ask AI to flesh it
-    // out into a real brief (angle/objective/cta/design direction), the same
-    // fields an AI-suggested idea already gets, BEFORE the user approves it.
-    // Best-effort: if this fails or isn't configured, the idea just stays as
-    // typed — never blocks the save itself.
-    // Skipped outright when the operator writes their own copy. Elongating
-    // exists to give the AI writer a fuller brief, and there is no AI writer
-    // on this idea — running it anyway would send their post to a model they
-    // deliberately opted out of, and overwrite the topic they typed.
+    // A manually-typed idea only has a thin topic — ask AI to flesh it out
+    // into a real brief before it is approved. Best-effort, and skipped when
+    // the operator writes their own copy: their post is not sent to a model
+    // they opted out of.
     const elongateUrl = created.copyMode === 'own' ? '' : state.webhooks?.elongateIdea
     if (elongateUrl) {
       const brandCtx = contextFor('plan')
-      const instructions = brandCtx.instructions
       const elongated = await elongateIdea(elongateUrl, {
-        instructions,
+        instructions: brandCtx.instructions,
         brand_name: brandCtx.brand_name, brand_descriptor: brandCtx.brand_descriptor,
         idea: { platform: created.platform, topic: created.topic, tone: created.tone, date: created.date },
       })
@@ -720,30 +688,20 @@ export function CampaignPlanner() {
       }
     }
 
-    const nextIdeas = ideas.map(i => i.id === tempIdea.id ? created : i)
-    update({ ideas: nextIdeas })
-    // Re-open the editor on the now-enriched idea (the card remounts under its
-    // real id the instant `ideas` updates, since IdeaCard is keyed by id) so
-    // the user sees the elongated brief and can adjust it before approving.
+    update({ ideas: ideas.map(i => i.id === tempIdea.id ? created : i) })
+    // Re-open the editor on the enriched idea so the brief can be adjusted.
     setAutoEditId(created.id)
     setTimeout(() => setAutoEditId(null), 400)
-    draftIdeas(nextIdeas, [created.id])
     return { ok: true, idea: created }
   }
 
   async function bulkStatus(status) {
     setBusy(true)
     await setAllIdeaStatus(accessToken, planId, status)
-    // Mirror the same scoping as setAllIdeaStatus's DB write: "Reset" really
-    // does touch everything, but Approve all / Reject all only affect ideas
-    // still 'proposed' — otherwise the local board would claim a change the
-    // DB didn't actually make (a previously-rejected idea showing "approved"
-    // in this tab while the row itself never moved).
+    // Same scoping as the DB write: "Reset" touches everything, Approve all /
+    // Reject all only ideas still 'proposed'.
     const affected = ideas.filter(i => !i.isNew && (status === 'proposed' || i.status === 'proposed'))
     update({ ideas: ideas.map(i => (status === 'proposed' || i.status === 'proposed') ? { ...i, status } : i) })
-    // Same scoping again, for the same reason: logging every card would claim
-    // decisions the DB never made. 'proposed' is a reset, not a judgement, so
-    // it records as an edit rather than an approval.
     logIdeaEvents(activeWorkspaceId, accessToken, affected.map(i => ({
       planId, ideaId: i.id,
       event: status === 'rejected' ? 'rejected' : status === 'approved' ? 'approved' : 'edited',
@@ -753,107 +711,75 @@ export function CampaignPlanner() {
     setBusy(false)
   }
 
-  // Add a blank, unsaved idea card and open its editor — nothing is written
-  // to the database until the user clicks Save (see onIdeaCreate).
+  // Add a blank, unsaved idea card and open its editor.
   function addIdea() {
-    const p = platformFilter !== 'all' ? platformFilter : (platforms[0] || 'instagram')
+    const p = platforms[0] || 'instagram'
     const fmt = defaultFormat(p)
     const draftIdea = {
       id: `new_${uid()}`, isNew: true, status: 'proposed',
       platform: p,
-      date: startDate, title: '', topic: '', angle: '',
+      date: '', time: DEFAULT_POST_TIME, title: '', topic: '', angle: '',
       postFormat: fmt, aspectRatio: defaultAspectRatio(p, fmt), mediaType: formatsFor(p).find(f => f.id === fmt)?.media || 'image',
       wantsCaption: true, slideCount: slideRange(p, fmt)?.default || 1,
       tone: 'professional',
     }
-    setStatusFilter('all'); setSeasonalOnly(false); setPlatformFilter('all')
+    setStatusFilter('all'); setSeasonalOnly(false)
     setAutoEditId(draftIdea.id)
     update({ ideas: [...ideas, draftIdea] })
-    // autoEdit only needs to be true for the new card's first mount; clear it
-    // afterwards so re-filtering doesn't re-open the editor unexpectedly.
     setTimeout(() => setAutoEditId(null), 400)
   }
 
-  // Finalising a plan turns approved ideas into real post rows.
-  //
-  // This used to partition on copy_mode: 'own' ideas were written here
-  // directly, while 'ai' ideas were fired at the Instagram Plan Generation
-  // workflow, which wrote caption AND image into a post row in the background.
-  // That workflow is retired — Creative Studio is the only thing that makes an
-  // image now — so BOTH halves take the same, single path: the row is written
-  // here, from what the idea already carries.
-  //
-  // copy_mode still means something, just not about which path runs. It is the
-  // difference between words a person typed and words a model drafted, and it
-  // decides provenance on the row (see sourceForIdea) rather than routing.
-  //
-  // The one thing the old AI path did that nothing else did was GUARANTEE a
-  // caption existed. ensureCaptions now does exactly that and nothing more.
+  // ── Captions step: per-post writes ──────────────────────────────────────
+  function patchLocal(idea, patch) { onIdeaChange({ ...idea, ...patch }) }
+  async function saveIdeaFields(idea, dbPatch) {
+    const res = await updateIdea(accessToken, idea.id, dbPatch)
+    if (res.error) setError(`Couldn't save: ${res.error}`)
+  }
+  function pickCaption(idea, opt) {
+    const patch = { captionAr: opt.caption_ar || '', captionEn: opt.caption_en || '' }
+    patchLocal(idea, patch)
+    saveIdeaFields(idea, { caption_ar: patch.captionAr, caption_en: patch.captionEn })
+  }
+  function clearCaptionChoice(idea) {
+    patchLocal(idea, { captionAr: '', captionEn: '' })
+    saveIdeaFields(idea, { caption_ar: '', caption_en: '' })
+  }
+
+  // Finalising turns approved ideas into real post rows, from what each idea
+  // carries: its picture, its chosen (or own) caption, its date and time.
+  // Nothing is chosen on anyone's behalf — the button stays disabled until
+  // every post that needs a caption has one.
   async function finalizePlan() {
     const approved = ideas.filter(i => i.status === 'approved')
-    if (approved.length === 0) { setError('Approve at least one idea before finalizing the plan.'); return }
+    if (approved.length === 0) { setError('Approve at least one idea first.'); return }
+    if (approved.some(i => !captionReady(i))) { setError('Pick a caption for every post first.'); return }
     setError(''); setBusy(true)
 
-    // Mark the briefed ones 'processing' before any of the waiting starts —
-    // durable and instant, so Post Approvals shows real state on reload rather
-    // than only while this tab stays open. An idea whose words were typed by
-    // hand is never marked: nothing is being generated for it.
     await markIdeasProcessing(accessToken, planId, { copyMode: 'ai' })
 
-    // ── Make sure every idea that wants a caption has one ──
-    const captionLanguage = state.brandProfile?.captionLanguage || 'both'
-    const { ideas: readyIdeas, errors: captionErrors } = await ensureCaptions({
-      draftCopyUrl: state.webhooks?.draftCopy,
-      ideas: approved,
-      accessToken,
-      buildPayload: idea => {
-        // Per idea, not per batch — same reasoning as draftIdeas above: a
-        // large brand directory reaches the prompt as a bare name index, so
-        // what the featured service actually is only arrives if THIS idea's
-        // brief is what selects it.
-        const ctx = contextFor('caption', { matchText: [idea.topic, idea.title, idea.angle, idea.imageIdea] })
-        return {
-          plan_idea_id: idea.id, platform: idea.platform, topic: idea.topic, angle: idea.angle || '',
-          tone: idea.tone || '', objective: idea.objective || '', cta: idea.cta || '',
-          occasion: idea.occasion || '', content_pillar: idea.pillar || '',
-          format: idea.postFormat, aspect_ratio: idea.aspectRatio, media_type: idea.mediaType,
-          wants_caption: idea.wantsCaption, image_idea: idea.imageIdea || '',
-          caption_language: captionLanguage, instructions: ctx.instructions,
-          brand_name: ctx.brand_name, brand_descriptor: ctx.brand_descriptor,
-        }
-      },
-    })
+    // Any post still without a date or time gets one now, the same way setup
+    // places them, so nothing reaches Approvals unscheduled by accident.
+    const readyIdeas = distributeDates(approved, { startDate, endDate, postingDays })
+      .map(i => ({ ...i, time: i.time || DEFAULT_POST_TIME }))
 
-    // ── Write the rows ──
     const res = await publishIdeasAsPosts(activeWorkspaceId, accessToken, planId, readyIdeas)
     if (res.error) {
-      // Nothing was written — put the ideas back to a state that offers Retry
-      // instead of leaving them spinning on a batch that already gave up.
       await markIdeasGenerated(accessToken, readyIdeas.map(i => i.id), { status: 'failed', error: res.error })
       setBusy(false); setError(`The posts couldn't be saved: ${res.error}`); return
     }
     const posts = res.posts || []
 
-    // Clear 'processing' for the ideas that actually produced a row, and fail
-    // the ones that didn't. Nothing else does this now that the background
-    // workflow is gone (see markIdeasGenerated).
     const wroteRow = new Set(posts.map(p => p.ideaId))
     await markIdeasGenerated(accessToken, [...wroteRow])
     const noRow = readyIdeas.filter(i => !wroteRow.has(i.id)).map(i => i.id)
     if (noRow.length) await markIdeasGenerated(accessToken, noRow, { status: 'failed', error: 'No post row was written for this idea.' })
-    // A caption that couldn't be written is a warning, not a failure: the row
-    // exists, it is in Approvals, and someone can type the words there. Losing
-    // the whole finalize over it would throw away every row that did work.
-    const warnings = [...captionErrors, ...(res.errors || [])]
+    const warnings = [...(res.errors || [])]
 
-    // 'active', not 'generating' — by the time this returns, every row exists.
-    // There is no background batch left to advance a progress state.
     await updatePlan(accessToken, planId, { status: 'active' })
 
     // Video renders still run in the background, each polling for its own
-    // cover image before firing. Only for ideas whose video does not already
-    // exist — an idea with its own footage (Studio or upload) would have it
-    // replaced.
+    // cover image before firing — only for ideas whose video does not already
+    // exist.
     triggerVideoRenders({
       webhooks: state.webhooks,
       videoIdeas: readyIdeas.filter(i => i.mediaType === 'video' && i.copyMode !== 'own' && !i.previewVideoUrl),
@@ -866,15 +792,12 @@ export function CampaignPlanner() {
 
   const brandReady = state.brandProfile && !isBrandProfileEmpty(state.brandProfile)
   const proposedCount = ideas.filter(i => i.status === 'proposed').length
-  const approvedCount = ideas.filter(i => i.status === 'approved').length
+  const approvedCount = approvedIdeas.length
   const rejectedCount = ideas.filter(i => i.status === 'rejected').length
   const seasonalCount = ideas.filter(i => i.occasion).length
   const reviewedCount = approvedCount + rejectedCount
 
-  // Content-mix breakdown — tallies content_pillar across everything still in
-  // play (rejected ideas don't count, they won't get made). Marketers think
-  // in ratios ("40% product / 20% educational…"); without this, imbalance
-  // (7 product posts, 1 tip) only shows up by reading every card.
+  // Content-mix breakdown across everything still in play.
   const pillarBreakdown = (() => {
     const counts = {}
     let unlabeled = 0
@@ -891,19 +814,20 @@ export function CampaignPlanner() {
     const want = statusFilter === 'undecided' ? 'proposed' : statusFilter
     if (statusFilter !== 'all' && i.status !== want) return false
     if (seasonalOnly && !i.occasion) return false
-    if (platformFilter !== 'all' && i.platform !== platformFilter) return false
     if (dayFilter && i.date !== dayFilter) return false
     return true
   })
   const weekGroups = groupByWeek(filteredIdeas)
   const setupMoments = includeHolidays ? momentsInRange(startDate, endDate) : []
+  const stepIndex = STEPS.findIndex(s => s.key === step)
+  const brainSections = getBrandBrainSections(directory.schema).filter(s => s.value !== 'assets')
+  const brainSummary = [
+    ...brainSections.filter(s => brandBrainSections.includes(s.value)).map(s => s.label),
+    ...(activeRuleCount ? [`${activeRuleCount} learned rule${activeRuleCount === 1 ? '' : 's'}`] : []),
+  ]
 
   return (
     <div className="max-w-4xl space-y-4">
-      {/* Hero. Was a purple gradient panel with a violet icon tile — a colour
-          that appears in no palette this app defines, on the only page that
-          used it. Now a flat panel on the brand accent, with the accent
-          carried by a left rule rather than a fill. */}
       <div className="border border-border border-l-2 border-l-amber-700 bg-white p-5">
         <div className="flex items-start gap-4">
           <div className="w-10 h-10 bg-amber-700 flex items-center justify-center flex-shrink-0">
@@ -913,28 +837,25 @@ export function CampaignPlanner() {
             <p className="eyebrow text-text-tertiary mb-1.5">Monthly planning</p>
             <h1 className="text-lg font-bold text-text tracking-tight mb-2">Plan the month before it starts.</h1>
             <p className="text-xs text-text-secondary leading-relaxed max-w-xl">
-              Pick a month and we'll propose a full slate of post ideas — pulling from your Brand Brain and
-              the seasonal moments in range (Ramadan, Eid, National Day…). You approve the ideas worth making;
-              only approved ones move on to content generation.
+              Add the posts you want — and let AI suggest more if you like. Approve the ideas, give each one
+              a picture, then pick a caption written from that picture.
             </p>
           </div>
         </div>
       </div>
 
-      {/* Step indicator — segments of one continuous bar, sharing borders, so
-          the three steps read as a single track. The arrow glyphs between
-          floating pills were doing that job with punctuation instead. */}
+      {/* Step indicator — segments of one continuous bar. */}
       <div className="flex text-[10px] font-bold uppercase tracking-[0.08em]">
-        {['Setup', 'Review & approve', 'Approved'].map((label, i) => {
-          const active = ['setup', 'review', 'done'].indexOf(step) === i
-          const done = ['setup', 'review', 'done'].indexOf(step) > i
+        {STEPS.map((s, i) => {
+          const active = stepIndex === i
+          const done = stepIndex > i
           return (
-            <span key={label}
+            <span key={s.key}
               className={`px-3 py-1.5 border -ml-px first:ml-0
                 ${active ? 'bg-amber-700 text-white border-amber-700 relative z-10'
                   : done ? 'bg-sage-100 text-sage-800 border-sage-200'
                   : 'bg-white text-text-tertiary border-border'}`}>
-              {done ? '✓ ' : ''}{label}
+              {done ? '✓ ' : ''}{s.label}
             </span>
           )
         })}
@@ -946,38 +867,30 @@ export function CampaignPlanner() {
           <button onClick={() => navigate('/brand-brain')} className="underline font-medium hover:text-amber-800 ml-1">Set it up first</button> for on-brand ideas.
         </div>
       )}
-      {!webhookUrl && (
-        <div className="rounded-xl bg-amber-50 border border-amber-200 px-4 py-3 text-xs text-amber-700">
-          <span className="font-medium">Campaign Planner webhook not configured.</span> Add it in Settings → Integrations before generating.
-        </div>
-      )}
 
       {/* ── STEP: SETUP ── */}
       {step === 'setup' && (
         <Card className="p-6 space-y-5">
-          {/* Instagram is the only platform with a generation pipeline, so a
-              required picker with one option was a mandatory click that could
-              only ever be answered one way. */}
           <Select label="Which month? *" value={month} onChange={e => pickMonth(e.target.value)}>
             <option value="">Select month…</option>
             {months.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
           </Select>
 
-          {/* ── Cadence: shared by manual + AI posts alike ── */}
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <p className="text-xs font-medium text-text-secondary mb-2">Which days do you post? (optional)</p>
-              <div className="flex gap-1.5">
-                {WEEKDAYS.map(d => (
-                  <button key={d.value} onClick={() => toggleDay(d.value)} title={d.weekend ? 'Saudi weekend' : ''}
-                    className={`w-9 h-9 rounded-xl border text-[11px] font-semibold transition-all ${postingDays.includes(d.value) ? 'bg-amber-600 text-white border-amber-600' : d.weekend ? 'bg-stone-50 border-border text-text-tertiary hover:border-amber-400' : 'bg-white border-border text-text-secondary hover:border-amber-400'}`}>
-                    {d.label}
-                  </button>
-                ))}
-              </div>
-              <p className="text-[11px] text-text-tertiary mt-1.5">Leave all unselected to let the AI choose freely.</p>
+          {/* ── Cadence: shared by your posts and AI posts alike ── */}
+          <div>
+            <p className="text-xs font-medium text-text-secondary mb-2">Which days do you post? (optional)</p>
+            <div className="flex gap-1.5">
+              {WEEKDAYS.map(d => (
+                <button key={d.value} onClick={() => toggleDay(d.value)} title={d.weekend ? 'Saudi weekend' : ''}
+                  className={`w-9 h-9 rounded-xl border text-[11px] font-semibold transition-all ${postingDays.includes(d.value) ? 'bg-amber-600 text-white border-amber-600' : d.weekend ? 'bg-stone-50 border-border text-text-tertiary hover:border-amber-400' : 'bg-white border-border text-text-secondary hover:border-amber-400'}`}>
+                  {d.label}
+                </button>
+              ))}
             </div>
-            <Input label="Default posting time" type="time" value={defaultTime} onChange={e => update({ defaultTime: e.target.value })} />
+            <p className="text-[11px] text-text-tertiary mt-1.5">
+              Posts without a date are spread evenly across the month{postingDays.length ? ' on these days' : ''}.
+              Each one's exact date and time can be changed on the captions step.
+            </p>
           </div>
 
           <Toggle checked={includeHolidays} onChange={e => update({ includeHolidays: e.target.checked })}
@@ -996,47 +909,9 @@ export function CampaignPlanner() {
             <p className="text-[11px] text-text-tertiary px-1">No major Saudi moments fall in this month.</p>
           )}
 
-          {/* ── Brand Brain: universal, not AI-only. This context feeds every
-              post's actual content generation (caption + image) at approval
-              time — your own curated posts included, not just AI-proposed
-              ones — so it belongs here, shared, not behind the AI toggle. ── */}
-          <div>
-            <p className="text-xs font-medium text-text-secondary mb-2">Pull from Brand Brain</p>
-            <div className="flex gap-2 flex-wrap">
-              {getBrandBrainSections(directory.schema).map(s => {
-                const count = s.value === 'assets'
-                  ? directory.assets.length
-                  : (directory.rowsBySection[s.value] || []).length
-                const active = brandBrainSections.includes(s.value)
-                return (
-                  <button key={s.value} onClick={() => toggleSection(s.value)}
-                    className={`px-3 py-1.5 rounded-xl border text-sm font-medium transition-all ${active ? 'bg-amber-600 text-white border-amber-600' : 'bg-white border-border text-text-secondary hover:border-amber-400'}`}>
-                    {s.label}{count > 0 && <span className={active ? 'opacity-75 ml-1' : 'text-text-tertiary ml-1'}>({count})</span>}
-                  </button>
-                )
-              })}
-            </div>
-            <p className="text-[11px] text-text-tertiary mt-1.5">Feeds every post's content generation — your own posts and any AI-proposed ones alike.</p>
-
-            {/* The exact text the plan call will receive. Built by the SAME
-                buildContext() that assembles the payload, so this preview
-                cannot drift from what is actually sent — and it lands before
-                the Opus call rather than after it. */}
-            <div className="mt-3">
-              <BrandContextPanel context={setupContext} task="plan" />
-            </div>
-            {activeRuleCount > 0 && (
-              <p className="text-[11px] text-text-tertiary mt-1.5">
-                <span className="font-medium text-text-secondary">{activeRuleCount} learned rule{activeRuleCount === 1 ? '' : 's'}</span>
-                {' '}steering this plan — see Brand Brain → Learned Guidance.
-              </p>
-            )}
-          </div>
-
           <div className="h-px bg-border" />
 
-          {/* ── PRIMARY: individually curated posts. This is the main planning
-              surface — every other section on this page is secondary to it. ── */}
+          {/* ── PRIMARY: your own posts ── */}
           <div>
             <div className="flex items-center justify-between mb-1">
               <p className="text-sm font-bold text-text">Your posts</p>
@@ -1044,21 +919,16 @@ export function CampaignPlanner() {
                 <span className="text-[11px] text-text-tertiary">{seedPosts.filter(s => s.text.trim()).length} added</span>
               )}
             </div>
-            <p className="text-[11px] text-text-tertiary mb-2.5">The exact posts you want this month — each one goes straight onto the plan for you to refine, no AI guessing. Add as many as you like.</p>
+            <p className="text-[11px] text-text-tertiary mb-2.5">The posts you already know you want this month. Add as many as you like.</p>
 
             {seedPosts.length > 0 && (
               <div className="space-y-2.5 mb-2.5">
                 {seedPosts.map((s, i) => {
                   const refCount = (s.references || []).length
-                  const usingImage = s.imageMode === 'use_reference'
                   const ownCopy = s.copyMode === 'own'
                   const sFormat = s.postFormat || defaultFormat(s.platform)
                   const sRatios = aspectRatiosFor(s.platform, sFormat)
                   const sSlides = slideRange(s.platform, sFormat)
-                  function onPlatformChange(p) {
-                    const fmt = defaultFormat(p)
-                    updateSeed(i, { platform: p, postFormat: fmt, aspectRatio: defaultAspectRatio(p, fmt), slideCount: slideRange(p, fmt)?.default || 1 })
-                  }
                   function onFormatChange(fmt) {
                     updateSeed(i, { postFormat: fmt, aspectRatio: defaultAspectRatio(s.platform, fmt), slideCount: slideRange(s.platform, fmt)?.default || 1 })
                   }
@@ -1069,14 +939,12 @@ export function CampaignPlanner() {
                         rows={ownCopy ? 4 : 2}
                         placeholder={ownCopy
                           ? 'Type the post exactly as it should go out.'
-                          : 'e.g. Announce the new Riyadh showroom opening'}
+                          : 'What is this post about? e.g. Announce the new Riyadh showroom opening'}
                         value={s.text} onChange={e => updateSeed(i, { text: e.target.value })}
                       />
-                      {/* The one decision that separates a brief from a post.
-                          Off by default: the existing meaning of this box is
-                          "a topic I want covered", and silently reinterpreting
-                          everyone's seed posts as finished captions would
-                          publish notes-to-self. */}
+                      {/* Off by default: the box means "a topic I want
+                          covered", and reading everyone's notes as finished
+                          captions would publish notes-to-self. */}
                       <label className="flex items-start gap-2 cursor-pointer select-none">
                         <input type="checkbox" checked={ownCopy}
                           onChange={e => updateSeed(i, { copyMode: e.target.checked ? 'own' : 'ai' })}
@@ -1088,15 +956,11 @@ export function CampaignPlanner() {
                           <span className="block text-text-tertiary">
                             {ownCopy
                               ? 'Posted exactly as typed — no AI writes or rewrites it.'
-                              : 'Leave off to have the caption written from this as a brief.'}
+                              : 'Leave off and AI suggests 3 captions once the picture is ready.'}
                           </span>
                         </span>
                       </label>
                       <div className="flex items-center gap-2 flex-wrap">
-                        <select value={s.platform} onChange={e => onPlatformChange(e.target.value)}
-                          className="rounded-lg border border-border px-2 py-1.5 text-xs bg-white capitalize focus:outline-none focus:border-amber-400">
-                          {PLATFORMS.map(p => <option key={p} value={p}>{p}</option>)}
-                        </select>
                         <select value={sFormat} onChange={e => onFormatChange(e.target.value)}
                           className="rounded-lg border border-border px-2 py-1.5 text-xs bg-white focus:outline-none focus:border-amber-400">
                           {formatsFor(s.platform).map(f => <option key={f.id} value={f.id}>{f.label}</option>)}
@@ -1114,13 +978,15 @@ export function CampaignPlanner() {
                         )}
                         <input type="date" value={s.date || ''} min={startDate || undefined} max={endDate || undefined}
                           onChange={e => updateSeed(i, { date: e.target.value })}
+                          title="Only for a post that must go out on a specific day — otherwise leave empty and it is placed for you"
                           className="rounded-lg border border-border px-2 py-1.5 text-xs bg-white focus:outline-none focus:border-amber-400" />
-                        <button onClick={() => openSeedImagePicker(i)}
-                          className={`px-2.5 py-1.5 rounded-lg text-[11px] font-medium whitespace-nowrap transition-colors ${usingImage ? 'text-sage-700 bg-sage-50 hover:bg-sage-100' : refCount > 0 ? 'text-amber-700 bg-amber-50 hover:bg-amber-100' : 'text-text-tertiary hover:text-text hover:bg-surface-subtle border border-border'}`}>
-                          {usingImage ? '🖼 Set' : refCount > 0 ? `📎 ${refCount}` : '🖼 Image'}
+                        <button onClick={() => setPickingSeedIdx(i)}
+                          className={`px-2.5 py-1.5 rounded-lg text-[11px] font-medium whitespace-nowrap transition-colors ${refCount > 0 ? 'text-sage-700 bg-sage-50 hover:bg-sage-100' : 'text-text-tertiary hover:text-text hover:bg-surface-subtle border border-border'}`}>
+                          {refCount > 0 ? `🖼 Image set${refCount > 1 ? ` (${refCount})` : ''}` : '🖼 Add image'}
                         </button>
                         <button onClick={() => removeSeed(i)} className="ml-auto text-[11px] px-2 py-1.5 text-text-tertiary hover:text-red-500" title="Remove">✕ Remove</button>
                       </div>
+                      {!s.date && <p className="text-[10px] text-text-tertiary">No date — it will be placed in the month for you.</p>}
                     </div>
                   )
                 })}
@@ -1132,11 +998,18 @@ export function CampaignPlanner() {
             </button>
           </div>
 
-          {/* ── SECONDARY: AI-assist is an explicit, off-by-default add-on ── */}
+          {/* ── SECONDARY: AI suggestions, off by default ── */}
           <div className="rounded-2xl border border-border bg-surface-subtle p-4 space-y-4">
             <Toggle checked={aiAssist} onChange={e => update({ aiAssist: e.target.checked })}
-              label="Also let AI propose additional posts this month" />
-            <p className="text-[11px] text-text-tertiary -mt-2.5">Fills out the rest of the month around your posts above. Leave this off for a plan that's exactly what you added.</p>
+              label="Also let AI suggest more posts this month" />
+            <p className="text-[11px] text-text-tertiary -mt-2.5">
+              {aiAssist
+                ? 'The AI plans around your posts, using your latest research, past posts and learned rules so it doesn\'t repeat itself.'
+                : 'Leave off for a plan that is exactly the posts you added.'}
+            </p>
+            {aiAssist && !webhookUrl && (
+              <p className="text-[11px] text-amber-700">The Campaign Planner webhook isn't configured — add it in Settings → Integrations.</p>
+            )}
 
             {aiAssist && (
               <div className="space-y-4 pt-3 border-t border-border">
@@ -1162,7 +1035,6 @@ export function CampaignPlanner() {
                   placeholder="e.g. 40% product, 20% educational, 20% trust/testimonials, 20% engagement"
                   value={contentMixTarget} onChange={e => update({ contentMixTarget: e.target.value })}
                 />
-                <p className="text-[11px] text-text-tertiary -mt-2.5">The planner will aim for this ratio. Once ideas are proposed, the board shows the actual breakdown next to it.</p>
 
                 {featurableItems.length > 0 && (
                   <div>
@@ -1178,9 +1050,41 @@ export function CampaignPlanner() {
                         )
                       })}
                     </div>
-                    <p className="text-[11px] text-text-tertiary mt-1.5">The plan will spread coverage across these instead of picking whatever's easiest to write.</p>
                   </div>
                 )}
+              </div>
+            )}
+          </div>
+
+          {/* ── What the AI reads from the Brand Brain — hidden until asked.
+              Applies to AI suggestions and to the captions written later. ── */}
+          <div>
+            <button onClick={() => setShowBrainPicker(v => !v)}
+              className="text-[11px] font-medium text-text-tertiary hover:text-text transition-colors text-left">
+              {showBrainPicker ? '▾' : '▸'} Change what the AI reads from your Brand Brain
+              {!showBrainPicker && brainSummary.length > 0 && (
+                <span className="text-text-disabled"> — now: {brainSummary.join(' · ')}</span>
+              )}
+            </button>
+            {showBrainPicker && (
+              <div className="mt-2.5 space-y-2.5 border border-border bg-surface-subtle/50 p-3">
+                <div className="flex gap-2 flex-wrap">
+                  {brainSections.map(s => {
+                    const count = (directory.rowsBySection[s.value] || []).length
+                    const active = brandBrainSections.includes(s.value)
+                    return (
+                      <button key={s.value} onClick={() => toggleSection(s.value)}
+                        className={`px-2.5 py-1 rounded-lg border text-xs font-medium transition-all ${active ? 'bg-amber-600 text-white border-amber-600' : 'bg-white border-border text-text-secondary hover:border-amber-400'}`}>
+                        {s.label}{count > 0 && <span className={active ? 'opacity-75 ml-1' : 'text-text-tertiary ml-1'}>({count})</span>}
+                      </button>
+                    )
+                  })}
+                </div>
+                <p className="text-[11px] text-text-tertiary">
+                  {activeRuleCount > 0 ? `${activeRuleCount} learned rule${activeRuleCount === 1 ? ' is' : 's are'} always included. ` : ''}
+                  Your saved Brand Brain is not changed.
+                </p>
+                <BrandContextPanel context={setupContext} task="plan" />
               </div>
             )}
           </div>
@@ -1190,19 +1094,18 @@ export function CampaignPlanner() {
           <div className="flex gap-3 pt-1">
             <Button variant="secondary" onClick={() => { clear(); navigate('/campaigns') }}>Cancel</Button>
             <Button onClick={handleGeneratePlan} disabled={loading}>
-              {loading ? <><Spinner size="sm" /> Building the plan…</> : aiAssist ? 'Generate Monthly Plan' : 'Create Plan'}
+              {loading ? <><Spinner size="sm" /> Building the plan…</> : aiAssist ? 'Create plan with AI ideas' : 'Create plan'}
             </Button>
           </div>
         </Card>
       )}
 
-      {/* ── STEP: REVIEW & APPROVE ── */}
+      {/* ── STEP: REVIEW IDEAS ── */}
       {step === 'review' && (
         <div className="space-y-4">
           <Card className="p-5 space-y-4">
             <Input label="Plan name" value={name} onChange={e => update({ name: e.target.value })} />
 
-            {/* Review progress */}
             <div>
               <div className="flex items-center justify-between mb-1.5">
                 <span className="text-[11px] font-semibold text-text-secondary uppercase tracking-wide">Reviewed</span>
@@ -1214,8 +1117,6 @@ export function CampaignPlanner() {
               </div>
             </div>
 
-            {/* Content mix — makes imbalance (7 product, 1 tip) visible at a
-                glance instead of something you'd only notice reading every card. */}
             {(pillarBreakdown.sorted.length > 0 || contentMixTarget) && (
               <div className="bg-surface-subtle border border-border px-3 py-2.5">
                 <div className="flex items-center gap-1.5 flex-wrap text-[11px]">
@@ -1237,7 +1138,6 @@ export function CampaignPlanner() {
               </div>
             )}
 
-            {/* Status filters */}
             <div className="flex items-center gap-1.5 flex-wrap">
               {[['all', 'All', ideas.length], ['undecided', 'Undecided', proposedCount], ['approved', 'Approved', approvedCount], ['rejected', 'Rejected', rejectedCount]].map(([val, label, n]) => (
                 <button key={val} onClick={() => setStatusFilter(val)}
@@ -1257,47 +1157,25 @@ export function CampaignPlanner() {
                   {formatDate(dayFilter)} ✕
                 </button>
               )}
-              <div className="flex items-center gap-1 ml-auto">
-                {platforms.length > 1 && (
-                  <div className="flex items-center gap-1 mr-2">
-                    {['all', ...platforms].map(p => (
-                      <button key={p} onClick={() => setPlatformFilter(p)}
-                        className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold capitalize transition-colors ${platformFilter === p ? 'bg-stone-800 text-white' : 'bg-white border border-border text-text-secondary hover:border-stone-300'}`}>
-                        {p === 'all' ? 'Both' : p}
-                      </button>
-                    ))}
-                  </div>
-                )}
-                <div className="flex items-center rounded-lg border border-border overflow-hidden">
-                  <button onClick={() => setViewMode('list')}
-                    className={`px-2.5 py-1 text-[11px] font-semibold transition-colors ${viewMode === 'list' ? 'bg-stone-800 text-white' : 'bg-white text-text-secondary hover:bg-surface-subtle'}`}>
-                    ☰ List
-                  </button>
-                  <button onClick={() => setViewMode('calendar')}
-                    className={`px-2.5 py-1 text-[11px] font-semibold transition-colors ${viewMode === 'calendar' ? 'bg-stone-800 text-white' : 'bg-white text-text-secondary hover:bg-surface-subtle'}`}>
-                    📅 Calendar
-                  </button>
-                </div>
+              <div className="flex items-center rounded-lg border border-border overflow-hidden ml-auto">
+                <button onClick={() => setViewMode('list')}
+                  className={`px-2.5 py-1 text-[11px] font-semibold transition-colors ${viewMode === 'list' ? 'bg-stone-800 text-white' : 'bg-white text-text-secondary hover:bg-surface-subtle'}`}>
+                  ☰ List
+                </button>
+                <button onClick={() => setViewMode('calendar')}
+                  className={`px-2.5 py-1 text-[11px] font-semibold transition-colors ${viewMode === 'calendar' ? 'bg-stone-800 text-white' : 'bg-white text-text-secondary hover:bg-surface-subtle'}`}>
+                  📅 Calendar
+                </button>
               </div>
             </div>
 
-            {/* Bulk actions */}
             <div className="flex items-center gap-2 flex-wrap pt-1 border-t border-border">
               <span className="text-[11px] text-text-tertiary pt-2">Bulk:</span>
               <Button variant="secondary" size="xs" onClick={() => bulkStatus('approved')} disabled={busy}>Approve all</Button>
               <Button variant="secondary" size="xs" onClick={() => bulkStatus('rejected')} disabled={busy}>Reject all</Button>
               <Button variant="secondary" size="xs" onClick={() => bulkStatus('proposed')} disabled={busy}>Reset</Button>
-              <Button variant="ghost" size="xs" onClick={() => setShowMoreModal(true)} disabled={busy} className="ml-auto">✨ Generate more with AI</Button>
+              <Button variant="ghost" size="xs" onClick={() => setShowMoreModal(true)} disabled={busy} className="ml-auto">✨ Suggest more with AI</Button>
               <Button variant="ghost" size="xs" onClick={addIdea} disabled={busy}>+ Add idea</Button>
-            </div>
-
-            {/* What the copy on this board was written against. Shown once for
-                the board rather than once per card: it is the same context for
-                every idea here, and twelve identical chips would be noise. No
-                mute control — the captions were already written, so a toggle
-                here would only describe a past call. */}
-            <div className="pt-1">
-              <BrandContextPanel context={draftContext} task="caption" />
             </div>
           </Card>
 
@@ -1306,14 +1184,12 @@ export function CampaignPlanner() {
               onClose={() => { setShowMoreModal(false); setMoreError('') }} onGenerate={handleGenerateMore} />
           )}
 
-          {/* Month overview — clicking a day filters the list below to it */}
           {viewMode === 'calendar' && ideas.length > 0 && (
             <CalendarView ideas={ideas} startDate={startDate} endDate={endDate} selectedDay={dayFilter} onDayClick={pickCalendarDay} />
           )}
 
-          {/* Grouped, filtered idea list */}
           {viewMode === 'calendar' ? null : ideas.length === 0 ? (
-            <Card className="p-6"><p className="text-xs text-text-tertiary text-center">No ideas left — go back and regenerate.</p></Card>
+            <Card className="p-6"><p className="text-xs text-text-tertiary text-center">No ideas left — add one, or suggest more with AI.</p></Card>
           ) : filteredIdeas.length === 0 ? (
             <Card className="p-6"><p className="text-xs text-text-tertiary text-center">No ideas match this filter.</p></Card>
           ) : (
@@ -1327,11 +1203,8 @@ export function CampaignPlanner() {
                   </div>
                   {group.ideas.map(idea => (
                     <IdeaCard key={idea.id} idea={idea} index={ideas.indexOf(idea)} accessToken={accessToken} workspaceId={activeWorkspaceId}
-                      autoEdit={idea.id === autoEditId} mediaOptionsUrl={state.webhooks?.mediaOptions}
-                      brandName={state.brandProfile?.customFields?.brand_name || ''}
-                      onChange={onIdeaChange} onRemove={onIdeaRemove} onCreate={onIdeaCreate}
-                      onOpenStudio={openStudio} studioSession={studioSessions[idea.id]}
-                      onRedraft={redraftIdea} />
+                      autoEdit={idea.id === autoEditId}
+                      onChange={onIdeaChange} onRemove={onIdeaRemove} onCreate={onIdeaCreate} />
                   ))}
                 </div>
               ))}
@@ -1342,40 +1215,33 @@ export function CampaignPlanner() {
 
           <div className="sticky bottom-0 -mx-1 px-1 pb-1">
             <div className="flex items-center gap-3 bg-white/95 backdrop-blur-sm border border-border rounded-2xl shadow-dropdown px-5 py-3.5">
-              {/* A plan opened from the list (or returned to from Studio) never
-                  had its setup step filled out in this session — stepping
-                  "back" to setup would drop you on a blank form unrelated to
-                  this plan. Send those back to where they came from instead. */}
+              {/* A plan opened from the list never had its setup filled in this
+                  session — "back" to a blank setup form would be unrelated to
+                  this plan, so those go back to the list. */}
               <Button variant="secondary" onClick={() => openedFromPlanList ? navigate('/campaigns') : update({ step: 'setup' })}>Back</Button>
               <Button onClick={() => update({ step: 'media' })} disabled={approvedCount === 0}>
-                Next — make the pictures ({approvedCount} approved)
+                Next — pictures ({approvedCount} approved)
               </Button>
               <p className="text-xs text-text-tertiary flex-1">
-                {aiCopyCount === 0
-                  ? 'Attach your own image to each, or make one in the Studio. Your captions go out exactly as written.'
-                  : 'Every approved idea gets its image or video made by hand in the Studio, then the captions are written to match.'}
+                Next, give each approved idea a picture. Captions are written after, from the picture.
               </p>
             </div>
           </div>
         </div>
       )}
 
-
-      {/* ── STEP: MEDIA ──
-          The stage the marketing team actually works in. An image is finished
-          when the person making it has edited and re-iterated until she is
-          happy with it — never when a model returns something first time — so
-          this is a worklist, not a progress bar you watch. Nothing here
-          generates anything; every card is a door into the Studio. */}
+      {/* ── STEP: PICTURES ──
+          A worklist, not a progress bar: every card is either your own image
+          or a door into the Studio, where a picture is worked on until it is
+          right. Nothing here generates anything. */}
       {step === 'media' && (
         <div className="space-y-4">
           <Card className="p-5">
             <div className="flex items-baseline justify-between gap-4 mb-3">
               <div>
-                <h2 className="text-base font-bold text-text tracking-tight">Make the pictures</h2>
+                <h2 className="text-base font-bold text-text tracking-tight">Give each post a picture</h2>
                 <p className="text-xs text-text-secondary mt-0.5">
-                  Open each idea in the Studio and work on it until it's right. Captions come after —
-                  written against the picture you actually chose.
+                  Use an image from your Brand Brain or upload your own — or make one in the Studio.
                 </p>
               </div>
               <p className="text-sm font-semibold text-text flex-shrink-0">
@@ -1390,43 +1256,44 @@ export function CampaignPlanner() {
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             {approvedIdeas.map(idea => {
-              // An own-image idea reads as ready without ever entering the
-              // Studio — the picture is the one the operator attached.
               const ownMedia = hasOwnMedia(idea)
-              const st = idea.mediaStatus === 'ready' || ownMedia ? 'ready' : (idea.mediaStatus || 'none')
+              const st = hasMedia(idea) ? 'ready' : (idea.mediaStatus || 'none')
               const sess = studioSessions[idea.id]
+              const thumb = thumbFor(idea)
+              const refCount = (idea.references || []).length
               return (
-                <Card key={idea.id} className={`p-3 flex flex-col gap-2 ${st === 'ready' ? 'border-sage-200 bg-sage-50/30' : ''}`}>
-                  <div className="flex items-start gap-2.5">
-                    {idea.previewImageUrl ? (
-                      <img src={idea.previewImageUrl} alt="" className="w-14 h-14 object-cover border border-border flex-shrink-0" />
+                <Card key={idea.id} className={`p-3 flex flex-col gap-2.5 ${st === 'ready' ? 'border-sage-200 bg-sage-50/30' : ''}`}>
+                  <div className="flex items-start gap-3">
+                    {thumb ? (
+                      <PostImage src={thumb} alt="" className="w-20 h-20 object-cover border border-border flex-shrink-0" />
                     ) : (
-                      <div className="w-14 h-14 border border-dashed border-border bg-surface-subtle flex items-center justify-center flex-shrink-0 text-text-disabled text-lg">
+                      <div className="w-20 h-20 border border-dashed border-border bg-surface-subtle flex items-center justify-center flex-shrink-0 text-text-disabled text-xl">
                         {idea.mediaType === 'video' ? '🎬' : '🖼'}
                       </div>
                     )}
                     <div className="min-w-0 flex-1">
                       <p className="text-xs font-semibold text-text leading-snug line-clamp-2">{idea.title || idea.topic || 'Untitled idea'}</p>
-                      <p className="text-[10px] text-text-tertiary mt-0.5">
-                        {idea.date ? formatDate(idea.date) : 'No date'} · {aspectLabel(idea.aspectRatio)}
+                      <p className="text-[11px] text-text-secondary mt-1">
+                        {idea.date ? formatDate(idea.date) : 'Date set on save'}
+                        {' · '}{formatTime(idea.time || DEFAULT_POST_TIME)}
                       </p>
-                      <span className={`inline-block mt-1 text-[10px] font-bold px-1.5 py-0.5 leading-[1.4] ${
+                      <p className="text-[10px] text-text-tertiary mt-0.5">
+                        {formatsFor(idea.platform).find(f => f.id === idea.postFormat)?.label || 'Feed image'} · {aspectLabel(idea.aspectRatio)}
+                      </p>
+                      <span className={`inline-block mt-1.5 text-[10px] font-bold px-1.5 py-0.5 leading-[1.4] ${
                         st === 'ready' ? 'bg-sage-100 text-sage-700'
                         : st === 'in_studio' ? 'bg-violet-50 text-violet-700'
                         : 'bg-stone-100 text-text-tertiary'}`}>
-                        {ownMedia ? '✓ Your image' : st === 'ready' ? '✓ Ready' : st === 'in_studio' ? '🎬 In Studio' : 'Not started'}
+                        {ownMedia ? `✓ Your image${refCount > 1 ? `s (${refCount})` : ''}` : st === 'ready' ? '✓ Made in Studio' : st === 'in_studio' ? '🎬 In Studio' : 'Needs a picture'}
                       </span>
                     </div>
                   </div>
                   <div className="flex items-center gap-1.5 mt-auto pt-1 flex-wrap">
-                    {/* Two ways to get a picture, neither privileged. Someone
-                        posting a photo they already have should never have to
-                        go through a generation surface to attach it. */}
-                    <Button size="xs" variant={ownMedia ? 'secondary' : 'primary'} onClick={() => openMediaPicker(idea)}>
+                    <Button size="xs" variant={st === 'ready' ? 'secondary' : 'primary'} onClick={() => setMediaPickIdea(idea)}>
                       {ownMedia ? 'Change image' : 'Use my image'}
                     </Button>
                     <Button size="xs" variant="secondary" onClick={() => openStudio(idea)}>
-                      {idea.mediaStatus === 'ready' ? 'Change it' : sess ? 'Back to Studio' : 'Open Studio'}
+                      {idea.mediaStatus === 'ready' ? 'Edit in Studio' : sess ? 'Back to Studio' : 'Make in Studio'}
                     </Button>
                     {idea.mediaStatus === 'ready' && (
                       <button onClick={() => redoMedia(idea)}
@@ -1444,32 +1311,68 @@ export function CampaignPlanner() {
           <div className="sticky bottom-0 -mx-1 px-1 pb-1">
             <div className="flex items-center gap-3 bg-white/95 backdrop-blur-sm border border-border rounded-2xl shadow-dropdown px-5 py-3.5">
               <Button variant="secondary" onClick={() => update({ step: 'review' })}>Back to ideas</Button>
-              {/* The label is the promise this button makes, so it has to
-                  match which halves actually exist. Telling someone who wrote
-                  every caption themselves that we are about to "write the
-                  captions" describes the one thing they opted out of. */}
-              <Button onClick={finalizePlan} disabled={busy || approvedCount === 0}>
-                {busy
-                  ? <><Spinner size="sm" /> {aiCopyCount ? 'Writing captions…' : 'Saving your posts…'}</>
-                  : aiCopyCount === 0 ? 'Schedule my posts'
-                  : ownCopyCount === 0 ? 'Write the captions'
-                  : `Write ${aiCopyCount} caption${aiCopyCount === 1 ? '' : 's'} · save ${ownCopyCount} of mine`}
+              <Button onClick={() => { setError(''); update({ step: 'captions' }) }} disabled={approvedCount === 0}>
+                Next — captions
               </Button>
-              {/* A soft gate. Blocking outright would just get worked around,
-                  and there are real reasons to move on with one picture
-                  outstanding. */}
+              {/* A soft gate: there are real reasons to move on with a picture
+                  still outstanding. */}
               <p className="text-xs text-text-tertiary flex-1">
                 {mediaReadyCount < approvedIdeas.length
-                  ? aiCopyCount === 0
-                    // Nothing generates on a fully manual plan, so the old
-                    // reassurance ("they'll generate one instead") would be a
-                    // promise this path cannot keep — those posts go out with
-                    // no picture at all unless one is attached.
-                    ? `${approvedIdeas.length - mediaReadyCount} still without a picture — those will be saved as text-only.`
-                    : `${approvedIdeas.length - mediaReadyCount} still without a picture — you can carry on, they'll generate one instead.`
-                  : aiCopyCount === 0
-                    ? 'Every post has its media and its words. Nothing left to write.'
-                    : 'Every idea has its media. Captions will be written against them.'}
+                  ? `${approvedIdeas.length - mediaReadyCount} still without a picture — their captions will be written from the idea alone.`
+                  : 'Every post has its picture. Captions are written from them next.'}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── STEP: CAPTIONS ── */}
+      {step === 'captions' && (
+        <div className="space-y-4">
+          <Card className="p-5">
+            <div className="flex items-baseline justify-between gap-4">
+              <div>
+                <h2 className="text-base font-bold text-text tracking-tight">Pick a caption for each post</h2>
+                <p className="text-xs text-text-secondary mt-0.5">
+                  Three options written from each picture and its idea. Choose one, edit it if you like,
+                  and check the date and time.
+                </p>
+              </div>
+              <p className="text-sm font-semibold text-text flex-shrink-0">
+                {approvedIdeas.length - captionsMissing.length} of {approvedIdeas.length} ready
+              </p>
+            </div>
+          </Card>
+
+          <div className="space-y-3">
+            {approvedIdeas.map(idea => (
+              <CaptionCard key={idea.id} idea={idea} thumbUrl={thumbFor(idea)} language={captionLanguage}
+                dateMin={startDate} dateMax={endDate} redrafting={redraftingId === idea.id}
+                onPick={opt => pickCaption(idea, opt)}
+                onEdit={patch => patchLocal(idea, patch)}
+                onSaveField={(field, value) => saveIdeaFields(idea, { [field]: value })}
+                onClearChoice={() => clearCaptionChoice(idea)}
+                onRedraft={() => redraftCaptions(idea)}
+                onDate={date => { patchLocal(idea, { date }); saveIdeaFields(idea, { scheduled_date: date || null }) }}
+                onTime={time => { patchLocal(idea, { time }); saveIdeaFields(idea, { publish_time: time || '' }) }}
+              />
+            ))}
+          </div>
+
+          {error && <div className="rounded-xl bg-red-50 border border-red-100 px-4 py-3 text-xs text-red-600">{error}</div>}
+
+          <div className="sticky bottom-0 -mx-1 px-1 pb-1">
+            <div className="flex items-center gap-3 bg-white/95 backdrop-blur-sm border border-border rounded-2xl shadow-dropdown px-5 py-3.5">
+              <Button variant="secondary" onClick={() => update({ step: 'media' })}>Back to pictures</Button>
+              <Button onClick={finalizePlan} disabled={busy || approvedCount === 0 || captionsMissing.length > 0}>
+                {busy ? <><Spinner size="sm" /> Saving your posts…</> : `Save ${approvedCount} post${approvedCount === 1 ? '' : 's'} to Approvals`}
+              </Button>
+              <p className="text-xs text-text-tertiary flex-1">
+                {captionsMissing.length > 0
+                  ? captionsDrafting
+                    ? 'Writing captions…'
+                    : `Pick a caption for ${captionsMissing.length} more post${captionsMissing.length === 1 ? '' : 's'}.`
+                  : 'Everything has its picture, words and time. Posts land in Approvals for a final check.'}
               </p>
             </div>
           </div>
@@ -1483,18 +1386,14 @@ export function CampaignPlanner() {
             <svg className="w-7 h-7 text-sage-600" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
           </div>
           <div>
-            {/* No "generating now" state any more. There is no background
-                batch left to wait on — every post row exists by the time this
-                screen renders, so promising more would send someone off to
-                watch Approvals for arrivals that already happened. */}
             <h2 className="text-lg font-bold text-text tracking-tight">
-              Plan approved — your posts are ready to review.
+              Plan saved — your posts are ready to review.
             </h2>
             <p className="text-sm text-text-secondary mt-1 max-w-md mx-auto">
               <span className="font-semibold text-text">{approvedCount} idea{approvedCount === 1 ? '' : 's'}</span> approved for <span className="font-semibold text-text">{name}</span>
               {manualResult?.count > 0 && (
                 <>, and <span className="font-semibold text-text">{manualResult.count} post{manualResult.count === 1 ? '' : 's'}</span> {manualResult.count === 1 ? 'is' : 'are'} waiting in Post Approvals</>
-              )}. Check the caption against the picture there, then approve and schedule.
+              )}. Give them a last look there, then approve and schedule.
             </p>
             {manualResult?.warnings?.length > 0 && (
               <p className="text-xs text-red-600 mt-2 max-w-md mx-auto">
@@ -1510,26 +1409,24 @@ export function CampaignPlanner() {
         </Card>
       )}
 
-      {/* Media-stage image picker — persists straight to the idea, since by
-          this point the idea is a real row. No mode toggle: choosing here
-          always means "this image IS the post". */}
+      {/* Pictures-step image picker — persists straight to the idea. */}
       {mediaPickIdea && (
         <ReferencePicker
-          value={mediaPickIdea.references || []}
+          asPost
+          value={mediaPickIdea.imageMode === 'use_reference' ? (mediaPickIdea.references || []) : []}
           onSave={saveMediaImages}
           onClose={() => setMediaPickIdea(null)}
           format={mediaPickIdea.postFormat}
         />
       )}
 
-      {/* Per-seed-post image picker (Stage-1 brief) — stores URLs + mode on the
-          draft; nothing is persisted until the plan itself is created. */}
+      {/* Setup-step image picker — stored on the draft until the plan is created. */}
       {pickingSeedIdx !== null && (
         <ReferencePicker
+          asPost
           value={seedPosts[pickingSeedIdx]?.references || []}
           onSave={saveSeedImages}
           onClose={() => setPickingSeedIdx(null)}
-          mode={seedPickerMode} onModeChange={setSeedPickerMode}
           format={seedPosts[pickingSeedIdx]?.postFormat}
         />
       )}
