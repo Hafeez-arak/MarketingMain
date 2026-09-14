@@ -174,11 +174,9 @@
           }
         }
       },
-      "retryOnFail": true,
-      "maxTries": 2,
-      "waitBetweenTries": 5000,
       "alwaysOutputData": true,
-      "notes": "One lens per request, run by the agent container next to n8n (AGENT_BASE_URL). The agent stops a lens at its own budget (AGENT_LENS_BUDGET_MS in n8n/docker/docker-compose.yml) and writes an honest timeout; this 10-minute HTTP timeout sits above that. Idempotent per (run_id, lens). batchSize 3 keeps a monthly run's seven lenses from opening seven model calls at once."
+      "notes": "One lens per request, run by the agent container next to n8n (AGENT_BASE_URL). NO node-level retry, on purpose: n8n retries a failed HTTP node as a whole, so one lens answering non-2xx re-sent all five and billed every lens twice (run 4de11a81, 2026-09-14: $2.62 instead of ~$1.40). onError=continueRegularOutput passes a failed lens on as its own item instead; the lens route is idempotent per (run_id, lens) and writes an honest failure row, so synthesise still sees every lens. The agent stops a lens at AGENT_LENS_BUDGET_MS; this 10-minute timeout sits above that. batchSize 3 keeps a monthly run's seven lenses from opening seven model calls at once.",
+      "onError": "continueRegularOutput"
     },
     {
       "id": "synthesise",
@@ -257,7 +255,7 @@
         280
       ],
       "parameters": {
-        "jsCode": "// Runs once, after every lens item has come back. Emits a single item so\n// synthesise is called once per run rather than once per lens.\n//\n// Deliberately NOT named for a number. The set is decided per run by sales\n// motion and cadence — five on a weekly run, seven on a monthly one — and a\n// node that assumed six would be wrong on both.\nconst items = $input.all();\nconst first = items[0]?.json || {};\nconst runId = first.run_id || $('One item per lens').first().json.run_id;\nconst ws = $('One item per lens').first().json.workspace_id;\nconst cadence = $('One item per lens').first().json.cadence || 'weekly';\n\nconst failed = items.filter(i => i.json?.lens_ok === false).map(i => i.json.lens);\nconst timedOut = items.filter(i => i.json?.timed_out).map(i => i.json.lens);\n\nreturn [{ json: { workspace_id: ws, run_id: runId, cadence, lenses: items.length, failed, timed_out: timedOut } }];\n"
+        "jsCode": "// Runs once, after every lens item has come back. Emits a single item so\n// synthesise is called once per run rather than once per lens.\n//\n// Deliberately NOT named for a number. The set is decided per run by sales\n// motion and cadence — five on a weekly run, seven on a monthly one — and a\n// node that assumed six would be wrong on both.\n//\n// A lens request that failed at the HTTP level arrives as n8n's own error\n// item ({ error: ... }) with no `lens` field, because the lens step continues\n// on error rather than retrying the whole batch. Its lens name comes from the\n// matching input item, so the summary can still say WHICH lens failed and why.\nconst items = $input.all();\nconst sent = $('One item per lens').all();\nconst first = sent[0]?.json || {};\nconst runId = first.run_id;\nconst ws = first.workspace_id;\nconst cadence = first.cadence || 'weekly';\n\nconst lensOf = (item, i) => item.json?.lens || sent[item.pairedItem?.item ?? i]?.json?.lens || `item ${i}`;\nconst failed = [];\nconst errors = [];\nitems.forEach((item, i) => {\n  const j = item.json || {};\n  const httpError = j.error && !j.lens;\n  if (j.lens_ok === false || httpError) {\n    failed.push(lensOf(item, i));\n    if (httpError) errors.push(`${lensOf(item, i)}: ${typeof j.error === 'string' ? j.error : (j.error?.message || JSON.stringify(j.error))}`.slice(0, 200));\n  }\n});\nconst timedOut = items.filter(i => i.json?.timed_out).map((item, i) => lensOf(item, i));\n\nreturn [{ json: { workspace_id: ws, run_id: runId, cadence, lenses: items.length, failed, timed_out: timedOut, errors } }];\n"
       },
       "executeOnce": false
     },

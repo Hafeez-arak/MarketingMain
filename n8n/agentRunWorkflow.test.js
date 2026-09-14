@@ -181,3 +181,26 @@ describe('the Run button reaches the same driver', () => {
     expect(byName('POST /api/agent/synthesise').parameters.options.timeout).toBeGreaterThan(budget('AGENT_SYNTHESISE_BUDGET_MS'))
   })
 })
+
+describe('a failed lens costs one lens, not the whole set', () => {
+  // Run 4de11a81 (2026-09-14): one lens answered non-2xx on the first try, n8n
+  // retried the lens NODE, and the retry re-sent all five — every lens billed
+  // twice. Reproduced with a stand-in server: a single 500 in the batch
+  // re-sends every request, including the ones that had already succeeded.
+  const lens = byName('POST /api/agent/lens')
+
+  it('never retries the lens step as a whole', () => {
+    expect(lens.retryOnFail).not.toBe(true)
+  })
+
+  it('passes a failed lens on as its own item, so the brief still runs', () => {
+    expect(lens.onError).toBe('continueRegularOutput')
+  })
+
+  it('names the lens behind an HTTP-level failure in the summary', () => {
+    const code = byName('Wait for every lens').parameters.jsCode
+    expect(code).toMatch(/\$\('One item per lens'\)/)
+    expect(code).toMatch(/pairedItem/)
+    expect(code).toMatch(/errors/)
+  })
+})
