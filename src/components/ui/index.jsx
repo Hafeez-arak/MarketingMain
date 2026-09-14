@@ -252,6 +252,16 @@ export function Spinner({ size='md' }) {
   return <div className={`${sizes[size]} border-current border-t-transparent rounded-full animate-spin`} />
 }
 
+// A stand-in for something that is still on its way. Pages used to paint their
+// real layout over empty state while a fetch was in flight, so the first thing
+// anyone saw was "Not connected", "0 posts" or "No posts yet" — each a claim,
+// and a wrong one, until the data landed. A skeleton makes no claim. Size it
+// with classes to match what it replaces, so nothing jumps when that arrives.
+// A span so it can sit inside a <p>; `block` so it still takes a width.
+export function Skeleton({ className = '' }) {
+  return <span aria-hidden="true" className={`block bg-surface-muted animate-pulse ${className}`} />
+}
+
 // A square switch: the knob is a filled block that slides between two ends of
 // a bordered track. Reads as a physical two-position selector rather than the
 // soft iOS pill, which is the only shape in the app that couldn't be squared

@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { useApp, actions } from '../../store/app'
-import { Card, Button, Badge, Empty, PostImage, Spinner } from '../../components/ui/index'
+import { Card, Button, Badge, Empty, PostImage, Skeleton } from '../../components/ui/index'
 import { PLATFORM_META, formatDateTime, isLivePlatform } from '../../lib/utils'
 import { useConnectedAccounts } from '../../lib/useConnectedAccounts'
 import { ConnectAccounts } from '../../components/social/ConnectAccounts'
@@ -32,7 +32,7 @@ function PlatformCard({ platformKey, meta, posts, accounts, loading, onOpen }) {
               Coming soon
             </span>
           ) : loading ? (
-            <Spinner size="sm" />
+            <Skeleton className="h-[18px] w-20" />
           ) : (
             <span className={`text-[10px] font-bold uppercase tracking-[0.08em] px-1.5 py-0.5 leading-[1.4] ${connected ? 'bg-green-50 text-green-700' : 'bg-surface-subtle text-text-tertiary'}`}>
               {connected ? 'Connected' : 'Not connected'}
@@ -46,7 +46,9 @@ function PlatformCard({ platformKey, meta, posts, accounts, loading, onOpen }) {
             : posts.length === 0 ? 'No posts created yet.' : `${posts.length} post${posts.length === 1 ? '' : 's'} created`}
         </p>
         <p className="text-xs text-text-tertiary mb-4 truncate min-h-[1rem]">
-          {live && connected
+          {live && loading
+            ? <Skeleton className="h-3 w-28" />
+            : live && connected
             ? accounts.map(a => a.username ? `@${a.username}` : a.display_name).filter(Boolean).join(', ')
             : ''}
         </p>
@@ -61,7 +63,7 @@ function PlatformCard({ platformKey, meta, posts, accounts, loading, onOpen }) {
             disabled={!live} onClick={onOpen}>
             {live ? 'Open' : 'Coming soon'}
           </Button>
-          {live && !connected && (
+          {live && !loading && !connected && (
             <Button variant="primary" size="sm" className="flex-1 justify-center"
               onClick={onOpen}>
               Connect
@@ -135,7 +137,7 @@ export function SocialPlatform() {
             <div>
               <h2 className="font-semibold text-text">{meta.label}</h2>
               <p className="text-xs text-text-secondary">
-                {posts.length} post{posts.length === 1 ? '' : 's'} · {connected ? 'Connected' : 'Not connected'}
+                {posts.length} post{posts.length === 1 ? '' : 's'} · {loading ? 'Checking connection…' : connected ? 'Connected' : 'Not connected'}
               </p>
             </div>
           </div>

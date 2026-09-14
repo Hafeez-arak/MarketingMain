@@ -1,10 +1,10 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useAuth } from '../../store/auth'
-import { Card, Button, Empty, Spinner, PillSelect, IconBadge, Avatar } from '../ui/index'
+import { Card, Button, Empty, Spinner, PillSelect, IconBadge, Avatar, Skeleton } from '../ui/index'
 import { Icon } from '../ui/icons'
 import { fetchAccountAnalytics } from '../../lib/zernioConnect'
 import { profileUrlOf } from '../../lib/socialAnalytics'
-import { AnalyticsDashboard } from '../../pages/analytics/Dashboard'
+import { AnalyticsDashboard, DashboardSkeleton } from '../../pages/analytics/Dashboard'
 import { fmt, timeAgo } from '../../pages/analytics/format'
 
 // ─── One connected account's analytics ─────────────────────────────────────
@@ -53,7 +53,7 @@ export function AccountAnalytics({ platform, accounts = [], loadingAccounts = fa
 
   if (!account) {
     return loadingAccounts
-      ? <Card className="p-12 flex items-center justify-center"><Spinner /></Card>
+      ? <DashboardSkeleton />
       : (
         <Card>
           <Empty icon={Icon.users} title="No account connected"
@@ -124,9 +124,11 @@ export function AccountAnalytics({ platform, accounts = [], loadingAccounts = fa
                     <p className="text-xs text-text-tertiary mb-1.5 flex items-center gap-1.5">
                       <span className="text-text-tertiary">{m.icon}</span>{m.label}
                     </p>
-                    <p className="text-2xl font-bold text-text">
-                      {insights ? fmt(insights.metrics?.[m.key]?.total || 0) : '—'}
-                    </p>
+                    {current
+                      ? <p className="text-2xl font-bold text-text">
+                          {insights ? fmt(insights.metrics?.[m.key]?.total || 0) : '—'}
+                        </p>
+                      : <Skeleton className="h-8 w-16" />}
                   </div>
                 ))}
               </div>
@@ -143,8 +145,11 @@ export function AccountAnalytics({ platform, accounts = [], loadingAccounts = fa
         )}
       </Card>
 
-      {!current && loading
-        ? <Card className="p-12 flex items-center justify-center"><Spinner /></Card>
+      {/* `!current`, not `!current && loading`: the first load is deferred a
+          tick, so `loading` is still false on the first paint and the graphs
+          were drawn over no response — all zeros — until it started. */}
+      {!current
+        ? <DashboardSkeleton />
         : <AnalyticsDashboard dash={current} days={days} accountId={accountId} onRetry={load} perPlatform={false} />}
     </div>
   )

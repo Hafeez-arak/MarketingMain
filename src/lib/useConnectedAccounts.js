@@ -19,7 +19,13 @@ import {
 export function useConnectedAccounts(platform = '') {
   const { activeWorkspaceId } = useAuth()
   const [accounts, setAccounts] = useState([])
-  const [loading, setLoading]   = useState(false)
+  const [fetching, setFetching] = useState(false)
+  // The workspace the list was last answered for. `loading` used to be a plain
+  // flag that started false and only flipped once the deferred fetch began, so
+  // every screen's first paint said "Not connected" and offered a Connect
+  // button for the length of a round trip. Until an answer lands for THIS
+  // workspace, `loading` below reads true.
+  const [loadedFor, setLoadedFor] = useState(null)
   const [error, setError]       = useState('')
 
   // Guards a stale response from a PREVIOUS workspace overwriting the current
@@ -32,11 +38,14 @@ export function useConnectedAccounts(platform = '') {
   const refresh = useCallback(async () => {
     if (!activeWorkspaceId) { setAccounts([]); return }
     const seq = ++requestSeq.current
-    setLoading(true)
+    setFetching(true)
     setError('')
     const res = await fetchConnectedAccounts(activeWorkspaceId)
     if (seq !== requestSeq.current) return
-    setLoading(false)
+    setFetching(false)
+    // Answered on failure too — otherwise the error would sit under a loader
+    // that never goes away.
+    setLoadedFor(activeWorkspaceId)
     if (res.error) { setError(res.error); return }
     setAccounts(res.accounts || [])
   }, [activeWorkspaceId])
@@ -47,6 +56,8 @@ export function useConnectedAccounts(platform = '') {
   // Same deferral InstagramPage uses for its first fetch. The requestSeq guard
   // above, not this, is what keeps a stale response from landing.
   useEffect(() => { queueMicrotask(refresh) }, [refresh])
+
+  const loading = fetching || (!!activeWorkspaceId && loadedFor !== activeWorkspaceId)
 
   const forPlatform = platform
     ? accounts.filter(a => a.platform === platform)

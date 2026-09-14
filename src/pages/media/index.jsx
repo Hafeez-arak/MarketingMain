@@ -2,7 +2,7 @@ import { useRef, useState, useEffect, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { useAuth } from '../../store/auth'
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from '../../lib/supabaseClient'
-import { Card, Button, Empty, ConfirmDialog, PageHeader } from '../../components/ui/index'
+import { Card, Button, Empty, ConfirmDialog, PageHeader, Skeleton } from '../../components/ui/index'
 
 function isVideo(mimeType) {
   return (mimeType || '').startsWith('video/')
@@ -208,7 +208,7 @@ export function MediaLibrary() {
                   ? 'bg-amber-700 text-white border-amber-700 relative z-10'
                   : 'bg-white text-text-secondary border-border hover:text-text hover:bg-surface-subtle'
               }`}>
-              {f === 'all' ? `All (${stale ? 0 : assets.length})` : f}
+              {f === 'all' ? (stale ? 'All' : `All (${assets.length})`) : f}
             </button>
           ))}
         </div>
@@ -259,7 +259,9 @@ export function MediaLibrary() {
 
       {/* Files */}
       {loading || stale ? (
-        <div className="flex items-center justify-center py-12 text-text-tertiary text-sm">Loading…</div>
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3" aria-busy="true" aria-label="Loading media">
+          {Array.from({ length: 8 }, (_, i) => <Skeleton key={i} className="aspect-square w-full" />)}
+        </div>
       ) : filtered.length === 0 ? (
         <Card>
           <Empty

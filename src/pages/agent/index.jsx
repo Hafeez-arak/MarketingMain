@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import { useAuth } from '../../store/auth'
-import { Card, PageHeader, SectionHead, Button, Spinner, Empty } from '../../components/ui/index'
+import { Card, PageHeader, SectionHead, Button, Spinner, Empty, Skeleton } from '../../components/ui/index'
 import { useAgentChat } from '../../lib/useAgentChat'
 import { describePage, suggestionsFor } from '../../lib/pageContext'
 import { startResearchRun, fetchRuns, fetchLensResults } from '../../lib/agentRun'
@@ -44,6 +44,9 @@ export default function AgentPage() {
   const { turns, busy, ask, reset, stop, ready, threadId, openThread } = useAgentChat()
   const [question, setQuestion] = useState('')
   const [runs, setRuns] = useState([])
+  // Separate from `runs.length`, which is also 0 before the first answer — and
+  // the page used to say "No run has been started" in that gap.
+  const [runsLoaded, setRunsLoaded] = useState(false)
   const [lensRows, setLensRows] = useState([])
   const [running, setRunning] = useState(false)
   const [runNote, setRunNote] = useState('')
@@ -68,6 +71,7 @@ export default function AgentPage() {
       // after the person has switched to another brand.
       if (cancelled) return
       setRuns(rows)
+      setRunsLoaded(true)
       const latest = rows?.[0]
       if (!latest) { setLensRows([]); return }
       const lr = await fetchLensResults(activeWorkspaceId, latest.id, accessToken)
@@ -142,7 +146,11 @@ export default function AgentPage() {
           subtitle="Measures every competitor with a verified Instagram handle, then investigates what moved. The numbers are computed in code, never by a model."
         />
         {runNote ? <p className="mt-2 text-sm text-slate-700">{runNote}</p> : null}
-        {runs.length === 0 ? (
+        {!runsLoaded ? (
+          <div className="mt-3 space-y-2" aria-busy="true" aria-label="Loading runs">
+            {[0, 1, 2].map(i => <Skeleton key={i} className="h-4 w-full max-w-md" />)}
+          </div>
+        ) : runs.length === 0 ? (
           <p className="mt-2 text-sm text-slate-500">No run has been started for this brand yet.</p>
         ) : (
           <ul className="mt-3 space-y-1.5">

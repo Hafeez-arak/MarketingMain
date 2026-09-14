@@ -35,7 +35,7 @@ export function TikTokPage() {
             <div>
               <h2 className="font-semibold text-text">TikTok</h2>
               <p className="text-xs text-text-secondary">
-                {posts.length} post{posts.length === 1 ? '' : 's'} · {connected ? 'Connected' : 'Not connected'}
+                {posts.length} post{posts.length === 1 ? '' : 's'} · {loading ? 'Checking connection…' : connected ? 'Connected' : 'Not connected'}
               </p>
             </div>
           </div>

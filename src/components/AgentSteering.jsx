@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useAuth } from '../store/auth'
-import { Card, SectionHead, Button } from './ui/index'
+import { Card, SectionHead, Button, Skeleton } from './ui/index'
 import {
   fetchAgenda, setHandleByHand, setAgendaStatus, addAgendaRow,
   deleteAgendaRow, watchlistReadiness, resolveHandles, discoverCompetitors,
@@ -128,9 +128,26 @@ function HandleRow({ row, accessToken, onChanged }) {
   )
 }
 
+function RowsSkeleton() {
+  return (
+    <div className="mt-2 space-y-3 py-1" aria-busy="true" aria-label="Loading">
+      {[0, 1].map(i => (
+        <div key={i} className="space-y-1.5">
+          <Skeleton className="h-3.5 w-40" />
+          <Skeleton className="h-3 w-56" />
+        </div>
+      ))}
+    </div>
+  )
+}
+
 export function AgentSteering() {
   const { activeWorkspaceId, accessToken } = useAuth()
   const [agenda, setAgenda] = useState({ questions: [], competitors: [] })
+  // The empty agenda above is a starting value, not an answer. Until the first
+  // fetch lands, both cards used to state "No competitors are being watched
+  // yet" and "None yet" about a brand that has both.
+  const [loaded, setLoaded] = useState(false)
   const [reload, setReload] = useState(0)
   const [newQuestion, setNewQuestion] = useState('')
   const [newCompetitor, setNewCompetitor] = useState('')
@@ -142,7 +159,11 @@ export function AgentSteering() {
   useEffect(() => {
     if (!activeWorkspaceId || !accessToken) return undefined
     let cancelled = false
-    fetchAgenda(activeWorkspaceId, accessToken).then(a => { if (!cancelled) setAgenda(a) })
+    fetchAgenda(activeWorkspaceId, accessToken).then(a => {
+      if (cancelled) return
+      setAgenda(a)
+      setLoaded(true)
+    })
     return () => { cancelled = true }
   }, [activeWorkspaceId, accessToken, reload])
 
@@ -198,7 +219,7 @@ export function AgentSteering() {
       <Card className="p-4">
         <SectionHead
           title="Competitors it watches"
-          subtitle={readiness.note}
+          subtitle={loaded ? readiness.note : 'Loading the watchlist…'}
           action={
             <span className="flex gap-1">
               <Button size="sm" variant="ghost" onClick={findRivals} disabled={finding}>
@@ -211,11 +232,13 @@ export function AgentSteering() {
           }
         />
         {findNote ? <p className="mt-1 text-xs text-slate-600">{findNote}</p> : null}
-        <ul className="mt-2">
-          {agenda.competitors.map(row => (
-            <HandleRow key={row.id} row={row} accessToken={accessToken} onChanged={refresh} />
-          ))}
-        </ul>
+        {loaded ? (
+          <ul className="mt-2">
+            {agenda.competitors.map(row => (
+              <HandleRow key={row.id} row={row} accessToken={accessToken} onChanged={refresh} />
+            ))}
+          </ul>
+        ) : <RowsSkeleton />}
         <div className="mt-3 flex gap-2">
           <input
             value={newCompetitor}
@@ -238,7 +261,9 @@ export function AgentSteering() {
           title="Standing questions"
           subtitle="Asked every run, so one week stays comparable to the last."
         />
-        {agenda.questions.length === 0 ? (
+        {!loaded ? (
+          <RowsSkeleton />
+        ) : agenda.questions.length === 0 ? (
           <p className="mt-2 text-sm text-slate-500">
             None yet. Without these the agent decides for itself what to chase each week.
           </p>

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Button, Modal, Spinner, ConfirmDialog, Avatar } from '../ui/index'
+import { Button, Modal, Spinner, ConfirmDialog, Avatar, Skeleton } from '../ui/index'
 import { PLATFORM_META, isLivePlatform } from '../../lib/utils'
 import { tokenAge, TOKEN_LIFETIME_DAYS, supportsCatalogAudio } from '../../lib/zernioConnect'
 import { useConnectFlow, useDisconnect } from '../../lib/useConnectedAccounts'
@@ -66,6 +66,19 @@ function AccountRow({ account, onDisconnect, disconnecting }) {
         onClick={() => onDisconnect(account)}>
         {disconnecting ? 'Removing…' : 'Disconnect'}
       </Button>
+    </div>
+  )
+}
+
+// Shaped like AccountRow, so the card holds its height while the list loads.
+function AccountRowSkeleton() {
+  return (
+    <div className="flex items-center gap-3 py-3" aria-busy="true" aria-label="Loading connected accounts">
+      <Skeleton className="w-9 h-9 rounded-full flex-shrink-0" />
+      <div className="flex-1 space-y-1.5">
+        <Skeleton className="h-3.5 w-32" />
+        <Skeleton className="h-3 w-48" />
+      </div>
     </div>
   )
 }
@@ -203,9 +216,7 @@ export function ConnectAccounts({ platform, accounts, loading, error, refresh, c
         </div>
       )}
 
-      {loading && accounts.length === 0 && (
-        <div className="py-4 flex justify-center"><Spinner size="sm" /></div>
-      )}
+      {loading && accounts.length === 0 && <AccountRowSkeleton />}
 
       {accounts.length > 0 && (
         <div className="divide-y divide-border">
@@ -223,23 +234,29 @@ export function ConnectAccounts({ platform, accounts, loading, error, refresh, c
         </p>
       )}
 
-      <div className="mt-3">
-        <Button variant={accounts.length ? 'outline' : 'primary'} size="sm"
-          disabled={flow.phase === 'starting'}
-          onClick={flow.start}>
-          {flow.phase === 'starting'
-            ? 'Opening…'
-            : !accounts.length ? `Connect ${meta.label}`
-            : oneOnly ? `Replace the connected ${meta.label} account`
-            : `Connect another ${meta.label} account`}
-        </Button>
-        {oneOnly && accounts.length > 0 && (
-          <p className="text-xs text-text-tertiary mt-1.5">
-            Instagram allows one account per workspace. Connecting a different one
-            replaces this account and discards its conversations and stats here.
-          </p>
-        )}
-      </div>
+      {/* Held back until the list is in. Before, it rendered as "Connect
+          Instagram" and then changed its mind to "Replace the connected
+          account" once the accounts arrived — a primary button inviting you to
+          connect something that was already connected. */}
+      {!(loading && accounts.length === 0) && (
+        <div className="mt-3">
+          <Button variant={accounts.length ? 'outline' : 'primary'} size="sm"
+            disabled={flow.phase === 'starting'}
+            onClick={flow.start}>
+            {flow.phase === 'starting'
+              ? 'Opening…'
+              : !accounts.length ? `Connect ${meta.label}`
+              : oneOnly ? `Replace the connected ${meta.label} account`
+              : `Connect another ${meta.label} account`}
+          </Button>
+          {oneOnly && accounts.length > 0 && (
+            <p className="text-xs text-text-tertiary mt-1.5">
+              Instagram allows one account per workspace. Connecting a different one
+              replaces this account and discards its conversations and stats here.
+            </p>
+          )}
+        </div>
+      )}
 
       <SelectionModal
         open={flow.phase === 'selecting' || flow.phase === 'finishing'}

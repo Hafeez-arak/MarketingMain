@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from 'react'
-import { Button, Spinner } from '../ui/index'
+import { Button, Spinner, Skeleton } from '../ui/index'
 import { PLATFORM_META } from '../../lib/utils'
 import { formatsFor } from '../../lib/postFormats'
 import {
@@ -48,9 +48,16 @@ function FieldLabel({ children, hint }) {
 // Chips rather than a plain multi-select, because "which account is this going
 // out as" is the single most consequential choice on this screen and a
 // collapsed select hides it behind a click.
-function AccountPicker({ accounts, selected, onChange, platform }) {
+function AccountPicker({ accounts, selected, onChange, platform, loading = false }) {
   const meta = PLATFORM_META[platform] || {}
   const usable = accounts.filter(a => a.is_active !== false)
+
+  // Opened straight after the page loads, the list may not be in yet — and
+  // "No account connected, connect one first" is not something to tell
+  // someone whose account is connected.
+  if (loading && usable.length === 0) {
+    return <Skeleton className="h-9 w-40" />
+  }
 
   if (usable.length === 0) {
     return (
@@ -166,7 +173,7 @@ function ScheduleRow({ value, onChange }) {
 }
 
 export function PostComposer({
-  open, platform = 'instagram', accounts = [], campaigns = [], workspaceId,
+  open, platform = 'instagram', accounts = [], accountsLoading = false, campaigns = [], workspaceId,
   initial, onClose, onSaveDraft, onSchedule, onPublish, busy = false,
   captionAssist,
 }) {
@@ -240,7 +247,7 @@ export function PostComposer({
             <Section>
               <FieldLabel>Publish to</FieldLabel>
               <AccountPicker accounts={platformAccounts} selected={state.accountIds}
-                platform={state.platform}
+                platform={state.platform} loading={accountsLoading}
                 onChange={ids => patch({ accountIds: ids })} />
             </Section>
 

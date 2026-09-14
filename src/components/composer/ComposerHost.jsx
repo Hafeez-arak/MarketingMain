@@ -95,7 +95,7 @@ export function ComposerHost({
   openPost = null, onOpenPostHandled, trigger = true,
 }) {
   const { activeWorkspaceId, accessToken } = useAuth()
-  const { accounts } = useConnectedAccounts(platform)
+  const { accounts, loading: accountsLoading } = useConnectedAccounts(platform)
   const [open, setOpen]       = useState(false)
   const [busy, setBusy]       = useState(false)
   const [note, setNote]       = useState('')
@@ -189,6 +189,7 @@ export function ComposerHost({
         initial={initial}
         platform={initial?.platform || platform}
         accounts={accounts}
+        accountsLoading={accountsLoading}
         campaigns={campaigns}
         workspaceId={activeWorkspaceId}
         busy={busy}
