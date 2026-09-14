@@ -7,7 +7,7 @@ import {
 import { Card, Button, PlatformPill, Empty, PostImage, IconBadge, PillSelect, Skeleton } from '../../components/ui/index'
 import { Icon } from '../../components/ui/icons'
 import { BestTimeHeatmap, MetricToggle } from './charts'
-import { fmt } from './format'
+import { fmt, foldFollowers } from './format'
 
 // ─── The Analytics graphs, drawn from one Zernio dashboard response ────────
 // Shared by /analytics (the workspace view, fed by the Zernio Dashboard n8n
@@ -215,15 +215,24 @@ export function AnalyticsDashboard({ dash, days, accountId = '', onRetry, perPla
   // Zernio omits followersCount until its first daily snapshot, and the
   // follower-stats and history endpoints fill on the same clock — so take
   // the best any of them has rather than trusting one.
+  //
+  // null, not 0, when NONE of the three has anything. Every source reports an
+  // uncounted account as zero: `followersCount: null`, and follower-stats
+  // returns `currentFollowers: 0` beside `dataPoints: 0` and an empty series —
+  // a default computed over no observations. Folding those with `|| 0` and
+  // Math.max produced a confident "0" in the KPI tile, which reads as an
+  // account with no audience rather than one nobody has counted yet.
+  //
+  // `dataPoints` is the discriminator, and it is why this cannot be done by
+  // looking at the number alone: an account genuinely at zero followers has
+  // snapshots behind it and must still read as 0.
   const totalFollowers = useMemo(() => {
-    const fromOverview = zAccounts
-      .filter(a => !accountId || a._id === accountId)
-      .reduce((s, a) => s + (a.followersCount || 0), 0)
-    const fromStats = (dash?.followers?.accounts || [])
-      .filter(a => !accountId || a._id === accountId)
-      .reduce((s, a) => s + (a.currentFollowers || 0), 0)
-    const latest = followerRows.length ? (followerRows[followerRows.length - 1].followers || 0) : 0
-    return Math.max(fromOverview, fromStats, latest)
+    const scoped = a => !accountId || a._id === accountId
+    return foldFollowers(
+      zAccounts.filter(scoped),
+      (dash?.followers?.accounts || []).filter(scoped),
+      followerRows,
+    )
   }, [zAccounts, dash?.followers?.accounts, followerRows, accountId])
 
   const bestPost = useMemo(() => {
@@ -321,7 +330,13 @@ export function AnalyticsDashboard({ dash, days, accountId = '', onRetry, perPla
           <div className="p-5">
             <p className="text-xs text-text-tertiary mb-1.5">Total followers</p>
             <p className="text-2xl font-bold text-text flex items-center gap-1.5">
-              <span className="text-text-tertiary">{Icon.users}</span>{fmt(totalFollowers)}
+              <span className="text-text-tertiary">{Icon.users}</span>
+              {/* An em dash, not a zero. The chart below already says when the
+                  first snapshot lands; the tile must not contradict it with a
+                  number nobody measured. */}
+              {totalFollowers === null
+                ? <span className="text-text-tertiary" title="Zernio records followers once a day. A newly connected account has no count until its first snapshot.">—</span>
+                : fmt(totalFollowers)}
             </p>
           </div>
           <div className="p-5">
