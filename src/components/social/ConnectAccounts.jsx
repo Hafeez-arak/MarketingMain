@@ -3,6 +3,7 @@ import { Button, Modal, Spinner, ConfirmDialog, Avatar, Skeleton } from '../ui/i
 import { PLATFORM_META, isLivePlatform } from '../../lib/utils'
 import { tokenAge, TOKEN_LIFETIME_DAYS, supportsCatalogAudio } from '../../lib/zernioConnect'
 import { useConnectFlow, useDisconnect } from '../../lib/useConnectedAccounts'
+import { mayDisconnect } from '../../lib/platformSafety'
 
 // ─── Connected accounts, for one platform ──────────────────────────────────
 // Used by the social hub and by each platform page, so "connected" looks and
@@ -40,6 +41,7 @@ function AudioUpgradeNotice({ account }) {
 
 function AccountRow({ account, onDisconnect, disconnecting }) {
   const needsReconnect = account.needs_reconnection === true || account.is_active === false
+  const protectedAccount = !mayDisconnect(account)
   return (
     <div className="flex items-center gap-3 py-3">
       {account.profile_picture
@@ -58,14 +60,29 @@ function AccountRow({ account, onDisconnect, disconnecting }) {
             </span>
           )}
         </p>
-        {needsReconnect
-          ? <p className="text-xs text-red-600 mt-0.5">Needs reconnecting — publishing will fail until it is.</p>
-          : <><TokenNotice account={account} /><AudioUpgradeNotice account={account} /></>}
+        {protectedAccount
+          ? <p className="text-xs text-sky-700 mt-0.5">
+              Protected — this product measures this account but never publishes to it or
+              disconnects it.
+            </p>
+          : needsReconnect
+            ? <p className="text-xs text-red-600 mt-0.5">Needs reconnecting — publishing will fail until it is.</p>
+            : <><TokenNotice account={account} /><AudioUpgradeNotice account={account} /></>}
       </div>
-      <Button variant="ghost" size="xs" disabled={disconnecting}
-        onClick={() => onDisconnect(account)}>
-        {disconnecting ? 'Removing…' : 'Disconnect'}
-      </Button>
+      {/* No Disconnect button at all, rather than a disabled one. A greyed
+          button invites someone to go looking for how to enable it; its
+          absence plus the line above says the decision was made deliberately.
+          The server refuses this regardless — see api/zernio/[action].js. */}
+      {protectedAccount ? (
+        <span className="text-[10px] font-bold uppercase tracking-[0.08em] bg-sky-50 text-sky-700 px-1.5 py-0.5">
+          Protected
+        </span>
+      ) : (
+        <Button variant="ghost" size="xs" disabled={disconnecting}
+          onClick={() => onDisconnect(account)}>
+          {disconnecting ? 'Removing…' : 'Disconnect'}
+        </Button>
+      )}
     </div>
   )
 }

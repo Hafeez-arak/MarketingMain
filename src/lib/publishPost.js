@@ -4,6 +4,7 @@ import { BRAND_TIMEZONE } from './brandTime'
 import {
   composedCaption, platformSpecificData, tiktokSettings, validateComposer,
 } from './composerState'
+import { mayPublishTo, protectionReason } from './platformSafety'
 
 // ─── One publish path ──────────────────────────────────────────────────────
 // Every platform publishes through Zernio. The Meta Graph API path was removed
@@ -70,6 +71,20 @@ export function buildPublishRequest(state, {
 // claimed row that failed for a reason we could have named in the composer is
 // the worst of both.
 export async function publishComposed(state, opts = {}) {
+  // ── Protected accounts, before validation and before the network ──
+  //
+  // First, not last: a refusal that arrives after the composer has been
+  // validated and the request built is a refusal that has already had several
+  // chances to be routed around. ARAK's LinkedIn is the company's real page
+  // and this product does not publish to it.
+  //
+  // This is the first of three layers, not the guarantee. The browser can be
+  // bypassed, so the n8n publish workflow refuses the same platform
+  // server-side and the API refuses to disconnect it. See
+  // src/lib/platformSafety.js.
+  const account = opts.account || { platform: state.platform }
+  if (!mayPublishTo(account)) return { error: protectionReason(account) }
+
   const check = validateComposer(state)
   if (!check.ok) return { error: check.errors[0], errors: check.errors }
 

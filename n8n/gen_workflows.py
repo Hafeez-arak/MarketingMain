@@ -1283,6 +1283,18 @@ async function workspaceProfileId(wsId){
   return String((Array.isArray(rows) && rows[0] && rows[0].zernio_profile_id) || '');
 }
 const platform    = body.platform || 'instagram';
+
+// ── Protected accounts ──────────────────────────────────────────────────
+// ARAK Lighting's LinkedIn is the company's REAL, official page. Instagram
+// here is @lightingaaa, a one-follower test account that has been published
+// to with captions like "bvvv". Every path in this workflow was written for
+// the second kind of account, where a mistake is deleted a minute later.
+//
+// Mirrors PROTECTED_PLATFORMS in src/lib/platformSafety.js — the two lists
+// are short and must agree; if one grows, grow the other.
+const PROTECTED_PLATFORMS = ['linkedin'];
+const isProtectedPlatform = p => PROTECTED_PLATFORMS.includes(String(p || '').trim().toLowerCase());
+
 // Moving an already-scheduled post to a new time, rather than a first publish.
 const isReschedule = body.reschedule === true;
 // Set once a reschedule has actually retired the old Zernio post, so the
@@ -1362,6 +1374,31 @@ async function claimPost(){
 
 try {
   if (!ZERNIO) throw new Error('ZERNIO_API_KEY is not set on this n8n instance.');
+
+  // ── Protected accounts, first thing inside the try ────────────────────
+  //
+  // INSIDE the try deliberately, and the placement is the whole lesson of
+  // draft_status: the browser opens the publishing spinner and only this
+  // workflow can close it, so a refusal thrown past the catch below leaves a
+  // post spinning forever with no error anyone can read. The catch patches
+  // publish_status to 'failed' with this message and returns a clean
+  // { ok:false } — a refusal has to be as well-behaved as a success.
+  //
+  // This is also the layer that actually guarantees the rule. The composer
+  // hides LinkedIn and publishPost.js refuses it, but both run in the
+  // browser; a webhook is reachable without one, and a replayed or hand-made
+  // request lands right here. Nothing has reached Zernio or claimed the row
+  // at this point.
+  //
+  // Covers cancel and reschedule too, because it precedes that branch: the
+  // ask was no posting AND no deleting on the real page.
+  if (isProtectedPlatform(platform)) {
+    throw new Error(
+      platform + ' is a protected account in this workspace: this product does not publish to it, ' +
+      'schedule on it, or delete its posts. Analytics and reporting are unaffected. ' +
+      'Changing that is a decision for whoever owns the page.'
+    );
+  }
 
   // ---- 0) cancel-only: give the slot back, keep the post ----
   //

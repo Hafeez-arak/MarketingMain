@@ -2,6 +2,7 @@ import {
   createZernio, normalizeAccount, ownedByProfile, profileIdOf,
   CONNECT_SPECS, CONNECTABLE, explainZernioError, ZernioError, qs, analyticsPlan, retryRateLimited,
 } from './_zernio.js'
+import { mayDisconnect, protectionReason } from '../../src/lib/platformSafety.js'
 
 // ─── Per-workspace OAuth ───────────────────────────────────────────────────
 //
@@ -239,6 +240,33 @@ async function requireOwnedAccount(z, { workspaceId, profileId, accountId }) {
   return found
 }
 
+/**
+ * The stored `is_protected` flag for an account.
+ *
+ * Read separately because it is OURS, not Zernio's: normalizeAccount builds
+ * its object from Zernio's response, which has never heard of this column, so
+ * an account arriving through requireOwnedAccount carries only the platform.
+ * The platform alone already protects LinkedIn, but the flag is what lets a
+ * person protect any other account without a deploy, and it would be quietly
+ * inert if nothing ever read it.
+ *
+ * Fails CLOSED. If the lookup errors we return true — "we could not check"
+ * has to mean protected, because the alternative is deleting a real company
+ * page because a query timed out.
+ */
+async function isAccountProtected({ workspaceId, accountId }) {
+  try {
+    const rows = await supa(
+      `social_accounts?workspace_id=eq.${workspaceId}` +
+      `&zernio_account_id=eq.${encodeURIComponent(accountId)}&select=is_protected&limit=1`,
+      { token: SERVICE_KEY },
+    )
+    return rows?.[0]?.is_protected === true
+  } catch {
+    return true
+  }
+}
+
 // ─── Actions ───────────────────────────────────────────────────────────────
 
 const handlers = {
@@ -298,7 +326,18 @@ const handlers = {
   async disconnect(z, { ws, profileId, body }) {
     const accountId = String(body.account_id || '').trim()
     if (!accountId) return fail('account_id is required.', 400)
-    await requireOwnedAccount(z, { workspaceId: ws.id, profileId, accountId })
+    const account = await requireOwnedAccount(z, { workspaceId: ws.id, profileId, accountId })
+
+    // ── Protected accounts ──
+    // Checked HERE, server-side, because this is the only place the browser
+    // cannot route around. The UI hides the button too, but a hidden button is
+    // a courtesy and this is the guarantee: disconnecting ARAK's real LinkedIn
+    // page deletes it at Zernio, which is not something a stray click on a
+    // shared laptop should be able to do. See src/lib/platformSafety.js.
+    const protectedRow = await isAccountProtected({ workspaceId: ws.id, accountId })
+    if (!mayDisconnect({ ...account, is_protected: protectedRow })) {
+      return fail(protectionReason(account), 403)
+    }
 
     await z.request(`accounts/${encodeURIComponent(accountId)}`, { method: 'DELETE' })
 
