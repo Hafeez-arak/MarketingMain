@@ -2,7 +2,7 @@ import { callModel } from './_provider.js'
 import { db } from './_supabase.js'
 import { loadBrandContext, IDENTITY } from './_context.js'
 import { textIn, urlsFromResponse } from '../../src/lib/agent/loop.js'
-import { BRIEF_SCHEMA, SYNTHESISE_PROMPT, mergeBrief } from '../../src/lib/agent/brief.js'
+import { BRIEF_SCHEMA, SYNTHESISE_PROMPT, mergeBrief, withRefs } from '../../src/lib/agent/brief.js'
 import {
   lensesFor, motionOf, lensSummary, rankFindings, agendaFilterFor,
 } from '../../src/lib/agent/lenses.js'
@@ -333,8 +333,11 @@ export async function synthesiseRun({ workspaceId, runId, cadence = 'weekly', de
     // four findings continuing and all four were new, while the single
     // genuine repeat scored 1.00. See novelty.js.
     const seenBefore = priorFindingsFrom(priorRuns)
-    const findings = rankFindings(
-      applyNovelty(results.flatMap(r => r.findings || []), seenBefore))
+    // Refs are stamped BEFORE the synthesis sees the findings, because the
+    // whole point of them is that the model can point an idea at one. Stamping
+    // after would leave `answers` referring to nothing.
+    const findings = withRefs(rankFindings(
+      applyNovelty(results.flatMap(r => r.findings || []), seenBefore)))
     const summary = lensSummary(results)
 
     await markStage(workspaceId, runId, 'synthesise')
@@ -399,7 +402,7 @@ export async function synthesiseRun({ workspaceId, runId, cadence = 'weekly', de
       return bail(gathered, `The brief did not parse: ${err.message}`, cost, summary)
     }
 
-    const report = mergeBrief(gathered, brief, allowedUrls)
+    const report = mergeBrief(gathered, brief, allowedUrls, findings)
     report.lenses = summary
     report.findings = findings
     report.sales_motion = { motion, explicit }
@@ -523,7 +526,9 @@ export async function persistReport(workspaceId, runId, report) {
         status: 'proposed',
         source: 'research',
         confidence: r.confidence ?? null,
-        evidence: { sources: r.sources || [], run_id: runId },
+        // `dated` rides in evidence because brand_memory has no column for it
+        // and this is a warning for the reviewer, not a fact about the brand.
+        evidence: { sources: r.sources || [], run_id: runId, dated: Boolean(r.dated) },
       },
       prefer: 'return=minimal',
     }).catch(err => console.error('[agent/synthesise] rule:', err.message))

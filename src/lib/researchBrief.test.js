@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   partitionByClock, deadlineLabel, urgencyOf, lensStates, lensHeadline,
-  emptiness, setupGaps, compact, signed, pct,
+  emptiness, setupGaps, compact, signed, pct, marketDirection, actionPlan,
 } from './researchBrief'
 
 const NOW = new Date('2026-09-12T09:00:00Z')
@@ -222,5 +222,78 @@ describe('numbers a person can read at a glance', () => {
   it('renders a confidence as a percentage', () => {
     expect(pct(0.35)).toBe('35%')
     expect(pct(1)).toBe('100%')
+  })
+})
+
+describe('where the market is moving', () => {
+  it('uses what the agent wrote when the brief has it', () => {
+    const out = marketDirection({
+      market_direction: [{ movement: 'Huda is buying presence', basis: 'instagram' }],
+      competitor_board: [{ name: 'Huda', read: 'steady' }],
+    })
+    expect(out.derived).toBe(false)
+    expect(out.items).toHaveLength(1)
+    expect(out.items[0].movement).toBe('Huda is buying presence')
+  })
+
+  it('assembles one from the per-rival reads on a brief written before the field existed', () => {
+    // Not a nicety. Every brief on screen today predates market_direction, and
+    // the reads say exactly this — nine sections down, at the bottom of a card.
+    const out = marketDirection({
+      competitor_board: [
+        { name: 'Huda Lighting', read: 'Holding a steady three-post rhythm.' },
+        { name: 'Technolight', read: 'Live but silent this period.' },
+        { name: 'Alfanar', read: '' },
+      ],
+    })
+    expect(out.derived).toBe(true)
+    expect(out.items).toHaveLength(2)
+    expect(out.items[0].movement).toContain('Huda Lighting:')
+  })
+
+  it('returns nothing rather than a derived section with no content in it', () => {
+    expect(marketDirection({}).items).toEqual([])
+    expect(marketDirection({}).derived).toBe(false)
+  })
+})
+
+describe('gaps and the ideas that close them', () => {
+  const report = {
+    gaps: [{ id: 'G1', gap: 'no compliance story' }, { id: 'G2', gap: 'no presence' }],
+    proposed_ideas: [
+      { title: 'SASO brief', answers_ref: { kind: 'gap', id: 'G1' } },
+      { title: 'National Day', answers_ref: { kind: 'finding', ref: 'F2', headline: 'National Day is 11 days out' } },
+      { title: 'unbound' },
+    ],
+  }
+
+  it('files an idea under the gap it answers', () => {
+    const { blocks } = actionPlan(report)
+    expect(blocks[0].ideas.map(i => i.title)).toEqual(['SASO brief'])
+    expect(blocks[1].ideas).toEqual([])
+  })
+
+  it('keeps an idea that answers a finding in its own row rather than forcing it under a gap', () => {
+    const { loose } = actionPlan(report)
+    expect(loose.map(i => i.title)).toEqual(['National Day', 'unbound'])
+  })
+
+  it('sends the planner the ideas in the order they are rendered', () => {
+    // Otherwise "send 3 to planner" sends a different three from the three on
+    // screen the moment the rendering order stops matching the report's.
+    expect(actionPlan(report).ordered.map(i => i.title))
+      .toEqual(['SASO brief', 'National Day', 'unbound'])
+    expect(actionPlan(report).ideaCount).toBe(3)
+  })
+
+  it('renders an old brief flat, exactly as it did before binding existed', () => {
+    // Every idea in every brief written before `answers` has no ref. None of
+    // them may vanish.
+    const old = { gaps: [{ gap: 'a' }], proposed_ideas: [{ title: 'x' }, { title: 'y' }] }
+    const plan = actionPlan(old)
+    expect(plan.blocks).toHaveLength(1)
+    expect(plan.blocks[0].gap.id).toBe('G1')
+    expect(plan.blocks[0].ideas).toEqual([])
+    expect(plan.loose.map(i => i.title)).toEqual(['x', 'y'])
   })
 })

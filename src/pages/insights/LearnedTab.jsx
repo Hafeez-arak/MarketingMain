@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom'
 import { Card, SectionHead, Button, Input, Select } from '../../components/ui/index'
 import { REJECT_REASON_LABELS, WEAK_SAMPLE, MEMORY_SCOPES, SCOPE_LABELS } from '../../lib/insights'
+import { datedRule } from '../../lib/agent/brief'
 import { useState } from 'react'
 
 // ─── The What We Learned tab — what we now know about ourselves ────────────
@@ -82,6 +83,13 @@ function ProposedRule({ rule, onActivate, onDismiss, busy }) {
   const [text, setText] = useState(rule.rule)
   const edited = text.trim() !== rule.rule
   const sample = rule.evidence?.sample_size
+  // Checked against what is in the BOX, not against what was proposed, so
+  // editing the date out of a rule clears the warning as you type — and
+  // re-derived at render rather than read from `evidence.dated`, so the rules
+  // already sitting in this queue from before the run started stamping it are
+  // warned about too. The INDEX Saudi proposal sat here from 17 Aug to the day
+  // before the event with nothing on the card saying it had a clock.
+  const dated = datedRule(text)
 
   return (
     <div className="rounded-xl border border-border bg-white p-3">
@@ -94,6 +102,13 @@ function ProposedRule({ rule, onActivate, onDismiss, busy }) {
       </p>
       {rule.detail && (
         <p className="text-[11px] text-text-secondary mt-2 leading-relaxed">{rule.detail}</p>
+      )}
+      {dated && (
+        <p className="text-[11px] text-amber-700 mt-2 leading-relaxed">
+          This names a date, and a rule has no expiry — approved, it keeps steering every
+          generation long after the moment passes. If it is a one-off, send it to a content
+          plan as an idea instead, or edit the date out to make it a standing rule.
+        </p>
       )}
       <div className="flex items-center gap-2 mt-3">
         <Button size="sm" disabled={busy} onClick={() => onActivate(rule, text.trim())}>
