@@ -115,6 +115,17 @@ describe('postAnalytics', () => {
     expect(out.posts[1].likes).toBe(2)
   })
 
+  it('carries the post link and media type, so a best post can be opened', async () => {
+    const z = zOf(async () => ({ posts: [{
+      latePostId: null, platform: 'linkedin', mediaType: 'text',
+      platformPostUrl: 'https://www.linkedin.com/feed/update/urn:li:share:7475469427937947649',
+      analytics: { likes: 17 },
+    }] }))
+    const { posts } = await postAnalytics(z, 'p1')
+    expect(posts[0].platform_post_url).toBe('https://www.linkedin.com/feed/update/urn:li:share:7475469427937947649')
+    expect(posts[0].media_type).toBe('text')
+  })
+
   it('labels a post we published through the app', async () => {
     const out = await postAnalytics(zOf(async () => live), 'p1')
     expect(out.posts[0].origin).toBe('published_by_this_app')

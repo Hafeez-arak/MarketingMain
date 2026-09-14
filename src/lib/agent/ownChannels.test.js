@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   engagementIn, postsIn, undatedIn, analyticsByPost, windowStats, stateOf,
-  changeFor, ownChannels, ownChannelFindings, priorPeriod,
+  changeFor, ownChannels, ownChannelFindings, priorPeriod, externalRows, plainTopic, lastPostAt,
   WEAK_SAMPLE, MIN_FOR_CHANGE, CHANGE_FLOOR,
 } from './ownChannels.js'
 
@@ -355,5 +355,152 @@ describe('ownChannels with a post mid-publish', () => {
     expect(ig).toHaveLength(1)
     expect(ig[0].headline).toContain('mid-publish')
     expect(ig[0].evidence.undated).toBe(1)
+  })
+})
+
+// ─── Posts made directly on the platform ───────────────────────────────────
+//
+// Live on 2026-09-14: ARAK Lighting's LinkedIn page had two posts Zernio
+// measured, neither made through this app. The run read only our own tables,
+// so it saw a connected page with nothing on it.
+
+describe('externalRows', () => {
+  const direct = {
+    zernio_post_id: '', origin: 'posted_directly_on_platform', platform: 'linkedin',
+    platform_post_id: 'urn:li:ugcPost:7501272770023120896',
+    platform_post_url: 'https://www.linkedin.com/feed/update/urn:li:ugcPost:7501272770023120896',
+    published_at: '2026-09-08T13:39:55.522Z', content: 'We signed an MoU with TAWAL\nSecond line',
+    likes: 15, comments: 0, shares: 2, saves: null, reach: 516, impressions: 1027, views: null, clicks: 186,
+    last_updated: '2026-09-14 13:13:07', media_type: 'image',
+  }
+  const viaApp = { ...direct, zernio_post_id: '6aa7d0ce504dd4a6f4bea726', origin: 'published_by_this_app', platform_post_id: 'x' }
+
+  it('turns a directly-made post into a post row and one analytics row', () => {
+    const { posts, analytics } = externalRows([direct])
+    expect(posts).toHaveLength(1)
+    expect(posts[0]).toMatchObject({ platform: 'linkedin', origin: 'external', topic: 'We signed an MoU with TAWAL', format: 'image' })
+    expect(analytics[0]).toMatchObject({ post_id: posts[0].id, likes: 15, shares: 2, saves: null, clicks: 186, metric_date: '2026-09-14' })
+  })
+
+  it('skips a post the app published, which our own tables already count', () => {
+    expect(externalRows([viaApp]).posts).toHaveLength(0)
+  })
+
+  it('takes the same platform post once', () => {
+    expect(externalRows([direct, direct]).posts).toHaveLength(1)
+  })
+})
+
+describe('ownChannels with posts made directly on LinkedIn', () => {
+  const accounts = [{ platform: 'linkedin', username: 'ARAK Lighting', is_active: true, followers_count: 4779 }]
+  const direct = (id, published_at, likes) => ({
+    zernio_post_id: '', origin: 'posted_directly_on_platform', platform: 'linkedin',
+    platform_post_id: id, published_at, content: `Post ${id}`, likes, comments: 0, shares: 0, saves: null,
+    last_updated: '2026-09-14',
+  })
+
+  it('measures them, so a page that posted is not reported as silent', () => {
+    const out = ownChannels({ accounts, period: PERIOD, prior: PRIOR, external: [direct('a', '2026-09-08T10:00:00Z', 20)] })
+    const li = out.platforms.find(p => p.platform === 'linkedin')
+    expect(li.state).toBe('measured')
+    expect(li.posts).toBe(1)
+    expect(li.posted_directly).toBe(1)
+    expect(li.avg_engagement).toBe(20)
+  })
+
+  it('ignores a null save instead of counting it as zero', () => {
+    const out = ownChannels({ accounts, period: PERIOD, external: [direct('a', '2026-09-08T10:00:00Z', 20)] })
+    expect(out.platforms.find(p => p.platform === 'linkedin').avg_engagement).toBe(20)
+  })
+
+  it('says when the last post went out on a quiet week', () => {
+    const out = ownChannels({ accounts, period: PERIOD, prior: PRIOR, external: [direct('old', '2026-06-24T08:46:39Z', 21)] })
+    const li = out.platforms.find(p => p.platform === 'linkedin')
+    expect(li.state).toBe('silent')
+    expect(li.last_post_at).toBe('2026-06-24T08:46:39.000Z')
+    expect(li.note).toContain('nothing was published')
+    expect(li.note).toContain('2026-06-24')
+    const silent = ownChannelFindings(out).find(f => f.evidence?.platform === 'linkedin' && f.evidence?.state === 'silent')
+    expect(silent.detail).toContain('2026-06-24')
+  })
+
+  it('does not count posts from a platform with no connected account', () => {
+    const out = ownChannels({ accounts: [], period: PERIOD, external: [direct('a', '2026-09-08T10:00:00Z', 20)] })
+    const li = out.platforms.find(p => p.platform === 'linkedin')
+    expect(li.state).toBe('not_connected')
+    expect(li.posts).toBe(0)
+  })
+
+  it('adds up app posts and directly-made posts together', () => {
+    const posts = [post('app1', 'linkedin', '2026-09-07T00:00:00Z')]
+    const analytics = [metric('app1', 10)]
+    const out = ownChannels({ accounts, posts, analytics, period: PERIOD, external: [direct('a', '2026-09-08T10:00:00Z', 30)] })
+    const li = out.platforms.find(p => p.platform === 'linkedin')
+    expect(li.posts).toBe(2)
+    expect(li.posted_directly).toBe(1)
+    expect(li.avg_engagement).toBe(20)
+  })
+})
+
+describe('ownChannelFindings with LinkedIn page totals', () => {
+  const accounts = [{ platform: 'linkedin', username: 'ARAK Lighting', is_active: true }]
+  const page = {
+    ok: true, window: { since: '2026-09-07', until: '2026-09-14', days: 7 },
+    impressions: 2351, members_reached: 662, clicks: 229, reactions: 58, comments: 0, reposts: 0,
+    engagement_rate_pct: 7.3, followers_gained_organic: 54, page_views: { total: 46 },
+    data_delay: 'LinkedIn organization stats may be delayed up to 48 hours.',
+  }
+
+  it('reports the page totals, even in a week with no post', () => {
+    const out = ownChannels({ accounts, period: PERIOD, pageInsights: { linkedin: page } })
+    const li = out.platforms.find(p => p.platform === 'linkedin')
+    expect(li.page_insights).toBe(page)
+    const f = ownChannelFindings(out).find(x => x.evidence?.kind === 'page_insights')
+    expect(f.headline).toBe('Our LinkedIn page: 2,351 impressions, 229 clicks and 54 new followers over the last 7 days.')
+    expect(f.detail).toContain('662 members reached')
+    expect(f.detail).toContain('48 hours')
+  })
+
+  it('says nothing about page totals it could not read', () => {
+    const out = ownChannels({ accounts, period: PERIOD, pageInsights: { linkedin: { ok: false, error: '412' } } })
+    expect(ownChannelFindings(out).some(x => x.evidence?.kind === 'page_insights')).toBe(false)
+  })
+
+  it('never reports page totals for a platform that is not connected', () => {
+    const out = ownChannels({ accounts: [], period: PERIOD, pageInsights: { linkedin: page } })
+    expect(ownChannelFindings(out).some(x => x.evidence?.kind === 'page_insights')).toBe(false)
+  })
+})
+
+describe('plainTopic', () => {
+  it('reads LinkedIn mentions and escapes as plain words', () => {
+    const raw = 'We are pleased to announce an MoU \\(MoU\\) with @[TAWAL](urn:li:organization:14784924) today.\nMore'
+    expect(plainTopic(raw)).toBe('We are pleased to announce an MoU (MoU) with TAWAL today.')
+  })
+})
+
+describe('lastPostAt', () => {
+  it('ignores a post scheduled after the period, which has not gone out', () => {
+    const posts = [
+      { published_at: '2026-09-03T13:39:55Z' },
+      { published_at: null, scheduled_date: '2026-10-16' },
+    ]
+    expect(lastPostAt(posts, '2026-09-14T00:00:00Z')).toBe('2026-09-03T13:39:55.000Z')
+  })
+  it('is null with nothing dated', () => {
+    expect(lastPostAt([{ published_at: null }], '2026-09-14T00:00:00Z')).toBeNull()
+  })
+})
+
+describe('best post on a channel made directly on the platform', () => {
+  it('says so in the right number', () => {
+    const accounts = [{ platform: 'linkedin', username: 'ARAK Lighting', is_active: true }]
+    const external = [{
+      zernio_post_id: '', platform: 'linkedin', platform_post_id: 'a', published_at: '2026-09-08T10:00:00Z',
+      content: 'Post a', likes: 20, comments: 0, shares: 0, saves: null, last_updated: '2026-09-14',
+    }]
+    const out = ownChannels({ accounts, period: PERIOD, external })
+    const best = ownChannelFindings(out).find(f => f.headline.startsWith('Best LinkedIn post'))
+    expect(best.detail).toContain('1 of this period\'s 1 LinkedIn post was made directly on LinkedIn')
   })
 })

@@ -50,6 +50,12 @@ function num(value) {
   return Number.isFinite(n) ? n : null
 }
 
+/** A count for a sentence: 2,351, or "an unknown number of" when unmeasured. */
+function fmtCount(value) {
+  const n = num(value)
+  return n === null ? 'an unknown number of' : n.toLocaleString('en-US')
+}
+
 function round(value, places = 2) {
   const n = num(value)
   if (n === null) return null
@@ -219,6 +225,92 @@ export function changeFor(now, prev) {
 }
 
 /**
+ * A post's first line as plain words.
+ *
+ * LinkedIn's text arrives with its own markup: punctuation escaped as `\(MoU\)`
+ * and a mention as `@[TAWAL](urn:li:organization:14784924)`. Quoted as-is, the
+ * brief's "best post" line reads like a stack trace.
+ */
+export function plainTopic(content) {
+  return String(content || '')
+    .split('\n')[0]
+    .replace(/@\[([^\]]+)\]\([^)]*\)/g, '$1')
+    .replace(/\\([\\()[\]*_#.!-])/g, '$1')
+    .trim()
+    .slice(0, 120)
+}
+
+/**
+ * Posts made directly on a platform, turned into the rows everything here reads.
+ *
+ * Our tables only hold posts published THROUGH this app. On 2026-09-14 ARAK
+ * Lighting's LinkedIn page had two posts Zernio could measure and neither was
+ * made here, so the run saw a connected page with nothing on it and would have
+ * said "nothing went out on LinkedIn" about a page with 4,779 followers.
+ *
+ * `postAnalytics` in api/agent/_zernioLive.js reads them. This keeps only the
+ * ones with no Zernio post id: a post the app published is also in Zernio's
+ * list, and is already counted from `generated_posts`, so taking it twice
+ * would double it in every average.
+ *
+ * Pure: rows in, rows out.
+ */
+export function externalRows(external = []) {
+  const posts = []
+  const analytics = []
+  const seen = new Set()
+  for (const e of external || []) {
+    if (!e || e.zernio_post_id || e.origin === 'published_by_this_app') continue
+    const platform = String(e.platform || '').toLowerCase()
+    const key = e.platform_post_id || e.platform_post_url || ''
+    if (!platform || !key || seen.has(key)) continue
+    seen.add(key)
+    const id = `external:${key}`
+    posts.push({
+      id,
+      platform,
+      published_at: e.published_at || null,
+      scheduled_date: null,
+      // The first line of the post, which is its headline on both platforms.
+      topic: plainTopic(e.content),
+      format: e.media_type || '',
+      platform_post_url: e.platform_post_url || '',
+      origin: 'external',
+    })
+    analytics.push({
+      post_id: id,
+      metric_date: String(e.last_updated || e.published_at || '').slice(0, 10),
+      likes: e.likes, comments: e.comments, shares: e.shares,
+      // null, not 0, where the platform does not count it (LinkedIn saves):
+      // engagementOf skips a null rather than averaging in a zero.
+      saves: e.saves,
+      reach: e.reach, impressions: e.impressions, views: e.views, clicks: e.clicks,
+      origin: 'external',
+    })
+  }
+  return { posts, analytics }
+}
+
+/**
+ * The newest date any of these posts went out, or null.
+ *
+ * Nothing after `before` counts. A post scheduled for next month has a
+ * `scheduled_date` too, and on 2026-09-14 Instagram's "last post" read as
+ * 2026-10-16 — a date that has not happened.
+ */
+export function lastPostAt(posts, before = Date.now()) {
+  const ceiling = typeof before === 'number' ? before : Date.parse(before || '')
+  let best = null
+  for (const p of posts || []) {
+    const when = Date.parse(p?.published_at || p?.scheduled_date || '')
+    if (!Number.isFinite(when)) continue
+    if (Number.isFinite(ceiling) && when > ceiling) continue
+    if (best === null || when > best) best = when
+  }
+  return best === null ? null : new Date(best).toISOString()
+}
+
+/**
  * Every platform we could be marketing on, and how we actually did on each.
  *
  * Every LIVE platform gets a row, including ones with no account — a channel
@@ -232,10 +324,12 @@ export function changeFor(now, prev) {
  * @param {Array}  analytics post_analytics rows for those posts
  * @param {object} period    the window being reported
  * @param {object} prior     the window before it, for comparison
+ * @param {Array}  external  Zernio's post list (postAnalytics().posts); only
+ *                           posts made directly on the platform are used
+ * @param {object} pageInsights  page-level totals by platform, e.g.
+ *                           { linkedin: linkedinPageInsights(...) }
  */
-export function ownChannels({ accounts = [], posts = [], analytics = [], period, prior } = {}) {
-  const byPostId = analyticsByPost(analytics)
-
+export function ownChannels({ accounts = [], posts = [], analytics = [], period, prior, external = [], pageInsights = {} } = {}) {
   const live = new Map()
   for (const a of accounts) {
     const key = String(a?.platform || '').toLowerCase()
@@ -246,14 +340,23 @@ export function ownChannels({ accounts = [], posts = [], analytics = [], period,
     if (!live.has(key)) live.set(key, a)
   }
 
+  // Posts made directly on a platform count only where an account is
+  // connected: a post from an account that has since been disconnected is not
+  // this brand's channel any more.
+  const ext = externalRows(external)
+  const allPosts = [...(posts || []), ...ext.posts.filter(p => live.has(p.platform))]
+  const byPostId = analyticsByPost([...(analytics || []), ...ext.analytics])
+
   const platforms = LIVE_PLATFORMS.map(platform => {
     const account = live.get(platform) || null
-    const mine = (posts || []).filter(p => String(p?.platform || '').toLowerCase() === platform)
+    const mine = allPosts.filter(p => String(p?.platform || '').toLowerCase() === platform)
     const now = windowStats(postsIn(mine, period), byPostId)
     const prev = prior ? windowStats(postsIn(mine, prior), byPostId) : null
     const state = stateOf({ connected: !!account, posts: now.posts, measured: now.measured })
     const label = PLATFORM_META[platform]?.label || platform
     const undated = undatedIn(mine).length
+    const last = lastPostAt(mine, period?.end || Date.now())
+    const insights = pageInsights?.[platform] || null
 
     return {
       platform,
@@ -263,6 +366,15 @@ export function ownChannels({ accounts = [], posts = [], analytics = [], period,
       followers: num(account?.followers_count),
       needs_reconnection: account?.needs_reconnection === true,
       ...now,
+      // How many of this period's posts were made directly on the platform
+      // rather than through this app. Both kinds are in `posts`.
+      posted_directly: postsIn(mine.filter(p => p.origin === 'external'), period).length,
+      // The newest post on the channel in anything we can see, so a quiet
+      // week can say how long the quiet has lasted.
+      last_post_at: last,
+      // Page-level totals (LinkedIn company pages), or null. Includes every
+      // post on the page and the page's own views and follower gains.
+      page_insights: insights,
       // Posts that exist but sit in no window, because publishing has not
       // settled and stamped them yet. Reported as its own number so it can
       // never be read as either "we posted" or "we did not".
@@ -283,7 +395,9 @@ export function ownChannels({ accounts = [], posts = [], analytics = [], period,
         ? `${undated} ${label} post${undated === 1 ? ' is' : 's are'} mid-publish — accepted by ` +
           'Zernio but not yet stamped with a publish time, so nothing can be placed in this ' +
           'period or measured yet. This is publishing in progress, not a quiet week.'
-        : NOTES[state](label),
+        : state === 'silent' && last
+          ? `${NOTES.silent(label)} The last post went out on ${last.slice(0, 10)}.`
+          : NOTES[state](label),
     }
   })
 
@@ -322,6 +436,35 @@ export function ownChannels({ accounts = [], posts = [], analytics = [], period,
 export function ownChannelFindings(own) {
   const findings = []
   for (const p of own?.platforms || []) {
+    const page = p.page_insights
+    if (p.connected && page?.ok) {
+      // Page totals come first and stand on their own. A quiet week on the
+      // page is still a week in which the page was seen, clicked and followed,
+      // and on LinkedIn that is most of what a B2B page is for.
+      const days = page.window?.days
+      const bits = [
+        page.members_reached != null ? `${fmtCount(page.members_reached)} members reached` : '',
+        page.engagement_rate_pct != null ? `engagement rate ${page.engagement_rate_pct}%` : '',
+        page.page_views?.total != null ? `${fmtCount(page.page_views.total)} page views` : '',
+      ].filter(Boolean)
+      findings.push({
+        headline: `Our ${p.label} page: ${fmtCount(page.impressions)} impressions, ${fmtCount(page.clicks)} clicks ` +
+          `and ${fmtCount(page.followers_gained_organic)} new followers over the last ${days} days.`,
+        detail: `${bits.length ? `${bits.join(', ')}. ` : ''}Page totals across every post on the page, ` +
+          `including ones made directly on ${p.label}. ${page.data_delay || ''}`.trim(),
+        confidence: 1,
+        novelty: 'continuing',
+        suggested_action: '',
+        evidence: {
+          platform: p.platform, kind: 'page_insights', window: page.window,
+          impressions: page.impressions, members_reached: page.members_reached, clicks: page.clicks,
+          reactions: page.reactions, comments: page.comments, reposts: page.reposts,
+          engagement_rate_pct: page.engagement_rate_pct,
+          followers_gained_organic: page.followers_gained_organic, page_views: page.page_views,
+        },
+      })
+    }
+
     if (p.state === 'not_connected') {
       // Only worth raising once there is something to compare it against —
       // otherwise a brand that has deliberately never used LinkedIn gets the
@@ -360,15 +503,16 @@ export function ownChannelFindings(own) {
         continue
       }
 
+      const lastLine = p.last_post_at ? ` The last post went out on ${p.last_post_at.slice(0, 10)}.` : ''
       findings.push({
         headline: `Nothing went out on ${p.label} this period.`,
-        detail: `The account @${p.username || p.label} is connected${p.needs_reconnection ? ' but is flagged as needing reconnection' : ''} and published no posts in this window.`,
+        detail: `The account @${p.username || p.label} is connected${p.needs_reconnection ? ' but is flagged as needing reconnection' : ''} and published no posts in this window.${lastLine}`,
         confidence: 1,
         novelty: 'changed',
         suggested_action: p.needs_reconnection
           ? `Reconnect the ${p.label} account — publishing may be failing rather than paused.`
           : `Either schedule for ${p.label} or accept it as dormant and say so.`,
-        evidence: { platform: p.platform, posts: 0, state: p.state },
+        evidence: { platform: p.platform, posts: 0, state: p.state, last_post_at: p.last_post_at || null },
       })
       continue
     }
@@ -421,7 +565,11 @@ export function ownChannelFindings(own) {
     if (p.best_post) {
       findings.push({
         headline: `Best ${p.label} post this period: ${p.best_post.topic || 'untitled'} at ${p.best_post.engagement} interactions.`,
-        detail: `Format: ${p.best_post.format || 'unrecorded'}.${p.best_post.url ? ` ${p.best_post.url}` : ''}`,
+        detail: `Format: ${p.best_post.format || 'unrecorded'}.${p.best_post.url ? ` ${p.best_post.url}` : ''}` +
+          (p.posted_directly
+            ? ` ${p.posted_directly} of this period's ${p.posts} ${p.label} post${p.posts === 1 ? '' : 's'} ` +
+              `${p.posted_directly === 1 ? 'was' : 'were'} made directly on ${p.label}, not through this app.`
+            : ''),
         confidence: 1,
         novelty: 'new',
         suggested_action: 'Check whether its format and angle are repeatable before assuming the topic was the cause.',
