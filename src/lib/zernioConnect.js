@@ -320,6 +320,13 @@ export async function disconnectAccount(workspaceId, accountId) {
   return { ok: true }
 }
 
+// One account's analytics — posts, daily metrics, best time, follower history
+// and, for Instagram, account-wide insights. Returns the response as-is (the
+// shape AnalyticsDashboard reads), or { error } when the whole call failed.
+export async function fetchAccountAnalytics(workspaceId, accountId, days = 30) {
+  return call('analytics', { workspace_id: workspaceId, account_id: accountId, days })
+}
+
 // ── Token age ─────────────────────────────────────────────────────────────
 // Instagram's long-lived tokens expire 60 days after they are granted, and a
 // token that dies is indistinguishable, from the UI, from an account that was

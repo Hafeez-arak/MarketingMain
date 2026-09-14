@@ -1,6 +1,6 @@
 import {
   createZernio, normalizeAccount, ownedByProfile, profileIdOf,
-  CONNECT_SPECS, CONNECTABLE, explainZernioError, ZernioError, qs,
+  CONNECT_SPECS, CONNECTABLE, explainZernioError, ZernioError, qs, analyticsPlan, retryRateLimited,
 } from './_zernio.js'
 
 // ─── Per-workspace OAuth ───────────────────────────────────────────────────
@@ -30,7 +30,7 @@ const ZERNIO_KEY   = process.env.ZERNIO_API_KEY || ''
 
 const ACTIONS = new Set([
   'accounts', 'connect_url', 'selection_options', 'selection_complete',
-  'disconnect', 'creator_info', 'audio_search',
+  'disconnect', 'creator_info', 'audio_search', 'analytics',
 ])
 
 // ─── Supabase ──────────────────────────────────────────────────────────────
@@ -346,6 +346,35 @@ const handlers = {
       commentDisabled: data.comment_disabled === true,
       duetDisabled: data.duet_disabled === true,
       stitchDisabled: data.stitch_disabled === true,
+    }
+  },
+
+  // One account's analytics, for a platform page's Analytics tab. The same
+  // response shape as the Zernio Dashboard n8n workflow, so both screens draw
+  // with one component — but served from here, where the account is first
+  // proven to be this workspace's. The workflow takes account_id on trust.
+  //
+  // Each read fails on its own: a rate limit on best-time must not blank the
+  // follower chart. A failed read comes back as { _error } in its slot.
+  async analytics(z, { ws, profileId, body }) {
+    const accountId = String(body.account_id || '').trim()
+    if (!accountId) return fail('account_id is required.', 400)
+    const account = await requireOwnedAccount(z, { workspaceId: ws.id, profileId, accountId })
+
+    const plan = analyticsPlan({ platform: account.platform, accountId, days: body.days })
+    const results = await Promise.all(plan.requests.map(r =>
+      retryRateLimited(() => z.request(r.path, { query: r.query }))
+        .catch(err => ({ _error: explainZernioError(err) }))))
+
+    return {
+      account,
+      platform: account.platform,
+      days: plan.days,
+      fromDate: plan.fromDate,
+      toDate: plan.toDate,
+      insightsFrom: plan.insightsFrom,
+      metricsSupported: plan.metricsSupported,
+      ...Object.fromEntries(plan.requests.map((r, i) => [r.key, results[i]])),
     }
   },
 
