@@ -67,13 +67,12 @@ const initialState = {
     [DEFAULT_WORKSPACE_ID]: {
       campaigns: [], posts: [], emailFlows: [], mediaAssets: [], approvals: [],
       connectedAccounts: { instagram: false, facebook: false, tiktok: false, x: false },
-      instagramInstructions: '', instagramSchedule: {},
+      instagramSchedule: {},
       webhooks: { ...DEFAULT_WEBHOOKS },
       supabase: { url: '', anonKey: '' },
     }
   },
   team: [],
-  instagramInstructions: '',
   instagramSchedule: {},
   webhooks: { ...DEFAULT_WEBHOOKS },
   supabase: { url: '', anonKey: '' },
@@ -91,7 +90,6 @@ const PERSIST_KEYS = [
   'campaigns','posts','emailFlows','mediaAssets','approvals',
   'connectedAccounts','workspace','team',
   'workspaces','activeWorkspaceId','workspaceData',
-  'instagramInstructions',
   'instagramSchedule',
   'webhooks',
   'supabase',
@@ -161,7 +159,6 @@ function reducer(state, action) {
     case 'UPDATE_WORKSPACE':   return { ...state, workspace: { ...state.workspace, ...action.payload } }
     case 'ADD_TEAM_MEMBER':    return { ...state, team: [...state.team, action.payload] }
     case 'REMOVE_TEAM_MEMBER': return { ...state, team: state.team.filter(m => m.id !== action.payload) }
-    case 'SET_INSTAGRAM_INSTRUCTIONS': return { ...state, instagramInstructions: action.payload }
     case 'SET_INSTAGRAM_SCHEDULE':     return { ...state, instagramSchedule: action.payload }
     case 'SET_WEBHOOK': return { ...state, webhooks: { ...state.webhooks, [action.payload.platform]: action.payload.url } }
     // Applying a blob fetched from workspace_webhooks. Deliberately NOT a
@@ -196,7 +193,7 @@ function reducer(state, action) {
       const emptyData = {
         campaigns: [], posts: [], emailFlows: [], mediaAssets: [], approvals: [],
         connectedAccounts: { instagram: false, facebook: false, tiktok: false, x: false },
-        instagramInstructions: '', instagramSchedule: {},
+        instagramSchedule: {},
           webhooks: { ...DEFAULT_WEBHOOKS },
         supabase: { url: '', anonKey: '' },
       }
@@ -216,7 +213,7 @@ function reducer(state, action) {
         campaigns: state.campaigns, posts: state.posts, emailFlows: state.emailFlows,
         mediaAssets: state.mediaAssets, approvals: state.approvals,
         connectedAccounts: state.connectedAccounts,
-        instagramInstructions: state.instagramInstructions, instagramSchedule: state.instagramSchedule,
+        instagramSchedule: state.instagramSchedule,
         webhooks: state.webhooks, supabase: state.supabase,
       }
       const newData = (state.workspaceData || {})[id] || {}
@@ -231,7 +228,6 @@ function reducer(state, action) {
         mediaAssets: newData.mediaAssets || [],
         approvals: newData.approvals || [],
         connectedAccounts: newData.connectedAccounts || { instagram: false, facebook: false, tiktok: false, x: false },
-        instagramInstructions: newData.instagramInstructions || '',
         instagramSchedule: newData.instagramSchedule || {},
         webhooks: webhooksFrom(newData.webhooks),
         supabase: newData.supabase || { url: '', anonKey: '' },
@@ -267,7 +263,6 @@ function reducer(state, action) {
           mediaAssets: nextData.mediaAssets || [],
           approvals: nextData.approvals || [],
           connectedAccounts: nextData.connectedAccounts || { instagram: false, facebook: false, tiktok: false, x: false },
-          instagramInstructions: nextData.instagramInstructions || '',
           instagramSchedule: nextData.instagramSchedule || {},
           webhooks: webhooksFrom(nextData.webhooks),
           supabase: nextData.supabase || { url: '', anonKey: '' },

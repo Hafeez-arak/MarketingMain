@@ -1,18 +1,16 @@
 import { useState, useRef, useEffect } from 'react'
 import { createPortal } from 'react-dom'
-import { useNavigate } from 'react-router-dom'
 import { useApp, actions } from '../../store/app'
 import { useAuth } from '../../store/auth'
 import { ComposerHost } from '../../components/composer/ComposerHost'
 import { ConnectAccounts } from '../../components/social/ConnectAccounts'
 import { useConnectedAccounts } from '../../lib/useConnectedAccounts'
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from '../../lib/supabaseClient'
-import { Card, Button, Badge, Textarea, Spinner, PostImage } from '../../components/ui/index'
+import { Card, Badge, Spinner, PostImage } from '../../components/ui/index'
 import { formatDateTime } from '../../lib/utils'
-import { buildInstructionsString, useBrandProfileSync, logEditFeedback } from '../../lib/brandBrain'
+import { useBrandProfileSync, logEditFeedback } from '../../lib/brandBrain'
 import { useBrandContext } from '../../lib/brandContext'
 import { CaptionStudio } from '../../components/CaptionStudio'
-import { QuickCreatePanel } from '../../components/QuickCreatePanel'
 import { fetchScheduledPosts } from '../../lib/scheduledPosts'
 
 // ─── Constants ─────────────────────────────────────────────────────────────
@@ -38,14 +36,6 @@ const CUSTOM_POST_TYPES = [
 
 const IMAGE_STYLES = LIGHTING_STYLES
 
-const TONES = [
-  { value: 'professional',  label: 'Professional' },
-  { value: 'inspirational', label: 'Inspirational' },
-  { value: 'educational',   label: 'Educational' },
-  { value: 'casual',        label: 'Casual & Friendly' },
-  { value: 'promotional',   label: 'Promotional' },
-]
-
 
 // ─── Main Page ─────────────────────────────────────────────────────────────
 // ─── Supabase generated posts hook ────────────────────────────────────────
@@ -69,7 +59,7 @@ function useSupabasePosts(supabaseUrl, anonKey, workspaceId) {
       // straight off instagram_generated_posts. That table is frozen history
       // now — new Instagram posts are written to generated_posts — so reading
       // it directly would show the 21 old rows and silently omit everything
-      // made since, including posts created from this page's own Create tab.
+      // made since, including posts from this page's own Create Post composer.
       // The view unions both and is security_invoker, so RLS still applies.
       const [schedRows, manualRes] = await Promise.all([
         fetchScheduledPosts(workspaceId, anonKey, { platform: 'instagram', limit: 100 }),
@@ -172,8 +162,6 @@ export function InstagramPage() {
     return () => clearInterval(interval)
   }, [supabaseUrl, anonKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const [screen,   setScreen]   = useState('posts')
-
   return (
     <div className="max-w-7xl space-y-5">
       {/* Header */}
@@ -189,7 +177,7 @@ export function InstagramPage() {
           </div>
           <div>
             <h2 className="font-bold text-text text-base tracking-tight">Instagram</h2>
-            <p className="text-xs text-text-secondary">{mergedPosts.length} post{mergedPosts.length !== 1 ? 's' : ''} · AI content generation</p>
+            <p className="text-xs text-text-secondary">{mergedPosts.length} post{mergedPosts.length !== 1 ? 's' : ''}</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -202,11 +190,6 @@ export function InstagramPage() {
               {lastFetchedAt ? `Synced ${lastFetchedAt.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}` : 'Sync'}
             </button>
           )}
-          {/* Two different things, deliberately kept apart. This composes a
-              post from media that already exists and publishes it; the
-              "Generate with AI" tab below asks the model to invent one. Both
-              were called "Create Post", which left no way to reach the
-              publishing half at all. */}
           <ComposerHost platform="instagram" campaigns={state.campaigns}
             onDone={fetchRemotePosts} label="Create Post" />
         </div>
@@ -248,28 +231,7 @@ export function InstagramPage() {
         ))}
       </div>
 
-      {/* Tab bar */}
-      <div className="flex w-fit">
-        {[{ key: 'posts', label: 'Posts' }, { key: 'create', label: 'Generate with AI' }].map(t => (
-          <button key={t.key} onClick={() => setScreen(t.key)}
-            /* Active uses Instagram's own magenta, matching this page's other
-               primary affordances rather than the app accent. */
-            className={`px-3 py-1.5 border -ml-px first:ml-0 text-xs font-semibold transition-colors ${screen === t.key ? 'bg-[#E1306C] text-white border-[#E1306C] relative z-10' : 'bg-white text-text-secondary border-border hover:text-text hover:bg-surface-subtle'}`}>
-            {t.label}
-          </button>
-        ))}
-      </div>
-
-      {screen === 'posts'    && <PostsList posts={mergedPosts} dispatch={dispatch} state={state} onCreateClick={() => setScreen('create')} updatePostStatus={updatePostStatus} webhookUrl="" regenWebhookUrl="" />}
-      {screen === 'create'   && (
-        <div className="space-y-4 max-w-2xl">
-          <QuickCreatePanel platform="instagram" tones={TONES} workspaceId={activeWorkspaceId} accessToken={accessToken}
-            webhooks={state.webhooks} instructions={buildInstructionsString(state.brandProfile, state.instagramInstructions)}
-            captionLanguage={state.brandProfile?.captionLanguage || 'both'}
-            onDone={() => { setScreen('posts'); fetchRemotePosts() }} />
-          <InstructionsAccordion state={state} />
-        </div>
-      )}
+      <PostsList posts={mergedPosts} dispatch={dispatch} state={state} updatePostStatus={updatePostStatus} webhookUrl="" regenWebhookUrl="" />
     </div>
   )
 }
@@ -782,7 +744,7 @@ function PostDetail({ post, state, webhookUrl, regenWebhookUrl, supabaseUrl, ano
 export { PostDetail as InstagramPostDetail }
 
 // ─── Posts List ────────────────────────────────────────────────────────────
-function PostsList({ posts, dispatch, state, onCreateClick, updatePostStatus, webhookUrl, regenWebhookUrl }) {
+function PostsList({ posts, dispatch, state, updatePostStatus, webhookUrl, regenWebhookUrl }) {
   const [filter,       setFilter]       = useState('all')
   const [selectedPost, setSelectedPost] = useState(null)
 
@@ -906,14 +868,7 @@ function PostsList({ posts, dispatch, state, onCreateClick, updatePostStatus, we
             </svg>
           </div>
           <p className="font-medium text-text mb-1">No {filter !== 'all' ? FILTERS.find(f=>f.key===filter)?.label.toLowerCase()+' ' : ''}posts yet</p>
-          {/* Named the wrong company on every workspace but the original one.
-              Falls back to no name rather than a placeholder: an empty state
-              that names nobody reads fine, one that names the wrong brand
-              does not. */}
-          <p className="text-sm text-text-secondary mb-4">
-            Generate your first AI-powered post{state.brandProfile?.customFields?.brand_name ? ` for ${state.brandProfile.customFields.brand_name}` : ''}.
-          </p>
-          <Button onClick={onCreateClick}>Create Post</Button>
+          <p className="text-sm text-text-secondary">Use Create Post above to compose and publish one.</p>
         </Card>
       ) : (
         <div className="grid grid-cols-1 gap-3">
@@ -988,50 +943,3 @@ function PostsList({ posts, dispatch, state, onCreateClick, updatePostStatus, we
   )
 }
 
-
-// ─── Instructions Accordion ────────────────────────────────────────────────
-function InstructionsAccordion({ state }) {
-  const { dispatch } = useApp()
-  const navigate = useNavigate()
-  const [open,         setOpen]         = useState(false)
-  const [instructions, setInstructions] = useState(state.instagramInstructions || '')
-  const [saved,        setSaved]        = useState(false)
-  function handleSave() {
-    dispatch({ type: 'SET_INSTAGRAM_INSTRUCTIONS', payload: instructions })
-    setSaved(true); setTimeout(() => setSaved(false), 2000)
-  }
-  return (
-    <Card className="overflow-hidden">
-      <button onClick={() => setOpen(o => !o)}
-        className="w-full flex items-center justify-between px-5 py-4 text-left hover:bg-surface-subtle transition-colors">
-        <div className="flex items-center gap-2.5">
-          <div className="w-7 h-7 rounded-lg bg-purple-100 flex items-center justify-center">
-            <svg className="w-3.5 h-3.5 text-purple-600" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-              <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
-            </svg>
-          </div>
-          <div>
-            <p className="text-sm font-medium text-text">Instagram-Specific Notes</p>
-            <p className="text-xs text-text-secondary">{state.instagramInstructions ? '✓ Notes saved' : 'Optional — layers on top of your Brand Brain profile'}</p>
-          </div>
-        </div>
-        <svg className={`w-4 h-4 text-text-tertiary transition-transform ${open ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>
-      </button>
-      {open && (
-        <div className="px-5 pb-5 border-t border-border pt-4 space-y-3 fade-up">
-          <p className="text-xs text-text-tertiary">
-            Your core brand voice, dos/don'ts, and audience now live in one place —{' '}
-            <button type="button" onClick={() => navigate('/brand-brain')} className="text-purple-600 hover:text-purple-700 underline font-medium">Brand Brain</button>.
-            Use this field only for things specific to Instagram, e.g. Reels-style hooks or emoji usage.
-          </p>
-          <Textarea
-            placeholder={"Examples:\n• Reels hooks should be punchy, under 6 words\n• Carousel posts: keep each slide to one idea"}
-            value={instructions} onChange={e => setInstructions(e.target.value)} rows={5} />
-          <Button onClick={handleSave} variant={saved ? 'secondary' : 'primary'} className="w-full justify-center">
-            {saved ? '✓ Saved' : 'Save Instagram Notes'}
-          </Button>
-        </div>
-      )}
-    </Card>
-  )
-}
