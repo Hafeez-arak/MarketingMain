@@ -122,11 +122,39 @@ export const READ_TOOLS = [
     },
   },
   {
+    name: 'get_channel_analytics',
+    cost: FREE,
+    description:
+      'THIS BRAND\'S OWN ANALYTICS — the account-level numbers, per platform. Call this for any ' +
+      'question about "our analytics", "the Zernio analytics", "our numbers", followers, reach, ' +
+      'engagement, or how a connected account is doing. Zernio is this product\'s publishing ' +
+      'provider: every post goes out through it and Zernio syncs each post\'s numbers back into ' +
+      'our own analytics tables, so "the Zernio analytics" means THIS, not a competitor — ' +
+      'Zernio is never a rival and never belongs on the watchlist. ' +
+      'Returns every connected account (platform, username, followers, whether it needs ' +
+      'reconnecting) and per-platform performance for the window, each with a "state": ' +
+      '"not_connected", "silent" (connected, nothing published), "unmeasured" (published but no ' +
+      'analytics synced) or "measured". Those four are different answers and must not be ' +
+      'collapsed into "no data". The "sync" block tells you HOW FRESH this is and whether ' +
+      'analytics rows exist at all — a post published minutes ago has no numbers because the ' +
+      'daily sync has not run, which is a fact about the pipeline, not a performance result.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        days: { type: 'integer', description: 'Window in days. Default 30, max 365. The window before it is fetched too, for comparison.' },
+        platform: { type: 'string', description: 'Optional platform filter, e.g. "instagram" or "tiktok".' },
+      },
+      required: [],
+    },
+  },
+  {
     name: 'get_our_performance',
     cost: FREE,
     description:
       'How this brand\'s own posts have actually performed, broken down by format, by content ' +
-      'pillar and by weekday. Every row carries BOTH "posts" and "measured" — how many we ' +
+      'pillar and by weekday. Use get_channel_analytics instead for account-level or ' +
+      'per-platform numbers; this one is for finding which KIND of post works. ' +
+      'Every row carries BOTH "posts" and "measured" — how many we ' +
       'published versus how many we have analytics for. Quote the sample size whenever you ' +
       'draw a conclusion from this, and say plainly when it is too small to support one.',
     input_schema: {

@@ -5,6 +5,7 @@ import {
 } from '../../src/lib/agent/gather.js'
 import { tokenHealth, worthSurfacing } from '../../src/lib/agent/tokenHealth.js'
 import { ownChannels, priorPeriod } from '../../src/lib/agent/ownChannels.js'
+import { readAccounts, readOwnPosts, readAnalyticsFor } from './_ownData.js'
 
 // ─── Stage 0, the IO half ──────────────────────────────────────────────────
 // Ported from the n8n Gather node. The arithmetic lives in
@@ -78,16 +79,18 @@ export async function checkTokenHealth() {
 /**
  * Every social account this workspace has connected, on any platform.
  *
- * Deliberately unfiltered. The old read here ended in `platform=eq.instagram`,
- * which was the single line that made the whole agent Instagram-only: the
- * TikTok and LinkedIn rows were sitting in the same table the whole time and
- * nothing ever selected them.
+ * Deliberately unfiltered by platform. The old read here ended in
+ * `platform=eq.instagram`, which was the single line that made the whole agent
+ * Instagram-only: the TikTok and LinkedIn rows were sitting in the same table
+ * the whole time and nothing ever selected them.
+ *
+ * Now through _ownData's reader, which the chat tools share. Two readers of
+ * "our own numbers" had already drifted once — the run read both posts tables
+ * and the assistant read one — and the assistant is the half a person talks
+ * to, so it was the wrong half to be wrong.
  */
 async function connectedAccounts(workspaceId) {
-  return db(
-    `social_accounts?workspace_id=eq.${workspaceId}&is_active=eq.true` +
-    `&select=platform,username,followers_count,needs_reconnection,is_active&limit=50`,
-  ).catch(() => [])
+  return readAccounts(workspaceId, { activeOnly: true })
 }
 
 /**
@@ -108,55 +111,17 @@ export async function gatherOwnChannels(workspaceId, period) {
   try {
     const accounts = await connectedAccounts(workspaceId)
 
-    // Both windows in one read. `published_at` is the column that decides
-    // which week a post belongs to, but it is null for anything that never
-    // went out, so the window is widened by the fallback column rather than
-    // filtered in SQL — postsIn() does the precise bucketing in code where it
-    // is testable.
+    // Both windows in one read, across BOTH posts tables, with analytics
+    // matched under either our post id or Zernio's. All of that now lives in
+    // _ownData.js so the assistant's tools run the identical query — the run
+    // and the chat disagreeing about how our own week went was the bug, and a
+    // shared reader is the only fix that stays fixed.
+    //
+    // postsIn() still does the precise bucketing in code, where it is testable,
+    // so the widened SQL window costs nothing in accuracy.
     const from = prior?.start || period?.start
-    const posts = await db(
-      `generated_posts?workspace_id=eq.${workspaceId}` +
-      `&or=(published_at.gte.${from},scheduled_date.gte.${String(from).slice(0, 10)})` +
-      `&select=id,platform,topic,format,media_type,post_kind,status,publish_status,` +
-      `published_at,scheduled_date,platform_post_url&limit=500`,
-    ).catch(() => [])
-
-    // ── The frozen Instagram table ──
-    //
-    // Checked live on 2026-09-13: `generated_posts` holds ZERO rows, every one
-    // of this company's 21 real posts is still in `instagram_generated_posts`,
-    // and all 14 post_analytics rows point at that table. Reading only the new
-    // table would report "we have never published anything" to a brand that
-    // has — the exact kind of confident wrong number this agent is built to
-    // avoid.
-    //
-    // Read-only and additive. Nothing writes here, the new table stays the
-    // single write target, and the day the legacy rows are migrated or age out
-    // of the window this simply returns nothing. The Zernio sync already reads
-    // both tables for the same reason, so this is the established shape rather
-    // than a new exception.
-    //
-    // The columns differ — it has no `platform`, `format` or `media_type`,
-    // because it predates a world with more than one platform — so the rows
-    // are normalised here into the shape ownChannels expects.
-    const legacy = await db(
-      `instagram_generated_posts?workspace_id=eq.${workspaceId}` +
-      `&or=(published_at.gte.${from},scheduled_date.gte.${String(from).slice(0, 10)})` +
-      `&select=id,topic,post_kind,status,publish_status,published_at,scheduled_date,platform_post_url&limit=500`,
-    ).catch(() => [])
-
-    const all = [
-      ...(posts || []),
-      ...(legacy || []).map(p => ({ ...p, platform: 'instagram', format: '', media_type: '' })),
-    ]
-
-    const ids = all.map(p => p.id).filter(Boolean)
-    const analytics = ids.length
-      ? await db(
-          `post_analytics?workspace_id=eq.${workspaceId}&post_id=in.(${ids.join(',')})` +
-          `&select=post_id,platform,metric_date,likes,comments,shares,saves,reach,views&limit=2000`,
-        ).catch(() => [])
-      : []
+    const all = await readOwnPosts(workspaceId, { from })
+    const analytics = await readAnalyticsFor(workspaceId, all)
 
     return ownChannels({ accounts: accounts || [], posts: all, analytics: analytics || [], period, prior })
   } catch (err) {

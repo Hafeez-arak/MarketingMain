@@ -10,6 +10,7 @@ import { isLive } from '../../lib/agent/progress'
 import { AgentSteering } from '../../components/AgentSteering'
 import PastConversations from '../../components/PastConversations'
 import { AgentMarkdown } from '../../components/AgentMarkdown'
+import AskInput from '../../components/AskInput'
 
 // ─── /agent — the assistant, full page ─────────────────────────────────────
 // The same agent, the same tools and the SAME conversation as the drawer —
@@ -213,20 +214,22 @@ export default function AgentPage() {
           </div>
         )}
 
+        {/* items-end so the buttons stay level with the last line of a
+            composer that has grown, rather than centring against it. */}
         <form
           onSubmit={e => { e.preventDefault(); send() }}
-          className="mt-4 flex gap-2 border-t border-slate-100 pt-3"
+          className="mt-4 flex gap-2 items-end border-t border-slate-100 pt-3"
         >
           {/* Beside the composer rather than up in the page header: this is a
               thing you reach for while reading a conversation, not a page-level
               action, and the header already carries the two that are. */}
           <PastConversations activeThreadId={threadId} onOpen={openThread} onDeleteActive={reset} />
-          <input
+          <AskInput
             value={question}
-            onChange={e => setQuestion(e.target.value)}
+            onChange={setQuestion}
+            onSubmit={send}
             placeholder="Ask anything about this brand…"
             disabled={!ready}
-            className="flex-1 text-sm px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-1 focus:ring-slate-400 disabled:bg-slate-50"
           />
           {busy ? (
             <Button variant="ghost" onClick={stop}>Stop</Button>

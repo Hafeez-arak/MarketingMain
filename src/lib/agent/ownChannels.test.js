@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
-  engagementIn, postsIn, analyticsByPost, windowStats, stateOf,
-  changeFor, ownChannels, priorPeriod,
+  engagementIn, postsIn, undatedIn, analyticsByPost, windowStats, stateOf,
+  changeFor, ownChannels, ownChannelFindings, priorPeriod,
   WEAK_SAMPLE, MIN_FOR_CHANGE, CHANGE_FLOOR,
 } from './ownChannels.js'
 
@@ -291,5 +291,69 @@ describe('ownChannels', () => {
     // Stage 0 must never take a run down; an empty workspace is the common case.
     expect(() => ownChannels()).not.toThrow()
     expect(ownChannels().platforms).toHaveLength(3)
+  })
+})
+
+// ─── The post that is neither published nor not ────────────────────────────
+//
+// Live on 2026-09-14: this workspace's one published Instagram post carries
+// status "published", publish_status "publishing", and NULL for both
+// published_at and scheduled_date. It belongs to no week, so every window
+// misses it and the channel reported `silent` — "nothing went out on Instagram
+// this period", said about a post that was going out at that moment.
+
+describe('undatedIn', () => {
+  const inFlight = { id: 'p1', platform: 'instagram', published_at: null, scheduled_date: null }
+
+  it('finds a post carrying no usable date at all', () => {
+    expect(undatedIn([inFlight])).toHaveLength(1)
+  })
+
+  it('ignores a post that has either date', () => {
+    expect(undatedIn([post('a', 'instagram', '2026-09-07T00:00:00Z')])).toHaveLength(0)
+    expect(undatedIn([{ id: 'b', scheduled_date: '2026-09-07' }])).toHaveLength(0)
+  })
+
+  it('treats an unparseable date as no date, not as a date', () => {
+    expect(undatedIn([{ id: 'c', published_at: 'soon', scheduled_date: '' }])).toHaveLength(1)
+  })
+})
+
+describe('ownChannels with a post mid-publish', () => {
+  const accounts = [{ platform: 'instagram', username: 'lightingaaa', is_active: true, followers_count: 0 }]
+  const inFlight = [{
+    id: '30ee4311', platform: 'instagram', status: 'published',
+    publish_status: 'publishing', published_at: null, scheduled_date: null,
+    zernio_post_id: '6aa7ac79064b3c3b3395d4ce',
+  }]
+
+  it('counts it as undated rather than losing it', () => {
+    const out = ownChannels({ accounts, posts: inFlight, analytics: [], period: PERIOD, prior: PRIOR })
+    const ig = out.platforms.find(p => p.platform === 'instagram')
+    expect(ig.posts).toBe(0)
+    expect(ig.undated).toBe(1)
+  })
+
+  it('does NOT claim nothing went out', () => {
+    const out = ownChannels({ accounts, posts: inFlight, analytics: [], period: PERIOD, prior: PRIOR })
+    const ig = out.platforms.find(p => p.platform === 'instagram')
+    expect(ig.note).toContain('mid-publish')
+    expect(ig.note).not.toContain('published no posts')
+  })
+
+  it('still says nothing went out when nothing did', () => {
+    const out = ownChannels({ accounts, posts: [], analytics: [], period: PERIOD, prior: PRIOR })
+    const ig = out.platforms.find(p => p.platform === 'instagram')
+    expect(ig.undated).toBe(0)
+    expect(ig.note).toContain('nothing was published')
+  })
+
+  it('reports it as in-flight rather than as a quiet week', () => {
+    const out = ownChannels({ accounts, posts: inFlight, analytics: [], period: PERIOD, prior: PRIOR })
+    const findings = ownChannelFindings(out)
+    const ig = findings.filter(f => f.evidence?.platform === 'instagram')
+    expect(ig).toHaveLength(1)
+    expect(ig[0].headline).toContain('mid-publish')
+    expect(ig[0].evidence.undated).toBe(1)
   })
 })
