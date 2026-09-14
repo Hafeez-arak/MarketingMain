@@ -6,7 +6,7 @@ import {
   WRITE_TOOLS, WRITE_TARGETS, OWNERSHIP_CHECKS,
   FORBIDDEN_WRITE_TABLES, FORBIDDEN_STATUSES, writeToolsReachingForbiddenStatus,
   MEMORY_SOURCES, AGENT_MEMORY_SOURCE, POST_SOURCES, AGENT_POST_SOURCE,
-  POST_PLATFORMS, MEMORY_SCOPES,
+  POST_PLATFORMS, MEMORY_SCOPES, deDash,
 } from './writeTools'
 import { toolsFor, toolsExposingWorkspace, toolDefs, READ_TOOLS, PROVIDER_TOOLS } from './tools'
 
@@ -173,5 +173,43 @@ describe('the values we write are values Postgres accepts', () => {
     // recover from a raw 23514 constraint violation.
     const source = fs.readFileSync(path.join(repoRoot, 'api/agent/_writeTools.js'), 'utf8')
     expect(source).toMatch(/POST_PLATFORMS\.includes\(platform\)/)
+  })
+})
+
+describe('a caption the agent writes reads like a person wrote it', () => {
+  // Same rule as the caption workflows (n8n/gen_workflows.py,
+  // HUMAN_VOICE_RULES). draft_post is the other door to a published caption,
+  // so it gets the same two halves: the tool description asks, deDash makes
+  // sure. The asking half alone leaks about one caption in a handful.
+
+  it('the tool description bans the dash', () => {
+    const draft = WRITE_TOOLS.find(t => t.name === 'draft_post')
+    expect(draft.description).toMatch(/no em dashes/i)
+  })
+
+  it('both captions are cleaned on the way into the row', () => {
+    const source = fs.readFileSync(path.join(repoRoot, 'api/agent/_writeTools.js'), 'utf8')
+    expect(source).toMatch(/const caption = deDash\(/)
+    expect(source).toMatch(/caption_ar: deDash\(/)
+  })
+
+  it('turns a dash into the comma of whichever language the line is in', () => {
+    expect(deDash('Soft light — all evening.')).toBe('Soft light, all evening.')
+    expect(deDash('ضوء ناعم — طوال المساء')).toBe('ضوء ناعم، طوال المساء')
+    expect(deDash('Light – and shadow.')).toBe('Light, and shadow.')
+  })
+
+  it('never doubles up punctuation, and drops one that opens or closes a line', () => {
+    expect(deDash('Warm, — and quiet.')).toBe('Warm, and quiet.')
+    expect(deDash('— Warm light\nQuiet rooms —')).toBe('Warm light\nQuiet rooms')
+  })
+
+  it('leaves the bilingual divider line alone', () => {
+    expect(deDash('Warm light\n\n—\n\nضوء دافئ')).toBe('Warm light\n\n—\n\nضوء دافئ')
+  })
+
+  it('handles nothing at all', () => {
+    expect(deDash(undefined)).toBe('')
+    expect(deDash('')).toBe('')
   })
 })
