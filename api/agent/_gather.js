@@ -6,6 +6,8 @@ import {
 import { tokenHealth, worthSurfacing } from '../../src/lib/agent/tokenHealth.js'
 import { ownChannels, priorPeriod } from '../../src/lib/agent/ownChannels.js'
 import { readAccounts, readOwnPosts, readAnalyticsFor } from './_ownData.js'
+import { postAnalytics, linkedinPageInsights } from './_zernioLive.js'
+import { createZernio } from '../zernio/_zernio.js'
 
 // ─── Stage 0, the IO half ──────────────────────────────────────────────────
 // Ported from the n8n Gather node. The arithmetic lives in
@@ -94,6 +96,45 @@ async function connectedAccounts(workspaceId) {
 }
 
 /**
+ * What only Zernio can tell us: posts made directly on a platform, and a
+ * LinkedIn company page's own totals.
+ *
+ * Our tables hold only what this app published. ARAK Lighting posts to its
+ * LinkedIn page directly, so without this the run saw a connected page with
+ * no posts and reported the channel as silent.
+ *
+ * Never throws, and never fails the run: without it the run still has every
+ * post the app published, and the gap is named in `zernio_note`.
+ */
+export async function gatherZernioOwn(accounts, period, { apiKey = process.env.ZERNIO_API_KEY || '' } = {}) {
+  const none = note => ({ external: [], pageInsights: {}, note })
+  if (!apiKey) return none('ZERNIO_API_KEY is not set, so posts made directly on a platform and LinkedIn page totals were not read.')
+  const live = (accounts || []).filter(a => a?.zernio_profile_id)
+  if (!live.length) return none('')
+  try {
+    const z = createZernio({ apiKey })
+    const page = live.find(a => String(a.platform).toLowerCase() === 'linkedin' && a.account_type !== 'personal')
+    // A week of page totals, or the period if longer. LinkedIn's own numbers
+    // lag up to 48 hours, which the insight carries in `data_delay`.
+    const days = Math.max(7, Math.round(Number(period?.days) || 7))
+    const [posts, insights] = await Promise.all([
+      postAnalytics(z, live[0].zernio_profile_id),
+      page ? linkedinPageInsights(z, page, days) : Promise.resolve(null),
+    ])
+    return {
+      external: posts.ok ? posts.posts : [],
+      pageInsights: insights ? { linkedin: insights } : {},
+      note: [
+        posts.ok ? '' : `Could not read posts from Zernio: ${posts.error}`,
+        insights && !insights.ok ? `Could not read LinkedIn page totals: ${insights.error}` : '',
+      ].filter(Boolean).join(' '),
+    }
+  } catch (err) {
+    return none(`Zernio could not be read: ${String(err?.message || err).slice(0, 200)}`)
+  }
+}
+
+/**
  * How our own posts did, on every platform we publish to.
  *
  * This is the half of the run that needs no Meta credentials and no verified
@@ -122,8 +163,13 @@ export async function gatherOwnChannels(workspaceId, period) {
     const from = prior?.start || period?.start
     const all = await readOwnPosts(workspaceId, { from })
     const analytics = await readAnalyticsFor(workspaceId, all)
+    const zernio = await gatherZernioOwn(accounts, period)
 
-    return ownChannels({ accounts: accounts || [], posts: all, analytics: analytics || [], period, prior })
+    const own = ownChannels({
+      accounts: accounts || [], posts: all, analytics: analytics || [], period, prior,
+      external: zernio.external, pageInsights: zernio.pageInsights,
+    })
+    return zernio.note ? { ...own, zernio_note: zernio.note } : own
   } catch (err) {
     const empty = ownChannels({ accounts: [], posts: [], analytics: [], period, prior })
     return { ...empty, error: String(err?.message || err).slice(0, 200) }

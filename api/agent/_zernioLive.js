@@ -271,6 +271,10 @@ export async function postAnalytics(z, profileId, { limit = POST_LIMIT } = {}) {
         status: p?.status || '',
         platform,
         platform_post_id: p?.platforms?.[0]?.platformPostId || '',
+        platform_post_url: p?.platformPostUrl || p?.platforms?.[0]?.platformPostUrl || '',
+        // 'text', 'image', 'video', … when Zernio knows it. The research run
+        // quotes it on a best post, so "format: unrecorded" means unknown.
+        media_type: p?.mediaType || '',
         likes: metric('likes'),
         comments: metric('comments'),
         shares: metric('shares'),
