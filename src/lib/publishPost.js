@@ -1,33 +1,16 @@
 import { defaultWebhookUrl } from './n8nWebhooks'
 import { publishPost as publishViaZernio } from './zernio'
-import { publishPost as publishViaMeta } from './meta'
 import { BRAND_TIMEZONE } from './brandTime'
 import {
   composedCaption, platformSpecificData, tiktokSettings, validateComposer,
 } from './composerState'
 
-// ─── One publish path, two providers ───────────────────────────────────────
-// Zernio is primary. It is the only one of the two that can reach TikTok at
-// all, and having Instagram go out through a different provider than TikTok
-// means two payload shapes, two failure vocabularies and two sets of bugs for
-// one button.
-//
-// Meta stays wired rather than deleted. It is the path Instagram publishing
-// ran on through August 2026 and it is proven in production; keeping it a
-// function call away means a Zernio outage is a one-line change, not a
-// redeploy of three workflows. That is the same reasoning that kept zernio.js
-// intact when the migration went the other way — the module was dormant, not
-// dismantled, and it is why this reversal is cheap.
-
-export const PROVIDERS = { ZERNIO: 'zernio', META: 'meta' }
-
-// Instagram is the only platform either provider can serve, so it is the only
-// one where a choice exists. Asking for Meta on TikTok is a caller bug, not a
-// fallback — answered here rather than as a confusing provider error.
-export function providerFor(platform, preferred = PROVIDERS.ZERNIO) {
-  if (platform !== 'instagram') return PROVIDERS.ZERNIO
-  return preferred === PROVIDERS.META ? PROVIDERS.META : PROVIDERS.ZERNIO
-}
+// ─── One publish path ──────────────────────────────────────────────────────
+// Every platform publishes through Zernio. The Meta Graph API path was removed
+// on 2026-09-14: it could only ever reach Instagram, and two providers behind
+// one Publish button meant two payload shapes and two failure vocabularies.
+// Meta survives only server-side, as the research agent's read-only source of
+// competitor numbers (business_discovery) — nothing publishes through it.
 
 // Media is passed by URL: everything the composer offers already lives in
 // public Supabase Storage, so there is nothing to upload. The first video wins
@@ -90,16 +73,6 @@ export async function publishComposed(state, opts = {}) {
   const check = validateComposer(state)
   if (!check.ok) return { error: check.errors[0], errors: check.errors }
 
-  const provider = providerFor(state.platform, opts.provider)
   const req = buildPublishRequest(state, opts)
-
-  if (provider === PROVIDERS.META) {
-    const url = defaultWebhookUrl('metaPublish')
-    const res = await publishViaMeta(url, req)
-    return { ...res, provider }
-  }
-
-  const url = defaultWebhookUrl('publishPost')
-  const res = await publishViaZernio(url, req)
-  return { ...res, provider }
+  return publishViaZernio(defaultWebhookUrl('publishPost'), req)
 }

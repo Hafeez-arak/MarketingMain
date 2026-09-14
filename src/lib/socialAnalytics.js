@@ -3,7 +3,7 @@ import { SUPABASE_URL, SUPABASE_ANON_KEY } from './supabaseClient'
 // ─── Provider-neutral analytics reads ──────────────────────────────────────
 // Plain Supabase reads of `social_accounts` and `post_analytics`. No secret is
 // involved and no provider is implied: both tables are written by whichever
-// publishing workflow is active (Zernio historically, Meta now), and every row
+// publishing workflow wrote them (Zernio now; Meta until 2026-09-14), and every row
 // carries `publish_provider` saying which.
 //
 // These lived in zernio.js, which was only ever true by accident — they read
@@ -16,11 +16,14 @@ function headers(accessToken) {
   return { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${accessToken || SUPABASE_ANON_KEY}` }
 }
 
+// Active accounts only. A deactivated row is a connection someone removed —
+// the 1-follower test account, for one — and listing it would put its numbers
+// back on every screen that reads this.
 export async function fetchSocialAccounts(workspaceId, accessToken) {
   if (!workspaceId) return []
   try {
     const res = await fetch(
-      `${SUPABASE_URL}/rest/v1/social_accounts?workspace_id=eq.${workspaceId}&select=*&order=platform.asc`,
+      `${SUPABASE_URL}/rest/v1/social_accounts?workspace_id=eq.${workspaceId}&is_active=eq.true&select=*&order=platform.asc`,
       { headers: headers(accessToken) },
     )
     return res.ok ? await res.json() : []

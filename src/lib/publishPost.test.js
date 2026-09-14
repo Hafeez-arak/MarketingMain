@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildPublishRequest, providerFor, PROVIDERS } from './publishPost'
+import { buildPublishRequest } from './publishPost'
 import { emptyComposer, setOption } from './composerState'
 
 // What actually goes on the wire. Asserted here rather than only observed in
@@ -17,23 +17,6 @@ const composed = (over = {}) => ({
 })
 
 const opts = { postId: 'p1', workspaceId: 'ws1' }
-
-describe('providerFor', () => {
-  it('defaults Instagram to Zernio', () => {
-    expect(providerFor('instagram')).toBe(PROVIDERS.ZERNIO)
-  })
-
-  it('honours an explicit Meta preference on Instagram', () => {
-    expect(providerFor('instagram', PROVIDERS.META)).toBe(PROVIDERS.META)
-  })
-
-  // Meta cannot reach TikTok at all. Asking for it is a caller bug, and
-  // answering it here beats a confusing error from a provider that was never
-  // going to work.
-  it('ignores a Meta preference on TikTok, which Meta cannot serve', () => {
-    expect(providerFor('tiktok', PROVIDERS.META)).toBe(PROVIDERS.ZERNIO)
-  })
-})
 
 describe('buildPublishRequest', () => {
   it('folds hashtags into the caption and does not send them twice', () => {

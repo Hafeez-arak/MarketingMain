@@ -1,6 +1,7 @@
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './supabaseClient'
 import { brandWallToUtcISO, brandWallString, formatBrandDateTime } from './brandTime'
-import { publishPost } from './meta'
+import { publishPost } from './zernio'
+import { defaultWebhookUrl } from './n8nWebhooks'
 
 // ─── Posts, across all three tables ────────────────────────────────────────
 // Reads go through the scheduled_posts view (20260813_scheduled_posts_view.sql);
@@ -85,28 +86,16 @@ export async function patchPost(accessToken, postTable, postId, patch) {
 
 // ─── Moving a post to a different time ─────────────────────────────────────
 //
-// Who owns "when this goes out" is the whole question, and moving to Meta
-// changed the answer. Under Zernio a scheduled post lived AT Zernio; our
-// column was a copy, and when the two disagreed Zernio won and the post fired
-// at the old time — hence the cancel-the-old-then-create-a-new dance.
-//
-// The Instagram Graph API cannot schedule at all, so we hold the slot
-// outright: `scheduled_publish_at` is the only copy that exists, and there is
-// nothing left to desync from.
-//
-// That does NOT make a scheduled move a plain UPDATE, and this is the part
-// worth being careful about. The publish workflow's cron sweeps every five
-// minutes and claims due rows by flipping 'scheduled' -> 'publishing'. A
-// browser PATCH cannot see that claim, so a drag landing in the same instant
-// would rewrite the time of a post already going out — and the post would go
-// out anyway, at neither the old time nor the new one. Routing the move
-// through the workflow makes it take the same atomic claim the sweeper does,
-// so exactly one of them wins.
+// Who owns "when this goes out" is the whole question. A scheduled post lives
+// AT Zernio; our `scheduled_publish_at` is a copy, and when the two disagree
+// Zernio wins and the post fires at the old time. So a scheduled move cannot
+// be a browser PATCH — that would change our copy and nothing else. It goes
+// through the publish workflow, which cancels the Zernio post and books a new
+// one under the same atomic claim that guards publishing.
 //
 //   not_published / failed  — nobody else can touch it. Update the row, done.
-//   scheduled               — ours, but the sweeper is a live second writer.
-//                             Go through the workflow so the claim arbitrates.
-//   publishing              — mid-flight at Instagram. Refuse.
+//   scheduled               — booked at Zernio. Go through the workflow.
+//   publishing              — mid-flight at the platform. Refuse.
 //   published               — already out. Nothing to move.
 //
 // `movePost` below is the single entry point; this function just names the
@@ -154,7 +143,7 @@ export async function movePost({ accessToken, post, dateKey, time, webhooks, wor
   // publish_status transition — that is what lets its atomic claim mean
   // anything — and a browser write that moved the time before the claim was
   // taken would be the one writer the guard cannot see.
-  const result = await publishPost(webhooks?.metaPublish, {
+  const result = await publishPost((webhooks?.publishPost || defaultWebhookUrl('publishPost')), {
     postId: post.id, postTable: post.post_table, workspaceId,
     platform: post.platform,
     accountId: post.zernio_account_id || undefined,
@@ -206,7 +195,7 @@ export async function unschedulePost({ accessToken, post, webhooks, workspaceId 
 }
 
 async function cancelScheduled({ webhooks, post, workspaceId }) {
-  const url = webhooks?.metaPublish
+  const url = (webhooks?.publishPost || defaultWebhookUrl('publishPost'))
   if (!url) return { error: 'Publish webhook not configured — set it in Settings → Integrations.' }
   try {
     const res = await fetch(url, {

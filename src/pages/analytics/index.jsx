@@ -8,24 +8,21 @@ import { useApp } from '../../store/app'
 import { useAuth } from '../../store/auth'
 import { Card, Button, PlatformPill, Empty, Spinner, PostImage, IconBadge, PillSelect, PageHeader } from '../../components/ui/index'
 import { Icon } from '../../components/ui/icons'
-import { fetchSocialAccounts, syncMetaInsights, fetchMetaDashboard } from '../../lib/meta'
+import { syncZernio, fetchZernioDashboard } from '../../lib/zernio'
+import { fetchSocialAccounts } from '../../lib/socialAnalytics'
+import { defaultWebhookUrl } from '../../lib/n8nWebhooks'
 import { BestTimeHeatmap, MetricToggle } from './charts'
 
 // ─── Analytics ───────────────────────────────────────────────────────────
-// Instagram's own numbers, proxied through n8n — the browser never holds the
-// Meta access token (see src/lib/meta.js). The per-post figures are fetched
-// live on every load rather than read from Supabase, so this covers
-// EVERYTHING on the connected account, not only what we published.
+// Zernio's numbers, proxied through n8n — the browser never holds the Zernio
+// API key (see src/lib/zernio.js). Zernio pre-aggregates the time-shaped
+// widgets (best time to post, posting frequency, content decay, follower
+// history), so the page asks for them rather than deriving them.
 //
-// The page shape is unchanged from when Zernio served it, but where the data
-// comes from is not, and the difference shows up in one place worth knowing
-// about. Zernio pre-aggregated the time-shaped widgets — best time to post,
-// posting frequency, content decay, follower history — as endpoints you asked
-// for. Meta has no equivalent: it reports lifetime totals per post and keeps
-// no history for us at all. Those sections are therefore derived from rows the
-// Insights Sync workflow accumulates daily, which means they start the day the
-// sync does and a missed day is a permanent gap. Nothing on this page can
-// backfill one.
+// Always scoped to ONE account. The Zernio Dashboard workflow filters by
+// account_id and nothing else, and Zernio's analytics endpoints are team-wide,
+// so an unscoped call would return every workspace's numbers. With no account
+// connected there is nothing to ask for, and no call is made.
 
 const fmt = n => n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M`
   : n >= 1_000 ? `${(n / 1_000).toFixed(1)}k`
@@ -163,18 +160,22 @@ export function Analytics() {
     return () => { cancelled = true }
   }, [activeWorkspaceId, accessToken])
 
+  // The account the dashboard is scoped to: the one picked, else the first
+  // connected account on the chosen platform. Never '' while one exists.
+  const scopedAccount = selectedAccount
+    || accounts.find(a => !platform || a.platform === platform)?.zernio_account_id
+    || ''
+
   const loadDashboard = useCallback(async () => {
+    if (!scopedAccount) { setDashLoading(false); return null }
     setDashLoading(true)
-    // workspaceId is new against the Zernio call and not optional: the daily,
-    // decay and follower sections are read out of OUR tables, which are
-    // workspace-scoped. Without it those three come back empty rather than
-    // wrong, which is the right failure but still a blank chart.
-    const result = await fetchMetaDashboard(state.webhooks?.metaDashboard, {
-      platform, accountId: selectedAccount, days, workspaceId: activeWorkspaceId,
-    })
+    const result = await fetchZernioDashboard(
+      state.webhooks?.zernioDashboard || defaultWebhookUrl('zernioDashboard'),
+      { platform, accountId: scopedAccount, days },
+    )
     setDashLoading(false)
     return result
-  }, [state.webhooks?.metaDashboard, platform, selectedAccount, days, activeWorkspaceId])
+  }, [state.webhooks?.zernioDashboard, platform, scopedAccount, days])
 
   useEffect(() => {
     let cancelled = false
@@ -187,7 +188,7 @@ export function Analytics() {
 
   async function handleSync() {
     setSyncing(true); setNote('')
-    const result = await syncMetaInsights(state.webhooks?.metaSync, activeWorkspaceId)
+    const result = await syncZernio(state.webhooks?.zernioSync || defaultWebhookUrl('zernioSync'), activeWorkspaceId)
     setSyncing(false)
     setNote(result.error || result.analytics_skipped
       || `Synced ${result.accounts_synced ?? 0} account(s), ${result.rows_written ?? 0} metric row(s).`)
@@ -234,7 +235,7 @@ export function Analytics() {
   const decayBuckets = [...(dash?.decay?.buckets || [])].sort((a, b) => a.bucket_order - b.bucket_order)
   const followerRows = (() => {
     const stats = dash?.followers?.stats || {}
-    const arr = selectedAccount ? (stats[selectedAccount] || []) : Object.values(stats).flat()
+    const arr = scopedAccount ? (stats[scopedAccount] || []) : Object.values(stats).flat()
     return arr
   })()
 
@@ -324,7 +325,7 @@ export function Analytics() {
             <div className="flex-1">
               <h3 className="font-semibold text-text mb-1">No connected accounts yet</h3>
               <p className="text-sm text-text-secondary mb-3">
-                Once the Instagram account is wired up in n8n, hit Refresh — it'll appear here with real reach, engagement and follower data.
+                Connect an account through Zernio in Integrations, then hit Refresh — it'll appear here with real reach, engagement and follower data.
               </p>
               <Button onClick={() => navigate('/integrations')}>Set up integrations</Button>
             </div>
@@ -339,8 +340,7 @@ export function Analytics() {
               <option value="instagram">Instagram</option>
             </PillSelect>
             {accounts.length > 1 && (
-              <PillSelect value={selectedAccount} onChange={e => setSelectedAccount(e.target.value)} className="w-40">
-                <option value="">All profiles</option>
+              <PillSelect value={scopedAccount} onChange={e => setSelectedAccount(e.target.value)} className="w-40">
                 {accounts.map(a => (
                   <option key={a.id} value={a.zernio_account_id}>{a.username ? `@${a.username}` : a.display_name}</option>
                 ))}
