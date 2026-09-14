@@ -147,6 +147,31 @@ the two cannot answer the same question differently again.
 | `get_plans` | content plans and their ideas |
 | `get_media` | what is in the media library, so ideas can reference real assets |
 
+**Ask the provider (metered)**
+
+| tool | returns |
+|---|---|
+| `get_zernio_live` | Zernio's own numbers: account insights, follower stats, every post it measures |
+
+Our stored analytics only cover posts published **through this app**. Zernio
+also measures posts made directly on the platform, and on Arak's Instagram
+those are seven of nine and hold most of the engagement — they have no local
+post row, so no other tool can see them. `origin` labels which kind each post
+is; a `posted_directly_on_platform` row is real history, not missing data.
+
+Two traps encoded there. Account insights take a window of at most **29** days:
+the documented limit is 30, but `until` is a date that expands to end-of-day,
+so a nominal 30 is 30d 23:59:59 and Meta rejects the entire request. And
+`follower_count` is not a valid metric on that endpoint — followers come from
+`follower-stats`, written by a daily snapshotter, which reports
+`currentFollowers: 0` with `dataPoints: 0` for an account it has never sampled.
+That zero is a default over an empty series, so the tool returns `null` with
+`measured: false` rather than passing a manufactured zero to the model.
+
+METERED, in its own `PROVIDER_TOOLS` group rather than among the reads:
+`READ_TOOLS` carries the invariant that everything in it is a free Supabase
+query, and the loop paces itself on that.
+
 **Go look outside (metered)**
 
 | tool | notes |

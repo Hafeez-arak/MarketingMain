@@ -242,6 +242,49 @@ import { WRITE_TOOLS } from './writeTools.js'
 export { WRITE_TOOLS }
 
 /**
+ * Our publishing provider, asked directly. METERED.
+ *
+ * Its own group rather than a metered entry among the reads, because
+ * READ_TOOLS carries a real invariant — everything in it is a Supabase query
+ * that cannot fail expensively — and a metered tool sitting in that list would
+ * break the pacing the loop depends on. The test that asserts it caught this
+ * on the first try, which is the whole reason the invariant is written down.
+ *
+ * Distinct from WEB_TOOLS: that is the open web, read as a stranger. This is
+ * our own API, holding the authoritative numbers our database only mirrors.
+ */
+export const PROVIDER_TOOLS = [
+  {
+    name: 'get_zernio_live',
+    cost: METERED,
+    description:
+      'Ask Zernio DIRECTLY for this account\'s numbers, instead of reading our stored copy. ' +
+      'Use this when get_channel_analytics shows little or nothing, when someone asks about ' +
+      'posts or history our database does not have, or when they want the account\'s real ' +
+      'follower count and reach. ' +
+      'Our stored analytics only cover posts published THROUGH this app. Zernio also measures ' +
+      'posts made directly on the platform, and on this account those are the majority and hold ' +
+      'most of the engagement — every "origin": "posted_directly_on_platform" row is real ' +
+      'history that exists in no other tool. Never call those missing or broken data. ' +
+      'Follower figures carry "measured": false until Zernio\'s daily snapshotter has run at ' +
+      'least once, and the 0 reported alongside is a default over an empty series, not a count — ' +
+      'say "not counted yet", never "zero followers". Account insights are Instagram-only and ' +
+      'can lag up to 48 hours; pass that delay on rather than presenting them as live.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        days: {
+          type: 'integer',
+          description: 'Window for account-level insights. Default and maximum 29 — the platform ' +
+            'rejects anything wider outright, so a larger number is clamped rather than honoured.',
+        },
+      },
+      required: [],
+    },
+  },
+]
+
+/**
  * The open web. METERED — these draw down a paid or free-tier quota, unlike
  * every read above, which is a Supabase query. That is what the cost class is
  * for, and a caller that cannot tell them apart cannot pace itself.
@@ -297,11 +340,19 @@ export const WEB_TOOLS = [
  * flop?" does not, and offering them there invites an assistant that files a
  * proposal every time it has an opinion.
  */
-export const ALL_TOOLS = [...READ_TOOLS]
+// PROVIDER_TOOLS is in here so findTool and isFree resolve `get_zernio_live`
+// — isFree treats an unknown name as metered, which would be the right answer
+// by accident, but findTool returning null makes the tool uncallable.
+export const ALL_TOOLS = [...READ_TOOLS, ...PROVIDER_TOOLS]
 
 export function toolsFor({ writes = false, web = false } = {}) {
   return [
     ...READ_TOOLS,
+    // Always offered. Asking our own provider how our own account is doing is
+    // the plainest question this assistant gets, and our stored copy is
+    // missing most of the account's history — gating it behind the `web` flag
+    // would leave the chat surface answering from the thinner source.
+    ...PROVIDER_TOOLS,
     ...(web ? WEB_TOOLS : []),
     ...(writes ? WRITE_TOOLS : []),
   ]

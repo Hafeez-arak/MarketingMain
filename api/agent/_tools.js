@@ -8,6 +8,7 @@ import { ownChannels, priorPeriod } from '../../src/lib/agent/ownChannels.js'
 import {
   readAccounts, readOwnPosts, readAnalyticsFor, readAnalyticsOverview, syncHealth,
 } from './_ownData.js'
+import { liveZernioAnalytics } from './_zernioLive.js'
 
 // ─── Running a tool ────────────────────────────────────────────────────────
 // The executors behind the definitions in src/lib/agent/tools.js.
@@ -259,6 +260,17 @@ async function getChannelAnalytics(workspaceId, args) {
   }
 }
 
+/**
+ * Zernio, asked directly rather than through our mirror of it.
+ *
+ * METERED, and that is not bookkeeping: these are real HTTP calls to a
+ * provider that rate-limits, unlike every other read tool here, which is a
+ * Supabase query. A loop that cannot tell them apart cannot pace itself.
+ */
+async function getZernioLive(workspaceId, args) {
+  return liveZernioAnalytics(workspaceId, { days: clamp(args?.days, 29, 29) })
+}
+
 async function getOurPerformance(workspaceId, args) {
   const cutoff = since(args?.days, 90)
   // Through the shared reader: both posts tables, and analytics matched under
@@ -375,6 +387,7 @@ const EXECUTORS = {
   get_prior_research:     getPriorResearch,
   get_competitor_metrics: getCompetitorMetrics,
   get_channel_analytics:  getChannelAnalytics,
+  get_zernio_live:        getZernioLive,
   get_our_performance:    getOurPerformance,
   get_posts:              getPosts,
   get_schedule:           getSchedule,
