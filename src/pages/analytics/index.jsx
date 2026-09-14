@@ -9,7 +9,7 @@ import { useAuth } from '../../store/auth'
 import { Card, Button, PlatformPill, Empty, Spinner, PostImage, IconBadge, PillSelect, PageHeader } from '../../components/ui/index'
 import { Icon } from '../../components/ui/icons'
 import { syncZernio, fetchZernioDashboard } from '../../lib/zernio'
-import { fetchSocialAccounts } from '../../lib/socialAnalytics'
+import { fetchSocialAccounts, profileUrlOf } from '../../lib/socialAnalytics'
 import { defaultWebhookUrl } from '../../lib/n8nWebhooks'
 import { BestTimeHeatmap, MetricToggle } from './charts'
 
@@ -676,7 +676,7 @@ export function Analytics() {
                           </ResponsiveContainer>
                           <div className="flex flex-wrap gap-2 mt-2">
                             {frequencyRows.map(r => (
-                              <span key={r.platform} className="text-[10px] px-1.5 py-0.5 bg-surface-subtle border border-border text-text-secondary">
+                              <span key={`${r.platform}-${r.posts_per_week}`} className="text-[10px] px-1.5 py-0.5 bg-surface-subtle border border-border text-text-secondary">
                                 <span className="capitalize font-medium">{r.platform}</span> · {r.posts_per_week}/wk · {r.avg_engagement_rate.toFixed(0)}%
                               </span>
                             ))}
@@ -725,14 +725,27 @@ export function Analytics() {
             </div>
             <div className="divide-y divide-border">
               {accounts.map(a => {
-                const active = selectedAccount === a.zernio_account_id
+                // Picking a row re-scopes the dashboard, which only means
+                // something when there is another account to pick. With one,
+                // the click changed nothing but a small "Viewing" label, and
+                // read as a link that did not open.
+                const choosable = accounts.length > 1
+                const active = choosable && scopedAccount === a.zernio_account_id
+                const url = profileUrlOf(a)
                 return (
                   <div key={a.id}
-                    onClick={() => setSelectedAccount(active ? '' : a.zernio_account_id)}
-                    className={`flex items-center gap-4 px-5 py-3 cursor-pointer transition-colors ${active ? 'bg-amber-50/60' : 'hover:bg-surface-subtle'}`}>
+                    onClick={choosable ? () => setSelectedAccount(a.zernio_account_id) : undefined}
+                    className={`flex items-center gap-4 px-5 py-3 transition-colors ${choosable ? 'cursor-pointer' : ''} ${active ? 'bg-amber-50/60' : 'hover:bg-surface-subtle'}`}>
                     <PlatformPill platform={a.platform} />
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-text truncate">{a.display_name || a.username || a.platform}</p>
+                      {url ? (
+                        <a href={url} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()}
+                          className="block text-sm font-medium text-text truncate hover:underline">
+                          {a.display_name || a.username || a.platform}
+                        </a>
+                      ) : (
+                        <p className="text-sm font-medium text-text truncate">{a.display_name || a.username || a.platform}</p>
+                      )}
                       {a.username && <p className="text-xs text-text-tertiary truncate">@{a.username}</p>}
                     </div>
                     <div className="text-sm text-text-secondary">{fmt(a.followers_count || 0)} followers</div>
@@ -740,8 +753,8 @@ export function Analytics() {
                       ? <span className="text-[10px] font-semibold px-1.5 py-0.5 bg-red-50 text-red-600 uppercase tracking-[0.08em]">Reconnect needed</span>
                       : <span className="text-[10px] font-semibold px-1.5 py-0.5 bg-sage-100 text-sage-800 uppercase tracking-[0.08em]">Connected</span>}
                     {active && <span className="text-[10px] font-semibold text-amber-700">Viewing</span>}
-                    {a.profile_url && (
-                      <a href={a.profile_url} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()}
+                    {url && (
+                      <a href={url} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()}
                         className="text-[11px] font-semibold text-amber-700 hover:underline">Open ↗</a>
                     )}
                   </div>

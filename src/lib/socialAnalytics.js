@@ -16,6 +16,21 @@ function headers(accessToken) {
   return { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${accessToken || SUPABASE_ANON_KEY}` }
 }
 
+// Where an account lives on its platform. Zernio returns `profileUrl: null` for
+// an Instagram account connected through facebook_login, and Zernio Sync
+// stores that as '', so the stored value is only a first choice. Instagram and
+// TikTok URLs follow from the handle; LinkedIn's do not (a person and a company
+// page live under different paths), so it is never guessed.
+export function profileUrlOf(account) {
+  const stored = String(account?.profile_url || '').trim()
+  if (stored) return stored
+  const handle = String(account?.username || '').trim().replace(/^@/, '')
+  if (!handle) return ''
+  if (account.platform === 'instagram') return `https://www.instagram.com/${encodeURIComponent(handle)}/`
+  if (account.platform === 'tiktok') return `https://www.tiktok.com/@${encodeURIComponent(handle)}`
+  return ''
+}
+
 // Active accounts only. A deactivated row is a connection someone removed —
 // the 1-follower test account, for one — and listing it would put its numbers
 // back on every screen that reads this.
