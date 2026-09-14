@@ -1,5 +1,6 @@
 import {
   createZernio, retryRateLimited, explainZernioError, INSTAGRAM_INSIGHT_METRICS,
+  LINKEDIN_PAGE_METRICS, LINKEDIN_MAX_DAYS,
 } from '../zernio/_zernio.js'
 import { readAccounts } from './_ownData.js'
 
@@ -128,6 +129,71 @@ export async function accountInsights(z, accountId, days = MAX_INSIGHT_DAYS) {
 }
 
 /**
+ * A LinkedIn company page's own numbers, across every post on the page.
+ *
+ * Page-level, like Instagram's account insights, and the only place three
+ * things live: impressions on posts made directly on LinkedIn, follower gains,
+ * and page views. LinkedIn has NO views metric for an ordinary post — it counts
+ * impressions — so a question about LinkedIn views is answered with
+ * impressions, and says so, never with a zero.
+ *
+ * The window is capped at 88 days, Zernio's limit for this read (89 → 400).
+ * A personal profile is not asked: Zernio refuses it with
+ * personal_account_not_supported.
+ *
+ * `engagement_rate` arrives from LinkedIn as a 0..1 fraction; it is passed on
+ * as a percentage so it cannot be read as 0.07%.
+ */
+export async function linkedinPageInsights(z, account, days = MAX_INSIGHT_DAYS) {
+  const base = {
+    account_id: account?.zernio_account_id || '',
+    name: account?.display_name || account?.username || '',
+  }
+  if (account?.account_type === 'personal') {
+    return { ...base, ok: false, error: 'Page insights exist only for LinkedIn company pages; this account is a personal profile.' }
+  }
+  const span = Math.min(Math.max(1, Number(days) || MAX_INSIGHT_DAYS), LINKEDIN_MAX_DAYS)
+  const until = new Date()
+  const since = new Date(until.getTime() - span * 86_400_000)
+  try {
+    const out = await retryRateLimited(() => z.request('analytics/linkedin/org-aggregate-analytics', {
+      query: {
+        accountId: base.account_id, since: ymd(since), until: ymd(until),
+        metricType: 'total_value', metrics: LINKEDIN_PAGE_METRICS.join(','),
+      },
+    }))
+    const metrics = out?.metrics || {}
+    const total = key => metrics[key]?.total ?? null
+    const rate = total('engagement_rate')
+    return {
+      ...base,
+      ok: true,
+      window: { since: ymd(since), until: ymd(until), days: span },
+      impressions: total('impressions'),
+      // LinkedIn's unique_impressions: distinct members who saw a post.
+      members_reached: total('unique_impressions'),
+      clicks: total('clicks'),
+      reactions: total('likes'),
+      comments: total('comments'),
+      reposts: total('shares'),
+      engagement_rate_pct: rate === null ? null : Math.round(rate * 10000) / 100,
+      followers_gained_organic: total('organic_followers_gained'),
+      followers_gained_paid: total('paid_followers_gained'),
+      page_views: {
+        total: total('page_views_total'),
+        overview: total('page_views_overview'),
+        careers: total('page_views_careers'),
+        jobs: total('page_views_jobs'),
+        life: total('page_views_life'),
+      },
+      data_delay: out?.dataDelay || '',
+    }
+  } catch (err) {
+    return { ...base, ok: false, error: explainZernioError(err) }
+  }
+}
+
+/**
  * Followers, and how they moved.
  *
  * Separate from insights because it is a separate pipeline: Zernio's daily
@@ -191,21 +257,28 @@ export async function postAnalytics(z, profileId, { limit = POST_LIMIT } = {}) {
     const posts = (out?.posts || []).map(p => {
       const a = p?.analytics || {}
       const zernioPostId = p?.latePostId || ''
+      const platform = p?.platforms?.[0]?.platform || p?.platform || ''
+      // LinkedIn has no views on an ordinary post and a company page has no
+      // saves. Zernio fills both with 0; they are passed on as null so neither
+      // reads as a measurement of nothing.
+      const unmeasured = platform === 'linkedin' ? ['views', 'saves'] : []
+      const metric = key => (unmeasured.includes(key) ? null : (a[key] ?? null))
       return {
         zernio_post_id: zernioPostId,
         origin: zernioPostId ? 'published_by_this_app' : 'posted_directly_on_platform',
         content: String(p?.content || '').slice(0, 200),
         published_at: p?.publishedAt || null,
         status: p?.status || '',
-        platform: p?.platforms?.[0]?.platform || '',
+        platform,
         platform_post_id: p?.platforms?.[0]?.platformPostId || '',
-        likes: a.likes ?? null,
-        comments: a.comments ?? null,
-        shares: a.shares ?? null,
-        saves: a.saves ?? null,
-        reach: a.reach ?? null,
-        impressions: a.impressions ?? null,
-        views: a.views ?? null,
+        likes: metric('likes'),
+        comments: metric('comments'),
+        shares: metric('shares'),
+        saves: metric('saves'),
+        reach: metric('reach'),
+        impressions: metric('impressions'),
+        views: metric('views'),
+        clicks: metric('clicks'),
         engagement_rate: a.engagementRate ?? null,
         last_updated: a.lastUpdated || null,
       }
@@ -251,12 +324,15 @@ export async function liveZernioAnalytics(workspaceId, { days = MAX_INSIGHT_DAYS
   const z = createZernio({ apiKey: key })
   const instagram = profile.accounts.find(a => String(a.platform).toLowerCase() === 'instagram')
 
-  const [followers, posts, insights] = await Promise.all([
+  const linkedinPages = profile.accounts.filter(a => String(a.platform).toLowerCase() === 'linkedin')
+
+  const [followers, posts, insights, linkedin] = await Promise.all([
     followerStats(z, profile.profileId),
     postAnalytics(z, profile.profileId),
     instagram?.zernio_account_id
       ? accountInsights(z, instagram.zernio_account_id, days)
-      : Promise.resolve({ ok: false, error: 'No Instagram account connected; account-level insights are Instagram-only.' }),
+      : Promise.resolve({ ok: false, error: 'No Instagram account connected, so there are no Instagram account insights.' }),
+    Promise.all(linkedinPages.map(a => linkedinPageInsights(z, a, days))),
   ])
 
   const byOrigin = { published_by_this_app: 0, posted_directly_on_platform: 0 }
@@ -267,6 +343,12 @@ export async function liveZernioAnalytics(workspaceId, { days = MAX_INSIGHT_DAYS
     profile_id: profile.profileId,
     followers,
     account_insights: insights,
+    linkedin_page_insights: linkedin,
+    metric_notes:
+      'LinkedIn does not count views on ordinary posts. Its measure of how often a post was seen is ' +
+      'impressions, and members_reached is the number of distinct members who saw it. LinkedIn views ' +
+      'and saves are null because LinkedIn does not report them, not because they were zero — answer ' +
+      'a question about LinkedIn views with impressions, and say that is what LinkedIn measures.',
     post_analytics: posts,
     counts: byOrigin,
     // The sentence that stops the two numbers being confused. Someone reading

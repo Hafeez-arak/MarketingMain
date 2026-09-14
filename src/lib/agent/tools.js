@@ -268,15 +268,21 @@ export const PROVIDER_TOOLS = [
       'history that exists in no other tool. Never call those missing or broken data. ' +
       'Follower figures carry "measured": false until Zernio\'s daily snapshotter has run at ' +
       'least once, and the 0 reported alongside is a default over an empty series, not a count — ' +
-      'say "not counted yet", never "zero followers". Account insights are Instagram-only and ' +
-      'can lag up to 48 hours; pass that delay on rather than presenting them as live.',
+      'say "not counted yet", never "zero followers". ' +
+      'Returns Instagram account insights and, for each LinkedIn company page, page insights in ' +
+      '"linkedin_page_insights": impressions, members reached, clicks, reactions, comments, reposts, ' +
+      'engagement rate, followers gained and page views, across every post on the page. LinkedIn has ' +
+      'no views on ordinary posts — impressions is its measure — so never report LinkedIn views as ' +
+      'zero; see "metric_notes". Both kinds of insight can lag up to 48 hours; pass that delay on ' +
+      'rather than presenting them as live.',
     input_schema: {
       type: 'object',
       properties: {
         days: {
           type: 'integer',
-          description: 'Window for account-level insights. Default and maximum 29 — the platform ' +
-            'rejects anything wider outright, so a larger number is clamped rather than honoured.',
+          description: 'Window for account- and page-level insights. Default 29. Instagram accepts ' +
+            'at most 29 days and a LinkedIn page at most 88; a larger number is clamped per platform ' +
+            'rather than honoured.',
         },
       },
       required: [],

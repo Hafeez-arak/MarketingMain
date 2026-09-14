@@ -188,7 +188,13 @@ export function normalizeAccount(raw, { connectedAt = null } = {}) {
     // LinkedIn only: 'personal' | 'organization'. Publishing differs between
     // them (an organisation post is authored by the page, not the person), so
     // it is carried rather than flattened away.
-    account_type: a.accountType || a.account_type || null,
+    //
+    // GET /accounts carries it under metadata, not at the top level — checked
+    // live 2026-09-14 on the ARAK Lighting page: top-level `accountType: null`,
+    // `metadata.accountType: 'organization'`. Reading the top level alone
+    // stored null, so the "Company page" badge never showed and the analytics
+    // route could not tell a page from a person.
+    account_type: a.accountType || a.account_type || meta.accountType || null,
     // When OAuth was granted, which is what makes "this token is 58 days old,
     // reconnect" answerable. Our own mirror wins when we have it: it is
     // written once on INSERT and never updated, whereas Zernio's createdAt
@@ -493,14 +499,41 @@ export const INSTAGRAM_INSIGHT_METRICS = ['reach', 'views', 'accounts_engaged', 
 
 // Instagram reports neither impressions (gone since Graph v22) nor per-post
 // clicks, so offering those toggles would draw lines that can only be zero.
+//
+// LinkedIn is the mirror image. Impressions and clicks are its native per-post
+// numbers; it has no views on an ordinary post (LinkedIn counts views on video
+// only, and Zernio's per-post read does not carry even those) and a company
+// page has no saves. Measured live 2026-09-14 on ARAK Lighting's latest post:
+// impressions 1,027, reach 516, clicks 186, views 0, saves 0.
 const METRICS_SUPPORTED = {
   instagram: ['likes', 'comments', 'shares', 'saves', 'views', 'reach'],
+  linkedin: ['impressions', 'reach', 'likes', 'comments', 'shares', 'clicks'],
 }
+
+// ─── LinkedIn company page analytics ───────────────────────────────────────
+// Page-level numbers from LinkedIn's organisation statistics: every post on
+// the page, including the ones made directly on LinkedIn, plus follower gains
+// and page views. Only a company page has them — Zernio answers a personal
+// profile with 400 personal_account_not_supported.
+//
+// Page views are totals only; LinkedIn does not split them by day, so they are
+// absent from the series. The window is capped at 88 days: measured live,
+// since→until of 89 days is refused ("Date range cannot exceed 88 days") and
+// 88 answers.
+export const LINKEDIN_PAGE_METRICS = [
+  'impressions', 'unique_impressions', 'clicks', 'likes', 'comments', 'shares', 'engagement_rate',
+  'organic_followers_gained', 'paid_followers_gained',
+  'page_views_total', 'page_views_overview', 'page_views_careers', 'page_views_jobs', 'page_views_life',
+]
+export const LINKEDIN_SERIES_METRICS = [
+  'impressions', 'unique_impressions', 'clicks', 'likes', 'comments', 'shares', 'organic_followers_gained',
+]
+export const LINKEDIN_MAX_DAYS = 88
 
 const DAY_MS = 86400000
 const isoDay = ms => new Date(ms).toISOString().slice(0, 10)
 
-export function analyticsPlan({ platform, accountId, days, now = Date.now() }) {
+export function analyticsPlan({ platform, accountId, accountType = null, days, now = Date.now() }) {
   const span = ANALYTICS_DAYS.includes(Number(days)) ? Number(days) : 30
   const fromDate = isoDay(now - span * DAY_MS)
   const toDate = isoDay(now)
@@ -526,11 +559,73 @@ export function analyticsPlan({ platform, accountId, days, now = Date.now() }) {
     )
   }
 
+  // null counts as a page. Rows mirrored before account_type was read
+  // correctly carry null, and every LinkedIn account connected so far is a
+  // page; a personal profile that slips through gets Zernio's own
+  // personal_account_not_supported in the slot rather than a broken tab.
+  if (platform === 'linkedin' && accountType !== 'personal') {
+    insightsFrom = isoDay(now - Math.min(span, LINKEDIN_MAX_DAYS) * DAY_MS)
+    const page = { accountId, since: insightsFrom, until: toDate }
+    requests.push(
+      { key: 'linkedinPage', path: 'analytics/linkedin/org-aggregate-analytics',
+        query: { ...page, metricType: 'total_value', metrics: LINKEDIN_PAGE_METRICS.join(',') } },
+      { key: 'linkedinSeries', path: 'analytics/linkedin/org-aggregate-analytics',
+        query: { ...page, metricType: 'time_series', metrics: LINKEDIN_SERIES_METRICS.join(',') } },
+    )
+  }
+
   return {
     days: span, fromDate, toDate, insightsFrom,
     metricsSupported: METRICS_SUPPORTED[platform] || null,
     requests,
   }
+}
+
+// ─── Refresh: ask the platform again, now ──────────────────────────────────
+//
+// Zernio re-reads each account's posts on its own cycle, at most every ~90
+// minutes, and every analytics read above is served from that copy. A Refresh
+// button that only re-reads the copy shows the same numbers again — which is
+// exactly "refresh does nothing". POST /posts/sync-external makes Zernio fetch
+// the account's latest posts from the platform immediately. It reads from the
+// platform and publishes nothing.
+//
+// Zernio debounces it per account (~15s): a second press inside that window
+// answers `skipped: true` without fetching, and that is reported as such
+// rather than as a refresh that happened. Verified live 2026-09-14 on the
+// LinkedIn page: first call re-read 3 posts in 2.9s, the next answered skipped.
+//
+// One account failing does not stop the rest, and an account that needs
+// reconnecting is not asked at all — Zernio would answer 409, and the useful
+// sentence there is "reconnect", not a status code.
+export async function syncAccountPosts(z, accounts, { retry = retryRateLimited } = {}) {
+  return Promise.all((accounts || []).map(async a => {
+    const base = {
+      account_id: a.zernio_account_id,
+      platform: a.platform,
+      name: a.display_name || a.username || '',
+    }
+    if (a.is_active === false || a.needs_reconnection === true) {
+      return { ...base, ok: false, needs_reconnection: true, error: 'Needs reconnecting before it can refresh.' }
+    }
+    try {
+      const out = await retry(() => z.request('posts/sync-external', {
+        method: 'POST', body: { accountId: a.zernio_account_id },
+      }))
+      const synced = out?.synced || {}
+      return {
+        ...base,
+        ok: true,
+        skipped: synced.skipped === true,
+        posts_synced: Number(synced.postsSynced) || 0,
+        // `postsFound` read 0 on the live call that nonetheless returned three
+        // posts, so the list itself is the count worth reporting.
+        recent_posts: Array.isArray(out?.posts) ? out.posts.length : null,
+      }
+    } catch (err) {
+      return { ...base, ok: false, error: explainZernioError(err) }
+    }
+  }))
 }
 
 // ─── Turning a Zernio failure into something a person can act on ───────────

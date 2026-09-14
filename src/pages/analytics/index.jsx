@@ -1,117 +1,92 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useApp } from '../../store/app'
 import { useAuth } from '../../store/auth'
 import { Card, Button, PlatformPill, Spinner, IconBadge, PillSelect, PageHeader } from '../../components/ui/index'
 import { Icon } from '../../components/ui/icons'
-import { syncZernio, fetchZernioDashboard } from '../../lib/zernio'
-import { fetchSocialAccounts, profileUrlOf } from '../../lib/socialAnalytics'
+import { syncZernio } from '../../lib/zernio'
+import { profileUrlOf } from '../../lib/socialAnalytics'
 import { defaultWebhookUrl } from '../../lib/n8nWebhooks'
-import { AnalyticsDashboard, DashboardSkeleton } from './Dashboard'
-import { fmt, timeAgo } from './format'
+import { LIVE_PLATFORMS, PLATFORM_META } from '../../lib/utils'
+import { syncAccounts, describeSync } from '../../lib/zernioConnect'
+import { useConnectedAccounts, publishConnectedAccounts } from '../../lib/useConnectedAccounts'
+import { AccountAnalytics } from '../../components/social/AccountAnalytics'
+import { DashboardSkeleton } from './Dashboard'
+import { fmt } from './format'
 
 // ─── Analytics ───────────────────────────────────────────────────────────
-// Zernio's numbers, proxied through n8n — the browser never holds the Zernio
-// API key (see src/lib/zernio.js). Zernio pre-aggregates the time-shaped
-// widgets (best time to post, posting frequency, content decay, follower
-// history), so the page asks for them rather than deriving them.
+// Every connected account's numbers, one account at a time. The graphs are
+// AccountAnalytics — the same component as each platform page's Analytics
+// tab — so this page reads through /api/zernio/analytics, which checks the
+// account belongs to this workspace. It used to read through the n8n Zernio
+// Dashboard workflow, which took account_id on trust, went through the box's
+// tunnel, and offered Instagram as the only platform to pick.
 //
-// Always scoped to ONE account. The Zernio Dashboard workflow filters by
-// account_id and nothing else, and Zernio's analytics endpoints are team-wide,
-// so an unscoped call would return every workspace's numbers. With no account
-// connected there is nothing to ask for, and no call is made.
-//
-// The graphs themselves live in ./Dashboard, shared with each platform page's
-// Analytics tab (which reads one account through /api/zernio/analytics).
+// Zernio's analytics endpoints are team-wide, so every read names one account;
+// with nothing connected there is nothing to ask for, and no call is made.
 
 export function Analytics() {
   const { state } = useApp()
-  const { activeWorkspaceId, accessToken } = useAuth()
+  const { activeWorkspaceId } = useAuth()
   const navigate = useNavigate()
+  const { allAccounts, loading } = useConnectedAccounts()
 
-  const [accounts, setAccounts] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [dash, setDash] = useState(null)
-  const [dashLoading, setDashLoading] = useState(true)
+  const [platform, setPlatform] = useState('')
   const [syncing, setSyncing] = useState(false)
   const [note, setNote] = useState('')
+  const [reloadKey, setReloadKey] = useState(0)
 
-  const [platform, setPlatform] = useState('instagram')
-  const [selectedAccount, setSelectedAccount] = useState('')
-  const [days, setDays] = useState(30)
+  // Platforms with an account, in the app's usual order.
+  const platforms = LIVE_PLATFORMS.filter(p => allAccounts.some(a => a.platform === p))
+  const chosen = platforms.includes(platform) ? platform : (platforms[0] || '')
+  const scoped = allAccounts.filter(a => a.platform === chosen)
 
-  // Connected accounts — straight Supabase read, independent of the Zernio
-  // proxy, so the account picker still works even if that webhook is down.
-  useEffect(() => {
-    let cancelled = false
-    ;(async () => {
-      if (!activeWorkspaceId) { setLoading(false); return }
-      const accts = await fetchSocialAccounts(activeWorkspaceId, accessToken)
-      if (cancelled) return
-      setAccounts(accts)
-      setLoading(false)
-    })()
-    return () => { cancelled = true }
-  }, [activeWorkspaceId, accessToken])
-
-  // The account the dashboard is scoped to: the one picked, else the first
-  // connected account on the chosen platform. Never '' while one exists.
-  const scopedAccount = selectedAccount
-    || accounts.find(a => !platform || a.platform === platform)?.zernio_account_id
-    || ''
-
-  const loadDashboard = useCallback(async () => {
-    if (!scopedAccount) { setDashLoading(false); return null }
-    setDashLoading(true)
-    const result = await fetchZernioDashboard(
-      state.webhooks?.zernioDashboard || defaultWebhookUrl('zernioDashboard'),
-      { platform, accountId: scopedAccount, days },
-    )
-    setDashLoading(false)
-    return result
-  }, [state.webhooks?.zernioDashboard, platform, scopedAccount, days])
-
-  useEffect(() => {
-    let cancelled = false
-    ;(async () => {
-      const result = await loadDashboard()
-      if (!cancelled) setDash(result)
-    })()
-    return () => { cancelled = true }
-  }, [loadDashboard])
-
+  // Refresh does two things, and waits for only one of them.
+  //
+  // It asks Zernio to re-read every account from its platform now, then reloads
+  // the numbers on screen — before, it only ran the n8n sync and re-read
+  // Zernio's copy, which Zernio itself refreshes at most every ~90 minutes, so
+  // the page came back unchanged.
+  //
+  // The n8n Zernio Sync still runs alongside, because it writes the stored copy
+  // (post_analytics) the assistant reads. It is slower and goes through the
+  // box, so the page does not wait for it; only its failure is reported.
   async function handleSync() {
-    setSyncing(true); setNote('')
-    const result = await syncZernio(state.webhooks?.zernioSync || defaultWebhookUrl('zernioSync'), activeWorkspaceId)
+    setSyncing(true)
+    setNote('')
+    const stored = syncZernio(state.webhooks?.zernioSync || defaultWebhookUrl('zernioSync'), activeWorkspaceId)
+    const live = await syncAccounts(activeWorkspaceId)
+    if (live.error) {
+      setNote(live.error)
+    } else {
+      publishConnectedAccounts(activeWorkspaceId, live.accounts)
+      setNote(`${describeSync(live.synced)} Reach and impressions can still lag the platform by up to 48 hours.`)
+    }
+    setReloadKey(k => k + 1)
     setSyncing(false)
-    setNote(result.error || result.analytics_skipped
-      || `Synced ${result.accounts_synced ?? 0} account(s), ${result.rows_written ?? 0} metric row(s).`)
-    setDash(await loadDashboard())
-  }
 
-  if (loading) {
-    return (
-      <div className="max-w-7xl space-y-4">
-        <PageHeader title="Analytics" subtitle="Real performance pulled live from your connected accounts." />
-        <DashboardSkeleton />
-      </div>
-    )
+    const result = await stored
+    if (result?.error) {
+      setNote(n => `${n} The stored copy the assistant reads did not update: ${result.error}`.trim())
+    }
   }
-
-  const lastSync = dash?.overview?.overview?.lastSync
 
   return (
     <div className="max-w-7xl space-y-4">
       <PageHeader title="Analytics" subtitle="Real performance pulled live from your connected accounts.">
-        <div className="text-right">
-          <Button size="sm" variant="secondary" onClick={handleSync} disabled={syncing}>
-            {syncing ? <><Spinner size="sm" /> Syncing…</> : 'Refresh from Zernio'}
-          </Button>
-          {note && <p className="text-[10px] text-text-tertiary mt-1.5 max-w-[260px]">{note}</p>}
-        </div>
+        {(loading || allAccounts.length > 0) && (
+          <div className="text-right">
+            <Button size="sm" variant="secondary" onClick={handleSync} disabled={syncing || loading}>
+              {syncing ? <><Spinner size="sm" /> Refreshing…</> : 'Refresh from Zernio'}
+            </Button>
+          </div>
+        )}
       </PageHeader>
+      {note && <p className="text-xs text-text-secondary -mt-2 text-right">{note}</p>}
 
-      {accounts.length === 0 ? (
+      {loading ? (
+        <DashboardSkeleton />
+      ) : allAccounts.length === 0 ? (
         <Card className="p-6 border-dashed bg-surface-muted">
           <div className="flex items-start gap-4">
             <div className="w-10 h-10 border border-amber-200 bg-amber-50 flex items-center justify-center text-amber-700 flex-shrink-0">
@@ -120,46 +95,26 @@ export function Analytics() {
             <div className="flex-1">
               <h3 className="font-semibold text-text mb-1">No connected accounts yet</h3>
               <p className="text-sm text-text-secondary mb-3">
-                Connect an account through Zernio in Integrations, then hit Refresh — it'll appear here with real reach, engagement and follower data.
+                Connect an account on the Social Media page, and its reach, engagement and follower numbers will show here.
               </p>
-              <Button onClick={() => navigate('/integrations')}>Set up integrations</Button>
+              <Button onClick={() => navigate('/social')}>Connect an account</Button>
             </div>
           </div>
         </Card>
       ) : (
         <>
-          {/* Filter bar */}
-          <div className="flex flex-wrap items-center gap-2">
-            <PillSelect value={platform} onChange={e => setPlatform(e.target.value)} className="w-32">
-              <option value="">All platforms</option>
-              <option value="instagram">Instagram</option>
-            </PillSelect>
-            {accounts.length > 1 && (
-              <PillSelect value={scopedAccount} onChange={e => setSelectedAccount(e.target.value)} className="w-40">
-                {accounts.map(a => (
-                  <option key={a.id} value={a.zernio_account_id}>{a.username ? `@${a.username}` : a.display_name}</option>
-                ))}
+          {platforms.length > 1 && (
+            <div className="flex flex-wrap items-center gap-2">
+              <PillSelect value={chosen} onChange={e => setPlatform(e.target.value)} className="w-36">
+                {platforms.map(p => <option key={p} value={p}>{PLATFORM_META[p]?.label || p}</option>)}
               </PillSelect>
-            )}
-            <PillSelect value={String(days)} onChange={e => setDays(Number(e.target.value))} className="w-32">
-              <option value="7">Last 7 days</option>
-              <option value="30">Last 30 days</option>
-              <option value="90">Last 90 days</option>
-            </PillSelect>
-            {dashLoading && <Spinner size="sm" />}
-            <div className="ml-auto text-[11px] text-text-tertiary text-right leading-tight">
-              {lastSync && <p>Last sync: {timeAgo(lastSync)}</p>}
             </div>
-          </div>
+          )}
 
-          {/* Keyed on having no response yet rather than on dashLoading. When
-              the accounts arrive there is one render where the account is
-              known but the dashboard fetch has not started, and dashLoading is
-              still false from the empty run before it — that frame painted all
-              zeros. A refetch (new date range) keeps the old numbers up. */}
-          {!dash && scopedAccount
-            ? <DashboardSkeleton />
-            : <AnalyticsDashboard dash={dash} days={days} accountId={scopedAccount} onRetry={handleSync} />}
+          {/* Keyed on the platform so the account picked inside does not
+              carry over to a platform it does not belong to. */}
+          <AccountAnalytics key={chosen} platform={chosen} accounts={scoped}
+            refreshable={false} reloadKey={reloadKey} />
 
           {/* Connected accounts — always shown regardless of dashboard state */}
           <Card className="overflow-hidden">
@@ -167,21 +122,19 @@ export function Analytics() {
               <IconBadge>{Icon.users}</IconBadge>
               <div>
                 <h3 className="font-semibold text-text text-sm">Connected accounts</h3>
-                <p className="text-xs text-text-tertiary mt-0.5">Managed in Zernio — reconnect there if a token expires</p>
+                <p className="text-xs text-text-tertiary mt-0.5">Managed on each platform's page — reconnect there if access expires</p>
               </div>
             </div>
             <div className="divide-y divide-border">
-              {accounts.map(a => {
-                // Picking a row re-scopes the dashboard, which only means
-                // something when there is another account to pick. With one,
-                // the click changed nothing but a small "Viewing" label, and
-                // read as a link that did not open.
-                const choosable = accounts.length > 1
-                const active = choosable && scopedAccount === a.zernio_account_id
+              {allAccounts.map(a => {
+                // Picking a row switches the platform shown above, which only
+                // means something when there is another platform to switch to.
+                const choosable = platforms.length > 1
+                const active = choosable && chosen === a.platform
                 const url = profileUrlOf(a)
                 return (
-                  <div key={a.id}
-                    onClick={choosable ? () => setSelectedAccount(a.zernio_account_id) : undefined}
+                  <div key={a.zernio_account_id}
+                    onClick={choosable ? () => setPlatform(a.platform) : undefined}
                     className={`flex items-center gap-4 px-5 py-3 transition-colors ${choosable ? 'cursor-pointer' : ''} ${active ? 'bg-amber-50/60' : 'hover:bg-surface-subtle'}`}>
                     <PlatformPill platform={a.platform} />
                     <div className="flex-1 min-w-0">
@@ -193,7 +146,9 @@ export function Analytics() {
                       ) : (
                         <p className="text-sm font-medium text-text truncate">{a.display_name || a.username || a.platform}</p>
                       )}
-                      {a.username && <p className="text-xs text-text-tertiary truncate">@{a.username}</p>}
+                      {a.account_type === 'organization'
+                        ? <p className="text-xs text-text-tertiary truncate">Company page</p>
+                        : a.username && <p className="text-xs text-text-tertiary truncate">@{a.username}</p>}
                     </div>
                     {/* null is "not counted yet", not zero. Zernio leaves
                         followersCount null until a follower snapshot lands,

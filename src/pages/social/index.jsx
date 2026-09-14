@@ -109,7 +109,7 @@ export function SocialOverview() {
 }
 
 // ─── Single Platform Page ─────────────────────────────────────────────────
-// The generic fallback. Instagram, TikTok and Snapchat each have their own
+// The generic fallback. Instagram, LinkedIn, TikTok and Snapchat each have their own
 // page; this renders any platform that does not, so a platform added to
 // PLATFORM_META before its page exists still shows something honest rather
 // than a blank route.

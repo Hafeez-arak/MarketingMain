@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   profileIdOf, ownedByProfile, normalizeAccount, qs, followerCountOf,
-  createZernio, ZernioError, CONNECT_SPECS, explainZernioError,
+  createZernio, ZernioError, CONNECT_SPECS, explainZernioError, syncAccountPosts,
 } from './_zernio.js'
 
 // ─── The bug that caused this rebuild, pinned ──────────────────────────────
@@ -466,5 +466,81 @@ describe('snapchat', () => {
     const err = new ZernioError('Snapchat integration is currently in beta.',
       { status: 403, code: 'PLATFORM_BETA_RESTRICTED' })
     expect(explainZernioError(err)).toMatch(/closed beta/i)
+  })
+})
+
+// ─── LinkedIn's account type lives in metadata ─────────────────────────────
+// Captured live 2026-09-14 from GET /v1/accounts for the ARAK Lighting page,
+// trimmed. The top-level field the old code read is null.
+const LIVE_LINKEDIN_PAGE = {
+  _id: '6aa7f2b1726ebfe037ea7013',
+  platform: 'linkedin',
+  username: 'ARAK Lighting',
+  displayName: 'ARAK Lighting',
+  isActive: true,
+  accountType: null,
+  followersCount: 4779,
+  profileUrl: 'https://www.linkedin.com/company/araklighting/',
+  profileId: { _id: PROFILE, name: 'arak_ws_00000000-0000-0000-0000-000000000001' },
+  metadata: {
+    accountType: 'organization',
+    organizationInfo: { id: '1', name: 'ARAK Lighting', vanityName: 'araklighting' },
+  },
+}
+
+describe('normalizeAccount on a live LinkedIn page', () => {
+  it('reads the account type from metadata, where Zernio actually puts it', () => {
+    expect(normalizeAccount(LIVE_LINKEDIN_PAGE).account_type).toBe('organization')
+  })
+
+  it('keeps the page URL and follower count', () => {
+    const a = normalizeAccount(LIVE_LINKEDIN_PAGE)
+    expect(a.profile_url).toBe('https://www.linkedin.com/company/araklighting/')
+    expect(a.followers_count).toBe(4779)
+  })
+})
+
+// ─── Refresh ───────────────────────────────────────────────────────────────
+describe('syncAccountPosts', () => {
+  const page = (id, extra = {}) => ({
+    zernio_account_id: id, platform: 'linkedin', display_name: 'ARAK Lighting',
+    is_active: true, needs_reconnection: false, ...extra,
+  })
+  const noRetry = fn => fn()
+  // The live answer, trimmed: postsFound 0 while three posts came back.
+  const LIVE_SYNC = { synced: { postsFound: 0, postsSynced: 0, skipped: false }, posts: [{}, {}, {}] }
+
+  it('asks Zernio to fetch each account from the platform now', async () => {
+    const calls = []
+    const z = { request: async (path, opts) => { calls.push({ path, opts }); return LIVE_SYNC } }
+    const [r] = await syncAccountPosts(z, [page('li1')], { retry: noRetry })
+    expect(calls).toEqual([{ path: 'posts/sync-external', opts: { method: 'POST', body: { accountId: 'li1' } } }])
+    expect(r).toMatchObject({ account_id: 'li1', ok: true, skipped: false, recent_posts: 3 })
+  })
+
+  it('reports a debounced call as skipped rather than as a refresh', async () => {
+    const z = { request: async () => ({ synced: { postsFound: 0, postsSynced: 0, skipped: true }, posts: [] }) }
+    const [r] = await syncAccountPosts(z, [page('li1')], { retry: noRetry })
+    expect(r.skipped).toBe(true)
+  })
+
+  it('does not ask for an account that needs reconnecting', async () => {
+    let called = false
+    const z = { request: async () => { called = true; return LIVE_SYNC } }
+    const [r] = await syncAccountPosts(z, [page('li1', { needs_reconnection: true })], { retry: noRetry })
+    expect(called).toBe(false)
+    expect(r).toMatchObject({ ok: false, needs_reconnection: true })
+  })
+
+  it('keeps going when one account fails', async () => {
+    const z = {
+      request: async (path, opts) => {
+        if (opts.body.accountId === 'bad') throw new ZernioError('Rate limit exceeded.', { status: 429 })
+        return LIVE_SYNC
+      },
+    }
+    const out = await syncAccountPosts(z, [page('bad'), page('li1')], { retry: noRetry })
+    expect(out[0]).toMatchObject({ ok: false, error: 'Rate limit exceeded.' })
+    expect(out[1]).toMatchObject({ ok: true, recent_posts: 3 })
   })
 })

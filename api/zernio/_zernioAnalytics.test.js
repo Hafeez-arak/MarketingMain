@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest'
-import { analyticsPlan, INSTAGRAM_INSIGHT_METRICS, retryRateLimited, ZernioError } from './_zernio.js'
+import {
+  analyticsPlan, INSTAGRAM_INSIGHT_METRICS, retryRateLimited, ZernioError,
+  LINKEDIN_PAGE_METRICS, LINKEDIN_SERIES_METRICS,
+} from './_zernio.js'
 
 // ─── Which Zernio reads one account's Analytics tab makes ──────────────────
 // Two things here fail silently if they are wrong. Zernio's analytics
@@ -110,5 +113,62 @@ describe('analyticsPlan metric toggles', () => {
     expect(metricsSupported).not.toContain('impressions')
     expect(metricsSupported).not.toContain('clicks')
     expect(metricsSupported).toContain('reach')
+  })
+})
+
+// ─── A LinkedIn company page ───────────────────────────────────────────────
+// Its page-level numbers come from a different read with a different limit, and
+// its per-post numbers are a different set — impressions and clicks, never
+// views or saves. Every value below was measured against the live ARAK
+// Lighting page on 2026-09-14.
+describe('analyticsPlan for a LinkedIn company page', () => {
+  const page = days => analyticsPlan({ platform: 'linkedin', accountId: 'li1', accountType: 'organization', days, now: NOW })
+
+  it('reads the page totals and a daily series, both scoped to the one account', () => {
+    const k = byKey(page(30))
+    expect(k.linkedinPage).toMatchObject({ path: 'analytics/linkedin/org-aggregate-analytics' })
+    expect(k.linkedinPage.query).toMatchObject({ accountId: 'li1', metricType: 'total_value', since: '2026-08-15', until: '2026-09-14' })
+    expect(k.linkedinSeries.query).toMatchObject({ accountId: 'li1', metricType: 'time_series' })
+  })
+
+  // 89 days was refused live ("Date range cannot exceed 88 days"); 88 answered.
+  it('caps the page window at 88 days', () => {
+    const plan = page(90)
+    expect(byKey(plan).linkedinPage.query.since).toBe('2026-06-18')
+    expect(plan.insightsFrom).toBe('2026-06-18')
+    expect(plan.fromDate).toBe('2026-06-16')
+  })
+
+  // LinkedIn refuses page views as a series, so asking for them there fails the read.
+  it('asks for page views in the totals only', () => {
+    expect(LINKEDIN_PAGE_METRICS).toContain('page_views_total')
+    expect(LINKEDIN_SERIES_METRICS.some(m => m.startsWith('page_views'))).toBe(false)
+    expect(byKey(page(30)).linkedinSeries.query.metrics.split(',')).toEqual(LINKEDIN_SERIES_METRICS)
+  })
+
+  it('offers impressions and clicks, and neither views nor saves', () => {
+    const { metricsSupported } = page(30)
+    expect(metricsSupported).toEqual(expect.arrayContaining(['impressions', 'clicks', 'reach']))
+    expect(metricsSupported).not.toContain('views')
+    expect(metricsSupported).not.toContain('saves')
+  })
+
+  it('treats an unrecorded account type as a page', () => {
+    const plan = analyticsPlan({ platform: 'linkedin', accountId: 'li1', days: 30, now: NOW })
+    expect(plan.requests.map(r => r.key)).toContain('linkedinPage')
+  })
+
+  it('makes no page reads for a personal profile, which Zernio refuses', () => {
+    const plan = analyticsPlan({ platform: 'linkedin', accountId: 'li2', accountType: 'personal', days: 30, now: NOW })
+    const keys = plan.requests.map(r => r.key)
+    expect(keys).not.toContain('linkedinPage')
+    expect(keys).not.toContain('linkedinSeries')
+    expect(plan.insightsFrom).toBeNull()
+  })
+
+  it('makes none of Instagram\'s reads', () => {
+    const keys = page(30).requests.map(r => r.key)
+    expect(keys).not.toContain('insights')
+    expect(keys).not.toContain('followerHistory')
   })
 })
