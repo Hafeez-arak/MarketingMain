@@ -3,7 +3,11 @@ import { loadBrandContext } from './_context.js'
 import { findTool, isFree, ALL_TOOLS, WRITE_TOOLS, WEB_TOOLS } from '../../src/lib/agent/tools.js'
 import { searchWeb, readPage } from './_web.js'
 import { WRITE_EXECUTORS, checkOwnership, isWriteTool } from './_writeTools.js'
-import { ourPerformance, competitorBoard } from '../../src/lib/agent/aggregate.js'
+import { ourPerformance, competitorBoard, indexAnalytics, analyticsFor } from '../../src/lib/agent/aggregate.js'
+import { ownChannels, priorPeriod } from '../../src/lib/agent/ownChannels.js'
+import {
+  readAccounts, readOwnPosts, readAnalyticsFor, readAnalyticsOverview, syncHealth,
+} from './_ownData.js'
 
 // ─── Running a tool ────────────────────────────────────────────────────────
 // The executors behind the definitions in src/lib/agent/tools.js.
@@ -141,23 +145,101 @@ async function getCompetitorMetrics(workspaceId, args) {
   return competitorBoard(rows || [])
 }
 
+/**
+ * Our own account-level numbers, on every platform — the Zernio side.
+ *
+ * The gap this closes: the assistant had no tool that could see a connected
+ * account at all. Asked to "check the analytics from Zernio" it searched the
+ * competitor watchlist, found no rival by that name, and truthfully reported
+ * that it could not find Zernio — while the workspace's own Instagram account,
+ * synced by Zernio ninety minutes earlier, sat in `social_accounts` with no
+ * tool pointing at it.
+ *
+ * Reuses ownChannels, which the research run already reports from. Same
+ * function, same four states, same refusal to collapse "not connected",
+ * "published nothing", "published but unsynced" and "measured" into one shrug
+ * — so the answer a person gets in chat matches the one in their brief.
+ */
+async function getChannelAnalytics(workspaceId, args) {
+  const days = clamp(args?.days, 30, 365)
+  const platform = String(args?.platform || '').trim().toLowerCase()
+  const end = new Date()
+  const start = new Date(end.getTime() - days * 86_400_000)
+  const period = { start: start.toISOString(), end: end.toISOString(), days }
+  const prior = priorPeriod(period)
+
+  // Accounts UNFILTERED by is_active. A disconnected account is very often the
+  // whole answer to "why can you not see my numbers", and hiding it here would
+  // make that answer unreachable. ownChannels skips inactive rows itself.
+  const accounts = await readAccounts(workspaceId)
+  const posts = await readOwnPosts(workspaceId, {
+    from: prior?.start || period.start,
+    platform,
+  })
+  const analytics = await readAnalyticsFor(workspaceId, posts)
+  const overview = await readAnalyticsOverview(workspaceId)
+
+  const channels = ownChannels({ accounts, posts, analytics, period, prior })
+
+  // Orphans: rows that exist but attach to no post in either table. Counted
+  // rather than silently dropped — see readAnalyticsOverview.
+  const index = indexAnalytics(analytics)
+  const attached = new Set()
+  for (const p of posts) {
+    for (const row of analyticsFor(index, p) || []) attached.add(row.post_id || row.zernio_post_id)
+  }
+  const orphaned = (overview || []).filter(
+    a => !attached.has(a.post_id) && !attached.has(a.zernio_post_id),
+  )
+
+  return {
+    ...channels,
+    accounts: (accounts || []).map(a => ({
+      platform: a.platform,
+      username: a.username,
+      display_name: a.display_name,
+      is_active: a.is_active !== false,
+      needs_reconnection: a.needs_reconnection === true,
+      followers: a.followers_count,
+      last_synced_at: a.last_synced_at,
+      connected_at: a.connected_at,
+      provider: a.publish_provider,
+    })),
+    sync: {
+      ...syncHealth(accounts, analytics),
+      // Stated separately from `analytics_rows`, which counts only what
+      // attached. These two differing is the signal.
+      rows_in_workspace: (overview || []).length,
+      orphaned_rows: orphaned.length,
+      orphan_note: orphaned.length
+        ? `${orphaned.length} analytics row${orphaned.length === 1 ? '' : 's'} exist in this ` +
+          'workspace but belong to posts that no longer exist in either posts table. They are ' +
+          'real measurements of deleted posts — report them as history that cannot be attributed, ' +
+          'never as current performance.'
+        : '',
+    },
+    // Named so the model cannot mistake the provider for a competitor even if
+    // it skipped the tool description.
+    provider_note:
+      'Zernio is this product\'s publishing provider, not a competitor. These are OUR numbers, ' +
+      'read from our own tables, which Zernio\'s sync writes into on a daily cadence.',
+  }
+}
+
 async function getOurPerformance(workspaceId, args) {
   const cutoff = since(args?.days, 90)
-  const platform = args?.platform ? `&platform=eq.${encodeURIComponent(args.platform)}` : ''
-  const posts = await db(
-    `generated_posts?${ws(workspaceId)}${platform}&created_at=gte.${cutoff}` +
-    `&order=created_at.desc&limit=${CAPS.posts}` +
-    `&select=id,platform,format,media_type,post_kind,topic,status,publish_status,` +
-    `published_at,scheduled_date`,
-  )
-  const ids = (posts || []).map(p => p.id).filter(Boolean)
-  const analytics = ids.length
-    ? await db(
-        `post_analytics?${ws(workspaceId)}&post_id=in.(${ids.join(',')})` +
-        `&select=post_id,metric_date,likes,comments,shares,saves,reach,views`,
-      )
-    : []
-  return ourPerformance(posts || [], analytics || [])
+  // Through the shared reader: both posts tables, and analytics matched under
+  // EITHER our post id or Zernio's. The previous version read `generated_posts`
+  // alone and joined on `post_id` alone, which returned zero analytics rows for
+  // this workspace — so the assistant reported "nothing measured" about posts
+  // whose numbers were sitting one table away.
+  const posts = await readOwnPosts(workspaceId, {
+    from: cutoff,
+    platform: String(args?.platform || '').trim().toLowerCase(),
+    limit: CAPS.posts,
+  })
+  const analytics = await readAnalyticsFor(workspaceId, posts)
+  return ourPerformance(posts, analytics)
 }
 
 async function getPosts(workspaceId, args) {
@@ -175,26 +257,21 @@ async function getPosts(workspaceId, args) {
     `generated_posts?${parts.join('&')}&order=created_at.desc&limit=${limit}` +
     `&select=id,platform,caption,caption_ar,caption_en,hashtags,topic,format,media_type,` +
     `post_kind,status,publish_status,published_at,scheduled_date,publish_time,` +
-    `platform_post_url,plan_id,created_at`,
+    `platform_post_url,plan_id,created_at,zernio_post_id`,
   )
-  const ids = (posts || []).map(p => p.id).filter(Boolean)
-  const analytics = ids.length
-    ? await db(
-        `post_analytics?${ws(workspaceId)}&post_id=in.(${ids.join(',')})` +
-        `&select=post_id,metric_date,likes,comments,shares,saves,reach,views,impressions`,
-      )
-    : []
-  const byPost = {}
-  for (const a of analytics || []) (byPost[a.post_id] ||= []).push(a)
+  // Matched under either id — a metric row is keyed by Zernio's post id, and
+  // joining on ours alone returned nothing for this workspace. See
+  // indexAnalytics.
+  const analytics = await readAnalyticsFor(workspaceId, posts || [])
+  const byPost = indexAnalytics(analytics)
 
   return {
-    posts: (posts || []).map(p => ({
-      ...p,
+    posts: (posts || []).map(p => {
       // Attached rather than left for a second call: "why did this flop" needs
       // the caption and the numbers in the same breath.
-      analytics: byPost[p.id] || [],
-      has_analytics: Boolean(byPost[p.id]?.length),
-    })),
+      const rows = analyticsFor(byPost, p) || []
+      return { ...p, analytics: rows, has_analytics: rows.length > 0 }
+    }),
     count: (posts || []).length,
     note: (posts || []).length ? '' : 'No posts match that filter in this workspace.',
   }
@@ -264,6 +341,7 @@ const EXECUTORS = {
   get_memory:             getMemory,
   get_prior_research:     getPriorResearch,
   get_competitor_metrics: getCompetitorMetrics,
+  get_channel_analytics:  getChannelAnalytics,
   get_our_performance:    getOurPerformance,
   get_posts:              getPosts,
   get_schedule:           getSchedule,

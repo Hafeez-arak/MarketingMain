@@ -26,7 +26,7 @@
 // against.
 
 import { LIVE_PLATFORMS, PLATFORM_META } from '../utils.js'
-import { engagementOf } from './aggregate.js'
+import { engagementOf, indexAnalytics, analyticsFor } from './aggregate.js'
 
 /** Below this many measured posts, a per-platform average is quoted but flagged. */
 export const WEAK_SAMPLE = 5
@@ -81,6 +81,26 @@ export function engagementIn(rows) {
   return stats ? stats.engagement : null
 }
 
+/**
+ * Posts that carry no date at all, so no window can contain them.
+ *
+ * Not a hypothetical. Checked live on 2026-09-14: this workspace's one
+ * published Instagram post has `status: "published"`, `publish_status:
+ * "publishing"`, and NULL for both `published_at` and `scheduled_date` —
+ * Zernio has taken it and the timestamp lands when the publish settles.
+ *
+ * `postsIn` correctly refuses to place it in a week, which made the platform
+ * read `silent` and the brief say "nothing went out on Instagram this period"
+ * about a post that was going out at that moment. Counting these separately is
+ * what lets the agent say the true thing instead: something is in flight, and
+ * it has no numbers yet because it has not finished publishing.
+ */
+export function undatedIn(posts) {
+  return (posts || []).filter(p =>
+    !Number.isFinite(Date.parse(p?.published_at || '')) &&
+    !Number.isFinite(Date.parse(p?.scheduled_date || '')))
+}
+
 /** Keep only the posts published inside [start, end). */
 export function postsIn(posts, period) {
   const start = Date.parse(period?.start || '')
@@ -95,14 +115,17 @@ export function postsIn(posts, period) {
   })
 }
 
-/** post_analytics rows grouped by the post they belong to. */
+/**
+ * post_analytics rows grouped by the post they belong to.
+ *
+ * DELEGATES to indexAnalytics, for the same reason engagementIn delegates to
+ * engagementOf: the rule about which id a metric row is keyed under — ours or
+ * Zernio's — is a rule, and a second copy of it is a copy that will eventually
+ * disagree. The original version here keyed on `post_id` alone and dropped
+ * every row the sync had written under the provider's id.
+ */
 export function analyticsByPost(analytics) {
-  const by = {}
-  for (const a of analytics || []) {
-    const id = a?.post_id
-    if (id) (by[id] ||= []).push(a)
-  }
-  return by
+  return indexAnalytics(analytics)
 }
 
 /**
@@ -119,7 +142,7 @@ export function windowStats(posts, byPostId) {
   let best = null
 
   for (const p of posts || []) {
-    const e = engagementIn(byPostId?.[p.id])
+    const e = engagementIn(analyticsFor(byPostId, p))
     if (e === null) continue
     measured += 1
     engagement += e
@@ -230,6 +253,7 @@ export function ownChannels({ accounts = [], posts = [], analytics = [], period,
     const prev = prior ? windowStats(postsIn(mine, prior), byPostId) : null
     const state = stateOf({ connected: !!account, posts: now.posts, measured: now.measured })
     const label = PLATFORM_META[platform]?.label || platform
+    const undated = undatedIn(mine).length
 
     return {
       platform,
@@ -239,6 +263,10 @@ export function ownChannels({ accounts = [], posts = [], analytics = [], period,
       followers: num(account?.followers_count),
       needs_reconnection: account?.needs_reconnection === true,
       ...now,
+      // Posts that exist but sit in no window, because publishing has not
+      // settled and stamped them yet. Reported as its own number so it can
+      // never be read as either "we posted" or "we did not".
+      undated,
       // Quoted, but flagged. The codebase's existing instinct is to show a
       // thin number with a warning rather than withhold it — withholding
       // teaches people the page is broken, flagging teaches them to wait.
@@ -248,7 +276,14 @@ export function ownChannels({ accounts = [], posts = [], analytics = [], period,
       avg_engagement_prev: prev?.avg_engagement ?? null,
       change: changeFor(now, prev),
       state,
-      note: NOTES[state](label),
+      // "Nothing went out" is only true if nothing is on its way out. An
+      // in-flight post makes the stock silent note a confident falsehood, so
+      // it is replaced rather than appended to.
+      note: state === 'silent' && undated > 0
+        ? `${undated} ${label} post${undated === 1 ? ' is' : 's are'} mid-publish — accepted by ` +
+          'Zernio but not yet stamped with a publish time, so nothing can be placed in this ' +
+          'period or measured yet. This is publishing in progress, not a quiet week.'
+        : NOTES[state](label),
     }
   })
 
@@ -306,6 +341,25 @@ export function ownChannelFindings(own) {
     }
 
     if (p.state === 'silent') {
+      // An in-flight post is not a quiet week, and reporting it as one sends
+      // someone to schedule content they have already published.
+      if (p.undated > 0) {
+        findings.push({
+          headline: p.undated === 1
+            ? `A ${p.label} post is mid-publish and has no timestamp yet.`
+            : `${p.undated} ${p.label} posts are mid-publish and have no timestamps yet.`,
+          detail: 'Accepted by Zernio but not yet stamped with a publish time, so they fall in no ' +
+            'reporting period and have no analytics. Nothing is wrong unless this persists — ' +
+            'the timestamp lands when the publish settles and the daily sync runs.',
+          confidence: 1,
+          novelty: 'new',
+          suggested_action: `Check back after the next sync. If ${p.label} posts stay unstamped for ` +
+            'more than a day, the publish is stuck rather than slow.',
+          evidence: { platform: p.platform, undated: p.undated, state: p.state },
+        })
+        continue
+      }
+
       findings.push({
         headline: `Nothing went out on ${p.label} this period.`,
         detail: `The account @${p.username || p.label} is connected${p.needs_reconnection ? ' but is flagged as needing reconnection' : ''} and published no posts in this window.`,

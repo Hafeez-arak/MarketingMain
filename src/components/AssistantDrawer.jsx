@@ -6,6 +6,7 @@ import { describePage, describeContextLabel, suggestionsFor } from '../lib/pageC
 import { Spinner } from './ui/index'
 import PastConversations from './PastConversations'
 import { AgentMarkdown } from './AgentMarkdown'
+import AskInput from './AskInput'
 
 // ─── The assistant, on every page ──────────────────────────────────────────
 // AGENT.md §5a. A drawer that opens anywhere and knows what you are looking
@@ -180,9 +181,12 @@ export function AssistantDrawer() {
               <div ref={bottom} />
             </div>
 
+            {/* items-end keeps the history and Ask buttons pinned to the bottom
+                of a composer that has grown to several lines, rather than
+                floating up the middle of it. */}
             <form
               onSubmit={e => { e.preventDefault(); send() }}
-              className="p-3 border-t border-slate-100 flex gap-2"
+              className="p-3 border-t border-slate-100 flex gap-2 items-end"
             >
               {/* The same way back the /agent page has. The popup portals to
                   the body rather than into this panel, so it is the same size
@@ -193,20 +197,19 @@ export function AssistantDrawer() {
                 onDeleteActive={reset}
                 onOpenChange={setHistoryOpen}
               />
-              <input
-                ref={input}
+              <AskInput
+                inputRef={input}
                 value={question}
-                onChange={e => setQuestion(e.target.value)}
+                onChange={setQuestion}
+                onSubmit={send}
                 placeholder={contextLabel ? `Ask about ${contextLabel}…` : 'Ask anything…'}
                 disabled={!ready}
-                className="flex-1 text-sm px-3 py-2 rounded-lg border border-slate-200
-                           focus:outline-none focus:ring-1 focus:ring-slate-400 disabled:bg-slate-50"
               />
               {busy ? (
                 <button
                   type="button"
                   onClick={stop}
-                  className="text-xs px-3 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"
+                  className="text-xs px-3 py-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"
                 >
                   Stop
                 </button>

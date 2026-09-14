@@ -120,7 +120,23 @@ unchanged. This is the full belt, with the new ones marked.
 | `get_memory` | every rule in every status, so nothing is re-proposed |
 | `get_prior_research` | last N run headlines + open agenda questions |
 | `get_our_performance` | our pillar/format/weekday breakdown, with sample sizes |
+| `get_channel_analytics` | our own account-level numbers per platform — the Zernio side |
 | `get_competitor_metrics` | the Stage-0 delta table |
+
+`get_channel_analytics` is the answer to "how are we doing", as distinct from
+`get_our_performance`'s "what kind of post works". It exists because the
+assistant previously had no tool that could see a connected account at all:
+asked to check the Zernio analytics it searched the competitor watchlist, found
+no rival by that name, and said so — while the workspace's own Instagram
+account sat in `social_accounts` with nothing pointing at it.
+
+Zernio is the publishing provider, never a competitor. It syncs each post's
+numbers into `post_analytics`, keyed by **its** post id, with `post_id` as a
+pointer at whichever of our tables the post came from. Every reader joined on
+`post_id` alone and so returned nothing the moment a post changed tables —
+`indexAnalytics` / `analyticsFor` in `aggregate.js` now match on either id, and
+`api/agent/_ownData.js` is the single reader both the run and the chat use, so
+the two cannot answer the same question differently again.
 
 **Read — the operation (new)**
 

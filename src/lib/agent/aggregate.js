@@ -46,6 +46,58 @@ function round(value, places = 2) {
 // ─── Our own performance ───────────────────────────────────────────────────
 
 /**
+ * Index post_analytics rows so a post can find its own, under EITHER id.
+ *
+ * ── WHY TWO KEYS ──
+ *
+ * Our analytics do not originate with us. They come from Zernio, which
+ * publishes the post and then syncs the platform's numbers back. A
+ * `post_analytics` row is therefore identified by the PROVIDER's id —
+ * `zernio_post_id` — and carries `post_id` and `post_table` alongside it as a
+ * pointer at whichever of our tables the post came from.
+ *
+ * Keying only on `post_id` looked correct and was quietly wrong. Verified live
+ * on 2026-09-14: every `post_analytics` row in this workspace carries
+ * `post_table: "instagram_generated_posts"` and a `post_id` that exists in
+ * that legacy table and NOT in `generated_posts`. A join written as
+ * `post_analytics.post_id IN (generated_posts ids)` therefore returned zero
+ * rows, and the assistant answered "we have no analytics" about a brand whose
+ * analytics were sitting in the table it had just read.
+ *
+ * Indexing both keys matches a post by whichever id the sync happened to
+ * write, which is the only join that survives a post moving between tables.
+ */
+export function indexAnalytics(analytics) {
+  const by = {}
+  for (const a of analytics || []) {
+    // Both keys point at the SAME row objects, so nothing is duplicated into
+    // an average: every consumer goes through `analyticsFor`, which returns
+    // exactly one of the two lists, and `engagementOf` takes newest-wins
+    // rather than summing in any case.
+    for (const key of [a?.post_id, a?.zernio_post_id]) {
+      if (key) (by[key] ||= []).push(a)
+    }
+  }
+  return by
+}
+
+/**
+ * The analytics rows belonging to one post, or null when it has none.
+ *
+ * Our own id wins when both match. `zernio_post_id` is the provider's, and an
+ * empty string is a real stored value in `generated_posts` — the column is
+ * written as '' for a post that was never sent to Zernio, which would
+ * otherwise index every unpublished post under one shared key.
+ */
+export function analyticsFor(index, post) {
+  if (!index || !post) return null
+  const mine = post.id ? index[post.id] : null
+  if (mine?.length) return mine
+  const theirs = post.zernio_post_id ? index[post.zernio_post_id] : null
+  return theirs?.length ? theirs : null
+}
+
+/**
  * Fold post analytics into one engagement number per post.
  *
  * Interactions, not impressions: reach depends on how far the platform chose
@@ -100,7 +152,8 @@ export function engagementOf(analyticsRows) {
  * emptiness rather than hiding it behind an average of one.
  *
  * @param {Array} posts     generated_posts rows
- * @param {object} byPostId post_analytics rows keyed by post id
+ * @param {object} byPostId an `indexAnalytics` index — keyed by BOTH our post
+ *                          id and Zernio's, resolved through `analyticsFor`
  * @param {(post:object)=>string} keyOf  what to group by
  */
 export function performanceBy(posts, byPostId, keyOf) {
@@ -110,7 +163,7 @@ export function performanceBy(posts, byPostId, keyOf) {
     if (!groups.has(key)) groups.set(key, { key, posts: 0, measured: 0, engagement: 0 })
     const g = groups.get(key)
     g.posts += 1
-    const stats = engagementOf(byPostId?.[post.id])
+    const stats = engagementOf(analyticsFor(byPostId, post))
     if (stats) { g.measured += 1; g.engagement += stats.engagement }
   }
   return [...groups.values()]
@@ -135,13 +188,11 @@ export function performanceBy(posts, byPostId, keyOf) {
  */
 export function ourPerformance(posts, analytics, { now = new Date() } = {}) {
   const rows = posts || []
-  const byPostId = {}
-  for (const a of analytics || []) {
-    const pid = a?.post_id
-    if (pid) (byPostId[pid] ||= []).push(a)
-  }
+  // Dual-keyed: a metric row reaches its post under our id OR Zernio's. See
+  // indexAnalytics — joining on post_id alone is what made this return zero.
+  const byPostId = indexAnalytics(analytics)
 
-  const measured = rows.filter(p => engagementOf(byPostId[p.id]))
+  const measured = rows.filter(p => engagementOf(analyticsFor(byPostId, p)))
   const weekdays = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
 
   return {
