@@ -95,7 +95,11 @@ export const WRITE_TOOLS = [
     description:
       'Write a draft post into the composer for review. It lands as a draft and is NOT ' +
       'scheduled and NOT published — you have no ability to do either. Follow the brand\'s ' +
-      'active rules and say in your reply which ones you applied.',
+      'active rules and say in your reply which ones you applied. Write the caption the way ' +
+      'a person at this brand would type it: no em dashes or en dashes anywhere in it (use a ' +
+      'comma, a full stop or a new line), no "it\'s not just X, it\'s Y", no Elevate / Unlock / ' +
+      'Discover / Transform, plain words over grand ones, and one concrete detail instead of ' +
+      'three adjectives.',
     input_schema: {
       type: 'object',
       additionalProperties: false,
@@ -162,6 +166,25 @@ export const AGENT_POST_SOURCE = 'generated'
 
 /** generated_posts.platform — CHECK. A platform outside this list is a 400. */
 export const POST_PLATFORMS = ['instagram', 'tiktok', 'snapchat', 'linkedin']
+
+// ─── The one punctuation mark that gives the machine away ──────────────────
+// The same rule the caption workflows enforce (n8n/gen_workflows.py,
+// HUMAN_VOICE_RULES): a caption goes out under the brand's name, and an em
+// dash in it is the tell. The tool description asks for none; this is why a
+// caption never has one anyway. A line that is nothing but dashes is left
+// alone — that is the divider between the Arabic and English halves of a
+// bilingual caption, not punctuation.
+export function deDash(text) {
+  return String(text == null ? '' : text).split('\n').map(line => {
+    if (/^\s*[—–]+\s*$/.test(line)) return line
+    const sep = /[\u0600-\u06FF]/.test(line) ? '، ' : ', '
+    return line
+      .replace(/^(\s*)[—–]+\s*/, '$1')
+      .replace(/\s*[—–]+\s*$/, '')
+      .replace(/\s*[—–]+\s*/g, sep)
+      .replace(/([,،;:!?.…])\s*[,،]\s+/g, '$1 ')
+  }).join('\n')
+}
 
 /** brand_memory.scope — CHECK. Must match the tool's enum exactly. */
 export const MEMORY_SCOPES = ['plan', 'caption', 'image', 'timing', 'competitor', 'trend', 'global']

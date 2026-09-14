@@ -144,6 +144,58 @@ NO_INVENTED_FACTS = (
 # One string, since almost every prompt wants both.
 PROMPT_RULES = PRECEDENCE_RULES + "\n\n" + NO_INVENTED_FACTS
 
+# Captions go out under the brand's name, and the thing that gives away a
+# machine wrote them is always the same short list of habits, the em dash
+# above all. This is deliberately a separate block from PROMPT_RULES: it
+# belongs only to prompts that write PUBLISHED copy. A creative brief or an
+# image prompt is read by staff, so its voice does not matter.
+#
+# The rules themselves are written without a single dash on purpose. A model
+# picks up punctuation habits from the prompt it is reading, so a ban typed
+# with an em dash in it is a ban that loses.
+HUMAN_VOICE_RULES = (
+    "HOW THE COPY MUST SOUND: like a real person at this brand typed it, not "
+    "like a model wrote marketing copy.\n"
+    "1. NEVER use an em dash (\u2014) or an en dash (\u2013). Not in the English, "
+    "not in the Arabic, not once. Where you would reach for one, use a comma, "
+    "a full stop, or start a new line. These instructions use dashes freely; "
+    "the caption you write must not.\n"
+    "2. Skip the tells. No \"it's not just X, it's Y\". No Elevate, Unlock, "
+    "Discover, Transform, Redefine, Experience, Seamless, Effortless, "
+    "Testament, Nestled. No \"in a world where\", no \"say goodbye to\", no "
+    "\"here's the thing\". No three-adjective chants (\"bold, bright, "
+    "beautiful\") and no stacked one-word fragments for drama.\n"
+    "3. Plain words beat grand ones: \"light\" not \"luminance\", \"we built\" not "
+    "\"we meticulously crafted\". One concrete detail beats three adjectives. A "
+    "post with nothing to brag about can simply say what the thing is.\n"
+    "4. Vary the rhythm the way people actually type. A short line, then a "
+    "longer one. Contractions in English. Saudi Arabic that sounds spoken, "
+    "never a press release run through a translator.\n"
+    "5. Ordinary is allowed. If it reads like someone wrote it in two minutes "
+    "and meant it, it is right."
+)
+
+# The prompt half of the same rule is obeyed most of the time, not all of it,
+# and one stray em dash is exactly what the marketer notices. So the text is
+# cleaned on the way out as well, in every workflow that returns caption copy.
+#
+# A line that is nothing but dashes is left alone: that is a divider, and the
+# bilingual separator stored between the Arabic and English halves of a
+# caption is exactly that shape.
+DE_DASH_JS = r"""
+function deDash(text){
+  return String(text == null ? '' : text).split('\n').map(function(line){
+    if (/^\s*[\u2014\u2013]+\s*$/.test(line)) return line;
+    var sep = /[\u0600-\u06FF]/.test(line) ? '\u060c ' : ', ';
+    return line
+      .replace(/^(\s*)[\u2014\u2013]+\s*/, '$1')            // opening a line: a bullet, drop it
+      .replace(/\s*[\u2014\u2013]+\s*$/, '')                 // closing a line: nothing left to join
+      .replace(/\s*[\u2014\u2013]+\s*/g, sep)                // anywhere else: it was punctuation
+      .replace(/([,\u060c;:!?.\u2026])\s*[,\u060c]\s+/g, '$1 '); // never double up the punctuation
+  }).join('\n');
+}
+"""
+
 
 def js_str(text: str) -> str:
     """Embed a Python string as a JS template-literal-safe literal."""
@@ -163,10 +215,17 @@ def _with_brand(js: str) -> str:
     the surrounding `${ }` is already there. Emitting it as a JSON literal
     rather than raw text means the rules cannot terminate the template or be
     re-parsed as JS, whatever punctuation they contain.
+    `${__CAPTION_VOICE__}` works the same way, but only the two prompts that
+    write published captions use it. `__DE_DASH_JS__` is the exception: it is
+    a function definition, so it is spliced in as raw JS, not as a string.
     """
     return (
         BRAND_PERSONA_JS + "\n" + js
-    ).replace('__PROMPT_RULES__', js_str(PROMPT_RULES))
+    ).replace(
+        '__PROMPT_RULES__', js_str(PROMPT_RULES)
+    ).replace(
+        '__CAPTION_VOICE__', js_str(HUMAN_VOICE_RULES)
+    ).replace('__DE_DASH_JS__', DE_DASH_JS)
 
 
 # ============================================================
@@ -275,6 +334,7 @@ function safeJson(t){
   }
 }
 
+__DE_DASH_JS__
 const body     = ($input.first().json.body) || {};
 const mode     = body.mode === 'piece' ? 'piece' : 'variants';
 const platform = 'instagram';
@@ -313,6 +373,8 @@ BRAND CONTEXT:
 ${ctx.instructions || 'No brand profile has been filled in yet — work only from the post facts below and make no claims about the company.'}
 
 LANGUAGE: ${langRule}
+
+${__CAPTION_VOICE__}
 
 ${__PROMPT_RULES__}`;
 
@@ -380,14 +442,15 @@ try {
   const textBlock = resp.content.find(b => b.type === 'text');
   const parsed = safeJson(textBlock && textBlock.text);
   if (mode === 'variants') {
-    const variants = Array.isArray(parsed.variants) ? parsed.variants.slice(0, 3) : [];
+    const variants = (Array.isArray(parsed.variants) ? parsed.variants.slice(0, 3) : [])
+      .map(v => Object.assign({}, v, { caption_ar: deDash(v && v.caption_ar), caption_en: deDash(v && v.caption_en) }));
     if (!variants.length) throw new Error('No variants returned by the model.');
     return [{ json: { ok: true, mode, platform, variants } }];
   } else {
     return [{ json: { ok: true, mode, piece,
-      value:    parsed.value    || '',
-      value_ar: parsed.value_ar || '',
-      value_en: parsed.value_en || '' } }];
+      value:    deDash(parsed.value),
+      value_ar: deDash(parsed.value_ar),
+      value_en: deDash(parsed.value_en) } }];
   }
 } catch (err) {
   return [{ json: { ok: false, error: (err && err.message) ? err.message : String(err) } }];
@@ -608,6 +671,7 @@ function safeJson(t){
   return {};
 }
 
+__DE_DASH_JS__
 const body     = ($input.first().json.body) || {};
 const planIdeaId = body.plan_idea_id || '';
 const platform = 'instagram';
@@ -650,6 +714,8 @@ BRAND CONTEXT:
 ${instructions || 'No brand profile has been filled in yet — work only from the post facts below and make no claims about the company.'}
 
 LANGUAGE: ${langRule}
+
+${__CAPTION_VOICE__}
 
 ${__PROMPT_RULES__}`;
 
@@ -712,7 +778,8 @@ try {
   const textBlock = resp.content.find(b => b.type === 'text');
   const replyText = String((textBlock && textBlock.text) || '');
   const parsed = safeJson(replyText);
-  const captionOptions = wantsCaption && Array.isArray(parsed.caption_options) ? parsed.caption_options.slice(0, 3) : [];
+  const captionOptions = (wantsCaption && Array.isArray(parsed.caption_options) ? parsed.caption_options.slice(0, 3) : [])
+    .map(o => Object.assign({}, o, { caption_ar: deDash(o && o.caption_ar), caption_en: deDash(o && o.caption_en) }));
   const mediaPromptOptions = wantsMedia && Array.isArray(parsed.media_prompt_options) ? parsed.media_prompt_options.slice(0, 3) : [];
   // Say what came back. This workflow keeps no copy of the reply, so the
   // error on the row is the only place a failed draft can be diagnosed from.

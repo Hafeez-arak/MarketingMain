@@ -1,7 +1,7 @@
 import { db } from './_supabase.js'
 import {
   OWNERSHIP_CHECKS, WRITE_TARGETS, POST_PLATFORMS,
-  AGENT_MEMORY_SOURCE, AGENT_POST_SOURCE,
+  AGENT_MEMORY_SOURCE, AGENT_POST_SOURCE, deDash,
 } from '../../src/lib/agent/writeTools.js'
 
 // ─── Executing a write ─────────────────────────────────────────────────────
@@ -153,7 +153,10 @@ async function addAgendaItem(workspaceId, args) {
 
 async function draftPost(workspaceId, args) {
   const platform = clip(args.platform, 40).trim().toLowerCase()
-  const caption = clip(args.caption, 4000)
+  // Cleaned, not just asked for in the tool description: a model told not to
+  // use an em dash still writes one every few captions, and this one goes
+  // straight into the composer a person sends from.
+  const caption = deDash(clip(args.caption, 4000))
   if (!platform) return { error: 'A post needs a platform.' }
   // Checked here rather than left to Postgres: the model can recover from
   // "instagram, tiktok or snapchat" and cannot recover from a 23514.
@@ -169,7 +172,7 @@ async function draftPost(workspaceId, args) {
       workspace_id: workspaceId,
       platform,
       caption,
-      caption_ar: clip(args.caption_ar, 4000),
+      caption_ar: deDash(clip(args.caption_ar, 4000)),
       hashtags: clip(args.hashtags, 1000),
       topic: clip(args.topic, 300),
       format: clip(args.format, 60),
