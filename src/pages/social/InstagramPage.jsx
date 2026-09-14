@@ -4,6 +4,7 @@ import { useApp, actions } from '../../store/app'
 import { useAuth } from '../../store/auth'
 import { ComposerHost } from '../../components/composer/ComposerHost'
 import { ConnectAccounts } from '../../components/social/ConnectAccounts'
+import { AccountAnalytics } from '../../components/social/AccountAnalytics'
 import { useConnectedAccounts } from '../../lib/useConnectedAccounts'
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from '../../lib/supabaseClient'
 import { Card, Badge, Spinner, PostImage } from '../../components/ui/index'
@@ -201,6 +202,12 @@ export function InstagramPage() {
     return () => { clearTimeout(first); clearInterval(interval) }
   }, [hasPublishing, activeWorkspaceId]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Opened straight on Analytics with ?tab=analytics. Read once rather than
+  // through the router: this page's URL also carries Zernio's OAuth callback
+  // params, and nothing here should be rewriting them.
+  const [tab, setTab] = useState(() =>
+    new URLSearchParams(window.location.search).get('tab') === 'analytics' ? 'analytics' : 'posts')
+
   // A post just sent gets the full set of status checks again.
   function handlePosted() {
     zernioSync.current = { at: 0, runs: 0 }
@@ -240,6 +247,21 @@ export function InstagramPage() {
         </div>
       </div>
 
+      {/* Posts | Analytics. Analytics is one connected account's numbers —
+          the same graphs as /analytics, scoped to that account. */}
+      <div className="flex items-center gap-1 border-b border-border">
+        {[{ key: 'posts', label: 'Posts' }, { key: 'analytics', label: 'Analytics' }].map(t => (
+          <button key={t.key} onClick={() => setTab(t.key)}
+            className={`px-4 py-2 text-sm font-medium -mb-px border-b-2 transition-colors ${tab === t.key
+              ? 'border-text text-text' : 'border-transparent text-text-secondary hover:text-text'}`}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'analytics' ? (
+        <AccountAnalytics platform="instagram" accounts={igAccounts.accounts} loadingAccounts={igAccounts.loading} />
+      ) : (<>
       {/* Accounts.
           This page is bespoke rather than the generic SocialPlatform one, so
           it did not inherit the connect UI every other platform page gets —
@@ -278,6 +300,7 @@ export function InstagramPage() {
 
       <PostsList posts={mergedPosts} dispatch={dispatch} state={state} updatePostStatus={updatePostStatus} onRefresh={fetchRemotePosts}
         accounts={igAccounts.accounts} onPosted={handlePosted} webhookUrl="" regenWebhookUrl="" />
+      </>)}
     </div>
   )
 }

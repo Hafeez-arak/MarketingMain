@@ -1729,15 +1729,21 @@ try {
 
     for (const a of mine){
       try {
+        const row = { workspace_id: wsId, zernio_account_id: a._id, platform: a.platform,
+                      username: a.username || '', display_name: a.displayName || '',
+                      profile_picture: a.profilePicture || '',
+                      is_active: a.isActive !== false, needs_reconnection: a.needsReconnection === true,
+                      last_synced_at: new Date().toISOString(), updated_at: new Date().toISOString() };
+        // Only what Zernio actually reported. It sends followersCount: null
+        // until its first daily snapshot and profileUrl: null for an Instagram
+        // account connected through Facebook login; writing those as 0 and ''
+        // overwrote a real follower count with zero on every refresh. One row
+        // per request, so differing keys cannot trip PGRST102.
+        if (typeof a.followersCount === 'number') row.followers_count = a.followersCount;
+        if (a.profileUrl) row.profile_url = a.profileUrl;
         await req({ method:'POST', url:`${SUPA_URL}/rest/v1/social_accounts?on_conflict=workspace_id,zernio_account_id`,
           headers:{ ...sHeaders, Prefer:'resolution=merge-duplicates,return=minimal' },
-          body:{ workspace_id: wsId, zernio_account_id: a._id, platform: a.platform,
-                 username: a.username || '', display_name: a.displayName || '',
-                 profile_picture: a.profilePicture || '', profile_url: a.profileUrl || '',
-                 is_active: a.isActive !== false, needs_reconnection: a.needsReconnection === true,
-                 followers_count: a.followersCount || 0, last_synced_at: new Date().toISOString(),
-                 updated_at: new Date().toISOString() },
-          json:true });
+          body: row, json:true });
         accountsSynced++;
       } catch (e) { /* one bad account row must not abort the whole sync */ }
     }
@@ -1754,11 +1760,18 @@ try {
   const targets = [];
   for (const table of POST_TABLES){
     try {
+      // generated_posts carries the platform; the legacy Instagram table has
+      // no such column (selecting it is a 400 that skips the whole table), and
+      // every row in it is Instagram by definition.
+      const cols = table === 'generated_posts'
+        ? 'id,workspace_id,platform,zernio_post_id,zernio_account_id,publish_status'
+        : 'id,workspace_id,zernio_post_id,zernio_account_id,publish_status';
       const rows = await req({ method:'GET',
-        url:`${SUPA_URL}/rest/v1/${table}?select=id,workspace_id,zernio_post_id,zernio_account_id,publish_status&zernio_post_id=neq.&publish_status=in.(published,scheduled,publishing)${wsFilter}&limit=500`,
+        url:`${SUPA_URL}/rest/v1/${table}?select=${cols}&zernio_post_id=neq.&publish_status=in.(published,scheduled,publishing)${wsFilter}&limit=500`,
         headers:sHeaders, json:true });
       for (const r of (rows || [])){
-        if (r.zernio_post_id) targets.push({ ...r, post_table: table });
+        if (r.zernio_post_id) targets.push({ ...r, post_table: table,
+          platform: r.platform || (table === 'instagram_generated_posts' ? 'instagram' : '') });
       }
     } catch (e) { /* a missing table (generated_posts on older DBs) is fine */ }
   }
@@ -1770,6 +1783,7 @@ try {
     try {
       // Primary: the real per-day timeline.
       let wrote = false;
+      let single = null;
       try {
         const tl = await req({ method:'GET',
           url:`${ZBASE}/analytics/post-timeline?postId=${encodeURIComponent(t.zernio_post_id)}`,
@@ -1779,7 +1793,7 @@ try {
           await req({ method:'POST', url:`${SUPA_URL}/rest/v1/post_analytics?on_conflict=zernio_post_id,platform,metric_date`,
             headers:{ ...sHeaders, Prefer:'resolution=merge-duplicates,return=minimal' },
             body:{ workspace_id: t.workspace_id, zernio_post_id: t.zernio_post_id,
-                   platform: day.platform || '', platform_post_id: day.platformPostId || '',
+                   platform: day.platform || t.platform || '', platform_post_id: day.platformPostId || '',
                    post_table: t.post_table, post_id: t.id,
                    // Carried from the post row — the timeline payload has no
                    // accountId, so this is the only way to attribute metrics
@@ -1797,7 +1811,7 @@ try {
 
       // Fallback: too new for a timeline — store current totals as today.
       if (!wrote){
-        const single = await req({ method:'GET',
+        single = await req({ method:'GET',
           url:`${ZBASE}/analytics?postId=${encodeURIComponent(t.zernio_post_id)}`,
           headers:zHeaders, json:true });
         const perPlatform = (single && single.platformAnalytics) || [];
@@ -1806,10 +1820,19 @@ try {
         // Unlike the timeline, the single-post response DOES carry accountId
         // per platform — prefer it, and fall back to the one recorded at
         // publish time.
+        //
+        // A post Zernio is still fetching answers 202 with syncStatus
+        // 'pending' and a roll-up of placeholder zeros. Those are not
+        // measurements; writing them stored a row with a blank platform that
+        // the next real sync could never overwrite (platform is part of the
+        // unique key).
         const entries = perPlatform.length
-          ? perPlatform.map(p => ({ platform: p.platform, platformPostId: p.platformPostId, accountId: p.accountId, a: p.analytics || {} }))
-          : [{ platform: single.platform || '', platformPostId: '', accountId: '', a: (single && single.analytics) || {} }];
+          ? perPlatform.map(p => ({ platform: p.platform || t.platform, platformPostId: p.platformPostId, accountId: p.accountId,
+                                    pending: p.syncStatus === 'pending', a: p.analytics || {} }))
+          : [{ platform: (single && single.platform) || t.platform, platformPostId: '', accountId: '',
+               pending: !!single && single.syncStatus === 'pending', a: (single && single.analytics) || {} }];
         for (const e of entries){
+          if (e.pending || !e.platform) continue;
           if (!e.a || !Object.keys(e.a).length) continue;
           const present = METRIC_KEYS.filter(k => e.a[k] !== undefined && e.a[k] !== null);
           await req({ method:'POST', url:`${SUPA_URL}/rest/v1/post_analytics?on_conflict=zernio_post_id,platform,metric_date`,
@@ -1826,20 +1849,31 @@ try {
             json:true });
           rowsWritten++;
         }
+      }
 
-        // Zernio knows the real publish state; if a scheduled post has since
-        // gone live, reflect that on our row so the UI stops calling it
-        // "scheduled" forever.
-        const zStatus = String((single && single.status) || '').toLowerCase();
-        if (zStatus === 'published' && t.publish_status !== 'published'){
-          try {
+      // Zernio knows the real publish state; if a scheduled or publishing
+      // post has since gone live, reflect that on our row so the UI stops
+      // calling it "Publishing…" forever.
+      //
+      // This used to run only on the fallback path — but a post that is live
+      // is exactly the one that HAS a timeline, so it took the primary path
+      // and was never reconciled. Checked for every unfinished post now.
+      if (t.publish_status !== 'published'){
+        try {
+          if (!single){
+            single = await req({ method:'GET',
+              url:`${ZBASE}/analytics?postId=${encodeURIComponent(t.zernio_post_id)}`,
+              headers:zHeaders, json:true });
+          }
+          const zStatus = String((single && single.status) || '').toLowerCase();
+          if (zStatus === 'published'){
             await req({ method:'PATCH', url:`${SUPA_URL}/rest/v1/${t.post_table}?id=eq.${t.id}`,
               headers:{ ...sHeaders, Prefer:'return=minimal' },
               body:{ publish_status:'published',
                      published_at: single.publishedAt || new Date().toISOString(),
                      platform_post_url: single.platformPostUrl || '' }, json:true });
-          } catch (e) { /* non-fatal */ }
-        }
+          }
+        } catch (e) { /* non-fatal */ }
       }
     } catch (e) {
       errors.push({ zernio_post_id: t.zernio_post_id, error: (e && e.message) || String(e) });

@@ -420,6 +420,82 @@ async function readPendingData(z, { profileId, pendingDataToken }) {
 
 export const CONNECTABLE = Object.keys(CONNECT_SPECS)
 
+// ─── One account's analytics: which Zernio reads, over which window ────────
+//
+// Every analytics endpoint at Zernio is scoped to the API TEAM, not to a
+// profile, so a request without accountId returns every workspace's numbers.
+// Each request below names the account; the route checks the account belongs
+// to the caller's workspace before any of them is sent.
+//
+// The windows are not all the same, deliberately:
+//   • Instagram account insights come from Meta, which refuses more than 30
+//     days between since and until (#100) — a 30-day span is already one too
+//     many, so it is capped at 29 whatever window the page asked for.
+//   • Instagram follower history allows 89 days; capped at 88 for the same
+//     off-by-one reason.
+// A tab load is eight reads at once, and switching window or account a couple
+// of times in a row trips Zernio's rate limit: measured 2026-09-14, the third
+// consecutive load lost two reads to "Rate limit exceeded. Please retry after
+// 1 seconds." One retry after the wait Zernio names recovers that; anything
+// longer than a few seconds is left to fail rather than hold the page.
+export async function retryRateLimited(fn, { sleep = ms => new Promise(r => setTimeout(r, ms)), maxWaitMs = 3000 } = {}) {
+  try {
+    return await fn()
+  } catch (err) {
+    if (!(err instanceof ZernioError) || err.status !== 429) throw err
+    const seconds = Number((String(err.message).match(/retry after (\d+(?:\.\d+)?) second/i) || [])[1] || 1)
+    const waitMs = seconds * 1000
+    if (waitMs > maxWaitMs) throw err
+    await sleep(waitMs)
+    return fn()
+  }
+}
+
+export const ANALYTICS_DAYS = [7, 30, 90]
+export const INSTAGRAM_INSIGHT_METRICS = ['reach', 'views', 'accounts_engaged', 'total_interactions', 'profile_links_taps']
+
+// Instagram reports neither impressions (gone since Graph v22) nor per-post
+// clicks, so offering those toggles would draw lines that can only be zero.
+const METRICS_SUPPORTED = {
+  instagram: ['likes', 'comments', 'shares', 'saves', 'views', 'reach'],
+}
+
+const DAY_MS = 86400000
+const isoDay = ms => new Date(ms).toISOString().slice(0, 10)
+
+export function analyticsPlan({ platform, accountId, days, now = Date.now() }) {
+  const span = ANALYTICS_DAYS.includes(Number(days)) ? Number(days) : 30
+  const fromDate = isoDay(now - span * DAY_MS)
+  const toDate = isoDay(now)
+  const scoped = { platform, accountId }
+
+  const requests = [
+    { key: 'overview', path: 'analytics', query: { ...scoped, fromDate, toDate, limit: 100, source: 'all' } },
+    { key: 'daily', path: 'analytics/daily-metrics', query: { ...scoped, fromDate, toDate } },
+    { key: 'bestTime', path: 'analytics/best-time', query: scoped },
+    { key: 'frequency', path: 'analytics/posting-frequency', query: scoped },
+    { key: 'decay', path: 'analytics/content-decay', query: scoped },
+    { key: 'followers', path: 'accounts/follower-stats', query: { accountIds: accountId, fromDate, toDate } },
+  ]
+
+  let insightsFrom = null
+  if (platform === 'instagram') {
+    insightsFrom = isoDay(now - Math.min(span, 29) * DAY_MS)
+    requests.push(
+      { key: 'insights', path: 'analytics/instagram/account-insights',
+        query: { accountId, since: insightsFrom, until: toDate, metrics: INSTAGRAM_INSIGHT_METRICS.join(',') } },
+      { key: 'followerHistory', path: 'analytics/instagram/follower-history',
+        query: { accountId, since: isoDay(now - Math.min(span, 88) * DAY_MS), until: toDate, metricType: 'time_series' } },
+    )
+  }
+
+  return {
+    days: span, fromDate, toDate, insightsFrom,
+    metricsSupported: METRICS_SUPPORTED[platform] || null,
+    requests,
+  }
+}
+
 // ─── Turning a Zernio failure into something a person can act on ───────────
 //
 // Zernio's `code` is machine-readable and stable; its `error` is prose aimed
