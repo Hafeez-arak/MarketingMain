@@ -1,21 +1,12 @@
 import { BRAND_TIMEZONE } from './brandTime'
 
 // ─── Zernio (publishing + analytics) — the primary path ──────────────────
-// Live again, and now for three platforms rather than one. Instagram
-// publishing moved to Meta's Graph API in August 2026 and this module went
-// dormant; it comes back because Meta can only ever reach Instagram, and
-// running Instagram through one provider while TikTok goes through another
-// means two payload shapes, two failure vocabularies and two sets of bugs
-// behind a single Publish button.
-//
-// meta.js is NOT deleted — it is the proven path and stays one function call
-// away, which is what makes a Zernio outage a one-line change in
-// publishPost.js rather than a redeploy. That this reversal is cheap is
-// entirely because the previous migration dismantled nothing; keep it that
-// way in whichever direction the next one goes.
+// The only publishing provider, for every platform. The Meta Graph API path
+// (meta.js) was removed on 2026-09-14 along with the test Instagram account it
+// was connected to.
 //
 // Callers should go through src/lib/publishPost.js rather than here, so the
-// provider choice lives in one place.
+// request shape is built in one place.
 // ─────────────────────────────────────────────────────────────────────────
 // The browser NEVER calls zernio.com directly and never sees the Zernio
 // API key — that key lives only in n8n's environment (same as every other

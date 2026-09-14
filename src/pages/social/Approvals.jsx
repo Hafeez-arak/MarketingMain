@@ -12,9 +12,7 @@ import { fetchBrandSchema, fetchDirectoryRows } from '../../lib/brandSchema'
 import { fetchApprovalsData, markIdeaProcessing, markIdeasGenerated } from '../../lib/contentPlans'
 import { ensureCaptions } from '../../lib/campaignPlanner'
 import { publishIdeasAsPosts } from '../../lib/studioBridge'
-import { publishPost, syncMetaInsights } from '../../lib/meta'
-import { publishPost as publishViaZernio } from '../../lib/zernio'
-import { providerFor, PROVIDERS } from '../../lib/publishPost'
+import { publishPost as publishViaZernio, syncZernio } from '../../lib/zernio'
 import { defaultWebhookUrl } from '../../lib/n8nWebhooks'
 import { fetchScheduledPosts } from '../../lib/scheduledPosts'
 import { dbIdeaToDraft } from '../../lib/campaignPlan'
@@ -469,30 +467,18 @@ export function Approvals() {
     }
 
     setPublishingId(post.id)
-    // Provider-aware rather than hardcoded to Meta. Meta reaches Instagram and
-    // nothing else, so a TikTok post sent through the old call had no chance
-    // of working. Zernio is primary now and serves all three; meta.js stays
-    // wired behind providerFor() as the fallback.
-    const provider   = providerFor(post.platform)
-    const publishVia = provider === PROVIDERS.META ? publishPost : publishViaZernio
-    const webhook    = provider === PROVIDERS.META
-      ? (state.webhooks?.metaPublish || defaultWebhookUrl('metaPublish'))
-      : (state.webhooks?.publishPost || defaultWebhookUrl('publishPost'))
-
-    const result = await publishVia(webhook, {
+    const webhook = state.webhooks?.publishPost || defaultWebhookUrl('publishPost')
+    const result = await publishViaZernio(webhook, {
       postId: post.id, postTable: post._table, workspaceId: activeWorkspaceId,
       platform: post.platform,
       accountId: post.zernioAccountId || undefined,
       // The em-dash separator (not a plain blank line) is what
-      // isolateBilingual() in the Meta publish workflow looks for to apply
+      // isolateBilingual() in the Zernio publish workflow looks for to apply
       // Unicode directional isolation per language — see CaptionStudio.jsx's
       // own `pick()`, which this mirrors. Without it, Arabic + English text
       // in one caption is sent unisolated and Instagram renders the RTL/LTR
       // boundary wrong (trailing punctuation and standalone digits/"+" jump
       // to the wrong side).
-      //
-      // The Zernio publish workflow applies the same isolation from the same
-      // marker, so this holds whichever provider handles the post.
       caption: post.captionAr && post.captionEn
         ? [post.captionAr, post.captionEn].filter(Boolean).join('\n\n—\n\n')
         : (post.copy || post.captionEn || post.captionAr || ''),
@@ -595,15 +581,11 @@ export function Approvals() {
     }
   }
 
-  // Pull fresh metrics from Instagram on demand — the same workflow the daily
-  // schedule runs, so there's one sync path, not two.
-  //
-  // Not merely a cache refresh: Instagram reports lifetime totals and keeps no
-  // history for us, so this call is what records today's point on every time
-  // series the Analytics page draws.
+  // Pull fresh accounts and metrics from Zernio on demand — the same workflow
+  // the daily schedule runs, so there's one sync path, not two.
   async function handleSync() {
     setSyncing(true); setSyncNote('')
-    const result = await syncMetaInsights(state.webhooks?.metaSync, activeWorkspaceId)
+    const result = await syncZernio(state.webhooks?.zernioSync || defaultWebhookUrl('zernioSync'), activeWorkspaceId)
     setSyncing(false)
     setSyncNote(result.error
       ? result.error

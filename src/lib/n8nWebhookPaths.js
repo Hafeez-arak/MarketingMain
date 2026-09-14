@@ -33,11 +33,10 @@ export const WEBHOOK_PATHS = {
   creativeStitch:   'arak-creative-stitch',
   creativeCancel:   'arak-creative-cancel',
   falBalance:       'arak-fal-balance',
-  // Meta Graph API — the live publishing + analytics path.
-  metaPublish:      'arak-meta-publish',
-  metaSync:         'arak-meta-sync',
-  metaDashboard:    'arak-meta-dashboard',
-  // Zernio. `zernioConnect` is deliberately ABSENT: per-workspace OAuth moved
+  // Zernio — the only publishing + analytics path. The three Meta slots
+  // (metaPublish/metaSync/metaDashboard) were removed on 2026-09-14 with the
+  // test account they served; dropping them is what stops this proxy
+  // forwarding to the Meta workflows still published on the box. `zernioConnect` is deliberately ABSENT: per-workspace OAuth moved
   // to api/zernio/[action].js on 2026-09-10 and the workflow is retired.
   // Leaving the slot here would keep arak-zernio-connect reachable through
   // this proxy, and that workflow takes workspace_id straight off the request

@@ -22,7 +22,8 @@ four-platform publishing work go first.
 - **Meta token expires 2026-10-18.** Even with Zernio publishing all four
   platforms, the research agent reads competitors through Meta's
   `business_discovery`, so the token stays load-bearing. Needs a Business
-  Manager System User token, and the real Arak account connected in place of
-  the test account `@lightingaaa`.
+  Manager System User token. The test account `@lightingaaa` was disconnected
+  from the platform on 2026-09-14 (both rows `is_active=false`); the real Arak
+  account gets connected through Zernio, not Meta.
 - **Two unmerged branches**, one commit each: `access-invites`,
   `webhook-guard-response-docs`.
