@@ -9,6 +9,7 @@ import { RunProgress } from '../../components/RunProgress'
 import { isLive } from '../../lib/agent/progress'
 import { AgentSteering } from '../../components/AgentSteering'
 import PastConversations from '../../components/PastConversations'
+import { AgentMarkdown } from '../../components/AgentMarkdown'
 
 // ─── /agent — the assistant, full page ─────────────────────────────────────
 // The same agent, the same tools and the SAME conversation as the drawer —
@@ -188,15 +189,16 @@ export default function AgentPage() {
           <div className="space-y-4 max-h-[55vh] overflow-y-auto pr-1">
             {turns.map((t, i) => (
               <div key={i} className={t.role === 'user' ? 'text-right' : ''}>
-                <div className={
-                  t.role === 'user'
-                    ? 'inline-block bg-slate-100 rounded-2xl px-3.5 py-2 text-sm text-slate-800 max-w-[85%] text-left'
-                    : 'text-sm text-slate-800 whitespace-pre-wrap leading-relaxed'
-                }>
-                  {t.text}
-                  {t.role === 'assistant' && !t.text && !t.error && busy && i === turns.length - 1
-                    ? <Spinner size="sm" /> : null}
-                </div>
+                {t.role === 'user' ? (
+                  <div className="inline-block bg-slate-100 rounded-2xl px-3.5 py-2 text-sm text-slate-800 max-w-[85%] text-left whitespace-pre-wrap">
+                    {t.text}
+                  </div>
+                ) : (
+                  <>
+                    <AgentMarkdown>{t.text}</AgentMarkdown>
+                    {!t.text && !t.error && busy && i === turns.length - 1 ? <Spinner size="sm" /> : null}
+                  </>
+                )}
                 {t.error ? <div className="mt-1 text-sm text-red-600">{t.error}</div> : null}
                 {t.role === 'assistant' ? <ToolTrace steps={t.steps} /> : null}
                 {t.role === 'assistant' && t.cost ? (

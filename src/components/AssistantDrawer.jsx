@@ -5,6 +5,7 @@ import { useAgentChat } from '../lib/useAgentChat'
 import { describePage, describeContextLabel, suggestionsFor } from '../lib/pageContext'
 import { Spinner } from './ui/index'
 import PastConversations from './PastConversations'
+import { AgentMarkdown } from './AgentMarkdown'
 
 // ─── The assistant, on every page ──────────────────────────────────────────
 // AGENT.md §5a. A drawer that opens anywhere and knows what you are looking
@@ -159,10 +160,8 @@ export function AssistantDrawer() {
                       </div>
                     ) : (
                       <div>
-                        <div className="text-sm text-slate-800 whitespace-pre-wrap leading-relaxed">
-                          {t.text}
-                          {!t.text && !t.error && busy && i === turns.length - 1 ? <Spinner size="sm" /> : null}
-                        </div>
+                        <AgentMarkdown>{t.text}</AgentMarkdown>
+                        {!t.text && !t.error && busy && i === turns.length - 1 ? <Spinner size="sm" /> : null}
                         {t.error ? (
                           <div className="mt-1 text-sm text-red-600">{t.error}</div>
                         ) : null}
