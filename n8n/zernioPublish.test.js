@@ -248,3 +248,53 @@ describe('account resolution when the caller names no account', () => {
     expect(sent).toHaveLength(0)
   })
 })
+
+// ─── The account that must never be published to ───────────────────────────
+//
+// ARAK Lighting's LinkedIn is the company's REAL page. The composer hides it
+// and publishPost.js refuses it, but both of those run in the browser and a
+// webhook is reachable without one. This is the layer that cannot be routed
+// around, so it is the layer worth testing.
+
+describe('protected accounts', () => {
+  const linkedinAccounts = [{ _id: 'acc_li', platform: 'linkedin', isActive: true }]
+
+  it('refuses to publish to LinkedIn, and sends Zernio nothing', async () => {
+    const { routes, sent } = zernio({ accounts: linkedinAccounts })
+    const out = await run({ ...base, account_id: 'acc_li', platform: 'linkedin' },
+      { postgrest: db(), routes })
+
+    expect(out.out.ok).toBe(false)
+    expect(out.out.error).toMatch(/protected/i)
+    // The assertion that actually matters: nothing reached the provider.
+    expect(sent).toHaveLength(0)
+  })
+
+  it('refuses a SCHEDULED LinkedIn post too, not just an immediate one', async () => {
+    const { routes, sent } = zernio({ accounts: linkedinAccounts })
+    const out = await run({
+      ...base, account_id: 'acc_li', platform: 'linkedin',
+      scheduled_for: '2026-12-01T09:00:00', timezone: 'Asia/Riyadh',
+    }, { postgrest: db(), routes })
+
+    expect(out.out.ok).toBe(false)
+    expect(sent).toHaveLength(0)
+  })
+
+  it('is not fooled by capitalisation from a hand-made request', async () => {
+    const { routes, sent } = zernio({ accounts: linkedinAccounts })
+    const out = await run({ ...base, account_id: 'acc_li', platform: 'LinkedIn' },
+      { postgrest: db(), routes })
+
+    expect(out.out.ok).toBe(false)
+    expect(sent).toHaveLength(0)
+  })
+
+  it('still publishes to Instagram — the guard is narrow', async () => {
+    // A safety check that blocked everything would pass every test above and
+    // break the product.
+    const { routes, sent } = zernio()
+    await run({ ...base, platform: 'instagram' }, { postgrest: db(), routes })
+    expect(sent).toHaveLength(1)
+  })
+})
