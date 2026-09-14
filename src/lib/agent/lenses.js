@@ -274,7 +274,41 @@ export function searchBudgetFor(lenses) {
 export const FINDING_FIELDS = [
   'lens', 'headline', 'detail', 'sources', 'confidence',
   'novelty', 'perishable_until', 'suggested_action', 'evidence',
+  'for_whom', 'technical_note',
 ]
+
+// ─── Who a finding is for ──────────────────────────────────────────────────
+//
+// A research run aimed at marketing keeps turning up things that are true,
+// sourced, and not marketing's to act on: a SASO certification deadline for
+// low-voltage lighting, a building-code revision, a standards change. They are
+// worth knowing and they were expensive to find, but a reader scanning for
+// what to publish this Thursday has to step over them.
+//
+// The tempting fix — a separate Technical page — is wrong, and the SASO case
+// is why. A mandatory certification deadline is technical in SUBJECT and
+// marketing in USE: "every fixture we ship is already certified, here is what
+// specifiers must check before December" is one of the strongest posts this
+// brand can make, and it exists only because a compliance date was found. Send
+// that to another page and marketing never sees its best angle of the week.
+//
+// So the axis is not subject, it is OWNERSHIP:
+//
+//   marketing   there is something to publish. The default, and the common case.
+//   both        publishable AND the technical team needs to know. Stays in the
+//               marketing flow; carries a line for the other team.
+//   technical   genuinely nothing to publish. Kept, but out of the way.
+export const FOR_WHOM = ['marketing', 'both', 'technical']
+
+/**
+ * Whether a finding belongs out of the marketing flow entirely.
+ *
+ * `both` is deliberately NOT technical-only. It is the case the whole field
+ * exists to serve — a finding with a publishable angle that someone else also
+ * needs — and treating it as technical would hide exactly what we set out to
+ * keep.
+ */
+export const isTechnicalOnly = f => f?.for_whom === 'technical'
 
 export function makeFinding(lensKey, raw = {}) {
   return {
@@ -289,7 +323,38 @@ export function makeFinding(lensKey, raw = {}) {
     perishable_until: raw.perishable_until || null,
     suggested_action: String(raw.suggested_action || '').trim(),
     evidence: raw.evidence && typeof raw.evidence === 'object' ? raw.evidence : {},
+    ...audienceOf(raw),
   }
+}
+
+/**
+ * Decide who a finding is for, and refuse a technical label that is not earned.
+ *
+ * ── WHY THE GUARD IS IN CODE AND NOT IN THE PROMPT ──
+ *
+ * The moment a model has a bucket labelled "not marketing's problem", it has
+ * somewhere to put anything it could not turn into an action. Nothing about
+ * that is malicious — filing a hard finding under `technical` reads, from
+ * inside the generation, like being tidy. The result is a marketing brief that
+ * thins out a little every week while the run keeps reporting the same number
+ * of findings, and nobody can see it happening because the findings are all
+ * still there, just somewhere else.
+ *
+ * The prompt asks for a reason. This ENFORCES it: `technical` without a
+ * `technical_note` saying what the other team does about it is not a
+ * classification, it is a shrug, and a shrug goes back in the marketing flow
+ * where a person will read it. Same reason repeats are caught in code rather
+ * than by asking the model not to repeat itself.
+ */
+function audienceOf(raw = {}) {
+  const note = String(raw.technical_note || '').trim()
+  const claimed = FOR_WHOM.includes(raw.for_whom) ? raw.for_whom : 'marketing'
+  // A bare "technical" is a shrug. Marketing gets to see it and decide.
+  const for_whom = claimed === 'technical' && !note ? 'marketing' : claimed
+  // The note only means anything alongside a technical audience. Carrying it on
+  // a purely marketing finding would put an empty "for the technical team" line
+  // under cards that have nothing to do with them.
+  return { for_whom, technical_note: for_whom === 'marketing' ? '' : note }
 }
 
 /**

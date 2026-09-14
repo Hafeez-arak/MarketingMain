@@ -55,6 +55,32 @@ export const FINDINGS_SCHEMA = {
                 'What the brand should DO about it, concretely. A finding with no action ' +
                 'is trivia however true it is.',
             },
+            // Who owns this. Not what it is ABOUT — see the description: a
+            // certification deadline is a technical subject and a marketing
+            // opportunity at the same time, and the whole point of this field
+            // is to keep that case in front of marketing rather than filing it
+            // away under its subject matter.
+            for_whom: {
+              type: 'string',
+              enum: ['marketing', 'both', 'technical'],
+              description:
+                'Who acts on this. Judge by whether there is something to PUBLISH, never by ' +
+                'how technical the subject sounds. A mandatory certification deadline is a ' +
+                'technical fact and an excellent post ("we are already compliant — here is ' +
+                'what specifiers must check before the date"), so it is "both", not ' +
+                '"technical". Use "marketing" (the default) when only marketing acts. Use ' +
+                '"both" when there is a publishable angle AND the product or technical team ' +
+                'needs to know. Use "technical" ONLY when you have looked for a publishable ' +
+                'angle and there genuinely is not one — it must carry a technical_note saying ' +
+                'so, and without one it will be shown to marketing anyway.',
+            },
+            technical_note: {
+              type: 'string',
+              description:
+                'One line for the product or technical team: what they need to check, decide ' +
+                'or do. Required whenever for_whom is "both" or "technical". On "technical" ' +
+                'it must also say why there is no marketing angle.',
+            },
             sources: {
               type: 'array',
               items: {

@@ -1,11 +1,57 @@
 import { describe, it, expect } from 'vitest'
 import {
-  partitionByClock, deadlineLabel, urgencyOf, lensStates, lensHeadline,
+  partitionByClock, splitByAudience, deadlineLabel, urgencyOf, lensStates, lensHeadline,
   emptiness, setupGaps, compact, signed, pct, marketDirection, actionPlan,
 } from './researchBrief'
 
 const NOW = new Date('2026-09-12T09:00:00Z')
 const f = (headline, extra = {}) => ({ headline, confidence: 0.5, ...extra })
+
+describe('who acts on a finding is decided before how urgent it is', () => {
+  it('takes only the findings with nothing to publish out of the flow', () => {
+    const { marketing, technical } = splitByAudience([
+      f('carousels outperform stills'),
+      f('SASO deadline — post the compliance checklist', { for_whom: 'both', technical_note: 'retest 40 SKUs' }),
+      f('cable gland spec revised', { for_whom: 'technical', technical_note: 'update the datasheets' }),
+    ], NOW)
+
+    // `both` stays with marketing. That is the entire point of the field: a
+    // finding with a publishable angle does not leave the page because its
+    // subject is technical.
+    expect(marketing.map(x => x.headline)).toEqual([
+      'carousels outperform stills',
+      'SASO deadline — post the compliance checklist',
+    ])
+    expect(technical.map(x => x.headline)).toEqual(['cable gland spec revised'])
+  })
+
+  it('keeps a dated technical finding out of "Do this"', () => {
+    // The bug this ordering prevents. A compliance date is maximally urgent
+    // and minimally actionable here, so sorting by the clock first puts the
+    // one finding marketing cannot use at the very top of their queue.
+    const findings = [
+      f('national day', { perishable_until: '2026-09-23' }),
+      f('certification deadline', { perishable_until: '2026-09-15', for_whom: 'technical', technical_note: 'lab retest' }),
+    ]
+    const { marketing, technical } = splitByAudience(findings, NOW)
+    const { act } = partitionByClock(marketing, NOW)
+
+    expect(act.map(x => x.headline)).toEqual(['national day'])
+    expect(technical.map(x => x.headline)).toEqual(['certification deadline'])
+  })
+
+  it('still ranks the technical side so the dated ones read first', () => {
+    const { technical } = splitByAudience([
+      f('evergreen standard', { for_whom: 'technical', technical_note: 'n' }),
+      f('deadline in three days', { perishable_until: '2026-09-15', for_whom: 'technical', technical_note: 'n' }),
+    ], NOW)
+    expect(technical.map(x => x.headline)).toEqual(['deadline in three days', 'evergreen standard'])
+  })
+
+  it('survives a run with no findings at all', () => {
+    expect(splitByAudience(undefined, NOW)).toEqual({ marketing: [], technical: [] })
+  })
+})
 
 describe('a brief is a queue, sorted by how long you have', () => {
   it('separates dated findings from evergreen ones', () => {

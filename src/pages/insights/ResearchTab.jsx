@@ -4,7 +4,7 @@ import { AgentSteering } from '../../components/AgentSteering'
 import { SendIdeasToPlan } from '../../components/SendIdeasToPlan'
 import { RunProgress } from '../../components/RunProgress'
 import {
-  partitionByClock, deadlineLabel, urgencyOf, lensStates, lensHeadline,
+  partitionByClock, splitByAudience, deadlineLabel, urgencyOf, lensStates, lensHeadline,
   emptiness, pct, compact, signed, ownChannelRows, marketDirection, actionPlan, basisLabel,
 } from '../../lib/researchBrief'
 import { noveltyLabel } from '../../lib/agent/novelty'
@@ -96,6 +96,25 @@ function Sources({ sources, uncited }) {
   )
 }
 
+/**
+ * The line a finding carries for the product or technical team.
+ *
+ * Rendered UNDER the marketing action, never instead of it, and deliberately
+ * quiet — this is a card in the marketing flow and the post is still the point.
+ * The whole argument for keeping these findings here rather than on a separate
+ * page is that the technical fact and the publishable angle are one thought; a
+ * note styled loudly enough to compete with "Do:" would pull them apart again
+ * on the screen after having kept them together in the data.
+ */
+function TechNote({ finding }) {
+  if (finding?.for_whom !== 'both' || !finding?.technical_note) return null
+  return (
+    <p className="text-[11px] mt-2 leading-relaxed opacity-70 border-l-2 border-current/20 pl-2">
+      <span className="font-semibold">For the technical team: </span>{finding.technical_note}
+    </p>
+  )
+}
+
 // A dated finding. The deadline is the loudest thing on the card, because it
 // is the only reason this one is above the others.
 function ActCard({ finding, now }) {
@@ -116,6 +135,7 @@ function ActCard({ finding, now }) {
           <span className="font-semibold">Do: </span>{finding.suggested_action}
         </p>
       )}
+      <TechNote finding={finding} />
       {finding.detail && (
         <p className="text-[11px] mt-2 leading-relaxed opacity-75">{finding.detail}</p>
       )}
@@ -417,8 +437,14 @@ export function ResearchTab({
   run, runs, lensRows, selectedId, onSelectRun, onRun, running, now,
 }) {
   const report = useMemo(() => run?.report || {}, [run])
+  // Audience before clock. A compliance date nobody here can publish about is
+  // both the most urgent thing on the page and the least useful, so it must
+  // leave the queue before the queue is sorted — see splitByAudience.
+  const { marketing, technical } = useMemo(
+    () => splitByAudience(report.findings || [], now), [report, now],
+  )
   const { act, standing, passed } = useMemo(
-    () => partitionByClock(report.findings || [], now), [report, now],
+    () => partitionByClock(marketing, now), [marketing, now],
   )
   const states = useMemo(() => lensStates(report), [report])
   const empty = useMemo(() => emptiness(report), [report])
@@ -432,9 +458,9 @@ export function ResearchTab({
   const counts = useMemo(() => ({
     act: direction.items.length + act.length + plan.blocks.length + plan.loose.length,
     evidence: channels.length + (report.competitor_board || []).length
-      + standing.length + (report.market || []).length,
+      + standing.length + (report.market || []).length + technical.length,
     quality: states.length + (report.unanswered || []).length + passed.length,
-  }), [direction, act, plan, channels, report, standing, states, passed])
+  }), [direction, act, plan, channels, report, standing, states, passed, technical])
 
   // A zone with nothing in it is not listed and not rendered. A failed run has
   // no findings and no gaps, and a rail offering "Do this 0" above an empty
@@ -686,6 +712,7 @@ export function ResearchTab({
                       <span className="font-semibold">Do: </span>{f.suggested_action}
                     </p>
                   )}
+                  <TechNote finding={f} />
                   <div className="flex items-center gap-2 mt-2 text-[10px] text-text-tertiary">
                     <span className="uppercase tracking-wide">{f.lens}</span>
                     {f.confidence != null && <span>· confidence {pct(f.confidence)}</span>}
@@ -704,6 +731,47 @@ export function ResearchTab({
               ))}
             </div>
           </Card>
+        )}
+
+        {/* Findings with nothing to publish. Folded, last, and kept in full.
+            Folded because this is a marketing page and these are not marketing's
+            to act on; kept because they were expensive to find and somebody in
+            the building needs them. The count is on the summary so a reader can
+            see there is something here without opening it. */}
+        {technical.length > 0 && (
+          <Fold
+            title="For the technical team"
+            subtitle="Standards, certification and compliance the run turned up with no angle to publish. Worth forwarding, not worth planning around."
+            count={technical.length}
+          >
+            <div className="space-y-2.5">
+              {technical.map((f, i) => (
+                <div key={`t${i}`} className="rounded-xl border border-border bg-slate-50/60 p-3.5">
+                  <div className="flex items-start justify-between gap-3">
+                    <p className="text-sm text-text leading-snug">{f.headline}</p>
+                    {deadlineLabel(f, now) && (
+                      <span className="text-[11px] text-text-tertiary shrink-0 tabular-nums whitespace-nowrap">
+                        {deadlineLabel(f, now)}
+                      </span>
+                    )}
+                  </div>
+                  {f.technical_note && (
+                    <p className="text-xs text-text-secondary mt-2 leading-relaxed">
+                      <span className="font-semibold">They need to: </span>{f.technical_note}
+                    </p>
+                  )}
+                  {f.detail && (
+                    <p className="text-[11px] text-text-tertiary mt-2 leading-relaxed">{f.detail}</p>
+                  )}
+                  <div className="flex items-center gap-2 mt-2 text-[10px] text-text-tertiary">
+                    <span className="uppercase tracking-wide">{f.lens}</span>
+                    {f.confidence != null && <span>· confidence {pct(f.confidence)}</span>}
+                  </div>
+                  <Sources sources={f.sources} />
+                </div>
+              ))}
+            </div>
+          </Fold>
         )}
       </Zone>}
 
