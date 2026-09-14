@@ -12,6 +12,10 @@ import { useBrandProfileSync, logEditFeedback } from '../../lib/brandBrain'
 import { useBrandContext } from '../../lib/brandContext'
 import { CaptionStudio } from '../../components/CaptionStudio'
 import { fetchScheduledPosts } from '../../lib/scheduledPosts'
+import { publishComposed } from '../../lib/publishPost'
+import { composerFromPost } from '../../lib/composerState'
+import { syncZernio } from '../../lib/zernio'
+import { defaultWebhookUrl } from '../../lib/n8nWebhooks'
 
 // ─── Constants ─────────────────────────────────────────────────────────────
 const LIGHTING_STYLES = [
@@ -85,6 +89,8 @@ function useSupabasePosts(supabaseUrl, anonKey, workspaceId) {
         // keeps saying "Pending Review" and offers to publish a second time.
         status:              r.publish_status === 'published' ? 'published'
                            : r.publish_status === 'scheduled' ? 'scheduled'
+                           : r.publish_status === 'publishing' ? 'publishing'
+                           : r.publish_status === 'failed' ? 'failed'
                            : r.status,
         publishStatus:       r.publish_status || 'not_published',
         publishError:        r.publish_error || '',
@@ -172,6 +178,35 @@ export function InstagramPage() {
     return () => clearInterval(interval)
   }, [supabaseUrl, anonKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Zernio answers a new post with 'publishing' and only the sync workflow
+  // ever learns it went live — which used to mean the daily 06:00 run, so a
+  // post already on Instagram read "Publishing…" for the rest of the day.
+  // While anything is still publishing, ask again: first after 15s (Instagram
+  // needs a moment), then at most once a minute, and give up after ten tries
+  // so a post stuck at Zernio cannot keep the page calling it forever.
+  const zernioSync = useRef({ at: 0, runs: 0 })
+  const hasPublishing = remotePosts.some(p => p.publishStatus === 'publishing')
+  useEffect(() => {
+    if (!hasPublishing || !activeWorkspaceId) return
+    const tick = async () => {
+      const s = zernioSync.current
+      if (s.runs >= 10 || Date.now() - s.at < 60000) return
+      s.at = Date.now()
+      s.runs += 1
+      await syncZernio(state.webhooks?.zernioSync || defaultWebhookUrl('zernioSync'), activeWorkspaceId)
+      fetchRemotePosts()
+    }
+    const first = setTimeout(tick, 15000)
+    const interval = setInterval(tick, 60000)
+    return () => { clearTimeout(first); clearInterval(interval) }
+  }, [hasPublishing, activeWorkspaceId]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // A post just sent gets the full set of status checks again.
+  function handlePosted() {
+    zernioSync.current = { at: 0, runs: 0 }
+    fetchRemotePosts()
+  }
+
   return (
     <div className="max-w-7xl space-y-5">
       {/* Header */}
@@ -241,7 +276,8 @@ export function InstagramPage() {
         ))}
       </div>
 
-      <PostsList posts={mergedPosts} dispatch={dispatch} state={state} updatePostStatus={updatePostStatus} onRefresh={fetchRemotePosts} webhookUrl="" regenWebhookUrl="" />
+      <PostsList posts={mergedPosts} dispatch={dispatch} state={state} updatePostStatus={updatePostStatus} onRefresh={fetchRemotePosts}
+        accounts={igAccounts.accounts} onPosted={handlePosted} webhookUrl="" regenWebhookUrl="" />
     </div>
   )
 }
@@ -256,7 +292,7 @@ function mediaFileName(topic) {
 
 
 // ─── Post Detail Modal ─────────────────────────────────────────────────────
-function PostDetail({ post, state, webhookUrl, regenWebhookUrl, supabaseUrl, anonKey, onClose, onStatusChange, onPublish, onImageUpdated, onCaptionUpdated, onDelete }) {
+function PostDetail({ post, state, webhookUrl, regenWebhookUrl, supabaseUrl, anonKey, onClose, onStatusChange, onPublish, onPosted, accounts = [], onImageUpdated, onCaptionUpdated, onDelete }) {
   const { activeWorkspaceId, accessToken } = useAuth()
   // The rewrite panel used to be handed buildInstructionsString(profile) —
   // the flattened profile and nothing else, with no brand identity line, no
@@ -271,6 +307,40 @@ function PostDetail({ post, state, webhookUrl, regenWebhookUrl, supabaseUrl, ano
   // stagedImage = newly generated image waiting for user to Save or Discard
   const [stagedImage,    setStagedImage]    = useState(null)
   const [approved,       setApproved]       = useState(post.status === 'published')
+
+  // Direct posting (when the page passes onPosted). The post was already
+  // approved where it was planned, so this popup only sends it: no approve
+  // step, and no trip back through the composer to choose an account again.
+  // One connected account is used as-is; several means the user picks. Read
+  // at render rather than frozen into state, because the account list can
+  // arrive after the popup has opened.
+  const usableAccounts = accounts.filter(a => a.is_active !== false)
+  const [pickedAccount, setPickedAccount] = useState('')
+  const accountId = pickedAccount || (usableAccounts.length === 1 ? usableAccounts[0].zernio_account_id : '')
+  const [sending,     setSending]     = useState(false)
+  const [sendError,   setSendError]   = useState('')
+  const [scheduling,  setScheduling]  = useState(false)
+  const [when,        setWhen]        = useState('')
+
+  // Built through composerFromPost + publishComposed, the same pair the
+  // composer's Post now uses, so caption, media, options and validation are
+  // identical whichever button sent the post. `scheduledFor` is overridden:
+  // composerFromPost fills it from the planned date, and Post now must not
+  // quietly become a schedule.
+  async function sendPost(scheduledFor) {
+    if (!post._raw) return
+    setSending(true)
+    setSendError('')
+    const composed = {
+      ...composerFromPost(post._raw, { platform: 'instagram' }),
+      accountIds: accountId ? [accountId] : [],
+      scheduledFor: scheduledFor || '',
+    }
+    const res = await publishComposed(composed, { postId: post.id, postTable: post._table, workspaceId: activeWorkspaceId })
+    setSending(false)
+    if (res.error) { setSendError(res.error); return }
+    onPosted()
+  }
 
   // Sync currentImage when the parent updates post.imageUrl (e.g. after a
   // save/regen). Adjusted during render rather than in an effect so the card
@@ -698,7 +768,61 @@ function PostDetail({ post, state, webhookUrl, regenWebhookUrl, supabaseUrl, ano
                   — nothing was ever sent, yet the post then read as live. With
                   onPublish it opens the composer on this post instead, the
                   same path Post now takes: row updated in place, then Zernio. */}
-              {!sentToZernio && post.status !== 'published' && (
+              {onPosted && !sentToZernio && (
+                <div className="flex-1 min-w-0 space-y-2">
+                  {usableAccounts.length === 0 && (
+                    <p className="text-xs text-red-600">No Instagram account connected. Connect one on the Instagram page first.</p>
+                  )}
+                  {usableAccounts.length > 1 && (
+                    <select value={pickedAccount} onChange={e => setPickedAccount(e.target.value)}
+                      className="w-full border border-border px-3 py-2 text-sm bg-white text-text focus:outline-none">
+                      <option value="">Choose an account…</option>
+                      {usableAccounts.map(a => (
+                        <option key={a.zernio_account_id} value={a.zernio_account_id}>
+                          {a.username ? `@${a.username}` : a.display_name || 'Account'}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                  {scheduling && (
+                    <div className="flex items-center gap-2">
+                      <input type="datetime-local" value={when} onChange={e => setWhen(e.target.value)}
+                        className="border border-border px-3 py-2 text-sm bg-white text-text focus:outline-none" />
+                      <span className="text-xs text-text-tertiary">Riyadh time</span>
+                    </div>
+                  )}
+                  <div className="flex gap-3">
+                    <button disabled={sending || !accountId} onClick={() => sendPost('')}
+                      className="flex-1 py-3.5 rounded-2xl text-sm font-bold text-white transition-all active:scale-95 disabled:opacity-50"
+                      style={{ background: '#E1306C' }}>
+                      {sending && !scheduling ? 'Posting…' : 'Post now'}
+                    </button>
+                    {!scheduling ? (
+                      <button disabled={sending || !accountId}
+                        onClick={() => { setWhen(composerFromPost(post._raw || {}, { platform: 'instagram' }).scheduledFor || ''); setScheduling(true) }}
+                        className="px-6 py-3.5 rounded-2xl text-sm font-semibold border-2 border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors disabled:opacity-50">
+                        Schedule
+                      </button>
+                    ) : (
+                      <button disabled={sending || !accountId || !when} onClick={() => sendPost(when)}
+                        className="px-6 py-3.5 rounded-2xl text-sm font-semibold border-2 border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors disabled:opacity-50">
+                        {sending ? 'Scheduling…' : 'Confirm schedule'}
+                      </button>
+                    )}
+                  </div>
+                  {sendError && <p className="text-xs text-red-600">{sendError}</p>}
+                  {!sendError && post.publishStatus === 'failed' && post.publishError && (
+                    <p className="text-xs text-red-600">Last attempt failed: {post.publishError}</p>
+                  )}
+                  {onPublish && (
+                    <button type="button" onClick={() => onPublish(post)}
+                      className="text-xs text-text-secondary hover:text-text underline">
+                      Edit in composer
+                    </button>
+                  )}
+                </div>
+              )}
+              {!onPosted && !sentToZernio && post.status !== 'published' && (
                 <button
                   onClick={() => { if (onPublish) { onPublish(post); return } onStatusChange(post, 'published'); setApproved(true) }}
                   className="flex-1 flex items-center justify-center gap-2.5 py-3.5 rounded-2xl text-sm font-bold text-white transition-all active:scale-95"
@@ -716,7 +840,7 @@ function PostDetail({ post, state, webhookUrl, regenWebhookUrl, supabaseUrl, ano
                   {post.publishStatus === 'publishing' ? 'Publishing…' : post.status === 'scheduled' ? 'Scheduled' : 'Published'}
                 </div>
               )}
-              {!sentToZernio && post.status !== 'scheduled' && post.status !== 'published' && (
+              {!onPosted && !sentToZernio && post.status !== 'scheduled' && post.status !== 'published' && (
                 <button onClick={() => onPublish ? onPublish(post) : onStatusChange(post, 'scheduled')}
                   className="px-6 py-3.5 rounded-2xl text-sm font-semibold border-2 border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors">
                   Schedule
@@ -768,7 +892,7 @@ function PostDetail({ post, state, webhookUrl, regenWebhookUrl, supabaseUrl, ano
 export { PostDetail as InstagramPostDetail }
 
 // ─── Posts List ────────────────────────────────────────────────────────────
-function PostsList({ posts, dispatch, state, updatePostStatus, onRefresh, webhookUrl, regenWebhookUrl }) {
+function PostsList({ posts, dispatch, state, updatePostStatus, onRefresh, onPosted, accounts, webhookUrl, regenWebhookUrl }) {
   const [filter,       setFilter]       = useState('all')
   const [selectedPost, setSelectedPost] = useState(null)
   const [composerPost, setComposerPost] = useState(null)
@@ -961,6 +1085,8 @@ function PostsList({ posts, dispatch, state, updatePostStatus, onRefresh, webhoo
           onClose={() => setSelectedPost(null)}
           onStatusChange={handleStatusChange}
           onPublish={post => { setSelectedPost(null); setComposerPost(post) }}
+          onPosted={() => { setSelectedPost(null); onPosted?.() }}
+          accounts={accounts}
           onImageUpdated={handleImageUpdated}
           onCaptionUpdated={handleCaptionUpdated}
           onDelete={handleDelete}

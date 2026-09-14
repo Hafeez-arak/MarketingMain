@@ -38,6 +38,7 @@ export const isLivePlatform = platform => PLATFORM_META[platform]?.status !== 'b
 export const STATUS_META = {
   draft:           { label:'Draft',     classes:'bg-stone-100 text-stone-600' },
   scheduled:       { label:'Scheduled', classes:'bg-sky-50 text-sky-700 ring-1 ring-sky-200' },
+  publishing:      { label:'Publishing', classes:'bg-sky-50 text-sky-700 ring-1 ring-sky-200' },
   published:       { label:'Published', classes:'bg-sage-100 text-sage-700 ring-1 ring-sage-200' },
   failed:          { label:'Failed',    classes:'bg-red-50 text-red-600 ring-1 ring-red-200' },
   live:            { label:'Live',      classes:'bg-sage-100 text-sage-700' },
