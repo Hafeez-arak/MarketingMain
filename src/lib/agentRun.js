@@ -4,6 +4,7 @@
 // a status: the spinner this opens can only be closed by a row changing.
 
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './supabaseClient'
+import { defaultWebhookUrl, describeWebhookFailure } from './n8nWebhooks'
 
 /**
  * Ask for a research run.
@@ -14,13 +15,25 @@ import { SUPABASE_URL, SUPABASE_ANON_KEY } from './supabaseClient'
  */
 export async function startResearchRun({ workspaceId, accessToken, periodDays = 7 }) {
   try {
-    const res = await fetch('/api/agent/run', {
+    // Through n8n, which drives the whole run on the agent container next to
+    // it — the same workflow the Monday run uses. Calling /api/agent/run here
+    // used to start a run nothing would finish: the lenses were only ever
+    // driven by n8n, so an app-started run sat at "lenses" forever.
+    //
+    // The token goes in the body as well as the header. The proxy checks the
+    // header and forwards only the body; n8n hands this token to the agent,
+    // which uses it to prove the caller belongs to this workspace.
+    const res = await fetch(defaultWebhookUrl('agentRun'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
-      body: JSON.stringify({ workspace_id: workspaceId, trigger: 'manual', period_days: periodDays }),
+      body: JSON.stringify({
+        workspace_id: workspaceId, trigger: 'manual', period_days: periodDays, access_token: accessToken,
+      }),
     })
+    if (!res.ok) return { ok: false, error: await describeWebhookFailure(res) }
     const body = await res.json().catch(() => ({}))
-    if (!res.ok) return { ok: false, error: body?.error || `The run returned ${res.status}.` }
+    if (!body || typeof body !== 'object') return { ok: false, error: 'The run did not answer.' }
+    if (!body.ok && !body.already_running) return { ok: false, error: body.error || 'The run failed to start.' }
     return body
   } catch (err) {
     return { ok: false, error: String(err?.message || err) }

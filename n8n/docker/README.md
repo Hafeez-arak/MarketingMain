@@ -284,3 +284,29 @@ imported workflows — survives either way.
 docker compose down          # stops + removes the container, keeps the volume (workflows/credentials survive)
 docker compose down -v       # also deletes the volume — full reset
 ```
+
+## The research agent container
+
+`docker-compose.yml` runs a second service, **`agent`** (`arak-marketing-agent`): the same
+`api/agent/*.js` handlers Vercel runs, served by `server/agent.js`. n8n calls it as
+`http://agent:3000`. It is not published beyond `127.0.0.1:5690`.
+
+Every research run goes through the **"Agent — weekly research run"** workflow
+(`n8n/workflows/Agent — weekly research run.json`): the Monday 06:00 schedule, and the app's
+**Run research** button through `arak-agent-run`. The workflow starts the run on the agent,
+runs the lenses, then the brief.
+
+**Keys the agent needs in `.env`** (on top of the n8n ones): `AGENT_RUN_SECRET`,
+`FIRECRAWL_API_KEY`, and optionally `SUPABASE_ANON_KEY`. `SUPABASE_KEY` doubles as the service
+key. See `.env.example`.
+
+**Deploy after a pull** (on the box):
+
+```bash
+cd n8n/docker && docker compose up -d --build agent && cd ../.. && ./n8n/redeploy.sh "Agent — weekly research run"
+curl -s localhost:5690/healthz   # {"ok":true}
+```
+
+**Time budgets** are set on the service (`AGENT_LENS_BUDGET_MS` etc.), well past Vercel's 300s,
+because nothing here cuts a request off. Keep n8n's lens/synthesise HTTP timeouts (10 min)
+above them.

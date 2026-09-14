@@ -2,8 +2,6 @@ import { db, isConfigured } from './_supabase.js'
 import { authorise } from './_serviceAuth.js'
 import { runSingleLens } from './_investigate.js'
 import { deadlineFor } from '../../src/lib/agent/phases.js'
-import { advance } from './_chain.js'
-import { patchRun } from './_gather.js'
 
 // ─── POST /api/agent/lens ──────────────────────────────────────────────────
 // Run ONE research lens for a run that already has its numbers.
@@ -52,9 +50,6 @@ export default async function handler(req, res) {
   const runId = String(body.run_id || '').trim()
   const lens = String(body.lens || '').trim()
   const cadence = body.cadence === 'monthly' ? 'monthly' : 'weekly'
-  // Set when /run started this lens rather than n8n: finishing it means
-  // starting whatever comes next, because nothing else will.
-  const chain = body.chain === true
 
   if (!workspaceId || !runId || !lens) {
     res.status(400).json({ error: 'workspace_id, run_id and lens are all required.' })
@@ -80,7 +75,7 @@ export default async function handler(req, res) {
     // attach here, and the id alone would let it.
     const runs = await db(
       `research_runs?id=eq.${encodeURIComponent(runId)}&workspace_id=eq.${encodeURIComponent(workspaceId)}` +
-      `&select=id,status,stage,planned:report->planned_lenses&limit=1`,
+      `&select=id,status,stage&limit=1`,
     )
     const run = runs?.[0]
     if (!run) {
@@ -104,46 +99,13 @@ export default async function handler(req, res) {
     })
 
     if (!out.ok) {
-      // No result row was written, so a chained run would pick this same lens
-      // again forever. End it instead, saying which lens and why.
-      if (chain) {
-        await patchRun(workspaceId, runId, {
-          status: 'failed', error: `The ${lens} lens could not run: ${out.error}`.slice(0, 500),
-          finished_at: new Date().toISOString(),
-        }).catch(() => {})
-      }
       res.status(out.status || 500).json({ error: out.error })
       return
     }
 
-    // Started before answering, not after: once this function has answered,
-    // the platform may freeze it, and the next lens would never be asked for.
-    let next = null
-    if (chain) {
-      const done = await db(
-        `research_lens_results?run_id=eq.${encodeURIComponent(runId)}&workspace_id=eq.${encodeURIComponent(workspaceId)}&select=lens`,
-      ).catch(() => [])
-      const planned = Array.isArray(run.planned) ? run.planned : []
-      const result = await advance(req, {
-        workspaceId, runId, cadence, planned,
-        // This lens's row was just written; named here too, so a read that
-        // lagged the write cannot send the chain round to the same lens.
-        done: [...(done || []), { lens }],
-      })
-      next = result.step
-    }
-
-    res.status(200).json({ ...out, run_id: runId, ...(next ? { next } : {}) })
+    res.status(200).json({ ...out, run_id: runId })
   } catch (err) {
     console.error('[agent/lens]', err)
-    // A chained run has no other driver, so a crash here ends it honestly
-    // rather than leaving it at `lenses` for someone to notice hours later.
-    if (chain) {
-      await patchRun(workspaceId, runId, {
-        status: 'failed', error: String(err?.message || err).slice(0, 500),
-        finished_at: new Date().toISOString(),
-      }).catch(() => {})
-    }
     res.status(500).json({ ok: false, run_id: runId, lens, error: String(err?.message || err).slice(0, 400) })
   }
 }

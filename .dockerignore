@@ -1,0 +1,18 @@
+# Only the agent image builds from the repo root (server/Dockerfile), and it
+# copies api/agent, api/zernio/_zernio.js, src/lib and server/agent.js. Keep
+# everything else — and every secret — out of the build context.
+.git
+.claude
+node_modules
+dist
+dist-ssr
+public
+brand-assets
+docs
+n8n
+supabase
+.env
+.env.*
+**/*.test.js
+**/*.local
+.DS_Store

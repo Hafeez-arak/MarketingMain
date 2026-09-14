@@ -55,4 +55,8 @@ export const WEBHOOK_PATHS = {
   // The weekly review itself. ASYNC: this answers with a run id immediately
   // and keeps working — the browser polls research_runs, it never waits.
   researchRun:      'arak-research-run',
+  // The research run the Run button starts. The "Agent — weekly research run"
+  // workflow answers it: it starts the run on the agent container next to n8n
+  // and drives every lens and the brief itself. Also what runs on Mondays.
+  agentRun:         'arak-agent-run',
 }
