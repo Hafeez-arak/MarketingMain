@@ -511,10 +511,10 @@ export function AnalyticsDashboard({ dash, days, accountId = '', onRetry, perPla
               <IconBadge tone="rose">{Icon.trophy}</IconBadge>
               <h3 className="font-semibold text-text text-sm">Top performing posts</h3>
             </div>
-            <div className="overflow-x-auto">
+            <div className="overflow-auto max-h-[360px]">
               <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-border">
+                <thead className="sticky top-0 z-10 bg-white shadow-[inset_0_-1px_0_#dde3e2]">
+                  <tr>
                     <th className="text-left px-5 py-2.5 text-[11px] font-medium uppercase tracking-wide text-text-tertiary">Post</th>
                     <th className="text-right px-5 py-2.5 text-[11px] font-medium uppercase tracking-wide text-text-tertiary">Likes</th>
                     <th className="text-right px-5 py-2.5 text-[11px] font-medium uppercase tracking-wide text-text-tertiary">Comments</th>
