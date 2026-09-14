@@ -194,17 +194,50 @@ async function getChannelAnalytics(workspaceId, args) {
 
   return {
     ...channels,
-    accounts: (accounts || []).map(a => ({
+    // ── LIVE accounts only ──
+    //
+    // Split from the dead ones, and the split is the point. The first version
+    // returned all three of this workspace's `social_accounts` rows in one
+    // list with an `is_active` flag, and the assistant reported "three
+    // Instagram connections on file" — then, having seen three account rows
+    // and a thin history in the same breath, invented a causal link between
+    // them: "that split is why history looks thin". It is not. History is thin
+    // because the posts were deleted.
+    //
+    // One flat list invited both errors. A model asked "how many accounts"
+    // counts the list it was given, and two unexplained numbers sitting
+    // together is an invitation to explain one with the other. So the live
+    // ones are `accounts` and nothing else is.
+    accounts: (accounts || []).filter(a => a.is_active !== false).map(a => ({
       platform: a.platform,
       username: a.username,
       display_name: a.display_name,
-      is_active: a.is_active !== false,
       needs_reconnection: a.needs_reconnection === true,
       followers: a.followers_count,
       last_synced_at: a.last_synced_at,
       connected_at: a.connected_at,
       provider: a.publish_provider,
     })),
+    // Kept, because "why can you not see my numbers" is very often answered by
+    // a row that is sitting right here switched off — but kept somewhere it
+    // cannot be counted as a connection or blamed for anything.
+    former_connections: (accounts || []).filter(a => a.is_active === false).map(a => ({
+      platform: a.platform,
+      username: a.username,
+      provider: a.publish_provider,
+      followers_when_disconnected: a.followers_count,
+      last_synced_at: a.last_synced_at,
+    })),
+    former_connections_note:
+      (accounts || []).some(a => a.is_active === false)
+        ? 'These are DISCONNECTED rows, not connections. Reconnecting the same account creates a ' +
+          'new row and switches the old one off rather than deleting it, so one account connected ' +
+          'three times leaves three rows and exactly one live connection. They are excluded from ' +
+          'every number above, they do not split or dilute any metric, and they explain nothing ' +
+          'about how much history exists — never cite them as a cause of missing or thin data. ' +
+          'Mention them only when asked about connection history or about why an account is not ' +
+          'being measured.'
+        : '',
     sync: {
       ...syncHealth(accounts, analytics),
       // Stated separately from `analytics_rows`, which counts only what

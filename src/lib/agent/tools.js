@@ -131,8 +131,13 @@ export const READ_TOOLS = [
       'provider: every post goes out through it and Zernio syncs each post\'s numbers back into ' +
       'our own analytics tables, so "the Zernio analytics" means THIS, not a competitor — ' +
       'Zernio is never a rival and never belongs on the watchlist. ' +
-      'Returns every connected account (platform, username, followers, whether it needs ' +
-      'reconnecting) and per-platform performance for the window, each with a "state": ' +
+      'Returns the LIVE connected accounts in "accounts" (platform, username, followers, whether ' +
+      'it needs reconnecting). Disconnected rows are kept separately in "former_connections" and ' +
+      'are NOT connections — reconnecting an account adds a row and switches the old one off ' +
+      'rather than deleting it, so one account connected three times leaves three rows and one ' +
+      'live connection. Never count them as accounts, and never explain thin or missing history ' +
+      'by their existence; they are excluded from every number in this result. ' +
+      'Also returns per-platform performance for the window, each with a "state": ' +
       '"not_connected", "silent" (connected, nothing published), "unmeasured" (published but no ' +
       'analytics synced) or "measured". Those four are different answers and must not be ' +
       'collapsed into "no data". The "sync" block tells you HOW FRESH this is and whether ' +
