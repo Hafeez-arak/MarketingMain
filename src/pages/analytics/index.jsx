@@ -7,7 +7,7 @@ import { Icon } from '../../components/ui/icons'
 import { syncZernio, fetchZernioDashboard } from '../../lib/zernio'
 import { fetchSocialAccounts, profileUrlOf } from '../../lib/socialAnalytics'
 import { defaultWebhookUrl } from '../../lib/n8nWebhooks'
-import { AnalyticsDashboard } from './Dashboard'
+import { AnalyticsDashboard, DashboardSkeleton } from './Dashboard'
 import { fmt, timeAgo } from './format'
 
 // ─── Analytics ───────────────────────────────────────────────────────────
@@ -90,7 +90,12 @@ export function Analytics() {
   }
 
   if (loading) {
-    return <div className="max-w-7xl"><Card className="p-12 flex items-center justify-center"><Spinner /></Card></div>
+    return (
+      <div className="max-w-7xl space-y-4">
+        <PageHeader title="Analytics" subtitle="Real performance pulled live from your connected accounts." />
+        <DashboardSkeleton />
+      </div>
+    )
   }
 
   const lastSync = dash?.overview?.overview?.lastSync
@@ -147,7 +152,14 @@ export function Analytics() {
             </div>
           </div>
 
-          <AnalyticsDashboard dash={dash} days={days} accountId={scopedAccount} onRetry={handleSync} />
+          {/* Keyed on having no response yet rather than on dashLoading. When
+              the accounts arrive there is one render where the account is
+              known but the dashboard fetch has not started, and dashLoading is
+              still false from the empty run before it — that frame painted all
+              zeros. A refetch (new date range) keeps the old numbers up. */}
+          {!dash && scopedAccount
+            ? <DashboardSkeleton />
+            : <AnalyticsDashboard dash={dash} days={days} accountId={scopedAccount} onRetry={handleSync} />}
 
           {/* Connected accounts — always shown regardless of dashboard state */}
           <Card className="overflow-hidden">

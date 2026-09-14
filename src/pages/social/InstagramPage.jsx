@@ -7,7 +7,7 @@ import { ConnectAccounts } from '../../components/social/ConnectAccounts'
 import { AccountAnalytics } from '../../components/social/AccountAnalytics'
 import { useConnectedAccounts } from '../../lib/useConnectedAccounts'
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from '../../lib/supabaseClient'
-import { Card, Badge, Spinner, PostImage } from '../../components/ui/index'
+import { Card, Badge, Spinner, PostImage, Skeleton } from '../../components/ui/index'
 import { formatDateTime } from '../../lib/utils'
 import { useBrandProfileSync, logEditFeedback } from '../../lib/brandBrain'
 import { useBrandContext } from '../../lib/brandContext'
@@ -48,6 +48,10 @@ function useSupabasePosts(supabaseUrl, anonKey, workspaceId) {
   const [remotePosts,   setRemotePosts]   = useState([])
   const [loadingPosts,  setLoadingPosts]  = useState(false)
   const [lastFetchedAt, setLastFetchedAt] = useState(null)
+  // Whether any fetch has finished, successfully or not. Separate from
+  // lastFetchedAt, which a failed fetch never sets — keying the first-load
+  // skeleton on that would leave it up forever after one bad request.
+  const [settled,       setSettled]       = useState(false)
 
   async function fetchRemotePosts() {
     if (!supabaseUrl || !anonKey || !workspaceId) return
@@ -123,6 +127,7 @@ function useSupabasePosts(supabaseUrl, anonKey, workspaceId) {
       // didn't land is a stale list rather than an empty screen.
     } finally {
       setLoadingPosts(false)
+      setSettled(true)
     }
   }
 
@@ -141,7 +146,12 @@ function useSupabasePosts(supabaseUrl, anonKey, workspaceId) {
     )
   }
 
-  return { remotePosts, loadingPosts, lastFetchedAt, fetchRemotePosts, updatePostStatus }
+  // The first fetch is deferred a tick after mount, so `loadingPosts` is still
+  // false on the first paint. Without this the page opened on "0 posts" and
+  // "No posts yet" and then filled in.
+  const firstLoad = !settled && !!(supabaseUrl && anonKey && workspaceId)
+
+  return { remotePosts, loadingPosts, firstLoad, lastFetchedAt, fetchRemotePosts, updatePostStatus }
 }
 
 export function InstagramPage() {
@@ -153,7 +163,7 @@ export function InstagramPage() {
   const supabaseUrl = SUPABASE_URL
   const anonKey     = accessToken || ''
 
-  const { remotePosts, loadingPosts, lastFetchedAt, fetchRemotePosts, updatePostStatus } =
+  const { remotePosts, loadingPosts, firstLoad, lastFetchedAt, fetchRemotePosts, updatePostStatus } =
     useSupabasePosts(supabaseUrl, anonKey, activeWorkspaceId)
 
   // Merge: remote posts first (newest), deduplicate by id against local
@@ -229,7 +239,9 @@ export function InstagramPage() {
           </div>
           <div>
             <h2 className="font-bold text-text text-base tracking-tight">Instagram</h2>
-            <p className="text-xs text-text-secondary">{mergedPosts.length} post{mergedPosts.length !== 1 ? 's' : ''}</p>
+            {firstLoad
+              ? <Skeleton className="h-3 w-14 mt-1" />
+              : <p className="text-xs text-text-secondary">{mergedPosts.length} post{mergedPosts.length !== 1 ? 's' : ''}</p>}
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -292,13 +304,15 @@ export function InstagramPage() {
           { label: 'Published', value: mergedPosts.filter(p => p.status === 'published').length },
         ].map(s => (
           <Card key={s.label} className="p-4 text-center">
-            <p className="text-2xl font-bold text-text">{s.value}</p>
+            {firstLoad
+              ? <Skeleton className="h-8 w-10 mx-auto" />
+              : <p className="text-2xl font-bold text-text">{s.value}</p>}
             <p className="text-xs text-text-secondary mt-0.5">{s.label}</p>
           </Card>
         ))}
       </div>
 
-      <PostsList posts={mergedPosts} dispatch={dispatch} state={state} updatePostStatus={updatePostStatus} onRefresh={fetchRemotePosts}
+      <PostsList posts={mergedPosts} loading={firstLoad} dispatch={dispatch} state={state} updatePostStatus={updatePostStatus} onRefresh={fetchRemotePosts}
         accounts={igAccounts.accounts} onPosted={handlePosted} webhookUrl="" regenWebhookUrl="" />
       </>)}
     </div>
@@ -915,7 +929,29 @@ function PostDetail({ post, state, webhookUrl, regenWebhookUrl, supabaseUrl, ano
 export { PostDetail as InstagramPostDetail }
 
 // ─── Posts List ────────────────────────────────────────────────────────────
-function PostsList({ posts, dispatch, state, updatePostStatus, onRefresh, onPosted, accounts, webhookUrl, regenWebhookUrl }) {
+// Shaped like the post cards below — thumbnail left, badges and two caption
+// lines right — so the list does not jump when the real rows land.
+function PostListSkeleton() {
+  return (
+    <div className="grid grid-cols-1 gap-3" aria-busy="true" aria-label="Loading posts">
+      {[0, 1, 2].map(i => (
+        <Card key={i} className="overflow-hidden">
+          <div className="flex">
+            <Skeleton className="w-28 h-28 flex-shrink-0" />
+            <div className="flex-1 p-4 space-y-2.5">
+              <Skeleton className="h-4 w-24" />
+              <Skeleton className="h-3.5 w-full" />
+              <Skeleton className="h-3.5 w-2/3" />
+              <Skeleton className="h-3 w-32" />
+            </div>
+          </div>
+        </Card>
+      ))}
+    </div>
+  )
+}
+
+function PostsList({ posts, loading = false, dispatch, state, updatePostStatus, onRefresh, onPosted, accounts, webhookUrl, regenWebhookUrl }) {
   const [filter,       setFilter]       = useState('all')
   const [selectedPost, setSelectedPost] = useState(null)
   const [composerPost, setComposerPost] = useState(null)
@@ -1020,7 +1056,7 @@ function PostsList({ posts, dispatch, state, updatePostStatus, onRefresh, onPost
                 
               } : {}}>
               {f.label}
-              {f.count > 0 && (
+              {!loading && f.count > 0 && (
                 <span className={`ml-1.5 text-[10px] px-1.5 py-0.5 leading-[1.4] font-bold ${
                   filter === f.key ? 'bg-white/25 text-white' : 'bg-surface-subtle text-text-tertiary'
                 }`}>{f.count}</span>
@@ -1028,11 +1064,13 @@ function PostsList({ posts, dispatch, state, updatePostStatus, onRefresh, onPost
             </button>
           ))}
         </div>
-        <span className="text-[11px] text-text-tertiary">{filtered.length} post{filtered.length !== 1 ? 's' : ''}</span>
+        {!loading && <span className="text-[11px] text-text-tertiary">{filtered.length} post{filtered.length !== 1 ? 's' : ''}</span>}
       </div>
 
       {/* Empty state */}
-      {filtered.length === 0 ? (
+      {loading ? (
+        <PostListSkeleton />
+      ) : filtered.length === 0 ? (
         <Card className="p-12 text-center">
           <div className="w-12 h-12 rounded-2xl mx-auto mb-4 flex items-center justify-center"
             style={{ background: '#E1306C' }}>

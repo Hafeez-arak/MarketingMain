@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useApp } from '../../store/app'
 import { useAuth } from '../../store/auth'
-import { Card, Button, PageHeader, Spinner, PostImage } from '../../components/ui/index'
+import { Card, Button, PageHeader, Spinner, PostImage, Skeleton } from '../../components/ui/index'
 import {
   MONTH_LABELS, indexByDay, dayEntries, findCrowding,
   summarize, platformColor, publishState, addDays, startOfWeek, isPastSlot,
@@ -196,7 +196,9 @@ export function Schedule() {
           ].map(s => (
             <div key={s.label} className="p-4">
               <p className="eyebrow mb-2">{s.label}</p>
-              <p className="text-2xl font-bold text-text leading-none tabular-nums">{s.value}</p>
+              {loading
+                ? <Skeleton className="h-6 w-10" />
+                : <p className="text-2xl font-bold text-text leading-none tabular-nums">{s.value}</p>}
             </div>
           ))}
         </div>

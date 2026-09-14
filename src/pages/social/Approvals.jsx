@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useApp } from '../../store/app'
 import { useAuth } from '../../store/auth'
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from '../../lib/supabaseClient'
-import { Card, Button, Badge, Empty, Spinner, PostImage, PageHeader } from '../../components/ui/index'
+import { Card, Button, Badge, Empty, Spinner, PostImage, PageHeader, Skeleton } from '../../components/ui/index'
 import { formatDateTime } from '../../lib/utils'
 import { formatBrandDateTime, BRAND_TIMEZONE_LABEL } from '../../lib/brandTime'
 import { logEditFeedback } from '../../lib/brandBrain'
@@ -96,6 +96,10 @@ function useApprovalPosts(accessToken, workspaceId) {
   const [ideas,   setIdeas]   = useState([])
   const [plans,   setPlans]   = useState([])
   const [loading, setLoading] = useState(false)
+  // Whether the first fetch has come back. The page calls fetchAll from an
+  // effect, which runs after the first paint — so with `loading` alone that
+  // paint showed "Nothing to review" before anything had been asked.
+  const [loaded,  setLoaded]  = useState(false)
 
   const fetchAll = useCallback(async () => {
     if (!accessToken) return
@@ -121,6 +125,7 @@ function useApprovalPosts(accessToken, workspaceId) {
       setPlans(approvalsData.plans || [])
     } finally {
       setLoading(false)
+      setLoaded(true)
     }
   }, [accessToken, workspaceId])
 
@@ -137,7 +142,39 @@ function useApprovalPosts(accessToken, workspaceId) {
     setPosts(prev => prev.map(p => p.id === post.id && p.platform === post.platform ? { ...p, status } : p))
   }
 
-  return { posts, ideas, plans, loading, fetchAll, updateStatus, setIdeas }
+  return { posts, ideas, plans, loading, loaded, fetchAll, updateStatus, setIdeas }
+}
+
+// Shaped like a plan group with its first cards open, so the page keeps its
+// structure while the queue loads.
+function ApprovalsSkeleton() {
+  return (
+    <div className="space-y-4" aria-busy="true" aria-label="Loading posts">
+      {[2, 0].map((cards, g) => (
+        <div key={g} className="border border-border bg-white overflow-hidden">
+          <div className="flex items-center gap-2.5 px-4 py-3">
+            <Skeleton className="w-3.5 h-3.5" />
+            <Skeleton className="h-4 w-40" />
+            <Skeleton className="h-3 w-12" />
+          </div>
+          {cards > 0 && (
+            <div className="grid grid-cols-1 gap-3 p-4 pt-0">
+              {Array.from({ length: cards }, (_, i) => (
+                <div key={i} className="flex gap-4 border border-border p-4">
+                  <Skeleton className="w-24 h-24 flex-shrink-0" />
+                  <div className="flex-1 space-y-2.5">
+                    <Skeleton className="h-4 w-28" />
+                    <Skeleton className="h-3.5 w-full" />
+                    <Skeleton className="h-3.5 w-3/4" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  )
 }
 
 // ─── Small card variants for in-flight/failed generation ──────────────────
@@ -332,7 +369,7 @@ function PostCard({ post, onOpen, onApprove, onReject, onPublish, publishing, on
 export function Approvals() {
   const { state } = useApp()
   const { activeWorkspaceId, accessToken } = useAuth()
-  const { posts, ideas, plans, loading, fetchAll, updateStatus, setIdeas } = useApprovalPosts(accessToken, activeWorkspaceId)
+  const { posts, ideas, plans, loading, loaded, fetchAll, updateStatus, setIdeas } = useApprovalPosts(accessToken, activeWorkspaceId)
   const [platformFilter, setPlatformFilter] = useState('all')  // all | instagram
   const [statusFilter,   setStatusFilter]   = useState('pending_review')
   const [selectedPost,   setSelectedPost]   = useState(null)
@@ -684,8 +721,8 @@ export function Approvals() {
         </div>
       </div>
 
-      {loading && items.length === 0 ? (
-        <Card className="p-12 flex items-center justify-center"><Spinner /></Card>
+      {(loading || !loaded) && items.length === 0 ? (
+        <ApprovalsSkeleton />
       ) : grouped.length === 0 ? (
         <Card>
           <Empty

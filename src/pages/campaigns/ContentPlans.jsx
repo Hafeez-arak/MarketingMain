@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useApp, actions } from '../../store/app'
 import { useAuth } from '../../store/auth'
-import { Card, Button, Empty, Spinner, ConfirmDialog, IconBadge, PageHeader } from '../../components/ui/index'
+import { Card, Button, Empty, Spinner, ConfirmDialog, IconBadge, PageHeader, Skeleton } from '../../components/ui/index'
 import { Icon } from '../../components/ui/icons'
 import { formatDate, PLATFORM_META } from '../../lib/utils'
 import { fetchPlans, fetchPlanWithIdeas, deletePlan } from '../../lib/contentPlans'
@@ -64,7 +64,24 @@ export function ContentPlans() {
       </PageHeader>
 
       {loading ? (
-        <div className="flex items-center justify-center py-16 text-text-tertiary text-sm"><Spinner size="sm" /> <span className="ml-2">Loading plans…</span></div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4" aria-busy="true" aria-label="Loading plans">
+          {[0, 1, 2, 3].map(i => (
+            <Card key={i} className="p-5">
+              <div className="flex items-start gap-3 mb-3">
+                <Skeleton className="w-7 h-7 flex-shrink-0" />
+                <div className="flex-1 space-y-1.5">
+                  <Skeleton className="h-4 w-2/3" />
+                  <Skeleton className="h-3 w-32" />
+                </div>
+              </div>
+              <Skeleton className="h-3 w-full mb-1.5" />
+              <Skeleton className="h-3 w-4/5 mb-4" />
+              <div className="pt-3 border-t border-border">
+                <Skeleton className="h-7 w-16" />
+              </div>
+            </Card>
+          ))}
+        </div>
       ) : plans.length === 0 ? (
         <Card className="shadow-none border-border">
           <Empty

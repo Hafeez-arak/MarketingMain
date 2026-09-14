@@ -4,7 +4,7 @@ import {
   ResponsiveContainer, BarChart, Bar, LineChart, Line, XAxis, YAxis,
   CartesianGrid, Tooltip,
 } from 'recharts'
-import { Card, Button, PlatformPill, Empty, PostImage, IconBadge, PillSelect } from '../../components/ui/index'
+import { Card, Button, PlatformPill, Empty, PostImage, IconBadge, PillSelect, Skeleton } from '../../components/ui/index'
 import { Icon } from '../../components/ui/icons'
 import { BestTimeHeatmap, MetricToggle } from './charts'
 import { fmt } from './format'
@@ -105,6 +105,41 @@ export function ChartCard({ title, subtitle, total, right, icon, tone, children 
       </div>
       {children}
     </Card>
+  )
+}
+
+// Stands in for the KPI strip and the first row of charts until a response
+// exists. AnalyticsDashboard drawn over no response prints "0.0%" and
+// "0 followers" — which reads as an account with no audience, not as a page
+// that is still loading.
+export function DashboardSkeleton() {
+  return (
+    <div className="space-y-4" aria-busy="true" aria-label="Loading analytics">
+      <Card className="overflow-hidden">
+        <div className="grid grid-cols-2 sm:grid-cols-5 divide-y sm:divide-y-0 divide-x-0 sm:divide-x divide-border">
+          {[0, 1, 2, 3, 4].map(i => (
+            <div key={i} className="p-5">
+              <Skeleton className="h-3 w-20 mb-2.5" />
+              <Skeleton className="h-7 w-16" />
+            </div>
+          ))}
+        </div>
+      </Card>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {[0, 1].map(i => (
+          <Card key={i} className="p-5">
+            <div className="flex items-start gap-2.5 mb-4">
+              <Skeleton className="w-7 h-7" />
+              <div className="space-y-1.5">
+                <Skeleton className="h-3.5 w-32" />
+                <Skeleton className="h-3 w-44" />
+              </div>
+            </div>
+            <Skeleton className="h-[220px] w-full" />
+          </Card>
+        ))}
+      </div>
+    </div>
   )
 }
 
