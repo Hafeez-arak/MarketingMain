@@ -37,7 +37,18 @@ export const PHASES = ['gather', 'lenses', 'synthesise', 'complete']
  * EARLY and writing an honest "this timed out" is strictly better than being
  * killed, so every budget here leaves room to write that row.
  */
-export const PLATFORM_CEILING_MS = 300_000
+// Overridable per environment. On Vercel nothing is set and the defaults below
+// are the platform's own limits. In the agent container next to n8n (see
+// n8n/docker/docker-compose.yml) there is no 300s ceiling, so the budgets are
+// raised there. Read through globalThis so this module still loads in the
+// browser bundle, where `process` does not exist.
+const ENV = (globalThis.process && globalThis.process.env) || {}
+function envMs(key, fallback) {
+  const n = Number(ENV[key])
+  return Number.isFinite(n) && n > 0 ? n : fallback
+}
+
+export const PLATFORM_CEILING_MS = envMs('AGENT_CEILING_MS', 300_000)
 export const SAFETY_MARGIN_MS = 45_000
 
 /** How long each phase may take before it must wrap up and report. */
@@ -47,9 +58,9 @@ export const PHASE_BUDGET_MS = {
   gather: 120_000,
   // One lens. Deliberately well under the ceiling: the route also has to load
   // context, write a result row, and answer.
-  lens: 150_000,
+  lens: envMs('AGENT_LENS_BUDGET_MS', 150_000),
   // Synthesis reads every lens result and writes the brief someone acts on.
-  synthesise: 180_000,
+  synthesise: envMs('AGENT_SYNTHESISE_BUDGET_MS', 180_000),
 }
 
 /**

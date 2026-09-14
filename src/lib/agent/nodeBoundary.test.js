@@ -87,7 +87,6 @@ describe('the agent runs in Node, not in a bundle', () => {
     'api/agent/_loop.js',
     'api/agent/_gather.js',
     'api/agent/_investigate.js',
-    'api/agent/_chain.js',
     'api/agent/_lenses.js',
     'api/agent/_web.js',
     // The endpoints themselves. Vercel imports these files directly, so if one

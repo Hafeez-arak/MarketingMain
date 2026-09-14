@@ -100,11 +100,12 @@ export default function AgentPage() {
     // "Already running" is a success, not a failure — a second press attaches
     // to the run already going rather than starting a second agent on the same
     // period and doubling the bill.
+    // The run answers once the numbers are committed; the lenses and the brief
+    // carry on in the background, so there is no headline to show yet.
     setRunNote(
       out.already_running ? out.reason
         : out.ok
-          ? `${out.headline || 'Run complete.'} — ${out.measured} measured, ${out.failed} unreadable` +
-            (out.investigated ? '' : ` (${out.note || 'measured numbers only'})`)
+          ? 'Measuring — the numbers are committed. The investigation continues in the background.'
           : out.error || 'The run failed.',
     )
     setRunning(false)

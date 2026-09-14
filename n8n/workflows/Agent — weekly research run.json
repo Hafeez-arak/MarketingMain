@@ -75,7 +75,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ workspace_id: $json.workspace_id, trigger: 'scheduled', cadence: $json.cadence || 'weekly' }) }}",
+        "jsonBody": "={{ JSON.stringify({ workspace_id: $json.workspace_id, trigger: 'scheduled', cadence: $json.cadence || 'weekly', drive: false }) }}",
         "options": {
           "timeout": 180000,
           "response": {
@@ -105,7 +105,7 @@
           "combinator": "and",
           "conditions": [
             {
-              "leftValue": "={{ $json.ok }}",
+              "leftValue": "={{ $json.ok === true && $json.already_running !== true && Array.isArray($json.next?.lenses) }}",
               "rightValue": true,
               "operator": {
                 "type": "boolean",
@@ -115,7 +115,8 @@
             }
           ]
         }
-      }
+      },
+      "notes": "A run that is already going is someone else's to drive — attaching a second driver would run every lens twice."
     },
     {
       "id": "fan_out",
@@ -127,7 +128,7 @@
         280
       ],
       "parameters": {
-        "jsCode": "// The route tells us which lenses this run wants. Read from the response\n// rather than hardcoded here, so adding a lens is a code change in the repo\n// — which is tested — and not an edit in this UI, which is not.\n//\n// The cadence comes back from the route too, and is carried onto every lens\n// call. The lens route REFUSES a lens the run does not include, so a monthly\n// run whose lens calls quietly defaulted to weekly would be rejected one lens\n// at a time — and the failure would read as \"this run does not include a\n// rivals lens\" rather than as the plumbing mistake it is.\nconst out = [];\nfor (const item of $input.all()) {\n  const runId = item.json.run_id;\n  const ws = item.json.workspace_id || $('Which brands').first().json.workspace_id;\n  const cadence = item.json.cadence || $('Which brands').first().json.cadence || 'weekly';\n  for (const lens of (item.json.next?.lenses || [])) {\n    out.push({ json: { workspace_id: ws, run_id: runId, lens, cadence } });\n  }\n}\nreturn out;\n"
+        "jsCode": "// The route tells us which lenses this run wants. Read from the response\n// rather than hardcoded here, so adding a lens is a code change in the repo\n// — which is tested — and not an edit in this UI, which is not.\n//\n// Everything comes from /run's own reply, which carries workspace_id and\n// cadence. This runs after both triggers (the Monday schedule and the app's\n// Run button), and a reference to either trigger's node would fail on the\n// other branch, where that node never ran.\n//\n// The cadence is carried onto every lens call. The lens route REFUSES a lens\n// the run does not include, so a monthly run whose lens calls quietly\n// defaulted to weekly would be rejected one lens at a time.\nconst out = [];\nfor (const item of $input.all()) {\n  const runId = item.json.run_id;\n  const ws = item.json.workspace_id;\n  const cadence = item.json.cadence || 'weekly';\n  if (!runId || !ws) continue;\n  for (const lens of (item.json.next?.lenses || [])) {\n    out.push({ json: { workspace_id: ws, run_id: runId, lens, cadence } });\n  }\n}\nreturn out;\n"
       }
     },
     {
@@ -159,7 +160,7 @@
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ workspace_id: $json.workspace_id, run_id: $json.run_id, lens: $json.lens, cadence: $json.cadence || 'weekly' }) }}",
         "options": {
-          "timeout": 280000,
+          "timeout": 600000,
           "batching": {
             "batch": {
               "batchSize": 3,
@@ -173,11 +174,9 @@
           }
         }
       },
-      "retryOnFail": true,
-      "maxTries": 2,
-      "waitBetweenTries": 5000,
       "alwaysOutputData": true,
-      "notes": "One lens per request, bounded server-side by a 150s wall-clock budget. Idempotent per (run_id, lens), so a retry replaces its own row rather than adding a second result. batchSize 3 stops the whole lens set opening that many concurrent model calls at once — the set is five on a weekly run and seven on a monthly one, so it is deliberately not a number tied to either."
+      "notes": "One lens per request, run by the agent container next to n8n (AGENT_BASE_URL). NO node-level retry, on purpose: n8n retries a failed HTTP node as a whole, so one lens answering non-2xx re-sent all five and billed every lens twice (run 4de11a81, 2026-09-14: $2.62 instead of ~$1.40). onError=continueRegularOutput passes a failed lens on as its own item instead; the lens route is idempotent per (run_id, lens) and writes an honest failure row, so synthesise still sees every lens. The agent stops a lens at AGENT_LENS_BUDGET_MS; this 10-minute timeout sits above that. batchSize 3 keeps a monthly run's seven lenses from opening seven model calls at once.",
+      "onError": "continueRegularOutput"
     },
     {
       "id": "synthesise",
@@ -208,7 +207,7 @@
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ workspace_id: $json.workspace_id, run_id: $json.run_id, cadence: $json.cadence || 'weekly' }) }}",
         "options": {
-          "timeout": 280000,
+          "timeout": 600000,
           "response": {
             "response": {
               "neverError": true
@@ -256,9 +255,107 @@
         280
       ],
       "parameters": {
-        "jsCode": "// Runs once, after every lens item has come back. Emits a single item so\n// synthesise is called once per run rather than once per lens.\n//\n// Deliberately NOT named for a number. The set is decided per run by sales\n// motion and cadence — five on a weekly run, seven on a monthly one — and a\n// node that assumed six would be wrong on both.\nconst items = $input.all();\nconst first = items[0]?.json || {};\nconst runId = first.run_id || $('One item per lens').first().json.run_id;\nconst ws = $('One item per lens').first().json.workspace_id;\nconst cadence = $('One item per lens').first().json.cadence || 'weekly';\n\nconst failed = items.filter(i => i.json?.lens_ok === false).map(i => i.json.lens);\nconst timedOut = items.filter(i => i.json?.timed_out).map(i => i.json.lens);\n\nreturn [{ json: { workspace_id: ws, run_id: runId, cadence, lenses: items.length, failed, timed_out: timedOut } }];\n"
+        "jsCode": "// Runs once, after every lens item has come back. Emits a single item so\n// synthesise is called once per run rather than once per lens.\n//\n// Deliberately NOT named for a number. The set is decided per run by sales\n// motion and cadence — five on a weekly run, seven on a monthly one — and a\n// node that assumed six would be wrong on both.\n//\n// A lens request that failed at the HTTP level arrives as n8n's own error\n// item ({ error: ... }) with no `lens` field, because the lens step continues\n// on error rather than retrying the whole batch. Its lens name comes from the\n// matching input item, so the summary can still say WHICH lens failed and why.\nconst items = $input.all();\nconst sent = $('One item per lens').all();\nconst first = sent[0]?.json || {};\nconst runId = first.run_id;\nconst ws = first.workspace_id;\nconst cadence = first.cadence || 'weekly';\n\nconst lensOf = (item, i) => item.json?.lens || sent[item.pairedItem?.item ?? i]?.json?.lens || `item ${i}`;\nconst failed = [];\nconst errors = [];\nitems.forEach((item, i) => {\n  const j = item.json || {};\n  const httpError = j.error && !j.lens;\n  if (j.lens_ok === false || httpError) {\n    failed.push(lensOf(item, i));\n    if (httpError) errors.push(`${lensOf(item, i)}: ${typeof j.error === 'string' ? j.error : (j.error?.message || JSON.stringify(j.error))}`.slice(0, 200));\n  }\n});\nconst timedOut = items.filter(i => i.json?.timed_out).map((item, i) => lensOf(item, i));\n\nreturn [{ json: { workspace_id: ws, run_id: runId, cadence, lenses: items.length, failed, timed_out: timedOut, errors } }];\n"
       },
       "executeOnce": false
+    },
+    {
+      "id": "trigger_app",
+      "name": "Run button (app)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -620,
+        720
+      ],
+      "webhookId": "arak-agent-run",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "arak-agent-run",
+        "responseMode": "responseNode",
+        "options": {}
+      }
+    },
+    {
+      "id": "guard_app",
+      "name": "Webhook Secret Guard",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -400,
+        720
+      ],
+      "parameters": {
+        "jsCode": "const expected = String($env.N8N_WEBHOOK_SECRET || '').trim();\nif (expected) {\n  const headers = ($input.first().json || {}).headers || {};\n  const got = String(headers['x-webhook-secret'] || headers['X-Webhook-Secret'] || '').trim();\n  if (got !== expected) {\n    throw new Error('Unauthorized: missing or invalid webhook secret');\n  }\n}\nreturn $input.all();"
+      }
+    },
+    {
+      "id": "from_app",
+      "name": "From the app",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -180,
+        720
+      ],
+      "parameters": {
+        "jsCode": "// The Run button, through api/n8n/[slot].js. That proxy proves the caller is\n// signed in to the app; it does not know which workspaces they belong to.\n//\n// So the caller's own token is handed to the agent for the first step, and\n// the agent checks membership with it (api/agent/_serviceAuth.js). Starting\n// the run with AGENT_RUN_SECRET instead would take the workspace_id in this\n// body on trust — any signed-in user could run, and bill, any workspace.\n// Every step after /run uses the secret: by then the run row exists, created\n// by a caller who was checked.\nconst body = $input.first().json.body || {};\nreturn [{\n  json: {\n    workspace_id: String(body.workspace_id || '').trim(),\n    access_token: String(body.access_token || '').trim(),\n    period_days: Number(body.period_days) || 7,\n    cadence: body.cadence === 'monthly' ? 'monthly' : 'weekly',\n  },\n}];\n"
+      }
+    },
+    {
+      "id": "run_app",
+      "name": "POST /api/agent/run (app)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        40,
+        720
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.AGENT_BASE_URL }}/api/agent/run",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $json.access_token }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ workspace_id: $json.workspace_id, trigger: 'manual', cadence: $json.cadence || 'weekly', period_days: $json.period_days, drive: false }) }}",
+        "options": {
+          "timeout": 180000,
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "notes": "Stage 0 only. Returns in well under a minute with the measured numbers already committed, plus `next.lenses` — the list this run intends to execute."
+    },
+    {
+      "id": "answer_app",
+      "name": "Answer the app",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        260,
+        720
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "notes": "Answers the Run button as soon as the numbers are committed, with /run's own reply (run_id, or already_running, or the error). The lenses carry on after this; the page polls research_runs."
     }
   ],
   "connections": {
@@ -362,6 +459,61 @@
         [
           {
             "node": "What happened",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run button (app)": {
+      "main": [
+        [
+          {
+            "node": "Webhook Secret Guard",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook Secret Guard": {
+      "main": [
+        [
+          {
+            "node": "From the app",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "From the app": {
+      "main": [
+        [
+          {
+            "node": "POST /api/agent/run (app)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "POST /api/agent/run (app)": {
+      "main": [
+        [
+          {
+            "node": "Answer the app",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Answer the app": {
+      "main": [
+        [
+          {
+            "node": "Did it start?",
             "type": "main",
             "index": 0
           }

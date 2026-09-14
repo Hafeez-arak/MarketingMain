@@ -83,9 +83,54 @@ services:
       - N8N_RUNNERS_TASK_TIMEOUT=600
       - GENERIC_TIMEZONE=Asia/Riyadh
       - TZ=Asia/Riyadh
+      # The research agent, over the Docker network (the `agent` service
+      # below). Set here rather than in .env so it cannot be left pointing at
+      # Vercel: the "Agent — weekly research run" workflow calls
+      # $env.AGENT_BASE_URL/api/agent/{run,lens,synthesise}.
+      - AGENT_BASE_URL=http://agent:3000
     volumes:
       - arak_marketing_n8n_data:/home/node/.n8n
       - ../workflows:/workflows:ro
+
+  # ── The research agent ────────────────────────────────────────────────────
+  # The same api/agent handlers Vercel runs, as a long-lived Node process (see
+  # server/agent.js). n8n drives a run through it: the Monday schedule and the
+  # app's Run button both land in the "Agent — weekly research run" workflow.
+  #
+  # Why here and not Vercel: on Vercel every step of a run lives inside a 300s
+  # ceiling, and a run that drove itself there was refused with 508
+  # INFINITE_LOOP_DETECTED. On this machine neither limit exists, so the time
+  # budgets below are set well past Vercel's.
+  #
+  # Holds no state. Everything it reads and writes is in Supabase, so moving it
+  # to another machine is this file, the repo and .env.
+  agent:
+    build:
+      context: ../..
+      dockerfile: server/Dockerfile
+    image: arak-marketing-agent:latest
+    container_name: arak-marketing-agent
+    restart: unless-stopped
+    # Loopback only: n8n reaches it by service name, and nothing outside this
+    # machine should reach it at all. The port is for `curl localhost:5690/healthz`.
+    ports:
+      - "127.0.0.1:5690:3000"
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
+    env_file:
+      - .env
+    environment:
+      - AGENT_PORT=3000
+      # The agent reads SUPABASE_SERVICE_ROLE_KEY; this .env has always called
+      # the same key SUPABASE_KEY. Either name works.
+      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY:-${SUPABASE_KEY}}
+      # Time budgets (src/lib/agent/phases.js). Vercel keeps its defaults
+      # (300s ceiling, 225s lens); here a slow tender search gets 7 minutes.
+      # n8n's lens and synthesise HTTP timeouts are 10 minutes, above these.
+      - AGENT_CEILING_MS=900000
+      - AGENT_LENS_BUDGET_MS=420000
+      - AGENT_SYNTHESISE_BUDGET_MS=360000
 
 volumes:
   arak_marketing_n8n_data:

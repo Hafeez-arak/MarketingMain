@@ -3,7 +3,6 @@ import { gather, patchRun } from './_gather.js'
 import { planLenses } from './_investigate.js'
 import { periodFor } from '../../src/lib/agent/gather.js'
 import { authorise } from './_serviceAuth.js'
-import { shouldDrive, advance } from './_chain.js'
 
 // ─── POST /api/agent/run ───────────────────────────────────────────────────
 // The weekly research run. AGENT.md §6, RESEARCH-AGENT.md §4.
@@ -67,10 +66,6 @@ export default async function handler(req, res) {
 
   const trigger = ['manual', 'scheduled', 'chat'].includes(body.trigger) ? body.trigger : 'manual'
   const cadence = body.cadence === 'monthly' ? 'monthly' : 'weekly'
-  // Who presses "next". n8n's Monday run drives its own lenses; a run started
-  // anywhere else (the Run button, the assistant) has no other driver, so it
-  // drives itself. See _chain.js for the run that sat at `lenses` for hours.
-  const driving = shouldDrive({ trigger, drive: body.drive })
   const periodDays = Math.min(90, Math.max(1, Number(body.period_days) || 7))
   const now = new Date()
   const period = periodFor(periodDays, now)
@@ -179,23 +174,15 @@ export default async function handler(req, res) {
       report: { ...gatheredReport, planned_lenses: plan.lenses, cadence },
     })
 
-    if (driving) {
-      const chain = await advance(req, { workspaceId, runId, cadence, planned: plan.lenses, done: [] })
-      if (!chain.ok) {
-        // advance() has already marked the run failed, with this reason.
-        res.status(200).json({ ok: false, run_id: runId, error: chain.error })
-        return
-      }
-    }
-
     res.status(200).json({
       ok: true,
       run_id: runId,
+      // Echoed so the driver reads the workspace from this reply alone. The
+      // n8n workflow has two triggers, and a lens step that looked the
+      // workspace up from one trigger's node would fail on the other branch.
+      workspace_id: workspaceId,
       already_running: false,
       stage: 'lenses',
-      // True when this run starts its own lenses and brief. A driver that sees
-      // it must not call them as well.
-      driving,
       snapshots: out.snapshots,
       measured: out.measured,
       failed: out.failed,
