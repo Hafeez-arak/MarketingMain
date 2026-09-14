@@ -71,6 +71,58 @@ export function formatTime(hhmm) {
   return `${h12}:${String(m).padStart(2, '0')} ${period}`
 }
 
+// The time every planned post starts at. Not asked for on the setup page any
+// more — a post's date and time are confirmed next to its picture and caption
+// on the last step, where they can be judged against the actual post.
+export const DEFAULT_POST_TIME = '19:00'
+
+const toYMD = d =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+const DAY_KEYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat']
+
+// Give every undated post a date, spread evenly over the plan's range.
+//
+// A post that already has a date keeps it — someone typed that date because
+// the post is FOR that day (a launch, an occasion), and moving it would be
+// wrong in a way nobody would notice until it went out. Only the undated ones
+// are placed: four undated posts in a month land roughly a week apart, and
+// they are placed around the fixed ones rather than on top of them.
+//
+// `postingDays` narrows the candidate days when the brand only posts on
+// certain weekdays; if that leaves nothing in range, every day is a candidate
+// again rather than dropping the posts.
+export function distributeDates(posts, { startDate, endDate, postingDays = [] } = {}) {
+  const list = posts || []
+  const start = parseYMD(startDate)
+  const end = parseYMD(endDate)
+  const undatedIdx = list.map((p, i) => (p?.date ? -1 : i)).filter(i => i >= 0)
+  if (!start || !end || end < start || !undatedIdx.length) return list
+
+  const allDays = []
+  for (const d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) allDays.push(new Date(d))
+  const allowed = postingDays.length
+    ? allDays.filter(d => postingDays.includes(DAY_KEYS[d.getDay()]))
+    : allDays
+  const candidates = (allowed.length ? allowed : allDays).map(toYMD)
+
+  const taken = new Set(list.filter(p => p?.date).map(p => p.date))
+  const free = candidates.filter(k => !taken.has(k))
+  // More posts than free days: share days rather than lose posts.
+  const pool = free.length >= undatedIdx.length ? free : candidates
+
+  // Centre of each equal slice, so 4 posts in October land on the 4th, 12th, 20th and 28th
+  // rather than bunching at the start or ending exactly on the last day. With
+  // at least as many days as posts the slices are a day or more wide, so no
+  // two posts can round onto the same day.
+  const n = undatedIdx.length
+  const chosen = undatedIdx.map((_, k) =>
+    pool[Math.min(pool.length - 1, Math.floor(((k + 0.5) * pool.length) / n))])
+
+  const out = list.slice()
+  undatedIdx.forEach((i, k) => { out[i] = { ...out[i], date: chosen[k] } })
+  return out
+}
+
 // Ideas grouped into the weeks they fall in, oldest first, with anything
 // undated collected at the end under "Unscheduled".
 //

@@ -8,7 +8,6 @@
 // here it is an import.
 
 import { PLATFORM_META } from '../../lib/utils'
-import { DEFAULT_BRAND_BRAIN_SECTIONS } from '../../lib/brandBrain'
 
 export const GOALS = ['Brand awareness','Lead generation','Product launch','Community engagement','Event promotion','Sales & offers']
 export const PLATFORMS = ['instagram'] // the only platform with a generation pipeline
@@ -23,11 +22,17 @@ export const PLATFORMS = ['instagram'] // the only platform with a generation pi
 // this list held instagram, tiktok and snapchat, and went stale the moment
 // LinkedIn was added back — LinkedIn simply could not be chosen as a target,
 // with nothing to indicate the option was missing rather than withheld.
-export const TARGET_PLATFORMS = Object.entries(PLATFORM_META).map(([id, meta]) => ({
-  id,
-  label: meta.label,
-  cls: `${meta.bg} ${meta.text} ${meta.border}`,
-}))
+//
+// Beta platforms are left out. Snapchat is still `status:'beta'` — it can't be
+// connected or published to — so offering it as a target promised a post that
+// would never go anywhere.
+export const TARGET_PLATFORMS = Object.entries(PLATFORM_META)
+  .filter(([, meta]) => meta.status !== 'beta')
+  .map(([id, meta]) => ({
+    id,
+    label: meta.label,
+    cls: `${meta.bg} ${meta.text} ${meta.border}`,
+  }))
 export const targetLabel = id => PLATFORM_META[id]?.label || id
 
 export const IG_TONES = [
@@ -60,18 +65,33 @@ export const WEEKDAYS = [
   { value: 'fri', label: 'Fri', weekend: true }, { value: 'sat', label: 'Sat', weekend: true },
 ]
 
+// What the AI reads from the Brand Brain unless someone opens the hidden
+// picker and changes it. The brand's voice, plus every directory the workspace
+// has (added once the schema loads — see CampaignPlanner). Not the Asset
+// Library: that block is a list of photo folder names, which told a caption
+// writer nothing, and pictures are now chosen directly rather than described.
+export const PLANNER_BRAND_SECTIONS = ['voice']
+
+// A selection nobody has touched yet — either this default or the older
+// ['voice','assets'] one still sitting in someone's saved draft.
+export function isUntouchedSelection(sel = []) {
+  return sel.every(k => k === 'voice' || k === 'assets') && sel.includes('voice')
+}
+
 export const DEFAULT_DRAFT = {
-  step: 'setup', // 'setup' | 'review' | 'media' | 'done'
+  // setup → review (ideas only) → media (pictures) → captions → done
+  step: 'setup',
   month: '', goal: '', goalCategory: '', platforms: ['instagram'],
   startDate: '', endDate: '', approxCount: '', includeHolidays: true,
-  // Cadence: which weekdays this brand actually posts on (empty = AI decides
-  // freely, today's behavior) and the default publish time.
-  postingDays: [], defaultTime: '19:00',
+  // Cadence: which weekdays this brand actually posts on (empty = any day).
+  // There is no default-time field any more — every post starts at
+  // DEFAULT_POST_TIME and is confirmed on the captions step.
+  postingDays: [],
   // Individually curated posts (below) are the PRIMARY planning surface.
   // AI-proposed filler is an explicit, off-by-default add-on — when false,
   // the AI planner webhook is never even called.
   aiAssist: false,
-  brandBrainSections: DEFAULT_BRAND_BRAIN_SECTIONS,
+  brandBrainSections: PLANNER_BRAND_SECTIONS,
   // Stage-1 brief inputs — all optional. Give the planner real material to
   // work with instead of just a count + a general idea.
   featuredProductIds: [],   // brand_products ids to emphasize this month

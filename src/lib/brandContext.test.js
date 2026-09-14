@@ -209,6 +209,36 @@ describe('buildContext', () => {
     expect(featured?.text).not.toContain('Treatment 2')
   })
 
+  // The planner always passes its section picker's selection, and the picker
+  // lists `services`, never `services__featured`. Testing the block's own key
+  // withheld the matched row's detail from every planner call.
+  it('keeps a featured block when its parent section is selected', () => {
+    const rows = Array.from({ length: 15 }, (_, i) => ({
+      id: `s${i}`,
+      data: { name: `Treatment ${i}`, desc: `Detail for ${i}` },
+    }))
+    const ctx = buildContext(baseProfile(), baseSchema(), { rowsBySection: { services: rows } }, [], {
+      matchText: 'Book Treatment 4 today',
+      sections: ['voice', 'services'],
+    })
+    const featured = ctx.blocks.find(b => b.key === 'services__featured')
+    expect(featured?.muted).toBe(false)
+    expect(ctx.instructions).toContain('Detail for 4')
+  })
+
+  it('withholds a featured block when its parent section is not selected', () => {
+    const rows = Array.from({ length: 15 }, (_, i) => ({
+      id: `s${i}`,
+      data: { name: `Treatment ${i}`, desc: `Detail for ${i}` },
+    }))
+    const ctx = buildContext(baseProfile(), baseSchema(), { rowsBySection: { services: rows } }, [], {
+      matchText: 'Book Treatment 4 today',
+      sections: ['voice'],
+    })
+    expect(ctx.blocks.find(b => b.key === 'services__featured')?.mutedBy).toBe('section')
+    expect(ctx.instructions).not.toContain('Detail for 4')
+  })
+
   it('every block considered is present in blocks[], muted or not, for the preview panel', () => {
     const { blocks } = buildContext(baseProfile(), baseSchema(), { rowsBySection: {} }, [], { mutedKeys: ['voice'] })
     expect(blocks.some(b => b.key === 'voice' && b.muted)).toBe(true)

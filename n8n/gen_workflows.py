@@ -592,6 +592,20 @@ const mediaType = body.media_type || 'image';       // image | video | none
 const wantsCaption = body.wants_caption !== false;
 const instructions = body.instructions || '';
 
+// Captions-only: the planner's captions step runs after the picture exists,
+// so image-prompt options would describe a picture that is already made.
+// Opt-in so any caller that still wants image prompts keeps getting them.
+const captionOnly = body.caption_only === true;
+
+// The finished picture, so the captions describe what is actually in the
+// shot. Never a video — a clip is not sent to the model at all; a video
+// post is captioned from its brief alone. At most two images: enough for a
+// carousel's opening slides without paying for every slide.
+const imageUrls = mediaType === 'video' ? [] : (Array.isArray(body.image_urls) ? body.image_urls : [])
+  .map(u => String(u || '').trim())
+  .filter(u => /^https:\/\//i.test(u))
+  .slice(0, 2);
+
 const langRule = lang === 'ar'
   ? 'Write in SAUDI ARABIC (Gulf/Najdi dialect — natural, modern, warm; NOT stiff MSA). Fill the *_ar field; set *_en to "".'
   : lang === 'en'
@@ -620,9 +634,10 @@ CALL TO ACTION: ${body.cta || ''}
 OCCASION: ${body.occasion || '(none)'}
 CONTENT PILLAR: ${body.content_pillar || '(none)'}
 FORMAT: ${format} (${mediaType === 'video' ? 'video' : mediaType === 'none' ? 'text only, no media' : 'image'}${aspectRatio ? `, ${aspectRatio} orientation` : ''})
-${body.image_idea ? `MARKETER'S OWN VISION FOR THE MEDIA: ${body.image_idea}` : ''}`;
+${body.image_idea ? `MARKETER'S OWN VISION FOR THE MEDIA: ${body.image_idea}` : ''}
+${imageUrls.length ? `THE FINISHED ${imageUrls.length > 1 ? 'PICTURES ARE' : 'PICTURE IS'} ATTACHED ABOVE. Write every caption for what is actually in ${imageUrls.length > 1 ? 'them' : 'it'} — the real subject, setting, light and mood — and keep it consistent with the topic. Never describe anything that is not visible or stated in the brief, and do not read out text that appears in the image word for word.` : ''}`;
 
-const wantsMedia = mediaType !== 'none';
+const wantsMedia = mediaType !== 'none' && !captionOnly;
 const wantsMotion = mediaType === 'video';
 
 const captionSchema = wantsCaption
@@ -646,6 +661,9 @@ try {
     headers:{ 'x-api-key':ANTHROPIC, 'anthropic-version':'2023-06-01', 'content-type':'application/json' },
     body:{ model:'claude-sonnet-5', max_tokens:3000, messages:[{ role:'user', content:[
       { type:'text', text: cachedPrefix, cache_control:{ type:'ephemeral' } },
+      // Images sit AFTER the cached block, so the brand prefix stays
+      // byte-identical across a plan's posts and keeps its cache hit.
+      ...imageUrls.map(url => ({ type:'image', source:{ type:'url', url } })),
       { type:'text', text: variableSuffix },
     ] }] },
     json:true });
@@ -1910,6 +1928,9 @@ const pastIdeas     = Array.isArray(input.past_ideas) ? input.past_ideas : [];
 const postingDays   = Array.isArray(input.posting_days) ? input.posting_days : [];
 const contentMixTarget = input.content_mix_target || '';
 const defaultTime   = input.posting_time || '19:00';
+const research      = input.research && typeof input.research === 'object' ? input.research : null;
+const agentMemory   = String(input.agent_memory || '').slice(0, 6000);
+const recentPosts   = Array.isArray(input.recent_posts) ? input.recent_posts.slice(0, 40) : [];
 
 const countLine = approxCount
   ? `Plan for approximately ${approxCount} posts total across the date range.`
@@ -2037,6 +2058,30 @@ const varietySection = totalPast >= 5 && pillarDist.length
     `Deliberately rebalance AWAY from the most-used pillars above. If a pillar already accounts for a large share of past ideas, it should be a small share of this plan -- reach for the brand's under-used pillars and formats instead. Do not simply produce more of what dominates that list.\n`
   : '';
 
+// ── Research: this brand's own research agent, not a generic trend list ──
+// Its proposed ideas are evidence-backed — each one answers a finding — so
+// they are offered as strong candidates to adapt, with the reason attached.
+// Adapt, not copy: the plan still has to fit this month's dates and mix.
+const researchIdeas = research && Array.isArray(research.ideas) ? research.ideas.slice(0, 10) : [];
+const researchFindings = research && Array.isArray(research.findings) ? research.findings.slice(0, 6) : [];
+const researchSection = research && (research.headline || researchIdeas.length || researchFindings.length)
+  ? `\nLATEST RESEARCH FROM THIS BRAND'S RESEARCH AGENT${research.date ? ` (${research.date})` : ''} -- use it to decide what is worth posting now:\n` +
+    (research.headline ? `Headline: ${research.headline}\n` : '') +
+    (researchFindings.length ? `Findings:\n${researchFindings.map(f => `- ${f}`).join('\n')}\n` : '') +
+    (researchIdeas.length ? `Ideas the research proposed (each answers a finding). Where one fits this month, build a post from it -- keep its reasoning, fit it to the dates, and put that reasoning in "rationale". Do not repeat one that is already covered below:\n${researchIdeas.map(i => `- ${i.title}${i.angle ? ' — ' + i.angle : ''}${i.rationale ? ` [why: ${i.rationale}]` : ''}`).join('\n')}\n` : '')
+  : '';
+
+// ── The research agent's memory — including every idea it already proposed.
+const agentMemorySection = agentMemory
+  ? `\nRESEARCH AGENT'S MEMORY FOR THIS BRAND (standing context and ideas already proposed -- do not propose a near-copy of an idea listed here unless the research above says it is still the right one):\n${agentMemory}\n`
+  : '';
+
+// ── Posts actually made recently, beyond plan history — a post made straight
+// in the Studio never had an idea row, so past_ideas alone misses it.
+const recentPostsSection = recentPosts.length
+  ? `\nPOSTS ALREADY MADE RECENTLY (do not propose the same subject or a lightly reworded version of these):\n${recentPosts.map(p => `- [${p.platform || 'instagram'}${p.date ? ', ' + p.date : ''}] ${p.topic || ''}${p.caption ? ` — "${p.caption}"` : ''}`).join('\n')}\n`
+  : '';
+
 // -- Target content mix: a freeform ratio the human wants (e.g. "40% product,
 // 20% educational, 20% trust, 20% engagement") -- a soft aim, not a hard rule,
 // since content_pillar is freeform text and can't be numerically enforced. --
@@ -2094,7 +2139,7 @@ PLATFORMS: ${platforms.join(', ')}
 DATE RANGE: ${startDate} to ${endDate}
 ${countLine}
 ${cadenceSection}${timeSection}${ramadanTimeNote}${holidaySection}
-${featuredProductsSection}${seedPostsSection}${existingIdeasSection}${contentMixSection}${pastIdeasSection}${varietySection}
+${featuredProductsSection}${seedPostsSection}${existingIdeasSection}${contentMixSection}${researchSection}${pastIdeasSection}${recentPostsSection}${agentMemorySection}${varietySection}
 Now produce the plan for the request above, following all the rules already given.`;
 
 return [{

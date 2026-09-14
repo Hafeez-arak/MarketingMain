@@ -32,11 +32,13 @@ export function momentsInRange(startDate, endDate) {
 // object. This is that object, in one place: the plan list opens plans from
 // here, and so does the return trip out of Creative Studio.
 //
-// Always 'review'. Whoever is being sent to a plan wants to see its ideas —
-// dropping them on the setup form would hide the very board they came for.
-export function planDraftFromPlan(plan, ideas) {
+// Never the setup form — whoever is being sent to a plan wants its ideas, not
+// a blank form that would hide the board they came for. The review board by
+// default; `step` lets the Studio send people back to the pictures step
+// instead, because that is the step they left from.
+export function planDraftFromPlan(plan, ideas, { step = 'review' } = {}) {
   return {
-    step: 'review',
+    step,
     month: plan.month || '', goal: plan.goal || '', goalCategory: plan.goal_category || '',
     platforms: plan.platforms || ['instagram'],
     startDate: plan.start_date || '', endDate: plan.end_date || '',
@@ -102,8 +104,8 @@ export function dbIdeaToDraft(row) {
     mediaType: row.media_type || 'image',
     groupId: row.group_id || '',
     wantsCaption: row.wants_caption !== false,
-    // Draft copy — options proposed at plan time, and whichever one (or
-    // hand-edit) the reviewer picked. See IdeaDraftPanel.
+    // Caption options written on the captions step, and whichever one (or
+    // hand-edit) the reviewer picked. See CaptionCard.
     captionOptions: row.caption_options || [],
     mediaPromptOptions: row.media_prompt_options || [],
     captionAr: row.caption_ar || '',
