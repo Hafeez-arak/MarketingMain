@@ -237,6 +237,75 @@ export function ownChannelRows(report = {}) {
       || (b.avg_engagement ?? -1) - (a.avg_engagement ?? -1))
 }
 
+/**
+ * Where the market is moving — the top of the brief.
+ *
+ * The run writes `market_direction` since 2026-09-14. Every brief before that
+ * one does not have it, and those briefs are the ones on screen today, so the
+ * fallback is not a nicety: it assembles the same thing out of what an older
+ * report does carry — the per-rival reads, which said exactly this and said it
+ * at the BOTTOM of a competitor card nine sections down.
+ *
+ * `derived` is returned rather than hidden. A synthesis the agent wrote and a
+ * list this function stitched together are different claims, and a reader who
+ * cannot tell them apart will over-trust the second.
+ */
+export function marketDirection(report = {}) {
+  const written = (report.market_direction || []).filter(m => m?.movement)
+  if (written.length) return { items: written, derived: false }
+
+  const items = (report.competitor_board || [])
+    .filter(c => c.read)
+    .map(c => ({ movement: `${c.name}: ${c.read}`, basis: 'instagram', so_what: '' }))
+
+  return { items, derived: items.length > 0 }
+}
+
+const BASIS_LABEL = {
+  instagram: 'measured on Instagram',
+  web: 'from what we read',
+  our_analytics: 'from our own analytics',
+  calendar: 'from the calendar',
+}
+export const basisLabel = b => BASIS_LABEL[b] || ''
+
+/**
+ * Gaps, and the ideas that execute them, as one list.
+ *
+ * These were two cards a screen apart. The 12 Sep brief is the case that made
+ * it obvious: gap 1 ended "publish a short technical brief", and idea 2 WAS
+ * that brief — in a different card, below two other sections, connected only
+ * by a sentence of rationale the reader had to match up from memory.
+ *
+ * An idea that points at a FINDING rather than a gap is not forced under one:
+ * it keeps its own row with the finding named on it. An idea pointing at
+ * nothing — every idea in every brief written before `answers` existed — falls
+ * to `loose`, which renders exactly as the old ideas card did. Nothing
+ * regresses for an old brief; new ones gain the binding.
+ */
+export function actionPlan(report = {}) {
+  const gaps = (report.gaps || []).map((g, i) => ({ ...g, id: g.id || `G${i + 1}` }))
+  const ideas = report.proposed_ideas || []
+
+  const under = new Map(gaps.map(g => [g.id, []]))
+  const loose = []
+
+  for (const idea of ideas) {
+    const ref = idea.answers_ref
+    if (ref?.kind === 'gap' && under.has(ref.id)) under.get(ref.id).push(idea)
+    else loose.push(idea)
+  }
+
+  return {
+    blocks: gaps.map(gap => ({ gap, ideas: under.get(gap.id) || [] })),
+    loose,
+    // Every idea, in the order they are rendered, so the send-to-planner
+    // control sends what is on screen rather than the raw report order.
+    ordered: [...gaps.flatMap(g => under.get(g.id) || []), ...loose],
+    ideaCount: ideas.length,
+  }
+}
+
 /** Percentage, rounded, for confidence and share values that arrive 0–1. */
 export function pct(n) {
   const v = num(n)

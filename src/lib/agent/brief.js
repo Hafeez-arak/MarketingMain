@@ -26,7 +26,10 @@ export const BRIEF_SCHEMA = {
   schema: {
     type: 'object',
     additionalProperties: false,
-    required: ['headline', 'market', 'gaps', 'proposed_rules', 'proposed_ideas', 'agenda_changes', 'unanswered'],
+    required: [
+      'headline', 'market_direction', 'market', 'gaps', 'proposed_rules', 'proposed_ideas',
+      'agenda_changes', 'unanswered',
+    ],
     properties: {
       headline: {
         type: 'string',
@@ -34,6 +37,38 @@ export const BRIEF_SCHEMA = {
           'One sentence: what actually changed this week. If nothing changed, say exactly that — ' +
           '"nothing moved this week" is a complete and correct headline, and manufacturing a ' +
           'finding to justify having run is the failure this whole report is designed to avoid.',
+      },
+      // ── Where the market is moving ──
+      // The one section allowed to be a SYNTHESIS rather than a single cited
+      // finding: it reads the board, the movements and the web findings
+      // together and says what direction they point in. It exists because the
+      // pieces that answer "what are rivals doing, and so what" were split
+      // across three cards a screen apart — the per-rival reads at the bottom
+      // of the board, the gaps in the middle, the ideas above them — and a
+      // reader had to assemble the sentence themselves, every week.
+      market_direction: {
+        type: 'array',
+        description:
+          'At most three. Each statement names WHO is moving and WHAT they are doing — ' +
+          '"rivals are getting more active" is not a direction; "Huda is buying physical ' +
+          'presence: a 737 sqm showroom and three posts a week at 1.2/1k" is. Rests on the ' +
+          'board, the movements and the market findings you already have; introduces no new ' +
+          'claim. If the week points nowhere, return an empty array — a manufactured direction ' +
+          'is worse than none, and "the board did not move" is a complete answer.',
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['movement', 'basis'],
+          properties: {
+            movement: { type: 'string', description: 'One sentence. Who is moving, and what they are doing.' },
+            basis: {
+              type: 'string',
+              enum: ['instagram', 'web', 'our_analytics', 'calendar'],
+              description: 'What this rests on. Instagram PROVES, web EXPLAINS — never blur them.',
+            },
+            so_what: { type: 'string', description: 'One clause: what it means for us. Omit rather than pad.' },
+          },
+        },
       },
       // Per-competitor reading. Keyed by name so it merges onto the board that
       // stage 0 already computed, rather than replacing it.
@@ -82,8 +117,12 @@ export const BRIEF_SCHEMA = {
         items: {
           type: 'object',
           additionalProperties: false,
-          required: ['gap', 'basis', 'our_position', 'suggested_response'],
+          required: ['id', 'gap', 'basis', 'our_position', 'suggested_response'],
           properties: {
+            // Referenced by proposed_ideas. Written by you, in the order you
+            // write them, so an idea can say which gap it executes rather than
+            // leaving a reader to match two paragraphs by eye.
+            id: { type: 'string', description: 'G1, G2, G3 — in the order you write them.' },
             gap: { type: 'string' },
             basis: { type: 'string', enum: ['instagram', 'web', 'our_analytics'] },
             our_position: { type: 'string', description: 'What we actually did, with the number.' },
@@ -95,7 +134,12 @@ export const BRIEF_SCHEMA = {
         type: 'array',
         description:
           'At most 4, fewer is better, none at all is correct when the research supports nothing ' +
-          'specific. A rule steers every future caption this brand generates.',
+          'specific. A rule steers every future caption this brand generates, FOREVER — there is ' +
+          'no expiry and nothing reviews it again. So a rule must be true in six months: a way of ' +
+          'framing things, a claim to make, a thing to avoid. NEVER a dated instruction. ' +
+          '"Tie project posts to energy-efficiency outcomes" is a rule. "Create content for INDEX ' +
+          'Saudi Arabia 2026 (Sept 15-17)" is NOT — it is an idea, it goes in proposed_ideas, and ' +
+          'as a rule it would still be instructing the planner about that trade show next year.',
         items: {
           type: 'object',
           additionalProperties: false,
@@ -114,11 +158,22 @@ export const BRIEF_SCHEMA = {
         items: {
           type: 'object',
           additionalProperties: false,
-          required: ['title', 'rationale'],
+          required: ['title', 'rationale', 'answers'],
           properties: {
             title: { type: 'string' },
             angle: { type: 'string' },
-            rationale: { type: 'string', description: 'Which finding this answers.' },
+            rationale: { type: 'string', description: 'Which finding this answers, in prose.' },
+            // The same link as `rationale`, but as a reference rather than as
+            // prose, so the page can render the idea UNDER the thing it
+            // answers instead of in a separate card. Prose alone meant the
+            // connection existed only in a reader's memory.
+            answers: {
+              type: 'string',
+              description:
+                'The id of one of your gaps ("G2"), or the ref of one of the findings you were ' +
+                'given ("F3"). Empty string only when it genuinely answers neither — an idea ' +
+                'with nothing behind it is one the research did not earn.',
+            },
             suggested_format: { type: 'string' },
           },
         },
@@ -255,6 +310,34 @@ export const SYNTHESISE_PROMPT = [
   'will not matter. A date carrying a generic "post about it" is worth less than no finding,',
   'and manufacturing a reason to care is the failure mode here.',
   '',
+  'WHERE THE MARKET IS MOVING, AND WHAT WE DO ABOUT IT, ARE ONE THOUGHT.',
+  'A reader arrives with one question — "what should we do?" — and the honest answer has two',
+  'halves that only mean something together: where the market is going, and what that costs or',
+  'offers us. Write them as one chain:',
+  '  market_direction  the direction of travel. Who is moving and what they are doing, from the',
+  '                    board, the movements and what you read. At most three. No new claims —',
+  '                    this is a synthesis of evidence you already have, not another finding.',
+  '  gaps              where that direction and our own position do not line up.',
+  '  proposed_ideas    the content that closes a gap, each one pointing at the gap or finding it',
+  '                    answers via `answers`.',
+  'Every idea carries an `answers` reference — "G2" for one of your own gaps, or "F3" for one of',
+  'the findings you were given above. The page renders the idea underneath the thing it answers,',
+  'so a wrong reference files it under the wrong finding and an empty one leaves it orphaned at',
+  'the bottom. If an idea answers nothing on this list, that is a reason to reconsider proposing',
+  'it, not a reason to invent a reference.',
+  '',
+  'A RULE IS FOREVER. AN IDEA IS FOR THIS WEEK. DO NOT CONFUSE THEM.',
+  'An approved rule is appended to the brand context of every future generation until a person',
+  'deletes it by hand. There is no expiry and nothing reviews it a second time. So before you',
+  'propose one, ask whether it is still true and still worth following in six months.',
+  '  A rule:  a way of framing things, a claim worth making, a thing to avoid, a contrast to draw.',
+  '  NOT a rule: anything with a date, a deadline, a season or a named event in it. That is an',
+  '              IDEA — put it in proposed_ideas, where it is read next to the finding that',
+  '              produced it and expires with this brief.',
+  'A dated item proposed as a rule is not a small mistake: it either gets approved and keeps',
+  'instructing the planner about an event that has passed, or it sits in a review queue with no',
+  'clock on it until the window closes. Both have happened.',
+  '',
   'Hard rules:',
   '- Every market finding carries the sources you actually read. No source, no finding.',
   '- Say when a sample is too small to carry a conclusion. "n=3" is a fact, not a hedge.',
@@ -264,6 +347,107 @@ export const SYNTHESISE_PROMPT = [
   '- Propose at most four rules, and none at all if nothing supports one. A rule steers every',
   '  future caption this brand generates.',
 ].join('\n')
+
+// ─── A rule with a date on it is not a rule ────────────────────────────────
+// `brand_memory` has no expiry column. An approved rule is appended to the
+// Learned Guidance block of every matching generation until a person retires
+// it by hand — so "create content tied to INDEX Saudi Arabia 2026 (Sept 15-17)"
+// approved once keeps instructing the planner about a trade show that ended,
+// in November, in March, forever. That proposal sat in the review queue from
+// 17 Aug to the day before the event, which is the other half of the problem:
+// nothing about a rule communicates that it is perishable, because rules are
+// not supposed to be.
+//
+// The dated thing belongs in `proposed_ideas`, which is read beside the
+// finding that produced it and dies with the brief.
+//
+// Deliberately a WARNING rather than a filter. A durable rule can legitimately
+// name a year — "reference SASO 2663:2025 compliance in technical posts" is a
+// standing instruction that happens to contain 2025 — and silently dropping
+// that would be a worse failure than showing a caution nobody needed. The
+// person approving is already the gate; this gives them the one fact they
+// cannot see from the sentence.
+
+const MONTH =
+  '(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?' +
+  '|aug(?:ust)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)'
+
+/**
+ * Does this rule name a moment in time?
+ *
+ * @param {string} rule the rule sentence itself — never the detail, which is
+ *   evidence and is expected to carry dates.
+ * @returns {boolean}
+ */
+export function datedRule(rule) {
+  const t = ` ${String(rule || '')} `
+  if (/\b\d{4}-\d{2}-\d{2}\b/.test(t)) return true
+  if (new RegExp(`\\b\\d{1,2}\\s*(?:st|nd|rd|th)?\\s+${MONTH}\\b`, 'i').test(t)) return true
+  if (new RegExp(`\\b${MONTH}\\.?\\s+\\d{1,2}\\b`, 'i').test(t)) return true
+  // A standalone year. Not one inside a standard's designation — SASO
+  // 2663:2025 is a document number, not a deadline, and the colon is what
+  // separates the two cases in every example this app has seen.
+  if (/(?<![:\-\d])\b20[2-9]\d\b/.test(t)) return true
+  return false
+}
+
+// ─── References ────────────────────────────────────────────────────────────
+// Two things in a brief point at other things in the same brief: an idea says
+// which gap or finding it executes. Before this the pointer was a sentence of
+// prose and the reader did the matching, which in practice meant they did not.
+//
+// Refs are assigned in CODE, never by the model. A model asked to invent stable
+// ids across a 16k-token response will occasionally reuse one, and a duplicate
+// id silently files two ideas under the wrong finding.
+
+/** Stamp F1…Fn onto the findings, in the order the synthesis will see them. */
+export function withRefs(findings = []) {
+  return findings.map((f, i) => ({ ...f, ref: `F${i + 1}` }))
+}
+
+/**
+ * Re-stamp gap ids as G1…Gn.
+ *
+ * The model is asked for these so it can point its ideas at them, but what it
+ * writes is a suggestion: a missing id, a duplicate, or "Gap 2" instead of
+ * "G2" would all break the binding silently. The model's own value is kept as
+ * `claimed_id` so a pointer written against it can still be resolved.
+ */
+export function withGapIds(gaps = []) {
+  return gaps.map((g, i) => ({ ...g, id: `G${i + 1}`, claimed_id: String(g.id || '').trim() }))
+}
+
+const normRef = v => String(v || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '')
+
+/**
+ * Resolve each idea's `answers` pointer against the gaps and findings it could
+ * be pointing at.
+ *
+ * An unresolvable pointer is DROPPED rather than rendered: a chip reading
+ * "because: G4" when there is no G4 is worse than no chip, and the idea's
+ * `rationale` already says the same thing in prose. Nothing is lost.
+ */
+export function bindIdeas(ideas = [], gaps = [], findings = []) {
+  const byGap = new Map()
+  for (const g of gaps) {
+    byGap.set(normRef(g.id), g.id)
+    if (g.claimed_id) byGap.set(normRef(g.claimed_id), g.id)
+  }
+  const byFinding = new Map(findings.map(f => [normRef(f.ref), f]))
+
+  return ideas.map(idea => {
+    const ref = normRef(idea.answers)
+    if (!ref) return { ...idea, answers_ref: null }
+    if (byGap.has(ref)) {
+      return { ...idea, answers_ref: { kind: 'gap', id: byGap.get(ref) } }
+    }
+    const f = byFinding.get(ref)
+    if (f) {
+      return { ...idea, answers_ref: { kind: 'finding', ref: f.ref, headline: f.headline || '' } }
+    }
+    return { ...idea, answers_ref: null }
+  })
+}
 
 // ─── Merging the model's half onto the measured half ───────────────────────
 
@@ -281,7 +465,7 @@ export const SYNTHESISE_PROMPT = [
  * person can still judge it; a proposed RULE that lost all its sources is
  * DROPPED, because a rule steers generation and nobody reviews it again.
  */
-export function mergeBrief(gathered, brief, allowedUrls) {
+export function mergeBrief(gathered, brief, allowedUrls, findings = []) {
   const allow = allowedUrls instanceof Set ? allowedUrls : new Set(allowedUrls || [])
   const keep = s => allow.has(typeof s === 'string' ? s : s?.url)
 
@@ -291,9 +475,13 @@ export function mergeBrief(gathered, brief, allowedUrls) {
   })
 
   const proposedRules = (brief?.proposed_rules || [])
-    .map(r => ({ ...r, sources: (r.sources || []).filter(keep) }))
+    .map(r => ({ ...r, sources: (r.sources || []).filter(keep), dated: datedRule(r.rule) }))
     // Silently dropped, not flagged. This is the strict side of the asymmetry.
     .filter(r => r.sources.length > 0)
+
+  // Stamped before the ideas are bound, because the binding resolves against
+  // these ids rather than against whatever the model wrote.
+  const gaps = withGapIds(brief?.gaps || [])
 
   const readByName = new Map(
     (brief?.competitor_reads || []).map(r => [String(r.name || '').toLowerCase(), r.read]),
@@ -309,9 +497,10 @@ export function mergeBrief(gathered, brief, allowedUrls) {
       read: readByName.get(String(c.name || '').toLowerCase()) || '',
     })),
     market,
-    gaps: brief?.gaps || [],
+    market_direction: brief?.market_direction || [],
+    gaps,
     proposed_rules: proposedRules,
-    proposed_ideas: brief?.proposed_ideas || [],
+    proposed_ideas: bindIdeas(brief?.proposed_ideas || [], gaps, findings),
     agenda_changes: brief?.agenda_changes || [],
     unanswered: [...(gathered.unanswered || []), ...(brief?.unanswered || [])],
     rules_dropped_uncited:
