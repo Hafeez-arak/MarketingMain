@@ -572,13 +572,40 @@ async function req(opts){
   }
 }
 
+// The reply is asked for bare JSON and usually is. The ways it is not — a
+// fence or a sentence around it, `//` comments copied from a template, a raw
+// line break inside an Arabic caption, a trailing comma — all used to collapse
+// to {}, which reached the board as "no options" with nothing to say why.
+// Observed 2026-09-14 on the first captions-from-the-picture run.
+function tidyJson(s){
+  let out = '', inStr = false, esc = false;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (inStr) {
+      if (esc) { esc = false; out += ch; continue; }
+      if (ch === '\\') { esc = true; out += ch; continue; }
+      if (ch === '"') { inStr = false; out += ch; continue; }
+      // A control character is illegal inside a JSON string; escape it.
+      if (ch === '\n') { out += '\\n'; continue; }
+      if (ch === '\r') { out += '\\r'; continue; }
+      if (ch === '\t') { out += '\\t'; continue; }
+      out += ch; continue;
+    }
+    if (ch === '"') { inStr = true; out += ch; continue; }
+    // A comment outside a string runs to the end of its line.
+    if (ch === '/' && s[i + 1] === '/') { while (i < s.length && s[i] !== '\n') i++; out += '\n'; continue; }
+    out += ch;
+  }
+  return out.replace(/,(\s*[}\]])/g, '$1');
+}
 function safeJson(t){
   const c = String(t||'').replace(/```json|```/g,'').trim();
-  try { return JSON.parse(c); } catch(e){
-    const m = c.match(/\{[\s\S]*\}/);
-    if(m){ try { return JSON.parse(m[0]); } catch(_){} }
-    return {};
+  const m = c.match(/\{[\s\S]*\}/);
+  for (const candidate of [c, m && m[0]].filter(Boolean)) {
+    try { return JSON.parse(candidate); } catch(_){}
+    try { return JSON.parse(tidyJson(candidate)); } catch(_){}
   }
+  return {};
 }
 
 const body     = ($input.first().json.body) || {};
@@ -640,21 +667,30 @@ ${imageUrls.length ? `THE FINISHED ${imageUrls.length > 1 ? 'PICTURES ARE' : 'PI
 const wantsMedia = mediaType !== 'none' && !captionOnly;
 const wantsMotion = mediaType === 'video';
 
-const captionSchema = wantsCaption
-  ? `"caption_options":[{"caption_ar":"","caption_en":""}, {…}, {…}]  // exactly 3 genuinely different options — vary the hook/structure, not just wording`
-  : `"caption_options":[]  // this post has no caption — leave empty`;
-const mediaSchema = wantsMedia
-  ? `"media_prompt_options":[{"media_prompt":"a vivid, detailed prompt ready to hand to an image${wantsMotion ? '/video cover' : ''} generator — describe the actual scene, lighting, composition, mood"${wantsMotion ? ', "motion_prompt":"how the still should animate into video — camera move, light behavior, pacing"' : ''}}, {…}, {…}]  // exactly 3 genuinely different directions`
-  : `"media_prompt_options":[]  // text-only post, no media — leave empty`;
+// The template is literal JSON — no `//` notes in it. Models copy a template
+// faithfully, and a comment copied into the reply is not JSON. Everything the
+// notes used to say lives in the instructions above the template instead.
+const captionItem = '{"caption_ar":"","caption_en":""}';
+const mediaItem = wantsMotion ? '{"media_prompt":"","motion_prompt":""}' : '{"media_prompt":""}';
+const captionSchema = `"caption_options":[${wantsCaption ? [captionItem, captionItem, captionItem].join(',') : ''}]`;
+const mediaSchema = `"media_prompt_options":[${wantsMedia ? [mediaItem, mediaItem, mediaItem].join(',') : ''}]`;
+
+// Captions-only must not say "this post has no image": when the picture is
+// attached, that line contradicts the one telling the model to describe it.
+const mediaLine = wantsMedia
+  ? `- 3 genuinely different ${wantsMotion ? 'video' : 'image'} directions for this post's media. Each media_prompt is a vivid, detailed prompt ready to hand to an image${wantsMotion ? '/video cover' : ''} generator — the actual scene, lighting, composition and mood.${wantsMotion ? ' Each motion_prompt says how the still should animate into video — camera move, light behaviour, pacing.' : ''}`
+  : captionOnly
+    ? '- No image prompts — the picture for this post already exists. Return an empty media_prompt_options array.'
+    : '- This post has no image or video — return an empty media_prompt_options array.';
 
 const variableSuffix = `${postFacts}
 
 Write:
-${wantsCaption ? '- 3 distinct caption options for this post.' : "- This post has NO caption — return an empty caption_options array."}
-${wantsMedia ? `- 3 distinct ${wantsMotion ? 'video' : 'image'} direction options for this post's media.` : '- This post has no image or video — return an empty media_prompt_options array.'}
+${wantsCaption ? '- 3 genuinely different caption options for this post — vary the hook and the structure, not just the wording.' : "- This post has NO caption — return an empty caption_options array."}
+${mediaLine}
 
-Return ONLY valid JSON, no markdown fences, EXACTLY this shape:
-{${captionSchema}, ${mediaSchema}}`;
+Return ONLY valid JSON — no markdown fences, no comments, nothing before or after it. Write line breaks inside a caption as \\n. EXACTLY this shape:
+{${captionSchema},${mediaSchema}}`;
 
 try {
   const resp = await req({ method:'POST', url:'https://api.anthropic.com/v1/messages',
@@ -674,11 +710,17 @@ try {
   // thinking wasn't explicitly requested — content[0] is NOT reliably the
   // text block, so find it by type instead of indexing.
   const textBlock = resp.content.find(b => b.type === 'text');
-  const parsed = safeJson(textBlock && textBlock.text);
+  const replyText = String((textBlock && textBlock.text) || '');
+  const parsed = safeJson(replyText);
   const captionOptions = wantsCaption && Array.isArray(parsed.caption_options) ? parsed.caption_options.slice(0, 3) : [];
   const mediaPromptOptions = wantsMedia && Array.isArray(parsed.media_prompt_options) ? parsed.media_prompt_options.slice(0, 3) : [];
-  if (wantsCaption && !captionOptions.length) throw new Error('No caption options returned by the model.');
-  if (wantsMedia && !mediaPromptOptions.length) throw new Error('No media prompt options returned by the model.');
+  // Say what came back. This workflow keeps no copy of the reply, so the
+  // error on the row is the only place a failed draft can be diagnosed from.
+  const replyHint = (replyText.trim()
+    ? ` Reply began: "${replyText.replace(/\s+/g, ' ').trim().slice(0, 160)}"`
+    : ' The reply had no text.') + (resp.stop_reason === 'max_tokens' ? ' (cut off at max_tokens)' : '');
+  if (wantsCaption && !captionOptions.length) throw new Error('No caption options returned by the model.' + replyHint);
+  if (wantsMedia && !mediaPromptOptions.length) throw new Error('No media prompt options returned by the model.' + replyHint);
   return { json: { _ok: true, plan_idea_id: planIdeaId, caption_options: captionOptions, media_prompt_options: mediaPromptOptions } };
 } catch (err) {
   return { json: { _ok: false, plan_idea_id: planIdeaId, error: (err && err.message) ? err.message : String(err) } };

@@ -95,3 +95,76 @@ describe('Draft Copy — captions only', () => {
     expect(text).not.toContain('"media_prompt_options":[]')
   })
 })
+
+// ─── Reading the reply ─────────────────────────────────────────────────────
+// The first live captions-from-the-picture run (2026-09-14) came back as "No
+// caption options returned by the model." with nothing else to go on. Every
+// reply shape below used to end the same way.
+
+async function draftWithReply(body, text, extra = {}) {
+  const routes = [['api.anthropic.com/v1/messages', async () =>
+    ({ statusCode: 200, body: { type: 'message', stop_reason: 'end_turn', ...extra, content: [{ type: 'text', text }] } })]]
+  const { items } = await runCodeNode(DRAFT, { env: ENV, input: { body }, routes })
+  return items?.json ?? items?.[0]?.json
+}
+
+describe('Draft Copy — reading the reply', () => {
+  const CAPTION_ONLY = { ...BASE, caption_only: true, image_urls: ['https://cdn.test/a.png'] }
+
+  it('reads a reply with // comments copied into it', async () => {
+    const out = await draftWithReply(CAPTION_ONLY,
+      '{"caption_options":[{"caption_ar":"أ","caption_en":"a"},{"caption_ar":"ب","caption_en":"b"},{"caption_ar":"ج","caption_en":"c"}]  // exactly 3\n,"media_prompt_options":[]  // leave empty\n}')
+    expect(out._ok).toBe(true)
+    expect(out.caption_options).toHaveLength(3)
+  })
+
+  it('reads a caption with a raw line break and keeps the line break', async () => {
+    const out = await draftWithReply(CAPTION_ONLY,
+      '{"caption_options":[{"caption_ar":"سطر أول\nسطر ثان","caption_en":"line one\nline two"},{"caption_ar":"ب","caption_en":"b"},{"caption_ar":"ج","caption_en":"c"}],"media_prompt_options":[]}')
+    expect(out._ok).toBe(true)
+    expect(out.caption_options[0].caption_en).toBe('line one\nline two')
+  })
+
+  it('reads a reply with a trailing comma', async () => {
+    const out = await draftWithReply(CAPTION_ONLY,
+      '{"caption_options":[{"caption_ar":"أ","caption_en":"a"},{"caption_ar":"ب","caption_en":"b"},{"caption_ar":"ج","caption_en":"c"},],"media_prompt_options":[],}')
+    expect(out._ok).toBe(true)
+    expect(out.caption_options).toHaveLength(3)
+  })
+
+  it('does not treat // inside a caption as a comment', async () => {
+    const out = await draftWithReply(CAPTION_ONLY,
+      '{"caption_options":[{"caption_ar":"أ","caption_en":"See https://arak-sa.com today"},{"caption_ar":"ب","caption_en":"b"},{"caption_ar":"ج","caption_en":"c"}],"media_prompt_options":[]}')
+    expect(out.caption_options[0].caption_en).toBe('See https://arak-sa.com today')
+  })
+
+  it('says what the model replied when no captions come back', async () => {
+    const out = await draftWithReply(CAPTION_ONLY, "I can't see an image attached, so I can't describe it.")
+    expect(out._ok).toBe(false)
+    expect(out.error).toContain('No caption options returned by the model.')
+    expect(out.error).toContain('Reply began: "I can\'t see an image attached')
+  })
+
+  it('says when the reply was cut off', async () => {
+    const out = await draftWithReply(CAPTION_ONLY, '{"caption_options":[{"caption_ar":"أ', { stop_reason: 'max_tokens' })
+    expect(out.error).toContain('(cut off at max_tokens)')
+  })
+})
+
+describe('Draft Copy — the captions-only prompt', () => {
+  it('never tells the model the post has no image while one is attached', async () => {
+    const { text } = await draft({ ...BASE, caption_only: true, image_urls: ['https://cdn.test/a.png'] })
+    expect(text).toContain('PICTURE IS ATTACHED ABOVE')
+    expect(text).not.toContain('no image or video')
+    expect(text).toContain('No image prompts')
+  })
+
+  it('puts no // comments in the JSON template', async () => {
+    for (const body of [{ ...BASE, caption_only: true }, { ...BASE }, { ...BASE, media_type: 'video', format: 'reel' }]) {
+      const { text } = await draft(body)
+      const template = text.slice(text.indexOf('EXACTLY this shape:'))
+      expect(template).not.toContain('//')
+      expect(() => JSON.parse(template.slice(template.indexOf('{')))).not.toThrow()
+    }
+  })
+})
