@@ -1,4 +1,6 @@
-import { createZernio } from '../zernio/_zernio.js'
+import {
+  createZernio, retryRateLimited, explainZernioError, INSTAGRAM_INSIGHT_METRICS,
+} from '../zernio/_zernio.js'
 import { readAccounts } from './_ownData.js'
 
 // ─── Asking Zernio directly ────────────────────────────────────────────────
@@ -46,6 +48,11 @@ import { readAccounts } from './_ownData.js'
  *
  * 29 is the largest value that survives that expansion. Verified against the
  * live account: 30 → HTTP 400, 29 → 200.
+ *
+ * `analyticsPlan` in _zernio.js clamps to the same 29 for the Analytics page,
+ * having arrived at it independently. Two callers finding the same boundary
+ * the same painful way is the argument for it being written down in both
+ * places rather than inferred once.
  */
 const MAX_INSIGHT_DAYS = 29
 
@@ -93,9 +100,15 @@ export async function accountInsights(z, accountId, days = MAX_INSIGHT_DAYS) {
   const until = new Date()
   const since = new Date(until.getTime() - span * 86_400_000)
   try {
-    const out = await z.request('analytics/instagram/account-insights', {
-      query: { accountId, since: ymd(since), until: ymd(until) },
-    })
+    // Metrics named explicitly from the shared list rather than left to the
+    // endpoint's default. Zernio's own error enumerates what is valid, and
+    // `follower_count` is not among them — asking for it 400s the whole call.
+    const out = await retryRateLimited(() => z.request('analytics/instagram/account-insights', {
+      query: {
+        accountId, since: ymd(since), until: ymd(until),
+        metrics: INSTAGRAM_INSIGHT_METRICS.join(','),
+      },
+    }))
     const metrics = out?.metrics || {}
     return {
       ok: true,
@@ -110,7 +123,7 @@ export async function accountInsights(z, accountId, days = MAX_INSIGHT_DAYS) {
       data_delay: out?.dataDelay || '',
     }
   } catch (err) {
-    return { ok: false, error: String(err?.message || err).slice(0, 300) }
+    return { ok: false, error: explainZernioError(err) }
   }
 }
 
@@ -130,7 +143,7 @@ export async function accountInsights(z, accountId, days = MAX_INSIGHT_DAYS) {
  */
 export async function followerStats(z, profileId) {
   try {
-    const out = await z.request('accounts/follower-stats', { query: { profileId } })
+    const out = await retryRateLimited(() => z.request('accounts/follower-stats', { query: { profileId } }))
     return {
       ok: true,
       accounts: (out?.accounts || []).map(a => {
@@ -154,7 +167,7 @@ export async function followerStats(z, profileId) {
       }),
     }
   } catch (err) {
-    return { ok: false, error: String(err?.message || err).slice(0, 300) }
+    return { ok: false, error: explainZernioError(err) }
   }
 }
 
@@ -174,7 +187,7 @@ export async function followerStats(z, profileId) {
  */
 export async function postAnalytics(z, profileId, { limit = POST_LIMIT } = {}) {
   try {
-    const out = await z.request('analytics', { query: { profileId, limit } })
+    const out = await retryRateLimited(() => z.request('analytics', { query: { profileId, limit } }))
     const posts = (out?.posts || []).map(p => {
       const a = p?.analytics || {}
       const zernioPostId = p?.latePostId || ''
@@ -205,7 +218,7 @@ export async function postAnalytics(z, profileId, { limit = POST_LIMIT } = {}) {
       last_sync: out?.overview?.lastSync || null,
     }
   } catch (err) {
-    return { ok: false, error: String(err?.message || err).slice(0, 300) }
+    return { ok: false, error: explainZernioError(err) }
   }
 }
 
