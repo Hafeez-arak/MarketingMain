@@ -2,16 +2,19 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { useAuth } from '../../store/auth'
 import { Card, Button, Empty, Spinner, PillSelect, IconBadge, Avatar, Skeleton } from '../ui/index'
 import { Icon } from '../ui/icons'
-import { fetchAccountAnalytics } from '../../lib/zernioConnect'
+import { fetchAccountAnalytics, syncAccounts, describeSync } from '../../lib/zernioConnect'
+import { publishConnectedAccounts } from '../../lib/useConnectedAccounts'
 import { profileUrlOf } from '../../lib/socialAnalytics'
 import { AnalyticsDashboard, DashboardSkeleton } from '../../pages/analytics/Dashboard'
 import { fmt, timeAgo } from '../../pages/analytics/format'
+import { LinkedInInsights } from './LinkedInInsights'
 
 // ─── One connected account's analytics ─────────────────────────────────────
-// The Analytics tab on a platform page. Same graphs as /analytics, scoped to a
-// single account, plus what only makes sense for one account: Instagram's
-// account-wide insights (reach and views across feed, stories, explore and
-// profile — not the sum of post numbers) and its follower history.
+// The Analytics tab on a platform page, and the body of /analytics. Same
+// graphs everywhere, scoped to a single account, plus what only makes sense
+// for one account: Instagram's account-wide insights (reach and views across
+// feed, stories, explore and profile — not the sum of post numbers), a
+// LinkedIn company page's totals, and follower history.
 //
 // Data comes from /api/zernio/analytics, which checks the account belongs to
 // this workspace before reading anything.
@@ -24,15 +27,25 @@ const INSIGHTS = [
   { key: 'profile_links_taps', label: 'Profile link taps', icon: Icon.trending },
 ]
 
-export function AccountAnalytics({ platform, accounts = [], loadingAccounts = false }) {
+// `refreshable` is off where the page around this has its own Refresh for
+// every account (/analytics), so there are not two buttons doing one job.
+// `reloadKey` is how that page asks for the numbers again after refreshing.
+export function AccountAnalytics({ platform, accounts = [], loadingAccounts = false, refreshable = true, reloadKey = 0 }) {
   const { activeWorkspaceId } = useAuth()
   const [picked, setPicked] = useState('')
   const [days, setDays] = useState(30)
   const [dash, setDash] = useState(null)
   const [loading, setLoading] = useState(false)
+  const [syncing, setSyncing] = useState(false)
+  const [note, setNote] = useState('')
 
   const account = accounts.find(a => a.zernio_account_id === picked) || accounts[0] || null
   const accountId = account?.zernio_account_id || ''
+  // Strings, not the account object: the list is answered from memory first
+  // and then replaced by Zernio's, and a new object for the same account must
+  // not fetch everything again.
+  const accountPlatform = account?.platform || platform
+  const accountType = account?.account_type || null
 
   // A slow answer for the previously chosen account must not land on top of
   // the one now chosen.
@@ -41,15 +54,34 @@ export function AccountAnalytics({ platform, accounts = [], loadingAccounts = fa
     if (!activeWorkspaceId || !accountId) return
     const n = ++seq.current
     setLoading(true)
-    const res = await fetchAccountAnalytics(activeWorkspaceId, accountId, days)
+    const res = await fetchAccountAnalytics(activeWorkspaceId, accountId, days, {
+      platform: accountPlatform, accountType,
+    })
     if (n !== seq.current) return
     setDash(res)
     setLoading(false)
-  }, [activeWorkspaceId, accountId, days])
+  }, [activeWorkspaceId, accountId, days, accountPlatform, accountType])
 
   // Deferred a tick, like the page's other first fetches: load() flips
   // `loading` before its first await.
-  useEffect(() => { queueMicrotask(load) }, [load])
+  useEffect(() => { queueMicrotask(load) }, [load, reloadKey])
+
+  // Refresh asks the platform first, THEN reads. Re-reading alone returned
+  // Zernio's copy from up to ~90 minutes ago, which is why the old button
+  // appeared to do nothing.
+  async function handleRefresh() {
+    setSyncing(true)
+    setNote('')
+    const res = await syncAccounts(activeWorkspaceId, accountId)
+    if (res.error) {
+      setNote(res.error)
+    } else {
+      publishConnectedAccounts(activeWorkspaceId, res.accounts)
+      setNote(`${describeSync(res.synced)} Reach and impressions can still lag the platform by up to 48 hours.`)
+    }
+    await load()
+    setSyncing(false)
+  }
 
   if (!account) {
     return loadingAccounts
@@ -68,6 +100,7 @@ export function AccountAnalytics({ platform, accounts = [], loadingAccounts = fa
   const insights = current?.insights
   const lastSync = current?.overview?.overview?.lastSync
   const url = profileUrlOf(account)
+  const isPage = account.platform === 'linkedin' && account.account_type !== 'personal'
 
   return (
     <div className="space-y-4">
@@ -87,14 +120,19 @@ export function AccountAnalytics({ platform, accounts = [], loadingAccounts = fa
           <option value="30">Last 30 days</option>
           <option value="90">Last 90 days</option>
         </PillSelect>
-        {loading && <Spinner size="sm" />}
+        {(loading || syncing) && <Spinner size="sm" />}
         <div className="ml-auto flex items-center gap-3">
           {lastSync && <span className="text-[11px] text-text-tertiary">Zernio synced {timeAgo(lastSync)}</span>}
-          <Button size="sm" variant="secondary" onClick={load} disabled={loading}>Refresh</Button>
+          {refreshable && (
+            <Button size="sm" variant="secondary" onClick={handleRefresh} disabled={loading || syncing}>
+              {syncing ? 'Refreshing…' : 'Refresh'}
+            </Button>
+          )}
         </div>
       </div>
+      {note && <p className="text-xs text-text-secondary -mt-2">{note}</p>}
 
-      {/* The account, and what Instagram says about it as a whole */}
+      {/* The account, and what its platform says about it as a whole */}
       <Card className="overflow-hidden">
         <div className="px-5 py-4 flex items-center gap-3 border-b border-border">
           {account.profile_picture
@@ -108,7 +146,9 @@ export function AccountAnalytics({ platform, accounts = [], loadingAccounts = fa
             ) : (
               <p className="text-sm font-semibold text-text truncate">{account.display_name || account.username}</p>
             )}
-            {account.username && <p className="text-xs text-text-tertiary truncate">@{account.username}</p>}
+            {isPage
+              ? <p className="text-xs text-text-tertiary truncate">Company page{account.followers_count != null ? ` · ${fmt(account.followers_count)} followers` : ''}</p>
+              : account.username && <p className="text-xs text-text-tertiary truncate">@{account.username}</p>}
           </div>
           {url && <a href={url} target="_blank" rel="noreferrer" className="text-[11px] font-semibold text-amber-700 hover:underline">Open profile ↗</a>}
         </div>
@@ -142,6 +182,10 @@ export function AccountAnalytics({ platform, accounts = [], loadingAccounts = fa
               </div>
             </>
           )
+        )}
+
+        {platform === 'linkedin' && (
+          <LinkedInInsights dash={current} days={days} isPage={isPage} />
         )}
       </Card>
 

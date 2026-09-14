@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { useAuth } from '../store/auth'
+import { supabase, SUPABASE_URL, SUPABASE_ANON_KEY } from './supabaseClient'
 import {
   fetchConnectedAccounts, startConnect, disconnectAccount,
   readConnectCallback, fetchSelectionOptions, completeSelection,
   explainOAuthError,
 } from './zernioConnect'
+import { createAccountsStore, browserStorage, MIRROR_SELECT } from './accountsCache'
 
 // ─── The one place a screen asks "what is actually connected?" ─────────────
 // Replaces `state.connectedAccounts[platform]`, a boolean in localStorage that
@@ -15,61 +17,80 @@ import {
 // This holds the real list from Zernio, scoped to the active workspace. An
 // empty list is a legitimate answer, not an error — a new workspace has
 // nothing connected and should be told so plainly.
+//
+// Shared across every screen and remembered between visits: see
+// ./accountsCache.js for why, and for which early answers are allowed to show.
+
+// Our own copy in social_accounts, read with the caller's token (RLS limits it
+// to workspaces they belong to) and filtered to this workspace explicitly —
+// RLS alone is not isolation for a member of several.
+async function readMirror(workspaceId) {
+  try {
+    const { data } = await supabase.auth.getSession()
+    const token = data?.session?.access_token
+    if (!token) return []
+    const res = await fetch(
+      `${SUPABASE_URL}/rest/v1/social_accounts?workspace_id=eq.${encodeURIComponent(workspaceId)}` +
+      `&is_active=eq.true&zernio_account_id=not.is.null&select=${MIRROR_SELECT}&order=platform.asc`,
+      { headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${token}` } },
+    )
+    return res.ok ? await res.json() : []
+  } catch {
+    return []
+  }
+}
+
+const store = createAccountsStore({
+  fetchLive: fetchConnectedAccounts,
+  fetchMirror: readMirror,
+  storage: browserStorage(),
+})
+
+// For a screen already holding a list fresh from Zernio — the Refresh action
+// returns one — so every other screen shows it without asking again.
+export function publishConnectedAccounts(workspaceId, accounts) {
+  store.replace(workspaceId, accounts)
+}
 
 export function useConnectedAccounts(platform = '') {
   const { activeWorkspaceId } = useAuth()
-  const [accounts, setAccounts] = useState([])
-  const [fetching, setFetching] = useState(false)
-  // The workspace the list was last answered for. `loading` used to be a plain
-  // flag that started false and only flipped once the deferred fetch began, so
-  // every screen's first paint said "Not connected" and offered a Connect
-  // button for the length of a round trip. Until an answer lands for THIS
-  // workspace, `loading` below reads true.
-  const [loadedFor, setLoadedFor] = useState(null)
-  const [error, setError]       = useState('')
+  const workspaceId = activeWorkspaceId || null
 
-  // Guards a stale response from a PREVIOUS workspace overwriting the current
-  // one's list. Switching workspace fires a second load while the first is in
-  // flight, and out-of-order arrival would leave one workspace's accounts on
-  // another's screen — which, on a publish screen, is how you post as the
-  // wrong brand.
-  const requestSeq = useRef(0)
+  const subscribe = useCallback(fn => store.subscribe(workspaceId, fn), [workspaceId])
+  const snapshot = useSyncExternalStore(subscribe, () => store.getSnapshot(workspaceId))
 
-  const refresh = useCallback(async () => {
-    if (!activeWorkspaceId) { setAccounts([]); return }
-    const seq = ++requestSeq.current
-    setFetching(true)
-    setError('')
-    const res = await fetchConnectedAccounts(activeWorkspaceId)
-    if (seq !== requestSeq.current) return
-    setFetching(false)
-    // Answered on failure too — otherwise the error would sit under a loader
-    // that never goes away.
-    setLoadedFor(activeWorkspaceId)
-    if (res.error) { setError(res.error); return }
-    setAccounts(res.accounts || [])
-  }, [activeWorkspaceId])
+  // Deferred a tick: refresh() marks the entry as refreshing before its first
+  // await, and doing that in the effect body is a cascading render. The store
+  // drops the call when a live answer is under FRESH_MS old, so five screens
+  // mounting together still make one request.
+  useEffect(() => {
+    if (!workspaceId) return
+    queueMicrotask(() => store.refresh(workspaceId))
+  }, [workspaceId])
 
-  // Deferred a tick rather than called straight from the effect body. refresh()
-  // flips `loading` before its first await, so calling it inline sets state
-  // synchronously during commit — a cascading render, and one React now flags.
-  // Same deferral InstagramPage uses for its first fetch. The requestSeq guard
-  // above, not this, is what keeps a stale response from landing.
-  useEffect(() => { queueMicrotask(refresh) }, [refresh])
+  const refresh = useCallback(() => store.refresh(workspaceId, { force: true }), [workspaceId])
 
-  const loading = fetching || (!!activeWorkspaceId && loadedFor !== activeWorkspaceId)
+  // "Not answered yet", not "a request is running". A remembered list counts,
+  // so a reload paints the accounts at once; an empty memory does not, so no
+  // screen says "Not connected" before Zernio has.
+  const loading = !!workspaceId && !snapshot.source
 
   const forPlatform = platform
-    ? accounts.filter(a => a.platform === platform)
-    : accounts
+    ? snapshot.accounts.filter(a => a.platform === platform)
+    : snapshot.accounts
 
   return {
     accounts: forPlatform,
-    allAccounts: accounts,
+    allAccounts: snapshot.accounts,
     loading,
-    error,
+    // The background check, including over a list already on screen. For a
+    // small spinner beside the list, never for replacing it.
+    refreshing: snapshot.refreshing,
+    // Zernio itself has answered in this session — not memory, not the mirror.
+    verified: snapshot.source === 'live',
+    error: snapshot.error,
     refresh,
-    workspaceId: activeWorkspaceId,
+    workspaceId,
     // Live, not cached: "connected" means Zernio currently lists an active
     // account, which is the only definition that can be wrong in a way the
     // user cares about.

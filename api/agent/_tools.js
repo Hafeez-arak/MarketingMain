@@ -268,7 +268,8 @@ async function getChannelAnalytics(workspaceId, args) {
  * Supabase query. A loop that cannot tell them apart cannot pace itself.
  */
 async function getZernioLive(workspaceId, args) {
-  return liveZernioAnalytics(workspaceId, { days: clamp(args?.days, 29, 29) })
+  // 88 is LinkedIn's page limit; Instagram's insights clamp themselves to 29.
+  return liveZernioAnalytics(workspaceId, { days: clamp(args?.days, 29, 88) })
 }
 
 async function getOurPerformance(workspaceId, args) {

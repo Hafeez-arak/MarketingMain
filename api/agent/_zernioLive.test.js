@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { accountInsights, followerStats, postAnalytics } from './_zernioLive.js'
+import { accountInsights, followerStats, postAnalytics, linkedinPageInsights } from './_zernioLive.js'
 
 // ─── Shapes pinned from the live API, 2026-09-14 ───────────────────────────
 //
@@ -131,5 +131,78 @@ describe('postAnalytics', () => {
     const out = await postAnalytics(zOf(async () => ({})), 'p1')
     expect(out.ok).toBe(true)
     expect(out.posts).toEqual([])
+  })
+})
+
+// ─── LinkedIn, measured live on the ARAK Lighting page, 2026-09-14 ─────────
+const LIVE_PAGE_TOTALS = {
+  success: true, accountId: '6aa7f2b1726ebfe037ea7013', platform: 'linkedin', metricType: 'total_value',
+  metrics: {
+    impressions: { total: 2353 }, unique_impressions: { total: 664 }, clicks: { total: 229 },
+    likes: { total: 58 }, comments: { total: 0 }, shares: { total: 0 },
+    engagement_rate: { total: 0.07058338717516317 },
+    organic_followers_gained: { total: 56 }, paid_followers_gained: { total: 0 },
+    page_views_total: { total: 2 }, page_views_overview: { total: 1 }, page_views_careers: { total: 1 },
+    page_views_jobs: { total: 1 }, page_views_life: { total: 0 },
+  },
+  dataDelay: 'LinkedIn organization stats may be delayed up to 48 hours.',
+}
+const ARAK_PAGE = {
+  zernio_account_id: '6aa7f2b1726ebfe037ea7013', platform: 'linkedin',
+  display_name: 'ARAK Lighting', account_type: 'organization',
+}
+
+describe('linkedinPageInsights', () => {
+  it('reads the page totals, with engagement as a percentage', async () => {
+    let asked = null
+    const z = zOf(async (path, opts) => { asked = { path, query: opts.query }; return LIVE_PAGE_TOTALS })
+    const out = await linkedinPageInsights(z, ARAK_PAGE, 30)
+    expect(asked.path).toBe('analytics/linkedin/org-aggregate-analytics')
+    expect(asked.query).toMatchObject({ accountId: '6aa7f2b1726ebfe037ea7013', metricType: 'total_value' })
+    expect(out).toMatchObject({
+      ok: true, name: 'ARAK Lighting', impressions: 2353, members_reached: 664, clicks: 229,
+      reactions: 58, engagement_rate_pct: 7.06, followers_gained_organic: 56,
+    })
+    expect(out.page_views.total).toBe(2)
+    expect(out.data_delay).toMatch(/48 hours/)
+  })
+
+  it('never asks for more than 88 days', async () => {
+    let query = null
+    const z = zOf(async (path, opts) => { query = opts.query; return LIVE_PAGE_TOTALS })
+    const out = await linkedinPageInsights(z, ARAK_PAGE, 365)
+    const span = (Date.parse(query.until) - Date.parse(query.since)) / 86_400_000
+    expect(span).toBe(88)
+    expect(out.window.days).toBe(88)
+  })
+
+  it('does not ask about a personal profile', async () => {
+    let called = false
+    const z = zOf(async () => { called = true; return LIVE_PAGE_TOTALS })
+    const out = await linkedinPageInsights(z, { ...ARAK_PAGE, account_type: 'personal' }, 30)
+    expect(called).toBe(false)
+    expect(out.ok).toBe(false)
+  })
+
+  it('returns an error rather than throwing', async () => {
+    const z = zOf(async () => { throw new Error('upstream exploded') })
+    const out = await linkedinPageInsights(z, ARAK_PAGE, 30)
+    expect(out.ok).toBe(false)
+    expect(out.error).toMatch(/exploded/)
+  })
+})
+
+describe('postAnalytics on a LinkedIn post', () => {
+  it('passes views and saves on as null, and carries clicks', async () => {
+    const z = zOf(async () => ({
+      overview: { totalPosts: 1 },
+      posts: [{
+        latePostId: null, publishedAt: '2026-09-03T13:39:55.522Z', status: 'published',
+        platforms: [{ platform: 'linkedin', platformPostId: 'urn:li:ugcPost:7501272770023120896' }],
+        analytics: { impressions: 1027, reach: 516, likes: 15, comments: 0, shares: 2, saves: 0, clicks: 186, views: 0 },
+      }],
+    }))
+    const { posts } = await postAnalytics(z, 'p1')
+    expect(posts[0]).toMatchObject({ platform: 'linkedin', impressions: 1027, clicks: 186, comments: 0, views: null, saves: null })
   })
 })
