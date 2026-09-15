@@ -168,3 +168,42 @@ describe('Draft Copy — the captions-only prompt', () => {
     }
   })
 })
+
+// ─── LinkedIn ──────────────────────────────────────────────────────────────
+describe('Draft Copy — LinkedIn', () => {
+  const LI_TEXT = { ...BASE, platform: 'linkedin', format: 'text', media_type: 'none', caption_only: true }
+
+  it('writes for LinkedIn, with its rules, in the uncached half only', async () => {
+    const { content, text } = await draft(LI_TEXT, { caption_options: THREE_CAPTIONS.caption_options })
+    expect(content[0].text).toContain('ONE LinkedIn post')
+    expect(content[0].text).not.toContain('HOW A LINKEDIN POST WORKS')
+    expect(text).toContain('HOW A LINKEDIN POST WORKS')
+    expect(text).toContain('about 210 characters, before "…see more"')
+    expect(text).toContain('This is a text post: there is no picture or video')
+  })
+
+  it('leaves an Instagram prompt without any of it', async () => {
+    const { content, text } = await draft({ ...BASE, caption_only: true }, { caption_options: THREE_CAPTIONS.caption_options })
+    expect(content[0].text).toContain('ONE Instagram post')
+    expect(text).not.toContain('LINKEDIN')
+  })
+
+  it('tells the writer what the poll asks', async () => {
+    const { text } = await draft({ ...LI_TEXT, format: 'poll', poll: { question: 'Which matters most?', options: ['Energy', 'Glare'] } },
+      { caption_options: THREE_CAPTIONS.caption_options })
+    expect(text).toContain('This post is a POLL')
+    expect(text).toContain('asking: "Which matters most?" with the answers "Energy", "Glare"')
+    expect(text).not.toContain('This is a text post')
+  })
+
+  it('never puts a dash in the rules it adds', async () => {
+    const { text } = await draft(LI_TEXT, { caption_options: THREE_CAPTIONS.caption_options })
+    const rules = text.slice(text.indexOf('HOW A LINKEDIN POST WORKS'), text.indexOf('Write:'))
+    expect(rules).not.toMatch(/[–—]/)
+  })
+
+  it('treats an unknown platform as Instagram', async () => {
+    const { content } = await draft({ ...BASE, platform: 'tiktok', caption_only: true }, { caption_options: THREE_CAPTIONS.caption_options })
+    expect(content[0].text).toContain('ONE Instagram post')
+  })
+})

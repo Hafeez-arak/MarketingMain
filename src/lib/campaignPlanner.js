@@ -14,6 +14,10 @@ import { markIdeasDrafting, fetchIdeaDrafts, updateIdea } from './contentPlans'
 
 const INSTAGRAM_TONE_FALLBACK = 'professional'
 
+// The platforms the planning workflow can write ideas for. Kept in step with
+// PLATFORMS in pages/campaigns/planConstants.js and the workflow's own list.
+export const PLANNABLE_PLATFORMS = ['instagram', 'linkedin']
+
 // Ask n8n to decompose a goal into a list of post ideas. The webhook is
 // expected to return JSON shaped like:
 //   { campaignName?: string, posts: [{ platform, date, topic, tone, angle,
@@ -32,9 +36,13 @@ export async function requestCampaignPlan(webhookUrl, payload) {
     const raw  = Array.isArray(data) ? data[0] : data
     const posts = Array.isArray(raw?.posts) ? raw.posts : []
     if (posts.length === 0) return { error: 'The workflow returned no posts. Check the n8n response shape against the spec.' }
+    // Only a platform this plan asked for. The workflow already refuses
+    // anything else; checked again because a post landing on a platform
+    // nobody planned for is a quiet mistake — it looks like any other idea.
+    const asked = Array.isArray(payload?.platforms) && payload.platforms.length ? payload.platforms : ['instagram']
     const normalized = posts.map((p, i) => ({
       _rowId:   `plan_${i}_${Date.now()}`,
-      platform: 'instagram',
+      platform: PLANNABLE_PLATFORMS.includes(p.platform) && asked.includes(p.platform) ? p.platform : asked[0],
       date:     p.date    || '',
       time:     p.time    || '',
       title:    p.title   || p.topic || '',
@@ -67,6 +75,9 @@ export async function requestCampaignPlan(webhookUrl, payload) {
       // Recurring-series marker ("Tip Tuesday") — lets cross-month history
       // tell "deliberate repeat format" apart from "already covered angle."
       series:               p.series                || '',
+      // A LinkedIn poll's question and answers, when the planner proposed
+      // one. Narrowed and checked in normalizeAiIdea, not here.
+      poll:                 p.poll && typeof p.poll === 'object' ? p.poll : null,
     }))
     return { ok: true, posts: normalized, suggestedName: raw?.campaignName || '' }
   } catch (err) {

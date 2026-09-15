@@ -175,8 +175,29 @@ export function derivePostKind({ platform, format, wantsCaption = true, imageTex
   const f = getFormat(platform, format)
   if (!f || f.media === 'none') return 'text_only'
   if (f.media === 'video') return 'video'
-  if (f.id === 'carousel' || f.id === 'photo_carousel') return 'carousel'
+  // LinkedIn's multi-image is a carousel in every sense the engine cares about
+  // — several slides, one post. Its id differs only because LinkedIn calls it
+  // that; left out here it was stored as a single caption_image.
+  if (f.id === 'carousel' || f.id === 'photo_carousel' || f.id === 'multi_image') return 'carousel'
   if ((imageText || '').trim()) return 'text_image'
   if (!wantsCaption) return 'image_only'
   return 'caption_image'
+}
+
+// The format an idea should carry on ANOTHER platform it is sent to.
+//
+// An idea's format belongs to its main platform. When it also targets a
+// second one, the id is kept if that platform has it (feed_image, video),
+// otherwise the first format there with the same kind of media — a reel sent
+// to LinkedIn is a video, an Instagram carousel is a multi-image. Null when
+// the platform has nothing that carries this media at all, which is the
+// caller's cue to refuse rather than write a row that cannot publish.
+export function formatForTarget(platform, formatId, mediaType) {
+  const list = FORMAT_CATALOG[platform]
+  if (!list) return null
+  const exact = list.find(f => f.id === formatId)
+  if (exact) return exact.id
+  const wantsSlides = !!Object.values(FORMAT_CATALOG).flat().find(f => f.id === formatId)?.slides
+  const sameMedia = list.filter(f => f.media === (mediaType || 'image'))
+  return (sameMedia.find(f => !!f.slides === wantsSlides) || sameMedia[0])?.id || null
 }

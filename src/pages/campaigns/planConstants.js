@@ -8,9 +8,14 @@
 // here it is an import.
 
 import { PLATFORM_META } from '../../lib/utils'
+import { PLANNABLE_PLATFORMS } from '../../lib/campaignPlanner'
 
 export const GOALS = ['Brand awareness','Lead generation','Product launch','Community engagement','Event promotion','Sales & offers']
-export const PLATFORMS = ['instagram'] // the only platform with a generation pipeline
+// Where a plan's ideas can be GENERATED — the platforms the planning and
+// caption workflows know how to write for. LinkedIn joined Instagram on
+// 2026-09-15; it is still drafts-only (PROTECTED_PLATFORMS), so a LinkedIn
+// idea ends as a post in Approvals and never reaches the page from here.
+export const PLATFORMS = PLANNABLE_PLATFORMS
 
 // Where one idea can be SENT. Distinct from PLATFORMS above, which is where
 // ideas can be GENERATED — the plan-generation workflow only speaks Instagram,

@@ -1,5 +1,6 @@
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './supabaseClient'
-import { defaultAspectRatio, getFormat } from './postFormats'
+import { defaultAspectRatio, getFormat, formatForTarget, derivePostKind } from './postFormats'
+import { isProtectedPlatform } from './platformSafety'
 import { finalizeVersion } from './creativeStudio'
 
 // ─── Plan ↔ Creative Studio bridge ─────────────────────────────────────────
@@ -360,10 +361,17 @@ export async function saveIdeaPlatforms(accessToken, ideaId, platforms, primaryP
 // rows, surfaced through the scheduled_posts view — but nothing writes to it
 // any more. It is frozen, not live. Do not add it back here: a row written
 // there would land in a table no publish or analytics path follows forward.
+//
+// LinkedIn is here so a plan's LinkedIn posts reach Approvals at all — until
+// 2026-09-15 it was missing, and finalising dropped every one of them with
+// "no platform to post to". Being writable is not being publishable: LinkedIn
+// is in PROTECTED_PLATFORMS, and both writers below keep its rows out of
+// pending_publish.
 const PLATFORM_TABLE = {
   instagram: 'generated_posts',
   tiktok:    'generated_posts',
   snapchat:  'generated_posts',
+  linkedin:  'generated_posts',
 }
 export function tableForPlatform(platform) {
   return PLATFORM_TABLE[platform] || null
@@ -455,6 +463,14 @@ export async function sendVersionToPosts(workspaceId, accessToken, {
   const errors = []
   for (const platform of list) {
     const table = PLATFORM_TABLE[platform]
+    // A protected platform only ever gets a draft. Refused BEFORE the row is
+    // written, for the same reason ComposerHost does: publishPost would
+    // refuse it next, and a row already in pending_publish would sit there
+    // with nothing ever coming to pick it up.
+    if (mode !== 'queue' && isProtectedPlatform(platform)) {
+      errors.push(`${platform}: drafts only — send it to Approvals instead of publishing or scheduling.`)
+      continue
+    }
     // Copy is written only when there is copy to write. Under the media-first
     // flow the picture is finished BEFORE the caption exists, and the post row
     // may already carry a caption that plan generation wrote — sending an
@@ -553,6 +569,25 @@ function manualMediaFor(idea) {
   return { image_url: urls[0] || '', image_urls: urls, video_url: '', cover_image_url: '' }
 }
 
+// What a plan idea carries into generated_posts.platform_options on one
+// platform. LinkedIn only, today: the first comment (where a company page
+// puts its link) and, on a poll, the poll itself — which must be complete,
+// because LinkedIn cannot edit a poll after it is published. { value } to
+// write, {} for nothing, { error } to refuse the row.
+function platformOptionsFor(platform, format, idea) {
+  if (platform !== 'linkedin') return {}
+  const value = {}
+  if ((idea.firstComment || '').trim()) value.firstComment = idea.firstComment.trim()
+  if (format.id === 'poll') {
+    const poll = idea.platformOptions?.poll
+    const question = String(poll?.question || '').trim()
+    const answers = (poll?.options || []).map(o => String(o || '').trim()).filter(Boolean)
+    if (!question || answers.length < 2) return { error: 'the poll needs a question and at least two answers.' }
+    value.poll = { question, options: answers, duration: poll.duration || 'SEVEN_DAYS' }
+  }
+  return Object.keys(value).length ? { value } : {}
+}
+
 // Write one post row per idea per target platform.
 //
 // Partial success is reported honestly for the same reason it is in
@@ -588,9 +623,29 @@ export async function publishIdeasAsPosts(workspaceId, accessToken, planId, idea
     // picture would erase it, and the loss would only surface at publish time.
     // Same reasoning as the hasCopy guard in sendVersionToPosts.
     const hasMedia = !!(media.image_url || media.video_url)
+    const mediaType = media.video_url ? 'video' : hasMedia ? 'image' : (idea.mediaType || 'image')
 
     for (const platform of targets) {
       const table = PLATFORM_TABLE[platform]
+      // The idea's format on THIS platform — its own on the main platform, the
+      // nearest equivalent on any other it also targets (see formatForTarget).
+      // Written onto the row because the composer opens a post in whatever
+      // format the row says, and a blank one opened a LinkedIn image post as a
+      // text post that then refused its own picture.
+      const format = platform === idea.platform
+        ? (idea.postFormat || formatForTarget(platform, '', mediaType))
+        : formatForTarget(platform, idea.postFormat, mediaType)
+      const f = format ? getFormat(platform, format) : null
+      // Null means the platform has no format for this kind of media at all —
+      // a LinkedIn text post or poll also sent to Instagram. Refused rather
+      // than written as an Instagram post with nothing in it.
+      //
+      // A missing PICTURE on a format that takes one is deliberately not
+      // refused: the pictures step lets a post move on without one, and the
+      // row is where it gets its picture later.
+      if (!f) { errors.push(`${label} (${platform}): ${platform} has no format for a post without media.`); continue }
+      const options = platformOptionsFor(platform, f, idea)
+      if (options.error) { errors.push(`${label} (${platform}): ${options.error}`); continue }
       const base = {
         ...copyFieldsFor(platform, {
           caption,
@@ -601,7 +656,9 @@ export async function publishIdeasAsPosts(workspaceId, accessToken, planId, idea
         first_comment: idea.firstComment || '',
         topic: idea.topic || idea.title || '',
         aspect_ratio: idea.aspectRatio || defaultAspectRatio(platform, idea.postFormat || 'post'),
-        post_kind: media.video_url ? 'video' : 'caption_image',
+        format: f.id,
+        post_kind: derivePostKind({ platform, format: f.id, wantsCaption: idea.wantsCaption !== false }),
+        ...(options.value ? { platform_options: options.value } : {}),
         scheduled_date: idea.date || null,
         publish_time: idea.time || '',
         plan_id: planId || null,
@@ -619,7 +676,7 @@ export async function publishIdeasAsPosts(workspaceId, accessToken, planId, idea
         status: 'pending_review',
       }
       base.platform = platform
-      base.media_type = media.video_url ? 'video' : 'image'
+      base.media_type = f.media === 'none' ? 'none' : media.video_url ? 'video' : 'image'
 
       try {
         // Same duplicate guard as the Studio path: an idea that already has a

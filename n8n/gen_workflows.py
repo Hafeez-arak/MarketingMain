@@ -516,7 +516,7 @@ function safeJson(t){
 const body = ($input.first().json.body) || {};
 const idea = body.idea || {};
 const instructions = body.instructions || '';
-const platformName = 'Instagram';
+const platformName = idea.platform === 'linkedin' ? 'LinkedIn' : 'Instagram';
 
 const cachedPrefix = `You are a senior social media strategist for ${brandPersona(body)}.
 
@@ -674,8 +674,10 @@ function safeJson(t){
 __DE_DASH_JS__
 const body     = ($input.first().json.body) || {};
 const planIdeaId = body.plan_idea_id || '';
-const platform = 'instagram';
-const platformName = 'Instagram';
+// Instagram or LinkedIn — the only two the planner writes for. Anything else
+// is written as Instagram, as every call was before LinkedIn joined.
+const platform = body.platform === 'linkedin' ? 'linkedin' : 'instagram';
+const platformName = platform === 'linkedin' ? 'LinkedIn' : 'Instagram';
 const lang     = body.caption_language || 'both';   // ar | en | both
 const format   = body.format || 'feed_image';
 const aspectRatio = body.aspect_ratio || '';
@@ -719,6 +721,26 @@ ${__CAPTION_VOICE__}
 
 ${__PROMPT_RULES__}`;
 
+// A LinkedIn poll's question and answers, when this post is one — the text
+// has to set the question up, so the writer is told what it is.
+const poll = platform === 'linkedin' && body.poll && typeof body.poll === 'object' && String(body.poll.question || '').trim()
+  ? { question: String(body.poll.question).trim(), options: (Array.isArray(body.poll.options) ? body.poll.options : []).map(o => String(o || '').trim()).filter(Boolean) }
+  : null;
+
+// LinkedIn is read differently from Instagram, and a caption written by the
+// Instagram rules reads like one there. Sent only for LinkedIn and only in the
+// uncached half, so an Instagram prompt is byte-for-byte what it was.
+const linkedinRules = platform !== 'linkedin' ? '' : `
+HOW A LINKEDIN POST WORKS. Follow all of these:
+- This goes out on the brand's LinkedIn company page, to professionals in the industry. Write the way a knowledgeable person at the company would talk to peers: specific, useful, confident, never salesy.
+- The feed shows only the first two lines, about 210 characters, before "…see more". Those lines must work on their own as the hook: the result, the problem, the surprising detail, or the question. Never open with the brand's name, a greeting, or scene-setting.
+- LinkedIn allows 3,000 characters. Most posts should land between 600 and 1,300; go shorter when there is less to say, never pad.
+- Short paragraphs of one to three sentences with a blank line between them. No walls of text, no bullet-point lists of adjectives.
+- At most three hashtags, specific to the industry, on the last line. No hashtag blocks.
+- No links in the post itself. If the reader needs one, say it is in the first comment.
+- Emoji rarely, if at all.${mediaType === 'none' && !poll ? '\n- This is a text post: there is no picture or video, so never refer to one.' : ''}${poll ? `\n- This post is a POLL. The poll itself appears under the text, asking: "${poll.question}"${poll.options.length ? ` with the answers ${poll.options.map(o => `"${o}"`).join(', ')}` : ''}. The text sets the question up in a few lines, says why it matters to this audience, and invites people to vote. Do not repeat the answers as a list and do not ask a different question.` : ''}
+`;
+
 const postFacts = `POST TOPIC: ${body.topic || ''}
 ANGLE: ${body.angle || ''}
 TONE: ${body.tone || ''}
@@ -750,9 +772,9 @@ const mediaLine = wantsMedia
     : '- This post has no image or video — return an empty media_prompt_options array.';
 
 const variableSuffix = `${postFacts}
-
+${linkedinRules}
 Write:
-${wantsCaption ? '- 3 genuinely different caption options for this post — vary the hook and the structure, not just the wording.' : "- This post has NO caption — return an empty caption_options array."}
+${wantsCaption ? `- 3 genuinely different ${platform === 'linkedin' ? 'LinkedIn post texts' : 'caption options'} for this post — vary the hook and the structure, not just the wording.` : "- This post has NO caption — return an empty caption_options array."}
 ${mediaLine}
 
 Return ONLY valid JSON — no markdown fences, no comments, nothing before or after it. Write line breaks inside a caption as \\n. EXACTLY this shape:
@@ -761,7 +783,9 @@ Return ONLY valid JSON — no markdown fences, no comments, nothing before or af
 try {
   const resp = await req({ method:'POST', url:'https://api.anthropic.com/v1/messages',
     headers:{ 'x-api-key':ANTHROPIC, 'anthropic-version':'2023-06-01', 'content-type':'application/json' },
-    body:{ model:'claude-sonnet-5', max_tokens:3000, messages:[{ role:'user', content:[
+    // Three bilingual LinkedIn posts of up to ~1,300 characters each do not
+    // fit in 3000 tokens with room to spare; a cut-off reply is a failed draft.
+    body:{ model:'claude-sonnet-5', max_tokens: platform === 'linkedin' ? 8000 : 3000, messages:[{ role:'user', content:[
       { type:'text', text: cachedPrefix, cache_control:{ type:'ephemeral' } },
       // Images sit AFTER the cached block, so the brand prefix stays
       // byte-identical across a plan's posts and keeps its cache hit.
@@ -2102,7 +2126,12 @@ BUILD_PROMPT_JS = _with_brand(r"""const input = $input.first().json.body;
 
 const goal         = input.goal || '';
 const goalCategory = input.goal_category || '';
-const platforms    = input.platforms || ['instagram'];
+// Only platforms this workflow knows how to plan for. Anything else asked for
+// is dropped here rather than passed to the model as a platform it would
+// then invent formats for; nothing left means Instagram, as before.
+const KNOWN_PLATFORMS = ['instagram', 'linkedin'];
+const askedPlatforms = (Array.isArray(input.platforms) ? input.platforms : []).filter(p => KNOWN_PLATFORMS.includes(p));
+const platforms    = askedPlatforms.length ? askedPlatforms : ['instagram'];
 const startDate    = input.start_date || '';
 const endDate      = input.end_date || '';
 const approxCount  = input.approx_post_count || null;
@@ -2289,10 +2318,16 @@ ${__PROMPT_RULES__}
 
 You will be given a specific goal, date range, platform list, and any constraints for ONE planning request. Decompose it into a list of individual post ideas, spread across the date range and platforms — do not put everything on day one, and vary the topic/angle so the campaign doesn't feel repetitive.
 
+PLATFORMS: Plan ONLY for the platforms listed under PLATFORMS in the request. When more than one is listed, give each platform its own posts and its own cadence, and never plan the same post twice with the wording shuffled — if one subject suits both, give each platform a genuinely different angle on it.
+
+INSTAGRAM posts are visual first: every one is a picture, a carousel or a reel, and the caption supports the image.
+
+LINKEDIN posts go out on the brand's company page, to a professional audience: developers, architects, consultants, contractors, facility and procurement teams, and people who work in the industry. Write for decisions and expertise, not for mood — project outcomes, specification and standards insight, how a problem was solved, lessons from a real job, team and company milestones, industry changes and what they mean. A LinkedIn post with no picture at all is normal and often the strongest choice: choose "text" when the value is in what is said, a poll when the audience's opinion is the point, and a picture only when it genuinely shows something. Plan fewer LinkedIn posts than Instagram ones — about one to three a week is right for a company page.
+
 IMPORTANT: For each Saudi seasonal/cultural moment that falls in the given date range, create at least one dedicated post tied to it and set its "occasion" accordingly. Vary the "content_pillar" across the month so it isn't all product pushes — mix the content pillars this brand actually uses (see the brand context above for its own recurring formats and pillars), its service or product range, educational content, brand story, and the seasonal moments.
 
 Each post needs:
-- "platform": always exactly "instagram"
+- "platform": exactly one of the platforms listed under PLATFORMS in the request ("instagram" or "linkedin")
 - "date": a date in YYYY-MM-DD format, within the given date range inclusive, and matching the posting-days constraint if one was given
 - "time": a time in HH:MM 24h format (KSA time), per the posting-time guidance given
 - "topic": a specific, concrete topic for that post
@@ -2303,26 +2338,30 @@ Each post needs:
 - "rationale": one short sentence on WHY this idea is worth posting, so the reviewer can approve or reject it on merit
 - "objective": what this specific post is FOR — pick ONE: "Awareness", "Engagement", "Sales/Leads", "Trust/Credibility", "Community"
 - "cta": a short, specific call-to-action matching the objective and platform — e.g. "DM us for a quote", "Save this for your next project", "Tag someone planning a renovation", "Visit our showroom this weekend", "Share your thoughts in the comments". Never generic filler like "Learn more" — make it concrete to this post.
-- "suggested_format": pick ONE — "post", "carousel", or "reel" (step-by-step/list -> carousel; motion/showcase -> reel; single strong visual -> post)
+- "suggested_format": pick ONE, from the list for this post's platform —
+  instagram: "post", "carousel", or "reel" (step-by-step/list -> carousel; motion/showcase -> reel; single strong visual -> post)
+  linkedin: "text", "image", "multi_image", "video", or "poll" (an insight, story or announcement -> text; one photo that proves the point -> image; a project in several shots -> multi_image; a walkthrough or demonstration -> video; asking the audience to choose -> poll)
+- "poll": ONLY on a linkedin post whose suggested_format is "poll", otherwise leave it out — { "question": at most 140 characters, "options": 2 to 4 short, distinct answers of at most 30 characters each }. Ask something this audience genuinely has an opinion on, and make the answers cover the real choices.
 - "tone": pick ONE — professional, inspirational, educational, casual, promotional
 - "suggested_style": how this specific post should actually look — pick ONE — photorealistic, dramatic, minimalist, warm_residential, cool_commercial, facade_exterior
-  Base this on the topic and angle, not just the tone — e.g. a comparison/breakdown topic should usually be minimalist, a before/after topic should usually be dramatic, an exterior/landscape topic should usually be facade_exterior.
-- "suggested_aspect_ratio": pick ONE — 1:1, 4:5, 1.91:1
+  Base this on the topic and angle, not just the tone — e.g. a comparison/breakdown topic should usually be minimalist, a before/after topic should usually be dramatic, an exterior/landscape topic should usually be facade_exterior. Leave it "" for a linkedin text post or poll, which has no picture.
+- "suggested_aspect_ratio": pick ONE — instagram: 1:1, 4:5, 1.91:1; linkedin image or multi_image: 1.91:1, 1:1, 4:5; linkedin video: 16:9, 1:1, 9:16; "" for a linkedin text post or poll
 - "series": a short recurring-series name if this post is a deliberate weekly/monthly repeat format (e.g. "Tip Tuesday"), or "" if it's a one-off. Check the previous-months history below before inventing a new series name -- continue an existing one if it fits.
-- "design_tip": a real creative-direction note (2-4 full sentences) on how to actually design this post's visual — written the way you'd genuinely brief a photographer or designer, not a generic platitude. Cover the mood/lighting, the framing or composition, and what should be in or out of frame. This is the ONLY place visual guidance shows up to the user, so it needs to stand on its own without a separate style label next to it.
+- "design_tip": a real creative-direction note (2-4 full sentences) on how to actually design this post's visual — written the way you'd genuinely brief a photographer or designer, not a generic platitude. Cover the mood/lighting, the framing or composition, and what should be in or out of frame. This is the ONLY place visual guidance shows up to the user, so it needs to stand on its own without a separate style label next to it. For a linkedin text post or poll there is no visual: leave it "".
 
 Respond with ONLY valid JSON, no markdown fences, no commentary, in exactly this shape:
 {
   "campaignName": "short descriptive campaign name",
   "posts": [
-    { "platform": "instagram", "date": "YYYY-MM-DD", "time": "HH:MM", "title": "...", "topic": "...", "angle": "...", "occasion": "", "content_pillar": "...", "rationale": "...", "objective": "...", "cta": "...", "suggested_format": "post", "tone": "...", "suggested_style": "...", "suggested_aspect_ratio": "...", "design_tip": "...", "series": "" }
+    { "platform": "instagram", "date": "YYYY-MM-DD", "time": "HH:MM", "title": "...", "topic": "...", "angle": "...", "occasion": "", "content_pillar": "...", "rationale": "...", "objective": "...", "cta": "...", "suggested_format": "post", "tone": "...", "suggested_style": "...", "suggested_aspect_ratio": "...", "design_tip": "...", "series": "" },
+    { "platform": "linkedin", "date": "YYYY-MM-DD", "time": "HH:MM", "title": "...", "topic": "...", "angle": "...", "occasion": "", "content_pillar": "...", "rationale": "...", "objective": "...", "cta": "...", "suggested_format": "poll", "poll": { "question": "...", "options": ["...", "..."] }, "tone": "...", "suggested_style": "", "suggested_aspect_ratio": "", "design_tip": "", "series": "" }
   ]
 }`;
 
 // ── UNCACHED suffix: this specific request's parameters. ──
 const promptVariable = `GOAL: ${goal}
 ${goalCategory ? `GOAL CATEGORY: ${goalCategory}` : ''}
-PLATFORMS: ${platforms.join(', ')}
+PLATFORMS: ${platforms.join(', ')}${platforms.length === 1 ? ` (every post's "platform" is "${platforms[0]}")` : ''}
 DATE RANGE: ${startDate} to ${endDate}
 ${countLine}
 ${cadenceSection}${timeSection}${ramadanTimeNote}${holidaySection}
@@ -2373,6 +2412,29 @@ const igStyles = ['photorealistic', 'dramatic', 'minimalist', 'warm_residential'
 
 const igAspects = ['1:1', '4:5', '1.91:1'];
 
+// LinkedIn's formats, and the orientations each one takes — the same catalog
+// as src/lib/postFormats.js. A text post and a poll have none.
+const LI_FORMATS = ['text', 'image', 'multi_image', 'video', 'poll'];
+const LI_ASPECTS = { image: ['1.91:1', '1:1', '4:5'], multi_image: ['1:1', '1.91:1'], video: ['16:9', '1:1', '9:16'] };
+
+// A poll LinkedIn would accept, or null: a question of at most 140
+// characters and 2 to 4 distinct answers of at most 30. Over-long text is cut
+// rather than the poll thrown away — a person edits it before it is saved.
+function cleanPoll(poll) {
+  if (!poll || typeof poll !== 'object') return null;
+  const question = String(poll.question || '').trim().slice(0, 140);
+  const seen = new Set();
+  const options = [];
+  for (const o of Array.isArray(poll.options) ? poll.options : []) {
+    const t = String(o || '').trim().slice(0, 30);
+    if (!t || seen.has(t.toLowerCase())) continue;
+    seen.add(t.toLowerCase());
+    options.push(t);
+  }
+  if (!question || options.length < 2) return null;
+  return { question, options: options.slice(0, 4) };
+}
+
 const OBJECTIVES = ['Awareness', 'Engagement', 'Sales/Leads', 'Trust/Credibility', 'Community'];
 
 const DAY_KEYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat']; // JS getDay() order
@@ -2409,7 +2471,8 @@ const posts = (parsed.posts || [])
   .filter(p => p && p.platform && p.date && p.topic)
   .filter(p => allowedPlatforms.includes(p.platform))
   .map(p => {
-    const platform = 'instagram';
+    const platform = p.platform;
+    const isLinkedIn = platform === 'linkedin';
     let date = p.date;
     if (date < startDate) date = startDate;
     if (date > endDate) date = endDate;
@@ -2422,7 +2485,20 @@ const posts = (parsed.posts || [])
 
     const suggestedStyle = igStyles.includes(p.suggested_style) ? p.suggested_style : 'photorealistic';
 
-    const suggestedAspectRatio = igAspects.includes(p.suggested_aspect_ratio) ? p.suggested_aspect_ratio : '1:1';
+    // A LinkedIn poll with no usable question is a text post, not a poll
+    // card nobody can finish. Any other unknown format is a text post too —
+    // on LinkedIn that is the default, where on Instagram it is a picture.
+    let format = isLinkedIn
+      ? (LI_FORMATS.includes(p.suggested_format) ? p.suggested_format : 'text')
+      : (['post','carousel','reel'].includes(p.suggested_format) ? p.suggested_format : 'post');
+    const poll = isLinkedIn && format === 'poll' ? cleanPoll(p.poll) : null;
+    if (isLinkedIn && format === 'poll' && !poll) format = 'text';
+    const noMedia = isLinkedIn && (format === 'text' || format === 'poll');
+
+    const aspectChoices = isLinkedIn ? (LI_ASPECTS[format] || []) : igAspects;
+    const suggestedAspectRatio = aspectChoices.includes(p.suggested_aspect_ratio)
+      ? p.suggested_aspect_ratio
+      : (aspectChoices[0] || '');
 
     const objective = OBJECTIVES.includes(p.objective) ? p.objective : 'Awareness';
 
@@ -2433,16 +2509,17 @@ const posts = (parsed.posts || [])
       topic: String(p.topic).slice(0, 300),
       angle: p.angle ? String(p.angle).slice(0, 300) : '',
       tone,
-      suggested_style: suggestedStyle,
+      suggested_style: noMedia ? '' : suggestedStyle,
       suggested_aspect_ratio: suggestedAspectRatio,
-      design_tip: p.design_tip ? String(p.design_tip).slice(0, 500) : '',
+      design_tip: !noMedia && p.design_tip ? String(p.design_tip).slice(0, 500) : '',
       title: p.title ? String(p.title).slice(0, 120) : String(p.topic).slice(0, 120),
       occasion: p.occasion ? String(p.occasion).slice(0, 60) : '',
       content_pillar: p.content_pillar ? String(p.content_pillar).slice(0, 60) : '',
       rationale: p.rationale ? String(p.rationale).slice(0, 300) : '',
       objective,
       cta: p.cta ? String(p.cta).slice(0, 140) : '',
-      suggested_format: ['post','carousel','reel'].includes(p.suggested_format) ? p.suggested_format : 'post',
+      suggested_format: format,
+      ...(poll ? { poll } : {}),
       series: p.series ? String(p.series).slice(0, 60) : '',
     };
   });

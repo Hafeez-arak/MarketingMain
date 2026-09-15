@@ -13,8 +13,9 @@ import {
   formatsFor, defaultFormat, aspectRatiosFor, defaultAspectRatio, slideRange, aspectLabel,
   derivePostKind,
 } from '../../lib/postFormats'
-import { groupByWeek, monthOptions, normalizeAiIdea, distributeDates, formatTime, DEFAULT_POST_TIME } from './planModel'
-import { GOALS, WEEKDAYS, DEFAULT_DRAFT, isUntouchedSelection } from './planConstants'
+import { groupByWeek, monthOptions, normalizeAiIdea, distributeDates, formatTime, DEFAULT_POST_TIME, pollProblems } from './planModel'
+import { GOALS, WEEKDAYS, DEFAULT_DRAFT, isUntouchedSelection, PLATFORMS, targetLabel } from './planConstants'
+import { isProtectedPlatform } from '../../lib/platformSafety'
 import { IdeaCard } from './IdeaCard'
 import { CaptionCard } from './CaptionCard'
 import { GenerateMoreModal, CalendarView } from './plannerParts'
@@ -59,16 +60,21 @@ function useDraft() {
 // workflow enforces the same limits; they are applied here too so the payload
 // says what will actually be looked at.
 function captionImagesFor(idea) {
-  if (idea.mediaType === 'video') return []
+  if (idea.mediaType === 'video' || idea.mediaType === 'none') return []
   if (idea.previewImageUrl) return [idea.previewImageUrl]
   if (idea.imageMode === 'use_reference') return (idea.references || []).filter(Boolean).slice(0, 2)
   return []
 }
 
+// A post that carries no picture or video at all — a LinkedIn text post or
+// poll. It has no pictures step to go through: its words ARE the post.
+const isTextOnly = idea => idea.mediaType === 'none'
+
 // What stands in for the post on a card: the accepted Studio picture, or the
 // image the operator attached. Reading only previewImageUrl showed a blank
 // placeholder next to "✓ Your image" for every attached picture.
 function thumbFor(idea) {
+  if (isTextOnly(idea)) return ''
   if (idea.previewImageUrl) return idea.previewImageUrl
   if (idea.imageMode === 'use_reference') return (idea.references || [])[0] || ''
   return ''
@@ -242,6 +248,9 @@ export function CampaignPlanner() {
         brand_name: brandCtx.brand_name, brand_descriptor: brandCtx.brand_descriptor,
         caption_only: true,
         image_urls: captionImagesFor(idea),
+        // A poll's text introduces a question the post already asks, so the
+        // writer is told what it is rather than inventing a second one.
+        ...(idea.postFormat === 'poll' && idea.platformOptions?.poll ? { poll: idea.platformOptions.poll } : {}),
       })
     }))
 
@@ -318,6 +327,30 @@ export function CampaignPlanner() {
   const toggleSection  = s => update({ brandBrainSections: brandBrainSections.includes(s) ? brandBrainSections.filter(x => x !== s) : [...brandBrainSections, s] })
   const toggleProduct  = id => update({ featuredProductIds: featuredProductIds.includes(id) ? featuredProductIds.filter(x => x !== id) : [...featuredProductIds, id] })
   const toggleDay      = d  => update({ postingDays: postingDays.includes(d) ? postingDays.filter(x => x !== d) : [...postingDays, d] })
+  // Which platforms this month is for. Never empty — the last one cannot be
+  // switched off. A post already added for a platform being switched off
+  // moves to one still on, in that platform's default format, rather than
+  // silently keeping a platform the plan no longer has.
+  function togglePlatform(id) {
+    if (platforms.includes(id) && platforms.length === 1) return
+    const next = platforms.includes(id) ? platforms.filter(x => x !== id) : PLATFORMS.filter(x => x === id || platforms.includes(x))
+    update({
+      platforms: next,
+      seedPosts: seedPosts.map(sp => next.includes(sp.platform) ? sp : seedForPlatform(sp, next[0])),
+    })
+  }
+  // A seed post moved to another platform keeps its words and its date; its
+  // format, orientation and slides are that platform's defaults, and a
+  // picture is dropped when the new format has no room for one.
+  function seedForPlatform(sp, p) {
+    const fmt = defaultFormat(p)
+    const noMedia = formatsFor(p).find(f => f.id === fmt)?.media === 'none'
+    return {
+      ...sp, platform: p, postFormat: fmt, aspectRatio: defaultAspectRatio(p, fmt),
+      slideCount: slideRange(p, fmt)?.default || 1,
+      references: noMedia ? [] : sp.references,
+    }
+  }
 
   // ── Seed posts (specific posts the user already wants, optionally with an image) ──
   const addSeed = () => {
@@ -332,6 +365,7 @@ export function CampaignPlanner() {
     }] })
   }
   const updateSeed = (i, patch)  => update({ seedPosts: seedPosts.map((s, idx) => idx === i ? { ...s, ...patch } : s) })
+  const moveSeed   = (i, p)      => update({ seedPosts: seedPosts.map((s, idx) => idx === i ? seedForPlatform(s, p) : s) })
   const removeSeed = i           => update({ seedPosts: seedPosts.filter((_, idx) => idx !== i) })
   function saveSeedImages(urls) {
     updateSeed(pickingSeedIdx, { references: urls })
@@ -347,6 +381,7 @@ export function CampaignPlanner() {
 
   function validateSetup() {
     if (!month) return 'Pick which month this plan is for.'
+    if (!platforms.length) return 'Pick at least one platform.'
     const hasSeeds = seedPosts.some(s => s.text.trim())
     if (!aiAssist && !hasSeeds) return 'Add at least one post, or turn on "Also let AI suggest more posts."'
     return ''
@@ -556,13 +591,21 @@ export function CampaignPlanner() {
   // made, so counting only Studio-accepted media would show "0 of 4 ready".
   const hasOwnMedia = i => i.imageMode === 'use_reference' && (i.references || []).length > 0
   const hasMedia = i => i.mediaStatus === 'ready' || hasOwnMedia(i)
-  const mediaReadyCount = approvedIdeas.filter(hasMedia).length
+  // Only posts that take a picture go through the pictures step. A plan of
+  // nothing but LinkedIn text posts and polls skips it entirely.
+  const mediaIdeas = approvedIdeas.filter(i => !isTextOnly(i))
+  const mediaReadyCount = mediaIdeas.filter(hasMedia).length
+  // Nothing approved yet reads as the usual next step, not as a skip.
+  const afterReview = mediaIdeas.length || !approvedIdeas.length ? 'media' : 'captions'
 
   // Captions: a post is ready when it needs no caption, carries your own, or
   // has one chosen from the options.
   const needsAiCaption = i => i.wantsCaption !== false && i.copyMode !== 'own'
   const hasCaption = i => !!((i.captionEn || '').trim() || (i.captionAr || '').trim())
-  const captionReady = i => i.wantsCaption === false || hasCaption(i)
+  // A poll is not finished until its question and answers are, whatever its
+  // text says — LinkedIn cannot edit a poll once it is published.
+  const pollReady = i => i.postFormat !== 'poll' || pollProblems(i.platformOptions?.poll).length === 0
+  const captionReady = i => (i.wantsCaption === false || hasCaption(i)) && pollReady(i)
   const captionsMissing = approvedIdeas.filter(i => !captionReady(i))
   const captionsDrafting = approvedIdeas.some(i => i.draftStatus === 'drafting')
 
@@ -752,7 +795,7 @@ export function CampaignPlanner() {
   async function finalizePlan() {
     const approved = ideas.filter(i => i.status === 'approved')
     if (approved.length === 0) { setError('Approve at least one idea first.'); return }
-    if (approved.some(i => !captionReady(i))) { setError('Pick a caption for every post first.'); return }
+    if (approved.some(i => !captionReady(i))) { setError('Pick a caption for every post, and finish every poll, first.'); return }
     setError(''); setBusy(true)
 
     await markIdeasProcessing(accessToken, planId, { copyMode: 'ai' })
@@ -876,6 +919,29 @@ export function CampaignPlanner() {
             {months.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
           </Select>
 
+          {/* ── Platforms: which channels this month's posts are for ── */}
+          <div>
+            <p className="text-xs font-medium text-text-secondary mb-2">Which platforms is this month for?</p>
+            <div className="flex gap-2 flex-wrap">
+              {PLATFORMS.map(p => {
+                const on = platforms.includes(p)
+                return (
+                  <button key={p} onClick={() => togglePlatform(p)}
+                    title={on && platforms.length === 1 ? 'A plan needs at least one platform' : ''}
+                    className={`px-3 py-1.5 rounded-xl border text-sm font-medium transition-all ${on ? 'bg-amber-600 text-white border-amber-600' : 'bg-white border-border text-text-secondary hover:border-amber-400'}`}>
+                    {on ? '✓ ' : ''}{targetLabel(p)}
+                  </button>
+                )
+              })}
+            </div>
+            {platforms.some(isProtectedPlatform) && (
+              <p className="text-[11px] text-sky-800 bg-sky-50 border border-sky-100 px-3 py-2 mt-2">
+                LinkedIn posts are planned, pictured and captioned here like any other, and land in Approvals as drafts.
+                Nothing in this app posts to the LinkedIn page.
+              </p>
+            )}
+          </div>
+
           {/* ── Cadence: shared by your posts and AI posts alike ── */}
           <div>
             <p className="text-xs font-medium text-text-secondary mb-2">Which days do you post? (optional)</p>
@@ -929,8 +995,16 @@ export function CampaignPlanner() {
                   const sFormat = s.postFormat || defaultFormat(s.platform)
                   const sRatios = aspectRatiosFor(s.platform, sFormat)
                   const sSlides = slideRange(s.platform, sFormat)
+                  const sNoMedia = formatsFor(s.platform).find(f => f.id === sFormat)?.media === 'none'
                   function onFormatChange(fmt) {
-                    updateSeed(i, { postFormat: fmt, aspectRatio: defaultAspectRatio(s.platform, fmt), slideCount: slideRange(s.platform, fmt)?.default || 1 })
+                    const noMedia = formatsFor(s.platform).find(f => f.id === fmt)?.media === 'none'
+                    updateSeed(i, {
+                      postFormat: fmt, aspectRatio: defaultAspectRatio(s.platform, fmt), slideCount: slideRange(s.platform, fmt)?.default || 1,
+                      // A text post or poll has no picture; one picked for an
+                      // image format before the switch would otherwise ride
+                      // along and be refused at finalize.
+                      ...(noMedia ? { references: [] } : {}),
+                    })
                   }
                   return (
                     <div key={i} className="rounded-xl border border-border p-3 space-y-2 bg-white">
@@ -961,6 +1035,12 @@ export function CampaignPlanner() {
                         </span>
                       </label>
                       <div className="flex items-center gap-2 flex-wrap">
+                        {platforms.length > 1 && (
+                          <select value={s.platform} onChange={e => moveSeed(i, e.target.value)} title="Which platform this post is for"
+                            className="rounded-lg border border-border px-2 py-1.5 text-xs bg-white focus:outline-none focus:border-amber-400">
+                            {platforms.map(p => <option key={p} value={p}>{targetLabel(p)}</option>)}
+                          </select>
+                        )}
                         <select value={sFormat} onChange={e => onFormatChange(e.target.value)}
                           className="rounded-lg border border-border px-2 py-1.5 text-xs bg-white focus:outline-none focus:border-amber-400">
                           {formatsFor(s.platform).map(f => <option key={f.id} value={f.id}>{f.label}</option>)}
@@ -980,10 +1060,12 @@ export function CampaignPlanner() {
                           onChange={e => updateSeed(i, { date: e.target.value })}
                           title="Only for a post that must go out on a specific day — otherwise leave empty and it is placed for you"
                           className="rounded-lg border border-border px-2 py-1.5 text-xs bg-white focus:outline-none focus:border-amber-400" />
-                        <button onClick={() => setPickingSeedIdx(i)}
-                          className={`px-2.5 py-1.5 rounded-lg text-[11px] font-medium whitespace-nowrap transition-colors ${refCount > 0 ? 'text-sage-700 bg-sage-50 hover:bg-sage-100' : 'text-text-tertiary hover:text-text hover:bg-surface-subtle border border-border'}`}>
-                          {refCount > 0 ? `🖼 Image set${refCount > 1 ? ` (${refCount})` : ''}` : '🖼 Add image'}
-                        </button>
+                        {!sNoMedia && (
+                          <button onClick={() => setPickingSeedIdx(i)}
+                            className={`px-2.5 py-1.5 rounded-lg text-[11px] font-medium whitespace-nowrap transition-colors ${refCount > 0 ? 'text-sage-700 bg-sage-50 hover:bg-sage-100' : 'text-text-tertiary hover:text-text hover:bg-surface-subtle border border-border'}`}>
+                            {refCount > 0 ? `🖼 Image set${refCount > 1 ? ` (${refCount})` : ''}` : '🖼 Add image'}
+                          </button>
+                        )}
                         <button onClick={() => removeSeed(i)} className="ml-auto text-[11px] px-2 py-1.5 text-text-tertiary hover:text-red-500" title="Remove">✕ Remove</button>
                       </div>
                       {!s.date && <p className="text-[10px] text-text-tertiary">No date — it will be placed in the month for you.</p>}
@@ -1203,6 +1285,7 @@ export function CampaignPlanner() {
                   </div>
                   {group.ideas.map(idea => (
                     <IdeaCard key={idea.id} idea={idea} index={ideas.indexOf(idea)} accessToken={accessToken} workspaceId={activeWorkspaceId}
+                      planPlatforms={platforms}
                       autoEdit={idea.id === autoEditId}
                       onChange={onIdeaChange} onRemove={onIdeaRemove} onCreate={onIdeaCreate} />
                   ))}
@@ -1219,11 +1302,13 @@ export function CampaignPlanner() {
                   session — "back" to a blank setup form would be unrelated to
                   this plan, so those go back to the list. */}
               <Button variant="secondary" onClick={() => openedFromPlanList ? navigate('/campaigns') : update({ step: 'setup' })}>Back</Button>
-              <Button onClick={() => update({ step: 'media' })} disabled={approvedCount === 0}>
-                Next — pictures ({approvedCount} approved)
+              <Button onClick={() => { setError(''); update({ step: afterReview }) }} disabled={approvedCount === 0}>
+                {afterReview === 'media' ? 'Next — pictures' : 'Next — captions'} ({approvedCount} approved)
               </Button>
               <p className="text-xs text-text-tertiary flex-1">
-                Next, give each approved idea a picture. Captions are written after, from the picture.
+                {approvedCount > 0 && afterReview === 'captions'
+                  ? 'None of these posts takes a picture, so the next step is their words.'
+                  : 'Next, give each approved idea a picture. Captions are written after, from the picture.'}
               </p>
             </div>
           </div>
@@ -1245,17 +1330,22 @@ export function CampaignPlanner() {
                 </p>
               </div>
               <p className="text-sm font-semibold text-text flex-shrink-0">
-                {mediaReadyCount} of {approvedIdeas.length} ready
+                {mediaReadyCount} of {mediaIdeas.length} ready
               </p>
             </div>
             <div className="h-1.5 bg-surface-subtle overflow-hidden">
               <div className="h-full bg-sage-500 transition-all"
-                style={{ width: `${approvedIdeas.length ? (mediaReadyCount / approvedIdeas.length) * 100 : 0}%` }} />
+                style={{ width: `${mediaIdeas.length ? (mediaReadyCount / mediaIdeas.length) * 100 : 0}%` }} />
             </div>
+            {mediaIdeas.length < approvedIdeas.length && (
+              <p className="text-[11px] text-text-tertiary mt-2">
+                {approvedIdeas.length - mediaIdeas.length} text post{approvedIdeas.length - mediaIdeas.length === 1 ? '' : 's'} or poll{approvedIdeas.length - mediaIdeas.length === 1 ? '' : 's'} need no picture — {approvedIdeas.length - mediaIdeas.length === 1 ? 'it goes' : 'they go'} straight to captions.
+              </p>
+            )}
           </Card>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {approvedIdeas.map(idea => {
+            {mediaIdeas.map(idea => {
               const ownMedia = hasOwnMedia(idea)
               const st = hasMedia(idea) ? 'ready' : (idea.mediaStatus || 'none')
               const sess = studioSessions[idea.id]
@@ -1317,8 +1407,8 @@ export function CampaignPlanner() {
               {/* A soft gate: there are real reasons to move on with a picture
                   still outstanding. */}
               <p className="text-xs text-text-tertiary flex-1">
-                {mediaReadyCount < approvedIdeas.length
-                  ? `${approvedIdeas.length - mediaReadyCount} still without a picture — their captions will be written from the idea alone.`
+                {mediaReadyCount < mediaIdeas.length
+                  ? `${mediaIdeas.length - mediaReadyCount} still without a picture — their captions will be written from the idea alone.`
                   : 'Every post has its picture. Captions are written from them next.'}
               </p>
             </div>
@@ -1355,6 +1445,8 @@ export function CampaignPlanner() {
                 onRedraft={() => redraftCaptions(idea)}
                 onDate={date => { patchLocal(idea, { date }); saveIdeaFields(idea, { scheduled_date: date || null }) }}
                 onTime={time => { patchLocal(idea, { time }); saveIdeaFields(idea, { publish_time: time || '' }) }}
+                onPollEdit={poll => patchLocal(idea, { platformOptions: { ...(idea.platformOptions || {}), poll } })}
+                onPollSave={poll => saveIdeaFields(idea, { platform_options: { ...(idea.platformOptions || {}), poll } })}
               />
             ))}
           </div>
@@ -1363,7 +1455,9 @@ export function CampaignPlanner() {
 
           <div className="sticky bottom-0 -mx-1 px-1 pb-1">
             <div className="flex items-center gap-3 bg-white/95 backdrop-blur-sm border border-border rounded-2xl shadow-dropdown px-5 py-3.5">
-              <Button variant="secondary" onClick={() => update({ step: 'media' })}>Back to pictures</Button>
+              <Button variant="secondary" onClick={() => update({ step: afterReview === 'media' ? 'media' : 'review' })}>
+                {afterReview === 'media' ? 'Back to pictures' : 'Back to ideas'}
+              </Button>
               <Button onClick={finalizePlan} disabled={busy || approvedCount === 0 || captionsMissing.length > 0}>
                 {busy ? <><Spinner size="sm" /> Saving your posts…</> : `Save ${approvedCount} post${approvedCount === 1 ? '' : 's'} to Approvals`}
               </Button>
@@ -1371,7 +1465,9 @@ export function CampaignPlanner() {
                 {captionsMissing.length > 0
                   ? captionsDrafting
                     ? 'Writing captions…'
-                    : `Pick a caption for ${captionsMissing.length} more post${captionsMissing.length === 1 ? '' : 's'}.`
+                    : captionsMissing.some(i => hasCaption(i) || i.wantsCaption === false)
+                      ? `Finish ${captionsMissing.length} more post${captionsMissing.length === 1 ? '' : 's'} — a caption, or a poll's question and answers.`
+                      : `Pick a caption for ${captionsMissing.length} more post${captionsMissing.length === 1 ? '' : 's'}.`
                   : 'Everything has its picture, words and time. Posts land in Approvals for a final check.'}
               </p>
             </div>
@@ -1395,6 +1491,11 @@ export function CampaignPlanner() {
                 <>, and <span className="font-semibold text-text">{manualResult.count} post{manualResult.count === 1 ? '' : 's'}</span> {manualResult.count === 1 ? 'is' : 'are'} waiting in Post Approvals</>
               )}. Give them a last look there, then approve and schedule.
             </p>
+            {approvedIdeas.some(i => (i.platforms?.length ? i.platforms : [i.platform]).some(isProtectedPlatform)) && (
+              <p className="text-xs text-sky-800 mt-2 max-w-md mx-auto">
+                LinkedIn posts are drafts: they can be reviewed and edited in Approvals, but nothing here posts them to the page.
+              </p>
+            )}
             {manualResult?.warnings?.length > 0 && (
               <p className="text-xs text-red-600 mt-2 max-w-md mx-auto">
                 Needs a look: {manualResult.warnings.join(' · ')}
