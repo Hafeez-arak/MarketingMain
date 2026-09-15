@@ -70,6 +70,15 @@ export function ReferencePicker({ value = [], onSave, onClose, asPost = false, f
     return singleOnly ? [url] : [...prev, url]   // single mode replaces the current pick
   })
   const remove = url => setSelected(prev => prev.filter(u => u !== url))
+  // A carousel's slides go out in the order they are listed here.
+  const dragFrom = useRef(null)
+  const move = (from, to) => setSelected(prev => {
+    if (to < 0 || to >= prev.length || from === to) return prev
+    const next = [...prev]
+    const [item] = next.splice(from, 1)
+    next.splice(to, 0, item)
+    return next
+  })
 
   const kindsPresent = [...new Set(assets.map(a => a.kind))]
   const shownAssets = kindFilter === 'all' ? assets : assets.filter(a => a.kind === kindFilter)
@@ -108,16 +117,33 @@ export function ReferencePicker({ value = [], onSave, onClose, asPost = false, f
           <div>
             <p className="text-[11px] font-semibold text-text-secondary mb-1.5">
               {selected.length} selected{singleOnly ? ' (max 1)' : ''}
+              {isCarousel && selected.length > 1 && <span className="font-normal text-text-tertiary"> · slides go out in this order — drag or use ‹ › to reorder</span>}
             </p>
             <div className="flex gap-2 flex-wrap">
-              {selected.map(url => (
-                <div key={url} className="relative w-16 h-16 rounded-lg overflow-hidden border border-border group">
-                  <PostImage src={url} alt="Selected" className="w-full h-full object-cover" />
-                  <button onClick={() => remove(url)}
-                    className="absolute top-0.5 right-0.5 w-5 h-5 bg-black/70 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-                    title="Remove">
-                    <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>
-                  </button>
+              {selected.map((url, i) => (
+                <div key={url}
+                  draggable={isCarousel}
+                  onDragStart={e => { dragFrom.current = i; e.dataTransfer.effectAllowed = 'move' }}
+                  onDragOver={e => { if (isCarousel) e.preventDefault() }}
+                  onDrop={e => { e.preventDefault(); if (dragFrom.current !== null) move(dragFrom.current, i); dragFrom.current = null }}
+                  className={`flex flex-col items-center ${isCarousel ? 'cursor-grab active:cursor-grabbing' : ''}`}>
+                  <div className="relative w-16 h-16 rounded-lg overflow-hidden border border-border group">
+                    <PostImage src={url} alt="Selected" className="w-full h-full object-cover pointer-events-none" />
+                    {isCarousel && <span className="absolute top-0 left-0 text-[9px] font-bold bg-black/70 text-white px-1 leading-[1.5]">{i + 1}</span>}
+                    <button onClick={() => remove(url)}
+                      className="absolute top-0.5 right-0.5 w-5 h-5 bg-black/70 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity"
+                      title="Remove">
+                      <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>
+                    </button>
+                  </div>
+                  {isCarousel && selected.length > 1 && (
+                    <span className="flex">
+                      <button type="button" onClick={() => move(i, i - 1)} disabled={i === 0} aria-label={`Move slide ${i + 1} earlier`}
+                        className="text-sm font-semibold leading-none w-7 h-5 text-text-secondary hover:text-amber-700 hover:bg-amber-50 disabled:opacity-20 disabled:hover:bg-transparent">‹</button>
+                      <button type="button" onClick={() => move(i, i + 1)} disabled={i === selected.length - 1} aria-label={`Move slide ${i + 1} later`}
+                        className="text-sm font-semibold leading-none w-7 h-5 text-text-secondary hover:text-amber-700 hover:bg-amber-50 disabled:opacity-20 disabled:hover:bg-transparent">›</button>
+                    </span>
+                  )}
                 </div>
               ))}
             </div>

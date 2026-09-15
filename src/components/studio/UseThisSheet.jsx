@@ -5,6 +5,7 @@ import { requestCaptionStudio } from '../../lib/campaignPlanner'
 import { publishPost } from '../../lib/zernio'
 import { defaultWebhookUrl } from '../../lib/n8nWebhooks'
 import { BrandContextPanel } from '../BrandContextPanel'
+import { rebookChangedPosts } from '../../lib/planScheduling'
 
 // ─── "Use this →" ───────────────────────────────────────────────────────────
 // The step that turns a finished Studio asset into real posts. Everything the
@@ -128,11 +129,13 @@ export function UseThisSheet({ open, onClose, version, session, workspaceId, acc
       when: { mode: 'queue' }, attachOnly: true,
     })
     if (res.error) { setBusy(false); setError(res.error); return }
+    // A post already booked at Zernio gets the new picture only by re-booking.
+    const rebooked = await rebookChangedPosts({ accessToken, workspaceId, posts: res.posts })
     // Marked after the row is written, so the board can never say "ready"
     // about media that failed to attach to anything.
     const marked = await markIdeaMediaReady(accessToken, session.plan_idea_id, { version })
     setBusy(false)
-    setDone({ posts: res.posts, failures: [], warning: marked.error || res.warning, plan: true })
+    setDone({ posts: res.posts, failures: rebooked.errors, warning: marked.error || res.warning, plan: true })
     onSent?.(res.posts)
   }
 
@@ -158,6 +161,8 @@ export function UseThisSheet({ open, onClose, version, session, workspaceId, acc
           imageUrl: version.image_url || '', videoUrl: version.video_url || '',
           coverImageUrl: isVideo ? (version.image_url || '') : '',
           scheduledFor: mode === 'schedule' && at ? new Date(at).toISOString() : undefined,
+          // Already booked at Zernio: replace that booking rather than be refused.
+          reschedule: !!p.rebook,
         })
         if (out.error) failures.push(`${PLATFORM_LABEL[p.platform] || p.platform}: ${out.error}`)
       }
@@ -297,7 +302,7 @@ export function UseThisSheet({ open, onClose, version, session, workspaceId, acc
               <p className="text-xs font-medium text-text-secondary mb-1.5">When?</p>
               <div className="flex flex-wrap gap-1.5">
                 {[
-                  { v: 'queue',    l: 'Send to Approvals' },
+                  { v: 'queue',    l: 'Send to Post Queue' },
                   { v: 'schedule', l: 'Schedule' },
                   { v: 'now',      l: 'Publish now' },
                 ].map(o => (
@@ -325,7 +330,7 @@ export function UseThisSheet({ open, onClose, version, session, workspaceId, acc
             <div className="flex items-center justify-end gap-2 pt-1">
               <Button variant="secondary" onClick={onClose} disabled={busy}>Cancel</Button>
               <Button onClick={confirm} disabled={!canConfirm}>
-                {busy ? <><Spinner size="sm" /> Sending…</> : mode === 'now' ? 'Publish' : mode === 'schedule' ? 'Schedule' : 'Send to Approvals'}
+                {busy ? <><Spinner size="sm" /> Sending…</> : mode === 'now' ? 'Publish' : mode === 'schedule' ? 'Schedule' : 'Send to Post Queue'}
               </Button>
             </div>
           </>

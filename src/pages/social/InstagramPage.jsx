@@ -15,6 +15,7 @@ import { CaptionStudio } from '../../components/CaptionStudio'
 import { fetchScheduledPosts } from '../../lib/scheduledPosts'
 import { publishComposed } from '../../lib/publishPost'
 import { composerFromPost } from '../../lib/composerState'
+import { postLock } from '../../lib/postLock'
 import { syncZernio } from '../../lib/zernio'
 import { defaultWebhookUrl } from '../../lib/n8nWebhooks'
 
@@ -329,8 +330,12 @@ function mediaFileName(topic) {
 
 
 // ─── Post Detail Modal ─────────────────────────────────────────────────────
-function PostDetail({ post, state, webhookUrl, regenWebhookUrl, supabaseUrl, anonKey, onClose, onStatusChange, onPublish, onPosted, accounts = [], onImageUpdated, onCaptionUpdated, onDelete }) {
+function PostDetail({ post, state, webhookUrl, regenWebhookUrl, supabaseUrl, anonKey, onClose, onStatusChange, onPublish, onPosted, accounts = [], onImageUpdated, onCaptionUpdated, onDelete, locked = false }) {
   const { activeWorkspaceId, accessToken } = useAuth()
+  // Gone out (lib/postLock.js): shown as it went, with nothing that edits it —
+  // no caption edit or rewrite, no new image, no approve, no delete. The caller
+  // may say so; the row is checked here too, so no caller can forget.
+  const isLocked = locked || postLock(post._raw || post).locked
   // The rewrite panel used to be handed buildInstructionsString(profile) —
   // the flattened profile and nothing else, with no brand identity line, no
   // task scoping and none of the brand's learned rules. Same builder as every
@@ -500,8 +505,8 @@ function PostDetail({ post, state, webhookUrl, regenWebhookUrl, supabaseUrl, ano
   const statusLabel =
     post.publishStatus === 'publishing' ? '● Publishing…' :
     post.publishStatus === 'failed'     ? '✕ Publish failed' :
-    post.status === 'published'         ? '✓ Published' :
-    post.status === 'scheduled'         ? '⏰ Scheduled' :
+    isLocked || post.status === 'published' ? '✓ Published' :
+    post.publishStatus === 'scheduled' || post.status === 'scheduled' ? '⏰ Scheduled' :
     post.status === 'draft'             ? '✎ Draft' : '● Pending Review'
 
   const arCss       = `${arParts[0]}/${arParts[1]}`
@@ -520,8 +525,8 @@ function PostDetail({ post, state, webhookUrl, regenWebhookUrl, supabaseUrl, ano
         <div className="flex items-center justify-between px-8 py-5 border-b border-border flex-shrink-0">
           <div className="flex items-center gap-2.5 flex-wrap">
             <span className={`text-xs font-bold px-2.5 py-1 leading-[1.4] tracking-wide ${
-              post.status === 'pending_publish' ? 'bg-amber-100 text-amber-700' :
-              post.status === 'published'       ? 'bg-green-100 text-green-700' :
+              !isLocked && post.status === 'pending_publish' ? 'bg-amber-100 text-amber-700' :
+              isLocked || post.status === 'published' ? 'bg-green-100 text-green-700' :
                                                   'bg-blue-100 text-blue-700'}`}>
               {statusLabel}
             </span>
@@ -614,6 +619,10 @@ function PostDetail({ post, state, webhookUrl, regenWebhookUrl, supabaseUrl, ano
                     Discard
                   </button>
                 </div>
+              ) : isLocked ? (
+                <p className="text-xs text-center text-text-tertiary leading-relaxed px-2">
+                  This post has gone out — its picture can’t be changed.
+                </p>
               ) : !activeRegenUrl ? (
                 /* No workflow answers the regen path for a plan-generated
                    post — the slot it used was never deployed. Creative Studio
@@ -743,7 +752,9 @@ function PostDetail({ post, state, webhookUrl, regenWebhookUrl, supabaseUrl, ano
                 <div>
                   <div className="flex items-center justify-between mb-2">
                     <p className="text-[11px] font-bold text-text-tertiary uppercase tracking-widest">Caption</p>
-                    {!editingCaption ? (
+                    {isLocked ? (
+                      <span className="text-[11px] text-text-tertiary">Gone out — read-only</span>
+                    ) : !editingCaption ? (
                       <div className="flex gap-1.5">
                         <button onClick={() => setStudioOpen(true)}
                           className="flex items-center gap-1 text-xs text-violet-600 hover:text-violet-700 font-semibold px-2.5 py-1 rounded-lg hover:bg-violet-50 transition-colors">
@@ -805,7 +816,7 @@ function PostDetail({ post, state, webhookUrl, regenWebhookUrl, supabaseUrl, ano
                   — nothing was ever sent, yet the post then read as live. With
                   onPublish it opens the composer on this post instead, the
                   same path Post now takes: row updated in place, then Zernio. */}
-              {onPosted && !sentToZernio && (
+              {onPosted && !sentToZernio && !isLocked && (
                 <div className="flex-1 min-w-0 space-y-2">
                   {usableAccounts.length === 0 && (
                     <p className="text-xs text-red-600">No Instagram account connected. Connect one on the Instagram page first.</p>
@@ -859,7 +870,7 @@ function PostDetail({ post, state, webhookUrl, regenWebhookUrl, supabaseUrl, ano
                   )}
                 </div>
               )}
-              {!onPosted && !sentToZernio && post.status !== 'published' && (
+              {!onPosted && !sentToZernio && !isLocked && post.status !== 'published' && (
                 <button
                   onClick={() => { if (onPublish) { onPublish(post); return } onStatusChange(post, 'published'); setApproved(true) }}
                   className="flex-1 flex items-center justify-center gap-2.5 py-3.5 rounded-2xl text-sm font-bold text-white transition-all active:scale-95"
@@ -871,19 +882,19 @@ function PostDetail({ post, state, webhookUrl, regenWebhookUrl, supabaseUrl, ano
                     : <><svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg> Approve & Publish</>}
                 </button>
               )}
-              {(sentToZernio || post.status === 'published') && (
+              {(sentToZernio || isLocked || post.status === 'published') && (
                 <div className="flex-1 flex items-center justify-center gap-2.5 py-3.5 rounded-2xl text-sm font-bold bg-green-50 text-green-700 border-2 border-green-200">
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
-                  {post.publishStatus === 'publishing' ? 'Publishing…' : post.status === 'scheduled' ? 'Scheduled' : 'Published'}
+                  {post.publishStatus === 'publishing' ? 'Publishing…' : isLocked ? 'Published' : post.publishStatus === 'scheduled' || post.status === 'scheduled' ? 'Scheduled' : 'Published'}
                 </div>
               )}
-              {!onPosted && !sentToZernio && post.status !== 'scheduled' && post.status !== 'published' && (
+              {!onPosted && !sentToZernio && !isLocked && post.status !== 'scheduled' && post.status !== 'published' && (
                 <button onClick={() => onPublish ? onPublish(post) : onStatusChange(post, 'scheduled')}
                   className="px-6 py-3.5 rounded-2xl text-sm font-semibold border-2 border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors">
                   Schedule
                 </button>
               )}
-              {onDelete && (
+              {onDelete && !isLocked && (
                 <button onClick={() => { onDelete(post); onClose() }}
                   className="px-6 py-3.5 rounded-2xl text-sm font-semibold border-2 border-red-200 bg-red-50 text-red-600 hover:bg-red-100 transition-colors">
                   Delete

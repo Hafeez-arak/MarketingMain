@@ -108,3 +108,52 @@ describe('sendVersionToPosts — LinkedIn is drafts only', () => {
     expect(res.warning).toContain('linkedin: drafts only')
   })
 })
+
+// ─── Re-saving a plan after some of it has gone out ────────────────────────
+// 2026-09-15: a second save PATCHed a published Instagram post back to
+// pending_review and rewrote its caption; and an idea aimed at Instagram AND
+// LinkedIn found "its row" by idea id alone, so both platforms wrote one row.
+describe('publishIdeasAsPosts — existing rows', () => {
+  // `existing` maps platform → the row a GET for that idea+platform returns.
+  function withExisting(existing) {
+    vi.stubGlobal('fetch', vi.fn(async (url, opts = {}) => {
+      const method = opts.method || 'GET'
+      if (method === 'GET') {
+        const platform = /platform=eq\.([a-z]+)/.exec(url)?.[1]
+        return { ok: true, json: async () => (existing[platform] ? [existing[platform]] : []) }
+      }
+      const body = JSON.parse(opts.body)
+      writes.push({ method, url, body })
+      return { ok: true, json: async () => [{ id: `row-${writes.length}`, ...body }] }
+    }))
+  }
+  const igIdea = over => idea({
+    platform: 'instagram', postFormat: 'feed_image', mediaType: 'image',
+    previewImageUrl: 'https://cdn.test/a.png', captionEn: 'New words', ...over,
+  })
+
+  it('looks rows up per platform, so two platforms get two rows', async () => {
+    withExisting({ instagram: { id: 'ig-row', platform: 'instagram', publish_status: 'not_published' } })
+    await publishIdeasAsPosts('ws-1', 'tok', 'plan-1', [igIdea({ platforms: ['instagram', 'linkedin'] })])
+    expect(writes.map(w => [w.method, w.body.platform])).toEqual([['PATCH', 'instagram'], ['POST', 'linkedin']])
+    expect(writes[0].url).toContain('id=eq.ig-row')
+  })
+
+  it('never writes over a post that has gone out', async () => {
+    withExisting({ instagram: { id: 'ig-row', platform: 'instagram', status: 'pending_review', publish_status: 'published' } })
+    const res = await publishIdeasAsPosts('ws-1', 'tok', 'plan-1', [igIdea()])
+    expect(writes).toHaveLength(0)
+    expect(res.ok).toBe(true)
+    expect(res.skipped).toMatchObject([{ id: 'ig-row', platform: 'instagram' }])
+  })
+
+  it('keeps a booked post booked, and says when its content changed', async () => {
+    withExisting({ instagram: {
+      id: 'ig-row', platform: 'instagram', status: 'scheduled', publish_status: 'scheduled',
+      scheduled_publish_at: '2999-01-01T00:00:00Z', caption: 'Old words',
+    } })
+    const res = await publishIdeasAsPosts('ws-1', 'tok', 'plan-1', [igIdea()])
+    expect(writes[0].body.status).toBeUndefined()
+    expect(res.posts[0]).toMatchObject({ wasScheduled: true, changed: true })
+  })
+})

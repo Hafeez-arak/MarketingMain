@@ -2,9 +2,9 @@ import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useApp } from '../../store/app'
 import { useAuth } from '../../store/auth'
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from '../../lib/supabaseClient'
-import { Card, Button, Badge, Empty, Spinner, PostImage, PageHeader, Skeleton } from '../../components/ui/index'
-import { formatDateTime } from '../../lib/utils'
-import { formatBrandDateTime, BRAND_TIMEZONE_LABEL } from '../../lib/brandTime'
+import { Card, Button, Empty, Spinner, PostImage, PageHeader, Skeleton, ConfirmDialog } from '../../components/ui/index'
+import { formatDate, PLATFORM_META } from '../../lib/utils'
+import { formatBrandDateTime, formatBrandTime, brandWallToUtc, utcToBrandInputs, BRAND_TIMEZONE_LABEL } from '../../lib/brandTime'
 import { logEditFeedback } from '../../lib/brandBrain'
 import { fetchBrandProfile } from '../../lib/brandBrain'
 import { buildContext, fetchBrandMemory } from '../../lib/brandContext'
@@ -12,16 +12,24 @@ import { fetchBrandSchema, fetchDirectoryRows } from '../../lib/brandSchema'
 import { fetchApprovalsData, markIdeaProcessing, markIdeasGenerated } from '../../lib/contentPlans'
 import { ensureCaptions } from '../../lib/campaignPlanner'
 import { publishIdeasAsPosts } from '../../lib/studioBridge'
-import { publishPost as publishViaZernio, syncZernio } from '../../lib/zernio'
+import { syncZernio } from '../../lib/zernio'
 import { defaultWebhookUrl } from '../../lib/n8nWebhooks'
-import { fetchScheduledPosts } from '../../lib/scheduledPosts'
+import { fetchScheduledPosts, movePost, unschedulePost } from '../../lib/scheduledPosts'
+import { postLock, queueBucket } from '../../lib/postLock'
+import { accountFor, bookPost } from '../../lib/planScheduling'
+import { isProtectedPlatform } from '../../lib/platformSafety'
+import { useConnectedAccounts } from '../../lib/useConnectedAccounts'
+import { MediaViewer } from '../../components/PostMediaViewer'
 import { dbIdeaToDraft } from '../../lib/campaignPlan'
 import { InstagramPostDetail } from './InstagramPage'
 import { ComposerHost } from '../../components/composer/ComposerHost'
 
-// ─── Post Approvals ──────────────────────────────────────────────────────
-// One place to review every post the app produces, grouped by the monthly
-// plan it came from. Every approved idea has a durable generation_status
+// ─── Post Queue (was Post Approvals) ─────────────────────────────────────
+// Every post the app produces, grouped by the monthly plan it came from, and
+// sorted by what happens to it next — see TABS below for why there is no
+// approve/reject step any more. Route and file keep the old name so links and
+// imports elsewhere still work.
+// Every approved idea has a durable generation_status
 // (processing / completed / failed) tracked on plan_ideas — see
 // 20260723_generation_status — so a card here is never just "missing"; it
 // shows the real state, with a Retry action on failure. Posts not from a plan
@@ -56,7 +64,9 @@ function normalizePost(row, platform) {
     postKind: row.post_kind || 'caption_image',
     hashtags: row.hashtags, imageUrl: row.image_url, imagePrompt: row.image_prompt,
     style: row.style, topic: row.topic, aspectRatio: row.aspect_ratio,
-    scheduledAt: row.scheduled_date || null, campaignId: row.campaign_id,
+    scheduledAt: row.scheduled_date || null, publishTime: row.publish_time || '', campaignId: row.campaign_id,
+    // The planned moment as an instant, for "has its time passed?".
+    plannedAt: row.scheduled_date ? (brandWallToUtc(row.scheduled_date, (row.publish_time || '09:00').slice(0, 5))?.getTime() || null) : null,
     mediaUrls: mediaOf(row), status: row.status, source: row.source,
     planIdeaId: row.plan_idea_id || null,
     // Carried so a hand-written post created from a plan still groups under
@@ -179,7 +189,8 @@ function ApprovalsSkeleton() {
 
 // ─── Small card variants for in-flight/failed generation ──────────────────
 function ProcessingCard({ idea }) {
-  const platformMeta = { label: 'Instagram', color: 'bg-pink-50 text-pink-600' }
+  const m = PLATFORM_META[idea.platform] || PLATFORM_META.instagram
+  const platformMeta = { label: m.label, color: `${m.bg} ${m.text}` }
   return (
     <Card className="overflow-hidden">
       <div className="flex">
@@ -202,7 +213,8 @@ function ProcessingCard({ idea }) {
 }
 
 function FailedCard({ idea, post, onRetry, retrying }) {
-  const platformMeta = { label: 'Instagram', color: 'bg-pink-50 text-pink-600' }
+  const m = PLATFORM_META[idea.platform] || PLATFORM_META.instagram
+  const platformMeta = { label: m.label, color: `${m.bg} ${m.text}` }
   return (
     <Card className="overflow-hidden border-red-200">
       <div className="flex">
@@ -225,140 +237,159 @@ function FailedCard({ idea, post, onRetry, retrying }) {
   )
 }
 
-// Publish state shown on an already-approved post. Deliberately separate
-// from the review Badge: `status` is the human decision (approved), this is
-// what the platform actually did with it — a post can be approved and still
-// have failed to publish, and that's exactly what needs to be visible.
-const PUBLISH_META = {
-  scheduled:  { label: '🗓 Scheduled',  cls: 'bg-indigo-50 text-indigo-700' },
-  publishing: { label: '↗ Publishing…', cls: 'bg-amber-50 text-amber-700' },
-  published:  { label: '✓ Published',   cls: 'bg-sage-50 text-sage-700' },
-  failed:     { label: '✕ Publish failed', cls: 'bg-red-50 text-red-600' },
-}
+// ─── The queue's three buckets ────────────────────────────────────────────
+// A plan no longer passes through a separate approval — its dates, times,
+// pictures and captions were checked on the planner's captions step, and
+// saving it books each post at Zernio. So this screen stopped asking
+// "approve or reject?" and answers "what is going out, what went out, and
+// what needs a person?". The buckets come from lib/postLock.js, so a post is
+// read-only here for exactly the same reason it is read-only in the planner.
+const TABS = [
+  { key: 'attention', label: 'Needs attention' },
+  { key: 'upcoming',  label: 'Upcoming' },
+  { key: 'published', label: 'Published' },
+  { key: 'all',       label: 'All' },
+]
 
-function PublishBar({ post, onPublish, busy, onOpenComposer }) {
-  const [when, setWhen] = useState('')
-  const status = post.publishStatus || 'not_published'
-  const meta = PUBLISH_META[status]
-
-  // Already live (or on its way) — show state + the real permalink, not
-  // controls that would double-post.
-  if (status === 'published' || status === 'scheduled' || status === 'publishing') {
-    return (
-      <div className="flex items-center gap-2 mt-2 flex-wrap" onClick={e => e.stopPropagation()}>
-        <span className={`text-[10px] font-bold uppercase tracking-[0.08em] px-1.5 py-0.5 leading-[1.4] ${meta.cls}`}>{meta.label}</span>
-        {post.scheduledPublishAt && status === 'scheduled' && (
-          <span className="text-[10px] text-text-tertiary">for {formatBrandDateTime(post.scheduledPublishAt)}</span>
-        )}
-        {post.platformPostUrl && (
-          <a href={post.platformPostUrl} target="_blank" rel="noreferrer"
-            className="text-[10px] font-semibold text-amber-700 hover:underline">View on {post.platform} ↗</a>
-        )}
-      </div>
-    )
+// Why a post that is not booked is not booked, in words that say what to do.
+function attentionReason(post, accounts, now) {
+  if (post.publishStatus === 'failed') return post.publishError || 'Publishing failed.'
+  if (isProtectedPlatform(post.platform)) return 'LinkedIn posts are drafts — nothing here posts to the page.'
+  if (post.status === 'rejected') return 'Rejected.'
+  if (post.platform === 'tiktok' && !post.platformOptions?.tiktok?.privacy_level) {
+    return 'TikTok needs a privacy level and a per-post consent confirmation.'
   }
-
-  return (
-    <div className="mt-2 space-y-1.5" onClick={e => e.stopPropagation()}>
-      {status === 'failed' && (
-        <p className="text-[10px] text-red-600 leading-relaxed">{post.publishError || 'Publishing failed.'}</p>
-      )}
-      {/* TikTok cannot publish from here, and that is the platform's rule
-          rather than a gap. Every TikTok post needs a privacy level drawn
-          from the creator account's own allowed list plus two consent flags
-          TikTok requires per post and which are deliberately never stored —
-          none of which an approval card can collect. So it offers the one
-          place that can. */}
-      {post.platform === 'tiktok' && !post.platformOptions?.tiktok?.privacy_level ? (
-        <div className="flex items-center gap-2 flex-wrap">
-          <button onClick={() => onOpenComposer?.(post)}
-            className="text-[11px] font-semibold px-2.5 py-1 rounded-lg border border-amber-300 text-amber-800 bg-amber-50 hover:bg-amber-100 transition-colors">
-            ↗ Finish in composer
-          </button>
-          <span className="text-[10px] text-text-tertiary">
-            TikTok needs a privacy level and a per-post consent confirmation.
-          </span>
-        </div>
-      ) : (
-      <div className="flex items-center gap-2 flex-wrap">
-        <button onClick={() => onOpenComposer?.(post)}
-          className="text-[11px] font-semibold px-2.5 py-1 rounded-lg border border-border text-text-secondary hover:bg-surface-subtle transition-colors">
-          ✎ Edit
-        </button>
-        <button onClick={() => onPublish(post, '')} disabled={busy}
-          className="text-[11px] font-semibold px-2.5 py-1 rounded-lg border border-amber-300 text-amber-800 bg-amber-50 hover:bg-amber-100 transition-colors disabled:opacity-50">
-          {busy ? 'Working…' : status === 'failed' ? '↻ Retry publish' : '↗ Publish now'}
-        </button>
-        <span className="text-[10px] text-text-tertiary">or</span>
-        <input type="datetime-local" value={when} onChange={e => setWhen(e.target.value)}
-          className="text-[11px] border border-border rounded-lg px-2 py-1 bg-white" />
-        {/* The zone is not optional decoration. A bare datetime-local renders
-            in whatever zone the machine is set to, so without this the same
-            digits mean different moments to different people on the team. */}
-        <span className="text-[10px] font-semibold text-text-tertiary">{BRAND_TIMEZONE_LABEL}</span>
-        <button onClick={() => onPublish(post, when)} disabled={busy || !when}
-          className="text-[11px] font-semibold px-2.5 py-1 rounded-lg border border-border text-text-secondary hover:bg-surface-subtle transition-colors disabled:opacity-40">
-          🗓 Schedule
-        </button>
-      </div>
-      )}
-    </div>
-  )
+  if (!accountFor(post._raw, accounts)) {
+    const count = accounts.filter(a => a.platform === post.platform && a.is_active !== false).length
+    return count ? 'More than one account is connected — choose which one in the composer.' : `No ${PLATFORM_META[post.platform]?.label || post.platform} account is connected.`
+  }
+  if (post.plannedAt && post.plannedAt <= now) return 'Its planned time has passed — pick a new time.'
+  return 'Not scheduled yet.'
 }
 
-function PostCard({ post, onOpen, onApprove, onReject, onPublish, publishing, onOpenComposer }) {
-  const platformMeta = { label: 'Instagram', color: 'bg-pink-50 text-pink-600' }
-  return (
-    <Card className="overflow-hidden cursor-pointer hover:shadow-md hover:-translate-y-0.5 transition-all duration-150" onClick={() => onOpen(post)}>
-      <div className="flex">
-        <div className="w-28 flex-shrink-0 bg-surface-subtle overflow-hidden relative"
-          style={{ aspectRatio: (post.aspectRatio || '1:1').replace(':', '/'), minHeight: '80px', maxHeight: '140px' }}>
-          {post.imageUrl
-            ? <PostImage src={post.imageUrl} alt="" className="w-full h-full object-cover" />
-            : <div className="w-full h-full flex items-center justify-center">
-                <svg className="w-7 h-7 text-border-strong" fill="none" stroke="currentColor" strokeWidth="1" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
-              </div>}
-          {(post.mediaUrls?.length || 0) > 1 && (
-            <span className="absolute top-1 right-1 text-[9px] font-bold bg-black/60 text-white px-1.5 py-0.5 leading-[1.4] flex items-center gap-0.5">
-              <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><rect x="3" y="3" width="14" height="14" rx="2"/><path d="M21 7v12a2 2 0 0 1-2 2H7"/></svg>
-              {post.mediaUrls.length}
-            </span>
-          )}
-        </div>
-        <div className="flex-1 p-4 min-w-0">
-          <div className="flex items-start justify-between gap-2 mb-2">
-            <div className="flex items-center gap-1.5 flex-wrap">
-              <span className={`text-[10px] font-bold uppercase tracking-[0.08em] px-1.5 py-0.5 leading-[1.4] ${platformMeta.color}`}>{platformMeta.label}</span>
-              <Badge status={post.status} />
-              {post.source === 'plan' && <span className="text-[10px] bg-amber-50 text-amber-700 px-1.5 py-0.5 leading-[1.4] font-medium">📋 From plan</span>}
-              {post.postKind && post.postKind !== 'caption_image' && <span className="text-[10px] bg-indigo-50 text-indigo-700 px-1.5 py-0.5 leading-[1.4] font-medium capitalize">{post.postKind.replace('_', ' ')}</span>}
-            </div>
-          </div>
-          {post.captionAr && post.captionEn ? (
-            <div className="mb-1.5 space-y-1">
-              <p className="text-sm text-text line-clamp-2 leading-relaxed text-right" dir="rtl">{post.captionAr}</p>
-              <p className="text-sm text-text-secondary line-clamp-2 leading-relaxed">{post.captionEn}</p>
-            </div>
-          ) : (
-            <p className="text-sm text-text line-clamp-2 leading-relaxed mb-1.5" dir={post.captionAr && !post.captionEn ? 'rtl' : 'ltr'}>{post.copy || 'No caption'}</p>
-          )}
-          {post.hashtags && <p className="text-xs text-text-tertiary line-clamp-1 mb-1.5">{post.hashtags}</p>}
-          <p className="text-[11px] text-text-tertiary">{formatDateTime(post.createdAt)}{post.topic && <span className="ml-1.5 opacity-70">· {post.topic}</span>}{post.scheduledAt && <span className="ml-1.5 opacity-70">· for {post.scheduledAt}</span>}</p>
+// 'YYYY-MM-DDTHH:MM' in brand time, for a datetime-local input.
+function wallInput(dateKey, time) {
+  return dateKey ? `${dateKey}T${(time || '09:00').slice(0, 5)}` : ''
+}
 
-          {post.status === 'pending_review' ? (
-            <div className="flex items-center gap-2 mt-2">
-              <button onClick={e => { e.stopPropagation(); onApprove(post) }}
-                className="text-[11px] font-semibold px-2.5 py-1 rounded-lg border border-sage-200 text-sage-700 bg-sage-50 hover:bg-sage-100 transition-colors">✓ Approve</button>
-              <button onClick={e => { e.stopPropagation(); onReject(post) }}
-                className="text-[11px] font-semibold px-2.5 py-1 rounded-lg border border-red-200 text-red-500 hover:bg-red-50 transition-colors">✕ Reject</button>
-              <span className="text-[10px] text-text-tertiary ml-auto">Click card to edit / regenerate</span>
+function PlatformChip({ platform }) {
+  const m = PLATFORM_META[platform] || { label: platform, bg: 'bg-stone-100', text: 'text-stone-700' }
+  return <span className={`text-[10px] font-bold uppercase tracking-[0.08em] px-1.5 py-0.5 leading-[1.4] ${m.bg} ${m.text}`}>{m.label}</span>
+}
+
+const btn = 'text-[11px] font-semibold px-2.5 py-1 rounded-lg border transition-colors disabled:opacity-40'
+
+// One post, whatever bucket it is in. The actions are the bucket's:
+//   upcoming   edit (re-books at Zernio), reschedule, cancel the booking
+//   attention  edit, schedule, post now — or the one place that can fix it
+//   published  nothing but a link: it has gone out
+function QueueCard({ post, bucket, accounts, now, busy, onOpen, onOpenMedia, onEdit, onBook, onReschedule, onCancel }) {
+  const [expanded, setExpanded] = useState(false)
+  const [picking, setPicking] = useState(false)
+  const [when, setWhen] = useState('')
+  const media = post.mediaUrls || []
+  const thumb = post.imageUrl || media[0] || post.coverImageUrl || ''
+  const text = [post.captionAr, post.captionEn].filter(Boolean)
+  const caption = text.length ? text : [post.copy || '']
+  const long = caption.join('\n').length > 220 || caption.join('\n').split('\n').length > 4
+  const protectedPost = isProtectedPlatform(post.platform)
+  const needsComposer = post.platform === 'tiktok' && !post.platformOptions?.tiktok?.privacy_level
+  const account = accountFor(post._raw, accounts)
+  const lock = postLock(post._raw, now)
+
+  function startPicking() {
+    const cur = post.scheduledPublishAt ? utcToBrandInputs(post.scheduledPublishAt) : { date: post.scheduledAt, time: post.publishTime }
+    setWhen(wallInput(cur.date, cur.time))
+    setPicking(true)
+  }
+  const future = when && brandWallToUtc(when.slice(0, 10), when.slice(11, 16))?.getTime() > now + 60 * 1000
+
+  return (
+    <Card className={`overflow-hidden ${bucket === 'attention' && post.publishStatus === 'failed' ? 'border-red-200' : ''}`}>
+      <div className="flex items-start">
+        <button type="button" onClick={() => (thumb || post.videoUrl) && onOpenMedia(post)}
+          className="w-24 h-24 sm:w-28 sm:h-28 m-3 mr-0 flex-shrink-0 bg-surface-subtle border border-border hover:border-amber-400 overflow-hidden relative"
+          title={thumb ? 'Open the picture' : undefined}>
+          {thumb
+            ? <PostImage src={thumb} alt="" className="absolute inset-0 w-full h-full object-cover" />
+            : <span className="absolute inset-0 flex items-center justify-center text-text-disabled text-lg">{post.videoUrl ? '🎬' : '¶'}</span>}
+          {media.length > 1 && (
+            <span className="absolute top-1 right-1 text-[9px] font-bold bg-black/65 text-white px-1.5 leading-[1.6]">{media.length}</span>
+          )}
+        </button>
+
+        <div className="flex-1 p-4 min-w-0 space-y-2">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <PlatformChip platform={post.platform} />
+            {bucket === 'upcoming' && <span className="text-[10px] font-bold uppercase tracking-[0.08em] px-1.5 py-0.5 leading-[1.4] bg-indigo-50 text-indigo-700">🗓 {formatBrandDateTime(post.scheduledPublishAt)}</span>}
+            {bucket === 'published' && <span className="text-[10px] font-bold uppercase tracking-[0.08em] px-1.5 py-0.5 leading-[1.4] bg-sage-50 text-sage-700">{lock.state === 'publishing' ? '↗ Publishing…' : '✓ Published'}</span>}
+            {bucket === 'attention' && post.publishStatus === 'failed' && <span className="text-[10px] font-bold uppercase tracking-[0.08em] px-1.5 py-0.5 leading-[1.4] bg-red-50 text-red-600">✕ Failed</span>}
+            {protectedPost && <span className="text-[10px] font-bold uppercase tracking-[0.08em] px-1.5 py-0.5 leading-[1.4] bg-sky-50 text-sky-800">Draft only</span>}
+            {media.length > 1 && <span className="text-[10px] text-text-tertiary">Carousel · {media.length} slides</span>}
+            {post.topic && <span className="text-[11px] text-text-tertiary truncate">· {post.topic}</span>}
+          </div>
+
+          <button type="button" onClick={() => onOpen(post)} className="block text-left w-full">
+            {caption.map((c, i) => (
+              <p key={i} dir={/[؀-ۿ]/.test(c) ? 'rtl' : 'ltr'}
+                className={`text-sm leading-relaxed whitespace-pre-wrap break-words ${i ? 'text-text-secondary mt-1' : 'text-text'} ${expanded ? '' : 'line-clamp-3'}`}>
+                {c || 'No caption'}
+              </p>
+            ))}
+          </button>
+          {long && (
+            <button onClick={() => setExpanded(v => !v)} className="text-[11px] font-semibold text-amber-700 hover:text-amber-800">
+              {expanded ? 'Show less' : 'Show full caption'}
+            </button>
+          )}
+
+          {bucket === 'published' && (
+            <p className="text-[11px] text-text-tertiary flex items-center gap-2 flex-wrap">
+              {post.publishedAt ? `Went out ${formatBrandDateTime(post.publishedAt)}` : post.scheduledPublishAt ? `Went out ${formatBrandDateTime(post.scheduledPublishAt)}` : 'Gone out'}
+              {post.platformPostUrl && <a href={post.platformPostUrl} target="_blank" rel="noreferrer" className="font-semibold text-amber-700 hover:underline">View on {PLATFORM_META[post.platform]?.label || post.platform} ↗</a>}
+              <span>· can’t be edited</span>
+            </p>
+          )}
+
+          {bucket === 'attention' && (
+            <p className={`text-[11px] leading-relaxed ${post.publishStatus === 'failed' ? 'text-red-600' : 'text-amber-800'}`}>
+              {attentionReason(post, accounts, now)}
+              {post.scheduledAt && post.publishStatus !== 'failed' && <span className="text-text-tertiary"> · planned for {formatDate(post.scheduledAt)}{post.publishTime ? ` ${formatBrandTime(post.publishTime)}` : ''}</span>}
+            </p>
+          )}
+
+          {bucket !== 'published' && (
+            <div className="flex items-center gap-2 flex-wrap pt-0.5">
+              <button onClick={() => onEdit(post)} className={`${btn} border-border text-text-secondary hover:bg-surface-subtle`}>
+                {needsComposer ? '↗ Finish in composer' : '✎ Edit'}
+              </button>
+              {bucket === 'upcoming' && !picking && (
+                <>
+                  <button onClick={startPicking} disabled={busy} className={`${btn} border-border text-text-secondary hover:bg-surface-subtle`}>🗓 Reschedule</button>
+                  <button onClick={() => onCancel(post)} disabled={busy} className={`${btn} border-red-200 text-red-500 hover:bg-red-50`}>Cancel schedule</button>
+                </>
+              )}
+              {bucket === 'attention' && !protectedPost && !needsComposer && account && !picking && (
+                <>
+                  <button onClick={startPicking} disabled={busy} className={`${btn} border-amber-300 text-amber-800 bg-amber-50 hover:bg-amber-100`}>🗓 Schedule</button>
+                  <button onClick={() => onBook(post, '')} disabled={busy} className={`${btn} border-border text-text-secondary hover:bg-surface-subtle`}>↗ Post now</button>
+                </>
+              )}
+              {picking && (
+                <>
+                  <input type="datetime-local" value={when} onChange={e => setWhen(e.target.value)} aria-label="New time"
+                    className="text-[11px] border border-border rounded-lg px-2 py-1 bg-white" />
+                  <span className="text-[10px] font-semibold text-text-tertiary">{BRAND_TIMEZONE_LABEL}</span>
+                  <button disabled={busy || !future}
+                    onClick={async () => { const ok = bucket === 'upcoming' ? await onReschedule(post, when) : await onBook(post, when); if (ok) setPicking(false) }}
+                    className={`${btn} border-amber-300 text-amber-800 bg-amber-50 hover:bg-amber-100`}>
+                    {busy ? 'Working…' : bucket === 'upcoming' ? 'Move' : 'Schedule'}
+                  </button>
+                  <button onClick={() => setPicking(false)} className="text-[11px] text-text-tertiary hover:text-text">Cancel</button>
+                  {when && !future && <span className="text-[10px] text-red-600">Pick a time in the future.</span>}
+                </>
+              )}
             </div>
-          ) : post.status === 'pending_publish' ? (
-            // Approved — publishing is the next step, so the controls for it
-            // live right here rather than behind opening the post.
-            <PublishBar post={post} onPublish={onPublish} busy={publishing} onOpenComposer={onOpenComposer} />
-          ) : (
-            <p className="text-[10px] text-text-tertiary mt-1 opacity-60">Click to open full view</p>
           )}
         </div>
       </div>
@@ -366,92 +397,80 @@ function PostCard({ post, onOpen, onApprove, onReject, onPublish, publishing, on
   )
 }
 
+// The order within a group: what goes out next first; what went out most
+// recently first; what needs a person by the date it was meant for.
+function sortItems(items, tab) {
+  const at = x => x.post ? Date.parse(x.post.scheduledPublishAt || x.post.publishedAt || '') || x.post.plannedAt || 0 : 0
+  return [...items].sort((a, b) => tab === 'published' ? at(b) - at(a) : at(a) - at(b))
+}
+
 export function Approvals() {
   const { state } = useApp()
   const { activeWorkspaceId, accessToken } = useAuth()
-  const { posts, ideas, plans, loading, loaded, fetchAll, updateStatus, setIdeas } = useApprovalPosts(accessToken, activeWorkspaceId)
-  const [platformFilter, setPlatformFilter] = useState('all')  // all | instagram
-  const [statusFilter,   setStatusFilter]   = useState('pending_review')
-  const [selectedPost,   setSelectedPost]   = useState(null)
-  const [retryingId,     setRetryingId]     = useState(null)
-  const [expandedKeys,   setExpandedKeys]   = useState({})
-  const [publishingId,   setPublishingId]   = useState(null)
-  // The post currently open in the composer, or null. Set from a card's Edit /
-  // Finish action; cleared when the composer closes.
-  const [composerPost,   setComposerPost]   = useState(null)
-  const [publishError,   setPublishError]   = useState(null)
-  const [syncing,        setSyncing]        = useState(false)
-  const [syncNote,       setSyncNote]       = useState('')
+  const { posts, ideas, plans, loading, loaded, fetchAll, setIdeas } = useApprovalPosts(accessToken, activeWorkspaceId)
+  const { allAccounts: accounts } = useConnectedAccounts()
+  const [tab,           setTab]           = useState(null)   // null until the first load picks one
+  const [selectedPost,  setSelectedPost]  = useState(null)
+  const [retryingId,    setRetryingId]    = useState(null)
+  const [collapsed,     setCollapsed]     = useState({})
+  const [busyId,        setBusyId]        = useState(null)
+  const [cancelTarget,  setCancelTarget]  = useState(null)
+  const [viewer,        setViewer]        = useState(null)
+  // The post currently open in the composer, or null.
+  const [composerPost,  setComposerPost]  = useState(null)
+  const [notice,        setNotice]        = useState(null)   // { tone: 'error'|'ok', text }
+  const [syncing,       setSyncing]       = useState(false)
+  const [syncNote,      setSyncNote]      = useState('')
 
   useEffect(() => { fetchAll() }, [fetchAll])
 
-  // Smart polling: check every ~4s while anything is actively generating,
-  // otherwise fall back to a slow 30s heartbeat.
+  // Every ~4s while anything is generating or publishing, otherwise every 30s.
+  const active = ideas.some(i => i.generation_status === 'processing') || posts.some(p => p.publishStatus === 'publishing')
   useEffect(() => {
-    const hasProcessing = ideas.some(i => i.generation_status === 'processing')
-    const interval = setInterval(fetchAll, hasProcessing ? 4000 : 30000)
+    const interval = setInterval(fetchAll, active ? 4000 : 30000)
     return () => clearInterval(interval)
-  }, [fetchAll, ideas])
+  }, [fetchAll, active])
 
-  // `now` as state, ticked from an effect (React's purity rule forbids
-  // calling Date.now() during render) — only ticks while something is
-  // actually processing, so a stuck idea's staleness gets picked up within
-  // ~4s of crossing the threshold without an idle tab polling forever.
+  // `now` as state, ticked from an effect (React's purity rule forbids calling
+  // Date.now() during render). Ticks every 30s so a booked post whose time
+  // arrives moves to Published without a reload.
   const [now, setNow] = useState(() => Date.now())
   useEffect(() => {
-    if (!ideas.some(i => i.generation_status === 'processing')) return
-    const interval = setInterval(() => setNow(Date.now()), 4000)
+    const interval = setInterval(() => setNow(Date.now()), active ? 4000 : 30000)
     return () => clearInterval(interval)
-  }, [ideas])
+  }, [active])
 
-  // One unified list: plan-linked ideas (processing/failed/completed) and
-  // manual (non-plan) posts, so filtering/counting/grouping all work the
-  // same way regardless of where an item came from.
+  // One card per POST ROW. This used to be one card per plan idea, with the
+  // idea's post looked up in a Map keyed by idea id — so an idea sent to two
+  // platforms kept only one of its posts, and a plan showed fewer posts than it
+  // had. Ideas still get a card of their own while they have no post yet
+  // (writing, or failed to write).
   const items = useMemo(() => {
-    const byIdeaId = new Map(posts.filter(p => p.planIdeaId).map(p => [p.planIdeaId, p]))
+    const ideaHasPost = new Set(posts.map(p => p.planIdeaId).filter(Boolean))
     const ideaItems = ideas
-      .filter(i => i.generation_status && i.generation_status !== 'not_started')
+      .filter(i => !ideaHasPost.has(i.id) && ['processing', 'failed'].includes(i.generation_status))
       .map(i => {
-        const post = byIdeaId.get(i.id) || null
-        let effectiveStatus = i.generation_status === 'completed' && post ? post.status : i.generation_status
+        let kind = i.generation_status
         let idea = i
-        if (effectiveStatus === 'processing' && i.generation_started_at) {
-          const staleMs = now - new Date(i.generation_started_at).getTime()
-          if (staleMs > STALE_PROCESSING_MS) {
-            effectiveStatus = 'failed'
-            idea = { ...i, generation_error: 'Taking longer than expected — the request may never have reached n8n, or a step failed silently downstream. Retry, or check the n8n workflow.' }
-          }
+        if (kind === 'processing' && i.generation_started_at && now - new Date(i.generation_started_at).getTime() > STALE_PROCESSING_MS) {
+          kind = 'failed'
+          idea = { ...i, generation_error: 'Taking longer than expected — the request may never have finished. Retry, or check the n8n workflow.' }
         }
-        return { key: `idea_${i.id}`, type: 'idea', idea, post, effectiveStatus, platform: i.platform, planId: i.plan_id }
+        return { key: `idea_${i.id}`, type: kind, idea, bucket: 'attention', planId: i.plan_id }
       })
-      .filter(x => x.effectiveStatus) // drop the rare "completed but post vanished" case
-    const manualItems = posts
-      .filter(p => p.source !== 'plan')
-      .map(p => ({ key: `manual_${p.platform}_${p.id}`, type: 'manual', post: p, effectiveStatus: p.status, platform: p.platform, planId: p.planId || null }))
-    return [...ideaItems, ...manualItems]
+    const postItems = posts.map(p => ({
+      key: `post_${p.platform}_${p.id}`, type: 'post', post: p, planId: p.planId || null,
+      bucket: queueBucket(p._raw, now),
+    }))
+    return [...ideaItems, ...postItems]
   }, [ideas, posts, now])
 
-  const byPlatform = platformFilter === 'all' ? items : items.filter(x => x.platform === platformFilter)
-  const filtered = byPlatform.filter(x => {
-    if (statusFilter === 'all') return true
-    if (statusFilter === 'pending_review') return ['processing', 'failed', 'pending_review'].includes(x.effectiveStatus)
-    return x.effectiveStatus === statusFilter
-  })
+  const counts = Object.fromEntries(TABS.map(t => [t.key, t.key === 'all' ? items.length : items.filter(x => x.bucket === t.key).length]))
+  // Open on what needs a person when anything does, otherwise on what is next.
+  const currentTab = tab || (counts.attention ? 'attention' : counts.upcoming ? 'upcoming' : 'all')
+  const filtered = currentTab === 'all' ? items : items.filter(x => x.bucket === currentTab)
 
-  const STATUS_TABS = [
-    { key: 'pending_review',  label: 'Pending review', count: byPlatform.filter(x => ['processing', 'failed', 'pending_review'].includes(x.effectiveStatus)).length },
-    { key: 'pending_publish', label: 'Approved',       count: byPlatform.filter(x => x.effectiveStatus === 'pending_publish').length },
-    { key: 'rejected',        label: 'Rejected',       count: byPlatform.filter(x => x.effectiveStatus === 'rejected').length },
-    { key: 'all',             label: 'All',            count: byPlatform.length },
-  ]
-  const PLATFORM_TABS = [
-    { key: 'all',       label: 'All' },
-    { key: 'instagram', label: 'Instagram' },
-  ]
-
-  // Group filtered items by plan (most-recent plan first, since `plans` is
-  // already ordered newest-first from the fetch); non-plan posts land in a
-  // "Manual posts" group at the end.
+  // Group by plan (newest plan first, as fetched); posts from no plan last.
   const grouped = useMemo(() => {
     const byKey = new Map()
     for (const item of filtered) {
@@ -461,89 +480,63 @@ export function Approvals() {
     }
     const planGroups = plans
       .filter(p => byKey.has(p.id))
-      .map(p => ({ key: p.id, title: p.name || `${p.month || ''} Content Plan`, items: byKey.get(p.id) }))
-    const manualGroup = byKey.has('manual') ? [{ key: 'manual', title: 'Manual posts', items: byKey.get('manual') }] : []
-    return [...planGroups, ...manualGroup]
-  }, [filtered, plans])
+      .map(p => ({ key: p.id, title: p.name || `${p.month || ''} Content Plan`, items: sortItems(byKey.get(p.id), currentTab) }))
+    // A plan id this workspace has no plan row for (deleted plan) still shows.
+    const orphan = [...byKey.keys()].filter(k => k !== 'manual' && !plans.some(p => p.id === k))
+      .map(k => ({ key: k, title: 'Deleted plan', items: sortItems(byKey.get(k), currentTab) }))
+    const manualGroup = byKey.has('manual') ? [{ key: 'manual', title: 'Posts not from a plan', items: sortItems(byKey.get('manual'), currentTab) }] : []
+    return [...planGroups, ...orphan, ...manualGroup]
+  }, [filtered, plans, currentTab])
 
-  function isExpanded(key, index) {
-    return key in expandedKeys ? expandedKeys[key] : index === 0
+  // Every group opens expanded. Only the first used to, so a second month's
+  // posts looked missing until someone thought to click its header.
+  const isExpanded = key => !collapsed[key]
+  const toggleExpanded = key => setCollapsed(prev => ({ ...prev, [key]: !prev[key] }))
+
+  function openMedia(post) {
+    const urls = post.mediaUrls?.length ? post.mediaUrls : [post.imageUrl].filter(Boolean)
+    if (!urls.length && !post.videoUrl) return
+    setViewer({ urls, videoUrl: post.videoUrl || '' })
   }
-  function toggleExpanded(key, index) {
-    setExpandedKeys(prev => ({ ...prev, [key]: !isExpanded(key, index) }))
+
+  // Refuses a post that has gone out, in case the list is a poll behind.
+  function openComposer(post) {
+    const lock = postLock(post._raw)
+    if (lock.locked) { setNotice({ tone: 'error', text: lock.reason }); fetchAll(); return }
+    setComposerPost(post)
   }
 
-  async function handleApprove(post) { await updateStatus(post, 'pending_publish') }
-  async function handleReject(post)  { await updateStatus(post, 'rejected') }
+  // Schedule (`when` = 'YYYY-MM-DDTHH:MM', brand time) or post now (`when` = '').
+  async function handleBook(post, when) {
+    const account = accountFor(post._raw, accounts)
+    if (!account) { openComposer(post); return false }
+    setBusyId(post.id); setNotice(null)
+    const res = await bookPost(post._raw, { account, workspaceId: activeWorkspaceId, scheduledFor: when })
+    setBusyId(null)
+    setNotice(res.error ? { tone: 'error', text: res.error } : { tone: 'ok', text: when ? `Scheduled for ${formatBrandDateTime(brandWallToUtc(when.slice(0, 10), when.slice(11, 16)))}.` : 'Sent to publish.' })
+    fetchAll()
+    return !res.error
+  }
 
-  // Publish or schedule through Instagram's Graph API (via n8n — the access
-  // token never reaches the browser). `when` is a datetime-local string
-  // ('' = publish now).
-  //
-  // Scheduling does NOT hand the post to Instagram early: the Graph API has no
-  // scheduling, so a future `when` books the slot in our own row and the
-  // publish workflow's 5-minute cron sends it when it comes due.
-  async function handlePublish(post, when) {
-    // TikTok cannot be published from this screen, and that is the platform's
-    // rule rather than a gap here. Every TikTok post needs a privacy level
-    // drawn from the creator account's own allowed list, plus two consent
-    // flags TikTok requires per post and which are deliberately never stored.
-    // None of that can be collected from an approval card, so the composer on
-    // the TikTok page is where it has to happen.
-    //
-    // Said here rather than letting the workflow refuse it: the workflow's
-    // rejection is correct but arrives as "TikTok requires a privacy level",
-    // which does not tell anyone where to go.
-    if (post.platform === 'tiktok' && !post.platformOptions?.tiktok?.privacy_level) {
-      // The card offers "Finish in composer" for exactly this case, so this is
-      // now a backstop rather than the user-facing path — but it stays, since
-      // handlePublish is reachable from anywhere and the workflow's own
-      // refusal does not say where to go.
-      setComposerPost(post)
-      return
-    }
-
-    setPublishingId(post.id)
-    const webhook = state.webhooks?.publishPost || defaultWebhookUrl('publishPost')
-    const result = await publishViaZernio(webhook, {
-      postId: post.id, postTable: post._table, workspaceId: activeWorkspaceId,
-      platform: post.platform,
-      accountId: post.zernioAccountId || undefined,
-      // The em-dash separator (not a plain blank line) is what
-      // isolateBilingual() in the Zernio publish workflow looks for to apply
-      // Unicode directional isolation per language — see CaptionStudio.jsx's
-      // own `pick()`, which this mirrors. Without it, Arabic + English text
-      // in one caption is sent unisolated and Instagram renders the RTL/LTR
-      // boundary wrong (trailing punctuation and standalone digits/"+" jump
-      // to the wrong side).
-      caption: post.captionAr && post.captionEn
-        ? [post.captionAr, post.captionEn].filter(Boolean).join('\n\n—\n\n')
-        : (post.copy || post.captionEn || post.captionAr || ''),
-      hashtags: post.hashtags || '',
-      imageUrl: post.imageUrl || '',
-      imageUrls: (post.mediaUrls || []).length > 1 ? post.mediaUrls : undefined,
-      videoUrl: post.videoUrl || '',
-      coverImageUrl: post.coverImageUrl || '',
-      // Whatever was chosen last time this post passed through the composer.
-      // Absent on a freshly generated post, which is correct — the defaults
-      // then apply.
-      platformSpecificData: post.platformOptions?.[post.platform] || undefined,
-      // No timezone passed: publishPost applies the brand's. `when` is the raw
-      // datetime-local value, which is a wall clock with no zone of its own —
-      // and the label beside the input says KSA, so KSA is what it means.
-      // This used to send the browser's zone, which quietly made the same
-      // input mean a different moment depending on where you opened the app.
-      scheduledFor: when || undefined,
+  async function handleReschedule(post, when) {
+    setBusyId(post.id); setNotice(null)
+    const res = await movePost({
+      accessToken, post: post._raw, dateKey: when.slice(0, 10), time: when.slice(11, 16),
+      webhooks: state.webhooks, workspaceId: activeWorkspaceId,
     })
-    setPublishingId(null)
-    if (result.error) {
-      // The workflow already wrote publish_status='failed' + the reason to
-      // the row, so just refetch rather than duplicating the error into
-      // local state and risking the two disagreeing.
-      setPublishError({ id: post.id, message: result.error })
-    } else {
-      setPublishError(null)
-    }
+    setBusyId(null)
+    setNotice(res.error
+      ? { tone: 'error', text: res.unscheduled ? `The old slot was cancelled but the new one could not be booked, so this post is not scheduled anywhere: ${res.error}` : res.error }
+      : { tone: 'ok', text: `Moved to ${res.label || formatBrandDateTime(res.scheduledPublishAt)}.` })
+    fetchAll()
+    return !res.error
+  }
+
+  async function handleCancel(post) {
+    setBusyId(post.id); setNotice(null)
+    const res = await unschedulePost({ accessToken, post: post._raw, webhooks: state.webhooks, workspaceId: activeWorkspaceId })
+    setBusyId(null)
+    setNotice(res.error ? { tone: 'error', text: res.error } : { tone: 'ok', text: 'Schedule cancelled — the post is kept under Needs attention.' })
     fetchAll()
   }
 
@@ -632,13 +625,6 @@ export function Approvals() {
     fetchAll()
   }
 
-  function handleStatusChange(post, newStatus) {
-    updateStatus(post, newStatus)
-    if (selectedPost && selectedPost.id === post.id && selectedPost.platform === post.platform) {
-      setSelectedPost(prev => ({ ...prev, status: newStatus }))
-    }
-  }
-
   // Instagram's PostDetail doesn't persist caption edits itself (unlike its
   // image regen, which does) — it hands the new text back via this callback
   // and expects the caller to write it. Must replicate that PATCH here or
@@ -655,6 +641,8 @@ export function Approvals() {
     const target = (selectedPost && selectedPost.id === postId) ? selectedPost : null
     setSelectedPost(prev => (prev && prev.id === postId) ? { ...prev, copy: newCopy } : prev)
     if (!target?._table) return
+    // Gone out: the words that went out stay the record of what went out.
+    if (postLock(target._raw).locked) { setNotice({ tone: 'error', text: 'This post has already gone out, so its caption can’t be edited.' }); return }
     logEditFeedback(activeWorkspaceId, accessToken, { platform: target.platform, postId, field: 'caption', original: originalCopy, edited: newCopy })
     if (!accessToken) return
     await fetch(`${SUPABASE_URL}/rest/v1/${target._table}?id=eq.${postId}`, {
@@ -665,6 +653,7 @@ export function Approvals() {
   }
 
   async function handleDelete(post) {
+    if (postLock(post._raw).locked) { setNotice({ tone: 'error', text: 'This post has already gone out, so its record can’t be deleted.' }); return }
     if (accessToken) {
       await fetch(`${SUPABASE_URL}/rest/v1/${post._table}?id=eq.${post.id}`, {
         method: 'DELETE',
@@ -675,11 +664,13 @@ export function Approvals() {
     fetchAll()
   }
 
+  const selectedLocked = selectedPost ? postLock(selectedPost._raw, now).locked : false
+
   return (
     <div className="max-w-6xl space-y-4">
       <PageHeader
-        title="Post Approvals"
-        subtitle="Every post the Plan Generation workflows produce — grouped by the month they came from. Watch generation happen, review the real caption + image, approve, then publish or schedule.">
+        title="Post Queue"
+        subtitle="Every post from your plans and the composer — what goes out next, what went out, and what needs you. Saved plans are scheduled automatically; reschedule, edit or cancel them here.">
         <div className="text-right">
           <Button size="sm" variant="secondary" onClick={handleSync} disabled={syncing}>
             {syncing ? <><Spinner size="sm" /> Syncing…</> : 'Sync from Zernio'}
@@ -688,37 +679,23 @@ export function Approvals() {
         </div>
       </PageHeader>
 
-      {publishError && (
-        <Card className="p-3 border-red-200 bg-red-50">
-          <p className="text-xs text-red-600">
-            <span className="font-semibold">Publish failed.</span> {publishError.message}
-          </p>
+      {notice && (
+        <Card className={`p-3 flex items-start gap-3 ${notice.tone === 'error' ? 'border-red-200 bg-red-50' : 'border-sage-200 bg-sage-50'}`}>
+          <p className={`text-xs flex-1 ${notice.tone === 'error' ? 'text-red-600' : 'text-sage-800'}`}>{notice.text}</p>
+          <button onClick={() => setNotice(null)} className="text-xs text-text-tertiary hover:text-text" aria-label="Dismiss">✕</button>
         </Card>
       )}
 
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        {/* Status tabs as one segmented bar. Separate bordered buttons with
-            gaps made the selected one read as "a button that happens to be
-            dark" rather than as the active segment of a control. */}
-        <div className="flex flex-wrap">
-          {STATUS_TABS.map(t => (
-            <button key={t.key} onClick={() => setStatusFilter(t.key)}
-              className={`px-3 py-1.5 border -ml-px first:ml-0 text-xs font-semibold transition-colors
-                ${statusFilter === t.key
-                  ? 'bg-amber-700 text-white border-amber-700 relative z-10'
-                  : 'bg-white border-border text-text-secondary hover:text-text hover:bg-surface-subtle'}`}>
-              {t.label}{t.count > 0 && <span className={`ml-1.5 tabular-nums ${statusFilter === t.key ? 'opacity-70' : 'text-text-tertiary'}`}>{t.count}</span>}
-            </button>
-          ))}
-        </div>
-        <div className="flex">
-          {PLATFORM_TABS.map(t => (
-            <button key={t.key} onClick={() => setPlatformFilter(t.key)}
-              className={`px-3 py-1.5 border -ml-px first:ml-0 text-xs font-semibold transition-colors ${platformFilter === t.key ? 'bg-amber-700 text-white border-amber-700 relative z-10' : 'bg-white text-text-secondary border-border hover:text-text hover:bg-surface-subtle'}`}>
-              {t.label}
-            </button>
-          ))}
-        </div>
+      <div className="flex flex-wrap">
+        {TABS.map(t => (
+          <button key={t.key} onClick={() => setTab(t.key)}
+            className={`px-3 py-1.5 border -ml-px first:ml-0 text-xs font-semibold transition-colors
+              ${currentTab === t.key
+                ? 'bg-amber-700 text-white border-amber-700 relative z-10'
+                : 'bg-white border-border text-text-secondary hover:text-text hover:bg-surface-subtle'}`}>
+            {t.label}{counts[t.key] > 0 && <span className={`ml-1.5 tabular-nums ${currentTab === t.key ? 'opacity-70' : 'text-text-tertiary'}`}>{counts[t.key]}</span>}
+          </button>
+        ))}
       </div>
 
       {(loading || !loaded) && items.length === 0 ? (
@@ -727,38 +704,36 @@ export function Approvals() {
         <Card>
           <Empty
             icon={<svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>}
-            /* The All tab has no adjective to interpolate, so the generic
-               branch produced "No all posts". Named rather than patched with
-               a replace(), since the next tab added would hit this too. */
             title={
-              statusFilter === 'pending_review' ? 'Nothing to review'
-              : statusFilter === 'all' ? 'No posts yet'
-              : `No ${STATUS_TABS.find(t => t.key === statusFilter)?.label.toLowerCase()} posts`
+              currentTab === 'attention' ? 'Nothing needs you'
+              : currentTab === 'upcoming' ? 'Nothing scheduled'
+              : currentTab === 'published' ? 'Nothing published yet'
+              : 'No posts yet'
             }
-            description="Approve a plan from Campaigns → Plan with AI and generated posts will show up here as they're ready."
+            description="Plan a month in Campaigns — saving the plan schedules its posts, and they show up here."
           />
         </Card>
       ) : (
         <div className="space-y-4">
-          {grouped.map((group, index) => {
-            const expanded = isExpanded(group.key, index)
+          {grouped.map(group => {
+            const expanded = isExpanded(group.key)
             return (
-              <div key={group.key} className="rounded-2xl border border-border bg-white overflow-hidden">
-                <button onClick={() => toggleExpanded(group.key, index)}
+              <div key={group.key} className="border border-border bg-white overflow-hidden">
+                <button onClick={() => toggleExpanded(group.key)} aria-expanded={expanded}
                   className="w-full flex items-center gap-2.5 px-4 py-3 hover:bg-surface-subtle transition-colors">
                   <svg className={`w-3.5 h-3.5 text-text-tertiary transition-transform flex-shrink-0 ${expanded ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg>
-                  <span className="font-semibold text-text text-sm">{group.title}</span>
+                  <span className="font-semibold text-text text-sm text-left">{group.title}</span>
                   <span className="text-[11px] text-text-tertiary">{group.items.length} post{group.items.length !== 1 ? 's' : ''}</span>
                 </button>
                 {expanded && (
                   <div className="grid grid-cols-1 gap-3 p-4 pt-0">
                     {group.items.map(item => {
-                      if (item.type === 'idea' && item.effectiveStatus === 'processing') return <ProcessingCard key={item.key} idea={item.idea} />
-                      if (item.type === 'idea' && item.effectiveStatus === 'failed') return <FailedCard key={item.key} idea={item.idea} post={item.post} onRetry={handleRetry} retrying={retryingId === item.idea.id} />
-                      return <PostCard key={item.key} post={item.post} onOpen={setSelectedPost}
-                        onOpenComposer={setComposerPost}
-                        onApprove={handleApprove} onReject={handleReject}
-                        onPublish={handlePublish} publishing={publishingId === item.post.id} />
+                      if (item.type === 'processing') return <ProcessingCard key={item.key} idea={item.idea} />
+                      if (item.type === 'failed') return <FailedCard key={item.key} idea={item.idea} post={null} onRetry={handleRetry} retrying={retryingId === item.idea.id} />
+                      return <QueueCard key={item.key} post={item.post} bucket={item.bucket} accounts={accounts} now={now}
+                        busy={busyId === item.post.id}
+                        onOpen={setSelectedPost} onOpenMedia={openMedia} onEdit={openComposer}
+                        onBook={handleBook} onReschedule={handleReschedule} onCancel={setCancelTarget} />
                     })}
                   </div>
                 )}
@@ -768,10 +743,14 @@ export function Approvals() {
         </div>
       )}
 
-      {/* webhookUrl/regenWebhookUrl are empty by design: the Instagram
-          generation workflows are retired, so no endpoint answers a regen.
-          PostDetail already handles the empty case by pointing at Creative
-          Studio rather than offering a button that can only error. */}
+      <ConfirmDialog open={!!cancelTarget} onClose={() => setCancelTarget(null)}
+        onConfirm={() => handleCancel(cancelTarget)} title="Cancel this schedule?"
+        message="The post is taken off the schedule at Zernio and will not go out. It stays here under Needs attention, so you can schedule it again." danger />
+
+      {viewer && <MediaViewer {...viewer} onClose={() => setViewer(null)} />}
+
+      {/* Full view. A post that has gone out opens read-only: no caption
+          edit, no image regeneration, no delete. */}
       {selectedPost && selectedPost.platform === 'instagram' && (
         <InstagramPostDetail
           post={selectedPost}
@@ -780,24 +759,20 @@ export function Approvals() {
           regenWebhookUrl=""
           supabaseUrl={SUPABASE_URL}
           anonKey={accessToken || ''}
+          locked={selectedLocked}
           onClose={() => setSelectedPost(null)}
-          onStatusChange={handleStatusChange}
-          onPublish={post => { setSelectedPost(null); setComposerPost(post) }}
+          onStatusChange={() => {}}
+          onPublish={post => { setSelectedPost(null); openComposer(post) }}
           onImageUpdated={() => {}}
           onCaptionUpdated={handleCaptionUpdated}
-          onDelete={handleDelete}
+          onDelete={selectedLocked ? undefined : handleDelete}
         />
       )}
 
-      {/* The composer, opened from a card rather than from its own button.
-          This is what closes the loop between the generation half of the app
-          and the publishing half: a post produced by a plan can be reviewed,
-          adjusted and sent through exactly the same path as one composed by
-          hand — and, for TikTok, is the only place its required privacy level
-          and per-post consent can be collected at all.
-
-          Keyed by post id so switching between two posts remounts rather than
-          leaving the previous one's caption in the fields. */}
+      {/* The composer, opened from a card. Keyed by post id so switching
+          between two posts remounts rather than leaving the previous one's
+          caption in the fields. Saving a booked post re-books it at Zernio
+          (see ComposerHost). */}
       <ComposerHost
         key={composerPost?.id || 'none'}
         trigger={false}

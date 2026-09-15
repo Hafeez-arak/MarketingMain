@@ -43,7 +43,7 @@ const STATUS_META = {
 const isOwnPost = idea => idea.copyMode === 'own'
 
 // ─── One idea in the review list, with inline approve/reject + edit ─────────
-export function IdeaCard({ idea, index, accessToken, workspaceId, onChange, onRemove, onCreate, autoEdit = false, planPlatforms = [] }) {
+export function IdeaCard({ idea, index, accessToken, workspaceId, onChange, onRemove, onCreate, autoEdit = false, planPlatforms = [], lock = null }) {
   const [editing, setEditing] = useState(autoEdit)
   const [saving,  setSaving]  = useState(false)
   const [saveError, setSaveError] = useState('')
@@ -192,8 +192,19 @@ export function IdeaCard({ idea, index, accessToken, workspaceId, onChange, onRe
           <span className={`text-[10px] font-semibold px-1.5 py-0.5 leading-[1.4] flex-shrink-0 ${st.cls}`}>{st.label}</span>
         </div>
 
-        {/* Actions — Reject reveals one-tap reason chips instead of rejecting blind */}
-        {showRejectReasons ? (
+        {/* Actions — Reject reveals one-tap reason chips instead of rejecting blind.
+            A post that has gone out has none: un-approving, editing or deleting
+            the idea would not change what is already on the platform, only
+            make the plan disagree with it. */}
+        {lock?.locked ? (
+          <div className="flex items-center gap-2 mt-3 pl-8 flex-wrap">
+            <span className="text-[10px] font-bold uppercase tracking-[0.08em] px-1.5 py-0.5 leading-[1.4] bg-sage-100 text-sage-700">
+              {lock.state === 'publishing' ? '↗ Publishing' : '✓ Published'}
+            </span>
+            {lock.url && <a href={lock.url} target="_blank" rel="noreferrer" className="text-[11px] font-semibold text-amber-700 hover:underline">View post ↗</a>}
+            <span className="text-[11px] text-text-tertiary">Gone out — it can no longer be changed here.</span>
+          </div>
+        ) : showRejectReasons ? (
           <div className="flex items-center gap-1.5 mt-3 pl-8 flex-wrap">
             <span className="text-[11px] text-text-tertiary mr-1">Why?</span>
             {REJECT_REASONS.map(r => (

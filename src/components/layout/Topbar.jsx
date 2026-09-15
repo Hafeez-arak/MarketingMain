@@ -12,7 +12,7 @@ const titles = {
   '/social/tiktok': 'TikTok',
   '/social/snapchat': 'Snapchat',
   '/social/linkedin': 'LinkedIn',
-  '/social/approvals': 'Post Approvals',
+  '/social/approvals': 'Post Queue',
   '/settings': 'Settings', '/integrations': 'Integrations', '/team': 'Team & Access',
 }
 
