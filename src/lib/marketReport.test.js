@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import runs from '../dev/runsFixture.json'
 import {
-  teamsOf, topThree, salesRows, competitorMoves, socialActivity, upcomingEvents, marketNotes,
+  teamsOf, topThree, salesRows, competitorMoves, socialActivity, upcomingEvents, eventsView, marketNotes,
   newCompetitors, sourceList, sectionVisible, dayLabel, resolveRefs,
 } from './marketReport'
 
@@ -143,5 +143,35 @@ describe('market notes do not repeat themselves', () => {
     // Seven market items in the 14 Sep brief, every one a restatement.
     expect(notes.filter(h => /^Riyadh's hotel pipeline/.test(h))).toHaveLength(0)
     expect(notes.filter(h => /Mostadam/.test(h))).toHaveLength(1)
+  })
+})
+
+describe('events in three bands', () => {
+  const now = new Date('2026-09-15T08:00:00Z')
+  const store = [
+    { id: 'a', name: 'Buyers Property Expo 2026', start_date: '2026-10-20', end_date: '2026-10-23', exhibitor_deadline: '2026-09-30' },
+    { id: 'b', name: 'Tech Conference 2027', start_date: '2027-02-08', end_date: '2027-02-11', exhibitor_deadline: '2026-11-15' },
+    { id: 'c', name: 'Tech Conference 2026', start_date: '2026-02-09', end_date: '2026-02-12', takeaway: 'Technolight showed KNX' },
+    { id: 'd', name: 'Old Show 2025', start_date: '2025-03-01', end_date: '2025-03-03' },
+    { id: 'e', name: 'Industry Week', start_date: null },
+  ]
+
+  it('puts imminent, later-this-year and recently-ended events in their own bands', () => {
+    const v = eventsView({ events: store, now })
+    expect(v.soon.map(e => e.id)).toEqual(['a'])
+    expect(v.later.map(e => e.id)).toEqual(['b', 'e'])
+    expect(v.recent.map(e => e.id)).toEqual(['c'])
+    expect(v.recent[0].takeaway).toBe('Technolight showed KNX')
+  })
+
+  it('an event the run found but the store lacks still shows, and an ended one carries what came of it', () => {
+    const report = { findings: [
+      { lens: 'events', headline: 'Expo X 2026 ended', detail: 'Three developers launched towers', sources: [{ url: 'https://x.com' }], event: { name: 'Expo X 2026', start_date: '2026-05-01', end_date: '2026-05-03' } },
+      { lens: 'events', headline: 'Tech Conference 2027 dates', sources: [{ url: 'https://t.com' }], event: { name: 'Tech Conference 2027', start_date: '2027-02-08' } },
+    ] }
+    const v = eventsView({ report, events: store, now })
+    expect(v.recent.map(e => e.name)).toContain('Expo X 2026')
+    expect(v.recent.find(e => e.name === 'Expo X 2026').takeaway).toBe('Three developers launched towers')
+    expect(v.later.filter(e => /Tech Conference 2027/.test(e.name))).toHaveLength(1)
   })
 })

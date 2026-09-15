@@ -6,7 +6,7 @@ import {
   PERISHABLE, SLOW,
 } from './lenses'
 import {
-  openingsPrompt, demandPrompt, categoryPrompt, rivalsPrompt, craftPrompt, LENS_PROMPTS,
+  openingsPrompt, eventsPrompt, demandPrompt, categoryPrompt, rivalsPrompt, craftPrompt, LENS_PROMPTS,
 } from './lensPrompts'
 import { SYNTHESISE_PROMPT } from './brief'
 import { volatileFragment } from './prompt'
@@ -44,9 +44,9 @@ describe('the lens set is general, not lighting-shaped', () => {
     }
   })
 
-  it('covers the seven questions and no more', () => {
+  it('covers the eight questions and no more', () => {
     expect(LENSES.map(l => l.key).sort())
-      .toEqual(['calendar', 'category', 'craft', 'demand', 'openings', 'ourselves', 'rivals'])
+      .toEqual(['calendar', 'category', 'craft', 'demand', 'events', 'openings', 'ourselves', 'rivals'])
   })
 
   it('the weekly run covers growth AND what competitors are doing', () => {
@@ -160,7 +160,9 @@ describe('cadence keeps a monthly question off a weekly bill', () => {
     // research instead. Capping the total is the honest version of the same
     // intent. Raised 24 → 26 on 2026-09-15 when the competitor lens went
     // weekly; demand gave up two searches to keep the rise that small.
-    expect(searchBudgetFor(lensesFor({ cadence: 'weekly' }))).toBeLessThanOrEqual(26)
+    // Raised 26 → 30 the same day for the events lens (6); openings gave up
+    // two, since events were the job it was spending them on.
+    expect(searchBudgetFor(lensesFor({ cadence: 'weekly' }))).toBeLessThanOrEqual(30)
   })
 })
 
@@ -423,15 +425,15 @@ describe('the calendar lens makes no model call at all', () => {
   })
 
   it('hands its trade-show job to a lens that actually searches', () => {
-    // The half that genuinely needed a model did not get deleted, it moved.
-    // If it had been deleted, nothing would look for Big 5 or LEAP again.
-    // Asserted on the RESPONSIBILITY, not on the punctuation. The first
-    // version matched "trade shows, exhibitions" and broke when the sentence
-    // was reworded, which tested the comma rather than the behaviour.
-    const p = openingsPrompt({ brandName: 'X' }, { motion: 'specification' })
+    // The half that genuinely needed a model did not get deleted, it moved —
+    // twice now. Openings carried it as a leftover job and, told that finding
+    // no events was fine, found none; every brief listed one public holiday.
+    // Since 2026-09-15 the events lens owns it with its own budget.
+    const p = eventsPrompt({ brandName: 'X' }, { motion: 'specification' })
     expect(p).toMatch(/trade shows/i)
     expect(p).toMatch(/exhibitions/i)
-    expect(p).toMatch(/procurement or budget\s+cycles/i)
+    expect(lensByKey('events').budget.searches).toBeGreaterThan(0)
+    expect(openingsPrompt({ brandName: 'X' }, { motion: 'specification' })).toMatch(/procurement or budget\s+cycles/i)
   })
 })
 
@@ -702,12 +704,45 @@ describe('openings reports the project even when it cannot reach the date', () =
     expect(p()).toMatch(/single most valuable thing you can find/i)
   })
 
-  it('makes the trade-show half explicitly second to the projects', () => {
-    // Both belong here, but they are different searches. Without a stated
-    // priority the budget splits evenly and neither finishes.
+  it('spends none of its searches on expos any more — the events lens has them', () => {
     const text = p()
-    expect(text).toMatch(/Projects come FIRST/)
-    expect(text).toMatch(/correct trade and not a failure/)
-    expect(text.indexOf('SECOND')).toBeGreaterThan(text.indexOf('1. Projects entering DESIGN'))
+    expect(text).not.toMatch(/correct trade and not a failure/)
+    expect(text).toMatch(/separate events lens/)
+  })
+})
+
+describe('the events lens looks where the buyers are, not only at our own industry', () => {
+  const facts = { brandName: 'X', descriptor: 'a specification supplier', geography: 'Riyadh, Saudi Arabia' }
+
+  it('asks for the buyers\' own expos and the conferences that shape demand', () => {
+    // The two events the team named on 2026-09-15 were a property developer's
+    // own expo and a technology conference — neither is an industry trade show,
+    // and a lens looking only for those would never have found them.
+    const p = eventsPrompt(facts, { motion: 'specification' })
+    expect(p).toMatch(/developers' and real-estate expos/)
+    expect(p).toMatch(/single developer's\s+own launch/)
+    expect(p).toMatch(/technology, smart-city/)
+  })
+
+  it('reports editions that already happened, and the next edition\'s dates', () => {
+    const p = eventsPrompt(facts, { motion: 'specification' })
+    expect(p).toMatch(/ENDED in the last nine months/)
+    expect(p).toMatch(/next edition/)
+  })
+
+  it('names no specific event and no industry — the rings come from who gathers', () => {
+    const p = eventsPrompt({ brandName: 'X' }, { motion: 'local_service' }).toLowerCase()
+    for (const word of ['leap', 'big 5', 'lighting', 'saudi build', 'cityscape']) expect(p).not.toContain(word)
+  })
+
+  it('looks for competitors on exhibitor lists, and is shown what is already tracked', () => {
+    const p = eventsPrompt(facts, { motion: 'specification', competitors: ['Technolight'], intel: 'EVENTS ALREADY TRACKED\n- Expo A 2026' })
+    expect(p).toContain('Technolight')
+    expect(p).toContain('Expo A 2026')
+  })
+
+  it('runs every week and leads for a specification business', () => {
+    expect(lensesFor({ cadence: 'weekly' }).map(l => l.key)).toContain('events')
+    expect(MOTIONS.specification.leads).toContain('events')
   })
 })

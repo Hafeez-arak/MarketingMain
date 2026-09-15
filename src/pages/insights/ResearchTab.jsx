@@ -8,7 +8,7 @@ import {
   partitionByClock, deadlineLabel, lensStates, lensHeadline, emptiness, pct, marketDirection, basisLabel,
 } from '../../lib/researchBrief'
 import {
-  TEAMS, sectionVisible, forTeam, topThree, salesRows, competitorMoves, socialActivity, upcomingEvents,
+  TEAMS, sectionVisible, forTeam, topThree, salesRows, competitorMoves, socialActivity, eventsView,
   marketNotes, marketingRecommendations, newCompetitors, sourceList, dayLabel, domainOf, teamsOf,
 } from '../../lib/marketReport'
 import { fetchIntel, updateOpportunity, updateEventDecision } from '../../lib/marketIntel'
@@ -365,7 +365,10 @@ function OurChannel({ p }) {
   )
 }
 
-function EventsTable({ rows, canEdit, onDecision }) {
+// One table for all three bands. A recent event swaps the exhibitor-deadline
+// column for what came of it, because a deadline that passed is not what a
+// reader of a finished expo needs — who showed what, and what was announced, is.
+function EventsTable({ rows, canEdit, onDecision, recent = false }) {
   return (
     <div className="overflow-x-auto -mx-4 sm:-mx-5">
       <table className="w-full min-w-[760px] text-left text-xs">
@@ -374,9 +377,9 @@ function EventsTable({ rows, canEdit, onDecision }) {
             <th className="font-semibold py-2 pl-4 sm:pl-5 pr-3 w-[25%]">Event</th>
             <th className="font-semibold py-2 pr-3 w-[12%]">Dates</th>
             <th className="font-semibold py-2 pr-3 w-[14%]">Venue</th>
-            <th className="font-semibold py-2 pr-3 w-[11%]">Exhibitor deadline</th>
-            <th className="font-semibold py-2 pr-3 w-[12%]">Competitors going</th>
-            <th className="font-semibold py-2 pr-4 sm:pr-5 w-[26%]">Recommendation</th>
+            {!recent && <th className="font-semibold py-2 pr-3 w-[11%]">Exhibitor deadline</th>}
+            <th className="font-semibold py-2 pr-3 w-[12%]">{recent ? 'Competitors there' : 'Competitors going'}</th>
+            <th className={`font-semibold py-2 pr-4 sm:pr-5 ${recent ? 'w-[37%]' : 'w-[26%]'}`}>{recent ? 'What came of it' : 'Recommendation'}</th>
           </tr>
         </thead>
         <tbody>
@@ -396,18 +399,21 @@ function EventsTable({ rows, canEdit, onDecision }) {
                 {e.start ? `${fmtDate(e.start)}${e.end && e.end !== e.start ? ` – ${fmtDate(e.end)}` : ''}` : 'TBC'}
               </td>
               <td className="py-3 pr-3 text-text-secondary">{e.venue || '—'}</td>
-              <td className="py-3 pr-3 tabular-nums">
+              {!recent && <td className="py-3 pr-3 tabular-nums">
                 {e.exhibitorDeadline ? (
                   <>
                     <p className={`font-semibold ${e.deadlineDays != null && e.deadlineDays >= 0 && e.deadlineDays <= 14 ? 'text-red-700' : 'text-text'}`}>{fmtDate(e.exhibitorDeadline)}</p>
                     <p className="text-[10px] text-text-tertiary">{dayLabel(e.deadlineDays)}</p>
                   </>
                 ) : <span className="text-text-tertiary">{e.kind === 'calendar' ? '—' : 'not found'}</span>}
-              </td>
+              </td>}
               <td className="py-3 pr-3 text-text-secondary">{e.competitors.length ? e.competitors.join(', ') : '—'}</td>
               <td className="py-3 pr-4 sm:pr-5 text-text-secondary leading-relaxed">
-                <Clamp text={e.recommendation} />
-                {e.id && canEdit && (
+                <Clamp text={recent ? e.takeaway || e.recommendation : e.recommendation} />
+                {recent && e.takeaway && e.recommendation && (
+                  <p className="text-[11px] text-text-tertiary mt-1.5"><span className="font-semibold">For us: </span>{e.recommendation}</p>
+                )}
+                {e.id && canEdit && !recent && (
                   <div className="mt-2 flex items-center gap-2">
                     <span className="text-[10px] text-text-tertiary">We are</span>
                     <PillSelect value={e.decision} onChange={ev => onDecision(e, ev.target.value)}>
@@ -527,7 +533,7 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
   )
   const moves = useMemo(() => competitorMoves(report), [report])
   const social = useMemo(() => socialActivity({ report, signals: intel.signals, now }), [report, intel.signals, now])
-  const events = useMemo(() => upcomingEvents({ report, events: intel.events, runId: run?.id, now }), [report, intel.events, run?.id, now])
+  const events = useMemo(() => eventsView({ report, events: intel.events, runId: run?.id, now }), [report, intel.events, run?.id, now])
   const notes = useMemo(() => marketNotes(report, now), [report, now])
   const plan = useMemo(() => marketingRecommendations(report), [report])
   const candidates = useMemo(() => newCompetitors({ report, agendaCompetitors }), [report, agendaCompetitors])
@@ -547,7 +553,7 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
     { key: 'sales', label: 'Sales: act now', count: sales.open.length },
     { key: 'competitors', label: 'Competitor moves', count: visibleMoves.length },
     { key: 'social', label: 'Social activity', count: social.theirs.length + social.ours.length },
-    { key: 'events', label: 'Events', count: events.length },
+    { key: 'events', label: 'Events', count: events.count },
     { key: 'market', label: 'Market & technical', count: visibleNotes.length },
     { key: 'recs', label: 'Marketing recommendations', count: plan.blocks.length + plan.loose.length },
     { key: 'newcomp', label: 'New competitors', count: candidates.length },
@@ -752,13 +758,32 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
 
       {/* 5 ── Events */}
       {sectionVisible('events', team) && (
-        <Section id="events" n={num('events')} title="Events — next 90 days"
-          note="Expos, conferences and sponsorship openings the agent is tracking, plus the calendar dates marketing plans around.">
+        <Section id="events" n={num('events')} title="Events and expos"
+          note="Our own industry's shows, the expos where our buyers gather, and the conferences that shape what they ask for — plus the calendar dates marketing plans around.">
           {!storeLoaded ? (
             <div className="space-y-2" aria-busy="true"><Skeleton className="h-10 w-full" /></div>
-          ) : events.length ? (
-            <EventsTable rows={events} canEdit={intel.available} onDecision={onDecision} />
-          ) : <Quiet>Nothing dated in the next 90 days.</Quiet>}
+          ) : events.count ? (
+            <div className="space-y-5">
+              <div>
+                <p className="text-[10px] font-semibold text-text-tertiary uppercase tracking-wide mb-2">Next 90 days</p>
+                {events.soon.length
+                  ? <EventsTable rows={events.soon} canEdit={intel.available} onDecision={onDecision} />
+                  : <Quiet>Nothing dated in the next 90 days.</Quiet>}
+              </div>
+              {events.later.length > 0 && (
+                <div>
+                  <p className="text-[10px] font-semibold text-text-tertiary uppercase tracking-wide mb-2">Later this year — book stands and deadlines now</p>
+                  <EventsTable rows={events.later} canEdit={intel.available} onDecision={onDecision} />
+                </div>
+              )}
+              {events.recent.length > 0 && (
+                <div>
+                  <p className="text-[10px] font-semibold text-text-tertiary uppercase tracking-wide mb-2">Recently — what happened</p>
+                  <EventsTable rows={events.recent} recent />
+                </div>
+              )}
+            </div>
+          ) : <Quiet>No events found yet. The events lens searches for them from the next run.</Quiet>}
         </Section>
       )}
 

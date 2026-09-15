@@ -304,11 +304,81 @@ export function openingsPrompt(brand, { motion, agenda = [], language = '', inte
     'Prefer the last few weeks, but older still counts when the work has not been awarded.',
     'Say how old it is and let the reader judge.',
     '',
-    'SECOND, and only with whatever searches are left: the dated events this market runs on',
-    '— trade shows and exhibitions this brand\'s buyers attend, and the procurement or budget',
-    'cycles that decide when they can commit. Projects come FIRST. If you spend everything on',
-    'projects and report no events at all, that is the correct trade and not a failure.',
-    'For an event, also look for who is EXHIBITING — a competitor with a stand booked is a finding.',
+    'Expos, conferences and trade shows are NOT your question — a separate events lens covers',
+    'them with its own searches. Spend yours on projects, and on the procurement or budget',
+    'cycles that decide when buyers can commit.',
+    known(intel),
+    standing(agenda),
+    localLanguage(language),
+    CLOSING,
+  ].join('\n')
+}
+
+/**
+ * EVENTS — the expos, conferences and gatherings our teams should be at.
+ *
+ * Its own lens since 2026-09-15. It used to be the openings lens's leftover
+ * job, "only with whatever searches are left", and every brief's Events
+ * section held one public holiday. The events that matter to a business are
+ * rarely only its own industry's trade show: the buyers' own expos (where
+ * every exhibitor is a prospect) and the conferences that shape what buyers
+ * ask for are worth as much, and none of them were being looked for.
+ *
+ * Generic on purpose, like every prompt here: the rings are described by who
+ * gathers, never by naming an event or an industry.
+ */
+export function eventsPrompt(brand, { motion, competitors = [], agenda = [], language = '', intel = '' }) {
+  const buyers = {
+    specification: [
+      '2. Where the BUYERS gather — the expos and summits of the people who specify and commission',
+      '   this category: property developers\' and real-estate expos (including a single developer\'s',
+      '   own launch or sales exhibition), construction and contractor shows, hospitality and',
+      '   facilities-management events, government and giga-programme forums. Every exhibitor at a',
+      '   buyers\' expo is a named prospect, so these are worth as much as the industry\'s own shows.',
+    ],
+    local_service: [
+      '2. Where the CUSTOMERS gather — community, lifestyle, wedding, wellness or seasonal events and',
+      '   pop-ups in their area, and the venues or developments opening with an event.',
+    ],
+    product: [
+      '2. Where the BUYERS gather — consumer shows, retail and marketplace events, creator meet-ups.',
+    ],
+  }
+  return [
+    who(brand),
+    competitors.length ? `Competitors to look for on exhibitor and speaker lists: ${competitors.slice(0, 12).join(', ')}` : '',
+    '',
+    'One question: WHICH EVENTS SHOULD THIS BRAND\'S TEAMS BE AT, EXHIBIT AT, OR KNOW HAPPENED?',
+    '',
+    'Cover the next twelve months, and anything that ENDED in the last nine months. Look in three rings,',
+    'and spread your searches across all three rather than spending them on one:',
+    '1. The brand\'s OWN industry — its trade shows, exhibitions and professional conferences in this market.',
+    ...(buyers[motion] || buyers.local_service),
+    '3. What SHAPES demand — technology, smart-city, sustainability and national-programme conferences',
+    '   and summits where the things buyers will soon ask for are announced.',
+    'Also: awards the brand could enter, and sponsorship or partnership openings (public art, city',
+    'festivals, industry weeks) with a deadline.',
+    '',
+    'Search event listings and calendars for this market, organisers\' and venues\' own sites, and news of',
+    'announced editions. Official event websites are the best source for dates and exhibitor lists.',
+    '',
+    'For EVERY event, report a finding with `event` filled — name (official name, with the edition year),',
+    'start_date, end_date, venue, city, organizer, url, exhibitor_deadline, and competitors_exhibiting (any',
+    'competitor you actually saw on an exhibitor, sponsor or speaker list). Leave out a field you did not',
+    'establish; never invent a date. Set perishable_until to the exhibitor deadline if there is one, else',
+    'the start date, and leave it out for an event that has already ended.',
+    '',
+    'suggested_action says what our teams should do: exhibit, visit and meet named exhibitors, enter, sponsor,',
+    'or skip — and by when. Set for_whom to "sales" when the value is the people there, "marketing" when it is',
+    'visibility or content, "both" when it is also technical.',
+    '',
+    'An event that ALREADY HAPPENED is still a finding: say in the headline that it has ended, put what came',
+    'out of it that matters to this brand in detail — announcements, partnerships, who exhibited, what',
+    'competitors showed — and if the next edition\'s dates are announced, report that edition as its own',
+    'finding. A postponed or cancelled event is a finding too.',
+    '',
+    'Every event must be one this brand\'s buyers, partners or competitors genuinely attend. Rate the rest',
+    'relevance "low" rather than leaving them out — they are stored, not reported.',
     known(intel),
     standing(agenda),
     localLanguage(language),
@@ -515,6 +585,7 @@ export const LENS_PROMPTS = {
   // computed, the "what should we do about it" judgement moved to synthesis,
   // and its trade-show hunt moved into openings.
   openings: openingsPrompt,
+  events: eventsPrompt,
   demand: demandPrompt,
   category: categoryPrompt,
   rivals: rivalsPrompt,

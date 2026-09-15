@@ -10,7 +10,7 @@ import {
 import { useReportFilename } from '../../lib/reports/print'
 import { lensStates, lensHeadline, pct } from '../../lib/researchBrief'
 import {
-  TEAMS, sectionVisible, forTeam, topThree, salesRows, competitorMoves, socialActivity, upcomingEvents,
+  TEAMS, sectionVisible, forTeam, topThree, salesRows, competitorMoves, socialActivity, eventsView,
   marketNotes, marketingRecommendations, newCompetitors, sourceList, dayLabel,
 } from '../../lib/marketReport'
 import { fetchIntel } from '../../lib/marketIntel'
@@ -122,7 +122,7 @@ export function ResearchReport() {
   const sales = useMemo(() => salesRows({ report, opportunities: intel.opportunities, runId: run?.id, now }), [report, intel, run, now])
   const moves = useMemo(() => competitorMoves(report), [report])
   const social = useMemo(() => socialActivity({ report, signals: intel.signals, now }), [report, intel, now])
-  const events = useMemo(() => upcomingEvents({ report, events: intel.events, runId: run?.id, now }), [report, intel, run, now])
+  const events = useMemo(() => eventsView({ report, events: intel.events, runId: run?.id, now }), [report, intel, run, now])
   const notes = useMemo(() => marketNotes(report, now), [report, now])
   const plan = useMemo(() => marketingRecommendations(report), [report])
   const candidates = useMemo(() => newCompetitors({ report, agendaCompetitors }), [report, agendaCompetitors])
@@ -302,24 +302,36 @@ export function ResearchReport() {
 
             {/* ── Events ── */}
             {show('events') && (
-              <ReportSection title="Events — next 90 days">
-                {events.length ? (
-                  <ReportTable head={[{ label: 'Event' }, { label: 'Dates' }, { label: 'Exhibitor deadline' }, { label: 'Competitors' }, { label: 'Recommendation' }]}>
-                    {events.map((e, i) => (
-                      <ReportRow key={e.id || i}>
-                        <Cell first className="w-[28%]">
-                          <span className="font-semibold">{e.name}</span>
-                          {e.venue && <span className="block text-[10px] text-text-tertiary">{e.venue}</span>}
-                          {e.decision && e.decision !== 'undecided' && <span className="block text-[10px] text-text-tertiary">We are: {e.decision}</span>}
-                        </Cell>
-                        <Cell className="w-[13%] whitespace-nowrap">{e.start ? `${shortDate(e.start)}${e.end && e.end !== e.start ? ` – ${shortDate(e.end)}` : ''}` : 'TBC'}</Cell>
-                        <Cell className="w-[13%] whitespace-nowrap">{e.exhibitorDeadline ? shortDate(e.exhibitorDeadline) : '—'}</Cell>
-                        <Cell className="w-[14%]" muted>{e.competitors.join(', ') || '—'}</Cell>
-                        <Cell className="w-[32%]">{e.recommendation || '—'}</Cell>
-                      </ReportRow>
-                    ))}
-                  </ReportTable>
-                ) : <p className="text-[11px] text-text-tertiary">Nothing dated in the next 90 days.</p>}
+              <ReportSection title="Events and expos"
+                note="Our industry's shows, the expos where our buyers gather, and the conferences that shape demand.">
+                {events.count ? (
+                  <div className="space-y-3">
+                    {[['Next 90 days', events.soon, false], ['Later this year', events.later, false], ['Recently — what happened', events.recent, true]]
+                      .filter(([, rows]) => rows.length)
+                      .map(([label, rows, recent]) => (
+                        <div key={label}>
+                          <p className="text-[10px] font-semibold uppercase tracking-wide text-text-tertiary mb-1">{label}</p>
+                          <ReportTable head={recent
+                            ? [{ label: 'Event' }, { label: 'Dates' }, { label: 'Competitors' }, { label: 'What came of it' }]
+                            : [{ label: 'Event' }, { label: 'Dates' }, { label: 'Exhibitor deadline' }, { label: 'Competitors' }, { label: 'Recommendation' }]}>
+                            {rows.map((e, i) => (
+                              <ReportRow key={e.id || i}>
+                                <Cell first className="w-[28%]">
+                                  <span className="font-semibold">{e.name}</span>
+                                  {e.venue && <span className="block text-[10px] text-text-tertiary">{e.venue}</span>}
+                                  {e.decision && e.decision !== 'undecided' && <span className="block text-[10px] text-text-tertiary">We are: {e.decision}</span>}
+                                </Cell>
+                                <Cell className="w-[13%] whitespace-nowrap">{e.start ? `${shortDate(e.start)}${e.end && e.end !== e.start ? ` – ${shortDate(e.end)}` : ''}` : 'TBC'}</Cell>
+                                {!recent && <Cell className="w-[13%] whitespace-nowrap">{e.exhibitorDeadline ? shortDate(e.exhibitorDeadline) : '—'}</Cell>}
+                                <Cell className="w-[14%]" muted>{e.competitors.join(', ') || '—'}</Cell>
+                                <Cell className={recent ? 'w-[45%]' : 'w-[32%]'}>{(recent ? e.takeaway || e.recommendation : e.recommendation) || '—'}</Cell>
+                              </ReportRow>
+                            ))}
+                          </ReportTable>
+                        </div>
+                      ))}
+                  </div>
+                ) : <p className="text-[11px] text-text-tertiary">No events found yet.</p>}
               </ReportSection>
             )}
 

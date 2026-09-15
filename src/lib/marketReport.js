@@ -31,7 +31,7 @@
 import { rankFindings, daysLeft } from './agent/lenses'
 import { similarity } from './agent/memory'
 import {
-  sameName, nameKey, daysTo, cleanDate, isOpenOpportunity, CLOSED_STATUSES, SOCIAL_CHANNELS, eventStatus,
+  sameName, nameKey, daysTo, cleanDate, isOpenOpportunity, CLOSED_STATUSES, SOCIAL_CHANNELS,
 } from './agent/intel'
 import { ownChannelRows, actionPlan, pct } from './researchBrief'
 
@@ -359,52 +359,85 @@ export function socialActivity({ report = {}, signals = [], now = new Date(), da
 // ─── Events ────────────────────────────────────────────────────────────────
 
 /**
- * Everything dated in the window: tracked expos, expos this run found, and the
- * computed calendar dates marketing plans around.
+ * Every event our teams should know about, in three bands.
+ *
+ *   soon    starts within 90 days (or is on now) — decide this month
+ *   later   91 days to a year out — the exhibitor deadlines for these fall now
+ *   recent  ended in the last nine months — who exhibited and what came of it
+ *
+ * The spec's "next 90 days" alone hid the events that matter most for
+ * planning: a February expo's stand has to be booked in the autumn, and last
+ * spring's technology conference is where this year's asks were announced.
+ * Undated editions sit in `later`, labelled TBC.
+ *
+ * Tracked events from the store come first; events this run found that the
+ * store does not have yet follow; computed calendar dates join `soon`.
  */
-export function upcomingEvents({ report = {}, events = [], runId = null, now = new Date(), days = 90 } = {}) {
-  const inWindow = start => {
-    const d = daysTo(start, now)
-    return d === null || (d >= -7 && d <= days)
+export function eventsView({ report = {}, events = [], runId = null, now = new Date(), soonDays = 90, aheadDays = 365, backDays = 274 } = {}) {
+  const band = (start, end) => {
+    const last = cleanDate(end) || cleanDate(start)
+    const ds = daysTo(start, now)
+    const de = daysTo(last, now)
+    if (de !== null && de < 0) return de >= -backDays ? 'recent' : null
+    if (ds === null) return 'later'
+    if (ds <= soonDays) return 'soon'
+    return ds <= aheadDays ? 'later' : null
   }
-  const rows = []
+  const out = { soon: [], later: [], recent: [] }
+  const push = row => { const b = band(row.start, row.end); if (b) out[b].push(row) }
+
   for (const e of events || []) {
-    if (eventStatus(e, now) === 'concluded' || !inWindow(e.start_date)) continue
-    rows.push({
+    push({
       id: e.id, kind: 'event', name: e.name, start: cleanDate(e.start_date), end: cleanDate(e.end_date),
       venue: [e.venue, e.city].filter(Boolean).join(', '), organizer: e.organizer || '', url: e.url || e.source_url || '',
       exhibitorDeadline: cleanDate(e.exhibitor_deadline), deadlineDays: daysTo(e.exhibitor_deadline, now),
-      competitors: e.competitors_exhibiting || [], recommendation: e.recommendation || '',
+      competitors: e.competitors_exhibiting || [], recommendation: e.recommendation || '', takeaway: e.takeaway || '',
       relevance: e.relevance || 'medium', decision: e.decision || 'undecided',
       isNew: Boolean(runId) && e.first_run_id === runId,
       changed: Boolean(runId) && e.last_run_id === runId && e.first_run_id !== runId ? e.last_change || '' : '',
     })
   }
+  const tracked = (events || []).map(e => e.name)
+  const seen = []
   for (const f of report.findings || []) {
     if (!f.event || !isReportable(f)) continue
-    if (rows.some(r => sameName(r.name, f.event.name) || nameKey(r.name) === nameKey(f.event.name))) continue
-    if (!inWindow(f.event.start_date)) continue
-    rows.push({
-      id: null, kind: 'event', name: f.event.name, start: cleanDate(f.event.start_date), end: cleanDate(f.event.end_date),
+    const name = f.event.name
+    const sameEdition = n => (sameName(n, name) || nameKey(n) === nameKey(name)) &&
+      String(n).match(/\b20\d\d\b/)?.[0] === String(name).match(/\b20\d\d\b/)?.[0]
+    if (tracked.some(sameEdition) || seen.some(sameEdition)) continue
+    seen.push(name)
+    const start = cleanDate(f.event.start_date)
+    const end = cleanDate(f.event.end_date)
+    const ended = (daysTo(end || start, now) ?? 0) < 0
+    push({
+      id: null, kind: 'event', name, start, end,
       venue: [f.event.venue, f.event.city].filter(Boolean).join(', '), organizer: f.event.organizer || '',
       url: f.event.url || firstUrl(f.sources), exhibitorDeadline: cleanDate(f.event.exhibitor_deadline),
       deadlineDays: daysTo(f.event.exhibitor_deadline, now), competitors: f.event.competitors_exhibiting || [],
-      recommendation: f.suggested_action || '', relevance: f.relevance || 'medium', decision: null, isNew: true, changed: '',
+      recommendation: f.suggested_action || '', takeaway: ended ? f.detail || '' : '',
+      relevance: f.relevance || 'medium', decision: null, isNew: f.store?.state !== 'seen', changed: '',
     })
   }
   for (const f of report.findings || []) {
     if (f.lens !== 'calendar') continue
     const date = cleanDate(f.evidence?.date || f.perishable_until)
     const d = daysTo(date, now)
-    if (d === null || d < 0 || d > days) continue
-    rows.push({
+    if (d === null || d < 0 || d > soonDays) continue
+    out.soon.push({
       id: null, kind: 'calendar', name: f.headline, start: date, end: null, venue: '', organizer: '', url: '',
-      exhibitorDeadline: null, deadlineDays: null, competitors: [], recommendation: f.suggested_action || '',
+      exhibitorDeadline: null, deadlineDays: null, competitors: [], recommendation: f.suggested_action || '', takeaway: '',
       relevance: f.relevance || 'medium', decision: null, isNew: false, changed: '',
     })
   }
-  return rows.sort((a, b) => (a.start || '9999').localeCompare(b.start || '9999'))
+  const asc = (a, b) => (a.start || '9999').localeCompare(b.start || '9999')
+  out.soon.sort(asc)
+  out.later.sort(asc)
+  out.recent.sort((a, b) => (b.end || b.start || '').localeCompare(a.end || a.start || ''))
+  return { ...out, count: out.soon.length + out.later.length + out.recent.length }
 }
+
+/** The next-90-days band alone, for callers that only want what is imminent. */
+export const upcomingEvents = args => eventsView(args).soon
 
 // ─── Market & technical notes ──────────────────────────────────────────────
 
