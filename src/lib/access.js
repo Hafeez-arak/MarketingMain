@@ -91,3 +91,48 @@ export async function cancelInvite(email) {
   const { error } = await supabase.rpc('cancel_invite', { target_email: email })
   return error ? error.message : null
 }
+
+// ─── Which companies each person gets ───────────────────────────────────────
+// Approval lets someone into the application; these three decide which
+// companies they actually see. Membership has always been the permission —
+// see 20260916_assign_workspaces_per_user — so assigning a company is
+// literally writing a workspace_members row, and the admin-only RPC below is
+// the only thing allowed to write one.
+
+// Every company that exists, not just the caller's own. Two select policies
+// answer this table: ordinary members see the ones they belong to, the access
+// admin sees all of them. Both are fine here — the page is admin-only.
+export async function fetchAllCompanies() {
+  const { data, error } = await supabase
+    .from('workspaces')
+    .select('id, name, admin_only')
+    .order('name')
+  if (error) return { companies: [], error: error.message }
+  return { companies: data || [], error: null }
+}
+
+// The whole roster in one query, shaped for the UI: { [user_id]: [ws_id, …] }.
+// One round trip for everyone rather than one per person — the list is a few
+// dozen rows at most and the page renders a checkbox grid per row.
+export async function fetchCompanyAssignments() {
+  const { data, error } = await supabase
+    .from('workspace_members')
+    .select('user_id, workspace_id')
+  if (error) return { assignments: {}, error: error.message }
+  const assignments = {}
+  for (const row of data || []) {
+    ;(assignments[row.user_id] ||= []).push(row.workspace_id)
+  }
+  return { assignments, error: null }
+}
+
+// Send the complete ticked set, not a diff: the function makes the roster
+// match it exactly, so a retry is harmless and a lost request can't leave
+// someone half-assigned.
+export async function setUserCompanies(userId, workspaceIds) {
+  const { error } = await supabase.rpc('set_user_workspaces', {
+    target_user: userId,
+    ws_ids: workspaceIds,
+  })
+  return error ? error.message : null
+}
