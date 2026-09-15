@@ -4,6 +4,7 @@ import { textIn, urlsFromResponse } from '../../src/lib/agent/loop.js'
 import { lensByKey, makeFinding } from '../../src/lib/agent/lenses.js'
 import { findingsFromEvents } from '../../src/lib/agent/calendar.js'
 import { ownChannelFindings } from '../../src/lib/agent/ownChannels.js'
+import { CHANNELS, SIGNAL_CATEGORIES } from '../../src/lib/agent/intel.js'
 
 // ─── Running a lens ────────────────────────────────────────────────────────
 // Each lens is one bounded model call with web search, asked one question and
@@ -62,9 +63,10 @@ export const FINDINGS_SCHEMA = {
             // away under its subject matter.
             for_whom: {
               type: 'string',
-              enum: ['marketing', 'both', 'technical'],
+              enum: ['marketing', 'sales', 'both', 'technical'],
               description:
-                'Who acts on this. Judge by whether there is something to PUBLISH, never by ' +
+                'Who acts on this. Use "sales" when the action is to contact someone, bid, or get ' +
+                'specified on a project. Otherwise judge by whether there is something to PUBLISH, never by ' +
                 'how technical the subject sounds. A mandatory certification deadline is a ' +
                 'technical fact and an excellent post ("we are already compliant — here is ' +
                 'what specifiers must check before the date"), so it is "both", not ' +
@@ -80,6 +82,52 @@ export const FINDINGS_SCHEMA = {
                 'One line for the product or technical team: what they need to check, decide ' +
                 'or do. Required whenever for_whom is "both" or "technical". On "technical" ' +
                 'it must also say why there is no marketing angle.',
+            },
+            // ── Added 2026-09-15: what makes a finding a storable signal, and
+            // a lead or an event a row the team can work across weeks. See
+            // src/lib/agent/intel.js for how each is matched against the store.
+            relevance: {
+              type: 'string',
+              enum: ['high', 'medium', 'low'],
+              description: 'How much it MATTERS (not how sure you are). low is stored but not reported.',
+            },
+            competitor: { type: 'string', description: 'Competitor name exactly as listed, or empty for the market.' },
+            channel: { type: 'string', enum: CHANNELS, description: 'Where you actually saw it.' },
+            category: { type: 'string', enum: SIGNAL_CATEGORIES },
+            lead: {
+              type: 'object',
+              additionalProperties: false,
+              description: 'Fill for a tender, project or named prospect.',
+              required: ['name'],
+              properties: {
+                name: { type: 'string', description: 'The project or tender\'s OWN name, stable week to week. Never a sentence.' },
+                type: { type: 'string', enum: ['tender', 'project', 'lead'] },
+                client: { type: 'string' },
+                contractor: { type: 'string' },
+                consultant: { type: 'string' },
+                location: { type: 'string' },
+                scope: { type: 'string' },
+                stage: { type: 'string', description: 'e.g. design, tender, awarded, construction, fit-out.' },
+                deadline: { type: 'string', description: 'ISO date, only when established.' },
+                timing: { type: 'string', enum: ['open', 'closed', 'unconfirmed'] },
+              },
+            },
+            event: {
+              type: 'object',
+              additionalProperties: false,
+              description: 'Fill for an expo, conference, awards or sponsorship opening.',
+              required: ['name'],
+              properties: {
+                name: { type: 'string', description: 'Official name.' },
+                start_date: { type: 'string' },
+                end_date: { type: 'string' },
+                venue: { type: 'string' },
+                city: { type: 'string' },
+                organizer: { type: 'string' },
+                url: { type: 'string' },
+                exhibitor_deadline: { type: 'string' },
+                competitors_exhibiting: { type: 'array', items: { type: 'string' } },
+              },
             },
             sources: {
               type: 'array',

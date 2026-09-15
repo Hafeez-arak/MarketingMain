@@ -1,321 +1,126 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Card, SectionHead, Button, Empty, Badge, PillSelect } from '../../components/ui/index'
+import { Card, Button, Empty, Badge, PillSelect, Skeleton } from '../../components/ui/index'
 import { AgentSteering } from '../../components/AgentSteering'
 import { SendIdeasToPlan } from '../../components/SendIdeasToPlan'
 import { RunProgress } from '../../components/RunProgress'
+import { useAuth } from '../../store/auth'
 import {
-  partitionByClock, splitByAudience, deadlineLabel, urgencyOf, lensStates, lensHeadline,
-  emptiness, pct, compact, signed, ownChannelRows, marketDirection, actionPlan, basisLabel,
+  partitionByClock, deadlineLabel, lensStates, lensHeadline, emptiness, pct, marketDirection, basisLabel,
 } from '../../lib/researchBrief'
-import { noveltyLabel } from '../../lib/agent/novelty'
+import {
+  TEAMS, sectionVisible, forTeam, topThree, salesRows, competitorMoves, socialActivity, upcomingEvents,
+  marketNotes, marketingRecommendations, newCompetitors, sourceList, dayLabel, domainOf, teamsOf,
+} from '../../lib/marketReport'
+import { fetchIntel, updateOpportunity, updateEventDecision } from '../../lib/marketIntel'
+import { fetchAgenda, setAgendaStatus } from '../../lib/agentAgenda'
+import { OPPORTUNITY_STATUSES, EVENT_DECISIONS } from '../../lib/agent/intel'
 import { isLive } from '../../lib/agent/progress'
 
-// ─── The Research tab — what is happening out there, and what to do ────────
-// The outward, perishable half of this page. A brief expires: National Day
-// passes, a tender closes, a standard comes into force. Everything durable —
-// the rules, our own performance, the decisions we made — is the other tab.
+// ─── The Research tab — the weekly market report, for three teams ──────────
+// Marketing, sales and the technical team read this, and each needs a
+// different slice. The page follows the operating spec's order:
 //
-// ── WHY THIS IS IN ZONES RATHER THAN A LIST ──
+//   Top 3 · Sales: act now · Competitor moves · Social activity · Events
+//   · Market & technical · Marketing recommendations · New competitors
+//   · Sources
 //
-// It used to be thirteen cards of equal weight in one column: progress,
-// selector, headline, act, gaps, ideas, standing, channels, board, lenses,
-// unanswered, passed deadlines, watchlist. Every one of them looked exactly as
-// important as every other, there was no way to jump, and the two sections a
-// person actually acts on sat above six they only consult when they doubt the
-// first two. Reading it top to bottom was the only way through, and nobody
-// reads a weekly report top to bottom twice.
+// with a team filter that hides what a team does not act on. Every section
+// is built by src/lib/marketReport.js, which the printable brief also uses.
 //
-// So the same content, in four zones, with a rail that jumps to each:
+// Two sections read the STORE rather than the brief — the lead tracker and
+// the events list — because a lead found three weeks ago and still open
+// belongs on this week's list. They are the current state, across all runs,
+// and are labelled that way so nobody reads them as this run's slice.
 //
-//   DO THIS            where the market is going, what has a clock on it, and
-//                      the gaps with the ideas that close them.
-//   EVIDENCE           the numbers the first zone rests on.
-//   HOW THIS RUN WENT  the audit trail. Collapsed, because it is read when you
-//                      doubt something — and a reader who doubts nothing
-//                      should not have to scroll past it.
-//   WHAT IT WATCHES    the watchlist and the standing questions. Setup, not
-//                      reading, and it no longer sits inside the report.
-//
-// ── AND WHY GAPS AND IDEAS ARE ONE SECTION ──
-//
-// They were two cards a screen apart. In the 12 Sep brief, gap 1 ended
-// "publish a short technical brief" and idea 2 WAS that brief — connected only
-// by a sentence of rationale the reader had to match up from memory. The run
-// now writes `answers` on every idea, so the idea renders under the gap it
-// closes. Briefs written before that still render flat, which is exactly what
-// they did before.
+// Follower counts appear nowhere. What competitors are doing, assembled from
+// small signals across channels, is the point.
+
 const fmtDate = iso => {
   if (!iso) return ''
-  const d = new Date(iso)
-  return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })
+  const d = new Date(String(iso).length === 10 ? `${iso}T00:00:00Z` : iso)
+  return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', timeZone: 'UTC' })
 }
 
-const URGENCY = {
-  now: 'bg-red-50 text-red-700 border-red-200',
-  soon: 'bg-amber-50 text-amber-700 border-amber-200',
-  later: 'bg-slate-50 text-slate-600 border-slate-200',
-  passed: 'bg-slate-50 text-slate-400 border-slate-200',
-  none: 'bg-slate-50 text-slate-600 border-slate-200',
+const TEAM_TONE = {
+  marketing: 'bg-sage-50 text-sage-700 border-sage-200',
+  sales: 'bg-amber-50 text-amber-800 border-amber-200',
+  technical: 'bg-slate-100 text-slate-700 border-slate-200',
 }
-
+const RELEVANCE_TONE = {
+  high: 'bg-red-50 text-red-700 border-red-200',
+  medium: 'bg-amber-50 text-amber-700 border-amber-200',
+  low: 'bg-slate-50 text-slate-500 border-slate-200',
+}
 const LENS_STATE = {
   found: { tone: 'text-emerald-700 bg-emerald-50', label: 'found something' },
   quiet: { tone: 'text-slate-500 bg-slate-100', label: 'looked, found nothing' },
   failed: { tone: 'text-red-700 bg-red-50', label: 'could not answer' },
+}
+const CHANNEL_LABEL = {
+  website: 'Website', linkedin: 'LinkedIn', instagram: 'Instagram', tiktok: 'TikTok', x: 'X', youtube: 'YouTube',
+  news: 'News', jobs: 'Jobs', tender_portal: 'Tenders', event_site: 'Event site', government: 'Government', other: 'Other',
+}
+
+function Chip({ children, tone = 'bg-slate-50 text-slate-600 border-slate-200', title }) {
+  return (
+    <span title={title} className={`inline-flex items-center max-w-full truncate px-1.5 py-0.5 rounded border text-[10px] font-medium whitespace-nowrap ${tone}`}>
+      {children}
+    </span>
+  )
+}
+
+const TeamChip = ({ team }) => <Chip tone={TEAM_TONE[team]}>{team}</Chip>
+const RelevanceChip = ({ value }) => (value ? <Chip tone={RELEVANCE_TONE[value]}>{value}</Chip> : null)
+
+function NewChip({ isNew, changed }) {
+  if (changed) return <Chip tone="bg-blue-50 text-blue-700 border-blue-200" title={changed}>changed</Chip>
+  if (isNew) return <Chip tone="bg-emerald-50 text-emerald-700 border-emerald-200">new</Chip>
+  return null
 }
 
 // Sources are the difference between a finding and an opinion, so they are
 // always visible — never behind a disclosure. An uncited finding says so.
 function Sources({ sources, uncited }) {
   if (uncited) {
-    return (
-      <p className="text-[11px] text-amber-700 mt-2">
-        No source survived verification — carried as an observation, not as evidence.
-      </p>
-    )
+    return <p className="text-[11px] text-amber-700 mt-2">No source survived verification — an observation, not evidence.</p>
   }
   if (!sources?.length) return null
   return (
     <div className="mt-2 flex flex-wrap gap-1.5">
-      {sources.slice(0, 5).map((s, i) => (
-        <a
-          key={i}
-          href={typeof s === 'string' ? s : s.url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-[10px] px-1.5 py-0.5 rounded border border-border text-text-tertiary hover:text-text hover:border-slate-400 truncate max-w-[220px]"
-          title={(typeof s === 'string' ? s : s.quote || s.title || s.url) || ''}
-        >
-          {(() => {
-            try { return new URL(typeof s === 'string' ? s : s.url).hostname.replace(/^www\./, '') }
-            catch { return 'source' }
-          })()}
-        </a>
-      ))}
+      {sources.slice(0, 5).map((s, i) => {
+        const url = typeof s === 'string' ? s : s.url
+        return (
+          <a key={i} href={url} target="_blank" rel="noopener noreferrer"
+            className="text-[10px] px-1.5 py-0.5 rounded border border-border text-text-tertiary hover:text-text hover:border-slate-400 truncate max-w-[220px]"
+            title={(typeof s === 'string' ? s : s.quote || s.title || url) || ''}>
+            {domainOf(url)}
+          </a>
+        )
+      })}
     </div>
   )
 }
 
-/**
- * The line a finding carries for the product or technical team.
- *
- * Rendered UNDER the marketing action, never instead of it, and deliberately
- * quiet — this is a card in the marketing flow and the post is still the point.
- * The whole argument for keeping these findings here rather than on a separate
- * page is that the technical fact and the publishable angle are one thought; a
- * note styled loudly enough to compete with "Do:" would pull them apart again
- * on the screen after having kept them together in the data.
- */
-function TechNote({ finding }) {
-  if (finding?.for_whom !== 'both' || !finding?.technical_note) return null
+// One small piece of evidence behind a combined claim: where it was seen, and
+// a link to it. The channel is shown first because "three channels agree" is
+// what makes a competitor move believable.
+function Piece({ p }) {
   return (
-    <p className="text-[11px] mt-2 leading-relaxed opacity-70 border-l-2 border-current/20 pl-2">
-      <span className="font-semibold">For the technical team: </span>{finding.technical_note}
-    </p>
-  )
-}
-
-// A dated finding. The deadline is the loudest thing on the card, because it
-// is the only reason this one is above the others.
-function ActCard({ finding, now }) {
-  const label = deadlineLabel(finding, now)
-  const urgency = urgencyOf(finding, now)
-  return (
-    <div className={`rounded-xl border p-3.5 ${URGENCY[urgency]}`}>
-      <div className="flex items-start justify-between gap-3">
-        <p className="text-sm font-semibold leading-snug">{finding.headline}</p>
-        {label && (
-          <span className="text-[11px] font-semibold shrink-0 tabular-nums whitespace-nowrap">
-            {label}
-          </span>
+    <li className="flex items-start gap-2 text-[11px] leading-relaxed min-w-0">
+      <span className="shrink-0 mt-px max-w-[40%]"><Chip>{CHANNEL_LABEL[p.channel] || p.channel || 'source'}</Chip></span>
+      <span className="text-text-secondary min-w-0">
+        {p.summary}
+        {p.date && <span className="text-text-tertiary"> · {fmtDate(p.date)}</span>}
+        {p.url && (
+          <> · <a href={p.url} target="_blank" rel="noopener noreferrer" className="text-text-tertiary underline underline-offset-2 hover:text-text break-all">{domainOf(p.url)}</a></>
         )}
-      </div>
-      {finding.suggested_action && (
-        <p className="text-xs mt-2 leading-relaxed opacity-90">
-          <span className="font-semibold">Do: </span>{finding.suggested_action}
-        </p>
-      )}
-      <TechNote finding={finding} />
-      {finding.detail && (
-        <p className="text-[11px] mt-2 leading-relaxed opacity-75">{finding.detail}</p>
-      )}
-      <div className="flex items-center gap-2 mt-2 text-[10px] opacity-70">
-        <span className="uppercase tracking-wide">{finding.lens}</span>
-        {finding.confidence != null && <span>· confidence {pct(finding.confidence)}</span>}
-        {finding.novelty && <span>· {noveltyLabel(finding, now)}</span>}
-      </div>
-      <Sources sources={finding.sources} />
-    </div>
+      </span>
+    </li>
   )
 }
 
-const CHANNEL_TONE = {
-  measured: 'border-border bg-white',
-  unmeasured: 'border-amber-200 bg-amber-50/40',
-  silent: 'border-border bg-slate-50/60',
-  not_connected: 'border-dashed border-border bg-transparent',
-}
-
-/**
- * One of our own channels.
- *
- * Deliberately a different card from CompetitorCard, though the numbers rhyme.
- * Ours are per-POST engagement from our own analytics on any platform; theirs
- * are per-PROFILE figures from business_discovery and exist on Instagram only.
- * One card serving both would quietly imply the two are the same measurement,
- * which is the confusion this whole section has to avoid.
- */
-function ChannelCard({ p }) {
-  const dim = p.state === 'not_connected'
-  return (
-    <div className={`rounded-xl border p-3.5 ${CHANNEL_TONE[p.state] || CHANNEL_TONE.measured}`}>
-      <div className="flex items-baseline justify-between gap-2">
-        <p className={`text-sm font-semibold truncate ${dim ? 'text-text-tertiary' : 'text-text'}`}>{p.label}</p>
-        {p.username && <span className="text-[11px] text-text-tertiary shrink-0">@{p.username}</span>}
-      </div>
-
-      {p.state !== 'measured' ? (
-        <p className="text-[11px] text-text-tertiary mt-2 leading-relaxed">{p.note}</p>
-      ) : (
-        <>
-          <div className="grid grid-cols-3 gap-2 mt-3">
-            <div>
-              <p className="text-[10px] text-text-tertiary uppercase tracking-wide">Posts</p>
-              <p className="text-sm font-semibold tabular-nums">{p.posts}</p>
-              {/* Never shown without it. "We published 6" beside an average
-                  computed from 2 is a true-sounding overstatement. */}
-              <p className="text-[10px] text-text-tertiary tabular-nums">{p.measured} measured</p>
-            </div>
-            <div>
-              <p className="text-[10px] text-text-tertiary uppercase tracking-wide">Eng/post</p>
-              <p className="text-sm font-semibold tabular-nums">{p.avg_engagement ?? '—'}</p>
-              {p.avg_engagement_prev != null && (
-                <p className="text-[10px] text-text-tertiary tabular-nums">was {p.avg_engagement_prev}</p>
-              )}
-            </div>
-            <div>
-              <p className="text-[10px] text-text-tertiary uppercase tracking-wide">Week</p>
-              <p className={`text-sm font-semibold tabular-nums ${
-                p.change ? (p.change.direction === 'up' ? 'text-emerald-600' : 'text-red-600') : ''}`}>
-                {p.change ? `${p.change.direction === 'up' ? '+' : '−'}${p.change.change_pct}%` : '—'}
-              </p>
-              {!p.change && <p className="text-[10px] text-text-tertiary">no call yet</p>}
-            </div>
-          </div>
-          {p.weak && (
-            <p className="text-[11px] text-amber-700 mt-2">
-              Thin sample — directional, not conclusive.
-            </p>
-          )}
-          {p.best_post && (
-            <p className="text-[11px] text-text-secondary mt-2 leading-relaxed">
-              Best: {p.best_post.topic || 'untitled'} · {p.best_post.engagement} interactions
-            </p>
-          )}
-        </>
-      )}
-    </div>
-  )
-}
-
-function CompetitorCard({ c }) {
-  const measured = c.data === 'instagram'
-  return (
-    <div className="rounded-xl border border-border bg-white p-3.5">
-      <div className="flex items-baseline justify-between gap-2">
-        <p className="text-sm font-semibold text-text truncate">{c.name}</p>
-        {c.handle && <span className="text-[11px] text-text-tertiary shrink-0">@{c.handle}</span>}
-      </div>
-      {!measured ? (
-        <p className="text-[11px] text-text-tertiary mt-2">
-          No Instagram account we can measure. Web evidence only.
-        </p>
-      ) : (
-        <>
-          <div className="grid grid-cols-3 gap-2 mt-3">
-            <div>
-              <p className="text-[10px] text-text-tertiary uppercase tracking-wide">Followers</p>
-              <p className="text-sm font-semibold tabular-nums">{compact(c.followers)}</p>
-              {c.followers_delta != null && (
-                <p className="text-[10px] text-text-tertiary tabular-nums">{signed(c.followers_delta)}</p>
-              )}
-            </div>
-            <div>
-              <p className="text-[10px] text-text-tertiary uppercase tracking-wide">Posts/wk</p>
-              <p className="text-sm font-semibold tabular-nums">{c.posts_per_week ?? '—'}</p>
-              {c.posts_per_week_prev != null && (
-                <p className="text-[10px] text-text-tertiary tabular-nums">was {c.posts_per_week_prev}</p>
-              )}
-            </div>
-            <div>
-              <p className="text-[10px] text-text-tertiary uppercase tracking-wide">Eng/1k</p>
-              <p className="text-sm font-semibold tabular-nums">{c.engagement_per_1k ?? '—'}</p>
-            </div>
-          </div>
-          {/* vs_us is null unless our own account clears a baseline. Rendering
-              a percentage against a 1-follower test account would be worse
-              than rendering nothing, so the absence is stated in words. */}
-          <p className="text-[11px] text-text-tertiary mt-2">
-            {c.vs_us ? `Versus us: ${c.vs_us}` : 'No comparable account of ours is connected.'}
-          </p>
-        </>
-      )}
-      {c.read && <p className="text-[11px] text-text-secondary mt-2 leading-relaxed">{c.read}</p>}
-    </div>
-  )
-}
-
-
-// ─── The rail ──────────────────────────────────────────────────────────────
-// Sticky, four buttons, and it tracks what you are looking at. The count
-// beside each label is the point: it says whether a zone is worth the jump
-// before you make it, which a plain anchor list does not.
-
-function Rail({ zones, active, onJump }) {
-  return (
-    <div className="sticky top-0 z-20 -mx-6 px-6 py-2 bg-surface-muted/95 backdrop-blur border-b border-border">
-      <div className="flex gap-1 overflow-x-auto scrollbar-thin">
-        {zones.map(z => (
-          <button
-            key={z.key}
-            onClick={() => onJump(z.key)}
-            className={`shrink-0 px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
-              active === z.key
-                ? 'bg-amber-700 text-white'
-                : 'text-text-secondary hover:text-text hover:bg-white'
-            }`}
-          >
-            {z.label}
-            {z.count != null && (
-              <span className={`ml-1.5 tabular-nums font-normal ${
-                active === z.key ? 'text-white/70' : 'text-text-tertiary'}`}>
-                {z.count}
-              </span>
-            )}
-          </button>
-        ))}
-      </div>
-    </div>
-  )
-}
-
-// scroll-mt keeps the heading clear of the rail that just scrolled you to it —
-// without it every jump lands with the title hidden behind the sticky bar.
-function Zone({ id, title, note, children }) {
-  return (
-    <section id={id} data-zone={id} className="scroll-mt-16 space-y-4">
-      <div className="pt-2">
-        <h2 className="text-xs font-semibold text-text-tertiary uppercase tracking-wide">{title}</h2>
-        {note && <p className="text-[11px] text-text-tertiary mt-0.5">{note}</p>}
-      </div>
-      {children}
-    </section>
-  )
-}
-
-// Native <details>, deliberately. A hand-rolled disclosure would need its own
-// open state, and the browser's already survives a re-render, works with
-// find-in-page, and is keyboard-accessible without any of it being written.
+// Native <details>: survives re-render, works with find-in-page, keyboard
+// accessible, and needs no state of its own.
 function Fold({ title, subtitle, count, children, open = false }) {
   return (
     <Card className="p-0 overflow-hidden">
@@ -337,95 +142,339 @@ function Fold({ title, subtitle, count, children, open = false }) {
   )
 }
 
-// ─── Where the market is moving ────────────────────────────────────────────
-// The first thing in the brief, because it is the sentence a reader was
-// assembling in their head anyway out of the per-rival reads at the bottom of
-// the board, the movements beside them, and the market findings four cards up.
-//
-// `derived` is shown, never hidden. A direction the agent wrote and a list
-// this page stitched out of an older brief are different claims.
-
-function DirectionCard({ direction }) {
-  if (!direction.items.length) return null
+// A numbered report section. scroll-mt keeps its heading clear of the sticky
+// bar that just scrolled to it.
+function Section({ id, n, title, note, children, action }) {
   return (
-    <Card className="p-4">
-      <SectionHead
-        title="Where the market is moving"
-        subtitle={direction.derived
-          ? 'Assembled from this run\'s per-rival reads — it predates the agent writing this section itself.'
-          : 'Read across the board, the movements and the week\'s sources. Not a new finding.'}
-      />
-      <ul className="mt-3 space-y-2.5">
-        {direction.items.map((m, i) => (
-          <li key={i} className="rounded-xl border border-border bg-white p-3.5">
-            <p className="text-sm text-text leading-snug">{m.movement}</p>
-            {m.so_what && (
-              <p className="text-xs text-text-secondary mt-2 leading-relaxed">
-                <span className="font-semibold">For us: </span>{m.so_what}
-              </p>
-            )}
-            {basisLabel(m.basis) && (
-              <p className="text-[10px] text-text-tertiary mt-2 uppercase tracking-wide">{basisLabel(m.basis)}</p>
-            )}
-          </li>
-        ))}
-      </ul>
-    </Card>
+    <section id={`brief-${id}`} data-zone={id} className="scroll-mt-28">
+      <Card className="p-0 overflow-hidden">
+        <div className="flex items-start justify-between gap-3 px-4 sm:px-5 py-4 border-b border-border">
+          <div className="min-w-0">
+            <h2 className="text-sm font-semibold text-text leading-tight">
+              {n != null && <span className="text-text-tertiary tabular-nums mr-2">{n}</span>}{title}
+            </h2>
+            {note && <p className="text-[11px] text-text-tertiary mt-1 leading-relaxed">{note}</p>}
+          </div>
+          {action}
+        </div>
+        <div className="p-4 sm:p-5">{children}</div>
+      </Card>
+    </section>
   )
 }
 
-// An idea, with the thing it answers named ON it rather than left in prose.
-function IdeaCard({ idea, under = false }) {
-  const ref = idea.answers_ref
+// Long text, cut to a few lines with a way to read the rest. A lead's
+// suggested action can run to a paragraph, and five of those made the lead
+// table a wall a salesperson scrolls past instead of scanning.
+function Clamp({ text, lines = 4 }) {
+  const [open, setOpen] = useState(false)
+  if (!text) return <span className="text-text-tertiary">—</span>
+  const long = text.length > 220
   return (
-    <div className={`rounded-xl border border-border bg-white p-3 ${under ? 'ml-3 border-l-2 border-l-sage-400' : ''}`}>
-      <p className="text-xs font-semibold text-text">{idea.title || idea.angle}</p>
-      {idea.angle && idea.title && (
-        <p className="text-[11px] text-text-secondary mt-1.5 leading-relaxed">{idea.angle}</p>
+    <span>
+      <span className={!open && long ? (lines === 3 ? 'line-clamp-3' : 'line-clamp-4') : ''}>{text}</span>
+      {long && (
+        <button onClick={() => setOpen(o => !o)} className="text-[10px] text-text-tertiary underline underline-offset-2 hover:text-text mt-0.5">
+          {open ? 'less' : 'more'}
+        </button>
       )}
-      {/* Only for an idea that is NOT already sitting under its gap — there the
-          binding is the position, and repeating it would be noise. */}
-      {!under && ref?.kind === 'finding' && ref.headline && (
-        <p className="text-[11px] text-sage-700 mt-2 leading-relaxed">
-          <span className="font-semibold">Answers: </span>{ref.headline}
-        </p>
+    </span>
+  )
+}
+
+const Quiet = ({ children }) => <p className="text-xs text-text-tertiary leading-relaxed">{children}</p>
+
+// ─── Sticky bar: who is reading, and where to jump ─────────────────────────
+
+function ReaderBar({ team, onTeam, sections, active, onJump }) {
+  return (
+    <div className="sticky top-0 z-20 -mx-4 sm:-mx-6 px-4 sm:px-6 py-2 bg-surface-muted/95 backdrop-blur border-b border-border space-y-2">
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="text-[10px] font-semibold text-text-tertiary uppercase tracking-wide">Reading as</span>
+        <div className="flex gap-1 flex-wrap">
+          {TEAMS.map(t => (
+            <button key={t.key} onClick={() => onTeam(t.key)} aria-pressed={team === t.key}
+              className={`px-2.5 py-1 text-xs font-semibold rounded-lg border transition-colors ${
+                team === t.key ? 'bg-amber-700 text-white border-amber-700' : 'bg-white text-text-secondary border-border hover:text-text'}`}>
+              {t.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="flex gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        {sections.map(z => (
+          <button key={z.key} onClick={() => onJump(z.key)}
+            className={`shrink-0 px-2.5 py-1 text-[11px] font-medium rounded-md transition-colors ${
+              active === z.key ? 'bg-white text-text shadow-sm' : 'text-text-tertiary hover:text-text hover:bg-white/70'}`}>
+            {z.label}
+            {z.count != null && <span className="ml-1 tabular-nums text-text-tertiary">{z.count}</span>}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// ─── Sections ──────────────────────────────────────────────────────────────
+
+function TopThree({ top }) {
+  if (!top.items.length) return <Quiet>Nothing new rose above the rest this week.</Quiet>
+  return (
+    <ol className="space-y-3">
+      {top.items.map((t, i) => (
+        <li key={i} className="flex gap-3">
+          <span className="shrink-0 w-6 h-6 rounded-full bg-amber-700 text-white text-xs font-bold flex items-center justify-center tabular-nums">{i + 1}</span>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-start justify-between gap-2">
+              <p className="text-sm font-semibold text-text leading-snug">{t.finding}</p>
+              <TeamChip team={t.team} />
+            </div>
+            {t.action && (
+              <p className="text-xs text-text-secondary mt-1.5 leading-relaxed"><span className="font-semibold">Action: </span>{t.action}</p>
+            )}
+            {/* A piece that IS the finding would repeat the headline above it
+                word for word — only its source is worth showing then. */}
+            {t.pieces.some(p => p.summary !== t.finding) && (
+              <ul className="mt-2 space-y-1">{t.pieces.filter(p => p.summary !== t.finding).map((p, j) => <Piece key={j} p={p} />)}</ul>
+            )}
+            {t.pieces.filter(p => p.summary === t.finding && p.url).map((p, j) => (
+              <a key={`s${j}`} href={p.url} target="_blank" rel="noopener noreferrer"
+                className="inline-block max-w-full truncate mt-1.5 mr-1.5 text-[10px] px-1.5 py-0.5 rounded border border-border text-text-tertiary hover:text-text">
+                {domainOf(p.url)}
+              </a>
+            ))}
+          </div>
+        </li>
+      ))}
+    </ol>
+  )
+}
+
+function SalesTable({ rows, canEdit, onStatus, busyId }) {
+  return (
+    <div className="overflow-x-auto -mx-4 sm:-mx-5">
+      <table className="w-full min-w-[760px] text-left text-xs">
+        <thead>
+          <tr className="text-[10px] uppercase tracking-wide text-text-tertiary border-b border-border">
+            <th className="font-semibold py-2 pl-4 sm:pl-5 pr-3 w-[26%]">Lead / tender / project</th>
+            <th className="font-semibold py-2 pr-3 w-[24%]">Details</th>
+            <th className="font-semibold py-2 pr-3 w-[11%]">Deadline</th>
+            <th className="font-semibold py-2 pr-3 w-[25%]">Suggested action</th>
+            <th className="font-semibold py-2 pr-4 sm:pr-5 w-[14%]">Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r, i) => (
+            <tr key={r.id || `f${i}`} className="border-b border-border last:border-0 align-top">
+              <td className="py-3 pl-4 sm:pl-5 pr-3">
+                <div className="flex items-center gap-1.5 flex-wrap mb-1">
+                  <Chip>{r.type}</Chip><RelevanceChip value={r.relevance} /><NewChip isNew={r.isNew} changed={r.changed} />
+                </div>
+                <p className="text-[13px] font-semibold text-text leading-snug">{r.name}</p>
+                {r.headline && r.headline !== r.name && <p className="text-[11px] text-text-tertiary mt-1 leading-relaxed"><Clamp text={r.headline} lines={3} /></p>}
+                {r.changed && <p className="text-[11px] text-blue-700 mt-1">Changed: {r.changed}</p>}
+              </td>
+              <td className="py-3 pr-3 text-text-secondary leading-relaxed">
+                {r.details.length ? r.details.map((d, j) => <div key={j}>{d}</div>) : <span className="text-text-tertiary">—</span>}
+                {r.url && (
+                  <a href={r.url} target="_blank" rel="noopener noreferrer" className="block mt-1 text-[10px] text-text-tertiary underline underline-offset-2 hover:text-text">
+                    {domainOf(r.url)}
+                  </a>
+                )}
+              </td>
+              <td className="py-3 pr-3 tabular-nums">
+                <p className={`font-semibold ${r.days != null && r.days >= 0 && r.days <= 7 ? 'text-red-700' : r.days != null && r.days < 0 ? 'text-text-tertiary' : 'text-text'}`}>
+                  {r.deadline ? fmtDate(r.deadline) : '—'}
+                </p>
+                <p className="text-[10px] text-text-tertiary">{dayLabel(r.days, r.timing)}</p>
+              </td>
+              <td className="py-3 pr-3 text-text-secondary leading-relaxed"><Clamp text={r.action} /></td>
+              <td className="py-3 pr-4 sm:pr-5">
+                {r.tracked && canEdit ? (
+                  <PillSelect value={r.status} onChange={e => onStatus(r, e.target.value)} className="w-full">
+                    {OPPORTUNITY_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+                  </PillSelect>
+                ) : (
+                  <span className="text-[10px] text-text-tertiary leading-relaxed block">
+                    {r.tracked ? r.status : 'Tracked from the next run'}
+                  </span>
+                )}
+                {busyId === r.id && <p className="text-[10px] text-text-tertiary mt-1">Saving…</p>}
+                {r.firstSeen && <p className="text-[10px] text-text-tertiary mt-1">since {fmtDate(r.firstSeen)}</p>}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+function CompetitorMove({ m }) {
+  return (
+    <div className="rounded-xl border border-border bg-white p-3.5">
+      <div className="flex items-start justify-between gap-2 flex-wrap">
+        <p className="text-sm font-semibold text-text">{m.competitor}</p>
+        <div className="flex gap-1 flex-wrap">
+          <RelevanceChip value={m.relevance} />
+          {m.channels.map(c => <Chip key={c}>{CHANNEL_LABEL[c] || c}</Chip>)}
+        </div>
+      </div>
+      {m.whatChanged && <p className="text-[13px] text-text mt-2 leading-snug">{m.whatChanged}</p>}
+      {m.picture && (
+        <p className="text-xs text-text-secondary mt-2 leading-relaxed"><span className="font-semibold">The picture: </span>{m.picture}</p>
       )}
-      {idea.rationale && (
-        <p className="text-[11px] text-text-tertiary mt-2 leading-relaxed">{idea.rationale}</p>
+      {m.effect && (
+        <p className="text-xs text-text-secondary mt-2 leading-relaxed"><span className="font-semibold">For us: </span>{m.effect}</p>
       )}
-      {idea.suggested_format && (
-        <p className="text-[10px] text-text-tertiary mt-1.5">{idea.suggested_format}</p>
+      {m.pieces.length > 0 && (
+        <details className="mt-2 group">
+          <summary className="cursor-pointer list-none [&::-webkit-details-marker]:hidden text-[11px] text-text-tertiary hover:text-text">
+            <span className="group-open:hidden">Built from {m.pieces.length} piece{m.pieces.length === 1 ? '' : 's'} — show</span>
+            <span className="hidden group-open:inline">Hide the pieces</span>
+          </summary>
+          <ul className="mt-2 space-y-1.5">{m.pieces.map((p, i) => <Piece key={i} p={p} />)}</ul>
+        </details>
       )}
     </div>
   )
 }
 
-// A gap and the content that closes it, as one unit.
+function OurChannel({ p }) {
+  return (
+    <div className="flex items-baseline justify-between gap-3 py-2 border-b border-border last:border-0">
+      <div className="min-w-0">
+        <p className="text-xs font-semibold text-text">
+          {p.label}{p.username && <span className="font-normal text-text-tertiary"> @{p.username}</span>}
+        </p>
+        <p className="text-[11px] text-text-tertiary mt-0.5 truncate">
+          {p.state === 'measured'
+            ? (p.best_post ? `Best: ${p.best_post.topic || 'untitled'} · ${p.best_post.engagement} interactions` : 'Measured')
+            : p.note}
+        </p>
+      </div>
+      {p.state === 'measured' && (
+        <div className="text-right shrink-0 tabular-nums">
+          <p className="text-xs font-semibold text-text">{p.posts} posts · {p.avg_engagement ?? '—'}/post</p>
+          <p className={`text-[10px] ${p.change ? (p.change.direction === 'up' ? 'text-emerald-600' : 'text-red-600') : 'text-text-tertiary'}`}>
+            {p.change ? `${p.change.direction === 'up' ? '+' : '−'}${p.change.change_pct}% vs prior` : p.weak ? 'thin sample' : 'no comparison yet'}
+          </p>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function EventsTable({ rows, canEdit, onDecision }) {
+  return (
+    <div className="overflow-x-auto -mx-4 sm:-mx-5">
+      <table className="w-full min-w-[760px] text-left text-xs">
+        <thead>
+          <tr className="text-[10px] uppercase tracking-wide text-text-tertiary border-b border-border">
+            <th className="font-semibold py-2 pl-4 sm:pl-5 pr-3 w-[25%]">Event</th>
+            <th className="font-semibold py-2 pr-3 w-[12%]">Dates</th>
+            <th className="font-semibold py-2 pr-3 w-[14%]">Venue</th>
+            <th className="font-semibold py-2 pr-3 w-[11%]">Exhibitor deadline</th>
+            <th className="font-semibold py-2 pr-3 w-[12%]">Competitors going</th>
+            <th className="font-semibold py-2 pr-4 sm:pr-5 w-[26%]">Recommendation</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((e, i) => (
+            <tr key={e.id || `${e.kind}${i}`} className="border-b border-border last:border-0 align-top">
+              <td className="py-3 pl-4 sm:pl-5 pr-3">
+                <div className="flex items-center gap-1.5 flex-wrap mb-1">
+                  <Chip>{e.kind === 'calendar' ? 'calendar' : 'event'}</Chip>
+                  <NewChip isNew={e.isNew} changed={e.changed} />
+                </div>
+                {e.url
+                  ? <a href={e.url} target="_blank" rel="noopener noreferrer" className="text-[13px] font-semibold text-text leading-snug hover:underline">{e.name}</a>
+                  : <p className="text-[13px] font-semibold text-text leading-snug">{e.name}</p>}
+                {e.organizer && <p className="text-[10px] text-text-tertiary mt-0.5">{e.organizer}</p>}
+              </td>
+              <td className="py-3 pr-3 tabular-nums text-text">
+                {e.start ? `${fmtDate(e.start)}${e.end && e.end !== e.start ? ` – ${fmtDate(e.end)}` : ''}` : 'TBC'}
+              </td>
+              <td className="py-3 pr-3 text-text-secondary">{e.venue || '—'}</td>
+              <td className="py-3 pr-3 tabular-nums">
+                {e.exhibitorDeadline ? (
+                  <>
+                    <p className={`font-semibold ${e.deadlineDays != null && e.deadlineDays >= 0 && e.deadlineDays <= 14 ? 'text-red-700' : 'text-text'}`}>{fmtDate(e.exhibitorDeadline)}</p>
+                    <p className="text-[10px] text-text-tertiary">{dayLabel(e.deadlineDays)}</p>
+                  </>
+                ) : <span className="text-text-tertiary">{e.kind === 'calendar' ? '—' : 'not found'}</span>}
+              </td>
+              <td className="py-3 pr-3 text-text-secondary">{e.competitors.length ? e.competitors.join(', ') : '—'}</td>
+              <td className="py-3 pr-4 sm:pr-5 text-text-secondary leading-relaxed">
+                <Clamp text={e.recommendation} />
+                {e.id && canEdit && (
+                  <div className="mt-2 flex items-center gap-2">
+                    <span className="text-[10px] text-text-tertiary">We are</span>
+                    <PillSelect value={e.decision} onChange={ev => onDecision(e, ev.target.value)}>
+                      {EVENT_DECISIONS.map(d => <option key={d} value={d}>{d}</option>)}
+                    </PillSelect>
+                  </div>
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+function Note({ n, now }) {
+  return (
+    <div className="rounded-xl border border-border bg-white p-3.5">
+      <div className="flex items-start justify-between gap-3">
+        <p className="text-sm text-text leading-snug">{n.headline}</p>
+        {n.days != null && n.days >= 0 && (
+          <span className="text-[11px] font-semibold shrink-0 tabular-nums whitespace-nowrap">{deadlineLabel({ perishable_until: dateIn(n.days, now) }, now)}</span>
+        )}
+      </div>
+      {n.detail && <p className="text-[11px] text-text-secondary mt-1.5 leading-relaxed">{n.detail}</p>}
+      {n.action && <p className="text-xs text-text-secondary mt-2 leading-relaxed"><span className="font-semibold">Marketing: </span>{n.action}</p>}
+      {n.technicalNote && <p className="text-xs text-text-secondary mt-1.5 leading-relaxed"><span className="font-semibold">Technical: </span>{n.technicalNote}</p>}
+      <div className="flex items-center gap-1.5 mt-2 flex-wrap">
+        {n.teams.map(t => <TeamChip key={t} team={t} />)}
+        <RelevanceChip value={n.relevance} />
+        {n.confidence != null && <span className="text-[10px] text-text-tertiary">confidence {pct(n.confidence)}</span>}
+        {n.store?.state === 'seen' && <span className="text-[10px] text-text-tertiary">· already known</span>}
+      </div>
+      <Sources sources={n.sources} uncited={n.uncited} />
+    </div>
+  )
+}
+
+const dateIn = (days, now) => new Date(now.getTime() + days * 86_400_000).toISOString().slice(0, 10)
+
+function IdeaCard({ idea, under = false }) {
+  const ref = idea.answers_ref
+  return (
+    <div className={`rounded-xl border border-border bg-white p-3 ${under ? 'ml-3 border-l-2 border-l-sage-400' : ''}`}>
+      <p className="text-xs font-semibold text-text">{idea.title || idea.angle}</p>
+      {idea.angle && idea.title && <p className="text-[11px] text-text-secondary mt-1.5 leading-relaxed">{idea.angle}</p>}
+      {!under && ref?.kind === 'finding' && ref.headline && (
+        <p className="text-[11px] text-sage-700 mt-2 leading-relaxed"><span className="font-semibold">Based on: </span>{ref.headline}</p>
+      )}
+      {idea.rationale && <p className="text-[11px] text-text-tertiary mt-2 leading-relaxed">{idea.rationale}</p>}
+      {idea.suggested_format && <p className="text-[10px] text-text-tertiary mt-1.5">{idea.suggested_format}</p>}
+    </div>
+  )
+}
+
 function GapBlock({ block }) {
   const { gap, ideas } = block
   return (
     <div className="rounded-xl border border-border bg-white p-3.5">
       <p className="text-sm text-text leading-snug">{gap.gap}</p>
-      {gap.our_position && (
-        <p className="text-[11px] text-text-tertiary mt-2 leading-relaxed">
-          <span className="font-semibold">Us: </span>{gap.our_position}
-        </p>
-      )}
-      {gap.suggested_response && (
-        <p className="text-xs text-text-secondary mt-2 leading-relaxed">
-          <span className="font-semibold">Response: </span>{gap.suggested_response}
-        </p>
-      )}
-      {gap.basis && (
-        <p className="text-[10px] text-text-tertiary mt-2 uppercase tracking-wide">
-          evidence: {gap.basis}
-        </p>
-      )}
+      {gap.our_position && <p className="text-[11px] text-text-tertiary mt-2 leading-relaxed"><span className="font-semibold">Us: </span>{gap.our_position}</p>}
+      {gap.suggested_response && <p className="text-xs text-text-secondary mt-2 leading-relaxed"><span className="font-semibold">Response: </span>{gap.suggested_response}</p>}
+      {gap.basis && <p className="text-[10px] text-text-tertiary mt-2 uppercase tracking-wide">based on: {basisLabel(gap.basis) || gap.basis}</p>}
       {ideas.length > 0 && (
         <div className="mt-3 pt-3 border-t border-border space-y-2">
-          <p className="text-[10px] font-semibold text-text-tertiary uppercase tracking-wide">
-            Content that closes it
-          </p>
+          <p className="text-[10px] font-semibold text-text-tertiary uppercase tracking-wide">Content that closes it</p>
           {ideas.map((idea, i) => <IdeaCard key={i} idea={idea} under />)}
         </div>
       )}
@@ -433,114 +482,160 @@ function GapBlock({ block }) {
   )
 }
 
-export function ResearchTab({
-  run, runs, lensRows, selectedId, onSelectRun, onRun, running, now,
-}) {
+// ─── The tab ───────────────────────────────────────────────────────────────
+
+export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRun, running, now }) {
+  const { activeWorkspaceId, accessToken } = useAuth()
   const report = useMemo(() => run?.report || {}, [run])
-  // Audience before clock. A compliance date nobody here can publish about is
-  // both the most urgent thing on the page and the least useful, so it must
-  // leave the queue before the queue is sorted — see splitByAudience.
-  const { marketing, technical } = useMemo(
-    () => splitByAudience(report.findings || [], now), [report, now],
+
+  const [team, setTeam] = useState(() => {
+    try { return localStorage.getItem('research.team') || 'all' } catch { return 'all' }
+  })
+  const chooseTeam = useCallback(t => {
+    setTeam(t)
+    try { localStorage.setItem('research.team', t) } catch { /* private window */ }
+  }, [])
+
+  // The store and the watchlist. Loaded here rather than by the page because
+  // only this tab reads them. Until they land, the two sections that depend
+  // on them show a skeleton — never "no leads", which would be a false claim
+  // about the market made from a request still in flight.
+  const [intel, setIntel] = useState({ signals: [], opportunities: [], events: [], available: false })
+  const [agendaCompetitors, setAgendaCompetitors] = useState([])
+  const [storeLoaded, setStoreLoaded] = useState(false)
+  const [busyId, setBusyId] = useState(null)
+  const [saveNote, setSaveNote] = useState('')
+
+  useEffect(() => {
+    if (!activeWorkspaceId) return undefined
+    let alive = true
+    Promise.all([fetchIntel(activeWorkspaceId, accessToken), fetchAgenda(activeWorkspaceId, accessToken)])
+      .then(([i, a]) => {
+        if (!alive) return
+        setIntel(i)
+        setAgendaCompetitors(a?.competitors || [])
+        setStoreLoaded(true)
+      })
+      .catch(() => { if (alive) setStoreLoaded(true) })
+    return () => { alive = false }
+  }, [activeWorkspaceId, accessToken, run?.id, run?.status])
+
+  const top = useMemo(() => topThree(report, now), [report, now])
+  const sales = useMemo(
+    () => salesRows({ report, opportunities: intel.opportunities, runId: run?.id, now }),
+    [report, intel.opportunities, run?.id, now],
   )
-  const { act, standing, passed } = useMemo(
-    () => partitionByClock(marketing, now), [marketing, now],
-  )
+  const moves = useMemo(() => competitorMoves(report), [report])
+  const social = useMemo(() => socialActivity({ report, signals: intel.signals, now }), [report, intel.signals, now])
+  const events = useMemo(() => upcomingEvents({ report, events: intel.events, runId: run?.id, now }), [report, intel.events, run?.id, now])
+  const notes = useMemo(() => marketNotes(report, now), [report, now])
+  const plan = useMemo(() => marketingRecommendations(report), [report])
+  const candidates = useMemo(() => newCompetitors({ report, agendaCompetitors }), [report, agendaCompetitors])
+  const sources = useMemo(() => sourceList(report), [report])
+  const direction = useMemo(() => marketDirection(report), [report])
   const states = useMemo(() => lensStates(report), [report])
   const empty = useMemo(() => emptiness(report), [report])
-  const channels = useMemo(() => ownChannelRows(report), [report])
-  const direction = useMemo(() => marketDirection(report), [report])
-  const plan = useMemo(() => actionPlan(report), [report])
+  const { passed } = useMemo(() => partitionByClock(report.findings || [], now), [report, now])
   const live = isLive(run)
 
-  // What each zone is worth jumping to. Counted from the same arrays the zone
-  // renders, so a zone can never advertise a number it does not contain.
-  const counts = useMemo(() => ({
-    act: direction.items.length + act.length + plan.blocks.length + plan.loose.length,
-    evidence: channels.length + (report.competitor_board || []).length
-      + standing.length + (report.market || []).length + technical.length,
-    quality: states.length + (report.unanswered || []).length + passed.length,
-  }), [direction, act, plan, channels, report, standing, states, passed, technical])
+  const visibleTop = top.items.filter(t => team === 'all' || t.team === team)
+  const visibleMoves = moves.items.filter(m => forTeam(team, m.teams))
+  const visibleNotes = notes.filter(n => forTeam(team, n.teams))
 
-  // A zone with nothing in it is not listed and not rendered. A failed run has
-  // no findings and no gaps, and a rail offering "Do this 0" above an empty
-  // heading is worse than a shorter rail — it sends a reader somewhere to
-  // find out there was nothing there.
-  const zones = useMemo(() => [
-    { key: 'act', label: 'Do this', count: counts.act },
-    { key: 'evidence', label: 'Evidence', count: counts.evidence },
-    { key: 'quality', label: 'How this run went', count: counts.quality },
-    // Never counted and never hidden: it is the only zone that is not part of
-    // this brief, and it is the one thing still worth reaching on a run that
-    // produced nothing at all.
+  const sections = useMemo(() => [
+    { key: 'top', label: 'Top 3', count: visibleTop.length },
+    { key: 'sales', label: 'Sales: act now', count: sales.open.length },
+    { key: 'competitors', label: 'Competitor moves', count: visibleMoves.length },
+    { key: 'social', label: 'Social activity', count: social.theirs.length + social.ours.length },
+    { key: 'events', label: 'Events', count: events.length },
+    { key: 'market', label: 'Market & technical', count: visibleNotes.length },
+    { key: 'recs', label: 'Marketing recommendations', count: plan.blocks.length + plan.loose.length },
+    { key: 'newcomp', label: 'New competitors', count: candidates.length },
+    { key: 'sources', label: 'Sources', count: sources.length },
+    { key: 'run', label: 'How this run went' },
     { key: 'watch', label: 'What it watches' },
-  ].filter(z => z.count == null || z.count > 0), [counts])
+  ].filter(s => ['run', 'watch'].includes(s.key) || sectionVisible(s.key, team)),
+  [team, visibleTop, sales, visibleMoves, social, events, visibleNotes, plan, candidates, sources])
 
-  const [activeZone, setActiveZone] = useState('act')
+  const [activeZone, setActiveZone] = useState('top')
   const rootRef = useRef(null)
-  // Derived rather than corrected in an effect. The rail's first entry is not
-  // always 'act' — on a failed run that zone does not exist — and a state
-  // fix-up would render one frame highlighting a button that is not there.
-  const active = zones.some(z => z.key === activeZone) ? activeZone : zones[0]?.key
+  const active = sections.some(z => z.key === activeZone) ? activeZone : sections[0]?.key
 
   const jump = useCallback(key => {
     document.getElementById(`brief-${key}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-    // Set immediately rather than waiting for the observer: a smooth scroll
-    // takes a few hundred ms, and a rail that does not respond to its own
-    // click until the scroll lands reads as a broken button.
     setActiveZone(key)
   }, [])
 
-  // Which zone is on screen.
-  //
-  // The callback is handed only the zones whose visibility CHANGED, in the
-  // order the observer noticed them — not in document order, and not the whole
-  // set. Reading `entries[0]` from that is why the rail sat on "Do this" with
-  // Evidence filling the screen: scrolling down fires one entry, the zone that
-  // just left. So visibility is accumulated across callbacks and the topmost
-  // visible zone in DOCUMENT order wins.
-  //
-  // rootMargin pulls the trigger line down from the very top so a zone counts
-  // as current once its heading is comfortably in view, rather than the moment
-  // one pixel of it appears.
+  // Visibility is accumulated across callbacks — the observer reports only
+  // what CHANGED — and the topmost visible section in document order wins.
   useEffect(() => {
     const nodes = [...(rootRef.current?.querySelectorAll('[data-zone]') || [])]
     if (!nodes.length || typeof IntersectionObserver === 'undefined') return undefined
     const seen = new Map()
-    const io = new IntersectionObserver(
-      entries => {
-        for (const e of entries) seen.set(e.target, e.isIntersecting)
-        const top = nodes.find(n => seen.get(n))
-        if (top) setActiveZone(top.dataset.zone.replace('brief-', ''))
-      },
-      { rootMargin: '-15% 0px -60% 0px', threshold: 0 },
-    )
+    const io = new IntersectionObserver(entries => {
+      for (const e of entries) seen.set(e.target, e.isIntersecting)
+      const topNode = nodes.find(n => seen.get(n))
+      if (topNode) setActiveZone(topNode.dataset.zone)
+    }, { rootMargin: '-20% 0px -60% 0px', threshold: 0 })
     nodes.forEach(n => io.observe(n))
     return () => io.disconnect()
-  }, [run?.id, zones])
+  }, [run?.id, sections])
+
+  const onStatus = useCallback(async (row, status) => {
+    setBusyId(row.id); setSaveNote('')
+    const prev = intel.opportunities
+    setIntel(i => ({ ...i, opportunities: i.opportunities.map(o => (o.id === row.id ? { ...o, status } : o)) }))
+    const out = await updateOpportunity(activeWorkspaceId, accessToken, row.id, { status })
+    if (!out.ok) {
+      setIntel(i => ({ ...i, opportunities: prev }))
+      setSaveNote(`Could not save that status: ${out.error}`)
+    }
+    setBusyId(null)
+  }, [intel.opportunities, activeWorkspaceId, accessToken])
+
+  const onDecision = useCallback(async (row, decision) => {
+    setSaveNote('')
+    const prev = intel.events
+    setIntel(i => ({ ...i, events: i.events.map(e => (e.id === row.id ? { ...e, decision } : e)) }))
+    const out = await updateEventDecision(activeWorkspaceId, accessToken, row.id, decision)
+    if (!out.ok) {
+      setIntel(i => ({ ...i, events: prev }))
+      setSaveNote(`Could not save that decision: ${out.error}`)
+    }
+  }, [intel.events, activeWorkspaceId, accessToken])
+
+  const onCandidate = useCallback(async (c, status) => {
+    if (!c.agendaId) return
+    setBusyId(c.agendaId)
+    const out = await setAgendaStatus(accessToken, c.agendaId, status)
+    if (out?.error) setSaveNote(`Could not update ${c.name}: ${out.error}`)
+    else setAgendaCompetitors(list => list.map(a => (a.id === c.agendaId ? { ...a, status } : a)))
+    setBusyId(null)
+  }, [accessToken])
 
   if (!runs.length) {
     return (
       <Empty
         title="No research has been run for this brand yet"
-        description="A run measures every competitor with a verified Instagram handle, then investigates what changed. The numbers are computed in code, never by a model."
+        description="A run looks for leads, events, competitor activity and market changes, and keeps what it finds so next week reports only what changed."
         action={<Button onClick={onRun} disabled={running}>Run research</Button>}
       />
     )
   }
 
+  const counts = report.intel
+  // Numbered in the order shown, so "3" is always the third section this
+  // reader sees whichever team filter is on.
+  const numbered = sections.filter(s => !['run', 'watch'].includes(s.key)).map(s => s.key)
+  const num = key => (numbered.includes(key) ? numbered.indexOf(key) + 1 : null)
+
   return (
     <div ref={rootRef} className="space-y-4">
-      {/* Only while it is happening. A finished run's progress belongs in the
-          audit zone with the rest of the trail — at the top of the page it was
-          the first thing a reader met every week, and it is the thing they
-          care about least once the brief exists. */}
       {live && <RunProgress run={run} lensRows={lensRows} now={now} />}
 
-      {/* The brief selector. Picking a date swaps the whole brief below. */}
       {runs.length > 1 && (
         <div className="flex items-center gap-2">
-          <span className="text-[11px] text-text-tertiary uppercase tracking-wide">Brief</span>
+          <span className="text-[11px] text-text-tertiary uppercase tracking-wide">Report</span>
           <PillSelect value={selectedId || runs[0].id} onChange={e => onSelectRun(e.target.value)}>
             {runs.map(r => (
               <option key={r.id} value={r.id}>
@@ -553,255 +648,214 @@ export function ResearchTab({
         </div>
       )}
 
-      {/* ── The headline. Above the rail, because it belongs to no zone ── */}
+      {/* ── Masthead ── */}
       <Card className="p-5">
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
             <p className="text-[11px] text-text-tertiary uppercase tracking-wide">
-              {fmtDate(report.period?.start)} – {fmtDate(report.period?.end)}
-              {report.baseline ? ' · first measurement, nothing to compare against yet' : ''}
+              Weekly market report · {fmtDate(report.period?.start)} – {fmtDate(report.period?.end)}
             </p>
-            <p className="text-base font-semibold text-text mt-1.5 leading-snug">
-              {run.error || report.headline || 'No headline.'}
-            </p>
+            <p className="text-base font-semibold text-text mt-1.5 leading-snug">{run.error || report.headline || 'No headline.'}</p>
           </div>
-          {/* Badge renders STATUS_META's own label when the status is one it
-              knows, so the run's vocabulary is mapped onto it rather than
-              passed through — 'complete' is not a key, 'completed' is. */}
-          <Badge status={
-            run.status === 'complete' ? 'completed'
-              : run.status === 'failed' ? 'failed' : 'pending'
-          } />
+          <Badge status={run.status === 'complete' ? 'completed' : run.status === 'failed' ? 'failed' : 'pending'} />
         </div>
-        {lensHeadline(states) && (
-          <p className="text-xs text-text-tertiary mt-3">{lensHeadline(states)}</p>
-        )}
+        <p className="text-xs text-text-tertiary mt-3">
+          {[
+            lensHeadline(states),
+            counts && `${counts.opportunities_new} new lead${counts.opportunities_new === 1 ? '' : 's'}` +
+              `${counts.opportunities_changed ? `, ${counts.opportunities_changed} changed` : ''}`,
+            counts && `${counts.signals_new} new signal${counts.signals_new === 1 ? '' : 's'} stored`,
+            counts && counts.events_new ? `${counts.events_new} new event${counts.events_new === 1 ? '' : 's'}` : '',
+          ].filter(Boolean).join(' · ')}
+        </p>
       </Card>
 
-      {empty.empty ? (
-        <Card className="p-5">
-          <p className="text-sm text-text-secondary leading-relaxed">{empty.reason}</p>
-        </Card>
-      ) : null}
+      {empty.empty && <Card className="p-5"><p className="text-sm text-text-secondary leading-relaxed">{empty.reason}</p></Card>}
+      {saveNote && <Card className="p-3 border-red-200 bg-red-50/50"><p className="text-xs text-red-700">{saveNote}</p></Card>}
 
-      <Rail zones={zones} active={active} onJump={jump} />
+      <ReaderBar team={team} onTeam={chooseTeam} sections={sections} active={active} onJump={jump} />
 
-      {/* ══ ZONE 1 — Do this ══ */}
-      {counts.act > 0 && <Zone
-        id="brief-act"
-        title="Do this"
-        note="Where the market is going, what has a clock on it, and the content that answers it."
-      >
-        <DirectionCard direction={direction} />
+      {/* 1 ── Top 3 */}
+      <Section id="top" n={num('top')} title="Top 3 this week"
+        note={top.derived ? 'Chosen in code from this run\'s findings — this report predates the agent writing its own top three.' : 'What most needs doing, across every team. The finding, then the action.'}>
+        <TopThree top={{ ...top, items: visibleTop }} />
+      </Section>
 
-        {act.length > 0 && (
-          <Card className="p-4">
-            <SectionHead
-              title="Act on these"
-              subtitle="Everything here has a date. Soonest first — the rest of the brief keeps."
-            />
-            <div className="mt-3 space-y-2.5">
-              {act.map((f, i) => <ActCard key={i} finding={f} now={now} />)}
-            </div>
-          </Card>
+      {/* 2 ── Sales: act now */}
+      {sectionVisible('sales', team) && (
+        <Section id="sales" n={num('sales')} title="Sales: act now"
+          note={sales.trackerAvailable
+            ? 'The lead tracker — every open lead across all runs, not only this week\'s. Set the status as you work them; the agent never changes it.'
+            : 'Leads from this report. From the next run they are saved to a tracker and carried week to week with a status you set.'}>
+          {!storeLoaded ? (
+            <div className="space-y-2" aria-busy="true"><Skeleton className="h-10 w-full" /><Skeleton className="h-10 w-full" /></div>
+          ) : sales.open.length ? (
+            <SalesTable rows={sales.open} canEdit={intel.available} onStatus={onStatus} busyId={busyId} />
+          ) : <Quiet>No open leads, tenders or projects.</Quiet>}
+          {sales.closed.length > 0 && (
+            <p className="text-[11px] text-text-tertiary mt-3">
+              {sales.closed.length} closed out ({sales.closed.map(c => `${c.name} — ${c.status}`).join('; ')}).
+            </p>
+          )}
+        </Section>
+      )}
+
+      {/* 3 ── Competitor moves */}
+      <Section id="competitors" n={num('competitors')} title="Competitor moves"
+        note={moves.derived
+          ? 'Assembled from this report\'s competitor readings — it predates the agent combining signals across channels.'
+          : 'What each competitor is doing, combined from small signals across their website, LinkedIn, job ads, social posts and the press — this week and earlier weeks.'}>
+        {visibleMoves.length ? (
+          <div className="grid gap-2.5 md:grid-cols-2">{visibleMoves.map((m, i) => <CompetitorMove key={i} m={m} />)}</div>
+        ) : <Quiet>No competitor did anything new that was found this week.</Quiet>}
+        {!direction.derived && direction.items.length > 0 && (
+          <div className="mt-4 pt-4 border-t border-border">
+            <p className="text-[10px] font-semibold text-text-tertiary uppercase tracking-wide mb-2">Direction across the market</p>
+            <ul className="space-y-2">
+              {direction.items.map((d, i) => (
+                <li key={i} className="text-xs text-text-secondary leading-relaxed">
+                  {d.movement}{d.so_what && <span className="text-text-tertiary"> — {d.so_what}</span>}
+                </li>
+              ))}
+            </ul>
+          </div>
         )}
+      </Section>
 
-        {/* ── Gaps and the ideas that close them, as ONE section ──
-            RULES are not here. They live once, in the rule book on the other
-            tab, behind the one approval surface RESEARCH-AGENT.md §8b asked
-            for. Ideas stay because they are output of this run rather than a
-            standing instruction. */}
-        {(plan.blocks.length > 0 || plan.loose.length > 0) && (
-          <Card className="p-4">
-            <SectionHead
-              title="What this means for us"
-              subtitle="Where the market and our position do not line up — and the content that answers it. Rules are reviewed under What We Learned."
-            />
-            <div className="mt-3 space-y-3">
-              {plan.blocks.map(block => <GapBlock key={block.gap.id} block={block} />)}
+      {/* 4 ── Social activity */}
+      {sectionVisible('social', team) && (
+        <Section id="social" n={num('social')} title="Social activity"
+          note="Our channels, measured from our own analytics on every platform we publish to — and what competitors are posting ABOUT, not how many follow them.">
+          <div className="grid gap-5 md:grid-cols-2">
+            <div>
+              <p className="text-[10px] font-semibold text-text-tertiary uppercase tracking-wide mb-1">Us</p>
+              {social.ours.length ? social.ours.map(p => <OurChannel key={p.platform} p={p} />) : <Quiet>No channel data in this report.</Quiet>}
             </div>
-
-            {plan.loose.length > 0 && (
-              <div className="mt-3 space-y-2">
-                {/* Named only when there is something above for them to be
-                    loose FROM. On an older brief every idea lands here and
-                    there is no gap binding to explain. */}
-                {plan.blocks.length > 0 && (
-                  <p className="text-[10px] font-semibold text-text-tertiary uppercase tracking-wide pt-3 border-t border-border">
-                    Other ideas from this run
-                  </p>
-                )}
-                {plan.loose.map((idea, i) => <IdeaCard key={i} idea={idea} />)}
-              </div>
-            )}
-
-            {plan.ideaCount > 0 && <SendIdeasToPlan ideas={plan.ordered} />}
-
-            {(report.repeated_ideas || []).length > 0 && (
-              <p className="text-[11px] text-text-tertiary mt-3">
-                {report.repeated_ideas.length} idea{report.repeated_ideas.length === 1 ? '' : 's'} dropped
-                for repeating something already proposed.
-              </p>
-            )}
-          </Card>
-        )}
-      </Zone>}
-
-      {/* ══ ZONE 2 — Evidence ══ */}
-      {counts.evidence > 0 && <Zone
-        id="brief-evidence"
-        title="Evidence"
-        note="The numbers and sources the zone above rests on."
-      >
-        {/* Our own week first. It is the thing we can act on, and it is
-            measured on every platform we publish to rather than on the one
-            platform rivals happen to be readable on. */}
-        {channels.length > 0 && (
-          <Card className="p-4">
-            <SectionHead
-              title="Our channels"
-              subtitle="Our own posts, measured from our own analytics. Every platform we publish to."
-            />
-            <div className="mt-3 grid gap-2.5 sm:grid-cols-2">
-              {channels.map(p => <ChannelCard key={p.platform} p={p} />)}
+            <div>
+              <p className="text-[10px] font-semibold text-text-tertiary uppercase tracking-wide mb-1">Competitors</p>
+              {social.theirs.length ? (
+                <div className="space-y-3">
+                  {social.theirs.map(g => (
+                    <div key={g.competitor}>
+                      <p className="text-xs font-semibold text-text">{g.competitor}</p>
+                      <ul className="mt-1 space-y-1">
+                        {g.items.map((it, i) => <Piece key={i} p={{ channel: it.platform, summary: it.text, url: it.url, date: it.date }} />)}
+                      </ul>
+                    </div>
+                  ))}
+                </div>
+              ) : <Quiet>No competitor social posts were found.</Quiet>}
             </div>
-            {report.own_performance?.note && (
-              <p className="text-[11px] text-text-tertiary mt-3">{report.own_performance.note}</p>
-            )}
-          </Card>
-        )}
+          </div>
+        </Section>
+      )}
 
-        {(report.competitor_board || []).length > 0 && (
-          <Card className="p-4">
-            <SectionHead
-              title="The board"
-              subtitle="Measured, computed in code. Never estimated by a model."
-            />
-            <div className="mt-3 grid gap-2.5 sm:grid-cols-2">
-              {report.competitor_board.map((c, i) => <CompetitorCard key={i} c={c} />)}
-            </div>
-            {(report.movements || []).length > 0 && (
-              <div className="mt-4 space-y-1.5">
-                <p className="text-[11px] font-semibold text-text-tertiary uppercase tracking-wide">Moved</p>
-                {report.movements.map((m, i) => (
-                  <p key={i} className="text-xs text-text-secondary">
-                    <span className="text-text">{m.what || m.competitor}</span>
-                    {m.from != null && ` — ${m.from} → ${m.to}`}
-                    {m.change_pct != null && ` (${m.change_pct}%)`}
-                    {m.significance && <span className="text-text-tertiary"> · {m.significance}</span>}
-                  </p>
-                ))}
-              </div>
-            )}
-          </Card>
-        )}
+      {/* 5 ── Events */}
+      {sectionVisible('events', team) && (
+        <Section id="events" n={num('events')} title="Events — next 90 days"
+          note="Expos, conferences and sponsorship openings the agent is tracking, plus the calendar dates marketing plans around.">
+          {!storeLoaded ? (
+            <div className="space-y-2" aria-busy="true"><Skeleton className="h-10 w-full" /></div>
+          ) : events.length ? (
+            <EventsTable rows={events} canEdit={intel.available} onDecision={onDecision} />
+          ) : <Quiet>Nothing dated in the next 90 days.</Quiet>}
+        </Section>
+      )}
 
-        {(standing.length > 0 || (report.market || []).length > 0) && (
-          <Card className="p-4">
-            <SectionHead
-              title="Standing observations"
-              subtitle="True for weeks rather than days. Informs planning, not this Thursday."
-            />
-            <div className="mt-3 space-y-2.5">
-              {standing.map((f, i) => (
-                <div key={`f${i}`} className="rounded-xl border border-border bg-white p-3.5">
-                  <p className="text-sm text-text leading-snug">{f.headline}</p>
-                  {f.detail && <p className="text-[11px] text-text-secondary mt-1.5 leading-relaxed">{f.detail}</p>}
-                  {f.suggested_action && (
-                    <p className="text-xs text-text-secondary mt-2 leading-relaxed">
-                      <span className="font-semibold">Do: </span>{f.suggested_action}
+      {/* 6 ── Market & technical */}
+      {sectionVisible('market', team) && (
+        <Section id="market" n={num('market')} title="Market and technical notes"
+          note="Regulation, standards, technology and giga-project change. Each carries the marketing angle and what the technical team should check.">
+          {visibleNotes.length ? (
+            <div className="space-y-2.5">{visibleNotes.map((note, i) => <Note key={i} n={note} now={now} />)}</div>
+          ) : <Quiet>No regulation, technology or giga-project change this week.</Quiet>}
+        </Section>
+      )}
+
+      {/* 7 ── Marketing recommendations */}
+      {sectionVisible('recs', team) && (
+        <Section id="recs" n={num('recs')} title="Marketing recommendations"
+          note="Where the market and our position do not line up, and the content that answers it. Each names what it is based on. Rules are reviewed under What We Learned.">
+          {plan.blocks.length || plan.loose.length ? (
+            <>
+              <div className="space-y-3">{plan.blocks.map(block => <GapBlock key={block.gap.id} block={block} />)}</div>
+              {plan.loose.length > 0 && (
+                <div className="mt-3 space-y-2">
+                  {plan.blocks.length > 0 && (
+                    <p className="text-[10px] font-semibold text-text-tertiary uppercase tracking-wide pt-3 border-t border-border">Other ideas from this run</p>
+                  )}
+                  {plan.loose.map((idea, i) => <IdeaCard key={i} idea={idea} />)}
+                </div>
+              )}
+              {plan.ideaCount > 0 && <SendIdeasToPlan ideas={plan.ordered} />}
+              {(report.repeated_ideas || []).length > 0 && (
+                <p className="text-[11px] text-text-tertiary mt-3">
+                  {report.repeated_ideas.length} idea{report.repeated_ideas.length === 1 ? '' : 's'} dropped for repeating something already proposed.
+                </p>
+              )}
+            </>
+          ) : <Quiet>No recommendations this week.</Quiet>}
+        </Section>
+      )}
+
+      {/* 8 ── New competitors */}
+      {sectionVisible('newcomp', team) && (
+        <Section id="newcomp" n={num('newcomp')} title="New competitors to review"
+          note="Companies the agent found acting as competitors that are not on the watchlist. You decide — accepted ones are researched from the next run.">
+          {!storeLoaded ? <Skeleton className="h-10 w-full" /> : candidates.length ? (
+            <ul className="divide-y divide-border">
+              {candidates.map(c => (
+                <li key={c.name} className="py-2.5 flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-xs font-semibold text-text">
+                      {c.name}{c.thisRun && <span className="ml-1.5"><Chip tone="bg-emerald-50 text-emerald-700 border-emerald-200">this week</Chip></span>}
                     </p>
-                  )}
-                  <TechNote finding={f} />
-                  <div className="flex items-center gap-2 mt-2 text-[10px] text-text-tertiary">
-                    <span className="uppercase tracking-wide">{f.lens}</span>
-                    {f.confidence != null && <span>· confidence {pct(f.confidence)}</span>}
+                    {c.why && <p className="text-[11px] text-text-tertiary mt-0.5 leading-relaxed">{c.why}</p>}
+                    {c.url && <a href={c.url} target="_blank" rel="noopener noreferrer" className="text-[10px] text-text-tertiary underline underline-offset-2">{domainOf(c.url)}</a>}
                   </div>
-                  <Sources sources={f.sources} />
-                </div>
-              ))}
-              {(report.market || []).map((m, i) => (
-                <div key={`m${i}`} className="rounded-xl border border-border bg-white p-3.5">
-                  <p className="text-sm text-text leading-snug">{m.finding}</p>
-                  {m.confidence != null && (
-                    <p className="text-[10px] text-text-tertiary mt-1.5">confidence {pct(m.confidence)} · {m.novelty || 'new'}</p>
+                  {c.agendaId && c.status === 'proposed' ? (
+                    <div className="flex gap-1.5 shrink-0">
+                      <Button size="sm" onClick={() => onCandidate(c, 'active')} disabled={busyId === c.agendaId}>Watch</Button>
+                      <Button size="sm" variant="secondary" onClick={() => onCandidate(c, 'retired')} disabled={busyId === c.agendaId}>Dismiss</Button>
+                    </div>
+                  ) : (
+                    <span className="text-[10px] text-text-tertiary shrink-0">{c.agendaId ? c.status : 'added after the run saves'}</span>
                   )}
-                  <Sources sources={m.sources} uncited={m.uncited} />
-                </div>
+                </li>
               ))}
-            </div>
-          </Card>
-        )}
+            </ul>
+          ) : <Quiet>No new competitors surfaced.</Quiet>}
+        </Section>
+      )}
 
-        {/* Findings with nothing to publish. Folded, last, and kept in full.
-            Folded because this is a marketing page and these are not marketing's
-            to act on; kept because they were expensive to find and somebody in
-            the building needs them. The count is on the summary so a reader can
-            see there is something here without opening it. */}
-        {technical.length > 0 && (
-          <Fold
-            title="For the technical team"
-            subtitle="Standards, certification and compliance the run turned up with no angle to publish. Worth forwarding, not worth planning around."
-            count={technical.length}
-          >
-            <div className="space-y-2.5">
-              {technical.map((f, i) => (
-                <div key={`t${i}`} className="rounded-xl border border-border bg-slate-50/60 p-3.5">
-                  <div className="flex items-start justify-between gap-3">
-                    <p className="text-sm text-text leading-snug">{f.headline}</p>
-                    {deadlineLabel(f, now) && (
-                      <span className="text-[11px] text-text-tertiary shrink-0 tabular-nums whitespace-nowrap">
-                        {deadlineLabel(f, now)}
-                      </span>
-                    )}
-                  </div>
-                  {f.technical_note && (
-                    <p className="text-xs text-text-secondary mt-2 leading-relaxed">
-                      <span className="font-semibold">They need to: </span>{f.technical_note}
-                    </p>
-                  )}
-                  {f.detail && (
-                    <p className="text-[11px] text-text-tertiary mt-2 leading-relaxed">{f.detail}</p>
-                  )}
-                  <div className="flex items-center gap-2 mt-2 text-[10px] text-text-tertiary">
-                    <span className="uppercase tracking-wide">{f.lens}</span>
-                    {f.confidence != null && <span>· confidence {pct(f.confidence)}</span>}
-                  </div>
-                  <Sources sources={f.sources} />
-                </div>
-              ))}
-            </div>
-          </Fold>
-        )}
-      </Zone>}
+      {/* 9 ── Sources */}
+      <Section id="sources" n={num('sources')} title="Sources"
+        note={`Every source this report cites, checked during the run of ${fmtDate(run.started_at)}. The refs say which items rest on each.`}>
+        {sources.length ? (
+          <ul className="space-y-1.5">
+            {sources.map(s => (
+              <li key={s.url} className="text-[11px] leading-relaxed flex gap-2">
+                <span className="text-text-tertiary shrink-0 w-[130px] truncate">{s.domain}</span>
+                <a href={s.url} target="_blank" rel="noopener noreferrer" className="text-text-secondary hover:text-text underline underline-offset-2 min-w-0 truncate">
+                  {s.title || s.url}
+                </a>
+                {s.citedBy.length > 0 && <span className="text-text-tertiary shrink-0">{s.citedBy.join(', ')}</span>}
+              </li>
+            ))}
+          </ul>
+        ) : <Quiet>This report cites no web sources.</Quiet>}
+      </Section>
 
-      {/* ══ ZONE 3 — How this run went ══
-          The audit trail, folded. It is read when a reader doubts something
-          above it, and a reader who doubts nothing should not scroll past it
-          to reach the watchlist. Nothing is removed — a run that never admits
-          a miss is one you cannot calibrate. */}
-      {counts.quality > 0 && <Zone
-        id="brief-quality"
-        title="How this run went"
-        note="The audit trail. Open it when you want to know how much of the brief to believe."
-      >
-        {report.repetition && (
-          <Card className="p-3"><p className="text-xs text-amber-700">{report.repetition}</p></Card>
-        )}
-
+      {/* ── How this run went ── */}
+      <section id="brief-run" data-zone="run" className="scroll-mt-28 space-y-3">
+        <h2 className="text-xs font-semibold text-text-tertiary uppercase tracking-wide pt-2">How this run went</h2>
+        {report.repetition && <Card className="p-3"><p className="text-xs text-amber-700">{report.repetition}</p></Card>}
         {states.length > 0 && (
-          <Fold
-            title="What was checked"
-            subtitle="A lens that looked and found nothing is not the same as one that could not answer, so both are named."
-            count={states.length}
-            open={states.some(s => s.state === 'failed')}
-          >
+          <Fold title="What was checked" subtitle="A lens that looked and found nothing is not the same as one that could not answer." count={states.length} open={states.some(s => s.state === 'failed')}>
             <div className="mt-3 space-y-1.5">
               {states.map(s => (
                 <div key={s.key} className="flex items-baseline gap-3 text-xs">
-                  <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium shrink-0 w-[130px] text-center ${LENS_STATE[s.state]?.tone || ''}`}>
-                    {LENS_STATE[s.state]?.label || s.state}
-                  </span>
+                  <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium shrink-0 w-[130px] text-center ${LENS_STATE[s.state]?.tone || ''}`}>{LENS_STATE[s.state]?.label || s.state}</span>
                   <span className="text-text font-medium w-[120px] shrink-0">{s.label}</span>
                   <span className="text-text-tertiary truncate">{s.error || s.question}</span>
                 </div>
@@ -809,51 +863,31 @@ export function ResearchTab({
             </div>
           </Fold>
         )}
-
         {(report.unanswered || []).length > 0 && (
-          <Fold
-            title="Could not answer"
-            subtitle="A research agent that never admits a miss is one you cannot calibrate."
-            count={report.unanswered.length}
-          >
-            <ul className="mt-3 space-y-2">
-              {report.unanswered.map((u, i) => (
-                <li key={i} className="text-xs text-text-tertiary leading-relaxed">{u}</li>
-              ))}
-            </ul>
+          <Fold title="Could not answer" subtitle="A research agent that never admits a miss is one you cannot calibrate." count={report.unanswered.length}>
+            <ul className="mt-3 space-y-2">{report.unanswered.map((u, i) => <li key={i} className="text-xs text-text-tertiary leading-relaxed">{u}</li>)}</ul>
           </Fold>
         )}
-
         {passed.length > 0 && (
-          <Fold
-            title="Deadlines that passed"
-            subtitle="Kept rather than hidden — an expired window explains a miss."
-            count={passed.length}
-          >
+          <Fold title="Deadlines that passed" subtitle="Kept rather than hidden — an expired window explains a miss." count={passed.length}>
             <div className="mt-3 space-y-1.5">
               {passed.map((f, i) => (
-                <p key={i} className="text-xs text-text-tertiary">
-                  <span className="line-through">{f.headline}</span> · {deadlineLabel(f, now)}
-                </p>
+                <p key={i} className="text-xs text-text-tertiary"><span className="line-through">{f.headline}</span> · {deadlineLabel(f, now)} · {teamsOf(f).join(', ')}</p>
               ))}
             </div>
           </Fold>
         )}
-
         {!live && <RunProgress run={run} lensRows={lensRows} now={now} />}
-      </Zone>}
+      </section>
 
-      {/* ══ ZONE 4 — What it watches ══
-          Setup, not reading. It used to sit at the bottom of the report with
-          no heading, which made it look like a last section of the brief
-          rather than the controls that decide what the NEXT one measures. */}
-      <Zone
-        id="brief-watch"
-        title="What it watches"
-        note="Not part of this brief — this is what the next one will measure."
-      >
+      {/* ── What it watches ── */}
+      <section id="brief-watch" data-zone="watch" className="scroll-mt-28 space-y-3">
+        <div className="pt-2">
+          <h2 className="text-xs font-semibold text-text-tertiary uppercase tracking-wide">What it watches</h2>
+          <p className="text-[11px] text-text-tertiary mt-0.5">Not part of this report — this is what the next one will look at.</p>
+        </div>
         <AgentSteering />
-      </Zone>
+      </section>
     </div>
   )
 }

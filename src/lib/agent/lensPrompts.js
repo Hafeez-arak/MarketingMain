@@ -129,7 +129,49 @@ function standing(agenda = []) {
   ].join('\n')
 }
 
+/**
+ * What the team already tracks, so a lens reports changes instead of repeats.
+ *
+ * Built by `knownIntelPrompt` in intel.js from the store. Passed in as text
+ * rather than rows so this file stays free of the store's shape.
+ */
+function known(text) {
+  return text ? ['', text] .join('\n') : ''
+}
+
+// ── LABELLING — added 2026-09-15 for the three-reader report ──
+//
+// The brief is read by marketing, sales and the technical team, and each needs
+// a different slice. These fields are how a finding lands in the right slice
+// and, when it carries a name, in the store that remembers it across weeks.
+const LABELS = [
+  '',
+  'Label every finding:',
+  '- relevance — how much it MATTERS, separate from how sure you are:',
+  '    high    affects a live deal or tender, an event within 60 days, or is a direct competitor',
+  '            move in the segments this brand sells into.',
+  '    medium  useful context for the next one to three months.',
+  '    low     background only. It is stored and left out of the report — so use it honestly',
+  '            rather than inflating everything to medium.',
+  '- competitor — the competitor\'s name exactly as listed, when the finding is about one. Empty',
+  '  when it is about the market.',
+  '- channel — where you actually saw it: website, linkedin, instagram, tiktok, x, youtube, news,',
+  '  jobs, tender_portal, event_site, government, other.',
+  '- category — project, partnership, product, pricing, hiring, expansion, content, event, award,',
+  '  leadership, regulation, gigaproject, tech, tender, other.',
+  '- for_whom "sales" when the thing to do is contact someone, bid, or get specified — a lead is not',
+  '  a post idea, and filing it as marketing hides it from the people who work leads.',
+  '- lead — fill it for any tender, project or named prospect: name (the project\'s or tender\'s OWN',
+  '  name, the same every week, e.g. "Mondrian Riyadh" — never a sentence), type (tender | project |',
+  '  lead), client, contractor, consultant, location, scope, stage, deadline (a real date or leave',
+  '  it out), timing (open | closed | unconfirmed). Leave out a field you did not establish.',
+  '- event — fill it for any expo, conference, awards or sponsorship opening: name (official name),',
+  '  start_date, end_date, venue, city, organizer, url, exhibitor_deadline, competitors_exhibiting',
+  '  (names of competitors you saw listed). Leave out what you did not establish.',
+].join('\n')
+
 const CLOSING = [
+  LABELS,
   '',
   'Rules:',
   '- REPORT WHAT YOU FOUND. Do not decide on the reader\'s behalf whether something',
@@ -144,8 +186,9 @@ const CLOSING = [
   '- Every finding needs a source you actually read. No source, no finding.',
   '- Only set perishable_until when a real date exists. Never invent one.',
   '- suggested_action must be something the brand can actually do this month.',
-  '- SET for_whom BY WHETHER THERE IS SOMETHING TO PUBLISH, NOT BY HOW TECHNICAL IT',
-  '  SOUNDS. This is a marketing run, and the findings it is worst at are the ones',
+  '- SET for_whom BY WHO ACTS, NOT BY HOW TECHNICAL IT SOUNDS. Someone to contact, a',
+  '  bid or a specification to win is "sales". Otherwise judge by whether there is',
+  '  something to PUBLISH. The findings this run is worst at are the ones',
   '  whose subject belongs to someone else: a certification deadline, a code change,',
   '  a standards revision. Those are usually the BEST posts available, because the',
   '  brand can say something about them its rivals cannot — mark them "both", write',
@@ -182,7 +225,7 @@ const CLOSING = [
  * that is a tender; for a local service it is a new neighbourhood, a rival
  * closing, or an event needing suppliers. Same question, different target.
  */
-export function openingsPrompt(brand, { motion, agenda = [], language = '' }) {
+export function openingsPrompt(brand, { motion, agenda = [], language = '', intel = '' }) {
   // Ranked, not listed. The previous version gave three equal bullets and the
   // model spread its searches evenly across them; design-stage projects are
   // worth more than everything else here combined, because they are the only
@@ -265,6 +308,8 @@ export function openingsPrompt(brand, { motion, agenda = [], language = '' }) {
     '— trade shows and exhibitions this brand\'s buyers attend, and the procurement or budget',
     'cycles that decide when they can commit. Projects come FIRST. If you spend everything on',
     'projects and report no events at all, that is the correct trade and not a failure.',
+    'For an event, also look for who is EXHIBITING — a competitor with a stand booked is a finding.',
+    known(intel),
     standing(agenda),
     localLanguage(language),
     CLOSING,
@@ -331,7 +376,7 @@ export function demandPrompt(brand, { competitors = [], agenda = [], language = 
  * Standards, regulation and procurement policy move whether or not a rival
  * posts, and for a specification business they decide what can be sold at all.
  */
-export function categoryPrompt(brand, { agenda = [], language = '' } = {}) {
+export function categoryPrompt(brand, { agenda = [], language = '', intel = '' } = {}) {
   // No `Market:` line: `who()` already carries geography, and it is now
   // resolved for every lens rather than only this one. Two lines saying the
   // same thing in one prompt is how a model starts weighting it twice.
@@ -359,6 +404,11 @@ export function categoryPrompt(brand, { agenda = [], language = '' } = {}) {
     '',
     'Say plainly how established each one is. "Announced, with a date" and "being discussed',
     'in the trade press" are different things and should not read the same.',
+    '',
+    'Include giga-project and major-programme news when it changes what gets specified or bought:',
+    'contracts awarded, phases announced, packages released. A named package with a contractor',
+    'is also a lead — fill `lead` for it.',
+    known(intel),
     standing(agenda),
     localLanguage(language),
     CLOSING,
@@ -366,47 +416,66 @@ export function categoryPrompt(brand, { agenda = [], language = '' } = {}) {
 }
 
 /**
- * RIVALS — what competitors are doing.
+ * COMPETITORS — what they are doing, across every channel, and what it means.
  *
- * The only lens that existed before, widened past posting cadence. Posting
- * frequency is a lagging, low-value signal; offers, pricing, launches and
- * hiring are what precede a move rather than report one.
+ * Rewritten 2026-09-15. It used to lead with a board of follower counts and
+ * posting cadence and ask what happened "beyond their posting". The team said
+ * plainly they do not care about followers: they want to know what rivals are
+ * DOING and how it affects us, built from "little little information from
+ * here and there" combined into something useful.
+ *
+ * So the lens now gathers small, dated, sourced traces — each one a finding,
+ * each one stored as a signal — and synthesis does the combining, across this
+ * week and the weeks already in the store. A single job advert is trivia; a
+ * job advert, a new brand on the website and a stand at Elenex in the same
+ * month is a move.
  */
-export function rivalsPrompt(brand, { competitors = [], board = [], movements = [], agenda = [], language = '' }) {
-  const measured = board.length
-    ? board.map(c =>
-        `- ${c.name}${c.handle ? ` (@${c.handle})` : ''}: ${c.followers ?? '?'} followers, ` +
-        `${c.activity || 'activity unknown'}, engagement/1k ${c.engagement_per_1k ?? 'unknown'}`,
-      ).join('\n')
-    : '(no competitor could be measured this period)'
-
-  const moved = movements.length
-    ? movements.map(m => `- ${m.what}: ${m.from} → ${m.to} (${m.change_pct}%, ${m.significance})`).join('\n')
-    : '(nothing moved measurably)'
+export function rivalsPrompt(brand, { competitors = [], board = [], agenda = [], language = '', intel = '' }) {
+  // Posting activity only, never follower counts: what they posted ABOUT is a
+  // trace of what they are doing; how many people follow them is not a move.
+  const activity = board
+    .filter(c => c.activity || (c.top_posts || []).length)
+    .map(c => {
+      const hooks = (c.top_posts || []).slice(0, 3).map(t => t.hook).filter(Boolean)
+      return `- ${c.name}: ${c.activity || 'activity unknown'}${hooks.length ? `; recent posts: ${hooks.map(h => `"${h}"`).join(' / ')}` : ''}`
+    }).join('\n')
 
   return [
     who(brand),
-    competitors.length ? `Competitors to watch: ${competitors.slice(0, 8).join(', ')}` : '',
+    competitors.length ? `Competitors to watch: ${competitors.slice(0, 12).join(', ')}` : '',
     '',
-    'MEASURED NUMBERS — these are computed in code and are given facts. Do not recompute,',
-    'estimate around, or contradict them.',
+    'One question: WHAT ARE THESE COMPETITORS DOING, AND HOW DOES IT AFFECT US?',
     '',
-    'Board:',
-    measured,
+    'Not follower counts and not posting frequency. Real activity leaves small public traces every',
+    'week, on different channels. Collect those traces. Each one you can source is a finding on its',
+    'own — one fact, one source, one date — even if it looks minor. The combining into a picture',
+    'happens later, across weeks, so a small trace you report now is what makes next month\'s',
+    'conclusion possible. Do not wait until you have a full story.',
     '',
-    'Movements:',
-    moved,
+    'Where to look, for each competitor (spread your searches across competitors and channels rather',
+    'than spending them all on one):',
+    '- Their WEBSITE: news, projects or references pages, new brands or product lines, new branches.',
+    '- LINKEDIN: the company page\'s public posts (projects handed over, partnerships, awards,',
+    '  events), and senior people joining or leaving. Use what search results and public pages',
+    '  show; never anything behind a login.',
+    '- JOB BOARDS: roles advertised (LinkedIn Jobs, Bayt, Indeed and similar). A KNX engineer, a',
+    '  Jeddah sales manager or a tender specialist says where they are investing before they say it.',
+    '- INSTAGRAM / TIKTOK / X / YOUTUBE: what their recent posts are ABOUT — a project reveal, a new',
+    '  brand, a showroom, an offer. The subject of the post is the trace, not its likes.',
+    '- TRADE PRESS and news: contracts won, projects completed, distribution agreements.',
+    '- TENDER AWARDS and EXHIBITOR LISTS: a name on an award notice or a stand at an expo.',
+    '- Pricing signals: public promotions, quoted rates in tender results.',
     '',
-    'Now find out what is happening with these competitors BEYOND their posting. Posting',
-    'frequency is a lagging indicator; these are leading ones:',
-    '- New offers, packages, services or pricing changes.',
-    '- Product launches, new brands carried, new partnerships or distribution.',
-    '- Hiring — who they are recruiting says what they are staffing up to deliver.',
-    '- Expansion, new locations, new markets.',
-    '- Anything they are saying publicly that suggests a change of direction.',
+    'For every finding: set `competitor` to the name exactly as listed above, `channel` to where you',
+    'saw it, and `category`. Put the "so what for us" in suggested_action — what our sales, marketing',
+    'or technical team should do given this — and set for_whom to whoever acts.',
     '',
-    'If the numbers above raise a question, chase THAT rather than researching generally.',
-    'A competitor whose posting doubled is worth asking about; one that did not move is not.',
+    activity ? ['What their Instagram shows this period (measured in code — a starting point, not a finding):', activity].join('\n') : '',
+    '',
+    'A competitor you could find nothing new about this week is normal — do not pad. But if you',
+    'find a company acting like a competitor that is NOT on the list above, report it as a finding',
+    'with competitor set to its name and say why it competes: that is how the watchlist grows.',
+    known(intel),
     standing(agenda),
     localLanguage(language),
     CLOSING,
