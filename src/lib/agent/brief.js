@@ -26,8 +26,15 @@ export const BRIEF_SCHEMA = {
   schema: {
     type: 'object',
     additionalProperties: false,
+    // ── Nothing in this schema is optional ──
+    // The API compiles a schema into a grammar and refuses one that is too
+    // large. On 2026-09-15 this one was refused ("The compiled grammar is too
+    // large") after the three-reader sections were added, and every optional
+    // property multiplies the grammar far more than a required one does. So
+    // every field is required — an empty string or an empty list is how the
+    // model says "none" — and schemaLimits.test.js holds it at zero.
     required: [
-      'headline', 'top_three', 'competitor_moves', 'market_direction', 'market', 'gaps',
+      'headline', 'top_three', 'competitor_moves', 'market_direction', 'gaps',
       'proposed_rules', 'proposed_ideas', 'agenda_changes', 'new_competitors', 'unanswered',
     ],
     properties: {
@@ -76,7 +83,10 @@ export const BRIEF_SCHEMA = {
             },
             effect_on_us: { type: 'string', description: 'How it affects us, and what we should do.' },
             relevance: { type: 'string', enum: ['high', 'medium', 'low'] },
-            teams: { type: 'array', items: { type: 'string', enum: ['marketing', 'sales', 'technical'] } },
+            // No `teams` here: which teams a move concerns is derived in code
+            // from the findings it cites, and the extra optional array was one
+            // of the things that pushed this schema's compiled grammar over the
+            // API's size limit on 2026-09-15.
             refs: { type: 'array', items: { type: 'string' }, description: 'Every F- and S-ref it combines.' },
           },
         },
@@ -89,11 +99,11 @@ export const BRIEF_SCHEMA = {
         items: {
           type: 'object',
           additionalProperties: false,
-          required: ['name', 'why'],
+          required: ['name', 'why', 'source_url'],
           properties: {
             name: { type: 'string' },
             why: { type: 'string', description: 'What they do that overlaps with us.' },
-            source_url: { type: 'string' },
+            source_url: { type: 'string', description: 'Where you saw them, or an empty string.' },
           },
         },
       },
@@ -124,7 +134,7 @@ export const BRIEF_SCHEMA = {
         items: {
           type: 'object',
           additionalProperties: false,
-          required: ['movement', 'basis'],
+          required: ['movement', 'basis', 'so_what'],
           properties: {
             movement: { type: 'string', description: 'One sentence. Who is moving, and what they are doing.' },
             basis: {
@@ -132,51 +142,17 @@ export const BRIEF_SCHEMA = {
               enum: ['instagram', 'web', 'our_analytics', 'calendar'],
               description: 'What this rests on. Instagram PROVES, web EXPLAINS — never blur them.',
             },
-            so_what: { type: 'string', description: 'One clause: what it means for us. Omit rather than pad.' },
+            so_what: { type: 'string', description: 'One clause: what it means for us. An empty string rather than padding.' },
           },
         },
       },
-      // Per-competitor reading. Keyed by name so it merges onto the board that
-      // stage 0 already computed, rather than replacing it.
-      competitor_reads: {
-        type: 'array',
-        items: {
-          type: 'object',
-          additionalProperties: false,
-          required: ['name', 'read'],
-          properties: {
-            name: { type: 'string', description: 'Exactly as it appears on the board.' },
-            read: { type: 'string', description: 'What they appear to be doing, in one sentence.' },
-          },
-        },
-      },
-      market: {
-        type: 'array',
-        description: 'Trends and explanations. EVERY item must carry sources you actually read.',
-        items: {
-          type: 'object',
-          additionalProperties: false,
-          required: ['finding', 'sources', 'confidence', 'novelty'],
-          properties: {
-            finding: { type: 'string' },
-            sources: {
-              type: 'array',
-              items: {
-                type: 'object',
-                additionalProperties: false,
-                required: ['url'],
-                properties: {
-                  url: { type: 'string' },
-                  title: { type: 'string' },
-                  quote: { type: 'string', description: 'The sentence that actually supports this.' },
-                },
-              },
-            },
-            confidence: { type: 'number', description: '0 to 1.' },
-            novelty: { type: 'string', enum: ['new', 'continuing', 'changed', 'resolved'] },
-          },
-        },
-      },
+      // ── `competitor_reads` and `market` are no longer asked for ──
+      // Both were removed on 2026-09-15 to bring the compiled grammar under the
+      // API's size limit; with them in, synthesis was refused outright. Neither
+      // is lost: a rival's one-line read is `competitor_moves[].what_changed`,
+      // and `market` is assembled in code from the lens findings in mergeBrief —
+      // which the synthesis only ever restated (all 7 items in the 14 Sep brief
+      // were rewordings of a finding), and which carry their own sources.
       gaps: {
         type: 'array',
         description: 'The "so what for us". The highest-value section — what a person acts on.',
@@ -224,7 +200,7 @@ export const BRIEF_SCHEMA = {
         items: {
           type: 'object',
           additionalProperties: false,
-          required: ['title', 'rationale', 'answers'],
+          required: ['title', 'angle', 'rationale', 'answers', 'suggested_format'],
           properties: {
             title: { type: 'string' },
             angle: { type: 'string' },
@@ -445,7 +421,7 @@ export const SYNTHESISE_PROMPT = [
   'clock on it until the window closes. Both have happened.',
   '',
   'Hard rules:',
-  '- Every market finding carries the sources you actually read. No source, no finding.',
+  '- Every claim rests on a finding or a stored signal you were given, named by its ref. No ref, no claim.',
   '- Say when a sample is too small to carry a conclusion. "n=3" is a fact, not a hedge.',
   '- "Nothing moved this week" is a complete headline. Do not manufacture a finding to',
   '  justify having run — the weeks where something did happen only mean anything if the',
@@ -571,11 +547,33 @@ export function bindIdeas(ideas = [], gaps = [], findings = []) {
  * person can still judge it; a proposed RULE that lost all its sources is
  * DROPPED, because a rule steers generation and nobody reviews it again.
  */
+/**
+ * The market trends in a set of lens findings: what searched lenses found about
+ * the market itself — not a competitor, a lead, an event, or our own numbers,
+ * which each have their own section — and not what was rated low relevance.
+ */
+export function marketFromFindings(findings = []) {
+  return (findings || [])
+    .filter(f => f && !['calendar', 'ourselves'].includes(f.lens) && f.relevance !== 'low' &&
+      !String(f.competitor || '').trim() && !f.lead && !f.event && String(f.headline || '').trim())
+    .map(f => ({
+      finding: f.headline,
+      sources: f.sources || [],
+      confidence: f.confidence ?? null,
+      novelty: f.novelty || 'new',
+      ref: f.ref || '',
+    }))
+}
+
 export function mergeBrief(gathered, brief, allowedUrls, findings = []) {
   const allow = allowedUrls instanceof Set ? allowedUrls : new Set(allowedUrls || [])
   const keep = s => allow.has(typeof s === 'string' ? s : s?.url)
 
-  const market = (brief?.market || []).map(m => {
+  // Market trends, assembled from the lens findings rather than written by
+  // the model (see the note in BRIEF_SCHEMA). The same citation rule applies:
+  // a source nobody actually read is removed, and a trend left with none is
+  // kept and flagged rather than hidden.
+  const market = marketFromFindings(findings).map(m => {
     const sources = (m.sources || []).filter(keep)
     return { ...m, sources, uncited: sources.length === 0 }
   })
@@ -590,7 +588,7 @@ export function mergeBrief(gathered, brief, allowedUrls, findings = []) {
   const gaps = withGapIds(brief?.gaps || [])
 
   const readByName = new Map(
-    (brief?.competitor_reads || []).map(r => [String(r.name || '').toLowerCase(), r.read]),
+    (brief?.competitor_moves || []).map(m => [String(m.competitor || '').toLowerCase(), m.what_changed || '']),
   )
 
   return {
