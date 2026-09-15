@@ -56,7 +56,10 @@ export function Sidebar() {
   const badges = { pendingAccess: isAccessAdmin ? pendingAccess : 0 }
 
   return (
-    <aside className="w-52 flex-shrink-0 flex flex-col h-full overflow-hidden bg-white border-r border-border">
+    <aside
+      data-print-hide
+      className="w-52 flex-shrink-0 flex flex-col h-full overflow-hidden bg-white border-r border-border"
+    >
 
       {/* Logo. Fixed to h-14 — the same height as the Topbar — so the sidebar's
           header rule and the topbar's rule form one unbroken horizontal line

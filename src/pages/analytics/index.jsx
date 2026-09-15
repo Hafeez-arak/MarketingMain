@@ -75,7 +75,14 @@ export function Analytics() {
     <div className="max-w-7xl space-y-4">
       <PageHeader title="Analytics" subtitle="Real performance pulled live from your connected accounts.">
         {(loading || allAccounts.length > 0) && (
-          <div className="text-right">
+          <div className="flex items-center gap-2">
+            {/* The page answers "what happened on Instagram on the 9th". This
+                answers "send me how we did last month" — a different question
+                that four live graphs and an account picker cannot be folded
+                into without ruining both. */}
+            <Button size="sm" variant="secondary" onClick={() => navigate('/analytics/report')} disabled={loading}>
+              Performance report
+            </Button>
             <Button size="sm" variant="secondary" onClick={handleSync} disabled={syncing || loading}>
               {syncing ? <><Spinner size="sm" /> Refreshing…</> : 'Refresh from Zernio'}
             </Button>

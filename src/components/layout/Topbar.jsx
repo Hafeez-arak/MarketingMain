@@ -36,7 +36,10 @@ export function Topbar() {
   const unread = state.notifications.filter(n => !n.read).length
 
   return (
-    <header className="h-14 bg-white border-b border-border flex items-center pl-5 pr-4 gap-4 flex-shrink-0">
+    <header
+      data-print-hide
+      className="h-14 bg-white border-b border-border flex items-center pl-5 pr-4 gap-4 flex-shrink-0"
+    >
       <div className="flex-1 min-w-0 flex items-center gap-3">
         {backTarget && (
           <button onClick={() => navigate(backTarget)}

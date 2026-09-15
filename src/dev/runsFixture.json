@@ -1,0 +1,1190 @@
+[
+ {
+  "id": "4de11a81-e4b1-4e6b-a625-3352dbf1dcbc",
+  "status": "complete",
+  "stage": "synthesise",
+  "started_at": "2026-09-14T17:56:37.754589+00:00",
+  "finished_at": "2026-09-14T18:02:50.687+00:00",
+  "report": {
+   "gaps": [
+    {
+     "id": "G1",
+     "gap": "LinkedIn is the channel our actual buyers live on \u2014 architects, MEP contractors, hotel operators \u2014 and it performed well on nothing: 9.37% engagement rate, 27 clicks, 12 organic new followers, all off residual reach from a post published 3 September. Meanwhile our Instagram cadence went up and engagement per 1k went down.",
+     "basis": "our_analytics",
+     "claimed_id": "G1",
+     "our_position": "Zero LinkedIn posts in the seven-day window, last post 3 September; Instagram cadence 3\u21924 posts/week with engagement per 1k falling 1000\u2192750, and our best Instagram post this period took 2 interactions (n=1 measured of 2 \u2014 directional only).",
+     "suggested_response": "Move the compliance and lead-time material to LinkedIn first and publish there weekly. The evidence says the audience that converts is already there and is still finding an 11-day-old post; raising Instagram volume without changing format is currently buying reach we cannot see returning."
+    },
+    {
+     "id": "G2",
+     "gap": "Huda is building an audience with video in a casual consumer register; we are publishing static feed images to a much smaller base. The two per-1k figures are not comparable \u2014 their 1.58/1k sits on 17,278 followers and our 750/1k on a tiny base, and our own Instagram is still not connected to the board \u2014 so this is a format gap, not a performance verdict.",
+     "basis": "instagram",
+     "claimed_id": "G2",
+     "our_position": "Format mix on our best post this period: feed_image, 2 interactions. Huda: 50% video, 50% carousel across 4 posts.",
+     "suggested_response": "Do not chase their voice \u2014 casual is explicitly off-brand. Do test their format: a short, sober walkthrough video of a project or of the Riyadh partner floor, which is the register we can carry credibly. One test, then judge."
+    },
+    {
+     "id": "G3",
+     "gap": "Buyers are now policing two separate compliance layers \u2014 product certification (SASO) and building-level design code plus national green rating (SBC 601/602, Mostadam) \u2014 and our content queue only addresses the first. Nothing we have proposed speaks to a developer pursuing a Mostadam tier or a specifier carrying SBC 601/602 obligations.",
+     "basis": "web",
+     "claimed_id": "G3",
+     "our_position": "One compliance post in the queue (\"December 2026: what the new SASO energy standards change for your BOQ\"), covering the product-certificate layer only.",
+     "suggested_response": "Split the compliance story in two: keep the SASO/BOQ post for contractors, and add a project-level piece for developers and mall/hospitality clients on how our specifications support SBC 601/602 and a Mostadam rating. Technical should confirm which of the 24 supplier lines have EPDs before we publish anything that implies we can produce them."
+    },
+    {
+     "id": "G4",
+     "gap": "The top-cited programme risk on Saudi sites is late equipment procurement, and our messaging still leads on design credibility and heritage rather than delivery certainty \u2014 the fear the contractor actually arrives with. Partly covered by the already-proposed \"How Solitaire Mall stayed on programme\" idea, which this week's evidence now makes the strongest unapproved item in the queue.",
+     "basis": "web",
+     "claimed_id": "G4",
+     "our_position": "No published content addressing lead time, stocked inventory or procurement chain; the 20+ certified-partner network is framed as curation, not as supply resilience.",
+     "suggested_response": "Approve the Solitaire Mall programme post \u2014 it is the repeat, and what changed is that an MEP industry source now names late procurement as the leading delay cause \u2014 and get ops to confirm current lead times per supplier line before any speed claim goes out."
+    },
+    {
+     "id": "G5",
+     "gap": "Saudi National Day is nine days out and the preparation window opened twelve days ago, so the act-by date has already passed. The brand's honest position on it is unusual: generic green content is explicitly off-brand, but we hold something no rival can claim \u2014 a named portfolio of national landmarks we lit, including King Fahad International Airport.",
+     "basis": "web",
+     "claimed_id": "G5",
+     "our_position": "No National Day content scheduled; two heritage-angle ideas for exactly this moment already sit unapproved in the queue (\"Fifty years, one Kingdom\" and \"Ninety-Fifth and forty-nine\").",
+     "suggested_response": "The decision this week is approve-or-skip, not generate. Pick one of the two existing heritage ideas, publish it on LinkedIn ahead of 23 September, and skip Instagram if there is no time to do it without clich\u00e9s \u2014 being absent reads better for a premium institution than arriving late with a green filter."
+    }
+   ],
+   "lenses": [
+    {
+     "ran": true,
+     "lens": "demand",
+     "count": 3,
+     "error": "",
+     "label": "Buyers",
+     "state": "found"
+    },
+    {
+     "ran": true,
+     "lens": "category",
+     "count": 4,
+     "error": "",
+     "label": "Category",
+     "state": "found"
+    },
+    {
+     "ran": true,
+     "lens": "openings",
+     "count": 3,
+     "error": "",
+     "label": "Projects & openings",
+     "state": "found"
+    },
+    {
+     "ran": true,
+     "lens": "calendar",
+     "count": 1,
+     "error": "",
+     "label": "Calendar",
+     "state": "found"
+    },
+    {
+     "ran": true,
+     "lens": "ourselves",
+     "count": 7,
+     "error": "",
+     "label": "Ourselves",
+     "state": "found"
+    }
+   ],
+   "market": [
+    {
+     "finding": "SASO certification has become a present-tense procurement gate, not just a 2026 deadline: non-certified lighting products face automatic disqualification in government tenders, plus customs seizure and municipal rejection risk.",
+     "novelty": "new",
+     "sources": [
+      {
+       "url": "https://www.adwaafactorysa.com/saso-certification-lighting-saudi-arabia/",
+       "quote": "In government tenders, non-SASO-certified products result in automatic disqualification.",
+       "title": "SASO Certification for Lighting Products in Saudi Arabia: The Complete Compliance Checklist"
+      }
+     ],
+     "uncited": false,
+     "confidence": 0.6
+    },
+    {
+     "finding": "There is a second, already-active compliance layer distinct from product certification: 26 energy-efficiency specifications now cover lighting and have been folded into the Saudi Building Code's energy-rationalization sections (SBC 601 non-residential, SBC 602 residential), governed by Ministry of Energy/SEEC rather than SASO. A project can pass one layer and fail the other.",
+     "novelty": "new",
+     "sources": [
+      {
+       "url": "https://www.seec.gov.sa/en/about/energy-efficiency-sectors/buildings-sector",
+       "quote": "Three standards have been issued to ensure high quality in energy efficiency for lighting, contributing in improving performance and reducing energy consumption.",
+       "title": "Buildings Sector | SEEC"
+      },
+      {
+       "url": "https://www.moenergy.gov.sa/en/eco-system/programs/seec/initiatives",
+       "quote": "Home and street lighting consumption decreased by 80% as a result of the energy efficiency standards",
+       "title": "Saudi Energy Efficiency Center - Initiatives | Ministry of Energy"
+      }
+     ],
+     "uncited": false,
+     "confidence": 0.5
+    },
+    {
+     "finding": "Mostadam, Saudi Arabia's own national green-building rating system, is an official Real Estate General Authority programme, and consulting sources report its higher tiers increasingly requiring documented material sustainability data (EPDs) in tender packages \u2014 a project-level gate that operates through exactly our buyer base of developers and specifiers. Treat the EPD-as-hard-requirement detail as directional: it comes from consulting blogs, not primary mandate text.",
+     "novelty": "new",
+     "sources": [
+      {
+       "url": "https://rega.gov.sa/en/rega-services/eservices/mostadam-system-for-green-building/",
+       "quote": "An electronic service provided by the Real Estate Mediation Platform",
+       "title": "Real Estate General Authority - Mostadam System for Green Building"
+      },
+      {
+       "url": "https://www.envirolink.me/mostadam-certification-saudi-arabia/",
+       "quote": "Giga-projects like NEOM make EPDs mandatory in tender documents.",
+       "title": "Mostadam Certification Saudi Arabia \u2014 EPD & Green Building Guide"
+      }
+     ],
+     "uncited": false,
+     "confidence": 0.5
+    },
+    {
+     "finding": "Late procurement of specialist MEP/lighting equipment is named as one of the most common causes of programme delay on Saudi projects \u2014 meaning the contractor's unspoken question at supplier evaluation is delivery certainty, not product quality. One industry source, not a survey.",
+     "novelty": "new",
+     "sources": [
+      {
+       "url": "https://daranan.com/blog/mep-contracting-saudi-arabia/",
+       "quote": "Late procurement of MEP equipment is one of the most common causes of programme delay on Saudi construction projects today.",
+       "title": "MEP Contracting in Saudi Arabia: Why Getting It Right Matters From Day One"
+      }
+     ],
+     "uncited": false,
+     "confidence": 0.55
+    },
+    {
+     "finding": "GRMS/smart-room automation has moved from premium add-on to baseline expectation in Saudi hospitality, with operators justifying it on roughly 25% energy-cost reduction and a 12\u201324 month payback \u2014 an energy argument, not only a guest-experience one.",
+     "novelty": "new",
+     "sources": [
+      {
+       "url": "https://aala-tech.com/guest-room-management-system-guide-saudi-arabia/",
+       "quote": "This is where GRMS is not optional; it is expected.",
+       "title": "Guest Room Management System: The Saudi Hotelier's Guide"
+      }
+     ],
+     "uncited": false,
+     "confidence": 0.5
+    },
+    {
+     "finding": "KSA and UAE together account for over 60% of regional KNX revenue, concentrated in hospitality and high-end residential \u2014 a harder number for the GRMS/KNX content already in the queue than \"growing demand\".",
+     "novelty": "continuing",
+     "sources": [
+      {
+       "url": "https://www.24marketreports.com/services/global-knx-home-automation-forecast-market",
+       "quote": "UAE and Saudi Arabia account for over 60% of regional KNX revenue, focusing on integrated solutions for hospitality and high-end residential sectors.",
+       "title": "KNX Home Automation Market, Global Outlook and Forecast 2025-2032"
+      }
+     ],
+     "uncited": false,
+     "confidence": 0.55
+    },
+    {
+     "finding": "Riyadh's hotel pipeline is unusually deep \u2014 a live tracker counts 13 hotels under construction plus one newly announced, with Aedas holding the most projects in the city, meaning lighting and GRMS specification is still open on most of them.",
+     "novelty": "new",
+     "sources": [
+      {
+       "url": "https://www.oftmw.com/markets/riyadh-hotel/",
+       "quote": "13 hotels are currently under construction in Riyadh.",
+       "title": "16 New Riyadh Luxury Hotels (2026) | Markets of Tomorrow"
+      }
+     ],
+     "uncited": false,
+     "confidence": 0.5
+    }
+   ],
+   "period": {
+    "end": "2026-09-14T17:56:36.551Z",
+    "days": 7,
+    "start": "2026-09-07T17:56:36.551Z"
+   },
+   "cadence": "weekly",
+   "sources": [],
+   "baseline": false,
+   "findings": [
+    {
+     "ref": "F1",
+     "lens": "calendar",
+     "detail": "Date: 2026-09-23. Work should start by 2026-09-02. The largest civic moment of the Saudi year. Brand participation is expected, heavily green, and very crowded \u2014 being late reads worse than being absent. Computed from the calendar, not researched \u2014 this date is not an estimate.",
+     "novelty": "continuing",
+     "sources": [],
+     "evidence": {
+      "date": "2026-09-23",
+      "kind": "national",
+      "act_by": "2026-09-02",
+      "days_until": 9,
+      "window_open": true
+     },
+     "for_whom": "marketing",
+     "headline": "Saudi National Day is 9 days away and the preparation window is already open.",
+     "confidence": 1,
+     "novelty_by": "computed",
+     "technical_note": "",
+     "perishable_until": "2026-09-23",
+     "suggested_action": "Decide this week whether Saudi National Day is worth posting for. If it is, the work starts now \u2014 the preparation window opened 12 days ago."
+    },
+    {
+     "ref": "F2",
+     "lens": "demand",
+     "detail": "A supplier compliance guide states plainly that non-SASO-certified lighting products face automatic disqualification in government tenders today, and can be seized at customs or rejected by municipal inspectors \u2014 this sits alongside the already-known 1 Dec 2026 hard enforcement date for the newer energy standards, but describes present-tense procurement risk rather than a future deadline. Confidence is moderate-high given the source is a compliance-focused vendor page, but the underlying SASO rules are verifiable public regulation.",
+     "novelty": "new",
+     "sources": [
+      {
+       "url": "https://www.adwaafactorysa.com/saso-certification-lighting-saudi-arabia/",
+       "quote": "In government tenders, non-SASO-certified products result in automatic disqualification.",
+       "title": "SASO Certification for Lighting Products in Saudi Arabia: The Complete Compliance Checklist - Al Adwaa Factory Co"
+      }
+     ],
+     "evidence": {},
+     "for_whom": "both",
+     "headline": "SASO certification has moved from a compliance formality to an active tender-disqualification risk that specifiers and contractors must now police before submission, not just before the 2026 deadline.",
+     "confidence": 0.6,
+     "first_seen": null,
+     "novelty_by": "computed",
+     "technical_note": "Compliance/procurement team should confirm Arak's own certificate documentation is current and readily producible per SKU, since this is the exact proof point the post would be implicitly making.",
+     "perishable_until": "2026-12-01",
+     "suggested_action": "Publish a short 'what we check before a fixture ever reaches your BOQ' piece aimed at MEP contractors and specifiers, listing SASO certificate verification as a standard step in Arak's quoting process \u2014 reassurance content that removes a named fear (tender rejection, customs seizure) rather than generic brand messaging."
+    },
+    {
+     "ref": "F3",
+     "lens": "category",
+     "detail": "Saudi Ministry of Energy / SEEC materials confirm 26 energy-efficiency specifications now cover lighting products and that these were folded into updates of the Saudi Building Code's two energy-rationalization sections (SBC 601 non-residential, SBC 602 residential). SEEC also states home/street lighting consumption fell 80% attributable to these standards. This is a second, currently-enforced compliance layer (design-stage code) that sits alongside the SASO certificate deadline already logged \u2014 worth distinguishing in any compliance-facing content so the brand doesn't conflate 'we hold SASO certificates' with 'we meet SBC 601/602 design requirements.'",
+     "novelty": "new",
+     "sources": [
+      {
+       "url": "https://www.seec.gov.sa/en/about/energy-efficiency-sectors/buildings-sector",
+       "quote": "Three standards have been issued to ensure high quality in energy efficiency for lighting, contributing in improving performance and reducing energy consumption.",
+       "title": "Buildings Sector | SEEC"
+      },
+      {
+       "url": "https://www.moenergy.gov.sa/en/eco-system/programs/seec/initiatives",
+       "quote": "Home and street lighting consumption decreased by 80% as a result of the energy efficiency standards",
+       "title": "Saudi Energy Efficiency Center - Initiatives | Ministry of Energy"
+      }
+     ],
+     "evidence": {},
+     "for_whom": "both",
+     "headline": "The mandatory SASO product-certification deadline (1 Dec 2026) sits alongside a separate, already-active building-level code \u2014 SBC 601/602 \u2014 that governs lighting energy performance at the design stage, not just the product-certification stage.",
+     "confidence": 0.5,
+     "first_seen": null,
+     "novelty_by": "computed",
+     "technical_note": "Compliance/technical team should confirm Arak's current documentation covers both SBC 601/602 design-stage lighting energy requirements and the SASO 2663/2874 product certificates \u2014 they are governed by different bodies (Ministry of Energy/SEEC vs SASO) and a project can fail one while passing the other.",
+     "perishable_until": "2026-12-01",
+     "suggested_action": "Note the SBC 601/602 vs SASO 2663/2874 distinction in the already-planned 'what the new SASO standards change for your BOQ' post so specifiers understand both compliance layers, not just the product certificate."
+    },
+    {
+     "ref": "F4",
+     "lens": "category",
+     "detail": "Mostadam (launched by the Ministry of Housing/Real Estate General Authority, aligned with the Saudi Green Building Code) is confirmed as an official government program via rega.gov.sa. Independent sustainability-consulting sources report that Gold/Platinum/Net-Zero Mostadam tiers increasingly require documented material sustainability data (EPDs) in tender packages, and describe suppliers losing government-project bids for lacking this documentation. This is a different mechanism from the SASO 2663/2874 product-certification deadline already on our calendar \u2014 Mostadam operates at the building/project level, largely through specifiers and developers, which is exactly Arak's buyer base. Confidence is moderate: the government program itself is well-documented and real; the specific claim that EPDs are now a hard tender requirement comes from consulting-firm blogs rather than a primary government mandate document, so treat that detail as directional rather than confirmed policy text.",
+     "novelty": "new",
+     "sources": [
+      {
+       "url": "https://rega.gov.sa/en/rega-services/eservices/mostadam-system-for-green-building/",
+       "quote": "An electronic service provided by the Real Estate Mediation Platform",
+       "title": "Real Estate General Authority - Mostadam System for Green Building"
+      },
+      {
+       "url": "https://www.envirolink.me/mostadam-certification-saudi-arabia/",
+       "quote": "Giga-projects like NEOM make EPDs mandatory in tender documents.",
+       "title": "Mostadam Certification Saudi Arabia \u2014 EPD & Green Building Guide"
+      }
+     ],
+     "evidence": {},
+     "for_whom": "both",
+     "headline": "Mostadam \u2014 Saudi Arabia's own national green-building rating system \u2014 is becoming a real tender gate on giga-projects, not just a Vision 2030 slogan.",
+     "confidence": 0.5,
+     "first_seen": null,
+     "novelty_by": "computed",
+     "technical_note": "Product/technical team should confirm which Arak-supplied fixtures (and which of the 24 supplier brands) already have EPDs or equivalent sustainability documentation available, since this is what a Mostadam-conscious specifier will ask for at tender stage.",
+     "perishable_until": "2030-12-31",
+     "suggested_action": "Draft a post/one-pager positioning Arak's lighting specifications against Mostadam's energy and materials criteria for developers and mall/hospitality clients pursuing certification \u2014 this is a genuinely new angle not yet in the content queue, distinct from the SASO deadline posts already proposed."
+    },
+    {
+     "ref": "F5",
+     "lens": "ourselves",
+     "detail": "Measured, not estimated. Significance: medium. Instagram profile data.",
+     "novelty": "changed",
+     "sources": [],
+     "evidence": {
+      "to": 4,
+      "from": 3,
+      "unit": "posts/week",
+      "what": "Us: posts per week",
+      "metric": "posts per week",
+      "direction": "up",
+      "change_pct": 33.3,
+      "competitor": "Us",
+      "significance": "medium",
+      "evidence_source": "instagram"
+     },
+     "for_whom": "marketing",
+     "headline": "Our posts per week moved 3 \u2192 4 (33.3%).",
+     "confidence": 1,
+     "novelty_by": "computed",
+     "technical_note": "",
+     "perishable_until": null,
+     "suggested_action": ""
+    },
+    {
+     "ref": "F6",
+     "lens": "ourselves",
+     "detail": "Measured, not estimated. Significance: medium. Instagram profile data.",
+     "novelty": "changed",
+     "sources": [],
+     "evidence": {
+      "to": 750,
+      "from": 1000,
+      "unit": "per 1k",
+      "what": "Us: engagement per 1k followers",
+      "metric": "engagement per 1k followers",
+      "direction": "down",
+      "change_pct": 25,
+      "competitor": "Us",
+      "significance": "medium",
+      "evidence_source": "instagram"
+     },
+     "for_whom": "marketing",
+     "headline": "Our engagement per 1k followers moved 1000 \u2192 750 (25%).",
+     "confidence": 1,
+     "novelty_by": "computed",
+     "technical_note": "",
+     "perishable_until": null,
+     "suggested_action": "Establish whether this was deliberate before treating it as a signal."
+    },
+    {
+     "ref": "F7",
+     "lens": "ourselves",
+     "detail": "1 of 2 posts measured. Not enough measured history to call a change yet. Thin sample (1 < 5) \u2014 directional, not conclusive.",
+     "novelty": "continuing",
+     "sources": [],
+     "evidence": {
+      "posts": 2,
+      "measured": 1,
+      "platform": "instagram",
+      "avg_engagement": 2
+     },
+     "for_whom": "marketing",
+     "headline": "Our Instagram averaged 2 interactions per post.",
+     "confidence": 1,
+     "novelty_by": "computed",
+     "technical_note": "",
+     "perishable_until": null,
+     "suggested_action": ""
+    },
+    {
+     "ref": "F8",
+     "lens": "ourselves",
+     "detail": "Format: feed_image.",
+     "novelty": "new",
+     "sources": [],
+     "evidence": {
+      "id": "94b9885e-9b5f-4218-bb97-8ff8958da4c1",
+      "url": "",
+      "topic": "",
+      "format": "feed_image",
+      "platform": "instagram",
+      "engagement": 2,
+      "published_at": "2026-09-14T10:49:09.151+00:00"
+     },
+     "for_whom": "marketing",
+     "headline": "Best Instagram post this period: untitled at 2 interactions.",
+     "confidence": 1,
+     "novelty_by": "computed",
+     "technical_note": "",
+     "perishable_until": null,
+     "suggested_action": "Check whether its format and angle are repeatable before assuming the topic was the cause."
+    },
+    {
+     "ref": "F9",
+     "lens": "ourselves",
+     "detail": "TikTok is a platform this product can publish to, and no account is connected. That is a choice worth making deliberately rather than by default.",
+     "novelty": "continuing",
+     "sources": [],
+     "evidence": {
+      "state": "not_connected",
+      "platform": "tiktok"
+     },
+     "for_whom": "marketing",
+     "headline": "We have no TikTok presence at all.",
+     "confidence": 1,
+     "novelty_by": "computed",
+     "technical_note": "",
+     "perishable_until": null,
+     "suggested_action": "Decide whether TikTok is a channel for this brand. If it is, connect the account; if it is not, retire the question."
+    },
+    {
+     "ref": "F10",
+     "lens": "ourselves",
+     "detail": "83 members reached, engagement rate 9.37%, 26 page views. Page totals across every post on the page, including ones made directly on LinkedIn. LinkedIn organization stats may be delayed up to 48 hours. Follower gain time series are bounded to the last 12 months ending 2 days before today.",
+     "novelty": "continuing",
+     "sources": [],
+     "evidence": {
+      "kind": "page_insights",
+      "clicks": 27,
+      "window": {
+       "days": 7,
+       "since": "2026-09-07",
+       "until": "2026-09-14"
+      },
+      "reposts": 0,
+      "comments": 0,
+      "platform": "linkedin",
+      "reactions": 1,
+      "page_views": {
+       "jobs": 1,
+       "life": 0,
+       "total": 26,
+       "careers": 1,
+       "overview": 14
+      },
+      "impressions": 365,
+      "members_reached": 83,
+      "engagement_rate_pct": 9.37,
+      "followers_gained_organic": 12
+     },
+     "for_whom": "marketing",
+     "headline": "Our LinkedIn page: 365 impressions, 27 clicks and 12 new followers over the last 7 days.",
+     "confidence": 1,
+     "novelty_by": "computed",
+     "technical_note": "",
+     "perishable_until": null,
+     "suggested_action": ""
+    },
+    {
+     "ref": "F11",
+     "lens": "ourselves",
+     "detail": "The account @ARAK Lighting is connected and published no posts in this window. The last post went out on 2026-09-03.",
+     "novelty": "changed",
+     "sources": [],
+     "evidence": {
+      "posts": 0,
+      "state": "silent",
+      "platform": "linkedin",
+      "last_post_at": "2026-09-03T13:39:55.522Z"
+     },
+     "for_whom": "marketing",
+     "headline": "Nothing went out on LinkedIn this period.",
+     "confidence": 1,
+     "novelty_by": "computed",
+     "technical_note": "",
+     "perishable_until": null,
+     "suggested_action": "Either schedule for LinkedIn or accept it as dormant and say so."
+    },
+    {
+     "ref": "F12",
+     "lens": "category",
+     "detail": "This brief was scoped to industry-wide forces (regulation, programmes, technology, supply, demand), not to the brand's own accounts. The standing request to connect Arak's Instagram account to the board is still unresolved per prior briefs, but is better answered by a lens actually examining the brand's own channel state.",
+     "novelty": "new",
+     "sources": [],
+     "evidence": {},
+     "for_whom": "technical",
+     "headline": "No change on the standing Instagram-connection request this run \u2014 it fell outside this lens's scope.",
+     "confidence": 0.9,
+     "first_seen": null,
+     "novelty_by": "computed",
+     "technical_note": "This is a platform-connection task with no publishable content angle of its own; flagging it here only because it is a standing question, not because this run investigated it.",
+     "perishable_until": null,
+     "suggested_action": "Have whoever owns the Zernio/Instagram connection complete it this month \u2014 it has now been outstanding across multiple briefs."
+    },
+    {
+     "ref": "F13",
+     "lens": "openings",
+     "detail": "CLOSED for the main-contractor package. MEED reported on 24 April 2026 that Boutique Group re-tendered the historic Tuwaiq Palace conversion (40 hotel rooms/suites + 56 villas, Diplomatic Quarter, Aga Khan Award-winning building) after the original 2022 tender, giving contractors until 31 May to submit proposals \u2014 a date that has passed given today's calendar position. The two sister projects in the same PIF palace-hotel programme (Red Palace, Al-Hamra Palace Jeddah) already have main contractors appointed (Mobco and Al-Redwan Contracting respectively), with Dar Al-Omran as supervision consultant across all three. Once Tuwaiq's main contractor is named, FF&E and lighting sub-packages typically follow within months.",
+     "novelty": "new",
+     "sources": [
+      {
+       "url": "https://guest.meed.com/boutique-group-tenders-riyadh-tuwaiq-palace-hotel/",
+       "quote": "Contractors have been given a deadline of 31 May to submit proposals.",
+       "title": "Boutique Group tenders Tuwaiq Palace hotel in Riyadh"
+      }
+     ],
+     "evidence": {},
+     "for_whom": "marketing",
+     "headline": "PIF's Boutique Group retendered the Tuwaiq Palace hotel conversion in Riyadh, with the contractor-bid deadline (31 May) already passed as of this run.",
+     "confidence": 0.65,
+     "first_seen": null,
+     "novelty_by": "computed",
+     "technical_note": "",
+     "perishable_until": null,
+     "suggested_action": "Have business development contact Dar Al-Omran (supervision consultant on all three PIF palace-hotel conversions) now to get on the radar for the Tuwaiq Palace lighting/FF&E package before the main contractor is announced and the sub-tender list is finalized; the heritage-restoration angle (45-year Saudi heritage lighting a landmark from 1957 onward) is a strong specification narrative once a contractor is confirmed."
+    },
+    {
+     "ref": "F14",
+     "lens": "demand",
+     "detail": "An MEP-contracting industry source explicitly names extended lead times for specialist equipment as a top cause of schedule slippage, advising contractors to start procurement immediately at contract award. This matches the fear structure MEP contractors and engineering firms carry into supplier evaluation: not 'is it good,' but 'will it arrive on time.' Confidence is moderate \u2014 one industry blog, not a survey, but the claim is specific and plausible given the Vision 2030 project pipeline.",
+     "novelty": "new",
+     "sources": [
+      {
+       "url": "https://daranan.com/blog/mep-contracting-saudi-arabia/",
+       "quote": "Late procurement of MEP equipment is one of the most common causes of programme delay on Saudi construction projects today.",
+       "title": "MEP Contracting in Saudi Arabia: Why Getting It Right Matters From Day One | Dar Anan"
+      }
+     ],
+     "evidence": {},
+     "for_whom": "both",
+     "headline": "The single most commonly cited project-programme risk on Saudi construction sites right now is late procurement of specialist electrical/lighting equipment, not design or budget.",
+     "confidence": 0.55,
+     "first_seen": null,
+     "novelty_by": "computed",
+     "technical_note": "Product/ops team should confirm current lead times per supplier line (Philips, ABB, Reggiani, etc.) so any published claim about speed is defensible if a contractor asks for proof.",
+     "perishable_until": null,
+     "suggested_action": "Publish a short piece or carousel titled something like 'Why we quote lead time before we quote price' \u2014 walk through Arak's stocked-inventory/local-warehousing advantage on King Fahad Airport or Solitaire Mall scale projects, and name the certified-partner network (20+ brands) as what shortens the procurement chain versus single-brand importers."
+    },
+    {
+     "ref": "F15",
+     "lens": "category",
+     "detail": "Market research (24marketreports.com) states UAE and Saudi Arabia together account for over 60% of regional KNX revenue, with adoption concentrated in hospitality and high-end residential. This doesn't change direction \u2014 the 'KNX and GRMS: what hotel operators are actually specifying' idea already sits in the queue \u2014 but it gives that idea a harder number to cite. No new regulatory or technology trigger found beyond what was already known.",
+     "novelty": "new",
+     "sources": [
+      {
+       "url": "https://www.24marketreports.com/services/global-knx-home-automation-forecast-market",
+       "quote": "UAE and Saudi Arabia account for over 60% of regional KNX revenue, focusing on integrated solutions for hospitality and high-end residential sectors.",
+       "title": "KNX Home Automation Market, Global Outlook and Forecast 2025-2032"
+      }
+     ],
+     "evidence": {},
+     "for_whom": "marketing",
+     "headline": "GCC KNX/hospitality automation demand keeps concentrating in Saudi Arabia and the UAE, reinforcing the case for a GRMS-focused content push already on the docket.",
+     "confidence": 0.55,
+     "first_seen": null,
+     "novelty_by": "computed",
+     "technical_note": "",
+     "perishable_until": null,
+     "suggested_action": "When the already-proposed KNX/GRMS post is drafted, cite the 60%+ KSA/UAE regional revenue share as the market-size hook rather than a generic 'growing demand' claim."
+    },
+    {
+     "ref": "F16",
+     "lens": "demand",
+     "detail": "An industry hospitality-tech source frames GRMS as 'not optional; it is expected' given Saudi Arabia's hotel stock growth (167,500 keys by Q1 2025) concentrated in luxury/upscale segments, and reports operators justifying investment on a roughly 25% energy-cost-reduction assumption with 12\u201324 month payback. This aligns with \u2014 and gives fresh numbers to \u2014 Arak's existing GRMS/KNX messaging and the standing brand rule to tie lighting to energy-efficiency outcomes.",
+     "novelty": "new",
+     "sources": [
+      {
+       "url": "https://aala-tech.com/guest-room-management-system-guide-saudi-arabia/",
+       "quote": "This is where GRMS is not optional; it is expected.",
+       "title": "Guest Room Management System: The Saudi Hotelier's Guide"
+      }
+     ],
+     "evidence": {},
+     "for_whom": "marketing",
+     "headline": "For hotel operators and hospitality developers, GRMS/KNX-style smart room automation has shifted from a premium add-on to a baseline expectation, driven by a hotel pipeline where 78% of new supply is luxury/upscale.",
+     "confidence": 0.5,
+     "first_seen": null,
+     "novelty_by": "computed",
+     "technical_note": "",
+     "perishable_until": null,
+     "suggested_action": "A GRMS post using the payback framing directly \u2014 e.g. 'the energy case for automation, not just the guest experience case' \u2014 giving hotel operators a numbers-first argument (25% typical reduction, 12\u201324 month payback) rather than only comfort/luxury language, referencing Ritz Carlton or Four Seasons as proof points."
+    },
+    {
+     "ref": "F17",
+     "lens": "openings",
+     "detail": "This is a standing-pipeline observation, not a single new lead: a hospitality-development tracker updated in August 2026 puts 16 total Riyadh hotel developments in train, most still under construction rather than awarded/completed \u2014 meaning lighting and smart-room automation (GRMS) specification is still open on the majority of them. No individual project dates were verified beyond what's cited elsewhere in this report.",
+     "novelty": "new",
+     "sources": [
+      {
+       "url": "https://www.oftmw.com/markets/riyadh-hotel/",
+       "quote": "13 hotels are currently under construction in Riyadh.",
+       "title": "16 New Riyadh Luxury Hotels (2026) | Markets of Tomorrow"
+      }
+     ],
+     "evidence": {},
+     "for_whom": "marketing",
+     "headline": "Riyadh's hotel pipeline is unusually deep right now \u2014 a live tracker counts 13 hotels under construction plus 1 newly announced, with architecture firm Aedas holding the most projects in the city.",
+     "confidence": 0.5,
+     "first_seen": null,
+     "novelty_by": "computed",
+     "technical_note": "",
+     "perishable_until": null,
+     "suggested_action": "Have business development map which of these 13 under-construction hotels have not yet finalized an MEP/lighting supplier, prioritizing any where Aedas is the architect of record, and open a relationship conversation with Aedas' Riyadh office given their project-count lead in this market."
+    },
+    {
+     "ref": "F18",
+     "lens": "openings",
+     "detail": "TIMING UNCONFIRMED. A hospitality-openings tracker names the interior designer and describes the project as scheduled for 2026, but does not state a construction start, fit-out tender date, or current build stage. This places it earlier in the pipeline than Tuwaiq Palace (which is already at contractor-tender stage) \u2014 worth tracking but not yet actionable for a direct lighting-package approach.",
+     "novelty": "new",
+     "sources": [
+      {
+       "url": "https://connectingtravel.com/destinations/25-luxury-hotels-opening-in-saudi-arabia-in-2026",
+       "quote": "Scheduled for 2026, this would be Ennismore's first Mondrian property in Saudi Arabia.",
+       "title": "25 luxury hotels opening in Saudi Arabia in 2026"
+      }
+     ],
+     "evidence": {},
+     "for_whom": "marketing",
+     "headline": "Mondrian Riyadh, a LEED-certified 200-key hotel in Al Malga Urban Village, has a confirmed interior architect but no reported main-contractor or fit-out tender yet.",
+     "confidence": 0.4,
+     "first_seen": null,
+     "novelty_by": "computed",
+     "technical_note": "",
+     "perishable_until": null,
+     "suggested_action": "Add Mondrian Riyadh to the project watchlist and check back next cycle for a fit-out or MEP contractor announcement before attempting outreach."
+    }
+   ],
+   "headline": "Huda is now the only rival publishing on Instagram \u2014 and it has swapped specifier language for consumer showroom reels \u2014 while our own best-fit channel, LinkedIn, sat silent all week and still pulled 365 impressions and 12 new followers off a post from 3 September.",
+   "movements": [
+    {
+     "to": 4,
+     "from": 3,
+     "unit": "posts/week",
+     "what": "Us: posts per week",
+     "metric": "posts per week",
+     "direction": "up",
+     "change_pct": 33.3,
+     "competitor": "Us",
+     "significance": "medium",
+     "evidence_source": "instagram"
+    },
+    {
+     "to": 750,
+     "from": 1000,
+     "unit": "per 1k",
+     "what": "Us: engagement per 1k followers",
+     "metric": "engagement per 1k followers",
+     "direction": "down",
+     "change_pct": 25,
+     "competitor": "Us",
+     "significance": "medium",
+     "evidence_source": "instagram"
+    }
+   ],
+   "quiet_week": false,
+   "repetition": "",
+   "unanswered": [
+    "Connect ARAK's own Instagram account to the board \u2014 still not done. The competitor board again shows \"no comparable account of ours is connected yet\" for both rivals, so every Instagram comparison in this brief is one-sided. The category lens flagged this run that the request fell outside its scope; it is a platform-connection task for whoever owns the Zernio/Instagram link, not something research can resolve.",
+    "Connect the Arak Instagram account so the competitor board has a second side \u2014 same item, same answer: outstanding across multiple briefs now. Until it is done I can report our Instagram movements from our own analytics but cannot place them next to Huda's on a like-for-like basis.",
+    "Whether the engagement per 1k drop (1000\u2192750) was deliberate \u2014 I cannot tell from the data whether the extra post per week was a planned volume test or incidental. Someone who knows what was scheduled needs to say, before this is treated as a performance signal.",
+    "Arak's own certificate and EPD documentation position \u2014 the compliance ideas above imply we can produce SASO certificates per SKU and sustainability documentation per supplier line. I have no visibility into whether that is true; technical/product needs to confirm before publication."
+   ],
+   "sales_motion": {
+    "motion": "specification",
+    "explicit": true
+   },
+   "stage_reached": "synthesise",
+   "agenda_changes": [
+    {
+     "why": "Tuwaiq's contractor bid deadline of 31 May has passed and lighting/FF&E sub-packages typically follow within months of award; Mondrian Riyadh has an interior architect but no reported contractor. Both are watch-and-wait items where the timing of the approach matters more than the pitch.",
+     "action": "add",
+     "subject": "Tuwaiq Palace (Boutique Group/PIF) main-contractor announcement, and Mondrian Riyadh fit-out or MEP contractor announcement"
+    },
+    {
+     "why": "LinkedIn returned 9.37% engagement, 27 clicks and 12 organic followers on zero posts this week while Instagram cadence rose and engagement per 1k fell. One week is not proof, but it is a question worth a deliberate answer over the next few cycles.",
+     "action": "add",
+     "subject": "Whether LinkedIn should be this brand's primary publishing channel"
+    },
+    {
+     "why": "The buyers named in the brief are architects, MEP contractors, hotel operators, banks and government bodies, and the register TikTok rewards is the casual voice this brand explicitly forbids. Recommend closing the question as a deliberate no rather than leaving it open by default \u2014 reopen only if someone wants it reopened.",
+     "action": "retire",
+     "subject": "Whether to open a TikTok account"
+    }
+   ],
+   "planned_lenses": [
+    "openings",
+    "calendar",
+    "demand",
+    "ourselves",
+    "category"
+   ],
+   "proposed_ideas": [
+    {
+     "angle": "For developers and mall/hospitality clients chasing a Mostadam tier \u2014 what the rating asks of a lighting package, where the documentation comes from, and how a certified-partner catalogue shortens that paperwork.",
+     "title": "Mostadam on the drawings: how lighting is documented for a Saudi green-building rating",
+     "answers": "G3",
+     "rationale": "Answers the project-level compliance layer our queue ignores; Mostadam is confirmed as an official REGA programme and consulting sources report its higher tiers pulling material sustainability documentation into tender packages. It also sits squarely inside the standing rule to tie lighting to energy and sustainability outcomes.",
+     "answers_ref": {
+      "id": "G3",
+      "kind": "gap"
+     },
+     "suggested_format": "LinkedIn carousel, specifier-facing, with a one-pager version for BD"
+    },
+    {
+     "angle": "Walk through the procurement checks that happen before we price \u2014 certificate currency, stock position, factory lead time across the partner network \u2014 framed as removing the contractor's named risk rather than as a sales claim.",
+     "title": "Lead time is a line item: what we confirm before a fixture reaches your quote",
+     "answers": "F14",
+     "rationale": "Answers the delivery-certainty fear that an MEP industry source names as the leading cause of programme slippage, and turns the 20+ certified-partner network from a curation line into a supply-resilience argument. Ops must confirm per-line lead times first so the claim is defensible if a contractor asks for proof.",
+     "answers_ref": {
+      "ref": "F14",
+      "kind": "finding",
+      "headline": "The single most commonly cited project-programme risk on Saudi construction sites right now is late procurement of specialist electrical/lighting equipment, not design or budget."
+     },
+     "suggested_format": "LinkedIn text post or 5-panel carousel"
+    },
+    {
+     "angle": "The financial case rather than the guest-experience case \u2014 roughly 25% energy reduction, 12\u201324 month payback, and what the KNX layer has to do to deliver it in a real hotel.",
+     "title": "Who pays for the automation: the operator's energy math on a smart room",
+     "answers": "F16",
+     "rationale": "Distinct from the guest-experience and specification angles already in the queue: this one is numbers-first and addressed to the operator's finance question. Supported by a hospitality-tech source reporting GRMS as now expected rather than optional, and by KNX market data putting 60%+ of regional revenue in KSA and the UAE.",
+     "answers_ref": {
+      "ref": "F16",
+      "kind": "finding",
+      "headline": "For hotel operators and hospitality developers, GRMS/KNX-style smart room automation has shifted from a premium add-on to a baseline expectation, driven by a hotel pipeline where 78% of new supply is luxury/upscale."
+     },
+     "suggested_format": "Instagram carousel plus LinkedIn post"
+    },
+    {
+     "angle": "A sober read of the Riyadh hotel pipeline from the specifier's side \u2014 what gets decided at which stage, and why the lighting and GRMS conversation should start before fit-out tender.",
+     "title": "Thirteen hotels, thirteen unwritten lighting packages",
+     "answers": "F17",
+     "rationale": "Answers the pipeline opening: a live tracker counts 13 Riyadh hotels under construction with Aedas holding the most projects, meaning most lighting specifications are still open. Doubles as visible-to-architects positioning on the channel where our audience actually is \u2014 pair it with BD outreach to Aedas' Riyadh office.",
+     "answers_ref": {
+      "ref": "F17",
+      "kind": "finding",
+      "headline": "Riyadh's hotel pipeline is unusually deep right now \u2014 a live tracker counts 13 hotels under construction plus 1 newly announced, with architecture firm Aedas holding the most projects in the city."
+     },
+     "suggested_format": "LinkedIn post, authored voice"
+    }
+   ],
+   "proposed_rules": [
+    {
+     "rule": "Whenever compliance is claimed, name which layer it satisfies \u2014 product certification versus building-level design code or green rating \u2014 rather than saying \"certified\".",
+     "dated": false,
+     "scope": "caption",
+     "detail": "SEEC and Ministry of Energy sources confirm lighting energy requirements now sit inside SBC 601/602 at design stage, governed separately from SASO product certificates, and Mostadam gates at project level via REGA. A project can pass one and fail the other, so undifferentiated \"certified\" language is both weaker and riskier than precision. Evidence: two primary government sources plus one vendor compliance page \u2014 strong on the existence of the layers, moderate on how hard the tender gates bite. This distinction outlives the December 2026 deadline.",
+     "sources": [
+      "https://www.seec.gov.sa/en/about/energy-efficiency-sectors/buildings-sector",
+      "https://www.moenergy.gov.sa/en/eco-system/programs/seec/initiatives",
+      "https://rega.gov.sa/en/rega-services/eservices/mostadam-system-for-green-building/",
+      "https://www.adwaafactorysa.com/saso-certification-lighting-saudi-arabia/"
+     ],
+     "confidence": 0.55
+    },
+    {
+     "rule": "When addressing MEP contractors and engineering firms, lead with delivery certainty \u2014 lead time, stock position, procurement chain \u2014 before design credentials.",
+     "dated": false,
+     "scope": "caption",
+     "detail": "An MEP-contracting industry source names late procurement of specialist equipment as one of the most common causes of programme delay on Saudi projects, advising procurement to start at contract award. That makes \"will it arrive on time\" the contractor's first question and our 20+ certified-partner network an answer to it, not just a curation claim. Evidence is one industry source rather than a survey \u2014 moderate \u2014 but the fear structure is consistent with the Vision 2030 pipeline and is unlikely to change within a year.",
+     "sources": [
+      "https://daranan.com/blog/mep-contracting-saudi-arabia/"
+     ],
+     "confidence": 0.5
+    }
+   ],
+   "own_performance": {
+    "note": "",
+    "prior": {
+     "end": "2026-09-07T17:56:36.551Z",
+     "days": 7,
+     "start": "2026-08-31T17:56:36.551Z"
+    },
+    "period": {
+     "end": "2026-09-14T17:56:36.551Z",
+     "days": 7,
+     "start": "2026-09-07T17:56:36.551Z"
+    },
+    "platforms": [
+     {
+      "note": "",
+      "weak": true,
+      "label": "Instagram",
+      "posts": 2,
+      "state": "measured",
+      "change": null,
+      "undated": 0,
+      "measured": 1,
+      "platform": "instagram",
+      "username": "lightingaaa",
+      "best_post": {
+       "id": "94b9885e-9b5f-4218-bb97-8ff8958da4c1",
+       "url": "",
+       "topic": "",
+       "format": "feed_image",
+       "engagement": 2,
+       "published_at": "2026-09-14T10:49:09.151+00:00"
+      },
+      "connected": true,
+      "followers": null,
+      "posts_prev": 0,
+      "last_post_at": "2026-09-14T10:49:09.151Z",
+      "measured_prev": 0,
+      "page_insights": null,
+      "avg_engagement": 2,
+      "posted_directly": 0,
+      "total_engagement": 2,
+      "needs_reconnection": false,
+      "avg_engagement_prev": null
+     },
+     {
+      "note": "No TikTok account is connected, so nothing on TikTok can be measured.",
+      "weak": false,
+      "label": "TikTok",
+      "posts": 0,
+      "state": "not_connected",
+      "change": null,
+      "undated": 1,
+      "measured": 0,
+      "platform": "tiktok",
+      "username": "",
+      "best_post": null,
+      "connected": false,
+      "followers": null,
+      "posts_prev": 0,
+      "last_post_at": null,
+      "measured_prev": 0,
+      "page_insights": null,
+      "avg_engagement": null,
+      "posted_directly": 0,
+      "total_engagement": null,
+      "needs_reconnection": false,
+      "avg_engagement_prev": null
+     },
+     {
+      "note": "The LinkedIn account is connected but nothing was published to it in this period. The last post went out on 2026-09-03.",
+      "weak": false,
+      "label": "LinkedIn",
+      "posts": 0,
+      "state": "silent",
+      "change": null,
+      "undated": 0,
+      "measured": 0,
+      "platform": "linkedin",
+      "username": "ARAK Lighting",
+      "best_post": null,
+      "connected": true,
+      "followers": 4779,
+      "posts_prev": 1,
+      "last_post_at": "2026-09-03T13:39:55.522Z",
+      "measured_prev": 1,
+      "page_insights": {
+       "ok": true,
+       "name": "ARAK Lighting",
+       "clicks": 27,
+       "window": {
+        "days": 7,
+        "since": "2026-09-07",
+        "until": "2026-09-14"
+       },
+       "reposts": 0,
+       "comments": 0,
+       "reactions": 1,
+       "account_id": "6aa7f2b1726ebfe037ea7013",
+       "data_delay": "LinkedIn organization stats may be delayed up to 48 hours. Follower gain time series are bounded to the last 12 months ending 2 days before today.",
+       "page_views": {
+        "jobs": 1,
+        "life": 0,
+        "total": 26,
+        "careers": 1,
+        "overview": 14
+       },
+       "impressions": 365,
+       "members_reached": 83,
+       "engagement_rate_pct": 9.37,
+       "followers_gained_paid": 0,
+       "followers_gained_organic": 12
+      },
+      "avg_engagement": null,
+      "posted_directly": 0,
+      "total_engagement": null,
+      "needs_reconnection": false,
+      "avg_engagement_prev": 17
+     }
+    ],
+    "measured_count": 1,
+    "connected_count": 2
+   },
+   "competitor_board": [
+    {
+     "data": "instagram",
+     "name": "Huda Lighting",
+     "read": "Running a consistent four-post-a-week reel-and-carousel cadence in a consumer-retail voice that funnels toward the new Riyadh showroom, at 1.58 engagement per 1k on a 17.3k-follower base with no follower growth this period.",
+     "vs_us": null,
+     "handle": "hudalighting",
+     "activity": "4 posts this period",
+     "followers": 17278,
+     "top_posts": [
+      {
+       "hook": "The meetings, the coffee runs, the light changing across the room.",
+       "likes": 50,
+       "comments": 0,
+       "permalink": "https://www.instagram.com/reel/DdN3iCGDIjI/",
+       "timestamp": "2026-09-13T06:00:01+0000",
+       "media_type": "VIDEO"
+      },
+      {
+       "hook": "POV: you came in for one thing and now you're looking at everything.",
+       "likes": 32,
+       "comments": 0,
+       "permalink": "https://www.instagram.com/reel/DdIt8fLjHz6/",
+       "timestamp": "2026-09-11T06:00:02+0000",
+       "media_type": "VIDEO"
+      },
+      {
+       "hook": "Light doesn't simply illuminate a space \u2014 it reveals its character.",
+       "likes": 14,
+       "comments": 0,
+       "permalink": "https://www.instagram.com/p/DdDkuWFk3No/",
+       "timestamp": "2026-09-09T06:03:45+0000",
+       "media_type": "CAROUSEL_ALBUM"
+      }
+     ],
+     "format_mix": {
+      "VIDEO": 0.5,
+      "CAROUSEL_ALBUM": 0.5
+     },
+     "vs_us_note": "No comparable account of ours is connected yet.",
+     "media_count": 530,
+     "sample_size": 4,
+     "posts_per_week": 4,
+     "followers_delta": 0,
+     "engagement_per_1k": 1.58,
+     "posts_per_week_prev": 4
+    },
+    {
+     "data": "instagram",
+     "name": "Technolight",
+     "read": "Effectively inactive on Instagram \u2014 a large archive and a small audience, with its competitive weight sitting in showrooms and brand recognition rather than publishing.",
+     "vs_us": null,
+     "handle": "technolight",
+     "activity": "no NEW posts this period (the account itself is live)",
+     "followers": 1521,
+     "top_posts": [],
+     "format_mix": {},
+     "vs_us_note": "No comparable account of ours is connected yet.",
+     "media_count": 768,
+     "sample_size": 0,
+     "posts_per_week": 0,
+     "followers_delta": 0,
+     "engagement_per_1k": null,
+     "posts_per_week_prev": 0
+    }
+   ],
+   "market_direction": [
+    {
+     "basis": "instagram",
+     "so_what": "The showroom capital move we logged earlier now has a content engine behind it aimed at walk-in and design-curious buyers, not at BOQ decisions \u2014 that lane is theirs, and contesting it would put us in the casual register the brand explicitly avoids.",
+     "movement": "Huda Lighting is the only competitor on the board actually publishing \u2014 four posts a week, half of them reels, in a deliberately casual retail voice (\"POV: you came in for one thing and now you're looking at everything\") that reads as footfall marketing for its new Riyadh showroom rather than specifier content."
+    },
+    {
+     "basis": "instagram",
+     "so_what": "Our loudest positioning rival competes on showrooms and brand recognition, not social \u2014 so Instagram share of voice in the specifier segment is close to uncontested.",
+     "movement": "Technolight is dormant on Instagram: 768 posts of history, 1,521 followers, nothing new this period and nothing last period either."
+    },
+    {
+     "basis": "web",
+     "so_what": "Documentation and delivery certainty are becoming the specifier's real questions, and they are questions a 45-year certified-partner integrator can answer better than a single-brand importer.",
+     "movement": "The web evidence points the same way from three separate lenses: buyers are shifting their evaluation criteria from how a fixture looks to whether it clears certification and arrives on time \u2014 SASO non-certification now means automatic tender disqualification, SBC 601/602 and Mostadam gate at project level, and MEP contractors name late equipment procurement as the top cause of programme slippage."
+    }
+   ],
+   "rules_dropped_uncited": 0
+  },
+  "error": ""
+ },
+ {
+  "id": "43eaa9c3-7751-47f9-83cf-ccfc0697c223",
+  "status": "failed",
+  "stage": "lenses",
+  "started_at": "2026-09-14T17:20:55.101326+00:00",
+  "finished_at": "2026-09-14T17:25:20.895+00:00",
+  "report": {
+   "gaps": [],
+   "market": [],
+   "period": {
+    "end": "2026-09-14T17:20:54.057Z",
+    "days": 7,
+    "start": "2026-09-07T17:20:54.057Z"
+   },
+   "cadence": "weekly",
+   "sources": [],
+   "baseline": false,
+   "headline": "Nothing moved measurably this week.",
+   "movements": [],
+   "quiet_week": true,
+   "unanswered": [],
+   "stage_reached": "gather",
+   "agenda_changes": [],
+   "planned_lenses": [
+    "openings",
+    "calendar",
+    "demand",
+    "ourselves",
+    "category"
+   ],
+   "proposed_ideas": [],
+   "proposed_rules": [],
+   "own_performance": {
+    "note": "",
+    "prior": {
+     "end": "2026-09-07T17:20:54.057Z",
+     "days": 7,
+     "start": "2026-08-31T17:20:54.057Z"
+    },
+    "period": {
+     "end": "2026-09-14T17:20:54.057Z",
+     "days": 7,
+     "start": "2026-09-07T17:20:54.057Z"
+    },
+    "platforms": [
+     {
+      "note": "",
+      "weak": true,
+      "label": "Instagram",
+      "posts": 1,
+      "state": "measured",
+      "change": null,
+      "undated": 0,
+      "measured": 1,
+      "platform": "instagram",
+      "username": "lightingaaa",
+      "best_post": {
+       "id": "94b9885e-9b5f-4218-bb97-8ff8958da4c1",
+       "url": "",
+       "topic": "",
+       "format": "feed_image",
+       "engagement": 2,
+       "published_at": "2026-09-14T10:49:09.151+00:00"
+      },
+      "connected": true,
+      "followers": null,
+      "posts_prev": 0,
+      "last_post_at": "2026-09-14T10:49:09.151Z",
+      "measured_prev": 0,
+      "page_insights": null,
+      "avg_engagement": 2,
+      "posted_directly": 0,
+      "total_engagement": 2,
+      "needs_reconnection": false,
+      "avg_engagement_prev": null
+     },
+     {
+      "note": "No TikTok account is connected, so nothing on TikTok can be measured.",
+      "weak": false,
+      "label": "TikTok",
+      "posts": 0,
+      "state": "not_connected",
+      "change": null,
+      "undated": 1,
+      "measured": 0,
+      "platform": "tiktok",
+      "username": "",
+      "best_post": null,
+      "connected": false,
+      "followers": null,
+      "posts_prev": 0,
+      "last_post_at": null,
+      "measured_prev": 0,
+      "page_insights": null,
+      "avg_engagement": null,
+      "posted_directly": 0,
+      "total_engagement": null,
+      "needs_reconnection": false,
+      "avg_engagement_prev": null
+     },
+     {
+      "note": "The LinkedIn account is connected but nothing was published to it in this period. The last post went out on 2026-09-03.",
+      "weak": false,
+      "label": "LinkedIn",
+      "posts": 0,
+      "state": "silent",
+      "change": null,
+      "undated": 0,
+      "measured": 0,
+      "platform": "linkedin",
+      "username": "ARAK Lighting",
+      "best_post": null,
+      "connected": true,
+      "followers": 4779,
+      "posts_prev": 1,
+      "last_post_at": "2026-09-03T13:39:55.522Z",
+      "measured_prev": 1,
+      "page_insights": {
+       "ok": true,
+       "name": "ARAK Lighting",
+       "clicks": 27,
+       "window": {
+        "days": 7,
+        "since": "2026-09-07",
+        "until": "2026-09-14"
+       },
+       "reposts": 0,
+       "comments": 0,
+       "reactions": 1,
+       "account_id": "6aa7f2b1726ebfe037ea7013",
+       "data_delay": "LinkedIn organization stats may be delayed up to 48 hours. Follower gain time series are bounded to the last 12 months ending 2 days before today.",
+       "page_views": {
+        "jobs": 1,
+        "life": 0,
+        "total": 26,
+        "careers": 1,
+        "overview": 14
+       },
+       "impressions": 365,
+       "members_reached": 83,
+       "engagement_rate_pct": 9.37,
+       "followers_gained_paid": 0,
+       "followers_gained_organic": 12
+      },
+      "avg_engagement": null,
+      "posted_directly": 0,
+      "total_engagement": null,
+      "needs_reconnection": false,
+      "avg_engagement_prev": 17
+     }
+    ],
+    "measured_count": 1,
+    "connected_count": 2
+   },
+   "competitor_board": [
+    {
+     "data": "instagram",
+     "name": "Huda Lighting",
+     "vs_us": null,
+     "handle": "hudalighting",
+     "activity": "4 posts this period",
+     "followers": 17278,
+     "top_posts": [
+      {
+       "hook": "The meetings, the coffee runs, the light changing across the room.",
+       "likes": 50,
+       "comments": 0,
+       "permalink": "https://www.instagram.com/reel/DdN3iCGDIjI/",
+       "timestamp": "2026-09-13T06:00:01+0000",
+       "media_type": "VIDEO"
+      },
+      {
+       "hook": "POV: you came in for one thing and now you're looking at everything.",
+       "likes": 32,
+       "comments": 0,
+       "permalink": "https://www.instagram.com/reel/DdIt8fLjHz6/",
+       "timestamp": "2026-09-11T06:00:02+0000",
+       "media_type": "VIDEO"
+      },
+      {
+       "hook": "Light doesn't simply illuminate a space \u2014 it reveals its character.",
+       "likes": 14,
+       "comments": 0,
+       "permalink": "https://www.instagram.com/p/DdDkuWFk3No/",
+       "timestamp": "2026-09-09T06:03:45+0000",
+       "media_type": "CAROUSEL_ALBUM"
+      }
+     ],
+     "format_mix": {
+      "VIDEO": 0.5,
+      "CAROUSEL_ALBUM": 0.5
+     },
+     "vs_us_note": "No comparable account of ours is connected yet.",
+     "media_count": 530,
+     "sample_size": 4,
+     "posts_per_week": 4,
+     "followers_delta": 2,
+     "engagement_per_1k": 1.58,
+     "posts_per_week_prev": 4
+    },
+    {
+     "data": "instagram",
+     "name": "Technolight",
+     "vs_us": null,
+     "handle": "technolight",
+     "activity": "no NEW posts this period (the account itself is live)",
+     "followers": 1521,
+     "top_posts": [],
+     "format_mix": {},
+     "vs_us_note": "No comparable account of ours is connected yet.",
+     "media_count": 768,
+     "sample_size": 0,
+     "posts_per_week": 0,
+     "followers_delta": 0,
+     "engagement_per_1k": null,
+     "posts_per_week_prev": 0
+    }
+   ]
+  },
+  "error": "Could not start the category lens: returned 508"
+ }
+]
