@@ -4,6 +4,7 @@ import { Card, Button, PageHeader } from '../../components/ui/index'
 import {
   fetchAllAccess, approveAccess, revokeAccess,
   fetchInvites, inviteAccess, cancelInvite,
+  fetchAllCompanies, fetchCompanyAssignments, setUserCompanies,
 } from '../../lib/access'
 
 // ─── Team & Access ─────────────────────────────────────────────────────────
@@ -11,10 +12,16 @@ import {
 // — a form that looked like it did something and never did. This one drives
 // the real gate: public.user_access plus the approve/revoke functions.
 //
-// There is exactly one privilege in this application, and this page is it.
-// Everything else — creating companies, deleting them, generating, posting —
-// is identical for every approved person. So the page shows two lists and
-// four buttons, and that is the whole permission model.
+// Two privileges live here and nowhere else: who is let in at all, and which
+// companies they get. Everything else — creating companies, deleting them,
+// generating, posting — is identical for every approved person inside the
+// companies they hold, so those two decisions are the whole permission model.
+//
+// Approval still hands out every company that isn't marked admin_only, which
+// is the right default for a teammate. The per-person picker below is for the
+// cases that default can't express: someone who should only see one client,
+// and Arak Lighting, which is handed to nobody automatically and is now
+// assignable to anyone rather than being admin-only forever.
 
 function StatusTag({ status }) {
   const style = {
@@ -29,39 +36,132 @@ function StatusTag({ status }) {
   )
 }
 
-function PersonRow({ row, busy, onApprove, onRevoke, isSelf }) {
-  const isAdmin = row.role === 'admin'
+// The per-person company picker. Mounted only while open, which is what
+// seeds the draft from whatever the roster says right now — reopening after
+// a save shows the saved state rather than a stale copy from first render.
+function CompanyPicker({ companies, assigned, saving, onCancel, onSave }) {
+  const [draft, setDraft] = useState(() => new Set(assigned))
+
+  function toggle(id) {
+    setDraft(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id); else next.add(id)
+      return next
+    })
+  }
+
+  const changed =
+    draft.size !== assigned.length || assigned.some(id => !draft.has(id))
+
   return (
-    <li className="flex items-center gap-4 px-6 py-4 hover:bg-surface-muted transition-colors">
-      <div className="w-8 h-8 flex items-center justify-center text-[11px] font-bold text-white flex-shrink-0 bg-stone-500">
-        {(row.full_name || row.email || '?').charAt(0).toUpperCase()}
-      </div>
-      <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium text-text truncate">
-          {row.full_name || row.email}
-          {isSelf && <span className="text-text-tertiary font-normal"> (you)</span>}
+    <div className="px-6 pb-4 -mt-1">
+      <div className="border border-border bg-surface-muted p-4 space-y-3">
+        <p className="text-xs text-text-tertiary">
+          Tick every company this person should see. Unticking one removes their
+          access to it immediately — nothing they made there is deleted.
         </p>
-        {row.full_name && <p className="text-xs text-text-tertiary truncate">{row.email}</p>}
-      </div>
-      {isAdmin && (
-        <span className="text-[10px] font-semibold uppercase tracking-wide px-2 py-1 border bg-stone-800 text-white border-stone-800">
-          Admin
-        </span>
-      )}
-      <StatusTag status={row.status} />
-      <div className="flex items-center gap-1.5 flex-shrink-0 w-[132px] justify-end">
-        {row.status !== 'approved' && (
-          <Button size="xs" disabled={busy} onClick={() => onApprove(row)}>
-            {row.status === 'revoked' ? 'Restore' : 'Approve'}
+        <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+          {companies.map(c => (
+            <label key={c.id} className="flex items-center gap-2 text-sm text-text cursor-pointer py-0.5">
+              <input
+                type="checkbox"
+                checked={draft.has(c.id)}
+                onChange={() => toggle(c.id)}
+                className="accent-amber-500"
+              />
+              <span className="truncate">{c.name}</span>
+              {/* Marked so the admin knows why this one is unticked for
+                  everyone new: it is never handed out automatically. */}
+              {c.admin_only && (
+                <span className="text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 border bg-white text-stone-500 border-border flex-shrink-0">
+                  By invitation
+                </span>
+              )}
+            </label>
+          ))}
+          {companies.length === 0 && (
+            <p className="text-sm text-text-secondary col-span-2">No companies exist yet.</p>
+          )}
+        </div>
+        <div className="flex items-center gap-2 pt-1">
+          <Button size="xs" disabled={saving || !changed} onClick={() => onSave([...draft])}>
+            {saving ? 'Saving…' : 'Save companies'}
           </Button>
-        )}
-        {row.status === 'pending' && (
-          <Button size="xs" variant="secondary" disabled={busy} onClick={() => onRevoke(row)}>Deny</Button>
-        )}
-        {row.status === 'approved' && !isAdmin && (
-          <Button size="xs" variant="ghost" disabled={busy} onClick={() => onRevoke(row)}>Remove</Button>
-        )}
+          <Button size="xs" variant="ghost" disabled={saving} onClick={onCancel}>Cancel</Button>
+          <span className="text-xs text-text-tertiary ml-auto">
+            {draft.size} of {companies.length} selected
+          </span>
+        </div>
       </div>
+    </div>
+  )
+}
+
+function PersonRow({
+  row, busy, onApprove, onRevoke, isSelf,
+  companies = [], assigned = null, expanded = false, onToggleCompanies, onSaveCompanies,
+}) {
+  const isAdmin = row.role === 'admin'
+  // Only an approved person has a roster to edit at all; pending and revoked
+  // people hold zero memberships by design, and the RPC refuses them.
+  const canAssign = row.status === 'approved' && assigned !== null
+  return (
+    <li className="hover:bg-surface-muted transition-colors">
+      <div className="flex items-center gap-4 px-6 py-4">
+        <div className="w-8 h-8 flex items-center justify-center text-[11px] font-bold text-white flex-shrink-0 bg-stone-500">
+          {(row.full_name || row.email || '?').charAt(0).toUpperCase()}
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-medium text-text truncate">
+            {row.full_name || row.email}
+            {isSelf && <span className="text-text-tertiary font-normal"> (you)</span>}
+          </p>
+          {row.full_name && <p className="text-xs text-text-tertiary truncate">{row.email}</p>}
+          {canAssign && (
+            <p className="text-xs text-text-tertiary truncate mt-0.5">
+              {assigned.length === 0
+                ? 'No companies yet'
+                : companies
+                    .filter(c => assigned.includes(c.id))
+                    .map(c => c.name)
+                    .join(', ')}
+            </p>
+          )}
+        </div>
+        {isAdmin && (
+          <span className="text-[10px] font-semibold uppercase tracking-wide px-2 py-1 border bg-stone-800 text-white border-stone-800">
+            Admin
+          </span>
+        )}
+        <StatusTag status={row.status} />
+        <div className="flex items-center gap-1.5 flex-shrink-0 justify-end">
+          {canAssign && (
+            <Button size="xs" variant="secondary" onClick={() => onToggleCompanies(row)}>
+              {expanded ? 'Close' : `Companies (${assigned.length})`}
+            </Button>
+          )}
+          {row.status !== 'approved' && (
+            <Button size="xs" disabled={busy} onClick={() => onApprove(row)}>
+              {row.status === 'revoked' ? 'Restore' : 'Approve'}
+            </Button>
+          )}
+          {row.status === 'pending' && (
+            <Button size="xs" variant="secondary" disabled={busy} onClick={() => onRevoke(row)}>Deny</Button>
+          )}
+          {row.status === 'approved' && !isAdmin && (
+            <Button size="xs" variant="ghost" disabled={busy} onClick={() => onRevoke(row)}>Remove</Button>
+          )}
+        </div>
+      </div>
+      {expanded && canAssign && (
+        <CompanyPicker
+          companies={companies}
+          assigned={assigned}
+          saving={busy}
+          onCancel={() => onToggleCompanies(row)}
+          onSave={ids => onSaveCompanies(row, ids)}
+        />
+      )}
     </li>
   )
 }
@@ -77,16 +177,22 @@ export function Access() {
   const [confirm, setConfirm] = useState(null)  // person pending a remove/deny confirmation
   const [newEmail, setNewEmail] = useState('')
   const [adding, setAdding]     = useState(false)
+  const [companies, setCompanies]     = useState([])   // every company that exists
+  const [assignments, setAssignments] = useState({})   // user_id → [workspace_id]
+  const [openCompanies, setOpenCompanies] = useState(null) // user_id whose picker is open
 
   // Refresh after a decision. Deliberately does not flip `loading` — the
   // list is already on screen and blanking it to a spinner for 200ms makes
   // an approval feel like a page reload rather than a row changing state.
   const load = useCallback(async () => {
-    const [{ rows: data, error: e }, { invites: inv }] = await Promise.all([
-      fetchAllAccess(), fetchInvites(),
-    ])
+    const [{ rows: data, error: e }, { invites: inv }, { companies: comps }, { assignments: asg }] =
+      await Promise.all([
+        fetchAllAccess(), fetchInvites(), fetchAllCompanies(), fetchCompanyAssignments(),
+      ])
     setRows(data)
     setInvites(inv)
+    setCompanies(comps)
+    setAssignments(asg)
     setError(e || '')
   }, [])
 
@@ -94,13 +200,16 @@ export function Access() {
   // synchronous setState in it; `loading` starts true and is cleared once.
   useEffect(() => {
     let cancelled = false
-    Promise.all([fetchAllAccess(), fetchInvites()]).then(([{ rows: data, error: e }, { invites: inv }]) => {
-      if (cancelled) return
-      setRows(data)
-      setInvites(inv)
-      setError(e || '')
-      setLoading(false)
-    })
+    Promise.all([fetchAllAccess(), fetchInvites(), fetchAllCompanies(), fetchCompanyAssignments()])
+      .then(([{ rows: data, error: e }, { invites: inv }, { companies: comps }, { assignments: asg }]) => {
+        if (cancelled) return
+        setRows(data)
+        setInvites(inv)
+        setCompanies(comps)
+        setAssignments(asg)
+        setError(e || '')
+        setLoading(false)
+      })
     return () => { cancelled = true }
   }, [])
 
@@ -114,7 +223,7 @@ export function Access() {
     // Say which of the three things happened. "Done" would leave the admin
     // unsure whether that person can log in right now or still has to sign up.
     setNotice({
-      approved: `${email} now has access to every company.`,
+      approved: `${email} is in, with every company that isn't invitation-only. Use Companies on their row to narrow that down or add one.`,
       invited:  `${email} is cleared. They'll be let straight in when they sign up — tell them to create an account.`,
       already:  `${email} already has access.`,
     }[outcome] || 'Done.')
@@ -143,6 +252,24 @@ export function Access() {
     setBusyId(null)
   }
 
+  async function handleSaveCompanies(row, ids) {
+    setBusyId(row.user_id); setError(''); setNotice('')
+    const e = await setUserCompanies(row.user_id, ids)
+    if (e) { setError(e); setBusyId(null); return }
+    const names = companies.filter(c => ids.includes(c.id)).map(c => c.name)
+    setNotice(
+      names.length === 0
+        ? `${row.full_name || row.email} now has no companies. They can sign in but will see nothing until you assign one.`
+        : `${row.full_name || row.email} now has ${names.join(', ')}.`,
+    )
+    setOpenCompanies(null)
+    await load()
+    // Assigning to yourself changes your own switcher; cheap enough to resync
+    // either way rather than guess which case this was.
+    await refreshWorkspaces()
+    setBusyId(null)
+  }
+
   async function handleRevoke(row) {
     setBusyId(row.user_id); setError('')
     const e = await revokeAccess(row.user_id)
@@ -161,13 +288,14 @@ export function Access() {
         <PageHeader title="Team & Access" subtitle="Who can use this application." />
         <Card className="p-6">
           <p className="text-sm text-text-secondary leading-relaxed">
-            You have full access to every company here — creating, editing,
-            generating, scheduling, and publishing all work the same for
-            everyone on the team.
+            You have full access to the {workspaces.length === 1 ? 'company' : `${workspaces.length} companies`} in
+            your switcher — creating, editing, generating, scheduling, and
+            publishing all work the same for everyone on the team.
           </p>
           <p className="text-sm text-text-secondary leading-relaxed mt-3">
-            Adding or removing people is the one action reserved for the
-            administrator. Ask them and it takes about ten seconds.
+            Adding people, removing them, and deciding which companies each
+            person gets are the actions reserved for the administrator. Ask
+            them and it takes about ten seconds.
           </p>
         </Card>
       </div>
@@ -182,7 +310,7 @@ export function Access() {
     <div className="max-w-3xl space-y-4">
       <PageHeader
         title="Team & Access"
-        subtitle={`Approved people get all ${workspaces.length} ${workspaces.length === 1 ? 'company' : 'companies'} with identical rights.`}
+        subtitle={`Who can sign in, and which of the ${companies.length} ${companies.length === 1 ? 'company' : 'companies'} each of them gets.`}
       />
 
       {error && (
@@ -288,7 +416,7 @@ export function Access() {
         <div className="px-5 py-4 border-b border-border">
           <h3 className="font-semibold text-text text-sm">People with access</h3>
           <p className="text-xs text-text-tertiary mt-0.5">
-            Everyone below can do everything in every company. Only the admin can change this list.
+            Everyone below can do everything inside the companies they hold. Use Companies to change who gets what.
           </p>
         </div>
         {loading ? (
@@ -298,6 +426,11 @@ export function Access() {
             {approved.map(row => (
               <PersonRow key={row.user_id} row={row} busy={busyId === row.user_id}
                 isSelf={row.user_id === user?.id}
+                companies={companies}
+                assigned={assignments[row.user_id] || []}
+                expanded={openCompanies === row.user_id}
+                onToggleCompanies={p => setOpenCompanies(openCompanies === p.user_id ? null : p.user_id)}
+                onSaveCompanies={handleSaveCompanies}
                 onApprove={handleApprove} onRevoke={p => setConfirm({ ...p, action: 'remove' })} />
             ))}
           </ul>
