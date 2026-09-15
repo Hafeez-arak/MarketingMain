@@ -43,7 +43,7 @@ const STATUS_META = {
 const isOwnPost = idea => idea.copyMode === 'own'
 
 // ─── One idea in the review list, with inline approve/reject + edit ─────────
-export function IdeaCard({ idea, index, accessToken, workspaceId, onChange, onRemove, onCreate, autoEdit = false, planPlatforms = [], lock = null }) {
+export function IdeaCard({ idea, index, accessToken, workspaceId, onChange, onRemove, onCreate, autoEdit = false, planPlatforms = [], lock = null, todayKey = '' }) {
   const [editing, setEditing] = useState(autoEdit)
   const [saving,  setSaving]  = useState(false)
   const [saveError, setSaveError] = useState('')
@@ -158,6 +158,7 @@ export function IdeaCard({ idea, index, accessToken, workspaceId, onChange, onRe
             {/* One quiet line of facts: when, where, what shape. */}
             <p className="text-[11px] text-text-tertiary mt-1">
               {idea.date ? formatDate(idea.date) : 'Date set automatically'}
+              {!lock?.locked && idea.date && todayKey && idea.date < todayKey && <span className="text-red-600 font-semibold"> (date has passed)</span>}
               {' · '}{targets.map(targetLabel).join(' + ')}
               {' · '}{formatLabel}{idea.aspectRatio ? ` ${aspectLabel(idea.aspectRatio)}` : ''}
               {(idea.postFormat === 'carousel' || idea.postFormat === 'photo_carousel' || idea.postFormat === 'multi_image') && idea.slideCount > 1 ? ` · ${idea.slideCount} ${idea.postFormat === 'multi_image' ? 'images' : 'slides'}` : ''}
@@ -257,14 +258,14 @@ export function IdeaCard({ idea, index, accessToken, workspaceId, onChange, onRe
       </div>
 
       {editing && (
-        <IdeaEditModal idea={idea} tones={IG_TONES} saving={saving} saveError={saveError} planPlatforms={planPlatforms}
+        <IdeaEditModal idea={idea} tones={IG_TONES} saving={saving} saveError={saveError} planPlatforms={planPlatforms} todayKey={todayKey}
           onClose={() => { if (idea.isNew) onRemove(idea); else setEditing(false) }} onSave={saveEdits} />
       )}
     </div>
   )
 }
 
-export function IdeaEditModal({ idea, tones, saving, saveError, onClose, onSave, planPlatforms = [] }) {
+export function IdeaEditModal({ idea, tones, saving, saveError, onClose, onSave, planPlatforms = [], todayKey = '' }) {
   // The platform decides which formats exist, so it is chosen first and a
   // change resets the format to that platform's default.
   const [platform, setPlatform] = useState(idea.platform || planPlatforms[0] || 'instagram')
@@ -367,7 +368,7 @@ export function IdeaEditModal({ idea, tones, saving, saveError, onClose, onSave,
         )}
 
         <div className="grid grid-cols-2 gap-3">
-          <Input label="Date" type="date" value={date} onChange={e => setDate(e.target.value)} />
+          <Input label="Date" type="date" value={date} min={todayKey || undefined} onChange={e => setDate(e.target.value)} />
           <Select label="Tone" value={tone} onChange={e => setTone(e.target.value)}>
             {tones.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
           </Select>

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   parseYMD, startOfWeek, formatTime, groupByWeek, monthOptions,
-  buildCalendarCells, normalizeAiIdea, distributeDates, cleanPlanPoll, pollProblems,
+  buildCalendarCells, normalizeAiIdea, distributeDates, cleanPlanPoll, pollProblems, firstPlaceableDay,
 } from './planModel'
 import { derivePostKind, formatForTarget } from '../../lib/postFormats'
 
@@ -249,6 +249,26 @@ describe('distributeDates', () => {
     expect(out.every(p => p.date >= '2026-10-01' && p.date <= '2026-10-02')).toBe(true)
   })
 
+  // Planning September on the 15th used to put posts on the 4th and 12th.
+  it('places nothing before notBefore when the month is under way', () => {
+    const out = distributeDates([{}, {}, {}, {}], { startDate: '2026-09-01', endDate: '2026-09-30', notBefore: '2026-09-16' })
+    expect(out.every(p => p.date >= '2026-09-16' && p.date <= '2026-09-30')).toBe(true)
+    expect(new Set(out.map(p => p.date)).size).toBe(4)
+  })
+
+  it('re-places a past date only when asked to', () => {
+    const opts = { startDate: '2026-09-01', endDate: '2026-09-30', notBefore: '2026-09-16' }
+    expect(distributeDates([{ date: '2026-09-03' }], opts)[0].date).toBe('2026-09-03')
+    const moved = distributeDates([{ date: '2026-09-03' }, { date: '2026-09-23' }], { ...opts, replacePast: true })
+    expect(moved[0].date >= '2026-09-16').toBe(true)
+    expect(moved[1].date).toBe('2026-09-23')
+  })
+
+  it('leaves posts unscheduled when the whole range has passed', () => {
+    const out = distributeDates([{}, { date: '2026-08-10' }], { startDate: '2026-08-01', endDate: '2026-08-31', notBefore: '2026-09-16', replacePast: true })
+    expect(out.map(p => p.date)).toEqual([undefined, ''])
+  })
+
   it('leaves posts untouched without a usable range', () => {
     const posts = [{}, { date: '2026-10-05' }]
     expect(distributeDates(posts, { startDate: '', endDate: '' })).toEqual(posts)
@@ -341,5 +361,13 @@ describe('derivePostKind and formatForTarget', () => {
     expect(formatForTarget('instagram', 'multi_image', 'image')).toBe('carousel')
     expect(formatForTarget('instagram', 'text', 'none')).toBeNull()
     expect(formatForTarget('nowhere', 'text', 'none')).toBeNull()
+  })
+})
+
+describe('firstPlaceableDay', () => {
+  it('is tomorrow, across a month end', () => {
+    expect(firstPlaceableDay('2026-09-15')).toBe('2026-09-16')
+    expect(firstPlaceableDay('2026-09-30')).toBe('2026-10-01')
+    expect(firstPlaceableDay('')).toBe('')
   })
 })
