@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useSearchParams, useNavigate } from 'react-router-dom'
 import { useApp } from '../../store/app'
 import { useAuth } from '../../store/auth'
 import { Card, PageHeader, Button, Empty, Spinner } from '../../components/ui/index'
@@ -60,6 +60,7 @@ export function Insights() {
   const { activeWorkspaceId, activeWorkspace, accessToken } = useAuth()
   const { state } = useApp()
   const [params, setParams] = useSearchParams()
+  const navigate = useNavigate()
   const tab = TABS.some(t => t.key === params.get('tab')) ? params.get('tab') : 'research'
   const setTab = key => setParams(prev => { const n = new URLSearchParams(prev); n.set('tab', key); return n }, { replace: true })
 
@@ -208,6 +209,15 @@ export function Insights() {
         title="Research"
         subtitle={`What is happening around ${activeWorkspace?.name || 'this brand'}, and what we have learned from it.`}
       >
+        {/* Only once a run exists. A report button on a workspace that has
+            never run research opens a page whose only content is "nothing has
+            been run yet", which is a worse way to learn that than the empty
+            state already on this page. */}
+        {runs.length > 0 && (
+          <Button variant="secondary" size="sm" onClick={() => navigate(`/insights/report${selected?.id ? `?run=${selected.id}` : ''}`)}>
+            Brief as PDF
+          </Button>
+        )}
         <Button variant="secondary" size="sm" onClick={runResearch} disabled={running || watching}>
           {running ? 'Starting…' : watching ? 'Running…' : 'Run research'}
         </Button>

@@ -233,6 +233,11 @@ function devAgentApi(env) {
     'META_IG_TOKEN', 'META_IG_USER_ID',
     // The web providers behind the resolver and the ad-hoc tools.
     'FIRECRAWL_API_KEY', 'TAVILY_API_KEY',
+    // Posts made directly on a platform, and LinkedIn page totals — read by
+    // gatherZernioOwn, which both the run and /api/agent/performance call.
+    // devZernioApi happens to set this globally too, but relying on the load
+    // order of two unrelated plugins is not a dependency worth having.
+    'ZERNIO_API_KEY',
     // Lets the service-auth path be exercised locally rather than only in
     // production, which is where it would otherwise first be tested.
     'AGENT_RUN_SECRET',

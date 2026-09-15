@@ -157,3 +157,74 @@
   @apply text-amber-900 font-semibold;
   border-left-color: theme('colors.amber.700');
 }
+
+/* ─── Printing a report ──────────────────────────────────────────────────
+   Two pages in this app are documents rather than screens — the research
+   brief and the performance report — and "download as PDF" for both is the
+   browser's own print-to-PDF. That is a choice, not a shortcut: these
+   reports carry Arabic captions, and the JS PDF libraries within reach
+   either cannot shape Arabic at all or rasterise the page to a blurry image
+   with no selectable text. Printing keeps real text, real fonts, real RTL,
+   and adds no dependency to a bundle that already carries Konva.
+
+   ── THE ONE THING THAT MAKES OR BREAKS THIS ──
+
+   AppLayout is a fixed-height flex shell (`h-screen overflow-hidden`) whose
+   content lives in an inner scroller. Printed as-is that yields exactly one
+   page: the first viewport, with the rest of the document clipped away
+   inside an overflow paper has no concept of. So the height and overflow of
+   every ancestor has to be unwound here, or a three-page report silently
+   prints as one — and it prints as one that LOOKS complete, which is worse.
+
+   `[data-print-hide]` is on the sidebar, the topbar, the assistant drawer,
+   and every on-screen-only control inside the reports themselves. */
+@media print {
+  html, body, #root {
+    height: auto !important;
+    overflow: visible !important;
+    background: #fff !important;
+  }
+
+  /* The ancestor chain between #root and the report. Marked explicitly rather
+     than applied to every element, so a wide table's own overflow rules
+     inside the report are left alone. */
+  [data-print-shell],
+  [data-print-shell] > * {
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+    display: block !important;
+  }
+
+  [data-print-hide] { display: none !important; }
+
+  /* The page gutter belongs to the screen; paper has @page margins. */
+  [data-print-gutter] { padding: 0 !important; }
+
+  /* Colour is information here — a red "needs reconnecting" row that prints
+     grey says the opposite of what it means. */
+  *, *::before, *::after {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Never split a stat, a channel row or a post across two sheets. */
+  [data-print-keep] {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  [data-print-break] {
+    break-before: page;
+    page-break-before: always;
+  }
+
+  h1, h2, h3 { break-after: avoid; page-break-after: avoid; }
+  /* Underlined blue link text on paper is noise: the URL is printed in full
+     next to anything worth following. */
+  a { text-decoration: none !important; color: inherit !important; }
+}
+
+@page {
+  size: A4;
+  margin: 14mm 13mm;
+}

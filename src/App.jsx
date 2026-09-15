@@ -19,7 +19,9 @@ import { ContentPlans } from './pages/campaigns/ContentPlans'
 import { Schedule }                from './pages/schedule/index'
 import { EmailFlows }             from './pages/email/index'
 import { Analytics }               from './pages/analytics/index'
+import { PerformanceReport }       from './pages/analytics/PerformanceReport'
 import { Insights }                from './pages/insights/index'
+import { ResearchReport }          from './pages/insights/ResearchReport'
 import AgentPage                  from './pages/agent/index'
 import { MediaLibrary }            from './pages/media/index'
 import { SocialOverview, SocialPlatform } from './pages/social/index'
@@ -115,7 +117,13 @@ function ProtectedApp() {
             <Route path="/schedule"              element={<Schedule />} />
             <Route path="/email"                 element={<EmailFlows />} />
             <Route path="/analytics"             element={<Analytics />} />
+            {/* The two printable documents. Separate routes rather than a mode
+                on their parent pages: a report is a different object from a
+                dashboard — it has its own period, its own URL to send someone,
+                and it has to survive being printed. */}
+            <Route path="/analytics/report"      element={<PerformanceReport />} />
             <Route path="/insights"              element={<Insights />} />
+            <Route path="/insights/report"       element={<ResearchReport />} />
             {/* Research and "What We Learned" were two pages that each carried
                 a copy of the watchlist, the run history, the run button and the
                 proposed rules. They are one page with two halves now; the old
