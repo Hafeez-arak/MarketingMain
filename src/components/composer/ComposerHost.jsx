@@ -7,6 +7,7 @@ import { composedCaption, optionsFor, composerFromPost } from '../../lib/compose
 import { useConnectedAccounts } from '../../lib/useConnectedAccounts'
 import { mayPublishTo, protectionReason } from '../../lib/platformSafety'
 import { PostComposer } from './PostComposer'
+import { postLock } from '../../lib/postLock'
 
 // ─── The Create-post button, and everything behind it ──────────────────────
 // Both platform pages mount this rather than each wiring its own composer, so
@@ -101,6 +102,10 @@ export function ComposerHost({
   const [busy, setBusy]       = useState(false)
   const [note, setNote]       = useState('')
   const [initial, setInitial] = useState(null)
+  // The row the composer was opened on, for its publish state. A post already
+  // booked at Zernio has to be RE-booked when it changes, or the edit lands in
+  // our row and Zernio still sends the old version.
+  const [openedRow, setOpenedRow] = useState(null)
 
   // A post handed in from outside opens the composer prefilled. Converted
   // through composerFromPost rather than read field-by-field here, so the
@@ -112,7 +117,14 @@ export function ComposerHost({
     // setting state synchronously in an effect body is a cascading render.
     queueMicrotask(() => {
       if (cancelled) return
+      // A post that has gone out is not reopened for editing at all.
+      const lock = postLock(openPost)
+      if (lock.locked) {
+        setNote(lock.reason)
+        return
+      }
       setInitial(composerFromPost(openPost))
+      setOpenedRow(openPost)
       setNote('')
       setOpen(true)
     })
@@ -123,10 +135,20 @@ export function ComposerHost({
     setOpen(false)
     setBusy(false)
     setInitial(null)
+    setOpenedRow(null)
     onOpenPostHandled?.()
   }, [onOpenPostHandled])
 
+  const booked = !!openedRow?.id && openedRow?.publish_status === 'scheduled'
+
   const saveDraft = useCallback(async (state) => {
+    // Saving a booked post as a draft would change our copy while Zernio still
+    // publishes the old one at the old time. Schedule re-books it; cancelling
+    // the booking in the Post Queue is how it becomes a draft again.
+    if (booked && state.postId) {
+      setNote('This post is scheduled — use Schedule (or Post now) to save your changes, or cancel its schedule in the Post Queue first.')
+      return
+    }
     setBusy(true)
     const { error } = await writePost(
       accessToken, rowFrom(state, activeWorkspaceId, 'draft'),
@@ -136,7 +158,7 @@ export function ComposerHost({
     setNote('Saved as a draft.')
     close()
     onDone?.()
-  }, [accessToken, activeWorkspaceId, close, onDone])
+  }, [accessToken, activeWorkspaceId, close, onDone, booked])
 
   const send = useCallback(async (state, { schedule }) => {
     setBusy(true)
@@ -178,6 +200,8 @@ export function ComposerHost({
       // check can honour an account marked protected as well as a protected
       // platform. Without it that layer only ever sees { platform }.
       account: target,
+      // Already booked: cancel the old Zernio post and book this version.
+      reschedule: booked && !!state.postId,
     })
     setBusy(false)
 
@@ -192,7 +216,7 @@ export function ComposerHost({
     setNote(schedule ? 'Scheduled.' : 'Published.')
     close()
     onDone?.()
-  }, [accessToken, accounts, activeWorkspaceId, close, onDone])
+  }, [accessToken, accounts, activeWorkspaceId, close, onDone, booked])
 
   return (
     <>

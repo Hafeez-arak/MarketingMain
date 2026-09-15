@@ -28,6 +28,11 @@ import {
 } from '../../lib/contentPlans'
 import { BrandContextPanel } from '../../components/BrandContextPanel'
 import { openStudioForIdea, fetchSessionsForIdeas, resetIdeaMedia, publishIdeasAsPosts } from '../../lib/studioBridge'
+import { fetchScheduledPosts } from '../../lib/scheduledPosts'
+import { postLock } from '../../lib/postLock'
+import { schedulePlanPosts } from '../../lib/planScheduling'
+import { useConnectedAccounts } from '../../lib/useConnectedAccounts'
+import { MediaViewer, SlideStrip } from '../../components/PostMediaViewer'
 
 // The five stages, in order. `media` is the pictures step and `captions` the
 // words written against them — captions come after the picture on purpose, so
@@ -78,6 +83,15 @@ function thumbFor(idea) {
   if (idea.previewImageUrl) return idea.previewImageUrl
   if (idea.imageMode === 'use_reference') return (idea.references || [])[0] || ''
   return ''
+}
+
+// Every picture the post carries, in the order it goes out — all of a
+// carousel's slides, not just the first.
+function mediaUrlsFor(idea) {
+  if (isTextOnly(idea)) return []
+  if (idea.previewImageUrl) return [idea.previewImageUrl]
+  if (idea.imageMode === 'use_reference') return (idea.references || []).filter(Boolean)
+  return []
 }
 
 // ─── Main planner ───────────────────────────────────────────────────────────
@@ -213,6 +227,47 @@ export function CampaignPlanner() {
       update({ ideas: [...dbDraftIdeas, ...localOnly] })
     })
   }, [planId, accessToken, activeWorkspaceId])
+
+  // ── What has already gone out ───────────────────────────────────────────
+  // The post rows this plan produced, keyed by idea. An idea whose post has
+  // been published (or is publishing) is read-only everywhere on this page:
+  // the planner used to keep every field live, and saving again rewrote a
+  // post that was already on Instagram. See lib/postLock.js.
+  const { allAccounts: connectedAccounts, loading: accountsLoading } = useConnectedAccounts()
+  const [planPosts, setPlanPosts] = useState({})
+  const [postsTick, setPostsTick] = useState(0)
+  const savedIdeaKey = ideas.filter(i => !i.isNew && !String(i.id).startsWith('new_')).map(i => i.id).join(',')
+  useEffect(() => {
+    if (!savedIdeaKey || !accessToken || !activeWorkspaceId) return
+    let alive = true
+    fetchScheduledPosts(activeWorkspaceId, accessToken, { planIdeaIds: savedIdeaKey.split(',') }).then(rows => {
+      if (!alive) return
+      const byIdea = {}
+      for (const r of rows) (byIdea[r.plan_idea_id] ||= []).push(r)
+      setPlanPosts(byIdea)
+    })
+    return () => { alive = false }
+  }, [savedIdeaKey, accessToken, activeWorkspaceId, postsTick])
+
+  // Locked when ANY of the idea's posts has gone out — the idea's words and
+  // picture are what went out, so changing them would only make the plan
+  // disagree with the platform.
+  function ideaLock(idea) {
+    for (const row of planPosts[idea.id] || []) {
+      const lock = postLock(row)
+      if (lock.locked) return { ...lock, url: row.platform_post_url || '' }
+    }
+    return null
+  }
+  const isLocked = idea => !!ideaLock(idea)
+
+  // The full-screen picture viewer — { urls, videoUrl, start } or null.
+  const [viewer, setViewer] = useState(null)
+  function openMedia(idea, start = 0) {
+    const urls = mediaUrlsFor(idea)
+    if (!urls.length && !idea.previewVideoUrl) return
+    setViewer({ urls, videoUrl: idea.previewVideoUrl || '', start })
+  }
 
   // ── Captions ─────────────────────────────────────────────────────────────
   // Fire arak-draft-copy for a set of ideas — ONE call per idea, so a slow or
@@ -606,7 +661,9 @@ export function CampaignPlanner() {
   // text says — LinkedIn cannot edit a poll once it is published.
   const pollReady = i => i.postFormat !== 'poll' || pollProblems(i.platformOptions?.poll).length === 0
   const captionReady = i => (i.wantsCaption === false || hasCaption(i)) && pollReady(i)
-  const captionsMissing = approvedIdeas.filter(i => !captionReady(i))
+  const captionsMissing = approvedIdeas.filter(i => !isLocked(i) && !captionReady(i))
+  // What saving the plan will write: approved posts that haven't gone out.
+  const toSchedule = approvedIdeas.filter(i => !isLocked(i))
   const captionsDrafting = approvedIdeas.some(i => i.draftStatus === 'drafting')
 
   // Arriving on the captions step writes the options for every post that still
@@ -617,7 +674,7 @@ export function CampaignPlanner() {
   useEffect(() => {
     if (step !== 'captions' || !accessToken) return
     const todo = approvedIdeas.filter(i =>
-      needsAiCaption(i) && !hasCaption(i) && !autoDraftedRef.current.has(i.id) &&
+      !isLocked(i) && needsAiCaption(i) && !hasCaption(i) && !autoDraftedRef.current.has(i.id) &&
       (i.draftStatus === 'not_started' || !i.draftStatus || (i.draftStatus === 'ready' && !(i.captionOptions || []).length)))
     if (!todo.length) return
     todo.forEach(i => autoDraftedRef.current.add(i.id))
@@ -627,6 +684,7 @@ export function CampaignPlanner() {
   // Start one over. Clears the accepted version but keeps the Studio session
   // and the last thumbnail — what was tried before is useful context.
   async function redoMedia(idea) {
+    if (isLocked(idea)) return
     const res = await resetIdeaMedia(accessToken, idea.id)
     if (res.error) { setError(res.error); return }
     onIdeaChange({ ...idea, mediaStatus: 'none', mediaVersionId: null })
@@ -644,6 +702,7 @@ export function CampaignPlanner() {
   async function saveMediaImages(urls) {
     const idea = mediaPickIdea
     if (!idea) return { ok: true }
+    if (isLocked(idea)) return { error: 'This post has already gone out, so its picture can’t be changed.' }
     // Clearing every image is a real choice — it puts the idea back to having
     // its picture made in the Studio, rather than claiming one that isn't there.
     const mode = urls.length ? 'use_reference' : 'studio'
@@ -656,11 +715,21 @@ export function CampaignPlanner() {
     return { ok: true }
   }
 
+  // A carousel's slides, put in a new order from the pictures step. Saved at
+  // once — the order is what goes out.
+  async function reorderSlides(idea, urls) {
+    if (isLocked(idea)) return
+    onIdeaChange({ ...idea, references: urls })
+    const res = await updateIdea(accessToken, idea.id, { reference_image_urls: urls })
+    if (res.error) setError(`Couldn't save the slide order: ${res.error}`)
+  }
+
   // Open (or reopen) Creative Studio for one idea. An idea with a session goes
   // straight to it; one without goes to ?ideaId=, where the Studio pre-fills
   // its composer and creates the session at the first generation. The Studio's
   // "Back to plan" returns to the pictures step.
   async function openStudio(idea) {
+    if (isLocked(idea)) return
     const result = await openStudioForIdea(accessToken, idea)
     if (result.error) { setError(result.error); return }
     onIdeaChange({ ...idea, imageMode: 'studio', mediaStatus: idea.mediaStatus === 'ready' ? 'ready' : 'in_studio' })
@@ -673,6 +742,7 @@ export function CampaignPlanner() {
   }
 
   async function onIdeaRemove(idea) {
+    if (isLocked(idea)) return
     update({ ideas: ideas.filter(i => i.id !== idea.id) })
     // isNew ideas never made it to the database — nothing to delete.
     if (idea.isNew) return
@@ -740,11 +810,15 @@ export function CampaignPlanner() {
 
   async function bulkStatus(status) {
     setBusy(true)
-    await setAllIdeaStatus(accessToken, planId, status)
+    // A post that has gone out keeps its approval — "Reset" must not pull it
+    // back to undecided.
+    const lockedIds = ideas.filter(isLocked).map(i => i.id)
+    await setAllIdeaStatus(accessToken, planId, status, { exceptIds: lockedIds })
     // Same scoping as the DB write: "Reset" touches everything, Approve all /
     // Reject all only ideas still 'proposed'.
-    const affected = ideas.filter(i => !i.isNew && (status === 'proposed' || i.status === 'proposed'))
-    update({ ideas: ideas.map(i => (status === 'proposed' || i.status === 'proposed') ? { ...i, status } : i) })
+    const touches = i => !lockedIds.includes(i.id) && (status === 'proposed' || i.status === 'proposed')
+    const affected = ideas.filter(i => !i.isNew && touches(i))
+    update({ ideas: ideas.map(i => touches(i) ? { ...i, status } : i) })
     logIdeaEvents(activeWorkspaceId, accessToken, affected.map(i => ({
       planId, ideaId: i.id,
       event: status === 'rejected' ? 'rejected' : status === 'approved' ? 'approved' : 'edited',
@@ -773,8 +847,9 @@ export function CampaignPlanner() {
   }
 
   // ── Captions step: per-post writes ──────────────────────────────────────
-  function patchLocal(idea, patch) { onIdeaChange({ ...idea, ...patch }) }
+  function patchLocal(idea, patch) { if (!isLocked(idea)) onIdeaChange({ ...idea, ...patch }) }
   async function saveIdeaFields(idea, dbPatch) {
+    if (isLocked(idea)) return
     const res = await updateIdea(accessToken, idea.id, dbPatch)
     if (res.error) setError(`Couldn't save: ${res.error}`)
   }
@@ -788,20 +863,25 @@ export function CampaignPlanner() {
     saveIdeaFields(idea, { caption_ar: '', caption_en: '' })
   }
 
-  // Finalising turns approved ideas into real post rows, from what each idea
-  // carries: its picture, its chosen (or own) caption, its date and time.
+  // Saving the plan turns approved ideas into real post rows — from what each
+  // idea carries: its picture, its chosen (or own) caption, its date and time —
+  // and then books each one at Zernio for that date and time. There is no
+  // second approval: the captions step is where every post was checked.
+  //
+  // Posts that have already gone out are never written or re-booked. A post
+  // already booked is re-booked only when this save changed what it publishes.
   // Nothing is chosen on anyone's behalf — the button stays disabled until
   // every post that needs a caption has one.
   async function finalizePlan() {
-    const approved = ideas.filter(i => i.status === 'approved')
-    if (approved.length === 0) { setError('Approve at least one idea first.'); return }
+    const approved = ideas.filter(i => i.status === 'approved' && !isLocked(i))
+    if (approved.length === 0) { setError(approvedIdeas.length ? 'Every approved post has already gone out.' : 'Approve at least one idea first.'); return }
     if (approved.some(i => !captionReady(i))) { setError('Pick a caption for every post, and finish every poll, first.'); return }
     setError(''); setBusy(true)
 
     await markIdeasProcessing(accessToken, planId, { copyMode: 'ai' })
 
     // Any post still without a date or time gets one now, the same way setup
-    // places them, so nothing reaches Approvals unscheduled by accident.
+    // places them, so nothing is left unscheduled by accident.
     const readyIdeas = distributeDates(approved, { startDate, endDate, postingDays })
       .map(i => ({ ...i, time: i.time || DEFAULT_POST_TIME }))
 
@@ -811,14 +891,24 @@ export function CampaignPlanner() {
       setBusy(false); setError(`The posts couldn't be saved: ${res.error}`); return
     }
     const posts = res.posts || []
+    const skipped = res.skipped || []
 
-    const wroteRow = new Set(posts.map(p => p.ideaId))
+    // An idea whose post went out between loading and saving was marked
+    // processing above like the rest; it is finished, not failed.
+    const wroteRow = new Set([...posts.map(p => p.ideaId), ...skipped.map(p => p.ideaId)])
     await markIdeasGenerated(accessToken, [...wroteRow])
     const noRow = readyIdeas.filter(i => !wroteRow.has(i.id)).map(i => i.id)
     if (noRow.length) await markIdeasGenerated(accessToken, noRow, { status: 'failed', error: 'No post row was written for this idea.' })
-    const warnings = [...(res.errors || [])]
 
     await updatePlan(accessToken, planId, { status: 'active' })
+
+    // Book them. Read back fresh rather than trusted from the write, because
+    // booking decides from publish state the write never touched.
+    const rows = await fetchScheduledPosts(activeWorkspaceId, accessToken, { ids: posts.map(p => p.id).filter(Boolean) })
+    const booking = await schedulePlanPosts({
+      rows, accounts: connectedAccounts, workspaceId: activeWorkspaceId,
+      changedIds: new Set(posts.filter(p => !p.wasScheduled || p.changed).map(p => p.id)),
+    })
 
     // Video renders still run in the background, each polling for its own
     // cover image before firing — only for ideas whose video does not already
@@ -830,7 +920,18 @@ export function CampaignPlanner() {
     })
 
     setBusy(false)
-    update({ step: 'done', manualResult: { count: posts.length, warnings } })
+    setPostsTick(t => t + 1)
+    const ideaTitle = row => (ideas.find(i => i.id === row.plan_idea_id)?.title) || row.topic || 'Untitled post'
+    update({
+      step: 'done',
+      manualResult: {
+        count: posts.length,
+        warnings: [...(res.errors || [])],
+        booked: booking.booked.length + booking.kept.length,
+        attention: booking.attention.map(a => ({ title: ideaTitle(a.row), platform: a.row.platform, reason: a.reason })),
+        wentOut: skipped.length + booking.skipped.length,
+      },
+    })
   }
 
   const brandReady = state.brandProfile && !isBrandProfileEmpty(state.brandProfile)
@@ -1286,7 +1387,7 @@ export function CampaignPlanner() {
                   {group.ideas.map(idea => (
                     <IdeaCard key={idea.id} idea={idea} index={ideas.indexOf(idea)} accessToken={accessToken} workspaceId={activeWorkspaceId}
                       planPlatforms={platforms}
-                      autoEdit={idea.id === autoEditId}
+                      autoEdit={idea.id === autoEditId} lock={ideaLock(idea)}
                       onChange={onIdeaChange} onRemove={onIdeaRemove} onCreate={onIdeaCreate} />
                   ))}
                 </div>
@@ -1347,15 +1448,24 @@ export function CampaignPlanner() {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             {mediaIdeas.map(idea => {
               const ownMedia = hasOwnMedia(idea)
-              const st = hasMedia(idea) ? 'ready' : (idea.mediaStatus || 'none')
+              const lock = ideaLock(idea)
+              const st = lock ? 'sent' : hasMedia(idea) ? 'ready' : (idea.mediaStatus || 'none')
               const sess = studioSessions[idea.id]
               const thumb = thumbFor(idea)
+              const urls = mediaUrlsFor(idea)
               const refCount = (idea.references || []).length
+              const canOpen = urls.length > 0 || !!idea.previewVideoUrl
               return (
-                <Card key={idea.id} className={`p-3 flex flex-col gap-2.5 ${st === 'ready' ? 'border-sage-200 bg-sage-50/30' : ''}`}>
+                <Card key={idea.id} className={`p-3 flex flex-col gap-2.5 ${st === 'ready' || st === 'sent' ? 'border-sage-200 bg-sage-50/30' : ''}`}>
                   <div className="flex items-start gap-3">
                     {thumb ? (
-                      <PostImage src={thumb} alt="" className="w-20 h-20 object-cover border border-border flex-shrink-0" />
+                      <button type="button" onClick={() => openMedia(idea)} disabled={!canOpen} title="Open the picture"
+                        className="relative w-20 h-20 border border-border hover:border-amber-400 overflow-hidden flex-shrink-0">
+                        <PostImage src={thumb} alt="" className="w-full h-full object-cover" />
+                        {urls.length > 1 && (
+                          <span className="absolute top-1 right-1 text-[9px] font-bold bg-black/65 text-white px-1.5 leading-[1.6]">{urls.length}</span>
+                        )}
+                      </button>
                     ) : (
                       <div className="w-20 h-20 border border-dashed border-border bg-surface-subtle flex items-center justify-center flex-shrink-0 text-text-disabled text-xl">
                         {idea.mediaType === 'video' ? '🎬' : '🖼'}
@@ -1371,24 +1481,45 @@ export function CampaignPlanner() {
                         {formatsFor(idea.platform).find(f => f.id === idea.postFormat)?.label || 'Feed image'} · {aspectLabel(idea.aspectRatio)}
                       </p>
                       <span className={`inline-block mt-1.5 text-[10px] font-bold px-1.5 py-0.5 leading-[1.4] ${
-                        st === 'ready' ? 'bg-sage-100 text-sage-700'
+                        st === 'ready' || st === 'sent' ? 'bg-sage-100 text-sage-700'
                         : st === 'in_studio' ? 'bg-violet-50 text-violet-700'
                         : 'bg-stone-100 text-text-tertiary'}`}>
-                        {ownMedia ? `✓ Your image${refCount > 1 ? `s (${refCount})` : ''}` : st === 'ready' ? '✓ Made in Studio' : st === 'in_studio' ? '🎬 In Studio' : 'Needs a picture'}
+                        {lock ? (lock.state === 'publishing' ? '↗ Publishing' : '✓ Published') : ownMedia ? `✓ Your image${refCount > 1 ? `s (${refCount})` : ''}` : st === 'ready' ? '✓ Made in Studio' : st === 'in_studio' ? '🎬 In Studio' : 'Needs a picture'}
                       </span>
                     </div>
                   </div>
+                  {/* Every slide, in the order it goes out. Reordering is for
+                      your own images — a Studio picture is one image. */}
+                  {urls.length > 1 && (
+                    <div>
+                      <p className="text-[10px] text-text-tertiary mb-1">
+                        {lock ? 'Slides, as they went out' : ownMedia ? 'Slide order — drag or use ‹ › to move' : 'Slides'}
+                      </p>
+                      <SlideStrip urls={urls} onOpen={i => openMedia(idea, i)}
+                        onReorder={!lock && ownMedia ? next => reorderSlides(idea, next) : undefined} />
+                    </div>
+                  )}
                   <div className="flex items-center gap-1.5 mt-auto pt-1 flex-wrap">
-                    <Button size="xs" variant={st === 'ready' ? 'secondary' : 'primary'} onClick={() => setMediaPickIdea(idea)}>
-                      {ownMedia ? 'Change image' : 'Use my image'}
-                    </Button>
-                    <Button size="xs" variant="secondary" onClick={() => openStudio(idea)}>
-                      {idea.mediaStatus === 'ready' ? 'Edit in Studio' : sess ? 'Back to Studio' : 'Make in Studio'}
-                    </Button>
-                    {idea.mediaStatus === 'ready' && (
-                      <button onClick={() => redoMedia(idea)}
-                        title="Start this one over — the picture is unset, the Studio session is kept"
-                        className="text-[11px] text-text-tertiary hover:text-red-500 transition-colors ml-auto">Reset</button>
+                    {lock ? (
+                      <>
+                        {canOpen && <Button size="xs" variant="secondary" onClick={() => openMedia(idea)}>View</Button>}
+                        {lock.url && <a href={lock.url} target="_blank" rel="noreferrer" className="text-[11px] font-semibold text-amber-700 hover:underline">View post ↗</a>}
+                        <span className="text-[10px] text-text-tertiary">Gone out — can’t be changed.</span>
+                      </>
+                    ) : (
+                      <>
+                        <Button size="xs" variant={st === 'ready' ? 'secondary' : 'primary'} onClick={() => setMediaPickIdea(idea)}>
+                          {ownMedia ? 'Change image' : 'Use my image'}
+                        </Button>
+                        <Button size="xs" variant="secondary" onClick={() => openStudio(idea)}>
+                          {idea.mediaStatus === 'ready' ? 'Edit in Studio' : sess ? 'Back to Studio' : 'Make in Studio'}
+                        </Button>
+                        {idea.mediaStatus === 'ready' && (
+                          <button onClick={() => redoMedia(idea)}
+                            title="Start this one over — the picture is unset, the Studio session is kept"
+                            className="text-[11px] text-text-tertiary hover:text-red-500 transition-colors ml-auto">Reset</button>
+                        )}
+                      </>
                     )}
                   </div>
                 </Card>
@@ -1425,7 +1556,7 @@ export function CampaignPlanner() {
                 <h2 className="text-base font-bold text-text tracking-tight">Pick a caption for each post</h2>
                 <p className="text-xs text-text-secondary mt-0.5">
                   Three options written from each picture and its idea. Choose one, edit it if you like,
-                  and check the date and time.
+                  and check the date and time — this is the last check before the posts are scheduled.
                 </p>
               </div>
               <p className="text-sm font-semibold text-text flex-shrink-0">
@@ -1437,6 +1568,7 @@ export function CampaignPlanner() {
           <div className="space-y-3">
             {approvedIdeas.map(idea => (
               <CaptionCard key={idea.id} idea={idea} thumbUrl={thumbFor(idea)} language={captionLanguage}
+                mediaUrls={mediaUrlsFor(idea)} onOpenMedia={i => openMedia(idea, i)} lock={ideaLock(idea)}
                 dateMin={startDate} dateMax={endDate} redrafting={redraftingId === idea.id}
                 onPick={opt => pickCaption(idea, opt)}
                 onEdit={patch => patchLocal(idea, patch)}
@@ -1458,8 +1590,10 @@ export function CampaignPlanner() {
               <Button variant="secondary" onClick={() => update({ step: afterReview === 'media' ? 'media' : 'review' })}>
                 {afterReview === 'media' ? 'Back to pictures' : 'Back to ideas'}
               </Button>
-              <Button onClick={finalizePlan} disabled={busy || approvedCount === 0 || captionsMissing.length > 0}>
-                {busy ? <><Spinner size="sm" /> Saving your posts…</> : `Save ${approvedCount} post${approvedCount === 1 ? '' : 's'} to Approvals`}
+              <Button onClick={finalizePlan} disabled={busy || accountsLoading || toSchedule.length === 0 || captionsMissing.length > 0}>
+                {busy ? <><Spinner size="sm" /> Scheduling your posts…</>
+                  : toSchedule.length === 0 ? 'Everything has gone out'
+                  : `Schedule ${toSchedule.length} post${toSchedule.length === 1 ? '' : 's'}`}
               </Button>
               <p className="text-xs text-text-tertiary flex-1">
                 {captionsMissing.length > 0
@@ -1468,7 +1602,7 @@ export function CampaignPlanner() {
                     : captionsMissing.some(i => hasCaption(i) || i.wantsCaption === false)
                       ? `Finish ${captionsMissing.length} more post${captionsMissing.length === 1 ? '' : 's'} — a caption, or a poll's question and answers.`
                       : `Pick a caption for ${captionsMissing.length} more post${captionsMissing.length === 1 ? '' : 's'}.`
-                  : 'Everything has its picture, words and time. Posts land in Approvals for a final check.'}
+                  : 'Each post is booked for its date and time (KSA). Anything that can’t be booked waits in the Post Queue.'}
               </p>
             </div>
           </div>
@@ -1477,38 +1611,49 @@ export function CampaignPlanner() {
 
       {/* ── STEP: DONE ── */}
       {step === 'done' && (
-        <Card className="p-8 text-center space-y-4">
-          <div className="w-12 h-12 border border-sage-200 bg-sage-100 flex items-center justify-center mx-auto">
-            <svg className="w-7 h-7 text-sage-600" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
-          </div>
-          <div>
+        <Card className="p-8 space-y-4">
+          <div className="text-center space-y-3">
+            <div className="w-12 h-12 border border-sage-200 bg-sage-100 flex items-center justify-center mx-auto">
+              <svg className="w-7 h-7 text-sage-600" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
+            </div>
             <h2 className="text-lg font-bold text-text tracking-tight">
-              Plan saved — your posts are ready to review.
+              {manualResult?.booked > 0 ? 'Plan saved — your posts are scheduled.' : 'Plan saved.'}
             </h2>
-            <p className="text-sm text-text-secondary mt-1 max-w-md mx-auto">
-              <span className="font-semibold text-text">{approvedCount} idea{approvedCount === 1 ? '' : 's'}</span> approved for <span className="font-semibold text-text">{name}</span>
-              {manualResult?.count > 0 && (
-                <>, and <span className="font-semibold text-text">{manualResult.count} post{manualResult.count === 1 ? '' : 's'}</span> {manualResult.count === 1 ? 'is' : 'are'} waiting in Post Approvals</>
-              )}. Give them a last look there, then approve and schedule.
+            <p className="text-sm text-text-secondary max-w-md mx-auto">
+              <span className="font-semibold text-text">{name}</span>
+              {manualResult?.booked > 0 && <>: <span className="font-semibold text-text">{manualResult.booked} post{manualResult.booked === 1 ? '' : 's'}</span> booked for {manualResult.booked === 1 ? 'its' : 'their'} date and time</>}
+              {manualResult?.wentOut > 0 && <>, {manualResult.wentOut} already gone out and left as {manualResult.wentOut === 1 ? 'it was' : 'they were'}</>}
+              . Reschedule, edit or cancel any of them from the Post Queue.
             </p>
-            {approvedIdeas.some(i => (i.platforms?.length ? i.platforms : [i.platform]).some(isProtectedPlatform)) && (
-              <p className="text-xs text-sky-800 mt-2 max-w-md mx-auto">
-                LinkedIn posts are drafts: they can be reviewed and edited in Approvals, but nothing here posts them to the page.
-              </p>
-            )}
-            {manualResult?.warnings?.length > 0 && (
-              <p className="text-xs text-red-600 mt-2 max-w-md mx-auto">
-                Needs a look: {manualResult.warnings.join(' · ')}
-              </p>
-            )}
           </div>
+          {manualResult?.attention?.length > 0 && (
+            <div className="border border-amber-200 bg-amber-50/60 p-4 max-w-xl mx-auto">
+              <p className="text-xs font-semibold text-amber-800 mb-2">
+                {manualResult.attention.length} post{manualResult.attention.length === 1 ? '' : 's'} not scheduled — {manualResult.attention.length === 1 ? 'it waits' : 'they wait'} in the Post Queue under “Needs attention”:
+              </p>
+              <ul className="space-y-1">
+                {manualResult.attention.map((a, i) => (
+                  <li key={i} className="text-[11px] text-text-secondary leading-relaxed">
+                    <span className="font-semibold text-text">{a.title}</span> <span className="text-text-tertiary">({targetLabel(a.platform)})</span> — {a.reason}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {manualResult?.warnings?.length > 0 && (
+            <p className="text-xs text-red-600 max-w-md mx-auto text-center">
+              Needs a look: {manualResult.warnings.join(' · ')}
+            </p>
+          )}
           <div className="flex items-center justify-center gap-3 pt-2 flex-wrap">
-            <Button onClick={() => navigate('/social/approvals')}>Open Post Approvals</Button>
+            <Button onClick={() => navigate('/social/approvals')}>Open Post Queue</Button>
             <Button variant="secondary" onClick={() => navigate('/campaigns')}>View all plans</Button>
             <Button variant="secondary" onClick={() => { clear(); navigate('/campaigns/plan') }}>Plan another month</Button>
           </div>
         </Card>
       )}
+
+      {viewer && <MediaViewer {...viewer} onClose={() => setViewer(null)} />}
 
       {/* Pictures-step image picker — persists straight to the idea. */}
       {mediaPickIdea && (

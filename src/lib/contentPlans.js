@@ -275,9 +275,13 @@ export async function updateIdea(accessToken, ideaId, patch) {
 // all / Reject all must NOT — without the status=eq.proposed scope, clicking
 // "Approve all" would also flip already-rejected ideas back to approved
 // (and vice versa), silently overturning decisions the user already made.
-export async function setAllIdeaStatus(accessToken, planId, status) {
+//
+// `exceptIds` leaves those ideas alone whatever the status — the planner passes
+// the ideas whose posts have already gone out, which keep their approval.
+export async function setAllIdeaStatus(accessToken, planId, status, { exceptIds = [] } = {}) {
   try {
-    const scope = status === 'proposed' ? '' : '&status=eq.proposed'
+    const scope = (status === 'proposed' ? '' : '&status=eq.proposed') +
+      (exceptIds.length ? `&id=not.in.(${exceptIds.join(',')})` : '')
     const res = await fetch(`${SUPABASE_URL}/rest/v1/plan_ideas?plan_id=eq.${planId}${scope}`, {
       method: 'PATCH',
       headers: { ...authHeaders(accessToken), 'Content-Type': 'application/json', Prefer: 'return=representation' },

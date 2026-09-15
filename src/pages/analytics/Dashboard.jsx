@@ -378,8 +378,8 @@ export function AnalyticsDashboard({ dash, days, accountId = '', onRetry, perPla
           <Empty
             icon={<svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>}
             title="No posts in this window"
-            description="Publish a post from Post Approvals, or widen the date range above."
-            action={<Button onClick={() => navigate('/social/approvals')}>Go to Post Approvals</Button>}
+            description="Publish a post from the Post Queue, or widen the date range above."
+            action={<Button onClick={() => navigate('/social/approvals')}>Go to Post Queue</Button>}
           />
         </Card>
       ) : (

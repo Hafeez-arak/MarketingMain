@@ -2,6 +2,7 @@ import { SUPABASE_URL, SUPABASE_ANON_KEY } from './supabaseClient'
 import { brandWallToUtcISO, brandWallString, formatBrandDateTime } from './brandTime'
 import { publishPost } from './zernio'
 import { defaultWebhookUrl } from './n8nWebhooks'
+import { postLock } from './postLock'
 
 // ─── Posts, across all three tables ────────────────────────────────────────
 // Reads go through the scheduled_posts view (20260813_scheduled_posts_view.sql);
@@ -33,7 +34,7 @@ export const POST_TABLES = [
 // `from`/`to` filter on scheduled_publish_at for the calendar; omitted, you
 // get the review queue's view of the world (everything, by creation).
 export async function fetchScheduledPosts(workspaceId, accessToken, {
-  from, to, platform, publishStatus, unscheduled = false, limit = 400,
+  from, to, platform, publishStatus, unscheduled = false, limit = 400, planIdeaIds, ids,
 } = {}) {
   if (!workspaceId) return []
   const q = [
@@ -48,6 +49,15 @@ export async function fetchScheduledPosts(workspaceId, accessToken, {
   if (from) q.push(`scheduled_publish_at=gte.${from}`)
   if (to)   q.push(`scheduled_publish_at=lte.${to}`)
   if (platform) q.push(`platform=eq.${platform}`)
+  // A plan's own posts (the planner's lock check), or specific rows.
+  if (planIdeaIds) {
+    if (!planIdeaIds.length) return []
+    q.push(`plan_idea_id=in.(${planIdeaIds.join(',')})`)
+  }
+  if (ids) {
+    if (!ids.length) return []
+    q.push(`id=in.(${ids.join(',')})`)
+  }
   // An array means "any of these" — the tray wants not_published OR failed,
   // and issuing that as two queries would need merging and re-sorting here.
   if (publishStatus) {
@@ -103,8 +113,11 @@ export async function patchPost(accessToken, postTable, postId, patch) {
 // than failing after the drop.
 export function moveKindFor(post) {
   const status = post?.publish_status || 'not_published'
-  if (status === 'published')  return { kind: 'blocked', reason: 'Already published — this post has gone out.' }
   if (status === 'publishing') return { kind: 'blocked', reason: 'Publishing right now — wait for it to finish before moving it.' }
+  // Published, or scheduled for a moment that has already passed — gone out
+  // either way, and "moving" it would re-book a post that is already live.
+  const lock = postLock(post)
+  if (lock.locked) return { kind: 'blocked', reason: lock.reason }
   if (status === 'scheduled')  return { kind: 'remote',  reason: 'Scheduled — moving it re-books the slot.' }
   return { kind: 'local', reason: '' }
 }

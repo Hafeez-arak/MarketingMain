@@ -2,6 +2,7 @@ import { SUPABASE_URL, SUPABASE_ANON_KEY } from './supabaseClient'
 import { defaultAspectRatio, getFormat, formatForTarget, derivePostKind } from './postFormats'
 import { isProtectedPlatform } from './platformSafety'
 import { finalizeVersion } from './creativeStudio'
+import { postLock } from './postLock'
 
 // ─── Plan ↔ Creative Studio bridge ─────────────────────────────────────────
 // The join between the two halves of the app that never spoke: contentPlans
@@ -406,23 +407,48 @@ function copyFieldsFor(platform, { caption, captionAr, captionEn, hashtags }) {
   return { ...common, caption: caption || '' }
 }
 
-// Find the post row a plan idea already has on this table, if any.
+// Find the post row a plan idea already has on this table FOR THIS PLATFORM.
 //
 // This is what makes re-sending an asset UPDATE rather than duplicate. An idea
 // marked image_mode='studio' already had a row written for it by the plan
 // generation workflow — with an empty image_url, waiting for exactly this.
 // Inserting a second row instead would leave the empty one sitting in
 // Approvals forever, indistinguishable from a post whose generation failed.
-async function findPostForIdea(accessToken, table, ideaId) {
+//
+// The platform filter is not optional. Every platform shares generated_posts,
+// so an idea aimed at Instagram AND LinkedIn looked up "its row" twice and got
+// the Instagram one both times: the LinkedIn pass PATCHed over it, and the plan
+// ended up with one post where it asked for two.
+//
+// Publish state comes back with the row so callers can refuse a post that has
+// already gone out (postLock.js) and know when an edit has to re-book a slot.
+const EXISTING_POST_SELECT = [
+  'id', 'platform', 'status', 'publish_status', 'published_at', 'scheduled_publish_at', 'zernio_post_id',
+  'caption', 'caption_ar', 'caption_en', 'hashtags', 'first_comment', 'format', 'platform_options',
+  'image_url', 'image_urls', 'video_url', 'cover_image_url', 'scheduled_date', 'publish_time',
+].join(',')
+async function findPostForIdea(accessToken, table, ideaId, platform) {
   if (!ideaId) return null
   try {
     const res = await fetch(
-      `${SUPABASE_URL}/rest/v1/${table}?plan_idea_id=eq.${ideaId}&select=id,image_url,video_url&order=created_at.desc&limit=1`,
+      `${SUPABASE_URL}/rest/v1/${table}?plan_idea_id=eq.${ideaId}` +
+      `${platform ? `&platform=eq.${encodeURIComponent(platform)}` : ''}` +
+      `&select=${EXISTING_POST_SELECT}&order=created_at.desc&limit=1`,
       { headers: authHeaders(accessToken) },
     )
     if (!res.ok) return null
     return (await res.json())[0] || null
   } catch { return null }
+}
+
+// Whether writing `patch` over `row` would change anything that reaches the
+// platform. A scheduled post only needs re-booking at Zernio when it would.
+const PUBLISHED_FIELDS = ['caption', 'hashtags', 'first_comment', 'format', 'platform_options',
+  'image_url', 'image_urls', 'video_url', 'cover_image_url', 'scheduled_date', 'publish_time']
+export function changesPublishedPost(row, patch) {
+  if (!row) return true
+  return PUBLISHED_FIELDS.some(k => k in patch &&
+    JSON.stringify(patch[k] ?? (Array.isArray(row[k]) ? [] : '')) !== JSON.stringify(row[k] ?? (Array.isArray(patch[k]) ? [] : '')))
 }
 
 // Send one finished version to one or more platforms.
@@ -468,7 +494,7 @@ export async function sendVersionToPosts(workspaceId, accessToken, {
     // refuse it next, and a row already in pending_publish would sit there
     // with nothing ever coming to pick it up.
     if (mode !== 'queue' && isProtectedPlatform(platform)) {
-      errors.push(`${platform}: drafts only — send it to Approvals instead of publishing or scheduling.`)
+      errors.push(`${platform}: drafts only — send it to the Post Queue instead of publishing or scheduling.`)
       continue
     }
     // Copy is written only when there is copy to write. Under the media-first
@@ -498,8 +524,14 @@ export async function sendVersionToPosts(workspaceId, accessToken, {
     base.media_type = media.video_url ? 'video' : 'image'
 
     try {
-      const existing = await findPostForIdea(accessToken, table, ideaId)
+      const existing = await findPostForIdea(accessToken, table, ideaId, platform)
       if (!existing && attachOnly) continue      // nothing to fill in yet — finalising the plan will make it
+      // A post that has gone out keeps what went out. Its picture is history.
+      const lock = postLock(existing)
+      if (lock.locked) { errors.push(`${platform}: ${lock.reason}`); continue }
+      // A booked post keeps its slot: 'queue' must not drop it back to review
+      // while Zernio still holds it. The caller re-books it (see `rebook`).
+      if (existing?.publish_status === 'scheduled') delete base.status
       const url = existing
         ? `${SUPABASE_URL}/rest/v1/${table}?id=eq.${existing.id}`
         : `${SUPABASE_URL}/rest/v1/${table}`
@@ -510,7 +542,10 @@ export async function sendVersionToPosts(workspaceId, accessToken, {
       })
       if (!res.ok) { errors.push(`${platform}: ${await res.text()}`); continue }
       const [row] = await res.json()
-      posts.push({ platform, table, id: row?.id, updated: !!existing })
+      posts.push({
+        platform, table, id: row?.id, updated: !!existing,
+        rebook: existing?.publish_status === 'scheduled' && changesPublishedPost(existing, base),
+      })
     } catch (err) { errors.push(`${platform}: ${err.message}`) }
   }
 
@@ -601,6 +636,7 @@ export async function publishIdeasAsPosts(workspaceId, accessToken, planId, idea
 
   const posts = []
   const errors = []
+  const skipped = []
 
   for (const idea of list) {
     const label = idea.title || idea.topic || 'Untitled idea'
@@ -669,11 +705,12 @@ export async function publishIdeasAsPosts(workspaceId, accessToken, planId, idea
         // those 'manual' would quietly lie to Insights about which posts a
         // human actually wrote.
         source: idea.copyMode === 'own' ? 'manual' : 'plan',
-        // Still pending_review rather than approved. Writing your own caption
-        // is not the same as having checked it against the picture that ended
-        // up attached, and Approvals is where that check already happens for
-        // every other kind of post.
-        status: 'pending_review',
+        // No second approval: the plan's captions step is where each post was
+        // checked against its picture, and its date and time were chosen
+        // there. 'pending_publish' says "approved, waiting to be booked";
+        // schedulePlanPosts books it. A protected platform stays a draft for
+        // review, because nothing here may publish to it.
+        status: isProtectedPlatform(platform) ? 'pending_review' : 'pending_publish',
       }
       base.platform = platform
       base.media_type = f.media === 'none' ? 'none' : media.video_url ? 'video' : 'image'
@@ -682,7 +719,18 @@ export async function publishIdeasAsPosts(workspaceId, accessToken, planId, idea
         // Same duplicate guard as the Studio path: an idea that already has a
         // row (because its media was attached before the plan was finalised)
         // gets that row filled in, not a second one beside it.
-        const existing = await findPostForIdea(accessToken, table, idea.id)
+        const existing = await findPostForIdea(accessToken, table, idea.id, platform)
+        // Gone out: left exactly as it went. Reported, not an error — saving a
+        // plan again after part of it is live is normal, and the rest of the
+        // plan still saves.
+        const lock = postLock(existing)
+        if (lock.locked) {
+          skipped.push({ platform, id: existing.id, ideaId: idea.id, label, reason: lock.reason })
+          continue
+        }
+        // A booked post keeps its review status; re-booking it is the caller's
+        // job, and only when something Zernio publishes actually changed.
+        if (existing?.publish_status === 'scheduled') delete base.status
         const body = existing
           ? { ...base, ...(hasMedia ? media : {}) }
           : { workspace_id: workspaceId, ...media, ...base }
@@ -696,13 +744,17 @@ export async function publishIdeasAsPosts(workspaceId, accessToken, planId, idea
         )
         if (!res.ok) { errors.push(`${label} (${platform}): ${await res.text()}`); continue }
         const [row] = await res.json()
-        posts.push({ platform, table, id: row?.id, ideaId: idea.id, updated: !!existing })
+        posts.push({
+          platform, table, id: row?.id, ideaId: idea.id, updated: !!existing,
+          wasScheduled: existing?.publish_status === 'scheduled',
+          changed: changesPublishedPost(existing, body),
+        })
       } catch (err) {
         errors.push(`${label} (${platform}): ${err.message}`)
       }
     }
   }
 
-  if (!posts.length && errors.length) return { error: errors.join(' · ') }
-  return { ok: true, posts, errors }
+  if (!posts.length && !skipped.length && errors.length) return { error: errors.join(' · ') }
+  return { ok: true, posts, errors, skipped }
 }

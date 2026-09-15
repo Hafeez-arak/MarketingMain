@@ -7,6 +7,7 @@
 // Presentational: the planner owns every write. Keeping the network out of
 // this file is what lets one board-level poll drive every card at once.
 
+import { useLayoutEffect, useRef } from 'react'
 import { Spinner, PostImage } from '../../components/ui/index'
 import { aspectLabel, formatsFor, limitsFor } from '../../lib/postFormats'
 import { targetLabel } from './planConstants'
@@ -18,10 +19,26 @@ import { DEFAULT_POST_TIME, POLL_DURATIONS, pollProblems } from './planModel'
 const LINKEDIN_SEE_MORE = 210
 const DURATION_LABEL = { ONE_DAY: '1 day', THREE_DAYS: '3 days', SEVEN_DAYS: '1 week', FOURTEEN_DAYS: '2 weeks' }
 
-const box = 'w-full text-xs bg-white border border-border rounded-lg px-3 py-2 resize-y focus:outline-none focus:border-amber-400'
+const box = 'w-full text-xs leading-relaxed bg-white border border-border rounded-lg px-3 py-2 resize-y focus:outline-none focus:border-amber-400'
+
+// A caption box as tall as its caption. A fixed three rows showed a long
+// bilingual caption a few lines at a time behind a scrollbar, so nobody could
+// read the post they were approving in one look. Grows (and shrinks) with the
+// text on every change and when the card first paints; still resizable by hand.
+function AutoTextarea({ value, minRows = 3, className = box, ...props }) {
+  const ref = useRef(null)
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${el.scrollHeight + 2}px`
+  }, [value])
+  return <textarea ref={ref} value={value} rows={minRows} className={`${className} overflow-hidden`} {...props} />
+}
 
 export function CaptionCard({
-  idea, thumbUrl, language = 'both', dateMin, dateMax, redrafting = false,
+  idea, thumbUrl, mediaUrls = [], language = 'both', dateMin, dateMax, redrafting = false,
+  lock = null, onOpenMedia,
   onPick, onEdit, onSaveField, onClearChoice, onRedraft, onDate, onTime, onPollEdit, onPollSave,
 }) {
   const own = idea.copyMode === 'own'
@@ -42,7 +59,13 @@ export function CaptionCard({
       {/* The picture the words are for. */}
       <div className="w-28 flex-shrink-0">
         {thumbUrl ? (
-          <PostImage src={thumbUrl} alt="" className="w-28 h-28 object-cover border border-border" />
+          <button type="button" onClick={() => onOpenMedia?.(0)} title="Open the picture"
+            className="relative block w-28 h-28 border border-border hover:border-amber-400 overflow-hidden">
+            <PostImage src={thumbUrl} alt="" className="w-full h-full object-cover" />
+            {mediaUrls.length > 1 && (
+              <span className="absolute top-1 right-1 text-[9px] font-bold bg-black/65 text-white px-1.5 leading-[1.6]">1/{mediaUrls.length}</span>
+            )}
+          </button>
         ) : textOnly ? (
           <div className="w-28 h-28 border border-border bg-surface-subtle flex flex-col items-center justify-center text-text-tertiary text-[10px] text-center px-2 gap-1">
             <span className="text-lg">{isPoll ? '📊' : '¶'}</span>
@@ -65,6 +88,7 @@ export function CaptionCard({
           <p className="text-[11px] text-text-tertiary mt-0.5">{targets.map(targetLabel).join(' + ')}</p>
         </div>
 
+        {lock?.locked ? <LockedPost idea={idea} lock={lock} showAr={showAr} showEn={showEn} /> : <>
         {/* When it goes out. Set here rather than on setup, next to the actual post. */}
         <div className="flex items-center gap-2 flex-wrap">
           <label className="text-[11px] text-text-secondary flex items-center gap-1.5">
@@ -97,12 +121,12 @@ export function CaptionCard({
           <div className="space-y-1.5">
             <p className="text-[10px] font-bold text-sage-700 uppercase tracking-wide">✎ Your caption — posted as written</p>
             {(showEn || idea.captionEn) && (
-              <textarea value={idea.captionEn || ''} rows={3}
+              <AutoTextarea value={idea.captionEn || ''} rows={3}
                 onChange={e => onEdit({ captionEn: e.target.value })}
                 onBlur={e => onSaveField('caption_en', e.target.value)} className={box} />
             )}
             {(showAr || idea.captionAr) && (
-              <textarea value={idea.captionAr || ''} rows={3} dir="rtl" placeholder="النص العربي (اختياري)"
+              <AutoTextarea value={idea.captionAr || ''} rows={3} dir="rtl" placeholder="النص العربي (اختياري)"
                 onChange={e => onEdit({ captionAr: e.target.value })}
                 onBlur={e => onSaveField('caption_ar', e.target.value)} className={box} />
             )}
@@ -125,12 +149,12 @@ export function CaptionCard({
               </span>
             </div>
             {(showAr || idea.captionAr) && (
-              <textarea value={idea.captionAr || ''} rows={3} dir="rtl"
+              <AutoTextarea value={idea.captionAr || ''} rows={3} dir="rtl"
                 onChange={e => onEdit({ captionAr: e.target.value })}
                 onBlur={e => onSaveField('caption_ar', e.target.value)} className={box} />
             )}
             {(showEn || idea.captionEn) && (
-              <textarea value={idea.captionEn || ''} rows={isLinkedIn ? 6 : 3}
+              <AutoTextarea value={idea.captionEn || ''} rows={isLinkedIn ? 6 : 3}
                 onChange={e => onEdit({ captionEn: e.target.value })}
                 onBlur={e => onSaveField('caption_en', e.target.value)} className={box} />
             )}
@@ -180,7 +204,35 @@ export function CaptionCard({
             </button>
           </div>
         )}
+        </>}
       </div>
+    </div>
+  )
+}
+
+// A post that has gone out, as it went: its words in full and when, with no
+// field that can change it. The planner used to keep every box live after a
+// post was published, and saving the plan again rewrote the live post's row.
+function LockedPost({ idea, lock, showAr, showEn }) {
+  const text = 'text-xs text-text leading-relaxed whitespace-pre-wrap break-words'
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="text-[10px] font-bold uppercase tracking-[0.08em] px-1.5 py-0.5 leading-[1.4] bg-sage-100 text-sage-700">
+          {lock.state === 'publishing' ? '↗ Publishing' : '✓ Published'}
+        </span>
+        {lock.url && (
+          <a href={lock.url} target="_blank" rel="noreferrer" className="text-[11px] font-semibold text-amber-700 hover:underline">View post ↗</a>
+        )}
+        <span className="text-[11px] text-text-tertiary">{lock.reason}</span>
+      </div>
+      {(showAr || idea.captionAr) && idea.captionAr && (
+        <p className={`${text} bg-surface-subtle border border-border px-3 py-2`} dir="rtl">{idea.captionAr}</p>
+      )}
+      {(showEn || idea.captionEn) && idea.captionEn && (
+        <p className={`${text} bg-surface-subtle border border-border px-3 py-2`}>{idea.captionEn}</p>
+      )}
+      {!idea.captionAr && !idea.captionEn && <p className="text-[11px] text-text-tertiary">Went out without a caption.</p>}
     </div>
   )
 }
