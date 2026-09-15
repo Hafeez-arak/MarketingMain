@@ -6,9 +6,11 @@ import {
   emptyComposer, setPlatform as setPlatformIn, captionStats,
   capabilities, validateComposer,
 } from '../../lib/composerState'
+import { mayPublishTo, protectionReason } from '../../lib/platformSafety'
 import { MediaPicker } from './MediaPicker'
 import { InstagramPanel, InstagramPreview } from './InstagramFields'
 import { TikTokPanel, TikTokPreview } from './TikTokFields'
+import { LinkedInPanel, LinkedInPreview } from './LinkedInFields'
 
 // ─── Create a post ─────────────────────────────────────────────────────────
 // Two columns: what you are writing on the left, what it will look like on the
@@ -144,12 +146,13 @@ function PreviewColumn({ state, accounts }) {
           <span className={`w-6 h-6 rounded-lg flex items-center justify-center text-[10px] font-bold ${meta.bg} ${meta.text}`}>
             {meta.abbr}
           </span>
-          <h3 className="font-semibold text-text">{meta.label} {state.platform === 'tiktok' ? 'Post' : 'Post'}</h3>
+          <h3 className="font-semibold text-text">{meta.label} Post</h3>
         </div>
 
         {state.platform === 'instagram' && <InstagramPreview state={state} account={account} />}
         {state.platform === 'tiktok'    && <TikTokPreview    state={state} account={account} />}
-        {state.platform !== 'instagram' && state.platform !== 'tiktok' && (
+        {state.platform === 'linkedin'  && <LinkedInPreview  state={state} account={account} />}
+        {!['instagram', 'tiktok', 'linkedin'].includes(state.platform) && (
           <p className="text-sm text-text-secondary">No preview for {meta.label} yet.</p>
         )}
       </div>
@@ -193,6 +196,22 @@ export function PostComposer({
 
   const patch  = updates => setState(s => ({ ...s, ...updates }))
   const platformAccounts = accounts.filter(a => a.platform === state.platform)
+  const formatMedia = formats.find(f => f.id === state.format)?.media
+
+  // ── Protected accounts ──
+  // ARAK's LinkedIn is the company's real page and this product does not
+  // publish to it. The refusal already exists in publishPost.js and again in
+  // the n8n workflow; what it did NOT have was a way to be seen BEFORE the
+  // button was pressed, so the only feedback was "Saved, but publishing
+  // failed" after a row had already been written as pending_publish.
+  //
+  // Checked against the chosen account row where there is one, so an Instagram
+  // account someone marks protected is covered too — not just the platform.
+  // Falls back to the platform alone when nothing is chosen yet, which is what
+  // makes the notice appear as soon as LinkedIn is selected.
+  const chosen = platformAccounts.filter(a => state.accountIds.includes(a.zernio_account_id))
+  const blocked = (chosen.length ? chosen : [{ platform: state.platform }])
+    .find(a => !mayPublishTo(a))
 
   const insertEmoji = (emoji) => {
     const el = captionRef.current
@@ -206,7 +225,7 @@ export function PostComposer({
     // A video format holds exactly one video, so a new pick REPLACES rather
     // than appends — appending would build a state validation then rejects and
     // make the user delete the old one to fix it.
-    const single = formats.find(f => f.id === state.format)?.media === 'video'
+    const single = formatMedia === 'video'
     patch({ media: single ? picked.slice(0, 1) : [...state.media, ...picked] })
   }
 
@@ -308,14 +327,21 @@ export function PostComposer({
                   className="w-full border border-border px-3 py-2 text-sm bg-white text-text focus:outline-none focus:border-amber-600" />
               </div>
 
-              <div className="mt-4 pt-4 border-t border-border">
-                <MediaStrip media={state.media}
-                  onRemove={i => patch({ media: state.media.filter((_, x) => x !== i) })}
-                  onReorder={reorder} />
-                <Button variant="outline" size="sm" onClick={() => setPicking(true)}>
-                  {state.media.length ? 'Add more media' : 'Add media'}
-                </Button>
-              </div>
+              {/* Hidden entirely on a format that carries no media — LinkedIn's
+                  text post and its poll. An "Add media" button on a poll offers
+                  something the platform refuses outright, and the validator
+                  would then have to explain why the thing it just offered is an
+                  error. */}
+              {formatMedia !== 'none' && (
+                <div className="mt-4 pt-4 border-t border-border">
+                  <MediaStrip media={state.media}
+                    onRemove={i => patch({ media: state.media.filter((_, x) => x !== i) })}
+                    onReorder={reorder} />
+                  <Button variant="outline" size="sm" onClick={() => setPicking(true)}>
+                    {state.media.length ? 'Add more media' : 'Add media'}
+                  </Button>
+                </div>
+              )}
             </Section>
 
             {state.platform === 'instagram' && (
@@ -326,6 +352,9 @@ export function PostComposer({
             {state.platform === 'tiktok' && (
               <TikTokPanel state={state} setState={setState} caps={caps}
                 accountId={state.accountIds[0]} />
+            )}
+            {state.platform === 'linkedin' && (
+              <LinkedInPanel state={state} setState={setState} caps={caps} />
             )}
 
             <Section className="border-b-0">
@@ -343,6 +372,13 @@ export function PostComposer({
 
         {/* Footer */}
         <div className="border-t border-border px-6 py-4 shrink-0 bg-white">
+          {blocked && (
+            <div className="mb-3 border border-amber-300 bg-amber-50 px-3 py-2.5">
+              <p className="text-xs font-semibold text-amber-900 mb-0.5">Drafts only</p>
+              <p className="text-xs text-amber-800">{protectionReason(blocked)}</p>
+            </div>
+          )}
+
           {(check.errors.length > 0 || check.warnings.length > 0) && (
             <div className="mb-3 space-y-1">
               {check.errors.map((e, i) => <p key={i} className="text-xs text-red-600">{e}</p>)}
@@ -362,20 +398,25 @@ export function PostComposer({
               Save as draft
             </Button>
 
+            {/* Scheduling is a publish with a delay, so it is refused on a
+                protected account for the same reason Post now is. Save as
+                draft stays available deliberately: composing and reviewing a
+                LinkedIn post is the whole point of this screen — only reaching
+                the platform is off. */}
             {!scheduling ? (
-              <Button variant="secondary" size="sm" disabled={busy}
+              <Button variant="secondary" size="sm" disabled={busy || !!blocked}
                 onClick={() => setScheduling(true)}>
                 Schedule for later
               </Button>
             ) : (
               <Button variant="secondary" size="sm"
-                disabled={busy || !check.ok || !state.scheduledFor}
+                disabled={busy || !!blocked || !check.ok || !state.scheduledFor}
                 onClick={() => onSchedule?.(state)}>
                 {busy ? <Spinner size="sm" /> : 'Confirm schedule'}
               </Button>
             )}
 
-            <Button variant="primary" size="sm" disabled={busy || !check.ok}
+            <Button variant="primary" size="sm" disabled={busy || !!blocked || !check.ok}
               onClick={() => onPublish?.(state)}>
               {busy ? <Spinner size="sm" /> : 'Post now'}
             </Button>
@@ -388,7 +429,7 @@ export function PostComposer({
         onClose={() => setPicking(false)}
         onSelect={addMedia}
         multiple={caps.carousel}
-        kind={formats.find(f => f.id === state.format)?.media === 'video' ? 'video' : 'all'}
+        kind={formatMedia === 'video' ? 'video' : 'all'}
       />
     </div>
   )
