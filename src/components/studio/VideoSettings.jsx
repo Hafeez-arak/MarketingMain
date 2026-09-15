@@ -98,9 +98,14 @@ const MODEL_CAVEATS = {
   // over Kling O1 Edit's input limit, so "change the lighting" becomes a fresh
   // take instead of an edit of this one. Text/fonts/colours are unaffected at
   // any length — those are composited by us, never regenerated.
-  'seedance-2.5': 'Shape follows the source image; no aspect control on text-to-video. Past 10s, scene changes (lighting, objects, what happens) need a full re-render — text, fonts and colours stay free and instant at any length.',
+  //
+  // The old "no aspect control on text-to-video" half of this note is gone:
+  // 2.5's enum was 'auto' only when it was written and now takes real ratios.
+  'seedance-2.5': 'Sharp costs about 5× Draft here — check the movement cheaply first. Past 10s, scene changes (lighting, objects, what happens) need a full re-render; text, fonts and colours stay free and instant at any length.',
   'kling-2.5-turbo-pro': 'No style references, no end frame, one quality tier.',
   'hailuo-2.3': 'No style references, no end frame, one quality tier.',
+  'h3-max': 'No sound at all. Sharp is a 768p original enlarged to 1080p, not a native 1080p render.',
+  'gemini-omni-flash-1.1': 'Renders 16:9 or 9:16 only — other shapes are trimmed to fit when text is added. Always generates sound; there is no way to turn it off.',
 }
 
 export function ModelPicker({ modelId, onPick }) {
@@ -158,13 +163,19 @@ export function QualityRow({ model, duration, onDuration, resolution, onResoluti
   )
 }
 
-// Kling and Hailuo have no audio input at all; Veo bills it separately from
-// the clip itself, so it can't be "free" the way Seedance's is. The toggle's
-// label (and whether it even renders) follows model.audio rather than
-// assuming every model behaves like Seedance.
+// Kling, Hailuo and H3 Max have no audio input at all; Veo bills it separately
+// from the clip itself, so it can't be "free" the way Seedance's is; Gemini
+// Omni Flash has no parameter and makes sound regardless. The toggle's label
+// (and whether it even renders) follows model.audio rather than assuming every
+// model behaves like Seedance.
 export function AudioToggle({ model, audio, onAudio }) {
   if (model.audio === 'unsupported') {
     return <p className="text-[11px] text-text-tertiary">{model.label} doesn't generate audio.</p>
+  }
+  // A switch that cannot change anything is worse than no switch: it reads as
+  // a promise the render then breaks. Say what will happen instead.
+  if (model.audio === 'always') {
+    return <p className="text-[11px] text-text-tertiary">{model.label} always generates sound, invented by the model — it can't be turned off.</p>
   }
   return (
     <Toggle checked={audio} onChange={e => onAudio(e.target.checked)}

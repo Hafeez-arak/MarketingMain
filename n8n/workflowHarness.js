@@ -170,9 +170,19 @@ export async function runCodeNode(source, { env, input, postgrest, routes = [] }
     all:   () => items,
   }
 
+  // n8n hands a Code node this alongside httpRequest, and the video workflows
+  // call it to attach the downloaded clip for the upload node. Without it they
+  // threw on an undefined function and could not be tested at all — which is
+  // why the model catalog, the part of them most likely to be wrong, had no
+  // coverage. Faithful in the one way tests depend on: the bytes it was given
+  // survive on `.data`, so an assertion can check what would be uploaded.
+  const prepareBinaryData = async (data, fileName, mimeType) => ({
+    data, fileName, mimeType, fileSize: data?.length ?? 0,
+  })
+
   const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor
   const fn = new AsyncFunction('$input', '$env', source)
-  const out = await fn.call({ helpers: { httpRequest } }, $input, env)
+  const out = await fn.call({ helpers: { httpRequest, prepareBinaryData } }, $input, env)
   return { out: out?.[0]?.json ?? null, items: out, calls }
 }
 

@@ -24,6 +24,16 @@ export default defineConfig([
     files: ['api/**/*.js'],
     languageOptions: { globals: globals.node },
   },
+  // The n8n harness and its tests run in Node under vitest, and they handle
+  // real binary payloads: an image or clip is a Buffer on its way to Supabase
+  // Storage, and the tests assert on those bytes because a JSON-serialised
+  // Buffer is the one corruption that stores a file nothing can open. Buffer
+  // is correct there and was only an error because everything not named above
+  // is linted as browser code.
+  {
+    files: ['n8n/**/*.js'],
+    languageOptions: { globals: globals.node },
+  },
   {
     files: ['**/*.{js,jsx}'],
     extends: [

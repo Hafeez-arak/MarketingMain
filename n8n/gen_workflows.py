@@ -3213,7 +3213,7 @@ const instructions   = String(body.instructions || '').trim();
 // rows, so each candidate has somewhere to land the moment it finishes.
 const targets = Array.isArray(body.targets) ? body.targets : [];
 
-if (!basePrompt) return targets.map(t => ({ json: { _ok: false, version_id: t.version_id, error: 'No prompt to generate from.' } }));
+if (!basePrompt) return targets.map(t => ({ json: { _ok: false, _written: false, version_id: t.version_id, error: 'No prompt to generate from.' } }));
 
 // Two layers. The creative brief — subject, lighting, composition, materials —
 // is IDENTICAL for both candidates, because that is the variable the whole
@@ -3287,31 +3287,100 @@ async function genOpenAI(){
   return url;
 }
 
+// ─── Each candidate writes its own row, the moment it lands ────────────────
+// This node used to hand both candidates to a downstream Upload → Save pair.
+// n8n runs a node over ALL of its input items before the next node runs at
+// all, so nothing reached the table until the SLOWER provider finished: the
+// fast candidate sat rendered-but-invisible in memory while the browser showed
+// two spinners. gpt-image-2 at quality:'high' routinely takes around twice
+// nano-banana-2's time, so most of the wait the team was feeling was pure
+// queueing — the first image already existed and was being withheld from them.
+//
+// The row is written from inside the per-candidate chain instead, so each lane
+// goes ready on its own clock and the studio's poller paints it on the next
+// tick. Both candidates always STARTED together; only the reporting was ever
+// serialised, which is why this costs nothing extra and changes no output.
+//
+// It also makes the sticky note's long-standing claim ("fills each row as its
+// model returns") true for the first time.
+const SUPA = String($env.SUPABASE_URL || '').replace(/\/+$/, '');
+const SUPA_KEY = $env.SUPABASE_KEY;
+
+function supaHeaders(extra){
+  return Object.assign({ apikey: SUPA_KEY, Authorization: 'Bearer ' + SUPA_KEY }, extra || {});
+}
+
+// Deliberately no `json` flag, matching the upload in Creative Video
+// Reconcile — the one binary upload in this repo that has actually run in
+// production and recovered real clips. Passing the Buffer straight through
+// with an explicit Content-Type is what sends raw bytes; hand it to a JSON
+// serialiser instead and what lands in the bucket is the
+// {type:'Buffer',data:[...]} form — the very corruption reviveBinary() exists
+// to undo on the way in, and the one that once stored a "valid" image nobody
+// could open.
+async function uploadImage(filename, buf){
+  await req({
+    method: 'POST',
+    url: SUPA + '/storage/v1/object/' + BUCKET + '/' + filename,
+    headers: supaHeaders({ 'Content-Type': 'image/png', 'x-upsert': 'true' }),
+    body: buf,
+  });
+  return SUPA + '/storage/v1/object/public/' + BUCKET + '/' + filename;
+}
+
+async function patchVersion(versionId, patch){
+  await req({
+    method: 'PATCH',
+    url: SUPA + '/rest/v1/creative_versions?id=eq.' + versionId,
+    headers: supaHeaders({ 'Content-Type': 'application/json', Prefer: 'return=minimal' }),
+    body: patch,
+    json: true,
+  });
+}
+
 // fal's own URLs are not guaranteed to persist, and every later step (edit,
 // animate, overlay) re-reads this image — so it is copied into our bucket now
 // rather than trusted to still be there in ten minutes.
 async function oneCandidate(target){
+  const startedAt = Date.now();
   const tempUrl = target.provider === 'openai' ? await genOpenAI() : await genGemini();
   const buf = await req({ method:'GET', url: tempUrl, encoding:'arraybuffer' });
   if (!looksLikeImage(buf)) {
     throw new Error('Downloaded file is not a real image (' + buf.length + ' bytes, starts with "' + buf.toString('ascii', 0, 16) + '")');
   }
-  const base = target.version_id + '-' + Date.now() + '.png';
-  const filename = (sessionId ? sessionId + '/' : '') + base;
-  return {
-    json: { _ok: true, version_id: target.version_id, provider: target.provider, bucket: BUCKET, filename },
-    binary: { data: await prepareBinaryData(buf, base, 'image/png') },
-  };
+  const filename = (sessionId ? sessionId + '/' : '') + target.version_id + '-' + Date.now() + '.png';
+  const imageUrl = await uploadImage(filename, buf);
+  await patchVersion(target.version_id, { status: 'ready', error: '', image_url: imageUrl });
+  return { version_id: target.version_id, provider: target.provider, image_url: imageUrl,
+           seconds: Math.round((Date.now() - startedAt) / 100) / 10 };
 }
 
-// allSettled, not all — the whole point of this screen is a side-by-side
-// comparison, and one provider erroring should still leave the other one
-// standing rather than blanking the round.
-const settled = await Promise.allSettled(targets.map(oneCandidate));
-return settled.map((s, i) => s.status === 'fulfilled' ? s.value : ({
-  json: { _ok: false, version_id: targets[i].version_id, provider: targets[i].provider,
-          error: (s.reason && s.reason.message) ? s.reason.message : String(s.reason) },
-}));
+// One candidate's whole life, failure included. The failure is written from in
+// here for the same reason the success is: the other lane must not have to
+// wait on this one to find out it died.
+async function runCandidate(target){
+  try {
+    return { json: Object.assign({ _ok: true, _written: true }, await oneCandidate(target)) };
+  } catch (err) {
+    const message = String((err && err.message) || err).slice(0, 500);
+    try {
+      await patchVersion(target.version_id, { status: 'failed', error: message });
+      return { json: { _ok: false, _written: true, version_id: target.version_id,
+                       provider: target.provider, error: message } };
+    } catch (patchErr) {
+      // Supabase is unreachable from in here, so the failure could not even be
+      // recorded. Hand it downstream — that is the only reason the Mark Failed
+      // node still exists, and without it the card would spin forever.
+      return { json: { _ok: false, _written: false, version_id: target.version_id,
+                       provider: target.provider, error: message } };
+    }
+  }
+}
+
+// Promise.all rather than allSettled, because runCandidate absorbs every
+// provider failure itself. A rejection escaping it would mean a bug in this
+// node rather than a bad render, and should surface as one.
+return await Promise.all(targets.map(runCandidate));
 """
 
 CREATIVE_EDIT_JS = _CREATIVE_REQ_JS + r"""
@@ -3453,14 +3522,24 @@ const MODEL_CONFIGS = {
     t2v: 'bytedance/seedance-2.5/text-to-video',
     r2v: 'bytedance/seedance-2.5/reference-to-video',
     build(imageUrl, endImageUrl, refs) {
-      // 2.5's aspect_ratio enum is 'auto' and nothing else — sending a real
-      // ratio is rejected. Harmless on image-to-video, where auto follows the
-      // source frame; on text-to-video it means this model genuinely offers no
-      // shape control, which the picker says out loud.
+      // 2.5's aspect_ratio enum WAS 'auto' and nothing else, so this sent no
+      // ratio at all. Re-checked against fal's live schema 2026-09-15: both
+      // text-to-video and reference-to-video now take the same full list as
+      // 2.0, so the shape control is back. image-to-video still declares no
+      // enum — it follows the source frame, which is the right answer there,
+      // so the mapped ratio is simply not sent on that path.
       const input = { prompt, duration, resolution, generate_audio: generateAudio };
-      if (refs && refs.length) { input.image_urls = refs; return input; }
-      if (imageUrl) input.image_url = imageUrl;
-      if (endImageUrl) input.end_image_url = endImageUrl;
+      if (refs && refs.length) {
+        if (aspect) input.aspect_ratio = aspect;
+        input.image_urls = refs;
+        return input;
+      }
+      if (imageUrl) {
+        input.image_url = imageUrl;
+        if (endImageUrl) input.end_image_url = endImageUrl;
+        return input;
+      }
+      if (aspect) input.aspect_ratio = aspect;
       return input;
     },
   },
@@ -3500,6 +3579,76 @@ const MODEL_CONFIGS = {
       return input;
     },
   },
+  // ── Added 2026-09-15 ─────────────────────────────────────────────────────
+  // Each of these three disagrees with the Seedance shape in at least one
+  // field name or type, and every disagreement is silent rather than loud:
+  // fal ignores an unknown key instead of rejecting it, so a mis-named field
+  // produces a render that succeeds, bills in full, and ignored the input.
+  'wan-3.0-prime': {
+    i2v: 'alibaba/wan-3.0-prime/image-to-video',
+    t2v: 'alibaba/wan-3.0-prime/text-to-video',
+    r2v: 'alibaba/wan-3.0-prime/reference-to-video',
+    build(imageUrl, endImageUrl, refs) {
+      // Three traps here, all verified against fal's schema:
+      //  · the start frame is `start_image_url`, NOT the `image_url` every
+      //    other model on this list uses — the classic ignored-input case;
+      //  · sound is `audio`, not `generate_audio`, and DEFAULTS TO TRUE, so
+      //    leaving it out puts invented sound under a brand asset;
+      //  · duration is a number, not the numeric string Seedance takes.
+      const input = { prompt, duration: Number(duration) || 5, resolution, audio: generateAudio };
+      if (aspect) input.aspect_ratio = aspect;
+      if (refs && refs.length) { input.reference_image_urls = refs; return input; }
+      if (imageUrl) input.start_image_url = imageUrl;
+      if (endImageUrl) input.end_image_url = endImageUrl;
+      return input;
+    },
+  },
+  'h3-max': {
+    i2v: 'minimax/h3-max/image-to-video',
+    t2v: 'minimax/h3-max/text-to-video',
+    r2v: 'minimax/h3-max/reference-to-video',
+    build(imageUrl, endImageUrl, refs) {
+      // Resolution is UPPERCASE ('768P') and duration is a real integer, both
+      // rejected outright in the other spelling. The picker stores the
+      // lowercase form so every model in videoModels.js stays comparable, and
+      // the conversion happens here — one place, at the boundary.
+      const input = { prompt, duration: Number(duration) || 5,
+                      resolution: String(resolution || '768p').toUpperCase() };
+      if (refs && refs.length) {
+        if (aspect) input.aspect_ratio = aspect;
+        input.reference_image_urls = refs;
+        return input;
+      }
+      // image-to-video declares no aspect_ratio at all — it takes the source
+      // frame's shape, so sending one would be another ignored key.
+      if (imageUrl) {
+        input.image_url = imageUrl;
+        if (endImageUrl) input.end_image_url = endImageUrl;
+        return input;
+      }
+      if (aspect) input.aspect_ratio = aspect;
+      return input;
+    },
+  },
+  'gemini-omni-flash-1.1': {
+    i2v: 'google/gemini-omni-flash/v1.1/image-to-video',
+    t2v: 'google/gemini-omni-flash/v1.1/text-to-video',
+    r2v: 'google/gemini-omni-flash/v1.1/reference-to-video',
+    build(imageUrl, endImageUrl, refs) {
+      // References go in `image_urls` here, NOT the `reference_image_urls`
+      // that Wan and H3 Max use — the same trap, opposite direction.
+      // There is no audio parameter: this model always generates sound, which
+      // is why the picker states that instead of offering a dead toggle.
+      const input = { prompt, duration: Number(duration) || 8, resolution: resolution || '720p' };
+      if (aspect) input.aspect_ratio = aspect;
+      if (refs && refs.length) { input.image_urls = refs; return input; }
+      if (imageUrl) {
+        input.image_url = imageUrl;
+        if (endImageUrl) input.end_image_url = endImageUrl;
+      }
+      return input;
+    },
+  },
 };
 
 // MP4's magic bytes are an 'ftyp' box at offset 4, not at the start the way
@@ -3517,21 +3666,33 @@ function looksLikeVideo(buf){
 //
 //  · Seedance 2.0 takes auto/21:9/16:9/4:3/3:4/1:1/9:16 — no 4:5 bucket, the
 //    same gap gpt-image-2 has on the image side, so 3:4 is the nearest.
-//  · Seedance 2.5 takes 'auto' only — handled in its build(), not here.
-//  · Veo 3.1 takes auto/16:9/9:16 only, so it gets an ORIENTATION: portrait
-//    ratios become 9:16, everything else 16:9.
+//  · Seedance 2.5 used to take 'auto' only and was excluded here. As of
+//    2026-09-15 its enum matches 2.0's, so it now falls through to the same
+//    branch and the shape control it lacked is back.
+//  · Veo 3.1 and Gemini Omni Flash 1.1 take 16:9/9:16 only, so they get an
+//    ORIENTATION: portrait ratios become 9:16, everything else 16:9.
+//  · Wan 3.0 Prime and H3 Max take the same shapes Seedance does, but spell
+//    "let the model decide" as 'adaptive' rather than 'auto' — and H3 Max's
+//    text-to-video enum has no such value at all. So an unrecognised ratio has
+//    to land on a REAL one for H3 Max rather than on a keyword it would
+//    reject, which is what the RATIOS check below is for.
 //  · Kling and Hailuo take no aspect_ratio at all.
 //
 // An approximate ratio is acceptable now in a way it wasn't before, because
 // Creative Compose centre-crops the finished clip to the overlay's own shape.
 const SEEDANCE_MAP = { '4:5': '3:4' };
 const PORTRAIT = { '4:5': 1, '9:16': 1, '3:4': 1, '2:3': 1 };
+const RATIOS = { '21:9': 1, '16:9': 1, '4:3': 1, '1:1': 1, '3:4': 1, '9:16': 1 };
 function mapAspect(model, a) {
   const want = a || '';
-  if (model === 'veo-3.1-fast') return PORTRAIT[want] ? '9:16' : '16:9';
-  if (model === 'seedance-2.5') return '';           // enum is 'auto' only
+  if (model === 'veo-3.1-fast' || model === 'gemini-omni-flash-1.1') {
+    return PORTRAIT[want] ? '9:16' : '16:9';
+  }
   if (model === 'kling-2.5-turbo-pro' || model === 'hailuo-2.3') return '';
-  return SEEDANCE_MAP[want] || want || 'auto';
+  const mapped = SEEDANCE_MAP[want] || want;
+  if (model === 'wan-3.0-prime') return RATIOS[mapped] ? mapped : 'adaptive';
+  if (model === 'h3-max') return RATIOS[mapped] ? mapped : '16:9';
+  return mapped || 'auto';
 }
 
 const body = ($input.first().json.body) || {};
@@ -5259,32 +5420,48 @@ POST `arak-creative-video`
 ```
 
 Three modes, picked from what's in the payload:
-- `reference_image_urls` → **reference-to-video** (Seedance 2.0/2.5 only), a
-  separate endpoint taking `image_urls` (up to 9) addressed from the prompt as
-  `@Image1`. A sentence naming them is prepended automatically; without it the
-  model treats them as vague inspiration and mostly ignores them.
+- `reference_image_urls` → **reference-to-video**, a separate endpoint taking
+  up to 9 images addressed from the prompt as `@Image1`. A sentence naming them
+  is prepended automatically; without it the model treats them as vague
+  inspiration and mostly ignores them. Kling, Veo and Hailuo have no such
+  endpoint and fall through to text-to-video, so the picker refuses to send
+  references to those three rather than paying for a render that ignored them.
 - `image_url` → image-to-video, optionally with `end_image_url` as the last
-  frame (Seedance only), which is what makes a stitched two-clip sequence read
-  as a deliberate cut rather than a join.
+  frame, which is what makes a stitched two-clip sequence read as a deliberate
+  cut rather than a join.
 - neither → text-to-video, because a session may be image-only, video-only, or
   image-then-video.
 
 `model` selects the fal endpoint via MODEL_CONFIGS at the top of the Code
-node — unrecognised or missing values fall back to 'seedance-2'. Each
-model's `build()` there knows its own accepted inputs (Kling and Hailuo take
-neither `resolution` nor `aspect_ratio`; Veo's `duration` needs an 's' suffix),
-so the caller doesn't have to. `generate_audio` defaults false — free on
-Seedance, billed separately on Veo, absent on Kling/Hailuo.
+node — unrecognised or missing values fall back to 'seedance-2'. Each model's
+`build()` there knows its own accepted inputs, and those differ in ways that
+fail SILENTLY rather than loudly, because fal ignores an unknown key instead of
+rejecting it:
+- Kling and Hailuo take neither `resolution` nor `aspect_ratio`
+- Veo's `duration` needs an 's' suffix ("8s"); Wan, H3 Max and Gemini Omni
+  need a real integer, not the numeric string Seedance takes
+- Wan's start frame is `start_image_url`, not `image_url`, and its audio flag
+  is `audio`, not `generate_audio` — and it DEFAULTS TO TRUE
+- H3 Max spells resolutions uppercase ('768P')
+- Gemini Omni's references go in `image_urls`, not `reference_image_urls`
+
+`generate_audio` defaults false — free on Seedance and Wan, billed separately
+on Veo, absent on Kling/Hailuo/H3 Max, and unavoidable on Gemini Omni, which
+has no audio parameter at all and always generates sound.
 
 **Aspect ratio is per model** (fixed 2026-08-11 — it was one global map, and
 rewriting 4:5 to 3:4 for everyone meant every 4:5 and 1:1 Veo render failed,
-since Veo rejects 3:4). Seedance 2.0 has no 4:5 bucket so it gets 3:4; Seedance
-2.5 accepts only `auto`; Veo gets an orientation (9:16 or 16:9); Kling and
-Hailuo take none. An approximate shape is fine now because Creative Compose
-centre-crops the finished clip back to the overlay's own aspect.
+since Veo rejects 3:4). Seedance has no 4:5 bucket so it gets 3:4; Veo and
+Gemini Omni get an orientation (9:16 or 16:9); Wan falls back to `adaptive` and
+H3 Max to a real ratio, since H3 Max's text-to-video enum has no "decide for
+me" value; Kling and Hailuo take none. An approximate shape is fine now because
+Creative Compose centre-crops the finished clip back to the overlay's own
+aspect. (Seedance 2.5 was `auto`-only until 2026-09-15 and is no longer a
+special case.)
 
-Add a model by adding one entry to MODEL_CONFIGS — nothing else in the
-workflow is model-specific.
+Add a model by adding one entry to MODEL_CONFIGS, one to `videoModels.js` in
+the app, and — if it has a reference endpoint — one to MODELS_WITH_REFERENCES
+there. Nothing else in the workflow is model-specific.
 
 Needs env: FAL_KEY, SUPABASE_URL, SUPABASE_KEY."""
 
@@ -5602,16 +5779,55 @@ def _build_creative_workflow(name, webhook_path, sticky, js, code_node_name,
 
 
 def build_creative_generate() -> dict:
-    return _build_creative_workflow(
-        name="Arak Lighting – Creative Generate",
-        webhook_path="arak-creative-generate",
-        sticky=CREATIVE_GENERATE_STICKY,
-        js=CREATIVE_GENERATE_JS,
-        code_node_name="Generate Candidates",
-        mime="image/png",
-        media_field="image_url",
-        accepted_expr="={{ JSON.stringify({ status: 'accepted', session_id: $json.body.session_id }) }}",
-    )
+    """Generate is the ONE creative workflow that does not use the shared shape
+    above, and the reason is the only thing that makes it different: it renders
+    TWO candidates per request.
+
+    The shared shape writes rows from downstream Upload/Save nodes. n8n finishes
+    a node across all of its items before starting the next one, so with two
+    candidates in flight neither row was written until the slower model
+    returned — the team watched two spinners while one image already existed.
+    Here the Code node uploads and PATCHes each candidate itself the instant
+    that candidate is done (see CREATIVE_GENERATE_JS), so the fast lane appears
+    on its own.
+
+    That leaves Mark Failed reachable only when the Code node could not write
+    even the failure (Supabase unreachable from inside it). Rare, but the
+    alternative is a card that spins forever, which is what this whole
+    pending-row design exists to prevent.
+    """
+    nodes = [
+        _sticky(CREATIVE_GENERATE_STICKY, height=360, width=460, x=0, y=-180),
+        _webhook("arak-creative-generate", "responseNode", x=0, y=300),
+        _respond_json(
+            "Respond: Accepted",
+            "={{ JSON.stringify({ status: 'accepted', session_id: $json.body.session_id }) }}",
+            x=220, y=300),
+        _code("Generate Candidates", CREATIVE_GENERATE_JS, x=440, y=300),
+        _if_bool_equals("Row Still Unwritten?", "creative-gate-1",
+                        "={{ $json._written !== true }}", x=660, y=300),
+        _http_creative_fail("Generate Candidates", "Supabase: Mark Failed", x=880, y=300),
+    ]
+    return {
+        "name": "Arak Lighting – Creative Generate",
+        "nodes": nodes,
+        "connections": {
+            "Webhook": {"main": [[{"node": "Respond: Accepted", "type": "main", "index": 0}]]},
+            "Respond: Accepted": {"main": [[{"node": "Generate Candidates", "type": "main", "index": 0}]]},
+            "Generate Candidates": {"main": [[{"node": "Row Still Unwritten?", "type": "main", "index": 0}]]},
+            # True = the Code node never managed to write this row. False = it
+            # already said ready or failed, and there is nothing left to do.
+            "Row Still Unwritten?": {
+                "main": [
+                    [{"node": "Supabase: Mark Failed", "type": "main", "index": 0}],
+                    [],
+                ]
+            },
+        },
+        "active": False,
+        "settings": {"executionOrder": "v1"},
+        "tags": [],
+    }
 
 
 def build_creative_edit() -> dict:
