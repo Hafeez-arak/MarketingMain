@@ -25,6 +25,29 @@ export const FORMAT_CATALOG = {
     { id: 'video',          label: 'Video',          media: 'video', ratios: ['9:16'], defaultRatio: '9:16' },
     { id: 'photo_carousel', label: 'Photo carousel',  media: 'image', ratios: ['9:16'], defaultRatio: '9:16', slides: { min: 2, max: 10, default: 3 }, zernioMediaType: 'photo' },
   ],
+  // LinkedIn leads with TEXT, unlike every other platform here — a post with
+  // no media is the normal case rather than a degenerate one, which is why it
+  // is first and therefore the default. The others follow LinkedIn's own
+  // composer: one image, several images, one video, or a poll.
+  //
+  // `media: 'none'` is load-bearing. It is what tells the composer not to ask
+  // for an image, and what lets a LinkedIn post be finished without uploading
+  // anything at all.
+  //
+  // NOT here, deliberately: document (PDF/carousel) posts. LinkedIn supports
+  // them and so does Zernio, but a PDF has nowhere to live in this app — the
+  // media library records images and videos, and generated_posts stores an
+  // image_url and a video_url with no third column. Adding the format without
+  // that plumbing would put a choice on screen that cannot round-trip through
+  // a draft, which is the same "field that silently does nothing" this
+  // composer's header refuses elsewhere.
+  linkedin: [
+    { id: 'text',        label: 'Text post',   media: 'none',  ratios: [] },
+    { id: 'feed_image',  label: 'Single image', media: 'image', ratios: ['1.91:1', '1:1', '4:5'], defaultRatio: '1.91:1' },
+    { id: 'multi_image', label: 'Multi-image',  media: 'image', ratios: ['1:1', '1.91:1'],        defaultRatio: '1:1', slides: { min: 2, max: 20, default: 3 } },
+    { id: 'video',       label: 'Video',        media: 'video', ratios: ['16:9', '1:1', '9:16'],  defaultRatio: '16:9' },
+    { id: 'poll',        label: 'Poll',         media: 'none',  ratios: [] },
+  ],
   snapchat: [
     { id: 'story',     label: 'Story',     media: 'image', ratios: ['9:16'], defaultRatio: '9:16' },
     { id: 'spotlight', label: 'Spotlight', media: 'video', ratios: ['9:16'], defaultRatio: '9:16' },
@@ -56,6 +79,22 @@ export const PLATFORM_LIMITS = {
     carouselMax:   35,
     video: { minSeconds: 3, maxSeconds: 600, maxBytes: 4 * 1024 ** 3,  types: ['video/mp4', 'video/quicktime', 'video/webm'] },
     image: { maxBytes: 20 * 1024 ** 2,                                 types: ['image/jpeg', 'image/png', 'image/webp'] },
+  },
+  // LinkedIn. The caption ceiling is LinkedIn's own 3,000 for a post body —
+  // the one number here that is a hard API refusal rather than a threshold.
+  //
+  // carouselMax and the poll numbers come from Zernio's OpenAPI spec, which is
+  // what this app actually publishes through: "Up to 20 images, no
+  // multi-video" and a poll of 2–4 options, question ≤140, each option ≤30.
+  // The video bounds are LinkedIn's published upload limits (3 seconds to 15
+  // minutes, up to 5GB); the image size is advisory and is warned about rather
+  // than refused, the same as everywhere else here.
+  linkedin: {
+    caption:       3000,
+    carouselMax:   20,
+    video: { minSeconds: 3, maxSeconds: 900, maxBytes: 5 * 1024 ** 3,  types: ['video/mp4', 'video/quicktime'] },
+    image: { maxBytes: 10 * 1024 ** 2,                                 types: ['image/jpeg', 'image/png', 'image/gif'] },
+    poll:  { minOptions: 2, maxOptions: 4, questionMax: 140, optionMax: 30 },
   },
   snapchat: {
     caption:       250,

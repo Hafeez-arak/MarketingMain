@@ -122,6 +122,24 @@ export function defaultOptionsFor(platform) {
       video_cover_timestamp_ms: 1000,
     }
   }
+  if (platform === 'linkedin') {
+    return {
+      firstComment: '',
+      altText: '',
+      // LinkedIn builds a preview card for the first URL in a post that has no
+      // media of its own. Default OFF (i.e. previews left on) because that is
+      // LinkedIn's own behaviour, and a link post without its card is the odd
+      // choice rather than the safe one.
+      disableLinkPreview: false,
+      // A poll, or null when this is not a poll. Null rather than an empty
+      // object so "no poll" is unambiguous: an object with a blank question
+      // would reach the API and be rejected.
+      poll: null,
+      // No AI-disclosure equivalent. Instagram and TikTok both have a field
+      // for it; LinkedIn's API does not, so there is nothing to send and
+      // nothing to ask.
+    }
+  }
   return {}
 }
 
@@ -174,7 +192,7 @@ export function capabilities(state) {
   const f = getFormat(platform, format)
   const isStory = f?.id === 'story'
   const isReel  = f?.id === 'reel'
-  const isCarousel = f?.id === 'carousel' || f?.id === 'photo_carousel'
+  const isCarousel = f?.id === 'carousel' || f?.id === 'photo_carousel' || f?.id === 'multi_image'
 
   if (platform === 'instagram') {
     return {
@@ -214,7 +232,50 @@ export function capabilities(state) {
       consent: true,
     }
   }
+  if (platform === 'linkedin') {
+    const isPoll = f?.id === 'poll'
+    return {
+      // Zernio exposes firstComment on every LinkedIn post shape, and it is
+      // where a company page puts the link it does not want in the body —
+      // LinkedIn demotes posts that send people off-platform.
+      firstComment: true,
+      // Neither exists on LinkedIn: collaborator posts are an Instagram
+      // feature, and @mentions are not a field but text embedded in the body
+      // (Zernio resolves a profile URL to a URN you paste into the post), so
+      // there is nothing here to tag with.
+      collaborators: false,
+      userTags: false,
+      // Alt text is accepted for images and ignored on video.
+      altText: f?.media === 'image',
+      carousel: f?.id === 'multi_image',
+      // A preview card only exists when LinkedIn has a URL and no media of
+      // its own to show instead — attaching an image replaces the card. So the
+      // toggle is offered on exactly the format where it can do anything.
+      linkPreview: f?.media === 'none' && !isPoll,
+      poll: isPoll,
+      // The format carries no media at all. Named rather than re-derived by
+      // every caller, because "does this need an image?" is asked in three
+      // places and got a different answer in each before this existed.
+      textOnly: f?.media === 'none',
+      aiDisclosure: false,
+    }
+  }
   return { aiDisclosure: false }
+}
+
+// A poll, narrowed to what LinkedIn will accept: trimmed, blank options
+// dropped, and nothing sent at all unless there is a real question to ask.
+// Returns null rather than a half-built object, so the publish payload either
+// carries a valid poll or carries none.
+export function cleanPoll(poll, limits) {
+  const question = (poll?.question || '').trim()
+  const options = (poll?.options || []).map(o => String(o || '').trim()).filter(Boolean)
+  if (!question || options.length < (limits?.poll?.minOptions ?? 2)) return null
+  return {
+    question,
+    options: options.slice(0, limits?.poll?.maxOptions ?? 4),
+    duration: poll?.duration || 'SEVEN_DAYS',
+  }
 }
 
 // ── Pre-flight ────────────────────────────────────────────────────────────
@@ -246,11 +307,59 @@ export function validateComposer(state) {
   const videos = media.filter(m => m.type === 'video')
   const images = media.filter(m => m.type === 'image')
 
-  if (f?.media === 'video') {
+  // A format that carries no media — LinkedIn's text post and its poll — is
+  // checked FIRST, because the branch below it exists to demand an image and
+  // would demand one here too. This is the whole reason a LinkedIn post can be
+  // finished without uploading anything.
+  //
+  // Media is refused rather than ignored: a poll cannot be combined with media
+  // at all (Zernio's spec is explicit), and a text post with an image attached
+  // is simply an image post — the format picker is where that is chosen, not
+  // the media strip.
+  if (f?.media === 'none') {
+    if (media.length) {
+      errors.push(`A ${label} ${f.label.toLowerCase()} carries no media. Remove it, or pick an image or video format.`)
+    }
+    // Nothing else to publish, so the caption stops being optional. Without
+    // this the post reaches the workflow and fails there with "Nothing to
+    // publish", minutes later and with the row already claimed.
+    if (!composedCaption(state)) {
+      errors.push(`A ${label} ${f.label.toLowerCase()} needs some text.`)
+    }
+  } else if (f?.media === 'video') {
     if (!videos.length) errors.push(`A ${f.label} needs a video.`)
+    // LinkedIn accepts many images but only ever one video — "no multi-video",
+    // in Zernio's words. The same sentence happens to be true of a Reel.
     if (videos.length > 1) errors.push(`A ${f.label} takes one video, not ${videos.length}.`)
   } else if (!media.length) {
     errors.push(`Add ${caps.carousel ? 'at least two images' : 'an image'}.`)
+  }
+
+  // ── Poll ──
+  // LinkedIn cannot edit a poll after it is published, so every one of these
+  // is a mistake that cannot be corrected afterwards — worth refusing early.
+  if (caps.poll) {
+    const poll = opts.poll || {}
+    const question = (poll.question || '').trim()
+    const options = (poll.options || []).map(o => String(o || '').trim()).filter(Boolean)
+    const lim = limits.poll || { minOptions: 2, maxOptions: 4, questionMax: 140, optionMax: 30 }
+
+    if (!question) errors.push('A poll needs a question.')
+    if (question.length > lim.questionMax) {
+      errors.push(`A poll question is at most ${lim.questionMax} characters; this one is ${question.length}.`)
+    }
+    if (options.length < lim.minOptions) {
+      errors.push(`A poll needs at least ${lim.minOptions} answers.`)
+    }
+    if (options.length > lim.maxOptions) {
+      errors.push(`LinkedIn allows ${lim.maxOptions} poll answers; there are ${options.length}.`)
+    }
+    if (options.some(o => o.length > lim.optionMax)) {
+      errors.push(`Each poll answer is at most ${lim.optionMax} characters.`)
+    }
+    if (new Set(options.map(o => o.toLowerCase())).size !== options.length) {
+      errors.push('Two poll answers are the same.')
+    }
   }
 
   if (caps.carousel && images.length > limits.carouselMax) {
@@ -297,7 +406,9 @@ export function validateComposer(state) {
     errors.push('Confirm the TikTok content and consent declaration before posting.')
   }
 
-  if (!composedCaption(state) && state.platform !== 'instagram') {
+  // Not repeated for a format that has already refused above for the same
+  // reason — a warning restating an error reads as two separate problems.
+  if (!composedCaption(state) && state.platform !== 'instagram' && !caps.textOnly) {
     warnings.push('This post has no caption.')
   }
 
@@ -327,6 +438,27 @@ export function platformSpecificData(state) {
       ...(caps.catalogAudio && opts.audioConfiguration?.audioId
         ? { audioConfiguration: opts.audioConfiguration } : {}),
       ...(opts.isAiGenerated ? { isAiGenerated: true } : {}),
+    }
+  }
+
+  // LinkedIn. Every field here is one Zernio's LinkedInPlatformData actually
+  // defines — documentTitle and reshareUrl are the two it defines that this
+  // composer does not offer, for the reasons in FORMAT_CATALOG.
+  //
+  // organizationUrn is deliberately absent: the connected account already IS
+  // the organisation being posted as, and Zernio uses its default org when the
+  // field is omitted. Sending a URN we guessed at is how a post lands on the
+  // wrong page.
+  if (state.platform === 'linkedin') {
+    const poll = caps.poll ? cleanPoll(opts.poll, limitsFor('linkedin')) : null
+    return {
+      ...fields,
+      ...(opts.firstComment ? { firstComment: opts.firstComment } : {}),
+      ...(caps.altText && opts.altText ? { altText: opts.altText } : {}),
+      // Only ever sent as `true`. The field's own default is false, and
+      // spelling out a default is how a payload grows fields nobody chose.
+      ...(caps.linkPreview && opts.disableLinkPreview ? { disableLinkPreview: true } : {}),
+      ...(poll ? { poll } : {}),
     }
   }
   return fields

@@ -293,3 +293,143 @@ describe('payload shaping', () => {
     expect(tiktokSettings(emptyComposer('instagram'))).toBeNull()
   })
 })
+
+// ─── LinkedIn ──────────────────────────────────────────────────────────────
+// The platform where a post with no media is the normal case. Most of these
+// assert that the composer does NOT ask for an image, which is the opposite of
+// the rule every other platform here follows.
+describe('LinkedIn', () => {
+  const account = ['acc_li']
+
+  it('opens on a text post, so a post can be finished without uploading anything', () => {
+    const s = emptyComposer('linkedin')
+    expect(s.format).toBe('text')
+
+    const check = validateComposer({ ...s, accountIds: account, caption: 'Six projects, one lighting language.' })
+    expect(check.errors).toEqual([])
+    expect(check.ok).toBe(true)
+  })
+
+  it('switches to LinkedIn on a text post rather than an image format', () => {
+    const ig = { ...emptyComposer('instagram'), format: 'carousel' }
+    expect(setPlatform(ig, 'linkedin').format).toBe('text')
+  })
+
+  // The body IS the post. Nothing else would go out, and the workflow's own
+  // "Nothing to publish" arrives minutes later with the row already claimed.
+  it('refuses a text post with no text', () => {
+    const check = validateComposer({ ...emptyComposer('linkedin'), accountIds: account })
+    expect(check.errors.join(' ')).toMatch(/needs some text/)
+    // and does not ALSO warn about the same thing
+    expect(check.warnings.join(' ')).not.toMatch(/no caption/)
+  })
+
+  it('refuses media on a text post, because that is an image post', () => {
+    const check = validateComposer(
+      { ...emptyComposer('linkedin'), accountIds: account, caption: 'hello', media: [image()] })
+    expect(check.errors.join(' ')).toMatch(/carries no media/)
+  })
+
+  it("counts against LinkedIn's 3,000 rather than Instagram's 2,200", () => {
+    const s = { ...emptyComposer('linkedin'), caption: 'a'.repeat(2500) }
+    expect(captionStats(s).limit).toBe(3000)
+    expect(captionStats(s).over).toBe(false)
+    expect(captionStats({ ...s, caption: 'a'.repeat(3001) }).over).toBe(true)
+  })
+
+  it('allows 20 images in a multi-image post and refuses the 21st', () => {
+    const many = n => Array.from({ length: n }, (_, i) => image({ url: `https://cdn.test/${i}.jpg` }))
+    const base = { ...emptyComposer('linkedin'), format: 'multi_image', accountIds: account }
+
+    expect(validateComposer({ ...base, media: many(20) }).errors).toEqual([])
+    expect(validateComposer({ ...base, media: many(21) }).errors.join(' ')).toMatch(/allows 20 items/)
+  })
+
+  // "No multi-video", in Zernio's words — LinkedIn takes many images but only
+  // ever one video.
+  it('takes one video, not two', () => {
+    const two = [video(), video({ url: 'https://cdn.test/b.mp4' })]
+    const check = validateComposer({ ...emptyComposer('linkedin'), format: 'video', accountIds: account, media: two })
+    expect(check.errors.join(' ')).toMatch(/takes one video/)
+  })
+
+  describe('polls', () => {
+    const poll = (over = {}) => {
+      const s = { ...emptyComposer('linkedin'), format: 'poll', accountIds: account, caption: 'Curious what you think.' }
+      return setOption(s, 'poll', { question: 'Which matters most?', options: ['Glare', 'CRI'], duration: 'SEVEN_DAYS', ...over })
+    }
+
+    it('accepts a two-answer poll with no media at all', () => {
+      expect(validateComposer(poll()).errors).toEqual([])
+    })
+
+    it('refuses a poll with one answer, five answers, or a duplicate', () => {
+      expect(validateComposer(poll({ options: ['Glare'] })).errors.join(' ')).toMatch(/at least 2 answers/)
+      expect(validateComposer(poll({ options: ['a', 'b', 'c', 'd', 'e'] })).errors.join(' ')).toMatch(/allows 4 poll answers/)
+      expect(validateComposer(poll({ options: ['Glare', 'glare'] })).errors.join(' ')).toMatch(/the same/)
+    })
+
+    it('refuses an over-long question or answer', () => {
+      expect(validateComposer(poll({ question: 'q'.repeat(141) })).errors.join(' ')).toMatch(/at most 140/)
+      expect(validateComposer(poll({ options: ['Glare', 'o'.repeat(31)] })).errors.join(' ')).toMatch(/at most 30/)
+    })
+
+    // A poll cannot be combined with media at all — Zernio's spec is explicit,
+    // and the composer hides the media picker on this format for that reason.
+    it('refuses media on a poll', () => {
+      expect(validateComposer({ ...poll(), media: [image()] }).errors.join(' ')).toMatch(/carries no media/)
+    })
+
+    it('sends a trimmed poll, and nothing at all when it is half-built', () => {
+      const data = platformSpecificData(poll({ options: ['  Glare  ', 'CRI', ''] }))
+      expect(data.poll.options).toEqual(['Glare', 'CRI'])
+      expect(data.poll.duration).toBe('SEVEN_DAYS')
+
+      expect(platformSpecificData(poll({ question: '' }))).not.toHaveProperty('poll')
+      expect(platformSpecificData(poll({ options: ['Glare'] }))).not.toHaveProperty('poll')
+    })
+
+    it('does not send a poll from a text post that once had one', () => {
+      expect(platformSpecificData({ ...poll(), format: 'text' })).not.toHaveProperty('poll')
+    })
+  })
+
+  describe('the publish payload', () => {
+    it('carries a first comment on any format', () => {
+      let s = { ...emptyComposer('linkedin'), caption: 'x' }
+      s = setOption(s, 'firstComment', 'Full specs: arak-sa.com/villa')
+      expect(platformSpecificData(s).firstComment).toBe('Full specs: arak-sa.com/villa')
+    })
+
+    // The field's own default is false. Spelling out a default is how a
+    // payload grows fields nobody chose.
+    it('only mentions the link preview when it was turned off', () => {
+      const on  = setOption({ ...emptyComposer('linkedin'), caption: 'x' }, 'disableLinkPreview', false)
+      const off = setOption({ ...emptyComposer('linkedin'), caption: 'x' }, 'disableLinkPreview', true)
+
+      expect(platformSpecificData(on)).not.toHaveProperty('disableLinkPreview')
+      expect(platformSpecificData(off).disableLinkPreview).toBe(true)
+    })
+
+    // A preview card only exists where LinkedIn has no media to show instead,
+    // so the flag is meaningless — and withheld — on an image post.
+    it('withholds the link preview flag from an image post', () => {
+      const s = setOption({ ...emptyComposer('linkedin'), format: 'feed_image' }, 'disableLinkPreview', true)
+      expect(platformSpecificData(s)).not.toHaveProperty('disableLinkPreview')
+    })
+
+    it('sends alt text on an image post and withholds it from a video', () => {
+      const img = setOption({ ...emptyComposer('linkedin'), format: 'feed_image' }, 'altText', 'A lit facade at dusk')
+      const vid = setOption({ ...emptyComposer('linkedin'), format: 'video' }, 'altText', 'A lit facade at dusk')
+
+      expect(platformSpecificData(img).altText).toBe('A lit facade at dusk')
+      expect(platformSpecificData(vid)).not.toHaveProperty('altText')
+    })
+
+    // We post as the connected account. Guessing a URN is how a post lands on
+    // somebody else's page.
+    it('never invents an organizationUrn', () => {
+      expect(platformSpecificData({ ...emptyComposer('linkedin'), caption: 'x' })).not.toHaveProperty('organizationUrn')
+    })
+  })
+})

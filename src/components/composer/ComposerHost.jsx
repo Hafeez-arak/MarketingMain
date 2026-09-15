@@ -5,6 +5,7 @@ import { SUPABASE_URL, SUPABASE_ANON_KEY } from '../../lib/supabaseClient'
 import { publishComposed } from '../../lib/publishPost'
 import { composedCaption, optionsFor, composerFromPost } from '../../lib/composerState'
 import { useConnectedAccounts } from '../../lib/useConnectedAccounts'
+import { mayPublishTo, protectionReason } from '../../lib/platformSafety'
 import { PostComposer } from './PostComposer'
 
 // ─── The Create-post button, and everything behind it ──────────────────────
@@ -141,6 +142,25 @@ export function ComposerHost({
     setBusy(true)
     setNote('')
 
+    // ── Protected accounts, BEFORE the row is written ──
+    //
+    // publishComposed refuses this too, and so does the n8n workflow. What
+    // both of them are too late for is the row: writing it first means a
+    // refused LinkedIn publish left a post sitting in pending_publish that
+    // nothing would ever pick up, and the only feedback was "Saved, but
+    // publishing failed". Refusing here leaves nothing behind.
+    //
+    // The composer already disables both buttons on a protected account, so
+    // reaching this is a second tab, a stale render, or someone calling the
+    // handler directly. It still has to be safe.
+    const target = accounts.find(a => a.zernio_account_id === state.accountIds[0])
+      || { platform: state.platform }
+    if (!mayPublishTo(target)) {
+      setBusy(false)
+      setNote(protectionReason(target))
+      return
+    }
+
     // Row first, always. The workflow's duplicate guard is a filtered claim on
     // this row, and it is the only thing standing between a double-click and
     // the same post appearing twice on a real account. A post opened from
@@ -154,6 +174,10 @@ export function ComposerHost({
       postId: post.id,
       postTable: state.postTable || 'generated_posts',
       workspaceId: activeWorkspaceId,
+      // The real row rather than the platform alone, so publishPost's own
+      // check can honour an account marked protected as well as a protected
+      // platform. Without it that layer only ever sees { platform }.
+      account: target,
     })
     setBusy(false)
 
@@ -168,7 +192,7 @@ export function ComposerHost({
     setNote(schedule ? 'Scheduled.' : 'Published.')
     close()
     onDone?.()
-  }, [accessToken, activeWorkspaceId, close, onDone])
+  }, [accessToken, accounts, activeWorkspaceId, close, onDone])
 
   return (
     <>
