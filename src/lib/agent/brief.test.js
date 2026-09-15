@@ -43,9 +43,11 @@ describe('the model never gets to restate the numbers', () => {
   })
 
   it('a per-competitor read is merged onto the measured card, not over it', () => {
+    // The read now comes from competitor_moves; competitor_reads was dropped
+    // from the schema to keep the grammar under the API limit.
     const merged = mergeBrief(gathered, {
       headline: 'x',
-      competitor_reads: [{ name: 'Technolight', read: 'Pushing tunnel lighting.' }],
+      competitor_moves: [{ competitor: 'Technolight', what_changed: 'Pushing tunnel lighting.', picture: '', effect_on_us: '', relevance: 'medium', refs: [] }],
     }, new Set())
     expect(merged.competitor_board[0]).toMatchObject({
       name: 'Technolight', followers: 9000, read: 'Pushing tunnel lighting.',
@@ -60,12 +62,16 @@ describe('the model never gets to restate the numbers', () => {
 
 describe('citations are checked, and the asymmetry is deliberate', () => {
   const allowed = new Set(['https://real.example/a'])
+  // Market trends are assembled from lens findings now, so the citation rule
+  // is exercised on the findings handed to mergeBrief.
+  const findings = [
+    { lens: 'category', ref: 'F1', headline: 'cited', sources: [{ url: 'https://real.example/a' }], confidence: 0.7, novelty: 'new' },
+    { lens: 'category', ref: 'F2', headline: 'invented', sources: [{ url: 'https://fake.example/b' }], confidence: 0.9, novelty: 'new' },
+    { lens: 'rivals', ref: 'F3', headline: 'about a rival', competitor: 'Technolight', sources: [{ url: 'https://real.example/a' }] },
+    { lens: 'category', ref: 'F4', headline: 'background', relevance: 'low', sources: [{ url: 'https://real.example/a' }] },
+  ]
   const brief = {
     headline: 'x',
-    market: [
-      { finding: 'cited', sources: [{ url: 'https://real.example/a' }], confidence: 0.7, novelty: 'new' },
-      { finding: 'invented', sources: [{ url: 'https://fake.example/b' }], confidence: 0.9, novelty: 'new' },
-    ],
     proposed_rules: [
       { rule: 'Keep it', detail: '', scope: 'caption', sources: ['https://real.example/a'], confidence: 0.7 },
       { rule: 'Drop it', detail: '', scope: 'caption', sources: ['https://fake.example/b'], confidence: 0.9 },
@@ -75,7 +81,7 @@ describe('citations are checked, and the asymmetry is deliberate', () => {
   it('a finding that loses its sources is KEPT and flagged uncited', () => {
     // It may still be true and a person can judge it. Deleting it would hide
     // the model's reasoning rather than qualify it.
-    const merged = mergeBrief(gathered, brief, allowed)
+    const merged = mergeBrief(gathered, brief, allowed, findings)
     const invented = merged.market.find(m => m.finding === 'invented')
     expect(invented).toBeDefined()
     expect(invented.uncited).toBe(true)
@@ -91,8 +97,13 @@ describe('citations are checked, and the asymmetry is deliberate', () => {
     expect(merged.rules_dropped_uncited).toBe(1)
   })
 
+  it('market holds trends only — not a rival, and not what was rated low', () => {
+    const merged = mergeBrief(gathered, brief, allowed, findings)
+    expect(merged.market.map(m => m.finding)).toEqual(['cited', 'invented'])
+  })
+
   it('a fabricated URL never survives, however plausible', () => {
-    const merged = mergeBrief(gathered, brief, allowed)
+    const merged = mergeBrief(gathered, brief, allowed, findings)
     const urls = JSON.stringify(merged.market) + JSON.stringify(merged.proposed_rules)
     expect(urls).not.toContain('fake.example')
   })

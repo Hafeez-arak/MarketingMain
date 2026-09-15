@@ -38,7 +38,18 @@ export const FINDINGS_SCHEMA = {
         items: {
           type: 'object',
           additionalProperties: false,
-          required: ['headline', 'confidence'],
+          // ── Keep optional fields FEW ──
+          // Structured outputs refuses a schema with more than 24 optional
+          // parameters, counted across every nested object. On 2026-09-15 this
+          // one had 32 — every lead and event field was optional — and all five
+          // searching lenses were refused with a 400 before doing any work. So
+          // everything a finding always has is required (an empty string is a
+          // valid "not established"), and only five things stay optional.
+          // schemaLimits.test.js counts them.
+          required: [
+            'headline', 'detail', 'confidence', 'suggested_action', 'for_whom', 'relevance',
+            'competitor', 'channel', 'category', 'sources',
+          ],
           properties: {
             headline: { type: 'string', description: 'One sentence. What is true.' },
             detail: { type: 'string', description: 'What supports it, and how strongly.' },
@@ -91,17 +102,17 @@ export const FINDINGS_SCHEMA = {
               enum: ['high', 'medium', 'low'],
               description: 'How much it MATTERS (not how sure you are). low is stored but not reported.',
             },
-            competitor: { type: 'string', description: 'Competitor name exactly as listed, or empty for the market.' },
+            competitor: { type: 'string', description: 'Competitor name exactly as listed, or an empty string for the market.' },
             channel: { type: 'string', enum: CHANNELS, description: 'Where you actually saw it.' },
             category: { type: 'string', enum: SIGNAL_CATEGORIES },
             lead: {
               type: 'object',
               additionalProperties: false,
-              description: 'Fill for a tender, project or named prospect.',
-              required: ['name'],
+              description: 'Fill for a tender, project or named prospect. Every field is required; use an empty string for one you did not establish.',
+              required: ['name', 'type', 'client', 'contractor', 'consultant', 'location', 'scope', 'stage', 'deadline', 'timing'],
               properties: {
                 name: { type: 'string', description: 'The project or tender\'s OWN name, stable week to week. Never a sentence.' },
-                type: { type: 'string', enum: ['tender', 'project', 'lead'] },
+                type: { type: 'string', enum: ['tender', 'project', 'lead', ''] },
                 client: { type: 'string' },
                 contractor: { type: 'string' },
                 consultant: { type: 'string' },
@@ -109,14 +120,14 @@ export const FINDINGS_SCHEMA = {
                 scope: { type: 'string' },
                 stage: { type: 'string', description: 'e.g. design, tender, awarded, construction, fit-out.' },
                 deadline: { type: 'string', description: 'ISO date, only when established.' },
-                timing: { type: 'string', enum: ['open', 'closed', 'unconfirmed'] },
+                timing: { type: 'string', enum: ['open', 'closed', 'unconfirmed', ''] },
               },
             },
             event: {
               type: 'object',
               additionalProperties: false,
-              description: 'Fill for an expo, conference, awards or sponsorship opening.',
-              required: ['name'],
+              description: 'Fill for an expo, conference, awards or sponsorship opening. Every field is required; use an empty string (or an empty list) for one you did not establish.',
+              required: ['name', 'start_date', 'end_date', 'venue', 'city', 'organizer', 'url', 'exhibitor_deadline', 'competitors_exhibiting'],
               properties: {
                 name: { type: 'string', description: 'Official name.' },
                 start_date: { type: 'string' },
@@ -134,7 +145,7 @@ export const FINDINGS_SCHEMA = {
               items: {
                 type: 'object',
                 additionalProperties: false,
-                required: ['url'],
+                required: ['url', 'title', 'quote'],
                 properties: {
                   url: { type: 'string' },
                   title: { type: 'string' },

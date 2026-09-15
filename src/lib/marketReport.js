@@ -112,6 +112,16 @@ export function resolveRefs(refs = [], report = {}) {
   }).filter(Boolean)
 }
 
+/** Every team the cited findings concern; marketing and sales when none resolve. */
+function teamsFromRefs(refs = [], report = {}) {
+  const fs = findingByRef(report)
+  const teams = new Set((refs || []).flatMap(r => {
+    const f = fs.get(str(r).toUpperCase())
+    return f ? teamsOf(f) : []
+  }))
+  return teams.size ? [...teams] : ['marketing', 'sales']
+}
+
 function firstUrl(sources = []) {
   for (const s of sources || []) {
     const u = typeof s === 'string' ? s : s?.url
@@ -271,7 +281,9 @@ export function competitorMoves(report = {}) {
           picture: m.picture || '',
           effect: m.effect_on_us || '',
           relevance: m.relevance || 'medium',
-          teams: m.teams?.length ? m.teams : ['marketing', 'sales'],
+          // Derived from the findings it cites rather than asked for: the
+          // schema field was dropped to keep the grammar under the API limit.
+          teams: teamsFromRefs(m.refs, report),
           pieces,
           channels: [...new Set(pieces.map(p => p.channel).filter(Boolean))],
         }
