@@ -91,10 +91,23 @@ const DAY_KEYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat']
 // `postingDays` narrows the candidate days when the brand only posts on
 // certain weekdays; if that leaves nothing in range, every day is a candidate
 // again rather than dropping the posts.
-export function distributeDates(posts, { startDate, endDate, postingDays = [] } = {}) {
-  const list = posts || []
-  const start = parseYMD(startDate)
+//
+// `notBefore` ('YYYY-MM-DD') is the first day a post may be placed on. A plan
+// for the month already under way still covers the whole month, and spreading
+// from the 1st put half its posts on days that had already gone by. With
+// `replacePast`, a post whose date is before `notBefore` is placed again
+// rather than kept — used when ideas are first generated, where such a date
+// came from the model, never from a person.
+export function distributeDates(posts, { startDate, endDate, postingDays = [], notBefore = '', replacePast = false } = {}) {
+  const input = posts || []
+  const list = replacePast && notBefore
+    ? input.map(p => (p?.date && p.date < notBefore ? { ...p, date: '' } : p))
+    : input
+  // Nothing left of the range to place on: leave the rest unscheduled for a
+  // person to date, rather than invent days that have gone by.
+  if (notBefore && endDate && notBefore > endDate) return list
   const end = parseYMD(endDate)
+  const start = parseYMD(notBefore && notBefore > (startDate || '') ? notBefore : startDate)
   const undatedIdx = list.map((p, i) => (p?.date ? -1 : i)).filter(i => i >= 0)
   if (!start || !end || end < start || !undatedIdx.length) return list
 
@@ -308,4 +321,15 @@ export function pollProblems(poll) {
   if (options.some(o => o.length > lim.optionMax)) out.push(`Each answer is at most ${lim.optionMax} characters.`)
   if (new Set(options.map(o => o.toLowerCase())).size !== options.length) out.push('Two answers are the same.')
   return out
+}
+
+// The first day a new post can still be placed on: tomorrow, in brand time.
+// Tomorrow rather than today because a placed post still needs its picture and
+// caption, and one placed on today's date is usually past its time before it
+// is ready. Today can still be picked by hand.
+export function firstPlaceableDay(todayKey) {
+  const t = parseYMD(todayKey)
+  if (!t) return ''
+  t.setDate(t.getDate() + 1)
+  return toYMD(t)
 }

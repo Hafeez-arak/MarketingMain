@@ -13,7 +13,8 @@ import {
   formatsFor, defaultFormat, aspectRatiosFor, defaultAspectRatio, slideRange, aspectLabel,
   derivePostKind,
 } from '../../lib/postFormats'
-import { groupByWeek, monthOptions, normalizeAiIdea, distributeDates, formatTime, DEFAULT_POST_TIME, pollProblems } from './planModel'
+import { groupByWeek, monthOptions, normalizeAiIdea, distributeDates, formatTime, DEFAULT_POST_TIME, pollProblems, firstPlaceableDay } from './planModel'
+import { brandTodayKey } from '../../lib/brandTime'
 import { GOALS, WEEKDAYS, DEFAULT_DRAFT, isUntouchedSelection, PLATFORMS, targetLabel } from './planConstants'
 import { isProtectedPlatform } from '../../lib/platformSafety'
 import { IdeaCard } from './IdeaCard'
@@ -201,6 +202,14 @@ export function CampaignPlanner() {
   })
   const activeRuleCount = brandMemory.filter(r => r.status === 'active').length
   const months = monthOptions()
+  // Today in brand time, and the first day a post is placed on (tomorrow). A
+  // plan for the month already under way still spans the whole month, but
+  // nothing is placed — or offered to the AI — on a day that has gone by.
+  const todayKey = brandTodayKey()
+  const earliestDay = firstPlaceableDay(todayKey)
+  const planFrom = earliestDay && startDate && earliestDay > startDate ? earliestDay : startDate
+  const placement = { startDate, endDate, postingDays, notBefore: earliestDay }
+  const dateMin = todayKey && startDate && todayKey > startDate ? todayKey : startDate
   const captionLanguage = state.brandProfile?.captionLanguage || 'both'
 
   // Supabase is the source of truth for a saved plan's ideas — the draft
@@ -517,7 +526,7 @@ export function CampaignPlanner() {
         goal: effectiveGoal,
         goal_category: goalCategory || null,
         platforms,
-        start_date: startDate,
+        start_date: planFrom,
         end_date: endDate,
         approx_post_count: approxCount ? Number(approxCount) : null,
         include_holidays: includeHolidays,
@@ -551,7 +560,9 @@ export function CampaignPlanner() {
 
     // Your posts first, AI suggestions after. Anything without a date is
     // spread evenly through the month, around the ones that have one.
-    const allIdeas = distributeDates([...seedIdeas, ...aiPosts], { startDate, endDate, postingDays })
+    // A date the model gave that has already passed is placed again; a date
+    // you typed on a post is kept (the picker never offers a past day).
+    const allIdeas = distributeDates([...seedIdeas, ...aiPosts.map(i => ({ ...i, date: i.date && i.date < earliestDay ? '' : i.date }))], placement)
       .map(i => ({ ...i, time: i.time || DEFAULT_POST_TIME }))
 
     const ideasRes = await insertIdeas(activeWorkspaceId, accessToken, planRes.plan.id, allIdeas)
@@ -591,7 +602,7 @@ export function CampaignPlanner() {
       goal: effectiveGoal,
       goal_category: goalCategory || null,
       platforms,
-      start_date: startDate,
+      start_date: planFrom,
       end_date: endDate,
       approx_post_count: count,
       include_holidays: includeHolidays,
@@ -609,7 +620,8 @@ export function CampaignPlanner() {
     })
     if (result.error) { setMoreLoading(false); setMoreError(result.error); return }
 
-    const more = result.posts.map(normalizeAiIdea).map(i => ({ ...i, time: i.time || DEFAULT_POST_TIME }))
+    const more = distributeDates(result.posts.map(normalizeAiIdea), { ...placement, replacePast: true })
+      .map(i => ({ ...i, time: i.time || DEFAULT_POST_TIME }))
     const ideasRes = await insertIdeas(activeWorkspaceId, accessToken, planId, more, ideas.length)
     setMoreLoading(false)
     if (ideasRes.error) { setMoreError(`Generated but couldn't be saved: ${ideasRes.error}`); return }
@@ -882,7 +894,9 @@ export function CampaignPlanner() {
 
     // Any post still without a date or time gets one now, the same way setup
     // places them, so nothing is left unscheduled by accident.
-    const readyIdeas = distributeDates(approved, { startDate, endDate, postingDays })
+    // Never onto a day already gone; a date already set is left for the
+    // queue to flag rather than moved behind anyone's back.
+    const readyIdeas = distributeDates(approved, placement)
       .map(i => ({ ...i, time: i.time || DEFAULT_POST_TIME }))
 
     const res = await publishIdeasAsPosts(activeWorkspaceId, accessToken, planId, readyIdeas)
@@ -1019,6 +1033,11 @@ export function CampaignPlanner() {
             <option value="">Select month…</option>
             {months.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
           </Select>
+          {month && planFrom && planFrom !== startDate && planFrom <= endDate && (
+            <p className="text-[11px] text-text-tertiary -mt-2">
+              This month is already under way — posts are placed from {formatDate(planFrom)} onwards.
+            </p>
+          )}
 
           {/* ── Platforms: which channels this month's posts are for ── */}
           <div>
@@ -1157,7 +1176,7 @@ export function CampaignPlanner() {
                             onChange={e => updateSeed(i, { slideCount: Number(e.target.value) || sSlides.default })}
                             title="Number of slides" className="w-14 rounded-lg border border-border px-2 py-1.5 text-xs bg-white focus:outline-none focus:border-amber-400" />
                         )}
-                        <input type="date" value={s.date || ''} min={startDate || undefined} max={endDate || undefined}
+                        <input type="date" value={s.date || ''} min={dateMin || undefined} max={endDate || undefined}
                           onChange={e => updateSeed(i, { date: e.target.value })}
                           title="Only for a post that must go out on a specific day — otherwise leave empty and it is placed for you"
                           className="rounded-lg border border-border px-2 py-1.5 text-xs bg-white focus:outline-none focus:border-amber-400" />
@@ -1386,7 +1405,7 @@ export function CampaignPlanner() {
                   </div>
                   {group.ideas.map(idea => (
                     <IdeaCard key={idea.id} idea={idea} index={ideas.indexOf(idea)} accessToken={accessToken} workspaceId={activeWorkspaceId}
-                      planPlatforms={platforms}
+                      planPlatforms={platforms} todayKey={todayKey}
                       autoEdit={idea.id === autoEditId} lock={ideaLock(idea)}
                       onChange={onIdeaChange} onRemove={onIdeaRemove} onCreate={onIdeaCreate} />
                   ))}
@@ -1569,7 +1588,7 @@ export function CampaignPlanner() {
             {approvedIdeas.map(idea => (
               <CaptionCard key={idea.id} idea={idea} thumbUrl={thumbFor(idea)} language={captionLanguage}
                 mediaUrls={mediaUrlsFor(idea)} onOpenMedia={i => openMedia(idea, i)} lock={ideaLock(idea)}
-                dateMin={startDate} dateMax={endDate} redrafting={redraftingId === idea.id}
+                dateMin={dateMin} dateMax={endDate} todayKey={todayKey} redrafting={redraftingId === idea.id}
                 onPick={opt => pickCaption(idea, opt)}
                 onEdit={patch => patchLocal(idea, patch)}
                 onSaveField={(field, value) => saveIdeaFields(idea, { [field]: value })}

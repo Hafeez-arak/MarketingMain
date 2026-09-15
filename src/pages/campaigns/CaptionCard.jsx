@@ -37,7 +37,7 @@ function AutoTextarea({ value, minRows = 3, className = box, ...props }) {
 }
 
 export function CaptionCard({
-  idea, thumbUrl, mediaUrls = [], language = 'both', dateMin, dateMax, redrafting = false,
+  idea, thumbUrl, mediaUrls = [], language = 'both', dateMin, dateMax, todayKey = '', redrafting = false,
   lock = null, onOpenMedia,
   onPick, onEdit, onSaveField, onClearChoice, onRedraft, onDate, onTime, onPollEdit, onPollSave,
 }) {
@@ -109,6 +109,9 @@ export function CaptionCard({
         </div>
         {!idea.date && (
           <p className="text-[10px] text-text-tertiary -mt-2">No date yet — it is placed in the month when you save, or pick one.</p>
+        )}
+        {idea.date && todayKey && idea.date < todayKey && (
+          <p className="text-[11px] text-red-600 font-medium -mt-2">This date has already passed — pick a new one, or it won’t be scheduled.</p>
         )}
 
         {isPoll && (
