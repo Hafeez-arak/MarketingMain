@@ -19,7 +19,7 @@
 
 import {
   formatsFor, defaultFormat, aspectRatiosFor, defaultAspectRatio,
-  slideRange, derivePostKind,
+  slideRange, derivePostKind, PLATFORM_LIMITS,
 } from '../../lib/postFormats'
 
 export const MONTH_NAMES = [
@@ -230,8 +230,12 @@ export function buildCalendarCells(startDate, endDate) {
 export function normalizeAiIdea(p) {
   const platform = p.platform
   const legacyFormat = p.format || 'post'
-  const postFormat =
-      legacyFormat === 'carousel' ? 'carousel'
+  // A poll is only a poll if it arrived with something to ask. One without
+  // falls back to a text post rather than a poll card nobody can finish.
+  const poll = platform === 'linkedin' && legacyFormat === 'poll' ? cleanPlanPoll(p.poll) : null
+  const postFormat = platform === 'linkedin'
+    ? linkedinFormatFor(legacyFormat, poll)
+    : legacyFormat === 'carousel' ? 'carousel'
     : (legacyFormat === 'reel' && platform === 'instagram') ? 'reel'
     : defaultFormat(platform)
 
@@ -240,14 +244,68 @@ export function normalizeAiIdea(p) {
   const aspectRatio = validRatios.includes(p.suggestedAspectRatio)
     ? p.suggestedAspectRatio
     : defaultAspectRatio(platform, postFormat)
-  const slideCount = postFormat === 'carousel'
-    ? (slideRange(platform, postFormat)?.default || 3)
-    : 1
+  const slides = slideRange(platform, postFormat)
+  const slideCount = slides ? (slides.default || 3) : 1
 
   return {
     ...p,
     postFormat, aspectRatio, mediaType, slideCount,
     wantsCaption: true,
     postKind: derivePostKind({ platform, format: postFormat, wantsCaption: true, slideCount }),
+    ...(poll ? { platformOptions: { ...(p.platformOptions || {}), poll } } : {}),
   }
+}
+
+// The planner's LinkedIn vocabulary → the catalog's. The workflow asks for
+// text / image / multi_image / video / poll; Instagram's words are mapped too,
+// because a model that has just planned ten Instagram posts will sometimes
+// write "carousel" or "reel" for the LinkedIn one beside them.
+const LINKEDIN_FORMAT = {
+  text: 'text', post: 'feed_image', image: 'feed_image', feed_image: 'feed_image',
+  multi_image: 'multi_image', carousel: 'multi_image',
+  video: 'video', reel: 'video',
+}
+function linkedinFormatFor(legacy, poll) {
+  if (legacy === 'poll') return poll ? 'poll' : 'text'
+  return LINKEDIN_FORMAT[legacy] || defaultFormat('linkedin')
+}
+
+// A planned poll, narrowed to what LinkedIn accepts: a question of at most
+// 140 characters and 2–4 distinct answers of at most 30. Anything longer is
+// cut rather than refused — this is a draft a person edits on the captions
+// step, and a slightly long answer is easier to fix there than a missing poll.
+// Null when there is no question or fewer than two answers.
+export function cleanPlanPoll(poll) {
+  const lim = PLATFORM_LIMITS.linkedin.poll
+  const question = String(poll?.question || '').trim().slice(0, lim.questionMax)
+  const seen = new Set()
+  const options = []
+  for (const o of Array.isArray(poll?.options) ? poll.options : []) {
+    const text = String(o || '').trim().slice(0, lim.optionMax)
+    if (!text || seen.has(text.toLowerCase())) continue
+    seen.add(text.toLowerCase())
+    options.push(text)
+  }
+  if (!question || options.length < lim.minOptions) return null
+  return { question, options: options.slice(0, lim.maxOptions), duration: POLL_DURATIONS.includes(poll?.duration) ? poll.duration : 'SEVEN_DAYS' }
+}
+
+// Zernio's poll durations, shortest first.
+export const POLL_DURATIONS = ['ONE_DAY', 'THREE_DAYS', 'SEVEN_DAYS', 'FOURTEEN_DAYS']
+
+// What still stands between a planned poll and a finished one — the same
+// rules the composer refuses on, so a poll that passes here opens there clean.
+// Empty when the poll is ready.
+export function pollProblems(poll) {
+  const lim = PLATFORM_LIMITS.linkedin.poll
+  const question = String(poll?.question || '').trim()
+  const options = (poll?.options || []).map(o => String(o || '').trim()).filter(Boolean)
+  const out = []
+  if (!question) out.push('The poll needs a question.')
+  else if (question.length > lim.questionMax) out.push(`The question is ${question.length} characters; LinkedIn allows ${lim.questionMax}.`)
+  if (options.length < lim.minOptions) out.push(`The poll needs at least ${lim.minOptions} answers.`)
+  if (options.length > lim.maxOptions) out.push(`LinkedIn allows ${lim.maxOptions} answers.`)
+  if (options.some(o => o.length > lim.optionMax)) out.push(`Each answer is at most ${lim.optionMax} characters.`)
+  if (new Set(options.map(o => o.toLowerCase())).size !== options.length) out.push('Two answers are the same.')
+  return out
 }

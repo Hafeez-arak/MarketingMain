@@ -8,15 +8,21 @@
 // this file is what lets one board-level poll drive every card at once.
 
 import { Spinner, PostImage } from '../../components/ui/index'
-import { aspectLabel, formatsFor } from '../../lib/postFormats'
+import { aspectLabel, formatsFor, limitsFor } from '../../lib/postFormats'
 import { targetLabel } from './planConstants'
-import { DEFAULT_POST_TIME } from './planModel'
+import { DEFAULT_POST_TIME, POLL_DURATIONS, pollProblems } from './planModel'
+
+// Where LinkedIn's feed cuts a post off behind "…see more". Approximate — the
+// real cut depends on line breaks and screen width — and the same figure the
+// composer's preview draws, so the two agree about where the hook has to land.
+const LINKEDIN_SEE_MORE = 210
+const DURATION_LABEL = { ONE_DAY: '1 day', THREE_DAYS: '3 days', SEVEN_DAYS: '1 week', FOURTEEN_DAYS: '2 weeks' }
 
 const box = 'w-full text-xs bg-white border border-border rounded-lg px-3 py-2 resize-y focus:outline-none focus:border-amber-400'
 
 export function CaptionCard({
   idea, thumbUrl, language = 'both', dateMin, dateMax, redrafting = false,
-  onPick, onEdit, onSaveField, onClearChoice, onRedraft, onDate, onTime,
+  onPick, onEdit, onSaveField, onClearChoice, onRedraft, onDate, onTime, onPollEdit, onPollSave,
 }) {
   const own = idea.copyMode === 'own'
   const wantsCaption = idea.wantsCaption !== false
@@ -27,6 +33,9 @@ export function CaptionCard({
   const isVideo = idea.mediaType === 'video'
   const targets = idea.platforms?.length ? idea.platforms : [idea.platform]
   const formatLabel = formatsFor(idea.platform).find(f => f.id === idea.postFormat)?.label || 'Feed image'
+  const textOnly = idea.mediaType === 'none'
+  const isLinkedIn = idea.platform === 'linkedin'
+  const isPoll = isLinkedIn && idea.postFormat === 'poll'
 
   return (
     <div className={`border bg-white p-4 flex gap-4 ${hasChoice || own || !wantsCaption ? 'border-sage-200' : 'border-border'}`}>
@@ -34,6 +43,11 @@ export function CaptionCard({
       <div className="w-28 flex-shrink-0">
         {thumbUrl ? (
           <PostImage src={thumbUrl} alt="" className="w-28 h-28 object-cover border border-border" />
+        ) : textOnly ? (
+          <div className="w-28 h-28 border border-border bg-surface-subtle flex flex-col items-center justify-center text-text-tertiary text-[10px] text-center px-2 gap-1">
+            <span className="text-lg">{isPoll ? '📊' : '¶'}</span>
+            {isPoll ? 'Poll' : 'Text only'}
+          </div>
         ) : (
           <div className="w-28 h-28 border border-dashed border-border bg-surface-subtle flex flex-col items-center justify-center text-text-disabled text-[10px] text-center px-2 gap-1">
             <span className="text-lg">{isVideo ? '🎬' : '🖼'}</span>
@@ -73,6 +87,10 @@ export function CaptionCard({
           <p className="text-[10px] text-text-tertiary -mt-2">No date yet — it is placed in the month when you save, or pick one.</p>
         )}
 
+        {isPoll && (
+          <PollEditor poll={idea.platformOptions?.poll} onEdit={onPollEdit} onSave={onPollSave} />
+        )}
+
         {!wantsCaption ? (
           <p className="text-[11px] text-text-tertiary">This post goes out without a caption.</p>
         ) : own ? (
@@ -88,6 +106,7 @@ export function CaptionCard({
                 onChange={e => onEdit({ captionAr: e.target.value })}
                 onBlur={e => onSaveField('caption_ar', e.target.value)} className={box} />
             )}
+            {isLinkedIn && <LengthHint idea={idea} />}
           </div>
         ) : hasChoice ? (
           <div className="space-y-1.5">
@@ -111,14 +130,15 @@ export function CaptionCard({
                 onBlur={e => onSaveField('caption_ar', e.target.value)} className={box} />
             )}
             {(showEn || idea.captionEn) && (
-              <textarea value={idea.captionEn || ''} rows={3}
+              <textarea value={idea.captionEn || ''} rows={isLinkedIn ? 6 : 3}
                 onChange={e => onEdit({ captionEn: e.target.value })}
                 onBlur={e => onSaveField('caption_en', e.target.value)} className={box} />
             )}
+            {isLinkedIn && <LengthHint idea={idea} />}
           </div>
         ) : idea.draftStatus === 'drafting' ? (
           <div className="flex items-center gap-2 text-[11px] text-text-tertiary">
-            <Spinner size="sm" /> Writing 3 captions{thumbUrl && !isVideo ? ' from the picture' : ''}…
+            <Spinner size="sm" /> Writing 3 {isLinkedIn ? 'LinkedIn posts' : 'captions'}{thumbUrl && !isVideo ? ' from the picture' : ''}…
             <button onClick={onRedraft} disabled={redrafting}
               className="font-semibold text-amber-700 hover:text-amber-800 disabled:opacity-50">
               {redrafting ? '…' : '↻ Try again'}
@@ -161,6 +181,78 @@ export function CaptionCard({
           </div>
         )}
       </div>
+    </div>
+  )
+}
+
+// How long the post is against LinkedIn's limit, and whether the opening
+// fits before "…see more". Counted on the longer of the two languages, since
+// that is the one that reaches either limit first.
+function LengthHint({ idea }) {
+  const max = limitsFor('linkedin').caption
+  const text = [idea.captionEn || '', idea.captionAr || ''].sort((a, b) => b.length - a.length)[0]
+  const n = text.length
+  const firstBreak = text.indexOf('\n')
+  const opening = firstBreak >= 0 ? firstBreak : n
+  return (
+    <p className={`text-[10px] ${n > max ? 'text-red-600 font-semibold' : 'text-text-tertiary'}`}>
+      {n.toLocaleString()} / {max.toLocaleString()} characters
+      {n > max ? ' — too long for LinkedIn' : n > LINKEDIN_SEE_MORE
+        ? ` · readers see about the first ${LINKEDIN_SEE_MORE} before “…see more”${opening > LINKEDIN_SEE_MORE ? ', and the first line runs past it' : ''}`
+        : ''}
+    </p>
+  )
+}
+
+// A LinkedIn poll's question and answers. Edited locally on every keystroke
+// and saved on blur, like the caption boxes beside it. The limits are
+// LinkedIn's; the post cannot be saved to Approvals while any is broken,
+// because a published poll cannot be edited.
+function PollEditor({ poll, onEdit, onSave }) {
+  const current = { question: '', options: ['', ''], duration: 'SEVEN_DAYS', ...(poll || {}) }
+  const options = current.options?.length ? current.options : ['', '']
+  const lim = limitsFor('linkedin').poll
+  const problems = pollProblems(current)
+  const touched = !!(current.question || options.some(Boolean))
+  const set = patch => onEdit?.({ ...current, options, ...patch })
+  const save = patch => onSave?.({ ...current, options, ...patch })
+  const setOption = (i, v) => set({ options: options.map((o, idx) => idx === i ? v : o) })
+
+  return (
+    <div className="border border-sky-100 bg-sky-50/40 p-3 space-y-2">
+      <p className="text-[10px] font-bold text-sky-800 uppercase tracking-wide">Poll</p>
+      <input value={current.question} maxLength={lim.questionMax + 20}
+        placeholder="The question" onChange={e => set({ question: e.target.value })} onBlur={() => save({})}
+        className={box} />
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+        {options.map((o, i) => (
+          <div key={i} className="flex items-center gap-1">
+            <input value={o} placeholder={`Answer ${i + 1}`} maxLength={lim.optionMax + 10}
+              onChange={e => setOption(i, e.target.value)} onBlur={() => save({})} className={box} />
+            {options.length > lim.minOptions && (
+              <button onClick={() => save({ options: options.filter((_, idx) => idx !== i) })}
+                className="text-[11px] text-text-tertiary hover:text-red-500 px-1" title="Remove this answer">✕</button>
+            )}
+          </div>
+        ))}
+      </div>
+      <div className="flex items-center gap-3 flex-wrap">
+        {options.length < lim.maxOptions && (
+          <button onClick={() => set({ options: [...options, ''] })}
+            className="text-[11px] font-medium text-amber-700 hover:text-amber-800">+ Add an answer</button>
+        )}
+        <label className="text-[11px] text-text-secondary flex items-center gap-1.5">
+          Runs for
+          <select value={current.duration} onChange={e => save({ duration: e.target.value })}
+            className="rounded-lg border border-border px-2 py-1 text-xs bg-white focus:outline-none focus:border-amber-400">
+            {POLL_DURATIONS.map(d => <option key={d} value={d}>{DURATION_LABEL[d]}</option>)}
+          </select>
+        </label>
+        <span className="text-[10px] text-text-tertiary">Question up to {lim.questionMax} characters, answers up to {lim.optionMax}.</span>
+      </div>
+      {problems.length > 0 && (
+        <p className={`text-[11px] ${touched ? 'text-red-600' : 'text-text-tertiary'}`}>{problems.join(' ')}</p>
+      )}
     </div>
   )
 }

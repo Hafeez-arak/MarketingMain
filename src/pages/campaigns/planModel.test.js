@@ -1,8 +1,9 @@
 import { describe, it, expect } from 'vitest'
 import {
   parseYMD, startOfWeek, formatTime, groupByWeek, monthOptions,
-  buildCalendarCells, normalizeAiIdea, distributeDates,
+  buildCalendarCells, normalizeAiIdea, distributeDates, cleanPlanPoll, pollProblems,
 } from './planModel'
+import { derivePostKind, formatForTarget } from '../../lib/postFormats'
 
 // None of this was reachable from a test while it lived inside a 1,490-line
 // component. Every case below is one where being wrong produces something
@@ -251,5 +252,94 @@ describe('distributeDates', () => {
   it('leaves posts untouched without a usable range', () => {
     const posts = [{}, { date: '2026-10-05' }]
     expect(distributeDates(posts, { startDate: '', endDate: '' })).toEqual(posts)
+  })
+})
+
+// ─── LinkedIn ideas ────────────────────────────────────────────────────────
+describe('normalizeAiIdea — LinkedIn', () => {
+  const li = over => normalizeAiIdea({ platform: 'linkedin', ...over })
+
+  it('makes a text post with no media, orientation or slides', () => {
+    expect(li({ format: 'text' })).toMatchObject({ postFormat: 'text', mediaType: 'none', aspectRatio: '', slideCount: 1, postKind: 'text_only' })
+  })
+
+  it('maps the planner’s words onto the catalog, Instagram’s included', () => {
+    expect(li({ format: 'image' }).postFormat).toBe('feed_image')
+    expect(li({ format: 'post' }).postFormat).toBe('feed_image')
+    expect(li({ format: 'carousel' }).postFormat).toBe('multi_image')
+    expect(li({ format: 'reel' }).postFormat).toBe('video')
+    expect(li({ format: 'something else' }).postFormat).toBe('text')
+  })
+
+  it('gives a multi-image post slides and stores it as a carousel', () => {
+    const out = li({ format: 'multi_image' })
+    expect(out.slideCount).toBeGreaterThan(1)
+    expect(out.postKind).toBe('carousel')
+  })
+
+  it('keeps a poll that has a question and answers', () => {
+    const out = li({ format: 'poll', poll: { question: 'Which matters most?', options: ['Energy', 'Glare', ' '] } })
+    expect(out.postFormat).toBe('poll')
+    expect(out.platformOptions.poll).toEqual({ question: 'Which matters most?', options: ['Energy', 'Glare'], duration: 'SEVEN_DAYS' })
+  })
+
+  it('turns a poll with nothing to ask into a text post', () => {
+    const out = li({ format: 'poll', poll: { question: 'Only one answer?', options: ['Yes'] } })
+    expect(out.postFormat).toBe('text')
+    expect(out.platformOptions).toBeUndefined()
+  })
+
+  it('never gives an Instagram idea a poll', () => {
+    const out = normalizeAiIdea({ platform: 'instagram', format: 'poll', poll: { question: 'q', options: ['a', 'b'] } })
+    expect(out.postFormat).toBe('feed_image')
+    expect(out.platformOptions).toBeUndefined()
+  })
+})
+
+describe('cleanPlanPoll', () => {
+  it('cuts long text, drops duplicates and blanks, and keeps at most four answers', () => {
+    const out = cleanPlanPoll({ question: 'q'.repeat(200), options: ['A', 'a', '', 'x'.repeat(50), 'C', 'D', 'E'], duration: 'ONE_DAY' })
+    expect(out.question).toHaveLength(140)
+    expect(out.options).toEqual(['A', 'x'.repeat(30), 'C', 'D'])
+    expect(out.duration).toBe('ONE_DAY')
+  })
+
+  it('refuses an unknown duration in favour of a week', () => {
+    expect(cleanPlanPoll({ question: 'q', options: ['a', 'b'], duration: 'FOREVER' }).duration).toBe('SEVEN_DAYS')
+  })
+
+  it('is null without a question or two answers', () => {
+    expect(cleanPlanPoll(null)).toBeNull()
+    expect(cleanPlanPoll({ question: '', options: ['a', 'b'] })).toBeNull()
+    expect(cleanPlanPoll({ question: 'q', options: ['a', 'A'] })).toBeNull()
+  })
+})
+
+describe('pollProblems', () => {
+  it('is empty for a poll LinkedIn would take', () => {
+    expect(pollProblems({ question: 'Which?', options: ['Energy', 'Glare'] })).toEqual([])
+  })
+
+  it('names each thing LinkedIn would refuse', () => {
+    expect(pollProblems(undefined)).toEqual(['The poll needs a question.', 'The poll needs at least 2 answers.'])
+    expect(pollProblems({ question: 'q'.repeat(141), options: ['a', 'b'] })[0]).toContain('141 characters')
+    expect(pollProblems({ question: 'q', options: ['a', 'b', 'c', 'd', 'e'] })).toContain('LinkedIn allows 4 answers.')
+    expect(pollProblems({ question: 'q', options: ['x'.repeat(31), 'b'] })).toContain('Each answer is at most 30 characters.')
+    expect(pollProblems({ question: 'q', options: ['Yes', 'yes'] })).toContain('Two answers are the same.')
+  })
+})
+
+describe('derivePostKind and formatForTarget', () => {
+  it('stores LinkedIn multi-image as a carousel', () => {
+    expect(derivePostKind({ platform: 'linkedin', format: 'multi_image' })).toBe('carousel')
+  })
+
+  it('finds the nearest format on another platform, or none', () => {
+    expect(formatForTarget('linkedin', 'feed_image', 'image')).toBe('feed_image')
+    expect(formatForTarget('linkedin', 'carousel', 'image')).toBe('multi_image')
+    expect(formatForTarget('linkedin', 'reel', 'video')).toBe('video')
+    expect(formatForTarget('instagram', 'multi_image', 'image')).toBe('carousel')
+    expect(formatForTarget('instagram', 'text', 'none')).toBeNull()
+    expect(formatForTarget('nowhere', 'text', 'none')).toBeNull()
   })
 })

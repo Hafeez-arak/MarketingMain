@@ -43,7 +43,7 @@ const STATUS_META = {
 const isOwnPost = idea => idea.copyMode === 'own'
 
 // ─── One idea in the review list, with inline approve/reject + edit ─────────
-export function IdeaCard({ idea, index, accessToken, workspaceId, onChange, onRemove, onCreate, autoEdit = false }) {
+export function IdeaCard({ idea, index, accessToken, workspaceId, onChange, onRemove, onCreate, autoEdit = false, planPlatforms = [] }) {
   const [editing, setEditing] = useState(autoEdit)
   const [saving,  setSaving]  = useState(false)
   const [saveError, setSaveError] = useState('')
@@ -95,7 +95,15 @@ export function IdeaCard({ idea, index, accessToken, workspaceId, onChange, onRe
       else setSaveError(result.error || 'Could not save idea.')
       return
     }
+    // Moving an idea to another platform moves its main platform and keeps
+    // any other targets it had, minus the one it left.
+    const movedPlatform = patch.platform && patch.platform !== idea.platform
+    const nextTargets = movedPlatform
+      ? [patch.platform, ...targets.filter(t => t !== idea.platform && t !== patch.platform)]
+      : null
+    if (movedPlatform) patch = { ...patch, platforms: nextTargets }
     const dbPatch = {
+      ...(movedPlatform ? { platform: patch.platform, platforms: nextTargets } : {}),
       topic: patch.topic, angle: patch.angle, tone: patch.tone,
       scheduled_date: patch.date || null,
       suggested_style: patch.suggestedStyle || '', image_idea: patch.imageIdea || '',
@@ -152,7 +160,7 @@ export function IdeaCard({ idea, index, accessToken, workspaceId, onChange, onRe
               {idea.date ? formatDate(idea.date) : 'Date set automatically'}
               {' · '}{targets.map(targetLabel).join(' + ')}
               {' · '}{formatLabel}{idea.aspectRatio ? ` ${aspectLabel(idea.aspectRatio)}` : ''}
-              {(idea.postFormat === 'carousel' || idea.postFormat === 'photo_carousel') && idea.slideCount > 1 ? ` · ${idea.slideCount} slides` : ''}
+              {(idea.postFormat === 'carousel' || idea.postFormat === 'photo_carousel' || idea.postFormat === 'multi_image') && idea.slideCount > 1 ? ` · ${idea.slideCount} ${idea.postFormat === 'multi_image' ? 'images' : 'slides'}` : ''}
             </p>
 
             {/* Your own post needs one label and nothing else — there is no
@@ -238,14 +246,18 @@ export function IdeaCard({ idea, index, accessToken, workspaceId, onChange, onRe
       </div>
 
       {editing && (
-        <IdeaEditModal idea={idea} tones={IG_TONES} saving={saving} saveError={saveError}
+        <IdeaEditModal idea={idea} tones={IG_TONES} saving={saving} saveError={saveError} planPlatforms={planPlatforms}
           onClose={() => { if (idea.isNew) onRemove(idea); else setEditing(false) }} onSave={saveEdits} />
       )}
     </div>
   )
 }
 
-export function IdeaEditModal({ idea, tones, saving, saveError, onClose, onSave }) {
+export function IdeaEditModal({ idea, tones, saving, saveError, onClose, onSave, planPlatforms = [] }) {
+  // The platform decides which formats exist, so it is chosen first and a
+  // change resets the format to that platform's default.
+  const [platform, setPlatform] = useState(idea.platform || planPlatforms[0] || 'instagram')
+  const platformChoices = [...new Set([...planPlatforms, idea.platform].filter(Boolean))]
   const [topic,     setTopic]     = useState(idea.topic || '')
   const [angle,     setAngle]     = useState(idea.angle || '')
   const [tone,      setTone]      = useState(idea.tone || tones[0].value)
@@ -265,33 +277,47 @@ export function IdeaEditModal({ idea, tones, saving, saveError, onClose, onSave 
 
   // Format drives orientation and slide count from the catalog — pick a
   // format, only the orientations/slide range it actually supports show up.
-  const [postFormat, setPostFormat] = useState(idea.postFormat || defaultFormat(idea.platform))
-  const [aspectRatio, setAspectRatio] = useState(idea.aspectRatio || defaultAspectRatio(idea.platform, postFormat))
-  const [slideCount, setSlideCount] = useState(idea.slideCount || slideRange(idea.platform, postFormat)?.default || 3)
+  const [postFormat, setPostFormat] = useState(idea.postFormat || defaultFormat(idea.platform || platform))
+  const [aspectRatio, setAspectRatio] = useState(idea.aspectRatio || defaultAspectRatio(platform, postFormat))
+  const [slideCount, setSlideCount] = useState(idea.slideCount || slideRange(platform, postFormat)?.default || 3)
   const [wantsCaption, setWantsCaption] = useState(idea.wantsCaption !== false)
 
-  const formats = formatsFor(idea.platform)
+  const formats = formatsFor(platform)
   const currentFormat = formats.find(f => f.id === postFormat) || formats[0]
   const isVideo = currentFormat?.media === 'video'
   const showsMediaFields = currentFormat?.media !== 'none'
-  const ratios = aspectRatiosFor(idea.platform, postFormat)
-  const slides = slideRange(idea.platform, postFormat)
-  const styles = stylesFor(idea.platform)
+  const ratios = aspectRatiosFor(platform, postFormat)
+  const slides = slideRange(platform, postFormat)
+  const styles = stylesFor(platform)
+
+  function onPlatformChange(p) {
+    setPlatform(p)
+    const fmt = defaultFormat(p)
+    setPostFormat(fmt)
+    setAspectRatio(defaultAspectRatio(p, fmt))
+    setSlideCount(slideRange(p, fmt)?.default || 1)
+  }
 
   function onFormatChange(fmt) {
     setPostFormat(fmt)
-    setAspectRatio(defaultAspectRatio(idea.platform, fmt))
-    const s = slideRange(idea.platform, fmt)
+    setAspectRatio(defaultAspectRatio(platform, fmt))
+    const s = slideRange(platform, fmt)
     if (s) setSlideCount(s.default)
   }
 
-  const derivedKind = derivePostKind({ platform: idea.platform, format: postFormat, wantsCaption, slideCount })
+  const derivedKind = derivePostKind({ platform: platform, format: postFormat, wantsCaption, slideCount })
 
   return (
     <Modal open onClose={onClose} title={idea.isNew ? 'Add idea' : 'Edit idea'} width="max-w-xl">
       <div className="p-6 space-y-4">
         <Input label="Topic / what the post is about" value={topic} onChange={e => setTopic(e.target.value)} />
         <Textarea label="Angle (optional)" rows={2} value={angle} onChange={e => setAngle(e.target.value)} />
+
+        {platformChoices.length > 1 && (
+          <Select label="Platform" value={platform} onChange={e => onPlatformChange(e.target.value)}>
+            {platformChoices.map(p => <option key={p} value={p}>{targetLabel(p)}</option>)}
+          </Select>
+        )}
 
         <div className="grid grid-cols-2 gap-3">
           <Select label="Format" value={postFormat} onChange={e => onFormatChange(e.target.value)}>
@@ -413,6 +439,7 @@ export function IdeaEditModal({ idea, tones, saving, saveError, onClose, onSave 
         <div className="flex justify-end gap-3 pt-1">
           <Button variant="secondary" onClick={onClose}>{idea.isNew ? 'Discard' : 'Cancel'}</Button>
           <Button onClick={() => onSave({
+            platform,
             topic, angle, tone, date, suggestedStyle: style, imageIdea, objective, cta, hashtags, firstComment, series,
             postFormat, aspectRatio, mediaType: currentFormat?.media || 'image', wantsCaption, slideCount,
             postKind: derivedKind,

@@ -96,6 +96,10 @@ export function dbIdeaToDraft(row) {
     mediaStatus: row.media_status || 'none',
     mediaVersionId: row.media_version_id || null,
     references: row.reference_image_urls || [],
+    // Per-platform extras that have no column of their own — today a
+    // LinkedIn poll's question and answers. Same shape and name as
+    // generated_posts.platform_options, which is where finalize copies it.
+    platformOptions: row.platform_options && typeof row.platform_options === 'object' ? row.platform_options : {},
     // Format & orientation system — the fields generation actually reads.
     // Fall back to the catalog default when a row predates this migration
     // (empty format/aspect_ratio) so old ideas don't render blank controls.

@@ -183,6 +183,14 @@ export async function deletePlan(accessToken, planId) {
 // colliding at 0 and scrambling the order on reload (which sorts by position).
 export async function insertIdeas(workspaceId, accessToken, planId, ideas, startPosition = 0) {
   if (!workspaceId || !ideas?.length) return { ok: true, rows: [] }
+  // platform_options (a LinkedIn poll, today) is sent only when an idea in
+  // the batch actually carries some. The column arrived in
+  // 20260915_plan_idea_platform_options.sql, applied by hand; a database that
+  // has not had it yet would refuse EVERY insert naming it, and an
+  // Instagram-only plan has no reason to be the thing that finds out. And it
+  // is all-or-none across the batch, because PostgREST rejects a bulk insert
+  // whose rows do not share the same keys.
+  const withOptions = ideas.some(idea => nonEmptyOptions(idea.platformOptions))
   const body = ideas.map((idea, i) => ({
     workspace_id:     workspaceId,
     plan_id:          planId,
@@ -231,6 +239,8 @@ export async function insertIdeas(workspaceId, accessToken, planId, ideas, start
     caption_en:       idea.captionEn || '',
     status:           'proposed',
     position:         startPosition + i,
+    // Only when some idea in this batch has any — see below.
+    ...(withOptions ? { platform_options: nonEmptyOptions(idea.platformOptions) || {} } : {}),
   }))
   try {
     const res = await fetch(`${SUPABASE_URL}/rest/v1/plan_ideas`, {
@@ -241,6 +251,10 @@ export async function insertIdeas(workspaceId, accessToken, planId, ideas, start
     if (!res.ok) return { error: await res.text() }
     return { ok: true, rows: await res.json() }
   } catch (err) { return { error: err.message } }
+}
+
+function nonEmptyOptions(opts) {
+  return opts && typeof opts === 'object' && Object.keys(opts).length ? opts : null
 }
 
 export async function updateIdea(accessToken, ideaId, patch) {
