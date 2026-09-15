@@ -153,7 +153,11 @@ export const LENSES = [
     // about regarding COMPETITORS", which anchored a buyer-understanding
     // question to rivals who, being SMEs, mostly do nothing in a given week.
     // It now asks about our buyers directly.
-    budget: { searches: 6, maxTokens: 8_000, effort: 'medium' },
+    //
+    // Four searches, down from six on 2026-09-15 to pay for the competitor
+    // lens going weekly. What buyers care about moves over quarters, and the
+    // 14 Sep run's buyer findings came from its first three searches.
+    budget: { searches: 4, maxTokens: 8_000, effort: 'medium' },
     universal: true,
   },
   {
@@ -184,16 +188,25 @@ export const LENSES = [
   },
   {
     key: 'rivals',
-    label: 'Rivals',
-    question: 'What are competitors doing, and does it matter?',
+    label: 'Competitors',
+    question: 'What are competitors doing across every channel, and how does it affect us?',
     perishability: DURABLE,
-    // MONTHLY, demoted from weekly on 2026-09-12. The competitors here are
-    // SMEs: on the run that prompted this, Technolight had posted nothing at
-    // all in the period. Asking every Monday what they did buys the same
-    // answer four times and costs ~$0.25 each time. Monthly is the honest
-    // cadence for a signal that moves this slowly.
-    cadence: 'monthly',
-    budget: { searches: 5, maxTokens: 8_000, effort: 'medium' },
+    // WEEKLY again, since 2026-09-15, and asking a different question.
+    //
+    // It was demoted to monthly on 2026-09-12 because it asked "what did they
+    // POST", and SME rivals mostly post nothing — Technolight had no posts in
+    // the period that prompted it. That was the wrong question, not the wrong
+    // cadence. The team does not care about follower counts; it cares what
+    // rivals are DOING — a brand signed, a project won, a KNX engineer hired,
+    // a stand booked at Elenex — and those leave small traces on websites,
+    // LinkedIn pages, job boards, exhibitor lists and the trade press every
+    // week whether or not anyone posts. Each trace is stored as a signal
+    // (intel.js) and synthesis combines weeks of them into a move.
+    //
+    // Eight searches rather than five, because it now reads many channels per
+    // rival. Roughly +$0.35 a week over the monthly cadence.
+    cadence: 'weekly',
+    budget: { searches: 8, maxTokens: 10_000, effort: 'medium' },
     universal: true,
   },
   {
@@ -275,6 +288,11 @@ export const FINDING_FIELDS = [
   'lens', 'headline', 'detail', 'sources', 'confidence',
   'novelty', 'perishable_until', 'suggested_action', 'evidence',
   'for_whom', 'technical_note',
+  // Added 2026-09-15 for the three-reader report. `relevance` is how much it
+  // MATTERS, which confidence (how sure) never said; `competitor`, `channel`
+  // and `category` make a finding a storable signal; `lead` and `event` make
+  // it a tracked row the sales team can work.
+  'relevance', 'competitor', 'channel', 'category', 'lead', 'event',
 ]
 
 // ─── Who a finding is for ──────────────────────────────────────────────────
@@ -295,10 +313,14 @@ export const FINDING_FIELDS = [
 // So the axis is not subject, it is OWNERSHIP:
 //
 //   marketing   there is something to publish. The default, and the common case.
+//   sales       someone to call, a tender to bid, a project to get specified
+//               on. Added 2026-09-15: the 14 Sep brief filed three live leads
+//               as "marketing", so they sat among post ideas where the people
+//               who work leads never looked.
 //   both        publishable AND the technical team needs to know. Stays in the
 //               marketing flow; carries a line for the other team.
 //   technical   genuinely nothing to publish. Kept, but out of the way.
-export const FOR_WHOM = ['marketing', 'both', 'technical']
+export const FOR_WHOM = ['marketing', 'sales', 'both', 'technical']
 
 /**
  * Whether a finding belongs out of the marketing flow entirely.
@@ -324,7 +346,18 @@ export function makeFinding(lensKey, raw = {}) {
     suggested_action: String(raw.suggested_action || '').trim(),
     evidence: raw.evidence && typeof raw.evidence === 'object' ? raw.evidence : {},
     ...audienceOf(raw),
+    relevance: ['high', 'medium', 'low'].includes(raw.relevance) ? raw.relevance : 'medium',
+    competitor: String(raw.competitor || '').trim(),
+    channel: String(raw.channel || '').trim(),
+    category: String(raw.category || '').trim(),
+    lead: objectWithName(raw.lead),
+    event: objectWithName(raw.event),
   }
+}
+
+/** A lead or event is only kept when it names the thing — the store keys on it. */
+function objectWithName(v) {
+  return v && typeof v === 'object' && String(v.name || '').trim() ? v : null
 }
 
 /**
@@ -354,7 +387,7 @@ function audienceOf(raw = {}) {
   // The note only means anything alongside a technical audience. Carrying it on
   // a purely marketing finding would put an empty "for the technical team" line
   // under cards that have nothing to do with them.
-  return { for_whom, technical_note: for_whom === 'marketing' ? '' : note }
+  return { for_whom, technical_note: ['both', 'technical'].includes(for_whom) ? note : '' }
 }
 
 /**

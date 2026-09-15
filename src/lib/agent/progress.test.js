@@ -25,11 +25,11 @@ describe('the plan is read, not guessed', () => {
     const out = plannedLenses({}, [], { live: true })
     expect(out).toContain('openings')
     expect(out).toContain('calendar')
-    expect(out).not.toContain('rivals')   // weekly default
+    expect(out).not.toContain('craft')   // weekly default; craft is monthly
   })
 
   it('honours a monthly cadence in the fallback', () => {
-    expect(plannedLenses({ cadence: 'monthly' }, [], { live: true })).toContain('rivals')
+    expect(plannedLenses({ cadence: 'monthly' }, [], { live: true })).toContain('craft')
   })
 
   it('does not measure a FINISHED old run against today\'s lens set', () => {

@@ -1,6 +1,7 @@
 import { db, isConfigured } from './_supabase.js'
 import { authorise } from './_serviceAuth.js'
 import { synthesiseRun, persistReport } from './_investigate.js'
+import { persistIntel } from './_intel.js'
 import { patchRun } from './_gather.js'
 import { runTotals } from '../../src/lib/agent/cost.js'
 import { rememberRun, rebuildDigest } from './_memory.js'
@@ -97,6 +98,18 @@ export default async function handler(req, res) {
     // From here the run ends, whichever way it went. `deep.report` is the
     // gathered report when synthesis failed, so the numbers survive.
     await persistReport(workspaceId, runId, deep.report)
+
+    // Signals, leads and events into the store that carries them across
+    // weeks. Never fails the run — see _intel.js. The counts ride on the
+    // report so the page can say "3 new leads, 1 changed" without a query.
+    {
+      const watch = await db(
+        `research_agenda?workspace_id=eq.${encodeURIComponent(workspaceId)}&kind=eq.competitor&status=neq.retired&select=subject`,
+      ).catch(() => [])
+      deep.report.intel = await persistIntel(workspaceId, runId, deep.report, {
+        watchlist: (watch || []).map(r => r.subject).filter(Boolean),
+      })
+    }
 
     // Memory, after persist, and never allowed to fail the run: an agent with
     // no memory is the agent we had last week, which worked.

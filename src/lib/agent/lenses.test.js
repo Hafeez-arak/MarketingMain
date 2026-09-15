@@ -49,21 +49,24 @@ describe('the lens set is general, not lighting-shaped', () => {
       .toEqual(['calendar', 'category', 'craft', 'demand', 'openings', 'ourselves', 'rivals'])
   })
 
-  it('the weekly run is about GROWTH, not about watching competitors', () => {
-    // The 2026-09-12 rebalance. Five of six lenses used to be anchored to
-    // competitors, and those competitors are SMEs — on the run that prompted
-    // this, one of them had posted nothing at all. A set shaped that way can
-    // only ever answer "nothing moved", which is what it did, four weeks
-    // running.
+  it('the weekly run covers growth AND what competitors are doing', () => {
+    // 2026-09-12 demoted rivals to monthly because it asked what they POSTED,
+    // and SME rivals mostly post nothing. 2026-09-15 brought it back weekly
+    // asking what they are DOING across every channel — the traces a brand
+    // signing, a hire or a booked stand leave every week. Growth lenses stay.
     const weekly = lensesFor({ cadence: 'weekly' }).map(l => l.key)
     expect(weekly).toContain('openings')    // who is about to buy
     expect(weekly).toContain('demand')      // what buyers want
     expect(weekly).toContain('category')    // what is changing around us
-    expect(weekly).not.toContain('rivals')  // demoted to monthly
+    expect(weekly).toContain('rivals')      // what competitors are doing
+    expect(weekly).not.toContain('craft')   // still monthly
   })
 
-  it('still checks rivals, just not every week', () => {
-    expect(lensesFor({ cadence: 'monthly' }).map(l => l.key)).toContain('rivals')
+  it('never lets the competitor lens be about follower counts', () => {
+    const text = rivalsPrompt({ brandName: 'X' }, { competitors: ['A'] }).toLowerCase()
+    expect(text).toContain('linkedin')
+    expect(text).toContain('job')
+    expect(text).not.toMatch(/followers?,/)
   })
 })
 
@@ -155,8 +158,9 @@ describe('cadence keeps a monthly question off a weekly bill', () => {
     // once calendar's lookups moved out of the model entirely: its dates now
     // cost $0.00 and zero searches, and its search budget buys trade-show
     // research instead. Capping the total is the honest version of the same
-    // intent.
-    expect(searchBudgetFor(lensesFor({ cadence: 'weekly' }))).toBeLessThanOrEqual(24)
+    // intent. Raised 24 → 26 on 2026-09-15 when the competitor lens went
+    // weekly; demand gave up two searches to keep the rise that small.
+    expect(searchBudgetFor(lensesFor({ cadence: 'weekly' }))).toBeLessThanOrEqual(26)
   })
 })
 
@@ -255,7 +259,7 @@ describe('a finding knows whose problem it is', () => {
 
   it('treats an unknown audience as marketing rather than dropping the finding', () => {
     expect(makeFinding('demand', { ...SASO, for_whom: 'legal' }).for_whom).toBe('marketing')
-    expect(FOR_WHOM).toEqual(['marketing', 'both', 'technical'])
+    expect(FOR_WHOM).toEqual(['marketing', 'sales', 'both', 'technical'])
   })
 })
 
@@ -337,14 +341,31 @@ describe('the prompts are grounded in the brand, not in an industry', () => {
     expect(openingsPrompt(facts(ARAK), { motion: 'specification' })).toMatch(/never invent|guessing/i)
   })
 
-  it('rivals states the measured numbers as given facts', () => {
+  it('the competitor lens is handed what rivals posted about, never how many follow them', () => {
+    // 2026-09-15: the team does not care about followers. What a rival posted
+    // ABOUT is a trace of what they are doing; a follower count is not a move.
     const p = rivalsPrompt(facts(ARAK), {
       competitors: ['Technolight'],
-      board: [{ name: 'Technolight', handle: 'technolight', followers: 1522, activity: 'no NEW posts this period' }],
+      board: [{ name: 'Technolight', handle: 'technolight', followers: 1522, activity: 'no NEW posts this period',
+        top_posts: [{ hook: 'Handover at King Salman Park' }] }],
       movements: [],
     })
-    expect(p).toMatch(/do not recompute/i)
-    expect(p).toContain('1522')
+    expect(p).toContain('no NEW posts this period')
+    expect(p).toContain('Handover at King Salman Park')
+    expect(p).not.toContain('1522')
+  })
+
+  it('shows every searching lens what the team already tracks', () => {
+    const intel = 'LEADS ALREADY TRACKED\n- Mondrian Riyadh'
+    for (const p of [
+      openingsPrompt(facts(ARAK), { motion: 'specification', intel }),
+      categoryPrompt(facts(ARAK), { intel }),
+      rivalsPrompt(facts(ARAK), { competitors: ['A'], intel }),
+    ]) expect(p).toContain('Mondrian Riyadh')
+  })
+
+  it('asks for a lead\'s own name, because the store keys on it', () => {
+    expect(openingsPrompt(facts(ARAK), { motion: 'specification' })).toMatch(/OWN\s+name/)
   })
 
   it('no prompt carries a timestamp that would break the cache', () => {

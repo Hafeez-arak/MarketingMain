@@ -74,6 +74,7 @@ describe('the agent runs in Node, not in a bundle', () => {
     'src/lib/agent/lenses.js',
     'src/lib/agent/lensPrompts.js',
     'src/lib/agent/web.js',
+    'src/lib/agent/intel.js',
     // Reached by ownChannels.js and _investigate.js for LIVE_PLATFORMS. It is a
     // browser-utility module by location and a pure one by content — zero
     // imports — so it loads under Node, and this line is what keeps it that
@@ -89,6 +90,7 @@ describe('the agent runs in Node, not in a bundle', () => {
     'api/agent/_investigate.js',
     'api/agent/_lenses.js',
     'api/agent/_web.js',
+    'api/agent/_intel.js',
     // The endpoints themselves. Vercel imports these files directly, so if one
     // cannot load under Node the route is a 500 before any of the above
     // matters.

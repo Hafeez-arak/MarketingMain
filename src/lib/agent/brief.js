@@ -27,10 +27,76 @@ export const BRIEF_SCHEMA = {
     type: 'object',
     additionalProperties: false,
     required: [
-      'headline', 'market_direction', 'market', 'gaps', 'proposed_rules', 'proposed_ideas',
-      'agenda_changes', 'unanswered',
+      'headline', 'top_three', 'competitor_moves', 'market_direction', 'market', 'gaps',
+      'proposed_rules', 'proposed_ideas', 'agenda_changes', 'new_competitors', 'unanswered',
     ],
     properties: {
+      // ── The three-reader report, added 2026-09-15 ──
+      // Marketing, sales and the technical team read this brief. `top_three`
+      // is the only part most of them will read; `competitor_moves` is where
+      // small signals from many channels and many weeks become one claim.
+      top_three: {
+        type: 'array',
+        description:
+          'The three things that most need doing this week, across ALL three teams, most important ' +
+          'first. Fewer than three when fewer deserve it. Each is a finding plus the action — never ' +
+          'a restated number. Only what is NEW or CHANGED this week: a lead the team already tracks, ' +
+          'unchanged, is not a top item however large it is.',
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['finding', 'action', 'team', 'refs'],
+          properties: {
+            finding: { type: 'string', description: 'One sentence.' },
+            action: { type: 'string', description: 'What to do, concretely, and by when if there is a date.' },
+            team: { type: 'string', enum: ['marketing', 'sales', 'technical'] },
+            refs: { type: 'array', items: { type: 'string' }, description: 'F- or S-refs this rests on.' },
+          },
+        },
+      },
+      competitor_moves: {
+        type: 'array',
+        description:
+          'One entry per competitor that did something worth knowing. Combine the small signals — ' +
+          'this week\'s findings (F-refs) AND the history already stored (S-refs) — into what they ' +
+          'are actually doing. A job advert alone is trivia; a job advert, a new brand on the website ' +
+          'and a stand at an expo in the same month is a move. Never a follower count. Omit a ' +
+          'competitor with nothing new rather than writing "no change".',
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['competitor', 'what_changed', 'picture', 'effect_on_us', 'relevance', 'refs'],
+          properties: {
+            competitor: { type: 'string', description: 'Exactly as on the watchlist.' },
+            what_changed: { type: 'string', description: 'What is new THIS week, in one sentence.' },
+            picture: {
+              type: 'string',
+              description: 'What the pieces add up to across weeks and channels. Say how many pieces and ' +
+                'how firm the reading is — "three signals in a month" is not the same as "one post".',
+            },
+            effect_on_us: { type: 'string', description: 'How it affects us, and what we should do.' },
+            relevance: { type: 'string', enum: ['high', 'medium', 'low'] },
+            teams: { type: 'array', items: { type: 'string', enum: ['marketing', 'sales', 'technical'] } },
+            refs: { type: 'array', items: { type: 'string' }, description: 'Every F- and S-ref it combines.' },
+          },
+        },
+      },
+      new_competitors: {
+        type: 'array',
+        description:
+          'Companies acting as competitors that are NOT on the watchlist, found in this week\'s ' +
+          'findings. A person decides whether to add them. Empty when none surfaced.',
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['name', 'why'],
+          properties: {
+            name: { type: 'string' },
+            why: { type: 'string', description: 'What they do that overlaps with us.' },
+            source_url: { type: 'string' },
+          },
+        },
+      },
       headline: {
         type: 'string',
         description:
@@ -271,6 +337,29 @@ export const REFLECT_PROMPT = [
 export const SYNTHESISE_PROMPT = [
   'Write the brief.',
   '',
+  'THREE TEAMS READ THIS, AND EACH NEEDS SOMETHING DIFFERENT.',
+  '  Marketing  how to position us and what to publish.',
+  '  Sales      leads, tenders, projects and events to act on — someone to call, a bid to decide.',
+  '  Technical  products, standards and technologies competitors are pushing.',
+  '`top_three` is written for all three at once and is the only part many will read. Put the',
+  'single most consequential item first whichever team owns it. A tender deadline this week can',
+  'outrank the best post idea of the month.',
+  '',
+  'ONLY WHAT IS NEW OR CHANGED. Findings carry a `store` verdict computed against what the team',
+  'already tracks: "seen" means it was already known and nothing moved, "changed" names what moved.',
+  'A seen finding is context, never a top item and never a headline. A changed one leads with the',
+  'change ("Mondrian Riyadh now has a contractor"), not with the project.',
+  '',
+  'COMBINE THE SMALL PIECES. The competitor history below is signals already stored from earlier',
+  'weeks, each with an S-ref. This week\'s findings have F-refs. `competitor_moves` is where you',
+  'put them together: several small, sourced traces on different channels pointing the same way',
+  'are worth more than any one of them, and saying how many pieces a reading rests on is what lets',
+  'a reader trust it. Do not invent a pattern from one piece — say it is one piece.',
+  'Followers and posting frequency are never a competitor move.',
+  '',
+  'Findings marked relevance "low" are stored, not reported: do not put them in top_three, gaps,',
+  'ideas or competitor_moves.',
+  '',
   'The competitor board, the movements, our own per-platform performance and the period are',
   'already computed and will be attached to your output — do not restate them, and do not',
   'contradict them.',
@@ -505,6 +594,9 @@ export function mergeBrief(gathered, brief, allowedUrls, findings = []) {
     // The model's headline replaces stage 0's placeholder, but only if it
     // wrote one — a failed synthesis leaves the measured headline standing.
     headline: brief?.headline || gathered.headline,
+    top_three: (brief?.top_three || []).slice(0, 3),
+    competitor_moves: (brief?.competitor_moves || []).filter(m => m?.competitor && m.relevance !== 'low'),
+    new_competitors: (brief?.new_competitors || []).filter(c => String(c?.name || '').trim()),
     competitor_board: (gathered.competitor_board || []).map(c => ({
       ...c,
       read: readByName.get(String(c.name || '').toLowerCase()) || '',

@@ -86,13 +86,14 @@ describe('cadence reaches every route, or two lenses silently stop existing', ()
     expect(code).toMatch(/cadence\s*=/)
   })
 
-  it('the monthly set is a superset of the weekly one, and holds the demoted lenses', () => {
+  it('the monthly set is a superset of the weekly one, and holds the monthly-only lens', () => {
     const weekly = lensesFor({ cadence: 'weekly' }).map(l => l.key)
     const monthly = lensesFor({ cadence: 'monthly' }).map(l => l.key)
     for (const k of weekly) expect(monthly).toContain(k)
-    expect(monthly).toContain('rivals')
+    // rivals went back to weekly on 2026-09-15 (competitor intel across
+    // channels); craft is the lens that still only runs monthly.
     expect(monthly).toContain('craft')
-    expect(weekly).not.toContain('rivals')
+    expect(weekly).not.toContain('craft')
   })
 })
 

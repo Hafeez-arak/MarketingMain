@@ -18,6 +18,10 @@ import {
   deadlineFor, resultsFromRows, timingNote, pendingLenses, timedOutResult,
 } from '../../src/lib/agent/phases.js'
 import { LIVE_PLATFORMS } from '../../src/lib/utils.js'
+import { loadIntel } from './_intel.js'
+import {
+  knownIntelPrompt, planStoreWrites, annotateFindings, signalHistory, isOpenOpportunity, nameKey,
+} from '../../src/lib/agent/intel.js'
 
 // Re-exported: the resolver imported it from here before it moved to loop.js.
 export { urlsFromResponse }
@@ -148,7 +152,17 @@ export async function planLenses(workspaceId, runId, cadence = 'weekly') {
  * every lens's — the calendar's dates cost an API round trip, and fetching
  * them to run the demand lens would be waste repeated on every call.
  */
-async function argsForLens(key, { brandFacts, motion, competitors, gathered, profile, ctx, agenda = [], language = '' }) {
+async function argsForLens(key, { brandFacts, motion, competitors, gathered, profile, ctx, agenda = [], language = '', workspaceId = '' }) {
+  // What the team already tracks, so the lens reports changes instead of
+  // re-announcing last week. Read only for the three lenses that produce
+  // leads, events or competitor signals; never fatal — an empty store is a
+  // first run, not an error.
+  const intel = ['openings', 'category', 'rivals'].includes(key) && workspaceId
+    ? knownIntelPrompt(await loadIntel(workspaceId), {
+        competitors: key === 'rivals' ? competitors : null,
+      })
+    : ''
+
   if (key === 'calendar') {
     // No `args`: this lens has no prompt because it makes no model call. What
     // it needs is the computed calendar itself, which is the whole lens now.
@@ -159,19 +173,19 @@ async function argsForLens(key, { brandFacts, motion, competitors, gathered, pro
   // every lens that searches. It used to reach synthesis only, which reads what
   // the lenses already found and cannot look anything up, so a standing question
   // could change the write-up and never change what was searched for.
-  if (key === 'openings') return { args: [brandFacts, { motion, agenda, language }] }
+  if (key === 'openings') return { args: [brandFacts, { motion, agenda, language, intel }] }
   if (key === 'demand') return { args: [brandFacts, { competitors, agenda, language }] }
   // The market it researches rides in brandFacts like every other brand fact,
   // resolved once in loadRunContext rather than a second time here.
-  if (key === 'category') return { args: [brandFacts, { agenda, language }] }
+  if (key === 'category') return { args: [brandFacts, { agenda, language, intel }] }
   if (key === 'rivals') {
     return {
       args: [brandFacts, {
         competitors,
         agenda,
         language,
+        intel,
         board: gathered?.competitor_board || [],
-        movements: gathered?.movements || [],
       }],
     }
   }
@@ -229,7 +243,7 @@ export async function runSingleLens({ workspaceId, runId, lensKey, cadence = 'we
       result = runCalendarLens({ calendar })
     } else {
       const build = LENS_PROMPTS[lensKey]
-      const { args } = await argsForLens(lensKey, ctxBundle)
+      const { args } = await argsForLens(lensKey, { ...ctxBundle, workspaceId })
       if (!build || !args) {
         result = { lens: lensKey, ok: false, findings: [], sources: [], cost: 0, error: 'No prompt for this lens.' }
       } else {
@@ -336,8 +350,17 @@ export async function synthesiseRun({ workspaceId, runId, cadence = 'weekly', de
     // Refs are stamped BEFORE the synthesis sees the findings, because the
     // whole point of them is that the model can point an idea at one. Stamping
     // after would leave `answers` referring to nothing.
-    const findings = withRefs(rankFindings(
-      applyNovelty(results.flatMap(r => r.findings || []), seenBefore)))
+    const ranked = rankFindings(applyNovelty(results.flatMap(r => r.findings || []), seenBefore))
+
+    // The store's verdict overrides the headline match: "check the store
+    // before calling something new" is decided here, in code, against rows
+    // with names — then handed to the model as a fact. Nothing is written
+    // yet; persistIntel re-plans against a fresh read once the run closes.
+    const intel = await loadIntel(workspaceId)
+    const storePlan = planStoreWrites(ranked, intel, { runId, watchlist: ctxBundle.competitors })
+    const findings = withRefs(annotateFindings(ranked, storePlan))
+    const history = signalHistory(intel.signals)
+    const tracked = intel.opportunities.filter(isOpenOpportunity)
     const summary = lensSummary(results)
 
     await markStage(workspaceId, runId, 'synthesise')
@@ -362,6 +385,17 @@ export async function synthesiseRun({ workspaceId, runId, cadence = 'weekly', de
             'genuinely found nothing — say so rather than inventing something for it.',
             '',
             JSON.stringify({ findings, lenses: summary }, null, 2),
+            '',
+            // The weeks already in the store, per competitor, with S-refs —
+            // the small pieces competitor_moves combines this week's with.
+            Object.keys(history.byCompetitor).length
+              ? `COMPETITOR HISTORY ALREADY STORED (earlier weeks):\n${JSON.stringify(history.byCompetitor, null, 2)}`
+              : 'COMPETITOR HISTORY ALREADY STORED: none yet — this is the first run with a store.',
+            '',
+            `Competitors on the watchlist: ${ctxBundle.competitors.join(', ') || '(none)'}`,
+            tracked.length
+              ? `Leads the sales team already tracks (${tracked.length}): ${tracked.slice(0, 30).map(o => `${o.name} [${o.status}]`).join('; ')}`
+              : '',
             '',
             agenda?.length
               ? `Standing questions a person asked you to watch:\n${agenda.map(a => `- ${a.subject}`).join('\n')}`
@@ -404,6 +438,16 @@ export async function synthesiseRun({ workspaceId, runId, cadence = 'weekly', de
 
     const report = mergeBrief(gathered, brief, allowedUrls, findings)
     report.lenses = summary
+    // S-refs resolve against this, so a combined competitor claim can be
+    // traced to the earlier-week source it rests on after the store moves on.
+    report.signal_refs = history.refs
+    // A "new" competitor already on the watchlist is not new. Checked in code
+    // for the same reason repeats are: the model does not reliably remember
+    // a list it was shown two thousand tokens earlier.
+    {
+      const watched = new Set(ctxBundle.competitors.map(nameKey))
+      report.new_competitors = (report.new_competitors || []).filter(c => !watched.has(nameKey(c.name)))
+    }
     report.findings = findings
     report.sales_motion = { motion, explicit }
     // A run that is entirely repeats is telling you something no single
@@ -545,6 +589,28 @@ export async function persistReport(workspaceId, runId, report) {
     (report?.agenda_changes || []).filter(a => a.action === 'add'),  // retiring is a human decision
     priorQuestions || [],
   )
+
+  // New competitors land where discover_competitors already puts its
+  // proposals: the watchlist, as `proposed`, for a person to accept. Every
+  // status is checked, so a rival someone retired is not re-proposed.
+  const priorCompetitors = await db(
+    `research_agenda?workspace_id=eq.${workspaceId}&kind=eq.competitor&select=subject&limit=300`,
+  ).catch(() => [])
+  const knownNames = new Set((priorCompetitors || []).map(r => nameKey(r.subject)))
+  for (const c of report?.new_competitors || []) {
+    const key = nameKey(c.name)
+    if (!key || knownNames.has(key)) continue
+    knownNames.add(key)
+    await db('research_agenda', {
+      method: 'POST',
+      body: {
+        workspace_id: workspaceId, kind: 'competitor', subject: String(c.name).trim().slice(0, 200),
+        why: [c.why, c.source_url].filter(Boolean).join(' — ').slice(0, 1000),
+        status: 'proposed', created_by: 'agent', cadence: 'weekly',
+      },
+      prefer: 'return=minimal',
+    }).catch(err => console.error('[agent/synthesise] new competitor:', err.message))
+  }
 
   for (const a of freshAgenda) {
     await db('research_agenda', {
