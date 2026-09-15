@@ -828,8 +828,27 @@ export function CreativeStudio() {
     const ins = await insertPendingVersions(activeWorkspaceId, accessToken, s.id, rows)
     if (ins.error) { setBusy(''); setError(ins.error); return }
 
-    const fired = videoOnly
-      ? await requestVideo(webhooks.creativeVideo, {
+    // ── One webhook call PER CANDIDATE, not one call carrying both ─────────
+    // n8n finishes a node across every one of its input items before the next
+    // node runs at all. Both candidates in a single execution therefore meant
+    // neither row was written until the SLOWER model returned — the faster
+    // picture already existed, had already been paid for, and was being
+    // withheld. A call each gives each candidate its own execution, which is
+    // what actually makes it appear on its own.
+    //
+    // This is deliberately solved HERE rather than inside the workflow. The
+    // obvious fix — upload and mark the row ready from inside the Code node —
+    // was tried on 2026-09-15 and corrupted every image: a Buffer nested in
+    // httpRequest's options does not survive the task runner's RPC boundary
+    // and gets stored as the text {"type":"Buffer","data":[...]}, which serves
+    // as image/png and renders white. The bytes must leave through the
+    // downstream HTTP node, so independence has to come from splitting the
+    // request instead.
+    //
+    // Fired together rather than awaited in turn: sequencing two independent
+    // renders would hand back the delay this exists to remove.
+    const fires = videoOnly
+      ? [await requestVideo(webhooks.creativeVideo, {
           session_id: s.id, version_id: ins.rows[0].id, prompt: videoPrompt,
           model: modelId, duration, aspect_ratio: aspect, resolution, generate_audio: audio,
           // Collected by the frame slots beside the ➕ and, until this pass,
@@ -849,24 +868,34 @@ export function CreativeStudio() {
           reference_image_urls: modelImageRole(modelId) === 'references'
             ? (attachments.reference || []).map(r => r.url)
             : [],
-        })
-      : await requestGenerate(webhooks.creativeGenerate, {
+        })]
+      : await Promise.all(ins.rows.map(r => requestGenerate(webhooks.creativeGenerate, {
           session_id: s.id, prompt: finalPrompt, aspect_ratio: aspect,
           instructions: brandInstructions,
           reference_url: refUrl, reference_notes: refNotes,
-          targets: ins.rows.map(r => ({ version_id: r.id, provider: r.provider })),
-        })
+          // Still an array: the workflow's contract is unchanged, so an older
+          // deployment that receives several targets keeps working. It just
+          // carries one now.
+          targets: [{ version_id: r.id, provider: r.provider }],
+        })))
 
     setBusy('')
     setSessions(prev => [s, ...prev])
     setSession(s)
     setVersions(ins.rows)
     setComposers({}); setFocusedBranch(null)
-    if (fired.error) {
-      setError(fired.error)
+    // Each failure is written against ITS OWN row. One provider's webhook
+    // being refused must not blank the candidate that was accepted — which is
+    // exactly what marking every row failed used to do, back when a single
+    // call either succeeded or failed for both.
+    const refused = ins.rows
+      .map((r, i) => ({ row: r, error: fires[i]?.error }))
+      .filter(f => f.error)
+    if (refused.length) {
+      setError(refused[0].error)
       // The rows exist but nothing will ever fill them — say so on the cards
       // instead of leaving spinners running forever.
-      for (const r of ins.rows) await updateVersion(accessToken, r.id, { status: 'failed', error: fired.error })
+      for (const f of refused) await updateVersion(accessToken, f.row.id, { status: 'failed', error: f.error })
       refresh(s.id)
     }
   }

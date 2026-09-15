@@ -3290,7 +3290,7 @@ const instructions   = String(body.instructions || '').trim();
 // rows, so each candidate has somewhere to land the moment it finishes.
 const targets = Array.isArray(body.targets) ? body.targets : [];
 
-if (!basePrompt) return targets.map(t => ({ json: { _ok: false, _written: false, version_id: t.version_id, error: 'No prompt to generate from.' } }));
+if (!basePrompt) return targets.map(t => ({ json: { _ok: false, version_id: t.version_id, error: 'No prompt to generate from.' } }));
 
 // Two layers. The creative brief — subject, lighting, composition, materials —
 // is IDENTICAL for both candidates, because that is the variable the whole
@@ -3364,100 +3364,54 @@ async function genOpenAI(){
   return url;
 }
 
-// ─── Each candidate writes its own row, the moment it lands ────────────────
-// This node used to hand both candidates to a downstream Upload → Save pair.
-// n8n runs a node over ALL of its input items before the next node runs at
-// all, so nothing reached the table until the SLOWER provider finished: the
-// fast candidate sat rendered-but-invisible in memory while the browser showed
-// two spinners. gpt-image-2 at quality:'high' routinely takes around twice
-// nano-banana-2's time, so most of the wait the team was feeling was pure
-// queueing — the first image already existed and was being withheld from them.
-//
-// The row is written from inside the per-candidate chain instead, so each lane
-// goes ready on its own clock and the studio's poller paints it on the next
-// tick. Both candidates always STARTED together; only the reporting was ever
-// serialised, which is why this costs nothing extra and changes no output.
-//
-// It also makes the sticky note's long-standing claim ("fills each row as its
-// model returns") true for the first time.
-const SUPA = String($env.SUPABASE_URL || '').replace(/\/+$/, '');
-const SUPA_KEY = $env.SUPABASE_KEY;
-
-function supaHeaders(extra){
-  return Object.assign({ apikey: SUPA_KEY, Authorization: 'Bearer ' + SUPA_KEY }, extra || {});
-}
-
-// Deliberately no `json` flag, matching the upload in Creative Video
-// Reconcile — the one binary upload in this repo that has actually run in
-// production and recovered real clips. Passing the Buffer straight through
-// with an explicit Content-Type is what sends raw bytes; hand it to a JSON
-// serialiser instead and what lands in the bucket is the
-// {type:'Buffer',data:[...]} form — the very corruption reviveBinary() exists
-// to undo on the way in, and the one that once stored a "valid" image nobody
-// could open.
-async function uploadImage(filename, buf){
-  await req({
-    method: 'POST',
-    url: SUPA + '/storage/v1/object/' + BUCKET + '/' + filename,
-    headers: supaHeaders({ 'Content-Type': 'image/png', 'x-upsert': 'true' }),
-    body: buf,
-  });
-  return SUPA + '/storage/v1/object/public/' + BUCKET + '/' + filename;
-}
-
-async function patchVersion(versionId, patch){
-  await req({
-    method: 'PATCH',
-    url: SUPA + '/rest/v1/creative_versions?id=eq.' + versionId,
-    headers: supaHeaders({ 'Content-Type': 'application/json', Prefer: 'return=minimal' }),
-    body: patch,
-    json: true,
-  });
-}
-
 // fal's own URLs are not guaranteed to persist, and every later step (edit,
 // animate, overlay) re-reads this image — so it is copied into our bucket now
 // rather than trusted to still be there in ten minutes.
+//
+// ─── Why the bytes leave through a downstream node ─────────────────────────
+// It is tempting to upload from right here and mark the row ready, so that one
+// candidate never waits on the other. That was tried on 2026-09-15 and it
+// CORRUPTED EVERY IMAGE: `this.helpers.httpRequest` is proxied from the task
+// runner to n8n's main process as a single JSON.stringify'd message, and a
+// Buffer nested inside the options object is never reconstructed on the far
+// side — it arrives as the literal text '{"type":"Buffer","data":[...]}' and
+// is stored as the file. Supabase serves it back as image/png, the browser
+// cannot decode it, and the card renders plain white. Both candidates of the
+// 08:00 UTC round that day landed that way, at ~7x the real file size.
+//
+// Only prepareBinaryData survives the boundary, because the Buffer is a
+// TOP-LEVEL RPC argument there rather than a nested one. So this node prepares
+// the binary and a real HTTP node, running in the main process, uploads it.
+// See _http_creative_upload.
+//
+// The lockstep problem that idea was trying to solve is real, and is solved
+// instead where it actually belongs: the BROWSER fires one webhook call per
+// candidate, so each gets its own n8n execution with a single item in it.
+// Independent executions need no cleverness in here at all.
 async function oneCandidate(target){
-  const startedAt = Date.now();
   const tempUrl = target.provider === 'openai' ? await genOpenAI() : await genGemini();
   const buf = await req({ method:'GET', url: tempUrl, encoding:'arraybuffer' });
   if (!looksLikeImage(buf)) {
     throw new Error('Downloaded file is not a real image (' + buf.length + ' bytes, starts with "' + buf.toString('ascii', 0, 16) + '")');
   }
-  const filename = (sessionId ? sessionId + '/' : '') + target.version_id + '-' + Date.now() + '.png';
-  const imageUrl = await uploadImage(filename, buf);
-  await patchVersion(target.version_id, { status: 'ready', error: '', image_url: imageUrl });
-  return { version_id: target.version_id, provider: target.provider, image_url: imageUrl,
-           seconds: Math.round((Date.now() - startedAt) / 100) / 10 };
+  const base = target.version_id + '-' + Date.now() + '.png';
+  const filename = (sessionId ? sessionId + '/' : '') + base;
+  return {
+    json: { _ok: true, version_id: target.version_id, provider: target.provider, bucket: BUCKET, filename },
+    binary: { data: await prepareBinaryData(buf, base, 'image/png') },
+  };
 }
 
-// One candidate's whole life, failure included. The failure is written from in
-// here for the same reason the success is: the other lane must not have to
-// wait on this one to find out it died.
-async function runCandidate(target){
-  try {
-    return { json: Object.assign({ _ok: true, _written: true }, await oneCandidate(target)) };
-  } catch (err) {
-    const message = String((err && err.message) || err).slice(0, 500);
-    try {
-      await patchVersion(target.version_id, { status: 'failed', error: message });
-      return { json: { _ok: false, _written: true, version_id: target.version_id,
-                       provider: target.provider, error: message } };
-    } catch (patchErr) {
-      // Supabase is unreachable from in here, so the failure could not even be
-      // recorded. Hand it downstream — that is the only reason the Mark Failed
-      // node still exists, and without it the card would spin forever.
-      return { json: { _ok: false, _written: false, version_id: target.version_id,
-                       provider: target.provider, error: message } };
-    }
-  }
-}
-
-// Promise.all rather than allSettled, because runCandidate absorbs every
-// provider failure itself. A rejection escaping it would mean a bug in this
-// node rather than a bad render, and should surface as one.
-return await Promise.all(targets.map(runCandidate));
+// allSettled, not all — the whole point of this screen is a side-by-side
+// comparison, and one provider erroring should still leave the other one
+// standing rather than blanking the round. `targets` is normally a single
+// candidate now (one call per provider), but a caller may still send several
+// and this stays correct if one does.
+const settled = await Promise.allSettled(targets.map(oneCandidate));
+return settled.map((s, i) => s.status === 'fulfilled' ? s.value : ({
+  json: { _ok: false, version_id: targets[i].version_id, provider: targets[i].provider,
+          error: (s.reason && s.reason.message) ? s.reason.message : String(s.reason) },
+}));
 """
 
 CREATIVE_EDIT_JS = _CREATIVE_REQ_JS + r"""
@@ -5453,9 +5407,21 @@ POST `arak-creative-generate`
 ```
 
 The browser inserts BOTH pending `creative_versions` rows first and polls
-them, so this answers 'accepted' at once and fills each row as its model
-returns. One provider failing still leaves the other candidate — the whole
-point of the screen is a side-by-side choice.
+them, so this answers 'accepted' at once. One provider failing still leaves
+the other candidate — the whole point of the screen is a side-by-side choice.
+
+**One call per candidate** (2026-09-15). `targets` normally carries a single
+provider, because the browser fires this webhook once per candidate rather
+than once per round. That is what lets the fast model's picture appear while
+the slow one is still rendering: each candidate is its own execution, and n8n
+finishes a node across every item before the next node runs, so two candidates
+sharing one execution meant neither row was written until the slower finished.
+Several targets in one call still work and still behave correctly — they are
+just serialised again, which is the thing worth avoiding.
+
+Do NOT "fix" that by uploading from inside the Code node. It corrupts every
+image: a Buffer nested in httpRequest's options does not survive the task
+runner's RPC boundary and is stored as the text `{"type":"Buffer",...}`.
 
 Models: `gpt-image-2` + `nano-banana-2` (their `/edit` variants when a
 reference image is supplied — reference = inspiration, never a copy).
@@ -5856,55 +5822,28 @@ def _build_creative_workflow(name, webhook_path, sticky, js, code_node_name,
 
 
 def build_creative_generate() -> dict:
-    """Generate is the ONE creative workflow that does not use the shared shape
-    above, and the reason is the only thing that makes it different: it renders
-    TWO candidates per request.
+    """Uses the shared shape, and must keep using it.
 
-    The shared shape writes rows from downstream Upload/Save nodes. n8n finishes
-    a node across all of its items before starting the next one, so with two
-    candidates in flight neither row was written until the slower model
-    returned — the team watched two spinners while one image already existed.
-    Here the Code node uploads and PATCHes each candidate itself the instant
-    that candidate is done (see CREATIVE_GENERATE_JS), so the fast lane appears
-    on its own.
+    Moving the upload into the Code node so each candidate could go ready on
+    its own clock was tried on 2026-09-15 and corrupted every image — a Buffer
+    nested in httpRequest's options does not survive the task runner's RPC
+    boundary. See the long note in CREATIVE_GENERATE_JS.
 
-    That leaves Mark Failed reachable only when the Code node could not write
-    even the failure (Supabase unreachable from inside it). Rare, but the
-    alternative is a card that spins forever, which is what this whole
-    pending-row design exists to prevent.
+    Candidates are made independent one level up instead: the browser fires one
+    call per provider, so each candidate is its own execution with a single
+    item, and n8n's node-at-a-time item processing never gets the chance to
+    make one wait for the other.
     """
-    nodes = [
-        _sticky(CREATIVE_GENERATE_STICKY, height=360, width=460, x=0, y=-180),
-        _webhook("arak-creative-generate", "responseNode", x=0, y=300),
-        _respond_json(
-            "Respond: Accepted",
-            "={{ JSON.stringify({ status: 'accepted', session_id: $json.body.session_id }) }}",
-            x=220, y=300),
-        _code("Generate Candidates", CREATIVE_GENERATE_JS, x=440, y=300),
-        _if_bool_equals("Row Still Unwritten?", "creative-gate-1",
-                        "={{ $json._written !== true }}", x=660, y=300),
-        _http_creative_fail("Generate Candidates", "Supabase: Mark Failed", x=880, y=300),
-    ]
-    return {
-        "name": "Arak Lighting – Creative Generate",
-        "nodes": nodes,
-        "connections": {
-            "Webhook": {"main": [[{"node": "Respond: Accepted", "type": "main", "index": 0}]]},
-            "Respond: Accepted": {"main": [[{"node": "Generate Candidates", "type": "main", "index": 0}]]},
-            "Generate Candidates": {"main": [[{"node": "Row Still Unwritten?", "type": "main", "index": 0}]]},
-            # True = the Code node never managed to write this row. False = it
-            # already said ready or failed, and there is nothing left to do.
-            "Row Still Unwritten?": {
-                "main": [
-                    [{"node": "Supabase: Mark Failed", "type": "main", "index": 0}],
-                    [],
-                ]
-            },
-        },
-        "active": False,
-        "settings": {"executionOrder": "v1"},
-        "tags": [],
-    }
+    return _build_creative_workflow(
+        name="Arak Lighting – Creative Generate",
+        webhook_path="arak-creative-generate",
+        sticky=CREATIVE_GENERATE_STICKY,
+        js=CREATIVE_GENERATE_JS,
+        code_node_name="Generate Candidates",
+        mime="image/png",
+        media_field="image_url",
+        accepted_expr="={{ JSON.stringify({ status: 'accepted', session_id: $json.body.session_id }) }}",
+    )
 
 
 def build_creative_edit() -> dict:

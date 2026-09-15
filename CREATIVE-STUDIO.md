@@ -596,32 +596,48 @@ returned. `gpt-image-2` at `quality:'high'` routinely takes around twice
 spinners while one finished image already existed — and had already been paid
 for. Nothing was slow; something was being withheld.
 
-Each candidate now uploads its own PNG and PATCHes its own row from *inside*
-the per-candidate chain, the moment that model returns. Its failure is written
-from there too, for the same reason: neither lane should wait on the other to
-learn it died. `Upload to Supabase Storage` and `Supabase: Save Version` are
-gone; `Supabase: Mark Failed` survives only for the case where the Code node
-could not reach Supabase to record even the failure, which the `_written` flag
-on each item signals. The sticky note has claimed "fills each row as its model
-returns" since the workflow was written — it is true now.
+### The first attempt shipped a worse bug (#56, reverted same day)
 
-Two supporting changes:
+The obvious fix was to upload and PATCH each row from *inside* the Code node,
+so a candidate never waits on its sibling. That merged at 07:50 UTC, was
+redeployed, and **corrupted every image in the 08:00 round**.
 
-- **The studio polls every 1.5s for the first minute**, then relaxes to 4s. A
-  flat 4s tick was handing back up to four of the seconds the fix had just
-  saved, while a 1.5s tick for the length of a multi-minute video render would
-  be a few hundred pointless reads.
-- **The upload passes the Buffer straight through with an explicit
-  `Content-Type`** and no `json` flag, matching the binary upload in Creative
-  Video Reconcile — the one in this repo that has actually run in production.
-  Hand a Buffer to a JSON serialiser instead and what lands in the bucket is
-  the `{type:'Buffer',data:[...]}` form: a file that stores fine and opens
-  nowhere. `n8n/creativeGenerate.test.js` asserts the uploaded bytes still
-  start with a PNG signature, alongside the real regression test — that the
-  fast lane is readable while the slow one is still rendering.
+`this.helpers.httpRequest` is proxied from the task runner to n8n's main
+process as a single `JSON.stringify`'d message, and **a Buffer nested inside
+the options object is never reconstructed on the far side**. What reached
+Supabase Storage was the literal text `{"type":"Buffer","data":[...]}` — about
+7× the real file size — stored under a `.png` name and served back as
+`image/png`. The browser can't decode it, so the card renders plain **white**.
+That is the symptom to recognise: *the image "finishes" and stays blank.*
 
-`prepareBinaryData` was added to `workflowHarness.js` to make this testable at
-all; without it the video workflows threw on an undefined function, which is
+`_http_creative_upload`'s own docstring had said exactly this all along. Only
+`prepareBinaryData` survives the boundary, because its Buffer is a **top-level
+RPC argument** rather than a nested one.
+
+**A stub cannot catch this.** The harness's `httpRequest` receives the Buffer
+intact, because the harness is in-process and the RPC boundary *is* the bug. A
+test asserting "the upload got real bytes" passed against the broken code. The
+guard in `n8n/creativeGenerate.test.js` therefore asserts the **shape**: this
+node talks to Supabase not at all, and hands its bytes onward via
+`prepareBinaryData`.
+
+### What actually fixed it
+
+The lockstep problem is real; it just has to be solved one level up. **The
+browser now fires one webhook call per candidate**, so each gets its own n8n
+execution with a single item in it. Independent executions can't make each
+other wait, and the bytes still leave through the proven downstream HTTP node.
+The workflow is byte-for-byte the pre-#56 version again apart from comments.
+
+One webhook per candidate also means failures are per-candidate: a refused call
+marks only *its* row failed, where a single shared call previously blanked both.
+
+Also kept: **the studio polls every 1.5s for the first minute**, then relaxes to
+4s. A flat 4s tick handed back up to four of the seconds saved, while a 1.5s
+tick for a multi-minute video render would be a few hundred pointless reads.
+
+`prepareBinaryData` was added to `workflowHarness.js` so the video workflows
+could be tested at all; without it they threw on an undefined function, which is
 why the model catalog — the part most likely to be wrong — had no coverage.
 
 ## Endpoint facts — verified against fal's live schemas, 2026-08-11
