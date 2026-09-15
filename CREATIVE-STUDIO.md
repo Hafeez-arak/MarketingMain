@@ -216,7 +216,7 @@ don't arise.
 | Veo 3.1 Fast | 8s |
 | Kling 2.5 Turbo | 10s |
 | Seedance 2.0 | 15s |
-| **Seedance 2.5** (default) | **30s** (720p ceiling) |
+| **Seedance 2.5** (default) | **30s** (1080p since 2026-09-15) |
 
 The team asked for **15–30s** finished videos, so a fresh render now starts on
 **Seedance 2.5 at 20s**, the middle of that band (`videoModels.js`,
@@ -226,12 +226,31 @@ already resets length/quality to the chosen model's own defaults — hardcoding
 them in the page too would mean switching model and back handed you different
 settings than you started with.
 
-**The trade, stated plainly:** 2.5 has no 1080p tier, so 15–30s costs us the
-sharpest quality setting. That is the right way round — length is a hard
+**The trade, as it stood:** 2.5 had no 1080p tier, so 15–30s cost us the
+sharpest quality setting. That was the right way round — length is a hard
 requirement from the team, 1080p is a preference, and the Arabic text layer is
 composited by us afterwards at whatever resolution the clip came back at, so
-the text stays crisp regardless. For a short, premium 1080p piece, Seedance
-2.0 is still in the picker and still goes to 15s.
+the text stays crisp regardless.
+
+> **The trade is gone (2026-09-15).** fal added a **1080p** tier to Seedance
+> 2.5, so length and sharpness are no longer opposed. The catch moved to price:
+> 1080p is **$1.164/s** against $0.2205/s at 480p, which makes the default 20s
+> length **$23.28** a click instead of $4.41. So 1080p is offered but is **not**
+> the default — `defaultResolution` stays at 480p for the same reason every
+> other model here defaults to its cheapest tier: re-rendering until it looks
+> right is how the tool is actually used, and that habit must not run at
+> twenty-odd dollars a take. The Sharp button says what it costs before it is
+> pressed, which is the whole design of that row.
+>
+> Three cheaper routes to 1080p were added at the same time — **Wan 3.0 Prime**
+> ($0.28/s), **MiniMax H3 Max** ($0.16/s) and **Gemini Omni Flash 1.1**
+> ($0.15/s, and the only 4K on the picker). For a 1080p piece the question is
+> now which model, not whether we can afford the tier.
+>
+> Seedance 2.0 also gained 480p and 4K tiers. They are deliberately **not**
+> offered: fal publishes those two as token rates rather than a per-second
+> price, and a tier we cannot price honestly does not belong on a row whose
+> entire design is the money being on the button.
 
 `end_image_url` remains wired (start/end frame boxes on the video tab) — now
 for deliberate framing rather than as a workaround for a length ceiling.
@@ -365,6 +384,13 @@ cost full price, having ignored the pictures entirely. Nothing in the UI said
 so. `modelImageRole()` now decides what a model can actually do with images and
 the board states it: style references on Seedance, and on everything else the
 first image becomes the shot's opening frame, which every model supports.
+
+> **Updated 2026-09-15.** Wan 3.0 Prime, H3 Max and Gemini Omni Flash 1.1 all
+> have reference endpoints too, so Kling, Veo and Hailuo are now the only
+> exceptions. Because the failure is silent in both directions, the two halves
+> are no longer trusted to agree by inspection: a test walks every model on the
+> picker and asserts that `modelImageRole()` and the endpoint the workflow
+> actually selects say the same thing (`n8n/creativeVideo.test.js`).
 
 **Storyboard writes raced each other.** Each edit PATCHed the WHOLE
 `storyboard` blob with no coalescing, deliberately, so typed text couldn't be
@@ -556,6 +582,48 @@ render can never be orphaned again.
 reports success" both looked green here for weeks. Neither is evidence that an
 asset exists. Only a row reaching `status:'ready'` with a playable URL is.
 
+## Why both candidates used to appear at once (fixed 2026-09-15)
+
+The complaint was "image generation takes too long". The models were not the
+problem — the **reporting** was.
+
+`Generate Candidates` rendered both candidates in parallel (it has always used
+`Promise.allSettled`) and then handed them to a downstream `Upload → Save`
+pair. **n8n runs a node across all of its input items before the next node runs
+at all**, so neither row reached `creative_versions` until the *slower* model
+returned. `gpt-image-2` at `quality:'high'` routinely takes around twice
+`nano-banana-2`'s time, so for most of a round the team was watching two
+spinners while one finished image already existed — and had already been paid
+for. Nothing was slow; something was being withheld.
+
+Each candidate now uploads its own PNG and PATCHes its own row from *inside*
+the per-candidate chain, the moment that model returns. Its failure is written
+from there too, for the same reason: neither lane should wait on the other to
+learn it died. `Upload to Supabase Storage` and `Supabase: Save Version` are
+gone; `Supabase: Mark Failed` survives only for the case where the Code node
+could not reach Supabase to record even the failure, which the `_written` flag
+on each item signals. The sticky note has claimed "fills each row as its model
+returns" since the workflow was written — it is true now.
+
+Two supporting changes:
+
+- **The studio polls every 1.5s for the first minute**, then relaxes to 4s. A
+  flat 4s tick was handing back up to four of the seconds the fix had just
+  saved, while a 1.5s tick for the length of a multi-minute video render would
+  be a few hundred pointless reads.
+- **The upload passes the Buffer straight through with an explicit
+  `Content-Type`** and no `json` flag, matching the binary upload in Creative
+  Video Reconcile — the one in this repo that has actually run in production.
+  Hand a Buffer to a JSON serialiser instead and what lands in the bucket is
+  the `{type:'Buffer',data:[...]}` form: a file that stores fine and opens
+  nowhere. `n8n/creativeGenerate.test.js` asserts the uploaded bytes still
+  start with a PNG signature, alongside the real regression test — that the
+  fast lane is readable while the slow one is still rendering.
+
+`prepareBinaryData` was added to `workflowHarness.js` to make this testable at
+all; without it the video workflows threw on an undefined function, which is
+why the model catalog — the part most likely to be wrong — had no coverage.
+
 ## Endpoint facts — verified against fal's live schemas, 2026-08-11
 
 Two notes elsewhere in this file were stale. Corrected here.
@@ -563,16 +631,21 @@ Two notes elsewhere in this file were stale. Corrected here.
 | Model | Aspect ratios accepted | Max | Notes |
 |---|---|---|---|
 | Seedance 2.0 | auto/21:9/16:9/4:3/3:4/1:1/9:16 | 15s, 4K | takes `end_image_url` |
-| Seedance 2.5 | **`auto` only** | 30s, 720p | takes `end_image_url` |
+| Seedance 2.5 | ~~`auto` only~~ → full list (2026-09-15) | 30s, 1080p | takes `end_image_url` |
 | Veo 3.1 Fast | **auto/16:9/9:16 only** | 8s | one `image_url`, no refs, no end frame |
 | Kling 2.5 Turbo Pro | none | 10s | |
 | Hailuo 2.3 | none | 10s | |
+| Wan 3.0 Prime | adaptive/16:9/4:3/1:1/3:4/9:16 | 1080p | start frame is **`start_image_url`**; audio flag is **`audio`** and defaults **true** |
+| MiniMax H3 Max | 21:9/16:9/4:3/1:1/3:4/9:16 (no "auto" on t2v) | 15s, 1080P | resolutions **UPPERCASE**; integer duration; no audio |
+| Gemini Omni Flash 1.1 | **16:9/9:16 only** | 10s, 4K | refs go in **`image_urls`**; always makes sound, no flag |
 
 **Two live bugs found and fixed.** `ASPECT_MAP` was global where the constraint
 is per model:
 1. It rewrote 4:5 → 3:4 for everyone, and **Veo rejects 3:4** — so every 4:5 or
    1:1 Veo render was failing outright.
-2. It sent a real ratio to Seedance 2.5, which accepts only `auto`.
+2. It sent a real ratio to Seedance 2.5, which accepted only `auto`.
+   *(No longer true: 2.5's enum matches 2.0's as of 2026-09-15, so it is not a
+   special case any more and the ratio is sent again.)*
 
 It is now per-model, and an approximate shape is acceptable because Creative
 Compose centre-crops the finished clip back to the overlay's own aspect.

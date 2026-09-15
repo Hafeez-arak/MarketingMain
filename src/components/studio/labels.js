@@ -1,8 +1,18 @@
 // ─── What a version is called on screen ────────────────────────────────────
-// Provider names are deliberately the marketing team's words, not ours: they
-// asked for "ChatGPT" and "Gemini", and relabelling those to gpt-image-2 and
-// nano-banana-2 would make the comparison meaningless to the person choosing.
-export const PROVIDER_LABEL = { openai: 'ChatGPT', gemini: 'Gemini', seedance: 'Video', manual: 'Your edit' }
+// The familiar name first, the actual model in brackets after it. This used to
+// be "ChatGPT" and "Gemini" alone, on the reasoning that the model ids meant
+// nothing to the person choosing — true, but it left the opposite problem: the
+// two lanes are a comparison of two SPECIFIC models, and when one of them is
+// swapped for a newer version the label says nothing changed. Leading with the
+// team's own word keeps the screen readable; the bracket says what is actually
+// being compared, and has to be updated whenever genGemini/genOpenAI in the
+// Creative Generate workflow point somewhere new.
+export const PROVIDER_LABEL = {
+  openai: 'ChatGPT (GPT Image 2)',
+  gemini: 'Gemini (Nano Banana 2)',
+  seedance: 'Video',
+  manual: 'Your edit',
+}
 
 const KIND_LABEL = { edit: 'Edit', overlay: 'Edited', video: 'Video' }
 

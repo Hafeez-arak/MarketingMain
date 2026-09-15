@@ -515,10 +515,28 @@ export function CreativeStudio() {
   // one clip going ready and the next clip's row existing there is a couple of
   // seconds with nothing pending at all, and tearing the poller down inside
   // that gap makes the run depend on the insert to restart it.
+  //
+  // The interval is not fixed. A generate round's candidates now land in the
+  // table independently (the workflow writes each row the moment that model
+  // returns, rather than waiting for the slower one), and an image arrives in
+  // roughly 15–40s — so a flat 4s tick was handing back up to 4 of those
+  // seconds to a spinner for an image that already existed. Video renders take
+  // minutes, where a 1.5s poll would be a few hundred pointless reads, so the
+  // tick relaxes once the fast cases have had their chance.
   useEffect(() => {
     if (!session || (!anyPending && !sequencer.running)) return
-    const timer = setInterval(() => refresh(session.id), 4000)
-    return () => clearInterval(timer)
+    let timer
+    let stopped = false
+    const startedAt = Date.now()
+    const tick = () => {
+      if (stopped) return
+      timer = setTimeout(async () => {
+        await refresh(session.id)
+        tick()
+      }, Date.now() - startedAt < 60_000 ? 1500 : 4000)
+    }
+    tick()
+    return () => { stopped = true; clearTimeout(timer) }
   }, [session, anyPending, sequencer.running, refresh])
 
   async function openSession(s) {
