@@ -75,7 +75,11 @@ export function nameKey(name) {
     .trim()
 }
 
-const words = key => key.split(' ').filter(w => w.length > 1)
+// A year is not part of what makes two names the same thing: "Expo X 2026"
+// and "Buyers Property Expo 2026" share "expo" and "2026", and counting the
+// year as a word made them one event. Editions are told apart by year
+// elsewhere (the event fingerprint and matchEvent), never by this.
+const words = key => key.split(' ').filter(w => w.length > 1 && !/^(19|20)\d\d$/.test(w))
 
 /**
  * Are these two names the same thing?
@@ -176,7 +180,7 @@ export function opportunityFromFinding(f) {
 const yearOf = d => (d ? String(d).slice(0, 4) : '')
 const yearIn = name => (/\b(20\d\d)\b/.exec(name) || [])[1] || ''
 
-export function eventFromFinding(f, watchlist = []) {
+export function eventFromFinding(f, watchlist = [], now = new Date()) {
   const ev = f?.event
   const name = str(ev?.name)
   if (!name) return null
@@ -195,6 +199,10 @@ export function eventFromFinding(f, watchlist = []) {
       .map(c => canonicalCompetitor(c, watchlist)).filter(Boolean))],
     relevance: relevanceOf(f),
     recommendation: str(f.suggested_action),
+    // What came out of it, for an edition that already happened. The lens
+    // puts that in the finding's detail; an upcoming event has none.
+    takeaway: eventStatus({ start_date: start, end_date: cleanDate(ev.end_date) }, now) === 'concluded'
+      ? str(f.detail).slice(0, 2000) : '',
     source_url: src?.url || str(ev.url),
     // The year is part of an event's identity — Saudi Build 2026 and 2027 are
     // two rows, and the unique index would refuse the second otherwise. An
@@ -276,7 +284,7 @@ const OPP_FIELDS = [
 const EVENT_FIELDS = [
   ['start_date', 'starts'], ['end_date', 'ends'], ['venue', 'venue'], ['city', 'city'],
   ['exhibitor_deadline', 'exhibitor deadline'], ['organizer', 'organiser'],
-  ['competitors_exhibiting', 'exhibiting'],
+  ['competitors_exhibiting', 'exhibiting'], ['takeaway', 'takeaway'],
 ]
 
 /**
@@ -339,7 +347,7 @@ export function planStoreWrites(findings = [], existing = {}, { runId = null, no
     const notes = []
     const opp = opportunityFromFinding(f)
     if (opp) notes.push(upsert('opportunities', opp, matchOpportunity, OPP_FIELDS))
-    const ev = eventFromFinding(f, watchlist)
+    const ev = eventFromFinding(f, watchlist, now)
     if (ev) notes.push(upsert('events', ev, matchEvent, EVENT_FIELDS))
     const sig = signalFromFinding(f, watchlist)
     if (sig) notes.push(upsert('signals', sig, matchSignal, null))
@@ -433,11 +441,18 @@ export function knownIntelPrompt({ opportunities = [], events = [], signals = []
       lines.push(`- ${o.name}${bits.length ? ` (${bits.join(', ')})` : ''}`)
     }
   }
-  const upcoming = (events || []).filter(e => eventStatus(e, now) !== 'concluded').slice(0, 15)
-  if (upcoming.length) {
-    lines.push('', 'EVENTS ALREADY TRACKED — report again only if dates, venue, exhibitor deadline or exhibitors changed:')
-    for (const e of upcoming) {
-      lines.push(`- ${e.name}${e.start_date ? ` ${e.start_date}` : ' (dates unconfirmed)'}` +
+  // Recently ended ones are listed too: without them the events lens, which
+  // is asked to look nine months back, re-announces last month's expo as news
+  // every single week.
+  const recentCutoff = new Date(now.getTime() - 274 * 86_400_000).toISOString().slice(0, 10)
+  const tracked = (events || [])
+    .filter(e => eventStatus(e, now) !== 'concluded' || (cleanDate(e.end_date) || cleanDate(e.start_date) || '') >= recentCutoff)
+    .slice(0, 30)
+  if (tracked.length) {
+    lines.push('', 'EVENTS ALREADY TRACKED — report again only if dates, venue, exhibitor deadline or exhibitors changed,',
+      'or the next edition was announced:')
+    for (const e of tracked) {
+      lines.push(`- ${e.name}${eventStatus(e, now) === 'concluded' ? ' (ended)' : ''}${e.start_date ? ` ${e.start_date}` : ' (dates unconfirmed)'}` +
         `${e.exhibitor_deadline ? `, exhibitor deadline ${e.exhibitor_deadline}` : ''}` +
         `${(e.competitors_exhibiting || []).length ? `, exhibiting: ${e.competitors_exhibiting.join(', ')}` : ''}`)
     }

@@ -157,7 +157,7 @@ async function argsForLens(key, { brandFacts, motion, competitors, gathered, pro
   // re-announcing last week. Read only for the three lenses that produce
   // leads, events or competitor signals; never fatal — an empty store is a
   // first run, not an error.
-  const intel = ['openings', 'category', 'rivals'].includes(key) && workspaceId
+  const intel = ['openings', 'events', 'category', 'rivals'].includes(key) && workspaceId
     ? knownIntelPrompt(await loadIntel(workspaceId), {
         competitors: key === 'rivals' ? competitors : null,
       })
@@ -174,6 +174,7 @@ async function argsForLens(key, { brandFacts, motion, competitors, gathered, pro
   // the lenses already found and cannot look anything up, so a standing question
   // could change the write-up and never change what was searched for.
   if (key === 'openings') return { args: [brandFacts, { motion, agenda, language, intel }] }
+  if (key === 'events') return { args: [brandFacts, { motion, competitors, agenda, language, intel }] }
   if (key === 'demand') return { args: [brandFacts, { competitors, agenda, language }] }
   // The market it researches rides in brandFacts like every other brand fact,
   // resolved once in loadRunContext rather than a second time here.

@@ -52,7 +52,7 @@ export const MOTIONS = {
   specification: {
     label: 'Specification sale',
     note: 'Long cycle. Won by being named in a spec before the tender. Buyers are professionals, not consumers.',
-    leads: ['openings', 'rivals'],
+    leads: ['openings', 'events', 'rivals'],
   },
   local_service: {
     label: 'Local service',
@@ -140,7 +140,32 @@ export const LENSES = [
     //
     // The demand side is where a specification business grows. Competitors are
     // an input to that, not the subject of it.
-    budget: { searches: 8, maxTokens: 10_000, effort: 'medium' },
+    //
+    // Six searches, down from eight on 2026-09-15: its events job moved to the
+    // events lens, so every search it has now goes to projects.
+    budget: { searches: 6, maxTokens: 10_000, effort: 'medium' },
+    universal: true,
+  },
+  {
+    key: 'events',
+    label: 'Events & expos',
+    question: 'Which expos, conferences and events should our teams attend, exhibit at, or know just happened?',
+    perishability: PERISHABLE,
+    cadence: 'weekly',
+    // Its own lens since 2026-09-15. Events used to be the openings lens's
+    // SECOND job — "only with whatever searches are left", with an explicit
+    // note that reporting no events at all was the correct trade. It was
+    // obeyed: every brief's Events section held Saudi National Day and nothing
+    // else, while the buyers' own property expos and a major technology
+    // conference went unmentioned. A job that is allowed to get nothing gets
+    // nothing, so it gets its own budget.
+    //
+    // Three rings, all generic: the brand's own industry shows, the events
+    // where its BUYERS gather (for a specification business, developers' and
+    // contractors' expos), and the conferences that shape what buyers ask for.
+    // Recent editions count too — who exhibited and what was announced is a
+    // finding, and so are the next edition's dates.
+    budget: { searches: 6, maxTokens: 10_000, effort: 'medium' },
     universal: true,
   },
   {

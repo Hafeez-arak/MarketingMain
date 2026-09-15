@@ -31,6 +31,11 @@ describe('names are the identity of a lead or an event', () => {
     expect(sameName('The Mondrian Riyadh', 'mondrian riyadh')).toBe(true)
   })
 
+  it('never merges two events that only share a word and a year', () => {
+    expect(sameName('Expo X 2026', 'Buyers Property Expo 2026')).toBe(false)
+    expect(sameName('Saudi Build 2026', 'Saudi Build')).toBe(true)
+  })
+
   it('never merges two projects that only share a city', () => {
     expect(sameName('Riyadh', 'Mondrian Riyadh')).toBe(false)
     expect(sameName('Mondrian Riyadh', 'Tuwaiq Palace Riyadh')).toBe(false)
@@ -145,10 +150,29 @@ describe('reading the store', () => {
     expect(isOpenOpportunity({ status: 'dropped' })).toBe(false)
   })
 
+  it('an event that already ended keeps what came out of it', () => {
+    const past = eventFromFinding({ lens: 'events', headline: 'Expo A 2026 ended', detail: 'Technolight showed a new KNX range', sources: [{ url: 'https://a.com' }],
+      event: { name: 'Expo A 2026', start_date: '2026-02-09', end_date: '2026-02-12' } }, WATCH, NOW)
+    const next = eventFromFinding({ lens: 'events', headline: 'Expo A 2027', detail: 'Dates announced', sources: [{ url: 'https://a.com' }],
+      event: { name: 'Expo A 2027', start_date: '2027-02-08' } }, WATCH, NOW)
+    expect(past.takeaway).toBe('Technolight showed a new KNX range')
+    expect(next.takeaway).toBe('')
+    expect(matchEvent(next, [{ ...past, id: 'e1' }])).toBeNull()
+  })
+
+  it('lists recently ended events to the lens, so last month\'s expo is not news every week', () => {
+    const text = knownIntelPrompt({ events: [
+      { name: 'Expo A 2026', start_date: '2026-06-01', end_date: '2026-06-03' },
+      { name: 'Very old expo', start_date: '2025-06-01', end_date: '2025-06-03' },
+    ] }, { now: NOW })
+    expect(text).toContain('Expo A 2026 (ended)')
+    expect(text).not.toContain('Very old expo')
+  })
+
   it('lenses are shown tracked leads so they report changes, not repeats', () => {
     const text = knownIntelPrompt({
       opportunities: [{ name: 'Mondrian Riyadh', stage: 'design', status: 'new' }, { name: 'Old tender', status: 'lost' }],
-      events: [{ name: 'Saudi Build 2026', start_date: '2026-11-02', end_date: '2026-11-05' }, { name: 'Past expo', end_date: '2026-01-01' }],
+      events: [{ name: 'Saudi Build 2026', start_date: '2026-11-02', end_date: '2026-11-05' }, { name: 'Past expo', end_date: '2025-11-01' }],
     }, { now: NOW })
     expect(text).toContain('Mondrian Riyadh (design, no contractor named)')
     expect(text).not.toContain('Old tender')

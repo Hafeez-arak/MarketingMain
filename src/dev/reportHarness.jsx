@@ -88,7 +88,24 @@ function demoStore() {
   const findings = report.findings.map(f => (names[f.ref]
     ? { ...f, for_whom: 'sales', relevance: f.ref === 'F13' ? 'high' : 'medium', lead: { name: names[f.ref], type: f.ref === 'F13' ? 'tender' : 'project', location: 'Riyadh', consultant: f.ref === 'F13' ? 'Dar Al-Omran' : '', timing: f.ref === 'F13' ? 'closed' : 'unconfirmed' } }
     : f))
-  const plan = planStoreWrites(findings, {}, { runId: runs[0].id, now: new Date('2026-09-14T18:00:00Z') })
+  // Placeholder events, one per band, so the events section's three tables
+  // render. Deliberately named "(demo)" — they are not claims about real expos.
+  const demoEvents = [
+    { lens: 'events', ref: 'E1', headline: 'Developer property expo (demo) opens in October', relevance: 'high', for_whom: 'sales',
+      suggested_action: 'Visit and meet the exhibiting developers; list their upcoming towers for sales.',
+      sources: [{ url: 'https://example.com/developer-expo' }],
+      event: { name: 'Developer Property Expo (demo) 2026', start_date: '2026-10-20', end_date: '2026-10-23', venue: 'Riyadh Front', city: 'Riyadh', exhibitor_deadline: '2026-09-30', competitors_exhibiting: ['Technolight'] } },
+    { lens: 'events', ref: 'E2', headline: 'Tech conference (demo) 2027 dates announced', relevance: 'medium', for_whom: 'marketing',
+      suggested_action: 'Decide by November whether to exhibit in the smart-city hall.',
+      sources: [{ url: 'https://example.com/tech-conference' }],
+      event: { name: 'Tech Conference (demo) 2027', start_date: '2027-02-08', end_date: '2027-02-11', city: 'Riyadh', exhibitor_deadline: '2026-11-15' } },
+    { lens: 'events', ref: 'E3', headline: 'Tech conference (demo) 2026 has ended', relevance: 'medium', for_whom: 'both',
+      detail: 'Demo takeaway: a competitor showed a connected street-lighting range; two city programmes announced smart-pole pilots.',
+      suggested_action: 'Brief the technical team on the pilots.',
+      sources: [{ url: 'https://example.com/tech-conference-2026' }],
+      event: { name: 'Tech Conference (demo) 2026', start_date: '2026-02-09', end_date: '2026-02-12', city: 'Riyadh', competitors_exhibiting: ['Huda Lighting'] } },
+  ]
+  const plan = planStoreWrites([...findings, ...demoEvents], {}, { runId: runs[0].id, now: new Date('2026-09-14T18:00:00Z') })
   let n = 0
   const withIds = rows => rows.map(r => ({ id: `demo-${n += 1}`, status: 'new', decision: 'undecided', ...r }))
   return {
