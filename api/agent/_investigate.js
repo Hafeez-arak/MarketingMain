@@ -11,6 +11,7 @@ import { runLens, runOurselvesLens, runCalendarLens, markStage } from './_lenses
 import { gatherCalendar } from './_calendar.js'
 import { marketOf } from '../../src/lib/agent/calendar.js'
 import { priorIdeas } from './_memory.js'
+import { silentLensNote } from '../../src/lib/agent/runHealth.js'
 import { partitionRepeats } from '../../src/lib/agent/memory.js'
 import { freshQuestions, dedupeQuestions } from '../../src/lib/agent/agendaDedup.js'
 import { applyNovelty, priorFindingsFrom, repetitionNote } from '../../src/lib/agent/novelty.js'
@@ -324,7 +325,9 @@ export async function runSingleLens({ workspaceId, runId, lensKey, cadence = 'we
       status: result.ok ? 'ok' : 'failed',
       findings: result.findings || [],
       sources: result.sources || [],
-      note: result.note || '',
+      // A lens that read the market and reported nothing is recorded as
+      // suspect rather than passing as a quiet week. See silentLensNote.
+      note: result.note || silentLensNote(result),
       error: String(result.error || '').slice(0, 500),
       cost_usd: Number((result.cost || 0).toFixed(6)),
       duration_ms: durationMs,
