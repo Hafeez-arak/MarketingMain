@@ -515,6 +515,78 @@ export function categoryPrompt(brand, { agenda = [], language = '', intel = '' }
  * job advert, a new brand on the website and a stand at Elenex in the same
  * month is a move.
  */
+/**
+ * One watchlist row, rendered for the lens.
+ *
+ * Reads the COLUMNS rather than the prose note. A domain is the identity — the
+ * watchlist has carried "Lumiere", which is four Saudi companies, and
+ * "Al Nasser", which is three — so it leads, and its absence is stated as an
+ * instruction rather than left as a blank the model fills in with a guess.
+ *
+ * `kinds` is here because it decides which questions are even worth asking. An
+ * ELV integrator has no follower count worth reading and a manufacturer has no
+ * commissioning bench; asking both the same things wastes half the searches.
+ */
+/**
+ * What is worth knowing about a rival, per business line.
+ *
+ * A brand's lines are NOT two product catalogues — they are two buying
+ * centres, and that is why one set of questions cannot serve both. Lighting is
+ * specified by architects and lighting designers, so what matters is which
+ * agencies a rival holds and what they can prove they have lit. Controls is
+ * specified by MEP and ELV consultants and bought through the main contractor,
+ * so what matters is protocol coverage, certification and who they integrate
+ * for. Ask a controls integrator about photometric capability and you learn
+ * nothing; ask a lighting supplier about a commissioning bench and you learn
+ * less.
+ *
+ * Emitted only for the lines actually on this brand's watchlist, so a
+ * single-line business never reads a paragraph about a business it is not in.
+ * The vocabulary below is generic on purpose — `AXES` is keyed on the line's
+ * own name, and a brand whose lines are called something else gets the
+ * fallback, which asks the same question without presuming the answer.
+ */
+export const LINE_AXES = {
+  lighting: [
+    'which manufacturer AGENCIES or distribution rights they hold, and whether any are exclusive',
+    'what they can prove they have lit — named project references, and how recent',
+    'design capability: do they offer photometric study, dialux/relux layouts, fixture schedules, or only supply',
+  ],
+  controls: [
+    'which protocols they actually deliver — KNX, DALI, BACnet, Modbus — and any certification behind the claim',
+    'whether they commission themselves or subcontract it, and whether they have a test or demo bench',
+    'which manufacturers they integrate for, and which ELV or BMS partners they appear alongside',
+  ],
+}
+
+export function axesFor(lines = []) {
+  const seen = [...new Set(lines.filter(Boolean))]
+  if (!seen.length) return []
+  return seen.map(line => {
+    const axes = LINE_AXES[String(line).toLowerCase()]
+    return axes
+      ? `For rivals in "${line}":\n${axes.map(a => `  - ${a}`).join('\n')}`
+      : `For rivals in "${line}": what capability, rights or references decide who wins work in this line?`
+  })
+}
+
+export function competitorLine(n = {}) {
+  const bits = []
+  if (n.resolution === 'unresolvable') {
+    return 'CANNOT BE RESEARCHED — no domain and no resolvable identity. Do not spend a search on this name. ' +
+      'Report it as unresearchable so a person can supply one.'
+  }
+  bits.push(n.domain
+    ? `RESEARCH THIS DOMAIN: ${n.domain}`
+    : 'NO DOMAIN — more than one company may share this name. Do not guess which; report that it needs one.')
+  if ((n.lines || []).length) bits.push(`lines: ${n.lines.join(' + ')}`)
+  if ((n.kinds || []).length) bits.push(`kind: ${n.kinds.join(' + ')}`)
+  if (n.city) bits.push(n.city)
+  if (n.tier) bits.push(`tier ${n.tier}`)
+  const head = bits.join(' · ')
+  return n.why ? `${head}\n       ${n.why}` : head
+}
+
 export function rivalsPrompt(brand, { competitors = [], notes = [], board = [], agenda = [], language = '', intel = '', searches = 0 }) {
   // Posting activity only, never follower counts: what they posted ABOUT is a
   // trace of what they are doing; how many people follow them is not a move.
@@ -546,16 +618,23 @@ export function rivalsPrompt(brand, { competitors = [], notes = [], board = [], 
   //
   // Rendered under the name rather than beside it, so a long note cannot push
   // the numbered list out of shape.
-  const noteFor = new Map(notes.map(n => [String(n.name || '').toLowerCase(), n.why]))
+  // Keyed on `name` OR `subject`: the loader maps the row into `name`, but the
+  // column is called `subject`, and a caller handing rows straight through
+  // would otherwise render every rival as a bare name with no domain — a
+  // silent blank, which is the failure mode this codebase keeps paying for.
+  const noteFor = new Map(notes.map(n => [String(n.name || n.subject || '').toLowerCase(), n]))
   // Was `slice(0, 12)`. With 17 names on the list and lighting entered first,
   // that cut every controls competitor off the bottom — the lens would have
   // researched one business line and reported silence on the other, which is
   // the exact failure the line split exists to prevent. The whole list is
   // rolled; the BUDGET decides how far down it gets, and the sentence below
   // says so honestly instead of promising one search per name it cannot keep.
+  // Only the lines this brand's own watchlist actually uses.
+  const axes = axesFor(notes.flatMap(n => n.lines || []))
+
   const roll = competitors.map((c, i) => {
-    const note = noteFor.get(String(c).toLowerCase())
-    return `  ${i + 1}. ${c}${note ? `\n       ${note}` : ''}`
+    const n = noteFor.get(String(c).toLowerCase())
+    return `  ${i + 1}. ${c}${n ? `\n       ${competitorLine(n)}` : ''}`
   }).join('\n')
 
   return [
@@ -617,6 +696,17 @@ export function rivalsPrompt(brand, { competitors = [], notes = [], board = [], 
     // bullets in a list of seven, so they were the ones dropped when the budget
     // ran short. Three consecutive briefs carried website and social evidence
     // and nothing else.
+    // ── THE AXES DIFFER BY LINE, BECAUSE THE BUYER DOES ──
+    ...(axes.length ? [
+      'WHAT IS WORTH KNOWING DIFFERS BY BUSINESS LINE, because the people who specify each are not the same.',
+      ...axes,
+      '',
+      'AND FOR EVERY RIVAL, WHO THEY ARE CLOSE TO. Which consultants, lighting designers, main contractors or',
+      'ELV subcontractors keep appearing beside them — in project credits, case studies, event panels, joint',
+      'announcements. In a specification business the relationship is the moat, and it is public far more often',
+      'than people assume. File these as category "partnership".',
+      '',
+    ] : []),
     'TWO PASSES ARE NOT OPTIONAL, AND THEY COME BEFORE ANY GENERAL LOOKING:',
     '- JOB BOARDS, for the names above. What roles are they advertising, and where?',
     '- PRICING, for the names above. Public promotions, quoted rates, published price lists,',

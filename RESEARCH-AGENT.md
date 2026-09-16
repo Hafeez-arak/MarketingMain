@@ -468,6 +468,84 @@ the search budget (the top eight are four both-lines, two lighting, two
 controls) and so the names that cannot be researched at all sit at the bottom
 where they consume nothing.
 
+### b1. Identities, distribution rights and lost deals — 2026-09-16
+
+A review of b0 landed three additions worth taking, and the migration
+`20260919_competitor_intelligence.sql` implements them.
+
+**`domain`, `lines[]`, `kinds[]`, `city`, `tier`, `source`, `resolution` on the
+watchlist.** The prose note in `why` was a stopgap; these are columns now.
+`lines` and `kinds` are arrays because four of the seventeen rivals sell into
+both business lines and Al Nasser is manufacturer, distributor, retailer and
+integrator at once — a single value forces a wrong answer on exactly the
+companies that matter most.
+
+**`tier` is nullable and stays null.** It records how often a rival is actually
+met and what a deal against them is worth, which only the sales team knows. The
+first cut of this list tiered by SOURCE — sales-named was tier 1, agent-found
+was tier 2 — which points the search budget at whoever came up in a meeting
+rather than at whoever is actually met. `source` is now its own column, and a
+default tier would be an invention dressed as data. The loader orders by
+`tier.asc.nullslast, created_at.asc`, so list order carries the priority until
+sales fills it in.
+
+**`competitor_brands`.** In lighting, distribution rights decide who can bid
+what, and there was nowhere to record them. Al Nasser is the confirmed
+exclusive Berker partner for Saudi Arabia — one fact that says more about what
+they can win in controls than any amount of social activity. `relationship`
+separates `exclusive` from `claimed` from `unconfirmed`, because the difference
+between evidence and repetition is the whole value of the table.
+
+**`deal_outcomes`.** "Who are we losing to, and on what" is the question the
+business actually wants answered, and every other part of this system collects
+from the public web, where the answer is not. Six fields a person fills after a
+contested bid: project, competitor, line, what decided it, rough price delta,
+consultant. **The only table here a model never writes to.** Its failure mode is
+organisational rather than technical — a log like this dies in month three if it
+is not part of a routine — which is why `price_delta_pct` is explicitly rough:
+waiting for precision is how it dies.
+
+#### The axes differ by line, because the buyer does
+
+The two business lines are not two product catalogues, they are **two buying
+centres**. Lighting is specified by architects and lighting designers, so what
+matters is which agencies a rival holds and what they can prove they have lit.
+Controls is specified by MEP/ELV consultants and bought through the main
+contractor, so what matters is protocol coverage, certification and who they
+commission for. `LINE_AXES` in lensPrompts.js keys on the line's own name and
+emits only the lines a brand's own watchlist uses; a line with no vocabulary
+gets a fallback that asks the same question without presuming the answer.
+
+Alongside it, one question for every rival regardless of line: **who they keep
+appearing beside** — which consultants, lighting designers, main contractors
+and ELV subcontractors. In a specification business the relationship is the
+moat, and it is public far more often than people assume.
+
+#### What was NOT taken from that review
+
+- That the name research was half-done, naming ViaLighting, Namaraa, MASQ and
+  Sela-PASS as untouched and Sela-PASS as unresolvable. All four are live and
+  in the watchlist with domains: selapass.com returns "SelaPASS | Leading MEP &
+  Engineering Contractor in Saudi Arabia". The three genuinely unresolvable
+  names are Greenlight, Al Dhow and Spectrum, and they sit at the bottom of the
+  list marked `unresolvable` so they consume no search.
+- That `kind` was needed because a report had claimed rivals were absent from
+  social. No stored report contains that claim. `kind` is worth having for the
+  reason above; the evidence offered for it was not real.
+- That Light & Design was founded by a former Al Nasser board member. Nothing
+  found supports it. It may well be true and sales would know — but it does not
+  enter the data as fact.
+
+#### And one it got right about this file
+
+Its sharpest line was that the name research had the defect it diagnosed. True,
+though not of the names it picked: **"Al Nasser" is itself at least three live
+Saudi entities** — alnassergroup.com, al-nasser.com, alnasser.me, plus a
+separate retail store at alnasser.com. b0 asserted one of them from a single
+search result and made it the number-one rival. The entry now lists all three
+candidates and says *confirm before researching, do not guess* — the same
+instruction it gives for Lumiere.
+
 ### b. And it lands on the agenda, not in the Brand Brain
 
 This is where §5a stops being a constraint and starts being the thing that

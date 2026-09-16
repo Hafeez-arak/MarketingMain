@@ -122,8 +122,13 @@ export async function loadRunContext(workspaceId, runId, cadence = 'weekly') {
       // lens is told to cover this list IN ORDER before it looks for anyone
       // new. The watchlist's own sequence is the closest thing to a priority
       // the store holds — the rivals a person put there first.
+      // Ordered by tier where sales has set one, then by the sequence a person
+      // put them in. `tier` is null until sales fills it and must not be
+      // defaulted — nulls last is what keeps an unrated rival behind a rated
+      // one without pretending it was rated 3.
       db(`research_agenda?workspace_id=eq.${workspaceId}&kind=eq.competitor&status=neq.retired` +
-         `&select=subject,why&order=created_at.asc`),
+         `&select=subject,why,domain,lines,kinds,city,tier,resolution` +
+         `&order=tier.asc.nullslast,created_at.asc`),
       priorIdeas(workspaceId),
       db(`research_runs?id=eq.${runId}&workspace_id=eq.${workspaceId}&select=report,stage,status&limit=1`),
     ])
@@ -144,8 +149,17 @@ export async function loadRunContext(workspaceId, runId, cadence = 'weekly') {
   // is at least four different Saudi companies, and the lens had no way to know
   // which one to research.
   const competitorNotes = (competitorRows || [])
-    .filter(r => String(r.subject || '').trim() && String(r.why || '').trim())
-    .map(r => ({ name: String(r.subject).trim(), why: String(r.why).trim() }))
+    .filter(r => String(r.subject || '').trim())
+    .map(r => ({
+      name: String(r.subject).trim(),
+      domain: String(r.domain || '').trim(),
+      lines: Array.isArray(r.lines) ? r.lines : [],
+      kinds: Array.isArray(r.kinds) ? r.kinds : [],
+      city: String(r.city || '').trim(),
+      tier: Number.isFinite(Number(r.tier)) ? Number(r.tier) : null,
+      resolution: String(r.resolution || 'unresolved'),
+      why: String(r.why || '').trim(),
+    }))
 
   // Every lens asks a question about somewhere. `customFields.geography` is
   // the obvious source and is empty on all three live workspaces, so a lens
