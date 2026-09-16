@@ -13,6 +13,8 @@
 //     subtract last week's post count from this week's is asking it to be
 //     occasionally wrong about the number the reader trusts most.
 
+import { reconcileAccountPosting } from './ownChannels.js'
+
 const round = (n, p = 2) =>
   (n === null || n === undefined || n === '' || !Number.isFinite(Number(n)))
     ? null
@@ -283,6 +285,10 @@ export function gatherReport({ snapshots, prior, period, failures = [], caveats 
   const { movements, comparable } = computeMovements(snapshots, prior)
   const board = buildBoard(snapshots, prior)
   const baseline = comparable === 0
+  // Our Instagram is measured twice by two different instruments — the
+  // profile read, and our own published rows. Reconciled here, once, so the
+  // brief never quotes both as one number. See reconcileAccountPosting.
+  const ownReconciled = reconcileAccountPosting(own, snapshots)
 
   return {
     headline: baseline
@@ -303,7 +309,7 @@ export function gatherReport({ snapshots, prior, period, failures = [], caveats 
     // public source of a rival's numbers, while this covers every platform we
     // publish to. Merging them into one list would invite a comparison between
     // a measured TikTok of ours and a rival TikTok nobody can measure.
-    own_performance: own,
+    own_performance: ownReconciled,
     market: [], gaps: [], proposed_rules: [], proposed_ideas: [], agenda_changes: [],
     // Failures and caveats reach the report rather than being dropped. A
     // cadence that is really a floor, read next week as a fall, is a movement

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   partitionByClock, splitByAudience, deadlineLabel, urgencyOf, lensStates, lensHeadline,
-  emptiness, setupGaps, compact, signed, pct, marketDirection, actionPlan,
+  emptiness, setupGaps, compact, signed, pct, marketDirection, actionPlan, runEffort,
 } from './researchBrief'
 
 const NOW = new Date('2026-09-12T09:00:00Z')
@@ -341,5 +341,21 @@ describe('gaps and the ideas that close them', () => {
     expect(plan.blocks[0].gap.id).toBe('G1')
     expect(plan.blocks[0].ideas).toEqual([])
     expect(plan.loose.map(i => i.title)).toEqual(['x', 'y'])
+  })
+})
+
+describe('the run-effort line', () => {
+  it('says what was read against what was allowed, and names the discarded passes', () => {
+    const line = runEffort(lensStates({ lenses: [
+      { lens: 'openings', label: 'Projects & openings', state: 'found', count: 3, sources: 20, allowance: 6 },
+      { lens: 'category', label: 'Category', state: 'searched', count: 0, sources: 40, allowance: 6 },
+    ] }))
+    expect(line).toMatch(/60 sources read against an allowance of 12 searches/)
+    expect(line).toMatch(/Category/)
+    expect(line).toMatch(/discarded pass/)
+  })
+
+  it('says nothing at all for a brief written before any of this was recorded', () => {
+    expect(runEffort(lensStates({ lenses: [{ lens: 'openings', state: 'found', count: 1 }] }))).toBe('')
   })
 })

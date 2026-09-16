@@ -130,9 +130,37 @@ export function lensStates(report = {}) {
       question: meta?.question || '',
       state: r.state || (r.ran === false ? 'failed' : r.count ? 'found' : 'quiet'),
       count: r.count || 0,
+      // Absent on every brief written before 2026-09-16, hence the nulls: an
+      // old row cannot say how much it read, and pretending it read nothing
+      // would be a claim rather than a gap.
+      sources: r.sources ?? null,
+      allowance: r.allowance ?? null,
       error: r.error || '',
     }
   })
+}
+
+/**
+ * What the run actually spent, in one line.
+ *
+ * "7 checked / 4 hit / 3 null" was the most useful line in the 15 Sep report
+ * and it stopped one column short: three of those nulls had read 130 pages
+ * between them. Effort spent is the number that says whether a quiet week was
+ * quiet.
+ */
+export function runEffort(states = []) {
+  const rows = (states || []).filter(s => s.allowance !== null || s.sources !== null)
+  if (!rows.length) return ''
+  const read = rows.reduce((n, s) => n + (s.sources || 0), 0)
+  const allowed = rows.reduce((n, s) => n + (s.allowance || 0), 0)
+  const silent = rows.filter(s => s.state === 'searched')
+  return [
+    read ? `${read} source${read === 1 ? '' : 's'} read against an allowance of ${allowed} searches` : '',
+    silent.length
+      ? `${silent.length} question${silent.length === 1 ? '' : 's'} (${silent.map(s => s.label).join(', ')}) ` +
+        `read sources and reported nothing — that is a discarded pass, not a quiet market`
+      : '',
+  ].filter(Boolean).join(' · ')
 }
 
 /** One line summarising the lens strip, for a reader who will not read the strip. */
@@ -141,8 +169,10 @@ export function lensHeadline(states = []) {
   const found = states.filter(s => s.state === 'found').length
   const failed = states.filter(s => s.state === 'failed').length
   const quiet = states.filter(s => s.state === 'quiet').length
+  const searched = states.filter(s => s.state === 'searched').length
   const parts = []
   if (found) parts.push(`${found} found something`)
+  if (searched) parts.push(`${searched} read sources and reported nothing`)
   if (quiet) parts.push(`${quiet} looked and found nothing`)
   // Named last and never merged into "quiet" — this is the number that tells
   // you whether to believe the rest of the brief.

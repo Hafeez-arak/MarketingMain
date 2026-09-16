@@ -74,3 +74,29 @@ export function freshQuestions(proposed = [], existing = []) {
   }
   return { fresh, duplicates }
 }
+
+/**
+ * The standing questions, with exact repeats collapsed.
+ *
+ * `freshQuestions` guards the WRITE side, and the live agenda predates it: the
+ * 15 Sep run carried two identical Instagram-connection questions, handed both
+ * to every searching lens, and got the same answer to each. A question that
+ * normalises to a string already in the list buys nothing and costs searches,
+ * so the read side drops it.
+ *
+ * Same instrument as the write side, deliberately — exact match on the
+ * normalised text. A near-duplicate in different words survives here too, for
+ * the reason argued at the top of this file: the alternative merges two
+ * questions that differ by one load-bearing word.
+ */
+export function dedupeQuestions(rows = []) {
+  const seen = new Set()
+  const out = []
+  for (const r of rows || []) {
+    const key = questionKey(r?.subject ?? r)
+    if (!key || seen.has(key)) continue
+    seen.add(key)
+    out.push(r)
+  }
+  return out
+}

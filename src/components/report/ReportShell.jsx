@@ -15,9 +15,25 @@ import { usePrint } from '../../lib/reports/print'
  * on screen fits on paper — the failure this prevents is a report that looks
  * right in the browser and loses its last column in the PDF.
  */
+// ── `unicode-bidi: plaintext`, and it is not cosmetic ──
+//
+// This document carries Arabic company names, Arabic event names and Arabic
+// quotes inside otherwise-English sentences. Laid out in a strongly left-to-
+// right context, an Arabic run has its words reordered — the 15 Sep PDF
+// rendered شركة إنارة للإضاءة as إنارة شركة لإلضاءة, which is not a font
+// problem and not a typo: it is the paragraph direction being imposed on text
+// that has its own. `plaintext` tells the browser to take each paragraph's
+// direction from its first strong character, which is what makes a mixed-
+// script document readable, in print as much as on screen.
+//
+// Set once, on the document, rather than per-name: every future section
+// inherits it, and the one that forgets is the one a Saudi reader opens.
 export function ReportDoc({ children }) {
   return (
-    <div className="mx-auto w-full max-w-[860px] bg-white text-text print:max-w-none">
+    <div
+      className="mx-auto w-full max-w-[860px] bg-white text-text print:max-w-none"
+      style={{ unicodeBidi: 'plaintext' }}
+    >
       {children}
     </div>
   )
@@ -140,8 +156,13 @@ export function ReportRow({ children }) {
 
 export function Cell({ children, align = 'left', first = false, muted = false, className = '' }) {
   return (
-    <td className={`py-1.5 ${first ? '' : 'pl-3'} ${align === 'right' ? 'text-right tabular-nums' : ''} ${
-      muted ? 'text-text-tertiary' : 'text-text'} ${className}`}
+    // `dir="auto"` per cell as well as plaintext on the document: a table cell
+    // holding nothing but an Arabic name is its own paragraph, and it must
+    // align and order itself right-to-left without dragging the table with it.
+    <td
+      dir="auto"
+      className={`py-1.5 ${first ? '' : 'pl-3'} ${align === 'right' ? 'text-right tabular-nums' : ''} ${
+        muted ? 'text-text-tertiary' : 'text-text'} ${className}`}
     >
       {children}
     </td>
@@ -157,9 +178,25 @@ export function Cell({ children, align = 'left', first = false, muted = false, c
  * into a readable one, and a report that prints the figure while dropping
  * the caveat is the failure the agent's whole design is organised against.
  */
+// ── ALWAYS RENDERED, EVEN EMPTY ──
+//
+// This section was the most trusted thing in the 15 Sep report — a reader who
+// is told "this was an incomplete pass, not a clean null" can calibrate
+// everything above it. Returning null when the list is empty made its presence
+// a signal in itself: a run that admitted nothing looked identical to a run
+// with nothing to admit, and the second is rare enough to be worth stating.
 export function Caveats({ items = [] }) {
   const real = items.filter(Boolean)
-  if (!real.length) return null
+  if (!real.length) {
+    return (
+      <ReportSection title="What this report cannot tell you" keep>
+        <p className="text-[11px] text-text-secondary leading-relaxed">
+          Every question this run asked was answered and every lens reported. That is unusual —
+          read the sources before treating it as a complete picture of the market.
+        </p>
+      </ReportSection>
+    )
+  }
   return (
     <ReportSection title="What this report cannot tell you" keep>
       <ul className="space-y-1.5">

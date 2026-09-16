@@ -532,6 +532,71 @@ Two fields there are doing unusual work and are worth defending:
   findings will always produce findings. This single field is most of what
   separates this from the category.
 
+### a2. What the 15 Sep review changed — 2026-09-16
+
+The three-reader report shipped on 15 Sep and was read closely by someone who
+checked its numbers. Six things it got wrong are now held in code rather than
+in the prompt, because each of them is the kind of mistake a model makes again
+next week however clearly it is asked not to.
+
+**One number per measurement, and the measurement is named.** That report gave
+three different figures for our own Instagram posting — 7 a week in the Top 3,
+5 posts in the social table, 7 again in the limitations — and built a
+channel-weight recommendation on the gap. Two instruments measure that channel:
+`business_discovery` reads the profile (everything on the account), and
+`own_performance` counts our own published rows (the only ones that can carry
+analytics). `reconcileAccountPosting` now carries both on the platform row with
+a sentence saying why they differ, `ownPostingFacts` hands them to synthesis as
+given facts, and the prompt forbids deriving a third. The same rule covers
+comparisons: interactions per post and page impressions are different units, and
+a recommendation resting on fewer than five measured posts says so in its own
+sentence.
+
+**Two axes for a competitor move, not one.** Every move in that report was rated
+Medium, including one its own text called "confirmation of current state, not
+momentum". `relevance` keeps the one meaning it should have had — how much this
+matters — and freshness is derived in code from the store verdict the findings
+already carry (`new` / `changed` / `standing`). A standing fact about a serious
+rival is high significance and zero freshness, and that is a real and useful
+thing to be able to say.
+
+**The lead table holds leads.** A finding whose `for_whom` is "sales" is not a
+lead; the competitors lens writes those constantly. Three rows in "Sales: act
+now" were competitor intelligence, each duplicated two pages down. `isLeadFinding`
+requires a named lead, or a finding from the openings lens — a finding naming a
+competitor belongs to competitor moves unless it also names a project.
+
+**A window, where there is no published deadline.** Six of six rows read
+"unconfirmed", which is honest and unsortable. `leadWindow` gives every row a
+closing condition and, crucially, its `basis`: a published date, an estimate
+from the stage, or nothing established. Tender portals hide deadlines behind a
+login; they do not hide the stage, and the stage is what closes the window.
+
+**Standing events persist; calendar dates are not events.** That report's 90-day
+events table held Saudi National Day and not the two largest shows in this
+market, 48 days out. Computed dates now have their own band, every event row
+carries its exhibitor-deadline status every week (open / closed / not
+established), and the events lens re-confirms any tracked event inside 90 days
+even when nothing about it changed.
+
+**The watchlist before discovery.** The rivals lens found three companies nobody
+had listed — the best material in the run — and ran out of searches before
+reaching the two closest rivals on the watchlist. The list is now numbered in
+the prompt with one search reserved per name, hiring and pricing are required
+passes rather than bullets, and discovery is named as the thing to drop.
+
+Two sections became permanent: **Open items**, computed across runs so a blocker
+raised twice cannot vanish without a person closing it, and **What this report
+cannot tell you**, which now renders even when it is empty. And the run
+telemetry separates a lens that looked and found nothing from one that read
+forty pages and reported none of them — on 15 Sep three lenses read 130 sources
+between them and were all reported as a quiet week.
+
+Still open: source-quality tiering. The right shape is a field the lens fills
+when it reads a page — primary filing, trade press, aggregator, vendor
+marketing — not a guess from the domain, and the caveat should then follow
+automatically wherever that source is cited.
+
 ### b. Proposed rules → `brand_memory`
 
 Unchanged from today, and deliberately so. Scopes `competitor` and `trend`

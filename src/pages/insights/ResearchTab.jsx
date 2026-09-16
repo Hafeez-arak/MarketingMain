@@ -5,11 +5,12 @@ import { SendIdeasToPlan } from '../../components/SendIdeasToPlan'
 import { RunProgress } from '../../components/RunProgress'
 import { useAuth } from '../../store/auth'
 import {
-  partitionByClock, deadlineLabel, lensStates, lensHeadline, emptiness, pct, marketDirection, basisLabel,
+  partitionByClock, deadlineLabel, lensStates, lensHeadline, runEffort, emptiness, pct, marketDirection, basisLabel,
 } from '../../lib/researchBrief'
 import {
   TEAMS, sectionVisible, forTeam, topThree, salesRows, competitorMoves, socialActivity, eventsView,
-  marketNotes, marketingRecommendations, newCompetitors, sourceList, dayLabel, domainOf, teamsOf,
+  marketNotes, marketingRecommendations, newCompetitors, sourceList, domainOf, teamsOf,
+  openItems, freshnessLabel,
 } from '../../lib/marketReport'
 import { fetchIntel, updateOpportunity, updateEventDecision } from '../../lib/marketIntel'
 import { fetchAgenda, setAgendaStatus } from '../../lib/agentAgenda'
@@ -53,6 +54,9 @@ const RELEVANCE_TONE = {
 }
 const LENS_STATE = {
   found: { tone: 'text-emerald-700 bg-emerald-50', label: 'found something' },
+  // Amber, not grey: a lens that read forty pages and reported none of them
+  // has not had a quiet week, it has thrown a pass away.
+  searched: { tone: 'text-amber-700 bg-amber-50', label: 'read, reported nothing' },
   quiet: { tone: 'text-slate-500 bg-slate-100', label: 'looked, found nothing' },
   failed: { tone: 'text-red-700 bg-red-50', label: 'could not answer' },
 }
@@ -258,7 +262,7 @@ function SalesTable({ rows, canEdit, onStatus, busyId }) {
           <tr className="text-[10px] uppercase tracking-wide text-text-tertiary border-b border-border">
             <th className="font-semibold py-2 pl-4 sm:pl-5 pr-3 w-[26%]">Lead / tender / project</th>
             <th className="font-semibold py-2 pr-3 w-[24%]">Details</th>
-            <th className="font-semibold py-2 pr-3 w-[11%]">Deadline</th>
+            <th className="font-semibold py-2 pr-3 w-[13%]">Window closes</th>
             <th className="font-semibold py-2 pr-3 w-[25%]">Suggested action</th>
             <th className="font-semibold py-2 pr-4 sm:pr-5 w-[14%]">Status</th>
           </tr>
@@ -282,11 +286,16 @@ function SalesTable({ rows, canEdit, onStatus, busyId }) {
                   </a>
                 )}
               </td>
-              <td className="py-3 pr-3 tabular-nums">
-                <p className={`font-semibold ${r.days != null && r.days >= 0 && r.days <= 7 ? 'text-red-700' : r.days != null && r.days < 0 ? 'text-text-tertiary' : 'text-text'}`}>
-                  {r.deadline ? fmtDate(r.deadline) : '—'}
+              {/* A published date when one exists, and otherwise the window
+                  the stage implies — labelled as an estimate. Every row in the
+                  15 Sep report read "unconfirmed", which is honest and
+                  unsortable. */}
+              <td className="py-3 pr-3">
+                <p className={`font-semibold tabular-nums ${r.days != null && r.days >= 0 && r.days <= 7 ? 'text-red-700' : r.days != null && r.days < 0 ? 'text-text-tertiary' : 'text-text'}`}>
+                  {r.deadline ? fmtDate(r.deadline) : ''}
                 </p>
-                <p className="text-[10px] text-text-tertiary">{dayLabel(r.days, r.timing)}</p>
+                <p className="text-[10px] text-text-secondary leading-relaxed">{r.window.label}</p>
+                {r.window.basis === 'stage' && <p className="text-[10px] text-text-tertiary">estimated from stage</p>}
               </td>
               <td className="py-3 pr-3 text-text-secondary leading-relaxed"><Clamp text={r.action} /></td>
               <td className="py-3 pr-4 sm:pr-5">
@@ -317,6 +326,9 @@ function CompetitorMove({ m }) {
         <p className="text-sm font-semibold text-text">{m.competitor}</p>
         <div className="flex gap-1 flex-wrap">
           <RelevanceChip value={m.relevance} />
+          {/* Significance and freshness are two questions, and one chip
+              answering both is the reason every move read "medium". */}
+          {m.freshness && <Chip>{freshnessLabel(m.freshness)}</Chip>}
           {m.channels.map(c => <Chip key={c}>{CHANNEL_LABEL[c] || c}</Chip>)}
         </div>
       </div>
@@ -340,6 +352,14 @@ function CompetitorMove({ m }) {
   )
 }
 
+/** "Best: a carousel post" — never "Best: untitled", which is a null on screen. */
+function bestLine(p) {
+  if (!p.best_post) return p.weak ? 'Thin sample' : 'Measured'
+  const named = String(p.best_post.topic || '').trim() ||
+    (p.best_post.format ? `a ${p.best_post.format} post` : '')
+  return `Best: ${named || 'one post'} · ${p.best_post.engagement} interactions`
+}
+
 function OurChannel({ p }) {
   return (
     <div className="flex items-baseline justify-between gap-3 py-2 border-b border-border last:border-0">
@@ -348,9 +368,7 @@ function OurChannel({ p }) {
           {p.label}{p.username && <span className="font-normal text-text-tertiary"> @{p.username}</span>}
         </p>
         <p className="text-[11px] text-text-tertiary mt-0.5 truncate">
-          {p.state === 'measured'
-            ? (p.best_post ? `Best: ${p.best_post.topic || 'untitled'} · ${p.best_post.engagement} interactions` : 'Measured')
-            : p.note}
+          {p.state === 'measured' ? bestLine(p) : p.note}
         </p>
       </div>
       {p.state === 'measured' && (
@@ -399,13 +417,16 @@ function EventsTable({ rows, canEdit, onDecision, recent = false }) {
                 {e.start ? `${fmtDate(e.start)}${e.end && e.end !== e.start ? ` – ${fmtDate(e.end)}` : ''}` : 'TBC'}
               </td>
               <td className="py-3 pr-3 text-text-secondary">{e.venue || '—'}</td>
-              {!recent && <td className="py-3 pr-3 tabular-nums">
+              {/* The deadline's STATUS, on every row, every week: open, closed,
+                  or never established. A reader deciding whether to exhibit
+                  needs today's position, not the diff against last week. */}
+              {!recent && <td className="py-3 pr-3">
                 {e.exhibitorDeadline ? (
                   <>
-                    <p className={`font-semibold ${e.deadlineDays != null && e.deadlineDays >= 0 && e.deadlineDays <= 14 ? 'text-red-700' : 'text-text'}`}>{fmtDate(e.exhibitorDeadline)}</p>
-                    <p className="text-[10px] text-text-tertiary">{dayLabel(e.deadlineDays)}</p>
+                    <p className={`font-semibold tabular-nums ${e.deadlineDays != null && e.deadlineDays >= 0 && e.deadlineDays <= 14 ? 'text-red-700' : 'text-text'}`}>{fmtDate(e.exhibitorDeadline)}</p>
+                    <p className="text-[10px] text-text-tertiary">{e.deadlineStatus}</p>
                   </>
-                ) : <span className="text-text-tertiary">{e.kind === 'calendar' ? '—' : 'not found'}</span>}
+                ) : <span className="text-text-tertiary text-[11px]">{e.deadlineStatus || 'not established'}</span>}
               </td>}
               <td className="py-3 pr-3 text-text-secondary">{e.competitors.length ? e.competitors.join(', ') : '—'}</td>
               <td className="py-3 pr-4 sm:pr-5 text-text-secondary leading-relaxed">
@@ -459,7 +480,9 @@ function IdeaCard({ idea, under = false }) {
   const ref = idea.answers_ref
   return (
     <div className={`rounded-xl border border-border bg-white p-3 ${under ? 'ml-3 border-l-2 border-l-sage-400' : ''}`}>
-      <p className="text-xs font-semibold text-text">{idea.title || idea.angle}</p>
+      <p className="text-xs font-semibold text-text">
+        {!under && idea.n ? <span className="tabular-nums">{idea.n}. </span> : null}{idea.title || idea.angle}
+      </p>
       {idea.angle && idea.title && <p className="text-[11px] text-text-secondary mt-1.5 leading-relaxed">{idea.angle}</p>}
       {!under && ref?.kind === 'finding' && ref.headline && (
         <p className="text-[11px] text-sage-700 mt-2 leading-relaxed"><span className="font-semibold">Based on: </span>{ref.headline}</p>
@@ -474,7 +497,11 @@ function GapBlock({ block }) {
   const { gap, ideas } = block
   return (
     <div className="rounded-xl border border-border bg-white p-3.5">
-      <p className="text-sm text-text leading-snug">{gap.gap}</p>
+      {/* Numbered across both lists — see marketingRecommendations. An
+          unnumbered recommendation reads as an afterthought. */}
+      <p className="text-sm text-text leading-snug">
+        {block.n ? <span className="font-semibold tabular-nums">{block.n}. </span> : null}{gap.gap}
+      </p>
       {gap.our_position && <p className="text-[11px] text-text-tertiary mt-2 leading-relaxed"><span className="font-semibold">Us: </span>{gap.our_position}</p>}
       {gap.suggested_response && <p className="text-xs text-text-secondary mt-2 leading-relaxed"><span className="font-semibold">Response: </span>{gap.suggested_response}</p>}
       {gap.basis && <p className="text-[10px] text-text-tertiary mt-2 uppercase tracking-wide">based on: {basisLabel(gap.basis) || gap.basis}</p>}
@@ -540,6 +567,9 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
   const sources = useMemo(() => sourceList(report), [report])
   const direction = useMemo(() => marketDirection(report), [report])
   const states = useMemo(() => lensStates(report), [report])
+  // Across runs, not out of this one. An item raised three weeks running and
+  // never closed is exactly what a per-run caveats list cannot show.
+  const open = useMemo(() => openItems({ runs }), [runs])
   const empty = useMemo(() => emptiness(report), [report])
   const { passed } = useMemo(() => partitionByClock(report.findings || [], now), [report, now])
   const live = isLive(run)
@@ -553,7 +583,7 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
     { key: 'sales', label: 'Sales: act now', count: sales.open.length },
     { key: 'competitors', label: 'Competitor moves', count: visibleMoves.length },
     { key: 'social', label: 'Social activity', count: social.theirs.length + social.ours.length },
-    { key: 'events', label: 'Events', count: events.count },
+    { key: 'events', label: 'Events', count: events.count + events.dates.length },
     { key: 'market', label: 'Market & technical', count: visibleNotes.length },
     { key: 'recs', label: 'Marketing recommendations', count: plan.blocks.length + plan.loose.length },
     { key: 'newcomp', label: 'New competitors', count: candidates.length },
@@ -783,7 +813,23 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
                 </div>
               )}
             </div>
-          ) : <Quiet>No events found yet. The events lens searches for them from the next run.</Quiet>}
+          ) : <Quiet>No expo, conference or awards opening is on the books yet.</Quiet>}
+          {/* Computed dates, kept out of the expo tables: a public holiday is
+              not something anyone exhibits at, and listing it among the shows
+              made an empty table look full. */}
+          {events.dates.length > 0 && (
+            <div className="mt-5">
+              <p className="text-[10px] font-semibold text-text-tertiary uppercase tracking-wide mb-2">Dates in the calendar — not events to attend</p>
+              <ul className="space-y-1.5">
+                {events.dates.map((d, i) => (
+                  <li key={i} className="text-xs text-text-secondary leading-relaxed">
+                    <span className="font-semibold text-text tabular-nums">{fmtDate(d.start)}</span> · {d.name}
+                    {d.recommendation && <span className="text-text-tertiary"> — {d.recommendation}</span>}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </Section>
       )}
 
@@ -800,7 +846,8 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
       {/* 7 ── Marketing recommendations */}
       {sectionVisible('recs', team) && (
         <Section id="recs" n={num('recs')} title="Marketing recommendations"
-          note="Where the market and our position do not line up, and the content that answers it. Each names what it is based on. Rules are reviewed under What We Learned.">
+          note={`Where the market and our position do not line up, and the content that answers it. Each names what it is based on. Rules are reviewed under What We Learned.${
+            plan.overCap ? ` This run proposed ${plan.total}; the brief asks for two to four.` : ''}`}>
           {plan.blocks.length || plan.loose.length ? (
             <>
               <div className="space-y-3">{plan.blocks.map(block => <GapBlock key={block.gap.id} block={block} />)}</div>
@@ -875,8 +922,11 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
       <section id="brief-run" data-zone="run" className="scroll-mt-28 space-y-3">
         <h2 className="text-xs font-semibold text-text-tertiary uppercase tracking-wide pt-2">How this run went</h2>
         {report.repetition && <Card className="p-3"><p className="text-xs text-amber-700">{report.repetition}</p></Card>}
+        {runEffort(states) && (
+          <Card className="p-3"><p className="text-xs text-text-secondary leading-relaxed">{runEffort(states)}.</p></Card>
+        )}
         {states.length > 0 && (
-          <Fold title="What was checked" subtitle="A lens that looked and found nothing is not the same as one that could not answer." count={states.length} open={states.some(s => s.state === 'failed')}>
+          <Fold title="What was checked" subtitle="A lens that looked and found nothing is not the same as one that could not answer." count={states.length} open={states.some(s => s.state === 'failed' || s.state === 'searched')}>
             <div className="mt-3 space-y-1.5">
               {states.map(s => (
                 <div key={s.key} className="flex items-baseline gap-3 text-xs">
@@ -886,6 +936,21 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
                 </div>
               ))}
             </div>
+          </Fold>
+        )}
+        {open.length > 0 && (
+          <Fold title="Open items" subtitle="Raised by an earlier run and not closed. Only a person can mark one resolved." count={open.length} open>
+            <ul className="mt-3 space-y-2">
+              {open.map((item, i) => (
+                <li key={i} className="text-xs text-text-secondary leading-relaxed">
+                  {item.text}
+                  <span className="text-text-tertiary">
+                    {' '}· first raised {fmtDate(item.firstRaised)} · {item.runs} run{item.runs === 1 ? '' : 's'}
+                    {item.thisRun ? '' : ' · not repeated this run'}
+                  </span>
+                </li>
+              ))}
+            </ul>
           </Fold>
         )}
         {(report.unanswered || []).length > 0 && (

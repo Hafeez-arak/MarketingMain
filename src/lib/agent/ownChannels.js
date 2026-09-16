@@ -420,6 +420,77 @@ export function ownChannels({ accounts = [], posts = [], analytics = [], period,
   }
 }
 
+// ─── Two true numbers for the same week ────────────────────────────────────
+//
+// The 15 Sep report said our Instagram posting went "from 4 to 7 posts a week"
+// in its Top 3, "5 posts" in the social table, and "7 posts/week" again in the
+// limitations — three figures for one channel in one document, and a
+// recommendation to shift channel weight resting on the gap between them.
+//
+// Neither number was wrong. They count different things:
+//
+//   the ACCOUNT    business_discovery reads the Instagram profile itself, so
+//                  it sees every post on the account, including ones nobody
+//                  made through this app. It is a rate: posts per week.
+//   OUR PUBLISHING `own_performance` counts the rows in our own tables for
+//                  this exact window, and only those can carry analytics.
+//
+// A reader cannot be expected to hold that distinction while skimming, so it
+// is resolved here, once, in code: each platform carries both figures and a
+// sentence saying why they differ, and the synthesis is handed the sentence
+// rather than left to reconcile two numbers it was given separately.
+export function reconcileAccountPosting(own, snapshots = []) {
+  if (!own) return own
+  const self = (snapshots || []).find(s => s?.is_self && s?.data_source === 'instagram')
+  if (!self) return own
+  const accountPosts = num(self.posts_in_period)
+  if (accountPosts === null) return own
+
+  return {
+    ...own,
+    platforms: (own.platforms || []).map(p => {
+      if (p.platform !== 'instagram') return p
+      const mine = Number(p.posts) || 0
+      const agrees = accountPosts === mine
+      return {
+        ...p,
+        account_posts: accountPosts,
+        account_posts_per_week: num(self.posts_per_week),
+        posting_note: agrees
+          ? ''
+          : `The Instagram account itself shows ${accountPosts} post${accountPosts === 1 ? '' : 's'} in this ` +
+            `window against ${mine} we published through this app${p.posted_directly ? '' : ''} — the account ` +
+            'number counts everything on the profile, ours counts what we can measure. Both are correct; ' +
+            'they are not the same measurement and must never be quoted as one.',
+      }
+    }),
+  }
+}
+
+/**
+ * The posting facts, in the words the brief must use.
+ *
+ * Handed to synthesis as given numbers so it has no reason to compute a third
+ * one, and so the one comparison that is NOT available — our per-post
+ * engagement against a rival's page totals — is named as unavailable rather
+ * than left for the model to notice.
+ */
+export function ownPostingFacts(own) {
+  return (own?.platforms || []).map(p => ({
+    platform: p.platform,
+    label: p.label,
+    state: p.state,
+    posts_we_published: p.posts ?? 0,
+    posts_on_the_account: p.account_posts ?? null,
+    measured: p.measured ?? 0,
+    avg_engagement_per_post: p.avg_engagement ?? null,
+    page_totals: p.page_insights?.ok
+      ? { impressions: p.page_insights.impressions, clicks: p.page_insights.clicks, days: p.page_insights.window?.days }
+      : null,
+    note: [p.posting_note, p.weak ? `Thin sample: ${p.measured} measured post${p.measured === 1 ? '' : 's'}.` : ''].filter(Boolean).join(' '),
+  }))
+}
+
 /**
  * Turn the per-platform numbers into the findings the brief reports.
  *
@@ -533,7 +604,12 @@ export function ownChannelFindings(own) {
     }
 
     // Measured.
-    const sample = `${p.measured} of ${p.posts} post${p.posts === 1 ? '' : 's'} measured`
+    // The reconciliation sentence rides on every measured finding for this
+    // platform, because the contradiction it prevents appeared in the TOP 3 of
+    // the 15 Sep report — a section written from the findings, not from the
+    // table underneath it.
+    const sample = `${p.measured} of ${p.posts} post${p.posts === 1 ? '' : 's'} measured` +
+      (p.posting_note ? `. ${p.posting_note}` : '')
     const caveat = p.weak ? ` Thin sample (${p.measured} < ${WEAK_SAMPLE}) — directional, not conclusive.` : ''
 
     if (p.change) {
@@ -562,9 +638,14 @@ export function ownChannelFindings(own) {
       })
     }
 
+    // `topic` is often empty — plenty of posts are published without one, and
+    // "Best: untitled" printed in the 15 Sep report's social table is a null
+    // leaking into a sentence. Where there is no topic the post is named by
+    // what we do know: its format, and failing that its number.
     if (p.best_post) {
+      const named = String(p.best_post.topic || '').trim() || (p.best_post.format ? `a ${p.best_post.format} post` : 'one post')
       findings.push({
-        headline: `Best ${p.label} post this period: ${p.best_post.topic || 'untitled'} at ${p.best_post.engagement} interactions.`,
+        headline: `Best ${p.label} post this period: ${named} at ${p.best_post.engagement} interactions.`,
         detail: `Format: ${p.best_post.format || 'unrecorded'}.${p.best_post.url ? ` ${p.best_post.url}` : ''}` +
           (p.posted_directly
             ? ` ${p.posted_directly} of this period's ${p.posts} ${p.label} post${p.posts === 1 ? '' : 's'} ` +
