@@ -61,10 +61,32 @@ export function buildRequest({
   // block rather than the first. Caching is a prefix match: marking the end of
   // the stable region caches everything up to it, whereas marking the middle
   // would leave the brand context re-billed on every call.
+  //
+  // ── EMPTY BLOCKS ARE DROPPED, NOT SENT ──
+  //
+  // The API rejects the whole request with
+  //   400 "cache_control cannot be set for empty text blocks"
+  // and `brand` is legitimately '' for calls that are ABOUT the agent rather
+  // than about the market — compact_memory is the one that matters, since it
+  // decides what the agent never sees again.
+  //
+  // Every compact_memory call this app has ever made failed this way: 3 of 3,
+  // on 2026-09-14 and 09-15, all 400s. Compaction only runs once the digest is
+  // already dropping notes, so the one job that exists to stop memory being
+  // lost could not run at exactly the moment it was needed, and the failure
+  // was invisible because a compaction that never happens looks like a
+  // compaction that was not needed.
+  //
+  // So: drop empty blocks, and put the breakpoint on the last block that
+  // actually survives. A single-block system prompt still caches.
   const system = [
     { type: 'text', text: identity },
-    { type: 'text', text: brand, cache_control: { type: 'ephemeral' } },
-  ]
+    { type: 'text', text: brand },
+  ].filter(b => String(b.text || '').trim())
+
+  if (system.length) {
+    system[system.length - 1].cache_control = { type: 'ephemeral' }
+  }
 
   return {
     model,

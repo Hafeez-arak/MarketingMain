@@ -84,3 +84,35 @@ describe('contextPreamble — the volatile tail', () => {
     expect(contextPreamble(null)).toBe('')
   })
 })
+
+describe('empty system blocks', () => {
+  const args = { model: 'claude-sonnet-5', identity: 'I am the agent.', messages: [{ role: 'user', content: 'hi' }] }
+
+  it('drops an empty brand block rather than sending it — the compact_memory 400', () => {
+    // 3 of 3 compact_memory calls died on "cache_control cannot be set for
+    // empty text blocks" (2026-09-14, 09-15) because this job passes brand ''.
+    const req = buildRequest({ ...args, brand: '' })
+    expect(req.system).toHaveLength(1)
+    expect(req.system[0].text).toBe('I am the agent.')
+    expect(req.system.every(b => b.text.trim())).toBe(true)
+  })
+
+  it('still caches when only one block survives', () => {
+    const req = buildRequest({ ...args, brand: '   ' })
+    expect(req.system[0].cache_control).toEqual({ type: 'ephemeral' })
+  })
+
+  it('keeps the breakpoint on the LAST block when both survive', () => {
+    const req = buildRequest({ ...args, brand: 'Arak sells lighting.' })
+    expect(req.system).toHaveLength(2)
+    expect(req.system[0].cache_control).toBeUndefined()
+    expect(req.system[1].cache_control).toEqual({ type: 'ephemeral' })
+  })
+
+  it('never sets cache_control on a block it did not keep', () => {
+    for (const brand of ['', '  ', '\n', undefined, null]) {
+      const req = buildRequest({ ...args, brand })
+      expect(req.system.some(b => !String(b.text || '').trim())).toBe(false)
+    }
+  })
+})
