@@ -192,9 +192,18 @@ describe('homepageCatching', () => {
 
 describe('impressionMovers', () => {
   it('never computes a percentage against zero — an arrival is reported as an arrival', () => {
-    const [m] = impressionMovers([row({ query: 'new thing', impressions: 80 })], [])
+    // A previous period that exists but did not contain this query.
+    const [m] = impressionMovers(
+      [row({ query: 'new thing', impressions: 80 })],
+      [row({ query: 'something else', impressions: 40 })])
     expect(m.state).toBe('new')
     expect(m.delta).toBeUndefined()
+  })
+
+  it('treats a missing previous period as a baseline, not as 172 arrivals', () => {
+    // The first live run compared 172 queries against an empty property and
+    // called every one of them new. That is a baseline; nothing has moved.
+    expect(impressionMovers([row({ query: 'a', impressions: 900 })], [])).toEqual([])
   })
 
   it('reports a query that stopped appearing, using what it had rather than what it has', () => {
@@ -343,5 +352,115 @@ describe('bidi isolation', () => {
       brandTerms: ['arak'],
     }).filter(x => x.headline.includes('We appear'))
     expect(f.headline).toContain('⁨knx riyadh⁩')
+  })
+})
+
+describe('tuned against the first real run, 2026-09-16', () => {
+  const terms = ['arak', 'اراك']
+
+  it('does not tell marketing to rewrite a title for the company’s own name', () => {
+    // The single finding the first live run produced, and it was noise.
+    const rows = [row({ query: 'اراك', impressions: 33, clicks: 0, position: 9.1 })]
+    expect(appearingNotWinning(rows)).toHaveLength(1)                      // without the filter
+    expect(appearingNotWinning(rows, { brandTerms: terms })).toHaveLength(0) // with it
+  })
+
+  it('reaches the queries a new site actually ranks for, at 21-30', () => {
+    // Both of arak-sa.com's real non-brand queries, which the old band dropped.
+    const rows = [
+      row({ query: 'lighting consultant riyadh', impressions: 151, clicks: 0, position: 20.3 }),
+      row({ query: 'lighting design saudi arabia', impressions: 77, clicks: 0, position: 23.2 }),
+    ]
+    expect(appearingNotWinning(rows, { brandTerms: terms })).toHaveLength(2)
+  })
+
+  it('still refuses position 31+, where no honest advice follows', () => {
+    const rows = [row({ query: 'smart street light pole', impressions: 200, clicks: 0, position: 49.4 })]
+    expect(appearingNotWinning(rows, { brandTerms: terms })).toHaveLength(0)
+  })
+
+  it('changes the advice at the point where a title rewrite stops working', () => {
+    const near = searchFindings({
+      queries: [row({ query: 'x', impressions: 200, clicks: 0, position: 8 })], brandTerms: terms,
+      previous: [row({ query: 'other', impressions: 50 })],
+    }).find(f => f.headline.includes('We appear'))
+    const far = searchFindings({
+      queries: [row({ query: 'y', impressions: 200, clicks: 0, position: 23.2 })], brandTerms: terms,
+      previous: [row({ query: 'other', impressions: 50 })],
+    }).find(f => f.headline.includes('We appear'))
+
+    expect(near.suggested_action).toContain('Rewrite the title')
+    expect(far.suggested_action).toContain('not a title problem')
+    expect(far.suggested_action).toContain('needs a page of its own')
+  })
+
+  it('says outright that a first period has nothing to compare against', () => {
+    const [summary] = searchFindings({
+      queries: [row({ query: 'x', impressions: 200, clicks: 1, position: 9 })],
+      previous: [], brandTerms: terms,
+    })
+    expect(summary.detail).toContain('FIRST measured period')
+    expect(summary.evidence.baseline).toBe(true)
+  })
+
+  it('does not claim a baseline once a previous period exists', () => {
+    const [summary] = searchFindings({
+      queries: [row({ query: 'x', impressions: 200, clicks: 1, position: 9 })],
+      previous: [row({ query: 'x', impressions: 100 })], brandTerms: terms,
+    })
+    expect(summary.detail).not.toContain('FIRST measured period')
+    expect(summary.evidence.baseline).toBe(false)
+  })
+})
+
+describe('a query that is both unclicked and homeless', () => {
+  const q = { query: 'lighting consultant riyadh', clicks: 0, ctr: 0, impressions: 151, position: 20.3 }
+
+  it('is reported once, not twice in adjacent bullets', () => {
+    const found = searchFindings({
+      queries: [{ ...q, page: '' }],
+      pages: [{ ...q, page: 'https://arak-sa.com/' }],
+      previous: [{ query: 'other', page: '', clicks: 0, ctr: 0, impressions: 50, position: 9 }],
+      brandTerms: ['arak'],
+    }).filter(f => f.headline.includes('lighting consultant riyadh'))
+    expect(found).toHaveLength(1)
+  })
+
+  it('says both halves in the one headline, because together they are the stronger claim', () => {
+    const [f] = searchFindings({
+      queries: [{ ...q, page: '' }],
+      pages: [{ ...q, page: 'https://arak-sa.com/' }],
+      previous: [{ query: 'other', page: '', clicks: 0, ctr: 0, impressions: 50, position: 9 }],
+      brandTerms: ['arak'],
+    }).filter(f => f.headline.includes('lighting consultant riyadh'))
+    expect(f.headline).toContain('position 20.3')
+    expect(f.headline).toContain('lands on the homepage')
+  })
+
+  it('still reports a homeless query the position band declined to flag', () => {
+    // Position 45 is past the band, so appearingNotWinning correctly says
+    // nothing — no title or page fix wins a click from there. But "the
+    // homepage is ranking because we have no page for this" is still true and
+    // still worth writing down, so the two are complementary rather than
+    // duplicates.
+    const far = { query: 'guest room management system', clicks: 0, ctr: 0, impressions: 90, position: 45 }
+    const found = searchFindings({
+      queries: [{ ...far, page: '' }],
+      pages: [{ ...far, page: 'https://arak-sa.com/' }],
+      previous: [], brandTerms: ['arak'],
+    }).filter(f => f.headline.includes('guest room management'))
+    expect(found).toHaveLength(1)
+    expect(found[0].headline).toContain('lands on the homepage')
+  })
+
+  it('does not add a "new this period" bullet under a query it just explained', () => {
+    const q = { query: 'lighting consultant riyadh', clicks: 0, ctr: 0, impressions: 151, position: 20.3 }
+    const found = searchFindings({
+      queries: [{ ...q, page: '' }],
+      pages: [{ ...q, page: 'https://arak-sa.com/' }],
+      previous: [{ query: 'other', page: '', clicks: 0, ctr: 0, impressions: 50, position: 9 }],
+      brandTerms: ['arak'],
+    })
+    expect(found.filter(f => f.evidence?.state === 'new')).toHaveLength(0)
   })
 })

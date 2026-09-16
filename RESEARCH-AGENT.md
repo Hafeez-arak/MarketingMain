@@ -681,6 +681,44 @@ Search Console keeps revising the last couple of days, so a window ending today
 always reads as a decline — and a weekly agent would report that decline forever
 as news.
 
+#### Tuned against the first real run, 2026-09-16
+
+The property was connected the day this shipped, and the live data contradicted
+four things the code assumed. All four were invisible against a fixture; none
+would have survived a week of real reports.
+
+**The position band was set for a site that ranks better than this one.** It
+stopped at 20, roughly where page two ends. arak-sa.com's non-brand impressions
+sit 93 at positions 1-10, 50 at 11-20 and **269 at 21-30** — so the band
+excluded most of the demand, and both queries actually worth having (151 and 77
+impressions, at 20.3 and 23.2) fell just outside and were dropped in silence.
+Now 4-30, with `tweakable: 15` deciding the ADVICE rather than the cutoff: near
+the top of page one a title and description can win the click back; at position
+22 they cannot, and saying otherwise is advice that quietly does not work.
+
+**Brand queries leaked into the fix-this list.** The single finding the first
+run produced was "we appear for اراك at position 9.1 and get no clicks —
+rewrite the title", where اراك is the company's own name in Arabic.
+`homepageCatching` had the brand filter from the start; `appearingNotWinning`
+never did.
+
+**An empty previous period was read as 172 arrivals.** The property held nothing
+before 2026-08-17, so every query came back "new this period" — five of nine
+findings, none of them meaning anything. That is a BASELINE, the distinction
+`gather.js` already draws for competitor numbers (`baseline` vs `quiet_week`).
+`impressionMovers` now returns nothing at all without a previous period and the
+summary says so in words.
+
+**The same query was reported up to three times.** Once as visible-but-unclicked,
+once as landing on the homepage, once as a mover. They are one finding, and
+merged it is stronger than any of the three alone: the demand is proven, the
+ranking is proven, and the reason it converts nothing is that Google had no page
+of ours to send it to. A `reported` set keeps the later sections off a query
+already given a bullet.
+
+Net effect on the same live data: **9 findings to 3**, and all three are claims
+a person can act on.
+
 #### Business lines
 
 Findings carry a `line`, the first use of the second axis (the first being

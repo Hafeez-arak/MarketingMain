@@ -283,15 +283,27 @@ export const NARRATABLE_CLICKS = 10
 export const MIN_IMPRESSIONS = 30
 
 /**
- * Positions 4 to 20 are the only band where a page can be argued into the
- * clicks it is missing.
+ * The band where a query is worth acting on, and the point inside it where the
+ * ACTION changes.
  *
- * Above 4 with no clicks usually means the query wanted something else and no
- * title rewrite will fix it. Below 20 we are not really competing, and telling
- * marketing to "improve the title" of something on page three is advice that
- * cannot work.
+ * Re-tuned on 2026-09-16 against the first real data, which contradicted the
+ * guess this was built on. The original band stopped at 20 because that is
+ * roughly where page two ends. But a new site does not rank on page one: of
+ * arak-sa.com's non-brand impressions, 93 sat at positions 1-10, 50 at 11-20
+ * and **269 at 21-30** — so the band excluded the bulk of the demand, and both
+ * of the queries actually worth having (151 and 77 impressions, at 20.3 and
+ * 23.2) fell just outside it and were silently dropped.
+ *
+ * Still bounded at both ends. Above 4 with no clicks usually means the query
+ * wanted something else and no rewrite will fix it. Past 30 we are not
+ * competing at all, and there is no advice that honestly follows from it.
+ *
+ * `tweakable` is where the recommendation changes rather than where it stops.
+ * Near the top of page one a title and description can win the click back. At
+ * position 22 they cannot — that is a missing page, and telling marketing to
+ * adjust a meta description would be advice that quietly cannot work.
  */
-export const WINNABLE = { from: 4, to: 20 }
+export const WINNABLE = { from: 4, to: 30, tweakable: 15 }
 
 /**
  * Queries where we are already visible and getting nothing.
@@ -301,8 +313,15 @@ export const WINNABLE = { from: 4, to: 20 }
  * impressions prove the demand exists and that Google already considers us a
  * candidate. What is missing is a page that deserves the click.
  */
-export function appearingNotWinning(rows = [], { minImpressions = MIN_IMPRESSIONS, band = WINNABLE } = {}) {
+export function appearingNotWinning(rows = [], { minImpressions = MIN_IMPRESSIONS, band = WINNABLE, brandTerms = [] } = {}) {
   return rows
+    // Brand queries are excluded, and the first live run is why: the one
+    // finding this produced was "we appear for اراك at position 9.1 and get no
+    // clicks — rewrite the title", where اراك is the company's own name in
+    // Arabic. Someone searching a company by name and not clicking is not a
+    // content gap, and homepageCatching had this filter from the start while
+    // this function never did.
+    .filter(r => !isBrandQuery(r.query, brandTerms))
     .filter(r => r.impressions >= minImpressions && r.clicks === 0 &&
                  r.position >= band.from && r.position <= band.to)
     .sort((a, b) => b.impressions - a.impressions)
@@ -337,6 +356,15 @@ export function homepageCatching(rows = [], brandTerms = [], { minImpressions = 
  * reported as such rather than as a percentage against zero.
  */
 export function impressionMovers(current = [], previous = [], { minImpressions = MIN_IMPRESSIONS } = {}) {
+  // No previous period at all is a BASELINE, not a page of arrivals.
+  //
+  // arak-sa.com's property held no data before 2026-08-17, so the first real
+  // run compared 172 queries against nothing and called every one of them
+  // "new this period" — five of its nine findings said so, and none of them
+  // meant anything. gather.js already draws this distinction for competitor
+  // numbers (`baseline` vs `quiet_week`); search demand needs it too.
+  if (!previous.length) return []
+
   const before = new Map(previous.map(r => [r.query, r]))
   const after = new Map(current.map(r => [r.query, r]))
   const out = []
@@ -374,7 +402,7 @@ export function impressionMovers(current = [], previous = [], { minImpressions =
 }
 
 /** How a period reads in one line, with the brand split made explicit. */
-export function periodSummary(rows = [], brandTerms = [], lines = []) {
+export function periodSummary(rows = [], brandTerms = [], lines = [], previous = []) {
   const { brand, nonBrand } = splitBrand(rows, brandTerms)
   return {
     all: totals(rows),
@@ -382,6 +410,8 @@ export function periodSummary(rows = [], brandTerms = [], lines = []) {
     nonBrand: totals(nonBrand),
     byLine: lineTotals(rows, lines),
     thin: totals(rows).clicks < NARRATABLE_CLICKS,
+    // Nothing to compare against yet, as distinct from compared-and-unchanged.
+    baseline: !previous.length,
   }
 }
 
@@ -423,7 +453,7 @@ export function searchFindings({
   // Joined first, so every finding below classifies on the page a query
   // actually resolves to rather than on the words in the query.
   const joined = attachPages(queries, pages)
-  const summary = periodSummary(joined, brandTerms, lines)
+  const summary = periodSummary(joined, brandTerms, lines, previous)
   const host = str(site).replace(/^sc-domain:/, '')
 
   if (!queries.length) {
@@ -450,7 +480,11 @@ export function searchFindings({
         ? `At this volume click counts are too thin to read as movement — ${NARRATABLE_CLICKS} clicks on a ` +
           'single query is the floor this report will narrate a change from. Impressions and position are ' +
           'the numbers to work with.'
-        : 'Click volume is now high enough to read changes per query.'),
+        : 'Click volume is now high enough to read changes per query.') +
+      (summary.baseline
+        ? ' This is the FIRST measured period — the property holds nothing before it, so there is no ' +
+          'comparison to draw and nothing here is a rise or a fall. Next period has a baseline to move against.'
+        : ''),
     confidence: 1,
     relevance: 'medium',
     for_whom: 'marketing',
@@ -460,9 +494,27 @@ export function searchFindings({
     evidence: summary,
   })
 
-  for (const r of appearingNotWinning(joined).slice(0, 5)) {
+  // A query can be BOTH visible-but-unclicked and landing on the homepage, and
+  // on the first live run two of five findings were the second half repeating
+  // the first — same query, adjacent bullets, near-identical advice. They are
+  // one finding, and together they are a stronger one than either alone: the
+  // demand is proven, the ranking is proven, and the reason it converts nothing
+  // is that Google had no page of ours to send it to.
+  const homeless = new Set(homepageCatching(pages, brandTerms).map(r => r.query))
+  // Every query already given a bullet. A mover saying "and it is new this
+  // period" under a finding that just explained the query in full is a
+  // second bullet carrying no second fact.
+  const reported = new Set()
+
+  for (const r of appearingNotWinning(joined, { brandTerms }).slice(0, 5)) {
+    const onHomepage = homeless.has(r.query)
+    if (onHomepage) homeless.delete(r.query)
+    reported.add(r.query)
     out.push({
-      headline: `We appear for "${isolate(r.query)}" ${r.impressions} times at position ${pos(r.position)} and get no clicks.`,
+      headline: onHomepage
+        ? `"${isolate(r.query)}" brings ${r.impressions} impressions at position ${pos(r.position)}, converts nothing, ` +
+          'and lands on the homepage because no page of ours answers it.'
+        : `We appear for "${isolate(r.query)}" ${r.impressions} times at position ${pos(r.position)} and get no clicks.`,
       detail: 'Google already treats us as a candidate for this search, so the demand and the ranking both ' +
         'exist. What is missing is a result worth clicking — a title, a description, or a page that answers ' +
         'the query directly instead of a general one that mentions it.',
@@ -471,13 +523,22 @@ export function searchFindings({
       for_whom: 'marketing',
       channel: 'website',
       category: 'content',
-      suggested_action: `Rewrite the title and meta description for the page ranking on "${isolate(r.query)}", or give ` +
-        'the query its own page if the ranking one only mentions it in passing.',
+      // The advice has to follow from WHERE it ranks. Near the top of page one
+      // a title and description can win the click back; at position 22 they
+      // cannot, and saying so would be advice that quietly does not work.
+      suggested_action: r.position <= WINNABLE.tweakable
+        ? `Rewrite the title and meta description for the page ranking on "${isolate(r.query)}", or give ` +
+          'the query its own page if the ranking one only mentions it in passing.'
+        : `At position ${pos(r.position)} this is not a title problem — nobody is seeing the result to ` +
+          `click it. "${isolate(r.query)}" needs a page of its own, using the words people are actually ` +
+          'searching in its heading, linked from the service section it belongs to.',
       evidence: r,
     })
   }
 
-  for (const r of homepageCatching(pages, brandTerms).slice(0, 5)) {
+  // Only the ones not already reported above, with their stronger framing.
+  for (const r of homepageCatching(pages, brandTerms).filter(r => homeless.has(r.query)).slice(0, 5)) {
+    reported.add(r.query)
     out.push({
       headline: `"${isolate(r.query)}" lands on the homepage — ${r.impressions} impressions with no page of its own.`,
       detail: 'The homepage ranking for a specific, multi-word search is Google saying it had nothing more ' +
@@ -492,7 +553,7 @@ export function searchFindings({
     })
   }
 
-  for (const m of impressionMovers(joined, previous).slice(0, 5)) {
+  for (const m of impressionMovers(joined, previous).filter(m => !reported.has(m.query)).slice(0, 5)) {
     const moved = m.state === 'new'
       ? `"${isolate(m.query)}" is new this period at ${m.impressions} impressions.`
       : m.state === 'gone'
