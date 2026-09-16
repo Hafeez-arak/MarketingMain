@@ -123,7 +123,7 @@ export async function loadRunContext(workspaceId, runId, cadence = 'weekly') {
       // new. The watchlist's own sequence is the closest thing to a priority
       // the store holds — the rivals a person put there first.
       db(`research_agenda?workspace_id=eq.${workspaceId}&kind=eq.competitor&status=neq.retired` +
-         `&select=subject&order=created_at.asc`),
+         `&select=subject,why&order=created_at.asc`),
       priorIdeas(workspaceId),
       db(`research_runs?id=eq.${runId}&workspace_id=eq.${workspaceId}&select=report,stage,status&limit=1`),
     ])
@@ -134,6 +134,18 @@ export async function loadRunContext(workspaceId, runId, cadence = 'weekly') {
   // Brain until someone sets it explicitly — see motionOf().
   const { motion, explicit } = motionOf(profile || {})
   const competitors = (competitorRows || []).map(r => r.subject).filter(Boolean)
+  // The same rows with the note a person wrote against each name. Kept SEPARATE
+  // from `competitors` rather than changing its shape: six call sites take that
+  // array as plain names, and a competitor is matched by name in intel.js too.
+  //
+  // `why` is where the domain, the business line, the city and what kind of
+  // company it is are recorded — and until 2026-09-16 the query did not select
+  // it, so none of that reached the lens. The watchlist named "Lumiere", which
+  // is at least four different Saudi companies, and the lens had no way to know
+  // which one to research.
+  const competitorNotes = (competitorRows || [])
+    .filter(r => String(r.subject || '').trim() && String(r.why || '').trim())
+    .map(r => ({ name: String(r.subject).trim(), why: String(r.why).trim() }))
 
   // Every lens asks a question about somewhere. `customFields.geography` is
   // the obvious source and is empty on all three live workspaces, so a lens
@@ -160,7 +172,7 @@ export async function loadRunContext(workspaceId, runId, cadence = 'weekly') {
     // an answer we already had. See dedupeQuestions.
     agenda: dedupeQuestions(agenda || []),
     priorRuns: priorRuns || [],
-    competitors, alreadySaid: alreadySaid || [], motion, explicit, brandFacts, language,
+    competitors, competitorNotes, alreadySaid: alreadySaid || [], motion, explicit, brandFacts, language,
     lenses: lensesFor({ motion, cadence }),
   }
 }
@@ -192,7 +204,7 @@ export async function planLenses(workspaceId, runId, cadence = 'weekly') {
  * every lens's — the calendar's dates cost an API round trip, and fetching
  * them to run the demand lens would be waste repeated on every call.
  */
-async function argsForLens(key, { brandFacts, motion, competitors, gathered, profile, ctx, agenda = [], language = '', workspaceId = '' }) {
+async function argsForLens(key, { brandFacts, motion, competitors, competitorNotes = [], gathered, profile, ctx, agenda = [], language = '', workspaceId = '' }) {
   // What the team already tracks, so the lens reports changes instead of
   // re-announcing last week. Read only for the three lenses that produce
   // leads, events or competitor signals; never fatal — an empty store is a
@@ -223,6 +235,7 @@ async function argsForLens(key, { brandFacts, motion, competitors, gathered, pro
     return {
       args: [brandFacts, {
         competitors,
+        notes: competitorNotes,
         agenda,
         language,
         intel,

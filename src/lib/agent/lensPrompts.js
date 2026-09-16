@@ -515,7 +515,7 @@ export function categoryPrompt(brand, { agenda = [], language = '', intel = '' }
  * job advert, a new brand on the website and a stand at Elenex in the same
  * month is a move.
  */
-export function rivalsPrompt(brand, { competitors = [], board = [], agenda = [], language = '', intel = '', searches = 0 }) {
+export function rivalsPrompt(brand, { competitors = [], notes = [], board = [], agenda = [], language = '', intel = '', searches = 0 }) {
   // Posting activity only, never follower counts: what they posted ABOUT is a
   // trace of what they are doing; how many people follow them is not a move.
   const activity = board
@@ -535,7 +535,28 @@ export function rivalsPrompt(brand, { competitors = [], board = [], agenda = [],
   // not mentioned anywhere in the brief. Discovery is worth having and it is
   // never worth the two names a person explicitly asked to have watched, so the
   // list is numbered and the order is an instruction rather than a suggestion.
-  const roll = competitors.slice(0, 12).map((c, i) => `  ${i + 1}. ${c}`).join('\n')
+  // ── THE NOTE IS THE HALF THAT WAS MISSING ──
+  //
+  // A name on its own is not an identity, and this watchlist proves it: it
+  // carried "Lumiere", which is at least four different Saudi companies. The
+  // note a person wrote against each name records the domain, the business
+  // line, the city and what kind of company it is — a manufacturer and an ELV
+  // integrator are not researched the same way — and before 2026-09-16 the
+  // query that loads the watchlist did not even select it.
+  //
+  // Rendered under the name rather than beside it, so a long note cannot push
+  // the numbered list out of shape.
+  const noteFor = new Map(notes.map(n => [String(n.name || '').toLowerCase(), n.why]))
+  // Was `slice(0, 12)`. With 17 names on the list and lighting entered first,
+  // that cut every controls competitor off the bottom — the lens would have
+  // researched one business line and reported silence on the other, which is
+  // the exact failure the line split exists to prevent. The whole list is
+  // rolled; the BUDGET decides how far down it gets, and the sentence below
+  // says so honestly instead of promising one search per name it cannot keep.
+  const roll = competitors.map((c, i) => {
+    const note = noteFor.get(String(c).toLowerCase())
+    return `  ${i + 1}. ${c}${note ? `\n       ${note}` : ''}`
+  }).join('\n')
 
   return [
     who(brand),
@@ -544,8 +565,20 @@ export function rivalsPrompt(brand, { competitors = [], board = [], agenda = [],
           `THE WATCHLIST, IN THE ORDER A PERSON PUT IT THERE. Cover these FIRST, in this order:`,
           roll,
           searches
-            ? `You have ${searches} searches. Spend one on each name above before you spend any on anything else.`
+            ? (searches >= competitors.length
+                ? `You have ${searches} searches. Spend one on each name above before you spend any on anything else.`
+                // Promising a search per name when there are more names than
+                // searches is an instruction that cannot be followed, and a
+                // lens given one quietly decides for itself which to drop.
+                : `You have ${searches} searches and there are ${competitors.length} names. Work DOWN the ` +
+                  'list in order and get as far as the budget takes you — the order is the priority. Name ' +
+                  'the ones you did not reach in the detail of another finding, so a silence is never ' +
+                  'mistaken for "nothing is happening there".')
             : '',
+          'Where a note names a DOMAIN, research that domain — not the company name. Several names on this',
+          'list are shared by more than one Saudi company, and a name alone has already sent this lens to',
+          'the wrong one. Where a note says the domain is unknown or ambiguous, SKIP that company and say',
+          'so in a finding: spending a search guessing which company was meant is worse than not looking.',
           'A competitor you did not reach is reported as not reached — say so in the detail of another',
           'finding rather than leaving a silence, because silence reads as "nothing is happening there".',
         ].filter(Boolean).join('\n')
