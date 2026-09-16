@@ -33,10 +33,29 @@ export const FINDINGS_SCHEMA = {
     properties: {
       findings: {
         type: 'array',
+        // ── THIS DESCRIPTION USED TO UNDO THE PROMPT ──
+        //
+        // It said: "Returning an empty array is a correct and common answer —
+        // most weeks most lenses find nothing, and saying so is worth more
+        // than padding."
+        //
+        // That is the instruction lensPrompts.js documents at length as THE
+        // INSTRUCTION THAT COST US EVERY FINDING, and which was removed from
+        // the prompt on 2026-09-12 after it threw away a 300-key Waldorf
+        // Astoria conversion. It survived here, untouched since #21 — so the
+        // prompt said "report what you found" while the schema, sitting right
+        // next to the output, said "finding nothing is normal". On 2026-09-15
+        // the events, demand and category lenses read 130 sources between
+        // them and returned valid, empty arrays, billed and recorded as `ok`.
+        //
+        // An instruction that lives in two places has to be fixed in two
+        // places. Uncertainty belongs in `confidence`, never in silence.
         description:
-          'What you actually established. Returning an empty array is a correct and ' +
-          'common answer — most weeks most lenses find nothing, and saying so is worth ' +
-          'more than padding.',
+          'What you actually established, with an honest confidence on each. A partial or ' +
+          'low-confidence finding is worth reporting — a reader can discount a 0.35, but ' +
+          'cannot discount an empty array, which is indistinguishable from never having ' +
+          'looked. Only return an empty array if you genuinely read the sources and there ' +
+          'was nothing in them; if you read many sources, that should be rare.',
         items: {
           type: 'object',
           additionalProperties: false,
@@ -46,8 +65,15 @@ export const FINDINGS_SCHEMA = {
           // one had 32 — every lead and event field was optional — and all five
           // searching lenses were refused with a 400 before doing any work. So
           // everything a finding always has is required (an empty string is a
-          // valid "not established"), and only five things stay optional.
-          // schemaLimits.test.js counts them.
+          // valid "not established").
+          //
+          // Nine are optional now, not five: 2026-09-16 established that making
+          // a field REQUIRED that the model often cannot establish does not
+          // produce an empty string, it produces an empty findings array. The
+          // four added back are the ones with no honest empty value — a source's
+          // `quote` and `title`, an event's `exhibitor_deadline` and
+          // `competitors_exhibiting`. schemaLimits.test.js counts them and holds
+          // the total under a budget of 12, well inside the API's 24.
           required: [
             'headline', 'detail', 'confidence', 'suggested_action', 'for_whom', 'relevance',
             'competitor', 'channel', 'category', 'sources',
@@ -128,8 +154,12 @@ export const FINDINGS_SCHEMA = {
             event: {
               type: 'object',
               additionalProperties: false,
-              description: 'Fill for an expo, conference, awards or sponsorship opening. Every field is required; use an empty string (or an empty list) for one you did not establish.',
-              required: ['name', 'start_date', 'end_date', 'venue', 'city', 'organizer', 'url', 'exhibitor_deadline', 'competitors_exhibiting'],
+              // `exhibitor_deadline` and `competitors_exhibiting` are optional:
+              // they are the two an event page almost never carries, and the
+              // rest are satisfiable with an empty string. The name is what
+              // makes the row, and eventFromFinding drops anything without one.
+              description: 'Fill for an expo, conference, awards or sponsorship opening. Only the name is essential — use an empty string for anything else you did not establish, and omit the exhibitor deadline and competitor list entirely if you did not find them. A named event with nothing but a city is still worth reporting.',
+              required: ['name', 'start_date', 'end_date', 'venue', 'city', 'organizer', 'url'],
               properties: {
                 name: { type: 'string', description: 'Official name.' },
                 start_date: { type: 'string' },
@@ -142,16 +172,43 @@ export const FINDINGS_SCHEMA = {
                 competitors_exhibiting: { type: 'array', items: { type: 'string' } },
               },
             },
+            // ── WHY `quote` AND `title` ARE OPTIONAL ──
+            //
+            // #64 made all three required. `sources` is itself required on
+            // every finding, and CLOSING forbids inventing — so a page you
+            // read but cannot quote verbatim left no legal way to file the
+            // finding at all, and dropping it became the cheapest compliant
+            // answer.
+            //
+            // The lenses it killed say which: rivals and openings read news
+            // and company pages, where a supporting sentence is easy, and
+            // both returned 5 findings on 2026-09-15. demand, category and
+            // events synthesise across many pages — or read exhibitor lists
+            // and tables that contain no prose sentence at all — and all
+            // three returned zero from 130 sources the same day, having
+            // returned 3 and 4 the day before.
+            //
+            // A URL is the part that makes a finding checkable. Demanding
+            // prose that some sources do not contain buys nothing and costs
+            // everything.
             sources: {
               type: 'array',
               items: {
                 type: 'object',
                 additionalProperties: false,
-                required: ['url', 'title', 'quote'],
+                required: ['url'],
                 properties: {
                   url: { type: 'string' },
                   title: { type: 'string' },
-                  quote: { type: 'string', description: 'The sentence that actually supports this.' },
+                  quote: {
+                    type: 'string',
+                    description:
+                      'The sentence that actually supports this, when the page contains one. ' +
+                      'Omit it for a listing, table, exhibitor list or PDF with no quotable ' +
+                      'sentence, or when the detail sits behind a login — that is a fact about ' +
+                      'the source, never a reason to drop the finding. Do not paraphrase into ' +
+                      'quotation marks.',
+                  },
                 },
               },
             },
@@ -219,7 +276,20 @@ export async function runLens({
 
     let parsed = []
     try {
-      parsed = JSON.parse(textIn(out.response))?.findings || []
+      // `?.findings || []` used to stand here, and it conflated two completely
+      // different outcomes: the model answering "nothing this week", and the
+      // model returning a shape we did not ask for. Both produced an empty
+      // array, `ok: true`, and a row indistinguishable from a quiet week.
+      // A missing key is this lens failing and must say so.
+      const body = JSON.parse(textIn(out.response))
+      if (!body || !Array.isArray(body.findings)) {
+        return {
+          lens: lensKey, ok: false, findings: [], sources: [...allowed],
+          cost: out.cost || 0,
+          error: 'Findings missing: the response parsed but had no `findings` array.',
+        }
+      }
+      parsed = body.findings
     } catch (err) {
       // Unparseable output is this lens failing, not the run failing. Five
       // other answers are unaffected.

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { runHealth, scheduleNeverRan, STALE_DAYS, STUCK_MINUTES } from './runHealth.js'
+import { runHealth, scheduleNeverRan, silentLensNote, STALE_DAYS, STUCK_MINUTES, SILENT_SOURCE_FLOOR } from './runHealth.js'
 
 const NOW = new Date('2026-09-13T12:00:00Z')
 const run = (extra = {}) => ({
@@ -98,5 +98,49 @@ describe('scheduleNeverRan', () => {
     // One manual run proves nothing about the schedule.
     expect(scheduleNeverRan([run()])).toBe(false)
     expect(scheduleNeverRan([])).toBe(false)
+  })
+})
+
+describe('silentLensNote', () => {
+  const res = (findings, sources, extra = {}) => ({
+    ok: true,
+    findings: Array.from({ length: findings }, (_, i) => ({ headline: `f${i}` })),
+    sources: Array.from({ length: sources }, (_, i) => `https://x/${i}`),
+    ...extra,
+  })
+
+  it('flags the 2026-09-15 failure: many sources read, nothing reported', () => {
+    // events (54), demand (31) and category (45) all recorded status ok.
+    for (const n of [54, 31, 45]) {
+      expect(silentLensNote(res(0, n))).toMatch(/^Suspect: read \d+ sources and returned no findings\./)
+    }
+  })
+
+  it('says nothing when the lens reported findings', () => {
+    expect(silentLensNote(res(5, 66))).toBe('')
+  })
+
+  it('does not cry wolf over a lens that barely searched', () => {
+    expect(silentLensNote(res(0, SILENT_SOURCE_FLOOR - 1))).toBe('')
+    expect(silentLensNote(res(0, 0))).toBe('')
+  })
+
+  it('flags exactly at the floor', () => {
+    expect(silentLensNote(res(0, SILENT_SOURCE_FLOOR))).not.toBe('')
+  })
+
+  it('leaves a failed lens alone — it already carries an error', () => {
+    expect(silentLensNote({ ...res(0, 40), ok: false })).toBe('')
+  })
+
+  it('survives a malformed or missing result', () => {
+    expect(silentLensNote(null)).toBe('')
+    expect(silentLensNote({ ok: true })).toBe('')
+  })
+
+  it('never flags the free lenses, which read no sources by design', () => {
+    // calendar and ourselves compute rather than search.
+    expect(silentLensNote(res(1, 0))).toBe('')
+    expect(silentLensNote(res(0, 0))).toBe('')
   })
 })
