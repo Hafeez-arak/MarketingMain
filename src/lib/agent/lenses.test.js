@@ -746,3 +746,17 @@ describe('the events lens looks where the buyers are, not only at our own indust
     expect(MOTIONS.specification.leads).toContain('events')
   })
 })
+
+describe('a lens that read and reported nothing is not a quiet one', () => {
+  it('separates the discarded pass from the still market, and carries the effort', () => {
+    const rows = lensSummary([
+      { lens: 'openings', ok: true, findings: [{ headline: 'x' }], sources: ['https://a', 'https://b'] },
+      // The 15 Sep case: 40 sources read, nothing kept.
+      { lens: 'category', ok: true, findings: [], sources: Array.from({ length: 40 }, (_, i) => `https://s${i}`) },
+      { lens: 'ourselves', ok: true, findings: [], sources: [] },
+      { lens: 'rivals', ok: false, findings: [], sources: [], error: 'timed out' },
+    ])
+    expect(rows.map(r => r.state)).toEqual(['found', 'searched', 'quiet', 'failed'])
+    expect(rows[1]).toMatchObject({ sources: 40, allowance: 6 })
+  })
+})

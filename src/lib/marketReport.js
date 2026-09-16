@@ -61,6 +61,8 @@ export const sectionVisible = (key, team) =>
 export const forTeam = (team, teams = []) => team === 'all' || teams.includes(team)
 
 const str = v => String(v ?? '').trim()
+/** Whitespace a source title carried in from the page it was scraped off. */
+const flat = v => str(v).replace(/\s+/g, ' ')
 const TECH_CATEGORIES = ['regulation', 'tech', 'product']
 const RELEVANCE_RANK = { high: 3, medium: 2, low: 0 }
 
@@ -181,6 +183,70 @@ const detailBits = o => [
   o.scope,
 ].filter(Boolean)
 
+// ── WHAT IS A LEAD, AND WHAT IS ONLY ABOUT A COMPETITOR ──
+//
+// This filter used to be `teamsOf(f).includes('sales')`, which is true of any
+// finding whose `for_whom` is "sales" — and the competitors lens writes those
+// constantly, because "this rival now sells GRMS, tell sales" is genuinely
+// sales's to know. The 15 Sep report is what that costs: Datacore, Tawridat Al
+// Hadaf and Inara each appeared as a row in a table headed "act now", typed
+// PROJECT · MEDIUM, and then appeared AGAIN two pages down under Competitor
+// moves. A salesperson opening a list of things to call found three rows with
+// nobody to call.
+//
+// So a row here needs a thing to work: a named lead, or a finding from the
+// lens whose whole question is "who is about to need what we sell". A finding
+// that names a competitor is competitor intelligence and belongs to that
+// section — unless it ALSO carries a named lead, which is the real case of a
+// rival being on a project we want.
+export function isLeadFinding(f) {
+  if (!f || f.event || ['ourselves', 'calendar'].includes(f.lens)) return false
+  if (str(f.lead?.name)) return true
+  if (str(f.competitor)) return false
+  return f.lens === 'openings' || f.for_whom === 'sales'
+}
+
+// ── WHEN DOES THIS CLOSE, WHEN NOBODY PUBLISHED A DATE ──
+//
+// Six of six rows in the 15 Sep report read "— unconfirmed" or "closed", which
+// is honest and unusable: a table nobody can sort by urgency is a table nobody
+// works. Tender portals put the deadline behind a login (lensPrompts.js says
+// so at length), so the date is often genuinely unreachable — but the STAGE is
+// not, and the stage is what actually closes the window. A project in design
+// can still be specified; one whose contractor is buying cannot.
+//
+// Estimated from the stage and labelled as an estimate, never printed as if it
+// were a published date.
+const STAGE_WINDOWS = [
+  [/feasib|concept|master ?plan|early|announc/i, 'while the concept is open — closes when the consultant is appointed'],
+  [/design|schematic|dd\b|detailed/i, 'while it is in design — closes when the package goes to tender'],
+  [/tender|bid|rfp|itt|prequal|eoi/i, 'closes when bids are returned'],
+  [/award|contract(or)? (appointed|named|signed)/i, 'closes when the contractor places procurement'],
+  [/construct|fit.?out|delivery|handover/i, 'closing now — procurement is running'],
+]
+
+/**
+ * When the window on a lead shuts, and on what authority.
+ *
+ * `basis` is the point: "deadline" is a date someone published, "stage" is our
+ * own inference from where the project has got to, and "unknown" is the
+ * admission that we have neither. A reader must be able to tell those apart
+ * before they sort on them.
+ */
+export function leadWindow(row = {}) {
+  if (row.deadline) return { label: dayLabel(row.days, row.timing), basis: 'deadline' }
+  // Checked BEFORE the stage scan: a lens that established the window has
+  // closed knows more than a regular expression reading the word "tender" in
+  // the project's name, and telling someone bids are still open when they are
+  // not is the one error this whole column must not make.
+  if (row.timing === 'closed') return { label: 'the published window has closed', basis: 'deadline' }
+  const hay = [row.details && row.details.join(' '), row.headline, row.name].filter(Boolean).join(' ')
+  for (const [re, label] of STAGE_WINDOWS) {
+    if (re.test(hay)) return { label, basis: 'stage' }
+  }
+  return { label: 'no window established — the call is how to find out', basis: 'unknown' }
+}
+
 /**
  * Every lead worth a salesperson's time: the tracker first, then anything this
  * run found that the tracker does not have yet.
@@ -210,7 +276,7 @@ export function salesRows({ report = {}, opportunities = [], runId = null, now =
   }))
 
   const fromRun = (report.findings || [])
-    .filter(f => isReportable(f) && teamsOf(f).includes('sales') && !f.event && f.lens !== 'ourselves' && f.lens !== 'calendar')
+    .filter(f => isReportable(f) && isLeadFinding(f))
     .map(f => {
       const lead = f.lead || {}
       const name = str(lead.name) || f.headline
@@ -241,7 +307,9 @@ export function salesRows({ report = {}, opportunities = [], runId = null, now =
     (Number(b.isNew || Boolean(b.changed)) - Number(a.isNew || Boolean(a.changed))) ||
     liveDays(a) - liveDays(b)
 
-  const all = [...tracked, ...fromRun]
+  // Every row carries its window, so the section can be sorted and read by
+  // urgency even where no date was ever published.
+  const all = [...tracked, ...fromRun].map(r => ({ ...r, window: leadWindow(r) }))
   return {
     open: all.filter(r => !CLOSED_STATUSES.includes(r.status)).sort(order),
     closed: all.filter(r => CLOSED_STATUSES.includes(r.status)),
@@ -260,6 +328,47 @@ export function dayLabel(days, timing = '') {
 }
 
 // ─── Competitor moves ──────────────────────────────────────────────────────
+
+// ── SIGNIFICANCE AND FRESHNESS ARE TWO DIFFERENT QUESTIONS ──
+//
+// Every competitor move in the 15 Sep report was rated Medium, including one
+// the agent itself described as "a standing page rather than a launch —
+// confirmation of current state, not momentum". Both readings are defensible
+// on a single axis, which is the tell that the axis is wrong: a standing fact
+// about a serious rival is HIGH significance and ZERO freshness, and squashing
+// those into one word makes the whole column stop discriminating.
+//
+// So `relevance` keeps its meaning — how much this matters — and freshness is
+// derived, in code, from the store verdict the findings already carry. Derived
+// rather than asked for: the model is not a reliable judge of whether it has
+// said something before, and planStoreWrites already decided this against rows
+// with names.
+const FRESHNESS_RANK = { new: 0, changed: 1, standing: 2 }
+
+export function freshnessFromFindings(findings = []) {
+  const states = (findings || []).filter(Boolean).map(f => f.store?.state || 'new')
+  // Empty means we have nothing to judge on — an old brief whose moves were
+  // assembled from per-rival reads, with no findings behind them. Saying
+  // "standing" there would be asserting that nothing moved, which nobody
+  // checked; an empty label renders as no chip at all.
+  if (!states.length) return ''
+  if (states.includes('new')) return 'new'
+  if (states.includes('changed')) return 'changed'
+  return 'standing'
+}
+
+export function freshnessOf(refs = [], report = {}) {
+  const fs = findingByRef(report)
+  const cited = (refs || []).map(r => fs.get(str(r).toUpperCase())).filter(Boolean)
+  // Refs that resolve to nothing but signals: every piece of this reading came
+  // from an earlier week, which IS a standing picture rather than a move.
+  if (!cited.length) return (refs || []).length ? 'standing' : ''
+  return freshnessFromFindings(cited)
+}
+
+/** "new this week" / "changed this week" / "standing — nothing moved". */
+export const freshnessLabel = f =>
+  ({ new: 'new this week', changed: 'changed this week', standing: 'standing — nothing moved this week' }[f] || '')
 
 /**
  * What each competitor is doing, assembled from small pieces.
@@ -281,13 +390,16 @@ export function competitorMoves(report = {}) {
           picture: m.picture || '',
           effect: m.effect_on_us || '',
           relevance: m.relevance || 'medium',
+          freshness: freshnessOf(m.refs, report),
           // Derived from the findings it cites rather than asked for: the
           // schema field was dropped to keep the grammar under the API limit.
           teams: teamsFromRefs(m.refs, report),
           pieces,
           channels: [...new Set(pieces.map(p => p.channel).filter(Boolean))],
         }
-      }).sort((a, b) => (RELEVANCE_RANK[b.relevance] ?? 2) - (RELEVANCE_RANK[a.relevance] ?? 2)),
+      }).sort((a, b) =>
+        (RELEVANCE_RANK[b.relevance] ?? 2) - (RELEVANCE_RANK[a.relevance] ?? 2) ||
+        (FRESHNESS_RANK[a.freshness] ?? 2) - (FRESHNESS_RANK[b.freshness] ?? 2)),
     }
   }
 
@@ -315,6 +427,7 @@ export function competitorMoves(report = {}) {
       picture: g.pieces.length > 1 ? `${g.pieces.length} pieces this run.` : '',
       effect: top?.suggested_action || '',
       relevance: top?.relevance || 'medium',
+      freshness: freshnessFromFindings(g.findings),
       teams: top ? teamsOf(top) : ['marketing'],
       pieces: g.pieces,
       channels: [...new Set(g.pieces.map(p => p.channel).filter(Boolean))],
@@ -383,7 +496,20 @@ export function socialActivity({ report = {}, signals = [], now = new Date(), da
  * Undated editions sit in `later`, labelled TBC.
  *
  * Tracked events from the store come first; events this run found that the
- * store does not have yet follow; computed calendar dates join `soon`.
+ * store does not have yet follow.
+ *
+ * ── CALENDAR DATES ARE NOT EVENTS ──
+ *
+ * They used to be pushed into `soon` alongside the expos. The 15 Sep report is
+ * what that produced: a 90-day events table containing Saudi National Day —
+ * which is a date in the calendar, not something anyone exhibits at — while
+ * Saudi Build and Saudi Elenex, 48 days out at RICEC with lighting pavilions,
+ * were absent. Mixing the two makes an empty events table look full, which is
+ * the one thing that must never happen to this section: a reader who sees rows
+ * stops asking why the show they were expecting is not among them.
+ *
+ * So they get their own band. Both are reported; neither is disguised as the
+ * other.
  */
 export function eventsView({ report = {}, events = [], runId = null, now = new Date(), soonDays = 90, aheadDays = 365, backDays = 274 } = {}) {
   const band = (start, end) => {
@@ -395,7 +521,7 @@ export function eventsView({ report = {}, events = [], runId = null, now = new D
     if (ds <= soonDays) return 'soon'
     return ds <= aheadDays ? 'later' : null
   }
-  const out = { soon: [], later: [], recent: [] }
+  const out = { soon: [], later: [], recent: [], dates: [] }
   const push = row => { const b = band(row.start, row.end); if (b) out[b].push(row) }
 
   for (const e of events || []) {
@@ -435,7 +561,7 @@ export function eventsView({ report = {}, events = [], runId = null, now = new D
     const date = cleanDate(f.evidence?.date || f.perishable_until)
     const d = daysTo(date, now)
     if (d === null || d < 0 || d > soonDays) continue
-    out.soon.push({
+    out.dates.push({
       id: null, kind: 'calendar', name: f.headline, start: date, end: null, venue: '', organizer: '', url: '',
       exhibitorDeadline: null, deadlineDays: null, competitors: [], recommendation: f.suggested_action || '', takeaway: '',
       relevance: f.relevance || 'medium', decision: null, isNew: false, changed: '',
@@ -444,8 +570,24 @@ export function eventsView({ report = {}, events = [], runId = null, now = new D
   const asc = (a, b) => (a.start || '9999').localeCompare(b.start || '9999')
   out.soon.sort(asc)
   out.later.sort(asc)
+  out.dates.sort(asc)
   out.recent.sort((a, b) => (b.end || b.start || '').localeCompare(a.end || a.start || ''))
+  // The deadline STATUS, on every row, every week. A tracked expo whose
+  // exhibitor deadline nobody has established is a different thing from one
+  // whose deadline has passed, and the person reading this needs the deadline
+  // in front of them rather than the diff against last week.
+  for (const band_ of ['soon', 'later', 'recent']) {
+    out[band_] = out[band_].map(e => ({ ...e, deadlineStatus: deadlineStatus(e) }))
+  }
   return { ...out, count: out.soon.length + out.later.length + out.recent.length }
+}
+
+/** "open, in 12 days" / "closed 3 days ago" / "not established". */
+export function deadlineStatus(e = {}) {
+  if (!e.exhibitorDeadline) return e.kind === 'calendar' ? '' : 'not established'
+  const d = e.deadlineDays
+  if (d === null || d === undefined) return 'not established'
+  return d >= 0 ? `open, ${dayLabel(d)}` : `closed ${-d} day${d === -1 ? '' : 's'} ago`
 }
 
 /** The next-90-days band alone, for callers that only want what is imminent. */
@@ -488,8 +630,81 @@ export function marketNotes(report = {}, now = new Date()) {
 
 // ─── Marketing recommendations ─────────────────────────────────────────────
 
-/** Gaps and the ideas that close them — each already names what it rests on. */
-export const marketingRecommendations = report => actionPlan(report)
+/**
+ * Gaps and the ideas that close them — each already names what it rests on.
+ *
+ * Numbered here rather than in the renderer, and numbered ACROSS both lists.
+ * The 15 Sep report numbered its gap-backed recommendations 1, 2, 3 and then
+ * rendered two loose ideas with no number at all, so the most time-critical
+ * item in the document (a National Day piece with nine days on it) read as an
+ * afterthought under the numbered ones. A reader counts what is numbered.
+ *
+ * The spec asks for two to four. More than four is not truncated — an idea
+ * that was researched is not made wrong by its position — but `overCap` says
+ * so, and the renderer folds the surplus.
+ */
+export const RECOMMENDATION_CAP = 4
+
+export function marketingRecommendations(report) {
+  const plan = actionPlan(report)
+  const blocks = plan.blocks.map((b, i) => ({ ...b, n: i + 1 }))
+  const loose = plan.loose.map((l, i) => ({ ...l, n: blocks.length + i + 1 }))
+  const total = blocks.length + loose.length
+  return { ...plan, blocks, loose, total, overCap: total > RECOMMENDATION_CAP, cap: RECOMMENDATION_CAP }
+}
+
+// ─── Open items ────────────────────────────────────────────────────────────
+
+/**
+ * What we said last week and the week before that nobody has closed.
+ *
+ * ── WHY A SECTION AND NOT A FOOTNOTE ──
+ *
+ * `unanswered` is written fresh every run and read as this run's caveats, so
+ * an item that keeps recurring looks new every time and an item that stops
+ * recurring vanishes without anyone deciding it was fixed. Two real cases from
+ * consecutive Arak runs: a 404 on the company's own About page, flagged as a
+ * pre-tender credibility risk and then simply absent the following week; and
+ * the Instagram connection, raised twice, both times in a limitations
+ * footnote, where nobody acts.
+ *
+ * This reads the run history the page has already loaded and says, for each
+ * item, when it was first raised and whether this run repeated it. It cannot
+ * know that something was FIXED — only a person knows that — so it says
+ * "not repeated this run" rather than "resolved", which is the honest claim.
+ */
+export function openItems({ runs = [], limit = 10, lookback = 6 } = {}) {
+  const complete = (runs || [])
+    .filter(r => r?.report && (r.report.unanswered || []).length)
+    .sort((a, b) => String(b.started_at || '').localeCompare(String(a.started_at || '')))
+    .slice(0, lookback)
+  if (!complete.length) return []
+
+  const latestId = complete[0].id
+  const items = []
+  for (const run of complete) {
+    const date = String(run.started_at || '').slice(0, 10)
+    for (const raw of run.report.unanswered || []) {
+      const text = flat(raw)
+      if (!text) continue
+      // Similarity, not equality: the same blocker is written a little
+      // differently every week, and two lines that are 80% the same sentence
+      // are one open item rather than two.
+      const hit = items.find(i => similarity(i.text, text) >= 0.6)
+      if (hit) {
+        hit.runs += 1
+        hit.firstRaised = date || hit.firstRaised
+        continue
+      }
+      items.push({ text, firstRaised: date, lastRaised: date, runs: 1, thisRun: run.id === latestId })
+    }
+  }
+  return items
+    .filter(i => i.runs > 1 || i.thisRun)
+    .sort((a, b) => Number(b.thisRun) - Number(a.thisRun) || b.runs - a.runs ||
+      String(a.firstRaised).localeCompare(String(b.firstRaised)))
+    .slice(0, limit)
+}
 
 // ─── New competitors ───────────────────────────────────────────────────────
 
@@ -517,11 +732,14 @@ export function newCompetitors({ report = {}, agendaCompetitors = [] } = {}) {
 export function sourceList(report = {}) {
   const by = new Map()
   const add = (url, title, label) => {
-    const u = str(url)
+    // Flattened, because a scraped title arrives carrying the newlines of the
+    // page it came off — and a numbered list whose items contain line breaks
+    // printed as two entries run together in the 15 Sep PDF.
+    const u = flat(url)
     if (!/^https?:\/\//i.test(u)) return
-    if (!by.has(u)) by.set(u, { url: u, title: str(title), domain: domainOf(u), citedBy: [] })
+    if (!by.has(u)) by.set(u, { url: u, title: flat(title), domain: domainOf(u), citedBy: [] })
     const row = by.get(u)
-    if (!row.title && title) row.title = str(title)
+    if (!row.title && title) row.title = flat(title)
     if (label && !row.citedBy.includes(label)) row.citedBy.push(label)
   }
   for (const f of report.findings || []) {

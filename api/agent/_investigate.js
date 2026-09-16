@@ -4,7 +4,7 @@ import { loadBrandContext, IDENTITY } from './_context.js'
 import { textIn, urlsFromResponse } from '../../src/lib/agent/loop.js'
 import { BRIEF_SCHEMA, SYNTHESISE_PROMPT, mergeBrief, withRefs } from '../../src/lib/agent/brief.js'
 import {
-  lensesFor, motionOf, lensSummary, rankFindings, agendaFilterFor,
+  lensesFor, motionOf, lensSummary, rankFindings, agendaFilterFor, lensByKey,
 } from '../../src/lib/agent/lenses.js'
 import { LENS_PROMPTS } from '../../src/lib/agent/lensPrompts.js'
 import { runLens, runOurselvesLens, runCalendarLens, markStage } from './_lenses.js'
@@ -12,12 +12,13 @@ import { gatherCalendar } from './_calendar.js'
 import { marketOf } from '../../src/lib/agent/calendar.js'
 import { priorIdeas } from './_memory.js'
 import { partitionRepeats } from '../../src/lib/agent/memory.js'
-import { freshQuestions } from '../../src/lib/agent/agendaDedup.js'
+import { freshQuestions, dedupeQuestions } from '../../src/lib/agent/agendaDedup.js'
 import { applyNovelty, priorFindingsFrom, repetitionNote } from '../../src/lib/agent/novelty.js'
 import {
   deadlineFor, resultsFromRows, timingNote, pendingLenses, timedOutResult,
 } from '../../src/lib/agent/phases.js'
 import { LIVE_PLATFORMS } from '../../src/lib/utils.js'
+import { ownPostingFacts } from '../../src/lib/agent/ownChannels.js'
 import { loadIntel } from './_intel.js'
 import {
   knownIntelPrompt, planStoreWrites, annotateFindings, signalHistory, isOpenOpportunity, nameKey,
@@ -59,6 +60,32 @@ function refusalOf(response) {
   return `The model declined${d?.category ? ` (${d.category})` : ''}.`
 }
 
+/**
+ * What the last run told this team to do, and what it said it could not close.
+ *
+ * Kept deliberately small — the three actions and the open items, from ONE run
+ * — because the whole point is that it is cheap enough to send every week. The
+ * full prior report is thousands of tokens of material the store already
+ * carries in structured form.
+ */
+function lastWeek(priorRuns = []) {
+  const report = priorRuns?.[0]?.report
+  if (!report) return ''
+  const date = String(priorRuns[0].started_at || '').slice(0, 10)
+  const top = (report.top_three || []).filter(t => t?.finding).slice(0, 3)
+  const open = (report.unanswered || []).slice(0, 6)
+  if (!top.length && !open.length) return ''
+  return [
+    `WHAT THE RUN OF ${date || 'LAST WEEK'} ASKED THIS TEAM TO DO:`,
+    ...top.map(t => `- [${t.team || 'marketing'}] ${t.finding} → ${t.action || ''}`),
+    open.length ? 'AND WHAT IT SAID IT COULD NOT ESTABLISH:' : '',
+    ...open.map(u => `- ${u}`),
+    'For each of these, say what happened: closed, still open, or overtaken. An item that is still',
+    'open belongs in `unanswered` again, worded the same way so it can be matched — an item that',
+    'silently stops appearing reads as fixed, and nobody fixed it.',
+  ].filter(Boolean).join('\n')
+}
+
 /** The window the calendar lens looks ahead over. Long enough to produce something. */
 function lookahead(weeks = 8, now = new Date()) {
   const to = new Date(now.getTime() + weeks * 7 * 86_400_000)
@@ -79,16 +106,23 @@ export async function loadRunContext(workspaceId, runId, cadence = 'weekly') {
     await Promise.all([
       loadBrandContext(workspaceId, 'research'),
       db(`research_agenda?workspace_id=eq.${workspaceId}&kind=eq.question&status=eq.active` +
-         `${agendaFilterFor(cadence)}&select=subject,why`),
+         `${agendaFilterFor(cadence)}&select=subject,why&order=created_at.asc`),
       // `started_at` so a repeat can be dated — "we have said this for three
       // weeks" is the sentence a person acts on, and "continuing" is not.
       // Six runs rather than three: at a weekly cadence three is barely a
       // month, and a finding that returns every six weeks would read as new
-      // every single time. Only the HEADLINES ever reach the model; the rest
-      // of each report is read in code.
+      // every single time. Six headlines reach the model, plus the MOST RECENT
+      // run's top three and open items (see lastWeek) — without those, a brief
+      // could not say what became of what it told people to do last week. The
+      // rest of every report is read in code.
       db(`research_runs?workspace_id=eq.${workspaceId}&id=neq.${runId}&status=eq.complete` +
          `&order=started_at.desc&limit=6&select=report,started_at`),
-      db(`research_agenda?workspace_id=eq.${workspaceId}&kind=eq.competitor&status=neq.retired&select=subject`),
+      // Ordered oldest first, and that order is load-bearing now: the rivals
+      // lens is told to cover this list IN ORDER before it looks for anyone
+      // new. The watchlist's own sequence is the closest thing to a priority
+      // the store holds — the rivals a person put there first.
+      db(`research_agenda?workspace_id=eq.${workspaceId}&kind=eq.competitor&status=neq.retired` +
+         `&select=subject&order=created_at.asc`),
       priorIdeas(workspaceId),
       db(`research_runs?id=eq.${runId}&workspace_id=eq.${workspaceId}&select=report,stage,status&limit=1`),
     ])
@@ -119,7 +153,12 @@ export async function loadRunContext(workspaceId, runId, cadence = 'weekly') {
   const language = market.language || ''
 
   return {
-    brand, ctx, profile, gathered, agenda: agenda || [], priorRuns: priorRuns || [],
+    brand, ctx, profile, gathered,
+    // Deduped on the way in. Two rows carrying the same question were handed
+    // to every searching lens and answered twice, which is searches spent on
+    // an answer we already had. See dedupeQuestions.
+    agenda: dedupeQuestions(agenda || []),
+    priorRuns: priorRuns || [],
     competitors, alreadySaid: alreadySaid || [], motion, explicit, brandFacts, language,
     lenses: lensesFor({ motion, cadence }),
   }
@@ -187,6 +226,10 @@ async function argsForLens(key, { brandFacts, motion, competitors, gathered, pro
         language,
         intel,
         board: gathered?.competitor_board || [],
+        // The lens is told its own budget so "one search per name on the
+        // watchlist before anything else" is a number it can plan against
+        // rather than an instruction it has no way to price.
+        searches: lensByKey('rivals')?.budget?.searches || 0,
       }],
     }
   }
@@ -380,6 +423,16 @@ export async function synthesiseRun({ workspaceId, runId, cadence = 'weekly', de
               movements: gathered?.movements || [],
               baseline: gathered?.baseline,
               quiet_week: gathered?.quiet_week,
+              // ── Added after the 15 Sep report quoted three different post
+              // counts for one channel ──
+              // The prompt has always said "our own per-platform performance is
+              // already computed — do not restate it", and the numbers were
+              // never actually shown here. So the model reconstructed them from
+              // the ourselves-lens prose and from the Instagram movements, which
+              // measure a different thing, and wrote whichever suited the
+              // sentence. Given explicitly, with the reconciliation note, there
+              // is nothing left to reconstruct.
+              our_channels: ownPostingFacts(gathered?.own_performance),
             }, null, 2),
             '',
             'These are the findings each research lens returned. A lens with no findings',
@@ -417,6 +470,14 @@ export async function synthesiseRun({ workspaceId, runId, cadence = 'weekly', de
             (priorRuns || []).length
               ? `Previous headlines:\n${priorRuns.map(r => `- ${r.report?.headline || ''}`).filter(Boolean).join('\n')}`
               : '',
+            // ── LAST WEEK'S OWN PROMISES ──
+            // Only headlines used to cross this boundary, so the synthesis
+            // could not say what became of what it told people to do. Items
+            // raised as blockers simply stopped appearing — the 404 on the
+            // company's own About page was flagged as a pre-tender credibility
+            // risk one week and was absent, neither fixed nor open, the next.
+            // Two small lists, from the most recent run only.
+            lastWeek(priorRuns),
           ].filter(Boolean).join('\n'),
         },
         { role: 'user', content: SYNTHESISE_PROMPT },

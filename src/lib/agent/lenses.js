@@ -464,13 +464,32 @@ export function rankFindings(findings, now = new Date()) {
  * between a report someone trusts and one they skim. This is why `ran` and
  * `error` are separate from `count`.
  */
+// ── "QUIET" HID A THIRD STATE, AND IT IS THE EXPENSIVE ONE ──
+//
+// On 2026-09-15 three lenses read 130 sources between them and returned zero
+// findings. Every one of them was reported as "looked and found nothing",
+// which is what a genuinely still market looks like — so the brief said the
+// week was quiet when what had actually happened was that three questions were
+// researched and then discarded. That is a different fact, with a different
+// fix, and it is invisible unless the number of sources READ is carried
+// alongside the number of findings KEPT.
+//
+// So a lens that read sources and reported nothing is `searched`, not `quiet`,
+// and every row carries what it read against what it was allowed to spend.
 export function lensSummary(results) {
-  return (results || []).map(r => ({
-    lens: r.lens,
-    label: lensByKey(r.lens)?.label || r.lens,
-    ran: r.ok !== false,
-    count: (r.findings || []).length,
-    error: r.error || '',
-    state: r.ok === false ? 'failed' : (r.findings || []).length ? 'found' : 'quiet',
-  }))
+  return (results || []).map(r => {
+    const count = (r.findings || []).length
+    const sources = (r.sources || []).length
+    const allowance = lensByKey(r.lens)?.budget?.searches ?? 0
+    return {
+      lens: r.lens,
+      label: lensByKey(r.lens)?.label || r.lens,
+      ran: r.ok !== false,
+      count,
+      sources,
+      allowance,
+      error: r.error || '',
+      state: r.ok === false ? 'failed' : count ? 'found' : (sources ? 'searched' : 'quiet'),
+    }
+  })
 }

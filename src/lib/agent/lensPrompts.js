@@ -379,6 +379,21 @@ export function eventsPrompt(brand, { motion, competitors = [], agenda = [], lan
     '',
     'Every event must be one this brand\'s buyers, partners or competitors genuinely attend. Rate the rest',
     'relevance "low" rather than leaving them out — they are stored, not reported.',
+    '',
+    // ── A TRACKED EXPO IS NOT "ALREADY REPORTED" ──
+    //
+    // The tracked-events block below says "report again only if something
+    // changed", which is right for keeping the store clean and wrong for the
+    // one case that matters: a high-relevance show inside the next 90 days. On
+    // 15 Sep the two biggest shows in this market — 48 days out, with lighting
+    // pavilions — were absent from the report's 90-day table while a public
+    // holiday sat in it, because nothing about them had changed that week. The
+    // reader needs the deadline in front of them, not the diff.
+    'ONE EXCEPTION TO "ONLY IF IT CHANGED": any event already tracked that STARTS WITHIN 90 DAYS, or whose',
+    'exhibitor deadline falls within 90 days, is re-confirmed every single run. Check its dates and its',
+    'exhibitor deadline against the organiser\'s own site and report it again with what you found — including',
+    '"unchanged, deadline still open" — so the people deciding whether to exhibit are looking at today\'s',
+    'status rather than at the week it was first found.',
     known(intel),
     standing(agenda),
     localLanguage(language),
@@ -500,7 +515,7 @@ export function categoryPrompt(brand, { agenda = [], language = '', intel = '' }
  * job advert, a new brand on the website and a stand at Elenex in the same
  * month is a move.
  */
-export function rivalsPrompt(brand, { competitors = [], board = [], agenda = [], language = '', intel = '' }) {
+export function rivalsPrompt(brand, { competitors = [], board = [], agenda = [], language = '', intel = '', searches = 0 }) {
   // Posting activity only, never follower counts: what they posted ABOUT is a
   // trace of what they are doing; how many people follow them is not a move.
   const activity = board
@@ -510,9 +525,31 @@ export function rivalsPrompt(brand, { competitors = [], board = [], agenda = [],
       return `- ${c.name}: ${c.activity || 'activity unknown'}${hooks.length ? `; recent posts: ${hooks.map(h => `"${h}"`).join(' / ')}` : ''}`
     }).join('\n')
 
+  // ── THE ORDER IS THE BUDGET ──
+  //
+  // On 15 Sep this lens found three companies nobody had listed — an IT
+  // integrator selling room-management systems, a façade manufacturer quoting
+  // direct, a rival brand's dealer — which was the best material in the report.
+  // It also ran out of searches before it reached Al Nasser Group or
+  // Technolight, the two closest rivals on the watchlist, and one of them was
+  // not mentioned anywhere in the brief. Discovery is worth having and it is
+  // never worth the two names a person explicitly asked to have watched, so the
+  // list is numbered and the order is an instruction rather than a suggestion.
+  const roll = competitors.slice(0, 12).map((c, i) => `  ${i + 1}. ${c}`).join('\n')
+
   return [
     who(brand),
-    competitors.length ? `Competitors to watch: ${competitors.slice(0, 12).join(', ')}` : '',
+    competitors.length
+      ? [
+          `THE WATCHLIST, IN THE ORDER A PERSON PUT IT THERE. Cover these FIRST, in this order:`,
+          roll,
+          searches
+            ? `You have ${searches} searches. Spend one on each name above before you spend any on anything else.`
+            : '',
+          'A competitor you did not reach is reported as not reached — say so in the detail of another',
+          'finding rather than leaving a silence, because silence reads as "nothing is happening there".',
+        ].filter(Boolean).join('\n')
+      : '',
     '',
     'One question: WHAT ARE THESE COMPETITORS DOING, AND HOW DOES IT AFFECT US?',
     '',
@@ -540,11 +577,28 @@ export function rivalsPrompt(brand, { competitors = [], board = [], agenda = [],
     'saw it, and `category`. Put the "so what for us" in suggested_action — what our sales, marketing',
     'or technical team should do given this — and set for_whom to whoever acts.',
     '',
+    // ── THE TWO PASSES THAT KEEP GETTING DROPPED ──
+    // Hiring and pricing are the earliest public evidence of a rival's
+    // direction — a KNX engineer advertised in Jeddah is a Jeddah smart-
+    // building push six months before anyone announces one — and they were
+    // bullets in a list of seven, so they were the ones dropped when the budget
+    // ran short. Three consecutive briefs carried website and social evidence
+    // and nothing else.
+    'TWO PASSES ARE NOT OPTIONAL, AND THEY COME BEFORE ANY GENERAL LOOKING:',
+    '- JOB BOARDS, for the names above. What roles are they advertising, and where?',
+    '- PRICING, for the names above. Public promotions, quoted rates, published price lists,',
+    '  distribution or dealership announcements that imply a price position.',
+    'If a pass genuinely returns nothing for a competitor, say that in a finding at low confidence.',
+    '"No roles advertised" is a fact about a company that is not growing, and it is worth a line.',
+    '',
     activity ? ['What their Instagram shows this period (measured in code — a starting point, not a finding):', activity].join('\n') : '',
     '',
     'A competitor you could find nothing new about this week is normal — do not pad. But if you',
     'find a company acting like a competitor that is NOT on the list above, report it as a finding',
     'with competitor set to its name and say why it competes: that is how the watchlist grows.',
+    'This is the LAST thing you do, with searches left over. It is genuinely valuable — the best',
+    'material in the 15 Sep run came from here — and it is still never worth a name on the list',
+    'above going unchecked. If you are short, drop this, not them.',
     known(intel),
     standing(agenda),
     localLanguage(language),

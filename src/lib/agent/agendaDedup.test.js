@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { questionKey, freshQuestions } from './agendaDedup.js'
+import { questionKey, freshQuestions, dedupeQuestions } from './agendaDedup.js'
 
 const q = subject => ({ action: 'add', subject, why: 'because' })
 
@@ -77,5 +77,16 @@ describe('freshQuestions', () => {
   it('survives nonsense', () => {
     expect(() => freshQuestions(null, null)).not.toThrow()
     expect(freshQuestions(null, null).fresh).toEqual([])
+  })
+})
+
+describe('the read side', () => {
+  it('hands each standing question to the lenses once, however many rows carry it', () => {
+    const rows = [
+      { id: '1', subject: 'Connect the Arak Instagram account' },
+      { id: '2', subject: 'connect the ARAK Instagram account?' },
+      { id: '3', subject: 'Which giga-projects are entering DESIGN stage?' },
+    ]
+    expect(dedupeQuestions(rows).map(r => r.id)).toEqual(['1', '3'])
   })
 })

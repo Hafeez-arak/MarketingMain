@@ -8,10 +8,10 @@ import {
   ReportTable, ReportRow, Cell, Caveats, ReportFooter,
 } from '../../components/report/ReportShell'
 import { useReportFilename } from '../../lib/reports/print'
-import { lensStates, lensHeadline, pct } from '../../lib/researchBrief'
+import { lensStates, lensHeadline, runEffort, pct } from '../../lib/researchBrief'
 import {
   TEAMS, sectionVisible, forTeam, topThree, salesRows, competitorMoves, socialActivity, eventsView,
-  marketNotes, marketingRecommendations, newCompetitors, sourceList, dayLabel,
+  marketNotes, marketingRecommendations, newCompetitors, sourceList, openItems, freshnessLabel,
 } from '../../lib/marketReport'
 import { fetchIntel } from '../../lib/marketIntel'
 import { fetchAgenda } from '../../lib/agentAgenda'
@@ -53,6 +53,14 @@ function sourceLine(sources = []) {
     }).filter(Boolean),
   )]
   return domains.length ? domains.slice(0, 4).join(', ') : ''
+}
+
+/** "Best: a carousel post" — never "Best: untitled", which is a null in print. */
+function bestLine(p) {
+  if (!p.best_post) return p.weak ? 'Thin sample' : 'Measured'
+  const named = String(p.best_post.topic || '').trim() ||
+    (p.best_post.format ? `a ${p.best_post.format} post` : '')
+  return named ? `Best: ${named}` : `Best post: ${p.best_post.engagement} interactions`
 }
 
 function ReportSkeleton() {
@@ -128,6 +136,9 @@ export function ResearchReport() {
   const candidates = useMemo(() => newCompetitors({ report, agendaCompetitors }), [report, agendaCompetitors])
   const sources = useMemo(() => sourceList(report), [report])
   const states = useMemo(() => lensStates(report), [report])
+  // Read across runs, not out of this one: an item raised three weeks running
+  // and never closed is the thing this report kept losing.
+  const open = useMemo(() => openItems({ runs }), [runs])
 
   const brand = activeWorkspace?.name || 'This brand'
   const runDate = run ? fmtDate(run.started_at) : ''
@@ -222,7 +233,7 @@ export function ResearchReport() {
               <ReportSection title="Sales: act now"
                 note={sales.trackerAvailable ? 'Every open lead in the tracker, across all runs, with its current status.' : 'Leads from this report.'}>
                 {sales.open.length ? (
-                  <ReportTable head={[{ label: 'Lead / tender / project' }, { label: 'Details' }, { label: 'Deadline' }, { label: 'Suggested action' }]}>
+                  <ReportTable head={[{ label: 'Lead / tender / project' }, { label: 'Details' }, { label: 'Window closes' }, { label: 'Suggested action' }]}>
                     {sales.open.map((r, i) => (
                       <ReportRow key={r.id || i}>
                         <Cell first className="w-[30%]">
@@ -236,9 +247,15 @@ export function ResearchReport() {
                           {r.details.join(' · ') || '—'}
                           {sourceLine([r.url]) && <span className="block text-[10px]">{sourceLine([r.url])}</span>}
                         </Cell>
-                        <Cell className="w-[12%] whitespace-nowrap">
-                          {r.deadline ? shortDate(r.deadline) : '—'}
-                          <span className="block text-[10px] text-text-tertiary">{dayLabel(r.days, r.timing)}</span>
+                        {/* A published date when there is one; otherwise the
+                            stage's own window, labelled as the estimate it is.
+                            Six blank deadlines made this table unsortable. */}
+                        <Cell className="w-[16%]">
+                          {r.deadline ? shortDate(r.deadline) : ''}
+                          <span className="block text-[10px] text-text-secondary">{r.window.label}</span>
+                          {r.window.basis === 'stage' && (
+                            <span className="block text-[10px] text-text-tertiary">estimated from stage, not published</span>
+                          )}
                         </Cell>
                         <Cell className="w-[32%]">{r.action || '—'}</Cell>
                       </ReportRow>
@@ -257,7 +274,8 @@ export function ResearchReport() {
                     <div key={i} data-print-keep className="border-l-2 border-text pl-3">
                       <p className="text-[13px] font-semibold text-text">{m.competitor}
                         <span className="ml-1.5 text-[10px] font-normal uppercase tracking-wide text-text-tertiary">
-                          {[m.relevance, ...m.channels].filter(Boolean).join(' · ')}
+                          {[m.relevance && `relevance ${m.relevance}`, freshnessLabel(m.freshness), ...m.channels]
+                            .filter(Boolean).join(' · ')}
                         </span>
                       </p>
                       {m.whatChanged && <p className="text-[12px] text-text mt-0.5 leading-snug">{m.whatChanged}</p>}
@@ -283,7 +301,7 @@ export function ResearchReport() {
                         <Cell align="right">{p.state === 'not_connected' ? '—' : p.posts}</Cell>
                         <Cell align="right">{p.avg_engagement ?? '—'}</Cell>
                         <Cell align="right">{p.change ? `${p.change.direction === 'up' ? '+' : '−'}${p.change.change_pct}%` : '—'}</Cell>
-                        <Cell muted>{p.state === 'measured' ? (p.best_post ? `Best: ${p.best_post.topic || 'untitled'}` : (p.weak ? 'Thin sample' : 'Measured')) : p.note}</Cell>
+                        <Cell muted>{p.state === 'measured' ? bestLine(p) : p.note}</Cell>
                       </ReportRow>
                     ))}
                   </ReportTable>
@@ -322,7 +340,12 @@ export function ResearchReport() {
                                   {e.decision && e.decision !== 'undecided' && <span className="block text-[10px] text-text-tertiary">We are: {e.decision}</span>}
                                 </Cell>
                                 <Cell className="w-[13%] whitespace-nowrap">{e.start ? `${shortDate(e.start)}${e.end && e.end !== e.start ? ` – ${shortDate(e.end)}` : ''}` : 'TBC'}</Cell>
-                                {!recent && <Cell className="w-[13%] whitespace-nowrap">{e.exhibitorDeadline ? shortDate(e.exhibitorDeadline) : '—'}</Cell>}
+                                {!recent && (
+                                  <Cell className="w-[15%]">
+                                    {e.exhibitorDeadline ? shortDate(e.exhibitorDeadline) : ''}
+                                    <span className="block text-[10px] text-text-tertiary">{e.deadlineStatus}</span>
+                                  </Cell>
+                                )}
                                 <Cell className="w-[14%]" muted>{e.competitors.join(', ') || '—'}</Cell>
                                 <Cell className={recent ? 'w-[45%]' : 'w-[32%]'}>{(recent ? e.takeaway || e.recommendation : e.recommendation) || '—'}</Cell>
                               </ReportRow>
@@ -331,7 +354,25 @@ export function ResearchReport() {
                         </div>
                       ))}
                   </div>
-                ) : <p className="text-[11px] text-text-tertiary">No events found yet.</p>}
+                ) : <p className="text-[11px] text-text-tertiary">No expo, conference or awards opening is on the books.</p>}
+                {/* Public holidays and seasonal dates are computed, not found,
+                    and they are not something anyone exhibits at. Listing them
+                    among the expos made an empty table look full. */}
+                {events.dates.length > 0 && (
+                  <div className="mt-3">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-text-tertiary mb-1">
+                      Dates in the calendar — not events to attend
+                    </p>
+                    <ul className="space-y-1">
+                      {events.dates.map((d, i) => (
+                        <li key={i} className="text-[11px] text-text-secondary leading-relaxed">
+                          <span className="font-semibold text-text">{shortDate(d.start)}</span> · {d.name}
+                          {d.recommendation && ` — ${d.recommendation}`}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
               </ReportSection>
             )}
 
@@ -356,11 +397,12 @@ export function ResearchReport() {
             {/* ── Marketing recommendations ── */}
             {show('recs') && (plan.blocks.length > 0 || plan.loose.length > 0) && (
               <ReportSection title="Marketing recommendations"
-                note="Each is a gap between the market and our position, with the content proposed to close it. Proposals only — nothing here has been scheduled or published.">
+                note={`Each is a gap between the market and our position, with the content proposed to close it. Proposals only — nothing here has been scheduled or published.${
+                  plan.overCap ? ` This run proposed ${plan.total}; the brief asks for two to four.` : ''}`}>
                 <div className="space-y-3">
                   {plan.blocks.map((block, i) => (
                     <div key={block.gap.id || i} data-print-keep>
-                      <p className="text-[12px] text-text leading-snug">{i + 1}. {block.gap.gap}</p>
+                      <p className="text-[12px] text-text leading-snug">{block.n}. {block.gap.gap}</p>
                       {block.gap.suggested_response && <p className="text-[11px] text-text-secondary mt-0.5 leading-relaxed"><span className="font-semibold">Response: </span>{block.gap.suggested_response}</p>}
                       {block.ideas.length > 0 && (
                         <ul className="mt-1 ml-3 border-l border-border pl-3 space-y-1">
@@ -372,9 +414,12 @@ export function ResearchReport() {
                       )}
                     </div>
                   ))}
+                  {/* Numbered on from the gap-backed ones. Unnumbered, these
+                      read as an appendix — and the most time-critical item in
+                      the 15 Sep report was one of them. */}
                   {plan.loose.map((idea, i) => (
                     <div key={`l${i}`} data-print-keep>
-                      <p className="text-[12px] font-semibold text-text">{idea.title || idea.angle}</p>
+                      <p className="text-[12px] font-semibold text-text">{idea.n}. {idea.title || idea.angle}</p>
                       {idea.rationale && <p className="text-[11px] text-text-tertiary mt-0.5 leading-relaxed">{idea.rationale}</p>}
                     </div>
                   ))}
@@ -408,10 +453,34 @@ export function ResearchReport() {
               </ReportSection>
             )}
 
+            {/* ── Open items ── */}
+            <ReportSection title="Open items" keep
+              note="Raised by an earlier run and not closed. Nothing here is marked resolved automatically — only a person can say that.">
+              {open.length ? (
+                <ul className="space-y-1.5">
+                  {open.map((item, i) => (
+                    <li key={i} className="text-[11px] text-text-secondary leading-relaxed flex gap-2">
+                      <span className="text-text-tertiary shrink-0 tabular-nums">{item.firstRaised}</span>
+                      <span>
+                        {item.text}
+                        <span className="text-text-tertiary">
+                          {' '}· raised in {item.runs} run{item.runs === 1 ? '' : 's'}
+                          {item.thisRun ? '' : ' · not repeated this run'}
+                        </span>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              ) : <p className="text-[11px] text-text-tertiary">Nothing is carried over from earlier runs.</p>}
+            </ReportSection>
+
             <ReportSection title="How this run went" keep>
               <p className="text-[11px] text-text-secondary leading-relaxed">
                 {states.length ? `${states.length} question${states.length === 1 ? '' : 's'} checked · ${lensHeadline(states)}.` : 'This run recorded no per-question results.'}
               </p>
+              {runEffort(states) && (
+                <p className="text-[11px] text-text-tertiary leading-relaxed mt-1">{runEffort(states)}.</p>
+              )}
             </ReportSection>
 
             <Caveats items={report.unanswered || []} />
