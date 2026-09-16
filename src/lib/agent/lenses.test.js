@@ -44,9 +44,9 @@ describe('the lens set is general, not lighting-shaped', () => {
     }
   })
 
-  it('covers the eight questions and no more', () => {
+  it('covers the nine questions and no more', () => {
     expect(LENSES.map(l => l.key).sort())
-      .toEqual(['calendar', 'category', 'craft', 'demand', 'events', 'openings', 'ourselves', 'rivals'])
+      .toEqual(['calendar', 'category', 'craft', 'demand', 'events', 'openings', 'ourselves', 'rivals', 'search'])
   })
 
   it('the weekly run covers growth AND what competitors are doing', () => {

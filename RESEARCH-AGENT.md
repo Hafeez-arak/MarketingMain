@@ -597,6 +597,129 @@ when it reads a page — primary filing, trade press, aggregator, vendor
 marketing — not a guess from the domain, and the caveat should then follow
 automatically wherever that source is cited.
 
+### a3. Search demand — the first first-party signal, 2026-09-16
+
+Every other lens infers what buyers want from something second-hand: a rival's
+post, a trade article, a tender listing. The `search` lens reads what people
+actually typed into Google on the way to our own site, in both scripts,
+including the searches where we appeared and nobody clicked.
+
+**Zero budget, like Calendar and Ourselves.** It is a measured API read, not a
+model call, so it costs nothing and cannot time out on a slow search.
+
+**Why it is a lens and not a few rows inside `ourselves`.** Three outcomes have
+to stay distinct, and only a lens can report the middle one:
+
+| outcome | `ok` | means |
+|---|---|---|
+| unconfigured | `true`, with a note | no property set for this brand. Nothing is wrong. |
+| failed | `false` | a property IS set and the call did not work — bad key, service account never added, grant revoked. |
+| quiet | `true` | it answered and had nothing. A real result. |
+
+A dead credential reporting "nothing found" is indistinguishable from nobody
+searching for us, and the report would state the second with full confidence.
+This agent has been bitten by a silent empty twice already.
+
+#### No OAuth flow, and that is not a shortcut
+
+There is no Connect button, no consent screen, no refresh token and no
+reconnect UI. OAuth exists so a PERSON can grant an app access to THEIR data.
+We do not need that: Google issues us an identity of our own (a service
+account with its own email), and a human grants that identity access to our own
+property once, by hand, in Search Console.
+
+What remains is technically still an OAuth grant — a JWT signed with the
+service account's private key, exchanged at Google's token endpoint for a
+one-hour access token (RFC 7523). No browser, no user, ~30 lines of
+`node:crypto`, **and no new dependency** — which matters because the agent
+container installs exactly one package (see `server/Dockerfile`).
+
+The day another workspace wants to connect a property *we* do not control, this
+stops being enough and a real consent flow has to be built. Until then it is
+the same shape as `META_IG_TOKEN`: a long-lived server credential.
+
+#### Setup
+
+1. Google Cloud: create a project, enable the **Search Console API**, create a
+   **service account**, download a **JSON key**.
+2. Search Console → Settings → Users and permissions → add the service
+   account's `client_email` as a **Full** user. Full is enough to read
+   performance data; Owner is only needed for the Indexing API, which we do not
+   use.
+3. Put the JSON in the n8n box's `.env` as `GOOGLE_SA_KEY` (raw or base64 — both
+   are accepted, because a PEM with newlines survives some .env parsers and not
+   others). The compose file already passes `.env` through; no Dockerfile or
+   compose change is needed. Redeploy the agent container.
+4. Set the brand's `customFields.website` to the verified property. A **Domain
+   property** is addressed as `sc-domain:arak-sa.com` — *not* a URL. Handing it
+   `https://arak-sa.com/` returns a 403 that reads like a permissions problem
+   and is not one.
+
+`GOOGLE_SC_SITE` is a deployment-wide fallback for when a brand sets none.
+Both keys are named literally in a comment at the top of
+`api/agent/_searchConsole.js`, because `vite.config.js`'s dev allowlist is kept
+in step with `grep -rho 'process\.env\.[A-Z0-9_]*' api/agent/` and every read
+goes through an injectable parameter that grep would never find.
+
+#### The rule this lens exists to enforce
+
+arak-sa.com had **122 web-search clicks in a quarter** when this was written. At
+that volume a click count is noise: 3 → 6 is two people, not a doubling, and an
+agent asked what changed will find something to say every week and be wrong
+every week.
+
+So the reported numbers are **impressions, query text and position**, which are
+stable at low volume and are the useful half anyway. "We appeared 400 times for
+*guest room management system saudi* at position 14 and were not chosen" is a
+content brief and needs no clicks at all to be true. The floors are constants in
+`src/lib/agent/searchConsole.js` — `MIN_IMPRESSIONS` 30, `NARRATABLE_CLICKS` 10,
+and a winnable band of positions 4–20. Below position 4 with no clicks the query
+wanted something else; past 20, "improve the title" is advice that cannot work.
+
+The window is **28 days against the previous 28**, ending **three days back**.
+Search Console keeps revising the last couple of days, so a window ending today
+always reads as a decline — and a weekly agent would report that decline forever
+as news.
+
+#### Business lines
+
+Findings carry a `line`, the first use of the second axis (the first being
+`teamsOf`). It is **stamped in code, never asked of a model**: each query is
+joined to the landing page that took most of its impressions, and the page's
+path decides the line. A URL is a fact; a keyword match is an opinion. Query
+words are the fallback, which is the case that matters most — a query landing on
+the homepage because the page it deserves does not exist.
+
+Unclassified findings carry `''` rather than a default. A finding filed under
+the wrong business is worse than an unfiled one, because someone acts on it.
+
+Nothing about lighting is in the code. The lines come from
+`customFields.business_lines`, one per row, `key | Label | patterns` — a pattern
+starting with `/` matches the landing page's path (language prefix stripped, so
+`/ar/services/x` classifies like `/services/x`), anything else matches the query
+text:
+
+```
+controls | Controls & automation | /services/lighting-controls, /services/home-automation, knx, grms, guest room
+lighting | Lighting | /services/indoor-lighting, /services/facade-lighting, /services/outdoor-lighting, /services/lighting-design, luminaire, facade
+```
+
+#### One thing only looking found
+
+Queries are interpolated into English sentences next to numbers, and without
+isolation the bidi algorithm absorbs the number into the RTL run:
+
+```
+intended:  We appear for "شركة إنارة واجهات الرياض" 233 times at position 12.1
+rendered:  We appear for "233 شركة إنارة واجهات الرياض" times at position 12.1
+```
+
+The impression count moves inside the quotes and reads as part of the query. The
+string was correct and only its *display* was wrong, so no test would have
+caught it — it was found in the dev harness. `isolate()` wraps every query in
+U+2068/U+2069, which travels with the text rather than living in a renderer,
+because these strings are also printed to PDF and read back by the model.
+
 ### b. Proposed rules → `brand_memory`
 
 Unchanged from today, and deliberately so. Scopes `competitor` and `trend`

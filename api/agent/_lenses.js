@@ -5,6 +5,8 @@ import { lensByKey, makeFinding } from '../../src/lib/agent/lenses.js'
 import { findingsFromEvents } from '../../src/lib/agent/calendar.js'
 import { ownChannelFindings } from '../../src/lib/agent/ownChannels.js'
 import { CHANNELS, SIGNAL_CATEGORIES } from '../../src/lib/agent/intel.js'
+import { searchConfig, searchFindings, lineOf } from '../../src/lib/agent/searchConsole.js'
+import { fetchSearchData } from './_searchConsole.js'
 
 // ─── Running a lens ────────────────────────────────────────────────────────
 // Each lens is one bounded model call with web search, asked one question and
@@ -359,6 +361,59 @@ export async function runOurselvesLens({ gathered }) {
     return { lens: 'ourselves', ok: true, findings, sources: [], cost: 0, error: '', note: own?.note || '' }
   } catch (err) {
     return { lens: 'ourselves', ok: false, findings: [], sources: [], cost: 0, error: String(err?.message || err) }
+  }
+}
+
+/**
+ * Search demand — measured, not researched.
+ *
+ * Reads Search Console for the brand's own property and turns the rows into
+ * findings. Makes no model call, so it costs nothing and cannot time out on a
+ * slow search.
+ *
+ * THE THREE OUTCOMES ARE DELIBERATELY DISTINCT, and keeping them apart is the
+ * whole reason this is a lens rather than a few extra rows inside `ourselves`:
+ *
+ *   unconfigured  no property set for this brand. ok, with a note. Nothing is
+ *                 wrong; there is simply nothing to read.
+ *   failed        a property IS configured and the call did not work — a bad
+ *                 key, a service account nobody added, a revoked grant. This
+ *                 must surface as FAILED, because a broken credential that
+ *                 reports "nothing found" is indistinguishable from nobody
+ *                 searching for us, and the report would state the second with
+ *                 total confidence.
+ *   quiet         it answered and had nothing. A real result.
+ */
+export async function runSearchLens({ profile, ctx, now = new Date() }) {
+  try {
+    const { site, lines, brandTerms } = searchConfig(profile || {}, ctx || {})
+    const data = await fetchSearchData({ site, now })
+
+    if (!data.configured) {
+      return {
+        lens: 'search', ok: true, findings: [], sources: [], cost: 0, error: '',
+        note: `${data.error} Set customFields.website to the verified Search Console property and add the ` +
+          'service account as a user on it.',
+      }
+    }
+    if (!data.ok) {
+      return { lens: 'search', ok: false, findings: [], sources: [], cost: 0, error: data.error, note: '' }
+    }
+
+    const findings = searchFindings({
+      queries: data.queries, pages: data.pages, previous: data.previous,
+      brandTerms, lines, site: data.site,
+      // The line is stamped in code from the landing page, never asked of a
+      // model: the URL is a fact and lenses.js must stay free of any one
+      // brand's vocabulary. An unclassified finding carries ''.
+    }).map(raw => makeFinding('search', { ...raw, line: lineOf(raw.evidence || {}, lines) }))
+
+    return {
+      lens: 'search', ok: true, findings, sources: [], cost: 0, error: '',
+      note: `${data.site}, ${data.windows.current.start} to ${data.windows.current.end}.`,
+    }
+  } catch (err) {
+    return { lens: 'search', ok: false, findings: [], sources: [], cost: 0, error: String(err?.message || err).slice(0, 300) }
   }
 }
 

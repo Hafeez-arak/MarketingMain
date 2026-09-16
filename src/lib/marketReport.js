@@ -49,6 +49,7 @@ export const SECTIONS = [
   { key: 'competitors', label: 'Competitor moves', teams: ['marketing', 'sales', 'technical'] },
   { key: 'social', label: 'Social activity', teams: ['marketing'] },
   { key: 'events', label: 'Events', teams: ['marketing', 'sales'] },
+  { key: 'search', label: 'Search demand', teams: ['marketing', 'sales'] },
   { key: 'market', label: 'Market & technical', teams: ['marketing', 'technical'] },
   { key: 'recs', label: 'Marketing recommendations', teams: ['marketing'] },
   { key: 'newcomp', label: 'New competitors', teams: ['marketing', 'sales'] },
@@ -626,6 +627,48 @@ export function marketNotes(report = {}, now = new Date()) {
       store: null, uncited: m.uncited, ref: '',
     }))
   return [...findings, ...synth]
+}
+
+// ─── Search demand ─────────────────────────────────────────────────────────
+
+/**
+ * What people typed on the way to us, and where we appear without being chosen.
+ *
+ * Assembled from the `search` lens's findings rather than re-derived, because
+ * the judgement about what is worth reporting — the impression floor, the
+ * winnable position band, the refusal to narrate thin click counts — lives in
+ * src/lib/agent/searchConsole.js and is tested there. This function only sorts
+ * the results into the shapes the page renders.
+ *
+ * `present` is false when the lens did not run at all, which is NOT the same
+ * as a lens that ran and found nothing. The renderer has to be able to tell
+ * them apart or an unconfigured property looks like an empty market.
+ */
+export function searchDemand(report = {}) {
+  const findings = (report.findings || []).filter(f => f?.lens === 'search')
+  if (!findings.length) return { present: false, summary: null, opportunities: [], movers: [], byLine: [] }
+
+  const asRow = f => ({
+    headline: f.headline, detail: f.detail || '', action: f.suggested_action || '',
+    line: f.line || '', relevance: f.relevance || 'medium', ref: f.ref,
+    evidence: f.evidence || {},
+  })
+
+  const summaryFinding = findings.find(f => f.evidence?.all)
+  const summary = summaryFinding?.evidence || null
+
+  return {
+    present: true,
+    summary,
+    note: summaryFinding?.headline || '',
+    // Queries where the ranking already exists and the click does not — the
+    // highest-value half, and the half that does not depend on traffic volume.
+    opportunities: findings.filter(f => f.category === 'content').map(asRow),
+    // Reported in impressions. See the note at the top of searchConsole.js for
+    // why clicks are not trusted to move at this volume.
+    movers: findings.filter(f => f !== summaryFinding && f.category !== 'content' && f.evidence?.state).map(asRow),
+    byLine: summary?.byLine || [],
+  }
 }
 
 // ─── Marketing recommendations ─────────────────────────────────────────────

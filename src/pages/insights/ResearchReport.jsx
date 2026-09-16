@@ -12,6 +12,7 @@ import { lensStates, lensHeadline, runEffort, pct } from '../../lib/researchBrie
 import {
   TEAMS, sectionVisible, forTeam, topThree, salesRows, competitorMoves, socialActivity, eventsView,
   marketNotes, marketingRecommendations, newCompetitors, sourceList, openItems, freshnessLabel,
+  searchDemand,
 } from '../../lib/marketReport'
 import { fetchIntel } from '../../lib/marketIntel'
 import { fetchAgenda } from '../../lib/agentAgenda'
@@ -132,6 +133,7 @@ export function ResearchReport() {
   const social = useMemo(() => socialActivity({ report, signals: intel.signals, now }), [report, intel, now])
   const events = useMemo(() => eventsView({ report, events: intel.events, runId: run?.id, now }), [report, intel, run, now])
   const notes = useMemo(() => marketNotes(report, now), [report, now])
+  const search = useMemo(() => searchDemand(report), [report])
   const plan = useMemo(() => marketingRecommendations(report), [report])
   const candidates = useMemo(() => newCompetitors({ report, agendaCompetitors }), [report, agendaCompetitors])
   const sources = useMemo(() => sourceList(report), [report])
@@ -372,6 +374,37 @@ export function ResearchReport() {
                       ))}
                     </ul>
                   </div>
+                )}
+              </ReportSection>
+            )}
+
+            {/* ── Search demand ── */}
+            {/* Printed even when the lens found nothing, unlike most sections:
+                an absent section reads as "we did not look", and the whole
+                point of this one is to say what people are searching for AND
+                to be honest when the answer is "almost nothing". */}
+            {show('search') && search.present && (
+              <ReportSection title="Search demand"
+                note="What people typed on the way to our own site, measured by Google Search Console. Impressions and position rather than clicks — at this volume a click count is too thin to read as movement.">
+                {search.note && <p className="text-[12px] text-text leading-snug mb-2" dir="auto">{search.note}</p>}
+                {search.byLine.length > 0 && (
+                  <p className="text-[10px] text-text-tertiary mb-2">
+                    {search.byLine.map(l => `${l.label}: ${l.impressions} impressions`).join(' · ')}
+                  </p>
+                )}
+                {search.opportunities.length + search.movers.length === 0 ? (
+                  <p className="text-[11px] text-text-secondary leading-relaxed">
+                    Nothing crossed the reporting floor this period. That is a result, not a gap.
+                  </p>
+                ) : (
+                  <ul className="space-y-2">
+                    {[...search.opportunities, ...search.movers].slice(0, 10).map((x, i) => (
+                      <li key={i} data-print-keep className="text-[11px] text-text-secondary leading-relaxed">
+                        <p className="text-[12px] text-text font-medium leading-snug" dir="auto">{x.headline}</p>
+                        {x.action && <p><span className="font-semibold">Do: </span>{x.action}</p>}
+                      </li>
+                    ))}
+                  </ul>
                 )}
               </ReportSection>
             )}
