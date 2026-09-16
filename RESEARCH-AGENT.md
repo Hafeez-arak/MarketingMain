@@ -546,6 +546,59 @@ search result and made it the number-one rival. The entry now lists all three
 candidates and says *confirm before researching, do not guess* — the same
 instruction it gives for Lumiere.
 
+### b2. The business view — where we stand, not what happened — 2026-09-16
+
+`/insights/business`, beside "Brief as PDF" on the Research page. Same print
+mechanism as the brief, so there is no second PDF path to keep in step.
+
+The weekly brief answers *what happened*. This answers *where do we stand*,
+which is a different question for a different reader on a different clock. Six
+blocks per business line:
+
+| block | source | can it be empty? |
+|---|---|---|
+| verdict | assembled in code from the blocks below | it says so |
+| who is beating us | `deal_outcomes` only | **yes, and it is** |
+| the board | watchlist + `competitor_brands` + signals | yes |
+| what moved | signals, last 35 days, max 3 | yes |
+| what we cannot answer | computed from the gaps | **never hidden** |
+
+**Every block can return "not established", and most of them currently do.**
+A page that fills six blocks every month regardless of what was found is a page
+that will be wrong six ways and trusted for about two months. `notEstablished`
+carries a `why` that is shown to the reader, not swallowed.
+
+The verdict is **assembled in code** from what the other blocks established, so
+it can never claim more than the page behind it. With no bid recorded it says
+"this is a picture of activity, not of position" — which is the true statement
+and the one a model asked to summarise would not have made.
+
+`losing` takes no signals argument at all, and that is the design: activity on
+the public web says nothing about who took the job. It is the first block a
+person reads and the only one nothing else can fill.
+
+#### One page per line, not a filter
+
+The weekly report filters one document by line, because its top three are
+genuinely company-wide. This does not. Lighting and controls are not two
+catalogues, they are **two buying centres** — lighting specified by architects
+and lighting designers, controls by MEP/ELV consultants and bought through the
+main contractor — so the rivals barely overlap and the axes that decide a bid
+differ. The board's own note changes with the line to say which axes those are.
+
+#### A bug the tests caught
+
+`Number(null)` is `0`, which is finite — so an untiered rival scored as tier 0
+and sorted **above** a tiered one, exactly inverting the priority the column
+exists to express. Null is checked before the numeric coercion now.
+
+#### Its emptiest state is the most useful thing it says
+
+Today the page reports, per line: one rival with no confirmed domain, eight of
+eight never researched, no rival tiered, and no contested bid recorded — each
+with a `Closed by:` line naming who can close it. That list is the argument for
+the sales session, in the form a person can act on.
+
 ### b. And it lands on the agenda, not in the Brand Brain
 
 This is where §5a stops being a constraint and starts being the thing that

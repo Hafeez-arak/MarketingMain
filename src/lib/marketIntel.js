@@ -47,6 +47,36 @@ export async function fetchIntel(workspaceId, accessToken) {
   }
 }
 
+/**
+ * What the business view needs, and nothing else.
+ *
+ * Separate from fetchIntel because it reads three tables that page uses and
+ * the weekly report does not — the watchlist with its new identity columns,
+ * the distribution rights, and the contested bids. `available: false` when they
+ * cannot be read, so an unapplied migration reads as "cannot say" rather than
+ * as "no rivals", which would be a claim about the market made from a missing
+ * table.
+ */
+export async function fetchCompetitorIntel(workspaceId, accessToken) {
+  const empty = { watchlist: [], brands: [], deals: [], available: false }
+  if (!workspaceId) return empty
+  const ws = encodeURIComponent(workspaceId)
+  try {
+    const [watchlist, brands, deals] = await Promise.all([
+      get(`research_agenda?workspace_id=eq.${ws}&kind=eq.competitor&status=eq.active` +
+        '&select=id,subject,why,domain,lines,kinds,city,tier,source,resolution' +
+        '&order=tier.asc.nullslast,created_at.asc', accessToken),
+      get(`competitor_brands?workspace_id=eq.${ws}&limit=300` +
+        '&select=competitor,brand,relationship,line,source_url,observed_at', accessToken),
+      get(`deal_outcomes?workspace_id=eq.${ws}&limit=500` +
+        '&select=project,competitor,line,outcome,decided_by,price_delta_pct,value_sar,client,consultant,decided_on', accessToken),
+    ])
+    return { watchlist, brands, deals, available: true }
+  } catch {
+    return empty
+  }
+}
+
 async function patch(table, workspaceId, accessToken, id, body) {
   try {
     const res = await fetch(

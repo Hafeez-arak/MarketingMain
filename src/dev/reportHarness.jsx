@@ -5,6 +5,7 @@ import { AppProvider } from '../store/appStore'
 import { AppLayout } from '../components/layout/AppLayout'
 import { PerformanceReport } from '../pages/analytics/PerformanceReport'
 import { ResearchReport } from '../pages/insights/ResearchReport'
+import { BusinessView } from '../pages/insights/BusinessView'
 import { Insights } from '../pages/insights/index'
 import { planStoreWrites } from '../lib/agent/intel'
 import fixture from './reportFixture.json'
@@ -69,6 +70,23 @@ window.fetch = async (url, init) => {
   // event names attached to the three openings findings and one calendar date
   // the way the lens now reports them, so the tracker's editable rows render.
   // Dev-only: these names are the 14 Sep run's own projects, not new claims.
+  // ── The competitor tables, for the business view ──
+  // `#business` serves the REAL watchlist with an empty bid log, which is the
+  // honest state today and the one worth looking at: almost every block on the
+  // page should be reporting a gap. `#business-full` adds contested bids and
+  // signals so the filled state can be checked too.
+  if (href.includes('research_agenda')) {
+    if ((init?.method || 'GET') !== 'GET') return new Response(null, { status: 204 })
+    return new Response(JSON.stringify(demoWatchlist()), { status: 200, headers: { 'Content-Type': 'application/json' } })
+  }
+  for (const table of ['competitor_brands', 'deal_outcomes']) {
+    if (href.includes(table)) {
+      if ((init?.method || 'GET') !== 'GET') return new Response(null, { status: 204 })
+      const full = window.location.hash.startsWith('#business-full')
+      const rows = table === 'competitor_brands' ? demoBrands() : (full ? demoDeals() : [])
+      return new Response(JSON.stringify(rows), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    }
+  }
   for (const table of ['research_opportunities', 'research_events', 'research_signals']) {
     if (href.includes(table)) {
       const rows = window.location.hash === '#brief-store' ? demoStore()[table] : []
@@ -80,6 +98,51 @@ window.fetch = async (url, init) => {
     return new Response('[]', { status: 200, headers: { 'Content-Type': 'application/json' } })
   }
   return realFetch(url, init)
+}
+
+// The live watchlist as it stands, so the business view can be looked at
+// against real identities rather than invented ones. Dev-only.
+const C = (subject, domain, lines, kinds, city, resolution = 'company') =>
+  ({ id: subject, subject, why: '', domain, lines, kinds, city, tier: null, source: 'sales', resolution })
+
+function demoWatchlist() {
+  return [
+    C('Al Nasser Group', '', ['lighting', 'controls'], ['manufacturer', 'distributor', 'retailer', 'integrator'], 'Riyadh', 'unresolved'),
+    C('Huda Lighting', 'hudalighting.com', ['lighting'], ['brand', 'supplier'], 'Riyadh'),
+    C('Nassli Group', 'nassli.com.sa', ['lighting', 'controls'], ['manufacturer', 'integrator'], 'Saudi Arabia'),
+    C('Sela-PASS', 'selapass.com', ['controls'], ['integrator'], 'Riyadh'),
+    C('Armada', 'armadasolutions.com.sa', ['lighting', 'controls'], ['supplier'], 'Riyadh'),
+    C('Futuron', 'futuron.sa', ['controls'], ['integrator'], 'Riyadh'),
+    C('ViaLighting', 'vialighting.com', ['lighting'], ['supplier'], 'Riyadh'),
+    C('Spectra Electricals', 'spectra.com.sa', ['lighting', 'controls'], ['supplier'], 'Riyadh'),
+    C('SAS Systems Engineering', 'sas-se.com', ['controls'], ['integrator'], 'Jeddah'),
+    C('Nouran Lighting', 'nouran.net', ['lighting'], ['supplier'], 'Riyadh'),
+    C('MASQ Lighting', 'masqlighting.com', ['lighting'], ['designer', 'supplier'], 'Riyadh'),
+    C('Prime Star Technologies', 'primestartech.com', ['controls'], ['contractor'], 'Riyadh'),
+    C('Namaraa', 'namaraa.com', ['lighting'], ['supplier'], 'Riyadh'),
+    C('Spectrum Lighting', '', ['lighting'], ['designer'], '', 'unresolved'),
+    C('Greenlight', '', ['lighting'], [], '', 'unresolvable'),
+    C('Al Dhow', '', ['lighting'], [], '', 'unresolvable'),
+  ]
+}
+
+function demoBrands() {
+  return [
+    { competitor: 'Al Nasser Group', brand: 'Berker', relationship: 'exclusive', line: 'controls', source_url: 'https://example.com/berker', observed_at: '2026-09-16' },
+    { competitor: 'Al Nasser Group', brand: 'NOORTEK', relationship: 'exclusive', line: 'lighting', source_url: '', observed_at: '2026-09-16' },
+    { competitor: 'Al Nasser Group', brand: 'SIDRA', relationship: 'exclusive', line: 'lighting', source_url: '', observed_at: '2026-09-16' },
+  ]
+}
+
+// Deliberately "(demo)" — these are not real bids, they exist so the filled
+// state of the page can be checked before any real one is recorded.
+function demoDeals() {
+  return [
+    { project: 'Riyadh hotel tower (demo)', competitor: 'Al Nasser Group', line: 'controls', outcome: 'lost', decided_by: 'agency_rights', value_sar: 1400000, consultant: 'Dar Al-Omran', decided_on: '2026-08-20' },
+    { project: 'Government HQ (demo)', competitor: 'Al Nasser Group', line: 'controls', outcome: 'lost', decided_by: 'agency_rights', value_sar: 900000, consultant: '', decided_on: '2026-07-11' },
+    { project: 'Mall refit (demo)', competitor: 'Sela-PASS', line: 'controls', outcome: 'won', decided_by: 'unknown', value_sar: 600000, consultant: '', decided_on: '2026-06-30' },
+    { project: 'Hospital lighting (demo)', competitor: 'Huda Lighting', line: 'lighting', outcome: 'lost', decided_by: 'price', value_sar: 480000, consultant: '', decided_on: '2026-08-02' },
+  ]
 }
 
 function demoStore() {
@@ -119,8 +182,9 @@ function demoStore() {
 // without editing this file — and so the research one can be reached at all,
 // since it is the half with the real brief behind it.
 const route = window.location.hash === '#research' ? '/insights/report'
-  : window.location.hash.startsWith('#brief') ? '/insights'
-    : '/analytics/report'
+  : window.location.hash.startsWith('#business') ? '/insights/business'
+    : window.location.hash.startsWith('#brief') ? '/insights'
+      : '/analytics/report'
 
 export function ReportHarness() {
   return (
@@ -131,6 +195,7 @@ export function ReportHarness() {
             <Routes>
               <Route path="/analytics/report" element={<PerformanceReport />} />
               <Route path="/insights/report" element={<ResearchReport />} />
+              <Route path="/insights/business" element={<BusinessView />} />
               <Route path="/insights" element={<Insights />} />
             </Routes>
           </AppLayout>
