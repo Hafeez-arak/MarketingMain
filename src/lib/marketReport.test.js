@@ -4,6 +4,7 @@ import {
   teamsOf, topThree, salesRows, competitorMoves, socialActivity, upcomingEvents, eventsView, marketNotes,
   marketingRecommendations, openItems,
   newCompetitors, sourceList, sectionVisible, dayLabel, resolveRefs,
+  searchDemand,
 } from './marketReport'
 
 // The real 14 Sep 2026 Arak brief — written before any of the three-reader
@@ -315,5 +316,41 @@ describe('what is not known is not asserted', () => {
       now: NOW,
     })
     expect(open[0].window).toEqual({ label: 'the published window has closed', basis: 'deadline' })
+  })
+})
+
+describe('searchDemand', () => {
+  const f = (o = {}) => ({ lens: 'search', relevance: 'medium', ...o })
+
+  it('distinguishes a lens that never ran from one that ran and found nothing', () => {
+    expect(searchDemand({ findings: [] }).present).toBe(false)
+    const quiet = searchDemand({ findings: [f({ headline: 'no queries', evidence: { all: { clicks: 0, impressions: 0, queries: 0 } } })] })
+    expect(quiet.present).toBe(true)
+    expect(quiet.opportunities).toEqual([])
+  })
+
+  it('separates the queries we can win from the ones that merely moved', () => {
+    const view = searchDemand({
+      findings: [
+        f({ headline: 'summary', evidence: { all: { clicks: 3 }, byLine: [{ key: 'controls', label: 'Controls', impressions: 400 }] } }),
+        f({ headline: 'appear, no clicks', category: 'content', suggested_action: 'rewrite the title', evidence: { query: 'grms saudi' } }),
+        f({ headline: 'rose', category: 'other', evidence: { state: 'rising', query: 'knx' } }),
+      ],
+    })
+    expect(view.opportunities).toHaveLength(1)
+    expect(view.opportunities[0].action).toBe('rewrite the title')
+    expect(view.movers).toHaveLength(1)
+    expect(view.byLine[0].label).toBe('Controls')
+  })
+
+  it('carries the business line through to the row, so the page can filter on it', () => {
+    const view = searchDemand({
+      findings: [f({ headline: 'x', category: 'content', line: 'controls', evidence: { query: 'knx' } })],
+    })
+    expect(view.opportunities[0].line).toBe('controls')
+  })
+
+  it('ignores findings from every other lens', () => {
+    expect(searchDemand({ findings: [{ lens: 'rivals', headline: 'x' }] }).present).toBe(false)
   })
 })

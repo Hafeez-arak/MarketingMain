@@ -7,7 +7,7 @@ import {
   lensesFor, motionOf, lensSummary, rankFindings, agendaFilterFor, lensByKey,
 } from '../../src/lib/agent/lenses.js'
 import { LENS_PROMPTS } from '../../src/lib/agent/lensPrompts.js'
-import { runLens, runOurselvesLens, runCalendarLens, markStage } from './_lenses.js'
+import { runLens, runOurselvesLens, runCalendarLens, runSearchLens, markStage } from './_lenses.js'
 import { gatherCalendar } from './_calendar.js'
 import { marketOf } from '../../src/lib/agent/calendar.js'
 import { priorIdeas } from './_memory.js'
@@ -278,11 +278,13 @@ export async function runSingleLens({ workspaceId, runId, lensKey, cadence = 'we
       return { ok: false, status: 400, error: `This run does not include a "${lensKey}" lens.` }
     }
 
-    // The two computed lenses first, because neither has a prompt and asking
-    // LENS_PROMPTS for one would report "no prompt for this lens" on the two
+    // The computed lenses first, because none of them has a prompt and asking
+    // LENS_PROMPTS for one would report "no prompt for this lens" on the three
     // lenses that are the most reliable things in the run.
     if (lensKey === 'ourselves') {
       result = await runOurselvesLens({ gathered: ctxBundle.gathered })
+    } else if (lensKey === 'search') {
+      result = await runSearchLens({ profile: ctxBundle.profile, ctx: ctxBundle.ctx })
     } else if (lensKey === 'calendar') {
       const { calendar } = await argsForLens('calendar', ctxBundle)
       result = runCalendarLens({ calendar })

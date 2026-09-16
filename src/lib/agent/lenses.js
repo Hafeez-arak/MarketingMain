@@ -212,6 +212,37 @@ export const LENSES = [
     universal: true,
   },
   {
+    key: 'search',
+    label: 'Search demand',
+    question: 'What are people actually typing on their way to us, and where do we appear without being chosen?',
+    perishability: DURABLE,
+    cadence: 'weekly',
+    // The only FIRST-PARTY demand signal in the whole run.
+    //
+    // Every other lens infers what buyers want from something second-hand — a
+    // rival's post, a trade article, a tender listing. This one reads what
+    // people typed into Google on the way to our own site, in both languages,
+    // including the searches where we appeared and nobody clicked. That last
+    // set is the valuable one: the impressions prove the demand and the
+    // ranking exist, so what is missing is a page worth choosing.
+    //
+    // Zero budget, like Calendar and Ourselves: this is a measured API read,
+    // not a model call. It is listed as a lens rather than folded into
+    // `ourselves` for one reason — so a broken credential is reported as
+    // FAILED instead of quiet. A dead key that reads as "nothing found" looks
+    // exactly like nobody searching for us, and this agent has already been
+    // bitten twice by a silent empty.
+    budget: { searches: 0, maxTokens: 0, effort: 'low' },
+    // Universal, and the distinction is worth stating because it looks
+    // otherwise at first glance: this lens needs CONFIGURATION (a verified
+    // property, a service account added to it) but it is not DOMAIN-SPECIFIC.
+    // Every brand in every industry has customers who search for what it
+    // sells. A brand that has not configured a property gets a lens that
+    // reports itself unconfigured — which is a setup step, not a reason the
+    // question does not apply.
+    universal: true,
+  },
+  {
     key: 'rivals',
     label: 'Competitors',
     question: 'What are competitors doing across every channel, and how does it affect us?',
@@ -318,6 +349,14 @@ export const FINDING_FIELDS = [
   // and `category` make a finding a storable signal; `lead` and `event` make
   // it a tracked row the sales team can work.
   'relevance', 'competitor', 'channel', 'category', 'lead', 'event',
+  // Added 2026-09-16. Which BUSINESS LINE a finding belongs to, for a brand
+  // that sells more than one thing to more than one buyer. Never asked of a
+  // model and never inferred from a lens's subject: it is stamped in code from
+  // something factual — the landing page a search resolved to, the watchlist
+  // entry a signal came from — against lines the brand itself configured. An
+  // empty string means unclassified, which is honest; a finding filed under
+  // the wrong business is worse than an unfiled one, because someone acts on it.
+  'line',
 ]
 
 // ─── Who a finding is for ──────────────────────────────────────────────────
@@ -377,6 +416,7 @@ export function makeFinding(lensKey, raw = {}) {
     category: String(raw.category || '').trim(),
     lead: objectWithName(raw.lead),
     event: objectWithName(raw.event),
+    line: String(raw.line || '').trim(),
   }
 }
 

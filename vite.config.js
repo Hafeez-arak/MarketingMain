@@ -241,6 +241,11 @@ function devAgentApi(env) {
     // Lets the service-auth path be exercised locally rather than only in
     // production, which is where it would otherwise first be tested.
     'AGENT_RUN_SECRET',
+    // The Search Console service account, and the property it may read. Absent
+    // here, the search lens reports itself unconfigured on a laptop while
+    // working in production — which is the confusing direction for a bug to
+    // run, and exactly what the META_IG_TOKEN note above is about.
+    'GOOGLE_SA_KEY', 'GOOGLE_SC_SITE',
   ]) {
     if (env[key] && !process.env[key]) process.env[key] = env[key]
   }

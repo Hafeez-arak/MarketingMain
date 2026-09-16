@@ -10,7 +10,7 @@ import {
 import {
   TEAMS, sectionVisible, forTeam, topThree, salesRows, competitorMoves, socialActivity, eventsView,
   marketNotes, marketingRecommendations, newCompetitors, sourceList, domainOf, teamsOf,
-  openItems, freshnessLabel,
+  openItems, freshnessLabel, searchDemand,
 } from '../../lib/marketReport'
 import { fetchIntel, updateOpportunity, updateEventDecision } from '../../lib/marketIntel'
 import { fetchAgenda, setAgendaStatus } from '../../lib/agentAgenda'
@@ -451,6 +451,26 @@ function EventsTable({ rows, canEdit, onDecision, recent = false }) {
   )
 }
 
+// A search row. The line chip is rendered only when the brand has configured
+// business lines and this row matched one — an unclassified row shows nothing
+// rather than a "General" chip, which would read as a decision nobody made.
+function SearchRow({ r, lineLabel }) {
+  return (
+    <div className="rounded-xl border border-border bg-white p-3.5">
+      <div className="flex items-start justify-between gap-3">
+        <p className="text-sm text-text leading-snug" dir="auto">{r.headline}</p>
+        {r.line && lineLabel(r.line) && (
+          <span className="text-[10px] font-semibold shrink-0 px-1.5 py-0.5 rounded bg-surface-muted text-text-tertiary uppercase tracking-wide">
+            {lineLabel(r.line)}
+          </span>
+        )}
+      </div>
+      {r.detail && <p className="text-[11px] text-text-secondary mt-1.5 leading-relaxed">{r.detail}</p>}
+      {r.action && <p className="text-xs text-text-secondary mt-2 leading-relaxed"><span className="font-semibold">Do: </span>{r.action}</p>}
+    </div>
+  )
+}
+
 function Note({ n, now }) {
   return (
     <div className="rounded-xl border border-border bg-white p-3.5">
@@ -562,6 +582,12 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
   const social = useMemo(() => socialActivity({ report, signals: intel.signals, now }), [report, intel.signals, now])
   const events = useMemo(() => eventsView({ report, events: intel.events, runId: run?.id, now }), [report, intel.events, run?.id, now])
   const notes = useMemo(() => marketNotes(report, now), [report, now])
+  const search = useMemo(() => searchDemand(report), [report])
+  // Labels come from the run's own byLine roll-up, so the page never has to
+  // know what a brand's business lines are called.
+  const lineLabel = useCallback(
+    key => search.byLine.find(l => l.key === key)?.label || '',
+    [search.byLine])
   const plan = useMemo(() => marketingRecommendations(report), [report])
   const candidates = useMemo(() => newCompetitors({ report, agendaCompetitors }), [report, agendaCompetitors])
   const sources = useMemo(() => sourceList(report), [report])
@@ -584,6 +610,7 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
     { key: 'competitors', label: 'Competitor moves', count: visibleMoves.length },
     { key: 'social', label: 'Social activity', count: social.theirs.length + social.ours.length },
     { key: 'events', label: 'Events', count: events.count + events.dates.length },
+    { key: 'search', label: 'Search demand', count: search.opportunities.length + search.movers.length },
     { key: 'market', label: 'Market & technical', count: visibleNotes.length },
     { key: 'recs', label: 'Marketing recommendations', count: plan.blocks.length + plan.loose.length },
     { key: 'newcomp', label: 'New competitors', count: candidates.length },
@@ -591,7 +618,7 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
     { key: 'run', label: 'How this run went' },
     { key: 'watch', label: 'What it watches' },
   ].filter(s => ['run', 'watch'].includes(s.key) || sectionVisible(s.key, team)),
-  [team, visibleTop, sales, visibleMoves, social, events, visibleNotes, plan, candidates, sources])
+  [team, visibleTop, sales, visibleMoves, social, events, search, visibleNotes, plan, candidates, sources])
 
   const [activeZone, setActiveZone] = useState('top')
   const rootRef = useRef(null)
@@ -833,7 +860,48 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
         </Section>
       )}
 
-      {/* 6 ── Market & technical */}
+      {/* 6 ── Search demand */}
+      {sectionVisible('search', team) && (
+        <Section id="search" n={num('search')} title="Search demand"
+          note="What people typed on the way to our own site, measured by Google. Impressions and position, not clicks — at this volume a click count is too thin to read as movement.">
+          {!search.present ? (
+            <Quiet>
+              This run had no search data. Either no Search Console property is configured for this brand, or the
+              lens could not reach it — &ldquo;What was checked&rdquo; below says which.
+            </Quiet>
+          ) : (
+            <div className="space-y-3">
+              {search.note && <p className="text-sm text-text leading-snug" dir="auto">{search.note}</p>}
+              {search.byLine.length > 0 && (
+                <div className="flex flex-wrap gap-1.5">
+                  {search.byLine.map(l => (
+                    <span key={l.key || 'none'} className="text-[11px] px-2 py-1 rounded-md bg-surface-muted text-text-secondary">
+                      {l.label}: <span className="tabular-nums font-semibold">{l.impressions}</span> impressions
+                    </span>
+                  ))}
+                </div>
+              )}
+              {search.opportunities.length > 0 && (
+                <div className="space-y-2.5">
+                  <p className="text-[10px] font-semibold text-text-tertiary uppercase tracking-wide">Demand we are not converting</p>
+                  {search.opportunities.map((r, i) => <SearchRow key={i} r={r} lineLabel={lineLabel} />)}
+                </div>
+              )}
+              {search.movers.length > 0 && (
+                <div className="space-y-2.5 pt-1">
+                  <p className="text-[10px] font-semibold text-text-tertiary uppercase tracking-wide">What moved</p>
+                  {search.movers.map((r, i) => <SearchRow key={i} r={r} lineLabel={lineLabel} />)}
+                </div>
+              )}
+              {!search.opportunities.length && !search.movers.length && (
+                <Quiet>Nothing in the search data crossed the floor this period. That is a result, not a gap.</Quiet>
+              )}
+            </div>
+          )}
+        </Section>
+      )}
+
+      {/* 7 ── Market & technical */}
       {sectionVisible('market', team) && (
         <Section id="market" n={num('market')} title="Market and technical notes"
           note="Regulation, standards, technology and giga-project change. Each carries the marketing angle and what the technical team should check.">
