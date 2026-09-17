@@ -251,7 +251,8 @@
      "novelty_by": "computed",
      "technical_note": "Compliance/procurement team should confirm Arak's own certificate documentation is current and readily producible per SKU, since this is the exact proof point the post would be implicitly making.",
      "perishable_until": "2026-12-01",
-     "suggested_action": "Publish a short 'what we check before a fixture ever reaches your BOQ' piece aimed at MEP contractors and specifiers, listing SASO certificate verification as a standard step in Arak's quoting process \u2014 reassurance content that removes a named fear (tender rejection, customs seizure) rather than generic brand messaging."
+     "suggested_action": "Publish a short 'what we check before a fixture ever reaches your BOQ' piece aimed at MEP contractors and specifiers, listing SASO certificate verification as a standard step in Arak's quoting process \u2014 reassurance content that removes a named fear (tender rejection, customs seizure) rather than generic brand messaging.",
+     "line": "lighting"
     },
     {
      "ref": "F3",
@@ -278,7 +279,8 @@
      "novelty_by": "computed",
      "technical_note": "Compliance/technical team should confirm Arak's current documentation covers both SBC 601/602 design-stage lighting energy requirements and the SASO 2663/2874 product certificates \u2014 they are governed by different bodies (Ministry of Energy/SEEC vs SASO) and a project can fail one while passing the other.",
      "perishable_until": "2026-12-01",
-     "suggested_action": "Note the SBC 601/602 vs SASO 2663/2874 distinction in the already-planned 'what the new SASO standards change for your BOQ' post so specifiers understand both compliance layers, not just the product certificate."
+     "suggested_action": "Note the SBC 601/602 vs SASO 2663/2874 distinction in the already-planned 'what the new SASO standards change for your BOQ' post so specifiers understand both compliance layers, not just the product certificate.",
+     "line": "lighting"
     },
     {
      "ref": "F4",
@@ -476,7 +478,8 @@
      "novelty_by": "computed",
      "technical_note": "",
      "perishable_until": null,
-     "suggested_action": "Either schedule for LinkedIn or accept it as dormant and say so."
+     "suggested_action": "Either schedule for LinkedIn or accept it as dormant and say so.",
+     "line": "lighting"
     },
     {
      "ref": "F12",
@@ -514,7 +517,8 @@
      "novelty_by": "computed",
      "technical_note": "",
      "perishable_until": null,
-     "suggested_action": "Have business development contact Dar Al-Omran (supervision consultant on all three PIF palace-hotel conversions) now to get on the radar for the Tuwaiq Palace lighting/FF&E package before the main contractor is announced and the sub-tender list is finalized; the heritage-restoration angle (45-year Saudi heritage lighting a landmark from 1957 onward) is a strong specification narrative once a contractor is confirmed."
+     "suggested_action": "Have business development contact Dar Al-Omran (supervision consultant on all three PIF palace-hotel conversions) now to get on the radar for the Tuwaiq Palace lighting/FF&E package before the main contractor is announced and the sub-tender list is finalized; the heritage-restoration angle (45-year Saudi heritage lighting a landmark from 1957 onward) is a strong specification narrative once a contractor is confirmed.",
+     "line": "lighting"
     },
     {
      "ref": "F14",
@@ -536,7 +540,8 @@
      "novelty_by": "computed",
      "technical_note": "Product/ops team should confirm current lead times per supplier line (Philips, ABB, Reggiani, etc.) so any published claim about speed is defensible if a contractor asks for proof.",
      "perishable_until": null,
-     "suggested_action": "Publish a short piece or carousel titled something like 'Why we quote lead time before we quote price' \u2014 walk through Arak's stocked-inventory/local-warehousing advantage on King Fahad Airport or Solitaire Mall scale projects, and name the certified-partner network (20+ brands) as what shortens the procurement chain versus single-brand importers."
+     "suggested_action": "Publish a short piece or carousel titled something like 'Why we quote lead time before we quote price' \u2014 walk through Arak's stocked-inventory/local-warehousing advantage on King Fahad Airport or Solitaire Mall scale projects, and name the certified-partner network (20+ brands) as what shortens the procurement chain versus single-brand importers.",
+     "line": "lighting"
     },
     {
      "ref": "F15",
@@ -558,7 +563,8 @@
      "novelty_by": "computed",
      "technical_note": "",
      "perishable_until": null,
-     "suggested_action": "When the already-proposed KNX/GRMS post is drafted, cite the 60%+ KSA/UAE regional revenue share as the market-size hook rather than a generic 'growing demand' claim."
+     "suggested_action": "When the already-proposed KNX/GRMS post is drafted, cite the 60%+ KSA/UAE regional revenue share as the market-size hook rather than a generic 'growing demand' claim.",
+     "line": "controls"
     },
     {
      "ref": "F16",
@@ -580,7 +586,8 @@
      "novelty_by": "computed",
      "technical_note": "",
      "perishable_until": null,
-     "suggested_action": "A GRMS post using the payback framing directly \u2014 e.g. 'the energy case for automation, not just the guest experience case' \u2014 giving hotel operators a numbers-first argument (25% typical reduction, 12\u201324 month payback) rather than only comfort/luxury language, referencing Ritz Carlton or Four Seasons as proof points."
+     "suggested_action": "A GRMS post using the payback framing directly \u2014 e.g. 'the energy case for automation, not just the guest experience case' \u2014 giving hotel operators a numbers-first argument (25% typical reduction, 12\u201324 month payback) rather than only comfort/luxury language, referencing Ritz Carlton or Four Seasons as proof points.",
+     "line": "controls"
     },
     {
      "ref": "F17",
@@ -602,7 +609,8 @@
      "novelty_by": "computed",
      "technical_note": "",
      "perishable_until": null,
-     "suggested_action": "Have business development map which of these 13 under-construction hotels have not yet finalized an MEP/lighting supplier, prioritizing any where Aedas is the architect of record, and open a relationship conversation with Aedas' Riyadh office given their project-count lead in this market."
+     "suggested_action": "Have business development map which of these 13 under-construction hotels have not yet finalized an MEP/lighting supplier, prioritizing any where Aedas is the architect of record, and open a relationship conversation with Aedas' Riyadh office given their project-count lead in this market.",
+     "line": "controls"
     },
     {
      "ref": "F18",
@@ -624,7 +632,8 @@
      "novelty_by": "computed",
      "technical_note": "",
      "perishable_until": null,
-     "suggested_action": "Add Mondrian Riyadh to the project watchlist and check back next cycle for a fit-out or MEP contractor announcement before attempting outreach."
+     "suggested_action": "Add Mondrian Riyadh to the project watchlist and check back next cycle for a fit-out or MEP contractor announcement before attempting outreach.",
+     "line": "lighting"
     },
     {
      "lens": "search",
@@ -964,7 +973,7 @@
      "category": "other",
      "lead": null,
      "event": null,
-     "line": "",
+     "line": "lighting",
      "ref": "S11"
     },
     {
@@ -993,7 +1002,7 @@
      "category": "other",
      "lead": null,
      "event": null,
-     "line": "",
+     "line": "controls",
      "ref": "S12"
     }
    ],

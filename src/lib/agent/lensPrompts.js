@@ -427,14 +427,41 @@ export function demandPrompt(brand, { competitors = [], agenda = [], language = 
     'is what is making their job harder this quarter, and what they are being asked to',
     'deliver that they were not asked for last year.',
     '',
-    'Look for:',
-    '- What they are publicly asking, arguing about, or complaining about. Professional',
-    '  forums, LinkedIn, industry press, association material, conference programmes.',
-    '- The requirement that keeps appearing in briefs — the thing suppliers now have to',
-    '  answer for that used to be optional.',
-    '- The fear that stalls a decision: risk, lead time, compliance, after-sales support.',
-    '- The words THEY use, which are rarely the words the industry uses.',
-    '- Where they are losing time, since that is what a supplier can remove.',
+    // ── ASK FOR THINGS THAT LEAVE A TRACE ──
+    //
+    // This lens returned ZERO findings on three consecutive runs while reading
+    // 37 sources and billing $0.48 each time. It was not broken. It was asked
+    // for something that is almost never written down — what buyers "care
+    // about", their fears, the words they use — and then held to CLOSING's
+    // rule that every claim carries a source. Both halves are reasonable and
+    // together they are impossible: the model reads everything, can cite none
+    // of it, and correctly returns nothing.
+    //
+    // So the list below now names DOCUMENTS. What a buyer requires shows up in
+    // the papers they publish, and those can be cited: a tender's evaluation
+    // criteria, a job advert's must-haves, a conference agenda, a consultation
+    // response. Infer the concern FROM the document, and cite the document.
+    'Look for DOCUMENTS these people write or publish. What they require is written down in',
+    'them, and a document can be cited — a mood cannot:',
+    '- TENDER and RFP documents: scope text, prequalification rules, evaluation criteria.',
+    '  What is scored, and what disqualifies a bidder, is the requirement stated plainly.',
+    '- JOB ADVERTS by the buying organisations — developers, consultants, contractors,',
+    '  hotel groups. What they hire for is what they are about to need from suppliers.',
+    '- CONFERENCE and EXPO programmes aimed at these roles. The session titles are a list',
+    '  of what the organisers know their audience will turn up for.',
+    '- STANDARDS and REGULATORY consultations, and the responses to them.',
+    '- PUBLISHED SPECIFICATIONS and design guides: what a client now writes into a spec',
+    '  that was optional two years ago.',
+    '- Case studies and project write-ups where the buyer explains what they chose and why.',
+    '',
+    'From any of those, the finding is the REQUIREMENT plus what it means for us. "Three',
+    'Riyadh hospitality tenders this quarter scored lighting bids on delivered lead time,',
+    'not price alone" is a finding with a source. "Buyers are worried about delays" is not,',
+    'however true it may be.',
+    '',
+    'If you genuinely find no such document, say so in one finding at low confidence and',
+    'name where you looked. Do not return an empty list — an empty list is indistinguishable',
+    'from never having looked, and this lens has returned one three runs in a row.',
     '',
     // Competitors are an input here, not the subject. The previous version of
     // this prompt made rival complaints the PRIMARY material, which quietly

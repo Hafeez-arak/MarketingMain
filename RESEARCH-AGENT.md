@@ -652,6 +652,60 @@ too late.
 
 The Business view's own copy was rewritten the same way.
 
+### b5. The four that were left — 2026-09-17
+
+**The demand lens was asked for something nobody writes down.** It returned
+zero findings on three consecutive runs while reading 37 sources and billing
+$0.48 each time, and the cache numbers show why it was expensive: 120,765
+uncached input tokens against 6,113 written to cache, where every working lens
+wrote 60-73k. It was not broken. It was asked what buyers "care about" — their
+fears, the words they use — and then held to CLOSING's rule that every claim
+carries a source. Both halves are reasonable and together they are impossible.
+
+It now asks for DOCUMENTS: tender evaluation criteria, job adverts by the
+buying organisations, conference programmes, standards consultations,
+published specifications. What a buyer requires is written down in the papers
+they publish, and a paper can be cited. A mood cannot. And an empty list is
+explicitly refused — if nothing is found it says so at low confidence and names
+where it looked.
+
+**`competitor_brands` has a writer.** One optional field on the findings
+schema, `brands`, with every field inside it required, so it costs a single
+optional parameter against the API's limit of 24. `brandsFromFinding` extracts
+them and `persistIntel` merges rather than ignoring duplicates — unlike the
+other three tables — because a rival moving from `claimed` to `exclusive`, or
+to `ended`, is the whole reason to track the row. Ignoring the duplicate would
+freeze the first thing we ever saw.
+
+**`deal_outcomes` has a form.** `RecordBid`, opened from the Business view's
+own toolbar rather than from a settings screen somebody visits once. Six
+fields, one required. The price gap is labelled "roughly" on purpose: a log
+that waits for exact numbers stops being filled in by the third month, and
+half-remembered beats nothing.
+
+**Findings carry a business line.** Stamped once in `_investigate.js` rather
+than in each lens, from two sources in order of trust: the finding's own words
+against the brand's configured patterns, then the competitor it names — but
+only when that competitor sells into exactly one line. Al Nasser and Nassli are
+in both, so their name settles nothing, and guessing from a rival who straddles
+is precisely how a controls finding lands on the lighting board. A `search`
+finding already carries a line from the landing page it resolved to, which is
+stronger than either, so it is never overwritten.
+
+The report gained the second axis: a Business chip row beside the team filter,
+built from the run so a brand with one undivided business never sees a control
+that does nothing. Top three, sales, competitor moves and market notes all
+filter on it — sections written by the model carry refs rather than a line, so
+the line is read back off the findings they cite, and an item citing two lines
+shows under both.
+
+**One thing the harness caught that no test would have.** An untagged finding
+appears only under "Everything", so switching to Controls emptied three
+sections at once and looked broken. It was not broken — it was telling the
+truth about what we know — but silence is the wrong way to say that, so the bar
+now counts them: "10 findings could not be tied to a business and show under
+Everything only."
+
 ### b. And it lands on the agenda, not in the Brand Brain
 
 This is where §5a stops being a constraint and starts being the thing that

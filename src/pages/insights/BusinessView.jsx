@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useAuth } from '../../store/auth'
-import { Empty, Skeleton } from '../../components/ui/index'
+import { Button, Empty, Skeleton } from '../../components/ui/index'
+import { RecordBid } from '../../components/RecordBid'
 import { ReportDoc, ReportToolbar, ReportMasthead, ReportSection } from '../../components/report/ReportShell'
 import { useReportFilename } from '../../lib/reports/print'
 import { fetchIntel, fetchCompetitorIntel } from '../../lib/marketIntel'
@@ -152,6 +153,8 @@ function Unknown({ items }) {
 export function BusinessView() {
   const { activeWorkspaceId, activeWorkspace, accessToken } = useAuth()
   const [state, setState] = useState({ loading: true, available: false, watchlist: [], brands: [], deals: [], signals: [] })
+  const [recording, setRecording] = useState(false)
+  const [reload, setReload] = useState(0)
 
   useEffect(() => {
     if (!activeWorkspaceId) return undefined
@@ -172,12 +175,15 @@ export function BusinessView() {
       })
     })
     return () => { alive = false }
-  }, [activeWorkspaceId, accessToken])
+  }, [activeWorkspaceId, accessToken, reload])
 
   const now = useMemo(() => new Date(), [])
   const pages = useMemo(
     () => businessView({ watchlist: state.watchlist, signals: state.signals, brands: state.brands, deals: state.deals, now }),
     [state, now])
+  // The lines this brand actually has rivals in, so the form offers those
+  // rather than a list someone has to remember.
+  const lines = useMemo(() => pages.map(p => p.line).filter(Boolean), [pages])
 
   const asOf = now.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })
   useReportFilename(`${activeWorkspace?.name || 'Brand'} — business view — ${now.toISOString().slice(0, 10)}`)
@@ -200,7 +206,18 @@ export function BusinessView() {
 
   return (
     <ReportDoc>
-      <ReportToolbar backTo="/insights" backLabel="Back to Research" />
+      <ReportToolbar backTo="/insights" backLabel="Back to Research">
+        {/* The one number on this page nobody can research. Put the way to add
+            it next to the page that needs it, not on a settings screen
+            somebody visits once. */}
+        <Button variant="secondary" size="sm" onClick={() => setRecording(true)}>Record a bid</Button>
+      </ReportToolbar>
+      <RecordBid
+        open={recording}
+        onClose={() => setRecording(false)}
+        onSaved={() => setReload(n => n + 1)}
+        lines={lines}
+      />
       <ReportMasthead
         kind="Business view"
         brand={activeWorkspace?.name || 'Brand'}

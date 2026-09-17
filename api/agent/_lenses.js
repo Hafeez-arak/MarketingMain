@@ -191,6 +191,43 @@ export const FINDINGS_SCHEMA = {
             // A URL is the part that makes a finding checkable. Demanding
             // prose that some sources do not contain buys nothing and costs
             // everything.
+            // ── DISTRIBUTION RIGHTS ARE THE COMPETITIVE POSITION ──
+            //
+            // In lighting, who holds which agency decides who can bid what. The
+            // rivals prompt already asks for this and the store already has a
+            // table for it (competitor_brands), and until now a lens that found
+            // "X is the exclusive agent for Y" had nowhere to put it: the fact
+            // ended up as prose inside a headline, unqueryable. The run of
+            // 2026-09-17 found exactly that about Al Nasser and Berker and lost
+            // it that way.
+            //
+            // One optional field, and every field inside it required, so this
+            // costs a single optional parameter against the API's limit of 24.
+            // `relationship` keeps 'claimed' (what they say) apart from
+            // 'unconfirmed' (what we inferred) — that difference is the whole
+            // value of the table.
+            brands: {
+              type: 'array',
+              description:
+                'Manufacturer brands or agencies this competitor carries, when a source says so. Omit ' +
+                'entirely if the finding is not about distribution. Only what the page actually states.',
+              items: {
+                type: 'object',
+                additionalProperties: false,
+                required: ['brand', 'relationship'],
+                properties: {
+                  brand: { type: 'string', description: 'The manufacturer or brand name, as written on the source.' },
+                  relationship: {
+                    type: 'string',
+                    enum: ['exclusive', 'non_exclusive', 'claimed', 'unconfirmed', 'ended'],
+                    description:
+                      'exclusive / non_exclusive when the source states the arrangement; "claimed" when the ' +
+                      'competitor asserts it about themselves; "unconfirmed" when you inferred it; "ended" ' +
+                      'when a source says the arrangement has stopped.',
+                  },
+                },
+              },
+            },
             sources: {
               type: 'array',
               items: {

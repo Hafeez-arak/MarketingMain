@@ -2,8 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   nameKey, sameName, cleanDate, canonicalCompetitor, signalFromFinding, opportunityFromFinding,
   eventFromFinding, planStoreWrites, annotateFindings, eventStatus, knownIntelPrompt, signalHistory,
-  matchEvent, isOpenOpportunity,
-} from './intel'
+  matchEvent, isOpenOpportunity, brandsFromFinding } from './intel'
 
 const NOW = new Date('2026-09-20T09:00:00Z')
 const WATCH = ['Technolight', 'Huda Lighting', 'Inara Lighting (شركة إنارة للإضاءة)', 'Alnasser Lighting']
@@ -189,5 +188,55 @@ describe('reading the store', () => {
     expect(refs.map(r => r.ref)).toEqual(['S1'])
     expect(byCompetitor['Huda Lighting'][0].channel).toBe('linkedin')
     expect(byCompetitor.Technolight).toBeUndefined()
+  })
+})
+
+describe('brandsFromFinding', () => {
+  const wl = ['Al Nasser Group', 'Huda Lighting']
+  const f = (o = {}) => ({ competitor: 'Al Nasser Group', headline: 'They carry it', sources: [{ url: 'https://x', title: 'X' }], ...o })
+
+  it('pulls out the agencies a rival carries', () => {
+    const out = brandsFromFinding(f({ brands: [{ brand: 'Berker', relationship: 'exclusive' }] }), wl)
+    expect(out).toHaveLength(1)
+    expect(out[0].brand).toBe('Berker')
+    expect(out[0].relationship).toBe('exclusive')
+    expect(out[0].source_url).toBe('https://x')
+  })
+
+  it('drops a brand with no competitor attached — the table keys on the pair', () => {
+    expect(brandsFromFinding(f({ competitor: '', brands: [{ brand: 'Berker', relationship: 'exclusive' }] }), wl)).toEqual([])
+  })
+
+  it('falls back to unconfirmed rather than trusting an unknown relationship', () => {
+    const [b] = brandsFromFinding(f({ brands: [{ brand: 'ABB', relationship: 'made-up' }] }), wl)
+    expect(b.relationship).toBe('unconfirmed')
+  })
+
+  it('ignores a finding that names no brands at all', () => {
+    expect(brandsFromFinding(f(), wl)).toEqual([])
+  })
+
+  it('keys on the competitor and brand pair, so the same agency refreshes one row', () => {
+    const [b] = brandsFromFinding(f({ brands: [{ brand: 'Berker', relationship: 'exclusive' }] }), wl)
+    expect(b.fingerprint).toContain('berker')
+  })
+})
+
+describe('planStoreWrites and brands', () => {
+  it('plans a brand row from a finding that names one', () => {
+    const plan = planStoreWrites([{
+      ref: 'F1', competitor: 'Huda Lighting', headline: 'Huda carries Flos',
+      relevance: 'medium', sources: [{ url: 'https://h' }],
+      brands: [{ brand: 'Flos', relationship: 'non_exclusive' }],
+    }], {}, { runId: 'r1', watchlist: ['Huda Lighting'] })
+    expect(plan.brands.insert).toHaveLength(1)
+    expect(plan.brands.insert[0].brand).toBe('Flos')
+    expect(plan.brands.insert[0].last_run_id).toBe('r1')
+  })
+
+  it('does not write the same agency twice when two findings name it', () => {
+    const one = { competitor: 'Huda Lighting', headline: 'a', sources: [{ url: 'https://h' }], brands: [{ brand: 'Flos', relationship: 'claimed' }] }
+    const plan = planStoreWrites([{ ...one, ref: 'F1' }, { ...one, ref: 'F2' }], {}, { runId: 'r1', watchlist: ['Huda Lighting'] })
+    expect(plan.brands.insert).toHaveLength(1)
   })
 })
