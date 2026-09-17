@@ -167,7 +167,22 @@ export function AgentSteering() {
     return () => { cancelled = true }
   }, [activeWorkspaceId, accessToken, reload])
 
-  const readiness = watchlistReadiness(agenda.competitors)
+  // ── Retired competitors are history, not a watchlist ──
+  //
+  // This panel rendered every competitor row whatever its status, so the 11
+  // rivals retired on 2026-09-16 kept sitting under the 17 the sales team
+  // actually named — and the list read as though the agent were still watching
+  // companies nobody had asked about.
+  //
+  // They are hidden rather than deleted, and the difference matters: the run
+  // decides a competitor is NEW by checking every name on the agenda
+  // regardless of status (see priorCompetitors in _investigate.js), so a
+  // retired row is exactly what stops the agent rediscovering it and proposing
+  // it again next week. Delete them and they come back.
+  const watched = (agenda.competitors || []).filter(c => c.status !== 'retired')
+  const retiredCount = (agenda.competitors || []).length - watched.length
+
+  const readiness = watchlistReadiness(watched)
 
   const addQuestion = async () => {
     if (!newQuestion.trim()) return
@@ -233,11 +248,22 @@ export function AgentSteering() {
         />
         {findNote ? <p className="mt-1 text-xs text-slate-600">{findNote}</p> : null}
         {loaded ? (
-          <ul className="mt-2">
-            {agenda.competitors.map(row => (
-              <HandleRow key={row.id} row={row} accessToken={accessToken} onChanged={refresh} />
-            ))}
-          </ul>
+          <>
+            <ul className="mt-2">
+              {watched.map(row => (
+                <HandleRow key={row.id} row={row} accessToken={accessToken} onChanged={refresh} />
+              ))}
+            </ul>
+            {retiredCount > 0 && (
+              // Counted rather than listed. Saying nothing at all would make a
+              // retired rival look like one that was never there, and the
+              // number is what tells someone the list was pruned on purpose.
+              <p className="mt-2 text-[11px] text-slate-500">
+                {retiredCount} retired {retiredCount === 1 ? 'competitor is' : 'competitors are'} hidden. They stay on
+                record so the agent does not rediscover and re-propose them.
+              </p>
+            )}
+          </>
         ) : <RowsSkeleton />}
         <div className="mt-3 flex gap-2">
           <input

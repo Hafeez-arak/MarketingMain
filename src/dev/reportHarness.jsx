@@ -102,8 +102,8 @@ window.fetch = async (url, init) => {
 
 // The live watchlist as it stands, so the business view can be looked at
 // against real identities rather than invented ones. Dev-only.
-const C = (subject, domain, lines, kinds, city, resolution = 'company') =>
-  ({ id: subject, subject, why: '', domain, lines, kinds, city, tier: null, source: 'sales', resolution })
+const C = (subject, domain, lines, kinds, city, resolution = 'company', status = 'active') =>
+  ({ id: subject, subject, why: '', domain, lines, kinds, city, tier: null, source: 'sales', resolution, status, kind: 'competitor', ig_status: 'unresolved', ig_handle: '' })
 
 function demoWatchlist() {
   return [
@@ -123,6 +123,12 @@ function demoWatchlist() {
     C('Spectrum Lighting', '', ['lighting'], ['designer'], '', 'unresolved'),
     C('Greenlight', '', ['lighting'], [], '', 'unresolvable'),
     C('Al Dhow', '', ['lighting'], [], '', 'unresolvable'),
+    // Retired, so the panel can be checked for what it does with them: hidden
+    // from the list, counted underneath. They stay on record because a
+    // deleted name is one the agent rediscovers and proposes again.
+    C('Datacore', '', ['lighting'], [], '', 'unresolved', 'retired'),
+    C('Tawridat Al Hadaf', '', ['lighting'], [], '', 'unresolved', 'retired'),
+    C('Technolight', 'technolight-ksa.com', ['lighting'], ['manufacturer'], 'Riyadh', 'company', 'retired'),
   ]
 }
 

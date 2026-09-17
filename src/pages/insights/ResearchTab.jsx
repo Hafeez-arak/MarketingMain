@@ -579,7 +579,15 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
     [report, intel.opportunities, run?.id, now],
   )
   const moves = useMemo(() => competitorMoves(report), [report])
-  const social = useMemo(() => socialActivity({ report, signals: intel.signals, now }), [report, intel.signals, now])
+  // Only the rivals still being watched. Passed explicitly rather than read
+  // inside the selector, so a failed agenda load reads as "no filter" instead
+  // of blanking the section.
+  const watching = useMemo(
+    () => (agendaCompetitors.length ? agendaCompetitors.filter(c => c.status !== 'retired').map(c => c.subject) : null),
+    [agendaCompetitors])
+  const social = useMemo(
+    () => socialActivity({ report, signals: intel.signals, watching, now }),
+    [report, intel.signals, watching, now])
   const events = useMemo(() => eventsView({ report, events: intel.events, runId: run?.id, now }), [report, intel.events, run?.id, now])
   const notes = useMemo(() => marketNotes(report, now), [report, now])
   const search = useMemo(() => searchDemand(report), [report])

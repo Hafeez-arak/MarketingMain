@@ -354,3 +354,24 @@ describe('searchDemand', () => {
     expect(searchDemand({ findings: [{ lens: 'rivals', headline: 'x' }] }).present).toBe(false)
   })
 })
+
+describe('socialActivity and the watchlist', () => {
+  const sig = (competitor, o = {}) => ({ competitor, channel: 'linkedin', summary: 'posted', source_url: 'https://x', first_seen_at: '2026-09-14', last_seen_at: '2026-09-14', ...o })
+  const NOW = new Date('2026-09-17T00:00:00Z')
+
+  it('drops a competitor that is no longer watched', () => {
+    const out = socialActivity({ signals: [sig('Datacore'), sig('Huda Lighting')], watching: ['Huda Lighting'], now: NOW })
+    expect(out.theirs.map(t => t.competitor)).toEqual(['Huda Lighting'])
+  })
+
+  it('filters on nothing when no watchlist is passed, rather than blanking the section', () => {
+    // An agenda load that failed must not read as "no competitors are active".
+    const out = socialActivity({ signals: [sig('Datacore')], now: NOW })
+    expect(out.theirs).toHaveLength(1)
+  })
+
+  it('treats an empty watchlist as no watchlist, for the same reason', () => {
+    const out = socialActivity({ signals: [sig('Datacore')], watching: [], now: NOW })
+    expect(out.theirs).toHaveLength(1)
+  })
+})
