@@ -104,7 +104,10 @@ export function buildRequest({
     // tool belt cannot silently invalidate every cached prefix in production.
     // They render BEFORE system, so their order is part of the cache key.
     tools: [...tools].sort((a, b) => String(a.name).localeCompare(String(b.name))),
-    messages,
+    // The conversation carries its own breakpoints — see
+    // withConversationCache. Everything before it is stable; this is the
+    // part that grows, and it grew uncached until 2026-09-17.
+    messages: withConversationCache(messages),
   }
 }
 
@@ -133,4 +136,134 @@ export function contextPreamble(context) {
     }, null, 2))
   }
   return lines.join('\n')
+}
+
+// ─── Caching the conversation, not just the prefix ─────────────────────────
+// The stable prefix above (tools → system) is only half the bill. The other
+// half is the conversation, and until now it was re-billed in full on every
+// pass of the tool loop: turn six re-sent five turns of tool results — search
+// snippets, whole pages of scraped markdown — at the uncached input price,
+// every time, because nothing after the system blocks carried a breakpoint.
+//
+// The fix is the standard incremental pattern: a breakpoint on the end of the
+// conversation so THIS request's prefix is written, and a second one on the
+// position the PREVIOUS request ended at so that prefix is read back. Two
+// breakpoints, not one, because the automatic lookback that finds a hit near
+// an explicit breakpoint spans a bounded number of blocks, and one loop turn
+// with several parallel tool calls can push a dozen blocks on its own.
+//
+// What it refuses to mark is as deliberate as what it marks: thinking blocks,
+// empty text, and one-shot calls that have no next turn to pay a write back.
+
+/** Blocks that must never carry the breakpoint. */
+const NEVER_CACHEABLE = new Set(['thinking', 'redacted_thinking'])
+
+/**
+ * The last block of a message that can carry `cache_control`.
+ *
+ * (1) Thinking blocks are skipped — they are replayed verbatim with their
+ * signatures and are not ours to annotate. (2) Empty text blocks are skipped
+ * for the same reason the system blocks are dropped when empty: the API
+ * answers 400 "cache_control cannot be set for empty text blocks" and takes
+ * the whole request with it.
+ *
+ * @returns {number} index, or -1 if the message has nothing markable
+ */
+function cacheableBlockIndex(content) {
+  if (!Array.isArray(content)) return -1
+  for (let i = content.length - 1; i >= 0; i -= 1) {
+    const block = content[i]
+    if (!block || typeof block !== 'object') continue
+    if (NEVER_CACHEABLE.has(block.type)) continue
+    if (block.type === 'text' && !String(block.text || '').trim()) continue
+    return i
+  }
+  return -1
+}
+
+/** A copy of `message` with the breakpoint on its last eligible block, or null. */
+function withCacheOn(message) {
+  const content = message?.content
+  if (typeof content === 'string') {
+    if (!content.trim()) return null
+    // A bare string and a single text block are the same request to the API,
+    // and only one of the two has somewhere to hang a breakpoint.
+    return { ...message, content: [{ type: 'text', text: content, cache_control: { type: 'ephemeral' } }] }
+  }
+  const i = cacheableBlockIndex(content)
+  if (i < 0) return null
+  return {
+    ...message,
+    content: content.map((block, j) => (
+      j === i ? { ...block, cache_control: { type: 'ephemeral' } } : block
+    )),
+  }
+}
+
+/** Drop every breakpoint a caller left on the conversation. */
+function stripped(messages) {
+  return messages.map(m => {
+    if (!Array.isArray(m?.content) || !m.content.some(b => b?.cache_control)) return m
+    return {
+      ...m,
+      content: m.content.map(block => {
+        if (!block?.cache_control) return block
+        const copy = { ...block }
+        delete copy.cache_control
+        return copy
+      }),
+    }
+  })
+}
+
+/**
+ * Place the conversation's cache breakpoints.
+ *
+ * Returns a NEW array and never mutates the one it was given — the tool loop
+ * keeps appending to a single `convo` across passes, and a breakpoint written
+ * into it in place would accumulate one per turn until the request crossed the
+ * four-breakpoint limit and started failing outright.
+ *
+ * @param {Array} messages
+ * @returns {Array}
+ */
+export function withConversationCache(messages = []) {
+  const n = messages.length
+
+  // A single-message call — every lens, synthesis, resolve, compact_memory —
+  // is asked once and never followed up. Marking it would write a cache entry
+  // that nothing ever reads, which is not free: a write costs 1.25× the plain
+  // input price. Caching pays only where there is a next turn to pay it back.
+  if (n < 3) return messages
+
+  const out = stripped(messages)
+
+  const mark = i => {
+    if (i < 0) return false
+    const marked = withCacheOn(out[i])
+    if (!marked) return false
+    out[i] = marked
+    return true
+  }
+
+  // This request's end: written now, read by the next turn.
+  mark(n - 1)
+
+  // The previous request's end, which is where the hit comes from. Both
+  // surfaces grow by exactly two messages per exchange — the tool loop pushes
+  // an assistant turn and its tool results, chat stores an answer and takes a
+  // question — so the previous request ended at n-3.
+  //
+  // Only user turns are marked. An assistant turn carries thinking blocks that
+  // are replayed with their signatures, and the n-3 slot is an assistant turn
+  // on exactly one path (the final out-of-budget call, which appends a third
+  // message). Stepping back to the user turn behind it costs nothing: a
+  // breakpoint is a position to match a prefix at, not a boundary that has to
+  // land on a particular turn.
+  for (let i = n - 3; i >= 0; i -= 1) {
+    if (out[i]?.role !== 'user') continue
+    if (mark(i)) break
+  }
+
+  return out
 }
