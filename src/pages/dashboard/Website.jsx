@@ -1,10 +1,7 @@
-import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Card, Button, Skeleton, IconBadge, Empty } from '../../components/ui/index'
 import { Icon } from '../../components/ui/icons'
-import { useAuth } from '../../store/auth'
-import { fetchWebsiteSearch } from '../../lib/websiteSearch'
-import { searchSummary, seoRecommendations, pagePerformance } from '../../lib/seoAdvice'
+import { Collapsible } from './Collapsible'
 import { fmt } from '../analytics/format'
 
 // ─── The website half of the dashboard ─────────────────────────────────────
@@ -93,40 +90,8 @@ function Header({ children, site }) {
   )
 }
 
-export function WebsiteCard() {
-  const { activeWorkspaceId, accessToken } = useAuth()
+export function WebsiteCard({ data, loading, summary, recommendations, pages }) {
   const navigate = useNavigate()
-  const [data, setData] = useState(null)
-  const [loading, setLoading] = useState(true)
-
-  // Deferred a tick, like every other first fetch in this app: the loading
-  // flag is set before the first await, and writing state from an effect BODY
-  // is a cascading render React flags.
-  useEffect(() => {
-    let cancelled = false
-    queueMicrotask(async () => {
-      if (cancelled) return
-      setLoading(true)
-      const res = await fetchWebsiteSearch(activeWorkspaceId, accessToken)
-      if (cancelled) return
-      setData(res)
-      setLoading(false)
-    })
-    return () => { cancelled = true }
-  }, [activeWorkspaceId, accessToken])
-
-  const summary = useMemo(
-    () => (data?.ok && data.configured ? searchSummary(data) : null),
-    [data],
-  )
-  const recommendations = useMemo(
-    () => (data?.ok && data.configured ? seoRecommendations(data) : []),
-    [data],
-  )
-  const pages = useMemo(
-    () => (data?.ok && data.configured ? pagePerformance(data.pages || []) : []),
-    [data],
-  )
 
   if (loading) {
     return (
@@ -227,20 +192,20 @@ export function WebsiteCard() {
             </p>
           )}
 
-          {/* ── The recommendations ── */}
-          <div className="border-t border-border">
-            <div className="px-4 py-3 flex items-center justify-between gap-3 border-b border-border">
-              <div className="min-w-0">
-                <h4 className="text-sm font-semibold text-text leading-tight">What to do about it</h4>
-                <p className="text-xs text-text-tertiary mt-0.5">Computed from the numbers above — no guesswork</p>
-              </div>
-            </div>
+          {/* ── The recommendations ──
+              Folded away by default. The urgent ones already appear at the top
+              of the page in "What to do now"; this is the full list, which is
+              reference material rather than an alert. */}
+          <Collapsible
+            title="What to do about it"
+            subtitle="Computed from the numbers above — no guesswork"
+            count={recommendations.length}>
             {recommendations.length === 0 ? (
-              <p className="px-4 py-5 text-xs text-text-tertiary">
+              <p className="px-4 py-5 text-xs text-text-tertiary border-t border-border">
                 Nothing clears the reporting floor this period. That is a real answer at this volume, not a gap.
               </p>
             ) : (
-              <ul className="divide-y divide-border">
+              <ul className="divide-y divide-border border-t border-border">
                 {recommendations.map(r => {
                   const tone = PRIORITY[r.priority] || PRIORITY.low
                   return (
@@ -263,16 +228,15 @@ export function WebsiteCard() {
                 })}
               </ul>
             )}
-          </div>
+          </Collapsible>
 
           {/* ── Which pages are doing any work ── */}
           {pages.length > 0 && (
-            <div className="border-t border-border">
-              <div className="px-4 py-3 border-b border-border">
-                <h4 className="text-sm font-semibold text-text leading-tight">Pages taking impressions</h4>
-                <p className="text-xs text-text-tertiary mt-0.5">Arabic and English folded together</p>
-              </div>
-              <ul className="divide-y divide-border">
+            <Collapsible
+              title="Pages taking impressions"
+              subtitle="Arabic and English folded together"
+              count={pages.length}>
+              <ul className="divide-y divide-border border-t border-border">
                 {pages.map(p => (
                   <li key={p.path} className="px-4 py-2.5 flex items-center justify-between gap-3">
                     <span className="text-xs text-text truncate font-mono">{p.path}</span>
@@ -282,7 +246,7 @@ export function WebsiteCard() {
                   </li>
                 ))}
               </ul>
-            </div>
+            </Collapsible>
           )}
         </>
       )}

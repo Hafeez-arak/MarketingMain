@@ -136,6 +136,58 @@ function analyticsFor(platform) {
   return { error: 'This account needs reconnecting before it can report.' }
 }
 
+// ── A research run, shaped as the agent writes one ──
+// Carries all four row kinds the priority list can produce: a live deadline,
+// a market direction with its so-what, and a gap with the idea that fills it.
+const inDays = n => new Date(Date.now() + n * 86_400_000).toISOString().slice(0, 10)
+
+const RESEARCH_RUNS = [
+  // Newest row is a run still in flight and carrying no report — latestReport
+  // must walk past it rather than blanking the card.
+  { id: 'run-3', status: 'running', stage: 'gather', report: null, started_at: new Date().toISOString() },
+  {
+    id: 'run-2', status: 'done', started_at: '2026-09-14T06:00:00Z', finished_at: '2026-09-14T06:21:00Z',
+    report: {
+      findings: [
+        {
+          ref: 'F1', headline: 'Riyadh municipality smart-pole tender closes in under a week',
+          lens: 'demand', channel: 'web', relevance: 'high', confidence: 0.9,
+          perishable_until: inDays(5),
+          suggested_action: 'Confirm whether we are pre-qualified before the portal closes.',
+        },
+        {
+          ref: 'F2', headline: 'Light Middle East exhibitor deadline',
+          lens: 'calendar', channel: 'web', relevance: 'medium', confidence: 0.8,
+          perishable_until: inDays(22),
+          suggested_action: 'Decide whether we are taking a stand this year.',
+        },
+        {
+          ref: 'F3', headline: 'A finding with no date on it at all',
+          lens: 'rivals', channel: 'instagram', relevance: 'low', confidence: 0.5,
+        },
+      ],
+      market_direction: [
+        {
+          movement: 'Hotel projects are specifying guest room management alongside lighting',
+          basis: 'web',
+          so_what: 'We sell GRMS on the homepage but have no page for it, so we never appear in the search.',
+        },
+      ],
+      gaps: [
+        { id: 'G1', gap: 'Nothing published on energy management for buildings',
+          our_position: 'Sold on the homepage, no page of its own.',
+          suggested_response: 'Publish a short technical brief.', basis: 'our_analytics' },
+      ],
+      proposed_ideas: [
+        { title: 'Energy management in three numbers', angle: 'A one-page technical brief for specifiers',
+          answers_ref: { kind: 'gap', id: 'G1' } },
+        { title: 'What a GRMS retrofit actually costs', angle: 'From the 240-key job' },
+      ],
+      competitor_board: [],
+    },
+  },
+]
+
 const SEARCH_OK = {
   ok: true, configured: true, site: 'sc-domain:arak-sa.com',
   windows: { days: 28, current: { start: '2026-08-18', end: '2026-09-14' }, previous: { start: '2026-07-21', end: '2026-08-17' } },
@@ -242,6 +294,10 @@ function installFetch(scenario) {
       if (scenario === 'empty') return json([])
       return json(url.includes('scheduled_publish_at=is.null') ? TRAY : UPCOMING)
     }
+    if (url.includes('/rest/v1/research_runs')) {
+      await new Promise(r => setTimeout(r, 350))
+      return json(scenario === 'no-research' || scenario === 'empty' ? [] : RESEARCH_RUNS)
+    }
     if (url.includes('/rest/v1/social_accounts')) {
       return json(scenario === 'empty' ? [] : ACCOUNTS)
     }
@@ -257,6 +313,7 @@ const SCENARIOS = [
   { key: 'full', label: 'Everything connected' },
   { key: 'no-gsc', label: 'Search Console not set up' },
   { key: 'broken-gsc', label: 'Search Console failing' },
+  { key: 'no-research', label: 'Research never run' },
   { key: 'empty', label: 'Nothing connected' },
 ]
 
