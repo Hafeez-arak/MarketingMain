@@ -1,225 +1,201 @@
+import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useApp } from '../store/app'
-import { Card, Button, Badge, PlatformPill, Empty, PostImage, IconBadge, PageHeader } from '../components/ui/index'
+import { Card, Button, PageHeader, IconBadge, Spinner } from '../components/ui/index'
 import { Icon } from '../components/ui/icons'
-import { formatDateTime } from '../lib/utils'
+import { useConnectedAccounts, publishConnectedAccounts } from '../lib/useConnectedAccounts'
+import { syncAccounts, describeSync } from '../lib/zernioConnect'
+import { useAuth } from '../store/auth'
+import { LIVE_PLATFORMS, PLATFORM_META } from '../lib/utils'
+import { combineOverview } from '../lib/dashboardOverview'
+import { useDashboardAnalytics } from './dashboard/useDashboardAnalytics'
+import { AnalyticsOverview, AnalyticsOverviewSkeleton, PlatformPicker } from './dashboard/Analytics'
+import { WebsiteCard } from './dashboard/Website'
+import { QueueCards } from './dashboard/Queue'
+import { CreatePostDialog } from './dashboard/CreatePost'
 
 // ─── Dashboard ───────────────────────────────────────────────────────────
-// Built entirely from the shared primitives (PageHeader, Card, IconBadge, the
-// Icon set) rather than page-local styling, so it can't drift away from the
-// rest of the app the way it did before — this page used to carry a warm
-// gradient hero and decorative progress rings that existed nowhere else.
 //
-// The layout is a stack of divided strips: a KPI row split by vertical rules,
-// then a 2/1 content split, then a platform row using the same divided-strip
-// treatment as the KPIs. Repeating one structural idea down the page is what
-// makes it read as designed rather than assembled.
-
-const PLATFORMS = [
-  { key: 'instagram', label: 'Instagram', color: '#e0687a' },
-  { key: 'facebook',  label: 'Facebook',  color: '#657b81' },
-  { key: 'tiktok',    label: 'TikTok',    color: '#325130' },
-  { key: 'x',         label: 'X',         color: '#7a848c' },
-]
+// Rebuilt 2026-09-17. What stood here before read `state.posts`,
+// `state.campaigns`, `state.approvals` and `state.emailFlows` from the
+// localStorage app store — a store that starts empty and that NOTHING in the
+// real pipeline ever writes to. Every tile was a zero, the platform overview
+// counted posts in it (and listed Facebook and X, which are not platforms in
+// this app at all), and the recent-posts list could never fill. The page was
+// not broken; it had never been connected to anything.
+//
+// Everything on it now comes from a source that is actually written to:
+//
+//   social numbers   /api/zernio/analytics, one call per connected account,
+//                    combined here (src/lib/dashboardOverview.js)
+//   the queue        Supabase scheduled_posts, the same view the calendar and
+//                    the Post Queue read
+//   the website      Google Search Console via /api/agent/search, with the
+//                    recommendations computed in code from the rows
+//
+// The one rule holding all of it together: a number nobody measured prints as
+// "—", never as 0. Zero is a measurement, and claiming one we did not take is
+// how a dead credential comes to read as a quiet month.
 
 export default function Dashboard() {
-  const { state } = useApp()
-  const navigate  = useNavigate()
+  const navigate = useNavigate()
+  const { activeWorkspaceId } = useAuth()
+  const { allAccounts, loading: loadingAccounts } = useConnectedAccounts()
 
-  const live      = state.campaigns.filter(c => c.status === 'live').length
-  const scheduled = state.posts.filter(p => p.status === 'scheduled').length
-  const pending   = state.approvals.filter(a => a.status === 'pending').length
-  const flows     = state.emailFlows.filter(f => f.status === 'active').length
-  const totalPosts = state.posts.length
+  const [days, setDays] = useState(30)
+  const [selected, setSelected] = useState(() => new Set())
+  const [creating, setCreating] = useState(false)
+  const [syncing, setSyncing] = useState(false)
+  const [note, setNote] = useState('')
+  const [reloadKey, setReloadKey] = useState(0)
 
-  const recentPosts     = [...state.posts].sort((a,b) => new Date(b.createdAt) - new Date(a.createdAt)).slice(0,6)
-  const recentApprovals = state.approvals.filter(a => a.status === 'pending').slice(0,4)
+  const { summaries, range, loading, settling } = useDashboardAnalytics({
+    accounts: allAccounts, days, reloadKey,
+  })
+
+  // Platforms with an account, in the app's usual order.
+  const platforms = useMemo(
+    () => LIVE_PLATFORMS.filter(p => allAccounts.some(a => a.platform === p)),
+    [allAccounts],
+  )
+
+  // An empty selection means "all of them", so a workspace that has never
+  // touched the picker sees everything — and unticking the last platform
+  // cannot leave the page blank with no way back.
+  const scoped = useMemo(
+    () => (selected.size ? summaries.filter(s => selected.has(s.platform)) : summaries),
+    [summaries, selected],
+  )
+  const overview = useMemo(() => combineOverview(scoped), [scoped])
+
+  function togglePlatform(p) {
+    setSelected(prev => {
+      const next = new Set(prev.size ? prev : platforms)
+      next.has(p) ? next.delete(p) : next.add(p)
+      // Back to every platform rather than to nothing.
+      return next.size ? next : new Set()
+    })
+  }
+
+  // Refresh does two things and waits for one, the same way /analytics does:
+  // Zernio re-reads each account from its platform now (its own copy is up to
+  // ~90 minutes old, which is why a plain re-read appears to do nothing), then
+  // the numbers on screen are asked for again.
+  async function handleRefresh() {
+    setSyncing(true)
+    setNote('')
+    const live = await syncAccounts(activeWorkspaceId)
+    if (live.error) {
+      setNote(live.error)
+    } else {
+      publishConnectedAccounts(activeWorkspaceId, live.accounts)
+      setNote(`${describeSync(live.synced)} Reach and impressions can still lag the platform by up to 48 hours.`)
+    }
+    setReloadKey(k => k + 1)
+    setSyncing(false)
+  }
 
   const hour = new Date().getHours()
   const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening'
 
-  const kpis = [
-    { label: 'Live campaigns',    value: live,      icon: Icon.checkCircle, path: '/campaigns' },
-    { label: 'Scheduled posts',   value: scheduled, icon: Icon.calendar,    path: '/schedule' },
-    { label: 'Email flows',       value: flows,      icon: Icon.mail,        path: '/email' },
-    { label: 'Pending approvals', value: pending,    icon: Icon.approve,     path: '/social/approvals' },
-    { label: 'Total posts',       value: totalPosts, icon: Icon.image,       path: '/schedule' },
+  // Three per-platform actions, because "create a post" is three different
+  // screens and picking for the user is what the old single Instagram link
+  // did wrong.
+  const quickActions = [
+    ...LIVE_PLATFORMS.map(p => ({
+      label: `Create ${PLATFORM_META[p]?.label || p} post`,
+      icon: Icon.image,
+      path: `/social/${p}`,
+    })),
+    { label: 'Plan a month',  icon: Icon.trending, path: '/campaigns' },
+    { label: 'View analytics', icon: Icon.activity, path: '/analytics' },
+    { label: 'View research',  icon: Icon.document, path: '/insights' },
   ]
 
-  const quickActions = [
-    { label: 'Create Instagram post', icon: Icon.image,       path: '/social/instagram' },
-    { label: 'Schedule content',      icon: Icon.calendar,     path: '/schedule' },
-    { label: 'Plan a month',          icon: Icon.trending,     path: '/campaigns' },
-    { label: 'Upload media',          icon: Icon.grid,         path: '/media' },
-    { label: 'View analytics',        icon: Icon.activity,     path: '/analytics' },
-  ]
+  const nothingConnected = !loadingAccounts && allAccounts.length === 0
 
   return (
     <div className="max-w-7xl space-y-4">
       <PageHeader
         title={greeting}
-        subtitle={pending > 0
-          ? <><span className="font-semibold text-amber-800">{pending} item{pending !== 1 ? 's' : ''}</span> awaiting approval{scheduled > 0 && <> · <span className="font-semibold text-text">{scheduled}</span> scheduled</>}.</>
-          : 'You\'re all caught up — nothing waiting on you right now.'}>
+        subtitle="Everything across your social accounts and the website, in one place.">
         <Button variant="secondary" onClick={() => navigate('/schedule')}>View calendar</Button>
-        <Button onClick={() => navigate('/social/instagram')}>Create post</Button>
+        <Button onClick={() => setCreating(true)}>Create post</Button>
       </PageHeader>
 
-      {/* KPI strip. One card split by vertical rules rather than five separate
-          cards — five bordered boxes with gaps between them puts eight visible
-          edges across the row; this puts four. */}
-      <Card className="overflow-hidden">
-        <div className="grid grid-cols-2 sm:grid-cols-5 divide-y sm:divide-y-0 sm:divide-x divide-border">
-          {kpis.map(k => (
-            <button key={k.label} onClick={() => navigate(k.path)}
-              className="p-4 text-left hover:bg-surface-subtle transition-colors focus:outline-none focus-visible:bg-surface-subtle">
-              <div className="flex items-center gap-1.5 mb-2">
-                <span className="text-text-tertiary flex-shrink-0">{k.icon}</span>
-                <p className="eyebrow truncate">{k.label}</p>
-              </div>
-              <p className="text-2xl font-bold text-text leading-none tabular-nums">{k.value || 0}</p>
-            </button>
-          ))}
-        </div>
-      </Card>
+      <CreatePostDialog open={creating} onClose={() => setCreating(false)} />
 
-      {/* Main content grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
-
-        {/* Recent posts - 2 cols */}
-        <Card className="lg:col-span-2 overflow-hidden">
-          <div className="flex items-center justify-between gap-4 px-4 py-3 border-b border-border">
-            <div className="flex items-center gap-2.5 min-w-0">
-              <IconBadge>{Icon.document}</IconBadge>
-              <div className="min-w-0">
-                <h3 className="font-semibold text-text text-sm leading-tight">Recent posts</h3>
-                <p className="text-xs text-text-tertiary mt-0.5">Across all platforms</p>
-              </div>
+      {nothingConnected ? (
+        <Card className="p-6 border-dashed bg-surface-muted">
+          <div className="flex items-start gap-4">
+            <div className="w-10 h-10 border border-amber-200 bg-amber-50 flex items-center justify-center text-amber-700 flex-shrink-0">
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><path d="m15 7-8.5 8.5a2.12 2.12 0 0 0 3 3L18 10a4.24 4.24 0 0 0-6-6l-8.5 8.5a6.36 6.36 0 0 0 9 9L21 13"/></svg>
             </div>
-            <Button variant="ghost" size="sm" onClick={() => navigate('/schedule')}>View all</Button>
+            <div className="flex-1">
+              <h3 className="font-semibold text-text mb-1">No connected accounts yet</h3>
+              <p className="text-sm text-text-secondary mb-3">
+                Connect an account and its followers, reach, views and engagement show up here.
+              </p>
+              <Button onClick={() => navigate('/social')}>Connect an account</Button>
+            </div>
           </div>
-          {recentPosts.length === 0 ? (
-            <Empty
-              icon={<svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18"/><path d="M3 9h18M9 21V9"/></svg>}
-              title="No posts yet"
-              description="Create your first post using the AI-powered Instagram generator."
-              action={<Button onClick={() => navigate('/social/instagram')}>Create a post</Button>}
-            />
-          ) : (
-            <ul className="divide-y divide-border">
-              {recentPosts.map(p => (
-                <li key={p.id} className="flex items-center gap-3 px-4 py-2.5 hover:bg-surface-subtle transition-colors">
-                  {(p.imageUrl || p.mediaUrls?.[0]) ? (
-                    <PostImage src={p.imageUrl || p.mediaUrls?.[0]} alt="" className="w-9 h-9 object-cover flex-shrink-0 border border-border" />
-                  ) : (
-                    <div className="w-9 h-9 bg-surface-subtle border border-border flex items-center justify-center flex-shrink-0 text-text-tertiary">
-                      {Icon.image}
-                    </div>
-                  )}
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm text-text truncate">{p.copy?.slice(0, 65) || 'No caption'}…</p>
-                    <div className="flex items-center gap-2 mt-1">
-                      <PlatformPill platform={p.platform} />
-                      <span className="text-[10px] text-text-tertiary tabular-nums">{formatDateTime(p.createdAt)}</span>
-                    </div>
-                  </div>
-                  <Badge status={p.status} />
-                </li>
-              ))}
-            </ul>
-          )}
         </Card>
-
-        {/* Right column */}
-        <div className="space-y-4">
-          {/* Quick actions */}
-          <Card className="overflow-hidden">
-            <div className="px-4 py-3 border-b border-border flex items-center gap-2.5">
-              <IconBadge tone="sage">{Icon.activity}</IconBadge>
-              <h3 className="font-semibold text-text text-sm">Quick actions</h3>
-            </div>
-            {/* Ruled rows, flush to the card edge. The old version floated
-                inset pills inside 8px of padding, which left a ragged column
-                of rounded shapes against the card's own straight edge. */}
-            <div className="divide-y divide-border">
-              {quickActions.map(q => (
-                <button key={q.label} onClick={() => navigate(q.path)}
-                  className="w-full text-left px-4 py-2.5 text-sm text-text-secondary
-                    hover:text-text hover:bg-surface-subtle transition-colors flex items-center gap-2.5">
-                  <span className="text-text-tertiary flex-shrink-0">{q.icon}</span>
-                  {q.label}
-                </button>
-              ))}
-            </div>
-          </Card>
-
-          {/* Pending approvals */}
-          <Card className="overflow-hidden">
-            <div className="px-4 py-3 border-b border-border flex items-center justify-between gap-3">
-              <div className="flex items-center gap-2.5 min-w-0">
-                <IconBadge tone="rose">{Icon.approve}</IconBadge>
-                <h3 className="font-semibold text-text text-sm">Pending approvals</h3>
-              </div>
-              {pending > 0 && (
-                <span className="text-[10px] font-bold px-1.5 py-0.5 bg-amber-700 text-white tabular-nums leading-[1.4]">{pending}</span>
-              )}
-            </div>
-            {recentApprovals.length === 0 ? (
-              <div className="py-7 text-center">
-                <div className="w-8 h-8 border border-sage-200 bg-sage-50 flex items-center justify-center mx-auto mb-2 text-sage-600">
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
-                </div>
-                <p className="text-xs text-text-tertiary">All clear</p>
-              </div>
-            ) : (
-              <ul className="divide-y divide-border">
-                {recentApprovals.map(a => (
-                  <li key={a.id} className="flex items-center gap-2.5 px-4 py-2.5 hover:bg-surface-subtle transition-colors">
-                    <PlatformPill platform={a.platform} />
-                    <p className="flex-1 text-xs text-text truncate">{a.title}</p>
-                  </li>
-                ))}
-              </ul>
-            )}
-            <div className="px-4 py-2.5 border-t border-border">
-              <Button variant="ghost" size="sm" className="w-full" onClick={() => navigate('/social/approvals')}>
-                View all approvals
+      ) : (
+        <>
+          {/* The picker and the refresh sit above the numbers they change. */}
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            {loadingAccounts
+              ? <div className="h-[30px]" />
+              : <PlatformPicker platforms={platforms} selected={selected.size ? selected : new Set(platforms)}
+                  onToggle={togglePlatform} />}
+            <div className="flex items-center gap-2 ml-auto">
+              {settling && !loading && <span className="text-[11px] text-text-tertiary">Still loading…</span>}
+              <Button size="sm" variant="secondary" onClick={handleRefresh} disabled={syncing || loadingAccounts}>
+                {syncing ? <><Spinner size="sm" /> Refreshing…</> : 'Refresh'}
               </Button>
             </div>
-          </Card>
-        </div>
-      </div>
-
-      {/* Platform overview — same divided-strip structure as the KPI row. */}
-      <Card className="overflow-hidden">
-        <div className="px-4 py-3 border-b border-border flex items-center justify-between gap-4">
-          <div className="flex items-center gap-2.5 min-w-0">
-            <IconBadge>{Icon.grid}</IconBadge>
-            <div className="min-w-0">
-              <h3 className="font-semibold text-text text-sm leading-tight">Platform overview</h3>
-              <p className="text-xs text-text-tertiary mt-0.5">Posts by platform, all time</p>
-            </div>
           </div>
-          <Button variant="ghost" size="sm" onClick={() => navigate('/analytics')}>Analytics</Button>
+          {note && <p className="text-xs text-text-secondary -mt-1">{note}</p>}
+
+          {loadingAccounts ? <AnalyticsOverviewSkeleton /> : (
+            <AnalyticsOverview
+              summaries={summaries}
+              overview={overview}
+              range={range}
+              days={days}
+              onDays={setDays}
+              selected={selected.size ? selected : new Set(platforms)}
+              loading={loading}
+              settling={settling} />
+          )}
+        </>
+      )}
+
+      {/* Website and SEO. Its own row rather than a column beside the social
+          numbers: it answers a different question and deserves the width. */}
+      <WebsiteCard />
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
+        <div className="lg:col-span-2 space-y-4">
+          <QueueCards />
         </div>
-        <div className="grid grid-cols-2 sm:grid-cols-5 divide-y sm:divide-y-0 sm:divide-x divide-border">
-          {PLATFORMS.map(p => {
-            const count = state.posts.filter(post => post.platform === p.key).length
-            return (
-              <div key={p.key} className="p-4">
-                <p className="eyebrow mb-2 flex items-center gap-1.5">
-                  {/* Square swatch. A round dot is the only circle that would
-                      appear on this page, and it isn't standing in for
-                      anything circular — it's a color key. */}
-                  <span className="w-2 h-2 flex-shrink-0" style={{ background: p.color }} />
-                  <span className="truncate">{p.label}</span>
-                </p>
-                <p className="text-2xl font-bold text-text leading-none tabular-nums">{count}</p>
-              </div>
-            )
-          })}
-        </div>
-      </Card>
+
+        <Card className="overflow-hidden">
+          <div className="px-4 py-3 border-b border-border flex items-center gap-2.5">
+            <IconBadge tone="sage">{Icon.activity}</IconBadge>
+            <h3 className="font-semibold text-text text-sm">Quick actions</h3>
+          </div>
+          <div className="divide-y divide-border">
+            {quickActions.map(q => (
+              <button key={q.label} onClick={() => navigate(q.path)}
+                className="w-full text-left px-4 py-2.5 text-sm text-text-secondary
+                  hover:text-text hover:bg-surface-subtle transition-colors flex items-center gap-2.5">
+                <span className="text-text-tertiary flex-shrink-0">{q.icon}</span>
+                {q.label}
+              </button>
+            ))}
+          </div>
+        </Card>
+      </div>
     </div>
   )
 }
