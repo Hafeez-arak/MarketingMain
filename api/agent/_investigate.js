@@ -14,6 +14,7 @@ import { priorIdeas } from './_memory.js'
 import { silentLensNote } from '../../src/lib/agent/runHealth.js'
 import { partitionRepeats } from '../../src/lib/agent/memory.js'
 import { freshQuestions, dedupeQuestions } from '../../src/lib/agent/agendaDedup.js'
+import { parseLines, stampLines } from '../../src/lib/agent/lines.js'
 import { applyNovelty, priorFindingsFrom, repetitionNote } from '../../src/lib/agent/novelty.js'
 import {
   deadlineFor, resultsFromRows, timingNote, pendingLenses, timedOutResult,
@@ -293,6 +294,17 @@ async function argsForLens(key, { brandFacts, motion, competitors, competitorNot
  * that wrote nothing would stall the run forever rather than cost it one
  * sixth.
  */
+/**
+ * The watchlist as records, for the line stamp.
+ *
+ * `competitors` is a list of NAMES and six call sites depend on that shape, so
+ * the records ride alongside it in `competitorNotes`. This picks out the two
+ * fields the stamp needs without either list having to change.
+ */
+function competitorRecordsOf(ctxBundle = {}) {
+  return (ctxBundle.competitorNotes || []).map(n => ({ subject: n.name, lines: n.lines || [] }))
+}
+
 export async function runSingleLens({ workspaceId, runId, lensKey, cadence = 'weekly', deadline }) {
   const startedAt = Date.now()
   const limit = deadline || deadlineFor('lens', startedAt)
@@ -426,7 +438,18 @@ export async function synthesiseRun({ workspaceId, runId, cadence = 'weekly', de
     // Refs are stamped BEFORE the synthesis sees the findings, because the
     // whole point of them is that the model can point an idea at one. Stamping
     // after would leave `answers` referring to nothing.
-    const ranked = rankFindings(applyNovelty(results.flatMap(r => r.findings || []), seenBefore))
+    // ── Stamp the business line before anything downstream reads it ──
+    // Done once, here, rather than in each lens: the rule is the same for all
+    // of them, and only this point has both the brand's configured lines and
+    // the watchlist. A `search` finding already carries a line stamped from
+    // the landing page it resolved to, and stampLines leaves that alone.
+    const ranked = stampLines(
+      rankFindings(applyNovelty(results.flatMap(r => r.findings || []), seenBefore)),
+      {
+        lines: parseLines(ctxBundle.profile?.customFields?.business_lines),
+        watchlist: competitorRecordsOf(ctxBundle),
+      },
+    )
 
     // The store's verdict overrides the headline match: "check the store
     // before calling something new" is decided here, in code, against rows

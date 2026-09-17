@@ -10,7 +10,7 @@ import {
 import {
   TEAMS, sectionVisible, forTeam, topThree, salesRows, competitorMoves, socialActivity, eventsView,
   marketNotes, marketingRecommendations, newCompetitors, sourceList, domainOf, teamsOf,
-  openItems, freshnessLabel, searchDemand,
+  openItems, freshnessLabel, searchDemand, linesIn, forLine, linesOfRefs, matchesLine,
 } from '../../lib/marketReport'
 import { fetchIntel, updateOpportunity, updateEventDecision } from '../../lib/marketIntel'
 import { fetchAgenda, setAgendaStatus } from '../../lib/agentAgenda'
@@ -190,7 +190,7 @@ const Quiet = ({ children }) => <p className="text-xs text-text-tertiary leading
 
 // ─── Sticky bar: who is reading, and where to jump ─────────────────────────
 
-function ReaderBar({ team, onTeam, sections, active, onJump }) {
+function ReaderBar({ team, onTeam, lines = [], line = 'all', onLine, untagged = 0, sections, active, onJump }) {
   return (
     <div className="sticky top-0 z-20 -mx-4 sm:-mx-6 px-4 sm:px-6 py-2 bg-surface-muted/95 backdrop-blur border-b border-border space-y-2">
       <div className="flex items-center gap-2 flex-wrap">
@@ -205,6 +205,27 @@ function ReaderBar({ team, onTeam, sections, active, onJump }) {
           ))}
         </div>
       </div>
+      {/* Only when the run actually found more than one line. A brand with one
+          undivided business should never see a control that does nothing. */}
+      {lines.length > 1 && (
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-[10px] font-semibold text-text-tertiary uppercase tracking-wide">Business</span>
+          <div className="flex gap-1 flex-wrap">
+            {[{ key: 'all', label: 'Everything' }, ...lines].map(l => (
+              <button key={l.key} onClick={() => onLine?.(l.key)} aria-pressed={line === l.key}
+                className={`px-2.5 py-1 text-xs font-semibold rounded-lg border transition-colors ${
+                  line === l.key ? 'bg-slate-700 text-white border-slate-700' : 'bg-white text-text-secondary border-border hover:text-text'}`}>
+                {l.label}
+              </button>
+            ))}
+          </div>
+          {line !== 'all' && untagged > 0 && (
+            <span className="text-[10px] text-text-tertiary">
+              {untagged} finding{untagged === 1 ? '' : 's'} could not be tied to a business and show under Everything only.
+            </span>
+          )}
+        </div>
+      )}
       <div className="flex gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {sections.map(z => (
           <button key={z.key} onClick={() => onJump(z.key)}
@@ -548,6 +569,15 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
     setTeam(t)
     try { localStorage.setItem('research.team', t) } catch { /* private window */ }
   }, [])
+  // Remembered per reader, like the team. Someone who works in controls opens
+  // this page in controls every week.
+  const [line, setLine] = useState(() => {
+    try { return localStorage.getItem('research.line') || 'all' } catch { return 'all' }
+  })
+  const chooseLine = useCallback(l => {
+    setLine(l)
+    try { localStorage.setItem('research.line', l) } catch { /* private window */ }
+  }, [])
 
   // The store and the watchlist. Loaded here rather than by the page because
   // only this tab reads them. Until they land, the two sections that depend
@@ -591,6 +621,16 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
   const events = useMemo(() => eventsView({ report, events: intel.events, runId: run?.id, now }), [report, intel.events, run?.id, now])
   const notes = useMemo(() => marketNotes(report, now), [report, now])
   const search = useMemo(() => searchDemand(report), [report])
+  // The second axis. Built from the run, so a brand with one undivided
+  // business never sees a control that does nothing.
+  const lines = useMemo(() => linesIn(report), [report])
+  // How much of the run carries no line at all. Shown rather than swallowed:
+  // an untagged item appears only under "Everything", so without this a reader
+  // switching to Controls sees sections empty out and reasonably concludes the
+  // page is broken. It is not — it is telling the truth about what we know.
+  const untagged = useMemo(
+    () => (report.findings || []).filter(f => !String(f?.line || '').trim()).length,
+    [report])
   // Labels come from the run's own byLine roll-up, so the page never has to
   // know what a brand's business lines are called.
   const lineLabel = useCallback(
@@ -608,13 +648,28 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
   const { passed } = useMemo(() => partitionByClock(report.findings || [], now), [report, now])
   const live = isLive(run)
 
-  const visibleTop = top.items.filter(t => team === 'all' || t.team === team)
-  const visibleMoves = moves.items.filter(m => forTeam(team, m.teams))
-  const visibleNotes = notes.filter(n => forTeam(team, n.teams))
+  // Both axes, independently: a sales person in controls wants sales items
+  // about controls. Sections written by the model carry refs rather than a
+  // line, so the line is read back off the findings they cite.
+  const visibleTop = top.items
+    .filter(t => team === 'all' || t.team === team)
+    .filter(t => matchesLine(line, linesOfRefs(t.refs, report)))
+  const visibleMoves = moves.items
+    .filter(m => forTeam(team, m.teams))
+    .filter(m => matchesLine(line, linesOfRefs(m.refs, report)))
+  // A lead carries its own line rather than refs, so it filters directly.
+  // Memoised because the sections rail depends on it, and a fresh object every
+  // render would rebuild that list on every keystroke elsewhere on the page.
+  const visibleSales = useMemo(
+    () => ({ ...sales, open: sales.open.filter(r => forLine(line, r.line)) }),
+    [sales, line])
+  const visibleNotes = notes
+    .filter(n => forTeam(team, n.teams))
+    .filter(n => matchesLine(line, linesOfRefs([n.ref].filter(Boolean), report)))
 
   const sections = useMemo(() => [
     { key: 'top', label: 'Top 3', count: visibleTop.length },
-    { key: 'sales', label: 'Sales: act now', count: sales.open.length },
+    { key: 'sales', label: 'Sales: act now', count: visibleSales.open.length },
     { key: 'competitors', label: 'Competitor moves', count: visibleMoves.length },
     { key: 'social', label: 'Social activity', count: social.theirs.length + social.ours.length },
     { key: 'events', label: 'Events', count: events.count + events.dates.length },
@@ -626,7 +681,7 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
     { key: 'run', label: 'How this run went' },
     { key: 'watch', label: 'What it watches' },
   ].filter(s => ['run', 'watch'].includes(s.key) || sectionVisible(s.key, team)),
-  [team, visibleTop, sales, visibleMoves, social, events, search, visibleNotes, plan, candidates, sources])
+  [team, visibleTop, visibleSales, visibleMoves, social, events, search, visibleNotes, plan, candidates, sources])
 
   const [activeZone, setActiveZone] = useState('top')
   const rootRef = useRef(null)
@@ -744,7 +799,8 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
       {empty.empty && <Card className="p-5"><p className="text-sm text-text-secondary leading-relaxed">{empty.reason}</p></Card>}
       {saveNote && <Card className="p-3 border-red-200 bg-red-50/50"><p className="text-xs text-red-700">{saveNote}</p></Card>}
 
-      <ReaderBar team={team} onTeam={chooseTeam} sections={sections} active={active} onJump={jump} />
+      <ReaderBar team={team} onTeam={chooseTeam} lines={lines} line={line} onLine={chooseLine}
+        untagged={untagged} sections={sections} active={active} onJump={jump} />
 
       {/* 1 ── Top 3 */}
       <Section id="top" n={num('top')} title="Top 3 this week"
@@ -760,8 +816,8 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
             : 'Leads from this report. From the next run they are saved to a tracker and carried week to week with a status you set.'}>
           {!storeLoaded ? (
             <div className="space-y-2" aria-busy="true"><Skeleton className="h-10 w-full" /><Skeleton className="h-10 w-full" /></div>
-          ) : sales.open.length ? (
-            <SalesTable rows={sales.open} canEdit={intel.available} onStatus={onStatus} busyId={busyId} />
+          ) : visibleSales.open.length ? (
+            <SalesTable rows={visibleSales.open} canEdit={intel.available} onStatus={onStatus} busyId={busyId} />
           ) : <Quiet>No open leads, tenders or projects.</Quiet>}
           {sales.closed.length > 0 && (
             <p className="text-[11px] text-text-tertiary mt-3">

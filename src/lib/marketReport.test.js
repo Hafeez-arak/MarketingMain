@@ -5,6 +5,7 @@ import {
   marketingRecommendations, openItems,
   newCompetitors, sourceList, sectionVisible, dayLabel, resolveRefs,
   searchDemand,
+  linesIn, forLine, linesOfRefs, matchesLine,
 } from './marketReport'
 
 // The real 14 Sep 2026 Arak brief — written before any of the three-reader
@@ -373,5 +374,45 @@ describe('socialActivity and the watchlist', () => {
   it('treats an empty watchlist as no watchlist, for the same reason', () => {
     const out = socialActivity({ signals: [sig('Datacore')], watching: [], now: NOW })
     expect(out.theirs).toHaveLength(1)
+  })
+})
+
+describe('the business-line filter', () => {
+  const report = {
+    findings: [
+      { ref: 'F1', line: 'controls', headline: 'a' },
+      { ref: 'F2', line: 'lighting', headline: 'b' },
+      { ref: 'F3', line: '', headline: 'c' },
+      { ref: 'F4', line: 'controls', headline: 'd' },
+    ],
+  }
+
+  it('offers only the lines this run actually found', () => {
+    expect(linesIn(report).map(l => l.key)).toEqual(['controls', 'lighting'])
+  })
+
+  it('offers nothing for a brand with one undivided business', () => {
+    expect(linesIn({ findings: [{ ref: 'F1', line: '' }] })).toEqual([])
+  })
+
+  it('reads a section item’s line back off the findings it cites', () => {
+    expect(linesOfRefs(['F1', 'F4'], report)).toEqual(['controls'])
+  })
+
+  it('lets a cross-line item belong to both rather than forcing a choice', () => {
+    const both = linesOfRefs(['F1', 'F2'], report)
+    expect(both.sort()).toEqual(['controls', 'lighting'])
+    expect(matchesLine('lighting', both)).toBe(true)
+    expect(matchesLine('controls', both)).toBe(true)
+  })
+
+  it('shows everything under "all"', () => {
+    expect(matchesLine('all', [])).toBe(true)
+    expect(forLine('all', '')).toBe(true)
+  })
+
+  it('keeps an unclassified finding out of both lines', () => {
+    expect(forLine('lighting', '')).toBe(false)
+    expect(forLine('controls', '')).toBe(false)
   })
 })

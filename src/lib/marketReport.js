@@ -35,6 +35,55 @@ import {
 } from './agent/intel'
 import { ownChannelRows, actionPlan, pct } from './researchBrief'
 
+/**
+ * The second axis: which side of the business a reader is in.
+ *
+ * `TEAMS` filters one report by WHO you are. This filters the same report by
+ * WHICH BUSINESS — lighting or controls — and the two are independent: a sales
+ * person in controls wants sales items about controls.
+ *
+ * A filter and not tabs, deliberately. "Top 3 this week" is genuinely
+ * company-wide and splitting it would hide the most important item from half
+ * the readers. The Business view is the surface that separates the lines
+ * properly, because there the whole question is per-line.
+ *
+ * Built from the run itself rather than from a fixed list, so a brand with one
+ * line never sees a control that does nothing, and a brand with three sees all
+ * three. An unclassified finding shows under "Everything" and nowhere else —
+ * it is not evidence about either business.
+ */
+export function linesIn(report = {}) {
+  const seen = new Map()
+  for (const f of report?.findings || []) {
+    const line = str(f?.line)
+    if (line && !seen.has(line)) seen.set(line, { key: line, label: line[0].toUpperCase() + line.slice(1) })
+  }
+  return [...seen.values()].sort((a, b) => a.key.localeCompare(b.key))
+}
+
+/** Does this item belong to the line being read? `all` always passes. */
+export const forLine = (line, value) => line === 'all' || str(value) === line
+
+/**
+ * Which line a section item belongs to, from the findings it cites.
+ *
+ * The same shape as freshnessOf: sections are written by the model and carry
+ * refs, not lines, so the line is read back off the evidence. An item citing
+ * two lines belongs to both and is shown under either — that is a real
+ * property of a cross-line move, not a failure to decide.
+ */
+export function linesOfRefs(refs = [], report = {}) {
+  const fs = findingByRef(report)
+  const out = new Set()
+  for (const r of refs || []) {
+    const line = str(fs.get(str(r).toUpperCase())?.line)
+    if (line) out.add(line)
+  }
+  return [...out]
+}
+
+export const matchesLine = (line, lines = []) => line === 'all' || lines.includes(line)
+
 export const TEAMS = [
   { key: 'all', label: 'Everyone' },
   { key: 'marketing', label: 'Marketing' },

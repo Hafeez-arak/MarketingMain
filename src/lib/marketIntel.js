@@ -77,6 +77,62 @@ export async function fetchCompetitorIntel(workspaceId, accessToken) {
   }
 }
 
+export const DECIDED_BY = [
+  ['price', 'Price'],
+  ['lead_time', 'Lead time'],
+  ['spec_lock_in', 'Already written into the spec'],
+  ['agency_rights', 'They had the agency we did not'],
+  ['relationship', 'Relationship'],
+  ['compliance', 'Compliance or certification'],
+  ['scope', 'Scope we could not cover'],
+  ['other', 'Something else'],
+  ['unknown', "Don't know"],
+]
+
+/**
+ * Record a bid we contested.
+ *
+ * The only table in the research store a model never writes to. Where we lose,
+ * and why, is not on any website — only the team who bid knows it — and until
+ * this existed the business view's first block could never fill.
+ *
+ * Kept to the fields someone will actually complete standing in a corridor.
+ * `price_delta_pct` is meant to be rough: a log that waits for exact numbers is
+ * one that stops being filled in by the third month.
+ */
+export async function recordDealOutcome(workspaceId, accessToken, deal) {
+  if (!workspaceId) return { ok: false, error: 'No workspace.' }
+  const project = String(deal?.project || '').trim()
+  if (!project) return { ok: false, error: 'A project name is needed.' }
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/deal_outcomes`, {
+      method: 'POST',
+      headers: { ...headers(accessToken), Prefer: 'return=minimal' },
+      body: JSON.stringify({
+        workspace_id: workspaceId,
+        project,
+        competitor: String(deal.competitor || '').trim(),
+        line: String(deal.line || '').trim(),
+        outcome: ['lost', 'won', 'open', 'no_bid'].includes(deal.outcome) ? deal.outcome : 'lost',
+        decided_by: DECIDED_BY.some(([k]) => k === deal.decided_by) ? deal.decided_by : 'unknown',
+        price_delta_pct: Number.isFinite(Number(deal.price_delta_pct)) && String(deal.price_delta_pct).trim() !== ''
+          ? Number(deal.price_delta_pct) : null,
+        value_sar: Number.isFinite(Number(deal.value_sar)) && String(deal.value_sar).trim() !== ''
+          ? Number(deal.value_sar) : null,
+        client: String(deal.client || '').trim(),
+        consultant: String(deal.consultant || '').trim(),
+        contractor: String(deal.contractor || '').trim(),
+        decided_on: String(deal.decided_on || '').trim() || null,
+        note: String(deal.note || '').trim(),
+      }),
+    })
+    if (!res.ok) return { ok: false, error: `${res.status}: ${(await res.text()).slice(0, 160)}` }
+    return { ok: true }
+  } catch (err) {
+    return { ok: false, error: String(err?.message || err) }
+  }
+}
+
 async function patch(table, workspaceId, accessToken, id, body) {
   try {
     const res = await fetch(

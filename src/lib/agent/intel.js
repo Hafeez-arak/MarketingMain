@@ -149,6 +149,37 @@ export function signalFromFinding(f, watchlist = []) {
   }
 }
 
+/**
+ * The distribution rights a finding reported.
+ *
+ * Kept out of `signalFromFinding` deliberately: a brand row is not an
+ * observation that ages, it is a standing fact about who can bid what, and it
+ * belongs in its own table with its own dedup key. One finding can name
+ * several brands, so this returns a list.
+ *
+ * A brand with no competitor attached is dropped. "Someone carries Berker" is
+ * not a fact anyone can use, and the table keys on the pair.
+ */
+export function brandsFromFinding(f, watchlist = []) {
+  const competitor = canonicalCompetitor(f?.competitor, watchlist)
+  if (!competitor) return []
+  const src = firstSource(f?.sources)
+  return (Array.isArray(f?.brands) ? f.brands : [])
+    .map(b => ({
+      competitor,
+      brand: String(b?.brand || '').trim(),
+      relationship: ['exclusive', 'non_exclusive', 'claimed', 'unconfirmed', 'ended']
+        .includes(b?.relationship) ? b.relationship : 'unconfirmed',
+      line: '',
+      source_url: src?.url || '',
+      source_title: src?.title || '',
+      observed_at: cleanDate(f?.perishable_until) ? null : null,
+      note: String(f?.headline || '').slice(0, 300),
+      fingerprint: `${nameKey(competitor)}|${nameKey(b?.brand)}`,
+    }))
+    .filter(b => b.brand)
+}
+
 export const signalKey = (competitor, summary) => `${nameKey(competitor) || '-'}|${fingerprint(summary)}`
 
 export function opportunityFromFinding(f) {
@@ -301,6 +332,7 @@ const EVENT_FIELDS = [
 export function planStoreWrites(findings = [], existing = {}, { runId = null, now = new Date(), watchlist = [] } = {}) {
   const stamp = now.toISOString()
   const out = {
+    brands: { insert: [] },
     signals: { insert: [], update: [] },
     opportunities: { insert: [], update: [] },
     events: { insert: [], update: [] },
@@ -351,6 +383,14 @@ export function planStoreWrites(findings = [], existing = {}, { runId = null, no
     if (ev) notes.push(upsert('events', ev, matchEvent, EVENT_FIELDS))
     const sig = signalFromFinding(f, watchlist)
     if (sig) notes.push(upsert('signals', sig, matchSignal, null))
+    // Brands are inserted rather than upserted: the write is an on-conflict
+    // merge against (workspace_id, fingerprint), so a brand seen every week
+    // refreshes one row instead of accumulating. Deduped within the run too,
+    // because two findings about the same rival can name the same agency.
+    for (const b of brandsFromFinding(f, watchlist)) {
+      if (out.brands.insert.some(x => x.fingerprint === b.fingerprint)) continue
+      out.brands.insert.push({ ...b, first_run_id: runId, last_run_id: runId, last_seen_at: stamp })
+    }
     if (notes.length) out.annotations.push({ index, ref: f.ref || null, notes })
   })
 

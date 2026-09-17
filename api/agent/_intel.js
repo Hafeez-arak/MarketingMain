@@ -47,7 +47,7 @@ function logged(what) {
  * meantime. Returns counts for the report.
  */
 export async function persistIntel(workspaceId, runId, report, { now = new Date(), watchlist = [] } = {}) {
-  const counts = { signals_new: 0, signals_seen: 0, opportunities_new: 0, opportunities_changed: 0, events_new: 0, events_changed: 0 }
+  const counts = { signals_new: 0, signals_seen: 0, opportunities_new: 0, opportunities_changed: 0, events_new: 0, events_changed: 0, brands_seen: 0 }
   try {
     const existing = await loadIntel(workspaceId)
     const plan = planStoreWrites(report?.findings || [], existing, { runId, now, watchlist })
@@ -76,6 +76,23 @@ export async function persistIntel(workspaceId, runId, report, { now = new Date(
           method: 'PATCH', body: u.patch, prefer: 'return=minimal',
         }).catch(err => console.error(`[agent/intel] update ${kind}:`, err?.message || err))
       }
+    }
+
+    // ── Distribution rights ──
+    // Merge rather than ignore-duplicates, unlike the three tables above: a
+    // brand row carries a RELATIONSHIP, and a rival moving from 'claimed' to
+    // 'exclusive' — or to 'ended' — is the whole reason to track it. Ignoring
+    // the duplicate would freeze the first thing we ever saw.
+    for (const row of plan.brands?.insert || []) {
+      const ok = await db('competitor_brands?on_conflict=workspace_id,fingerprint', {
+        method: 'POST',
+        body: { ...row, workspace_id: workspaceId },
+        prefer: 'resolution=merge-duplicates,return=minimal',
+      }).then(() => true).catch(err => {
+        console.error('[agent/intel] insert brands:', err?.message || err)
+        return false
+      })
+      if (ok) counts.brands_seen += 1
     }
 
     // Events that have passed since anyone looked. Code closes them — the one
