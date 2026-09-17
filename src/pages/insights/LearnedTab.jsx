@@ -9,11 +9,15 @@ import { useState } from 'react'
 // made on ideas, how our own posts did, and the rule book that steers every
 // future generation.
 //
-// THE RULE BOOK LIVES HERE AND ONLY HERE. Proposed rules were briefly rendered
-// on the research half too, by a second component with its own behaviour —
-// which is precisely the drift RESEARCH-AGENT.md §8b guards against when it
-// says "no new approval surface". One table, one component, one gate. The
-// research half links here instead.
+// APPROVAL HAPPENS HERE AND ONLY HERE. Proposed rules were briefly rendered on
+// the research half too, and Brand Brain's Learned Guidance carried its own
+// Activate button for months — two live gates onto one table, which is
+// precisely the drift RESEARCH-AGENT.md §8b guards against when it says "no
+// new approval surface". Approving a rule means letting it steer every future
+// generation, and that is not a decision anyone should make from a bare
+// sentence: the evidence, the sample size and the dated-rule warning exist
+// only on this card. Brand Brain still LISTS proposed rules, so the whole rule
+// book stays readable in one place — it just links here to act on them.
 
 const pct = n => `${Math.round(n * 100)}%`
 const round1 = n => (Math.round(n * 10) / 10).toFixed(1)
@@ -124,7 +128,7 @@ function ProposedRule({ rule, onActivate, onDismiss, busy }) {
 
 export function LearnedTab({
   events, decisions, performance, proposed, active, noHistory,
-  busy, reviewing, reviewNote, onRunReview, onActivate, onRetire, onRemove,
+  busy, reviewing, reviewNote, onRunReview, onShowResearch, onActivate, onRetire, onRemove,
 }) {
   const [scopeFilter, setScopeFilter] = useState('all')
   const shown = active.filter(r => scopeFilter === 'all' || r.scope === scopeFilter)
@@ -258,18 +262,19 @@ export function LearnedTab({
           subtitle="Suggestions waiting on you. Approving one adds a rule on TOP of the Brand Brain — it never edits what you wrote about the company."
           action={
             <div className="flex items-center gap-2">
-              {/* "Run research" is now a link, not a button. The one-shot
+              {/* "Run research" stopped being a button here. The one-shot
                   brand-research workflow it fired wrote `proposed` rows into
                   this same table from a second code path — three paths writing
                   one table is exactly the drift buildContext exists to prevent,
-                  and the agent's run supersedes it with evidence attached.
+                  and the agent's run supersedes it with evidence attached. It
+                  switches tabs rather than navigating: /insights/research is a
+                  redirect back to this same page, so routing through it meant
+                  a round trip to land on the half that was one click away.
                   "Run review" stays for now: its replacement is the agent's
                   `ourselves` lens, which cannot say anything until a real
                   Instagram account is connected. Removing a working button in
                   favour of one that returns nothing would be tidy and wrong. */}
-              <Link to="/insights/research">
-                <Button size="sm" variant="secondary">Research</Button>
-              </Link>
+              <Button size="sm" variant="secondary" onClick={onShowResearch}>Research</Button>
               <Button size="sm" variant="secondary" disabled={reviewing || busy} onClick={onRunReview}>
                 {reviewing ? 'Reviewing…' : 'Run review'}
               </Button>
@@ -292,10 +297,10 @@ export function LearnedTab({
             <p className="text-xs text-text-tertiary leading-relaxed">
               Nothing proposed. <strong className="font-semibold text-text-secondary">Run review</strong> reads
               the two sections above and suggests rules from them — it declines to run until there is
-              enough history to say anything honest. <strong className="font-semibold text-text-secondary">Run
-              research</strong> searches the web for this brand's market and competitors instead, so it works
-              before there is any history at all. You can also write rules by hand under Learned Guidance
-              in <Link to="/brand-brain" className="underline">Brand Brain</Link>.
+              enough history to say anything honest. <strong className="font-semibold text-text-secondary">Research</strong> opens
+              the other half, where a run searches this brand's market and competitors instead — so it has
+              something to say before there is any history at all. You can also write rules by hand under
+              Learned Guidance in <Link to="/brand-brain" className="underline">Brand Brain</Link>.
             </p>
           )}
         </div>

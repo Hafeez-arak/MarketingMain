@@ -103,9 +103,9 @@ export async function createAgendaItem(workspaceId, accessToken, row) {
 }
 
 // ─── Competitors, as the resolve step wants them ───────────────────────────
-// Sibling of competitorNamesFrom() in insights.js, and read the same way:
-// from the directory rather than asked for, because every workspace names and
-// shapes that section itself. Returns the whole row rather than just the name
+// Read from the directory rather than asked for, because every workspace names
+// and shapes that section itself. This replaced a names-only sibling that used
+// to live in insights.js. Returns the whole row rather than just the name
 // because verification needs the website and positioning — a bio linking to
 // the rival's own domain is the one conclusive signal there is, and it is
 // worthless if the domain never leaves the browser.

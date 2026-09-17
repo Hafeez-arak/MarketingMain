@@ -47,7 +47,10 @@ export const WEBHOOK_PATHS = {
   zernioSync:       'arak-zernio-sync',
   zernioDashboard:  'arak-zernio-dashboard',
   insightsReview:   'arak-insights-review',
-  brandResearch:    'arak-brand-research',
+  // No brandResearch slot. `arak-brand-research` wrote `proposed` rows into
+  // brand_memory from a second code path; the research agent's run does the
+  // same job with evidence attached, so the UI stopped calling it. Leaving
+  // the slot here would keep it reachable through this proxy.
   // Research agent. `researchResolve` finds and verifies competitors'
   // Instagram handles — the step the whole competitor board depends on, since
   // the Brand Brain holds zero handles today.
