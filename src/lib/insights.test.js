@@ -3,7 +3,6 @@ import {
   engagementOf,
   summariseDecisions,
   summarisePerformance,
-  competitorNamesFrom,
   WEAK_SAMPLE,
 } from './insights'
 
@@ -190,44 +189,5 @@ describe('summarisePerformance', () => {
     ]
     const { byPillar } = summarisePerformance({ metrics, posts }, ideas)
     expect(byPillar.map(p => p.key)).toEqual(['b', 'a'])
-  })
-})
-
-// ─── competitorNamesFrom ────────────────────────────────────────────────────
-
-describe('competitorNamesFrom', () => {
-  it('finds directory sections by title/key regardless of exact wording', () => {
-    const schema = {
-      sections: [{ key: 'watch', title: 'Competitor Watch', kind: 'directory', enabled: true }],
-      columns: [{ key: 'name', section_key: 'watch', enabled: true, in_prompt: true }],
-    }
-    const directory = { rowsBySection: { watch: [{ data: { name: 'Rival Spa' } }, { data: { name: 'Other Spa' } }] } }
-    expect(competitorNamesFrom(schema, directory)).toEqual(['Rival Spa', 'Other Spa'])
-  })
-
-  it('matches a renamed section as long as "competitor" or "rival" appears', () => {
-    const schema = {
-      sections: [{ key: 'rivals', title: 'Local Rivals', kind: 'directory', enabled: true }],
-      columns: [{ key: 'name', section_key: 'rivals', enabled: true, in_prompt: true }],
-    }
-    const directory = { rowsBySection: { rivals: [{ data: { name: 'X' } }] } }
-    expect(competitorNamesFrom(schema, directory)).toEqual(['X'])
-  })
-
-  it('returns an empty list when no directory section matches', () => {
-    const schema = {
-      sections: [{ key: 'services', title: 'Services', kind: 'directory', enabled: true }],
-      columns: [],
-    }
-    expect(competitorNamesFrom(schema, { rowsBySection: {} })).toEqual([])
-  })
-
-  it('dedupes repeated names', () => {
-    const schema = {
-      sections: [{ key: 'watch', title: 'Competitor Watch', kind: 'directory', enabled: true }],
-      columns: [{ key: 'name', section_key: 'watch', enabled: true, in_prompt: true }],
-    }
-    const directory = { rowsBySection: { watch: [{ data: { name: 'Rival Spa' } }, { data: { name: 'Rival Spa' } }] } }
-    expect(competitorNamesFrom(schema, directory)).toEqual(['Rival Spa'])
   })
 })

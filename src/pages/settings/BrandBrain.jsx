@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { Link } from 'react-router-dom'
 import { useApp, actions } from '../../store/app'
 import { useAuth } from '../../store/auth'
 import { Card, WarmCard, Button, Textarea, Input, Select, ConfirmDialog, Modal } from '../../components/ui/index'
@@ -1039,7 +1040,14 @@ function LearnedGuidance({ rules, onAdd, onSetStatus, onSetTasks, onDelete, busy
           </span>
         </span>
         <span className="flex items-center gap-1 shrink-0">
-          {r.status !== 'active' && (
+          {/* Retired only — never proposed. Bringing a retired rule back is
+              re-activating something a human already approved once; approving
+              a PROPOSED rule is a different act, and it happens on the What We
+              Learned tab, which is the only surface that shows the evidence,
+              the sample size and the dated-rule warning beside it. An Activate
+              button here was a second gate onto the same table with none of
+              that context attached. */}
+          {r.status === 'retired' && (
             <button type="button" disabled={busy} onClick={() => onSetStatus(r, 'active')}
               className="text-[11px] font-semibold px-2 py-1 rounded-lg border border-sage-200 text-sage-700 hover:bg-sage-50">
               Activate
@@ -1066,8 +1074,7 @@ function LearnedGuidance({ rules, onAdd, onSetStatus, onSetTasks, onDelete, busy
         <h2 className="text-sm font-semibold text-text">Learned Guidance</h2>
         <p className="text-xs text-text-secondary mt-1 leading-relaxed">
           Short rules that get added to every matching generation, on top of the fields above.
-          Write them yourself, or approve ones the system proposes from what was rejected,
-          edited, or how posts actually performed.
+          Write them yourself here; ones the system proposes are approved under What We Learned.
         </p>
       </div>
 
@@ -1091,6 +1098,11 @@ function LearnedGuidance({ rules, onAdd, onSetStatus, onSetTasks, onDelete, busy
           <div className="space-y-1.5">
             <p className="text-[11px] font-semibold text-amber-700 uppercase tracking-wide">
               Proposed — not steering anything yet ({proposed.length})
+            </p>
+            <p className="text-[11px] text-text-tertiary leading-relaxed">
+              Listed here so the whole rule book is readable in one place.{' '}
+              <Link to="/insights?tab=learned" className="underline">Approve them under What We Learned</Link>,
+              where each one is shown with the evidence it was inferred from.
             </p>
             {proposed.map(r => <Row key={r.id} r={r} />)}
           </div>

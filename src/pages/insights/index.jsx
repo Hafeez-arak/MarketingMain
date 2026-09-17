@@ -358,6 +358,7 @@ export function Insights() {
           noHistory={!events.length && !performance.postsWithMetrics}
           busy={busy} reviewing={reviewing} reviewNote={reviewNote}
           onRunReview={onRunReview} onActivate={onActivate} onRetire={onRetire} onRemove={onRemove}
+          onShowResearch={() => setTab('research')}
         />
       )}
     </div>
