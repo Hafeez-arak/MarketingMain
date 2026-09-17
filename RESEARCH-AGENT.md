@@ -599,6 +599,59 @@ eight never researched, no rival tiered, and no contested bid recorded — each
 with a `Closed by:` line naming who can close it. That list is the argument for
 the sales session, in the form a person can act on.
 
+### b3. A blank brief is a fault, not a quiet week — 2026-09-17
+
+The run of 2026-09-17 called synthesis, was charged for it (Opus, 35k in, 8.4k
+out, $0.44), got no error, and produced a real headline about two named Riyadh
+projects. Every section under that headline came back empty: `top_three`,
+`competitor_moves`, `gaps`, `proposed_ideas`, `proposed_rules` and
+`market_direction`, all zero. `rules_dropped_uncited` was 0, so nothing was
+filtered on our side — the model returned the arrays empty.
+
+The stored report was indistinguishable from a quiet week. It was not one: the
+lenses had returned 33 findings, ten of them about named competitors. **This is
+the lens silent-empty failure, one stage later, and it costs a whole run.**
+
+`briefEmptiness` now counts every section on every run and the counts are
+stored on `report.synthesis` alongside `stop_reason` and the raw character
+count. Recorded always, not only when something is wrong: a number that is
+always there can be compared week to week, and one that only appears on a bad
+week is one nobody recognises. When nothing at all was written the run says so
+in `unanswered`, naming how many findings went in.
+
+`blankUnderAHeadline` is the specific shape worth naming — a confident headline
+over six empty sections is a call that looked fine and produced nothing, which
+is different from a call that failed and is already caught by the parse and
+refusal checks.
+
+**The root cause is still unknown**, and a guess was checked and discarded:
+the failed first attempt does not poison the retry's input. The stale budget
+note reaches the report through `mergeBrief` spreading `gathered`, not through
+the model's prompt. The instrumentation above is what the next run will answer
+it with.
+
+### b4. The report is written to be read once — 2026-09-17
+
+The brief is read by sales, marketing and technical staff in Riyadh, mostly
+working in their second language, usually on a phone, usually between other
+things. The writing had drifted into long multi-clause sentences that sound
+authoritative and take effort to decode, and effort spent decoding is effort
+not spent acting.
+
+So both prompt layers now carry the rule, and it is rules rather than an
+adjective: short sentences, one idea each, the point first, everyday words, no
+stacked clauses, plain numbers. **Industry words are explicitly protected** —
+KNX, DALI, tender, specification, exhibitor deadline are the real names of
+things and explaining them would be condescending. What the rule targets is
+invented abstraction ("strategic posture", "market dynamics").
+
+It sits in `who()` in lensPrompts.js as well as in SYNTHESISE_PROMPT, because a
+finding's own words survive into the report — synthesis quotes them and the
+tracker stores them verbatim — so applying the rule only at the end would be
+too late.
+
+The Business view's own copy was rewritten the same way.
+
 ### b. And it lands on the agenda, not in the Brand Brain
 
 This is where §5a stops being a constraint and starts being the thing that

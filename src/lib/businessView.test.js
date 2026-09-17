@@ -21,7 +21,7 @@ describe('losing', () => {
   it('refuses to guess who we lose to when no bid has been recorded', () => {
     const out = losing([], 'lighting')
     expect(out.established).toBe(false)
-    expect(out.why).toContain('No contested bid')
+    expect(out.why).toContain('No bid has been recorded')
   })
 
   it('does not infer a loser from web signals — a busy rival is not a winning one', () => {
@@ -152,8 +152,8 @@ describe('verdict', () => {
       brd: { established: true, rows: [1, 2, 3], researched: 0 },
       line: 'controls',
     })
-    expect(v).toContain('none has returned a finding')
-    expect(v).toContain('nothing here pretends otherwise')
+    expect(v).toContain('none has turned up anything yet')
+    expect(v).toContain('not going to make something up')
   })
 
   it('says activity is not position while no bid is recorded', () => {
@@ -163,7 +163,7 @@ describe('verdict', () => {
       mv: { established: true, rows: [1] },
       line: 'lighting',
     })
-    expect(v).toContain('not of position')
+    expect(v).toContain('not who is winning')
   })
 
   it('leads with the loss record once there is one', () => {
@@ -189,6 +189,6 @@ describe('businessView', () => {
     expect(page.moved.established).toBe(false)
     expect(page.board.established).toBe(true)
     expect(page.unknown.length).toBeGreaterThan(0)
-    expect(page.verdict).toContain('nothing here pretends otherwise')
+    expect(page.verdict).toContain('not going to make something up')
   })
 })

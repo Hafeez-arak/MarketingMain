@@ -313,6 +313,26 @@ export const REFLECT_PROMPT = [
 export const SYNTHESISE_PROMPT = [
   'Write the brief.',
   '',
+  // ── PLAIN LANGUAGE IS A REQUIREMENT, NOT A PREFERENCE ──
+  //
+  // This brief is read by a sales team, a marketing team and a technical team
+  // in Riyadh, most of them working in their second language, usually on a
+  // phone, usually between other things. A sentence somebody has to read twice
+  // has failed, however precise it is — and the report has been drifting into
+  // long multi-clause sentences that sound authoritative and take effort to
+  // decode. Effort spent decoding is effort not spent acting.
+  'WRITE IT SO ANYONE CAN READ IT ONCE AND ACT.',
+  'Most people reading this work in English as a second language, on a phone, between other things.',
+  '  - Short sentences. One idea each. If a sentence needs a second comma to hold together, split it.',
+  '  - Say the thing first. Do not build up to it and do not save it for the end.',
+  '  - Everyday words. "Use" not "utilise". "Before" not "prior to". "Buy" not "procure".',
+  '  - Industry words ARE allowed when they are the real name of the thing — KNX, DALI, tender,',
+  '    specification, exhibitor deadline. Explaining those would be condescending. Inventing',
+  '    abstract ones ("strategic posture", "market dynamics") is what to avoid.',
+  '  - No dashes stacking clauses together. No semicolons. A full stop is free.',
+  '  - Numbers plainly: "418 times" not "an impression volume of 418".',
+  '  - If you cannot say it simply, you have not worked out what you mean yet. Work it out.',
+  '',
   'THREE TEAMS READ THIS, AND EACH NEEDS SOMETHING DIFFERENT.',
   '  Marketing  how to position us and what to publish.',
   '  Sales      leads, tenders, projects and events to act on — someone to call, a bid to decide.',
@@ -622,6 +642,57 @@ export function marketFromFindings(findings = []) {
       novelty: f.novelty || 'new',
       ref: f.ref || '',
     }))
+}
+
+/**
+ * How much the model actually wrote.
+ *
+ * ── WHY THIS EXISTS ──
+ *
+ * On 2026-09-17 a synthesis call succeeded — Opus, 35k in, 8.4k out, $0.44,
+ * no error, a real headline about two named Riyadh projects — and came back
+ * with `top_three`, `competitor_moves`, `gaps`, `proposed_ideas`,
+ * `proposed_rules` and `market_direction` ALL EMPTY. `rules_dropped_uncited`
+ * was 0, so nothing was filtered out on our side: the model returned the
+ * arrays empty.
+ *
+ * The report that got stored looked like a quiet week. It was not a quiet
+ * week — the lenses had returned 33 findings including ten about named
+ * competitors — and nothing anywhere said the brief had come back blank. That
+ * is the same silent-empty failure the lenses were fixed for in September, one
+ * stage later in the pipeline, and it costs a whole run's spend every time.
+ *
+ * So the counts are recorded on every run, not only failing ones. A number
+ * that is always there is one somebody can compare across weeks; a number that
+ * appears only when something is wrong is one nobody recognises.
+ */
+export function briefEmptiness(brief = {}) {
+  const n = key => (Array.isArray(brief?.[key]) ? brief[key].length : 0)
+  const sections = {
+    top_three: n('top_three'),
+    competitor_moves: n('competitor_moves'),
+    market_direction: n('market_direction'),
+    gaps: n('gaps'),
+    proposed_rules: n('proposed_rules'),
+    proposed_ideas: n('proposed_ideas'),
+    unanswered: n('unanswered'),
+    new_competitors: n('new_competitors'),
+    agenda_changes: n('agenda_changes'),
+  }
+  const written = Object.values(sections).reduce((a, b) => a + b, 0)
+  const headline = String(brief?.headline || '').trim()
+
+  return {
+    sections,
+    written,
+    hasHeadline: Boolean(headline),
+    // A headline with nothing under it is the specific shape worth naming. A
+    // brief with no headline AND nothing else is a failed call, which the
+    // parse and refusal checks already catch; a confident headline over six
+    // empty sections is a call that looked fine and produced nothing.
+    blankUnderAHeadline: Boolean(headline) && written === 0,
+    empty: written === 0,
+  }
 }
 
 export function mergeBrief(gathered, brief, allowedUrls, findings = []) {

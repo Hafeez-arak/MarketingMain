@@ -135,3 +135,21 @@ describe('the watchlist row shape', () => {
     expect(p).toContain('RESEARCH THIS DOMAIN: selapass.com')
   })
 })
+
+describe('plain language', () => {
+  const brand = { brandName: 'Arak', descriptor: 'lighting', audience: 'specifiers', geography: 'Riyadh' }
+
+  it('every lens is told to write so it can be read once', () => {
+    // A finding's own words survive into the report, so the rule has to start
+    // at the lens rather than be applied at the end.
+    const p = rivalsPrompt(brand, { competitors: ['A'], notes: [] })
+    expect(p).toContain('PLAIN ENGLISH')
+    expect(p).toContain('second language')
+  })
+
+  it('does not ban the trade words that are the real name of a thing', () => {
+    const p = rivalsPrompt(brand, { competitors: ['A'], notes: [] })
+    expect(p).toContain('KNX')
+    expect(p).toContain('are fine')
+  })
+})
