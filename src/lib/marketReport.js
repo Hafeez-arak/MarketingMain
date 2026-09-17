@@ -446,8 +446,18 @@ export function competitorMoves(report = {}) {
  * publish to. Theirs are what their posts are ABOUT, from stored signals on
  * any social channel and from the Instagram posts the board already read.
  */
-export function socialActivity({ report = {}, signals = [], now = new Date(), days = 45 } = {}) {
+export function socialActivity({ report = {}, signals = [], watching = null, now = new Date(), days = 45 } = {}) {
   const cutoff = new Date(now.getTime() - days * 86_400_000).toISOString()
+  // A competitor taken off the watchlist should stop appearing in a report
+  // about who we watch. Signals outlive the watchlist entry by design — they
+  // are evidence, and evidence is not deleted because priorities changed — so
+  // the filter belongs here rather than in the store.
+  //
+  // `null` means "no watchlist was passed", which is not the same as an empty
+  // one: an old caller, or a load that failed, must not silently blank the
+  // section. Only an explicit list filters.
+  const watched = watching?.length ? new Set(watching.map(n => nameKey(n)).filter(Boolean)) : null
+  const isWatched = name => !watched || watched.has(nameKey(name))
   const theirs = new Map()
   const push = (competitor, item) => {
     const key = nameKey(competitor)
@@ -459,6 +469,7 @@ export function socialActivity({ report = {}, signals = [], now = new Date(), da
   }
   for (const s of signals || []) {
     if (!SOCIAL_CHANNELS.includes(s.channel) || !s.competitor) continue
+    if (!isWatched(s.competitor)) continue
     if (String(s.last_seen_at || s.first_seen_at || '') < cutoff) continue
     push(s.competitor, { platform: s.channel, text: s.summary, url: s.source_url, date: String(s.first_seen_at || '').slice(0, 10) })
   }
