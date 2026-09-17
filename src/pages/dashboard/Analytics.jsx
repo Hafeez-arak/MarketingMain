@@ -265,82 +265,66 @@ export function AnalyticsOverview({ summaries, overview, range, days, onDays, se
           )}
         </Card>
 
-        <div className="space-y-4">
-          {/* Most active platform. Ranked by interactions rather than by how
-              often we posted — "most active" is a question about where the
-              audience is, and posts sit underneath so the other reading of the
-              word is one glance away. */}
-          <Card className="overflow-hidden">
-            <div className="px-4 py-3 border-b border-border flex items-center gap-2.5">
+        {/* ── Platforms, as one card ──
+            "Most active platform" and "By platform" were two boxes stacked on
+            top of each other answering the same question at two altitudes —
+            which platform matters, and how each one is doing. They are one
+            list now, with the leader carrying its numbers in full and the rest
+            compact underneath.
+
+            Most active is ranked by INTERACTIONS, not by how often we posted:
+            "most active" is a question about where the audience is, not about
+            where we happen to be typing. Posts and rate sit on the same row so
+            the other reading of the word is never more than a glance away. */}
+        <Card className="overflow-hidden">
+          <div className="px-4 py-3 border-b border-border flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5 min-w-0">
               <IconBadge tone="sage">{Icon.trophy}</IconBadge>
               <div className="min-w-0">
-                <h3 className="font-semibold text-text text-sm leading-tight">Most active platform</h3>
-                <p className="text-xs text-text-tertiary mt-0.5">By engagement in this window</p>
+                <h3 className="font-semibold text-text text-sm leading-tight">Platforms</h3>
+                <p className="text-xs text-text-tertiary mt-0.5">Most active first</p>
               </div>
             </div>
-            {!overview.mostActive ? (
-              <p className="px-4 py-5 text-xs text-text-tertiary">Nothing measured yet.</p>
-            ) : (
-              <div className="px-4 py-4">
-                <div className="flex items-center gap-2 mb-3">
-                  <span className="w-2.5 h-2.5 flex-shrink-0"
-                    style={{ background: PLATFORM_LINE[overview.mostActive.platform] || '#7a848c' }} />
-                  <p className="text-lg font-bold text-text leading-none">{label(overview.mostActive.platform)}</p>
-                </div>
-                <dl className="space-y-1.5 text-xs">
-                  <div className="flex justify-between gap-2">
-                    <dt className="text-text-tertiary">Interactions</dt>
-                    <dd className="font-semibold text-text tabular-nums">{fmt(overview.mostActive.interactions)}</dd>
-                  </div>
-                  <div className="flex justify-between gap-2">
-                    <dt className="text-text-tertiary">Posts</dt>
-                    <dd className="font-semibold text-text tabular-nums">{overview.mostActive.posts}</dd>
-                  </div>
-                  <div className="flex justify-between gap-2">
-                    <dt className="text-text-tertiary">Engagement rate</dt>
-                    <dd className="font-semibold text-text tabular-nums">
-                      {overview.mostActive.engagementRate === null ? '—' : `${overview.mostActive.engagementRate.toFixed(1)}%`}
-                    </dd>
-                  </div>
-                </dl>
-              </div>
-            )}
-          </Card>
+            <Button variant="ghost" size="sm" onClick={() => navigate('/analytics')}>Details</Button>
+          </div>
 
-          {/* Per-platform table. The old "Platform overview" card counted posts
-              in an empty demo store and listed Facebook and X, which are not
-              platforms in this app at all. */}
-          <Card className="overflow-hidden">
-            <div className="px-4 py-3 border-b border-border flex items-center justify-between gap-3">
-              <div className="flex items-center gap-2.5 min-w-0">
-                <IconBadge>{Icon.grid}</IconBadge>
-                <h3 className="font-semibold text-text text-sm">By platform</h3>
-              </div>
-              <Button variant="ghost" size="sm" onClick={() => navigate('/analytics')}>Details</Button>
-            </div>
-            {overview.byPlatform.length === 0 ? (
-              <p className="px-4 py-5 text-xs text-text-tertiary">No connected platform reported numbers.</p>
-            ) : (
-              <div className="divide-y divide-border">
-                {overview.byPlatform.map(p => (
-                  <div key={p.platform} className="px-4 py-3">
-                    <div className="flex items-center justify-between gap-2 mb-1.5">
-                      <span className="flex items-center gap-1.5 min-w-0">
-                        <span className="w-2 h-2 flex-shrink-0" style={{ background: PLATFORM_LINE[p.platform] || '#7a848c' }} />
-                        <span className="text-xs font-semibold text-text truncate">{label(p.platform)}</span>
+          {overview.byPlatform.length === 0 ? (
+            <p className="px-4 py-5 text-xs text-text-tertiary">No connected platform reported numbers.</p>
+          ) : (
+            <div className="divide-y divide-border">
+              {overview.byPlatform.map(p => {
+                const leader = overview.mostActive?.platform === p.platform
+                return (
+                  <div key={p.platform} className={`px-4 ${leader ? 'py-4 bg-surface-subtle' : 'py-3'}`}>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="flex items-center gap-2 min-w-0">
+                        <span className={`flex-shrink-0 ${leader ? 'w-2.5 h-2.5' : 'w-2 h-2'}`}
+                          style={{ background: PLATFORM_LINE[p.platform] || '#7a848c' }} />
+                        <span className={`truncate text-text ${leader ? 'text-base font-bold' : 'text-xs font-semibold'}`}>
+                          {label(p.platform)}
+                        </span>
+                        {leader && (
+                          <span className="text-[10px] font-bold uppercase tracking-[0.08em] px-1.5 py-0.5
+                            leading-[1.4] bg-sage-100 text-sage-700 flex-shrink-0">Most active</span>
+                        )}
                       </span>
-                      <span className="text-xs font-semibold text-text tabular-nums">{stat(p.followers)}</span>
+                      <span className="text-right flex-shrink-0">
+                        <span className={`block text-text tabular-nums ${leader ? 'text-base font-bold' : 'text-xs font-semibold'}`}>
+                          {stat(p.followers)}
+                        </span>
+                        <span className="block text-[10px] text-text-tertiary">followers</span>
+                      </span>
                     </div>
-                    <p className="text-[11px] text-text-tertiary tabular-nums">
+                    <p className={`text-[11px] text-text-tertiary tabular-nums ${leader ? 'mt-2.5' : 'mt-1.5'}`}>
                       {p.posts} post{p.posts === 1 ? '' : 's'} · {fmt(p.interactions)} interactions
                       {p.engagementRate !== null && ` · ${p.engagementRate.toFixed(1)}%`}
                     </p>
                   </div>
-                ))}
-              </div>
-            )}
-          </Card>
-        </div>
+                )
+              })}
+            </div>
+          )}
+        </Card>
       </div>
     </div>
   )

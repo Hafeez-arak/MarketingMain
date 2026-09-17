@@ -1,16 +1,19 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Card, Button, PageHeader, IconBadge, Spinner } from '../components/ui/index'
-import { Icon } from '../components/ui/icons'
+import { Card, Button, PageHeader, Spinner } from '../components/ui/index'
 import { useConnectedAccounts, publishConnectedAccounts } from '../lib/useConnectedAccounts'
 import { syncAccounts, describeSync } from '../lib/zernioConnect'
 import { useAuth } from '../store/auth'
-import { LIVE_PLATFORMS, PLATFORM_META } from '../lib/utils'
+import { LIVE_PLATFORMS } from '../lib/utils'
 import { combineOverview } from '../lib/dashboardOverview'
 import { useDashboardAnalytics } from './dashboard/useDashboardAnalytics'
-import { AnalyticsOverview, AnalyticsOverviewSkeleton, PlatformPicker } from './dashboard/Analytics'
-import { WebsiteCard } from './dashboard/Website'
+import { useWebsiteSearch } from './dashboard/useWebsiteSearch'
+import { useResearch } from './dashboard/useResearch'
+import { useQueue } from './dashboard/useQueue'
 import { QueueCards } from './dashboard/Queue'
+import { AnalyticsOverview, AnalyticsOverviewSkeleton, PlatformPicker } from './dashboard/Analytics'
+import { PriorityList } from './dashboard/Priority'
+import { WebsiteCard } from './dashboard/Website'
 import { CreatePostDialog } from './dashboard/CreatePost'
 
 // ─── Dashboard ───────────────────────────────────────────────────────────
@@ -35,6 +38,15 @@ import { CreatePostDialog } from './dashboard/CreatePost'
 // The one rule holding all of it together: a number nobody measured prints as
 // "—", never as 0. Zero is a measurement, and claiming one we did not take is
 // how a dead credential comes to read as a quiet month.
+//
+// ── WHY THE FETCHES LIVE HERE AND NOT IN THE CARDS ──
+//
+// "What to do now" at the top of the page is built from the research report,
+// the Search Console rules AND the post queue at once, and the cards further
+// down draw the same three. Fetching inside each card would mean two Search
+// Console round trips per visit — the slowest call on the page, and Google's
+// rather than ours — and would let the strip and the card compute "urgent"
+// differently from the same rows. One hook each, passed down.
 
 export default function Dashboard() {
   const navigate = useNavigate()
@@ -51,6 +63,9 @@ export default function Dashboard() {
   const { summaries, range, loading, settling } = useDashboardAnalytics({
     accounts: allAccounts, days, reloadKey,
   })
+  const website = useWebsiteSearch()
+  const research = useResearch()
+  const queue = useQueue()
 
   // Platforms with an account, in the app's usual order.
   const platforms = useMemo(
@@ -97,20 +112,6 @@ export default function Dashboard() {
   const hour = new Date().getHours()
   const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening'
 
-  // Three per-platform actions, because "create a post" is three different
-  // screens and picking for the user is what the old single Instagram link
-  // did wrong.
-  const quickActions = [
-    ...LIVE_PLATFORMS.map(p => ({
-      label: `Create ${PLATFORM_META[p]?.label || p} post`,
-      icon: Icon.image,
-      path: `/social/${p}`,
-    })),
-    { label: 'Plan a month',  icon: Icon.trending, path: '/campaigns' },
-    { label: 'View analytics', icon: Icon.activity, path: '/analytics' },
-    { label: 'View research',  icon: Icon.document, path: '/insights' },
-  ]
-
   const nothingConnected = !loadingAccounts && allAccounts.length === 0
 
   return (
@@ -123,6 +124,20 @@ export default function Dashboard() {
       </PageHeader>
 
       <CreatePostDialog open={creating} onClose={() => setCreating(false)} />
+
+      {/* ── What to do now ──
+          Above the numbers, because the question somebody actually arrives
+          with is not "how many followers" — it is "is there anything I am
+          about to miss". Drawn from the research report, the Search Console
+          rules and the post queue at once; the ranking lives in
+          src/lib/dashboardPriority.js. */}
+      <PriorityList
+        report={research.report}
+        runAt={research.runAt}
+        everRan={research.everRan}
+        recommendations={website.recommendations}
+        attention={queue.attention}
+        loading={research.loading || website.loading || queue.loading} />
 
       {nothingConnected ? (
         <Card className="p-6 border-dashed bg-surface-muted">
@@ -172,29 +187,11 @@ export default function Dashboard() {
 
       {/* Website and SEO. Its own row rather than a column beside the social
           numbers: it answers a different question and deserves the width. */}
-      <WebsiteCard />
+      <WebsiteCard data={website.data} loading={website.loading} summary={website.summary}
+        recommendations={website.recommendations} pages={website.pages} />
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
-        <div className="lg:col-span-2 space-y-4">
-          <QueueCards />
-        </div>
-
-        <Card className="overflow-hidden">
-          <div className="px-4 py-3 border-b border-border flex items-center gap-2.5">
-            <IconBadge tone="sage">{Icon.activity}</IconBadge>
-            <h3 className="font-semibold text-text text-sm">Quick actions</h3>
-          </div>
-          <div className="divide-y divide-border">
-            {quickActions.map(q => (
-              <button key={q.label} onClick={() => navigate(q.path)}
-                className="w-full text-left px-4 py-2.5 text-sm text-text-secondary
-                  hover:text-text hover:bg-surface-subtle transition-colors flex items-center gap-2.5">
-                <span className="text-text-tertiary flex-shrink-0">{q.icon}</span>
-                {q.label}
-              </button>
-            ))}
-          </div>
-        </Card>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
+        <QueueCards upcoming={queue.upcoming} attention={queue.attention} loading={queue.loading} />
       </div>
     </div>
   )

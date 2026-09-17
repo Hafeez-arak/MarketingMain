@@ -96,16 +96,16 @@ All verified in a browser against the harness (see §7), `npm test` 1638 passing
 These are **not** code problems. The card will say so on screen rather than
 showing zeros.
 
-- [ ] **`GOOGLE_SA_KEY` on Vercel.** The GCP service account has to be created,
-      its `client_email` added as a Full user on the Search Console property,
-      and the JSON put in the Vercel project env (and the box's `.env` for the
-      agent container). Until then the Website card reports itself
-      unconfigured with the setup steps, which is deliberate — a dead
-      credential that reads as "no traffic" is the silent failure this project
-      has already paid for twice.
-- [ ] **`customFields.website`** on Arak's `brand_profile` must hold the
-      verified property. Note: a PostgREST `PATCH` on a jsonb column REPLACES
-      the whole object — read, spread, write the union back.
+- [x] **`GOOGLE_SA_KEY` on Vercel** — done, live 2026-09-17. The Website card
+      is reading real Search Console numbers for `sc-domain:arak-sa.com`.
+- [x] **`customFields.website`** — done; the property resolved, which is what
+      the live numbers prove. (Reminder for next time: a PostgREST `PATCH` on a
+      jsonb column REPLACES the whole object — read, spread, write the union.)
+- [ ] **The agent container's own `.env`** on the WSL2 box still needs the same
+      `GOOGLE_SA_KEY` if the weekly research lens is to read the property too.
+      Vercel and the box are separate environments; setting one does not set
+      the other. Worth checking the next research run's search lens is not
+      reporting itself unconfigured.
 - [ ] **GA4 (or Plausible/Clarity) on arak-sa.com.** See §6.
 
 ---
@@ -156,7 +156,65 @@ surfaced.
 
 ---
 
-## 7. How to look at it without signing in
+## 7. Second pass — 2026-09-17, after the first version went live
+
+Search Console came online between the two passes (`GOOGLE_SA_KEY` is set), so
+the Website card is showing real numbers now.
+
+### Decided
+
+1. **"What to do now" replaces the idea of dashboard tabs.** The user first
+   proposed two tabs, one of them an "Overview" holding a short form of the
+   research. Argued against and dropped, for three reasons: the dashboard *is*
+   the overview so the name is a loop; a tab hides state on a page whose whole
+   job is showing state (you would never see an expiring tender unless you
+   remembered to click); and `/insights` already solves this by putting its
+   summary *above* both halves rather than behind a tab. One always-visible
+   ranked list instead.
+2. **One merged list, not two.** Recommended splitting urgency from direction;
+   the user chose one list. Built as one, with a kind tag on every row so it
+   still scans as four — see the header of `src/lib/dashboardPriority.js`.
+3. **Quick actions deleted entirely.** After removing the three "Create X post"
+   entries the user asked to drop, the survivors all duplicated the left
+   navigation. The user's own argument ("no one would scroll to the bottom,
+   they would go to the navigation") kills the card rather than relocating it.
+4. **Research is read-only here.** A run costs about $1. The dashboard reads the
+   newest finished run; starting one stays on `/insights` where the cost and
+   the progress are visible. No money-spending button on a landing page.
+5. **The research short form is direction + gaps-with-ideas**, not `topThree()`.
+   `topThree` scores +2 for a deadline inside 14 days and +1 for anything
+   sales-flagged, so for a marketing reader it can come back as three tender
+   deadlines — a sales digest wearing a marketing label.
+
+### Built
+
+- [x] `src/lib/dashboardPriority.js` (+ 26 tests) — merges the research report,
+      the Search Console rules and the post queue into one ranked list.
+- [x] `src/pages/dashboard/Priority.jsx` — draws it, dated with the run it came
+      from so three-week-old findings never read as this week's.
+- [x] `src/pages/dashboard/Collapsible.jsx` — real `<button>` + `aria-expanded`
+      + the `hidden` attribute, not a zero-height div.
+- [x] Website card: both long lists collapsed by default, tiles always visible.
+      The card went from roughly 1200px tall to 230px.
+- [x] "Most active platform" and "By platform" merged into one **Platforms**
+      card, leader first and marked.
+- [x] Quick actions card deleted.
+- [x] Fetches lifted into `useWebsiteSearch` / `useResearch` / `useQueue` so the
+      strip and the cards share one answer each — otherwise every visit made two
+      Search Console round trips, the slowest call on the page.
+
+### One design bug caught in the browser, not in tests
+
+The first version ranked the merged list flat. With a realistic week — two live
+tenders, two urgent Search Console items and a failed post — **the content gaps
+fell off the bottom every single time**, which is exactly the half the marketing
+reader opens the page for. Fixed with per-kind caps (`KIND_CAP`), plus a
+backfill so a quiet week does not produce a four-row list. A flat ranking here
+would have been correct and useless.
+
+---
+
+## 8. How to look at it without signing in
 
 `/` is behind auth, and the states worth checking (a platform that failed, a
 Search Console credential nobody has created, an account nobody has counted
