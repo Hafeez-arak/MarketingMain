@@ -162,7 +162,19 @@ describe('cadence keeps a monthly question off a weekly bill', () => {
     // weekly; demand gave up two searches to keep the rise that small.
     // Raised 26 → 30 the same day for the events lens (6); openings gave up
     // two, since events were the job it was spending them on.
-    expect(searchBudgetFor(lensesFor({ cadence: 'weekly' }))).toBeLessThanOrEqual(30)
+    //
+    // Raised 30 → 32 on 2026-09-17, giving demand back the two it gave up.
+    // That earlier trade is the one decision here the ledger has since
+    // overturned: starving a lens does not make it cheaper, it makes it
+    // useless AND dearer, because it exhausts its allowance and then burns
+    // tokens on calls the API answers with max_uses_exceeded.
+    //
+    //   demand, 6 searches   $0.326   3 findings
+    //   demand, 4 searches   $0.484   0 findings
+    //
+    // So this ceiling is a guard against sprawl, never a reason to cut a
+    // working lens below the level it needs to answer at all.
+    expect(searchBudgetFor(lensesFor({ cadence: 'weekly' }))).toBeLessThanOrEqual(32)
   })
 })
 
@@ -758,5 +770,28 @@ describe('a lens that read and reported nothing is not a quiet one', () => {
     ])
     expect(rows.map(r => r.state)).toEqual(['found', 'searched', 'quiet', 'failed'])
     expect(rows[1]).toMatchObject({ sources: 40, allowance: 6 })
+  })
+})
+
+describe('web tool budgets', () => {
+  it('gives demand six searches again — it produced nothing on four', () => {
+    // 09-14 at 6 → 3 findings; every run at 4 → 0. See the note on the lens.
+    const demand = lensByKey('demand')
+    expect(demand.budget.searches).toBe(6)
+  })
+
+  it('lets a lens read more than it searches, since one search finds several documents', () => {
+    const demand = lensByKey('demand')
+    expect(demand.budget.fetches).toBeGreaterThan(demand.budget.searches)
+  })
+
+  it('no searching lens is left below the level every recovered lens had', () => {
+    // The 2026-09-17 run isolated it: events (6), category (6) and rivals (8)
+    // all recovered after the schema fix; demand on 4 did not. Four is not a
+    // workable allowance for a lens that must cite what it reads.
+    for (const l of LENSES.filter(x => (x.budget?.searches || 0) > 0)) {
+      if (l.cadence === 'monthly') continue
+      expect(l.budget.searches, l.key).toBeGreaterThanOrEqual(6)
+    }
   })
 })

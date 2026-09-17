@@ -256,11 +256,29 @@ export const FINDINGS_SCHEMA = {
   },
 }
 
-/** Server-side web search, bounded by the lens's own budget. */
-const webTools = uses => (uses > 0
+/**
+ * Server-side web search and fetch, bounded by the lens's own budget.
+ *
+ * ── SEARCHING AND READING ARE NOT THE SAME BUDGET ──
+ *
+ * Both tools used to take the same number, which reads as tidy and is wrong:
+ * a search FINDS a page and a fetch READS it, and one search routinely turns
+ * up three documents worth opening. Worse, exceeding `max_uses` is not an
+ * exception — the API returns HTTP 200 with an `max_uses_exceeded` error
+ * object in the result block, which from inside the turn is indistinguishable
+ * from the web being down. On 2026-09-17 the demand lens said exactly that:
+ * "every search and fetch call was blocked before a single result came back."
+ *
+ * `calendar.js` carries the same scar from a different lens.
+ *
+ * So fetches default to searches + 2. The demand lens needs it most — since
+ * #71 its whole job is reading DOCUMENTS (tender criteria, job adverts,
+ * standards consultations), and a document has to be fetched to be cited.
+ */
+const webTools = ({ searches = 0, fetches = null } = {}) => (searches > 0
   ? [
-      { type: 'web_search_20260209', name: 'web_search', max_uses: uses },
-      { type: 'web_fetch_20260209', name: 'web_fetch', max_uses: uses },
+      { type: 'web_search_20260209', name: 'web_search', max_uses: searches },
+      { type: 'web_fetch_20260209', name: 'web_fetch', max_uses: fetches ?? searches + 2 },
     ]
   : [])
 
@@ -290,7 +308,7 @@ export async function runLens({
       stage: lensKey,
       identity,
       brand,
-      tools: webTools(lens.budget.searches),
+      tools: webTools(lens.budget),
       messages: [{ role: 'user', content: prompt }],
       maxTokens: lens.budget.maxTokens || 8_000,
       effort: lens.budget.effort || 'medium',

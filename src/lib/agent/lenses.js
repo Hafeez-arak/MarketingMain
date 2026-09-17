@@ -179,10 +179,28 @@ export const LENSES = [
     // question to rivals who, being SMEs, mostly do nothing in a given week.
     // It now asks about our buyers directly.
     //
-    // Four searches, down from six on 2026-09-15 to pay for the competitor
-    // lens going weekly. What buyers care about moves over quarters, and the
-    // 14 Sep run's buyer findings came from its first three searches.
-    budget: { searches: 4, maxTokens: 8_000, effort: 'medium' },
+    // ── SIX AGAIN, AND THE CUT TO FOUR IS WHY THIS LENS DIED ──
+    //
+    // It was cut 6 → 4 on 2026-09-15 to pay for the competitor lens going
+    // weekly, on the reasoning that the 14 Sep findings came from its first
+    // three searches. The ledger says otherwise, and the correlation is exact:
+    //
+    //   09-14   6 searches   $0.326   3 findings
+    //   09-15   4 searches   $0.222   0 findings
+    //   09-17   4 searches   $0.484   0 findings
+    //
+    // It has never produced a finding since the cut. The 09-17 run isolates it:
+    // after the schema fix, every lens with six or more searches recovered
+    // (events 6, category 6, rivals 8) and the only one that did not is the
+    // only one left on four.
+    //
+    // Note the cost column — the starved lens is DEARER. It exhausts its
+    // allowance, then burns tokens on calls the API answers with
+    // max_uses_exceeded. Paying for silence is the worst trade here.
+    //
+    // Fetches are named explicitly rather than left to the default: since #71
+    // this lens reads DOCUMENTS, and a document must be fetched to be cited.
+    budget: { searches: 6, fetches: 10, maxTokens: 8_000, effort: 'medium' },
     universal: true,
   },
   {

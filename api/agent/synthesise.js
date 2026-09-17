@@ -76,7 +76,19 @@ export default async function handler(req, res) {
       res.status(404).json({ error: 'No such run for this workspace.' })
       return
     }
-    if (run.status === 'complete') {
+    // ── "COMPLETE" IS NOT THE SAME AS "SYNTHESISED" ──
+    //
+    // This used to test `run.status === 'complete'`, and a run the spend cap
+    // cut short is written as complete at stage `gather` — so the one run that
+    // still had work owing was the one permanently refused. On 2026-09-17 run
+    // 191e21f4 had eight finished lenses and $2.29 of paid-for search sitting
+    // in research_lens_results with no report and no persisted leads, and the
+    // only way to finish it was to edit its status by hand.
+    //
+    // The stage is what records whether synthesis happened. Cost is paid at
+    // the lens stage and value is delivered at this one, so being cut between
+    // them must stay recoverable.
+    if (run.stage === 'synthesise') {
       res.status(200).json({ ok: true, skipped: true, run_id: runId, reason: 'Already synthesised.' })
       return
     }
