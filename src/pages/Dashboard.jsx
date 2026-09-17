@@ -12,7 +12,7 @@ import { useResearch } from './dashboard/useResearch'
 import { useQueue } from './dashboard/useQueue'
 import { QueueCards } from './dashboard/Queue'
 import { AnalyticsOverview, AnalyticsOverviewSkeleton, PlatformPicker } from './dashboard/Analytics'
-import { PriorityList } from './dashboard/Priority'
+import { ResearchCard } from './dashboard/Research'
 import { WebsiteCard } from './dashboard/Website'
 import { CreatePostDialog } from './dashboard/CreatePost'
 
@@ -125,19 +125,13 @@ export default function Dashboard() {
 
       <CreatePostDialog open={creating} onClose={() => setCreating(false)} />
 
-      {/* ── What to do now ──
-          Above the numbers, because the question somebody actually arrives
-          with is not "how many followers" — it is "is there anything I am
-          about to miss". Drawn from the research report, the Search Console
-          rules and the post queue at once; the ranking lives in
-          src/lib/dashboardPriority.js. */}
-      <PriorityList
-        report={research.report}
-        runAt={research.runAt}
-        everRan={research.everRan}
-        recommendations={website.recommendations}
-        attention={queue.attention}
-        loading={research.loading || website.loading || queue.loading} />
+      {/* ── What the research found ──
+          Above the numbers, because the question somebody arrives with is not
+          "how many followers" — it is "what is going on". A summary and a way
+          through, not a to-do list: the ranked strip that stood here first came
+          out on real data as a calendar reminder, an admin nag and a repeat of
+          the Search Console card below it. */}
+      <ResearchCard runs={research.runs} loading={research.loading} />
 
       {nothingConnected ? (
         <Card className="p-6 border-dashed bg-surface-muted">
