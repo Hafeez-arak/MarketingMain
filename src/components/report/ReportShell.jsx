@@ -31,7 +31,16 @@ import { usePrint } from '../../lib/reports/print'
 export function ReportDoc({ children }) {
   return (
     <div
-      className="mx-auto w-full max-w-[860px] bg-white text-text print:max-w-none"
+      // ── The sheet needs its own margin ──
+      // `bg-white` draws a page; without padding the text sits hard against
+      // the edge of it, which reads as a layout fault rather than a document —
+      // most obviously where a full-width table runs to both edges at once.
+      //
+      // `data-print-gutter` strips it on paper, where @page's 14mm/13mm is
+      // already the margin and this would stack on top of it. Same attribute
+      // AppLayout uses on the screen gutter, for the same reason.
+      data-print-gutter
+      className="mx-auto w-full max-w-[860px] bg-white text-text px-5 py-6 sm:px-10 sm:py-8 print:max-w-none"
       style={{ unicodeBidi: 'plaintext' }}
     >
       {children}
