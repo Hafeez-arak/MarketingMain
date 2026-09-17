@@ -415,6 +415,190 @@ stays unresolved and the competitor appears as `web_only` — **never a guess**.
 
 The resolved handle is human-correctable on the Research page.
 
+### b0. The watchlist is a list of identities, not of names — 2026-09-16
+
+The sales team supplied 12 lighting and 8 controls competitors. Reconciling
+them against the 12 already on the watchlist exposed what a name-only watchlist
+costs:
+
+- **Exactly one name overlapped** (Huda). The agent had spent every run
+  researching companies nobody had asked for, and had stored **16 signals in
+  total, 12 of them with no competitor attached at all**. The four that named a
+  company named Datacore, Tawridat, Inara and Hondel — all four flagged as
+  noise by the 15 Sep review. Technolight, Alfanar, Al-Babtain and the rest had
+  **zero**.
+- **"Lumiere" is at least four different Saudi companies** — Lumiere Group
+  (Ariss family, 1994), Lumiere KSA (2007), Lumiere Lighting Technology,
+  Lumiere Studio. The sales list has "Lumiere Lighting" under lighting and
+  "Lumiere Group" under controls. Nobody can tell whether that is one company
+  or two. **A name is not an identity. A domain is.**
+- **"Fututron" does not exist.** The company is Futuron (futuron.sa). The
+  misspelling would have returned nothing, forever, and read as a quiet rival.
+- **Four companies are genuinely in BOTH lines** — Al Nasser, Armada, Spectra,
+  Nassli. Nassli runs two businesses on two domains. A single-value `line`
+  field would force a wrong answer on exactly the companies that matter most,
+  which is why it has to be multi-valued when the column is added.
+- **Al Nasser Group (alnasser.me) is the closest comparable that exists**:
+  founded 1976, the same year as Arak, selling professional lighting *and*
+  building control systems, with its own manufacturing and 20+ retail branches.
+  It was on the old watchlist as "Alnasser Lighting" with no handle, no domain
+  and no signal ever recorded against it.
+
+`research_agenda` has no column for a domain, a line or a tier, so all of it
+goes in `why` — which is free text the rivals lens is given verbatim, and which
+**the loader did not even select until this date**. `select=subject` meant
+every note a person wrote against a competitor was invisible to the lens that
+researches them.
+
+Two things follow, and both are in the prompt now:
+
+- Research the **domain**, never the name. Where the note says the domain is
+  unknown or ambiguous, SKIP and say so — a search spent guessing which company
+  was meant is worse than not looking.
+- The roll is no longer `slice(0, 12)`. With 17 names entered lighting-first,
+  the cut fell above every controls competitor: the lens would have researched
+  one business line and reported silence on the other. And where there are more
+  names than searches the prompt now says so rather than promising one search
+  per name — an instruction that cannot be followed is one the model quietly
+  reinterprets, deciding for itself which rivals to drop.
+
+**The order is the priority**, because `created_at` is the only thing resembling
+one until a `tier` column exists. It is set so both business lines appear inside
+the search budget (the top eight are four both-lines, two lighting, two
+controls) and so the names that cannot be researched at all sit at the bottom
+where they consume nothing.
+
+### b1. Identities, distribution rights and lost deals — 2026-09-16
+
+A review of b0 landed three additions worth taking, and the migration
+`20260919_competitor_intelligence.sql` implements them.
+
+**`domain`, `lines[]`, `kinds[]`, `city`, `tier`, `source`, `resolution` on the
+watchlist.** The prose note in `why` was a stopgap; these are columns now.
+`lines` and `kinds` are arrays because four of the seventeen rivals sell into
+both business lines and Al Nasser is manufacturer, distributor, retailer and
+integrator at once — a single value forces a wrong answer on exactly the
+companies that matter most.
+
+**`tier` is nullable and stays null.** It records how often a rival is actually
+met and what a deal against them is worth, which only the sales team knows. The
+first cut of this list tiered by SOURCE — sales-named was tier 1, agent-found
+was tier 2 — which points the search budget at whoever came up in a meeting
+rather than at whoever is actually met. `source` is now its own column, and a
+default tier would be an invention dressed as data. The loader orders by
+`tier.asc.nullslast, created_at.asc`, so list order carries the priority until
+sales fills it in.
+
+**`competitor_brands`.** In lighting, distribution rights decide who can bid
+what, and there was nowhere to record them. Al Nasser is the confirmed
+exclusive Berker partner for Saudi Arabia — one fact that says more about what
+they can win in controls than any amount of social activity. `relationship`
+separates `exclusive` from `claimed` from `unconfirmed`, because the difference
+between evidence and repetition is the whole value of the table.
+
+**`deal_outcomes`.** "Who are we losing to, and on what" is the question the
+business actually wants answered, and every other part of this system collects
+from the public web, where the answer is not. Six fields a person fills after a
+contested bid: project, competitor, line, what decided it, rough price delta,
+consultant. **The only table here a model never writes to.** Its failure mode is
+organisational rather than technical — a log like this dies in month three if it
+is not part of a routine — which is why `price_delta_pct` is explicitly rough:
+waiting for precision is how it dies.
+
+#### The axes differ by line, because the buyer does
+
+The two business lines are not two product catalogues, they are **two buying
+centres**. Lighting is specified by architects and lighting designers, so what
+matters is which agencies a rival holds and what they can prove they have lit.
+Controls is specified by MEP/ELV consultants and bought through the main
+contractor, so what matters is protocol coverage, certification and who they
+commission for. `LINE_AXES` in lensPrompts.js keys on the line's own name and
+emits only the lines a brand's own watchlist uses; a line with no vocabulary
+gets a fallback that asks the same question without presuming the answer.
+
+Alongside it, one question for every rival regardless of line: **who they keep
+appearing beside** — which consultants, lighting designers, main contractors
+and ELV subcontractors. In a specification business the relationship is the
+moat, and it is public far more often than people assume.
+
+#### What was NOT taken from that review
+
+- That the name research was half-done, naming ViaLighting, Namaraa, MASQ and
+  Sela-PASS as untouched and Sela-PASS as unresolvable. All four are live and
+  in the watchlist with domains: selapass.com returns "SelaPASS | Leading MEP &
+  Engineering Contractor in Saudi Arabia". The three genuinely unresolvable
+  names are Greenlight, Al Dhow and Spectrum, and they sit at the bottom of the
+  list marked `unresolvable` so they consume no search.
+- That `kind` was needed because a report had claimed rivals were absent from
+  social. No stored report contains that claim. `kind` is worth having for the
+  reason above; the evidence offered for it was not real.
+- That Light & Design was founded by a former Al Nasser board member. Nothing
+  found supports it. It may well be true and sales would know — but it does not
+  enter the data as fact.
+
+#### And one it got right about this file
+
+Its sharpest line was that the name research had the defect it diagnosed. True,
+though not of the names it picked: **"Al Nasser" is itself at least three live
+Saudi entities** — alnassergroup.com, al-nasser.com, alnasser.me, plus a
+separate retail store at alnasser.com. b0 asserted one of them from a single
+search result and made it the number-one rival. The entry now lists all three
+candidates and says *confirm before researching, do not guess* — the same
+instruction it gives for Lumiere.
+
+### b2. The business view — where we stand, not what happened — 2026-09-16
+
+`/insights/business`, beside "Brief as PDF" on the Research page. Same print
+mechanism as the brief, so there is no second PDF path to keep in step.
+
+The weekly brief answers *what happened*. This answers *where do we stand*,
+which is a different question for a different reader on a different clock. Six
+blocks per business line:
+
+| block | source | can it be empty? |
+|---|---|---|
+| verdict | assembled in code from the blocks below | it says so |
+| who is beating us | `deal_outcomes` only | **yes, and it is** |
+| the board | watchlist + `competitor_brands` + signals | yes |
+| what moved | signals, last 35 days, max 3 | yes |
+| what we cannot answer | computed from the gaps | **never hidden** |
+
+**Every block can return "not established", and most of them currently do.**
+A page that fills six blocks every month regardless of what was found is a page
+that will be wrong six ways and trusted for about two months. `notEstablished`
+carries a `why` that is shown to the reader, not swallowed.
+
+The verdict is **assembled in code** from what the other blocks established, so
+it can never claim more than the page behind it. With no bid recorded it says
+"this is a picture of activity, not of position" — which is the true statement
+and the one a model asked to summarise would not have made.
+
+`losing` takes no signals argument at all, and that is the design: activity on
+the public web says nothing about who took the job. It is the first block a
+person reads and the only one nothing else can fill.
+
+#### One page per line, not a filter
+
+The weekly report filters one document by line, because its top three are
+genuinely company-wide. This does not. Lighting and controls are not two
+catalogues, they are **two buying centres** — lighting specified by architects
+and lighting designers, controls by MEP/ELV consultants and bought through the
+main contractor — so the rivals barely overlap and the axes that decide a bid
+differ. The board's own note changes with the line to say which axes those are.
+
+#### A bug the tests caught
+
+`Number(null)` is `0`, which is finite — so an untiered rival scored as tier 0
+and sorted **above** a tiered one, exactly inverting the priority the column
+exists to express. Null is checked before the numeric coercion now.
+
+#### Its emptiest state is the most useful thing it says
+
+Today the page reports, per line: one rival with no confirmed domain, eight of
+eight never researched, no rival tiered, and no contested bid recorded — each
+with a `Closed by:` line naming who can close it. That list is the argument for
+the sales session, in the form a person can act on.
+
 ### b. And it lands on the agenda, not in the Brand Brain
 
 This is where §5a stops being a constraint and starts being the thing that

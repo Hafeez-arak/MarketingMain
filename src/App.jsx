@@ -22,6 +22,7 @@ import { Analytics }               from './pages/analytics/index'
 import { PerformanceReport }       from './pages/analytics/PerformanceReport'
 import { Insights }                from './pages/insights/index'
 import { ResearchReport }          from './pages/insights/ResearchReport'
+import { BusinessView }            from './pages/insights/BusinessView'
 import AgentPage                  from './pages/agent/index'
 import { MediaLibrary }            from './pages/media/index'
 import { SocialOverview, SocialPlatform } from './pages/social/index'
@@ -124,6 +125,7 @@ function ProtectedApp() {
             <Route path="/analytics/report"      element={<PerformanceReport />} />
             <Route path="/insights"              element={<Insights />} />
             <Route path="/insights/report"       element={<ResearchReport />} />
+            <Route path="/insights/business"     element={<BusinessView />} />
             {/* Research and "What We Learned" were two pages that each carried
                 a copy of the watchlist, the run history, the run button and the
                 proposed rules. They are one page with two halves now; the old

@@ -218,6 +218,13 @@ export function Insights() {
             Brief as PDF
           </Button>
         )}
+        {/* Not gated on a run existing, unlike the brief. This page is built
+            from the watchlist and the contested-bid log, both of which are
+            worth reading before any research has been done — and its emptiest
+            state is the most useful thing it says. */}
+        <Button variant="secondary" size="sm" onClick={() => navigate('/insights/business')}>
+          Business view
+        </Button>
         <Button variant="secondary" size="sm" onClick={runResearch} disabled={running || watching}>
           {running ? 'Starting…' : watching ? 'Running…' : 'Run research'}
         </Button>
