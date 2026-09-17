@@ -1,7 +1,6 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useAuth } from '../../store/auth'
 import { fetchRuns } from '../../lib/agentRun'
-import { latestReport } from '../../lib/dashboardPriority'
 
 // ─── The last research run, read but never started ─────────────────────────
 //
@@ -10,10 +9,11 @@ import { latestReport } from '../../lib/dashboardPriority'
 // else — no button here can spend anything. Starting a run stays on
 // /insights, where the cost and the live progress are both visible.
 //
-// Five runs rather than one: the newest row may be a run that is still going
-// or that failed, and either carries no report. latestReport walks down to the
-// newest one that actually produced something, so pressing the button on the
-// Research page does not blank the dashboard while it works.
+// Five runs rather than one, because the newest is often not the one to show.
+// It may still be going, it may have failed, or — the case that actually bit —
+// it may have spent the month's budget and stopped before it analysed
+// anything, which looks complete in every column. summariseRuns walks down to
+// the newest run that genuinely thought; this hook just fetches.
 
 const RUNS_TO_SCAN = 5
 
@@ -40,15 +40,8 @@ export function useResearch() {
     return () => { cancelled = true }
   }, [activeWorkspaceId, accessToken])
 
-  const latest = useMemo(() => latestReport(runs), [runs])
-
-  return {
-    loading,
-    report: latest?.report || null,
-    runAt: latest?.runAt || '',
-    // Distinct from "no report": a workspace that has never run research at
-    // all should be told that, not shown an empty list as though this week
-    // were quiet.
-    everRan: runs.length > 0,
-  }
+  // The raw list. What counts as a usable run is a question with a wrong
+  // answer that looks right, so it lives in src/lib/researchSummary.js where
+  // it is tested, not in a hook.
+  return { runs, loading }
 }

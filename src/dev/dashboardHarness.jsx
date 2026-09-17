@@ -136,42 +136,52 @@ function analyticsFor(platform) {
   return { error: 'This account needs reconnecting before it can report.' }
 }
 
-// ── A research run, shaped as the agent writes one ──
-// Carries all four row kinds the priority list can produce: a live deadline,
-// a market direction with its so-what, and a gap with the idea that fills it.
-const inDays = n => new Date(Date.now() + n * 86_400_000).toISOString().slice(0, 10)
-
+// ── Research runs, shaped after Arak's real ones ──
+// The newest is a CAPPED run: complete in every column, a strong headline, 33
+// findings, and every synthesis section empty because it spent $15.06 of a
+// $15.00 monthly cap before it could analyse. That state is the whole reason
+// the card steps over a run rather than trusting `status`.
 const RESEARCH_RUNS = [
-  // Newest row is a run still in flight and carrying no report — latestReport
-  // must walk past it rather than blanking the card.
-  { id: 'run-3', status: 'running', stage: 'gather', report: null, started_at: new Date().toISOString() },
+  { id: 'run-4', status: 'running', stage: 'gather', report: null, started_at: new Date().toISOString() },
   {
-    id: 'run-2', status: 'done', started_at: '2026-09-14T06:00:00Z', finished_at: '2026-09-14T06:21:00Z',
+    id: 'run-3', status: 'complete', started_at: '2026-09-17T07:52:09Z', finished_at: '2026-09-17T07:55:07Z',
     report: {
-      findings: [
-        {
-          ref: 'F1', headline: 'Riyadh municipality smart-pole tender closes in under a week',
-          lens: 'demand', channel: 'web', relevance: 'high', confidence: 0.9,
-          perishable_until: inDays(5),
-          suggested_action: 'Confirm whether we are pre-qualified before the portal closes.',
-        },
-        {
-          ref: 'F2', headline: 'Light Middle East exhibitor deadline',
-          lens: 'calendar', channel: 'web', relevance: 'medium', confidence: 0.8,
-          perishable_until: inDays(22),
-          suggested_action: 'Decide whether we are taking a stand this year.',
-        },
-        {
-          ref: 'F3', headline: 'A finding with no date on it at all',
-          lens: 'rivals', channel: 'instagram', relevance: 'low', confidence: 0.5,
-        },
+      headline: 'Two landmark Riyadh projects named their design teams this week with lighting scope still open.',
+      stage_reached: 'synthesise',
+      findings: Array.from({ length: 33 }, (_, i) => ({ ref: `F${i}` })),
+      top_three: [], market_direction: [], competitor_moves: [], gaps: [], proposed_ideas: [],
+      competitor_board: [{ name: 'Huda' }],
+      unanswered: [
+        'The investigation did not complete, so this brief is the measured numbers only. ' +
+        'This workspace has used its $15.00 agent budget for the month ($15.06 spent).',
+      ],
+    },
+  },
+  {
+    id: 'run-2', status: 'complete', started_at: '2026-09-15T12:47:52Z', finished_at: '2026-09-15T12:55:14Z',
+    report: {
+      headline: 'The sales pipeline moved this week, not the board: Diriyah is running ten Riyadh hotels at once ' +
+        'and Qiddiya\'s stadium is in live tender preparation, while we put our extra output on Instagram ' +
+        'instead of the LinkedIn page that is still earning without us.',
+      findings: Array.from({ length: 19 }, (_, i) => ({ ref: `F${i}` })),
+      top_three: [
+        { finding: 'Qiddiya\'s stadium is in live tender preparation.',
+          action: 'Confirm whether we are pre-qualified before the portal closes.', team: 'sales', refs: ['F1'] },
+        { finding: 'Our extra output went to Instagram, not the LinkedIn page that is still earning without us.',
+          action: 'Move two of next week\'s posts to LinkedIn.', team: 'marketing', refs: ['F2'] },
+        { finding: 'Three non-traditional rivals surfaced.', action: 'Add them to the watchlist.', team: 'technical', refs: ['F3'] },
       ],
       market_direction: [
-        {
-          movement: 'Hotel projects are specifying guest room management alongside lighting',
-          basis: 'web',
-          so_what: 'We sell GRMS on the homepage but have no page for it, so we never appear in the search.',
-        },
+        { movement: 'Rivals are buying physical presence rather than specifier reach.',
+          basis: 'web', so_what: 'Specifier content is uncontested ground for us.' },
+      ],
+      competitor_moves: [
+        { competitor: 'Huda', what_changed: 'Swapped specifier language for consumer showroom reels.',
+          picture: 'Three signals in a month.', effect_on_us: 'The specifier audience is open.',
+          relevance: 'high', refs: ['F4'] },
+        { competitor: 'Technolight', what_changed: 'Hiring KNX engineers.',
+          picture: 'Two adverts and a new page.', effect_on_us: 'They are entering controls.',
+          relevance: 'medium', refs: ['F5'] },
       ],
       gaps: [
         { id: 'G1', gap: 'Nothing published on energy management for buildings',
@@ -179,11 +189,12 @@ const RESEARCH_RUNS = [
           suggested_response: 'Publish a short technical brief.', basis: 'our_analytics' },
       ],
       proposed_ideas: [
-        { title: 'Energy management in three numbers', angle: 'A one-page technical brief for specifiers',
-          answers_ref: { kind: 'gap', id: 'G1' } },
-        { title: 'What a GRMS retrofit actually costs', angle: 'From the 240-key job' },
+        { title: 'Energy management in three numbers', angle: 'A one-page technical brief', answers: 'G1' },
+        { title: 'What a GRMS retrofit actually costs', angle: 'From the 240-key job', answers: '' },
       ],
-      competitor_board: [],
+      new_competitors: [{ name: 'An IT integrator with a GRMS line', why: 'Overlaps on controls', source_url: '' }],
+      competitor_board: [{ name: 'Huda' }, { name: 'Technolight' }],
+      unanswered: ['Connect ARAK\'s own Instagram account to the board — still not done.'],
     },
   },
 ]
@@ -296,7 +307,10 @@ function installFetch(scenario) {
     }
     if (url.includes('/rest/v1/research_runs')) {
       await new Promise(r => setTimeout(r, 350))
-      return json(scenario === 'no-research' || scenario === 'empty' ? [] : RESEARCH_RUNS)
+      return json(
+        scenario === 'no-research' || scenario === 'empty' ? []
+          : scenario === 'capped' ? RESEARCH_RUNS.slice(0, 2)
+          : RESEARCH_RUNS)
     }
     if (url.includes('/rest/v1/social_accounts')) {
       return json(scenario === 'empty' ? [] : ACCOUNTS)
@@ -313,6 +327,7 @@ const SCENARIOS = [
   { key: 'full', label: 'Everything connected' },
   { key: 'no-gsc', label: 'Search Console not set up' },
   { key: 'broken-gsc', label: 'Search Console failing' },
+  { key: 'capped', label: 'Run hit the budget cap' },
   { key: 'no-research', label: 'Research never run' },
   { key: 'empty', label: 'Nothing connected' },
 ]

@@ -214,7 +214,74 @@ would have been correct and useless.
 
 ---
 
-## 8. How to look at it without signing in
+## 8. Third pass — the strip was wrong, and the run was broken
+
+The "What to do now" strip went live and read, on real data: a calendar
+reminder about Saudi National Day, an admin nag about two unbooked posts, and a
+repeat of the Search Console card further down the page. Three rows, none of
+which said what the research had actually found. The user's verdict — "there is
+no useful information here" — was correct.
+
+Two causes, and the bigger one was not the dashboard.
+
+### 1. It ignored `headline`
+
+The synthesis schema (`src/lib/agent/brief.js`) asks for one field in plain
+prose: **`headline` — "one sentence: what actually changed this week"**. It is
+the best writing in the report and the only field allowed to say "nothing
+moved", which the prompt names as a complete and correct answer. The strip
+never read it. It rebuilt a worse version out of ranked findings instead.
+
+### 2. The last run had run out of money before it could think
+
+Arak's 17 Sep run, read straight from the database:
+
+| | |
+|---|---|
+| `status` | `complete` |
+| `stage_reached` | `synthesise` |
+| findings | 33 |
+| headline | strong, specific |
+| top_three / market_direction / competitor_moves / gaps / proposed_ideas | **all empty** |
+
+Its own `unanswered[0]`: *"The investigation did not complete… This workspace
+has used its $15.00 agent budget for the month ($15.06 spent)."*
+
+**Neither `status` nor `stage_reached` catches this.** The only reliable tell is
+structural: findings present, every synthesis section empty. That is what
+`hasAnalysis()` tests. The dashboard had been showing a starved run as a quiet
+week for two days — precisely the silent failure this codebase is otherwise
+organised against.
+
+The cap was raised 15 → **30** on the user's instruction (a column on
+`workspaces`, not code).
+
+### Decided and built
+
+1. **The strip is gone.** Replaced by a Research card: the headline in full,
+   one or two key points with their actions, and one way through — "we found
+   this and this, read the full research". `top_three` leads the points, with
+   fallbacks through market direction, competitor moves and gaps, because a run
+   can synthesise one section and not another (14 Sep: no top_three, three
+   directions).
+2. **A crippled run is stepped over, not shown.** The card falls back to the
+   last run that genuinely analysed, dated, with a banner naming the skipped run
+   and quoting *its own* explanation rather than a guess at one.
+3. **Deadlines dropped from the dashboard entirely**, by the user's choice.
+   They live on the Research page. Failed posts stay in "Needs attention".
+4. `src/lib/dashboardPriority.js`, its tests and `Priority.jsx` deleted —
+   without deadlines and queue rows there was nothing left of them.
+
+### Still open
+
+- The agent container on the WSL2 box needs `GOOGLE_SA_KEY` in its own `.env`;
+  Vercel having it does not help the weekly research lens.
+- Worth watching whether the next run, with the cap at $30, completes synthesis.
+  If it stops again the cap is not the binding constraint.
+
+---
+
+## 9. How to look at it without signing in
 
 `/` is behind auth, and the states worth checking (a platform that failed, a
 Search Console credential nobody has created, an account nobody has counted
