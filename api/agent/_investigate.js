@@ -2,7 +2,7 @@ import { callModel } from './_provider.js'
 import { db } from './_supabase.js'
 import { loadBrandContext, IDENTITY } from './_context.js'
 import { textIn, urlsFromResponse } from '../../src/lib/agent/loop.js'
-import { BRIEF_SCHEMA, SYNTHESISE_PROMPT, mergeBrief, withRefs } from '../../src/lib/agent/brief.js'
+import { BRIEF_SCHEMA, SYNTHESISE_PROMPT, mergeBrief, withRefs, briefEmptiness } from '../../src/lib/agent/brief.js'
 import {
   lensesFor, motionOf, lensSummary, rankFindings, agendaFilterFor, lensByKey,
 } from '../../src/lib/agent/lenses.js'
@@ -530,8 +530,32 @@ export async function synthesiseRun({ workspaceId, runId, cadence = 'weekly', de
       return bail(gathered, `The brief did not parse: ${err.message}`, cost, summary)
     }
 
+    // ── A BRIEF THAT CAME BACK BLANK MUST SAY SO ──
+    //
+    // Recorded on every run, not only failing ones, so the numbers can be
+    // compared week to week. See briefEmptiness for the run this comes from:
+    // a successful, billed call that returned a real headline over six empty
+    // sections, and stored a report indistinguishable from a quiet week.
+    const wrote = briefEmptiness(brief)
+
     const report = mergeBrief(gathered, brief, allowedUrls, findings)
     report.lenses = summary
+    report.synthesis = {
+      ...wrote,
+      stop_reason: synth.response?.stop_reason || '',
+      // The raw length is the one number that separates "the model wrote
+      // nothing" from "the model wrote plenty and we dropped it".
+      text_chars: textIn(synth.response).length,
+      findings_in: findings.length,
+    }
+    if (wrote.empty) {
+      report.unanswered = [
+        ...(report.unanswered || []),
+        `The brief came back with no sections filled — ${findings.length} findings went in and the ` +
+        `model returned nothing to act on (stop_reason: ${report.synthesis.stop_reason || 'none'}, ` +
+        `${report.synthesis.text_chars} characters). This is a fault in the run, not a quiet week.`,
+      ]
+    }
     // S-refs resolve against this, so a combined competitor claim can be
     // traced to the earlier-week source it rests on after the store moves on.
     report.signal_refs = history.refs

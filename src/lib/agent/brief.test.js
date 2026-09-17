@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { BRIEF_SCHEMA, mergeBrief, planPrompt, withRefs, withGapIds, bindIdeas, datedRule } from './brief'
+import { BRIEF_SCHEMA, mergeBrief, planPrompt, withRefs, withGapIds, bindIdeas, datedRule, briefEmptiness, SYNTHESISE_PROMPT } from './brief'
 import { volatileFragment, buildRequest } from './prompt'
 
 const gathered = {
@@ -288,5 +288,61 @@ describe('a rule with a date on it is not a rule', () => {
     expect(merged.proposed_rules).toHaveLength(2)
     expect(merged.proposed_rules[0].dated).toBe(true)
     expect(merged.proposed_rules[1].dated).toBe(false)
+  })
+})
+
+describe('briefEmptiness', () => {
+  it('names the shape that cost a whole run: a confident headline over nothing', () => {
+    const out = briefEmptiness({ headline: 'Two landmark Riyadh projects named their design teams.' })
+    expect(out.empty).toBe(true)
+    expect(out.blankUnderAHeadline).toBe(true)
+    expect(out.written).toBe(0)
+  })
+
+  it('does not call a normal brief empty', () => {
+    const out = briefEmptiness({
+      headline: 'x', top_three: [1, 2, 3], gaps: [1], proposed_ideas: [1, 2],
+    })
+    expect(out.empty).toBe(false)
+    expect(out.written).toBe(6)
+    expect(out.sections.top_three).toBe(3)
+  })
+
+  it('counts every section, so a week can be compared with the week before', () => {
+    const out = briefEmptiness({})
+    expect(Object.keys(out.sections).sort()).toEqual([
+      'agenda_changes', 'competitor_moves', 'gaps', 'market_direction',
+      'new_competitors', 'proposed_ideas', 'proposed_rules', 'top_three', 'unanswered',
+    ])
+  })
+
+  it('separates a blank brief from a failed call — no headline is not the same thing', () => {
+    expect(briefEmptiness({}).blankUnderAHeadline).toBe(false)
+    expect(briefEmptiness({}).empty).toBe(true)
+  })
+
+  it('survives a brief whose fields are not arrays at all', () => {
+    const out = briefEmptiness({ headline: 'x', top_three: null, gaps: 'nope' })
+    expect(out.written).toBe(0)
+  })
+})
+
+describe('the brief is written to be read once', () => {
+  const text = String(SYNTHESISE_PROMPT)
+
+  it('says who is actually reading it and under what conditions', () => {
+    expect(text).toContain('second language')
+    expect(text).toContain('on a phone')
+  })
+
+  it('gives rules a writer can follow, not an adjective', () => {
+    expect(text).toContain('Short sentences')
+    expect(text).toContain('Say the thing first')
+    expect(text).toContain('Everyday words')
+  })
+
+  it('protects the industry words rather than flattening them', () => {
+    expect(text).toContain('Industry words ARE allowed')
+    expect(text).toContain('KNX')
   })
 })

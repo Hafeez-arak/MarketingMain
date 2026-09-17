@@ -69,9 +69,9 @@ export function losing(deals = [], line = '') {
   const contested = mine.filter(d => ['lost', 'won'].includes(d.outcome) && str(d.competitor))
   if (!contested.length) {
     return notEstablished(mine.length
-      ? 'Deals are recorded for this line, but none names who we were up against.'
-      : 'No contested bid has been recorded for this line. Until one is, who we lose to and why is a guess ' +
-        'and this page will not make it.')
+      ? 'We have bids recorded for this line, but none of them says who we were up against.'
+      : 'No bid has been recorded for this line yet. Until one is, we cannot say who we lose to or why. ' +
+        'We will not guess it.')
   }
 
   const by = new Map()
@@ -108,7 +108,7 @@ export function losing(deals = [], line = '') {
  */
 export function board({ watchlist = [], signals = [], brands = [], line = '', now = new Date() } = {}) {
   const rivals = watchlist.filter(c => inLine(c, line))
-  if (!rivals.length) return notEstablished('No competitor on the watchlist is marked as competing in this line.')
+  if (!rivals.length) return notEstablished('No competitor on the watchlist is marked as working in this line.')
 
   const rows = rivals.map(c => {
     const mine = signals.filter(s => sameName(s.competitor, c.subject))
@@ -148,8 +148,8 @@ export function moved({ signals = [], watchlist = [], line = '', now = new Date(
                     String(b.first_seen_at).localeCompare(String(a.first_seen_at)))
   if (!recent.length) {
     return notEstablished(rivals.length
-      ? `Nothing new was found about the ${rivals.length} rivals in this line in the last ${days} days.`
-      : 'No rivals are assigned to this line.')
+      ? `Nothing new about the ${rivals.length} rivals in this line in the last ${days} days.`
+      : 'No rivals are listed under this line.')
   }
   return {
     established: true,
@@ -179,8 +179,8 @@ export function unknown({ watchlist = [], signals = [], deals = [], line = '' } 
   if (noDomain.length) {
     out.push({
       gap: `${noDomain.length} rival${noDomain.length === 1 ? ' has' : 's have'} no confirmed domain`,
-      detail: `${noDomain.map(c => c.subject).join(', ')}. More than one company can share a name, so these ` +
-        'cannot be researched without one — and a guess would be worse than the gap.',
+      detail: `${noDomain.map(c => c.subject).join(', ')}. Several Saudi companies can share one name. ` +
+        'Without a website we cannot research them, and guessing would be worse than waiting.',
       ask: 'Sales confirms the website.',
     })
   }
@@ -199,7 +199,7 @@ export function unknown({ watchlist = [], signals = [], deals = [], line = '' } 
     out.push({
       gap: `${never.length} of ${rivals.length} rivals have never returned a single finding`,
       detail: `${never.slice(0, 6).map(c => c.subject).join(', ')}${never.length > 6 ? `, and ${never.length - 6} more` : ''}. ` +
-        'That is not a quiet rival — it is one we have not yet looked at.',
+        'This does not mean they are quiet. It means we have not looked at them yet.',
       ask: 'Time. Each weekly run reaches a few more.',
     })
   }
@@ -207,8 +207,8 @@ export function unknown({ watchlist = [], signals = [], deals = [], line = '' } 
   if (!rivals.some(c => c.tier)) {
     out.push({
       gap: 'No rival has a tier',
-      detail: 'Tier is how often we actually meet a company on a shortlist, and it decides which rivals the ' +
-        'weekly search budget reaches first. Nobody but sales can set it, so it is empty rather than guessed.',
+      detail: 'Tier is how often we meet a company on a shortlist. It decides which rivals the weekly ' +
+        'search reaches first. Only sales knows this, so we left it empty instead of guessing.',
       ask: 'Sales rates each rival 1 to 3.',
     })
   }
@@ -217,8 +217,8 @@ export function unknown({ watchlist = [], signals = [], deals = [], line = '' } 
   if (!lineDeals.length) {
     out.push({
       gap: 'No contested bid has been recorded',
-      detail: 'Where we lose and why is internal — it is not on any website, and no amount of research ' +
-        'substitutes for it. It is the first thing on this page and the only block nothing else can fill.',
+      detail: 'Where we lose, and why, is not on any website. Only our own team knows it. This is the ' +
+        'first thing on the page and the only part research cannot fill.',
       ask: 'Six fields after any contested or lost bid.',
     })
   }
@@ -237,20 +237,20 @@ export function verdict({ lose, brd, mv, line = '' } = {}) {
   if (lose?.established) {
     const top = lose.rows[0]
     const reason = DECIDED_BY_LABEL[top.topReason] || 'a reason nobody recorded'
-    return `${what}, we have contested ${lose.contested} recorded deal${lose.contested === 1 ? '' : 's'} and lost ` +
-      `${lose.lost}. ${top.competitor} accounts for the most, usually on ${reason}.`
+    return `${what}, we have bid against a rival ${lose.contested} time${lose.contested === 1 ? '' : 's'} and lost ` +
+      `${lose.lost}. We lose to ${top.competitor} most often, usually on ${reason}.`
   }
   if (brd?.established && brd.researched === 0) {
-    return `${what}, ${brd.rows.length} rivals are being watched and none has returned a finding yet. ` +
-      'There is nothing to conclude from this line, and nothing here pretends otherwise.'
+    return `${what}, we watch ${brd.rows.length} rivals and none has turned up anything yet. ` +
+      'So there is nothing to report for this line. We are not going to make something up.'
   }
   if (brd?.established) {
     const n = mv?.established ? mv.rows.length : 0
-    return `${what}, ${brd.researched} of ${brd.rows.length} rivals have returned findings and ` +
-      `${n ? `${n} thing${n === 1 ? '' : 's'} moved recently` : 'nothing moved recently'}. ` +
-      'How we fare against them in a bid is not yet recorded, so this is a picture of activity, not of position.'
+    return `${what}, ${brd.researched} of ${brd.rows.length} rivals have turned something up and ` +
+      `${n ? `${n} thing${n === 1 ? '' : 's'} changed recently` : 'nothing changed recently'}. ` +
+      'We have no record of how we do against them in a bid. So this shows what they are doing, not who is winning.'
   }
-  return `${what}, there is not yet enough to say anything true.`
+  return `${what}, we do not have enough yet to say anything useful.`
 }
 
 // ─── The page ──────────────────────────────────────────────────────────────

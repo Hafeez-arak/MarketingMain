@@ -125,7 +125,7 @@ function Moved({ block }) {
       </ul>
       {block.more > 0 && (
         <p className="text-[10px] text-text-tertiary mt-2">
-          {block.more} more held back — this block shows the three that matter most, on purpose.
+          {block.more} more not shown. This block deliberately shows only the three that matter most.
         </p>
       )}
     </>
@@ -134,7 +134,7 @@ function Moved({ block }) {
 
 function Unknown({ items }) {
   if (!items.length) {
-    return <p className="text-[11px] text-text-secondary">Nothing outstanding. Every rival in this line has a confirmed identity, a tier, and a recorded bid history.</p>
+    return <p className="text-[11px] text-text-secondary">Nothing missing. Every rival in this line has a confirmed website, a tier, and a bid history.</p>
   }
   return (
     <ul className="space-y-2">
@@ -192,7 +192,7 @@ export function BusinessView() {
         <ReportToolbar backTo="/insights" backLabel="Back to Research" />
         <Empty
           title="The competitor tables cannot be read"
-          description="Either the migration has not been applied to this database yet, or the request failed. This page says nothing rather than reporting an empty market, which would be a claim made from a missing table."
+          description="Either the database change has not been applied yet, or the request failed. We show nothing rather than an empty market, because that would be a claim built on a missing table."
         />
       </ReportDoc>
     )
@@ -215,23 +215,23 @@ export function BusinessView() {
           </ReportSection>
 
           <ReportSection title="Who is beating us, and on what"
-            note="From bids our own team recorded. Nothing on the public web can answer this, and this page will not guess it.">
+            note="Taken from bids our own team recorded. No website can tell us this, so we do not guess it.">
             <Losing block={p.losing} />
           </ReportSection>
 
           <ReportSection title="The board"
             note={p.line === 'controls'
-              ? 'Controls work is specified by MEP and ELV consultants and bought through the main contractor, so protocols, certification and who they commission for are what decide it.'
-              : 'Lighting is specified by architects and lighting designers, so the agencies a rival holds and what they can prove they have lit are what decide it.'}>
+              ? 'Controls work is chosen by MEP and ELV consultants, then bought through the main contractor. So what counts is which protocols a rival supports, what they are certified for, and who they commission for.'
+              : 'Lighting is chosen by architects and lighting designers. So what counts is which brands a rival can supply, and what they have already lit.'}>
             <Board block={p.board} />
           </ReportSection>
 
-          <ReportSection title="What moved" note="At most three. A quiet month is reported as quiet.">
+          <ReportSection title="What changed" note="The three that matter most. A quiet month is shown as quiet.">
             <Moved block={p.moved} />
           </ReportSection>
 
           <ReportSection title="What we still cannot answer"
-            note="Named rather than left blank, because an absent section reads as “fine”.">
+            note="Listed here rather than left out. A missing section looks like nothing is wrong.">
             <Unknown items={p.unknown} />
           </ReportSection>
         </div>

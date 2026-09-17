@@ -30,6 +30,14 @@ function who({ brandName, descriptor, audience, geography }) {
     descriptor ? `What they do: ${descriptor}` : '',
     audience ? `Who they sell to: ${audience}` : '',
     geography ? `Where they operate: ${geography}` : '',
+    '',
+    // A finding's own words survive all the way into the report — synthesis
+    // quotes them and the tracker stores them verbatim — so the plain-language
+    // rule has to start here rather than being applied at the end.
+    'WRITE EVERY HEADLINE, DETAIL AND ACTION IN PLAIN ENGLISH. Short sentences, one idea each,',
+    'everyday words, the point first. The people who read this work in English as a second language',
+    'and read on a phone. Trade terms that are the real name of a thing (KNX, DALI, tender,',
+    'exhibitor deadline) are fine; invented abstract ones are not.',
   ].filter(Boolean).join('\n')
 }
 

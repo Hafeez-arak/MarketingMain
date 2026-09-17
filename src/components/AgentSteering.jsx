@@ -259,8 +259,8 @@ export function AgentSteering() {
               // retired rival look like one that was never there, and the
               // number is what tells someone the list was pruned on purpose.
               <p className="mt-2 text-[11px] text-slate-500">
-                {retiredCount} retired {retiredCount === 1 ? 'competitor is' : 'competitors are'} hidden. They stay on
-                record so the agent does not rediscover and re-propose them.
+                {retiredCount} retired {retiredCount === 1 ? 'competitor is' : 'competitors are'} hidden. We keep
+                them on record so the agent does not find them again and suggest them back.
               </p>
             )}
           </>
