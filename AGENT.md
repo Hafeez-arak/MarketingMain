@@ -410,14 +410,31 @@ wrong lever.** Four design choices dominate it:
    combined and be less accurate. Cadence, format mix and engagement-per-1k
    are computed in code. This decision is already made and it is worth more
    than any model downgrade.
-2. **Prompt caching on the stable prefix.** Layer 1 plus the tool definitions
-   are byte-identical for a workspace across calls. Cached reads cost ~0.1×.
-   Render order is `tools` → `system` → `messages`, so stable content goes
-   first and volatile content (the question, timestamps, ids) goes last. **A
-   single `Date.now()` in the system prompt silently invalidates everything
-   and shows up only as a bill** — so the test asserts
-   `usage.cache_read_input_tokens > 0` on a repeated call rather than trusting
-   the arrangement.
+2. **Prompt caching, on the prefix and on the conversation.** Layer 1 plus
+   the tool definitions are byte-identical for a workspace across calls.
+   Cached reads cost ~0.1×. Render order is `tools` → `system` → `messages`,
+   so stable content goes first and volatile content (the question,
+   timestamps, ids) goes last. **A single `Date.now()` in the system prompt
+   silently invalidates everything and shows up only as a bill** — so the test
+   asserts `usage.cache_read_input_tokens > 0` on a repeated call rather than
+   trusting the arrangement.
+
+   The conversation is cached too, and this is the half that was missed until
+   2026-09-17. The prefix stops where the messages begin, so the tool loop was
+   re-sending every prior turn — search snippets, whole pages of scraped
+   markdown — at the full input price on every pass; turn six paid for turns
+   one through five again. `withConversationCache` places two breakpoints: one
+   at the end of the conversation, which writes this request's prefix, and one
+   at the position the previous request ended at, which reads it back. Two
+   rather than one because the automatic lookback that finds a hit near a
+   breakpoint spans a bounded number of blocks, and a single turn with several
+   parallel tool calls can push a dozen. Three rules keep it from costing more
+   than it saves: never mark a one-shot call (a lens, synthesis, resolve,
+   compact_memory — a write nobody reads still costs 1.25×), never mark a
+   thinking block or an empty text block (both are 400s), and never mutate the
+   caller's array, because the loop appends to one `convo` forever and an
+   in-place breakpoint would accumulate one per turn until the request crossed
+   the four-breakpoint limit.
 3. **Bounded loops.** A hard cap on tool calls per run, plus a task budget so
    the model paces itself. An unbounded loop is the only genuine runaway risk
    in this design.
