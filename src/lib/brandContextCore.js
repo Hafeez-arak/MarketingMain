@@ -276,7 +276,10 @@ export function buildContext(profile, schema, directory, memory, options = {}) {
       return matchesTask(sectionTasksByKey.get(f.section_key), task)
     }),
   }
-  const voiceText = buildInstructionsString(scopedProfile, platformNotes)
+  // `task` is passed even though the filtering above already applied it: that
+  // filter works on `fieldDefs`, and a workspace with none of them (Arak, on
+  // 2026-09-19) never reaches it. The legacy blob does its own scoping inside.
+  const voiceText = buildInstructionsString(scopedProfile, platformNotes, task)
   if (voiceText) blocks.push({ key: 'voice', label: 'Brand Voice & Identity', text: voiceText })
 
   // 2) Assets — reuse the existing formatter for the asset summary only.

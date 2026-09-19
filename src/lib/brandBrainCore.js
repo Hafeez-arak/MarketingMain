@@ -93,7 +93,38 @@ export function rowToProfile(row, fieldDefs) {
 // single "instructions" string the existing n8n webhooks already expect.
 // Keeps the webhook contract unchanged — workflows don't need to be rebuilt,
 // they just receive a richer instructions block.
-export function buildInstructionsString(profile, platformNotes) {
+// ── The legacy blob's task scoping ─────────────────────────────────────────
+//
+// A workspace with structured Brand Brain fields gets its scoping from
+// SCOPE_TASKS and each field's own `tasks` tag. A workspace that never defined
+// any — which on 2026-09-19 is Arak, with zero brand_fields and zero
+// brand_sections — falls down the legacy path below, where there is nothing to
+// hang a tag on, so EVERY column went to every task.
+//
+// What that looked like in practice: the picture models were handed "Speak as
+// 'we' — ARAK is an established institution", "Never do: excessive exclamation
+// marks" and a list of landmark client names, none of which describe an image.
+// nano-banana-2 rejected the request outright (fal 422, "the input cannot be
+// processed as the requested output type") while gpt-image-2 rendered it, which
+// is how a Gemini lane came to fail four times on a brief ChatGPT completed.
+//
+// So the legacy path gets the scoping too: for a task that DRAWS, only the
+// columns that describe how the brand looks. Every other task is untouched and
+// still receives the whole blob — this list is an exclusion for image/video,
+// not a new contract for captions and plans.
+//
+// toneDos/toneDonts stay in deliberately. They are the brand's guardrails, the
+// one part the prompt builders mark absolute, and Arak's own never-do list is
+// half visual ("Generic stock-photo lighting clichés"). A free-text column
+// written by a person cannot be split by key, so the choice is to send it or
+// drop a real visual rule; sending it is the smaller error.
+const DRAWING_TASKS = new Set(['image', 'video'])
+const VISUAL_KEYS = [
+  'voiceDescriptors', 'toneDos', 'toneDonts',
+  'visualIdentity', 'brandColors', 'visualStyleNotes', 'languages',
+]
+
+export function buildInstructionsString(profile, platformNotes, task = null) {
   if (!profile) profile = DEFAULT_BRAND_PROFILE
 
   // Schema-driven path: emit the workspace's own fields, in its own order,
@@ -118,27 +149,29 @@ export function buildInstructionsString(profile, platformNotes) {
   // Legacy path — used only when a workspace has no field definitions yet
   // (a brand new workspace, or a failed schema fetch). Keeps generation
   // working rather than sending an empty instructions block.
+  const draws = DRAWING_TASKS.has(task)
+  const only = key => (draws && !VISUAL_KEYS.includes(key) ? '' : profile[key])
   const sections = [
     // Identity first — this is the company persona the AI writes *as*.
-    profile.mission          && `Mission: ${profile.mission}`,
-    profile.positioning      && `Market positioning: ${profile.positioning}`,
-    profile.valueProposition && `Value proposition: ${profile.valueProposition}`,
-    profile.brandStory       && `Brand story:\n${profile.brandStory}`,
-    profile.companyFacts     && `Facts the brand can state:\n${profile.companyFacts}`,
-    profile.voiceDescriptors && `Brand voice: ${profile.voiceDescriptors}`,
-    profile.toneDos          && `Always do:\n${profile.toneDos}`,
-    profile.toneDonts        && `Never do:\n${profile.toneDonts}`,
-    profile.targetPersonas   && `Target audience:\n${profile.targetPersonas}`,
-    profile.marketContext    && `Market context:\n${profile.marketContext}`,
-    profile.keyProjects      && `Reference when relevant:\n${profile.keyProjects}`,
-    profile.productIndex     && `Product range (ask for the full sheet for specifics):\n${profile.productIndex}`,
-    profile.visualIdentity   && `Visual identity:\n${profile.visualIdentity}`,
-    profile.brandColors      && `Brand colours:\n${profile.brandColors}`,
-    profile.visualStyleNotes && `Visual style defaults:\n${profile.visualStyleNotes}`,
-    profile.languages        && `Languages:\n${profile.languages}`,
-    profile.contactInfo      && `Contact & conversion details:\n${profile.contactInfo}`,
-    profile.offersCtas       && `Offers & calls-to-action to push:\n${profile.offersCtas}`,
-    profile.complianceNotes  && `Compliance rules (esp. WhatsApp/email):\n${profile.complianceNotes}`,
+    only('mission')          && `Mission: ${profile.mission}`,
+    only('positioning')      && `Market positioning: ${profile.positioning}`,
+    only('valueProposition') && `Value proposition: ${profile.valueProposition}`,
+    only('brandStory')       && `Brand story:\n${profile.brandStory}`,
+    only('companyFacts')     && `Facts the brand can state:\n${profile.companyFacts}`,
+    only('voiceDescriptors') && `Brand voice: ${profile.voiceDescriptors}`,
+    only('toneDos')          && `Always do:\n${profile.toneDos}`,
+    only('toneDonts')        && `Never do:\n${profile.toneDonts}`,
+    only('targetPersonas')   && `Target audience:\n${profile.targetPersonas}`,
+    only('marketContext')    && `Market context:\n${profile.marketContext}`,
+    only('keyProjects')      && `Reference when relevant:\n${profile.keyProjects}`,
+    only('productIndex')     && `Product range (ask for the full sheet for specifics):\n${profile.productIndex}`,
+    only('visualIdentity')   && `Visual identity:\n${profile.visualIdentity}`,
+    only('brandColors')      && `Brand colours:\n${profile.brandColors}`,
+    only('visualStyleNotes') && `Visual style defaults:\n${profile.visualStyleNotes}`,
+    only('languages')        && `Languages:\n${profile.languages}`,
+    only('contactInfo')      && `Contact & conversion details:\n${profile.contactInfo}`,
+    only('offersCtas')       && `Offers & calls-to-action to push:\n${profile.offersCtas}`,
+    only('complianceNotes')  && `Compliance rules (esp. WhatsApp/email):\n${profile.complianceNotes}`,
     platformNotes?.trim()    && `Platform-specific notes:\n${platformNotes.trim()}`,
   ].filter(Boolean)
   return sections.join('\n\n')

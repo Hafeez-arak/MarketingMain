@@ -267,18 +267,63 @@ export function buildBranches(versions) {
     groups.get(root).push(v)
   }
 
+  // ── Retries rejoin the lane they came from ────────────────────────────────
+  //
+  // A round-0 candidate has no parent, and `parent_version_id` is the only
+  // thing that records lineage — so nothing could say that a retry belongs to
+  // the attempt it replaces. handleRetry inserts a fresh parentless row, which
+  // meant every retry of a failed candidate became a THIRD root and therefore
+  // a third lane. Measured on session bed07832 (the national-day brief,
+  // 2026-09-16): one ChatGPT candidate, one Gemini candidate and three retries
+  // of Gemini gave five roots and five stacked lanes, on a screen whose whole
+  // premise is two.
+  //
+  // So parentless attempts of the SAME provider are ONE lane. The failures sit
+  // in that lane's history strip, which is where a failed attempt belongs, and
+  // the screen keeps its one-column-per-model invariant however many retries
+  // it took. Derived here rather than fixed by deleting the dead rows, because
+  // deriving it also repairs every session already in the table.
+  //
+  // Storyboard rows are exempt and must stay exempt: a multi-clip session's
+  // clips are all parentless and all provider 'seedance', but they are
+  // genuinely different shots — `clip_index`/`clip_role` is what separates
+  // them from two attempts at the same thing. (They render on the ClipBoard
+  // rather than in lanes at all, so this only ever mattered defensively.)
+  const attemptKey = v =>
+    (!v || v.parent_version_id || v.clip_index != null || v.clip_role)
+      ? null
+      : `${v.provider || ''}|${v.kind || ''}`
+
+  const laneOf = new Map()
+  const merged = new Map()
+  for (const [rootId, list] of groups) {
+    const key = attemptKey(byId.get(rootId) || list[0])
+    if (key && !laneOf.has(key)) laneOf.set(key, rootId)
+    const lane = key ? laneOf.get(key) : rootId
+    if (!merged.has(lane)) merged.set(lane, [])
+    merged.get(lane).push(...list)
+  }
+  // Re-sorted because two merged groups interleave in time: a retry fired at
+  // 11:11:22 and an edit made on the FIRST attempt a minute later have to read
+  // in the order they happened — the history strip and `newest` both take this
+  // order literally.
+  for (const list of merged.values()) {
+    list.sort((a, b) =>
+      (a.round - b.round) || String(a.created_at || '').localeCompare(String(b.created_at || '')))
+  }
+
   // With variants > 1 a round produces several candidates from the SAME model,
   // so "ChatGPT" alone no longer identifies a lane. Numbered per provider, and
   // only when there's more than one of that provider — a plain 1-vs-1 round
   // should not suddenly read "ChatGPT 1".
   const perProvider = new Map()
-  for (const [, list] of groups) {
+  for (const [, list] of merged) {
     const p = list[0]?.provider || ''
     perProvider.set(p, (perProvider.get(p) || 0) + 1)
   }
   const seen = new Map()
 
-  return [...groups.entries()].map(([rootId, list]) => {
+  return [...merged.entries()].map(([rootId, list]) => {
     const ready = list.filter(v => v.status === 'ready')
     const provider = (byId.get(rootId) || list[0])?.provider || ''
     const n = (seen.get(provider) || 0) + 1
