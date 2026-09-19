@@ -7,6 +7,64 @@ export const fmt = n => n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M`
   : String(Math.round(n) || 0)
 
 /**
+ * A percentage, rendered the one way this app renders percentages.
+ *
+ * ── WHY THIS EXISTS ──
+ *
+ * The same engagement rate was printed by four call sites at two precisions:
+ * `toFixed(1)` in the KPI tile and `toFixed(0)` in the chart legend 200px
+ * below it, so one variable read "18.8%" in one place and "19%" in the other.
+ * The tables rounded to whole numbers too, which turns 6.5% into "7%" sitting
+ * a screen away from a tile saying "6.5%".
+ *
+ * None of those was a wrong calculation, and that is exactly what made it
+ * expensive to find: there was nothing wrong in the arithmetic, and the page
+ * still looked like it could not add up. One decimal everywhere, from one
+ * function, is the whole fix — below 10% the decimal is most of the
+ * information, and past 100% it has stopped earning its place.
+ *
+ * @param {number|null|undefined} value A percentage already scaled to 0..100.
+ * @param {string} [dash] What to render when there is no number to render.
+ * @returns {string}
+ */
+export function pct(value, dash = '—') {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return dash
+  return `${value >= 100 ? Math.round(value) : Math.round(value * 10) / 10}%`
+}
+
+/**
+ * "Last 29 days" for the window a strip ACTUALLY covers.
+ *
+ * ── WHY THIS IS NOT JUST `Last ${days} days` ──
+ *
+ * The two strips on an account page do not cover the same window, and until
+ * this existed nothing on screen admitted it. Meta refuses more than 30 days
+ * between `since` and `until` on account insights, so the platform strip is
+ * capped at 29 whatever the picker says; the post strip below it honours the
+ * full 90. Pick "Last 90 days" and you get a 29-day figure stacked on a 90-day
+ * figure, in identical type, with identical captions — and every comparison a
+ * reader makes between them is wrong by two months.
+ *
+ * So each strip states the span it was actually given, derived from the dates
+ * the server used rather than from the number in the picker. When they agree
+ * the two captions are identical and nobody notices; when they differ the
+ * difference is the first thing in the reader's eye.
+ *
+ * @param {string} from ISO day, e.g. `2026-08-21`.
+ * @param {string} to   ISO day.
+ * @param {number} [fallbackDays] Used when either date is missing.
+ * @returns {string}
+ */
+export function windowLabel(from, to, fallbackDays) {
+  const a = Date.parse(`${from}T00:00:00Z`)
+  const b = Date.parse(`${to}T00:00:00Z`)
+  const days = Number.isFinite(a) && Number.isFinite(b)
+    ? Math.round((b - a) / 86_400_000)
+    : fallbackDays
+  return days ? `Last ${days} days` : ''
+}
+
+/**
  * The follower count across whichever sources have actually counted, or null.
  *
  * ── WHY THIS IS NOT `Math.max(a, b, c)` ──

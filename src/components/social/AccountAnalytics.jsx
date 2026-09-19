@@ -6,7 +6,8 @@ import { fetchAccountAnalytics, syncAccounts, describeSync } from '../../lib/zer
 import { publishConnectedAccounts } from '../../lib/useConnectedAccounts'
 import { profileUrlOf } from '../../lib/socialAnalytics'
 import { AnalyticsDashboard, DashboardSkeleton } from '../../pages/analytics/Dashboard'
-import { fmt, timeAgo } from '../../pages/analytics/format'
+import { fmt, timeAgo, windowLabel } from '../../pages/analytics/format'
+import { MetricLabel, ScopeBanner } from '../analytics/MetricLabel'
 import { LinkedInInsights } from './LinkedInInsights'
 
 // ─── One connected account's analytics ─────────────────────────────────────
@@ -19,12 +20,16 @@ import { LinkedInInsights } from './LinkedInInsights'
 // Data comes from /api/zernio/analytics, which checks the account belongs to
 // this workspace before reading anything.
 
+// `info` is the key into src/lib/analytics/metricInfo.js. Namespaced `ig.*`
+// because the same words mean something else one strip down: "reach" here is
+// unique accounts across the whole profile, and "reach" in the KPI strip below
+// is every post's reach added together. Two entries, never one shared.
 const INSIGHTS = [
-  { key: 'reach', label: 'Accounts reached', icon: Icon.users },
-  { key: 'views', label: 'Views', icon: Icon.eye },
-  { key: 'accounts_engaged', label: 'Accounts engaged', icon: Icon.activity },
-  { key: 'total_interactions', label: 'Interactions', icon: Icon.heart },
-  { key: 'profile_links_taps', label: 'Profile link taps', icon: Icon.trending },
+  { key: 'reach', info: 'ig.reach', label: 'Accounts reached', icon: Icon.users },
+  { key: 'views', info: 'ig.views', label: 'Views', icon: Icon.eye },
+  { key: 'accounts_engaged', info: 'ig.accounts_engaged', label: 'Accounts engaged', icon: Icon.activity },
+  { key: 'total_interactions', info: 'ig.total_interactions', label: 'Interactions', icon: Icon.heart },
+  { key: 'profile_links_taps', info: 'ig.profile_links_taps', label: 'Profile link taps', icon: Icon.trending },
 ]
 
 // `refreshable` is off where the page around this has its own Refresh for
@@ -158,12 +163,20 @@ export function AccountAnalytics({ platform, accounts = [], loadingAccounts = fa
             <p className="px-5 py-4 text-sm text-text-secondary">Account insights did not load: {insights._error}</p>
           ) : (
             <>
+              {/* The span Meta actually gave us, not the one in the picker.
+                  Meta refuses more than 30 days on account insights, so at
+                  "Last 90 days" this strip is 29 days and the post strip
+                  below is 90 — and the two are only safe to read side by side
+                  if each says which it is. */}
+              <ScopeBanner
+                title="Straight from Instagram"
+                subtitle="Your whole account — posts, reels, stories, explore and the profile itself. People are counted once each."
+                right={windowLabel(current?.insightsFrom, current?.toDate, Math.min(days, 29))}
+              />
               <div className="grid grid-cols-2 sm:grid-cols-5 divide-y sm:divide-y-0 sm:divide-x divide-border">
                 {INSIGHTS.map(m => (
                   <div key={m.key} className="p-5">
-                    <p className="text-xs text-text-tertiary mb-1.5 flex items-center gap-1.5">
-                      <span className="text-text-tertiary">{m.icon}</span>{m.label}
-                    </p>
+                    <MetricLabel metric={m.info} label={m.label} icon={m.icon} className="mb-1.5" />
                     {current
                       ? <p className="text-2xl font-bold text-text">
                           {insights ? fmt(insights.metrics?.[m.key]?.total || 0) : '—'}
@@ -175,9 +188,9 @@ export function AccountAnalytics({ platform, accounts = [], loadingAccounts = fa
               <div className="px-5 py-2.5 border-t border-border flex items-center gap-2 text-[11px] text-text-tertiary">
                 <IconBadge>{Icon.clock}</IconBadge>
                 <span>
-                  Account-wide{current?.insightsFrom ? ` since ${current.insightsFrom}` : ''} — every surface, not just posts.
-                  {days > 30 && ' Instagram gives account insights for 30 days at most.'}
-                  {' '}Can lag up to 48 hours.
+                  {current?.insightsFrom ? `Since ${current.insightsFrom}. ` : ''}
+                  {days > 30 && 'Instagram gives account insights for 30 days at most, so this window is shorter than the one you picked. '}
+                  Can lag up to 48 hours.
                 </span>
               </div>
             </>

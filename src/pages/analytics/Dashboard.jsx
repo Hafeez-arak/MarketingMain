@@ -7,7 +7,15 @@ import {
 import { Card, Button, PlatformPill, Empty, PostImage, IconBadge, PillSelect, Skeleton } from '../../components/ui/index'
 import { Icon } from '../../components/ui/icons'
 import { BestTimeHeatmap, MetricToggle } from './charts'
-import { fmt, foldFollowers } from './format'
+import { MetricLabel, MetricInfoDot, ScopeBanner } from '../../components/analytics/MetricLabel'
+import { fmt, pct, windowLabel, foldFollowers } from './format'
+// The one definition of engagement rate, imported rather than restated. This
+// file used to carry its own copy — identical to dashboardOverview's on the
+// day it was written, and with nothing but good intentions keeping it that
+// way. Two rates that disagree by a tenth on two screens is a bug report
+// nobody can close, so there is now only one of them to edit.
+import { engagementRate } from '../../lib/dashboardOverview'
+import { platformEngagementRate } from '../../lib/analytics/engagementSource'
 
 // ─── The Analytics graphs, drawn from one Zernio dashboard response ────────
 // Shared by /analytics (the workspace view, fed by the Zernio Dashboard n8n
@@ -38,16 +46,6 @@ const metricIcon = key => ({
   likes: Icon.heart, comments: Icon.message, shares: Icon.trending, saves: Icon.document,
   views: Icon.eye, impressions: Icon.activity, reach: Icon.users, clicks: Icon.trending,
 }[key] || Icon.activity)
-
-// Interactions ÷ people reached (falls back to impressions when a platform
-// doesn't report reach) — same definition used everywhere else in this app.
-function engagementRate(a) {
-  if (!a) return null
-  const denom = a.reach || a.impressions || 0
-  if (!denom) return null
-  const interactions = (a.likes || 0) + (a.comments || 0) + (a.shares || 0) + (a.saves || 0)
-  return (interactions / denom) * 100
-}
 
 // Monday-start week bucket key (YYYY-MM-DD of that week's Monday).
 function weekOf(dateStr) {
@@ -83,14 +81,20 @@ const ZERO_METRICS = { impressions: 0, reach: 0, likes: 0, comments: 0, shares: 
 
 const EMPTY = []
 
-export function ChartCard({ title, subtitle, total, right, icon, tone, children }) {
+// `metric` is a key into src/lib/analytics/metricInfo.js. A chart whose title
+// alone doesn't say what it plots — "Engagement accumulation", "Posting
+// frequency vs engagement" — passes one and gets an ⓘ beside the heading.
+export function ChartCard({ title, subtitle, total, right, icon, tone, metric, children }) {
   return (
     <Card className="p-5">
       <div className="flex items-start justify-between gap-3 mb-4">
         <div className="flex items-start gap-2.5">
           {icon && <IconBadge tone={tone}>{icon}</IconBadge>}
           <div>
-            <h3 className="font-semibold text-text text-sm leading-tight">{title}</h3>
+            <h3 className="font-semibold text-text text-sm leading-tight flex items-center gap-1.5">
+              {title}
+              <MetricInfoDot metric={metric} label={title} />
+            </h3>
             {subtitle && <p className="text-xs text-text-tertiary mt-0.5">{subtitle}</p>}
           </div>
         </div>
@@ -116,8 +120,17 @@ export function DashboardSkeleton() {
   return (
     <div className="space-y-4" aria-busy="true" aria-label="Loading analytics">
       <Card className="overflow-hidden">
-        <div className="grid grid-cols-2 sm:grid-cols-5 divide-y sm:divide-y-0 divide-x-0 sm:divide-x divide-border">
-          {[0, 1, 2, 3, 4].map(i => (
+        {/* Stands in for the ScopeBanner too. Without it the strip grows a
+            36px band the moment the answer lands, and the whole page below
+            jumps down by that much. */}
+        <div className="px-5 py-2.5 bg-surface-subtle border-b border-border">
+          <Skeleton className="h-3 w-56" />
+        </div>
+        {/* Four, matching the strip's widest real form — engagement rate,
+            followers, posts, best post. A LinkedIn page settles to three,
+            because its rate lives in LinkedIn's own strip above. */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 divide-y sm:divide-y-0 divide-x-0 sm:divide-x divide-border">
+          {[0, 1, 2, 3].map(i => (
             <div key={i} className="p-5">
               <Skeleton className="h-3 w-20 mb-2.5" />
               <Skeleton className="h-7 w-16" />
@@ -144,6 +157,25 @@ export function DashboardSkeleton() {
 }
 
 const axisTick = { fontSize: 11, fill: '#7a848c' }
+
+// A table heading that can explain itself. Both tables abbreviate — "Impr.",
+// "ER" — and an abbreviation is exactly the case where a reader needs the
+// definition and has nowhere to get it. `align` because only the first column
+// of each table is left-aligned.
+// Class names are written out rather than interpolated: Tailwind generates
+// only the literals it finds in the source, and a `text-${align}` would
+// compile to nothing the day the last hard-coded `text-left` is deleted.
+function Th({ metric, label, align = 'right' }) {
+  const right = align === 'right'
+  return (
+    <th className={`${right ? 'text-right' : 'text-left'} px-5 py-2.5 text-[11px] font-medium uppercase tracking-wide text-text-tertiary`}>
+      <span className={`inline-flex items-center gap-1 ${right ? 'flex-row-reverse' : ''}`}>
+        <MetricInfoDot metric={metric} label={label} />
+        {label}
+      </span>
+    </th>
+  )
+}
 
 const alertIcon = <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
 
@@ -217,6 +249,13 @@ export function AnalyticsDashboard({ dash, days, accountId = '', onRetry, perPla
   }, [posts])
 
   const overallEngagementRate = useMemo(() => engagementRate(totals) ?? 0, [totals])
+
+  // Whether THIS strip draws the engagement rate, or leaves it to the
+  // platform's own strip above. LinkedIn publishes a rate and Instagram does
+  // not, so on a LinkedIn page the tile below is absent and the only rate on
+  // screen is LinkedIn's own; on Instagram it is the only rate on screen and
+  // it is ours. Either way: exactly one.
+  const ourRateShown = platformEngagementRate(dash) === null
 
   // Zernio omits followersCount until its first daily snapshot, and the
   // follower-stats and history endpoints fill on the same clock — so take
@@ -318,23 +357,38 @@ export function AnalyticsDashboard({ dash, days, accountId = '', onRetry, perPla
 
   return (
     <>
-      {/* KPI strip — one flat row divided by rules, not five boxed
-          cards. Reads as a single stat panel rather than a scatter
-          of separate widgets. */}
+      {/* KPI strip — one flat row divided by rules, not boxed cards. Reads as
+          a single stat panel rather than a scatter of separate widgets.
+
+          ── WHAT IS DELIBERATELY NOT HERE ──
+
+          "Total reach" used to sit second in this row, and on a platform page
+          it landed directly under the platform's own account figures, where it
+          contradicted them in plain sight: "Accounts reached 10" above "Total
+          reach 16". Both were right — 10 distinct people, and the eight posts'
+          reach added together, which counts a person once per post they saw —
+          but a summed reach is the one figure a reader will always take for
+          the real one. It is gone. The strip above already gives reach, counted
+          the way anybody means it.
+
+          The engagement rate is here only when the platform publishes none of
+          its own; LinkedIn's sits in the strip above instead. One rate per
+          page, whichever one is truest — see lib/analytics/engagementSource.js. */}
       <Card className="overflow-hidden">
-        <div className="grid grid-cols-2 sm:grid-cols-5 divide-y sm:divide-y-0 divide-x-0 sm:divide-x divide-border">
+        <ScopeBanner
+          title="Your posts, added up"
+          subtitle="Each post's own numbers added together. Someone who saw several posts is counted once per post."
+          right={`${overviewMeta.totalPosts ?? posts.length} post${(overviewMeta.totalPosts ?? posts.length) === 1 ? '' : 's'} · ${windowLabel(dash?.fromDate, dash?.toDate, days).toLowerCase()}`}
+        />
+        <div className={`grid grid-cols-2 ${ourRateShown ? 'sm:grid-cols-4' : 'sm:grid-cols-3'} divide-y sm:divide-y-0 divide-x-0 sm:divide-x divide-border`}>
+          {ourRateShown && (
+            <div className="p-5">
+              <MetricLabel metric="post.engagement_rate" label="Engagement rate" className="mb-1.5" />
+              <p className="text-2xl font-bold text-text">{pct(overallEngagementRate)}</p>
+            </div>
+          )}
           <div className="p-5">
-            <p className="text-xs text-text-tertiary mb-1.5">Engagement rate</p>
-            <p className="text-2xl font-bold text-text">{overallEngagementRate.toFixed(1)}%</p>
-          </div>
-          <div className="p-5">
-            <p className="text-xs text-text-tertiary mb-1.5">Total reach</p>
-            <p className="text-2xl font-bold text-text flex items-center gap-1.5">
-              <span className="text-text-tertiary">{Icon.eye}</span>{fmt(totals.reach)}
-            </p>
-          </div>
-          <div className="p-5">
-            <p className="text-xs text-text-tertiary mb-1.5">Total followers</p>
+            <MetricLabel metric="post.followers" label="Total followers" className="mb-1.5" />
             <p className="text-2xl font-bold text-text flex items-center gap-1.5">
               <span className="text-text-tertiary">{Icon.users}</span>
               {/* An em dash, not a zero. The chart below already says when the
@@ -346,18 +400,18 @@ export function AnalyticsDashboard({ dash, days, accountId = '', onRetry, perPla
             </p>
           </div>
           <div className="p-5">
-            <p className="text-xs text-text-tertiary mb-1.5">Posts this period</p>
+            <MetricLabel metric="post.count" label="Posts this period" className="mb-1.5" />
             <p className="text-2xl font-bold text-text flex items-center gap-1.5">
               <span className="text-text-tertiary">{Icon.document}</span>{overviewMeta.totalPosts ?? posts.length}
             </p>
           </div>
           <div className="p-5">
-            <p className="text-xs text-text-tertiary mb-1.5">Best post</p>
+            <MetricLabel metric="post.best" label="Best post" className="mb-1.5" />
             {bestPost ? (
               <div className="flex items-center gap-2">
                 <PostImage src={bestPost.thumbnailUrl} className="w-8 h-8 object-cover flex-shrink-0 border border-border" />
                 <div className="min-w-0">
-                  <p className="text-sm font-bold text-text leading-tight">{bestPost._er >= 0 ? `${bestPost._er.toFixed(0)}%` : '—'}</p>
+                  <p className="text-sm font-bold text-text leading-tight">{bestPost._er >= 0 ? pct(bestPost._er) : '—'}</p>
                   {bestPost.platformPostUrl && (
                     <a href={bestPost.platformPostUrl} target="_blank" rel="noreferrer" className="text-[11px] font-semibold text-amber-700 hover:underline">View ↗</a>
                   )}
@@ -400,7 +454,7 @@ export function AnalyticsDashboard({ dash, days, accountId = '', onRetry, perPla
                 </ResponsiveContainer>
               </ChartCard>
             )}
-            <ChartCard title="Posts over time" subtitle="Posts per week" total={posts.length} icon={Icon.trending}>
+            <ChartCard title="Posts over time" subtitle="Posts per week" total={posts.length} icon={Icon.trending} metric="calc.posts_over_time">
               <ResponsiveContainer width="100%" height={220}>
                 <BarChart data={postsOverTime}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e0e5e6" vertical={false} />
@@ -476,23 +530,23 @@ export function AnalyticsDashboard({ dash, days, accountId = '', onRetry, perPla
                     icon={metricIcon(m.key)} label={m.label} value={fmt(totals[m.key])}
                     onClick={() => toggleLineMetric(m.key)} />
                 ))}
-                <div className="text-left">
-                  <p className="text-xs text-text-tertiary">Eng. rate</p>
-                  <span className="flex items-center gap-1.5 mt-1 pl-0.5">
-                    <span className="text-sage-600 flex-shrink-0">{Icon.trending}</span>
-                    <span className="text-xl font-bold leading-none text-text">{overallEngagementRate.toFixed(0)}%</span>
-                  </span>
-                </div>
+                {/* An engagement rate used to hang off the end of this legend,
+                    reading "19%" while the KPI tile 200px above read "18.8%" —
+                    one variable, two roundings, and a reader with no way to
+                    know it was one number. It is gone rather than rounded to
+                    match: everything else in this column is a metric you can
+                    toggle a line for, a rate is not, and the page already
+                    states its rate once, higher up, where it is read first. */}
               </div>
             </div>
           </Card>
 
           {/* Best time to post / Follower history */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <ChartCard title="Best time to post" icon={Icon.clock}>
+            <ChartCard title="Best time to post" icon={Icon.clock} metric="calc.best_time">
               <BestTimeHeatmap slots={bestTimeSlots} />
             </ChartCard>
-            <ChartCard title="Follower history" icon={Icon.users} tone="sage">
+            <ChartCard title="Follower history" icon={Icon.users} tone="sage" metric="calc.follower_history">
               {followerRows.length === 0 ? (
                 <div className="h-[220px] flex flex-col items-center justify-center text-center gap-2">
                   <svg className="w-8 h-8 text-text-disabled" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>
@@ -524,16 +578,16 @@ export function AnalyticsDashboard({ dash, days, accountId = '', onRetry, perPla
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-border">
-                      <th className="text-left px-5 py-2.5 text-[11px] font-medium uppercase tracking-wide text-text-tertiary">Platform</th>
-                      <th className="text-right px-5 py-2.5 text-[11px] font-medium uppercase tracking-wide text-text-tertiary">Posts</th>
-                      <th className="text-right px-5 py-2.5 text-[11px] font-medium uppercase tracking-wide text-text-tertiary">Likes</th>
-                      <th className="text-right px-5 py-2.5 text-[11px] font-medium uppercase tracking-wide text-text-tertiary">Comments</th>
-                      <th className="text-right px-5 py-2.5 text-[11px] font-medium uppercase tracking-wide text-text-tertiary">Shares</th>
-                      <th className="text-right px-5 py-2.5 text-[11px] font-medium uppercase tracking-wide text-text-tertiary">Saves</th>
-                      <th className="text-right px-5 py-2.5 text-[11px] font-medium uppercase tracking-wide text-text-tertiary">Views</th>
-                      <th className="text-right px-5 py-2.5 text-[11px] font-medium uppercase tracking-wide text-text-tertiary">Impr.</th>
-                      <th className="text-right px-5 py-2.5 text-[11px] font-medium uppercase tracking-wide text-text-tertiary">Reach</th>
-                      <th className="text-right px-5 py-2.5 text-[11px] font-medium uppercase tracking-wide text-text-tertiary">ER</th>
+                      <Th metric="calc.platform_breakdown" label="Platform" align="left" />
+                      <Th metric="post.count" label="Posts" />
+                      <Th metric="post.likes" label="Likes" />
+                      <Th metric="post.comments" label="Comments" />
+                      <Th metric="post.shares" label="Shares" />
+                      <Th metric="post.saves" label="Saves" />
+                      <Th metric="post.views" label="Views" />
+                      <Th metric="post.impressions" label="Impr." />
+                      <Th metric="post.reach" label="Reach" />
+                      <Th metric="post.engagement_rate" label="ER" />
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border">
@@ -551,7 +605,7 @@ export function AnalyticsDashboard({ dash, days, accountId = '', onRetry, perPla
                         <td className="px-5 py-3 text-right font-medium">
                           {r.er === null
                             ? <span className="text-text-tertiary">—</span>
-                            : <span className="text-[10px] font-semibold px-1.5 py-0.5 bg-sage-100 text-sage-800 uppercase tracking-[0.08em]">{r.er.toFixed(0)}%</span>}
+                            : <span className="text-[10px] font-semibold px-1.5 py-0.5 bg-sage-100 text-sage-800 uppercase tracking-[0.08em]">{pct(r.er)}</span>}
                         </td>
                       </tr>
                     ))}
@@ -572,13 +626,15 @@ export function AnalyticsDashboard({ dash, days, accountId = '', onRetry, perPla
                 <thead className="sticky top-0 z-10 bg-white shadow-[inset_0_-1px_0_#dde3e2]">
                   <tr>
                     <th className="text-left px-5 py-2.5 text-[11px] font-medium uppercase tracking-wide text-text-tertiary">Post</th>
-                    <th className="text-right px-5 py-2.5 text-[11px] font-medium uppercase tracking-wide text-text-tertiary">Likes</th>
-                    <th className="text-right px-5 py-2.5 text-[11px] font-medium uppercase tracking-wide text-text-tertiary">Comments</th>
-                    {shown('views') && <th className="text-right px-5 py-2.5 text-[11px] font-medium uppercase tracking-wide text-text-tertiary">Views</th>}
-                    {shown('impressions') && <th className="text-right px-5 py-2.5 text-[11px] font-medium uppercase tracking-wide text-text-tertiary">Impr.</th>}
-                    {shown('reach') && <th className="text-right px-5 py-2.5 text-[11px] font-medium uppercase tracking-wide text-text-tertiary">Reach</th>}
-                    {listed('clicks') && <th className="text-right px-5 py-2.5 text-[11px] font-medium uppercase tracking-wide text-text-tertiary">Clicks</th>}
-                    <th className="text-right px-5 py-2.5 text-[11px] font-medium uppercase tracking-wide text-text-tertiary">ER</th>
+                    {/* `row.*`, not `post.*`: every cell here is one post, not
+                        the window's posts added up. */}
+                    <Th metric="row.likes" label="Likes" />
+                    <Th metric="row.comments" label="Comments" />
+                    {shown('views') && <Th metric="row.views" label="Views" />}
+                    {shown('impressions') && <Th metric="row.impressions" label="Impr." />}
+                    {shown('reach') && <Th metric="row.reach" label="Reach" />}
+                    {listed('clicks') && <Th metric="row.clicks" label="Clicks" />}
+                    <Th metric="row.engagement_rate" label="ER" />
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
@@ -607,7 +663,7 @@ export function AnalyticsDashboard({ dash, days, accountId = '', onRetry, perPla
                       {shown('reach') && <td className="px-5 py-3 text-right text-text-tertiary">{p.analytics?.reach ? fmt(p.analytics.reach) : '–'}</td>}
                       {listed('clicks') && <td className="px-5 py-3 text-right text-text">{fmt(p.analytics?.clicks)}</td>}
                       <td className="px-5 py-3 text-right font-medium text-text">
-                        {p._er === null ? <span className="text-text-tertiary">—</span> : `${p._er.toFixed(0)}%`}
+                        {p._er === null ? <span className="text-text-tertiary">—</span> : pct(p._er)}
                       </td>
                     </tr>
                   ))}
@@ -618,7 +674,7 @@ export function AnalyticsDashboard({ dash, days, accountId = '', onRetry, perPla
 
           {/* Posting frequency vs engagement / Engagement accumulation */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <ChartCard title="Posting frequency vs engagement" subtitle="Optimal cadence per platform" icon={Icon.activity} tone="sage">
+            <ChartCard title="Posting frequency vs engagement" subtitle="Optimal cadence per platform" icon={Icon.activity} tone="sage" metric="calc.frequency">
               {frequencyRows.length === 0 ? (
                 <p className="text-sm text-text-tertiary py-8 text-center">Not enough history yet.</p>
               ) : (
@@ -628,21 +684,21 @@ export function AnalyticsDashboard({ dash, days, accountId = '', onRetry, perPla
                       <CartesianGrid strokeDasharray="3 3" stroke="#e0e5e6" horizontal={false} />
                       <XAxis type="number" tick={axisTick} tickLine={false} axisLine={{ stroke: '#e0e5e6' }} unit="%" />
                       <YAxis type="category" dataKey="label" tick={axisTick} tickLine={false} axisLine={false} width={50} />
-                      <Tooltip formatter={v => `${v.toFixed(0)}%`} />
+                      <Tooltip formatter={v => pct(v)} />
                       <Bar dataKey="rate" fill="#558050" radius={[0, 6, 6, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
                   <div className="flex flex-wrap gap-2 mt-2">
                     {frequencyRows.map(r => (
                       <span key={`${r.platform}-${r.posts_per_week}`} className="text-[10px] px-1.5 py-0.5 bg-surface-subtle border border-border text-text-secondary">
-                        <span className="capitalize font-medium">{r.platform}</span> · {r.posts_per_week}/wk · {r.avg_engagement_rate.toFixed(0)}%
+                        <span className="capitalize font-medium">{r.platform}</span> · {r.posts_per_week}/wk · {pct(r.avg_engagement_rate)}
                       </span>
                     ))}
                   </div>
                 </>
               )}
             </ChartCard>
-            <ChartCard title="Engagement accumulation" subtitle="How engagement builds up after publishing" icon={Icon.trending}>
+            <ChartCard title="Engagement accumulation" subtitle="How engagement builds up after publishing" icon={Icon.trending} metric="calc.decay">
               {decayBuckets.length === 0 ? (
                 <p className="text-sm text-text-tertiary py-8 text-center">Not enough history yet.</p>
               ) : (
@@ -652,7 +708,7 @@ export function AnalyticsDashboard({ dash, days, accountId = '', onRetry, perPla
                       <CartesianGrid strokeDasharray="3 3" stroke="#e0e5e6" vertical={false} />
                       <XAxis dataKey="bucket_label" tick={axisTick} tickLine={false} axisLine={{ stroke: '#e0e5e6' }} />
                       <YAxis tick={axisTick} tickLine={false} axisLine={false} unit="%" />
-                      <Tooltip formatter={v => `${v.toFixed(0)}%`} />
+                      <Tooltip formatter={v => pct(v)} />
                       <Line type="monotone" dataKey="avg_pct_of_final" stroke="#657b81" strokeWidth={2} dot={{ r: 3 }} />
                     </LineChart>
                   </ResponsiveContainer>

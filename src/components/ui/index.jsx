@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { STATUS_META, PLATFORM_META } from '../../lib/utils'
 
@@ -292,6 +292,111 @@ export function ConfirmDialog({ open, onClose, onConfirm, title, message, danger
         </div>
       </div>
     </Modal>
+  )
+}
+
+/* ─── InfoDot ───────────────────────────────────────────────────────────────
+   A small ⓘ beside a label. Hover or focus it and a short definition appears.
+
+   ── WHY NOT `title=""` ──
+   The native tooltip waits about a second, can't be reached by keyboard, is
+   dismissed by the first mouse twitch, and can't be styled. A dashboard whose
+   numbers need explaining is exactly the place where the explanation has to
+   arrive the instant the pointer lands on it.
+
+   ── WHY A PORTAL ──
+   Every strip this sits in is inside a `Card` with `overflow-hidden`, and the
+   tiles are only ~80px tall. A bubble positioned inside that subtree is
+   clipped to a sliver. Rendering to <body> with `position: fixed` escapes the
+   clip, and measuring the trigger with getBoundingClientRect at open time is
+   what keeps it attached to the right tile.
+
+   Because it's fixed and measured once, it must close when the page moves
+   underneath it — hence the scroll/resize listeners. Closing is the right
+   behaviour rather than re-measuring: a tooltip is a glance, and one that
+   chases the page while you scroll reads as a bug.
+──────────────────────────────────────────────────────────────────────────── */
+
+const TIP_W = 248   // the bubble's width; used to clamp it inside the viewport
+const TIP_GAP = 8
+
+export function InfoDot({ label, what, note, className = '' }) {
+  const ref = useRef(null)
+  const [tip, setTip] = useState(null)
+  // Never derived from `label` — two tiles can legitimately share a label
+  // ("Reach" in both tables), and a duplicate id would point one tile's
+  // aria-describedby at the other tile's bubble.
+  const id = useId()
+
+  const open = () => {
+    const r = ref.current?.getBoundingClientRect()
+    if (!r) return
+    const half = TIP_W / 2
+    const cx = r.left + r.width / 2
+    // Clamp so a tile at either edge of the strip still shows the whole
+    // bubble; `left` is the bubble's left edge, not the trigger's centre.
+    const left = Math.min(Math.max(cx - half, TIP_GAP), window.innerWidth - TIP_W - TIP_GAP)
+    // Flip above when there isn't room below. 160px is a two-sentence bubble
+    // at this width with a little slack.
+    const below = window.innerHeight - r.bottom > 160
+    setTip({
+      left,
+      top: below ? r.bottom + TIP_GAP : undefined,
+      bottom: below ? undefined : window.innerHeight - r.top + TIP_GAP,
+      arrow: Math.min(Math.max(cx - left, 12), TIP_W - 12),
+      below,
+    })
+  }
+  const close = () => setTip(null)
+
+  useEffect(() => {
+    if (!tip) return
+    const onKey = e => { if (e.key === 'Escape') close() }
+    // `true` so a scroll inside any container — the post table, the page —
+    // reaches this, not just one that bubbles to window.
+    window.addEventListener('scroll', close, true)
+    window.addEventListener('resize', close)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('scroll', close, true)
+      window.removeEventListener('resize', close)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [tip])
+
+  if (!what) return null
+
+  return (
+    <>
+      <button ref={ref} type="button"
+        aria-label={label ? `What does ${label} mean?` : 'What does this mean?'}
+        aria-describedby={tip ? id : undefined}
+        aria-expanded={!!tip}
+        onMouseEnter={open} onMouseLeave={close}
+        onFocus={open} onBlur={close}
+        onClick={() => (tip ? close() : open())}
+        className={`inline-flex items-center justify-center w-3.5 h-3.5 flex-shrink-0 align-middle rounded-full border
+          text-[9px] font-bold leading-none transition-colors cursor-help
+          ${tip ? 'border-amber-700 text-amber-700 bg-amber-50' : 'border-stone-300 text-text-tertiary hover:border-amber-700 hover:text-amber-700'}
+          ${FOCUS} ${className}`}>
+        i
+      </button>
+      {tip && createPortal(
+        <div id={id} role="tooltip"
+          style={{ position: 'fixed', left: tip.left, top: tip.top, bottom: tip.bottom, width: TIP_W, zIndex: 60 }}
+          className="bg-text text-white text-[11px] leading-relaxed px-3 py-2.5 shadow-dropdown animate-fade-scale">
+          <span
+            aria-hidden
+            style={{ left: tip.arrow, [tip.below ? 'top' : 'bottom']: -4 }}
+            className="absolute w-2 h-2 bg-text rotate-45 -translate-x-1/2"
+          />
+          {label && <span className="block font-semibold mb-1">{label}</span>}
+          <span className="block text-white/90">{what}</span>
+          {note && <span className="block text-white/60 mt-1.5">{note}</span>}
+        </div>,
+        document.body,
+      )}
+    </>
   )
 }
 
