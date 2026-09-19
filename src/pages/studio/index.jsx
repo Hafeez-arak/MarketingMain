@@ -1489,8 +1489,13 @@ export function CreativeStudio() {
   //
   // A new row rather than reviving the old one: the failure is a real event in
   // the thread and overwriting it would hide that this took two attempts. The
-  // dead row is removed from view once the replacement exists, so the lane
-  // doesn't accumulate red cards.
+  // dead attempt stays in the lane's history strip as a small red thumb —
+  // which is also the only place it can be, since the poller re-reads the
+  // whole session from the table and anything hidden only in local state comes
+  // straight back a second later. That divergence is what made a retry look
+  // like it had spawned a whole new column. See buildBranches for the other
+  // half: a parentless retry now rejoins its provider's lane instead of
+  // starting one.
   async function handleRetry(version) {
     if (!version || !session) return
     setBusy(`retry:${version.id}`); setError('')
@@ -1585,9 +1590,12 @@ export function CreativeStudio() {
     }
 
     setBusy('')
-    // Swap the failed card for the fresh pending one in a single update, so
-    // the lane never briefly shows both.
-    setVersions(prev => [...prev.filter(v => v.id !== version.id), fresh])
+    // Appended, not swapped. The failed row is still in the table, so removing
+    // it here only hid it until the next poll — and while it was hidden the
+    // lane count and the history strip disagreed with what a refresh showed.
+    // The new attempt becomes the lane's newest version, which is what the
+    // stage renders, so the red card stops being the thing on screen anyway.
+    setVersions(prev => [...prev, fresh])
     if (fired.error) {
       setError(fired.error)
       await updateVersion(accessToken, fresh.id, { status: 'failed', error: fired.error })
