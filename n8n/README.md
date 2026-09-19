@@ -12,6 +12,17 @@ This writes the 4 files into `workflows/`. After any change to the Python source
 
 All workflows are zero-secret: credentials (`ANTHROPIC_API_KEY`, `REPLICATE_API_TOKEN`, `SUPABASE_URL`, `SUPABASE_KEY`, optional `IMAGE_PROVIDER`/`FAL_KEY`) are read from n8n environment variables at runtime, never hardcoded here.
 
+## `Arak Campaign Planner` went async on 2026-09-20 — REDEPLOY IT
+
+It now answers `202 {status:'accepted'}` immediately and PATCHes the finished plan onto `content_plans.generation_result` when Opus returns, instead of answering with the ideas and letting the browser save them. That old shape is why a big month could be paid for and thrown away: one Opus call with adaptive thinking outlives the serverless proxy in front of n8n, the request 504'd, and n8n finished into a socket nobody was holding.
+
+Two things follow:
+
+- **The app detects a stale deployment and says so.** `startCampaignPlan` refuses a response that still contains `posts` and tells you to redeploy, rather than polling a row nothing will ever write to. So until `n8n/redeploy.sh` has run on the box, every plan fails with that message — it is not a new bug.
+- **It needs `SUPABASE_URL` + `SUPABASE_KEY`** now, not just `ANTHROPIC_API_KEY`. Both are already set on the box for `Arak Lighting – Draft Copy`, which has used this same respond-then-write pattern all along.
+
+The matching app change also requires `supabase/migrations/20260920_plan_generation_async.sql` to have been applied by hand, as always.
+
 Every platform publishes and syncs through the `Zernio *` workflows. The three Meta workflows (`Publish Post (Meta)`, `Meta Insights Sync`, `Meta Dashboard`) were removed on 2026-09-14 along with the test Instagram account they served — **deactivate and delete them on the box**, because regenerating never removes a workflow n8n already has, and Meta Insights Sync re-activates that account's `social_accounts` row every day it runs. `META_IG_TOKEN` + `META_IG_USER_ID` remain for competitor `business_discovery` only (see `docker/.env.example` for the token-expiry trap).
 
 **Zernio Connect is gone from here (2026-09-10).** Per-workspace OAuth now lives in `api/zernio/[action].js`, a Vercel function in this repo, unit-tested against captured Zernio responses (`api/zernio/_zernio.test.js`). It was removed rather than left generating: the workflow's tenancy filter stringified Zernio's *populated* `profileId` reference and therefore discarded every account it was ever handed, and it took `workspace_id` off the request body with no membership check. `zernioConnect` is gone from `WEBHOOK_PATHS` so the proxy no longer forwards to it — but **the workflow may still be published on the box**. Deactivate `Arak Lighting – Zernio Connect` there, or rename its webhook path to `retired-arak-zernio-connect`, the way the LinkedIn workflows were retired.

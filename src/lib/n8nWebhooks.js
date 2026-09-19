@@ -53,10 +53,20 @@ export function defaultWebhookUrl(slot) {
 // a direct browser call could never produce, and all three look like an
 // opaque error string unless they're named:
 //
-//   504 — the serverless function hit its 60s ceiling. Crucially this does NOT
-//         mean the work failed: n8n keeps running and still writes its result.
-//         Telling the user to retry would run an expensive job a second time,
-//         so the message says to wait and refresh instead.
+//   504 — the serverless function hit its ceiling. Crucially this does NOT
+//         mean the work failed: n8n keeps running. Telling the user to retry
+//         would run an expensive job a second time, so the message says to
+//         wait and refresh instead.
+//
+//         That advice is only TRUE for a workflow that writes its own result
+//         to Supabase — arak-draft-copy, and since 2026-09-20 the campaign
+//         planner too. It used to be printed for the planner as well, which
+//         answered with the plan and let the BROWSER save it: there, a 504
+//         meant n8n finished into a socket nobody held and the month was
+//         discarded, so "wait and refresh" recovered nothing and the only way
+//         forward was to generate again and pay twice — the exact thing the
+//         sentence warns against. Every workflow that can outlive a request
+//         now persists its own result, which is what makes this honest.
 //   503 — no base URL configured (tunnel never started).
 //   502 — the tunnel restarted or died mid-flight.
 //
@@ -68,8 +78,8 @@ export async function describeWebhookFailure(res) {
   try { fromProxy = JSON.parse(text)?.error || '' } catch { /* not JSON */ }
 
   if (res.status === 504 || /FUNCTION_INVOCATION_TIMEOUT|task timed out/i.test(text)) {
-    return 'This took longer than the 60-second request limit, but it has NOT been ' +
-           'cancelled — the workflow is still running and will save its result. ' +
+    return 'This took longer than the request limit, but it has NOT been cancelled — ' +
+           'the workflow is still running and will save its result itself. ' +
            'Wait a moment and refresh rather than running it again, so it does not ' +
            'generate (and bill) twice.'
   }

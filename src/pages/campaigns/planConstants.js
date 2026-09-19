@@ -110,7 +110,21 @@ export const DEFAULT_DRAFT = {
   // its own images + generate-vs-use-image choice — set now or refined later
   // on the board (same field, same picker, just a different moment).
   seedPosts: [],            // { text, platform, format, references: [], imageMode: 'generate' }
+  // Which of the research agent's proposed ideas this month is being built
+  // around, by the normalised title ideasFromReport() keys on. Titles rather
+  // than ids because a research idea has none — it lives inside the run's
+  // report JSON, not a table of its own.
+  researchIdeaKeys: [],
   name: '', ideas: [], planId: null,
+  // ── A generation run that outlives the request that started it ──────────
+  // Plan generation is asynchronous: n8n answers 202 and writes the result
+  // onto the plan row minutes later. These two say "there is a run in flight
+  // and this is where it will land", which is what lets the page pick the
+  // wait back up after a reload, a tab switch, or a navigation away — none of
+  // which used to be survivable, because the only handle on a running plan
+  // was an open HTTP request.
+  generatingPlanId: null,
+  generatingMode: 'new',    // 'new' builds the first slate, 'more' tops up
   // What finalize wrote: how many post rows exist, plus anything that needed
   // saying (a caption that couldn't be drafted, a row that wouldn't save).
   // There is no second, asynchronous half to report on any more.

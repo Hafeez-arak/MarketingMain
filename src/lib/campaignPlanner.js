@@ -18,13 +18,34 @@ const INSTAGRAM_TONE_FALLBACK = 'professional'
 // PLATFORMS in pages/campaigns/planConstants.js and the workflow's own list.
 export const PLANNABLE_PLATFORMS = ['instagram', 'linkedin']
 
-// Ask n8n to decompose a goal into a list of post ideas. The webhook is
-// expected to return JSON shaped like:
-//   { campaignName?: string, posts: [{ platform, date, topic, tone, angle,
-//     suggested_style, suggested_aspect_ratio, design_tip }] }
-// See the accompanying n8n spec doc for the full contract.
-export async function requestCampaignPlan(webhookUrl, payload) {
+// ─── Starting a plan, and reading one back ─────────────────────────────────
+// These were one function. `requestCampaignPlan` POSTed to n8n, WAITED for the
+// whole month to be written by Opus, and normalized the body it got back.
+//
+// That is what made a slow plan a lost plan. The wait happened inside a
+// serverless function with a hard ceiling, so a big month 504'd — and since
+// nothing had been persisted yet, the finished plan had nowhere to land. n8n
+// answered a socket nobody was holding and the month was discarded after Opus
+// had already been billed for it. The error text told people to wait and
+// refresh, which recovered nothing, so the only way forward was to pay twice.
+//
+// Now the two halves are separate because they happen minutes apart:
+//   startCampaignPlan   — hands n8n a plan row to write to; returns at once.
+//   normalizePlanPosts  — turns what n8n eventually stored on that row into
+//                         the idea shape the board uses.
+// The normalizer is unchanged, and is still the only place the wire shape is
+// interpreted.
+
+// Ask n8n to start planning. The plan row must already exist: `plan_id` is
+// where the workflow writes when Opus returns, and a call without one has
+// nowhere to put its answer.
+//
+// Answers `{ status: 'accepted' }` in about as long as a round-trip takes —
+// the posts are NOT in this response and never will be. The caller polls
+// content_plans.generation_result (see awaitPlanGeneration) instead.
+export async function startCampaignPlan(webhookUrl, payload) {
   if (!webhookUrl) return { error: 'No Campaign Planner webhook configured. Go to Settings → Integrations → Workflow Webhooks.' }
+  if (!payload?.plan_id) return { error: 'Internal: the plan row has to exist before generation can start.' }
   try {
     const res = await fetch(webhookUrl, {
       method: 'POST',
@@ -32,10 +53,33 @@ export async function requestCampaignPlan(webhookUrl, payload) {
       body: JSON.stringify(payload),
     })
     if (!res.ok) return { error: await describeWebhookFailure(res) }
-    const data = await res.json()
-    const raw  = Array.isArray(data) ? data[0] : data
-    const posts = Array.isArray(raw?.posts) ? raw.posts : []
-    if (posts.length === 0) return { error: 'The workflow returned no posts. Check the n8n response shape against the spec.' }
+    // The body is only an acknowledgement. It is read rather than ignored so
+    // that a workflow still running the OLD synchronous shape — one that
+    // answers with posts — is named instead of silently polling forever.
+    const data = await res.json().catch(() => null)
+    const raw = Array.isArray(data) ? data[0] : data
+    if (raw && Array.isArray(raw.posts)) {
+      return {
+        error: 'The Campaign Planner workflow on n8n is the old synchronous version. ' +
+               'Redeploy it from n8n/workflows (n8n/redeploy.sh) so it saves the plan ' +
+               'itself instead of answering with it.',
+      }
+    }
+    return { ok: true }
+  } catch (err) {
+    return { error: err.message }
+  }
+}
+
+// What n8n stored, in the shape the board uses. `raw` is the
+// content_plans.generation_result blob:
+//   { campaignName?: string, posts: [{ platform, date, topic, tone, angle,
+//     suggested_style, suggested_aspect_ratio, design_tip }] }
+// See the accompanying n8n spec doc for the full contract.
+export function normalizePlanPosts(raw, payload) {
+  const posts = Array.isArray(raw?.posts) ? raw.posts : []
+  if (posts.length === 0) return { error: 'The workflow returned no posts. Check the n8n response shape against the spec.' }
+  {
     // Only a platform this plan asked for. The workflow already refuses
     // anything else; checked again because a post landing on a platform
     // nobody planned for is a quiet mistake — it looks like any other idea.
@@ -78,10 +122,14 @@ export async function requestCampaignPlan(webhookUrl, payload) {
       // A LinkedIn poll's question and answers, when the planner proposed
       // one. Narrowed and checked in normalizeAiIdea, not here.
       poll:                 p.poll && typeof p.poll === 'object' ? p.poll : null,
+      // The title of the research idea this post was built from, when it was
+      // built from one the person ticked on the setup step. Carries the
+      // provenance all the way to plan_ideas.source, so three months from now
+      // — when this post's analytics come back — the finding that caused it
+      // is still attached to it rather than lost in a prompt.
+      fromResearch:         String(p.from_research || '').trim(),
     }))
     return { ok: true, posts: normalized, suggestedName: raw?.campaignName || '' }
-  } catch (err) {
-    return { error: err.message }
   }
 }
 
