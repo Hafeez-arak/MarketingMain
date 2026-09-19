@@ -6,7 +6,8 @@ import {
 import { Card, Button, Skeleton, IconBadge, PillSelect, Empty } from '../../components/ui/index'
 import { Icon } from '../../components/ui/icons'
 import { PLATFORM_META } from '../../lib/utils'
-import { fmt } from '../analytics/format'
+import { MetricInfoDot } from '../../components/analytics/MetricLabel'
+import { fmt, pct } from '../analytics/format'
 import { platformSeries, followerChange } from '../../lib/dashboardOverview'
 
 // ─── The dashboard's analytics overview ────────────────────────────────────
@@ -61,10 +62,13 @@ function Delta({ value, suffix = '', invert = false }) {
   )
 }
 
-function Tile({ label: name, value, hint, delta }) {
+function Tile({ label: name, value, hint, delta, metric }) {
   return (
     <div className="p-4">
-      <p className="eyebrow mb-2 truncate">{name}</p>
+      <p className="eyebrow mb-2 flex items-center gap-1.5 min-w-0">
+        <span className="truncate">{name}</span>
+        <MetricInfoDot metric={metric} label={name} />
+      </p>
       <div className="flex items-baseline gap-2">
         <p className="text-2xl font-bold text-text leading-none tabular-nums">{value}</p>
         {delta}
@@ -179,16 +183,16 @@ export function AnalyticsOverview({ summaries, overview, range, days, onDays, se
 
       <Card className="overflow-hidden">
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 divide-y sm:divide-y-0 divide-x divide-border">
-          <Tile label="Followers" value={stat(overview.followers)}
+          <Tile label="Followers" value={stat(overview.followers)} metric="home.followers"
             hint={followers ? undefined : 'Counted daily'}
             delta={followers ? <Delta value={followers.delta} /> : null} />
-          <Tile label="Accounts reached" value={stat(overview.reach)}
+          <Tile label="Accounts reached" value={stat(overview.reach)} metric="home.reach"
             hint="People, not impressions" />
           {/* Named by whose number it is when it is not everybody's. LinkedIn
               takes no view count on an ordinary post, so a mixed selection's
               "post views" is the Instagram and TikTok half — saying so is the
               difference between a partial number and a wrong one. */}
-          <Tile label="Post views" value={stat(overview.postViews)}
+          <Tile label="Post views" value={stat(overview.postViews)} metric="home.post_views"
             hint={overview.postViews === null
               ? 'Not reported by these platforms'
               : overview.postViewPlatforms.length < overview.byPlatform.length
@@ -198,11 +202,12 @@ export function AnalyticsOverview({ summaries, overview, range, days, onDays, se
               counts these across every surface — feed, stories, explore and
               the profile itself — so they are NOT the post views above and
               must never be added to them. */}
-          <Tile label="Profile views" value={stat(overview.accountViews)}
+          <Tile label="Profile views" value={stat(overview.accountViews)} metric="home.account_views"
             hint="Profile and page, all surfaces" />
-          <Tile label="Engagement" value={overview.engagementRate === null ? '—' : `${overview.engagementRate.toFixed(1)}%`}
+          <Tile label="Engagement" value={pct(overview.engagementRate)}
+            metric="home.engagement_rate"
             hint={`${fmt(overview.interactions)} interactions`} />
-          <Tile label="Posts published" value={String(overview.posts)}
+          <Tile label="Posts published" value={String(overview.posts)} metric="home.posts"
             hint={`Last ${days} days`} />
         </div>
       </Card>
@@ -317,7 +322,7 @@ export function AnalyticsOverview({ summaries, overview, range, days, onDays, se
                     </div>
                     <p className={`text-[11px] text-text-tertiary tabular-nums ${leader ? 'mt-2.5' : 'mt-1.5'}`}>
                       {p.posts} post{p.posts === 1 ? '' : 's'} · {fmt(p.interactions)} interactions
-                      {p.engagementRate !== null && ` · ${p.engagementRate.toFixed(1)}%`}
+                      {p.engagementRate !== null && ` · ${pct(p.engagementRate)}`}
                     </p>
                   </div>
                 )
