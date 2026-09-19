@@ -17,6 +17,57 @@ four-platform publishing work go first.
 - **Studio and Brand Brain** (2,279 and 1,789 lines). The other two giants.
   Not known to be broken; listed for size, not for fault.
 
+## Creative Studio — image generation (raised 2026-09-19)
+
+Context for all of these: a marketer asked for three Saudi National Day posts
+and the Gemini lane failed four times with fal's 422, *"the input cannot be
+processed as the requested output type"*, while ChatGPT rendered the same
+brief. Two causes were fixed in PR #77 — retries opening new lanes, and the
+brand block's copywriting half reaching the models that draw. What is below is
+what that investigation turned up and did **not** act on.
+
+- **Auto-enhance is off by default** (`autoEnhance`, `src/pages/studio/index.jsx`).
+  All five rows of the failed session are `prompt_source: 'raw'`, so a
+  conversational brief — "I need you to help me create 3 posts…" — went to the
+  image models verbatim. Enhance exists to turn that into a picture
+  description, runs before any spend, and nobody ticks it. Flipping the default
+  is one line; it adds a Claude call per generate, which is why it is a
+  decision and not a fix.
+- **A URL in the prompt is inert.** Nothing in the generate path opens links —
+  Enhance calls Claude with no tools, Generate calls fal. "Use the official
+  visual identity from this link" therefore reached the model as text about an
+  attachment that was never attached, which is one of the causes fal's 422
+  names out loud. Two options, smallest first: warn when the prompt box
+  contains a URL, or **fetch it**. `api/agent/_web.js` already calls Firecrawl
+  with `formats: ['markdown']`; adding a screenshot format gives the rendered
+  page as an image, which drops straight into the reference-image slot the
+  studio already has — and a reference routes generation to
+  `nano-banana-2/edit`, the strongest instruction-follower available. Worth
+  knowing regardless: Gemini is independently likely to refuse *reproducing* an
+  official government identity, so "in the spirit of" will land where "use the
+  official identity" may not.
+- **"3 posts" in one prompt renders one image per model.** No batching exists
+  and none is planned; three posts is three prompts. Either say so in the
+  composer or build the fan-out — currently neither.
+- **Which clause Gemini actually refused was never proven.** The ablation —
+  same prompt minus the URL, minus the brand block, split into one post — costs
+  roughly $1 of real fal spend and was declined on 2026-09-19. The two fixed
+  causes were established by reading the stored prompts, not by testing fal.
+- **Higgsfield is not open source** — checked 2026-09-19. Their GitHub org has
+  the Python/TS SDKs, a CLI and an older GPU-orchestration framework; the
+  generative platform is not there, and they raised an $80M Series A extension
+  in January 2026 at $1.3B. The repos named "Open-Higgsfield-AI" are
+  third-party front-ends that still bill per generation through somebody's API.
+  The real option is the opposite one: **integrate their paid API** alongside
+  fal for Seedance 2.5 character continuity and their motion presets. Not
+  costed. Only worth opening if fal's model range becomes the limit.
+- **fal hit `User is locked. Reason: TOP_UP.` on 2026-09-17.** One render died
+  of it. The studio header shows the balance; nothing alerts before it runs
+  out.
+- **A reference photo containing a recognisable person is always refused** by
+  Seedance ("may contain likenesses of real people"), twice on 2026-09-02. The
+  picker does not warn before spending the attempt.
+
 ## Carried over from earlier work
 
 - **Meta token expires 2026-10-18.** Even with Zernio publishing all four
