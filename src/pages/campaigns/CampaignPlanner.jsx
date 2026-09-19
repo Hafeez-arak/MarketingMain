@@ -764,7 +764,21 @@ export function CampaignPlanner() {
       existing_ideas: existingIdeas,
       past_ideas: pastIdeas,
       research: memory.research,
-      chosen_research_ideas: chosenResearchPayload(),
+      // NO chosen_research_ideas here, unlike the first generation.
+      //
+      // The ticks live in the draft and are not cleared once they have been
+      // built, so sending them again would re-state "each of these MUST
+      // become a post" about ideas that ARE already posts in this plan — at
+      // the same time as existing_ideas says not to repeat what is already
+      // there. Two contradictory orders about the same three ideas, with the
+      // louder one arriving later: the top-up would duplicate the month's
+      // spine instead of adding to it.
+      //
+      // Nothing is lost by leaving it out. `research` above still carries the
+      // whole run, including those ideas, as background — so the model can
+      // still complement them, it just cannot be ordered to rebuild them.
+      // A specific research angle wanted in a top-up goes in the modal's
+      // focus field, which is what that field is for.
       agent_memory: memory.agentMemory,
       recent_posts: memory.recentPosts,
       posting_days: postingDays,
