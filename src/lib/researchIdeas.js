@@ -111,3 +111,74 @@ export function promotionNote({ sent = 0, skipped = 0, planName = '' } = {}) {
   if (skipped) return `Already in that plan — nothing new to send.`
   return 'Nothing to send.'
 }
+
+// ─── The same ideas, read from the planner's side ──────────────────────────
+// Everything above is the PUSH: standing on the research page, choosing a plan
+// to send ideas to. That only helps someone who happens to be reading the
+// report, and the plan has to exist already.
+//
+// The pull is the direction people actually work in. You sit down to plan
+// October, and what the agent found is the input you want — not a page you
+// have to remember to visit first. `ideasFromReport` is what the planner's
+// "From your research" panel lists, so both directions read one report the
+// same way and nothing is described twice.
+//
+// It deliberately returns ALL the ideas rather than pre-filtering to what
+// looks seasonal or urgent. Which ideas belong in this particular month is
+// the judgement the person is there to make; a list that silently hid some of
+// them would quietly make it for them.
+
+/**
+ * What an idea answers, as a sentence, or '' when it answers nothing named.
+ *
+ * `answers_ref` is the binding bindIdeas() adds — the gap or finding the run
+ * itself said this idea addresses. Carrying it into the planner is the point
+ * of the whole exercise: an idea with "rivals are all running Ramadan content
+ * and we are not" attached is a decision someone can make, where the bare
+ * title "Ramadan lighting guide" is just a chore.
+ */
+export function answersLabel(idea, gaps = []) {
+  const ref = idea?.answers_ref
+  if (!ref) return ''
+  if (ref.kind === 'finding') return clean(ref.headline)
+  if (ref.kind === 'gap') {
+    const gap = (gaps || []).find(g => g.id === ref.id)
+    return clean(gap?.gap || gap?.title)
+  }
+  return ''
+}
+
+/**
+ * A run's report as a list the planner can show and tick.
+ *
+ * `key` is the title, normalised — the same key alreadySent() matches on, so
+ * "is this already in the plan" is answered the same way on both sides. A
+ * research idea has no id of its own (it lives inside the run's report JSON,
+ * not a table), which is why the title has to serve.
+ */
+export function ideasFromReport(report = {}) {
+  const gaps = (report?.gaps || []).map((g, i) => ({ ...g, id: g.id || `G${i + 1}` }))
+  const out = []
+  const seen = new Set()
+  for (const idea of report?.proposed_ideas || []) {
+    const title = clean(idea?.title) || clean(idea?.angle)
+    if (!title) continue
+    const key = title.toLowerCase()
+    // A report that proposed the same title twice would otherwise render two
+    // identical rows that tick independently and insert twice.
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push({
+      key,
+      title,
+      angle: clean(idea?.angle),
+      rationale: clean(idea?.rationale),
+      suggested_format: clean(idea?.suggested_format),
+      answers: answersLabel(idea, gaps),
+      // Kept whole so promotable()/researchIdeaToPlanIdea() get the original
+      // idea, not this display projection of it.
+      raw: idea,
+    })
+  }
+  return out
+}

@@ -1,5 +1,5 @@
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './supabaseClient'
-import { promotable, promotionNote } from './researchIdeas'
+import { promotable, promotionNote, ideasFromReport, RESEARCH_SOURCE } from './researchIdeas'
 
 // ─── Content Plans ──────────────────────────────────────────────────────────
 // The monthly planning layer. A plan is created up front, its ideas are
@@ -22,6 +22,95 @@ export async function fetchPlans(workspaceId, accessToken) {
     if (!res.ok) return []
     return await res.json()
   } catch { return [] }
+}
+
+// ─── Waiting for a plan n8n is still writing ───────────────────────────────
+// Plan generation is asynchronous (see 20260920_plan_generation_async.sql).
+// The browser creates the plan in status 'generating', hands the id to n8n,
+// and n8n PATCHes the result onto the row whenever Opus finishes — which is
+// routinely longer than any HTTP request in front of it survives.
+//
+// So this is the read the planner loops on. Four outcomes, and keeping them
+// distinct is the whole job: "still working" and "n8n died" look identical
+// from a single row unless the clock is consulted, and treating the second as
+// the first is what produces a spinner nobody can escape.
+
+// How long a plan may sit in 'generating' before we stop believing in it.
+// Generous on purpose: an Opus month plan with adaptive thinking is minutes,
+// not seconds, and calling it dead early is worse than waiting — the user's
+// only recovery is to generate again, which pays for the same month twice.
+export const PLAN_GENERATION_TIMEOUT_MS = 15 * 60 * 1000
+
+/**
+ * Where a generating plan has got to.
+ *
+ *   { state: 'working' }            — n8n has it, keep polling.
+ *   { state: 'ready',  result }     — the posts are on the row, consume them.
+ *   { state: 'failed', error }      — n8n recorded a reason; show it.
+ *   { state: 'stale' }              — nothing came back in time.
+ *   { state: 'unknown' }            — the read itself failed (offline, 5xx).
+ *                                     NOT an error about the plan: the caller
+ *                                     must keep waiting rather than declare a
+ *                                     run dead because one poll missed.
+ *   { state: 'gone' }               — no such plan in this workspace.
+ *
+ * Workspace-scoped like every other read here, for the same reason: a plan id
+ * alone says nothing about who owns it.
+ */
+export async function readPlanGeneration(workspaceId, accessToken, planId) {
+  if (!workspaceId || !planId) return { state: 'unknown' }
+  try {
+    const res = await fetch(
+      `${SUPABASE_URL}/rest/v1/content_plans?id=eq.${planId}&workspace_id=eq.${workspaceId}` +
+      `&select=id,status,generation_result,generation_error,generation_started_at,generation_mode`,
+      { headers: authHeaders(accessToken) },
+    )
+    if (!res.ok) return { state: 'unknown' }
+    const [row] = await res.json()
+    if (!row) return { state: 'gone' }
+
+    // The error is checked before the result and before the status, because
+    // n8n writes `generation_error` and flips the status back to 'draft' in
+    // the same PATCH — reading status first would call a failed run finished.
+    const error = String(row.generation_error || '').trim()
+    if (error) return { state: 'failed', error, mode: row.generation_mode || 'new' }
+
+    const result = row.generation_result
+    if (result && Array.isArray(result.posts) && result.posts.length) {
+      return { state: 'ready', result, mode: row.generation_mode || 'new' }
+    }
+
+    // Anything not still marked 'generating', with no result and no error, is
+    // a run that ended without leaving a trace — treat it as finished rather
+    // than poll a row that will never change again.
+    if (row.status !== 'generating') return { state: 'stale', mode: row.generation_mode || 'new' }
+
+    const started = Date.parse(row.generation_started_at || '') || 0
+    if (started && Date.now() - started > PLAN_GENERATION_TIMEOUT_MS) {
+      return { state: 'stale', mode: row.generation_mode || 'new' }
+    }
+    return { state: 'working', mode: row.generation_mode || 'new' }
+  } catch {
+    return { state: 'unknown' }
+  }
+}
+
+/**
+ * Put the plan back to a state a person can act on.
+ *
+ * Called once the posts on the row have been turned into plan_ideas, and also
+ * when a run is abandoned. Clearing `generation_result` is what makes the row
+ * idempotent: a non-null result always means "work nobody has picked up yet",
+ * so leaving a consumed one behind would insert the same month twice on the
+ * next mount.
+ */
+export async function settlePlanGeneration(accessToken, planId, { error = '' } = {}) {
+  return updatePlan(accessToken, planId, {
+    status: 'draft',
+    generation_result: null,
+    generation_error: error,
+    generation_started_at: null,
+  })
 }
 
 // Workspace-scoped on purpose, like every other read in this file: a plan id
@@ -92,6 +181,65 @@ export async function fetchPastIdeas(workspaceId, accessToken, excludePlanId, li
 // never run research, and one failed read only costs that one section.
 // Workspace-scoped on every query, as always: RLS is per user, not per brand.
 const RESEARCH_MAX_AGE_DAYS = 45
+
+/**
+ * The latest run's proposed ideas, for the planner's "From your research"
+ * panel.
+ *
+ * Separate from fetchPlannerMemory even though both read the same run, and
+ * deliberately so: that one clips everything hard because it is building a
+ * PROMPT and every character costs tokens on a cached block. This one is
+ * building a LIST A PERSON READS AND TICKS, where the rationale is the whole
+ * reason to tick one, and clipping it to 300 characters would cut off the
+ * sentence that justifies the idea. Same source, different budgets.
+ *
+ * Best-effort like every other read here: a workspace that has never run
+ * research just gets no panel, and the plan is still buildable.
+ */
+export async function fetchResearchIdeas(workspaceId, accessToken) {
+  const empty = { runDate: '', runId: '', ideas: [] }
+  if (!workspaceId) return empty
+  try {
+    const since = new Date(Date.now() - RESEARCH_MAX_AGE_DAYS * 86400000).toISOString()
+    const res = await fetch(
+      `${SUPABASE_URL}/rest/v1/research_runs?workspace_id=eq.${workspaceId}&status=eq.complete` +
+      `&started_at=gte.${since}&select=id,started_at,report&order=started_at.desc&limit=1`,
+      { headers: authHeaders(accessToken) },
+    )
+    if (!res.ok) return empty
+    const [run] = await res.json()
+    if (!run?.report) return empty
+    return {
+      runDate: String(run.started_at || '').slice(0, 10),
+      runId: run.id || '',
+      ideas: ideasFromReport(run.report),
+    }
+  } catch { return empty }
+}
+
+/**
+ * The research ideas this workspace has already turned into plan ideas, as
+ * the same normalised-title keys ideasFromReport() produces.
+ *
+ * Used only to LABEL a row "already used" in the picker, never to hide it.
+ * The same angle is sometimes genuinely worth running again, and a picker
+ * that silently dropped ideas would be overruling the person it exists to
+ * inform. Matching is by title for the reason alreadySent() gives: a research
+ * idea has no id, it lives inside a run's report JSON.
+ */
+export async function fetchUsedResearchKeys(workspaceId, accessToken) {
+  if (!workspaceId) return []
+  try {
+    const res = await fetch(
+      `${SUPABASE_URL}/rest/v1/plan_ideas?workspace_id=eq.${workspaceId}&source=eq.${RESEARCH_SOURCE}` +
+      `&select=title&limit=500`,
+      { headers: authHeaders(accessToken) },
+    )
+    if (!res.ok) return []
+    const rows = await res.json()
+    return [...new Set(rows.map(r => String(r.title || '').trim().toLowerCase()).filter(Boolean))]
+  } catch { return [] }
+}
 
 export async function fetchPlannerMemory(workspaceId, accessToken) {
   const empty = { research: null, agentMemory: '', recentPosts: [] }
@@ -191,6 +339,12 @@ export async function insertIdeas(workspaceId, accessToken, planId, ideas, start
   // is all-or-none across the batch, because PostgREST rejects a bulk insert
   // whose rows do not share the same keys.
   const withOptions = ideas.some(idea => nonEmptyOptions(idea.platformOptions))
+  // Same all-or-none rule, same reason: `source` is only named when some idea
+  // in this batch actually came from research, and then it is named on every
+  // row. (`source` has shipped since 20260824_research_agent.sql, so unlike
+  // platform_options this is about PostgREST's uniform-keys rule alone, not
+  // about a migration that might be missing.)
+  const withResearch = ideas.some(idea => idea.fromResearch)
   const body = ideas.map((idea, i) => ({
     workspace_id:     workspaceId,
     plan_id:          planId,
@@ -238,6 +392,18 @@ export async function insertIdeas(workspaceId, accessToken, planId, ideas, start
     caption_ar:       idea.captionAr || '',
     caption_en:       idea.captionEn || '',
     status:           'proposed',
+    // Where this idea came from. 'research' means the planner built it from
+    // an idea the research agent proposed and a person ticked on the setup
+    // step — the same value SendIdeasToPlan writes when the ideas are pushed
+    // the other way, so the board can say so regardless of which direction
+    // they arrived from. See researchIdeas.js#RESEARCH_SOURCE.
+    //
+    // Named on EVERY row of a batch where any row needs it, never per row:
+    // PostgREST rejects a bulk insert whose rows do not share the same keys,
+    // which is the same trap `withOptions` above exists to avoid. Rows that
+    // did not come from research get the column's own 'planner' default
+    // spelled out rather than omitted.
+    ...(withResearch ? { source: idea.fromResearch ? RESEARCH_SOURCE : 'planner' } : {}),
     position:         startPosition + i,
     // Only when some idea in this batch has any — see below.
     ...(withOptions ? { platform_options: nonEmptyOptions(idea.platformOptions) || {} } : {}),

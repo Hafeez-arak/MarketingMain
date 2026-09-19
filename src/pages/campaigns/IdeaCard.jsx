@@ -30,6 +30,7 @@ import {
 // purpose: the status set here (proposed / approved / rejected) is a REVIEW
 // state, not the publish state that utils.js exports under the same name.
 const OCCASION_STYLE = 'bg-amber-100 text-amber-800 border-amber-200'
+const RESEARCH_STYLE = 'bg-sage-100 text-sage-800 border-sage-200'
 const PILLAR_STYLE   = 'bg-purple-50 text-purple-700 border-purple-100'
 const OWN_COPY_STYLE = 'bg-sage-100 text-sage-700 border-sage-200'
 const STATUS_META = {
@@ -171,8 +172,18 @@ export function IdeaCard({ idea, index, accessToken, workspaceId, onChange, onRe
               <div className="flex items-center gap-1.5 flex-wrap mt-1.5">
                 <span className={`${chip} ${OWN_COPY_STYLE}`}>✎ Your caption</span>
               </div>
-            ) : (idea.occasion || idea.pillar || idea.series || idea.objective) && (
+            ) : (idea.occasion || idea.pillar || idea.series || idea.objective || idea.source === 'research') && (
               <div className="flex items-center gap-1.5 flex-wrap mt-1.5">
+                {/* First, because it is the strongest thing that can be said
+                    about an idea on this board: this one is not a slot the
+                    planner filled, it traces back to something the research
+                    agent found and a person chose to act on. The `Why:` line
+                    below carries that finding across. */}
+                {idea.source === 'research' && (
+                  <span className={`${chip} ${RESEARCH_STYLE}`} title="Built from an idea the research agent proposed">
+                    ◆ From research
+                  </span>
+                )}
                 {idea.occasion && <span className={`${chip} ${OCCASION_STYLE}`}>★ {idea.occasion}</span>}
                 {idea.pillar && <span className={`${chip} font-medium ${PILLAR_STYLE}`}>{idea.pillar}</span>}
                 {idea.series && <span className={`${chip} bg-violet-50 text-violet-700 border-violet-100`} title="Deliberate recurring series — not flagged as repetition across months">🔁 {idea.series}</span>}

@@ -83,6 +83,13 @@ export function dbIdeaToDraft(row) {
     firstComment: row.first_comment || '',
     series: row.series || '',
     rejectReason: row.reject_reason || '',
+    // Where the idea came from — 'research' when it traces back to something
+    // the research agent proposed, whether it was ticked on the planner's
+    // setup step or pushed across from the research page. The board shows it
+    // so an idea with evidence behind it can be told apart from one the
+    // planner invented to fill a slot. Defaults to 'planner' for every row
+    // written before the column, which is what those rows were.
+    source: row.source || 'planner',
     format: row.suggested_format || 'post',
     suggestedStyle: row.suggested_style || '',
     suggestedAspectRatio: row.suggested_aspect_ratio || '',

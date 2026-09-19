@@ -8,7 +8,7 @@ import { isBrandProfileEmpty, useBrandProfileSync, getBrandBrainSections } from 
 import { buildContext, fetchBrandMemory, logIdeaEvent, logIdeaEvents, ideaSnapshot } from '../../lib/brandContext'
 import { fetchBrandSchema, fetchDirectoryRows } from '../../lib/brandSchema'
 import { fetchBrandAssets } from '../../lib/brandAssets'
-import { requestCampaignPlan, elongateIdea, requestDraftCopy, triggerVideoRenders } from '../../lib/campaignPlanner'
+import { startCampaignPlan, normalizePlanPosts, elongateIdea, requestDraftCopy, triggerVideoRenders } from '../../lib/campaignPlanner'
 import {
   formatsFor, defaultFormat, aspectRatiosFor, defaultAspectRatio, slideRange, aspectLabel,
   derivePostKind,
@@ -25,8 +25,10 @@ import { ReferencePicker } from '../../components/ReferencePicker'
 import {
   createPlan, insertIdeas, updateIdea, setAllIdeaStatus, deleteIdea, updatePlan, markIdeasProcessing,
   markIdeasGenerated, fetchPastIdeas, fetchPlanWithIdeas, markIdeasDrafting, fetchIdeaDrafts, markIdeaDraftFailed,
-  fetchPlannerMemory,
+  fetchPlannerMemory, fetchResearchIdeas, fetchUsedResearchKeys, readPlanGeneration, settlePlanGeneration,
+  PLAN_GENERATION_TIMEOUT_MS,
 } from '../../lib/contentPlans'
+import { ResearchIdeaPicker } from './ResearchIdeaPicker'
 import { BrandContextPanel } from '../../components/BrandContextPanel'
 import { openStudioForIdea, fetchSessionsForIdeas, resetIdeaMedia, publishIdeasAsPosts } from '../../lib/studioBridge'
 import { fetchScheduledPosts } from '../../lib/scheduledPosts'
@@ -54,8 +56,16 @@ function useDraft() {
   // Patches merge against the CURRENT draft, not the one this render captured.
   // Two dispatches from one render (set the step, then update ideas) would
   // otherwise have the second carry the old step along and undo the first.
+  //
+  // A patch may also be a FUNCTION of the current draft, for the same reason
+  // one step further out: generation finishes minutes after it was started,
+  // so the code appending its ideas must append to whatever the board holds
+  // when the write lands, not to the array it captured at the click.
   const update = patch => dispatch(actions.setCampaignPlanDraft(
-    prev => ({ ...DEFAULT_DRAFT, ...(prev || {}), ...patch }),
+    prev => {
+      const base = { ...DEFAULT_DRAFT, ...(prev || {}) }
+      return { ...base, ...(typeof patch === 'function' ? patch(base) : patch) }
+    },
   ))
   const clear  = () => dispatch(actions.setCampaignPlanDraft(null))
   return { draft, update, clear, state, dispatch }
@@ -193,7 +203,59 @@ export function CampaignPlanner() {
   const [moreLoading,   setMoreLoading]   = useState(false)
   const [moreError,     setMoreError]     = useState('')
 
-  const { step, month, goal, goalCategory, platforms, startDate, endDate, approxCount, includeHolidays, brandBrainSections, featuredProductIds, seedPosts, name, ideas, planId, manualResult, postingDays, aiAssist, contentMixTarget, openedFromPlanList } = draft
+  // What to say while n8n is still writing. Derived rather than state: it is
+  // a pure function of which kind of run is in flight, and holding it in
+  // state meant setting it from inside the poll effect — a cascading render
+  // for a sentence that was never independent of the draft in the first
+  // place. `loading` still exists but now covers only the brief moment spent
+  // handing the job over; the wait itself is not a request anyone is holding.
+
+  const { step, month, goal, goalCategory, platforms, startDate, endDate, approxCount, includeHolidays, brandBrainSections, featuredProductIds, seedPosts, name, ideas, planId, manualResult, postingDays, aiAssist, contentMixTarget, openedFromPlanList, researchIdeaKeys, generatingPlanId, generatingMode } = draft
+
+  // ── What the research agent proposed, for the setup step's picker ───────
+  // The pull direction of the research loop. Pushing already existed (the
+  // research page can send its ideas into a plan that already exists), but
+  // that only helps someone who thought to read the report first. Planning a
+  // month is when these are actually wanted, so they are fetched here and
+  // shown where the decision is made.
+  const [research, setResearch] = useState({ runDate: '', runId: '', ideas: [] })
+  const [usedResearchKeys, setUsedResearchKeys] = useState([])
+  useEffect(() => {
+    if (!activeWorkspaceId || !accessToken) return undefined
+    let alive = true
+    Promise.all([
+      fetchResearchIdeas(activeWorkspaceId, accessToken),
+      fetchUsedResearchKeys(activeWorkspaceId, accessToken),
+    ]).then(([r, used]) => {
+      if (!alive) return
+      setResearch(r)
+      setUsedResearchKeys(used)
+    })
+    return () => { alive = false }
+  }, [activeWorkspaceId, accessToken])
+
+  // The draft as it is RIGHT NOW, for the generation poll below. That effect
+  // deliberately does not list the draft in its dependencies — re-running it
+  // would restart the interval and reset the guard that stops one result
+  // being consumed twice — so it reads what it needs through here instead of
+  // through a closure captured when the run started, minutes earlier.
+  //
+  // Written in an effect rather than during render: a ref mutated mid-render
+  // is not safe under concurrent rendering, and the poll only ever reads this
+  // long after the commit anyway.
+  const draftRef = useRef(draft)
+  useEffect(() => { draftRef.current = draft })
+
+  const generationNote = !generatingPlanId ? ''
+    : generatingMode === 'more'
+      ? 'Writing more ideas… this keeps running if you leave the page.'
+      : 'Writing the month… this keeps running if you leave the page.'
+
+  const pickedResearchIdeas = research.ideas.filter(i => (researchIdeaKeys || []).includes(i.key))
+  function toggleResearchIdea(key) {
+    const on = (researchIdeaKeys || []).includes(key)
+    update({ researchIdeaKeys: on ? researchIdeaKeys.filter(k => k !== key) : [...(researchIdeaKeys || []), key] })
+  }
 
   // What the plan call will actually be given, for the preview panel inside the
   // hidden Brand Brain picker. Same builder as the payload.
@@ -454,15 +516,14 @@ export function CampaignPlanner() {
   const defaultGoal = () =>
     `A well-rounded month of brand content for ${activeWorkspace?.name || 'this brand'} — a mix of service and product highlights, educational content, and the seasonal/cultural moments falling in this month, all in the brand's own voice.`
 
-  async function handleGeneratePlan() {
-    const v = validateSetup()
-    if (v) { setError(v); return }
-    // The AI planner webhook is only needed when AI-assist is actually on —
-    // a plan of only your own posts never calls it.
-    if (aiAssist && !webhookUrl) { setError('Campaign Planner webhook not configured (Settings → Integrations).'); return }
-    setError(''); setLoading(true)
-
-    const filledSeeds = seedPosts.filter(s => s.text.trim())
+  // ── The seed posts, in both the shapes the plan needs ───────────────────
+  // Extracted from handleGeneratePlan because generation is now asynchronous:
+  // the run finishes minutes after the button was pressed, possibly in a
+  // different page lifetime after a reload, so the code that assembles the
+  // board cannot close over values from the click. It reads the persisted
+  // draft instead, and this is the one place that turns it into ideas.
+  function buildSeeds(from = seedPosts) {
+    const filledSeeds = from.filter(s => s.text.trim())
     // An attached image IS the post's picture. Without one, the picture is
     // made in the Studio on the pictures step.
     const seedImageMode = s => (s.references || []).length ? 'use_reference' : 'studio'
@@ -493,71 +554,149 @@ export function CampaignPlanner() {
         captionEn: ownCopy ? s.text.trim() : '',
       }
     })
+    return { cleanSeeds, seedIdeas }
+  }
 
-    let aiPosts = []
-    let featuredProducts = []
-    let effectiveGoal = ''
-    if (aiAssist) {
-      const brandCtx = contextFor('plan')
-      effectiveGoal = goal.trim() || defaultGoal()
-      // The rows to feature with their full context, not just ids. Columns
-      // flagged out of the prompt (prices) stay out here too.
-      featuredProducts = featurableItems
-        .filter(item => featuredProductIds.includes(item.id))
-        .map(item => {
-          const out = { name: item.name, catalogue: item.sectionTitle }
-          for (const c of item.cols.slice(1)) {
-            if (c.in_prompt === false) continue
-            const val = String(item.data[c.key] || '').trim()
-            if (val) out[c.key] = val
-          }
-          return out
-        })
-
-      // What the planner plans against beyond the Brand Brain: every idea from
-      // other plans (anti-repetition), the latest research, the research
-      // agent's memory, and the posts actually made lately.
-      const [pastIdeas, memory] = await Promise.all([
-        fetchPastIdeas(activeWorkspaceId, accessToken, null),
-        fetchPlannerMemory(activeWorkspaceId, accessToken),
-      ])
-
-      const result = await requestCampaignPlan(webhookUrl, {
-        goal: effectiveGoal,
-        goal_category: goalCategory || null,
-        platforms,
-        start_date: planFrom,
-        end_date: endDate,
-        approx_post_count: approxCount ? Number(approxCount) : null,
-        include_holidays: includeHolidays,
-        brand_brain_sections: brandBrainSections,
-        instructions: brandCtx.instructions || null,
-        brand_name: brandCtx.brand_name,
-        brand_descriptor: brandCtx.brand_descriptor,
-        featured_products: featuredProducts,
-        seed_posts: cleanSeeds,
-        content_mix_target: contentMixTarget || null,
-        past_ideas: pastIdeas,
-        research: memory.research,
-        agent_memory: memory.agentMemory,
-        recent_posts: memory.recentPosts,
-        posting_days: postingDays,
-        posting_time: DEFAULT_POST_TIME,
+  // The rows to feature with their full context, not just ids. Columns
+  // flagged out of the prompt (prices) stay out here too.
+  function buildFeaturedProducts() {
+    return featurableItems
+      .filter(item => featuredProductIds.includes(item.id))
+      .map(item => {
+        const out = { name: item.name, catalogue: item.sectionTitle }
+        for (const c of item.cols.slice(1)) {
+          if (c.in_prompt === false) continue
+          const val = String(item.data[c.key] || '').trim()
+          if (val) out[c.key] = val
+        }
+        return out
       })
-      if (result.error) { setLoading(false); setError(result.error); return }
-      aiPosts = result.posts.map(normalizeAiIdea)
-    }
+  }
 
+  // The research ideas this month is being built around, in the shape the
+  // workflow's prompt reads. Distinct from the `research` block that
+  // fetchPlannerMemory already sends: that one is the whole latest run as
+  // BACKGROUND, offered for the model to use if it fits. This is the
+  // shortlist a person ticked, and the prompt treats it as an instruction —
+  // which is the difference between the agent having a voice and having a
+  // say.
+  function chosenResearchPayload() {
+    if (!pickedResearchIdeas.length) return null
+    return {
+      date: research.runDate,
+      ideas: pickedResearchIdeas.map(i => ({
+        title: i.title, angle: i.angle, rationale: i.rationale,
+        answers: i.answers, suggested_format: i.suggested_format,
+      })),
+    }
+  }
+
+  async function handleGeneratePlan() {
+    const v = validateSetup()
+    if (v) { setError(v); return }
+    // The AI planner webhook is only needed when AI-assist is actually on —
+    // a plan of only your own posts never calls it.
+    if (aiAssist && !webhookUrl) { setError('Campaign Planner webhook not configured (Settings → Integrations).'); return }
+    setError(''); setLoading(true)
+
+    const { cleanSeeds, seedIdeas } = buildSeeds()
+    const featuredProducts = aiAssist ? buildFeaturedProducts() : []
+    const effectiveGoal = aiAssist ? (goal.trim() || defaultGoal()) : ''
+
+    // ── The plan row is created FIRST, and that ordering is the fix ───────
+    // It used to be created last, after the webhook had answered with the
+    // ideas. That made the open HTTP request the ONLY place a running plan
+    // existed — so when a month took longer than the proxy in front of n8n
+    // survives, the request 504'd, n8n finished into a socket nobody held,
+    // and an Opus-priced month was discarded with nothing to show for it.
+    // Creating the row first gives the run somewhere to land that does not
+    // depend on anyone still waiting.
+    const startedAt = new Date().toISOString()
     const planRes = await createPlan(activeWorkspaceId, accessToken, {
       name: name || `${months.find(m => m.value === month)?.label || 'Monthly'} Content Plan`,
       month, start_date: startDate, end_date: endDate,
-      goal: effectiveGoal, goal_category: goalCategory || '', platforms, status: 'draft',
+      goal: effectiveGoal, goal_category: goalCategory || '', platforms,
+      status: aiAssist ? 'generating' : 'draft',
       featured_products: featuredProducts.map(p => p.name),
       posting_days: postingDays, default_time: DEFAULT_POST_TIME,
       content_mix_target: contentMixTarget || null,
+      ...(aiAssist ? {
+        generation_started_at: startedAt, generation_mode: 'new', generation_error: '',
+      } : {}),
     })
     if (planRes.error) { setLoading(false); setError(`Plan couldn't be saved: ${planRes.error}`); return }
+    const newPlanId = planRes.plan.id
 
+    // A plan of only your own posts never calls n8n, so there is nothing to
+    // wait for — it is finished here, exactly as it always was.
+    if (!aiAssist) {
+      setLoading(false)
+      await finishGeneration(newPlanId, planRes.plan.name, seedIdeas, [])
+      return
+    }
+
+    // What the planner plans against beyond the Brand Brain: every idea from
+    // other plans (anti-repetition), the latest research, the research
+    // agent's memory, and the posts actually made lately.
+    const [pastIdeas, memory] = await Promise.all([
+      fetchPastIdeas(activeWorkspaceId, accessToken, null),
+      fetchPlannerMemory(activeWorkspaceId, accessToken),
+    ])
+    const brandCtx = contextFor('plan')
+
+    const started = await startCampaignPlan(webhookUrl, {
+      plan_id: newPlanId,
+      goal: effectiveGoal,
+      goal_category: goalCategory || null,
+      platforms,
+      start_date: planFrom,
+      end_date: endDate,
+      approx_post_count: approxCount ? Number(approxCount) : null,
+      include_holidays: includeHolidays,
+      brand_brain_sections: brandBrainSections,
+      instructions: brandCtx.instructions || null,
+      brand_name: brandCtx.brand_name,
+      brand_descriptor: brandCtx.brand_descriptor,
+      featured_products: featuredProducts,
+      seed_posts: cleanSeeds,
+      content_mix_target: contentMixTarget || null,
+      past_ideas: pastIdeas,
+      research: memory.research,
+      chosen_research_ideas: chosenResearchPayload(),
+      agent_memory: memory.agentMemory,
+      recent_posts: memory.recentPosts,
+      posting_days: postingDays,
+      posting_time: DEFAULT_POST_TIME,
+    })
+    setLoading(false)
+    if (started.error) {
+      // n8n never took the job, so nothing will ever write to this row. Put it
+      // back to a plain draft rather than leaving a plan that polls forever.
+      await settlePlanGeneration(accessToken, newPlanId, { error: '' })
+      setError(started.error)
+      return
+    }
+
+    // From here the run belongs to the plan row, not to this page. Recording
+    // the id in the draft is what lets the wait be picked back up after a
+    // reload or a navigation away.
+    syncedPlanIdRef.current = newPlanId
+    update({
+      planId: newPlanId,
+      name: planRes.plan.name,
+      generatingPlanId: newPlanId,
+      generatingMode: 'new',
+      step: 'review',
+    })
+    // No captions here. They are written on the captions step, from the
+    // picture each post actually ends up with.
+  }
+
+  // ── Turning a finished run into the board ───────────────────────────────
+  // Shared by both paths onto the review step: a plan with no AI at all
+  // (which is finished the moment it is created) and one whose ideas arrived
+  // minutes later from n8n.
+  async function finishGeneration(targetPlanId, planName, seedIdeas, aiPosts) {
     // Your posts first, AI suggestions after. Anything without a date is
     // spread evenly through the month, around the ones that have one.
     // A date the model gave that has already passed is placed again; a date
@@ -565,21 +704,19 @@ export function CampaignPlanner() {
     const allIdeas = distributeDates([...seedIdeas, ...aiPosts.map(i => ({ ...i, date: i.date && i.date < earliestDay ? '' : i.date }))], placement)
       .map(i => ({ ...i, time: i.time || DEFAULT_POST_TIME }))
 
-    const ideasRes = await insertIdeas(activeWorkspaceId, accessToken, planRes.plan.id, allIdeas)
-    setLoading(false)
+    const ideasRes = await insertIdeas(activeWorkspaceId, accessToken, targetPlanId, allIdeas)
     if (ideasRes.error) { setError(`Ideas generated but couldn't be saved: ${ideasRes.error}`); return }
 
     // Created in this tab — the ideas are already fresh, so the mount-sync
     // effect does not need to re-fetch them.
-    syncedPlanIdRef.current = planRes.plan.id
+    syncedPlanIdRef.current = targetPlanId
     update({
-      planId: planRes.plan.id,
+      planId: targetPlanId,
       ideas: ideasRes.rows.map(dbIdeaToDraft),
-      name: planRes.plan.name,
+      name: planName,
       step: 'review',
+      generatingPlanId: null,
     })
-    // No captions here. They are written on the captions step, from the
-    // picture each post actually ends up with.
   }
 
   // Top up the existing plan with more AI ideas — same webhook, with the
@@ -598,7 +735,21 @@ export function CampaignPlanner() {
       fetchPlannerMemory(activeWorkspaceId, accessToken),
     ])
 
-    const result = await requestCampaignPlan(webhookUrl, {
+    // Same async contract as the first generation: the plan row already
+    // exists here, so it only has to be put back into 'generating' for n8n to
+    // write onto. A top-up is a smaller ask than a whole month but runs on the
+    // same Opus call, so it hit the same timeout and lost the same way.
+    const marked = await updatePlan(accessToken, planId, {
+      status: 'generating',
+      generation_result: null,
+      generation_error: '',
+      generation_started_at: new Date().toISOString(),
+      generation_mode: 'more',
+    })
+    if (marked.error) { setMoreLoading(false); setMoreError(`Couldn't start: ${marked.error}`); return }
+
+    const started = await startCampaignPlan(webhookUrl, {
+      plan_id: planId,
       goal: effectiveGoal,
       goal_category: goalCategory || null,
       platforms,
@@ -613,22 +764,136 @@ export function CampaignPlanner() {
       existing_ideas: existingIdeas,
       past_ideas: pastIdeas,
       research: memory.research,
+      chosen_research_ideas: chosenResearchPayload(),
       agent_memory: memory.agentMemory,
       recent_posts: memory.recentPosts,
       posting_days: postingDays,
       posting_time: DEFAULT_POST_TIME,
     })
-    if (result.error) { setMoreLoading(false); setMoreError(result.error); return }
-
-    const more = distributeDates(result.posts.map(normalizeAiIdea), { ...placement, replacePast: true })
-      .map(i => ({ ...i, time: i.time || DEFAULT_POST_TIME }))
-    const ideasRes = await insertIdeas(activeWorkspaceId, accessToken, planId, more, ideas.length)
     setMoreLoading(false)
-    if (ideasRes.error) { setMoreError(`Generated but couldn't be saved: ${ideasRes.error}`); return }
-
-    update({ ideas: [...ideas, ...ideasRes.rows.map(dbIdeaToDraft)] })
+    if (started.error) {
+      await settlePlanGeneration(accessToken, planId, { error: '' })
+      setMoreError(started.error)
+      return
+    }
+    update({ generatingPlanId: planId, generatingMode: 'more' })
     setShowMoreModal(false)
   }
+
+  // ── Waiting on a run that outlives this page ────────────────────────────
+  // The only thing holding a running plan is the row itself, so this polls it
+  // rather than an open request. That is what makes the wait survivable: it
+  // restarts on mount from the persisted draft, so a reload, a tab switch, or
+  // wandering off to another page mid-generation all pick the plan back up
+  // instead of stranding it.
+  //
+  // ── Consuming a result exactly once ─────────────────────────────────────
+  // A non-null generation_result means "work nobody has picked up yet", so
+  // two readers both acting on it insert the same month twice — a whole
+  // duplicate board, from one paid run.
+  //
+  // `settled` closes that within one effect instance (two ticks racing). It
+  // is not enough on its own: StrictMode mounts every effect twice in dev, so
+  // there are two instances with two separate flags. `consumingRef` is the
+  // guard that spans them — it names the plan currently being consumed, and
+  // it is a ref rather than state precisely because it must be true the
+  // instant it is set, not after a re-render.
+  const consumingRef = useRef(null)
+  useEffect(() => {
+    if (!generatingPlanId || !accessToken || !activeWorkspaceId) return undefined
+    let alive = true
+    let settled = false
+    // A wall clock of our own, alongside the row's generation_started_at. The
+    // row's timestamp cannot expire a run whose reads are ALL failing, and a
+    // poll that can never conclude is the failure mode this whole change
+    // exists to remove. Read on the first tick rather than here: the clock is
+    // impure, and an effect body must stay free of that.
+    let giveUpAt = 0
+
+    // Both flags are set BEFORE the first await inside fn, so a second caller
+    // arriving mid-consume is turned away rather than joining in. Deliberately
+    // not cleared on the way out: the run is over, and the only thing that
+    // starts another is a new generatingPlanId.
+    async function finish(fn) {
+      if (settled || !alive) return
+      if (consumingRef.current === generatingPlanId) return
+      settled = true
+      consumingRef.current = generatingPlanId
+      await fn()
+    }
+
+    async function tick() {
+      if (!giveUpAt) giveUpAt = Date.now() + PLAN_GENERATION_TIMEOUT_MS
+      const r = await readPlanGeneration(activeWorkspaceId, accessToken, generatingPlanId)
+      if (!alive || settled) return
+
+      if (r.state === 'ready') {
+        await finish(async () => {
+          const norm = normalizePlanPosts(r.result, { platforms })
+          if (norm.error) {
+            await settlePlanGeneration(accessToken, generatingPlanId, { error: '' })
+            update({ generatingPlanId: null })
+            ;(r.mode === 'more' ? setMoreError : setError)(norm.error)
+            return
+          }
+          const aiPosts = norm.posts.map(normalizeAiIdea)
+          // Clear the row BEFORE inserting. A consumed result that is still
+          // sitting there is indistinguishable from a fresh one, and the next
+          // mount would replay the whole month into the plan a second time.
+          await settlePlanGeneration(accessToken, generatingPlanId, { error: '' })
+          const live = draftRef.current
+          if (r.mode === 'more') {
+            const more = distributeDates(aiPosts, { ...placement, replacePast: true })
+              .map(i => ({ ...i, time: i.time || DEFAULT_POST_TIME }))
+            const ideasRes = await insertIdeas(activeWorkspaceId, accessToken, generatingPlanId, more, live.ideas.length)
+            if (ideasRes.error) {
+              update({ generatingPlanId: null })
+              setMoreError(`Generated but couldn't be saved: ${ideasRes.error}`)
+            } else {
+              // Appended functionally, against whatever the board holds when
+              // the write lands — not the array this effect started with.
+              const fresh = ideasRes.rows.map(dbIdeaToDraft)
+              update(prev => ({ generatingPlanId: null, ideas: [...(prev?.ideas || []), ...fresh] }))
+            }
+          } else {
+            await finishGeneration(generatingPlanId, live.name, buildSeeds(live.seedPosts).seedIdeas, aiPosts)
+          }
+        })
+        return
+      }
+
+      if (r.state === 'failed') {
+        await finish(async () => {
+          await settlePlanGeneration(accessToken, generatingPlanId, { error: '' })
+          update({ generatingPlanId: null })
+          ;(r.mode === 'more' ? setMoreError : setError)(r.error)
+        })
+        return
+      }
+
+      if (r.state === 'gone' || r.state === 'stale' || Date.now() > giveUpAt) {
+        await finish(async () => {
+          if (r.state !== 'gone') await settlePlanGeneration(accessToken, generatingPlanId, { error: '' })
+          update({ generatingPlanId: null })
+          ;(r.mode === 'more' ? setMoreError : setError)(
+            'The planner stopped answering and nothing was saved. Nothing was charged twice — ' +
+            'the run is over. Try generating again.')
+        })
+      }
+      // 'working' and 'unknown' both mean keep waiting. 'unknown' is a failed
+      // READ, not a failed run, and treating one dropped request as a dead
+      // plan would throw away a month that is still being written.
+    }
+
+    tick()
+    const id = setInterval(tick, 5000)
+    return () => { alive = false; clearInterval(id) }
+    // `ideas` and `name` are read inside but deliberately not dependencies:
+    // re-running this effect would restart the interval and, worse, reset the
+    // `settled` guard that stops a result being consumed twice. The values it
+    // needs at completion are re-read from the draft at that moment.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [generatingPlanId, generatingMode, accessToken, activeWorkspaceId])
 
   function onIdeaChange(updated) {
     update({ ideas: ideas.map(i => i.id === updated.id ? updated : i) })
@@ -1238,6 +1503,16 @@ export function CampaignPlanner() {
                   value={contentMixTarget} onChange={e => update({ contentMixTarget: e.target.value })}
                 />
 
+                {/* What the research agent proposed. Inside the AI block on
+                    purpose: a ticked idea is an instruction to the planning
+                    call, so it has nothing to steer when AI is off. */}
+                <ResearchIdeaPicker
+                  research={research}
+                  selectedKeys={researchIdeaKeys}
+                  onToggle={toggleResearchIdea}
+                  usedKeys={usedResearchKeys}
+                />
+
                 {featurableItems.length > 0 && (
                   <div>
                     <p className="text-xs font-medium text-text-secondary mb-2">Feature these this month (optional)</p>
@@ -1305,6 +1580,29 @@ export function CampaignPlanner() {
       {/* ── STEP: REVIEW IDEAS ── */}
       {step === 'review' && (
         <div className="space-y-4">
+          {/* ── A run that is still being written ──────────────────────────
+              Says plainly that leaving is safe, because the thing this whole
+              change fixes is people re-running a plan that was still coming.
+              The old behaviour trained exactly that: the request timed out,
+              the page showed an error, and generating again was the only
+              move — which paid Opus twice for one month. */}
+          {generatingPlanId && (
+            <Card className="p-5">
+              <div className="flex items-start gap-3">
+                <Spinner size="sm" />
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-text">{generationNote || 'Writing the month…'}</p>
+                  <p className="text-[11px] text-text-secondary leading-relaxed mt-1">
+                    This takes a few minutes. It is running on the server, not in this tab — you can close the
+                    page, switch tabs or go elsewhere in the app and the ideas will be here when you come back.
+                    Don&apos;t start another plan for this month: the one running will still finish, and you would
+                    be charged for both.
+                  </p>
+                </div>
+              </div>
+            </Card>
+          )}
+
           <Card className="p-5 space-y-4">
             <Input label="Plan name" value={name} onChange={e => update({ name: e.target.value })} />
 

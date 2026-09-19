@@ -2116,9 +2116,15 @@ try {
 
 CAMPAIGN_PLANNER_STICKY = r"""## Arak Campaign Planner
 
-**Zero secrets in this file.** Only needs `ANTHROPIC_API_KEY`.
+**Zero secrets in this file.** Needs `ANTHROPIC_API_KEY`, `SUPABASE_URL` and `SUPABASE_KEY`.
 
-Turns a stated goal + date range into a full slate of dated, platform-specific post ideas — Ramadan/Eid/National Day awareness, posting-day/time cadence enforcement, cross-month anti-repetition (recurring series vs one-off history), target content-mix steering, featured-product coverage. Returns ideas only — never writes to Supabase itself; the app inserts them into plan_ideas after this responds.
+Turns a stated goal + date range into a full slate of dated, platform-specific post ideas — Ramadan/Eid/National Day awareness, posting-day/time cadence enforcement, cross-month anti-repetition (recurring series vs one-off history), target content-mix steering, featured-product coverage.
+
+**ASYNC (2026-09-20).** Answers `202 {status:'accepted'}` immediately and keeps working; the result is PATCHed onto `content_plans.generation_result` minutes later and the app polls that row. It used to respond last with the ideas in the body, and the browser wrote them — but one Opus call for a whole month outlives the serverless proxy in front of this, so the request 504'd and the finished plan had nowhere to land. The month was discarded after Opus had already been paid for it. The caller's clock no longer matters.
+
+`plan_id` is REQUIRED in the request body: the app creates the plan row (status `generating`) before calling, and that row is where this writes. A call without one has nowhere to put its answer.
+
+It still writes no `plan_ideas` rows. The parsed posts are parked verbatim on the plan row because turning them into ideas means the app's `normalizeAiIdea()` + `distributeDates()` — date spreading, past-date replacement, per-platform format defaults — which are unit tested on that side. A copy here would drift.
 
 Model: Opus 5 with adaptive thinking — this is the one call in the whole pipeline that genuinely needs the extra reasoning (whole-month coherence, holiday judgment), unlike per-post Sonnet calls. Priced the same as the Opus 4.8 it replaces, so staying on Opus here costs nothing. `max_tokens` is 32000, not 16000: it budgets thinking and response text together, and a truncated plan surfaces as a JSON parse error rather than an obviously-short plan."""
 
@@ -2145,6 +2151,15 @@ const postingDays   = Array.isArray(input.posting_days) ? input.posting_days : [
 const contentMixTarget = input.content_mix_target || '';
 const defaultTime   = input.posting_time || '19:00';
 const research      = input.research && typeof input.research === 'object' ? input.research : null;
+// The research ideas a PERSON ticked on the setup step, as opposed to
+// `research` above, which is the whole latest run offered as background.
+// The distinction is the whole point: background is "use this if it fits",
+// this is "these are the month's spine". Without the split, the agent had a
+// voice but never a say — every idea it proposed was equally optional, so a
+// person who had read the report and decided had no way to say so.
+const chosenResearch = input.chosen_research_ideas && typeof input.chosen_research_ideas === 'object'
+  ? input.chosen_research_ideas
+  : null;
 const agentMemory   = String(input.agent_memory || '').slice(0, 6000);
 const recentPosts   = Array.isArray(input.recent_posts) ? input.recent_posts.slice(0, 40) : [];
 
@@ -2287,6 +2302,20 @@ const researchSection = research && (research.headline || researchIdeas.length |
     (researchIdeas.length ? `Ideas the research proposed (each answers a finding). Where one fits this month, build a post from it -- keep its reasoning, fit it to the dates, and put that reasoning in "rationale". Do not repeat one that is already covered below:\n${researchIdeas.map(i => `- ${i.title}${i.angle ? ' — ' + i.angle : ''}${i.rationale ? ` [why: ${i.rationale}]` : ''}`).join('\n')}\n` : '')
   : '';
 
+// ── The shortlist. Not background: these were chosen, one by one, by the
+// person who asked for this plan, and each one is expected to come back as a
+// real post. The `from_research` field is how that post says which idea it
+// came from, which is what carries the finding all the way into the board and
+// then into the analytics months later.
+const chosenIdeas = chosenResearch && Array.isArray(chosenResearch.ideas) ? chosenResearch.ideas : [];
+const chosenResearchSection = chosenIdeas.length
+  ? `\nIDEAS THE USER CHOSE FROM THE RESEARCH${chosenResearch.date ? ` (${chosenResearch.date} run)` : ''} -- THESE ARE REQUIREMENTS, NOT SUGGESTIONS:\n` +
+    `Each one below MUST become at least one post in this plan. Build it properly: give it a date that suits it, a format, and a real angle -- do not just restate the title. Keep the reasoning: put WHY it matters (from its "why" below) into that post's "rationale".\n` +
+    `On each post you build from one of these, set "from_research" to that idea's title EXACTLY as written here, character for character. On every other post, omit "from_research" entirely.\n` +
+    chosenIdeas.map((i, n) => `${n + 1}. ${i.title}${i.angle ? ` — ${i.angle}` : ''}${i.answers ? `\n   [answers: ${i.answers}]` : ''}${i.rationale ? `\n   [why: ${i.rationale}]` : ''}${i.suggested_format ? `\n   [suggested format: ${i.suggested_format}]` : ''}`).join('\n') +
+    `\nThese are on top of whatever else the plan needs -- still fill out the rest of the month around them.\n`
+  : '';
+
 // ── The research agent's memory — including every idea it already proposed.
 const agentMemorySection = agentMemory
   ? `\nRESEARCH AGENT'S MEMORY FOR THIS BRAND (standing context and ideas already proposed -- do not propose a near-copy of an idea listed here unless the research above says it is still the right one):\n${agentMemory}\n`
@@ -2347,6 +2376,7 @@ Each post needs:
   Base this on the topic and angle, not just the tone — e.g. a comparison/breakdown topic should usually be minimalist, a before/after topic should usually be dramatic, an exterior/landscape topic should usually be facade_exterior. Leave it "" for a linkedin text post or poll, which has no picture.
 - "suggested_aspect_ratio": pick ONE — instagram: 1:1, 4:5, 1.91:1; linkedin image or multi_image: 1.91:1, 1:1, 4:5; linkedin video: 16:9, 1:1, 9:16; "" for a linkedin text post or poll
 - "series": a short recurring-series name if this post is a deliberate weekly/monthly repeat format (e.g. "Tip Tuesday"), or "" if it's a one-off. Check the previous-months history below before inventing a new series name -- continue an existing one if it fits.
+- "from_research": ONLY on a post you built from an idea listed under "IDEAS THE USER CHOSE FROM THE RESEARCH" (if that section is present at all). Set it to that idea's title, copied EXACTLY. Omit this field entirely on every other post — it is how the plan records which posts have evidence behind them, so a guess here is worse than leaving it out.
 - "design_tip": a real creative-direction note (2-4 full sentences) on how to actually design this post's visual — written the way you'd genuinely brief a photographer or designer, not a generic platitude. Cover the mood/lighting, the framing or composition, and what should be in or out of frame. This is the ONLY place visual guidance shows up to the user, so it needs to stand on its own without a separate style label next to it. For a linkedin text post or poll there is no visual: leave it "".
 
 Respond with ONLY valid JSON, no markdown fences, no commentary, in exactly this shape:
@@ -2365,7 +2395,7 @@ PLATFORMS: ${platforms.join(', ')}${platforms.length === 1 ? ` (every post's "pl
 DATE RANGE: ${startDate} to ${endDate}
 ${countLine}
 ${cadenceSection}${timeSection}${ramadanTimeNote}${holidaySection}
-${featuredProductsSection}${seedPostsSection}${existingIdeasSection}${contentMixSection}${researchSection}${pastIdeasSection}${recentPostsSection}${agentMemorySection}${varietySection}
+${featuredProductsSection}${seedPostsSection}${existingIdeasSection}${contentMixSection}${researchSection}${chosenResearchSection}${pastIdeasSection}${recentPostsSection}${agentMemorySection}${varietySection}
 Now produce the plan for the request above, following all the rules already given.`;
 
 return [{
@@ -2377,11 +2407,47 @@ return [{
     _platforms: platforms,
     _posting_days: postingDays,
     _default_time: defaultTime,
+    // The row this run writes its result onto. The app creates the plan
+    // BEFORE calling, precisely so this exists — see the async note in the
+    // sticky. Without it the run has nowhere to land and the months-long
+    // Opus call is thrown away the moment the HTTP request times out.
+    _plan_id: String(input.plan_id || ''),
+    // The titles the user ticked, lowercased. The parser checks
+    // `from_research` against these so a title the model invented or
+    // mistyped cannot stamp a post as evidence-backed when it is not.
+    _chosen_titles: chosenIdeas.map(i => String(i.title || '').trim().toLowerCase()).filter(Boolean),
   }
 }];""")
 
 PARSE_VALIDATE_PLAN_JS = r"""const response = $input.first().json;
 const bounds   = $('Build Prompt').first().json;
+const planId   = String(bounds._plan_id || '');
+
+// ── Why this node stopped throwing ────────────────────────────────────────
+// It used to `throw` on anything it could not parse. That was survivable
+// while the workflow was synchronous: the throw killed the run, the webhook
+// answered nothing, and the browser — which was still holding the request —
+// showed an error. Now the browser is NOT holding anything; it is polling
+// content_plans, and the only thing that ever moves that row off 'generating'
+// is the save node downstream of here. A throw skips it, so the plan would
+// spin forever with no reason attached and no way to retry that did not look
+// like a duplicate charge.
+//
+// So every failure below becomes a normal item carrying `_ok: false` and a
+// sentence a person can act on. The save node branches on `_ok` and writes
+// either the posts or the reason — the same shape Draft Copy uses.
+function fail(message) {
+  return [{ json: { _ok: false, plan_id: planId, error: String(message).slice(0, 600) } }];
+}
+
+// `Call Claude` runs with onError: continueRegularOutput so that an API
+// failure arrives HERE as data instead of killing the run before the save
+// node. That is the whole point — a 529 from Anthropic should leave the plan
+// saying "overloaded, try again", not stuck mid-generation.
+if (response && response.error) {
+  const e = response.error;
+  return fail('Claude rejected the request: ' + (e.message || e.type || JSON.stringify(e)));
+}
 
 let text = '';
 if (response.content && Array.isArray(response.content)) {
@@ -2391,13 +2457,25 @@ if (response.content && Array.isArray(response.content)) {
   text = response.completion || response.text || '';
 }
 
+// max_tokens budgets thinking AND response text together on Opus 5, so a
+// plan that ran long truncates mid-array and fails as a JSON parse error —
+// which reads like a model bug rather than a budget one. Name it before the
+// parse, where the actual cause is still known.
+if (response.stop_reason === 'max_tokens') {
+  return fail(
+    'The plan was cut off before it finished (hit the token budget). Ask for ' +
+    'fewer posts, or a shorter date range, and run it again.');
+}
+
 text = text.trim().replace(/^```json\s*/i, '').replace(/^```\s*/, '').replace(/```\s*$/, '');
+
+if (!text) return fail('Claude returned an empty plan.');
 
 let parsed;
 try {
   parsed = JSON.parse(text);
 } catch (e) {
-  throw new Error('Could not parse plan JSON from Claude response: ' + text.slice(0, 300));
+  return fail('Could not parse plan JSON from Claude response: ' + text.slice(0, 300));
 }
 
 const startDate = bounds._start_date;
@@ -2405,6 +2483,7 @@ const endDate   = bounds._end_date;
 const allowedPlatforms = bounds._platforms || ['instagram'];
 const postingDays = bounds._posting_days || []; // e.g. ['sun','tue','thu'] — [] means no constraint
 const defaultTime = bounds._default_time || '19:00';
+const chosenTitles = new Set(bounds._chosen_titles || []);
 
 const igTones = ['professional', 'inspirational', 'educational', 'casual', 'promotional'];
 
@@ -2521,11 +2600,28 @@ const posts = (parsed.posts || [])
       suggested_format: format,
       ...(poll ? { poll } : {}),
       series: p.series ? String(p.series).slice(0, 60) : '',
+      // Only kept when it MATCHES one of the titles the user actually ticked.
+      // The model is asked to copy the title exactly, and a near-miss or an
+      // invented one would otherwise stamp "From research" onto a post with
+      // no finding behind it — a provenance mark that lies is worse than none
+      // at all, because the whole point is that it can be trusted.
+      ...(chosenTitles.has(String(p.from_research || '').trim().toLowerCase())
+        ? { from_research: String(p.from_research).trim() }
+        : {}),
     };
   });
 
+// A run that parsed cleanly but produced nothing is still a failure — and a
+// silent one, because an empty `posts` array would be written as a perfectly
+// valid result and leave the board blank with no explanation.
+if (!posts.length) {
+  return fail('Claude returned a plan with no usable posts in it.');
+}
+
 return [{
   json: {
+    _ok: true,
+    plan_id: planId,
     campaignName: parsed.campaignName || '',
     posts,
   }
@@ -2629,6 +2725,55 @@ def _inject_webhook_guard(wf: dict) -> dict:
     if original:
         connections[guard["name"]] = original
     return wf
+
+
+def _http_save_plan_generation(x: int, y: int) -> dict:
+    """PATCH content_plans with the generated slate, or with the reason it
+    failed — one node, branching on _ok exactly like _http_save_draft.
+
+    This node is the ONLY thing that moves a plan off status 'generating'.
+    Every failure path upstream is therefore routed into it as data rather
+    than allowed to throw, because a throw here means a plan that spins
+    forever with nothing to explain it and no safe way to retry.
+
+    `generation_result` holds the parsed posts verbatim. Deliberately not
+    plan_ideas rows: the model output still has to go through
+    normalizeAiIdea() and distributeDates() in the app, which own date
+    spreading around pinned posts and per-platform format defaults and are
+    unit tested there. Writing idea rows from here would fork that logic into
+    an untested second copy. The row keeps the raw slate, the browser does
+    what it already does, and closing the tab mid-run loses nothing.
+    """
+    body_expr = (
+        "={{ JSON.stringify($json._ok "
+        "? { generation_result: { campaignName: $json.campaignName, posts: $json.posts }, "
+        "generation_error: '' } "
+        ": { generation_result: null, generation_error: $json.error, status: 'draft' }) }}"
+    )
+    return {
+        "parameters": {
+            "method": "PATCH",
+            "url": "={{ String($env.SUPABASE_URL).replace(/\\/+$/, '') }}/rest/v1/content_plans?id=eq.{{ $json.plan_id }}",
+            "sendHeaders": True,
+            "headerParameters": {
+                "parameters": [
+                    {"name": "apikey", "value": "={{ $env.SUPABASE_KEY }}"},
+                    {"name": "Authorization", "value": "=Bearer {{ $env.SUPABASE_KEY }}"},
+                    {"name": "Content-Type", "value": "application/json"},
+                    {"name": "Prefer", "value": "return=minimal"},
+                ]
+            },
+            "sendBody": True,
+            "specifyBody": "json",
+            "jsonBody": body_expr,
+            "options": {},
+        },
+        "id": nid(),
+        "name": "Supabase: Save Plan",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [x, y],
+    }
 
 
 def _respond_json(name: str, response_body_expr: str, x: int, y: int) -> dict:
@@ -3022,15 +3167,36 @@ def build_zernio_dashboard() -> dict:
 
 def build_campaign_planner() -> dict:
     """
-    Webhook (responseNode) -> Build Prompt (Code) -> Call Claude (HTTP,
-    x-api-key + $env.ANTHROPIC_API_KEY — NOT n8n credential auth, to match
-    every other workflow's zero-secrets-in-file / env-var-only pattern) ->
-    Parse & Validate Plan (Code) -> Respond to Webhook.
+    Webhook (responseNode) -> Respond: Accepted -> Build Prompt (Code) ->
+    Call Claude (HTTP, x-api-key + $env.ANTHROPIC_API_KEY — NOT n8n credential
+    auth, to match every other workflow's zero-secrets-in-file / env-var-only
+    pattern) -> Parse & Validate Plan (Code) -> Supabase: Save Plan.
+
+    ASYNC since 2026-09-20, and that is the whole point of the shape.
+
+    It used to respond LAST, with the ideas in the body, and the browser wrote
+    them into plan_ideas itself. One Opus 5 call with adaptive thinking for a
+    whole month routinely outlives the serverless proxy in front of this, so
+    the request 504'd — and since the write lived on the browser side, a
+    finished plan had nowhere to land. n8n completed, answered a socket nobody
+    held, and the month was discarded after Opus had been paid for it. The
+    app's own error text told people to wait and refresh, which recovered
+    nothing, so the only way forward was to run it again and pay twice.
+
+    Now it answers 202 the moment the secret checks out (the Draft Copy
+    pattern) and the result is written to the plan row whenever it is ready.
+    The caller's clock stopped mattering.
     """
     nodes = [
-        _sticky(CAMPAIGN_PLANNER_STICKY, height=300, width=440, x=0, y=-140),
+        _sticky(CAMPAIGN_PLANNER_STICKY, height=380, width=440, x=0, y=-220),
         _webhook("arak-campaign-planner", "responseNode", x=0, y=200),
-        _code("Build Prompt", BUILD_PROMPT_JS, x=220, y=200),
+        _respond_json(
+            "Respond: Accepted",
+            "={{ JSON.stringify({ status: 'accepted', plan_id: $json.body.plan_id }) }}",
+            x=220,
+            y=200,
+        ),
+        _code("Build Prompt", BUILD_PROMPT_JS, x=440, y=200),
         {
             "parameters": {
                 "method": "POST",
@@ -3067,19 +3233,31 @@ def build_campaign_planner() -> dict:
             "name": "Call Claude",
             "type": "n8n-nodes-base.httpRequest",
             "typeVersion": 4.2,
-            "position": [440, 200],
+            "position": [660, 200],
+            # Safe to retry: this is exactly ONE Anthropic call, not a fan-out,
+            # so a retry costs one more plan at worst and rescues the common
+            # 429/529 blip. (The rule it looks like it breaks — never
+            # retryOnFail a node that fans out paid calls — is about nodes
+            # running once per item; this one runs once per run.)
             "retryOnFail": True,
             "maxTries": 3,
             "waitBetweenTries": 3000,
+            # After those three tries, hand the failure DOWNSTREAM as data
+            # instead of killing the run. Nothing else moves the plan row off
+            # 'generating', so a hard stop here would strand the plan with a
+            # spinner and no reason. Parse & Validate Plan reads `error` off
+            # the item and turns it into a sentence the planner can show.
+            "onError": "continueRegularOutput",
         },
-        _code("Parse & Validate Plan", PARSE_VALIDATE_PLAN_JS, x=660, y=200),
-        _respond_json("Respond to Webhook", "={{ JSON.stringify($json) }}", x=880, y=200),
+        _code("Parse & Validate Plan", PARSE_VALIDATE_PLAN_JS, x=880, y=200),
+        _http_save_plan_generation(x=1100, y=200),
     ]
     connections = {
-        "Webhook": {"main": [[{"node": "Build Prompt", "type": "main", "index": 0}]]},
+        "Webhook": {"main": [[{"node": "Respond: Accepted", "type": "main", "index": 0}]]},
+        "Respond: Accepted": {"main": [[{"node": "Build Prompt", "type": "main", "index": 0}]]},
         "Build Prompt": {"main": [[{"node": "Call Claude", "type": "main", "index": 0}]]},
         "Call Claude": {"main": [[{"node": "Parse & Validate Plan", "type": "main", "index": 0}]]},
-        "Parse & Validate Plan": {"main": [[{"node": "Respond to Webhook", "type": "main", "index": 0}]]},
+        "Parse & Validate Plan": {"main": [[{"node": "Supabase: Save Plan", "type": "main", "index": 0}]]},
     }
     return {
         "name": "Arak Campaign Planner",
