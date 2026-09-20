@@ -106,6 +106,7 @@ export function IdeaCard({ idea, index, accessToken, workspaceId, onChange, onRe
       ...(movedPlatform ? { platform: patch.platform, platforms: nextTargets } : {}),
       topic: patch.topic, angle: patch.angle, tone: patch.tone,
       scheduled_date: patch.date || null,
+      publish_time: patch.time || null,
       suggested_style: patch.suggestedStyle || '', image_idea: patch.imageIdea || '',
       objective: patch.objective || '', cta: patch.cta || '',
       hashtags: patch.hashtags || '', first_comment: patch.firstComment || '',
@@ -295,6 +296,9 @@ export function IdeaEditModal({ idea, tones, saving, saveError, onClose, onSave,
   const [angle,     setAngle]     = useState(idea.angle || '')
   const [tone,      setTone]      = useState(idea.tone || tones[0].value)
   const [date,      setDate]      = useState(idea.date || '')
+  // The AI decides this when it spreads the month; the box is the override.
+  // Empty means "whatever the plan's default is", not midnight.
+  const [time,      setTime]      = useState(idea.time || '')
   const [style,     setStyle]     = useState(idea.suggestedStyle || '')
   const [imageIdea, setImageIdea] = useState(idea.imageIdea || '')
   const [objective, setObjective] = useState(idea.objective || '')
@@ -390,6 +394,8 @@ export function IdeaEditModal({ idea, tones, saving, saveError, onClose, onSave,
 
         <div className="grid grid-cols-2 gap-3">
           <Input label="Date" type="date" value={date} min={todayKey || undefined} onChange={e => setDate(e.target.value)} />
+          <Input label="Time" type="time" value={time} onChange={e => setTime(e.target.value)}
+            hint="Left empty, the plan's default time is used." />
           <Select label="Tone" value={tone} onChange={e => setTone(e.target.value)}>
             {tones.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
           </Select>
@@ -473,7 +479,7 @@ export function IdeaEditModal({ idea, tones, saving, saveError, onClose, onSave,
           <Button variant="secondary" onClick={onClose}>{idea.isNew ? 'Discard' : 'Cancel'}</Button>
           <Button onClick={() => onSave({
             platform,
-            topic, angle, tone, date, suggestedStyle: style, imageIdea, objective, cta, hashtags, firstComment, series,
+            topic, angle, tone, date, time, suggestedStyle: style, imageIdea, objective, cta, hashtags, firstComment, series,
             postFormat, aspectRatio, mediaType: currentFormat?.media || 'image', wantsCaption, slideCount,
             postKind: derivedKind,
             // Trimmed on the way out so a box left with only whitespace can't

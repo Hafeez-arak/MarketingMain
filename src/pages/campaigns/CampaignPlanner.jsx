@@ -15,9 +15,9 @@ import {
 } from '../../lib/postFormats'
 import { groupByWeek, monthOptions, normalizeAiIdea, distributeDates, formatTime, DEFAULT_POST_TIME, pollProblems, firstPlaceableDay } from './planModel'
 import { brandTodayKey } from '../../lib/brandTime'
-import { GOALS, OTHER_GOAL, isCustomGoal, WEEKDAYS, DEFAULT_DRAFT, isUntouchedSelection, PLATFORMS, targetLabel } from './planConstants'
+import { GOALS, OTHER_GOAL, isCustomGoal, WEEKDAYS, DEFAULT_DRAFT, isUntouchedSelection, PLATFORMS, targetLabel, IG_TONES } from './planConstants'
 import { isProtectedPlatform } from '../../lib/platformSafety'
-import { IdeaCard } from './IdeaCard'
+import { IdeaCard, IdeaEditModal } from './IdeaCard'
 import { CaptionCard } from './CaptionCard'
 import { GenerateMoreModal, CalendarView } from './plannerParts'
 import { momentsInRange, dbIdeaToDraft } from '../../lib/campaignPlan'
@@ -993,6 +993,46 @@ export function CampaignPlanner() {
     return { ok: true }
   }
 
+  // ── Editing a post from the pictures step ────────────────────────────────
+  // The same modal the review step opens, deliberately: format, orientation,
+  // slide count, date, time and platform are decisions made WHILE looking at
+  // the picture, and a second, slightly-different editor would be two places
+  // to keep in step and two things to learn.
+  const [editIdea, setEditIdea] = useState(null)
+  const [editSaving, setEditSaving] = useState(false)
+  const [editError, setEditError] = useState('')
+  async function saveEditedIdea(patch) {
+    const idea = editIdea
+    if (!idea) return
+    setEditSaving(true); setEditError('')
+    const result = await updateIdea(accessToken, idea.id, {
+      topic: patch.topic, angle: patch.angle, tone: patch.tone, platform: patch.platform,
+      scheduled_date: patch.date || null,
+      publish_time: patch.time || null,
+      suggested_style: patch.suggestedStyle || '', image_idea: patch.imageIdea || '',
+      objective: patch.objective || '', cta: patch.cta || '',
+      hashtags: patch.hashtags || '', first_comment: patch.firstComment || '',
+      series: patch.series || '',
+      format: patch.postFormat, aspect_ratio: patch.aspectRatio, media_type: patch.mediaType,
+      wants_caption: patch.wantsCaption !== false,
+      post_kind: patch.postKind || 'caption_image',
+      slide_count: patch.slideCount || 1,
+      copy_mode: patch.copyMode === 'own' ? 'own' : 'ai',
+      caption_en: patch.captionEn || '', caption_ar: patch.captionAr || '',
+    })
+    setEditSaving(false)
+    if (result.error) { setEditError(result.error); return }
+    const before = ideaSnapshot(idea)
+    const after  = ideaSnapshot({ ...idea, ...patch })
+    onIdeaChange({ ...idea, ...patch })
+    setEditIdea(null)
+    // Same signal the review step records: what a human changed about the
+    // AI's suggestion is worth more than the final text on its own.
+    logIdeaEvent(activeWorkspaceId, accessToken, {
+      planId: idea.planId, ideaId: idea.id, event: 'edited', before, after,
+    })
+  }
+
   // ── Attaching your own pictures ──────────────────────────────────────────
   // The picker hands back urls. They join whatever the idea already has
   // rather than replacing it — that is the point of the slide list. A Studio
@@ -1813,13 +1853,36 @@ export function CampaignPlanner() {
                     )}
                     <div className="min-w-0 flex-1">
                       <p className="text-xs font-semibold text-text leading-snug line-clamp-2">{idea.title || idea.topic || 'Untitled idea'}</p>
+                      {/* The topic, which is what the picture actually has to
+                          be OF. The card showed a title and a format and left
+                          you to remember the rest — so choosing a picture
+                          meant going back a step to read the idea again. */}
+                      {idea.topic && idea.topic !== idea.title && (
+                        <p className="text-[11px] text-text-secondary mt-0.5 leading-relaxed line-clamp-2">{idea.topic}</p>
+                      )}
                       <p className="text-[11px] text-text-secondary mt-1">
                         {idea.date ? formatDate(idea.date) : 'Date set on save'}
                         {' · '}{formatTime(idea.time || DEFAULT_POST_TIME)}
                       </p>
                       <p className="text-[10px] text-text-tertiary mt-0.5">
                         {formatsFor(idea.platform).find(f => f.id === idea.postFormat)?.label || 'Feed image'} · {aspectLabel(idea.aspectRatio)}
+                        {' · '}{(idea.platforms?.length ? idea.platforms : [idea.platform]).map(targetLabel).join(' + ')}
                       </p>
+                      {/* The same chips the review step judges an idea by. A
+                          picture for a National Day post is a different brief
+                          from a picture for a product post, and this step used
+                          to hide that distinction entirely. */}
+                      {(idea.occasion || idea.pillar || idea.objective || idea.source === 'research') && (
+                        <div className="flex items-center gap-1 flex-wrap mt-1.5">
+                          {idea.source === 'research' && (
+                            <span className="text-[9px] font-semibold px-1.5 py-0.5 leading-[1.4] border bg-sage-50 text-sage-700 border-sage-200"
+                              title="Built from an idea the research agent proposed">◆ Research</span>
+                          )}
+                          {idea.occasion && <span className="text-[9px] font-semibold px-1.5 py-0.5 leading-[1.4] border bg-amber-100 text-amber-800 border-amber-200">★ {idea.occasion}</span>}
+                          {idea.pillar && <span className="text-[9px] font-medium px-1.5 py-0.5 leading-[1.4] border bg-stone-100 text-text-secondary border-border">{idea.pillar}</span>}
+                          {idea.objective && <span className="text-[9px] font-medium px-1.5 py-0.5 leading-[1.4] border bg-sky-50 text-sky-700 border-sky-100">{idea.objective}</span>}
+                        </div>
+                      )}
                       <span className={`inline-block mt-1.5 text-[10px] font-bold px-1.5 py-0.5 leading-[1.4] ${
                         st === 'ready' || st === 'sent' ? 'bg-sage-100 text-sage-700'
                         : st === 'in_studio' ? 'bg-violet-50 text-violet-700'
@@ -1854,6 +1917,13 @@ export function CampaignPlanner() {
                         <Button size="xs" variant="secondary" onClick={() => openStudio(idea)}>
                           {idea.mediaStatus === 'ready' ? 'Edit in Studio' : sess ? 'Back to Studio' : 'Make in Studio'}
                         </Button>
+                        {/* The same modal the review step opens. Format,
+                            orientation, slide count, date, time and platforms
+                            are all decisions you make WHILE looking at the
+                            picture — and until now they lived two steps back,
+                            so changing a carousel to a reel meant leaving the
+                            step and finding your place again. */}
+                        <Button size="xs" variant="secondary" onClick={() => setEditIdea(idea)}>Edit</Button>
                         {idea.mediaStatus === 'ready' && (
                           <button onClick={() => redoMedia(idea)}
                             title="Start this one over — the picture is unset, the Studio session is kept"
@@ -1868,6 +1938,12 @@ export function CampaignPlanner() {
           </div>
 
           {error && <div className="rounded-xl bg-red-50 border border-red-100 px-4 py-3 text-xs text-red-600">{error}</div>}
+
+          {editIdea && (
+            <IdeaEditModal idea={editIdea} tones={IG_TONES} saving={editSaving} saveError={editError}
+              planPlatforms={platforms} todayKey={todayKey}
+              onClose={() => { setEditIdea(null); setEditError('') }} onSave={saveEditedIdea} />
+          )}
 
           <div className="sticky bottom-0 -mx-1 px-1 pb-1">
             <div className="flex items-center gap-3 bg-white/95 backdrop-blur-sm border border-border rounded-2xl shadow-dropdown px-5 py-3.5">
