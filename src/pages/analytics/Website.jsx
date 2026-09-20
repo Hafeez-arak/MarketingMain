@@ -10,7 +10,7 @@ import { MetricInfoDot, ScopeBanner } from '../../components/analytics/MetricLab
 import { Collapsible } from '../dashboard/Collapsible'
 import { ChartCard } from './Dashboard'
 import { fmt, pct, plural } from './format'
-import { Ga4Panels } from './WebsiteGa4'
+import { Ga4Panels, BioLinkPanel } from './WebsiteGa4'
 import { useWebsiteAnalytics } from './useWebsiteAnalytics'
 import { RangePicker } from '../../components/analytics/RangePicker'
 import { isCustom, rangeLabel } from '../../lib/dateRange'
@@ -250,8 +250,9 @@ export function WebsiteAnalytics(w) {
   const queryBodyId = useId()
   const {
     range, setRange, days, loading, refreshing, refresh, error,
-    search, ga4, usable, summary, daily, types, bands, coverage, queries,
+    search, ga4, bio, usable, summary, daily, types, bands, coverage, queries,
     pages, hosts, countries, devices, appearance, sitemaps, recommendations, ga4Summary,
+    arrivals, arrivalsSummary,
   } = w
 
   if (loading) return <WebsiteSkeleton />
@@ -309,6 +310,7 @@ export function WebsiteAnalytics(w) {
             action={<Button size="sm" variant="secondary" onClick={() => navigate('/brand-brain')}>Open Brand Brain</Button>} />
         </Card>
         <Ga4Panels ga4={ga4} summary={ga4Summary} days={days} />
+      <BioLinkPanel ga4={ga4} bio={bio} arrivals={arrivals} summary={arrivalsSummary} days={days} />
       </div>
     )
   }
@@ -329,6 +331,7 @@ export function WebsiteAnalytics(w) {
           </div>
         </Card>
         <Ga4Panels ga4={ga4} summary={ga4Summary} days={days} />
+      <BioLinkPanel ga4={ga4} bio={bio} arrivals={arrivals} summary={arrivalsSummary} days={days} />
       </div>
     )
   }
@@ -716,6 +719,7 @@ export function WebsiteAnalytics(w) {
 
       {/* ── The website's own numbers ── */}
       <Ga4Panels ga4={ga4} summary={ga4Summary} days={days} />
+      <BioLinkPanel ga4={ga4} bio={bio} arrivals={arrivals} summary={arrivalsSummary} days={days} />
     </div>
   )
 }

@@ -283,6 +283,14 @@ const INFO = {
   'web.users': {
     what: 'How many separate people visited, however many times each came back.',
   },
+  'web.social_arrivals': {
+    what: 'Visits that began on a social platform — Instagram, LinkedIn and the rest — as counted by the tag on the site.',
+    note: 'Always lower than Instagram’s bio taps, and never to be subtracted from them. Someone can tap and never arrive, and an untagged bio link is undercounted here because Instagram’s in-app browser usually sends no referrer, which files the visit as Direct instead.',
+  },
+  'web.bio_arrivals': {
+    what: 'Of those visits, the ones carrying the bio link’s own campaign tag — so they can be proved to have come from a link in a profile rather than from a shared post.',
+    note: 'Zero until the tagged link is pasted into the profile. GA4 cannot backfill: it only counts from the day the tagged link goes live.',
+  },
   'web.new_users': {
     what: 'Visitors GA4 had not seen before in this window.',
   },

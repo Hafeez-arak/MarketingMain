@@ -7,7 +7,7 @@ import {
   websiteSummary, dailySeries, searchTypes, positionBands, pageRows, hostSplit,
   queryRows, countryRows, deviceRows, appearanceRows, sitemapHealth, queryCoverage,
 } from '../lib/analytics/websiteAnalytics'
-import { ga4Summary } from '../lib/agent/ga4'
+import { ga4Summary, platformArrivals, arrivalsSummary } from '../lib/agent/ga4'
 import fixture from './websiteFixture.json'
 import '../index.css'
 
@@ -65,6 +65,16 @@ const GA4_LIVE = {
     { sessionSourceMedium: '(direct) / (none)', sessions: 38, totalUsers: 29 },
     { sessionSourceMedium: 'instagram.com / referral', sessions: 7, totalUsers: 4 },
   ],
+  // The state the real property is in today: social traffic arrives, none of
+  // it tagged, and the 38 Direct sessions above are hiding an unknown number
+  // of bio-link visits Instagram's in-app browser stripped the referrer from.
+  social: [
+    { sessionSource: 'google', sessionMedium: 'organic', sessionCampaignName: '(organic)', sessions: 61, totalUsers: 52, engagedSessions: 40 },
+    { sessionSource: '(direct)', sessionMedium: '(none)', sessionCampaignName: '(direct)', sessions: 38, totalUsers: 29, engagedSessions: 21 },
+    { sessionSource: 'l.instagram.com', sessionMedium: 'referral', sessionCampaignName: '(not set)', sessions: 5, totalUsers: 3, engagedSessions: 2 },
+    { sessionSource: 'instagram.com', sessionMedium: 'referral', sessionCampaignName: '(not set)', sessions: 2, totalUsers: 1, engagedSessions: 1 },
+  ],
+  socialAvailable: true,
   pages: [
     { pagePath: '/', screenPageViews: 121, sessions: 96, averageSessionDuration: 61 },
     { pagePath: '/services/smart-poles', screenPageViews: 44, sessions: 31, averageSessionDuration: 88 },
@@ -97,6 +107,44 @@ const GA4_LIVE = {
   keyEventsAvailable: true,
 }
 
+// The same property a fortnight after the tagged link went into the bio: the
+// bio campaign is now visible, and the old untagged referrals have not
+// vanished — people keep arriving on links shared before the change.
+const GA4_TAGGED = {
+  ...GA4_LIVE,
+  social: [
+    { sessionSource: 'google', sessionMedium: 'organic', sessionCampaignName: '(organic)', sessions: 61, totalUsers: 52, engagedSessions: 40 },
+    { sessionSource: 'instagram', sessionMedium: 'social', sessionCampaignName: 'bio', sessions: 22, totalUsers: 19, engagedSessions: 14 },
+    { sessionSource: 'l.instagram.com', sessionMedium: 'referral', sessionCampaignName: '(not set)', sessions: 4, totalUsers: 3, engagedSessions: 2 },
+    { sessionSource: 'linkedin', sessionMedium: 'social', sessionCampaignName: 'bio', sessions: 6, totalUsers: 6, engagedSessions: 4 },
+    { sessionSource: 'lnkd.in', sessionMedium: 'referral', sessionCampaignName: '(not set)', sessions: 3, totalUsers: 2, engagedSessions: 1 },
+  ],
+}
+
+// Instagram's own tap count, and the two ways it is absent. 61 taps against
+// 26 tagged arrivals is deliberate: that gap is the point of the panel, and a
+// fixture where they agreed would hide the one thing it must communicate.
+const TAPS_OK = {
+  ok: true, taps: 61, window: { since: '2026-08-23', until: '2026-09-20', days: 28 }, dataDelay: '',
+}
+const TAPS_CAPPED = {
+  ok: false, capped: true, maxDays: 29,
+  error: 'Instagram will not report link taps over a window longer than 29 days, so there is no tap count ' +
+    'for this one. Choose a shorter window to see it.',
+}
+const TAPS_NO_ACCOUNT = {
+  ok: false, error: 'No Instagram account is connected, so there are no bio-link taps to count.',
+}
+
+const BIO = {
+  site: 'https://arak-sa.com',
+  links: [
+    { id: 'instagram', label: 'Instagram', url: 'https://arak-sa.com/?utm_source=instagram&utm_medium=social&utm_campaign=bio' },
+    { id: 'linkedin', label: 'LinkedIn', url: 'https://arak-sa.com/?utm_source=linkedin&utm_medium=social&utm_campaign=bio' },
+  ],
+  taps: TAPS_OK,
+}
+
 function dailyGa4() {
   const { start, end } = fixture.search.windows.current
   const out = []
@@ -115,7 +163,19 @@ function dailyGa4() {
 
 const STATES = {
   'Live — Search Console, GA4 not connected': { search: fixture.search, ga4: fixture.ga4 },
-  'Live — both connected': { search: fixture.search, ga4: GA4_LIVE },
+  'Live — both connected': { search: fixture.search, ga4: GA4_LIVE, bio: BIO },
+  'Bio link — tagged, both platforms': { search: fixture.search, ga4: GA4_TAGGED, bio: BIO },
+  'Bio link — 90-day window, no taps': {
+    search: fixture.search, ga4: GA4_TAGGED, bio: { ...BIO, taps: TAPS_CAPPED },
+  },
+  'Bio link — no Instagram connected': {
+    search: fixture.search, ga4: GA4_TAGGED, bio: { ...BIO, taps: TAPS_NO_ACCOUNT },
+  },
+  'Bio link — GA4 rejected the social report': {
+    search: fixture.search,
+    ga4: { ...GA4_LIVE, social: [], socialAvailable: false },
+    bio: BIO,
+  },
   'Search Console not connected': {
     search: {
       ok: true, configured: false, site: '', error: 'GOOGLE_SA_KEY is not set.',
@@ -166,6 +226,8 @@ export function WebsiteHarness() {
   const state = STATES[name]
   const search = state.search
   const ga4 = state.ga4
+  const bio = state.bio || null
+  const arrivals = platformArrivals(ga4?.social || [])
   const usable = !!search?.ok && !!search?.configured
 
   // The same derivations useWebsiteAnalytics does, over the same rows. Kept in
@@ -178,7 +240,7 @@ export function WebsiteHarness() {
 
   const props = {
     days, setDays, loading: !!state.loading, refreshing: false, refresh: () => {}, error: '',
-    search, ga4, usable,
+    search, ga4, bio, usable, arrivals, arrivalsSummary: arrivalsSummary(arrivals),
     summary: usable ? websiteSummary(search) : null,
     daily: usable ? dailySeries(search.daily, search.windows) : [],
     types: usable ? searchTypes(search.types) : [],

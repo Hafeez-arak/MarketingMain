@@ -1,6 +1,8 @@
 import { callerId, callerMayUseWorkspace, db, isConfigured } from './_supabase.js'
 import { searchConfig } from '../../src/lib/agent/searchConsole.js'
-import { ga4Config } from '../../src/lib/agent/ga4.js'
+import { ga4Config, bioLink, siteOrigin, SOCIAL_PLATFORMS } from '../../src/lib/agent/ga4.js'
+import { createZernio } from '../zernio/_zernio.js'
+import { zernioProfileFor, accountInsights, MAX_INSIGHT_DAYS } from './_zernioLive.js'
 import { fetchWebsiteData, fetchSitemaps } from './_searchConsole.js'
 import { fetchGa4Data } from './_ga4.js'
 import { normalizeRange, resolveRange, isCustom } from '../../src/lib/dateRange.js'
@@ -16,7 +18,7 @@ import { normalizeRange, resolveRange, isCustom } from '../../src/lib/dateRange.
 //
 // /api/agent/search answers three calls' worth of questions and paints the
 // dashboard's Website card on every single visit to the home page. This route
-// makes seventeen Search Console calls and eleven GA4 reports. Putting both
+// makes seventeen Search Console calls and twelve GA4 reports. Putting both
 // behind one handler with an `include` parameter would mean the cheap caller
 // pays for the expensive one's imports and the expensive one's bugs, and the
 // first slow dashboard would be traced back here.
@@ -48,6 +50,12 @@ async function readBody(req) {
 // is mostly zeroes with a percentage sign on it. Search Console's own
 // retention stops at 16 months, comfortably outside MAX_RANGE_DAYS.
 export const WINDOWS = [7, 28, 90]
+
+// The profiles this brand actually has a bio on, so the panel offers two
+// links to paste rather than a menu of ten it will never use. Adding a
+// platform here is the whole change needed when one is connected — the
+// counting side already recognises every source in SOCIAL_PLATFORMS.
+const BIO_LINK_PLATFORMS = ['instagram', 'linkedin']
 export const MIN_WINDOW_DAYS = 7
 
 // Said here rather than in the component, so the browser bundle does not carry
@@ -65,6 +73,58 @@ const GA4_SETUP = [
   'Copy the numeric property id from Admin → Property settings (digits only, not the G- measurement id).',
   'Set customFields.ga4_property_id on the Brand Brain to that number.',
 ]
+
+// ─── The bio link ──────────────────────────────────────────────────────────
+//
+// The one question this tab could not answer: is anybody actually clicking the
+// link in the Instagram bio, and do they reach the site?
+//
+// It takes two sources, because no single one knows both halves. Instagram
+// counts the TAP and knows nothing after it. GA4 counts the ARRIVAL and, on a
+// bare untagged link, usually cannot tell it apart from someone typing the
+// address in — Instagram's in-app browser sends no referrer. So both are
+// fetched, both are labelled, and neither is ever subtracted from the other.
+//
+// ── WHY THE TAPS CAN BE ABSENT ON A WINDOW THAT WORKS FOR GA4 ──
+//
+// Meta rejects any account-insights request spanning more than 30 days — the
+// whole request, not the excess — so there is no 90-day tap count to be had.
+// A capped 29-day figure printed under a "Last 90 days" heading would be read
+// as 90 days of taps and would make the bio link look three times worse than
+// it is. So on a window Instagram cannot serve, the taps are absent and say
+// why, which is the same rule the LinkedIn 88-day cap already follows.
+
+/** Instagram's own count of bio-link taps, or a stated reason there is none. */
+async function fetchBioTaps(workspaceId, days) {
+  if (days > MAX_INSIGHT_DAYS) {
+    return {
+      ok: false,
+      capped: true,
+      maxDays: MAX_INSIGHT_DAYS,
+      error: `Instagram will not report link taps over a window longer than ${MAX_INSIGHT_DAYS} days, ` +
+        'so there is no tap count for this one. Choose a shorter window to see it.',
+    }
+  }
+  const key = process.env.ZERNIO_API_KEY || ''
+  if (!key) return { ok: false, error: 'ZERNIO_API_KEY is not set on this deployment.' }
+  try {
+    const profile = await zernioProfileFor(workspaceId)
+    const instagram = (profile?.accounts || []).find(a => String(a.platform).toLowerCase() === 'instagram')
+    if (!instagram?.zernio_account_id) {
+      return { ok: false, error: 'No Instagram account is connected, so there are no bio-link taps to count.' }
+    }
+    const insights = await accountInsights(createZernio({ apiKey: key }), instagram.zernio_account_id, days)
+    if (!insights.ok) return { ok: false, error: insights.error }
+    return {
+      ok: true,
+      taps: insights.profile_links_taps,
+      window: insights.window,
+      dataDelay: insights.data_delay || '',
+    }
+  } catch (err) {
+    return { ok: false, error: String(err?.message || err).slice(0, 300) }
+  }
+}
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -124,10 +184,14 @@ export default async function handler(req, res) {
     // Both products at once. GA4 is usually the unconfigured one and answers
     // in microseconds when it is; when it is configured it is the slower of
     // the two, and there is no reason for Search Console to wait behind it.
-    const [search, sitemaps, analytics] = await Promise.all([
+    const [search, sitemaps, analytics, taps] = await Promise.all([
       fetchWebsiteData({ site, days, ...fixed }),
       fetchSitemaps({ site }),
       fetchGa4Data({ property: ga4.path, days, ...fixed }),
+      // Never throws, and never fails the request: a workspace with no
+      // Instagram connected still has a website, and the tap half being
+      // missing must not take the arrivals half down with it.
+      fetchBioTaps(workspaceId, days),
     ])
 
     return res.status(200).json({
@@ -144,6 +208,22 @@ export default async function handler(req, res) {
         sitemaps: sitemaps.sitemaps || [],
         sitemapError: sitemaps.error || '',
         setup: search.configured ? undefined : SEARCH_SETUP,
+      },
+      // ── The bio link, as a third thing ──
+      // Not folded into `ga4` even though the arrivals come from there,
+      // because half of it is Instagram's number and the object it would sit
+      // in is otherwise literally GA4's payload, down to its ok/configured
+      // flags. A reader of that object should never have to wonder which
+      // fields Google answered for.
+      bio: {
+        site: siteOrigin(site),
+        // Ready to paste. Built here from the same constants the arrivals
+        // counter matches on, so a link that was copied off this screen is
+        // guaranteed to be counted by the panel that offered it.
+        links: SOCIAL_PLATFORMS.filter(p => BIO_LINK_PLATFORMS.includes(p.id)).map(p => ({
+          id: p.id, label: p.label, url: bioLink(site, p.id),
+        })).filter(l => l.url),
+        taps,
       },
       ga4: {
         ...analytics,

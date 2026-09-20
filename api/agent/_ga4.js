@@ -20,7 +20,7 @@ import { searchWindows } from '../../src/lib/agent/searchConsole.js'
 //
 // ── WHY runReport PER REPORT AND NOT batchRunReports ──
 //
-// The Data API will take five reports in one call, and this asks for eleven,
+// The Data API will take five reports in one call, and this asks for twelve,
 // so two batches would be the obvious shape and half the round trips.
 //
 // It is not worth it. A batch is atomic: one report naming a metric this
@@ -33,7 +33,7 @@ import { searchWindows } from '../../src/lib/agent/searchConsole.js'
 // it turns one panel into "nothing is marked as a key event yet", which is
 // both true and useful.
 //
-// Eleven small reports at four in flight is about two seconds. The page can
+// Twelve small reports at four in flight is about two seconds. The page can
 // afford it; it cannot afford being blank for a reason nobody can see.
 //
 // ── The two keys this module reads ──
@@ -160,6 +160,7 @@ export async function fetchGa4Data({
     daily: rowsOf('daily'),
     channels: rowsOf('channels'),
     sources: rowsOf('sources'),
+    social: rowsOf('social'),
     pages: rowsOf('pages'),
     landings: rowsOf('landings'),
     countries: rowsOf('countries'),
@@ -170,5 +171,9 @@ export async function fetchGa4Data({
     // are configured" and "the key-events report failed" look identical on
     // screen and mean completely different things.
     keyEventsAvailable: !by.get('keyEvents')?.error,
+    // Same distinction, same reason: "no social traffic in this window" and
+    // "the report that would have counted it was rejected" look identical on
+    // screen as an empty list, and one of them is a bug.
+    socialAvailable: !by.get('social')?.error,
   }
 }
