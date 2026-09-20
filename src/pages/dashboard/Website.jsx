@@ -158,7 +158,15 @@ export function WebsiteCard({ data, loading, summary, recommendations, pages }) 
   return (
     <Card className="overflow-hidden">
       <Header site={data?.site}>
-        <Button variant="ghost" size="sm" onClick={() => navigate('/insights')}>Research</Button>
+        {/* Points at the expansion of THIS card, not at a different subject.
+            It used to open /insights — the research agent's findings, which
+            are a separate thing that happens to also mention the website. The
+            Website tab on /analytics is where these four tiles go deeper:
+            Search Console in full, plus the GA4 half that says what happened
+            after the click. */}
+        <Button variant="ghost" size="sm" onClick={() => navigate('/analytics?channel=website')}>
+          Detailed analytics
+        </Button>
       </Header>
 
       {noRows ? (

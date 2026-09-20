@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useApp } from '../../store/app'
 import { useAuth } from '../../store/auth'
 import { Card, Button, PlatformPill, Spinner, IconBadge, PillSelect, PageHeader } from '../../components/ui/index'
@@ -82,7 +82,27 @@ export function Analytics() {
   const navigate = useNavigate()
   const { allAccounts, loading } = useConnectedAccounts()
 
-  const [platform, setPlatform] = useState('')
+  // ── THE CHOSEN CHANNEL LIVES IN THE URL ──
+  //
+  // It was local state, which meant /analytics had exactly one front door and
+  // always opened on a social platform. Nothing could link to the Website tab
+  // — including the dashboard's own website card, which sits directly above
+  // the numbers this page expands on.
+  //
+  // The URL carries it now, so `?channel=website` opens there, a reload stays
+  // there, and the back button goes where it looks like it goes.
+  const [params, setParams] = useSearchParams()
+  const [platform, setPlatform] = useState(() => params.get('channel') || '')
+
+  function chooseChannel(next) {
+    setPlatform(next)
+    // Replace rather than push: flicking between tabs is not five pages of
+    // history to back out through.
+    const p = new URLSearchParams(params)
+    if (next) p.set('channel', next); else p.delete('channel')
+    setParams(p, { replace: true })
+  }
+
   const [syncing, setSyncing] = useState(false)
   const [note, setNote] = useState('')
   const [reloadKey, setReloadKey] = useState(0)
@@ -96,11 +116,19 @@ export function Analytics() {
   // /analytics lands where it always has.
   //
   // Undecided while the accounts are still loading, and deliberately so. The
-  // list starts empty, so a channel picked before it arrives is always the
+  // list starts empty, so a channel GUESSED before it arrives is always the
   // website — and the page would open on the Website tab for a moment, fire
   // twenty-eight Google requests, and then replace itself with Instagram.
   // Nobody asked for either half of that.
-  const chosen = loading ? '' : (channels.includes(platform) ? platform : (platforms[0] || WEBSITE))
+  //
+  // A channel ASKED for is the exception, and the order below is the whole
+  // difference: `?channel=website` matches the channel list while it is still
+  // just [website], so the tab opens immediately instead of waiting out a
+  // guard that exists to stop a guess. Somebody who followed a link to the
+  // website numbers wants those twenty-eight requests.
+  const chosen = channels.includes(platform) ? platform
+    : loading ? ''
+      : (platforms[0] || WEBSITE)
   const onWebsite = chosen === WEBSITE
   const scoped = allAccounts.filter(a => a.platform === chosen)
 
@@ -166,7 +194,7 @@ export function Analytics() {
           the empty state would be the only way to reach it. */}
       {!loading && channels.length > 1 && (
         <div className="flex flex-wrap items-center gap-2">
-          <PillSelect value={chosen} onChange={e => setPlatform(e.target.value)} className="w-36">
+          <PillSelect value={chosen} onChange={e => chooseChannel(e.target.value)} className="w-36">
             {channels.map(p => (
               <option key={p} value={p}>{p === WEBSITE ? 'Website' : (PLATFORM_META[p]?.label || p)}</option>
             ))}
