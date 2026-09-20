@@ -10,7 +10,40 @@
 import { PLATFORM_META } from '../../lib/utils'
 import { PLANNABLE_PLATFORMS } from '../../lib/campaignPlanner'
 
-export const GOALS = ['Brand awareness','Lead generation','Product launch','Community engagement','Event promotion','Sales & offers']
+// What a month is broadly FOR. Sent to the planner as GOAL CATEGORY, so it
+// steers the whole slate rather than any one post. The list was six generic
+// marketing objectives, which left most real months with nothing that fit —
+// a month built around a finished project, a supplier, or a standards change
+// had to be filed under "Brand awareness" and lose its shape. It is now the
+// categories a B2B brand actually plans in, and OTHER_GOAL lets the month be
+// named something that isn't on the list at all rather than mis-filed.
+export const GOALS = [
+  'Brand awareness',
+  'Lead generation',
+  'Product launch',
+  'Project showcase',
+  'Thought leadership',
+  'Education & how-to',
+  'Trust & social proof',
+  'Partner & supplier spotlight',
+  'Community engagement',
+  'Event promotion',
+  'Sales & offers',
+  'Recruitment & employer brand',
+  'Seasonal & cultural moments',
+  'Company news & milestones',
+]
+
+// The sentinel the "Focus category" select uses for "none of these". It is
+// never stored and never sent — picking it swaps the select for a text box,
+// and whatever is typed there becomes the goal category verbatim.
+export const OTHER_GOAL = '__other__'
+
+/** True when a saved category is a typed-in one rather than a listed one. */
+export function isCustomGoal(value) {
+  const v = String(value || '').trim()
+  return !!v && !GOALS.includes(v)
+}
 // Where a plan's ideas can be GENERATED — the platforms the planning and
 // caption workflows know how to write for. LinkedIn joined Instagram on
 // 2026-09-15; it is still drafts-only (PROTECTED_PLATFORMS), so a LinkedIn
@@ -99,7 +132,6 @@ export const DEFAULT_DRAFT = {
   brandBrainSections: PLANNER_BRAND_SECTIONS,
   // Stage-1 brief inputs — all optional. Give the planner real material to
   // work with instead of just a count + a general idea.
-  featuredProductIds: [],   // brand_products ids to emphasize this month
   // Freeform target content-mix ratio (e.g. "40% product, 20% educational,
   // 20% trust/testimonials, 20% engagement") — sent as a planner instruction;
   // the board's mix bar shows the ACTUAL breakdown (by content_pillar) next
