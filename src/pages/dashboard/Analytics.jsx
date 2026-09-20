@@ -8,7 +8,7 @@ import { Icon } from '../../components/ui/icons'
 import { PLATFORM_META } from '../../lib/utils'
 import { MetricInfoDot } from '../../components/analytics/MetricLabel'
 import { fmt, pct } from '../analytics/format'
-import { platformSeries, followerChange } from '../../lib/dashboardOverview'
+import { metricFacets, followerChange } from '../../lib/dashboardOverview'
 
 // ─── The dashboard's analytics overview ────────────────────────────────────
 // What the old page had instead of this was a list of recent posts drawn from
@@ -99,6 +99,104 @@ export function PlatformPicker({ platforms, selected, onToggle }) {
   )
 }
 
+/**
+ * The metrics drawn, as many as you like at once.
+ *
+ * Toggles rather than a dropdown for the same reason the platforms above are:
+ * what is on and what is off is the whole state of the chart, and a closed
+ * <select> showing "Views" cannot say that likes and comments are also drawn.
+ *
+ * One metric always stays ticked. Unticking the last one would leave the card
+ * with nothing to draw and no obvious way back into it.
+ */
+export function MetricPicker({ options, selected, onToggle }) {
+  return (
+    <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Metrics">
+      {options.map(m => {
+        const on = selected.includes(m.key)
+        const last = on && selected.length === 1
+        return (
+          <button key={m.key} onClick={() => onToggle(m.key)} aria-pressed={on} disabled={last}
+            title={last ? 'At least one metric stays selected' : undefined}
+            className={`text-xs font-medium px-2.5 py-1.5 border transition-colors flex items-center gap-1.5
+              ${on ? 'border-stone-400 bg-surface-subtle text-text' : 'border-border text-text-tertiary hover:text-text'}
+              ${last ? 'cursor-default' : ''}`}>
+            <span className={`w-3 h-3 flex-shrink-0 border flex items-center justify-center
+              ${on ? 'bg-text border-text text-white' : 'border-border-strong'}`}>
+              {on && (
+                <svg viewBox="0 0 24 24" className="w-2.5 h-2.5" fill="none" stroke="currentColor" strokeWidth="4">
+                  <path d="m5 13 4 4L19 7" />
+                </svg>
+              )}
+            </span>
+            {m.label}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+/**
+ * One metric's trend: a line per platform, plus their combined total.
+ *
+ * `compact` is the small-multiple version — same marks, same colours, smaller
+ * type and fewer ticks, and no legend of its own because the panels share one.
+ */
+function TrendChart({ rows, platforms, height, compact = false }) {
+  const tick = compact ? { ...axisTick, fontSize: 10 } : axisTick
+  return (
+    <ResponsiveContainer width="100%" height={height}>
+      {/* The negative left margin pulls the plot back under Recharts' default
+          60px axis gutter. A compact panel narrows the gutter itself instead —
+          doing both clips the tick labels down to a stray bracket. */}
+      <LineChart data={rows} margin={{ top: 4, right: 8, left: compact ? 0 : -18, bottom: 0 }}>
+        <CartesianGrid strokeDasharray="2 4" stroke="#e7e5e4" vertical={false} />
+        <XAxis dataKey="label" tick={tick} tickLine={false} axisLine={{ stroke: '#e7e5e4' }}
+          minTickGap={compact ? 42 : 18} interval={compact ? 'preserveStartEnd' : 'preserveEnd'} />
+        <YAxis tick={tick} tickLine={false} axisLine={false} tickFormatter={fmt}
+          width={compact ? 36 : undefined} tickCount={compact ? 3 : undefined} />
+        <Tooltip contentStyle={{ fontSize: 12, border: '1px solid #e7e5e4', borderRadius: 0 }}
+          formatter={(v, name) => [fmt(v), name === 'total' ? 'Total' : label(name)]} />
+        {!compact && (
+          <Legend wrapperStyle={{ fontSize: 11 }} iconType="plainline"
+            formatter={v => (v === 'total' ? 'Total' : label(v))} />
+        )}
+        {/* The combined line first so it sits under the per-platform ones —
+            the total is context, each platform is the answer. */}
+        {platforms.length > 1 && (
+          <Line type="monotone" dataKey="total" stroke="#a8a29e" strokeWidth={2.5}
+            strokeDasharray="4 3" dot={false} />
+        )}
+        {platforms.map(p => (
+          <Line key={p} type="monotone" dataKey={p} stroke={PLATFORM_LINE[p] || '#7a848c'}
+            strokeWidth={2} dot={false} />
+        ))}
+      </LineChart>
+    </ResponsiveContainer>
+  )
+}
+
+/** The legend the small multiples share, so five panels do not carry five. */
+function SharedLegend({ platforms }) {
+  return (
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 pt-1">
+      {platforms.length > 1 && (
+        <span className="flex items-center gap-1.5 text-[11px] text-text-tertiary">
+          <span className="w-4 border-t-2 border-dashed" style={{ borderColor: '#a8a29e' }} />
+          Total
+        </span>
+      )}
+      {platforms.map(p => (
+        <span key={p} className="flex items-center gap-1.5 text-[11px] text-text-tertiary">
+          <span className="w-4 border-t-2" style={{ borderColor: PLATFORM_LINE[p] || '#7a848c' }} />
+          {label(p)}
+        </span>
+      ))}
+    </div>
+  )
+}
+
 export function AnalyticsOverviewSkeleton() {
   return (
     <div className="space-y-4" aria-busy="true" aria-label="Loading analytics">
@@ -122,7 +220,7 @@ export function AnalyticsOverviewSkeleton() {
 
 export function AnalyticsOverview({ summaries, overview, range, days, onDays, selected, loading, settling }) {
   const navigate = useNavigate()
-  const [metric, setMetric] = useState('views')
+  const [metrics, setMetrics] = useState(() => new Set(['views']))
 
   const scoped = useMemo(
     () => summaries.filter(s => !selected.size || selected.has(s.platform)),
@@ -147,21 +245,49 @@ export function AnalyticsOverview({ summaries, overview, range, days, onDays, se
   }, [scoped])
 
   // Derived, not corrected in state: unticking a platform must not silently
-  // rewrite a choice the user made and would get back by re-ticking it.
-  const activeMetric = metricOptions.some(m => m.key === metric) ? metric : 'interactions'
+  // rewrite a choice the user made and would get back by re-ticking it. A
+  // selection that the current platforms cannot fill falls back to the one
+  // metric every platform can.
+  //
+  // Ordered by SERIES_METRICS, not by the order they were ticked, so the
+  // panels do not rearrange themselves under the cursor.
+  const activeMetrics = useMemo(() => {
+    const keep = metricOptions.filter(m => metrics.has(m.key)).map(m => m.key)
+    return keep.length ? keep : ['interactions']
+  }, [metricOptions, metrics])
+
+  function toggleMetric(key) {
+    setMetrics(prev => {
+      const next = new Set(prev)
+      if (next.has(key)) {
+        if (activeMetrics.length <= 1) return prev
+        next.delete(key)
+      } else {
+        next.add(key)
+      }
+      return next
+    })
+  }
 
   const series = useMemo(
-    () => platformSeries(scoped, { metric: activeMetric, fromDate: range.fromDate, toDate: range.toDate }),
-    [scoped, activeMetric, range.fromDate, range.toDate],
+    () => metricFacets(scoped, { metrics: activeMetrics, fromDate: range.fromDate, toDate: range.toDate }),
+    [scoped, activeMetrics, range.fromDate, range.toDate],
   )
 
   const followers = useMemo(() => followerChange(scoped), [scoped])
 
   if (loading) return <AnalyticsOverviewSkeleton />
 
-  const rows = series.rows.map(r => ({ ...r, label: shortDay(r.bucket) }))
-  const hasSeries = rows.some(r => r.total > 0)
-  const metricLabel = metricOptions.find(m => m.key === activeMetric)?.label || activeMetric
+  const facets = series.facets.map(f => ({
+    ...f,
+    label: metricOptions.find(m => m.key === f.metric)?.label || f.metric,
+    rows: f.rows.map(r => ({ ...r, label: shortDay(r.bucket) })),
+  }))
+  const hasSeries = facets.some(f => f.total > 0)
+  const single = facets.length === 1
+  const heading = single ? `${facets[0].label} over time`
+    : facets.length <= 3 ? `${facets.map(f => f.label).join(', ')} over time`
+      : `${facets.length} metrics over time`
 
   return (
     <div className="space-y-4">
@@ -213,29 +339,35 @@ export function AnalyticsOverview({ summaries, overview, range, days, onDays, se
       </Card>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
-        {/* The trend, one line per platform plus the combined total. */}
+        {/* The trend, one line per platform plus the combined total.
+            Several metrics at once become one panel each rather than several
+            lines on one axis — see metricFacets for why that is not a style
+            preference. */}
         <Card className="lg:col-span-2 p-5">
-          <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
+          <div className="flex flex-wrap items-start justify-between gap-3 mb-3">
             <div className="flex items-start gap-2.5">
               <IconBadge>{Icon.trending}</IconBadge>
               <div>
-                <h3 className="font-semibold text-text text-sm leading-tight">{metricLabel} over time</h3>
+                <h3 className="font-semibold text-text text-sm leading-tight">{heading}</h3>
                 <p className="text-xs text-text-tertiary mt-0.5">
                   {series.mode === 'week' ? 'By week' : 'By day'} · {scoped.length === 0 ? 'nothing selected'
                     : `${series.platforms.map(label).join(', ')}`}
+                  {!single && ' · each metric on its own scale'}
                 </p>
               </div>
             </div>
-            <div className="flex items-center gap-2">
-              <PillSelect value={activeMetric} onChange={e => setMetric(e.target.value)} className="w-32">
-                {metricOptions.map(m => <option key={m.key} value={m.key}>{m.label}</option>)}
-              </PillSelect>
-              <PillSelect value={String(days)} onChange={e => onDays(Number(e.target.value))} className="w-32">
-                <option value="7">Last 7 days</option>
-                <option value="30">Last 30 days</option>
-                <option value="90">Last 90 days</option>
-              </PillSelect>
-            </div>
+            <PillSelect value={String(days)} onChange={e => onDays(Number(e.target.value))} className="w-32">
+              <option value="7">Last 7 days</option>
+              <option value="30">Last 30 days</option>
+              <option value="90">Last 90 days</option>
+            </PillSelect>
+          </div>
+
+          {/* The metrics on their own row rather than in the header: with five
+              of them they do not fit beside a title, and they are the control
+              most likely to be used twice in a row. */}
+          <div className="mb-4 pb-3 border-b border-border-light">
+            <MetricPicker options={metricOptions} selected={activeMetrics} onToggle={toggleMetric} />
           </div>
 
           {!hasSeries ? (
@@ -245,28 +377,35 @@ export function AnalyticsOverview({ summaries, overview, range, days, onDays, se
                   ? 'Waiting for the remaining accounts.'
                   : 'No posts went out in this range, or the platforms have not reported yet — reach and views can lag by up to 48 hours.'} />
             </div>
+          ) : single ? (
+            <TrendChart rows={facets[0].rows} platforms={series.platforms} height={240} />
           ) : (
-            <ResponsiveContainer width="100%" height={240}>
-              <LineChart data={rows} margin={{ top: 4, right: 8, left: -18, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="2 4" stroke="#e7e5e4" vertical={false} />
-                <XAxis dataKey="label" tick={axisTick} tickLine={false} axisLine={{ stroke: '#e7e5e4' }} minTickGap={18} />
-                <YAxis tick={axisTick} tickLine={false} axisLine={false} tickFormatter={fmt} />
-                <Tooltip contentStyle={{ fontSize: 12, border: '1px solid #e7e5e4', borderRadius: 0 }}
-                  formatter={(v, name) => [fmt(v), name === 'total' ? 'Total' : label(name)]} />
-                <Legend wrapperStyle={{ fontSize: 11 }} iconType="plainline"
-                  formatter={v => (v === 'total' ? 'Total' : label(v))} />
-                {/* The combined line first so it sits under the per-platform
-                    ones — the total is context, each platform is the answer. */}
-                {series.platforms.length > 1 && (
-                  <Line type="monotone" dataKey="total" stroke="#a8a29e" strokeWidth={2.5}
-                    strokeDasharray="4 3" dot={false} />
-                )}
-                {series.platforms.map(p => (
-                  <Line key={p} type="monotone" dataKey={p} stroke={PLATFORM_LINE[p] || '#7a848c'}
-                    strokeWidth={2} dot={false} />
+            <div className="space-y-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-5 gap-y-4">
+                {facets.map(f => (
+                  <div key={f.metric}>
+                    <div className="flex items-baseline justify-between gap-2 mb-1">
+                      <span className="text-xs font-semibold text-text">{f.label}</span>
+                      <span className="text-xs text-text-tertiary tabular-nums">{fmt(f.total)}</span>
+                    </div>
+                    {/* Whose number it is, when it is not everybody's. A panel
+                        summed over a platform that never reports the metric
+                        would otherwise read as that platform's quiet month.
+
+                        The row is always here, empty or not: the panels are
+                        read against each other, and one caption pushing its
+                        plot 14px below its neighbour's puts the two baselines
+                        out of line, which is exactly the comparison the shared
+                        x-axis exists to make. */}
+                    <p className="text-[10px] text-text-tertiary h-3.5 leading-[0.875rem] mb-1 truncate">
+                      {f.partial ? `${f.sources.map(label).join(' and ')} only` : ' '}
+                    </p>
+                    <TrendChart rows={f.rows} platforms={series.platforms} height={132} compact />
+                  </div>
                 ))}
-              </LineChart>
-            </ResponsiveContainer>
+              </div>
+              <SharedLegend platforms={series.platforms} />
+            </div>
           )}
         </Card>
 

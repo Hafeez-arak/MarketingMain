@@ -377,6 +377,57 @@ export function platformSeries(summaries = [], {
 }
 
 /**
+ * Several metrics over the same window, as one small chart each.
+ *
+ * ── WHY THIS IS NOT ONE CHART WITH SEVERAL LINES ──
+ *
+ * Views, likes and comments do not share a scale. A month that took 40,000
+ * views took roughly 1,600 likes and 240 comments, so drawing all three
+ * against one y-axis pins comments to the floor: the user ticks "Comments",
+ * sees a flat line on the baseline, and reads it as a month in which nobody
+ * commented rather than as a number two orders of magnitude below the one
+ * beside it. That is the same lie as a zero for a measurement nobody took.
+ *
+ * The usual patch is a second y-axis, and it is worse. Where two scales cross
+ * is chosen by whoever drew the chart, so the lines appear to lead and lag
+ * each other on evidence that is not in the data.
+ *
+ * So each metric gets its own panel and its own scale. The buckets are shared
+ * — same range, same order, computed once here — which is what makes the
+ * shapes comparable, and the platform colours are identical in every panel, so
+ * Instagram is the same line wherever it appears.
+ *
+ * `sources` carries the platforms that can actually fill each metric, because
+ * a total summed over a platform that never reported it has a quiet hole in
+ * it, and the panel has to be able to say whose number it is showing.
+ */
+export function metricFacets(summaries = [], {
+  metrics = ['views'], fromDate, toDate, mode,
+} = {}) {
+  const ok = summaries.filter(s => !s.error)
+  const bucket = mode || bucketModeFor(fromDate, toDate)
+  const platforms = [...new Set(ok.map(s => s.platform))]
+
+  const facets = metrics.map(metric => {
+    const series = platformSeries(ok, { metric, fromDate, toDate, mode: bucket })
+    // `interactions` is added up here from likes, comments, shares and saves
+    // rather than reported by anyone, so every platform fills it by definition.
+    const sources = metric === 'interactions'
+      ? platforms
+      : [...new Set(ok.filter(s => supportsMetric(s, metric)).map(s => s.platform))]
+    return {
+      metric,
+      rows: series.rows,
+      sources,
+      partial: sources.length > 0 && sources.length < platforms.length,
+      total: series.rows.reduce((n, r) => n + num(r.total), 0),
+    }
+  })
+
+  return { mode: bucket, platforms, facets }
+}
+
+/**
  * Follower movement across the window, or null when nobody has counted twice.
  *
  * Zernio fills these on a daily snapshot, so an account connected today has
