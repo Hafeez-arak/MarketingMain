@@ -68,6 +68,41 @@ what that investigation turned up and did **not** act on.
   Seedance ("may contain likenesses of real people"), twice on 2026-09-02. The
   picker does not warn before spending the attempt.
 
+## Website analytics — GA4 and the site itself (raised 2026-09-20)
+
+The Analytics page's Website tab shipped reading Search Console. The GA4 half
+is **built and waiting** — panels, route, service-account auth, the lot — and
+shows its four setup steps instead of numbers because arak-sa.com carries no
+analytics tag at all. Nothing in this repo changes when it is turned on.
+
+- **GA4 is deferred on deployment cost, not on doubt** (user, 2026-09-20).
+  Installing the tag means redeploying the website, and the Vercel deployment
+  credits reset **2026-09-24** — redeploying before then would exhaust them and
+  force a purchase. Revisit after that date. Full steps, including the
+  service-account email and the G-measurement-id-vs-property-id trap, are in
+  `docs/GA4-SETUP.md`.
+- **The cost of waiting is real and worth restating**: GA4 reports from the day
+  the tag goes live and cannot backfill. Every week it is off is a week that
+  never has session data, so this is the one item here where delay destroys
+  something rather than postponing it.
+- **The sitemap is dead.** `https://www.arak-sa.com/sitemap.xml`, submitted
+  2021-07-06, **last downloaded by Google 2025-02-26**, 2 warnings, and on the
+  `www` host that 301s to the apex. Regenerate, submit on the canonical host.
+  Needs a site deploy, so it is blocked by the same credit window — and it is
+  the cheapest explanation there is for a page taking no impressions.
+- **Image search earns nothing.** 892 impressions in 28 days at average
+  position 39.9, for one click — about a fifth of the site's total visibility.
+  Descriptive `alt` text and real filenames on the product and project
+  photography. Also a site change, also inside the credit window.
+- **No structured data at all.** `searchAppearance` reported one translated
+  result and nothing else, so every result is a plain blue link. Product and
+  organisation markup is the opening; not costed, not scheduled.
+- **`/about-us` still 404s** (the real page is `/about`) — carried from the
+  2026-09-16 Search Console notes and still open. Another site-side fix.
+- **Aqeeq and Alo Kheyatah have no `customFields.website`**, so their Website
+  tab shows setup steps. Correct behaviour, but if either brand has a verified
+  property it is one field away from working.
+
 ## Carried over from earlier work
 
 - **Meta token expires 2026-10-18.** Even with Zernio publishing all four
