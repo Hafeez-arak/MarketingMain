@@ -98,7 +98,11 @@ export function ComposerHost({
   openPost = null, onOpenPostHandled, trigger = true,
 }) {
   const { activeWorkspaceId, accessToken } = useAuth()
-  const { accounts, loading: accountsLoading } = useConnectedAccounts(platform)
+  // Unscoped: the composer lets you switch platform tabs after opening, and
+  // PostComposer filters this list itself (`platformAccounts`). Fetching just
+  // the opening platform's accounts left every other tab looking
+  // disconnected the moment someone clicked it, even when it was.
+  const { allAccounts: accounts, loading: accountsLoading } = useConnectedAccounts()
   const [open, setOpen]       = useState(false)
   const [busy, setBusy]       = useState(false)
   const [note, setNote]       = useState('')
