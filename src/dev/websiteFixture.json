@@ -1,0 +1,3084 @@
+{
+ "search": {
+  "ok": true,
+  "configured": true,
+  "site": "sc-domain:arak-sa.com",
+  "windows": {
+   "days": 28,
+   "current": {
+    "start": "2026-08-21",
+    "end": "2026-09-17"
+   },
+   "previous": {
+    "start": "2026-07-24",
+    "end": "2026-08-20"
+   }
+  },
+  "warnings": [],
+  "daily": [
+   {
+    "clicks": 0,
+    "impressions": 0,
+    "ctr": 0,
+    "position": 0,
+    "date": "2026-08-25"
+   },
+   {
+    "clicks": 3,
+    "impressions": 17,
+    "ctr": 0.17647058823529413,
+    "position": 3.1176470588235294,
+    "date": "2026-08-26"
+   },
+   {
+    "clicks": 9,
+    "impressions": 75,
+    "ctr": 0.12,
+    "position": 11.226666666666667,
+    "date": "2026-08-27"
+   },
+   {
+    "clicks": 5,
+    "impressions": 138,
+    "ctr": 0.036231884057971016,
+    "position": 24.485507246376812,
+    "date": "2026-08-28"
+   },
+   {
+    "clicks": 6,
+    "impressions": 132,
+    "ctr": 0.045454545454545456,
+    "position": 21.992424242424242,
+    "date": "2026-08-29"
+   },
+   {
+    "clicks": 8,
+    "impressions": 202,
+    "ctr": 0.039603960396039604,
+    "position": 29.45049504950495,
+    "date": "2026-08-30"
+   },
+   {
+    "clicks": 8,
+    "impressions": 175,
+    "ctr": 0.045714285714285714,
+    "position": 15.36,
+    "date": "2026-08-31"
+   },
+   {
+    "clicks": 9,
+    "impressions": 154,
+    "ctr": 0.05844155844155844,
+    "position": 16.383116883116884,
+    "date": "2026-09-01"
+   },
+   {
+    "clicks": 7,
+    "impressions": 133,
+    "ctr": 0.05263157894736842,
+    "position": 10.87218045112782,
+    "date": "2026-09-02"
+   },
+   {
+    "clicks": 2,
+    "impressions": 166,
+    "ctr": 0.012048192771084338,
+    "position": 15.05421686746988,
+    "date": "2026-09-03"
+   },
+   {
+    "clicks": 3,
+    "impressions": 128,
+    "ctr": 0.0234375,
+    "position": 16.78125,
+    "date": "2026-09-04"
+   },
+   {
+    "clicks": 6,
+    "impressions": 119,
+    "ctr": 0.05042016806722689,
+    "position": 11.739495798319327,
+    "date": "2026-09-05"
+   },
+   {
+    "clicks": 7,
+    "impressions": 137,
+    "ctr": 0.051094890510948905,
+    "position": 14.91970802919708,
+    "date": "2026-09-06"
+   },
+   {
+    "clicks": 12,
+    "impressions": 168,
+    "ctr": 0.07142857142857142,
+    "position": 11.69047619047619,
+    "date": "2026-09-07"
+   },
+   {
+    "clicks": 12,
+    "impressions": 175,
+    "ctr": 0.06857142857142857,
+    "position": 16.262857142857143,
+    "date": "2026-09-08"
+   },
+   {
+    "clicks": 7,
+    "impressions": 149,
+    "ctr": 0.04697986577181208,
+    "position": 12.046979865771812,
+    "date": "2026-09-09"
+   },
+   {
+    "clicks": 4,
+    "impressions": 159,
+    "ctr": 0.025157232704402517,
+    "position": 18.044025157232703,
+    "date": "2026-09-10"
+   },
+   {
+    "clicks": 2,
+    "impressions": 104,
+    "ctr": 0.019230769230769232,
+    "position": 21.115384615384617,
+    "date": "2026-09-11"
+   },
+   {
+    "clicks": 7,
+    "impressions": 138,
+    "ctr": 0.050724637681159424,
+    "position": 14.384057971014492,
+    "date": "2026-09-12"
+   },
+   {
+    "clicks": 5,
+    "impressions": 149,
+    "ctr": 0.03355704697986577,
+    "position": 19.543624161073826,
+    "date": "2026-09-13"
+   },
+   {
+    "clicks": 6,
+    "impressions": 190,
+    "ctr": 0.031578947368421054,
+    "position": 10.189473684210526,
+    "date": "2026-09-14"
+   },
+   {
+    "clicks": 6,
+    "impressions": 195,
+    "ctr": 0.03076923076923077,
+    "position": 19.379487179487178,
+    "date": "2026-09-15"
+   },
+   {
+    "clicks": 8,
+    "impressions": 162,
+    "ctr": 0.04938271604938271,
+    "position": 10.919753086419753,
+    "date": "2026-09-16"
+   },
+   {
+    "clicks": 5,
+    "impressions": 147,
+    "ctr": 0.034013605442176874,
+    "position": 14.081632653061224,
+    "date": "2026-09-17"
+   }
+  ],
+  "queries": [
+   {
+    "clicks": 32,
+    "impressions": 66,
+    "ctr": 0.48484848484848486,
+    "position": 2.0454545454545454,
+    "query": "arak lighting"
+   },
+   {
+    "clicks": 7,
+    "impressions": 202,
+    "ctr": 0.034653465346534656,
+    "position": 6.054455445544554,
+    "query": "arak"
+   },
+   {
+    "clicks": 2,
+    "impressions": 9,
+    "ctr": 0.2222222222222222,
+    "position": 4.333333333333334,
+    "query": "arak company"
+   },
+   {
+    "clicks": 2,
+    "impressions": 32,
+    "ctr": 0.0625,
+    "position": 15.4375,
+    "query": "شركة اراك"
+   },
+   {
+    "clicks": 1,
+    "impressions": 4,
+    "ctr": 0.25,
+    "position": 2.5,
+    "query": "arak company saudi arabia"
+   },
+   {
+    "clicks": 1,
+    "impressions": 5,
+    "ctr": 0.2,
+    "position": 7,
+    "query": "lighting riyadh"
+   },
+   {
+    "clicks": 1,
+    "impressions": 28,
+    "ctr": 0.03571428571428571,
+    "position": 38.535714285714285,
+    "query": "smart poles"
+   },
+   {
+    "clicks": 1,
+    "impressions": 1,
+    "ctr": 1,
+    "position": 8,
+    "query": "specialist lighting solutions"
+   },
+   {
+    "clicks": 1,
+    "impressions": 14,
+    "ctr": 0.07142857142857142,
+    "position": 5.428571428571429,
+    "query": "شركة arak"
+   },
+   {
+    "clicks": 0,
+    "impressions": 2,
+    "ctr": 0,
+    "position": 9,
+    "query": "\"saudi electricity company\" -site:reddit.com -site:twitter.com -site:x.com -site:wykop.pl -site:tripadvisor.com -site:youtube.com -site:yelp.com -site:booking.com -site:facebook.com -site:instagram.com -site:tiktok.com"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 63,
+    "query": "2020 arak"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 25,
+    "query": "a lights"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 1,
+    "query": "acc lighting"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 26,
+    "query": "advance lighting company"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 7,
+    "query": "agr lighting"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 9,
+    "query": "alko lighting"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 1,
+    "query": "another supplier"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 4,
+    "query": "arak %"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 51,
+    "query": "arak finance"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 87,
+    "query": "arak in bali"
+   },
+   {
+    "clicks": 0,
+    "impressions": 2,
+    "ctr": 0,
+    "position": 3.5,
+    "query": "arak medical equipment company"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 72,
+    "query": "arak saggi"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 7,
+    "query": "arak service"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 38,
+    "query": "arakis"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 3,
+    "query": "arakna"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 51,
+    "query": "araksa"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 65,
+    "query": "arc lamp"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 72,
+    "query": "arc lighting"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 60,
+    "query": "arc lights"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 57,
+    "query": "best smart poles for modern infrastructure"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 7,
+    "query": "car ambient light installation near me"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 8,
+    "query": "car ambient lighting installation near me"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 4,
+    "query": "car lighting installation near me"
+   },
+   {
+    "clicks": 0,
+    "impressions": 3,
+    "ctr": 0,
+    "position": 12,
+    "query": "ceiling lights riyadh"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 7,
+    "query": "chandelier installer near me"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 61,
+    "query": "commercial skylight repair near me"
+   },
+   {
+    "clicks": 0,
+    "impressions": 6,
+    "ctr": 0,
+    "position": 73,
+    "query": "construction light rentals ksa"
+   },
+   {
+    "clicks": 0,
+    "impressions": 8,
+    "ctr": 0,
+    "position": 67.875,
+    "query": "construction lights for rent ksa"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 1,
+    "query": "consult light"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 2,
+    "query": "contractor"
+   },
+   {
+    "clicks": 0,
+    "impressions": 17,
+    "ctr": 0,
+    "position": 49.588235294117645,
+    "query": "customized lighting design"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 15,
+    "query": "decorative & feature signage company riyadh"
+   },
+   {
+    "clicks": 0,
+    "impressions": 5,
+    "ctr": 0,
+    "position": 8.4,
+    "query": "delfino riyadh"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 2,
+    "query": "des photos stp"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 3,
+    "query": "design"
+   },
+   {
+    "clicks": 0,
+    "impressions": 4,
+    "ctr": 0,
+    "position": 31.5,
+    "query": "edge-lit signs in riyadh"
+   },
+   {
+    "clicks": 0,
+    "impressions": 2,
+    "ctr": 0,
+    "position": 58,
+    "query": "energy-efficient smart pole"
+   },
+   {
+    "clicks": 0,
+    "impressions": 11,
+    "ctr": 0,
+    "position": 14.909090909090908,
+    "query": "facade lighting in saudi arabia"
+   },
+   {
+    "clicks": 0,
+    "impressions": 8,
+    "ctr": 0,
+    "position": 15,
+    "query": "facade lighting ksa"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 4,
+    "query": "few others"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 12,
+    "query": "focus light shop near me"
+   },
+   {
+    "clicks": 0,
+    "impressions": 2,
+    "ctr": 0,
+    "position": 42.5,
+    "query": "home automation blinds saudi"
+   },
+   {
+    "clicks": 0,
+    "impressions": 2,
+    "ctr": 0,
+    "position": 49.5,
+    "query": "home automation companies in saudi arabia"
+   },
+   {
+    "clicks": 0,
+    "impressions": 3,
+    "ctr": 0,
+    "position": 49,
+    "query": "illuminated signage solutions company riyadh"
+   },
+   {
+    "clicks": 0,
+    "impressions": 2,
+    "ctr": 0,
+    "position": 47,
+    "query": "illuminated signage solutions in riyadh"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 65,
+    "query": "industrial lights"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 2,
+    "query": "is it it"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 2,
+    "query": "knx"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 1,
+    "query": "knx eib"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 5,
+    "query": "lamp restorers near me"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 6,
+    "query": "landscape lights near me"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 12,
+    "query": "led light store near me"
+   },
+   {
+    "clicks": 0,
+    "impressions": 6,
+    "ctr": 0,
+    "position": 29,
+    "query": "led lighting riyadh"
+   },
+   {
+    "clicks": 0,
+    "impressions": 3,
+    "ctr": 0,
+    "position": 88,
+    "query": "led replacement & electrical works company riyadh"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 38,
+    "query": "led roof lights"
+   },
+   {
+    "clicks": 0,
+    "impressions": 2,
+    "ctr": 0,
+    "position": 34,
+    "query": "led sa"
+   },
+   {
+    "clicks": 0,
+    "impressions": 2,
+    "ctr": 0,
+    "position": 5.5,
+    "query": "light company"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 8,
+    "query": "light company near me"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 82,
+    "query": "light fixture installation services near me"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 6,
+    "query": "light market near me"
+   },
+   {
+    "clicks": 0,
+    "impressions": 2,
+    "ctr": 0,
+    "position": 47.5,
+    "query": "light pole"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 2,
+    "query": "light projects"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 36,
+    "query": "light shop khobar"
+   },
+   {
+    "clicks": 0,
+    "impressions": 11,
+    "ctr": 0,
+    "position": 15,
+    "query": "light shop near me"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 39,
+    "query": "light shop riyadh"
+   },
+   {
+    "clicks": 0,
+    "impressions": 4,
+    "ctr": 0,
+    "position": 8.25,
+    "query": "light shops near me"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 100,
+    "query": "light stores near me"
+   },
+   {
+    "clicks": 0,
+    "impressions": 10,
+    "ctr": 0,
+    "position": 71.5,
+    "query": "lighting"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 11,
+    "query": "lighting companies"
+   },
+   {
+    "clicks": 0,
+    "impressions": 3,
+    "ctr": 0,
+    "position": 11.333333333333334,
+    "query": "lighting companies in riyadh"
+   },
+   {
+    "clicks": 0,
+    "impressions": 2,
+    "ctr": 0,
+    "position": 21,
+    "query": "lighting companies in saudi"
+   },
+   {
+    "clicks": 0,
+    "impressions": 2,
+    "ctr": 0,
+    "position": 15.5,
+    "query": "lighting companies in saudi arabia"
+   },
+   {
+    "clicks": 0,
+    "impressions": 5,
+    "ctr": 0,
+    "position": 7.8,
+    "query": "lighting company"
+   },
+   {
+    "clicks": 0,
+    "impressions": 12,
+    "ctr": 0,
+    "position": 62.25,
+    "query": "lighting consultant"
+   },
+   {
+    "clicks": 0,
+    "impressions": 180,
+    "ctr": 0,
+    "position": 18.3,
+    "query": "lighting consultant riyadh"
+   },
+   {
+    "clicks": 0,
+    "impressions": 2,
+    "ctr": 0,
+    "position": 2,
+    "query": "lighting contractor"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 7,
+    "query": "lighting control"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 66,
+    "query": "lighting design consultants"
+   },
+   {
+    "clicks": 0,
+    "impressions": 21,
+    "ctr": 0,
+    "position": 24.38095238095238,
+    "query": "lighting design firm"
+   },
+   {
+    "clicks": 0,
+    "impressions": 97,
+    "ctr": 0,
+    "position": 23.15463917525773,
+    "query": "lighting design saudi arabia"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 6,
+    "query": "lighting experts"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 21,
+    "query": "lighting fixtures"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 65,
+    "query": "lighting industrial"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 3,
+    "query": "lighting installation contractor"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 2,
+    "query": "lighting installation services"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 1,
+    "query": "lighting manufacturers in saudi arabia"
+   },
+   {
+    "clicks": 0,
+    "impressions": 2,
+    "ctr": 0,
+    "position": 18.5,
+    "query": "lighting near me"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 2,
+    "query": "lighting pole"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 54,
+    "query": "lighting rental companies near me"
+   },
+   {
+    "clicks": 0,
+    "impressions": 4,
+    "ctr": 0,
+    "position": 9,
+    "query": "lighting saudi arabia"
+   },
+   {
+    "clicks": 0,
+    "impressions": 3,
+    "ctr": 0,
+    "position": 6.333333333333333,
+    "query": "lighting shop near me"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 25,
+    "query": "lighting shops"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 93,
+    "query": "lighting shops near me"
+   },
+   {
+    "clicks": 0,
+    "impressions": 7,
+    "ctr": 0,
+    "position": 12.142857142857142,
+    "query": "lighting solutions"
+   },
+   {
+    "clicks": 0,
+    "impressions": 6,
+    "ctr": 0,
+    "position": 17,
+    "query": "lighting stores riyadh"
+   },
+   {
+    "clicks": 0,
+    "impressions": 3,
+    "ctr": 0,
+    "position": 25,
+    "query": "lighting suppliers in saudi arabia"
+   },
+   {
+    "clicks": 0,
+    "impressions": 2,
+    "ctr": 0,
+    "position": 3.5,
+    "query": "lighting supply"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 10,
+    "query": "lighting wholesale near me"
+   },
+   {
+    "clicks": 0,
+    "impressions": 3,
+    "ctr": 0,
+    "position": 38.666666666666664,
+    "query": "lights in ksa"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 7,
+    "query": "lights market near me"
+   },
+   {
+    "clicks": 0,
+    "impressions": 2,
+    "ctr": 0,
+    "position": 10.5,
+    "query": "lights shop near me"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 11,
+    "query": "lights wholesale near me"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 2,
+    "query": "located in"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 60,
+    "query": "lumen multi-cloud gateway"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 8,
+    "query": "mc arak"
+   },
+   {
+    "clicks": 0,
+    "impressions": 12,
+    "ctr": 0,
+    "position": 84.25,
+    "query": "middle east led lighting market"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 76,
+    "query": "multifunction poles solutions"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 10,
+    "query": "outdoor light fixtures near me"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 35,
+    "query": "outdoor lighting jeddah"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 38,
+    "query": "outdoor smart pole solutions"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 32,
+    "query": "parking smart poles"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 1,
+    "query": "philips lighting shop near me"
+   },
+   {
+    "clicks": 0,
+    "impressions": 4,
+    "ctr": 0,
+    "position": 11,
+    "query": "riadh arrak"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 7,
+    "query": "riyadh"
+   },
+   {
+    "clicks": 0,
+    "impressions": 2,
+    "ctr": 0,
+    "position": 10.5,
+    "query": "riyadh air head office"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 2,
+    "query": "saudi arabia"
+   },
+   {
+    "clicks": 0,
+    "impressions": 21,
+    "ctr": 0,
+    "position": 33.476190476190474,
+    "query": "saudi arabia architectural lighting market"
+   },
+   {
+    "clicks": 0,
+    "impressions": 15,
+    "ctr": 0,
+    "position": 59.2,
+    "query": "saudi arabia automotive lighting market"
+   },
+   {
+    "clicks": 0,
+    "impressions": 18,
+    "ctr": 0,
+    "position": 38.22222222222222,
+    "query": "saudi arabia ceiling light market"
+   },
+   {
+    "clicks": 0,
+    "impressions": 4,
+    "ctr": 0,
+    "position": 61.75,
+    "query": "saudi arabia led bulb market"
+   },
+   {
+    "clicks": 0,
+    "impressions": 12,
+    "ctr": 0,
+    "position": 66.33333333333333,
+    "query": "saudi arabia led lighting market"
+   },
+   {
+    "clicks": 0,
+    "impressions": 8,
+    "ctr": 0,
+    "position": 64.875,
+    "query": "saudi arabia led lights market"
+   },
+   {
+    "clicks": 0,
+    "impressions": 19,
+    "ctr": 0,
+    "position": 44.10526315789474,
+    "query": "saudi arabia lighting market"
+   },
+   {
+    "clicks": 0,
+    "impressions": 17,
+    "ctr": 0,
+    "position": 40.76470588235294,
+    "query": "saudi arabia smart lighting market"
+   },
+   {
+    "clicks": 0,
+    "impressions": 3,
+    "ctr": 0,
+    "position": 25,
+    "query": "saudi lighting"
+   },
+   {
+    "clicks": 0,
+    "impressions": 8,
+    "ctr": 0,
+    "position": 29,
+    "query": "saudi lighting company"
+   },
+   {
+    "clicks": 0,
+    "impressions": 4,
+    "ctr": 0,
+    "position": 1.25,
+    "query": "saudi lighting company riyadh"
+   },
+   {
+    "clicks": 0,
+    "impressions": 3,
+    "ctr": 0,
+    "position": 1,
+    "query": "seder group"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 1,
+    "query": "seder group head office"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 9,
+    "query": "seder head quarters"
+   },
+   {
+    "clicks": 0,
+    "impressions": 3,
+    "ctr": 0,
+    "position": 5,
+    "query": "seder headquarters"
+   },
+   {
+    "clicks": 0,
+    "impressions": 19,
+    "ctr": 0,
+    "position": 39.68421052631579,
+    "query": "smart city light pole"
+   },
+   {
+    "clicks": 0,
+    "impressions": 2,
+    "ctr": 0,
+    "position": 55,
+    "query": "smart home companies in riyadh"
+   },
+   {
+    "clicks": 0,
+    "impressions": 2,
+    "ctr": 0,
+    "position": 56.5,
+    "query": "smart home companies riyadh"
+   },
+   {
+    "clicks": 0,
+    "impressions": 7,
+    "ctr": 0,
+    "position": 41.142857142857146,
+    "query": "smart light pole"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 63,
+    "query": "smart light pole supplier"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 54,
+    "query": "smart lighting & poles"
+   },
+   {
+    "clicks": 0,
+    "impressions": 2,
+    "ctr": 0,
+    "position": 46.5,
+    "query": "smart lighting pole"
+   },
+   {
+    "clicks": 0,
+    "impressions": 4,
+    "ctr": 0,
+    "position": 7.25,
+    "query": "smart pole"
+   },
+   {
+    "clicks": 0,
+    "impressions": 3,
+    "ctr": 0,
+    "position": 26.333333333333332,
+    "query": "smart pole design"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 57,
+    "query": "smart pole manufacturers"
+   },
+   {
+    "clicks": 0,
+    "impressions": 20,
+    "ctr": 0,
+    "position": 49.85,
+    "query": "smart street light pole"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 54,
+    "query": "smart street poles"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 39,
+    "query": "street light poles"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 49,
+    "query": "street pole"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 73,
+    "query": "strip light company"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 3,
+    "query": "supplier"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 2,
+    "query": "supplier in riyadh"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 1,
+    "query": "this company"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 1,
+    "query": "website"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 2,
+    "query": "what company does"
+   },
+   {
+    "clicks": 0,
+    "impressions": 2,
+    "ctr": 0,
+    "position": 39.5,
+    "query": "whatsapp +966 outdoor lighting or highbay light or sports lighting"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 8,
+    "query": "where am i"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 11,
+    "query": "wholesale light market near me"
+   },
+   {
+    "clicks": 0,
+    "impressions": 2,
+    "ctr": 0,
+    "position": 57.5,
+    "query": "work light"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 20,
+    "query": "working light"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 61,
+    "query": "worklight"
+   },
+   {
+    "clicks": 0,
+    "impressions": 7,
+    "ctr": 0,
+    "position": 11,
+    "query": "آراك"
+   },
+   {
+    "clicks": 0,
+    "impressions": 9,
+    "ctr": 0,
+    "position": 58.55555555555556,
+    "query": "أفضل شركات الإنارة في السعودية"
+   },
+   {
+    "clicks": 0,
+    "impressions": 9,
+    "ctr": 0,
+    "position": 6.888888888888889,
+    "query": "ارئك"
+   },
+   {
+    "clicks": 0,
+    "impressions": 38,
+    "ctr": 0,
+    "position": 8.736842105263158,
+    "query": "اراك"
+   },
+   {
+    "clicks": 0,
+    "impressions": 4,
+    "ctr": 0,
+    "position": 50,
+    "query": "اراك الطبية"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 57,
+    "query": "اراك العقارية"
+   },
+   {
+    "clicks": 0,
+    "impressions": 2,
+    "ctr": 0,
+    "position": 30.5,
+    "query": "استشاريين تصميم انارة"
+   },
+   {
+    "clicks": 0,
+    "impressions": 3,
+    "ctr": 0,
+    "position": 60,
+    "query": "افضل محلات الانارة في الرياض"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 25,
+    "query": "اكسبت للانارة"
+   },
+   {
+    "clicks": 0,
+    "impressions": 11,
+    "ctr": 0,
+    "position": 64.18181818181819,
+    "query": "الانارة السعودية"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 5,
+    "query": "الاناره"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 19,
+    "query": "الراقدي للانارة"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 2,
+    "query": "انارة مكاتب"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 43,
+    "query": "تصميم اضاءة"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 1,
+    "query": "حط صوره"
+   },
+   {
+    "clicks": 0,
+    "impressions": 5,
+    "ctr": 0,
+    "position": 55.8,
+    "query": "خدمة توزيع الانارة"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 2,
+    "query": "شركات أتمتة المنازل السعودية"
+   },
+   {
+    "clicks": 0,
+    "impressions": 8,
+    "ctr": 0,
+    "position": 6.25,
+    "query": "شركة أراك"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 58,
+    "query": "شركة اضاءة المدينة للمقاولات"
+   },
+   {
+    "clicks": 0,
+    "impressions": 11,
+    "ctr": 0,
+    "position": 7,
+    "query": "شركة الاراك"
+   },
+   {
+    "clicks": 0,
+    "impressions": 6,
+    "ctr": 0,
+    "position": 59.5,
+    "query": "شركة الانارة السعودية"
+   },
+   {
+    "clicks": 0,
+    "impressions": 8,
+    "ctr": 0,
+    "position": 63.75,
+    "query": "شركة انارة"
+   },
+   {
+    "clicks": 0,
+    "impressions": 6,
+    "ctr": 0,
+    "position": 59.166666666666664,
+    "query": "شركة انارة السعودية"
+   },
+   {
+    "clicks": 0,
+    "impressions": 7,
+    "ctr": 0,
+    "position": 88.42857142857143,
+    "query": "شركة لافتات مضاءة أمامياً بالرياض"
+   },
+   {
+    "clicks": 0,
+    "impressions": 9,
+    "ctr": 0,
+    "position": 10.777777777777779,
+    "query": "شركه اراك"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 6,
+    "query": "فيليبس قطع غيار"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 1,
+    "query": "محل انارة"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 62,
+    "query": "محلات اضاءة الرياض"
+   },
+   {
+    "clicks": 0,
+    "impressions": 2,
+    "ctr": 0,
+    "position": 57,
+    "query": "محلات الانارة بالرياض"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 65,
+    "query": "محلات انارة الرياض"
+   },
+   {
+    "clicks": 0,
+    "impressions": 2,
+    "ctr": 0,
+    "position": 63,
+    "query": "محلات انارة في الرياض"
+   },
+   {
+    "clicks": 0,
+    "impressions": 6,
+    "ctr": 0,
+    "position": 38,
+    "query": "مهندس اضاءة الرياض"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 3,
+    "query": "موقع اراك"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 14,
+    "query": "نعم"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 2,
+    "query": "还有吗"
+   }
+  ],
+  "previous": [],
+  "pages": [
+   {
+    "clicks": 16,
+    "impressions": 39,
+    "ctr": 0.41025641025641024,
+    "position": 1.3076923076923077,
+    "query": "arak lighting",
+    "page": "https://arak-sa.com/"
+   },
+   {
+    "clicks": 6,
+    "impressions": 63,
+    "ctr": 0.09523809523809523,
+    "position": 7.746031746031746,
+    "query": "arak lighting",
+    "page": "http://www.arak-sa.com/"
+   },
+   {
+    "clicks": 5,
+    "impressions": 16,
+    "ctr": 0.3125,
+    "position": 2,
+    "query": "arak lighting",
+    "page": "https://arak-sa.com/ar"
+   },
+   {
+    "clicks": 4,
+    "impressions": 126,
+    "ctr": 0.031746031746031744,
+    "position": 4.8730158730158735,
+    "query": "arak",
+    "page": "https://arak-sa.com/"
+   },
+   {
+    "clicks": 4,
+    "impressions": 10,
+    "ctr": 0.4,
+    "position": 1.3,
+    "query": "arak lighting",
+    "page": "https://www.arak-sa.com/"
+   },
+   {
+    "clicks": 2,
+    "impressions": 50,
+    "ctr": 0.04,
+    "position": 6.22,
+    "query": "arak",
+    "page": "https://arak-sa.com/ar"
+   },
+   {
+    "clicks": 2,
+    "impressions": 26,
+    "ctr": 0.07692307692307693,
+    "position": 5.846153846153846,
+    "query": "شركة اراك",
+    "page": "https://arak-sa.com/ar"
+   },
+   {
+    "clicks": 1,
+    "impressions": 23,
+    "ctr": 0.043478260869565216,
+    "position": 4.304347826086957,
+    "query": "arak",
+    "page": "https://www.arak-sa.com/"
+   },
+   {
+    "clicks": 1,
+    "impressions": 7,
+    "ctr": 0.14285714285714285,
+    "position": 5.285714285714286,
+    "query": "arak company",
+    "page": "https://arak-sa.com/"
+   },
+   {
+    "clicks": 1,
+    "impressions": 2,
+    "ctr": 0.5,
+    "position": 3.5,
+    "query": "arak company",
+    "page": "https://arak-sa.com/ar"
+   },
+   {
+    "clicks": 1,
+    "impressions": 3,
+    "ctr": 0.3333333333333333,
+    "position": 1.6666666666666665,
+    "query": "arak company saudi arabia",
+    "page": "http://www.arak-sa.com/"
+   },
+   {
+    "clicks": 1,
+    "impressions": 20,
+    "ctr": 0.05,
+    "position": 5.05,
+    "query": "arak lighting",
+    "page": "https://arak-sa.com/contact"
+   },
+   {
+    "clicks": 1,
+    "impressions": 4,
+    "ctr": 0.25,
+    "position": 8.25,
+    "query": "lighting riyadh",
+    "page": "https://arak-sa.com/"
+   },
+   {
+    "clicks": 1,
+    "impressions": 27,
+    "ctr": 0.037037037037037035,
+    "position": 39.925925925925924,
+    "query": "smart poles",
+    "page": "https://arak-sa.com/services/smart-poles"
+   },
+   {
+    "clicks": 1,
+    "impressions": 1,
+    "ctr": 1,
+    "position": 8,
+    "query": "specialist lighting solutions",
+    "page": "https://www.arak-sa.com/"
+   },
+   {
+    "clicks": 1,
+    "impressions": 13,
+    "ctr": 0.07692307692307693,
+    "position": 5.461538461538462,
+    "query": "شركة arak",
+    "page": "https://arak-sa.com/ar"
+   },
+   {
+    "clicks": 0,
+    "impressions": 2,
+    "ctr": 0,
+    "position": 9,
+    "query": "\"saudi electricity company\" -site:reddit.com -site:twitter.com -site:x.com -site:wykop.pl -site:tripadvisor.com -site:youtube.com -site:yelp.com -site:booking.com -site:facebook.com -site:instagram.com -site:tiktok.com",
+    "page": "https://arak-sa.com/services"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 63,
+    "query": "2020 arak",
+    "page": "https://arak-sa.com/"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 25,
+    "query": "a lights",
+    "page": "https://arak-sa.com/"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 1,
+    "query": "acc lighting",
+    "page": "https://arak-sa.com/"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 26,
+    "query": "advance lighting company",
+    "page": "https://arak-sa.com/"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 7,
+    "query": "agr lighting",
+    "page": "https://www.arak-sa.com/"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 9,
+    "query": "alko lighting",
+    "page": "https://arak-sa.com/"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 1,
+    "query": "another supplier",
+    "page": "http://www.arak-sa.com/"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 9,
+    "query": "arak",
+    "page": "http://www.arak-sa.com/"
+   },
+   {
+    "clicks": 0,
+    "impressions": 3,
+    "ctr": 0,
+    "position": 46.333333333333336,
+    "query": "arak",
+    "page": "https://arak-sa.com/about"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 2,
+    "query": "arak",
+    "page": "https://arak-sa.com/ar/"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 68,
+    "query": "arak",
+    "page": "https://arak-sa.com/ar/contact"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 4,
+    "query": "arak %",
+    "page": "https://arak-sa.com/"
+   },
+   {
+    "clicks": 0,
+    "impressions": 4,
+    "ctr": 0,
+    "position": 2.5,
+    "query": "arak company",
+    "page": "http://www.arak-sa.com/"
+   },
+   {
+    "clicks": 0,
+    "impressions": 3,
+    "ctr": 0,
+    "position": 7,
+    "query": "arak company saudi arabia",
+    "page": "https://arak-sa.com/"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 51,
+    "query": "arak finance",
+    "page": "https://www.arak-sa.com/"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 87,
+    "query": "arak in bali",
+    "page": "https://arak-sa.com/"
+   },
+   {
+    "clicks": 0,
+    "impressions": 30,
+    "ctr": 0,
+    "position": 6,
+    "query": "arak lighting",
+    "page": "https://arak-sa.com/about"
+   },
+   {
+    "clicks": 0,
+    "impressions": 7,
+    "ctr": 0,
+    "position": 10.142857142857142,
+    "query": "arak lighting",
+    "page": "https://arak-sa.com/ar/about"
+   },
+   {
+    "clicks": 0,
+    "impressions": 9,
+    "ctr": 0,
+    "position": 6.888888888888889,
+    "query": "arak lighting",
+    "page": "https://arak-sa.com/ar/contact"
+   },
+   {
+    "clicks": 0,
+    "impressions": 4,
+    "ctr": 0,
+    "position": 7.75,
+    "query": "arak lighting",
+    "page": "https://arak-sa.com/ar/projects"
+   },
+   {
+    "clicks": 0,
+    "impressions": 16,
+    "ctr": 0,
+    "position": 5,
+    "query": "arak lighting",
+    "page": "https://arak-sa.com/projects"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 1,
+    "query": "arak lighting",
+    "page": "https://arak-sa.com/projects/athletic-showroom"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 1,
+    "query": "arak lighting",
+    "page": "https://arak-sa.com/projects/ritz-carlton"
+   },
+   {
+    "clicks": 0,
+    "impressions": 4,
+    "ctr": 0,
+    "position": 4.25,
+    "query": "arak lighting",
+    "page": "https://arak-sa.com/projects/riyadh-air"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 10,
+    "query": "arak lighting",
+    "page": "https://arak-sa.com/projects/seder-hq"
+   },
+   {
+    "clicks": 0,
+    "impressions": 17,
+    "ctr": 0,
+    "position": 6.9411764705882355,
+    "query": "arak lighting",
+    "page": "https://arak-sa.com/services"
+   },
+   {
+    "clicks": 0,
+    "impressions": 2,
+    "ctr": 0,
+    "position": 1,
+    "query": "arak lighting",
+    "page": "https://arak-sa.com/services/indoor-lighting"
+   },
+   {
+    "clicks": 0,
+    "impressions": 2,
+    "ctr": 0,
+    "position": 3.5,
+    "query": "arak lighting",
+    "page": "https://arak-sa.com/services/lighting-installation"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 7,
+    "query": "arak lighting",
+    "page": "https://arak-sa.com/services/smart-poles"
+   },
+   {
+    "clicks": 0,
+    "impressions": 2,
+    "ctr": 0,
+    "position": 5.5,
+    "query": "arak lighting",
+    "page": "https://www.arak-sa.com/about"
+   },
+   {
+    "clicks": 0,
+    "impressions": 2,
+    "ctr": 0,
+    "position": 3.5,
+    "query": "arak medical equipment company",
+    "page": "http://www.arak-sa.com/"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 72,
+    "query": "arak saggi",
+    "page": "https://arak-sa.com/"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 7,
+    "query": "arak service",
+    "page": "https://arak-sa.com/services"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 38,
+    "query": "arakis",
+    "page": "https://arak-sa.com/"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 3,
+    "query": "arakna",
+    "page": "http://www.arak-sa.com/"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 51,
+    "query": "araksa",
+    "page": "https://arak-sa.com/"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 65,
+    "query": "arc lamp",
+    "page": "https://arak-sa.com/"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 72,
+    "query": "arc lighting",
+    "page": "https://arak-sa.com/"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 60,
+    "query": "arc lights",
+    "page": "https://arak-sa.com/"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 57,
+    "query": "best smart poles for modern infrastructure",
+    "page": "https://arak-sa.com/services/smart-poles"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 7,
+    "query": "car ambient light installation near me",
+    "page": "https://arak-sa.com/"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 8,
+    "query": "car ambient lighting installation near me",
+    "page": "https://arak-sa.com/"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 4,
+    "query": "car lighting installation near me",
+    "page": "https://arak-sa.com/"
+   },
+   {
+    "clicks": 0,
+    "impressions": 3,
+    "ctr": 0,
+    "position": 12,
+    "query": "ceiling lights riyadh",
+    "page": "https://arak-sa.com/"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 7,
+    "query": "chandelier installer near me",
+    "page": "https://arak-sa.com/"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 61,
+    "query": "commercial skylight repair near me",
+    "page": "https://www.arak-sa.com/"
+   },
+   {
+    "clicks": 0,
+    "impressions": 6,
+    "ctr": 0,
+    "position": 73,
+    "query": "construction light rentals ksa",
+    "page": "https://arak-sa.com/"
+   },
+   {
+    "clicks": 0,
+    "impressions": 8,
+    "ctr": 0,
+    "position": 67.875,
+    "query": "construction lights for rent ksa",
+    "page": "https://arak-sa.com/"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 1,
+    "query": "consult light",
+    "page": "https://arak-sa.com/"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 2,
+    "query": "contractor",
+    "page": "https://arak-sa.com/"
+   },
+   {
+    "clicks": 0,
+    "impressions": 17,
+    "ctr": 0,
+    "position": 49.588235294117645,
+    "query": "customized lighting design",
+    "page": "https://arak-sa.com/"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 15,
+    "query": "decorative & feature signage company riyadh",
+    "page": "https://arak-sa.com/"
+   },
+   {
+    "clicks": 0,
+    "impressions": 5,
+    "ctr": 0,
+    "position": 8.4,
+    "query": "delfino riyadh",
+    "page": "https://arak-sa.com/projects/delfino"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 2,
+    "query": "des photos stp",
+    "page": "https://arak-sa.com/services/smart-poles"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 3,
+    "query": "design",
+    "page": "https://arak-sa.com/services/smart-poles"
+   },
+   {
+    "clicks": 0,
+    "impressions": 4,
+    "ctr": 0,
+    "position": 31.5,
+    "query": "edge-lit signs in riyadh",
+    "page": "https://arak-sa.com/"
+   },
+   {
+    "clicks": 0,
+    "impressions": 2,
+    "ctr": 0,
+    "position": 58,
+    "query": "energy-efficient smart pole",
+    "page": "https://arak-sa.com/services/smart-poles"
+   },
+   {
+    "clicks": 0,
+    "impressions": 10,
+    "ctr": 0,
+    "position": 14.9,
+    "query": "facade lighting in saudi arabia",
+    "page": "https://arak-sa.com/"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 15,
+    "query": "facade lighting in saudi arabia",
+    "page": "https://www.arak-sa.com/"
+   },
+   {
+    "clicks": 0,
+    "impressions": 6,
+    "ctr": 0,
+    "position": 15.333333333333334,
+    "query": "facade lighting ksa",
+    "page": "https://arak-sa.com/"
+   },
+   {
+    "clicks": 0,
+    "impressions": 2,
+    "ctr": 0,
+    "position": 14,
+    "query": "facade lighting ksa",
+    "page": "https://www.arak-sa.com/"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 4,
+    "query": "few others",
+    "page": "https://arak-sa.com/"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 12,
+    "query": "focus light shop near me",
+    "page": "https://arak-sa.com/"
+   },
+   {
+    "clicks": 0,
+    "impressions": 2,
+    "ctr": 0,
+    "position": 42.5,
+    "query": "home automation blinds saudi",
+    "page": "https://arak-sa.com/services/home-automation"
+   },
+   {
+    "clicks": 0,
+    "impressions": 2,
+    "ctr": 0,
+    "position": 49.5,
+    "query": "home automation companies in saudi arabia",
+    "page": "https://arak-sa.com/services/home-automation"
+   },
+   {
+    "clicks": 0,
+    "impressions": 3,
+    "ctr": 0,
+    "position": 49,
+    "query": "illuminated signage solutions company riyadh",
+    "page": "https://arak-sa.com/"
+   },
+   {
+    "clicks": 0,
+    "impressions": 2,
+    "ctr": 0,
+    "position": 47,
+    "query": "illuminated signage solutions in riyadh",
+    "page": "https://arak-sa.com/"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 65,
+    "query": "industrial lights",
+    "page": "https://arak-sa.com/"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 2,
+    "query": "is it it",
+    "page": "https://arak-sa.com/"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 2,
+    "query": "knx",
+    "page": "https://arak-sa.com/"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 3,
+    "query": "knx eib",
+    "page": "https://arak-sa.com/"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 1,
+    "query": "knx eib",
+    "page": "https://arak-sa.com/services"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 2,
+    "query": "knx eib",
+    "page": "https://arak-sa.com/services/home-automation"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 5,
+    "query": "lamp restorers near me",
+    "page": "https://arak-sa.com/"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 6,
+    "query": "landscape lights near me",
+    "page": "https://arak-sa.com/"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 12,
+    "query": "led light store near me",
+    "page": "https://arak-sa.com/"
+   },
+   {
+    "clicks": 0,
+    "impressions": 6,
+    "ctr": 0,
+    "position": 29,
+    "query": "led lighting riyadh",
+    "page": "https://arak-sa.com/"
+   },
+   {
+    "clicks": 0,
+    "impressions": 3,
+    "ctr": 0,
+    "position": 88,
+    "query": "led replacement & electrical works company riyadh",
+    "page": "https://arak-sa.com/"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 38,
+    "query": "led roof lights",
+    "page": "https://arak-sa.com/"
+   },
+   {
+    "clicks": 0,
+    "impressions": 2,
+    "ctr": 0,
+    "position": 34,
+    "query": "led sa",
+    "page": "https://arak-sa.com/"
+   },
+   {
+    "clicks": 0,
+    "impressions": 2,
+    "ctr": 0,
+    "position": 5.5,
+    "query": "light company",
+    "page": "https://arak-sa.com/"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 8,
+    "query": "light company near me",
+    "page": "https://arak-sa.com/"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 82,
+    "query": "light fixture installation services near me",
+    "page": "https://arak-sa.com/"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 6,
+    "query": "light market near me",
+    "page": "https://arak-sa.com/"
+   },
+   {
+    "clicks": 0,
+    "impressions": 2,
+    "ctr": 0,
+    "position": 47.5,
+    "query": "light pole",
+    "page": "https://arak-sa.com/services/smart-poles"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 2,
+    "query": "light projects",
+    "page": "https://arak-sa.com/"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 36,
+    "query": "light shop khobar",
+    "page": "https://arak-sa.com/"
+   },
+   {
+    "clicks": 0,
+    "impressions": 11,
+    "ctr": 0,
+    "position": 15,
+    "query": "light shop near me",
+    "page": "https://arak-sa.com/"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 39,
+    "query": "light shop riyadh",
+    "page": "https://arak-sa.com/"
+   },
+   {
+    "clicks": 0,
+    "impressions": 4,
+    "ctr": 0,
+    "position": 8.25,
+    "query": "light shops near me",
+    "page": "https://arak-sa.com/"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 100,
+    "query": "light stores near me",
+    "page": "https://arak-sa.com/"
+   },
+   {
+    "clicks": 0,
+    "impressions": 10,
+    "ctr": 0,
+    "position": 71.5,
+    "query": "lighting",
+    "page": "https://arak-sa.com/"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 11,
+    "query": "lighting companies",
+    "page": "https://arak-sa.com/"
+   },
+   {
+    "clicks": 0,
+    "impressions": 2,
+    "ctr": 0,
+    "position": 8,
+    "query": "lighting companies in riyadh",
+    "page": "https://arak-sa.com/"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 18,
+    "query": "lighting companies in riyadh",
+    "page": "https://www.arak-sa.com/"
+   },
+   {
+    "clicks": 0,
+    "impressions": 2,
+    "ctr": 0,
+    "position": 21,
+    "query": "lighting companies in saudi",
+    "page": "https://arak-sa.com/"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 23,
+    "query": "lighting companies in saudi arabia",
+    "page": "https://arak-sa.com/"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 8,
+    "query": "lighting companies in saudi arabia",
+    "page": "https://www.arak-sa.com/"
+   },
+   {
+    "clicks": 0,
+    "impressions": 5,
+    "ctr": 0,
+    "position": 7.8,
+    "query": "lighting company",
+    "page": "https://arak-sa.com/"
+   },
+   {
+    "clicks": 0,
+    "impressions": 12,
+    "ctr": 0,
+    "position": 62.25,
+    "query": "lighting consultant",
+    "page": "https://arak-sa.com/"
+   },
+   {
+    "clicks": 0,
+    "impressions": 2,
+    "ctr": 0,
+    "position": 90,
+    "query": "lighting consultant",
+    "page": "https://arak-sa.com/services/lighting-installation"
+   },
+   {
+    "clicks": 0,
+    "impressions": 6,
+    "ctr": 0,
+    "position": 18.5,
+    "query": "lighting consultant riyadh",
+    "page": "http://www.arak-sa.com/"
+   },
+   {
+    "clicks": 0,
+    "impressions": 159,
+    "ctr": 0,
+    "position": 10.773584905660377,
+    "query": "lighting consultant riyadh",
+    "page": "https://arak-sa.com/"
+   }
+  ],
+  "pageTotals": [
+   {
+    "clicks": 71,
+    "impressions": 1955,
+    "ctr": 0.03631713554987212,
+    "position": 16.74475703324808,
+    "page": "https://arak-sa.com/"
+   },
+   {
+    "clicks": 34,
+    "impressions": 525,
+    "ctr": 0.06476190476190476,
+    "position": 13.007619047619048,
+    "page": "https://arak-sa.com/ar"
+   },
+   {
+    "clicks": 16,
+    "impressions": 316,
+    "ctr": 0.05063291139240506,
+    "position": 5.6613924050632916,
+    "page": "http://www.arak-sa.com/"
+   },
+   {
+    "clicks": 11,
+    "impressions": 153,
+    "ctr": 0.0718954248366013,
+    "position": 16.941176470588236,
+    "page": "https://www.arak-sa.com/"
+   },
+   {
+    "clicks": 5,
+    "impressions": 255,
+    "ctr": 0.0196078431372549,
+    "position": 24.458823529411763,
+    "page": "https://arak-sa.com/services/smart-poles"
+   },
+   {
+    "clicks": 3,
+    "impressions": 158,
+    "ctr": 0.0189873417721519,
+    "position": 26.151898734177216,
+    "page": "https://arak-sa.com/contact"
+   },
+   {
+    "clicks": 1,
+    "impressions": 42,
+    "ctr": 0.023809523809523808,
+    "position": 8.119047619047619,
+    "page": "https://arak-sa.com/ar/about"
+   },
+   {
+    "clicks": 1,
+    "impressions": 62,
+    "ctr": 0.016129032258064516,
+    "position": 16.758064516129032,
+    "page": "https://arak-sa.com/projects"
+   },
+   {
+    "clicks": 1,
+    "impressions": 9,
+    "ctr": 0.1111111111111111,
+    "position": 6.444444444444445,
+    "page": "https://arak-sa.com/projects/athletic-showroom"
+   },
+   {
+    "clicks": 1,
+    "impressions": 15,
+    "ctr": 0.06666666666666667,
+    "position": 4.733333333333333,
+    "page": "https://arak-sa.com/services/indoor-lighting"
+   },
+   {
+    "clicks": 1,
+    "impressions": 11,
+    "ctr": 0.09090909090909091,
+    "position": 6.909090909090909,
+    "page": "https://arak-sa.com/services/projection-mapping"
+   },
+   {
+    "clicks": 1,
+    "impressions": 3,
+    "ctr": 0.3333333333333333,
+    "position": 6.333333333333333,
+    "page": "https://arak-sa.com/services/smart-poles/astra"
+   },
+   {
+    "clicks": 1,
+    "impressions": 11,
+    "ctr": 0.09090909090909091,
+    "position": 9.636363636363637,
+    "page": "https://www.arak-sa.com/about"
+   },
+   {
+    "clicks": 1,
+    "impressions": 9,
+    "ctr": 0.1111111111111111,
+    "position": 3.2222222222222223,
+    "page": "https://www.arak-sa.com/ar/%EF%BB%A7%EF%BB%84%EF%BA%8E%D9%82-%D8%A7%EF%BB%9F%EF%BB%8C%EF%BB%A4%EF%BB%9E/"
+   },
+   {
+    "clicks": 0,
+    "impressions": 148,
+    "ctr": 0,
+    "position": 8.56081081081081,
+    "page": "https://arak-sa.com/about"
+   },
+   {
+    "clicks": 0,
+    "impressions": 4,
+    "ctr": 0,
+    "position": 1.5,
+    "page": "https://arak-sa.com/ar/"
+   },
+   {
+    "clicks": 0,
+    "impressions": 27,
+    "ctr": 0,
+    "position": 20.814814814814813,
+    "page": "https://arak-sa.com/ar/contact"
+   },
+   {
+    "clicks": 0,
+    "impressions": 25,
+    "ctr": 0,
+    "position": 9.36,
+    "page": "https://arak-sa.com/ar/projects"
+   },
+   {
+    "clicks": 0,
+    "impressions": 3,
+    "ctr": 0,
+    "position": 6.666666666666667,
+    "page": "https://arak-sa.com/ar/projects/athletic-showroom"
+   },
+   {
+    "clicks": 0,
+    "impressions": 2,
+    "ctr": 0,
+    "position": 7,
+    "page": "https://arak-sa.com/ar/projects/delfino"
+   },
+   {
+    "clicks": 0,
+    "impressions": 4,
+    "ctr": 0,
+    "position": 7.25,
+    "page": "https://arak-sa.com/ar/projects/ritz-carlton"
+   },
+   {
+    "clicks": 0,
+    "impressions": 17,
+    "ctr": 0,
+    "position": 10,
+    "page": "https://arak-sa.com/ar/projects/riyadh-air"
+   },
+   {
+    "clicks": 0,
+    "impressions": 2,
+    "ctr": 0,
+    "position": 9.5,
+    "page": "https://arak-sa.com/ar/projects/solitaire-mall"
+   },
+   {
+    "clicks": 0,
+    "impressions": 12,
+    "ctr": 0,
+    "position": 11.916666666666666,
+    "page": "https://arak-sa.com/ar/services"
+   },
+   {
+    "clicks": 0,
+    "impressions": 7,
+    "ctr": 0,
+    "position": 12.285714285714286,
+    "page": "https://arak-sa.com/ar/services/home-automation"
+   },
+   {
+    "clicks": 0,
+    "impressions": 4,
+    "ctr": 0,
+    "position": 17.25,
+    "page": "https://arak-sa.com/ar/services/indoor-lighting"
+   },
+   {
+    "clicks": 0,
+    "impressions": 2,
+    "ctr": 0,
+    "position": 10.5,
+    "page": "https://arak-sa.com/ar/services/project-management"
+   },
+   {
+    "clicks": 0,
+    "impressions": 3,
+    "ctr": 0,
+    "position": 8.333333333333332,
+    "page": "https://arak-sa.com/ar/services/projection-mapping"
+   },
+   {
+    "clicks": 0,
+    "impressions": 7,
+    "ctr": 0,
+    "position": 6.714285714285714,
+    "page": "https://arak-sa.com/ar/services/smart-poles"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 7,
+    "page": "https://arak-sa.com/ar/services/smart-poles/helio"
+   }
+  ],
+  "previousPageTotals": [],
+  "countries": [
+   {
+    "clicks": 105,
+    "impressions": 2030,
+    "ctr": 0.05172413793103448,
+    "position": 16.27733990147783,
+    "country": "sau"
+   },
+   {
+    "clicks": 7,
+    "impressions": 37,
+    "ctr": 0.1891891891891892,
+    "position": 9.513513513513514,
+    "country": "egy"
+   },
+   {
+    "clicks": 7,
+    "impressions": 283,
+    "ctr": 0.024734982332155476,
+    "position": 14.226148409893993,
+    "country": "usa"
+   },
+   {
+    "clicks": 6,
+    "impressions": 102,
+    "ctr": 0.058823529411764705,
+    "position": 23.470588235294116,
+    "country": "ind"
+   },
+   {
+    "clicks": 4,
+    "impressions": 28,
+    "ctr": 0.14285714285714285,
+    "position": 8.678571428571429,
+    "country": "chn"
+   },
+   {
+    "clicks": 2,
+    "impressions": 14,
+    "ctr": 0.14285714285714285,
+    "position": 17.714285714285715,
+    "country": "can"
+   },
+   {
+    "clicks": 2,
+    "impressions": 6,
+    "ctr": 0.3333333333333333,
+    "position": 7.166666666666667,
+    "country": "cze"
+   },
+   {
+    "clicks": 2,
+    "impressions": 102,
+    "ctr": 0.0196078431372549,
+    "position": 14.254901960784315,
+    "country": "gbr"
+   },
+   {
+    "clicks": 2,
+    "impressions": 11,
+    "ctr": 0.18181818181818182,
+    "position": 15.727272727272727,
+    "country": "hkg"
+   },
+   {
+    "clicks": 1,
+    "impressions": 96,
+    "ctr": 0.010416666666666666,
+    "position": 16.739583333333336,
+    "country": "are"
+   },
+   {
+    "clicks": 1,
+    "impressions": 14,
+    "ctr": 0.07142857142857142,
+    "position": 7.928571428571429,
+    "country": "bhr"
+   },
+   {
+    "clicks": 1,
+    "impressions": 53,
+    "ctr": 0.018867924528301886,
+    "position": 16.547169811320757,
+    "country": "esp"
+   },
+   {
+    "clicks": 1,
+    "impressions": 6,
+    "ctr": 0.16666666666666666,
+    "position": 12,
+    "country": "fra"
+   },
+   {
+    "clicks": 1,
+    "impressions": 36,
+    "ctr": 0.027777777777777776,
+    "position": 11.25,
+    "country": "jpn"
+   },
+   {
+    "clicks": 1,
+    "impressions": 1,
+    "ctr": 1,
+    "position": 1,
+    "country": "lva"
+   },
+   {
+    "clicks": 1,
+    "impressions": 9,
+    "ctr": 0.1111111111111111,
+    "position": 17.88888888888889,
+    "country": "omn"
+   },
+   {
+    "clicks": 1,
+    "impressions": 17,
+    "ctr": 0.058823529411764705,
+    "position": 9.470588235294118,
+    "country": "pak"
+   },
+   {
+    "clicks": 1,
+    "impressions": 9,
+    "ctr": 0.1111111111111111,
+    "position": 26.77777777777778,
+    "country": "rus"
+   },
+   {
+    "clicks": 1,
+    "impressions": 1,
+    "ctr": 1,
+    "position": 1,
+    "country": "svn"
+   },
+   {
+    "clicks": 0,
+    "impressions": 7,
+    "ctr": 0,
+    "position": 20.571428571428573,
+    "country": "arg"
+   },
+   {
+    "clicks": 0,
+    "impressions": 30,
+    "ctr": 0,
+    "position": 42.7,
+    "country": "aus"
+   },
+   {
+    "clicks": 0,
+    "impressions": 2,
+    "ctr": 0,
+    "position": 11.5,
+    "country": "aut"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 31,
+    "country": "bel"
+   },
+   {
+    "clicks": 0,
+    "impressions": 5,
+    "ctr": 0,
+    "position": 38.8,
+    "country": "bgd"
+   },
+   {
+    "clicks": 0,
+    "impressions": 3,
+    "ctr": 0,
+    "position": 25.333333333333332,
+    "country": "bgr"
+   }
+  ],
+  "devices": [
+   {
+    "clicks": 95,
+    "impressions": 2050,
+    "ctr": 0.046341463414634146,
+    "position": 20.767804878048782,
+    "device": "DESKTOP"
+   },
+   {
+    "clicks": 52,
+    "impressions": 1252,
+    "ctr": 0.04153354632587859,
+    "position": 9.075079872204473,
+    "device": "MOBILE"
+   },
+   {
+    "clicks": 0,
+    "impressions": 10,
+    "ctr": 0,
+    "position": 5.6,
+    "device": "TABLET"
+   }
+  ],
+  "previousDevices": [],
+  "appearance": [
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 8,
+    "searchAppearance": "TRANSLATED_RESULT"
+   }
+  ],
+  "types": {
+   "web": {
+    "clicks": 147,
+    "impressions": 3312,
+    "ctr": 0.044384057971014496,
+    "position": 16.30193236714976,
+    "previous": {
+     "clicks": 0,
+     "impressions": 0,
+     "ctr": 0,
+     "position": 0
+    }
+   },
+   "image": {
+    "clicks": 1,
+    "impressions": 892,
+    "ctr": 0.0011210762331838565,
+    "position": 39.85986547085202,
+    "previous": {
+     "clicks": 0,
+     "impressions": 0,
+     "ctr": 0,
+     "position": 0
+    }
+   },
+   "video": {
+    "clicks": 0,
+    "impressions": 0,
+    "ctr": 0,
+    "position": 0,
+    "previous": {
+     "clicks": 0,
+     "impressions": 0,
+     "ctr": 0,
+     "position": 0
+    }
+   },
+   "news": {
+    "clicks": 0,
+    "impressions": 2,
+    "ctr": 0,
+    "position": 3,
+    "previous": {
+     "clicks": 0,
+     "impressions": 0,
+     "ctr": 0,
+     "position": 0
+    }
+   },
+   "discover": {
+    "clicks": 0,
+    "impressions": 0,
+    "ctr": 0,
+    "position": 0,
+    "previous": {
+     "clicks": 0,
+     "impressions": 0,
+     "ctr": 0,
+     "position": 0
+    }
+   }
+  },
+  "brandTerms": [
+   "arak lighting",
+   "arak",
+   "اراك",
+   "أراك"
+  ],
+  "lines": [],
+  "sitemaps": [
+   {
+    "path": "https://www.arak-sa.com/sitemap.xml",
+    "lastSubmitted": "2021-07-06T09:09:30.259Z",
+    "lastDownloaded": "2025-02-26T18:13:28.106Z",
+    "isPending": false,
+    "isSitemapsIndex": true,
+    "warnings": 2,
+    "errors": 0
+   }
+  ]
+ },
+ "ga4": {
+  "ok": false,
+  "configured": false,
+  "property": "",
+  "error": "No GA4 property is configured for this brand.",
+  "configError": "",
+  "setup": [
+   "Install a GA4 tag on the website — without it the property collects nothing, whatever is configured here.",
+   "In GA4, open Admin → Property access management and add the same service account client_email as a Viewer.",
+   "Copy the numeric property id from Admin → Property settings (digits only, not the G- measurement id).",
+   "Set customFields.ga4_property_id on the Brand Brain to that number."
+  ]
+ }
+}

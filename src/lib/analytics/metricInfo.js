@@ -228,6 +228,80 @@ const INFO = {
     what: 'Each platform’s posts and their numbers added up, side by side.',
     note: 'Every column here is a per-post total, so reach double-counts anyone who saw more than one post.',
   },
+
+  // ── The website: Google Search Console ──────────────────────────────────
+  // `site.*` because these are the property's numbers, the way `ig.*` are the
+  // account's. They measure what happens in Google's results — not on the
+  // website itself, which is what `web.*` below is for.
+  'site.impressions': {
+    what: 'Every time a page of yours appeared in Google’s web results for somebody’s search.',
+    note: 'Appearing is not being seen: a result at position 24 is on page three, and it still counts here.',
+  },
+  'site.clicks': {
+    what: 'Times somebody chose your result and came to the site.',
+    note: 'Google’s count of the click, not your site’s count of the visit. It will never match a sessions figure exactly.',
+  },
+  'site.ctr': {
+    what: 'The share of your appearances that turned into a click.',
+    note: 'It falls when you start ranking for more searches, which is a good thing happening — more appearances at low positions dilute the rate before they earn clicks.',
+  },
+  'site.position': {
+    what: 'Where you ranked on average, weighted by how often each result appeared.',
+    note: 'One number for a site that ranks 2nd for its own name and 24th for what it sells describes neither. The band chart below splits it.',
+  },
+  'site.non_brand': {
+    what: 'Impressions from people who did not type your company’s name.',
+    note: 'The demand you earned rather than the demand you already had. On a small site, brand searches flatter every other number on this page.',
+  },
+  'site.surfaces': {
+    what: 'The same site measured separately on each of Google’s surfaces — web, images, video, news and Discover.',
+    note: 'Image impressions are real visibility but they are not web rankings, so they are never folded into the totals above.',
+  },
+  'site.coverage': {
+    what: 'How much of your visibility the query table below can actually account for.',
+    note: 'Google withholds queries too few people searched, to protect the searcher. Those impressions count in the totals but belong to no query it will name.',
+  },
+  'site.bands': {
+    what: 'Your impressions split by where they ranked, rather than averaged into one number.',
+    note: 'Positions 11 and beyond are page two or worse. A title rewrite can win a click back on page one; past that, nobody is seeing the result to click it.',
+  },
+  'site.sitemap': {
+    what: 'The sitemap Google holds for this property, and when it last came back to read it.',
+    note: 'Measured from the last download, not the last submission: submitting is something you did once, downloading is Google choosing to return.',
+  },
+
+  // ── The website: GA4 ────────────────────────────────────────────────────
+  // `web.*` — what happens AFTER the click, which Search Console cannot see.
+  'web.sessions': {
+    what: 'Visits to the site, as counted by the GA4 tag on the page.',
+    note: 'Never equal to Search Console clicks: ad blockers, refused consent, bots and people leaving before the tag fires all sit in the gap.',
+  },
+  'web.users': {
+    what: 'How many separate people visited, however many times each came back.',
+  },
+  'web.new_users': {
+    what: 'Visitors GA4 had not seen before in this window.',
+  },
+  'web.page_views': {
+    what: 'Pages opened, added up across every visit.',
+  },
+  'web.engagement_rate': {
+    what: 'The share of visits that lasted over ten seconds, saw more than one page, or triggered a key event.',
+    note: 'GA4’s replacement for the old bounce rate, pointed the useful way round: higher is better.',
+  },
+  'web.bounce_rate': {
+    what: 'The share of visits that did none of those things — GA4’s bounce rate is simply the engagement rate subtracted from 100.',
+  },
+  'web.avg_session': {
+    what: 'How long an average visit lasted.',
+  },
+  'web.channels': {
+    what: 'Where visits came from, grouped the way GA4 groups them — organic search, direct, referral, social, paid and the rest.',
+  },
+  'web.key_events': {
+    what: 'Actions you marked as mattering in GA4 — a form sent, a number called, a catalogue downloaded.',
+    note: 'A property with none configured reports none. That is a setup step nobody has taken, not a month with no results.',
+  },
 }
 
 /**

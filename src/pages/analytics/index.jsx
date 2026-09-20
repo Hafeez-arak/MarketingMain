@@ -12,6 +12,7 @@ import { syncAccounts, describeSync } from '../../lib/zernioConnect'
 import { useConnectedAccounts, publishConnectedAccounts } from '../../lib/useConnectedAccounts'
 import { AccountAnalytics } from '../../components/social/AccountAnalytics'
 import { DashboardSkeleton } from './Dashboard'
+import { WebsiteTab } from './Website'
 import { fmt } from './format'
 
 // ─── Analytics ───────────────────────────────────────────────────────────
@@ -24,6 +25,56 @@ import { fmt } from './format'
 //
 // Zernio's analytics endpoints are team-wide, so every read names one account;
 // with nothing connected there is nothing to ask for, and no call is made.
+//
+// ── WHY "WEBSITE" IS IN THE SAME PICKER AS INSTAGRAM ──
+//
+// Because it is the same question asked of a different channel, and the site
+// is the place every other channel is trying to send people. It is NOT a
+// connected account, though: nothing about it comes from Zernio, there is no
+// account to pick inside it, and it reads two Google products directly. So it
+// is a channel in the picker and nothing else on this page treats it as one —
+// the Zernio refresh and the connected-accounts list below both belong to the
+// social platforms and are hidden while the website is showing.
+//
+// It is offered whether or not it is configured. Unconnected, the tab shows
+// the steps that would connect it, which is the thing a picker entry that
+// quietly disappears can never do.
+
+// Not a platform key — deliberately a separate constant so it can never be
+// passed to something expecting one. PLATFORM_META has no entry for it and
+// LIVE_PLATFORMS must not grow one: everything downstream of those two treats
+// a member as something Zernio can publish to.
+const WEBSITE = 'website'
+
+/**
+ * The prompt to connect a social account.
+ *
+ * Lifted out of the branch it used to live in, because it now has two callers
+ * and one of them is the Website tab. With nothing connected at all, the
+ * website is the only channel there is, so the page opens straight onto it —
+ * and for a moment that meant a brand new workspace could reach the Analytics
+ * page, see its website numbers, and never be told that connecting Instagram
+ * was a thing it could do. The prompt belongs to the social half whatever
+ * channel is on screen.
+ */
+function NoAccounts({ onConnect }) {
+  return (
+    <Card className="p-6 border-dashed bg-surface-muted">
+      <div className="flex items-start gap-4">
+        <div className="w-10 h-10 border border-amber-200 bg-amber-50 flex items-center justify-center text-amber-700 flex-shrink-0">
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><path d="m15 7-8.5 8.5a2.12 2.12 0 0 0 3 3L18 10a4.24 4.24 0 0 0-6-6l-8.5 8.5a6.36 6.36 0 0 0 9 9L21 13"/></svg>
+        </div>
+        <div className="flex-1">
+          <h3 className="font-semibold text-text mb-1">No connected accounts yet</h3>
+          <p className="text-sm text-text-secondary mb-3">
+            Connect an account on the Social Media page, and its reach, engagement and follower numbers will show here.
+          </p>
+          <Button onClick={onConnect}>Connect an account</Button>
+        </div>
+      </div>
+    </Card>
+  )
+}
 
 export function Analytics() {
   const { state } = useApp()
@@ -36,9 +87,21 @@ export function Analytics() {
   const [note, setNote] = useState('')
   const [reloadKey, setReloadKey] = useState(0)
 
-  // Platforms with an account, in the app's usual order.
+  // Platforms with an account, in the app's usual order, plus the website —
+  // which always appears, because an unconfigured channel that hides itself
+  // can never tell anyone how to configure it.
   const platforms = LIVE_PLATFORMS.filter(p => allAccounts.some(a => a.platform === p))
-  const chosen = platforms.includes(platform) ? platform : (platforms[0] || '')
+  const channels = [...platforms, WEBSITE]
+  // The default stays a social platform wherever there is one, so opening
+  // /analytics lands where it always has.
+  //
+  // Undecided while the accounts are still loading, and deliberately so. The
+  // list starts empty, so a channel picked before it arrives is always the
+  // website — and the page would open on the Website tab for a moment, fire
+  // twenty-eight Google requests, and then replace itself with Instagram.
+  // Nobody asked for either half of that.
+  const chosen = loading ? '' : (channels.includes(platform) ? platform : (platforms[0] || WEBSITE))
+  const onWebsite = chosen === WEBSITE
   const scoped = allAccounts.filter(a => a.platform === chosen)
 
   // Refresh does two things, and waits for only one of them.
@@ -73,51 +136,59 @@ export function Analytics() {
 
   return (
     <div className="max-w-7xl space-y-4">
-      <PageHeader title="Analytics" subtitle="Real performance pulled live from your connected accounts.">
-        {(loading || allAccounts.length > 0) && (
-          <div className="flex items-center gap-2">
-            {/* The page answers "what happened on Instagram on the 9th". This
-                answers "send me how we did last month" — a different question
-                that four live graphs and an account picker cannot be folded
-                into without ruining both. */}
-            <Button size="sm" variant="secondary" onClick={() => navigate('/analytics/report')} disabled={loading}>
-              Performance report
-            </Button>
+      <PageHeader title="Analytics"
+        subtitle="Real performance pulled live from your connected accounts and your website.">
+        <div className="flex items-center gap-2">
+          {/* The page answers "what happened on Instagram on the 9th". This
+              answers "send me how we did last month" — a different question
+              that four live graphs and an account picker cannot be folded
+              into without ruining both. */}
+          <Button size="sm" variant="secondary" onClick={() => navigate('/analytics/report')} disabled={loading}>
+            Performance report
+          </Button>
+          {/* Zernio holds the social accounts and knows nothing about the
+              website, so this button would be a no-op with a spinner on the
+              Website tab. That tab has its own Refresh, which re-reads Google. */}
+          {!onWebsite && (loading || allAccounts.length > 0) && (
             <Button size="sm" variant="secondary" onClick={handleSync} disabled={syncing || loading}>
               {syncing ? <><Spinner size="sm" /> Refreshing…</> : 'Refresh from Zernio'}
             </Button>
-          </div>
-        )}
+          )}
+        </div>
       </PageHeader>
-      {note && <p className="text-xs text-text-secondary -mt-2 text-right">{note}</p>}
+      {note && !onWebsite && <p className="text-xs text-text-secondary -mt-2 text-right">{note}</p>}
+
+      {/* The picker, above every branch below it.
+          It used to live inside the "has accounts" branch and appear only with
+          two platforms connected, which was fine while every entry was an
+          account. It cannot be there now: with nothing connected at all, the
+          Website tab still has something to show, and a picker hidden inside
+          the empty state would be the only way to reach it. */}
+      {!loading && channels.length > 1 && (
+        <div className="flex flex-wrap items-center gap-2">
+          <PillSelect value={chosen} onChange={e => setPlatform(e.target.value)} className="w-36">
+            {channels.map(p => (
+              <option key={p} value={p}>{p === WEBSITE ? 'Website' : (PLATFORM_META[p]?.label || p)}</option>
+            ))}
+          </PillSelect>
+        </div>
+      )}
 
       {loading ? (
         <DashboardSkeleton />
+      ) : onWebsite ? (
+        <>
+          {/* Shown beside the website's own numbers, not instead of them. With
+              nothing connected the picker has a single entry and hides itself,
+              so this is the only thing on the page that mentions the social
+              half exists. */}
+          {allAccounts.length === 0 && <NoAccounts onConnect={() => navigate('/social')} />}
+          <WebsiteTab />
+        </>
       ) : allAccounts.length === 0 ? (
-        <Card className="p-6 border-dashed bg-surface-muted">
-          <div className="flex items-start gap-4">
-            <div className="w-10 h-10 border border-amber-200 bg-amber-50 flex items-center justify-center text-amber-700 flex-shrink-0">
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><path d="m15 7-8.5 8.5a2.12 2.12 0 0 0 3 3L18 10a4.24 4.24 0 0 0-6-6l-8.5 8.5a6.36 6.36 0 0 0 9 9L21 13"/></svg>
-            </div>
-            <div className="flex-1">
-              <h3 className="font-semibold text-text mb-1">No connected accounts yet</h3>
-              <p className="text-sm text-text-secondary mb-3">
-                Connect an account on the Social Media page, and its reach, engagement and follower numbers will show here.
-              </p>
-              <Button onClick={() => navigate('/social')}>Connect an account</Button>
-            </div>
-          </div>
-        </Card>
+        <NoAccounts onConnect={() => navigate('/social')} />
       ) : (
         <>
-          {platforms.length > 1 && (
-            <div className="flex flex-wrap items-center gap-2">
-              <PillSelect value={chosen} onChange={e => setPlatform(e.target.value)} className="w-36">
-                {platforms.map(p => <option key={p} value={p}>{PLATFORM_META[p]?.label || p}</option>)}
-              </PillSelect>
-            </div>
-          )}
-
           {/* Keyed on the platform so the account picked inside does not
               carry over to a platform it does not belong to. */}
           <AccountAnalytics key={chosen} platform={chosen} accounts={scoped}
