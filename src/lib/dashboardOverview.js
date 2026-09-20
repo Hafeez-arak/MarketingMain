@@ -270,7 +270,20 @@ export function combineOverview(summaries = []) {
     postReach: metrics.reach,
     byPlatform: byPlatform.sort((a, b) => b.interactions - a.interactions || a.platform.localeCompare(b.platform)),
     mostActive,
-    topPosts: ok.flatMap(s => s.topPosts).sort((a, b) => b._interactions - a._interactions).slice(0, 5),
+    // Ranked by interactions, the same measure `mostActive` uses and for the
+    // same reason: this answers "what did the audience respond to", not "what
+    // did we publish". /analytics ranks its own table by engagement rate,
+    // which is the right question one account deep — a rate compares a small
+    // account's post with a large one's, and at this altitude the platforms
+    // are already folded together.
+    //
+    // A post nobody interacted with is dropped rather than listed last. The
+    // card is the answer to "what worked", and padding it to five with posts
+    // that earned nothing makes the list longer without making it truer.
+    topPosts: ok.flatMap(s => s.topPosts)
+      .filter(p => p._interactions > 0)
+      .sort((a, b) => b._interactions - a._interactions)
+      .slice(0, 5),
     errors: summaries.filter(s => s.error).map(s => ({ platform: s.platform, username: s.username, error: s.error })),
   }
 }

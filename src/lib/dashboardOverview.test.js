@@ -106,6 +106,22 @@ describe('combineOverview', () => {
     linkedinPage: { metrics: { page_views_total: { total: 120 }, unique_impressions: { total: 900 } } },
   }))
 
+  it('ranks top posts by interactions across every platform', () => {
+    const { topPosts } = combineOverview([ig, li])
+    expect(topPosts.map(p => p._interactions)).toEqual([120, 6, 4])
+    expect(topPosts[0].platform).toBe('instagram')
+  })
+
+  it('leaves a post nobody interacted with off the top list', () => {
+    const quiet = accountSummary(account('tiktok'), dash({
+      overview: { posts: [post('tiktok', { likes: 0, comments: 0, views: 4000 })], accounts: [] },
+    }))
+    // 4,000 views and not one like: it belongs in the views total above, not
+    // in a list headed "what worked".
+    expect(combineOverview([quiet]).topPosts).toEqual([])
+    expect(combineOverview([ig, quiet]).topPosts.map(p => p.platform)).toEqual(['instagram'])
+  })
+
   it('adds followers across platforms', () => {
     expect(combineOverview([ig, li]).followers).toBe(1500)
   })

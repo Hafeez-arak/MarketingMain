@@ -3,11 +3,13 @@ import { useNavigate } from 'react-router-dom'
 import {
   ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
 } from 'recharts'
-import { Card, Button, Skeleton, IconBadge, PillSelect, Empty } from '../../components/ui/index'
+import {
+  Card, Button, Skeleton, IconBadge, PillSelect, Empty, PostImage, PlatformPill,
+} from '../../components/ui/index'
 import { Icon } from '../../components/ui/icons'
 import { PLATFORM_META } from '../../lib/utils'
 import { MetricInfoDot } from '../../components/analytics/MetricLabel'
-import { fmt, pct } from '../analytics/format'
+import { fmt, pct, windowLabel } from '../analytics/format'
 import { metricFacets, followerChange } from '../../lib/dashboardOverview'
 
 // ─── The dashboard's analytics overview ────────────────────────────────────
@@ -197,6 +199,85 @@ function SharedLegend({ platforms }) {
   )
 }
 
+/**
+ * The posts that earned the numbers above.
+ *
+ * ── WHY THIS IS ON THE DASHBOARD AND NOT ONLY ON /analytics ──
+ *
+ * The tiles say 1.1k interactions and the chart says which week they landed
+ * in. Neither says which post did it, and that is the only one of the three
+ * a person can act on — the next post is written from this list, not from a
+ * total. combineOverview has been ranking these since it was written; nothing
+ * rendered them, so the answer was computed on every load and thrown away.
+ *
+ * Kept to a list rather than /analytics' table on purpose. This is the
+ * altitude where the question is "which one", not "by how much across seven
+ * columns"; the table is one click away and the row links straight out to the
+ * post itself.
+ */
+function TopPosts({ posts, windowText, onDetails }) {
+  return (
+    <Card className="overflow-hidden">
+      <div className="px-4 py-3 border-b border-border flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <IconBadge tone="sage">{Icon.heart}</IconBadge>
+          <div className="min-w-0">
+            <h3 className="font-semibold text-text text-sm leading-tight">What worked</h3>
+            <p className="text-xs text-text-tertiary mt-0.5">
+              Most interactions{windowText ? ` · ${windowText.toLowerCase()}` : ''}
+            </p>
+          </div>
+        </div>
+        <Button variant="ghost" size="sm" onClick={onDetails}>Details</Button>
+      </div>
+
+      {posts.length === 0 ? (
+        <p className="px-4 py-5 text-xs text-text-tertiary">
+          No post in this window has been credited with a like, comment, share or save yet —
+          the platforms can lag by up to 48 hours.
+        </p>
+      ) : (
+        <div className="divide-y divide-border">
+          {posts.map(p => (
+            <div key={p._id || `${p.platform}-${p.publishedAt}`} className="px-4 py-3 flex items-center gap-3">
+              <PostImage src={p.thumbnailUrl} alt=""
+                className="w-10 h-10 object-cover flex-shrink-0 border border-border" />
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-1.5 mb-1">
+                  <PlatformPill platform={p.platform} />
+                  <span className="text-[10px] text-text-tertiary">{(p.publishedAt || '').slice(0, 10)}</span>
+                  {p.platformPostUrl && (
+                    <a href={p.platformPostUrl} target="_blank" rel="noreferrer"
+                      className="text-[10px] font-semibold text-amber-700 hover:underline">View ↗</a>
+                  )}
+                </div>
+                {/* `content` is what /analytics reads and `caption` is what
+                    the dev harness writes, and nothing in this repo sets
+                    either — the shape is Zernio's, passed straight through.
+                    Reading both costs one `||` and is cheaper than a card
+                    that silently shows "No caption" against every post. */}
+                <p className="text-xs text-text-secondary truncate">
+                  {(p.content || p.caption || '').split('\n')[0]
+                    || <span className="text-text-tertiary">No caption</span>}
+                </p>
+              </div>
+              <div className="text-right flex-shrink-0">
+                <p className="text-sm font-bold text-text tabular-nums leading-none">{fmt(p._interactions)}</p>
+                {/* A rate nobody could compute prints as nothing rather than
+                    as 0% — a post whose reach has not landed yet has not
+                    earned a zero. */}
+                <p className="text-[10px] text-text-tertiary mt-1">
+                  interactions{p._er === null ? '' : ` · ${pct(p._er)}`}
+                </p>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
+  )
+}
+
 export function AnalyticsOverviewSkeleton() {
   return (
     <div className="space-y-4" aria-busy="true" aria-label="Loading analytics">
@@ -285,6 +366,8 @@ export function AnalyticsOverview({ summaries, overview, range, days, onDays, se
   }))
   const hasSeries = facets.some(f => f.total > 0)
   const single = facets.length === 1
+  // The window these numbers actually cover — see the Posts published tile.
+  const measured = windowLabel(range.fromDate, range.toDate, days)
   const heading = single ? `${facets[0].label} over time`
     : facets.length <= 3 ? `${facets.map(f => f.label).join(', ')} over time`
       : `${facets.length} metrics over time`
@@ -333,8 +416,15 @@ export function AnalyticsOverview({ summaries, overview, range, days, onDays, se
           <Tile label="Engagement" value={pct(overview.engagementRate)}
             metric="home.engagement_rate"
             hint={`${fmt(overview.interactions)} interactions`} />
+          {/* The window these numbers ACTUALLY cover, not the one in the
+              picker. Meta refuses more than 30 days between `since` and
+              `until` on account insights, so asking for 90 gets you 29 — and
+              until this read the dates back off the response, the tile printed
+              "Last 90 days" over a figure Zernio measured across a month.
+              `range` is Zernio's own fromDate/toDate, the same pair the chart's
+              x-axis is drawn from, so the tile and the axis cannot disagree. */}
           <Tile label="Posts published" value={String(overview.posts)} metric="home.posts"
-            hint={`Last ${days} days`} />
+            hint={measured} />
         </div>
       </Card>
 
@@ -409,6 +499,10 @@ export function AnalyticsOverview({ summaries, overview, range, days, onDays, se
           )}
         </Card>
 
+        {/* The side column. Two cards rather than one because the trend card
+            beside it grows with every metric ticked, and a single short card
+            left a column of white space the height of four panels. */}
+        <div className="space-y-4">
         {/* ── Platforms, as one card ──
             "Most active platform" and "By platform" were two boxes stacked on
             top of each other answering the same question at two altitudes —
@@ -469,6 +563,10 @@ export function AnalyticsOverview({ summaries, overview, range, days, onDays, se
             </div>
           )}
         </Card>
+
+        <TopPosts posts={overview.topPosts} windowText={measured}
+          onDetails={() => navigate('/analytics')} />
+        </div>
       </div>
     </div>
   )
