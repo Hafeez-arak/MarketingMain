@@ -3,6 +3,7 @@ import { defaultAspectRatio, getFormat, formatForTarget, derivePostKind } from '
 import { isProtectedPlatform } from './platformSafety'
 import { finalizeVersion } from './creativeStudio'
 import { postLock } from './postLock'
+import { projectionFor } from './mediaOrder'
 
 // ─── Plan ↔ Creative Studio bridge ─────────────────────────────────────────
 // The join between the two halves of the app that never spoke: contentPlans
@@ -387,15 +388,22 @@ export const SENDABLE_PLATFORMS = Object.keys(PLATFORM_TABLE)
 // nobody notices until it is live.
 function mediaFieldsFor(version) {
   const isVideo = version.media_type === 'video' || !!version.video_url
+  // A Studio version is ONE finished asset, so there is genuinely nothing to
+  // mix here — but it still goes through projectionFor so that `media` is
+  // written alongside the legacy columns and every reader sees the same
+  // ordered list whatever produced the row.
   if (isVideo) {
     return {
-      video_url: version.video_url || '',
+      ...projectionFor([{ type: 'video', url: version.video_url || '' }]),
+      // The still is the video's COVER, not a carousel item. Kept out of
+      // `media` deliberately: it is not something that plays in the post.
       cover_image_url: version.image_url || '',
-      image_url: '', image_urls: [],
     }
   }
-  const url = version.image_url || ''
-  return { image_url: url, image_urls: url ? [url] : [], video_url: '', cover_image_url: '' }
+  return {
+    ...projectionFor([{ type: 'image', url: version.image_url || '' }]),
+    cover_image_url: '',
+  }
 }
 
 // Per-table copy fields.
@@ -425,7 +433,7 @@ function copyFieldsFor(platform, { caption, captionAr, captionEn, hashtags }) {
 const EXISTING_POST_SELECT = [
   'id', 'platform', 'status', 'publish_status', 'published_at', 'scheduled_publish_at', 'zernio_post_id',
   'caption', 'caption_ar', 'caption_en', 'hashtags', 'first_comment', 'format', 'platform_options',
-  'image_url', 'image_urls', 'video_url', 'cover_image_url', 'scheduled_date', 'publish_time',
+  'media', 'image_url', 'image_urls', 'video_url', 'cover_image_url', 'scheduled_date', 'publish_time',
 ].join(',')
 async function findPostForIdea(accessToken, table, ideaId, platform) {
   if (!ideaId) return null
@@ -443,8 +451,13 @@ async function findPostForIdea(accessToken, table, ideaId, platform) {
 
 // Whether writing `patch` over `row` would change anything that reaches the
 // platform. A scheduled post only needs re-booking at Zernio when it would.
+// `media` is here, and it is not redundant beside image_urls/video_url:
+// reordering a carousel changes NOTHING about those columns — the same urls,
+// the same single video — while changing the post completely. Without this a
+// reorder would not count as a change, the re-book would be skipped, and
+// Zernio would go on publishing the old order.
 const PUBLISHED_FIELDS = ['caption', 'hashtags', 'first_comment', 'format', 'platform_options',
-  'image_url', 'image_urls', 'video_url', 'cover_image_url', 'scheduled_date', 'publish_time']
+  'media', 'image_url', 'image_urls', 'video_url', 'cover_image_url', 'scheduled_date', 'publish_time']
 export function changesPublishedPost(row, patch) {
   if (!row) return true
   return PUBLISHED_FIELDS.some(k => k in patch &&
@@ -596,12 +609,31 @@ export async function sendVersionToPosts(workspaceId, accessToken, {
 // mediaFieldsFor was written to avoid.
 function manualMediaFor(idea) {
   const video = idea.previewVideoUrl || ''
-  if (video) {
-    return { video_url: video, cover_image_url: idea.previewImageUrl || '', image_url: '', image_urls: [] }
-  }
   const refs = idea.imageMode === 'use_reference' ? (idea.references || []).filter(Boolean) : []
-  const urls = idea.previewImageUrl ? [idea.previewImageUrl] : refs
-  return { image_url: urls[0] || '', image_urls: urls, video_url: '', cover_image_url: '' }
+  const images = idea.previewImageUrl ? [idea.previewImageUrl] : refs
+
+  // ── WHERE THE PICTURES USED TO DIE ──
+  // This was `if (video) return { …, image_url: '', image_urls: [] }` — a
+  // video on the idea blanked its images before the row was ever written. So
+  // a carousel of two pictures and a clip reached generated_posts as a
+  // video-only post, and no later screen could show what was lost because
+  // nothing had been stored. That is the bug behind "I added 2 images and 1
+  // video and only the video is there".
+  //
+  // Images first, then the video: a carousel opens on a still, and the idea
+  // carries no ordering of its own to honour. Instagram sizes every item to
+  // the first, so leading with a picture is also the safer default.
+  const media = [
+    ...images.map(url => ({ type: 'image', url })),
+    ...(video ? [{ type: 'video', url: video }] : []),
+  ]
+
+  return {
+    ...projectionFor(media),
+    // A still that is ALSO the only image is the post's picture, not a cover.
+    // It is only a cover when there is a video and no separate picture to be.
+    cover_image_url: video && !images.length ? (idea.previewImageUrl || '') : '',
+  }
 }
 
 // What a plan idea carries into generated_posts.platform_options on one

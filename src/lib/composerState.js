@@ -1,5 +1,6 @@
 import { defaultFormat, getFormat, limitsFor, zernioFormatFields } from './postFormats'
 import { PLATFORM_META } from './utils'
+import { mediaOfPost, MAX_CAROUSEL_ITEMS, isMixed, countsOf } from './mediaOrder'
 
 // ─── Composer state, as pure data ──────────────────────────────────────────
 // Everything the create-post screen knows, with no React in it. The screen is
@@ -44,17 +45,20 @@ export function emptyComposer(platform = 'instagram') {
 export function composerFromPost(row, { platform = row?.platform } = {}) {
   if (!row) return emptyComposer(platform)
 
-  const images = Array.isArray(row.image_urls) && row.image_urls.length
-    ? row.image_urls
-    : [row.image_url].filter(Boolean)
-  const video = row.video_url || ''
-
+  // Everything the row holds, in order — NOT `video ? [video] : images`.
+  //
+  // That ternary is why reopening a mixed carousel showed only the clip: the
+  // two pictures were on the row the whole time and this refused to load them,
+  // and because rowFrom then wrote back what the composer was holding, saving
+  // the post DELETED them. mediaOfPost reads the ordered `media` column and
+  // falls back to the legacy columns for rows written before it existed.
+  //
   // Metadata is genuinely unknown for a stored row — the generator records a
   // URL, not a duration or a byte count. Left null so validation checks only
   // what it knows rather than inventing a failure. See PLATFORM_LIMITS.
-  const media = video
-    ? [{ url: video, type: 'video', mimeType: '', bytes: null, seconds: null }]
-    : images.map(url => ({ url, type: 'image', mimeType: '', bytes: null, seconds: null }))
+  const media = mediaOfPost(row).map(m => ({
+    ...m, mimeType: '', bytes: null, seconds: null,
+  }))
 
   return {
     ...emptyComposer(platform),
@@ -331,8 +335,42 @@ export function validateComposer(state) {
     // LinkedIn accepts many images but only ever one video — "no multi-video",
     // in Zernio's words. The same sentence happens to be true of a Reel.
     if (videos.length > 1) errors.push(`A ${f.label} takes one video, not ${videos.length}.`)
+    // A video format is a video, not a video plus pictures. Said out loud
+    // rather than resolved by dropping the images, which is what every layer
+    // below here used to do in silence.
+    if (images.length) {
+      errors.push(`A ${f.label} carries the video only — remove the ${images.length} image${images.length === 1 ? '' : 's'}, or switch to a carousel.`)
+    }
   } else if (!media.length) {
     errors.push(`Add ${caps.carousel ? 'at least two images' : 'an image'}.`)
+  } else if (isMixed(media)) {
+    // ── Images and videos in one post ──
+    // Instagram carousels genuinely take both — Zernio's Instagram guide is
+    // explicit: "Up to 10 items, images and videos mixed. All items share the
+    // aspect ratio of the first item." Nowhere else does.
+    //
+    // This branch used to not exist at all, while publishPost.mediaFields
+    // carried a comment claiming "the composer's own validation has already
+    // refused the mixed case". It never had. A mixed post sailed through,
+    // and each layer below quietly kept a different half of it.
+    if (!caps.carousel) {
+      errors.push(`A ${label} ${f?.label?.toLowerCase() || 'post'} takes images or one video, not both.`)
+    } else if (state.platform !== 'instagram') {
+      errors.push(`${label} carousels cannot mix images and video — that works on Instagram only.`)
+    } else {
+      // The aspect-ratio rule is Zernio's and we cannot check it here: a
+      // stored row carries no dimensions. Saying so beats publishing a
+      // carousel that silently crops.
+      warnings.push('Instagram sizes every item to match the FIRST one in the carousel — put the item with the aspect ratio you want first.')
+    }
+  }
+
+  // The 10-item ceiling counts everything in the carousel, not just pictures.
+  // The images-only check further down predates mixed media and would let
+  // 8 images plus 3 clips through.
+  if (caps.carousel && isMixed(media) && media.length > MAX_CAROUSEL_ITEMS) {
+    const c = countsOf(media)
+    errors.push(`A carousel holds ${MAX_CAROUSEL_ITEMS} items; this one has ${c.total} (${c.images} image${c.images === 1 ? '' : 's'} and ${c.videos} video${c.videos === 1 ? '' : 's'}).`)
   }
 
   // ── Poll ──

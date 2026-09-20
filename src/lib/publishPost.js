@@ -5,6 +5,7 @@ import {
   composedCaption, platformSpecificData, tiktokSettings, validateComposer,
 } from './composerState'
 import { mayPublishTo, protectionReason } from './platformSafety'
+import { normaliseMedia } from './mediaOrder'
 
 // ─── One publish path ──────────────────────────────────────────────────────
 // Every platform publishes through Zernio. The Meta Graph API path was removed
@@ -14,18 +15,36 @@ import { mayPublishTo, protectionReason } from './platformSafety'
 // competitor numbers (business_discovery) — nothing publishes through it.
 
 // Media is passed by URL: everything the composer offers already lives in
-// public Supabase Storage, so there is nothing to upload. The first video wins
-// over images because a post is one or the other, never both — and the
-// composer's own validation has already refused the mixed case.
+// public Supabase Storage, so there is nothing to upload.
+//
+// `media` is the ordered list the workflow builds Zernio's mediaItems from —
+// images and videos together, in the order the carousel plays. Instagram
+// allows that (up to 10 items, all sized to the first) and so does Zernio.
+//
+// This used to be `if (videos.length) return { videoUrl }`, carrying a comment
+// claiming "a post is one or the other, never both — and the composer's own
+// validation has already refused the mixed case". Neither half was true: no
+// such validation existed, and the line published the clip while silently
+// discarding every picture beside it.
+//
+// The flat fields are still sent, derived from the same list. The workflow
+// falls back to them for any caller that predates `media`, and several nodes
+// downstream still read them.
 function mediaFields(state) {
-  const videos = state.media.filter(m => m.type === 'video')
-  const images = state.media.filter(m => m.type === 'image')
-  if (videos.length) {
-    return { videoUrl: videos[0].url, coverImageUrl: state.coverImageUrl || '' }
-  }
+  const media = normaliseMedia(state.media)
+  const images = media.filter(m => m.type === 'image')
+  const videos = media.filter(m => m.type === 'video')
+  // Empty fields are omitted, not sent blank: a video post that carries an
+  // `imageUrl: ''` invites exactly the "is there an image or isn't there"
+  // guessing the rest of this change removes.
   return {
-    imageUrl: images[0]?.url || '',
-    imageUrls: images.length > 1 ? images.map(m => m.url) : undefined,
+    media,
+    ...(images.length ? { imageUrl: images[0].url } : {}),
+    ...(images.length > 1 ? { imageUrls: images.map(m => m.url) } : {}),
+    ...(videos.length ? { videoUrl: videos[0].url } : {}),
+    // A cover belongs to a video. Sending one on an all-images post would have
+    // the workflow attach a thumbnail to something that cannot use it.
+    ...(videos.length && state.coverImageUrl ? { coverImageUrl: state.coverImageUrl } : {}),
   }
 }
 
