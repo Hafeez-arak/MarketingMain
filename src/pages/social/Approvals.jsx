@@ -283,7 +283,7 @@ const btn = 'text-[11px] font-semibold px-2.5 py-1 rounded-lg border transition-
 //   upcoming   edit (re-books at Zernio), reschedule, cancel the booking
 //   attention  edit, schedule, post now — or the one place that can fix it
 //   published  nothing but a link: it has gone out
-function QueueCard({ post, bucket, accounts, now, busy, onOpen, onOpenMedia, onEdit, onBook, onReschedule, onCancel }) {
+function QueueCard({ post, bucket, accounts, now, busy, onOpen, onOpenMedia, onEdit, onBook, onReschedule, onCancel, onDelete }) {
   const [expanded, setExpanded] = useState(false)
   const [picking, setPicking] = useState(false)
   const [when, setWhen] = useState('')
@@ -375,6 +375,12 @@ function QueueCard({ post, bucket, accounts, now, busy, onOpen, onOpenMedia, onE
                   <button onClick={() => onBook(post, '')} disabled={busy} className={`${btn} border-border text-text-secondary hover:bg-surface-subtle`}>↗ Post now</button>
                 </>
               )}
+              {/* Never booked at Zernio here — nothing to unschedule, so a
+                  straight delete is safe. A booked post has to go through
+                  "Cancel schedule" first, which drops it back to attention. */}
+              {bucket === 'attention' && !picking && (
+                <button onClick={() => onDelete(post)} disabled={busy} className={`${btn} border-red-200 text-red-500 hover:bg-red-50`}>🗑 Delete</button>
+              )}
               {picking && (
                 <>
                   <input type="datetime-local" value={when} onChange={e => setWhen(e.target.value)} aria-label="New time"
@@ -415,6 +421,7 @@ export function Approvals() {
   const [collapsed,     setCollapsed]     = useState({})
   const [busyId,        setBusyId]        = useState(null)
   const [cancelTarget,  setCancelTarget]  = useState(null)
+  const [deleteTarget,  setDeleteTarget]  = useState(null)
   const [viewer,        setViewer]        = useState(null)
   // The post currently open in the composer, or null.
   const [composerPost,  setComposerPost]  = useState(null)
@@ -733,7 +740,7 @@ export function Approvals() {
                       return <QueueCard key={item.key} post={item.post} bucket={item.bucket} accounts={accounts} now={now}
                         busy={busyId === item.post.id}
                         onOpen={setSelectedPost} onOpenMedia={openMedia} onEdit={openComposer}
-                        onBook={handleBook} onReschedule={handleReschedule} onCancel={setCancelTarget} />
+                        onBook={handleBook} onReschedule={handleReschedule} onCancel={setCancelTarget} onDelete={setDeleteTarget} />
                     })}
                   </div>
                 )}
@@ -746,6 +753,10 @@ export function Approvals() {
       <ConfirmDialog open={!!cancelTarget} onClose={() => setCancelTarget(null)}
         onConfirm={() => handleCancel(cancelTarget)} title="Cancel this schedule?"
         message="The post is taken off the schedule at Zernio and will not go out. It stays here under Needs attention, so you can schedule it again." danger />
+
+      <ConfirmDialog open={!!deleteTarget} onClose={() => setDeleteTarget(null)}
+        onConfirm={() => { const target = deleteTarget; setDeleteTarget(null); handleDelete(target) }} title="Delete this post?"
+        message="It's removed from the Post Queue for good — the caption, media choices and options go with it. This can't be undone." danger />
 
       {viewer && <MediaViewer {...viewer} onClose={() => setViewer(null)} />}
 
