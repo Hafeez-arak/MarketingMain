@@ -14,18 +14,29 @@ import {
 //            honest definition of "on the calendar".
 //
 //   pending  approved posts that nothing is going to publish: never booked, or
-//            the booking failed. The strip. Not range-filtered, because the
-//            whole point is that they have no dependable time — a post whose
-//            planned slot passed in August still needs a person in September.
+//            the booking failed. Not range-filtered, because the whole point
+//            is that they have no dependable time — a post whose planned slot
+//            passed in August still needs a person in September.
+//
+//   upcoming the next posts due to go out, soonest first. Deliberately NOT
+//            range-filtered either: "what is coming" is a question about the
+//            future, not about whichever month you happen to have paged to,
+//            and scoping it to the visible window would empty the strip the
+//            moment you looked at October.
 //
 // A post therefore appears in exactly ONE of them. That is the change: the old
 // version showed every publish state on the grid and put every unscheduled
 // post — drafts, rejects, half-finished compositions — in the tray, so neither
 // surface answered a question anyone had.
 
+// How many of the next posts the strip carries. Enough to cover a busy week
+// without turning a glance into a scroll.
+const UPCOMING_LIMIT = 24
+
 export function useCalendarPosts({ workspaceId, accessToken, from, to, webhooks, accounts }) {
   const [posts, setPosts]         = useState([])
   const [pending, setPending]     = useState([])
+  const [upcoming, setUpcoming]   = useState([])
   const [error, setError]         = useState('')
   const [pendingId, setPendingId] = useState('')
   const [nonce, setNonce]         = useState(0)
@@ -60,16 +71,26 @@ export function useCalendarPosts({ workspaceId, accessToken, from, to, webhooks,
     // synchronous write from the effect body.
     ;(async () => {
       try {
-        const [booked, unbooked] = await Promise.all([
+        // Read once, here, rather than inside wantKey: a clock in the cache
+        // key would invalidate it on every render and refetch forever.
+        const nowISO = new Date().toISOString()
+        const [booked, unbooked, next] = await Promise.all([
           fetchScheduledPosts(workspaceId, accessToken, {
             from, to, publishStatus: ON_CALENDAR_STATUSES,
           }),
           fetchScheduledPosts(workspaceId, accessToken, {
             publishStatus: PENDING_STATUSES, status: APPROVED_STATUSES, limit: 120,
           }),
+          // `from` alone, with no `to`: everything still ahead of us. Passing
+          // from also flips the ordering to scheduled_publish_at ascending,
+          // which is exactly the order the strip wants — soonest first.
+          fetchScheduledPosts(workspaceId, accessToken, {
+            from: nowISO, publishStatus: ['scheduled', 'publishing'], limit: UPCOMING_LIMIT,
+          }),
         ])
         if (cancelled || latest.current !== wantKey) return
         setPosts(booked)
+        setUpcoming(next)
         // Filtered again here rather than trusting the query alone: `status`
         // is blank on older rows, and needsAttention is the one rule the
         // sidebar badge uses too. Two surfaces disagreeing about how many
@@ -120,8 +141,9 @@ export function useCalendarPosts({ workspaceId, accessToken, from, to, webhooks,
   return {
     // Emptiness is derived rather than stored, so the previous workspace's
     // rows can never render for a frame under a new workspace's heading.
-    posts:   ready ? posts   : [],
-    pending: ready ? pending : [],
+    posts:    ready ? posts    : [],
+    pending:  ready ? pending  : [],
+    upcoming: ready ? upcoming : [],
     loading, error, pendingId, reload, book, cancel,
   }
 }
