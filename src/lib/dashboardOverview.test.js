@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
-  accountSummary, combineOverview, platformSeries, bucketsInRange,
+  accountSummary, combineOverview, platformSeries, metricFacets, bucketsInRange,
   bucketModeFor, weekOf, followerChange, engagementRate,
   supportsMetric,
 } from './dashboardOverview'
@@ -105,6 +105,22 @@ describe('combineOverview', () => {
     },
     linkedinPage: { metrics: { page_views_total: { total: 120 }, unique_impressions: { total: 900 } } },
   }))
+
+  it('ranks top posts by interactions across every platform', () => {
+    const { topPosts } = combineOverview([ig, li])
+    expect(topPosts.map(p => p._interactions)).toEqual([120, 6, 4])
+    expect(topPosts[0].platform).toBe('instagram')
+  })
+
+  it('leaves a post nobody interacted with off the top list', () => {
+    const quiet = accountSummary(account('tiktok'), dash({
+      overview: { posts: [post('tiktok', { likes: 0, comments: 0, views: 4000 })], accounts: [] },
+    }))
+    // 4,000 views and not one like: it belongs in the views total above, not
+    // in a list headed "what worked".
+    expect(combineOverview([quiet]).topPosts).toEqual([])
+    expect(combineOverview([ig, quiet]).topPosts.map(p => p.platform)).toEqual(['instagram'])
+  })
 
   it('adds followers across platforms', () => {
     expect(combineOverview([ig, li]).followers).toBe(1500)
@@ -211,6 +227,61 @@ describe('platformSeries', () => {
       fromDate: '2026-09-14', toDate: '2026-09-15',
     })
     expect(platforms).toEqual(['instagram'])
+  })
+})
+
+describe('metricFacets', () => {
+  const daily = (date, metrics) => ({ date, metrics })
+  const igS = {
+    platform: 'instagram', error: '', metrics: {}, supports: ['views', 'reach', 'likes', 'comments'],
+    daily: [
+      daily('2026-09-14', { views: 100, likes: 10, comments: 0, shares: 0, saves: 0 }),
+      daily('2026-09-15', { views: 200, likes: 20, comments: 5, shares: 0, saves: 0 }),
+    ],
+  }
+  const liS = {
+    platform: 'linkedin', error: '', metrics: {}, supports: ['likes', 'comments'],
+    daily: [daily('2026-09-15', { views: 0, likes: 1, comments: 1, shares: 1, saves: 0 })],
+  }
+  const range = { fromDate: '2026-09-14', toDate: '2026-09-15' }
+
+  it('gives one panel per metric, each over the same buckets', () => {
+    const { facets } = metricFacets([igS, liS], { metrics: ['views', 'comments'], ...range })
+    expect(facets.map(f => f.metric)).toEqual(['views', 'comments'])
+    expect(facets[0].rows.map(r => r.bucket)).toEqual(facets[1].rows.map(r => r.bucket))
+    expect(facets[0].rows[1]).toMatchObject({ instagram: 200, linkedin: 0, total: 200 })
+    expect(facets[1].rows[1]).toMatchObject({ instagram: 5, linkedin: 1, total: 6 })
+  })
+
+  it('totals the whole window per metric', () => {
+    const { facets } = metricFacets([igS, liS], { metrics: ['views', 'likes'], ...range })
+    expect(facets[0].total).toBe(300)
+    expect(facets[1].total).toBe(31)
+  })
+
+  it('names the platforms behind a metric only some of them report', () => {
+    const { facets } = metricFacets([igS, liS], { metrics: ['views', 'likes'], ...range })
+    // LinkedIn takes no view count, so the views panel is the Instagram half
+    // and has to say so; likes come from both and carry no caveat.
+    expect(facets[0]).toMatchObject({ partial: true, sources: ['instagram'] })
+    expect(facets[1]).toMatchObject({ partial: false, sources: ['instagram', 'linkedin'] })
+  })
+
+  it('shares one bucket mode across the panels, whatever the range', () => {
+    const wide = metricFacets([igS], {
+      metrics: ['views', 'likes'], fromDate: '2026-06-18', toDate: '2026-09-16',
+    })
+    expect(wide.mode).toBe('week')
+    expect(wide.facets[0].rows).toHaveLength(wide.facets[1].rows.length)
+  })
+
+  it('leaves a failed account out of every panel', () => {
+    const { platforms, facets } = metricFacets(
+      [igS, { platform: 'tiktok', error: 'down', daily: [] }],
+      { metrics: ['views'], ...range },
+    )
+    expect(platforms).toEqual(['instagram'])
+    expect(facets[0].rows[0]).not.toHaveProperty('tiktok')
   })
 })
 

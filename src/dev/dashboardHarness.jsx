@@ -63,11 +63,24 @@ function dailyRows(seed, scale) {
   return out
 }
 
+const CAPTIONS = [
+  'Diriyah Gate lobby, 2700K throughout — the mock-up the client signed off on.',
+  'Behind the spec: why we run DALI over 0-10V on every hospitality job.',
+  'Qiddiya stadium concourse. Forty-eight metres of continuous run, no visible joint.',
+  'Three questions to ask before you approve a lighting schedule.',
+  'Riyadh showroom, open Sunday to Thursday.',
+]
+
 const post = (platform, i, analytics) => ({
   _id: `${platform}-post-${i}`,
   platform,
   publishedAt: new Date(Date.parse(`${FROM}T00:00:00Z`) + (i * 3 + 2) * 86_400_000).toISOString(),
-  caption: `${platform} post ${i}`,
+  // `content` is the field the pages read; `caption` is kept beside it because
+  // the two names have both been in play and the top-posts card reads either.
+  content: CAPTIONS[i % CAPTIONS.length],
+  caption: CAPTIONS[i % CAPTIONS.length],
+  thumbnailUrl: '',
+  platformPostUrl: `https://example.com/${platform}/${i}`,
   analytics,
 })
 
