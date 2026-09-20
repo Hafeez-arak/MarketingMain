@@ -46,9 +46,16 @@ export async function fetchWebsiteSearch(workspaceId, accessToken) {
  * unconfigured is the normal state until somebody installs a tag on the site,
  * and it must never hide working Search Console numbers behind it.
  */
-export async function fetchWebsiteAnalytics(workspaceId, accessToken, days = 28) {
+/** @param {object|number} range A `{ days }` preset or a `{ from, to }` window. */
+export async function fetchWebsiteAnalytics(workspaceId, accessToken, range = 28) {
   if (!workspaceId) return { ok: false, error: 'No workspace selected.' }
   if (!accessToken) return { ok: false, error: 'Sign in to read website analytics.' }
+  // Preset and fixed windows stay apart across the wire — see src/lib/dateRange.js.
+  const window = typeof range === 'number'
+    ? { days: range }
+    : (range?.from && range?.to
+      ? { from: range.from, to: range.to }
+      : { days: Number(range?.days) || 28 })
   try {
     const res = await fetch('/api/agent/website', {
       method: 'POST',
@@ -56,7 +63,7 @@ export async function fetchWebsiteAnalytics(workspaceId, accessToken, days = 28)
         'Content-Type': 'application/json',
         Authorization: `Bearer ${accessToken}`,
       },
-      body: JSON.stringify({ workspace_id: workspaceId, days }),
+      body: JSON.stringify({ workspace_id: workspaceId, ...window }),
     })
     const data = await res.json().catch(() => null)
     if (!data) return { ok: false, error: `The server returned ${res.status} with nothing in it.` }

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAuth } from '../../store/auth'
 import { fetchWebsiteAnalytics } from '../../lib/websiteSearch'
+import { resolveRange } from '../../lib/dateRange'
 import { seoRecommendations } from '../../lib/seoAdvice'
 import {
   websiteSummary, dailySeries, searchTypes, positionBands, pageRows, hostSplit,
@@ -24,7 +25,10 @@ import { ga4Summary } from '../../lib/agent/ga4'
 
 export function useWebsiteAnalytics() {
   const { activeWorkspaceId, accessToken } = useAuth()
-  const [days, setDays] = useState(28)
+  const [range, setRange] = useState({ days: 28 })
+  // One comparable string: `range` is an object, and depending on it directly
+  // would refetch Search Console and GA4 on every render of the tab.
+  const rangeKey = range.from && range.to ? `${range.from}..${range.to}` : `d${range.days}`
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
@@ -37,12 +41,13 @@ export function useWebsiteAnalytics() {
     if (!activeWorkspaceId || !accessToken) return
     const n = ++seq.current
     if (quiet) setRefreshing(true); else setLoading(true)
-    const res = await fetchWebsiteAnalytics(activeWorkspaceId, accessToken, days)
+    const res = await fetchWebsiteAnalytics(activeWorkspaceId, accessToken, range)
     if (n !== seq.current) return
     setData(res)
     setLoading(false)
     setRefreshing(false)
-  }, [activeWorkspaceId, accessToken, days])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeWorkspaceId, accessToken, rangeKey])
 
   // Deferred a tick, like every other first fetch in this app: `load` flips a
   // loading flag before its first await, and writing state from an effect BODY
@@ -60,8 +65,9 @@ export function useWebsiteAnalytics() {
   )
 
   return {
-    days,
-    setDays,
+    range,
+    setRange,
+    days: resolveRange(range).days,
     loading,
     refreshing,
     refresh: () => load({ quiet: true }),

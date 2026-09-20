@@ -4,12 +4,14 @@ import {
   ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
 } from 'recharts'
 import {
-  Card, Button, Skeleton, IconBadge, PillSelect, Empty, PostImage, PlatformPill,
+  Card, Button, Skeleton, IconBadge, Empty, PostImage, PlatformPill,
 } from '../../components/ui/index'
 import { Icon } from '../../components/ui/icons'
 import { PLATFORM_META } from '../../lib/utils'
 import { MetricInfoDot } from '../../components/analytics/MetricLabel'
 import { fmt, pct, windowLabel } from '../analytics/format'
+import { RangePicker } from '../../components/analytics/RangePicker'
+import { resolveRange } from '../../lib/dateRange'
 import { metricFacets, followerChange } from '../../lib/dashboardOverview'
 
 // ─── The dashboard's analytics overview ────────────────────────────────────
@@ -299,7 +301,7 @@ export function AnalyticsOverviewSkeleton() {
   )
 }
 
-export function AnalyticsOverview({ summaries, overview, range, days, onDays, selected, loading, settling }) {
+export function AnalyticsOverview({ summaries, overview, measured, range, onRange, selected, loading, settling }) {
   const navigate = useNavigate()
   const [metrics, setMetrics] = useState(() => new Set(['views']))
 
@@ -351,8 +353,8 @@ export function AnalyticsOverview({ summaries, overview, range, days, onDays, se
   }
 
   const series = useMemo(
-    () => metricFacets(scoped, { metrics: activeMetrics, fromDate: range.fromDate, toDate: range.toDate }),
-    [scoped, activeMetrics, range.fromDate, range.toDate],
+    () => metricFacets(scoped, { metrics: activeMetrics, fromDate: measured.fromDate, toDate: measured.toDate }),
+    [scoped, activeMetrics, measured.fromDate, measured.toDate],
   )
 
   const followers = useMemo(() => followerChange(scoped), [scoped])
@@ -367,7 +369,7 @@ export function AnalyticsOverview({ summaries, overview, range, days, onDays, se
   const hasSeries = facets.some(f => f.total > 0)
   const single = facets.length === 1
   // The window these numbers actually cover — see the Posts published tile.
-  const measured = windowLabel(range.fromDate, range.toDate, days)
+  const measuredLabel = windowLabel(measured.fromDate, measured.toDate, resolveRange(range).days)
   const heading = single ? `${facets[0].label} over time`
     : facets.length <= 3 ? `${facets.map(f => f.label).join(', ')} over time`
       : `${facets.length} metrics over time`
@@ -424,7 +426,7 @@ export function AnalyticsOverview({ summaries, overview, range, days, onDays, se
               `range` is Zernio's own fromDate/toDate, the same pair the chart's
               x-axis is drawn from, so the tile and the axis cannot disagree. */}
           <Tile label="Posts published" value={String(overview.posts)} metric="home.posts"
-            hint={measured} />
+            hint={measuredLabel} />
         </div>
       </Card>
 
@@ -446,11 +448,7 @@ export function AnalyticsOverview({ summaries, overview, range, days, onDays, se
                 </p>
               </div>
             </div>
-            <PillSelect value={String(days)} onChange={e => onDays(Number(e.target.value))} className="w-32">
-              <option value="7">Last 7 days</option>
-              <option value="30">Last 30 days</option>
-              <option value="90">Last 90 days</option>
-            </PillSelect>
+            <RangePicker value={range} onChange={onRange} />
           </div>
 
           {/* The metrics on their own row rather than in the header: with five
@@ -564,7 +562,7 @@ export function AnalyticsOverview({ summaries, overview, range, days, onDays, se
           )}
         </Card>
 
-        <TopPosts posts={overview.topPosts} windowText={measured}
+        <TopPosts posts={overview.topPosts} windowText={measuredLabel}
           onDetails={() => navigate('/analytics')} />
         </div>
       </div>

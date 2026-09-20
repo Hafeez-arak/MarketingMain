@@ -53,15 +53,15 @@ export default function Dashboard() {
   const { activeWorkspaceId } = useAuth()
   const { allAccounts, loading: loadingAccounts } = useConnectedAccounts()
 
-  const [days, setDays] = useState(30)
+  const [range, setRange] = useState({ days: 30 })
   const [selected, setSelected] = useState(() => new Set())
   const [creating, setCreating] = useState(false)
   const [syncing, setSyncing] = useState(false)
   const [note, setNote] = useState('')
   const [reloadKey, setReloadKey] = useState(0)
 
-  const { summaries, range, loading, settling } = useDashboardAnalytics({
-    accounts: allAccounts, days, reloadKey,
+  const { summaries, range: measured, loading, settling } = useDashboardAnalytics({
+    accounts: allAccounts, range, reloadKey,
   })
   const website = useWebsiteSearch()
   const research = useResearch()
@@ -169,9 +169,9 @@ export default function Dashboard() {
             <AnalyticsOverview
               summaries={summaries}
               overview={overview}
+              measured={measured}
               range={range}
-              days={days}
-              onDays={setDays}
+              onRange={setRange}
               selected={selected.size ? selected : new Set(platforms)}
               loading={loading}
               settling={settling} />

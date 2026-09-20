@@ -4,7 +4,7 @@ import {
   ResponsiveContainer, ComposedChart, Area, Line, LineChart, BarChart, Bar,
   XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine, Cell,
 } from 'recharts'
-import { Card, Button, Empty, Skeleton, IconBadge, PillSelect, Spinner } from '../../components/ui/index'
+import { Card, Button, Empty, Skeleton, IconBadge, Spinner } from '../../components/ui/index'
 import { Icon } from '../../components/ui/icons'
 import { MetricInfoDot, ScopeBanner } from '../../components/analytics/MetricLabel'
 import { Collapsible } from '../dashboard/Collapsible'
@@ -12,6 +12,8 @@ import { ChartCard } from './Dashboard'
 import { fmt, pct, plural } from './format'
 import { Ga4Panels } from './WebsiteGa4'
 import { useWebsiteAnalytics } from './useWebsiteAnalytics'
+import { RangePicker } from '../../components/analytics/RangePicker'
+import { isCustom, rangeLabel } from '../../lib/dateRange'
 
 // ─── The Website tab ───────────────────────────────────────────────────────
 //
@@ -247,7 +249,7 @@ export function WebsiteAnalytics(w) {
   const [allQueries, setAllQueries] = useState(false)
   const queryBodyId = useId()
   const {
-    days, setDays, loading, refreshing, refresh, error,
+    range, setRange, days, loading, refreshing, refresh, error,
     search, ga4, usable, summary, daily, types, bands, coverage, queries,
     pages, hosts, countries, devices, appearance, sitemaps, recommendations, ga4Summary,
   } = w
@@ -272,15 +274,19 @@ export function WebsiteAnalytics(w) {
   // and the gap between them is 27. `searchWindows` built the range from
   // `days` in the first place, so the authoritative number is already here and
   // there is nothing to infer.
-  const label = `Last ${search?.windows?.days || days} days`
+  // A fixed window is named by its dates; a rolling one by its length. Either
+  // way the number comes from the SERVER's window, not one recomputed here.
+  const serverDays = search?.windows?.days || days
+  const label = isCustom(range) && search?.windows?.current
+    ? rangeLabel({ from: search.windows.current.start, to: search.windows.current.end })
+    : `Last ${serverDays} days`
 
   const toolbar = (
     <div className="flex flex-wrap items-center gap-2">
-      <PillSelect value={days} onChange={e => setDays(Number(e.target.value))} className="w-36">
-        <option value={7}>Last 7 days</option>
-        <option value={28}>Last 28 days</option>
-        <option value={90}>Last 90 days</option>
-      </PillSelect>
+      {/* A week is the floor here, not a style choice: below it a weekday
+          effect reads as a trend and this site's volume makes three days
+          mostly zeroes. The server refuses a shorter one too. */}
+      <RangePicker value={range} onChange={setRange} presets={[7, 28, 90]} minDays={7} />
       <Button size="sm" variant="secondary" onClick={refresh} disabled={refreshing}>
         {refreshing ? <><Spinner size="sm" /> Refreshing…</> : 'Refresh'}
       </Button>

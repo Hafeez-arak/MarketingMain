@@ -328,9 +328,20 @@ export async function disconnectAccount(workspaceId, accountId) {
 // `platform` and `accountType` are hints that let the server start the reads
 // before it has finished checking the account; it re-plans if they are wrong,
 // and never trusts them for which account is read.
-export async function fetchAccountAnalytics(workspaceId, accountId, days = 30, { platform = '', accountType = null } = {}) {
+/**
+ * @param {object|number} range A `{ days }` preset or a `{ from, to }` window.
+ *   A bare number is still accepted — several call sites pass one.
+ */
+export async function fetchAccountAnalytics(workspaceId, accountId, range = 30, { platform = '', accountType = null } = {}) {
+  // The two shapes stay apart across the wire so the server can resolve a
+  // preset against its own clock — see src/lib/dateRange.js.
+  const window = typeof range === 'number'
+    ? { days: range }
+    : (range?.from && range?.to
+      ? { from: range.from, to: range.to }
+      : { days: Number(range?.days) || 30 })
   return call('analytics', {
-    workspace_id: workspaceId, account_id: accountId, days,
+    workspace_id: workspaceId, account_id: accountId, ...window,
     platform: platform || undefined, account_type: accountType || undefined,
   })
 }

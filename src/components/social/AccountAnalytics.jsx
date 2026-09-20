@@ -7,6 +7,9 @@ import { publishConnectedAccounts } from '../../lib/useConnectedAccounts'
 import { profileUrlOf } from '../../lib/socialAnalytics'
 import { AnalyticsDashboard, DashboardSkeleton } from '../../pages/analytics/Dashboard'
 import { fmt, timeAgo, windowLabel } from '../../pages/analytics/format'
+import { RangePicker } from '../analytics/RangePicker'
+import { ReachSplit } from './ReachSplit'
+import { resolveRange } from '../../lib/dateRange'
 import { MetricLabel, ScopeBanner } from '../analytics/MetricLabel'
 import { LinkedInInsights } from './LinkedInInsights'
 
@@ -38,7 +41,13 @@ const INSIGHTS = [
 export function AccountAnalytics({ platform, accounts = [], loadingAccounts = false, refreshable = true, reloadKey = 0 }) {
   const { activeWorkspaceId } = useAuth()
   const [picked, setPicked] = useState('')
-  const [days, setDays] = useState(30)
+  const [range, setRange] = useState({ days: 30 })
+  // How long the chosen window is, for the strips that say so and for the
+  // Instagram cap warning. A fixed window counts its own days.
+  const days = resolveRange(range).days
+  // One comparable string, so a `{ days: 30 }` literal rebuilt on every render
+  // does not restart the request.
+  const rangeKey = range.from && range.to ? `${range.from}..${range.to}` : `d${range.days}`
   const [dash, setDash] = useState(null)
   const [loading, setLoading] = useState(false)
   const [syncing, setSyncing] = useState(false)
@@ -59,13 +68,13 @@ export function AccountAnalytics({ platform, accounts = [], loadingAccounts = fa
     if (!activeWorkspaceId || !accountId) return
     const n = ++seq.current
     setLoading(true)
-    const res = await fetchAccountAnalytics(activeWorkspaceId, accountId, days, {
+    const res = await fetchAccountAnalytics(activeWorkspaceId, accountId, range, {
       platform: accountPlatform, accountType,
     })
     if (n !== seq.current) return
     setDash(res)
     setLoading(false)
-  }, [activeWorkspaceId, accountId, days, accountPlatform, accountType])
+  }, [activeWorkspaceId, accountId, rangeKey, accountPlatform, accountType])
 
   // Deferred a tick, like the page's other first fetches: load() flips
   // `loading` before its first await.
@@ -120,11 +129,7 @@ export function AccountAnalytics({ platform, accounts = [], loadingAccounts = fa
             ))}
           </PillSelect>
         )}
-        <PillSelect value={String(days)} onChange={e => setDays(Number(e.target.value))} className="w-32">
-          <option value="7">Last 7 days</option>
-          <option value="30">Last 30 days</option>
-          <option value="90">Last 90 days</option>
-        </PillSelect>
+        <RangePicker value={range} onChange={setRange} />
         {(loading || syncing) && <Spinner size="sm" />}
         <div className="ml-auto flex items-center gap-3">
           {lastSync && <span className="text-[11px] text-text-tertiary">Zernio synced {timeAgo(lastSync)}</span>}
@@ -185,6 +190,11 @@ export function AccountAnalytics({ platform, accounts = [], loadingAccounts = fa
                   </div>
                 ))}
               </div>
+              {/* Instagram's only follower/non-follower split, directly under
+                  the Reach tile it divides. */}
+              <ReachSplit payload={current?.reachByFollowType}
+                windowText={windowLabel(current?.insightsFrom, current?.toDate, Math.min(days, 29))} />
+
               <div className="px-5 py-2.5 border-t border-border flex items-center gap-2 text-[11px] text-text-tertiary">
                 <IconBadge>{Icon.clock}</IconBadge>
                 <span>
