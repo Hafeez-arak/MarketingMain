@@ -117,3 +117,36 @@ export function timeAgo(iso) {
   if (h < 24) return `${h}h ago`
   return `${Math.round(h / 24)}d ago`
 }
+
+/**
+ * A span of seconds, as a person would say it.
+ *
+ * GA4 returns `averageSessionDuration` in seconds with a long fractional tail —
+ * `74.31707317073172` — and printing that raw is the kind of precision that
+ * makes a page look like it is showing you its working rather than an answer.
+ *
+ * @param {number} seconds
+ * @returns {string} e.g. `1m 14s`, or `43s` under a minute.
+ */
+export function duration(seconds) {
+  const s = Math.round(Number(seconds) || 0)
+  if (!s) return '0s'
+  const m = Math.floor(s / 60)
+  return m ? `${m}m ${String(s % 60).padStart(2, '0')}s` : `${s}s`
+}
+
+/**
+ * A count and its noun, agreeing.
+ *
+ * `fmt` abbreviates above a thousand, so the only number this has to get right
+ * is one — and "1 clicks" sitting under a carefully worded panel is the kind
+ * of detail that makes a reader trust the arithmetic above it slightly less.
+ *
+ * @param {number} n
+ * @param {string} word The singular form.
+ * @param {string} [suffix] What to add when there is not exactly one of them.
+ * @returns {string}
+ */
+export function plural(n, word, suffix = 's') {
+  return `${fmt(n)} ${word}${Number(n) === 1 ? '' : suffix}`
+}

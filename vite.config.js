@@ -246,6 +246,10 @@ function devAgentApi(env) {
     // working in production — which is the confusing direction for a bug to
     // run, and exactly what the META_IG_TOKEN note above is about.
     'GOOGLE_SA_KEY', 'GOOGLE_SC_SITE',
+    // GA4 reads with the SAME service account as Search Console, so only the
+    // property id is new here. It is a fallback: the brand's own
+    // customFields.ga4_property_id wins when it is set.
+    'GOOGLE_GA4_PROPERTY',
   ]) {
     if (env[key] && !process.env[key]) process.env[key] = env[key]
   }

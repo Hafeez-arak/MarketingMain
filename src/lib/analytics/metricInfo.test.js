@@ -62,8 +62,13 @@ describe('metricInfo', () => {
     // The whole point of the file: `reach` alone would have to describe both
     // the account-wide figure and the per-post sum, and could only be right
     // about one of them.
+    //
+    // `site` and `web` are the website's two scopes and are split for exactly
+    // the same reason: `site.clicks` is Google's count of a result being
+    // chosen and `web.sessions` is our tag's count of a visit, they are never
+    // equal, and one shared entry would have to be wrong about one of them.
     for (const key of METRIC_INFO_KEYS) {
-      expect(key, key).toMatch(/^(ig|li|post|row|home|calc)\.[a-z_]+$/)
+      expect(key, key).toMatch(/^(ig|li|post|row|home|calc|site|web)\.[a-z_]+$/)
     }
   })
 

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { foldFollowers, pct, windowLabel } from './format'
+import { foldFollowers, pct, windowLabel, plural } from './format'
 
 // ─── One number, printed one way ───────────────────────────────────────────
 //
@@ -130,5 +130,24 @@ describe('foldFollowers', () => {
 
   it('survives undefined members without throwing', () => {
     expect(() => foldFollowers([undefined], [undefined], [undefined])).not.toThrow()
+  })
+})
+
+describe('plural', () => {
+  it('drops the suffix for exactly one', () => {
+    expect(plural(1, 'click')).toBe('1 click')
+    expect(plural(0, 'click')).toBe('0 clicks')
+    expect(plural(2, 'click')).toBe('2 clicks')
+  })
+
+  // `fmt` abbreviates past a thousand, so the abbreviated form is never the
+  // singular one and must not lose its 's'.
+  it('keeps the suffix on an abbreviated count', () => {
+    expect(plural(1200, 'click')).toBe('1.2k clicks')
+  })
+
+  it('takes an irregular suffix', () => {
+    expect(plural(1, 'query', 'ies')).toBe('1 query')
+    expect(plural(3, 'quer', 'ies')).toBe('3 queries')
   })
 })
