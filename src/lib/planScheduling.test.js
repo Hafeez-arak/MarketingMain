@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest'
 
 vi.mock('./supabaseClient', () => ({ SUPABASE_URL: 'https://db.test', SUPABASE_ANON_KEY: 'anon' }))
 
-const { bookingFor, accountFor } = await import('./planScheduling')
+const { bookingFor, accountFor, bookPostAt } = await import('./planScheduling')
 
 // 2026-09-15 12:00 UTC = 15:00 in Riyadh.
 const NOW = Date.parse('2026-09-15T12:00:00Z')
@@ -50,5 +50,48 @@ describe('bookingFor', () => {
   it('needs a connected account and a date', () => {
     expect(bookingFor(row(), { accounts: [], now: NOW }).reason).toMatch(/No instagram account/)
     expect(bookingFor(row({ scheduled_date: null }), { accounts: [ig], now: NOW }).reason).toMatch(/No date/)
+  })
+})
+
+// ─── bookPostAt ────────────────────────────────────────────────────────────
+// The Schedule page's one write. Every branch below returns BEFORE any
+// network call, which is the point: the page must refuse a bad slot itself
+// rather than discovering it from a failed workflow run.
+describe('bookPostAt', () => {
+  const at = { dateKey: '2026-09-20', time: '19:00' }
+
+  it('refuses a post that has already gone out', async () => {
+    const res = await bookPostAt({ post: row({ publish_status: 'published' }), ...at, accounts: [ig], now: NOW })
+    expect(res.error).toMatch(/already published/i)
+  })
+
+  it('refuses a post that is publishing right now', async () => {
+    const res = await bookPostAt({ post: row({ publish_status: 'publishing' }), ...at, accounts: [ig], now: NOW })
+    expect(res.error).toMatch(/publishing right now/i)
+  })
+
+  it('refuses a slot in the past', async () => {
+    const res = await bookPostAt({
+      post: row(), dateKey: '2026-09-15', time: '09:00', accounts: [ig], now: NOW,
+    })
+    expect(res.error).toMatch(/already passed/i)
+  })
+
+  it('refuses an unparseable slot rather than booking midnight', async () => {
+    const res = await bookPostAt({ post: row(), dateKey: 'not-a-date', time: '19:00', accounts: [ig], now: NOW })
+    expect(res.error).toMatch(/not a valid slot/i)
+  })
+
+  it('says which account is missing rather than guessing one', async () => {
+    const res = await bookPostAt({ post: row(), ...at, accounts: [], now: NOW })
+    expect(res.error).toMatch(/no instagram account is connected/i)
+  })
+
+  it('will not book a protected platform', async () => {
+    const li = { platform: 'linkedin', is_active: true, zernio_account_id: 'acc-li' }
+    const res = await bookPostAt({
+      post: row({ platform: 'linkedin' }), ...at, accounts: [li], now: NOW,
+    })
+    expect(res.error).toMatch(/drafts/i)
   })
 })

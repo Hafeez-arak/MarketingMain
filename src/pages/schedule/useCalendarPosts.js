@@ -1,19 +1,31 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { fetchScheduledPosts, movePost, unschedulePost, moveKindFor } from '../../lib/scheduledPosts'
-import { brandWallToUtcISO } from '../../lib/brandTime'
+import { fetchScheduledPosts, unschedulePost } from '../../lib/scheduledPosts'
+import { bookPostAt } from '../../lib/planScheduling'
+import {
+  ON_CALENDAR_STATUSES, PENDING_STATUSES, APPROVED_STATUSES, needsAttention,
+} from '../../lib/postStage'
 
 // ─── The calendar's data ───────────────────────────────────────────────────
-// Two queries, because they are two genuinely different question shapes and a
-// range filter cannot answer both: everything with a slot inside the visible
-// window, and everything movable that has no slot at all (the staging tray you
-// drag FROM). A NULL scheduled_publish_at fails both gte and lte, so the tray
-// can never fall out of a widened range.
+// Two queries, because the page shows two genuinely different things:
+//
+//   posts    everything BOOKED in the visible window — publish_status
+//            'scheduled', 'publishing' or 'published'. These have a real slot
+//            that something will act on (or already did), which is the only
+//            honest definition of "on the calendar".
+//
+//   pending  approved posts that nothing is going to publish: never booked, or
+//            the booking failed. The strip. Not range-filtered, because the
+//            whole point is that they have no dependable time — a post whose
+//            planned slot passed in August still needs a person in September.
+//
+// A post therefore appears in exactly ONE of them. That is the change: the old
+// version showed every publish state on the grid and put every unscheduled
+// post — drafts, rejects, half-finished compositions — in the tray, so neither
+// surface answered a question anyone had.
 
-const TRAY_STATUSES = ['not_published', 'failed']
-
-export function useCalendarPosts({ workspaceId, accessToken, from, to, webhooks }) {
+export function useCalendarPosts({ workspaceId, accessToken, from, to, webhooks, accounts }) {
   const [posts, setPosts]         = useState([])
-  const [tray, setTray]           = useState([])
+  const [pending, setPending]     = useState([])
   const [error, setError]         = useState('')
   const [pendingId, setPendingId] = useState('')
   const [nonce, setNonce]         = useState(0)
@@ -21,7 +33,7 @@ export function useCalendarPosts({ workspaceId, accessToken, from, to, webhooks 
   const ready = !!(workspaceId && accessToken && from && to)
 
   // What we currently want on screen, as one comparable value. `nonce` is in
-  // here so an explicit reload after a move re-fetches the same window.
+  // here so an explicit reload after a booking re-fetches the same window.
   const wantKey = ready ? `${workspaceId}|${from}|${to}|${nonce}` : ''
   // What we have actually loaded. Written only after a fetch resolves.
   const [haveKey, setHaveKey] = useState('')
@@ -48,15 +60,21 @@ export function useCalendarPosts({ workspaceId, accessToken, from, to, webhooks 
     // synchronous write from the effect body.
     ;(async () => {
       try {
-        const [scheduled, unscheduled] = await Promise.all([
-          fetchScheduledPosts(workspaceId, accessToken, { from, to }),
+        const [booked, unbooked] = await Promise.all([
           fetchScheduledPosts(workspaceId, accessToken, {
-            unscheduled: true, publishStatus: TRAY_STATUSES, limit: 60,
+            from, to, publishStatus: ON_CALENDAR_STATUSES,
+          }),
+          fetchScheduledPosts(workspaceId, accessToken, {
+            publishStatus: PENDING_STATUSES, status: APPROVED_STATUSES, limit: 120,
           }),
         ])
         if (cancelled || latest.current !== wantKey) return
-        setPosts(scheduled)
-        setTray(unscheduled)
+        setPosts(booked)
+        // Filtered again here rather than trusting the query alone: `status`
+        // is blank on older rows, and needsAttention is the one rule the
+        // sidebar badge uses too. Two surfaces disagreeing about how many
+        // posts need you is worse than either number being slightly stale.
+        setPending(unbooked.filter(p => needsAttention(p)))
         setError('')
         setHaveKey(wantKey)
       } catch (err) {
@@ -74,45 +92,24 @@ export function useCalendarPosts({ workspaceId, accessToken, from, to, webhooks 
   // Called from event handlers, where setting state is exactly right.
   const reload = useCallback(() => setNonce(n => n + 1), [])
 
-  // Move a post to a brand-time slot.
+  // ── Give a post a slot, or change the one it has ────────────────────────
   //
-  // Optimistic, but ONLY on the local path. A Zernio move has to cancel and
-  // re-book at the platform, which genuinely can fail, and painting the new
-  // time before Zernio has agreed to it is the same split-brain this whole
-  // change set exists to remove. So local moves paint immediately; Zernio
-  // moves show a pending chip and paint when the server confirms.
-  const move = useCallback(async (post, dateKey, time) => {
-    const plan = moveKindFor(post)
-    if (plan.kind === 'blocked') return { error: plan.reason }
-
-    const whenISO = brandWallToUtcISO(dateKey, time)
-    if (!whenISO) return { error: `Not a valid slot: ${dateKey} ${time}` }
-
-    const prevPosts = posts
-    const prevTray  = tray
-    if (plan.kind === 'local') {
-      setPosts(prev => [...prev.filter(p => p.id !== post.id), { ...post, scheduled_publish_at: whenISO }])
-      setTray(prev => prev.filter(p => p.id !== post.id))
-    }
+  // Never optimistic. Booking is a real outward action — Zernio has to accept
+  // the slot, and re-booking cancels an existing one first — so painting the
+  // new time before the workflow has agreed to it would recreate exactly the
+  // split brain this page exists to show. The chip goes pending instead, and
+  // the refetch after is what paints.
+  const book = useCallback(async (post, dateKey, time) => {
     setPendingId(post.id)
-
-    const res = await movePost({ accessToken, post, dateKey, time, webhooks, workspaceId })
+    const res = await bookPostAt({ post, dateKey, time, accounts, workspaceId })
     setPendingId('')
-
-    if (res.error) {
-      // Put the world back exactly as it was, then let the caller say why.
-      setPosts(prevPosts)
-      setTray(prevTray)
-      return res
-    }
-    // Refetch rather than trusting the optimistic copy: the workflow may also
-    // have changed publish_status and zernio_post_id, and a chip still reading
-    // "Scheduled" over a row that now says "failed" is worse than a flicker.
-    reload()
+    if (!res.error) reload()
     return res
-  }, [posts, tray, accessToken, webhooks, workspaceId, reload])
+  }, [accounts, workspaceId, reload])
 
-  const unschedule = useCallback(async (post) => {
+  // Clear a booked slot. The post does not disappear — it drops back into the
+  // strip, where it is visibly waiting on a person rather than silently gone.
+  const cancel = useCallback(async (post) => {
     setPendingId(post.id)
     const res = await unschedulePost({ accessToken, post, webhooks, workspaceId })
     setPendingId('')
@@ -123,8 +120,8 @@ export function useCalendarPosts({ workspaceId, accessToken, from, to, webhooks 
   return {
     // Emptiness is derived rather than stored, so the previous workspace's
     // rows can never render for a frame under a new workspace's heading.
-    posts: ready ? posts : [],
-    tray:  ready ? tray  : [],
-    loading, error, pendingId, reload, move, unschedule,
+    posts:   ready ? posts   : [],
+    pending: ready ? pending : [],
+    loading, error, pendingId, reload, book, cancel,
   }
 }

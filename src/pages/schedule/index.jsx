@@ -2,44 +2,65 @@ import { useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useApp } from '../../store/app'
 import { useAuth } from '../../store/auth'
-import { Card, Button, PageHeader, Spinner, PostImage, Skeleton } from '../../components/ui/index'
+import { Card, Button, PageHeader, Spinner, Skeleton } from '../../components/ui/index'
 import {
   MONTH_LABELS, indexByDay, dayEntries, findCrowding,
-  summarize, platformColor, publishState, addDays, startOfWeek, isPastSlot,
+  platformColor, addDays, startOfWeek, isPastSlot,
 } from './calendarModel'
 import { MonthGrid, DEFAULT_DROP_TIME } from './MonthGrid'
 import { WeekGrid } from './WeekGrid'
-import { TrayChip } from './PostChip'
+import { TrayChip, PostChip } from './PostChip'
+import { PostPanel } from './PostPanel'
 import { useCalendarPosts } from './useCalendarPosts'
+import { ComposerHost } from '../../components/composer/ComposerHost'
+import { useConnectedAccounts } from '../../lib/useConnectedAccounts'
+import { useUnseenPublished, markSeen, markAllSeen } from '../../lib/publishSeen'
+import { scheduleStage } from '../../lib/postStage'
+import { LIVE_PLATFORMS, PLATFORM_META } from '../../lib/utils'
 import {
   brandMonthRangeUTC, brandRangeUTC, brandTodayKey, formatBrandDateTime,
-  formatBrandTime, utcToBrandParts, BRAND_TIMEZONE_LABEL,
+  utcToBrandParts, BRAND_TIMEZONE_LABEL,
 } from '../../lib/brandTime'
-import { moveKindFor } from '../../lib/scheduledPosts'
 
 // ─── Content calendar ──────────────────────────────────────────────────────
-// Reads the `scheduled_posts` view — one ordered query across all three post
-// tables — so every platform appears, including the TikTok and Snapchat posts
-// that a hand-written union kept invisible. Every date and hour on this page
-// is BRAND time (Asia/Riyadh); see lib/brandTime.js for why that is a decision
-// rather than a formatting detail.
+// What this page is FOR: everything that is going out, when it goes out, and
+// the short list of approved posts that nothing is going to send.
 //
-// This page previously rendered `state.posts` and the two localStorage
-// monthly-plan maps, which meant it showed planning artifacts and never showed
-// a single real scheduled post.
+// Approving a post in the monthly planner IS scheduling it — saving a plan
+// books every approved post at Zernio for the moment it was planned (see
+// lib/planScheduling). So this page draws no review distinction at all. It
+// draws the only one that matters afterwards:
+//
+//   on the calendar   booked, in flight, or published. Blue, amber, green.
+//   in the strip      approved, but unbooked or failed. Red. Needs a person.
+//
+// Colour carries the state, so the grid is readable without hovering anything,
+// and a green chip is always in the past because a post only turns green by
+// having gone out.
+//
+// It used to show every publish state on the grid with the platform as the
+// only colour, and staged every unscheduled post — drafts and rejects included
+// — in a drag-me-somewhere tray. Neither surface answered a question anyone
+// had, and clicking a post opened its DAY rather than the post.
 
-const PLATFORM_FILTERS = ['all', 'instagram', 'tiktok', 'snapchat', 'facebook', 'x']
+const PLATFORM_FILTERS = ['all', ...LIVE_PLATFORMS]
 
 export function Schedule() {
   const { state } = useApp()
   const { activeWorkspaceId, accessToken } = useAuth()
   const navigate = useNavigate()
+  // Every connected account, across platforms — booking a post needs to know
+  // which account it goes out as, and that answer is not per-platform here.
+  const { allAccounts } = useConnectedAccounts()
 
   const today = brandTodayKey()
   const [view, setView]             = useState('month')      // 'month' | 'week'
   const [anchor, setAnchor]         = useState(today)        // any date inside the shown period
   const [platform, setPlatform]     = useState('all')
-  const [selectedDay, setSelectedDay] = useState(null)
+  const [selectedDay, setSelectedDay] = useState(null)       // highlighted cell
+  const [dayList, setDayList]       = useState(null)         // day panel, if open
+  const [openPost, setOpenPost]     = useState(null)         // the post panel
+  const [editing, setEditing]       = useState(null)         // handed to the composer
   const [dragging, setDragging]     = useState(null)
   const [notice, setNotice]         = useState(null)         // { tone, text }
   const [platformPicker, setPlatformPicker] = useState(false)
@@ -58,20 +79,62 @@ export function Schedule() {
     return brandRangeUTC(addDays(start, -7), addDays(start, 13))
   }, [view, year, month, anchor])
 
-  const { posts, tray, loading, error, pendingId, move, unschedule } =
+  const { posts, pending, loading, error, pendingId, book, cancel, reload } =
     useCalendarPosts({
       workspaceId: activeWorkspaceId, accessToken,
       from: range.from, to: range.to, webhooks: state.webhooks,
+      accounts: allAccounts,
     })
+
+  // Posts published since you last looked. The bell names them; here they are
+  // drawn darker until opened, so "it published" and "which one" are the same
+  // piece of information rather than two.
+  const unseen = useUnseenPublished(activeWorkspaceId)
 
   const shown = useMemo(
     () => (platform === 'all' ? posts : posts.filter(p => p.platform === platform)),
     [posts, platform])
+  const shownPending = useMemo(
+    () => (platform === 'all' ? pending : pending.filter(p => p.platform === platform)),
+    [pending, platform])
 
-  const index    = useMemo(() => indexByDay(shown), [shown])
-  const crowded  = useMemo(() => findCrowding(shown), [shown])
-  const counts   = useMemo(() => summarize(shown), [shown])
-  const byId     = useMemo(() => new Map([...posts, ...tray].map(p => [p.id, p])), [posts, tray])
+  const index   = useMemo(() => indexByDay(shown), [shown])
+  const crowded = useMemo(() => findCrowding(shown), [shown])
+  const byId    = useMemo(() => new Map([...posts, ...pending].map(p => [p.id, p])), [posts, pending])
+
+  // Counts describe what is on the grid, filter included, so the numbers
+  // always match what is underneath them.
+  const counts = useMemo(() => {
+    const out = { booked: 0, sending: 0, published: 0, sent: 0 }
+    for (const p of shown) {
+      const s = scheduleStage(p)
+      if (s in out) out[s]++
+    }
+    return out
+  }, [shown])
+
+  // Does the period on screen contain today? Drives the Today button's own
+  // state — the button worked before, it just had no way of saying so when you
+  // were already looking at today, which is indistinguishable from broken.
+  const showingToday = view === 'month'
+    ? today.startsWith(`${year}-${String(month + 1).padStart(2, '0')}`)
+    : (() => { const s = startOfWeek(anchor); return today >= s && today <= addDays(s, 6) })()
+
+  function goToToday() {
+    setAnchor(today)
+    // Visible feedback, always: the cell is highlighted whether or not the
+    // period changed, so pressing this never looks like nothing happened.
+    setSelectedDay(today)
+  }
+
+  // ── Opening a post ───────────────────────────────────────────────────────
+  function open(post) {
+    setOpenPost(post)
+    setDayList(null)
+    // Opening it IS seeing it. Clearing on open rather than on close means the
+    // dot goes away when you look, not when you tidy up.
+    if (activeWorkspaceId) markSeen(activeWorkspaceId, post.id)
+  }
 
   // ── Moving a post ────────────────────────────────────────────────────────
   // A drop on a month cell carries no hour, so the post keeps its own; one
@@ -82,9 +145,6 @@ export function Schedule() {
     return existing ? existing.time : DEFAULT_DROP_TIME
   }
 
-  // Plain functions rather than useCallback: neither grid is memoised, so a
-  // stable identity buys nothing, and threading runMove through a dependency
-  // array only creates a way for the two to fall out of step.
   function handleDrop(postId, dateKey, time) {
     const post = byId.get(postId)
     if (!post) return
@@ -93,38 +153,40 @@ export function Schedule() {
       setNotice({ tone: 'error', text: 'That slot is in the past — pick a future time.' })
       return
     }
-    const kind = moveKindFor(post).kind
-    if (kind === 'blocked') {
-      setNotice({ tone: 'error', text: moveKindFor(post).reason })
-      return
-    }
-    // Every movable post now moves on the drop, including scheduled ones.
-    // This used to stop and confirm, because under Zernio a scheduled move was
-    // a real outward action — cancel the booked post at the platform, create a
-    // new one — that could leave the post scheduled nowhere if the second half
-    // failed. Instagram's Graph API cannot schedule, so we hold the slot
-    // ourselves and a move is one claimed UPDATE: nothing leaves the building,
-    // nothing can half-succeed, and an undo is just another drag. A dialog
-    // warning about a cancel-and-rebook that no longer happens would be
-    // teaching the wrong mental model, not adding safety.
-    void runMove(post, dateKey, resolved)
+    void runBook(post, dateKey, resolved)
   }
 
-  async function runMove(post, dateKey, time) {
+  async function runBook(post, dateKey, time) {
     setNotice(null)
-    const res = await move(post, dateKey, time)
+    const res = await book(post, dateKey, time)
     if (res?.error) {
       setNotice({
         tone: 'error',
         text: res.unscheduled
-          ? `${res.error}`
-          : `Could not move that post: ${res.error}`,
+          // The workflow cancelled the old slot and could not book the new
+          // one. The post is booked NOWHERE, and saying only "could not move"
+          // would leave it looking unchanged.
+          ? `${res.error} It is no longer booked at all — it is in the strip above.`
+          : `Could not schedule that post: ${res.error}`,
       })
-    } else if (res?.movedVia === 'workflow') {
-      setNotice({ tone: 'ok', text: `Rescheduled for ${formatBrandDateTime(res.scheduledPublishAt)}.` })
-    } else {
-      setNotice({ tone: 'ok', text: `Moved to ${formatBrandDateTime(res.scheduledPublishAt)}.` })
+      return
     }
+    setOpenPost(null)
+    setNotice({
+      tone: 'ok',
+      text: res?.rebooked
+        ? `Moved to ${formatBrandDateTime(res.scheduledPublishAt)}.`
+        : `Booked for ${formatBrandDateTime(res.scheduledPublishAt)}.`,
+    })
+  }
+
+  async function runCancel(post) {
+    setNotice(null)
+    const res = await cancel(post)
+    setOpenPost(null)
+    setNotice(res?.error
+      ? { tone: 'error', text: res.error }
+      : { tone: 'ok', text: 'Taken off the schedule — it is waiting in the strip above.' })
   }
 
   // ── Period navigation ────────────────────────────────────────────────────
@@ -147,12 +209,14 @@ export function Schedule() {
         return `${fmt(s)} – ${fmt(e)}, ${e.slice(0, 4)}`
       })()
 
+  const unseenCount = unseen.length
+
   return (
     <div className="max-w-7xl space-y-4">
 
       <PageHeader
         title="Content Calendar"
-        subtitle={`Every scheduled post, across all platforms. Times are ${BRAND_TIMEZONE_LABEL} (Asia/Riyadh).`}>
+        subtitle={`Everything booked to go out, and what still needs a time. Times are ${BRAND_TIMEZONE_LABEL} (Asia/Riyadh).`}>
         <div className="flex">
           {[{ key: 'month', label: 'Month' }, { key: 'week', label: 'Week' }].map(v => (
             <button key={v.key} onClick={() => setView(v.key)}
@@ -170,7 +234,7 @@ export function Schedule() {
         </Button>
       </PageHeader>
 
-      {/* Result of the last move, and any load failure. */}
+      {/* Result of the last action, and any load failure. */}
       {(notice || error) && (
         <div className={`px-4 py-2.5 border text-xs flex items-start gap-2
           ${notice?.tone === 'ok'
@@ -183,45 +247,73 @@ export function Schedule() {
         </div>
       )}
 
-      {/* Counts, for what is actually in view — filter included, so the numbers
-          always describe the grid below them. */}
+      {/* Newly published, since you last looked. The bell says it happened;
+          this says how many and gets you to them. */}
+      {unseenCount > 0 && (
+        <div className="px-4 py-2.5 border border-green-200 bg-green-50 text-xs flex items-center gap-2">
+          <span className="w-2 h-2 rounded-full bg-green-600 flex-shrink-0" />
+          <span className="flex-1 text-green-800">
+            {unseenCount} post{unseenCount !== 1 ? 's' : ''} published since you last looked — shown in solid green below.
+          </span>
+          <button onClick={() => markAllSeen(activeWorkspaceId)}
+            className="font-semibold text-green-800 underline">Mark all seen</button>
+        </div>
+      )}
+
+      {/* Counts, for what is actually in view — filter included. */}
       <Card className="overflow-hidden">
-        <div className="grid grid-cols-2 sm:grid-cols-5 divide-y sm:divide-y-0 sm:divide-x divide-border">
+        <div className="grid grid-cols-2 sm:grid-cols-4 divide-y sm:divide-y-0 sm:divide-x divide-border">
           {[
-            { label: 'Scheduled', value: counts.scheduled },
-            { label: 'Published', value: counts.published },
-            { label: 'Publishing', value: counts.publishing },
-            { label: 'Failed',    value: counts.failed },
-            { label: 'Unscheduled', value: tray.length },
+            { label: 'Scheduled',  value: counts.booked,  tone: '#2563eb' },
+            { label: 'Publishing', value: counts.sending, tone: '#d97706' },
+            {
+              label: 'Gone out',
+              // Both have left, so both belong in this number — leaving the
+              // unconfirmed ones out would make the tiles disagree with the
+              // grid underneath them. The note is what keeps the number from
+              // claiming more than we know.
+              value: counts.published + counts.sent,
+              tone: '#16a34a',
+              note: counts.sent > 0
+                ? `${counts.sent} not confirmed yet`
+                : '',
+            },
+            { label: 'Needs a time', value: shownPending.length, tone: '#dc2626' },
           ].map(s => (
             <div key={s.label} className="p-4">
-              <p className="eyebrow mb-2">{s.label}</p>
+              <div className="flex items-center gap-1.5 mb-2">
+                <span className="w-2 h-2 flex-shrink-0" style={{ background: s.tone }} />
+                <p className="eyebrow">{s.label}</p>
+              </div>
               {loading
                 ? <Skeleton className="h-6 w-10" />
                 : <p className="text-2xl font-bold text-text leading-none tabular-nums">{s.value}</p>}
+              {!loading && s.note && (
+                <p className="text-[10px] text-text-tertiary mt-1.5">{s.note}</p>
+              )}
             </div>
           ))}
         </div>
       </Card>
 
-      {/* Staging tray — posts that exist and are ready but have no slot. This
-          is what makes the calendar an editor rather than a report: drag one
-          onto a day (or, in week view, onto an hour) to schedule it. */}
-      {tray.length > 0 && (
-        <Card className="overflow-hidden">
-          <div className="px-4 py-2.5 border-b border-border bg-surface-subtle flex items-center gap-2">
-            <p className="eyebrow text-text-tertiary">Not scheduled yet</p>
-            <span className="text-[10px] text-text-tertiary">
-              {tray.length} post{tray.length !== 1 ? 's' : ''} · drag onto the calendar to book a slot
+      {/* ── The strip ──
+          Approved posts that nothing is going to publish. Not a drag source:
+          the decision these are waiting on is a date and a time, and a drag
+          guesses the second one from wherever the cursor was. Click one. */}
+      {shownPending.length > 0 && (
+        <Card className="overflow-hidden border-red-200">
+          <div className="px-4 py-2.5 border-b border-border bg-red-50 flex items-center gap-2 flex-wrap">
+            <p className="eyebrow text-red-800">Not scheduled yet</p>
+            <span className="text-[11px] text-red-700">
+              {shownPending.length} approved post{shownPending.length !== 1 ? 's' : ''} that nothing will publish —
+              open one to give it a time.
             </span>
           </div>
           <div className="p-3 flex gap-2 overflow-x-auto">
-            {tray.map(post => (
+            {shownPending.map(post => (
               <TrayChip key={post.id} post={post}
                 pending={pendingId === post.id}
-                onDragStart={setDragging}
-                onDragEnd={() => setDragging(null)}
-                onOpen={() => setSelectedDay(null)} />
+                onOpen={open} />
             ))}
           </div>
         </Card>
@@ -250,8 +342,15 @@ export function Schedule() {
                 <option key={p} value={p}>{p === 'all' ? 'All platforms' : platformColor(p).label}</option>
               ))}
             </select>
-            <button onClick={() => setAnchor(today)}
-              className="px-3 py-1.5 border border-border bg-white text-xs font-semibold text-text-secondary hover:text-amber-800 hover:border-amber-700 transition-colors">
+            {/* Says where it takes you, and shows when you are already there.
+                As a bare "Today" that jumped to a month you were looking at
+                anyway, it was indistinguishable from a dead button. */}
+            <button onClick={goToToday}
+              title={showingToday ? "Highlight today's date" : `Jump to ${today}`}
+              className={`px-3 py-1.5 border text-xs font-semibold transition-colors
+                ${showingToday
+                  ? 'border-amber-700 bg-amber-50 text-amber-800'
+                  : 'border-border bg-white text-text-secondary hover:text-amber-800 hover:border-amber-700'}`}>
               Today
             </button>
           </div>
@@ -261,39 +360,68 @@ export function Schedule() {
           <MonthGrid
             year={year} month={month} index={index} crowded={crowded}
             pendingId={pendingId} selectedDay={selectedDay} draggingPost={dragging}
-            onSelectDay={setSelectedDay} onDropPost={handleDrop}
-            onOpenPost={p => setSelectedDay(utcToBrandParts(p.scheduled_publish_at)?.dateKey || null)} />
+            unseen={unseen}
+            onSelectDay={key => { setSelectedDay(key); setDayList(key) }}
+            onDropPost={handleDrop}
+            onDragStart={setDragging} onDragEnd={() => setDragging(null)}
+            onOpenPost={open} />
         ) : (
           <WeekGrid
             anchorDate={anchor} index={index} crowded={crowded}
             pendingId={pendingId} draggingPost={dragging}
-            onSelectDay={setSelectedDay} onDropPost={handleDrop}
-            onOpenPost={p => setSelectedDay(utcToBrandParts(p.scheduled_publish_at)?.dateKey || null)} />
+            unseen={unseen}
+            onSelectDay={key => { setSelectedDay(key); setDayList(key) }}
+            onDropPost={handleDrop}
+            onDragStart={setDragging} onDragEnd={() => setDragging(null)}
+            onOpenPost={open} />
         )}
       </Card>
 
       {!loading && shown.length === 0 && (
         <Card className="p-12 text-center">
-          <p className="font-semibold text-text text-sm mb-1">Nothing scheduled in this period</p>
+          <p className="font-semibold text-text text-sm mb-1">Nothing booked in this period</p>
           <p className="text-sm text-text-secondary">
-            Approve posts in Approvals, then drag them here from the tray above — or schedule them directly.
+            {shownPending.length > 0
+              ? 'The posts in the strip above are approved but have no time yet — open one to schedule it.'
+              : 'Approve a month in Content Generation and its posts are booked here automatically.'}
           </p>
         </Card>
       )}
 
-      {selectedDay && (
+      {/* Everything on one day. Reached by clicking a date, or "+N more" in a
+          crowded cell — the case a month cell physically cannot show. */}
+      {dayList && (
         <DayPanel
-          dateKey={selectedDay} entries={dayEntries(index, selectedDay)}
-          crowded={crowded} pendingId={pendingId}
-          onClose={() => setSelectedDay(null)}
-          onMove={(post, dateKey, time) => handleDrop(post.id, dateKey, time)}
-          onUnschedule={async post => {
-            const res = await unschedule(post)
-            setNotice(res?.error
-              ? { tone: 'error', text: res.error }
-              : { tone: 'ok', text: 'Slot cleared — the post is back in the tray.' })
-          }} />
+          dateKey={dayList} entries={dayEntries(index, dayList)}
+          crowded={crowded} pendingId={pendingId} unseen={unseen}
+          onClose={() => setDayList(null)}
+          onOpenPost={open} />
       )}
+
+      {openPost && (
+        <PostPanel
+          // Keyed, so opening a different post builds a fresh panel rather than
+          // reusing the last one's date and time boxes.
+          key={openPost.id}
+          post={byId.get(openPost.id) || openPost}
+          busy={pendingId === openPost.id}
+          onClose={() => setOpenPost(null)}
+          onBook={(post, date, time) => void runBook(post, date, time)}
+          onCancel={post => void runCancel(post)}
+          onEdit={post => { setOpenPost(null); setEditing(post) }} />
+      )}
+
+      {/* The composer, for changing the words or the picture. Mounted without
+          its own button — it opens only when a post is handed to it, and the
+          `key` forces a fresh one per post so a second edit never reopens on
+          the first post's draft state. */}
+      <ComposerHost
+        key={editing?.id || 'idle'}
+        trigger={false}
+        platform={editing?.platform || 'instagram'}
+        openPost={editing}
+        onOpenPostHandled={() => setEditing(null)}
+        onDone={reload} />
 
       {platformPicker && (
         <PlatformPicker
@@ -305,13 +433,11 @@ export function Schedule() {
 }
 
 // ─── Day panel ─────────────────────────────────────────────────────────────
-// Everything on one brand day, with the time each post goes out and a way to
-// change it that does not require a drag — a keyboard user has to be able to
-// reschedule too, and a 15-minute snap is not a precise enough instrument for
-// "make it exactly 19:05".
-function DayPanel({ dateKey, entries, crowded, pendingId, onClose, onMove, onUnschedule }) {
-  const [editing, setEditing] = useState(null)   // post id
-  const [draftTime, setDraftTime] = useState('')
+// Everything booked on one brand day. A list, not an editor: every row opens
+// the post, which is where the time and the cancel live. It used to carry its
+// own inline time editor, which was a second place that knew how to reschedule
+// and could drift from the one in the post itself.
+function DayPanel({ dateKey, entries, crowded, pendingId, unseen, onClose, onOpenPost }) {
   const label = new Date(`${dateKey}T12:00:00Z`).toLocaleDateString('en-US', {
     weekday: 'long', month: 'long', day: 'numeric', year: 'numeric', timeZone: 'UTC',
   })
@@ -320,7 +446,7 @@ function DayPanel({ dateKey, entries, crowded, pendingId, onClose, onMove, onUns
     <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
       style={{ background: 'rgba(28,35,33,0.45)' }}
       onClick={e => { if (e.target === e.currentTarget) onClose() }}>
-      <div style={{ width: '720px', maxHeight: '82vh' }}
+      <div style={{ width: '560px', maxHeight: '82vh' }}
         className="bg-white border border-border shadow-dropdown flex flex-col overflow-hidden animate-fade-scale">
 
         <div className="flex items-center justify-between px-5 py-4 flex-shrink-0 border-b border-border bg-surface-subtle">
@@ -328,98 +454,33 @@ function DayPanel({ dateKey, entries, crowded, pendingId, onClose, onMove, onUns
             <p className="eyebrow text-text-tertiary mb-1.5">Content calendar · {BRAND_TIMEZONE_LABEL}</p>
             <h3 className="font-semibold text-sm text-text">{label}</h3>
             <p className="text-xs text-text-tertiary mt-0.5">
-              {entries.length === 0 ? 'Nothing scheduled' : `${entries.length} post${entries.length !== 1 ? 's' : ''}`}
+              {entries.length === 0 ? 'Nothing booked' : `${entries.length} post${entries.length !== 1 ? 's' : ''}`}
             </p>
           </div>
-          <button onClick={onClose}
+          <button onClick={onClose} aria-label="Close"
             className="w-8 h-8 flex items-center justify-center text-text-tertiary hover:bg-stone-100 transition-colors">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>
           </button>
         </div>
 
-        <div className="overflow-y-auto flex-1 divide-y divide-border">
+        <div className="overflow-y-auto flex-1 p-3 space-y-1.5">
           {entries.length === 0 && (
             <p className="py-14 text-center text-sm text-text-secondary">
               Nothing goes out on this day.
             </p>
           )}
-          {entries.map(({ post, time }) => {
-            const pc = platformColor(post.platform)
-            const st = publishState(post.publish_status)
-            const plan = moveKindFor(post)
-            const isEditing = editing === post.id
-            return (
-              <div key={post.id} className="p-4 flex gap-3">
-                <div className="w-1 self-stretch flex-shrink-0" style={{ background: pc.dot }} />
-                {post.image_url
-                  ? <PostImage src={post.image_url} alt="" className="w-14 h-14 object-cover flex-shrink-0 border border-border" />
-                  : <div className="w-14 h-14 flex items-center justify-center flex-shrink-0 border border-border text-lg"
-                      style={{ background: pc.light }}>{post.video_url ? '🎬' : '📋'}</div>}
+          {entries.map(({ post, time }) => (
+            <PostChip key={post.id}
+              post={post} time={time}
+              crowded={crowded.has(post.id)}
+              pending={pendingId === post.id}
+              unseen={unseen.includes(post.id)}
+              onOpen={onOpenPost} />
+          ))}
+        </div>
 
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-1 flex-wrap">
-                    <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: pc.dot }}>{pc.label}</span>
-                    <span className={`text-[10px] font-bold uppercase tracking-[0.08em] px-1.5 py-0.5 ${st.cls}`}>{st.label}</span>
-                    <span className="text-[11px] font-semibold tabular-nums text-text-secondary">{formatBrandTime(time)}</span>
-                    {crowded.has(post.id) && (
-                      <span className="text-[9px] font-bold text-amber-700 bg-amber-50 px-1.5 py-0.5">
-                        within an hour of another {pc.label} post
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-xs text-text leading-relaxed line-clamp-2">
-                    {post.caption || post.topic || 'No caption yet'}
-                  </p>
-                  {post.publish_error && (
-                    <p className="text-[11px] text-red-600 mt-1.5 leading-relaxed">{post.publish_error}</p>
-                  )}
-
-                  <div className="flex items-center gap-2 mt-2 flex-wrap">
-                    {isEditing ? (
-                      <>
-                        <input type="time" value={draftTime} onChange={e => setDraftTime(e.target.value)}
-                          className="text-xs border border-border px-2 py-1" />
-                        <span className="text-[10px] text-text-tertiary">{BRAND_TIMEZONE_LABEL}</span>
-                        <button
-                          onClick={() => { setEditing(null); onMove(post, dateKey, draftTime) }}
-                          disabled={!draftTime}
-                          className="text-[11px] font-semibold px-2 py-1 border border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100 disabled:opacity-40">
-                          Save time
-                        </button>
-                        <button onClick={() => setEditing(null)}
-                          className="text-[11px] px-2 py-1 border border-border text-text-secondary hover:bg-surface-subtle">
-                          Cancel
-                        </button>
-                      </>
-                    ) : (
-                      <>
-                        <button
-                          onClick={() => { setEditing(post.id); setDraftTime(time) }}
-                          disabled={plan.kind === 'blocked' || pendingId === post.id}
-                          title={plan.kind === 'blocked' ? plan.reason : ''}
-                          className="text-[11px] font-semibold px-2 py-1 border border-border text-text-secondary hover:bg-surface-subtle disabled:opacity-40">
-                          Change time
-                        </button>
-                        <button
-                          onClick={() => onUnschedule(post)}
-                          disabled={plan.kind === 'blocked' || pendingId === post.id}
-                          title={plan.kind === 'blocked' ? plan.reason : ''}
-                          className="text-[11px] px-2 py-1 border border-border text-text-secondary hover:bg-surface-subtle disabled:opacity-40">
-                          Unschedule
-                        </button>
-                        {plan.kind === 'remote' && (
-                          <span className="text-[10px] text-text-tertiary">Queued to publish at this time</span>
-                        )}
-                        {plan.kind === 'blocked' && (
-                          <span className="text-[10px] text-text-tertiary">{plan.reason}</span>
-                        )}
-                      </>
-                    )}
-                  </div>
-                </div>
-              </div>
-            )
-          })}
+        <div className="px-5 py-3 border-t border-border flex-shrink-0">
+          <p className="text-[11px] text-text-tertiary">Click a post to view it, change its time, or take it off the schedule.</p>
         </div>
       </div>
     </div>
@@ -428,11 +489,14 @@ function DayPanel({ dateKey, entries, crowded, pendingId, onClose, onMove, onUns
 
 
 // ─── Platform picker ───────────────────────────────────────────────────────
-const NEW_POST_PLATFORMS = [
-  { key: 'instagram', label: 'Instagram', abbr: 'IG', bg: '#E1306C', desc: 'Posts, Reels, Stories' },
-  { key: 'tiktok',    label: 'TikTok',    abbr: 'TT', bg: '#010101', desc: 'Videos' },
-  { key: 'snapchat',  label: 'Snapchat',  abbr: 'SC', bg: '#B8A400', desc: 'Spotlight, Stories' },
-]
+// Built from LIVE_PLATFORMS, so it offers exactly what the app can publish to.
+// It used to be a hand-written list — Instagram, TikTok, Snapchat — which
+// offered a platform that cannot be connected and omitted LinkedIn, which can.
+const NEW_POST_DESC = {
+  instagram: 'Posts, Reels, Carousels',
+  tiktok:    'Videos',
+  linkedin:  'Company page posts',
+}
 
 function PlatformPicker({ onClose, onPick }) {
   return (
@@ -445,23 +509,26 @@ function PlatformPicker({ onClose, onPick }) {
             <p className="eyebrow text-amber-600 mb-1">New post</p>
             <h3 className="font-semibold text-sm text-text">Choose a platform</h3>
           </div>
-          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center text-text-tertiary hover:bg-stone-100 transition-colors">
+          <button onClick={onClose} aria-label="Close" className="w-8 h-8 flex items-center justify-center text-text-tertiary hover:bg-stone-100 transition-colors">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>
           </button>
         </div>
         <div className="p-5">
-          {NEW_POST_PLATFORMS.map(p => (
-            <button key={p.key} onClick={() => onPick(p.key)}
-              className="flex items-center gap-3 p-4 border border-border -mt-px first:mt-0 hover:bg-surface-subtle hover:border-stone-400 transition-colors text-left group w-full">
-              <div className="w-10 h-10 flex items-center justify-center text-white text-xs font-bold flex-shrink-0"
-                style={{ background: p.bg }}>{p.abbr}</div>
-              <div className="min-w-0">
-                <p className="text-sm font-semibold text-text group-hover:text-amber-700 transition-colors">{p.label}</p>
-                <p className="text-[10px] text-text-tertiary">{p.desc}</p>
-              </div>
-              <svg className="w-4 h-4 text-text-disabled ml-auto flex-shrink-0 group-hover:text-amber-600 transition-colors" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg>
-            </button>
-          ))}
+          {LIVE_PLATFORMS.map(key => {
+            const meta = PLATFORM_META[key]
+            return (
+              <button key={key} onClick={() => onPick(key)}
+                className="flex items-center gap-3 p-4 border border-border -mt-px first:mt-0 hover:bg-surface-subtle hover:border-stone-400 transition-colors text-left group w-full">
+                <div className="w-10 h-10 flex items-center justify-center text-white text-xs font-bold flex-shrink-0"
+                  style={{ background: meta.color }}>{meta.abbr}</div>
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-text group-hover:text-amber-700 transition-colors">{meta.label}</p>
+                  <p className="text-[10px] text-text-tertiary">{NEW_POST_DESC[key] || 'Posts'}</p>
+                </div>
+                <svg className="w-4 h-4 text-text-disabled ml-auto flex-shrink-0 group-hover:text-amber-600 transition-colors" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg>
+              </button>
+            )
+          })}
         </div>
       </div>
     </div>

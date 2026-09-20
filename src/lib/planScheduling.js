@@ -123,3 +123,66 @@ function wallFromInstant(value) {
   const p = utcToBrandInputs(value)
   return p.date ? `${p.date}T${p.time}` : undefined
 }
+
+// ─── Booking one post at a slot a person just chose ────────────────────────
+// What the Schedule page calls when you give a pending post a time, or change
+// a booked one's time.
+//
+// This exists because movePost (lib/scheduledPosts) cannot do it. For a post
+// that is not yet booked, movePost takes its "local" branch and PATCHes
+// scheduled_publish_at — our copy of the time — and stops. Nothing at Zernio
+// ever hears about it, so the post sits on the calendar looking scheduled and
+// is never sent. That is precisely how a post ends up "planned but not booked",
+// and a calendar whose whole job is to say what is going out must not be able
+// to manufacture one.
+//
+// So a slot chosen here goes through the same publishComposed path the planner
+// uses: the row is claimed atomically, Zernio books it, and publish_status
+// becomes 'scheduled' because the workflow said so rather than because we
+// assumed it.
+export async function bookPostAt({ post, dateKey, time, accounts = [], workspaceId, now = Date.now() }) {
+  const lock = postLock(post, now)
+  if (lock.locked) return { error: lock.reason }
+  if (post?.publish_status === 'publishing') {
+    return { error: 'Publishing right now — wait for it to finish.' }
+  }
+
+  const at = brandWallToUtc(dateKey, (time || '').slice(0, 5))
+  if (!at) return { error: `Not a valid slot: ${dateKey} ${time}` }
+  if (at.getTime() <= now + 60 * 1000) {
+    return { error: 'That time has already passed — pick a later one.' }
+  }
+
+  if (isProtectedPlatform(post.platform)) {
+    return { error: 'LinkedIn posts are drafts here — nothing in this app posts to the page.' }
+  }
+
+  const account = accountFor(post, accounts)
+  if (!account) {
+    const count = accounts.filter(a => a.platform === post.platform && a.is_active !== false).length
+    return {
+      error: count
+        ? `More than one ${post.platform} account is connected — choose which one in the composer.`
+        : `No ${post.platform} account is connected, so there is nothing to book this with.`,
+    }
+  }
+  if (!mayPublishTo(account)) return { error: 'This account is protected — drafts only.' }
+
+  // Already booked: Zernio is holding the old slot, so this has to cancel it
+  // and book the new one rather than leaving two.
+  const reschedule = post.publish_status === 'scheduled'
+  const res = await bookPost(post, {
+    account, workspaceId, reschedule,
+    scheduledFor: `${dateKey}T${(time || '').slice(0, 5)}`,
+  })
+  if (res.error) {
+    return {
+      error: res.error,
+      // The workflow sets this when it cancelled the old slot but could not
+      // book the new one — the post is now booked NOWHERE, which has to be
+      // said out loud rather than looking merely unchanged.
+      unscheduled: res.unscheduled === true,
+    }
+  }
+  return { ok: true, scheduledPublishAt: at.toISOString(), rebooked: reschedule }
+}
