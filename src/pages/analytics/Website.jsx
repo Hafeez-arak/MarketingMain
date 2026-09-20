@@ -1,3 +1,4 @@
+import { useId, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   ResponsiveContainer, ComposedChart, Area, Line, LineChart, BarChart, Bar,
@@ -99,6 +100,46 @@ function ShareRow({ label, sub, value, share, right, color = '#a3bf97' }) {
   )
 }
 
+/**
+ * The footer that opens a long list.
+ *
+ * ── WHY THE FIRST FEW ROWS STAY VISIBLE, RATHER THAN THE WHOLE PANEL FOLDING ──
+ *
+ * `Collapsible` already exists and folds a section away behind its heading.
+ * That is right for the technical notes at the bottom of this page, which you
+ * go looking for. It is wrong here: the top queries are the point of the
+ * panel, and a reader who has to click to see whether there is anything worth
+ * seeing will mostly not click.
+ *
+ * So the head of the list is always on screen and only the tail folds. The
+ * button says how many rows are behind it, because "Show more" alone gives no
+ * reason to press it — 22 is a reason.
+ *
+ * A real <button> with `aria-expanded` and `aria-controls`, not a div with an
+ * onClick: the control has to be reachable by keyboard and announced as one.
+ * The rows themselves are unmounted rather than hidden with CSS, so a screen
+ * reader and a find-in-page agree with what is drawn.
+ */
+function ShowMore({ open, hidden, onToggle, controls, noun = 'more' }) {
+  if (hidden <= 0) return null
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-expanded={open}
+      aria-controls={controls}
+      className="w-full px-5 py-2.5 border-t border-border flex items-center justify-center gap-1.5
+        text-xs font-semibold text-text-secondary hover:bg-surface-subtle transition-colors
+        focus:outline-none focus-visible:bg-surface-subtle">
+      {open ? 'Show fewer' : `Show ${hidden} ${noun}`}
+      <svg className={`w-3.5 h-3.5 transition-transform ${open ? 'rotate-180' : ''}`}
+        fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="m6 9 6 6 6-6" />
+      </svg>
+    </button>
+  )
+}
+
 function PanelHead({ title, subtitle, metric, icon = Icon.activity, tone = 'steel', right }) {
   return (
     <div className="px-5 py-4 border-b border-border flex items-start justify-between gap-3">
@@ -189,8 +230,22 @@ export function WebsiteTab() {
   return <WebsiteAnalytics {...useWebsiteAnalytics()} />
 }
 
+/**
+ * How many rows of a long table are worth showing unprompted.
+ *
+ * Three, because that is where the list stops being a headline and starts
+ * being a reference. The top three queries answer "what is this site known
+ * for"; rows four to twenty-five answer "what else", which is a question you
+ * ask deliberately.
+ */
+const PREVIEW_ROWS = 3
+
 export function WebsiteAnalytics(w) {
   const navigate = useNavigate()
+  // Declared before every early return below — a hook behind a condition is a
+  // hook that changes order between renders.
+  const [allQueries, setAllQueries] = useState(false)
+  const queryBodyId = useId()
   const {
     days, setDays, loading, refreshing, refresh, error,
     search, ga4, usable, summary, daily, types, bands, coverage, queries,
@@ -274,6 +329,8 @@ export function WebsiteAnalytics(w) {
 
   const noRows = !usable || !summary || summary.impressions === 0
   const imageType = types.find(t => t.type === 'image')
+  // The head of the list always; the tail only when asked for. See ShowMore.
+  const shownQueries = allQueries ? queries : queries.slice(0, PREVIEW_ROWS)
 
   return (
     <div className="space-y-4">
@@ -448,9 +505,15 @@ export function WebsiteAnalytics(w) {
 
           {/* ── What people searched ── */}
           <Card className="overflow-hidden">
+            {/* The subtitle has two jobs and they move independently: how much
+                of the table is on screen, and how much of the property's
+                visibility the table can account for at all. The second must
+                not change when somebody presses a button, and the first must
+                not claim twenty-five rows while three are showing. */}
             <PanelHead title="Search queries" metric="site.coverage" icon={Icon.cursor}
               subtitle={coverage
-                ? `Top ${Math.min(25, queries.length)} of ${fmt(coverage.namedQueries)} named queries · ${pct(coverage.share)} of impressions`
+                ? `${allQueries ? `Top ${queries.length}` : `${shownQueries.length} of the top ${queries.length}`}` +
+                  ` · ${fmt(coverage.namedQueries)} named queries hold ${pct(coverage.share)} of impressions`
                 : 'What people typed to reach us'} />
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
@@ -463,8 +526,8 @@ export function WebsiteAnalytics(w) {
                     <th className="text-right px-5 py-2.5 text-[11px] font-medium uppercase tracking-wide text-text-tertiary">Pos.</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-border">
-                  {queries.map(q => (
+                <tbody id={queryBodyId} className="divide-y divide-border">
+                  {shownQueries.map(q => (
                     <tr key={q.query} className="hover:bg-surface-subtle">
                       <td className="px-5 py-2.5 max-w-0">
                         {/* dir="auto" per cell, not on the table: these rows are
@@ -489,6 +552,8 @@ export function WebsiteAnalytics(w) {
                 </tbody>
               </table>
             </div>
+            <ShowMore open={allQueries} hidden={queries.length - PREVIEW_ROWS}
+              onToggle={() => setAllQueries(v => !v)} controls={queryBodyId} noun="more queries" />
           </Card>
 
           {/* ── What to do about it ──
