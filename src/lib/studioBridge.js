@@ -4,6 +4,7 @@ import { isProtectedPlatform } from './platformSafety'
 import { finalizeVersion } from './creativeStudio'
 import { postLock } from './postLock'
 import { projectionFor } from './mediaOrder'
+import { slidesFor } from './planSlides'
 
 // ─── Plan ↔ Creative Studio bridge ─────────────────────────────────────────
 // The join between the two halves of the app that never spoke: contentPlans
@@ -608,25 +609,26 @@ export async function sendVersionToPosts(workspaceId, accessToken, {
 // publishing a guide as the post is exactly the silent wrong-image failure
 // mediaFieldsFor was written to avoid.
 function manualMediaFor(idea) {
-  const video = idea.previewVideoUrl || ''
-  const refs = idea.imageMode === 'use_reference' ? (idea.references || []).filter(Boolean) : []
-  const images = idea.previewImageUrl ? [idea.previewImageUrl] : refs
-
-  // ── WHERE THE PICTURES USED TO DIE ──
-  // This was `if (video) return { …, image_url: '', image_urls: [] }` — a
-  // video on the idea blanked its images before the row was ever written. So
-  // a carousel of two pictures and a clip reached generated_posts as a
-  // video-only post, and no later screen could show what was lost because
-  // nothing had been stored. That is the bug behind "I added 2 images and 1
-  // video and only the video is there".
+  // ── WHERE THE PICTURES USED TO DIE, TWICE ──
   //
-  // Images first, then the video: a carousel opens on a still, and the idea
-  // carries no ordering of its own to honour. Instagram sizes every item to
-  // the first, so leading with a picture is also the safer default.
-  const media = [
-    ...images.map(url => ({ type: 'image', url })),
-    ...(video ? [{ type: 'video', url: video }] : []),
-  ]
+  // First: `if (video) return { …, image_url: '', image_urls: [] }` — a video
+  // on the idea blanked its images before the row was ever written, so a
+  // carousel of two pictures and a clip reached generated_posts as a
+  // video-only post. That is the bug behind "I added 2 images and 1 video and
+  // only the video is there", and it was fixed by ordering the media instead
+  // of choosing between it.
+  //
+  // Second, and fixed here: `idea.previewImageUrl ? [idea.previewImageUrl] :
+  // refs` — a Studio render WON and every upload was discarded. A post could
+  // be all-AI or all-yours and never both. The idea now carries an ordered
+  // slide list that remembers each slide's source, so a carousel of two AI
+  // images and two of your own arrives as exactly that, in your order.
+  //
+  // The idea DOES carry an ordering of its own now, so it is honoured rather
+  // than reimposed: whatever sits first is what the post opens on.
+  const media = slidesFor(idea).map(s => ({ type: s.type, url: s.url }))
+  const images = media.filter(m => m.type === 'image')
+  const video = media.find(m => m.type === 'video')
 
   return {
     ...projectionFor(media),

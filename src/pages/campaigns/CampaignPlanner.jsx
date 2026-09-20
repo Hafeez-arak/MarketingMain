@@ -31,6 +31,7 @@ import {
 import { ResearchIdeaPicker } from './ResearchIdeaPicker'
 import { BrandContextPanel } from '../../components/BrandContextPanel'
 import { openStudioForIdea, fetchSessionsForIdeas, resetIdeaMedia, publishIdeasAsPosts } from '../../lib/studioBridge'
+import { slidesFor, slideUrls, legacyFieldsFor, hasOwnSlides } from '../../lib/planSlides'
 import { fetchScheduledPosts } from '../../lib/scheduledPosts'
 import { postLock } from '../../lib/postLock'
 import { schedulePlanPosts } from '../../lib/planScheduling'
@@ -100,9 +101,10 @@ function thumbFor(idea) {
 // carousel's slides, not just the first.
 function mediaUrlsFor(idea) {
   if (isTextOnly(idea)) return []
-  if (idea.previewImageUrl) return [idea.previewImageUrl]
-  if (idea.imageMode === 'use_reference') return (idea.references || []).filter(Boolean)
-  return []
+  // One ordered list, whatever each slide was made by. This used to return
+  // `[idea.previewImageUrl]` when a Studio render existed and the uploads
+  // otherwise — so a mixed carousel could only ever show one of its halves.
+  return slideUrls(idea)
 }
 
 // ─── Main planner ───────────────────────────────────────────────────────────
@@ -906,8 +908,11 @@ export function CampaignPlanner() {
   const approvedIdeas = ideas.filter(i => i.status === 'approved')
   // An idea using its own image already HAS its picture — it was attached, not
   // made, so counting only Studio-accepted media would show "0 of 4 ready".
-  const hasOwnMedia = i => i.imageMode === 'use_reference' && (i.references || []).length > 0
-  const hasMedia = i => i.mediaStatus === 'ready' || hasOwnMedia(i)
+  // "Is any of this yours?" — asked of the slide list rather than of a mode,
+  // because a mixed carousel is both Studio's and yours and the old
+  // single-mode question had no true answer for it.
+  const hasOwnMedia = i => hasOwnSlides(i)
+  const hasMedia = i => i.mediaStatus === 'ready' || slidesFor(i).length > 0
   // Only posts that take a picture go through the pictures step. A plan of
   // nothing but LinkedIn text posts and polls skips it entirely.
   const mediaIdeas = approvedIdeas.filter(i => !isTextOnly(i))
@@ -959,30 +964,65 @@ export function CampaignPlanner() {
     ? { db: { caption_options: [], draft_status: 'not_started' }, local: { captionOptions: [], draftStatus: 'not_started' } }
     : { db: {}, local: {} }
 
-  // ── Attaching your own picture ───────────────────────────────────────────
+  // ── Saving an idea's slides ──────────────────────────────────────────────
+  // The ONE writer. Everything that changes a picture — the media picker, a
+  // reorder, a removal, a Studio render coming back — goes through here, and
+  // it writes the slide list plus the legacy columns derived from it. Two
+  // writers would have meant two chances for `slides` and
+  // preview_image_url/reference_image_urls to disagree about the same post,
+  // and the older screens still read the derived ones.
+  async function saveSlides(idea, slides, { clearStaleCaption = true } = {}) {
+    if (!idea) return { ok: true }
+    if (isLocked(idea)) return { error: 'This post has already gone out, so its picture can’t be changed.' }
+    const stale = clearStaleCaption ? staleCaptionPatch(idea) : { db: {}, local: {} }
+    const legacy = legacyFieldsFor(slides)
+    const result = await updateIdea(accessToken, idea.id, { slides, ...legacy, ...stale.db })
+    if (result.error) return { error: result.error }
+    if (clearStaleCaption) autoDraftedRef.current.delete(idea.id)
+    onIdeaChange({
+      ...idea,
+      slides,
+      references: legacy.reference_image_urls,
+      previewImageUrl: legacy.preview_image_url,
+      previewVideoUrl: legacy.preview_video_url,
+      imageMode: legacy.image_mode,
+      mediaType: legacy.media_type,
+      slideCount: legacy.slide_count,
+      ...stale.local,
+    })
+    return { ok: true }
+  }
+
+  // ── Attaching your own pictures ──────────────────────────────────────────
+  // The picker hands back urls. They join whatever the idea already has
+  // rather than replacing it — that is the point of the slide list. A Studio
+  // render already on the idea survives being given company, which is what
+  // "two AI images and two of my own" needs and what the old either/or
+  // model made impossible.
   const [mediaPickIdea, setMediaPickIdea] = useState(null)
   async function saveMediaImages(urls) {
     const idea = mediaPickIdea
     if (!idea) return { ok: true }
-    if (isLocked(idea)) return { error: 'This post has already gone out, so its picture can’t be changed.' }
-    // Clearing every image is a real choice — it puts the idea back to having
-    // its picture made in the Studio, rather than claiming one that isn't there.
-    const mode = urls.length ? 'use_reference' : 'studio'
-    const stale = staleCaptionPatch(idea)
-    const result = await updateIdea(accessToken, idea.id, { reference_image_urls: urls, image_mode: mode, ...stale.db })
-    if (result.error) return { error: result.error }
-    autoDraftedRef.current.delete(idea.id)
-    onIdeaChange({ ...idea, references: urls, imageMode: mode, ...stale.local })
+    const existing = slidesFor(idea)
+    const studio = existing.filter(s => s.source === 'studio')
+    // Clearing every image is a real choice — it leaves whatever the Studio
+    // made and nothing else, rather than claiming pictures that aren't there.
+    const next = urls.length
+      ? [...studio, ...urls.map(url => ({ url, type: 'image', source: 'upload' }))]
+      : studio
+    const res = await saveSlides(idea, next)
+    if (res.error) return res
     setMediaPickIdea(null)
     return { ok: true }
   }
 
   // A carousel's slides, put in a new order from the pictures step. Saved at
-  // once — the order is what goes out.
+  // once — the order is what goes out. Reordering is not a new picture, so it
+  // leaves the drafted captions alone.
   async function reorderSlides(idea, urls) {
-    if (isLocked(idea)) return
-    onIdeaChange({ ...idea, references: urls })
-    const res = await updateIdea(accessToken, idea.id, { reference_image_urls: urls })
+    const by = new Map(slidesFor(idea).map(s => [s.url, s]))
+    const next = urls.map(url => by.get(url) || { url, type: 'image', source: 'upload' })
+    const res = await saveSlides(idea, next, { clearStaleCaption: false })
     if (res.error) setError(`Couldn't save the slide order: ${res.error}`)
   }
 
