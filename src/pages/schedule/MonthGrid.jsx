@@ -13,7 +13,8 @@ const DEFAULT_DROP_TIME = '10:00'
 
 export function MonthGrid({
   year, month, index, crowded, pendingId, selectedDay,
-  onSelectDay, onOpenPost, onDropPost, draggingPost,
+  onSelectDay, onOpenPost, onDropPost, draggingPost, unseen = [],
+  onDragStart, onDragEnd,
 }) {
   const [hoverKey, setHoverKey] = useState('')
   const cells = monthGrid(year, month)
@@ -79,7 +80,9 @@ export function MonthGrid({
                   post={entry.post} time={entry.time}
                   crowded={crowded.has(entry.post.id)}
                   pending={pendingId === entry.post.id}
+                  unseen={unseen.includes(entry.post.id)}
                   onOpen={onOpenPost}
+                  onDragStart={onDragStart} onDragEnd={onDragEnd}
                   compact />
               ))}
               {entries.length > MAX_VISIBLE && (

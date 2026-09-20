@@ -2,6 +2,8 @@ import { NavLink } from 'react-router-dom'
 import { useAuth } from '../../store/auth'
 import { useState, useEffect } from 'react'
 import { fetchPendingCount } from '../../lib/access'
+import { fetchScheduledPosts } from '../../lib/scheduledPosts'
+import { needsAttention, APPROVED_STATUSES, PENDING_STATUSES } from '../../lib/postStage'
 
 const nav = [
   { section: 'Overview', items: [
@@ -18,7 +20,7 @@ const nav = [
   ]},
   { section: 'Social', items: [
     { to: '/social',           label: 'Social Media',   icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg> },
-    { to: '/social/approvals', label: 'Post Queue', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg> },
+    { to: '/social/approvals', label: 'Post Queue', badge: 'pendingPosts', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg> },
   ]},
   { section: 'Insights', items: [
     { to: '/analytics', label: 'Analytics', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg> },
@@ -36,7 +38,7 @@ const nav = [
 ]
 
 export function Sidebar() {
-  const { user, workspaces, activeWorkspace, activeWorkspaceId, switchWorkspace, signOut, isAccessAdmin } = useAuth()
+  const { user, workspaces, activeWorkspace, activeWorkspaceId, accessToken, switchWorkspace, signOut, isAccessAdmin } = useAuth()
   const [showWsPicker, setShowWsPicker] = useState(false)
   // The only notification the access gate has: a count on the nav item.
   // Requests otherwise sit unseen until someone thinks to look, and a
@@ -49,11 +51,34 @@ export function Sidebar() {
     fetchPendingCount().then(n => { if (!cancelled) setPendingAccess(n) })
     return () => { cancelled = true }
   }, [isAccessAdmin])
+
+  // ── Approved posts that nothing will publish ──
+  // The same question the Schedule page's strip asks, on the nav item that
+  // owns them. An approved post whose booking failed is invisible otherwise:
+  // it is not on the calendar (nothing is going to send it) and nobody thinks
+  // to open the Post Queue to look for a failure they were never told about.
+  const [pendingPosts, setPendingPosts] = useState(0)
+  useEffect(() => {
+    if (!activeWorkspaceId || !accessToken) return
+    let cancelled = false
+    // Re-read on a slow interval as well as on mount: this sits on screen for
+    // hours at a time, and a booking that fails at 3pm should not wait for a
+    // reload to show up.
+    async function count() {
+      const rows = await fetchScheduledPosts(activeWorkspaceId, accessToken, {
+        publishStatus: PENDING_STATUSES, status: APPROVED_STATUSES, limit: 200,
+      })
+      if (!cancelled) setPendingPosts(rows.filter(r => needsAttention(r)).length)
+    }
+    queueMicrotask(() => { if (!cancelled) void count() })
+    const id = setInterval(() => { void count() }, 120_000)
+    return () => { cancelled = true; clearInterval(id) }
+  }, [activeWorkspaceId, accessToken])
   // Gated at render rather than by resetting the count when isAccessAdmin
   // flips: a stale number from a previous session can then never leak into
   // a non-admin's sidebar, and the effect stays free of a synchronous
   // setState (which React's lint rule rightly flags as a cascading render).
-  const badges = { pendingAccess: isAccessAdmin ? pendingAccess : 0 }
+  const badges = { pendingAccess: isAccessAdmin ? pendingAccess : 0, pendingPosts }
 
   return (
     <aside

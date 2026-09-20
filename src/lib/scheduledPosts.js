@@ -34,7 +34,8 @@ export const POST_TABLES = [
 // `from`/`to` filter on scheduled_publish_at for the calendar; omitted, you
 // get the review queue's view of the world (everything, by creation).
 export async function fetchScheduledPosts(workspaceId, accessToken, {
-  from, to, platform, publishStatus, unscheduled = false, limit = 400, planIdeaIds, ids,
+  from, to, platform, publishStatus, status, unscheduled = false, limit = 400,
+  planIdeaIds, ids, publishedSince, order,
 } = {}) {
   if (!workspaceId) return []
   const q = [
@@ -65,9 +66,21 @@ export async function fetchScheduledPosts(workspaceId, accessToken, {
       ? `publish_status=in.(${publishStatus.join(',')})`
       : `publish_status=eq.${publishStatus}`)
   }
+  // The REVIEW status, which is a different column and a different question
+  // from publish_status: `status` says whether a person signed off,
+  // publish_status says what the platform did. The Schedule page needs both —
+  // "approved" and "not booked" is exactly the strip. See lib/postStage.js.
+  if (status) {
+    q.push(Array.isArray(status)
+      ? `status=in.(${status.join(',')})`
+      : `status=eq.${status}`)
+  }
+  // Everything that went out since an instant — what the publish watcher asks
+  // on each poll, so it reads a handful of rows rather than the whole history.
+  if (publishedSince) q.push(`published_at=gte.${publishedSince}`)
   // Ordered by when it goes out when that is what was asked for, otherwise by
   // when it was made — a review queue and a calendar want different spines.
-  q.push(`order=${from || to ? 'scheduled_publish_at.asc' : 'created_at.desc'}`)
+  q.push(`order=${order || (from || to ? 'scheduled_publish_at.asc' : 'created_at.desc')}`)
   try {
     const res = await fetch(`${SUPABASE_URL}/rest/v1/scheduled_posts?${q.join('&')}`, {
       headers: authHeaders(accessToken),

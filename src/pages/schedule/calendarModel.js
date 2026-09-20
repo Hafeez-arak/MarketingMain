@@ -10,6 +10,7 @@
 
 import { utcToBrandParts, brandDateKey, brandTodayKey } from '../../lib/brandTime'
 import { moveKindFor } from '../../lib/scheduledPosts'
+import { PLATFORM_META, LIVE_PLATFORMS } from '../../lib/utils'
 
 // ── Drag and drop ─────────────────────────────────────────────────────────
 // A private MIME type, so a grid cell only accepts chips from this calendar
@@ -25,25 +26,49 @@ export const DAY_LABELS   = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 export const MONTH_LABELS = ['January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December']
 
-export const PLATFORM_COLORS = {
-  instagram: { dot: '#E1306C', light: '#fce4f0', label: 'Instagram' },
-  facebook:  { dot: '#1877F2', light: '#e8f0fe', label: 'Facebook' },
-  tiktok:    { dot: '#555555', light: '#f0f0f0', label: 'TikTok' },
-  snapchat:  { dot: '#B8A400', light: '#fffbe6', label: 'Snapchat' },
-  x:         { dot: '#333333', light: '#f5f5f5', label: 'X / Twitter' },
+// A tint per platform for the week view's chip backgrounds. Kept here rather
+// than in PLATFORM_META because it exists only for this grid, and TikTok's
+// brand colour is black — a 6% wash of which is a grey nobody chose.
+const PLATFORM_TINT = {
+  instagram: '#fce4f0',
+  tiktok:    '#f0f0f0',
+  linkedin:  '#e6f0fa',
 }
-export const platformColor = p => PLATFORM_COLORS[p] || { dot: '#78716c', light: '#f5f5f4', label: p || 'Unknown' }
 
-// Publish state, as the calendar shows it. Distinct from the review `status`
-// column: a post can be approved (status) and still not_published (publish).
-export const PUBLISH_STATE = {
-  not_published: { label: 'Draft',      cls: 'bg-stone-100 text-stone-600' },
-  scheduled:     { label: 'Scheduled',  cls: 'bg-blue-50 text-blue-700' },
-  publishing:    { label: 'Publishing', cls: 'bg-amber-50 text-amber-700' },
-  published:     { label: 'Published',  cls: 'bg-green-50 text-green-700' },
-  failed:        { label: 'Failed',     cls: 'bg-red-50 text-red-700' },
+// Derived from PLATFORM_META rather than restated, so this page can never
+// again offer a platform the app does not actually publish to. It used to
+// carry its own list — with Facebook and X on it, neither of which has ever
+// existed here, and without LinkedIn, which does.
+export const PLATFORM_COLORS = Object.fromEntries(
+  LIVE_PLATFORMS.map(key => [key, {
+    dot: PLATFORM_META[key].color,
+    light: PLATFORM_TINT[key] || '#f5f5f4',
+    label: PLATFORM_META[key].label,
+  }]))
+
+export const platformColor = p => PLATFORM_COLORS[p]
+  || { dot: '#78716c', light: '#f5f5f4', label: PLATFORM_META[p]?.label || p || 'Unknown' }
+
+// ── What a chip LOOKS like, by where the post stands ──────────────────────
+// The calendar's one colour rule, and the thing that makes it readable at a
+// glance rather than only on hover: the state you are in owns the chip's edge
+// and fill, the platform owns nothing but a dot.
+//
+// Green means gone — and a green chip is always in the past, because a post
+// only turns green by going out. That is the whole point: nothing can be done
+// about a green chip and it should not invite a click that offers to reschedule
+// something already on Instagram.
+export const STAGE_STYLE = {
+  booked:    { ring: '#2563eb', fill: '#eff6ff', label: 'Scheduled',  text: 'text-blue-700' },
+  sending:   { ring: '#d97706', fill: '#fffbeb', label: 'Publishing', text: 'text-amber-700' },
+  published: { ring: '#16a34a', fill: '#f0fdf4', label: 'Published',  text: 'text-green-700' },
+  // Gone, but unconfirmed — the same green, because the thing green MEANS
+  // here is "nothing can be done about this", and that is equally true. The
+  // label is what differs, and it is the only part making a claim.
+  sent:      { ring: '#16a34a', fill: '#f0fdf4', label: 'Sent',       text: 'text-green-700' },
+  pending:   { ring: '#dc2626', fill: '#fef2f2', label: 'Not booked', text: 'text-red-700' },
 }
-export const publishState = s => PUBLISH_STATE[s] || PUBLISH_STATE.not_published
+export const stageStyle = stage => STAGE_STYLE[stage] || STAGE_STYLE.pending
 
 // ── Date keys, without Date arithmetic ────────────────────────────────────
 // 'YYYY-MM-DD' +/- n days. Done through Date.UTC rather than a local Date so
@@ -219,22 +244,6 @@ export function dropToTime(fraction, start, end, snapMinutes = 15) {
   const h = Math.floor(clamped / 60)
   const m = clamped % 60
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
-}
-
-// ── Summary counters ──────────────────────────────────────────────────────
-// Computed off the fetched rows rather than a separate count query: the range
-// is already in memory and a second round-trip could disagree with it.
-export function summarize(posts) {
-  const out = { scheduled: 0, published: 0, publishing: 0, failed: 0, draft: 0 }
-  for (const p of posts) {
-    const s = p.publish_status || 'not_published'
-    if (s === 'scheduled') out.scheduled++
-    else if (s === 'published') out.published++
-    else if (s === 'publishing') out.publishing++
-    else if (s === 'failed') out.failed++
-    else out.draft++
-  }
-  return out
 }
 
 // Is this slot in the past, in brand time? Scheduling backwards is always a

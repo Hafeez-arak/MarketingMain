@@ -2,8 +2,14 @@ import { useLocation } from 'react-router-dom'
 import { Sidebar } from './Sidebar'
 import { Topbar } from './Topbar'
 import { AssistantDrawer } from '../AssistantDrawer'
+import { usePublishWatch } from '../../lib/usePublishWatch'
+
 export function AppLayout({ children }) {
   const location = useLocation()
+  // Mounted here rather than on /schedule: a post goes out on Zernio's clock,
+  // not on whichever page happens to be open, so the bell has to be watching
+  // from wherever you are. See lib/usePublishWatch.js.
+  usePublishWatch()
   return (
     // ── data-print-* ──
     // This shell is `h-screen overflow-hidden` around an inner scroller, which

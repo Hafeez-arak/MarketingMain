@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import {
   DAY_LABELS, weekGrid, dayEntries, isToday, isPastSlot,
-  laneRange, laneLabel, lanePosition, dropToTime, platformColor, DRAG_MIME,
+  laneRange, laneLabel, lanePosition, dropToTime, DRAG_MIME,
   layoutDayColumn,
 } from './calendarModel'
 import { PostChip } from './PostChip'
@@ -33,7 +33,8 @@ function useNowMs(intervalMs = 60_000) {
 
 export function WeekGrid({
   anchorDate, index, crowded, pendingId,
-  onOpenPost, onDropPost, draggingPost, onSelectDay,
+  onOpenPost, onDropPost, draggingPost, onSelectDay, unseen = [],
+  onDragStart, onDragEnd,
 }) {
   const [hover, setHover] = useState(null)   // { key, time }
   const columnRefs = useRef({})
@@ -169,7 +170,6 @@ export function WeekGrid({
                 {/* Scheduled posts, split across sub-columns where they would
                     otherwise overlap. */}
                 {layoutDayColumn(entries).map(entry => {
-                  const pc = platformColor(entry.post.platform)
                   const width = 100 / entry.lanes
                   return (
                     <div key={entry.post.id}
@@ -179,12 +179,17 @@ export function WeekGrid({
                         left: `${entry.lane * width}%`,
                         width: `${width}%`,
                       }}>
-                      <div className="shadow-sm" style={{ background: pc.light }}>
+                      {/* No tint of its own any more: the chip's fill is now
+                          its publish state (blue booked, green published), and
+                          a platform wash behind it fought that for the eye. */}
+                      <div className="shadow-sm">
                         <PostChip
                           post={entry.post} time={entry.time}
                           crowded={crowded.has(entry.post.id)}
                           pending={pendingId === entry.post.id}
+                          unseen={unseen.includes(entry.post.id)}
                           onOpen={onOpenPost}
+                          onDragStart={onDragStart} onDragEnd={onDragEnd}
                           compact={entry.lanes > 1} />
                       </div>
                     </div>
