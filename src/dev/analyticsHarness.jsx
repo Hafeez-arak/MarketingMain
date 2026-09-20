@@ -42,14 +42,36 @@ const LI_ACCOUNT = {
   display_name: 'ARAK Lighting', is_active: true, account_type: 'organization', followers_count: 4800,
 }
 
-const post = (platform, i, analytics, dayOffset) => ({
-  _id: `${platform}-post-${i}`,
-  platform,
-  publishedAt: new Date(Date.parse(`${FROM}T00:00:00Z`) + dayOffset * 86_400_000).toISOString(),
-  content: `${platform} post ${i}`,
-  platformPostUrl: `https://example.com/${platform}/${i}`,
-  analytics,
-})
+// Inline SVG rather than a remote URL: the harness must draw the same with no
+// network, and a real CDN link would expire and quietly turn every fixture
+// into the broken-image placeholder.
+const swatch = (label, bg) =>
+  `data:image/svg+xml;utf8,${encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1080">` +
+    `<rect width="1080" height="1080" fill="${bg}"/>` +
+    `<text x="540" y="560" font-family="sans-serif" font-size="96" fill="#fff" ` +
+    `text-anchor="middle">${label}</text></svg>`,
+  )}`
+
+// Every third post is a carousel, so the lightbox's slide count and arrows
+// are reachable in the harness rather than only against a live account.
+const post = (platform, i, analytics, dayOffset) => {
+  const slides = i % 3 === 0 ? 3 : 1
+  return {
+    _id: `${platform}-post-${i}`,
+    platform,
+    publishedAt: new Date(Date.parse(`${FROM}T00:00:00Z`) + dayOffset * 86_400_000).toISOString(),
+    content: `${platform} post ${i}`,
+    platformPostUrl: `https://example.com/${platform}/${i}`,
+    mediaType: slides > 1 ? 'carousel' : 'image',
+    thumbnailUrl: swatch(`${i}`, '#4c5e61'),
+    mediaItems: Array.from({ length: slides }, (_, n) => ({
+      type: 'image',
+      url: swatch(`${i}.${n + 1}`, ['#4c5e61', '#325130', '#c2415c'][n % 3]),
+    })),
+    analytics,
+  }
+}
 
 // Eight posts whose reach adds to 16 and whose interactions add to 3 — the
 // screenshot's 18.8% (3 ÷ 16) falls out of the arithmetic rather than being
