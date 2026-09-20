@@ -9,7 +9,7 @@ import {
 } from './calendarModel'
 import { MonthGrid, DEFAULT_DROP_TIME } from './MonthGrid'
 import { WeekGrid } from './WeekGrid'
-import { TrayChip, PostChip } from './PostChip'
+import { TrayChip, PostChip, UpcomingChip } from './PostChip'
 import { PostPanel } from './PostPanel'
 import { useCalendarPosts } from './useCalendarPosts'
 import { ComposerHost } from '../../components/composer/ComposerHost'
@@ -79,7 +79,7 @@ export function Schedule() {
     return brandRangeUTC(addDays(start, -7), addDays(start, 13))
   }, [view, year, month, anchor])
 
-  const { posts, pending, loading, error, pendingId, book, cancel, reload } =
+  const { posts, pending, upcoming, loading, error, pendingId, book, cancel, reload } =
     useCalendarPosts({
       workspaceId: activeWorkspaceId, accessToken,
       from: range.from, to: range.to, webhooks: state.webhooks,
@@ -97,10 +97,19 @@ export function Schedule() {
   const shownPending = useMemo(
     () => (platform === 'all' ? pending : pending.filter(p => p.platform === platform)),
     [pending, platform])
+  const shownUpcoming = useMemo(
+    () => (platform === 'all' ? upcoming : upcoming.filter(p => p.platform === platform)),
+    [upcoming, platform])
 
   const index   = useMemo(() => indexByDay(shown), [shown])
   const crowded = useMemo(() => findCrowding(shown), [shown])
-  const byId    = useMemo(() => new Map([...posts, ...pending].map(p => [p.id, p])), [posts, pending])
+  // Every post the page is holding, from all three queries. `upcoming` is in
+  // here because a post booked for next month is reachable from the strip
+  // while sitting outside the visible range — without it the open panel would
+  // keep rendering the stale copy it was opened with after a reschedule.
+  const byId = useMemo(
+    () => new Map([...posts, ...pending, ...upcoming].map(p => [p.id, p])),
+    [posts, pending, upcoming])
 
   // Counts describe what is on the grid, filter included, so the numbers
   // always match what is underneath them.
@@ -315,6 +324,41 @@ export function Schedule() {
                 pending={pendingId === post.id}
                 onOpen={open} />
             ))}
+          </div>
+        </Card>
+      )}
+
+      {/* ── Going out next ──
+          What the month grid is worst at. The next post can be three rows
+          down, or on a month you are not looking at, so "what is coming" —
+          the question you arrive at this page with — takes a scan of the whole
+          grid to answer. This answers it in a glance, soonest first, and is
+          NOT scoped to the visible period: paging to October must not empty
+          the list of what goes out on Tuesday.
+
+          Every card opens the same post panel a grid chip does — view,
+          reschedule, cancel, edit. One panel, one set of controls, however you
+          got there. */}
+      {(loading || shownUpcoming.length > 0) && (
+        <Card className="overflow-hidden">
+          <div className="px-4 py-2.5 border-b border-border bg-surface-subtle flex items-center gap-2 flex-wrap">
+            <p className="eyebrow text-text-tertiary">Going out next</p>
+            {!loading && (
+              <span className="text-[11px] text-text-tertiary">
+                {shownUpcoming.length} booked post{shownUpcoming.length !== 1 ? 's' : ''} ahead ·
+                {' '}click one to view, reschedule or cancel it
+              </span>
+            )}
+          </div>
+          <div className="p-3 flex gap-2 overflow-x-auto">
+            {loading
+              ? Array.from({ length: 4 }, (_, i) => <Skeleton key={i} className="h-[86px] w-52 flex-shrink-0" />)
+              : shownUpcoming.map(post => (
+                <UpcomingChip key={post.id} post={post}
+                  pending={pendingId === post.id}
+                  unseen={unseen.includes(post.id)}
+                  onOpen={open} />
+              ))}
           </div>
         </Card>
       )}

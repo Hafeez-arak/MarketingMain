@@ -1,5 +1,5 @@
-import { platformColor, chipDraggable, stageStyle, DRAG_MIME } from './calendarModel'
-import { formatBrandTime } from '../../lib/brandTime'
+import { platformColor, chipDraggable, stageStyle, DRAG_MIME, DAY_LABELS, addDays } from './calendarModel'
+import { formatBrandTime, formatBrandDateTime, utcToBrandParts, brandTodayKey } from '../../lib/brandTime'
 import { moveKindFor } from '../../lib/scheduledPosts'
 import { scheduleStage, pendingReason } from '../../lib/postStage'
 
@@ -119,4 +119,67 @@ export function TrayChip({ post, onOpen, pending }) {
       </div>
     </button>
   )
+}
+
+// ─── The "going out next" strip ────────────────────────────────────────────
+// A booked post, as a card that leads with WHEN. The calendar answers "what
+// is on the 21st"; this answers "what is coming", which is the question you
+// actually arrive at the page with and the one a month grid is worst at — the
+// next post can be three rows down, or on a month you are not looking at.
+//
+// Same click target as a chip on the grid: it opens the post, with the same
+// view / reschedule / cancel / edit controls. There is one post panel, and
+// every route to it behaves identically.
+export function UpcomingChip({ post, onOpen, pending, unseen = false }) {
+  const pc = platformColor(post.platform)
+  const stage = scheduleStage(post)
+  const sty = stageStyle(stage)
+  const parts = utcToBrandParts(post.scheduled_publish_at)
+  const text = (post.caption || post.topic || post.hook || '').replace(/\s+/g, ' ').trim()
+
+  return (
+    <button type="button"
+      onClick={() => onOpen?.(post)}
+      title={`${pc.label} · ${sty.label} · ${formatBrandDateTime(post.scheduled_publish_at)}${text ? `\n${text}` : ''}`}
+      className={`flex flex-col gap-1 p-2.5 border-l-2 border-y border-r border-border bg-white
+        hover:border-stone-400 hover:bg-surface-subtle transition-colors
+        w-52 flex-shrink-0 text-left
+        ${pending ? 'opacity-50 animate-pulse' : ''}`}
+      style={{ borderLeftColor: sty.ring }}>
+
+      <div className="flex items-center gap-1.5">
+        <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: pc.dot }} />
+        <span className="text-[9px] font-bold uppercase tracking-wider" style={{ color: pc.dot }}>
+          {pc.label}
+        </span>
+        {/* Only when it is not the plain expected state. A row of chips all
+            saying "Scheduled" is a row of noise; "Publishing" is news. */}
+        {stage !== 'booked' && (
+          <span className={`text-[9px] font-bold uppercase tracking-wider ${sty.text}`}>{sty.label}</span>
+        )}
+        {unseen && <span className="w-1.5 h-1.5 rounded-full bg-green-600 flex-shrink-0 ml-auto" />}
+      </div>
+
+      {/* The day and the time, in brand time, as the card's headline. */}
+      <p className="text-[11px] font-semibold text-text tabular-nums">
+        {parts ? `${relativeDay(parts.dateKey)} · ${formatBrandTime(parts.time)}` : 'No time'}
+      </p>
+
+      <p className="text-[11px] text-text-secondary line-clamp-2 leading-snug">
+        {text || 'No caption yet'}
+      </p>
+    </button>
+  )
+}
+
+// 'Today' / 'Tomorrow' / 'Mon 29' — a date you can read without counting.
+// Brand-time keys throughout, so this never disagrees with the grid cell the
+// same post sits in.
+function relativeDay(dateKey) {
+  const today = brandTodayKey()
+  if (dateKey === today) return 'Today'
+  if (dateKey === addDays(today, 1)) return 'Tomorrow'
+  const [y, m, d] = dateKey.split('-').map(Number)
+  const at = new Date(Date.UTC(y, m - 1, d))
+  return `${DAY_LABELS[at.getUTCDay()]} ${d}`
 }

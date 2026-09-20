@@ -6,7 +6,7 @@ import { AuthContext } from '../store/auth'
 import { Schedule } from '../pages/schedule/index'
 import { MonthGrid } from '../pages/schedule/MonthGrid'
 import { WeekGrid } from '../pages/schedule/WeekGrid'
-import { TrayChip } from '../pages/schedule/PostChip'
+import { TrayChip, UpcomingChip } from '../pages/schedule/PostChip'
 import { PostPanel } from '../pages/schedule/PostPanel'
 import { indexByDay, findCrowding, addDays, MONTH_LABELS } from '../pages/schedule/calendarModel'
 import { brandTodayKey, brandWallToUtcISO, formatBrandDateTime, BRAND_TIMEZONE_LABEL } from '../lib/brandTime'
@@ -80,6 +80,10 @@ function Harness() {
   // darker "just published" treatment is visible without waiting for a poll.
   const [unseen, setUnseen] = useState(['e'])
   const [log, setLog]       = useState([])
+  // Read once at mount. The clock is not a render input — calling Date.now()
+  // during render makes the list update only when something unrelated
+  // re-renders, which is exactly the trap the week grid's now-line avoids.
+  const [nowMs] = useState(() => Date.now())
 
   const index   = useMemo(() => indexByDay(posts), [posts])
   const crowded = useMemo(() => findCrowding(posts), [posts])
@@ -146,6 +150,26 @@ function Harness() {
             </span>
           ))}
       </div>
+
+      {/* The "going out next" strip, on the same fixtures the grid uses — the
+          real component, so its date maths and click target are exercised. */}
+      {(() => {
+        const ahead = posts
+          .filter(p => ['scheduled', 'publishing'].includes(p.publish_status)
+            && Date.parse(p.scheduled_publish_at) > nowMs)
+          .sort((a, b) => Date.parse(a.scheduled_publish_at) - Date.parse(b.scheduled_publish_at))
+        if (!ahead.length) return null
+        return (
+          <div className="border border-border bg-white">
+            <p className="px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-text-tertiary border-b border-border bg-surface-subtle">
+              Going out next — click one to view, reschedule or cancel it
+            </p>
+            <div className="p-3 flex gap-2 overflow-x-auto">
+              {ahead.map(p => <UpcomingChip key={p.id} post={p} onOpen={open} unseen={unseen.includes(p.id)} />)}
+            </div>
+          </div>
+        )
+      })()}
 
       {pending.length > 0 && (
         <div className="border border-red-200 bg-white">
