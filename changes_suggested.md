@@ -101,11 +101,11 @@ showing zeros.
 - [x] **`customFields.website`** — done; the property resolved, which is what
       the live numbers prove. (Reminder for next time: a PostgREST `PATCH` on a
       jsonb column REPLACES the whole object — read, spread, write the union.)
-- [ ] **The agent container's own `.env`** on the WSL2 box still needs the same
-      `GOOGLE_SA_KEY` if the weekly research lens is to read the property too.
-      Vercel and the box are separate environments; setting one does not set
-      the other. Worth checking the next research run's search lens is not
-      reporting itself unconfigured.
+- [x] **The agent container's own `.env`** on the WSL2 box — done. Confirmed
+      2026-09-20 from `research_lens_results`: the 2026-09-17 run's `search`
+      lens came back `status: ok` against `sc-domain:arak-sa.com` for
+      2026-08-18 to 2026-09-14, with three findings and the business-line
+      roll-up populated. The box has the key.
 - [ ] **GA4 (or Plausible/Clarity) on arak-sa.com.** See §6 — and note that
       the CODE half is now done (2026-09-20). `/api/agent/website` reads the
       GA4 Data API with the same service account, and the Analytics page's
