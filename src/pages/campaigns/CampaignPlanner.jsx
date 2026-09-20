@@ -15,7 +15,7 @@ import {
 } from '../../lib/postFormats'
 import { groupByWeek, monthOptions, normalizeAiIdea, distributeDates, formatTime, DEFAULT_POST_TIME, pollProblems, firstPlaceableDay } from './planModel'
 import { brandTodayKey } from '../../lib/brandTime'
-import { GOALS, WEEKDAYS, DEFAULT_DRAFT, isUntouchedSelection, PLATFORMS, targetLabel } from './planConstants'
+import { GOALS, OTHER_GOAL, isCustomGoal, WEEKDAYS, DEFAULT_DRAFT, isUntouchedSelection, PLATFORMS, targetLabel } from './planConstants'
 import { isProtectedPlatform } from '../../lib/platformSafety'
 import { IdeaCard } from './IdeaCard'
 import { CaptionCard } from './CaptionCard'
@@ -169,20 +169,6 @@ export function CampaignPlanner() {
     }
   }
 
-  // Rows the planner can be told to build the month around. Any directory
-  // qualifies. A row's first column is its display name.
-  const featurableItems = []
-  for (const section of directory.schema.sections) {
-    if (section.kind !== 'directory' || section.enabled === false) continue
-    const cols = directory.schema.columns.filter(c => c.section_key === section.key && c.enabled !== false)
-    if (!cols.length) continue
-    for (const row of directory.rowsBySection[section.key] || []) {
-      const name = String(row.data?.[cols[0].key] || '').trim()
-      if (!name) continue
-      featurableItems.push({ id: row.id, name, sectionTitle: section.title, cols, data: row.data || {} })
-    }
-  }
-
   // Review-step view controls (client-side only).
   const [statusFilter,   setStatusFilter]   = useState('all')   // all | undecided | approved | rejected
   const [seasonalOnly,   setSeasonalOnly]   = useState(false)
@@ -197,6 +183,11 @@ export function CampaignPlanner() {
   // every plan, and a row of chips plus a context dump was the most confusing
   // thing on the page.
   const [showBrainPicker, setShowBrainPicker] = useState(false)
+  // Whether the focus category is being typed rather than picked. Seeded from
+  // the draft: a reopened plan whose category isn't on the list is a custom
+  // one, and without this it would come back reading "General" while still
+  // carrying the old value.
+  const [customCategory, setCustomCategory] = useState(() => isCustomGoal(draft.goalCategory))
 
   // "Generate more ideas" — AI top-up on top of the existing plan.
   const [showMoreModal, setShowMoreModal] = useState(false)
@@ -210,7 +201,7 @@ export function CampaignPlanner() {
   // place. `loading` still exists but now covers only the brief moment spent
   // handing the job over; the wait itself is not a request anyone is holding.
 
-  const { step, month, goal, goalCategory, platforms, startDate, endDate, approxCount, includeHolidays, brandBrainSections, featuredProductIds, seedPosts, name, ideas, planId, manualResult, postingDays, aiAssist, contentMixTarget, openedFromPlanList, researchIdeaKeys, generatingPlanId, generatingMode } = draft
+  const { step, month, goal, goalCategory, platforms, startDate, endDate, approxCount, includeHolidays, brandBrainSections, seedPosts, name, ideas, planId, manualResult, postingDays, aiAssist, contentMixTarget, openedFromPlanList, researchIdeaKeys, generatingPlanId, generatingMode } = draft
 
   // ── What the research agent proposed, for the setup step's picker ───────
   // The pull direction of the research loop. Pushing already existed (the
@@ -451,7 +442,6 @@ export function CampaignPlanner() {
   }, [ideas, accessToken])
 
   const toggleSection  = s => update({ brandBrainSections: brandBrainSections.includes(s) ? brandBrainSections.filter(x => x !== s) : [...brandBrainSections, s] })
-  const toggleProduct  = id => update({ featuredProductIds: featuredProductIds.includes(id) ? featuredProductIds.filter(x => x !== id) : [...featuredProductIds, id] })
   const toggleDay      = d  => update({ postingDays: postingDays.includes(d) ? postingDays.filter(x => x !== d) : [...postingDays, d] })
   // Which platforms this month is for. Never empty — the last one cannot be
   // switched off. A post already added for a platform being switched off
@@ -557,22 +547,6 @@ export function CampaignPlanner() {
     return { cleanSeeds, seedIdeas }
   }
 
-  // The rows to feature with their full context, not just ids. Columns
-  // flagged out of the prompt (prices) stay out here too.
-  function buildFeaturedProducts() {
-    return featurableItems
-      .filter(item => featuredProductIds.includes(item.id))
-      .map(item => {
-        const out = { name: item.name, catalogue: item.sectionTitle }
-        for (const c of item.cols.slice(1)) {
-          if (c.in_prompt === false) continue
-          const val = String(item.data[c.key] || '').trim()
-          if (val) out[c.key] = val
-        }
-        return out
-      })
-  }
-
   // The research ideas this month is being built around, in the shape the
   // workflow's prompt reads. Distinct from the `research` block that
   // fetchPlannerMemory already sends: that one is the whole latest run as
@@ -600,7 +574,6 @@ export function CampaignPlanner() {
     setError(''); setLoading(true)
 
     const { cleanSeeds, seedIdeas } = buildSeeds()
-    const featuredProducts = aiAssist ? buildFeaturedProducts() : []
     const effectiveGoal = aiAssist ? (goal.trim() || defaultGoal()) : ''
 
     // ── The plan row is created FIRST, and that ordering is the fix ───────
@@ -617,7 +590,6 @@ export function CampaignPlanner() {
       month, start_date: startDate, end_date: endDate,
       goal: effectiveGoal, goal_category: goalCategory || '', platforms,
       status: aiAssist ? 'generating' : 'draft',
-      featured_products: featuredProducts.map(p => p.name),
       posting_days: postingDays, default_time: DEFAULT_POST_TIME,
       content_mix_target: contentMixTarget || null,
       ...(aiAssist ? {
@@ -657,7 +629,6 @@ export function CampaignPlanner() {
       instructions: brandCtx.instructions || null,
       brand_name: brandCtx.brand_name,
       brand_descriptor: brandCtx.brand_descriptor,
-      featured_products: featuredProducts,
       seed_posts: cleanSeeds,
       content_mix_target: contentMixTarget || null,
       past_ideas: pastIdeas,
@@ -1499,10 +1470,25 @@ export function CampaignPlanner() {
                     label="Roughly how many AI posts? (optional)"
                     type="number" min="1" placeholder="Let AI decide"
                     value={approxCount} onChange={e => update({ approxCount: e.target.value })} />
-                  <Select label="Focus category (optional)" value={goalCategory} onChange={e => update({ goalCategory: e.target.value })}>
-                    <option value="">General</option>
-                    {GOALS.map(g => <option key={g} value={g}>{g}</option>)}
-                  </Select>
+                  <div className="space-y-2">
+                    <Select
+                      label="Focus category (optional)"
+                      value={customCategory ? OTHER_GOAL : goalCategory}
+                      onChange={e => {
+                        if (e.target.value === OTHER_GOAL) { setCustomCategory(true); update({ goalCategory: '' }) }
+                        else { setCustomCategory(false); update({ goalCategory: e.target.value }) }
+                      }}>
+                      <option value="">General</option>
+                      {GOALS.map(g => <option key={g} value={g}>{g}</option>)}
+                      <option value={OTHER_GOAL}>Other — write my own…</option>
+                    </Select>
+                    {customCategory && (
+                      <Input
+                        placeholder="Name this month's focus — e.g. 'Smart poles for municipalities'"
+                        value={goalCategory} onChange={e => update({ goalCategory: e.target.value })}
+                        autoFocus />
+                    )}
+                  </div>
                 </div>
 
                 <Textarea
@@ -1526,23 +1512,6 @@ export function CampaignPlanner() {
                   onToggle={toggleResearchIdea}
                   usedKeys={usedResearchKeys}
                 />
-
-                {featurableItems.length > 0 && (
-                  <div>
-                    <p className="text-xs font-medium text-text-secondary mb-2">Feature these this month (optional)</p>
-                    <div className="flex gap-2 flex-wrap">
-                      {featurableItems.map(item => {
-                        const active = featuredProductIds.includes(item.id)
-                        return (
-                          <button key={item.id} onClick={() => toggleProduct(item.id)}
-                            className={`px-3 py-1.5 rounded-xl border text-sm font-medium transition-all ${active ? 'bg-amber-600 text-white border-amber-600' : 'bg-white border-border text-text-secondary hover:border-amber-400'}`}>
-                            {item.name}<span className={active ? 'opacity-75 ml-1' : 'text-text-tertiary ml-1'}>· {item.sectionTitle}</span>
-                          </button>
-                        )
-                      })}
-                    </div>
-                  </div>
-                )}
               </div>
             )}
           </div>
