@@ -30,10 +30,17 @@ const SERVICE_KEY  = process.env.SUPABASE_SERVICE_ROLE_KEY || ''
 const ANON_KEY     = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || ''
 const ZERNIO_KEY   = process.env.ZERNIO_API_KEY || ''
 
-const ACTIONS = new Set([
-  'accounts', 'connect_url', 'selection_options', 'selection_complete',
-  'disconnect', 'creator_info', 'audio_search', 'analytics', 'sync',
-])
+// The actions this route answers. DERIVED from `handlers` rather than listed,
+// because the two lists drifted the moment one was added: `followers` was
+// written as a handler and not added here, so every call to it 404'd with
+// "Unknown action: followers" while the code that answered it sat directly
+// below, untouched and unreachable. A hand-kept allowlist beside a dispatch
+// table is two statements of the same fact, and one of them is always the
+// stale one.
+//
+// `handlers` is a const declared later in this module; this is only read
+// inside the request handler, long after the module has finished evaluating.
+export const isAction = name => Object.prototype.hasOwnProperty.call(handlers, name)
 
 // ─── Supabase ──────────────────────────────────────────────────────────────
 // Two identities, used deliberately:
@@ -602,7 +609,7 @@ export default async function handler(req, res) {
   }
 
   const action = String(req.query?.action || '')
-  if (!ACTIONS.has(action)) {
+  if (!isAction(action)) {
     return res.status(404).json({ ok: false, error: `Unknown action: ${action || '(none)'}` })
   }
 
