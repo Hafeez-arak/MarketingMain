@@ -49,7 +49,6 @@ export function IdeaCard({ idea, index, accessToken, workspaceId, onChange, onRe
   const [saving,  setSaving]  = useState(false)
   const [saveError, setSaveError] = useState('')
   const [showRejectReasons, setShowRejectReasons] = useState(false)
-  const [showTargets, setShowTargets] = useState(false)
   const targets = idea.platforms?.length ? idea.platforms : [idea.platform]
   const own = isOwnPost(idea)
   const formatLabel = formatsFor(idea.platform).find(f => f.id === idea.postFormat)?.label || 'Feed image'
@@ -227,22 +226,6 @@ export function IdeaCard({ idea, index, accessToken, workspaceId, onChange, onRe
             ))}
             <button onClick={() => setShowRejectReasons(false)} className="text-[11px] text-text-tertiary hover:text-text ml-1">Cancel</button>
           </div>
-        ) : showTargets ? (
-          <div className="flex items-center gap-1.5 mt-3 pl-8 flex-wrap">
-            <span className="text-[11px] text-text-tertiary mr-1">Publish to?</span>
-            {TARGET_PLATFORMS.map(p => {
-              const on = targets.includes(p.id)
-              const locked = p.id === idea.platform
-              return (
-                <button key={p.id} onClick={() => toggleTarget(p.id)} disabled={locked}
-                  title={locked ? 'The idea’s main platform — it sets the format, so it can’t be removed here' : ''}
-                  className={`text-[11px] font-medium px-2.5 py-1 rounded-lg border transition-colors ${on ? p.cls : 'border-border text-text-secondary hover:border-text-tertiary'} ${locked ? 'cursor-default' : ''}`}>
-                  {on ? '✓ ' : ''}{p.label}
-                </button>
-              )
-            })}
-            <button onClick={() => setShowTargets(false)} className="text-[11px] text-text-tertiary hover:text-text ml-1">Done</button>
-          </div>
         ) : (
         <div className="flex items-center gap-2 mt-3 pl-8">
           <button onClick={() => setStatus('approved')} disabled={saving || idea.isNew || idea.status === 'approved'}
@@ -254,17 +237,44 @@ export function IdeaCard({ idea, index, accessToken, workspaceId, onChange, onRe
             ✕ Reject
           </button>
           {!idea.isNew && <button onClick={() => setEditing(true)} className="text-[11px] font-medium px-2.5 py-1 rounded-lg text-text-tertiary hover:text-text hover:bg-surface-subtle transition-colors">Edit</button>}
-          {!idea.isNew && (
-            <button onClick={() => setShowTargets(true)}
-              title="Which platforms this post goes to."
-              className={`text-[11px] font-medium px-2.5 py-1 rounded-lg transition-colors ${targets.length > 1 ? 'text-sky-700 bg-sky-50 hover:bg-sky-100' : 'text-text-tertiary hover:text-text hover:bg-surface-subtle'}`}>
-              🎯 {targets.length > 1 ? `${targets.length} platforms` : 'Targets'}
-            </button>
-          )}
           <button onClick={() => onRemove(idea)} className="text-[11px] font-medium px-2.5 py-1 rounded-lg text-text-tertiary hover:text-red-500 transition-colors ml-auto">
             {idea.isNew ? 'Discard' : 'Delete'}
           </button>
         </div>
+        )}
+
+        {/* ── Platforms, always open ─────────────────────────────────────
+            This was a "🎯 Targets" button that opened a picker. Two things
+            were wrong with it. It was named after the code's word, not the
+            user's — the row it opened already asked "Publish to?", and the
+            same button relabelled itself "2 platforms" as soon as you used
+            it, so the feature had two names and neither was "platforms".
+            And it was shut: cross-posting one idea to Instagram, TikTok and
+            LinkedIn is a normal thing to want on most ideas, and a control
+            you have to find first is one most posts never get.
+
+            The primary platform stays locked here. It sets the format, the
+            tone list and the aspect ratio, so an idea with it switched off
+            would be describing two different posts. Change it in Edit. */}
+        {!idea.isNew && !editing && (
+          <div className="flex items-center gap-1.5 mt-2.5 pl-8 flex-wrap">
+            <span className="text-[11px] text-text-tertiary mr-0.5">Platforms</span>
+            {TARGET_PLATFORMS.map(p => {
+              const on = targets.includes(p.id)
+              const locked = p.id === idea.platform
+              return (
+                <button key={p.id} onClick={() => toggleTarget(p.id)} disabled={locked || lock?.locked}
+                  title={locked
+                    ? 'The main platform — it sets the format, so change it in Edit'
+                    : on ? `Also publishing to ${p.label} — click to remove` : `Also publish to ${p.label}`}
+                  className={`text-[11px] font-medium px-2.5 py-1 rounded-lg border transition-colors ${
+                    on ? p.cls : 'border-border text-text-secondary hover:border-text-tertiary hover:bg-surface-subtle'
+                  } ${locked ? 'cursor-default' : ''}`}>
+                  {on ? '✓ ' : '+ '}{p.label}
+                </button>
+              )
+            })}
+          </div>
         )}
       </div>
 
