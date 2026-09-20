@@ -8,6 +8,7 @@ import { useConnectedAccounts } from '../../lib/useConnectedAccounts'
 import { mayPublishTo, protectionReason } from '../../lib/platformSafety'
 import { PostComposer } from './PostComposer'
 import { postLock } from '../../lib/postLock'
+import { projectionFor } from '../../lib/mediaOrder'
 
 // ─── The Create-post button, and everything behind it ──────────────────────
 // Both platform pages mount this rather than each wiring its own composer, so
@@ -22,8 +23,6 @@ import { postLock } from '../../lib/postLock'
 
 function rowFrom(state, workspaceId, status) {
   const opts = optionsFor(state)
-  const videos = state.media.filter(m => m.type === 'video')
-  const images = state.media.filter(m => m.type === 'image')
 
   return {
     workspace_id: workspaceId,
@@ -32,10 +31,12 @@ function rowFrom(state, workspaceId, status) {
     hashtags: state.hashtags || '',
     first_comment: opts.firstComment || '',
     format: state.format,
-    media_type: videos.length ? 'video' : images.length ? 'image' : 'none',
-    image_url: images[0]?.url || '',
-    image_urls: images.map(m => m.url),
-    video_url: videos[0]?.url || '',
+    // `media` (ordered, mixed) plus the legacy columns derived from it, in one
+    // spread. This used to split state.media into images and videos by hand
+    // and write media_type: videos.length ? 'video' : … — which is how a
+    // carousel of two pictures and a clip was stored as a video post, and how
+    // reopening it and saving wrote image_urls: [] over the pictures.
+    ...projectionFor(state.media),
     cover_image_url: state.coverImageUrl || '',
     campaign_id: state.campaignId || null,
     // The whole per-platform block, stored as it will be sent. Round-tripping

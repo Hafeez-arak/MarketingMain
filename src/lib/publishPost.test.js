@@ -43,12 +43,34 @@ describe('buildPublishRequest', () => {
     expect(req.imageUrls).toEqual(['https://cdn.test/1.jpg', 'https://cdn.test/2.jpg'])
   })
 
-  it('prefers a video over images — a post is one or the other', () => {
+  it('sends a video post as a video and nothing else', () => {
     const media = [{ url: 'https://cdn.test/v.mp4', type: 'video' }]
     const req = buildPublishRequest(composed({ format: 'reel', media }), opts)
 
     expect(req.videoUrl).toBe('https://cdn.test/v.mp4')
     expect(req.imageUrl).toBeUndefined()
+    expect(req.media).toEqual([{ type: 'video', url: 'https://cdn.test/v.mp4' }])
+  })
+
+  it('sends a MIXED carousel in order, instead of dropping the pictures', () => {
+    // The bug: mediaFields was `if (videos.length) return { videoUrl }`, so a
+    // carousel of two pictures and a clip published as the clip alone. The
+    // ordered list is what the workflow builds Zernio's mediaItems from.
+    const media = [
+      { url: 'https://cdn.test/a.jpg', type: 'image' },
+      { url: 'https://cdn.test/v.mp4', type: 'video' },
+      { url: 'https://cdn.test/b.jpg', type: 'image' },
+    ]
+    const req = buildPublishRequest(composed({ format: 'carousel', media }), opts)
+
+    expect(req.media).toEqual([
+      { type: 'image', url: 'https://cdn.test/a.jpg' },
+      { type: 'video', url: 'https://cdn.test/v.mp4' },
+      { type: 'image', url: 'https://cdn.test/b.jpg' },
+    ])
+    // The flat fields stay populated for callers and nodes that predate it.
+    expect(req.imageUrls).toEqual(['https://cdn.test/a.jpg', 'https://cdn.test/b.jpg'])
+    expect(req.videoUrl).toBe('https://cdn.test/v.mp4')
   })
 
   it('carries Instagram options through as platformSpecificData', () => {

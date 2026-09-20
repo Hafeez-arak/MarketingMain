@@ -1510,26 +1510,51 @@ try {
   const content  = [caption, hashtags].filter(Boolean).join('\n\n');
 
   const mediaItems = [];
-  const videoUrl = body.video_url || '';
   const coverUrl = body.cover_image_url || '';
-  if (videoUrl){
-    const item = { type:'video', url: videoUrl };
-    // Zernio takes a cover for Reels under instagramThumbnail and for
-    // everything else under thumbnail — send both; each platform ignores
-    // the one it doesn't use.
-    if (coverUrl){ const c = toPublishable(coverUrl); item.thumbnail = c; item.instagramThumbnail = c; }
-    mediaItems.push(item);
-  } else {
-    // image_urls (carousel) preferred, else the single image_url.
-    const urls = Array.isArray(body.image_urls) && body.image_urls.length
-      ? body.image_urls
-      : [body.image_url].filter(Boolean);
-    for (const u of urls){
-      if (!u) continue;
-      const item = { type:'image', url: toPublishable(u) };
-      if (body.alt_text) item.altText = String(body.alt_text).slice(0, 1000);
-      mediaItems.push(item);
+
+  // ── The ordered list the browser sent ──
+  // `media` is [{type,url}] in carousel order and may MIX images and videos:
+  // Instagram allows up to 10 items of either kind, all sized to the first,
+  // and Zernio's mediaItems has always been an array that can express it.
+  //
+  // This node used to be `if (video_url) {one video} else {the images}`, which
+  // is why a carousel of two pictures and a clip published as the clip alone.
+  // The flat columns are still honoured, for every caller that predates
+  // `media` — the plan's own booking path among them.
+  const ordered = Array.isArray(body.media) && body.media.length
+    ? body.media
+        .filter(m => m && m.url)
+        .map(m => ({ type: m.type === 'video' ? 'video' : 'image', url: String(m.url) }))
+    : (() => {
+        const video = body.video_url || '';
+        if (video) return [{ type:'video', url: video }];
+        const urls = Array.isArray(body.image_urls) && body.image_urls.length
+          ? body.image_urls
+          : [body.image_url].filter(Boolean);
+        return urls.filter(Boolean).map(u => ({ type:'image', url: u }));
+      })();
+
+  for (const m of ordered){
+    const item = { type: m.type, url: toPublishable(m.url) };
+    if (m.type === 'video'){
+      // Zernio takes a cover for Reels under instagramThumbnail and for
+      // everything else under thumbnail — send both; each platform ignores
+      // the one it doesn't use. Only the FIRST video gets it: a cover is the
+      // post's poster frame, and a carousel has one.
+      if (coverUrl && !mediaItems.some(x => x.type === 'video')){
+        const c = toPublishable(coverUrl); item.thumbnail = c; item.instagramThumbnail = c;
+      }
+    } else if (body.alt_text){
+      item.altText = String(body.alt_text).slice(0, 1000);
     }
+    mediaItems.push(item);
+  }
+
+  // Zernio's ceiling, enforced here as well as in the browser: this webhook is
+  // reachable without it, and a silent truncation at the provider would be a
+  // post that publishes missing its last slides with nothing said.
+  if (mediaItems.length > 10){
+    throw new Error(`A carousel takes at most 10 items; this post has ${mediaItems.length}.`);
   }
 
   if (!content && !mediaItems.length){
@@ -1573,7 +1598,12 @@ try {
   // webhook: refusing here means a hand-made request gets a sentence rather
   // than an opaque provider rejection, and the row is not left claimed.
   if (psd.audioConfiguration){
-    const isReel = !psd.contentType && !!videoUrl;
+    // A Reel is ONE video and nothing else. This used to read `!!videoUrl`,
+    // which was the same thing back when a post could not hold both kinds —
+    // now a mixed carousel has a video too, and catalog audio on a carousel is
+    // a rejection at container creation.
+    const isReel = !psd.contentType
+      && mediaItems.length === 1 && mediaItems[0].type === 'video';
     if (!isReel){
       throw new Error('Catalog audio can only be attached to a Reel (a single video post).');
     }

@@ -36,7 +36,7 @@ const POST_TABLES = ['instagram_generated_posts', 'generated_posts']
 // unqualified second publish of a scheduled post is a double-post.
 export async function publishPost(webhookUrl, {
   postId, postTable, workspaceId, platform, accountId,
-  caption, hashtags, imageUrl, imageUrls, videoUrl, coverImageUrl, altText,
+  caption, hashtags, media, imageUrl, imageUrls, videoUrl, coverImageUrl, altText,
   platformSpecificData, tiktokSettings,
   scheduledFor, timezone, force = false, reschedule = false,
 }) {
@@ -50,6 +50,11 @@ export async function publishPost(webhookUrl, {
         post_id: postId, post_table: postTable, workspace_id: workspaceId, platform,
         account_id: accountId || undefined,
         caption: caption || '', hashtags: hashtags || '',
+        // The ordered list — images and videos together, in carousel order.
+        // The workflow builds Zernio's mediaItems straight from it and falls
+        // back to the flat fields below when it is absent, which is every
+        // caller that predates it (the planner's own booking path included).
+        media: Array.isArray(media) && media.length ? media : undefined,
         image_url: imageUrl || '', image_urls: imageUrls || undefined,
         video_url: videoUrl || '', cover_image_url: coverImageUrl || '', alt_text: altText || '',
         // The composer's per-platform options, already narrowed to the fields

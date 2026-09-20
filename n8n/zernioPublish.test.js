@@ -298,3 +298,67 @@ describe('protected accounts', () => {
     expect(sent).toHaveLength(1)
   })
 })
+
+// ─── Mixed carousels ───────────────────────────────────────────────────────
+// The node used to be `if (video_url) {one video} else {the images}`, so a
+// carousel of two pictures and a clip published as the clip alone. Zernio's
+// Instagram guide: "Up to 10 items, images and videos mixed. All items share
+// the aspect ratio of the first item."
+describe('mixed media carousels', () => {
+  const A = 'https://cdn.test/a.jpg'
+  const B = 'https://cdn.test/b.jpg'
+  const V = 'https://cdn.test/v.mp4'
+
+  it('sends images and video as one ordered mediaItems array', async () => {
+    const { routes, sent } = zernio()
+    await run({
+      ...base, platform: 'instagram',
+      media: [{ type: 'image', url: A }, { type: 'video', url: V }, { type: 'image', url: B }],
+      image_url: A, image_urls: [A, B], video_url: V,
+    }, { postgrest: db(), routes })
+
+    const items = sent[0].mediaItems || sent[0].platforms[0].mediaItems
+    expect(items.map(i => [i.type, i.url])).toEqual([
+      ['image', A], ['video', V], ['image', B],
+    ])
+  })
+
+  it('still honours the flat columns for callers that predate `media`', async () => {
+    const { routes, sent } = zernio()
+    await run({
+      ...base, platform: 'instagram', image_url: A, image_urls: [A, B], video_url: '',
+    }, { postgrest: db(), routes })
+
+    const items = sent[0].mediaItems || sent[0].platforms[0].mediaItems
+    expect(items.map(i => i.url)).toEqual([A, B])
+  })
+
+  it('refuses more than ten items rather than letting the provider truncate', async () => {
+    const { routes, sent } = zernio()
+    const many = Array.from({ length: 11 }, (_, i) => ({ type: 'image', url: `https://cdn.test/${i}.jpg` }))
+    const { out } = await run({
+      ...base, platform: 'instagram', media: many, image_url: many[0].url,
+    }, { postgrest: db(), routes })
+
+    expect(out.ok).toBe(false)
+    expect(String(out.error)).toMatch(/at most 10 items/i)
+    expect(sent).toHaveLength(0)
+  })
+
+  it('will not attach catalog audio to a mixed carousel', async () => {
+    // A Reel is ONE video. A carousel that merely contains a video is not one,
+    // and Instagram rejects catalog audio on it at container creation. The
+    // check used to read `!!videoUrl`, which was the same thing only because a
+    // post could not hold both kinds.
+    const { routes, sent } = zernio()
+    const { out } = await run({
+      ...base, platform: 'instagram',
+      media: [{ type: 'image', url: A }, { type: 'video', url: V }],
+      platform_specific_data: { audioConfiguration: { audioId: 'aud_1' } },
+    }, { postgrest: db(), routes })
+
+    expect(out.ok).toBe(false)
+    expect(String(out.error)).toMatch(/only be attached to a Reel/i)
+    expect(sent).toHaveLength(0)
+  })
+})

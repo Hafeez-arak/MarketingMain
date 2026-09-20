@@ -3,6 +3,7 @@ import { brandWallToUtcISO, brandWallString, formatBrandDateTime } from './brand
 import { publishPost } from './zernio'
 import { defaultWebhookUrl } from './n8nWebhooks'
 import { postLock } from './postLock'
+import { mediaOfPost } from './mediaOrder'
 
 // ─── Posts, across all three tables ────────────────────────────────────────
 // Reads go through the scheduled_posts view (20260813_scheduled_posts_view.sql);
@@ -175,6 +176,11 @@ export async function movePost({ accessToken, post, dateKey, time, webhooks, wor
     accountId: post.zernio_account_id || undefined,
     caption: post.caption || '',
     hashtags: post.hashtags || '',
+    // The ordered list, so re-booking a mixed carousel sends the same items in
+    // the same order it was published with. Reading only image_urls/video_url
+    // here would re-book it as video-only — the exact half-a-post this change
+    // exists to stop, arriving by a different door.
+    media: mediaOfPost(post),
     imageUrl: post.image_url || '',
     imageUrls: Array.isArray(post.image_urls) && post.image_urls.length > 1 ? post.image_urls : undefined,
     videoUrl: post.video_url || '',
