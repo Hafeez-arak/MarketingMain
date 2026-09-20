@@ -7,7 +7,7 @@ import {
   websiteSummary, dailySeries, searchTypes, positionBands, pageRows, hostSplit,
   queryRows, countryRows, deviceRows, appearanceRows, sitemapHealth, queryCoverage,
 } from '../../lib/analytics/websiteAnalytics'
-import { ga4Summary } from '../../lib/agent/ga4'
+import { ga4Summary, platformArrivals, arrivalsSummary } from '../../lib/agent/ga4'
 
 // ─── The Website tab's data, fetched once and derived once ─────────────────
 //
@@ -56,7 +56,14 @@ export function useWebsiteAnalytics() {
 
   const search = data?.search || null
   const ga4 = data?.ga4 || null
+  // The bio link: GA4's arrivals on one side, Instagram's taps on the other.
+  // Two sources, so it arrives as its own object rather than inside `ga4`.
+  const bio = data?.bio || null
   const usable = !!search?.ok && !!search?.configured
+
+  // Social sessions per platform. Read twice — by the panel and by its own
+  // summary line — so it is derived once here, like `allQueries` below.
+  const arrivals = useMemo(() => platformArrivals(ga4?.social || []), [ga4])
 
   // Full-length query rows: the one derivation read by more than one panel.
   const allQueries = useMemo(
@@ -75,6 +82,7 @@ export function useWebsiteAnalytics() {
 
     search,
     ga4,
+    bio,
     usable,
 
     summary: useMemo(() => (usable ? websiteSummary(search) : null), [usable, search]),
@@ -101,6 +109,11 @@ export function useWebsiteAnalytics() {
       () => (usable ? seoRecommendations({ ...search, limit: 10 }) : []),
       [usable, search],
     ),
+    // Social arrivals, per platform, derived once here for the same reason as
+    // everything else on this page: the panel and its summary line must count
+    // the same rows.
+    arrivals,
+    arrivalsSummary: useMemo(() => arrivalsSummary(arrivals), [arrivals]),
     ga4Summary: useMemo(
       () => (ga4?.ok && ga4?.configured ? ga4Summary(ga4) : null),
       [ga4],

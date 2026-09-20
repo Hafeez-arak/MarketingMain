@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   propertyPath, isoDate, normalizeReport, totalsOf, reportBody, reportPlan,
   ga4Summary, ga4Config, delta, TOTAL_METRICS,
+  platformOf, platformArrivals, arrivalsSummary, isTagged, isBioCampaign, siteOrigin, bioLink,
 } from './ga4.js'
 
 describe('propertyPath', () => {
@@ -215,5 +216,152 @@ describe('TOTAL_METRICS', () => {
     expect(TOTAL_METRICS).toContain('sessions')
     expect(TOTAL_METRICS).toContain('engagementRate')
     expect(new Set(TOTAL_METRICS).size).toBe(TOTAL_METRICS.length)
+  })
+})
+
+describe('platformOf', () => {
+  it('recognises a platform however GA4 spells the host', () => {
+    for (const s of ['instagram', 'instagram.com', 'l.instagram.com', 'm.instagram.com', 'Instagram']) {
+      expect(platformOf(s)?.id).toBe('instagram')
+    }
+  })
+
+  it('recognises the shorteners, which carry no readable name at all', () => {
+    expect(platformOf('lnkd.in')?.id).toBe('linkedin')
+    expect(platformOf('t.co')?.id).toBe('x')
+    expect(platformOf('fb.me')?.id).toBe('facebook')
+  })
+
+  it('leaves everything that is not social alone', () => {
+    expect(platformOf('google')).toBe(null)
+    expect(platformOf('(direct)')).toBe(null)
+    expect(platformOf('')).toBe(null)
+  })
+})
+
+describe('platformArrivals', () => {
+  // The shape GA4 really returns: the same platform under three hosts, one of
+  // them tagged, because the bio link was changed halfway through the window.
+  const rows = [
+    { sessionSource: 'l.instagram.com', sessionMedium: 'referral', sessionCampaignName: '(not set)', sessions: 9, totalUsers: 7, engagedSessions: 4 },
+    { sessionSource: 'instagram', sessionMedium: 'social', sessionCampaignName: 'bio', sessions: 5, totalUsers: 5, engagedSessions: 3 },
+    { sessionSource: 'instagram.com', sessionMedium: 'referral', sessionCampaignName: '(not set)', sessions: 2, totalUsers: 2, engagedSessions: 1 },
+    { sessionSource: 'lnkd.in', sessionMedium: 'referral', sessionCampaignName: '(not set)', sessions: 3, totalUsers: 3, engagedSessions: 2 },
+    { sessionSource: 'google', sessionMedium: 'organic', sessionCampaignName: '(organic)', sessions: 61, totalUsers: 52, engagedSessions: 40 },
+  ]
+
+  it('folds every spelling of a platform into one row', () => {
+    const [ig] = platformArrivals(rows)
+    expect(ig.id).toBe('instagram')
+    expect(ig.sessions).toBe(16)
+    expect(ig.users).toBe(14)
+    expect(ig.sources).toEqual(['l.instagram.com', 'instagram', 'instagram.com'])
+  })
+
+  it('keeps tagged and untagged apart, because untagged is a floor not a count', () => {
+    const [ig] = platformArrivals(rows)
+    expect(ig.bioSessions).toBe(5)
+    expect(ig.taggedSessions).toBe(5)
+    expect(ig.untaggedSessions).toBe(11)
+  })
+
+  it('drops everything that is not a social source', () => {
+    expect(platformArrivals(rows).map(r => r.id)).toEqual(['instagram', 'linkedin'])
+  })
+
+  it('orders by sessions, so the biggest platform reads first', () => {
+    expect(platformArrivals(rows)[0].sessions).toBeGreaterThan(platformArrivals(rows)[1].sessions)
+  })
+})
+
+describe('isBioCampaign', () => {
+  // A campaign renamed `bio-2026` must not read as the bio link disappearing.
+  it('counts a dated or suffixed bio campaign as the bio link', () => {
+    expect(isBioCampaign('bio')).toBe(true)
+    expect(isBioCampaign('bio-2026')).toBe(true)
+    expect(isBioCampaign('BIO_ramadan')).toBe(true)
+  })
+
+  it('does not swallow other campaigns', () => {
+    expect(isBioCampaign('ramadan')).toBe(false)
+    expect(isBioCampaign('(not set)')).toBe(false)
+  })
+
+  // The cost of the prefix match, written down so it is a decision rather
+  // than a surprise: a campaign that merely STARTS with the word counts too.
+  // Accepted, because the alternative failure — a renamed bio campaign
+  // silently reading as zero — is the one that gets acted on.
+  it('counts any campaign starting with the word, which is the trade-off', () => {
+    expect(isBioCampaign('biofuel-launch')).toBe(true)
+  })
+})
+
+describe('isTagged', () => {
+  it('treats every one of GA4’s ways of saying "no campaign" as untagged', () => {
+    for (const c of ['', '(not set)', '(direct)', '(organic)', '(referral)', '(none)']) {
+      expect(isTagged(c)).toBe(false)
+    }
+    expect(isTagged('bio')).toBe(true)
+  })
+})
+
+describe('arrivalsSummary', () => {
+  it('says plainly when nothing is tagged, rather than leaving a zero to be read as none', () => {
+    const rows = platformArrivals([
+      { sessionSource: 'l.instagram.com', sessionCampaignName: '(not set)', sessions: 9, totalUsers: 7 },
+    ])
+    const s = arrivalsSummary(rows)
+    expect(s.sessions).toBe(9)
+    expect(s.untagged).toBe(9)
+    expect(s.anyTagged).toBe(false)
+  })
+
+  it('adds up across platforms once anything is tagged', () => {
+    const rows = platformArrivals([
+      { sessionSource: 'instagram', sessionCampaignName: 'bio', sessions: 5, totalUsers: 5 },
+      { sessionSource: 'lnkd.in', sessionCampaignName: '(not set)', sessions: 3, totalUsers: 3 },
+    ])
+    const s = arrivalsSummary(rows)
+    expect(s).toMatchObject({ sessions: 8, users: 8, tagged: 5, bio: 5, untagged: 3, anyTagged: true })
+  })
+})
+
+describe('siteOrigin and bioLink', () => {
+  it('turns a Search Console property back into something pasteable', () => {
+    expect(siteOrigin('sc-domain:arak-sa.com')).toBe('https://arak-sa.com')
+    expect(siteOrigin('https://arak-sa.com/')).toBe('https://arak-sa.com')
+    expect(siteOrigin('')).toBe('')
+  })
+
+  // The link this panel hands out must be counted by the same panel. A
+  // capitalised source or a different medium would quietly land elsewhere.
+  it('builds a link platformArrivals will recognise', () => {
+    const url = bioLink('sc-domain:arak-sa.com', 'instagram')
+    expect(url).toBe('https://arak-sa.com/?utm_source=instagram&utm_medium=social&utm_campaign=bio')
+    const rows = platformArrivals([
+      { sessionSource: 'instagram', sessionMedium: 'social', sessionCampaignName: 'bio', sessions: 1, totalUsers: 1 },
+    ])
+    expect(rows[0].bioSessions).toBe(1)
+  })
+
+  it('has nothing to offer when no site is configured', () => {
+    expect(bioLink('', 'instagram')).toBe('')
+    expect(bioLink('sc-domain:arak-sa.com', '')).toBe('')
+  })
+})
+
+describe('reportPlan — the social report', () => {
+  const plan = reportPlan({ current: { start: '2026-08-24', end: '2026-09-20' }, previous: { start: '2026-07-27', end: '2026-08-23' } })
+  const social = plan.find(r => r.id === 'social')
+
+  it('asks for the campaign, which sessionSourceMedium cannot carry', () => {
+    expect(social.body.dimensions.map(d => d.name))
+      .toEqual(['sessionSource', 'sessionMedium', 'sessionCampaignName'])
+  })
+
+  // Optional so a property that rejects the dimension loses one panel, not
+  // the page — the same rule keyEvents established.
+  it('is optional', () => {
+    expect(social.optional).toBe(true)
   })
 })

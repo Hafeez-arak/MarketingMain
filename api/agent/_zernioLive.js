@@ -55,7 +55,7 @@ import { readAccounts } from './_ownData.js'
  * the same painful way is the argument for it being written down in both
  * places rather than inferred once.
  */
-const MAX_INSIGHT_DAYS = 29
+export const MAX_INSIGHT_DAYS = 29
 
 /** Posts to pull in one go. The account has 9; this is room to grow. */
 const POST_LIMIT = 100
@@ -118,6 +118,12 @@ export async function accountInsights(z, accountId, days = MAX_INSIGHT_DAYS) {
       views: metrics.views?.total ?? null,
       accounts_engaged: metrics.accounts_engaged?.total ?? null,
       total_interactions: metrics.total_interactions?.total ?? null,
+      // Taps on the link in the bio — Instagram's own count, and the only
+      // platform that reports one. Carried through rather than dropped: it is
+      // the tap half of the bio-link question the Website tab answers, and its
+      // arrivals half (GA4 sessions) is always smaller for reasons that are
+      // not a bug. Null, never 0, when Instagram did not report it.
+      profile_links_taps: metrics.profile_links_taps?.total ?? null,
       // Carried through verbatim. Zernio states its own staleness and the
       // agent is required to pass that on rather than present a 48-hour-old
       // number as this morning's.

@@ -183,6 +183,22 @@ export function reportPlan({ current, previous } = {}) {
       }),
     },
     {
+      // ── The bio link's half of the page ──
+      // Source, medium and campaign kept as three dimensions rather than the
+      // combined `sessionSourceMedium` above, because the campaign is the only
+      // thing that proves a session came from the link in a bio rather than
+      // from somebody sharing a post — and `sessionSourceMedium` cannot carry
+      // it. Marked optional: a property that has never seen a campaign still
+      // answers, but if this one report is rejected the rest of the page must
+      // not go with it.
+      id: 'social',
+      optional: true,
+      body: reportBody({
+        ...current, dimensions: ['sessionSource', 'sessionMedium', 'sessionCampaignName'],
+        metrics: ['sessions', 'totalUsers', 'engagedSessions'], orderBy: 'sessions', limit: 200,
+      }),
+    },
+    {
       id: 'pages',
       body: reportBody({
         ...current, dimensions: ['pagePath'],
@@ -281,4 +297,175 @@ export function ga4Summary({ totals = {}, previousTotals = {} } = {}) {
 export function ga4Config(profile = {}) {
   const cf = profile?.customFields || {}
   return propertyPath(cf.ga4_property_id || cf.ga4_property || '')
+}
+
+// ─── The bio link: who tapped it, and who actually arrived ─────────────────
+//
+// Two different numbers, and the whole reason this section exists is that they
+// are constantly mistaken for one another:
+//
+//   · TAPS are Instagram's count of people tapping the link in the bio. They
+//     come from Zernio's account insights (`profile_links_taps`), not from
+//     here, and Instagram is the only platform that reports them.
+//   · ARRIVALS are our tag's count of sessions that started from a social
+//     source. That is what this file can see.
+//
+// Arrivals are always lower — a tap that never finishes loading, an ad
+// blocker, a refused consent banner and a back button all sit in the gap. The
+// panel must print both with their own names and never subtract one from the
+// other, the same rule the two engagement rates on the social page cost this
+// project once already.
+//
+// ── WHY UNTAGGED SOCIAL TRAFFIC IS ITS OWN NUMBER ──
+//
+// Instagram's in-app browser frequently sends no referrer at all. Those
+// sessions land in `(direct) / (none)` and are indistinguishable from someone
+// typing the address in — so an untagged bio link UNDER-reports itself, badly,
+// and the undercount is invisible. A `utm_campaign` on the link is the only
+// thing that survives the in-app browser. So `platformArrivals` counts tagged
+// and untagged sessions separately: untagged social traffic is a measurement
+// that is known to be incomplete, and the panel says so rather than quoting it
+// as the answer.
+
+/** The campaign name the bio link carries. One word, lower case, everywhere. */
+export const BIO_CAMPAIGN = 'bio'
+
+/** The medium the bio link carries. `social` is what GA4 files as Organic Social. */
+export const BIO_MEDIUM = 'social'
+
+/**
+ * The platforms worth naming, and every spelling GA4 reports them under.
+ *
+ * `exact` holds the link-shortener hosts, which carry no readable name at all
+ * — `t.co` and `lnkd.in` tokenize into nothing a keyword could match.
+ * `tokens` is matched against the source split on punctuation, so one entry
+ * covers `instagram`, `instagram.com`, `l.instagram.com` and `m.instagram.com`
+ * at once — GA4 reports all four, depending on how the person got there.
+ */
+export const SOCIAL_PLATFORMS = [
+  { id: 'instagram', label: 'Instagram', tokens: ['instagram'], exact: [] },
+  { id: 'linkedin', label: 'LinkedIn', tokens: ['linkedin'], exact: ['lnkd.in'] },
+  { id: 'facebook', label: 'Facebook', tokens: ['facebook'], exact: ['fb.me', 'fb.com'] },
+  { id: 'tiktok', label: 'TikTok', tokens: ['tiktok'], exact: [] },
+  { id: 'youtube', label: 'YouTube', tokens: ['youtube'], exact: ['youtu.be'] },
+  { id: 'x', label: 'X (Twitter)', tokens: ['twitter'], exact: ['x.com', 't.co', 'x'] },
+  { id: 'whatsapp', label: 'WhatsApp', tokens: ['whatsapp'], exact: ['wa.me', 'chat.whatsapp.com'] },
+  { id: 'snapchat', label: 'Snapchat', tokens: ['snapchat'], exact: [] },
+  { id: 'pinterest', label: 'Pinterest', tokens: ['pinterest'], exact: [] },
+  { id: 'telegram', label: 'Telegram', tokens: ['telegram'], exact: ['t.me'] },
+]
+
+/** Which platform a GA4 source string belongs to, or null for everything else. */
+export function platformOf(source) {
+  const s = str(source).toLowerCase()
+  if (!s) return null
+  const parts = s.split(/[^a-z0-9]+/).filter(Boolean)
+  for (const p of SOCIAL_PLATFORMS) {
+    if (p.exact.includes(s)) return p
+    if (p.tokens.some(t => parts.includes(t))) return p
+  }
+  return null
+}
+
+// GA4's ways of saying "there was no campaign on this link". All four are
+// real values it returns, and all four mean untagged.
+const NO_CAMPAIGN = new Set(['', '(not set)', '(direct)', '(organic)', '(referral)', '(none)'])
+
+/** Did this session arrive on a link somebody tagged? */
+export function isTagged(campaign) {
+  return !NO_CAMPAIGN.has(str(campaign).toLowerCase())
+}
+
+/**
+ * Is this the bio link?
+ *
+ * `startsWith` rather than equality so `bio`, `bio-2026` and `bio_ramadan` all
+ * count — a campaign name gets dated the first time somebody runs a second
+ * link, and a panel that stopped counting on that day would read as a collapse
+ * in bio traffic rather than a rename.
+ */
+export function isBioCampaign(campaign) {
+  return str(campaign).toLowerCase().startsWith(BIO_CAMPAIGN)
+}
+
+/**
+ * Social arrivals, one row per platform.
+ *
+ * Takes the `social` report's rows (sessionSource × sessionMedium ×
+ * sessionCampaignName). Everything that is not a social source is dropped
+ * here rather than filtered in the query, because GA4's filter syntax cannot
+ * express "any of these ten hosts, however they are spelled" without ten
+ * clauses that would then live in two places.
+ */
+export function platformArrivals(rows = []) {
+  const by = new Map()
+  for (const r of rows) {
+    const p = platformOf(r.sessionSource)
+    if (!p) continue
+    const row = by.get(p.id) || {
+      id: p.id, label: p.label, sessions: 0, users: 0, engagedSessions: 0,
+      bioSessions: 0, taggedSessions: 0, untaggedSessions: 0, sources: [],
+    }
+    const sessions = num(r.sessions)
+    row.sessions += sessions
+    row.users += num(r.totalUsers)
+    row.engagedSessions += num(r.engagedSessions)
+    if (isBioCampaign(r.sessionCampaignName)) row.bioSessions += sessions
+    if (isTagged(r.sessionCampaignName)) row.taggedSessions += sessions
+    else row.untaggedSessions += sessions
+    const source = str(r.sessionSource)
+    if (source && !row.sources.includes(source)) row.sources.push(source)
+    by.set(p.id, row)
+  }
+  return [...by.values()].sort((a, b) => b.sessions - a.sessions)
+}
+
+/** The one-line verdict the panel leads with. */
+export function arrivalsSummary(rows = []) {
+  const sessions = rows.reduce((n, r) => n + num(r.sessions), 0)
+  const tagged = rows.reduce((n, r) => n + num(r.taggedSessions), 0)
+  const bio = rows.reduce((n, r) => n + num(r.bioSessions), 0)
+  return {
+    sessions,
+    users: rows.reduce((n, r) => n + num(r.users), 0),
+    tagged,
+    bio,
+    untagged: sessions - tagged,
+    // Nothing tagged at all is the state every property starts in, and it is
+    // the difference between "social sent 7 people" and "social sent at least
+    // 7 people, and we cannot see the rest". Named, not inferred from a zero.
+    anyTagged: tagged > 0,
+  }
+}
+
+/**
+ * The site as a link, from whatever Search Console calls it.
+ *
+ * The property is usually `sc-domain:arak-sa.com`, which is not a URL and
+ * cannot be pasted into an Instagram bio. This is the one place that turns it
+ * back into one.
+ */
+export function siteOrigin(site) {
+  const s = str(site).replace(/^sc-domain:/i, '')
+  if (!s) return ''
+  if (/^https?:\/\//i.test(s)) return s.replace(/\/+$/, '')
+  return `https://${s.replace(/\/+$/, '')}`
+}
+
+/**
+ * The tagged link to paste into a profile's bio.
+ *
+ * Built here rather than typed by hand in the panel because the three
+ * parameters have to agree with what `platformArrivals` looks for — a link
+ * carrying `utm_medium=referral` or a capitalised source would be counted as
+ * a different platform, or not counted at all, and nothing on screen would
+ * say why.
+ */
+export function bioLink(site, source, { campaign = BIO_CAMPAIGN, path = '/' } = {}) {
+  const origin = siteOrigin(site)
+  const src = str(source).toLowerCase()
+  if (!origin || !src) return ''
+  const p = path.startsWith('/') ? path : `/${path}`
+  const q = new URLSearchParams({ utm_source: src, utm_medium: BIO_MEDIUM, utm_campaign: campaign })
+  return `${origin}${p}?${q.toString()}`
 }

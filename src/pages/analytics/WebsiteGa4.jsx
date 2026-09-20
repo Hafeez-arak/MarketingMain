@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   ResponsiveContainer, ComposedChart, Area, Line, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -336,5 +337,180 @@ export function Ga4Panels({ ga4, summary, days }) {
         </Card>
       </div>
     </div>
+  )
+}
+
+// ─── The link in the bio ───────────────────────────────────────────────────
+//
+// Two numbers that answer one question between them, and must never be
+// confused for each other:
+//
+//   TAPS      Instagram's count of people tapping the link in the bio.
+//             Instagram is the only platform that reports it.
+//   ARRIVALS  our tag's count of sessions that began on a social source.
+//
+// Arrivals are always lower. A tap that never finished loading, an ad blocker,
+// a refused consent banner and an immediate back button all live in the gap.
+// The two are printed side by side, each under its own name and its own
+// window, and nothing on this panel subtracts one from the other.
+//
+// The third state is the important one, and it is the one this site is in
+// today: social traffic arriving with NO campaign tag. Instagram's in-app
+// browser usually sends no referrer, so an untagged bio link is undercounted
+// by an unknown amount that looks exactly like Direct traffic. That is not a
+// number to quote — it is a job to do — so when nothing is tagged the panel
+// leads with the link to paste rather than with a figure.
+
+function CopyField({ url }) {
+  const [copied, setCopied] = useState(false)
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(url)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1800)
+    } catch {
+      // A clipboard the browser refuses is not an error worth a banner — the
+      // link is on screen in full and can be selected by hand.
+      setCopied(false)
+    }
+  }
+  return (
+    <div className="flex items-center gap-2 min-w-0">
+      <code className="text-[11px] text-text-secondary bg-surface-subtle border border-border px-2 py-1
+        truncate flex-1 min-w-0">{url}</code>
+      <Button size="sm" variant="secondary" onClick={copy}>{copied ? 'Copied' : 'Copy'}</Button>
+    </div>
+  )
+}
+
+export function BioLinkPanel({ ga4, bio, arrivals = [], summary, days }) {
+  if (!ga4?.configured || !ga4?.ok) return null
+
+  const taps = bio?.taps || null
+  const links = bio?.links || []
+  const label = `Last ${ga4.windows?.days || days} days`
+  const share = shareOf(arrivals, 'sessions')
+  const untaggedOnly = summary && summary.sessions > 0 && !summary.anyTagged
+  // A rejected report is not a quiet month. Printing 0 arrivals because GA4
+  // refused the question would say the bio link sent nobody, which is the one
+  // sentence this panel must never say by accident.
+  const counted = ga4.socialAvailable !== false
+
+  return (
+    <Card className="overflow-hidden">
+      <Head
+        title="The link in your bio"
+        subtitle={`Taps on it, and how many of those reached the site · ${label}`} />
+
+      <div className="grid grid-cols-1 sm:grid-cols-3 divide-y sm:divide-y-0 sm:divide-x divide-border
+        border-b border-border">
+        <div className="p-4">
+          <p className="eyebrow mb-2 truncate flex items-center gap-1">
+            Bio taps · Instagram
+            <MetricInfoDot metric="ig.profile_links_taps" label="Bio taps" />
+          </p>
+          {taps?.ok && typeof taps.taps === 'number' ? (
+            <>
+              <p className="text-2xl font-bold text-text leading-none tabular-nums">{fmt(taps.taps)}</p>
+              <p className="text-[11px] text-text-tertiary mt-1.5 leading-tight">
+                Instagram's own count{taps.window ? `, ${taps.window.days} days to ${taps.window.until}` : ''}
+              </p>
+            </>
+          ) : (
+            <>
+              <p className="text-2xl font-bold text-text-tertiary leading-none">—</p>
+              <p className="text-[11px] text-text-tertiary mt-1.5 leading-tight">
+                {taps?.error || 'Instagram did not report link taps for this window.'}
+              </p>
+            </>
+          )}
+        </div>
+        <div className="p-4">
+          <p className="eyebrow mb-2 truncate flex items-center gap-1">
+            Arrivals from social
+            <MetricInfoDot metric="web.social_arrivals" label="Arrivals from social" />
+          </p>
+          <p className={`text-2xl font-bold leading-none tabular-nums ${counted ? 'text-text' : 'text-text-tertiary'}`}>
+            {counted ? fmt(summary?.sessions || 0) : '—'}
+          </p>
+          <p className="text-[11px] text-text-tertiary mt-1.5 leading-tight">
+            {counted
+              ? `${plural(summary?.users || 0, 'visitor')} · counted by the tag on the site`
+              : 'GA4 rejected the report that counts this.'}
+          </p>
+        </div>
+        <div className="p-4">
+          <p className="eyebrow mb-2 truncate flex items-center gap-1">
+            Traced to the bio link
+            <MetricInfoDot metric="web.bio_arrivals" label="Traced to the bio link" />
+          </p>
+          <p className={`text-2xl font-bold leading-none tabular-nums ${counted ? 'text-text' : 'text-text-tertiary'}`}>
+            {counted ? fmt(summary?.bio || 0) : '—'}
+          </p>
+          <p className="text-[11px] text-text-tertiary mt-1.5 leading-tight">
+            {counted ? "Sessions carrying the bio link's own tag" : 'GA4 rejected the report that counts this.'}
+          </p>
+        </div>
+      </div>
+
+      {/* The number that is missing, said as a job rather than a measurement. */}
+      {counted && untaggedOnly && (
+        <div className="px-5 py-4 border-b border-border bg-surface-subtle">
+          <p className="text-sm text-text mb-1.5 font-medium">Your bio link is not tagged yet</p>
+          <p className="text-xs text-text-secondary mb-3 leading-relaxed">
+            All {fmt(summary.sessions)} social {summary.sessions === 1 ? 'visit' : 'visits'} above arrived with
+            no campaign tag, and that figure is a floor rather than the answer: Instagram's in-app browser
+            usually sends no referrer, so most bio-link visits are currently being filed as Direct and cannot be
+            told apart from someone typing the address in. Swapping the plain link in each profile for the one
+            below fixes that from the day you paste it — GA4 cannot backfill the days before.
+          </p>
+          <div className="space-y-2">
+            {links.map(l => (
+              <div key={l.id}>
+                <p className="eyebrow mb-1">{l.label}</p>
+                <CopyField url={l.url} />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {ga4.socialAvailable === false ? (
+        <p className="px-5 py-4 text-xs text-rose-600">
+          GA4 rejected the report that counts social sources, so the breakdown below is missing rather than
+          empty. The site totals higher up the page are unaffected.
+        </p>
+      ) : arrivals.length === 0 ? (
+        <p className="px-5 py-4 text-xs text-text-tertiary">
+          No visits from a social platform in this window. If the bio link is untagged, some of them are sitting
+          in Direct instead — see the channel breakdown above.
+        </p>
+      ) : (
+        <ul className="divide-y divide-border">
+          {arrivals.map(r => (
+            <ShareRow key={r.id} label={r.label} share={share(r.sessions)}
+              right={`${fmt(r.sessions)} · ${pct(share(r.sessions))}`}
+              sub={r.taggedSessions > 0
+                ? `${plural(r.users, 'visitor')} · ${fmt(r.bioSessions)} from the bio link`
+                : `${plural(r.users, 'visitor')} · untagged, so this is a floor`}
+              color="#c9a35e" />
+          ))}
+        </ul>
+      )}
+
+      {(!counted || !untaggedOnly) && links.length > 0 && (
+        <Collapsible title="Tagged links to paste" subtitle="One per profile, so each platform counts separately"
+          count={links.length}>
+          <div className="px-5 py-3 space-y-2 border-t border-border">
+            {links.map(l => (
+              <div key={l.id}>
+                <p className="eyebrow mb-1">{l.label}</p>
+                <CopyField url={l.url} />
+              </div>
+            ))}
+          </div>
+        </Collapsible>
+      )}
+    </Card>
   )
 }
