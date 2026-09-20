@@ -107,7 +107,9 @@ async function runReport(token, property, body) {
  * stacked on a 90-day post strip (see `windowLabel` in pages/analytics/format).
  * One window, stated once, for both halves.
  */
-export async function fetchGa4Data({ property, now = new Date(), days = 28, env = process.env } = {}) {
+export async function fetchGa4Data({
+  property, now = new Date(), days = 28, from = '', to = '', env = process.env,
+} = {}) {
   const sa = serviceAccount(env)
   const resolved = propertyFor(property, env)
 
@@ -117,7 +119,7 @@ export async function fetchGa4Data({ property, now = new Date(), days = 28, env 
     return { ok: false, configured: false, error: 'No GA4 property is configured for this brand.', property: '' }
   }
 
-  const windows = searchWindows(now, { days })
+  const windows = searchWindows(now, { days, from, to })
   let token
   try {
     token = await accessToken(sa, GA4_SCOPE)

@@ -82,13 +82,34 @@ export const WINDOW_DAYS = 28
 const iso = d => d.toISOString().slice(0, 10)
 const shift = (d, days) => new Date(d.getTime() + days * 86_400_000)
 
-export function searchWindows(now = new Date(), { days = WINDOW_DAYS, lag = DATA_LAG_DAYS } = {}) {
-  const end = shift(new Date(now), -lag)
-  const start = shift(end, -(days - 1))
+/**
+ * The window to ask Search Console for, and the one before it to compare to.
+ *
+ * ── WHY A CHOSEN WINDOW IS NOT LAGGED ──
+ *
+ * A rolling window ends `lag` days back, because rows keep arriving for about
+ * two days and a window ending today always reads as a decline (see
+ * DATA_LAG_DAYS). A window somebody typed is different: they asked for the
+ * 1st to the 14th and moving it three days would answer a question they did
+ * not ask. The freshness caveat belongs on screen there, not in the dates.
+ *
+ * The comparison window is always the same length immediately before, so
+ * "last 28 days vs the 28 before" and "1–14 March vs 15–28 February" are the
+ * same sentence.
+ */
+export function searchWindows(now = new Date(), {
+  days = WINDOW_DAYS, lag = DATA_LAG_DAYS, from = '', to = '',
+} = {}) {
+  const fixed = from && to
+  const end = fixed ? new Date(`${to}T00:00:00Z`) : shift(new Date(now), -lag)
+  const start = fixed ? new Date(`${from}T00:00:00Z`) : shift(end, -(days - 1))
+  const span = fixed
+    ? Math.round((end.getTime() - start.getTime()) / 86_400_000) + 1
+    : days
   const prevEnd = shift(start, -1)
-  const prevStart = shift(prevEnd, -(days - 1))
+  const prevStart = shift(prevEnd, -(span - 1))
   return {
-    days,
+    days: span,
     current: { start: iso(start), end: iso(end) },
     previous: { start: iso(prevStart), end: iso(prevEnd) },
   }
