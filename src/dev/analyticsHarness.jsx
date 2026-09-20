@@ -193,11 +193,27 @@ function installFetch(platform) {
     ok: true, status: 200, json: () => Promise.resolve(body), text: () => Promise.resolve(JSON.stringify(body)),
   })
 
-  window.fetch = async input => {
+  window.fetch = async (input, init = {}) => {
     const url = String(input)
     if (url.includes('/api/zernio/analytics')) {
       await new Promise(r => setTimeout(r, 300))
       return json({ ok: true, ...analyticsFor(platform) })
+    }
+    // The Follower history card's own range picker reads this route rather
+    // than the nine-read analytics one. A longer window gets a longer series,
+    // so the card's picker visibly does something in the harness.
+    if (url.includes('/api/zernio/followers')) {
+      await new Promise(r => setTimeout(r, 250))
+      const body = JSON.parse(init.body || '{}')
+      const span = body.from && body.to
+        ? Math.round((Date.parse(body.to) - Date.parse(body.from)) / 86400000) + 1
+        : Number(body.days) || 30
+      const points = Math.min(span, 40)
+      const rows = Array.from({ length: points }, (_, i) => ({
+        date: new Date(Date.now() - (points - 1 - i) * 86400000).toISOString().slice(0, 10),
+        followers: 1800 + i * 2,
+      }))
+      return json({ ok: true, followers: { stats: { [body.account_id]: rows }, accounts: [] } })
     }
     if (url.includes('/api/zernio/sync')) {
       await new Promise(r => setTimeout(r, 600))
