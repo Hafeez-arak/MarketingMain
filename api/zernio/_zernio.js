@@ -558,6 +558,40 @@ function cappedStart(fromDate, toDate, capDays) {
 }
 
 /**
+ * Just the follower series, over a window of its own.
+ *
+ * ── WHY THIS IS NOT analyticsPlan WITH A DIFFERENT WINDOW ──
+ *
+ * The follower chart has its own range picker, because "how did the audience
+ * grow" is a question about a longer span than "how did last week's posts
+ * do". Answering it through analyticsPlan would make nine Zernio reads —
+ * posts, daily metrics, best time, posting frequency, content decay, account
+ * insights, the follow-type breakdown — to redraw one line, every time
+ * somebody nudges a date. These are the two reads that line is made of.
+ */
+export function followerPlan({ platform, accountId, days, from, to, now = Date.now() }) {
+  const { range } = normalizeRange(
+    from && to ? { from, to } : { days: Number(days) || 30 },
+    { now },
+  )
+  const { fromDate, toDate, days: span } = resolveRange(range || { days: 30 }, { now })
+
+  const requests = [
+    { key: 'followers', path: 'accounts/follower-stats', query: { accountIds: accountId, fromDate, toDate } },
+  ]
+  if (platform === 'instagram') {
+    requests.push({
+      key: 'followerHistory',
+      path: 'analytics/instagram/follower-history',
+      // Instagram's own series caps at 88 days, measured from this window's
+      // end for the same reason account insights are — see cappedStart.
+      query: { accountId, since: cappedStart(fromDate, toDate, 88), until: toDate, metricType: 'time_series' },
+    })
+  }
+  return { days: span, fromDate, toDate, requests }
+}
+
+/**
  * @param {object} opts
  * @param {number} [opts.days] A rolling window, resolved against `now`.
  * @param {string} [opts.from] With `to`, a fixed window that never moves.

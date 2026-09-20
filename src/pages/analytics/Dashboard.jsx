@@ -9,6 +9,9 @@ import { Icon } from '../../components/ui/icons'
 import { BestTimeHeatmap, MetricToggle } from './charts'
 import { MetricLabel, MetricInfoDot, ScopeBanner } from '../../components/analytics/MetricLabel'
 import { fmt, pct, windowLabel, foldFollowers } from './format'
+import { FollowerHistoryCard } from '../../components/analytics/FollowerHistoryCard'
+import { PostDetail } from '../../components/analytics/PostDetail'
+import { followerRowsFrom } from '../../lib/followerSeries'
 // The one definition of engagement rate, imported rather than restated. This
 // file used to carry its own copy — identical to dashboardOverview's on the
 // day it was written, and with nothing but good intentions keeping it that
@@ -179,9 +182,10 @@ function Th({ metric, label, align = 'right' }) {
 
 const alertIcon = <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
 
-export function AnalyticsDashboard({ dash, days, accountId = '', onRetry, perPlatform = true }) {
+export function AnalyticsDashboard({ dash, days, range = { days: 30 }, accountId = '', onRetry, perPlatform = true }) {
   const navigate = useNavigate()
   const [barMetric, setBarMetric] = useState('likes')
+  const [openPost, setOpenPost] = useState(null)
   const [lineMetrics, setLineMetrics] = useState(() => new Set(DEFAULT_LINE_METRICS))
 
   function toggleLineMetric(key) {
@@ -234,36 +238,6 @@ export function AnalyticsDashboard({ dash, days, accountId = '', onRetry, perPla
   // cross-platform; Instagram's own follower-history is the per-account
   // route's second source. Both are filled by Zernio's DAILY snapshotter, so
   // an account connected today has neither until tomorrow.
-  // ── WHICHEVER SOURCE HAS MORE HISTORY, NOT WHICHEVER ANSWERED ──
-  //
-  // This used to take follower-stats whenever it returned anything at all and
-  // only fall back to Instagram's own follower-history when it was empty. The
-  // two are filled by different pipelines on the same daily clock, so the one
-  // that answers first is not the one with the most behind it: a
-  // single-point follower-stats would hide a sixty-point history and the
-  // chart would show one day inside a ninety-day window.
-  //
-  // Measured 2026-09-20: both currently hold six days (15–20 Sept) for both
-  // connected accounts, and asking for 7, 30 or 90 days returns the same six
-  // — Zernio has no follower snapshots before the accounts were connected.
-  // No window setting can produce history that was never recorded.
-  const followerRows = useMemo(() => {
-    const stats = dash?.followers?.stats || {}
-    const fromStats = accountId ? (stats[accountId] || []) : Object.values(stats).flat()
-    const fromHistory = (dash?.followerHistory?.metrics?.follower_count?.values || [])
-      .map(v => ({ date: v.date, followers: v.value }))
-    return fromHistory.length > fromStats.length ? fromHistory : fromStats
-  }, [dash?.followers?.stats, dash?.followerHistory, accountId])
-
-  // What the series actually covers, which is not what the picker asked for.
-  const followerSpan = useMemo(() => {
-    if (!followerRows.length) return ''
-    const first = followerRows[0]?.date
-    const last = followerRows[followerRows.length - 1]?.date
-    const n = followerRows.length
-    return `${n} day${n === 1 ? '' : 's'} recorded · ${first}${first === last ? '' : ` to ${last}`}`
-  }, [followerRows])
-
   const totals = useMemo(() => {
     const acc = { ...ZERO_METRICS }
     for (const p of posts) { const a = p.analytics || {}; for (const k of Object.keys(acc)) acc[k] += a[k] || 0 }
@@ -298,9 +272,12 @@ export function AnalyticsDashboard({ dash, days, accountId = '', onRetry, perPla
     return foldFollowers(
       zAccounts.filter(scoped),
       (dash?.followers?.accounts || []).filter(scoped),
-      followerRows,
+      // The PAGE's window, deliberately. The chart below has its own picker;
+      // the tile must keep answering for the window the rest of the page is
+      // about, or two numbers on one screen would disagree with no clue why.
+      followerRowsFrom(dash, accountId),
     )
-  }, [zAccounts, dash?.followers?.accounts, followerRows, accountId])
+  }, [zAccounts, dash, accountId])
 
   const bestPost = useMemo(() => {
     const withEr = posts.map(p => ({ ...p, _er: p.analytics?.engagementRate ?? engagementRate(p.analytics) ?? -1 }))
@@ -379,6 +356,8 @@ export function AnalyticsDashboard({ dash, days, accountId = '', onRetry, perPla
 
   return (
     <>
+      <PostDetail post={openPost} onClose={() => setOpenPost(null)} />
+
       {/* KPI strip — one flat row divided by rules, not boxed cards. Reads as
           a single stat panel rather than a scatter of separate widgets.
 
@@ -434,8 +413,9 @@ export function AnalyticsDashboard({ dash, days, accountId = '', onRetry, perPla
                 <PostImage src={bestPost.thumbnailUrl} className="w-8 h-8 object-cover flex-shrink-0 border border-border" />
                 <div className="min-w-0">
                   <p className="text-sm font-bold text-text leading-tight">{bestPost._er >= 0 ? pct(bestPost._er) : '—'}</p>
-                  {bestPost.platformPostUrl && (
-                    <a href={bestPost.platformPostUrl} target="_blank" rel="noreferrer" className="text-[11px] font-semibold text-amber-700 hover:underline">View ↗</a>
+                  {bestPost && (
+                    <button onClick={() => setOpenPost(bestPost)}
+                      className="text-[11px] font-semibold text-amber-700 hover:underline">View ↗</button>
                   )}
                 </div>
               </div>
@@ -568,31 +548,11 @@ export function AnalyticsDashboard({ dash, days, accountId = '', onRetry, perPla
             <ChartCard title="Best time to post" icon={Icon.clock} metric="calc.best_time">
               <BestTimeHeatmap slots={bestTimeSlots} />
             </ChartCard>
-            <ChartCard title="Follower history" icon={Icon.users} tone="sage" metric="calc.follower_history"
-              subtitle={followerSpan || undefined}>
-              {followerRows.length === 0 ? (
-                <div className="h-[220px] flex flex-col items-center justify-center text-center gap-2">
-                  <svg className="w-8 h-8 text-text-disabled" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-                  <p className="text-sm font-medium text-text">No data available</p>
-                  <p className="text-xs text-text-tertiary">Zernio records followers once a day, so a newly connected account fills in from tomorrow. Reconnecting an account starts the series again.</p>
-                </div>
-              ) : (
-                <ResponsiveContainer width="100%" height={220}>
-                  <LineChart data={followerRows}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#e0e5e6" vertical={false} />
-                    <XAxis dataKey="date" tick={axisTick} tickLine={false} axisLine={{ stroke: '#e0e5e6' }} />
-                    <YAxis tick={axisTick} tickLine={false} axisLine={false} allowDecimals={false} />
-                    <Tooltip />
-                    {/* Dots below a fortnight of points, and this is not
-                        cosmetic: a line through ONE point draws nothing at
-                        all, so an account with a single snapshot rendered an
-                        empty chart that read as "no followers" rather than as
-                        "counted once so far". */}
-                    <Line type="monotone" dataKey="followers" stroke="#657b81" strokeWidth={2}
-                      dot={followerRows.length <= 14} />
-                  </LineChart>
-                </ResponsiveContainer>
-              )}
+            <ChartCard title="Follower history" icon={Icon.users} tone="sage" metric="calc.follower_history">
+              {/* Its own range picker: audience growth is a longer question
+                  than last week's posts, and widening the page to see three
+                  months of followers used to widen every post number too. */}
+              <FollowerHistoryCard pageRange={range} accountId={accountId} initial={dash} />
             </ChartCard>
           </div>
 
@@ -668,7 +628,14 @@ export function AnalyticsDashboard({ dash, days, accountId = '', onRetry, perPla
                 </thead>
                 <tbody className="divide-y divide-border">
                   {topPosts.map(p => (
-                    <tr key={p._id} className="hover:bg-surface-muted transition-colors">
+                    /* The whole row opens the post. The "View ↗" link beside
+                       the date was the only way in and leaves the app, so
+                       "look at this post" and "look at how it did" both ended
+                       at Instagram, which does not know what we measured. */
+                    <tr key={p._id} onClick={() => setOpenPost(p)}
+                      tabIndex={0} role="button"
+                      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setOpenPost(p) } }}
+                      className="hover:bg-surface-muted transition-colors cursor-pointer focus:outline-none focus:bg-surface-muted">
                       <td className="px-5 py-3">
                         <div className="flex items-center gap-3 max-w-xs">
                           <PostImage src={p.thumbnailUrl} className="w-9 h-9 object-cover flex-shrink-0 border border-border" />
@@ -678,6 +645,7 @@ export function AnalyticsDashboard({ dash, days, accountId = '', onRetry, perPla
                               <span className="text-[10px] text-text-tertiary">{(p.publishedAt || '').slice(0, 10)}</span>
                               {p.platformPostUrl && (
                                 <a href={p.platformPostUrl} target="_blank" rel="noreferrer"
+                                  onClick={e => e.stopPropagation()}
                                   className="text-[10px] font-semibold text-amber-700 hover:underline">View ↗</a>
                               )}
                             </div>

@@ -74,6 +74,9 @@ export function AccountAnalytics({ platform, accounts = [], loadingAccounts = fa
     if (n !== seq.current) return
     setDash(res)
     setLoading(false)
+    // `range` is covered by `rangeKey` — depending on the object itself
+    // would refetch on every render of the tab.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeWorkspaceId, accountId, rangeKey, accountPlatform, accountType])
 
   // Deferred a tick, like the page's other first fetches: load() flips
@@ -217,7 +220,7 @@ export function AccountAnalytics({ platform, accounts = [], loadingAccounts = fa
           were drawn over no response — all zeros — until it started. */}
       {!current
         ? <DashboardSkeleton />
-        : <AnalyticsDashboard dash={current} days={days} accountId={accountId} onRetry={load} perPlatform={false} />}
+        : <AnalyticsDashboard dash={current} days={days} range={range} accountId={accountId} onRetry={load} perPlatform={false} />}
     </div>
   )
 }

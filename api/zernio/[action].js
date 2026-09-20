@@ -1,6 +1,6 @@
 import {
   createZernio, normalizeAccount, ownedByProfile, profileIdOf,
-  CONNECT_SPECS, CONNECTABLE, explainZernioError, ZernioError, qs, analyticsPlan, retryRateLimited,
+  CONNECT_SPECS, CONNECTABLE, explainZernioError, ZernioError, qs, analyticsPlan, followerPlan, retryRateLimited,
   syncAccountPosts,
 } from './_zernio.js'
 import { mayDisconnect, protectionReason } from '../../src/lib/platformSafety.js'
@@ -450,6 +450,30 @@ const handlers = {
       toDate: plan.toDate,
       insightsFrom: plan.insightsFrom,
       metricsSupported: plan.metricsSupported,
+      ...Object.fromEntries(plan.requests.map((r, i) => [r.key, results[i]])),
+    }
+  },
+
+  // Just the follower series, for the Follower history card's own range
+  // picker. Same ownership proof as `analytics`, two Zernio reads instead of
+  // nine — see followerPlan for why it is not that route with a different
+  // window.
+  async followers(z, { ws, profileId, body }) {
+    const accountId = String(body.account_id || '').trim()
+    if (!accountId) return fail('account_id is required.', 400)
+
+    const account = await requireOwnedAccount(z, { workspaceId: ws.id, profileId, accountId })
+    const plan = followerPlan({
+      platform: account.platform, accountId,
+      days: body.days, from: body.from, to: body.to,
+    })
+    const { results } = await readPlan(z, plan)
+
+    return {
+      platform: account.platform,
+      days: plan.days,
+      fromDate: plan.fromDate,
+      toDate: plan.toDate,
       ...Object.fromEntries(plan.requests.map((r, i) => [r.key, results[i]])),
     }
   },

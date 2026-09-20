@@ -11,6 +11,7 @@ import { PLATFORM_META } from '../../lib/utils'
 import { MetricInfoDot } from '../../components/analytics/MetricLabel'
 import { fmt, pct, windowLabel } from '../analytics/format'
 import { RangePicker } from '../../components/analytics/RangePicker'
+import { PostDetail } from '../../components/analytics/PostDetail'
 import { resolveRange } from '../../lib/dateRange'
 import { metricFacets, followerChange } from '../../lib/dashboardOverview'
 
@@ -218,8 +219,12 @@ function SharedLegend({ platforms }) {
  * post itself.
  */
 function TopPosts({ posts, windowText, onDetails }) {
+  // The row opens the post, the same as the table on /analytics — see
+  // PostDetail for why the link out is not enough on its own.
+  const [openPost, setOpenPost] = useState(null)
   return (
     <Card className="overflow-hidden">
+      <PostDetail post={openPost} onClose={() => setOpenPost(null)} />
       <div className="px-4 py-3 border-b border-border flex items-center justify-between gap-3">
         <div className="flex items-center gap-2.5 min-w-0">
           <IconBadge tone="sage">{Icon.heart}</IconBadge>
@@ -241,7 +246,11 @@ function TopPosts({ posts, windowText, onDetails }) {
       ) : (
         <div className="divide-y divide-border">
           {posts.map(p => (
-            <div key={p._id || `${p.platform}-${p.publishedAt}`} className="px-4 py-3 flex items-center gap-3">
+            <div key={p._id || `${p.platform}-${p.publishedAt}`}
+              onClick={() => setOpenPost(p)} role="button" tabIndex={0}
+              onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setOpenPost(p) } }}
+              className="px-4 py-3 flex items-center gap-3 cursor-pointer hover:bg-surface-muted
+                transition-colors focus:outline-none focus:bg-surface-muted">
               <PostImage src={p.thumbnailUrl} alt=""
                 className="w-10 h-10 object-cover flex-shrink-0 border border-border" />
               <div className="min-w-0 flex-1">
@@ -250,6 +259,7 @@ function TopPosts({ posts, windowText, onDetails }) {
                   <span className="text-[10px] text-text-tertiary">{(p.publishedAt || '').slice(0, 10)}</span>
                   {p.platformPostUrl && (
                     <a href={p.platformPostUrl} target="_blank" rel="noreferrer"
+                      onClick={e => e.stopPropagation()}
                       className="text-[10px] font-semibold text-amber-700 hover:underline">View ↗</a>
                   )}
                 </div>

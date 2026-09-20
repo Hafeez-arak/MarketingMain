@@ -346,6 +346,24 @@ export async function fetchAccountAnalytics(workspaceId, accountId, range = 30, 
   })
 }
 
+/**
+ * Just the follower series, over a window of its own.
+ *
+ * The Follower history card has its own range picker — "how did the audience
+ * grow" spans longer than "how did last week's posts do" — and this is the
+ * two-read route that serves it rather than the nine-read analytics one.
+ *
+ * @param {object|number} range A `{ days }` preset or a `{ from, to }` window.
+ */
+export async function fetchFollowerHistory(workspaceId, accountId, range = 30) {
+  const window = typeof range === 'number'
+    ? { days: range }
+    : (range?.from && range?.to
+      ? { from: range.from, to: range.to }
+      : { days: Number(range?.days) || 30 })
+  return call('followers', { workspace_id: workspaceId, account_id: accountId, ...window })
+}
+
 // Refresh: Zernio re-reads the account (or every account, without an id) from
 // the platform now, instead of on its ~90-minute cycle, and returns the fresh
 // account list. See syncAccountPosts in api/zernio/_zernio.js.
