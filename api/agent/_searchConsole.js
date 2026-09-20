@@ -245,14 +245,16 @@ async function mapLimit(jobs, limit, run) {
  * panels reads as a quiet month instead of a broken connection. That is the
  * silent failure this project has already paid for twice.
  */
-export async function fetchWebsiteData({ site, now = new Date(), days = 28, env = process.env } = {}) {
+export async function fetchWebsiteData({
+  site, now = new Date(), days = 28, from = '', to = '', env = process.env,
+} = {}) {
   const sa = serviceAccount(env)
   const property = siteFor(site, env)
 
   if (!sa) return { ok: false, configured: false, error: 'GOOGLE_SA_KEY is not set.', site: property }
   if (!property) return { ok: false, configured: false, error: 'No Search Console property is configured for this brand.', site: property }
 
-  const windows = searchWindows(now, { days })
+  const windows = searchWindows(now, { days, from, to })
   let token
   try {
     token = await accessToken(sa)

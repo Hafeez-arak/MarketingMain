@@ -84,6 +84,10 @@ const INFO = {
     what: 'Taps on the website link in your Instagram bio.',
     note: 'The bio link only — not links inside captions or stories.',
   },
+  'ig.reach_follow_type': {
+    what: 'The same reach as above, split by whether the person already followed you when they saw it.',
+    note: 'Reach is the only thing Instagram will split this way — there is no follower/non-follower breakdown of likes, comments or engagement to be had. The two sides can add up to slightly less than total reach, because a person Instagram could not classify lands in neither.',
+  },
 
   // ── LinkedIn page statistics ────────────────────────────────────────────
   'li.impressions': {

@@ -430,13 +430,17 @@ const handlers = {
     if (!accountId) return fail('account_id is required.', 400)
 
     const hint = { platform: String(body.platform || '').toLowerCase(), accountType: body.account_type || null }
-    const early = hint.platform ? readPlan(z, analyticsPlan({ ...hint, accountId, days: body.days })) : null
+    // The window travels as it was chosen: `days` for a rolling one, `from`
+    // and `to` for a fixed one. Resolving a preset here rather than in the
+    // browser keeps it on the server's clock — see src/lib/dateRange.js.
+    const window = { days: body.days, from: body.from, to: body.to }
+    const early = hint.platform ? readPlan(z, analyticsPlan({ ...hint, accountId, ...window })) : null
     const account = await requireOwnedAccount(z, { workspaceId: ws.id, profileId, accountId })
 
     const actual = { platform: account.platform, accountType: account.account_type || null }
     const { plan, results } = early && samePlanShape(hint, actual)
       ? await early
-      : await readPlan(z, analyticsPlan({ ...actual, accountId, days: body.days }))
+      : await readPlan(z, analyticsPlan({ ...actual, accountId, ...window }))
 
     return {
       account,

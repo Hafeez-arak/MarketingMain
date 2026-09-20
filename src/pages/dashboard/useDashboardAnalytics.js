@@ -26,7 +26,7 @@ import { accountSummary } from '../../lib/dashboardOverview'
 // an account silently missing from a total reads as a platform that had a
 // quiet month.
 
-export function useDashboardAnalytics({ accounts = [], days = 30, reloadKey = 0 } = {}) {
+export function useDashboardAnalytics({ accounts = [], range = { days: 30 }, reloadKey = 0 } = {}) {
   const { activeWorkspaceId } = useAuth()
   const [responses, setResponses] = useState({})
   const [pending, setPending] = useState(0)
@@ -44,6 +44,15 @@ export function useDashboardAnalytics({ accounts = [], days = 30, reloadKey = 0 
   // one — the same race /analytics has when you click through platforms fast.
   const seq = useRef(0)
 
+  // The window as one comparable string. `range` is an object literal at the
+  // call site, so a new one arrives on every render of the page; depending on
+  // the object itself would refetch every account on every keystroke anywhere
+  // on the dashboard.
+  const rangeKey = useMemo(
+    () => (range?.from && range?.to ? `${range.from}..${range.to}` : `d${range?.days ?? 30}`),
+    [range?.from, range?.to, range?.days],
+  )
+
   const load = useCallback(() => {
     if (!activeWorkspaceId || !accounts.length) {
       setResponses({})
@@ -55,7 +64,7 @@ export function useDashboardAnalytics({ accounts = [], days = 30, reloadKey = 0 
     setPending(accounts.length)
 
     for (const a of accounts) {
-      fetchAccountAnalytics(activeWorkspaceId, a.zernio_account_id, days, {
+      fetchAccountAnalytics(activeWorkspaceId, a.zernio_account_id, range, {
         platform: a.platform, accountType: a.account_type || null,
       }).then(res => {
         if (run !== seq.current) return
@@ -67,7 +76,7 @@ export function useDashboardAnalytics({ accounts = [], days = 30, reloadKey = 0 
     // restart every request whenever the accounts store hands back an equal
     // list in a new array.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeWorkspaceId, key, days])
+  }, [activeWorkspaceId, key, rangeKey])
 
   // Deferred a tick, like every other first fetch in this app: load() writes
   // state before its first await, and doing that in an effect body is a
@@ -81,17 +90,18 @@ export function useDashboardAnalytics({ accounts = [], days = 30, reloadKey = 0 
     [accounts, responses],
   )
 
-  // The window every account was asked about. Taken from a response rather
-  // than recomputed here, so the chart's x-axis is the range Zernio actually
-  // measured rather than one this browser's clock inferred.
-  const range = useMemo(() => {
+  // The window every account was actually asked about — NOT the one requested.
+  // Taken from a response rather than recomputed here, so the chart's x-axis
+  // is the range Zernio measured rather than one this browser's clock
+  // inferred, and so a preset resolved on the server's clock stays honest.
+  const measured = useMemo(() => {
     const first = Object.values(responses).find(r => r?.fromDate)
     return { fromDate: first?.fromDate || '', toDate: first?.toDate || '' }
   }, [responses])
 
   return {
     summaries,
-    range,
+    range: measured,
     // "Nothing has answered yet", not "a request is running". A partial answer
     // is worth drawing — the alternative is holding an empty page until the
     // slowest platform replies.

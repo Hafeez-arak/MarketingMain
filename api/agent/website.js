@@ -3,6 +3,7 @@ import { searchConfig } from '../../src/lib/agent/searchConsole.js'
 import { ga4Config } from '../../src/lib/agent/ga4.js'
 import { fetchWebsiteData, fetchSitemaps } from './_searchConsole.js'
 import { fetchGa4Data } from './_ga4.js'
+import { normalizeRange, resolveRange, isCustom } from '../../src/lib/dateRange.js'
 
 // ─── POST /api/agent/website ───────────────────────────────────────────────
 // The Analytics page's Website tab. Everything Google will say about this
@@ -41,10 +42,13 @@ async function readBody(req) {
   return raw ? JSON.parse(raw) : {}
 }
 
-// The windows a reader can ask for. Not free-form: a window shorter than a
-// week lets a weekday effect read as a trend, and Search Console's own
-// retention stops at 16 months.
-const WINDOWS = [7, 28, 90]
+// The shortcuts the picker offers. A custom window is allowed alongside them
+// now, but the floor below is not negotiable: a window shorter than a week
+// lets a weekday effect read as a trend, and at this site's volume three days
+// is mostly zeroes with a percentage sign on it. Search Console's own
+// retention stops at 16 months, comfortably outside MAX_RANGE_DAYS.
+export const WINDOWS = [7, 28, 90]
+export const MIN_WINDOW_DAYS = 7
 
 // Said here rather than in the component, so the browser bundle does not carry
 // setup instructions for credentials it never handles.
@@ -81,7 +85,22 @@ export default async function handler(req, res) {
   if (!workspaceId) {
     return res.status(400).json({ ok: false, error: 'workspace_id is required.' })
   }
-  const days = WINDOWS.includes(Number(body.days)) ? Number(body.days) : 28
+  // The window, as chosen. A fixed one wins when both dates are real; the
+  // preset list is a set of shortcuts now rather than a whitelist, because
+  // Search Console and GA4 both take arbitrary start and end dates.
+  const { range, error: rangeError } = normalizeRange(
+    body.from && body.to ? { from: body.from, to: body.to } : { days: Number(body.days) || 28 },
+    { minDays: MIN_WINDOW_DAYS },
+  )
+  // Said rather than silently widened. A window quietly stretched from three
+  // days to seven answers a question nobody asked, and the reader has no way
+  // to tell that is what happened.
+  if (body.from && body.to && rangeError) {
+    return res.status(400).json({ ok: false, error: rangeError })
+  }
+  const window = range || { days: 28 }
+  const { fromDate, toDate, days } = resolveRange(window)
+  const fixed = isCustom(window) ? { from: fromDate, to: toDate } : {}
 
   // Who is asking, and may they — both with the caller's own token, so RLS
   // answers the second one. A workspace_id in a request body is not evidence.
@@ -106,9 +125,9 @@ export default async function handler(req, res) {
     // in microseconds when it is; when it is configured it is the slower of
     // the two, and there is no reason for Search Console to wait behind it.
     const [search, sitemaps, analytics] = await Promise.all([
-      fetchWebsiteData({ site, days }),
+      fetchWebsiteData({ site, days, ...fixed }),
       fetchSitemaps({ site }),
-      fetchGa4Data({ property: ga4.path, days }),
+      fetchGa4Data({ property: ga4.path, days, ...fixed }),
     ])
 
     return res.status(200).json({

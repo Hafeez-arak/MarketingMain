@@ -234,13 +234,35 @@ export function AnalyticsDashboard({ dash, days, accountId = '', onRetry, perPla
   // cross-platform; Instagram's own follower-history is the per-account
   // route's second source. Both are filled by Zernio's DAILY snapshotter, so
   // an account connected today has neither until tomorrow.
+  // ── WHICHEVER SOURCE HAS MORE HISTORY, NOT WHICHEVER ANSWERED ──
+  //
+  // This used to take follower-stats whenever it returned anything at all and
+  // only fall back to Instagram's own follower-history when it was empty. The
+  // two are filled by different pipelines on the same daily clock, so the one
+  // that answers first is not the one with the most behind it: a
+  // single-point follower-stats would hide a sixty-point history and the
+  // chart would show one day inside a ninety-day window.
+  //
+  // Measured 2026-09-20: both currently hold six days (15–20 Sept) for both
+  // connected accounts, and asking for 7, 30 or 90 days returns the same six
+  // — Zernio has no follower snapshots before the accounts were connected.
+  // No window setting can produce history that was never recorded.
   const followerRows = useMemo(() => {
     const stats = dash?.followers?.stats || {}
     const fromStats = accountId ? (stats[accountId] || []) : Object.values(stats).flat()
-    if (fromStats.length) return fromStats
-    const values = dash?.followerHistory?.metrics?.follower_count?.values || []
-    return values.map(v => ({ date: v.date, followers: v.value }))
+    const fromHistory = (dash?.followerHistory?.metrics?.follower_count?.values || [])
+      .map(v => ({ date: v.date, followers: v.value }))
+    return fromHistory.length > fromStats.length ? fromHistory : fromStats
   }, [dash?.followers?.stats, dash?.followerHistory, accountId])
+
+  // What the series actually covers, which is not what the picker asked for.
+  const followerSpan = useMemo(() => {
+    if (!followerRows.length) return ''
+    const first = followerRows[0]?.date
+    const last = followerRows[followerRows.length - 1]?.date
+    const n = followerRows.length
+    return `${n} day${n === 1 ? '' : 's'} recorded · ${first}${first === last ? '' : ` to ${last}`}`
+  }, [followerRows])
 
   const totals = useMemo(() => {
     const acc = { ...ZERO_METRICS }
@@ -546,12 +568,13 @@ export function AnalyticsDashboard({ dash, days, accountId = '', onRetry, perPla
             <ChartCard title="Best time to post" icon={Icon.clock} metric="calc.best_time">
               <BestTimeHeatmap slots={bestTimeSlots} />
             </ChartCard>
-            <ChartCard title="Follower history" icon={Icon.users} tone="sage" metric="calc.follower_history">
+            <ChartCard title="Follower history" icon={Icon.users} tone="sage" metric="calc.follower_history"
+              subtitle={followerSpan || undefined}>
               {followerRows.length === 0 ? (
                 <div className="h-[220px] flex flex-col items-center justify-center text-center gap-2">
                   <svg className="w-8 h-8 text-text-disabled" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>
                   <p className="text-sm font-medium text-text">No data available</p>
-                  <p className="text-xs text-text-tertiary">Zernio records followers once a day, so a newly connected account fills in from tomorrow.</p>
+                  <p className="text-xs text-text-tertiary">Zernio records followers once a day, so a newly connected account fills in from tomorrow. Reconnecting an account starts the series again.</p>
                 </div>
               ) : (
                 <ResponsiveContainer width="100%" height={220}>
@@ -560,7 +583,13 @@ export function AnalyticsDashboard({ dash, days, accountId = '', onRetry, perPla
                     <XAxis dataKey="date" tick={axisTick} tickLine={false} axisLine={{ stroke: '#e0e5e6' }} />
                     <YAxis tick={axisTick} tickLine={false} axisLine={false} allowDecimals={false} />
                     <Tooltip />
-                    <Line type="monotone" dataKey="followers" stroke="#657b81" strokeWidth={2} dot={false} />
+                    {/* Dots below a fortnight of points, and this is not
+                        cosmetic: a line through ONE point draws nothing at
+                        all, so an account with a single snapshot rendered an
+                        empty chart that read as "no followers" rather than as
+                        "counted once so far". */}
+                    <Line type="monotone" dataKey="followers" stroke="#657b81" strokeWidth={2}
+                      dot={followerRows.length <= 14} />
                   </LineChart>
                 </ResponsiveContainer>
               )}

@@ -45,6 +45,41 @@ describe('searchWindows', () => {
     dayAfterPrev.setUTCDate(dayAfterPrev.getUTCDate() + 1)
     expect(dayAfterPrev.toISOString().slice(0, 10)).toBe(w.current.start)
   })
+
+  // ── A window somebody typed is used as typed ──
+  // The three-day lag exists so a ROLLING window does not read as a permanent
+  // decline. Shifting a window the reader picked would answer a different
+  // question from the one they asked, so it is not shifted; the freshness
+  // caveat belongs on screen there instead.
+  describe('a fixed window', () => {
+    const f = searchWindows(new Date('2026-09-16T00:00:00Z'), {
+      from: '2026-03-01', to: '2026-03-14',
+    })
+
+    it('is not moved by the data lag', () => {
+      expect(f.current).toEqual({ start: '2026-03-01', end: '2026-03-14' })
+    })
+
+    it('counts its own length rather than the preset', () => {
+      expect(f.days).toBe(14)
+    })
+
+    it('compares against the same number of days immediately before', () => {
+      expect(f.previous).toEqual({ start: '2026-02-15', end: '2026-02-28' })
+    })
+
+    it('still leaves no gap between the two windows', () => {
+      const after = new Date(`${f.previous.end}T00:00:00Z`)
+      after.setUTCDate(after.getUTCDate() + 1)
+      expect(after.toISOString().slice(0, 10)).toBe(f.current.start)
+    })
+
+    it('needs both ends before it counts as fixed', () => {
+      const half = searchWindows(new Date('2026-09-16T00:00:00Z'), { from: '2026-03-01' })
+      expect(half.current.end).toBe('2026-09-13')
+      expect(half.days).toBe(WINDOW_DAYS)
+    })
+  })
 })
 
 describe('queryBody', () => {

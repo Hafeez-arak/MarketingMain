@@ -9,6 +9,8 @@
 // The `_` prefix keeps Vercel from turning this into a route. It is an
 // import, not an endpoint.
 
+import { normalizeRange, resolveRange } from '../../src/lib/dateRange.js'
+
 export const ZERNIO_BASE = 'https://zernio.com/api/v1'
 
 export class ZernioError extends Error {
@@ -494,6 +496,9 @@ export async function retryRateLimited(fn, { sleep = ms => new Promise(r => setT
   }
 }
 
+// The presets the pickers offer. No longer a whitelist — `analyticsPlan`
+// takes any window inside MAX_RANGE_DAYS, and these are just the three
+// shortcuts worth having in front of the custom picker.
 export const ANALYTICS_DAYS = [7, 30, 90]
 export const INSTAGRAM_INSIGHT_METRICS = ['reach', 'views', 'accounts_engaged', 'total_interactions', 'profile_links_taps']
 
@@ -533,10 +538,45 @@ export const LINKEDIN_MAX_DAYS = 88
 const DAY_MS = 86400000
 const isoDay = ms => new Date(ms).toISOString().slice(0, 10)
 
-export function analyticsPlan({ platform, accountId, accountType = null, days, now = Date.now() }) {
-  const span = ANALYTICS_DAYS.includes(Number(days)) ? Number(days) : 30
-  const fromDate = isoDay(now - span * DAY_MS)
-  const toDate = isoDay(now)
+/**
+ * The earliest day a capped metric may start, given the window's own end.
+ *
+ * ── WHY THIS IS NOT `now - cap` ──
+ *
+ * It used to be, and it was right while every window ended today. It is wrong
+ * the moment a window can end in the past: ask for January and Instagram's
+ * insights would be requested from "30 days ago" — a window that does not
+ * overlap the one being shown at all — and the tiles would carry September's
+ * reach above a January chart.
+ *
+ * The cap is a limit on the DISTANCE between since and until, so it has to be
+ * measured from `until`. A window shorter than the cap keeps its own start.
+ */
+function cappedStart(fromDate, toDate, capDays) {
+  const earliest = isoDay(Date.parse(`${toDate}T00:00:00Z`) - capDays * DAY_MS)
+  return fromDate > earliest ? fromDate : earliest
+}
+
+/**
+ * @param {object} opts
+ * @param {number} [opts.days] A rolling window, resolved against `now`.
+ * @param {string} [opts.from] With `to`, a fixed window that never moves.
+ * @param {string} [opts.to]
+ */
+export function analyticsPlan({
+  platform, accountId, accountType = null, days, from, to, now = Date.now(),
+}) {
+  // A fixed window wins when both dates are present and sane; anything else
+  // falls back to the rolling one. The whitelist is gone — Zernio takes
+  // arbitrary since/until on every endpoint here (verified live), so the three
+  // values it allowed were our limit, not a platform's. What survives is the
+  // clamp: a request is still refused above MAX_RANGE_DAYS, because an
+  // unbounded window is a slow call nobody asked for.
+  const { range } = normalizeRange(
+    from && to ? { from, to } : { days: Number(days) || 30 },
+    { now },
+  )
+  const { fromDate, toDate, days: span } = resolveRange(range || { days: 30 }, { now })
   const scoped = { platform, accountId }
 
   const requests = [
@@ -550,12 +590,28 @@ export function analyticsPlan({ platform, accountId, accountType = null, days, n
 
   let insightsFrom = null
   if (platform === 'instagram') {
-    insightsFrom = isoDay(now - Math.min(span, 29) * DAY_MS)
+    insightsFrom = cappedStart(fromDate, toDate, 29)
     requests.push(
       { key: 'insights', path: 'analytics/instagram/account-insights',
         query: { accountId, since: insightsFrom, until: toDate, metrics: INSTAGRAM_INSIGHT_METRICS.join(',') } },
       { key: 'followerHistory', path: 'analytics/instagram/follower-history',
-        query: { accountId, since: isoDay(now - Math.min(span, 88) * DAY_MS), until: toDate, metricType: 'time_series' } },
+        query: { accountId, since: cappedStart(fromDate, toDate, 88), until: toDate, metricType: 'time_series' } },
+      // ── Reach, split by whether the person already follows us ──
+      //
+      // `follow_type` is the only breakdown Instagram offers that answers
+      // "are we talking to the room or to the street", and reach is the ONLY
+      // metric that accepts it. Measured live against Zernio: the same call
+      // with accounts_engaged, total_interactions, likes or comments is a 400
+      // naming the valid breakdowns, so there is no follower/non-follower
+      // split of engagement to be had — from Meta, not from us.
+      //
+      // total_value only; time_series refuses every breakdown, so this is one
+      // number per side for the window rather than a line.
+      { key: 'reachByFollowType', path: 'analytics/instagram/account-insights',
+        query: {
+          accountId, since: insightsFrom, until: toDate,
+          metrics: 'reach', metricType: 'total_value', breakdown: 'follow_type',
+        } },
     )
   }
 
@@ -564,7 +620,7 @@ export function analyticsPlan({ platform, accountId, accountType = null, days, n
   // page; a personal profile that slips through gets Zernio's own
   // personal_account_not_supported in the slot rather than a broken tab.
   if (platform === 'linkedin' && accountType !== 'personal') {
-    insightsFrom = isoDay(now - Math.min(span, LINKEDIN_MAX_DAYS) * DAY_MS)
+    insightsFrom = cappedStart(fromDate, toDate, LINKEDIN_MAX_DAYS)
     const page = { accountId, since: insightsFrom, until: toDate }
     requests.push(
       { key: 'linkedinPage', path: 'analytics/linkedin/org-aggregate-analytics',

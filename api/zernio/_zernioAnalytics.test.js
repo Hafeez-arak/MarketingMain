@@ -59,10 +59,72 @@ describe('analyticsPlan', () => {
     expect(plan.metricsSupported).toBeNull()
   })
 
-  it('falls back to 30 days for a window the page does not offer', () => {
-    expect(analyticsPlan({ platform: 'instagram', accountId: 'a', days: 365, now: NOW }).days).toBe(30)
+  it('takes any rolling window, not only the three the picker shows', () => {
+    // The old three-value whitelist was ours; Zernio takes arbitrary
+    // since/until on every endpoint here. What is left is the outer clamp.
+    expect(analyticsPlan({ platform: 'instagram', accountId: 'a', days: 45, now: NOW }).days).toBe(45)
+    expect(analyticsPlan({ platform: 'instagram', accountId: 'a', days: 365, now: NOW }).days).toBe(365)
+    expect(analyticsPlan({ platform: 'instagram', accountId: 'a', days: 366, now: NOW }).days).toBe(30)
     expect(analyticsPlan({ platform: 'instagram', accountId: 'a', days: 'x', now: NOW }).days).toBe(30)
     expect(analyticsPlan({ platform: 'instagram', accountId: 'a', days: '7', now: NOW }).days).toBe(7)
+  })
+
+  it('takes a fixed window and leaves it exactly where it was put', () => {
+    const plan = analyticsPlan({
+      platform: 'instagram', accountId: 'a', from: '2026-03-01', to: '2026-03-31', now: NOW,
+    })
+    expect(plan.fromDate).toBe('2026-03-01')
+    expect(plan.toDate).toBe('2026-03-31')
+    expect(plan.days).toBe(31)
+    expect(byKey(plan).overview.query).toMatchObject({ fromDate: '2026-03-01', toDate: '2026-03-31' })
+    expect(byKey(plan).followers.query).toMatchObject({ fromDate: '2026-03-01', toDate: '2026-03-31' })
+  })
+
+  it('falls back to the rolling default when a fixed window is nonsense', () => {
+    // Backwards, and ending after today: both refused rather than corrected.
+    expect(analyticsPlan({ platform: 'instagram', accountId: 'a', from: '2026-03-31', to: '2026-03-01', now: NOW }).days).toBe(30)
+    expect(analyticsPlan({ platform: 'instagram', accountId: 'a', from: '2026-09-01', to: '2027-01-01', now: NOW }).days).toBe(30)
+  })
+
+  // ── The cap is measured from the window's end, not from today ──
+  // Ask for March and Instagram's insights must cover the end of March, not
+  // the last 29 days — which would put September's reach above a March chart.
+  it('clamps a capped metric against the end of the window it was given', () => {
+    const march = analyticsPlan({
+      platform: 'instagram', accountId: 'a', from: '2026-03-01', to: '2026-03-31', now: NOW,
+    })
+    expect(march.insightsFrom).toBe('2026-03-02')
+    expect(byKey(march).insights.query).toMatchObject({ since: '2026-03-02', until: '2026-03-31' })
+
+    // A window shorter than the cap keeps its own start.
+    const short = analyticsPlan({
+      platform: 'instagram', accountId: 'a', from: '2026-03-20', to: '2026-03-31', now: NOW,
+    })
+    expect(short.insightsFrom).toBe('2026-03-20')
+  })
+
+  it('clamps LinkedIn the same way, at 88 days', () => {
+    const plan = analyticsPlan({
+      platform: 'linkedin', accountId: 'a', from: '2026-01-01', to: '2026-06-30', now: NOW,
+    })
+    expect(plan.insightsFrom).toBe('2026-04-03')
+    expect(byKey(plan).linkedinPage.query).toMatchObject({ since: '2026-04-03', until: '2026-06-30' })
+  })
+
+  // Instagram's only follower/non-follower split, and the only metric that
+  // takes it — measured live: accounts_engaged and total_interactions 400.
+  it('asks Instagram for reach split by follow type', () => {
+    const plan = analyticsPlan({ platform: 'instagram', accountId: 'a', days: 30, now: NOW })
+    expect(byKey(plan).reachByFollowType.query).toMatchObject({
+      metrics: 'reach', metricType: 'total_value', breakdown: 'follow_type',
+    })
+    // Same window as the rest of the insights, so the split and the total agree.
+    expect(byKey(plan).reachByFollowType.query.since).toBe(plan.insightsFrom)
+  })
+
+  it('does not ask LinkedIn for a follow-type split it has no answer for', () => {
+    const plan = analyticsPlan({ platform: 'linkedin', accountId: 'a', days: 30, now: NOW })
+    expect(plan.requests.map(r => r.key)).not.toContain('reachByFollowType')
   })
 
   it('drops the metric toggles Instagram never fills', () => {
