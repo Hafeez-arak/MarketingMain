@@ -3,7 +3,7 @@
   "nodes": [
     {
       "parameters": {
-        "content": "## Arak Campaign Planner\n\n**Zero secrets in this file.** Needs `ANTHROPIC_API_KEY`, `SUPABASE_URL` and `SUPABASE_KEY`.\n\nTurns a stated goal + date range into a full slate of dated, platform-specific post ideas — Ramadan/Eid/National Day awareness, posting-day/time cadence enforcement, cross-month anti-repetition (recurring series vs one-off history), target content-mix steering, featured-product coverage.\n\n**ASYNC (2026-09-20).** Answers `202 {status:'accepted'}` immediately and keeps working; the result is PATCHed onto `content_plans.generation_result` minutes later and the app polls that row. It used to respond last with the ideas in the body, and the browser wrote them — but one Opus call for a whole month outlives the serverless proxy in front of this, so the request 504'd and the finished plan had nowhere to land. The month was discarded after Opus had already been paid for it. The caller's clock no longer matters.\n\n`plan_id` is REQUIRED in the request body: the app creates the plan row (status `generating`) before calling, and that row is where this writes. A call without one has nowhere to put its answer.\n\nIt still writes no `plan_ideas` rows. The parsed posts are parked verbatim on the plan row because turning them into ideas means the app's `normalizeAiIdea()` + `distributeDates()` — date spreading, past-date replacement, per-platform format defaults — which are unit tested on that side. A copy here would drift.\n\nModel: Opus 5 with adaptive thinking — this is the one call in the whole pipeline that genuinely needs the extra reasoning (whole-month coherence, holiday judgment), unlike per-post Sonnet calls. Priced the same as the Opus 4.8 it replaces, so staying on Opus here costs nothing. `max_tokens` is 32000, not 16000: it budgets thinking and response text together, and a truncated plan surfaces as a JSON parse error rather than an obviously-short plan.",
+        "content": "## Arak Campaign Planner\n\n**Zero secrets in this file.** Needs `ANTHROPIC_API_KEY`, `SUPABASE_URL` and `SUPABASE_KEY`.\n\nTurns a stated goal + date range into a full slate of dated, platform-specific post ideas — Ramadan/Eid/National Day awareness, posting-day/time cadence enforcement, cross-month anti-repetition (recurring series vs one-off history), target content-mix steering, featured-product coverage.\n\n**ASYNC (2026-09-20).** Answers `202 {status:'accepted'}` immediately and keeps working; the result is PATCHed onto `content_plans.generation_result` minutes later and the app polls that row. It used to respond last with the ideas in the body, and the browser wrote them — but one Opus call for a whole month outlives the serverless proxy in front of this, so the request 504'd and the finished plan had nowhere to land. The month was discarded after Opus had already been paid for it. The caller's clock no longer matters.\n\n`plan_id` is REQUIRED in the request body: the app creates the plan row (status `generating`) before calling, and that row is where this writes. A call without one has nowhere to put its answer.\n\nIt still writes no `plan_ideas` rows. The parsed posts are parked verbatim on the plan row because turning them into ideas means the app's `normalizeAiIdea()` + `distributeDates()` — date spreading, past-date replacement, per-platform format defaults — which are unit tested on that side. A copy here would drift.\n\nModel: Opus 5 with adaptive thinking — this is the one call in the whole pipeline that genuinely needs the extra reasoning (whole-month coherence, holiday judgment), unlike per-post Sonnet calls. Priced the same as the Opus 4.8 it replaces, so staying on Opus here costs nothing. `max_tokens` is 32000, not 16000: it budgets thinking and response text together, and a truncated plan surfaces as a JSON parse error rather than an obviously-short plan.\n\n**This call is SLOW, and that is the thing to remember about it.** Measured 2026-09-20 on a trimmed payload: 212s, 17k output tokens of which 8k were thinking. A real month — carrying past ideas, the latest research, the agent memory and recent posts — runs longer. It is non-streaming, so n8n waits for headers that only arrive once generation has finished, and the node therefore carries an explicit 600s timeout and NO retry. Both matter: n8n's unset default is 300s, and three retries at 300s used to consume the app's entire 15-minute wait, so the browser gave up and blanked the row a moment before n8n saved the reason. If 600s ever stops being enough, make this call streaming — do not raise the timeout past the app's 900s, or the error lands where nobody is reading.",
         "height": 380,
         "width": 440
       },
@@ -98,7 +98,9 @@
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ model: \"claude-opus-5\", max_tokens: 32000, thinking: { type: \"adaptive\" }, messages: [{ role: \"user\", content: [ { type: \"text\", text: $json.prompt_cached, cache_control: { type: \"ephemeral\" } }, { type: \"text\", text: $json.prompt_variable } ] }] }) }}",
-        "options": {}
+        "options": {
+          "timeout": 600000
+        }
       },
       "id": "6db8675e-ca70-5a14-860c-05042c8edea8",
       "name": "Call Claude",
@@ -108,9 +110,7 @@
         660,
         200
       ],
-      "retryOnFail": true,
-      "maxTries": 3,
-      "waitBetweenTries": 3000,
+      "retryOnFail": false,
       "onError": "continueRegularOutput"
     },
     {

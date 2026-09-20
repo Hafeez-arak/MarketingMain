@@ -32,11 +32,27 @@ import { formatDate } from '../../lib/utils'
 // ticking the box is a decision rather than a guess.
 
 export function ResearchIdeaPicker({ research, selectedKeys, onToggle, usedKeys = [] }) {
-  const { runDate, ideas } = research || {}
+  const { runDate, ideas, latestRunDate, staleIdeas } = research || {}
 
-  // Nothing to show is not an error state and gets no empty box: a workspace
-  // that has never run research should see the planner it has always seen.
-  if (!ideas?.length) return null
+  // ── A run that proposed nothing is not the same as no run ─────────────
+  // A workspace that has never run research should see the planner it has
+  // always seen, so that case still gets no box. But a run that FINISHED
+  // and proposed nothing used to take the same branch, and the whole panel
+  // vanished — which is indistinguishable from the feature not existing.
+  // It has happened: the 17 Sep 2026 run came back `complete` with 33
+  // findings and every synthesis array empty. Say it instead.
+  if (!ideas?.length) {
+    if (!latestRunDate) return null
+    return (
+      <div className="border border-border bg-surface-subtle/60 p-3">
+        <p className="text-[11px] text-text-secondary leading-relaxed">
+          Your latest research run ({formatDate(latestRunDate)}) proposed no content ideas, so there is
+          nothing to pick from here. The run is still sent to the planner as background.{' '}
+          <Link to="/insights" className="underline hover:text-text">Open the run</Link> to see what it found.
+        </p>
+      </div>
+    )
+  }
 
   const selected = selectedKeys || []
   const used = new Set(usedKeys)
@@ -50,6 +66,11 @@ export function ResearchIdeaPicker({ research, selectedKeys, onToggle, usedKeys 
             What the research agent proposed{runDate ? ` on ${formatDate(runDate)}` : ''}. Tick the ones this
             month should be built around — they are sent as instructions, with the reason they exist attached.
           </p>
+          {staleIdeas && (
+            <p className="text-[11px] text-amber-700 mt-1">
+              Your latest run ({formatDate(latestRunDate)}) proposed no ideas, so these are from the run before it.
+            </p>
+          )}
         </div>
         <Link to="/insights" className="text-[11px] underline text-text-tertiary hover:text-text-secondary shrink-0">
           View the run
