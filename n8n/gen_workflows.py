@@ -2156,7 +2156,9 @@ Turns a stated goal + date range into a full slate of dated, platform-specific p
 
 It still writes no `plan_ideas` rows. The parsed posts are parked verbatim on the plan row because turning them into ideas means the app's `normalizeAiIdea()` + `distributeDates()` — date spreading, past-date replacement, per-platform format defaults — which are unit tested on that side. A copy here would drift.
 
-Model: Opus 5 with adaptive thinking — this is the one call in the whole pipeline that genuinely needs the extra reasoning (whole-month coherence, holiday judgment), unlike per-post Sonnet calls. Priced the same as the Opus 4.8 it replaces, so staying on Opus here costs nothing. `max_tokens` is 32000, not 16000: it budgets thinking and response text together, and a truncated plan surfaces as a JSON parse error rather than an obviously-short plan."""
+Model: Opus 5 with adaptive thinking — this is the one call in the whole pipeline that genuinely needs the extra reasoning (whole-month coherence, holiday judgment), unlike per-post Sonnet calls. Priced the same as the Opus 4.8 it replaces, so staying on Opus here costs nothing. `max_tokens` is 32000, not 16000: it budgets thinking and response text together, and a truncated plan surfaces as a JSON parse error rather than an obviously-short plan.
+
+**This call is SLOW, and that is the thing to remember about it.** Measured 2026-09-20 on a trimmed payload: 212s, 17k output tokens of which 8k were thinking. A real month — carrying past ideas, the latest research, the agent memory and recent posts — runs longer. It is non-streaming, so n8n waits for headers that only arrive once generation has finished, and the node therefore carries an explicit 600s timeout and NO retry. Both matter: n8n's unset default is 300s, and three retries at 300s used to consume the app's entire 15-minute wait, so the browser gave up and blanked the row a moment before n8n saved the reason. If 600s ever stops being enough, make this call streaming — do not raise the timeout past the app's 900s, or the error lands where nobody is reading."""
 
 BUILD_PROMPT_JS = _with_brand(r"""const input = $input.first().json.body;
 
@@ -3257,26 +3259,58 @@ def build_campaign_planner() -> dict:
                 # obviously-truncated plan. Check stop_reason is not
                 # "max_tokens" if plans ever come back unparseable.
                 "jsonBody": "={{ JSON.stringify({ model: \"claude-opus-5\", max_tokens: 32000, thinking: { type: \"adaptive\" }, messages: [{ role: \"user\", content: [ { type: \"text\", text: $json.prompt_cached, cache_control: { type: \"ephemeral\" } }, { type: \"text\", text: $json.prompt_variable } ] }] }) }}",
-                "options": {},
+                # ── The timeout is the whole ballgame here ────────────────
+                # This is a NON-STREAMING call, so no response headers arrive
+                # until the entire generation has finished — and n8n's timeout
+                # is a wait-for-headers timeout. The full think-and-write time
+                # therefore counts against it.
+                #
+                # Measured 2026-09-20 on a DELIBERATELY TRIMMED payload (no
+                # past ideas, no research, no agent memory, no recent posts):
+                # 212s, 17,268 output tokens of which 8,344 were thinking. A
+                # real call from the app carries all four of those blocks, so
+                # it runs materially longer. Left unset, n8n applies its own
+                # default (300s) and a real month loses that race.
+                #
+                # 10 minutes, chosen against the app's own 15-minute
+                # PLAN_GENERATION_TIMEOUT_MS: the node has to fail, and the
+                # reason has to be SAVED, while the browser is still watching.
+                # If plans ever start timing out at 600s the fix is to make
+                # this call streaming, not to raise this number past 900s —
+                # past that the app stops listening and the error is lost.
+                "options": {"timeout": 600000},
             },
             "id": nid(),
             "name": "Call Claude",
             "type": "n8n-nodes-base.httpRequest",
             "typeVersion": 4.2,
             "position": [660, 200],
-            # Safe to retry: this is exactly ONE Anthropic call, not a fan-out,
-            # so a retry costs one more plan at worst and rescues the common
-            # 429/529 blip. (The rule it looks like it breaks — never
-            # retryOnFail a node that fans out paid calls — is about nodes
-            # running once per item; this one runs once per run.)
-            "retryOnFail": True,
-            "maxTries": 3,
-            "waitBetweenTries": 3000,
-            # After those three tries, hand the failure DOWNSTREAM as data
-            # instead of killing the run. Nothing else moves the plan row off
-            # 'generating', so a hard stop here would strand the plan with a
-            # spinner and no reason. Parse & Validate Plan reads `error` off
-            # the item and turns it into a sentence the planner can show.
+            # ── No retry, and that is a reversal ──────────────────────────
+            # This used to be retryOnFail with maxTries 3, on the reasoning
+            # that one Anthropic call per run is cheap to repeat and a retry
+            # rescues the common 429/529 blip. That reasoning holds for a
+            # blip, which fails in seconds. It does not hold for a TIMEOUT,
+            # which is the failure that actually happens here: three attempts
+            # at 300s plus the waits is ~15 minutes, which is exactly the
+            # app's own give-up point. So the browser hit its timeout, wrote
+            # the plan back to 'draft' and blanked the row — and n8n then
+            # saved its error onto a row nobody was watching any more. The
+            # user saw "the planner stopped answering", and the reason was
+            # erased a moment before it arrived.
+            #
+            # A timed-out attempt is also not free: the request may well have
+            # completed server-side and been billed, so retrying a timeout
+            # pays for the same month up to three times.
+            #
+            # One attempt, generously bounded, whose failure is saved in time
+            # to be read. A 429/529 still surfaces — as a sentence telling you
+            # to try again, which is what it always should have been.
+            "retryOnFail": False,
+            # Hand the failure DOWNSTREAM as data instead of killing the run.
+            # Nothing else moves the plan row off 'generating', so a hard stop
+            # here would strand the plan with a spinner and no reason. Parse &
+            # Validate Plan reads `error` off the item and turns it into a
+            # sentence the planner can show.
             "onError": "continueRegularOutput",
         },
         _code("Parse & Validate Plan", PARSE_VALIDATE_PLAN_JS, x=880, y=200),

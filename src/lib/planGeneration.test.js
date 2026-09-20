@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 
 vi.mock('./supabaseClient', () => ({ SUPABASE_URL: 'https://db.test', SUPABASE_ANON_KEY: 'anon' }))
-const { readPlanGeneration, insertIdeas, PLAN_GENERATION_TIMEOUT_MS } = await import('./contentPlans')
+const { readPlanGeneration, insertIdeas, fetchResearchIdeas, PLAN_GENERATION_TIMEOUT_MS } = await import('./contentPlans')
 const { ideasFromReport, answersLabel } = await import('./researchIdeas')
 
 afterEach(() => vi.unstubAllGlobals())
@@ -90,6 +90,59 @@ describe('insertIdeas — research provenance', () => {
     expect(rows.every(r => 'source' in r)).toBe(true)
     expect(rows[0].source).toBe('research')
     expect(rows[1].source).toBe('planner')
+  })
+})
+
+// ─── fetchResearchIdeas — one bad run must not erase the feature ───────────
+// The planner read only the single latest complete run. On 2026-09-17 a run
+// finished `complete` with 33 findings, a headline that had clearly read
+// them, and every synthesis array empty. The picker renders nothing when
+// there are no ideas, so the whole "From your research" panel disappeared —
+// while two perfectly good runs sat a few days behind it.
+
+function runsReturning(rows) {
+  vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => rows })))
+}
+
+const withIdeas = (date, title) => ({
+  id: `run-${date}`, started_at: `${date}T08:00:00Z`,
+  report: { proposed_ideas: [{ title, angle: '', rationale: '', answers: '', suggested_format: 'post' }] },
+})
+const noIdeas = date => ({
+  id: `run-${date}`, started_at: `${date}T08:00:00Z`,
+  report: { findings: ['a', 'b'], proposed_ideas: [] },
+})
+
+describe('fetchResearchIdeas', () => {
+  it('uses the latest run when it has ideas, and does not flag it stale', async () => {
+    runsReturning([withIdeas('2026-09-17', 'Fresh'), withIdeas('2026-09-15', 'Older')])
+    const out = await fetchResearchIdeas('w', 't')
+    expect(out.ideas.map(i => i.title)).toEqual(['Fresh'])
+    expect(out.runDate).toBe('2026-09-17')
+    expect(out.staleIdeas).toBe(false)
+  })
+
+  it('falls back to the newest run that proposed something, and says it is not the latest', async () => {
+    runsReturning([noIdeas('2026-09-17'), withIdeas('2026-09-15', 'Older')])
+    const out = await fetchResearchIdeas('w', 't')
+    expect(out.ideas.map(i => i.title)).toEqual(['Older'])
+    expect(out.runDate).toBe('2026-09-15')
+    expect(out.latestRunDate).toBe('2026-09-17')
+    expect(out.staleIdeas).toBe(true)
+  })
+
+  it('reports the latest run date when NO run proposed anything, so the panel can say so', async () => {
+    runsReturning([noIdeas('2026-09-17'), noIdeas('2026-09-15')])
+    const out = await fetchResearchIdeas('w', 't')
+    expect(out.ideas).toEqual([])
+    expect(out.latestRunDate).toBe('2026-09-17')
+  })
+
+  it('stays empty with no run date at all when research has never run', async () => {
+    runsReturning([])
+    const out = await fetchResearchIdeas('w', 't')
+    expect(out.ideas).toEqual([])
+    expect(out.latestRunDate).toBe('')
   })
 })
 

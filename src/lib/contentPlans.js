@@ -197,23 +197,41 @@ const RESEARCH_MAX_AGE_DAYS = 45
  * research just gets no panel, and the plan is still buildable.
  */
 export async function fetchResearchIdeas(workspaceId, accessToken) {
-  const empty = { runDate: '', runId: '', ideas: [] }
+  const empty = { runDate: '', runId: '', ideas: [], latestRunDate: '', staleIdeas: false }
   if (!workspaceId) return empty
   try {
     const since = new Date(Date.now() - RESEARCH_MAX_AGE_DAYS * 86400000).toISOString()
+    // ── Several runs, not one ──────────────────────────────────────────
+    // This read `limit=1`, and that one row was a single point of failure
+    // for the whole research-to-planner loop. On 2026-09-17 a run finished
+    // `complete`, with a headline that had plainly read all 33 of its
+    // findings, and every synthesis array empty — no ideas, no gaps, no
+    // top three. The picker renders nothing when there are no ideas, so
+    // the entire "From your research" panel silently disappeared, and the
+    // two earlier runs that DID propose ideas were four and five days old
+    // and perfectly good. One bad run should not erase the feature.
     const res = await fetch(
       `${SUPABASE_URL}/rest/v1/research_runs?workspace_id=eq.${workspaceId}&status=eq.complete` +
-      `&started_at=gte.${since}&select=id,started_at,report&order=started_at.desc&limit=1`,
+      `&started_at=gte.${since}&select=id,started_at,report&order=started_at.desc&limit=6`,
       { headers: authHeaders(accessToken) },
     )
     if (!res.ok) return empty
-    const [run] = await res.json()
-    if (!run?.report) return empty
-    return {
-      runDate: String(run.started_at || '').slice(0, 10),
-      runId: run.id || '',
-      ideas: ideasFromReport(run.report),
+    const runs = (await res.json()).filter(r => r?.report)
+    if (!runs.length) return empty
+
+    const latestRunDate = String(runs[0].started_at || '').slice(0, 10)
+    // The newest run that actually proposed something. Usually runs[0];
+    // when it is not, the panel says so rather than quietly serving older
+    // ideas as though they were this week's.
+    for (const run of runs) {
+      const ideas = ideasFromReport(run.report)
+      if (!ideas.length) continue
+      const runDate = String(run.started_at || '').slice(0, 10)
+      return { runDate, runId: run.id || '', ideas, latestRunDate, staleIdeas: runDate !== latestRunDate }
     }
+    // Runs exist, none proposed anything. Distinct from "never ran": the
+    // picker uses `latestRunDate` to say that out loud instead of vanishing.
+    return { ...empty, latestRunDate }
   } catch { return empty }
 }
 
