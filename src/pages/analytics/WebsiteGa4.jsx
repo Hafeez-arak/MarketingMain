@@ -384,17 +384,35 @@ function CopyField({ url }) {
 }
 
 export function BioLinkPanel({ ga4, bio, arrivals = [], summary, days }) {
-  if (!ga4?.configured || !ga4?.ok) return null
+  // ── WHY THIS IS NOT GATED ON GA4 ──
+  //
+  // It was, for one commit, and the panel was invisible on the only site it
+  // was built for: arak-sa.com has no GA4 property configured, so every tile
+  // — including the tap count, which comes from Zernio and never needed
+  // Google at all — disappeared behind a check for the half that was missing.
+  //
+  // The two halves fail separately here for the same reason `search` and
+  // `ga4` do in the route above them. Instagram can answer "did anybody tap
+  // it" on a site carrying no tag whatsoever, and that answer is worth
+  // showing on its own.
+  if (!bio) return null
 
-  const taps = bio?.taps || null
-  const links = bio?.links || []
-  const label = `Last ${ga4.windows?.days || days} days`
+  const taps = bio.taps || null
+  const links = bio.links || []
+  // GA4 answering at all is a separate question from GA4 being set up, and
+  // both are separate from this one report being accepted.
+  const ga4Live = !!(ga4?.configured && ga4?.ok)
+  // A rejected report is not a quiet month, and an unconfigured property is
+  // not an empty one. Printing 0 arrivals for either would say the bio link
+  // sent nobody, which is the one sentence this panel must never say by
+  // accident.
+  const counted = ga4Live && ga4.socialAvailable !== false
+  const uncountedBecause = !ga4Live
+    ? 'No analytics tag on the site, so arrivals cannot be counted.'
+    : 'GA4 rejected the report that counts this.'
+  const label = `Last ${(ga4Live && ga4.windows?.days) || days} days`
   const share = shareOf(arrivals, 'sessions')
   const untaggedOnly = summary && summary.sessions > 0 && !summary.anyTagged
-  // A rejected report is not a quiet month. Printing 0 arrivals because GA4
-  // refused the question would say the bio link sent nobody, which is the one
-  // sentence this panel must never say by accident.
-  const counted = ga4.socialAvailable !== false
 
   return (
     <Card className="overflow-hidden">
@@ -436,7 +454,7 @@ export function BioLinkPanel({ ga4, bio, arrivals = [], summary, days }) {
           <p className="text-[11px] text-text-tertiary mt-1.5 leading-tight">
             {counted
               ? `${plural(summary?.users || 0, 'visitor')} · counted by the tag on the site`
-              : 'GA4 rejected the report that counts this.'}
+              : uncountedBecause}
           </p>
         </div>
         <div className="p-4">
@@ -448,7 +466,7 @@ export function BioLinkPanel({ ga4, bio, arrivals = [], summary, days }) {
             {counted ? fmt(summary?.bio || 0) : '—'}
           </p>
           <p className="text-[11px] text-text-tertiary mt-1.5 leading-tight">
-            {counted ? "Sessions carrying the bio link's own tag" : 'GA4 rejected the report that counts this.'}
+            {counted ? "Sessions carrying the bio link's own tag" : uncountedBecause}
           </p>
         </div>
       </div>
@@ -475,7 +493,17 @@ export function BioLinkPanel({ ga4, bio, arrivals = [], summary, days }) {
         </div>
       )}
 
-      {ga4.socialAvailable === false ? (
+      {!ga4Live ? (
+        <div className="px-5 py-4 border-b border-border bg-surface-subtle">
+          <p className="text-sm text-text mb-1.5 font-medium">Half of this question has no answer yet</p>
+          <p className="text-xs text-text-secondary leading-relaxed">
+            Instagram counts the tap, and that number is above. What it cannot tell you is whether those people
+            reached the site, or what they did there — that only exists if a GA4 tag is on the website. The four
+            steps to turn it on are in the panel above this one. Until then the links below are safe to paste,
+            but nothing will be counted arriving on them.
+          </p>
+        </div>
+      ) : ga4.socialAvailable === false ? (
         <p className="px-5 py-4 text-xs text-rose-600">
           GA4 rejected the report that counts social sources, so the breakdown below is missing rather than
           empty. The site totals higher up the page are unaffected.

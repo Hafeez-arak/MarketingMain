@@ -226,7 +226,10 @@ export function WebsiteHarness() {
   const state = STATES[name]
   const search = state.search
   const ga4 = state.ga4
-  const bio = state.bio || null
+  // The route returns `bio` on every answer, whatever GA4's state — Instagram
+  // counts bio taps on a site carrying no tag at all — so the harness does
+  // too. A state that overrides it is testing a specific tap failure.
+  const bio = state.loading ? null : (state.bio || BIO)
   const arrivals = platformArrivals(ga4?.social || [])
   const usable = !!search?.ok && !!search?.configured
 
