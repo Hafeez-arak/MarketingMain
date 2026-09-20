@@ -15,9 +15,9 @@ import {
 } from '../../lib/postFormats'
 import { groupByWeek, monthOptions, normalizeAiIdea, distributeDates, formatTime, DEFAULT_POST_TIME, pollProblems, firstPlaceableDay } from './planModel'
 import { brandTodayKey } from '../../lib/brandTime'
-import { GOALS, OTHER_GOAL, isCustomGoal, WEEKDAYS, DEFAULT_DRAFT, isUntouchedSelection, PLATFORMS, targetLabel } from './planConstants'
+import { GOALS, OTHER_GOAL, isCustomGoal, WEEKDAYS, DEFAULT_DRAFT, isUntouchedSelection, PLATFORMS, targetLabel, IG_TONES } from './planConstants'
 import { isProtectedPlatform } from '../../lib/platformSafety'
-import { IdeaCard } from './IdeaCard'
+import { IdeaCard, IdeaEditModal } from './IdeaCard'
 import { CaptionCard } from './CaptionCard'
 import { GenerateMoreModal, CalendarView } from './plannerParts'
 import { momentsInRange, dbIdeaToDraft } from '../../lib/campaignPlan'
@@ -31,6 +31,7 @@ import {
 import { ResearchIdeaPicker } from './ResearchIdeaPicker'
 import { BrandContextPanel } from '../../components/BrandContextPanel'
 import { openStudioForIdea, fetchSessionsForIdeas, resetIdeaMedia, publishIdeasAsPosts } from '../../lib/studioBridge'
+import { slidesFor, slideUrls, legacyFieldsFor, hasOwnSlides } from '../../lib/planSlides'
 import { fetchScheduledPosts } from '../../lib/scheduledPosts'
 import { postLock } from '../../lib/postLock'
 import { schedulePlanPosts } from '../../lib/planScheduling'
@@ -100,9 +101,10 @@ function thumbFor(idea) {
 // carousel's slides, not just the first.
 function mediaUrlsFor(idea) {
   if (isTextOnly(idea)) return []
-  if (idea.previewImageUrl) return [idea.previewImageUrl]
-  if (idea.imageMode === 'use_reference') return (idea.references || []).filter(Boolean)
-  return []
+  // One ordered list, whatever each slide was made by. This used to return
+  // `[idea.previewImageUrl]` when a Studio render existed and the uploads
+  // otherwise — so a mixed carousel could only ever show one of its halves.
+  return slideUrls(idea)
 }
 
 // ─── Main planner ───────────────────────────────────────────────────────────
@@ -906,8 +908,11 @@ export function CampaignPlanner() {
   const approvedIdeas = ideas.filter(i => i.status === 'approved')
   // An idea using its own image already HAS its picture — it was attached, not
   // made, so counting only Studio-accepted media would show "0 of 4 ready".
-  const hasOwnMedia = i => i.imageMode === 'use_reference' && (i.references || []).length > 0
-  const hasMedia = i => i.mediaStatus === 'ready' || hasOwnMedia(i)
+  // "Is any of this yours?" — asked of the slide list rather than of a mode,
+  // because a mixed carousel is both Studio's and yours and the old
+  // single-mode question had no true answer for it.
+  const hasOwnMedia = i => hasOwnSlides(i)
+  const hasMedia = i => i.mediaStatus === 'ready' || slidesFor(i).length > 0
   // Only posts that take a picture go through the pictures step. A plan of
   // nothing but LinkedIn text posts and polls skips it entirely.
   const mediaIdeas = approvedIdeas.filter(i => !isTextOnly(i))
@@ -959,30 +964,105 @@ export function CampaignPlanner() {
     ? { db: { caption_options: [], draft_status: 'not_started' }, local: { captionOptions: [], draftStatus: 'not_started' } }
     : { db: {}, local: {} }
 
-  // ── Attaching your own picture ───────────────────────────────────────────
+  // ── Saving an idea's slides ──────────────────────────────────────────────
+  // The ONE writer. Everything that changes a picture — the media picker, a
+  // reorder, a removal, a Studio render coming back — goes through here, and
+  // it writes the slide list plus the legacy columns derived from it. Two
+  // writers would have meant two chances for `slides` and
+  // preview_image_url/reference_image_urls to disagree about the same post,
+  // and the older screens still read the derived ones.
+  async function saveSlides(idea, slides, { clearStaleCaption = true } = {}) {
+    if (!idea) return { ok: true }
+    if (isLocked(idea)) return { error: 'This post has already gone out, so its picture can’t be changed.' }
+    const stale = clearStaleCaption ? staleCaptionPatch(idea) : { db: {}, local: {} }
+    const legacy = legacyFieldsFor(slides)
+    const result = await updateIdea(accessToken, idea.id, { slides, ...legacy, ...stale.db })
+    if (result.error) return { error: result.error }
+    if (clearStaleCaption) autoDraftedRef.current.delete(idea.id)
+    onIdeaChange({
+      ...idea,
+      slides,
+      references: legacy.reference_image_urls,
+      previewImageUrl: legacy.preview_image_url,
+      previewVideoUrl: legacy.preview_video_url,
+      imageMode: legacy.image_mode,
+      mediaType: legacy.media_type,
+      slideCount: legacy.slide_count,
+      ...stale.local,
+    })
+    return { ok: true }
+  }
+
+  // ── Editing a post from the pictures step ────────────────────────────────
+  // The same modal the review step opens, deliberately: format, orientation,
+  // slide count, date, time and platform are decisions made WHILE looking at
+  // the picture, and a second, slightly-different editor would be two places
+  // to keep in step and two things to learn.
+  const [editIdea, setEditIdea] = useState(null)
+  const [editSaving, setEditSaving] = useState(false)
+  const [editError, setEditError] = useState('')
+  async function saveEditedIdea(patch) {
+    const idea = editIdea
+    if (!idea) return
+    setEditSaving(true); setEditError('')
+    const result = await updateIdea(accessToken, idea.id, {
+      topic: patch.topic, angle: patch.angle, tone: patch.tone, platform: patch.platform,
+      scheduled_date: patch.date || null,
+      publish_time: patch.time || null,
+      suggested_style: patch.suggestedStyle || '', image_idea: patch.imageIdea || '',
+      objective: patch.objective || '', cta: patch.cta || '',
+      hashtags: patch.hashtags || '', first_comment: patch.firstComment || '',
+      series: patch.series || '',
+      format: patch.postFormat, aspect_ratio: patch.aspectRatio, media_type: patch.mediaType,
+      wants_caption: patch.wantsCaption !== false,
+      post_kind: patch.postKind || 'caption_image',
+      slide_count: patch.slideCount || 1,
+      copy_mode: patch.copyMode === 'own' ? 'own' : 'ai',
+      caption_en: patch.captionEn || '', caption_ar: patch.captionAr || '',
+    })
+    setEditSaving(false)
+    if (result.error) { setEditError(result.error); return }
+    const before = ideaSnapshot(idea)
+    const after  = ideaSnapshot({ ...idea, ...patch })
+    onIdeaChange({ ...idea, ...patch })
+    setEditIdea(null)
+    // Same signal the review step records: what a human changed about the
+    // AI's suggestion is worth more than the final text on its own.
+    logIdeaEvent(activeWorkspaceId, accessToken, {
+      planId: idea.planId, ideaId: idea.id, event: 'edited', before, after,
+    })
+  }
+
+  // ── Attaching your own pictures ──────────────────────────────────────────
+  // The picker hands back urls. They join whatever the idea already has
+  // rather than replacing it — that is the point of the slide list. A Studio
+  // render already on the idea survives being given company, which is what
+  // "two AI images and two of my own" needs and what the old either/or
+  // model made impossible.
   const [mediaPickIdea, setMediaPickIdea] = useState(null)
   async function saveMediaImages(urls) {
     const idea = mediaPickIdea
     if (!idea) return { ok: true }
-    if (isLocked(idea)) return { error: 'This post has already gone out, so its picture can’t be changed.' }
-    // Clearing every image is a real choice — it puts the idea back to having
-    // its picture made in the Studio, rather than claiming one that isn't there.
-    const mode = urls.length ? 'use_reference' : 'studio'
-    const stale = staleCaptionPatch(idea)
-    const result = await updateIdea(accessToken, idea.id, { reference_image_urls: urls, image_mode: mode, ...stale.db })
-    if (result.error) return { error: result.error }
-    autoDraftedRef.current.delete(idea.id)
-    onIdeaChange({ ...idea, references: urls, imageMode: mode, ...stale.local })
+    const existing = slidesFor(idea)
+    const studio = existing.filter(s => s.source === 'studio')
+    // Clearing every image is a real choice — it leaves whatever the Studio
+    // made and nothing else, rather than claiming pictures that aren't there.
+    const next = urls.length
+      ? [...studio, ...urls.map(url => ({ url, type: 'image', source: 'upload' }))]
+      : studio
+    const res = await saveSlides(idea, next)
+    if (res.error) return res
     setMediaPickIdea(null)
     return { ok: true }
   }
 
   // A carousel's slides, put in a new order from the pictures step. Saved at
-  // once — the order is what goes out.
+  // once — the order is what goes out. Reordering is not a new picture, so it
+  // leaves the drafted captions alone.
   async function reorderSlides(idea, urls) {
-    if (isLocked(idea)) return
-    onIdeaChange({ ...idea, references: urls })
-    const res = await updateIdea(accessToken, idea.id, { reference_image_urls: urls })
+    const by = new Map(slidesFor(idea).map(s => [s.url, s]))
+    const next = urls.map(url => by.get(url) || { url, type: 'image', source: 'upload' })
+    const res = await saveSlides(idea, next, { clearStaleCaption: false })
     if (res.error) setError(`Couldn't save the slide order: ${res.error}`)
   }
 
@@ -1773,13 +1853,36 @@ export function CampaignPlanner() {
                     )}
                     <div className="min-w-0 flex-1">
                       <p className="text-xs font-semibold text-text leading-snug line-clamp-2">{idea.title || idea.topic || 'Untitled idea'}</p>
+                      {/* The topic, which is what the picture actually has to
+                          be OF. The card showed a title and a format and left
+                          you to remember the rest — so choosing a picture
+                          meant going back a step to read the idea again. */}
+                      {idea.topic && idea.topic !== idea.title && (
+                        <p className="text-[11px] text-text-secondary mt-0.5 leading-relaxed line-clamp-2">{idea.topic}</p>
+                      )}
                       <p className="text-[11px] text-text-secondary mt-1">
                         {idea.date ? formatDate(idea.date) : 'Date set on save'}
                         {' · '}{formatTime(idea.time || DEFAULT_POST_TIME)}
                       </p>
                       <p className="text-[10px] text-text-tertiary mt-0.5">
                         {formatsFor(idea.platform).find(f => f.id === idea.postFormat)?.label || 'Feed image'} · {aspectLabel(idea.aspectRatio)}
+                        {' · '}{(idea.platforms?.length ? idea.platforms : [idea.platform]).map(targetLabel).join(' + ')}
                       </p>
+                      {/* The same chips the review step judges an idea by. A
+                          picture for a National Day post is a different brief
+                          from a picture for a product post, and this step used
+                          to hide that distinction entirely. */}
+                      {(idea.occasion || idea.pillar || idea.objective || idea.source === 'research') && (
+                        <div className="flex items-center gap-1 flex-wrap mt-1.5">
+                          {idea.source === 'research' && (
+                            <span className="text-[9px] font-semibold px-1.5 py-0.5 leading-[1.4] border bg-sage-50 text-sage-700 border-sage-200"
+                              title="Built from an idea the research agent proposed">◆ Research</span>
+                          )}
+                          {idea.occasion && <span className="text-[9px] font-semibold px-1.5 py-0.5 leading-[1.4] border bg-amber-100 text-amber-800 border-amber-200">★ {idea.occasion}</span>}
+                          {idea.pillar && <span className="text-[9px] font-medium px-1.5 py-0.5 leading-[1.4] border bg-stone-100 text-text-secondary border-border">{idea.pillar}</span>}
+                          {idea.objective && <span className="text-[9px] font-medium px-1.5 py-0.5 leading-[1.4] border bg-sky-50 text-sky-700 border-sky-100">{idea.objective}</span>}
+                        </div>
+                      )}
                       <span className={`inline-block mt-1.5 text-[10px] font-bold px-1.5 py-0.5 leading-[1.4] ${
                         st === 'ready' || st === 'sent' ? 'bg-sage-100 text-sage-700'
                         : st === 'in_studio' ? 'bg-violet-50 text-violet-700'
@@ -1814,6 +1917,13 @@ export function CampaignPlanner() {
                         <Button size="xs" variant="secondary" onClick={() => openStudio(idea)}>
                           {idea.mediaStatus === 'ready' ? 'Edit in Studio' : sess ? 'Back to Studio' : 'Make in Studio'}
                         </Button>
+                        {/* The same modal the review step opens. Format,
+                            orientation, slide count, date, time and platforms
+                            are all decisions you make WHILE looking at the
+                            picture — and until now they lived two steps back,
+                            so changing a carousel to a reel meant leaving the
+                            step and finding your place again. */}
+                        <Button size="xs" variant="secondary" onClick={() => setEditIdea(idea)}>Edit</Button>
                         {idea.mediaStatus === 'ready' && (
                           <button onClick={() => redoMedia(idea)}
                             title="Start this one over — the picture is unset, the Studio session is kept"
@@ -1828,6 +1938,12 @@ export function CampaignPlanner() {
           </div>
 
           {error && <div className="rounded-xl bg-red-50 border border-red-100 px-4 py-3 text-xs text-red-600">{error}</div>}
+
+          {editIdea && (
+            <IdeaEditModal idea={editIdea} tones={IG_TONES} saving={editSaving} saveError={editError}
+              planPlatforms={platforms} todayKey={todayKey}
+              onClose={() => { setEditIdea(null); setEditError('') }} onSave={saveEditedIdea} />
+          )}
 
           <div className="sticky bottom-0 -mx-1 px-1 pb-1">
             <div className="flex items-center gap-3 bg-white/95 backdrop-blur-sm border border-border rounded-2xl shadow-dropdown px-5 py-3.5">

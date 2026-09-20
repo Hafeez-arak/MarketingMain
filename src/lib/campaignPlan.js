@@ -103,6 +103,11 @@ export function dbIdeaToDraft(row) {
     mediaStatus: row.media_status || 'none',
     mediaVersionId: row.media_version_id || null,
     references: row.reference_image_urls || [],
+    // The ordered media list, each slide knowing where it came from. Empty on
+    // every row written before 20260920_plan_idea_slides.sql — planSlides
+    // .slidesFor() derives those from the three fields above rather than
+    // reporting a plan mid-flight as having lost its pictures.
+    slides: Array.isArray(row.slides) ? row.slides : [],
     // Per-platform extras that have no column of their own — today a
     // LinkedIn poll's question and answers. Same shape and name as
     // generated_posts.platform_options, which is where finalize copies it.
