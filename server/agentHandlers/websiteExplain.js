@@ -1,5 +1,6 @@
-import { callerId, callerMayUseWorkspace, isConfigured } from './_supabase.js'
-import { callModel } from './_provider.js'
+import { Buffer } from 'node:buffer'
+import { callerId, callerMayUseWorkspace, isConfigured } from '../../api/agent/_supabase.js'
+import { callModel } from '../../api/agent/_provider.js'
 import { textIn } from '../../src/lib/agent/loop.js'
 import {
   EXPLAIN_SCHEMA, EXPLAIN_IDENTITY, explainPrompt, parseExplain,

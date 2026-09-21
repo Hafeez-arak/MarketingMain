@@ -29,4 +29,17 @@ Every platform publishes and syncs through the `Zernio *` workflows. The three M
 
 `Publish Post (Zernio)` and `Zernio Sync` carried the same populated-reference trap and both resolved accounts from an *unscoped* `GET /v1/accounts` — every account the API key can see, across every tenant. Both are now scoped by the workspace's `zernio_profile_id`, and both have tests (`zernioPublish.test.js`, `zernioSync.test.js`). **They need a redeploy on the box to take effect.**
 
+## Website Agent gateway — deploy it with the agent container
+
+`Arak Lighting – Website Agent` moves only the two newly added, on-demand Website checks (`indexHealth` and `websiteExplain`) off Vercel and through the existing private `agent` container. The prior deployment already used all 12 Hobby-plan functions; adding these two made Vercel reject it. The workflow accepts only these two actions — it is not a generic proxy.
+
+After pulling this change on the n8n box, rebuild the agent image and import the workflow:
+
+```bash
+cd n8n/docker && docker compose up -d --build agent
+cd .. && ./redeploy.sh "Arak Lighting – Website Agent"
+```
+
+Then redeploy Vercel. The Vercel proxy still checks the signed-in browser and sends the webhook secret; n8n forwards the browser token only over the Docker network, where the agent continues to check the caller's membership in the requested workspace.
+
 The workflow Code nodes are covered by tests such as `zernioPublish.test.js` and `zernioSync.test.js`, which run the **generated JSON** — not a copy of the source — through `workflowHarness.js` with Instagram and Supabase stubbed. If you change a Code node, regenerate first (`python3 gen_workflows.py`) or the tests will still be checking the old one.

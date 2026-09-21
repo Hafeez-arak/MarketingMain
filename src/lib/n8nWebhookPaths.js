@@ -62,4 +62,9 @@ export const WEBHOOK_PATHS = {
   // workflow answers it: it starts the run on the agent container next to n8n
   // and drives every lens and the brief itself. Also what runs on Mondays.
   agentRun:         'arak-agent-run',
+  // On-demand Website analysis. These two agent handlers run in the private
+  // agent container through one n8n gateway so Vercel stays at its 12-function
+  // Hobby-plan ceiling. Do not add unrelated agent routes here: this gateway
+  // intentionally only allows index health and the written explanation.
+  agentWebsite:     'arak-agent-website',
 }

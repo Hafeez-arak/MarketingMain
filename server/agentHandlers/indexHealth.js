@@ -1,7 +1,8 @@
-import { callerId, callerMayUseWorkspace, db, isConfigured } from './_supabase.js'
+import { Buffer } from 'node:buffer'
+import { callerId, callerMayUseWorkspace, db, isConfigured } from '../../api/agent/_supabase.js'
 import { searchConfig } from '../../src/lib/agent/searchConsole.js'
-import { fetchPageTotals } from './_searchConsole.js'
-import { fetchSitemapUrls, fetchInspections } from './_urlInspection.js'
+import { fetchPageTotals } from '../../api/agent/_searchConsole.js'
+import { fetchSitemapUrls, fetchInspections } from '../../api/agent/_urlInspection.js'
 import { inspectionTargets, indexHealth, MAX_INSPECTIONS } from '../../src/lib/agent/urlInspection.js'
 
 // ─── POST /api/agent/indexHealth ───────────────────────────────────────────

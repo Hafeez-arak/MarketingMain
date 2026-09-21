@@ -32,7 +32,7 @@ describe('agent server', () => {
   })
 
   it('serves every agent route, and only those', () => {
-    expect(ROUTES).toEqual(['run', 'lens', 'synthesise', 'resolve', 'discover', 'chat'])
+    expect(ROUTES).toEqual(['run', 'lens', 'synthesise', 'resolve', 'discover', 'chat', 'indexHealth', 'websiteExplain'])
   })
 
   it('calls the named handler with the body, the query and res.status().json()', async () => {
@@ -44,14 +44,18 @@ describe('agent server', () => {
         res.status(201).json({ route, body, query: req.query, auth: req.headers.authorization })
       },
     }))
-    const res = await fetch(`${base}/api/agent/lens?x=1`, {
+    // Camel-cased endpoint names are intentional: the private n8n Website
+    // gateway forwards the two handlers that were removed from Vercel, and
+    // route matching must not silently reject them before their membership
+    // check runs.
+    const res = await fetch(`${base}/api/agent/indexHealth?x=1`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: 'Bearer t' },
-      body: JSON.stringify({ lens: 'demand' }),
+      body: JSON.stringify({ workspace_id: 'workspace' }),
     })
     expect(res.status).toBe(201)
-    expect(await res.json()).toEqual({ route: 'lens', body: { lens: 'demand' }, query: { x: '1' }, auth: 'Bearer t' })
-    expect(seen).toEqual(['lens'])
+    expect(await res.json()).toEqual({ route: 'indexHealth', body: { workspace_id: 'workspace' }, query: { x: '1' }, auth: 'Bearer t' })
+    expect(seen).toEqual(['indexHealth'])
   })
 
   it('refuses anything that is not an agent route, including path tricks', async () => {

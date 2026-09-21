@@ -20,12 +20,22 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 // Not published to the internet. n8n reaches it as http://agent:3000; the only
 // host port is bound to 127.0.0.1 for health checks on the box itself.
 
-export const ROUTES = ['run', 'lens', 'synthesise', 'resolve', 'discover', 'chat']
+// The two on-demand Website checks used to be individual Vercel functions.
+// They live beside n8n now: the browser reaches one authenticated n8n
+// webhook, and n8n calls this private service over the Docker network. Keeping
+// them in this route allowlist means the public n8n gateway cannot become an
+// arbitrary internal HTTP proxy.
+export const ROUTES = ['run', 'lens', 'synthesise', 'resolve', 'discover', 'chat', 'indexHealth', 'websiteExplain']
+
+const N8N_HANDLERS = new Set(['indexHealth', 'websiteExplain'])
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 
 function defaultLoad(route) {
-  return import(pathToFileURL(path.join(here, '..', 'api', 'agent', `${route}.js`)).href)
+  const root = N8N_HANDLERS.has(route)
+    ? path.join(here, 'agentHandlers')
+    : path.join(here, '..', 'api', 'agent')
+  return import(pathToFileURL(path.join(root, `${route}.js`)).href)
 }
 
 /** The Vercel response helpers, over a plain Node response. */
@@ -51,7 +61,7 @@ export function createAgentServer({ load = defaultLoad, log = console } = {}) {
 
     // Only the routes that exist, matched exactly. A server that imports
     // whatever path a request names is a file-read primitive.
-    const route = /^\/api\/agent\/([a-z]+)$/.exec(url.pathname)?.[1]
+    const route = /^\/api\/agent\/([a-zA-Z]+)$/.exec(url.pathname)?.[1]
     if (!route || !ROUTES.includes(route)) {
       res.status(404).json({ error: 'No such agent route.' })
       return

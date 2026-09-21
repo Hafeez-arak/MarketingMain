@@ -1,3 +1,5 @@
+import { defaultWebhookUrl } from './n8nWebhooks'
+
 // ─── The website's side of the dashboard ───────────────────────────────────
 // One call to /api/agent/search, which reads Google Search Console for this
 // workspace's property. The service-account key stays on the server, exactly
@@ -85,13 +87,16 @@ export async function fetchIndexHealth(workspaceId, accessToken) {
   if (!workspaceId) return { ok: false, error: 'No workspace selected.' }
   if (!accessToken) return { ok: false, error: 'Sign in to read website analytics.' }
   try {
-    const res = await fetch('/api/agent/indexHealth', {
+    const res = await fetch(defaultWebhookUrl('agentWebsite'), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${accessToken}`,
       },
-      body: JSON.stringify({ workspace_id: workspaceId }),
+      // api/n8n authenticates this header, then n8n passes the same token to
+      // the private agent service so the handler still checks workspace
+      // membership before spending Search Console quota.
+      body: JSON.stringify({ action: 'indexHealth', workspace_id: workspaceId, access_token: accessToken }),
     })
     const data = await res.json().catch(() => null)
     if (!data) return { ok: false, error: `The server returned ${res.status} with nothing in it.` }
@@ -113,13 +118,13 @@ export async function fetchWebsiteExplanation(workspaceId, accessToken, facts, a
   if (!workspaceId) return { ok: false, points: [], error: 'No workspace selected.' }
   if (!accessToken) return { ok: false, points: [], error: 'Sign in to read website analytics.' }
   try {
-    const res = await fetch('/api/agent/websiteExplain', {
+    const res = await fetch(defaultWebhookUrl('agentWebsite'), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${accessToken}`,
       },
-      body: JSON.stringify({ workspace_id: workspaceId, facts, audience }),
+      body: JSON.stringify({ action: 'websiteExplain', workspace_id: workspaceId, facts, audience, access_token: accessToken }),
     })
     const data = await res.json().catch(() => null)
     if (!data) return { ok: false, points: [], error: `The server returned ${res.status} with nothing in it.` }

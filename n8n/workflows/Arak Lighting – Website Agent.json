@@ -1,0 +1,58 @@
+{
+  "name": "Arak Lighting – Website Agent",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Website Agent gateway\n\nReceives only the two on-demand Website analytics actions that would otherwise exceed Vercel Hobby's 12-function limit. The public Vercel proxy first verifies the signed-in browser; this workflow then forwards that same token to the private agent container, which enforces workspace membership.\n\nWebhook path: `/arak-agent-website`. Allowed body actions: `indexHealth`, `websiteExplain`.",
+        "height": 220,
+        "width": 480
+      },
+      "id": "d2e8a4ee-5182-58bb-bdf5-f28c46a9d8ce",
+      "name": "Note: Website Agent gateway",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [-40, 0]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "arak-agent-website",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "23da8e27-3a42-5d04-8b62-6411d814b3ad",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 260],
+      "webhookId": "arak-agent-website"
+    },
+    {
+      "parameters": {
+        "jsCode": "const expected = String($env.N8N_WEBHOOK_SECRET || '').trim();\nif (expected) {\n  const headers = ($input.first().json || {}).headers || {};\n  const got = String(headers['x-webhook-secret'] || headers['X-Webhook-Secret'] || '').trim();\n  if (got !== expected) throw new Error('Unauthorized: missing or invalid webhook secret');\n}\nreturn $input.all();"
+      },
+      "id": "40c03cd5-23b1-59f9-a413-0721f77f2b17",
+      "name": "Webhook Secret Guard",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [220, 260]
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = ($input.first().json || {}).body || {};\nconst action = String(body.action || '').trim();\nconst allowed = new Set(['indexHealth', 'websiteExplain']);\nconst accessToken = String(body.access_token || '').trim();\n\nif (!allowed.has(action)) {\n  return [{ json: { ok: false, error: 'Unsupported Website action.' } }];\n}\nif (!accessToken) {\n  return [{ json: { ok: false, error: 'Sign in to read website analytics.' } }];\n}\n\n// The browser token is deliberately forwarded only to the private agent\n// container. That handler is the authority for workspace membership; n8n\n// never trusts the workspace id in this body by itself.\nconst request = { ...body };\ndelete request.action;\ndelete request.access_token;\n\ntry {\n  const response = await this.helpers.httpRequest({\n    method: 'POST',\n    url: `${$env.AGENT_BASE_URL}/api/agent/${action}`,\n    headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },\n    body: request,\n    json: true,\n    returnFullResponse: true,\n    ignoreHttpStatusErrors: true,\n    timeout: action === 'indexHealth' ? 600000 : 180000,\n  });\n  const payload = response?.body && typeof response.body === 'object'\n    ? response.body\n    : { ok: false, error: `The agent returned ${response?.statusCode || 'an empty response'}.` };\n  return [{ json: payload }];\n} catch (err) {\n  return [{ json: { ok: false, error: `Could not reach the Website agent: ${String(err?.message || err).slice(0, 300)}` } }];\n}"
+      },
+      "id": "d16b0ca3-0c19-5f58-aa12-e1575ee84fef",
+      "name": "Forward to Website Agent",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, 260]
+    }
+  ],
+  "connections": {
+    "Webhook": { "main": [[{ "node": "Webhook Secret Guard", "type": "main", "index": 0 }]] },
+    "Webhook Secret Guard": { "main": [[{ "node": "Forward to Website Agent", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "active": false,
+  "id": "0bvj7bNHbjUHG3nt"
+}
