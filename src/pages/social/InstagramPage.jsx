@@ -13,10 +13,11 @@ import { formatDateTime } from '../../lib/utils'
 import { useBrandProfileSync, logEditFeedback } from '../../lib/brandBrain'
 import { useBrandContext } from '../../lib/brandContext'
 import { CaptionStudio } from '../../components/CaptionStudio'
-import { fetchScheduledPosts } from '../../lib/scheduledPosts'
+import { fetchScheduledPosts, movePost, unschedulePost } from '../../lib/scheduledPosts'
 import { publishComposed } from '../../lib/publishPost'
 import { composerFromPost } from '../../lib/composerState'
 import { postLock } from '../../lib/postLock'
+import { formatBrandDateTime, utcToBrandInputs, brandWallToUtc, BRAND_TIMEZONE_LABEL } from '../../lib/brandTime'
 import { syncZernio } from '../../lib/zernio'
 import { defaultWebhookUrl } from '../../lib/n8nWebhooks'
 
@@ -331,7 +332,7 @@ function mediaFileName(topic) {
 
 
 // ─── Post Detail Modal ─────────────────────────────────────────────────────
-function PostDetail({ post, state, webhookUrl, regenWebhookUrl, supabaseUrl, anonKey, onClose, onStatusChange, onPublish, onPosted, accounts = [], onImageUpdated, onCaptionUpdated, onDelete, locked = false }) {
+function PostDetail({ post, state, webhookUrl, regenWebhookUrl, supabaseUrl, anonKey, onClose, onStatusChange, onPublish, onPosted, accounts = [], onImageUpdated, onCaptionUpdated, onDelete, onRescheduled, locked = false }) {
   const { activeWorkspaceId, accessToken } = useAuth()
   // Gone out (lib/postLock.js): shown as it went, with nothing that edits it —
   // no caption edit or rewrite, no new image, no approve, no delete. The caller
@@ -364,6 +365,49 @@ function PostDetail({ post, state, webhookUrl, regenWebhookUrl, supabaseUrl, ano
   const [sendError,   setSendError]   = useState('')
   const [scheduling,  setScheduling]  = useState(false)
   const [when,        setWhen]        = useState('')
+
+  // Already booked at Zernio (rows come through the scheduled_posts view, so
+  // post._raw carries post_table — a manual, non-schedulable row does not).
+  // Post Queue's row lets you edit, reschedule or cancel a booked post right
+  // there; this popup used to only offer that once a post had NOT yet been
+  // sent, so a scheduled post opened here was frozen — read-only but for its
+  // caption. Same reschedule/cancel path Post Queue uses (lib/scheduledPosts).
+  const canReschedule = !isLocked && post.publishStatus === 'scheduled' && !!post._raw?.post_table
+  const [rescheduling, setRescheduling] = useState(false)
+  const [reschedWhen,  setReschedWhen]  = useState('')
+  const [reschedBusy,  setReschedBusy]  = useState(false)
+  const [reschedError, setReschedError] = useState('')
+
+  function startReschedule() {
+    const cur = post._raw?.scheduled_publish_at ? utcToBrandInputs(post._raw.scheduled_publish_at) : { date: '', time: '09:00' }
+    setReschedWhen(cur.date ? `${cur.date}T${(cur.time || '09:00').slice(0, 5)}` : '')
+    setReschedError('')
+    setRescheduling(true)
+  }
+
+  async function handleReschedule() {
+    if (!reschedWhen) return
+    const target = brandWallToUtc(reschedWhen.slice(0, 10), reschedWhen.slice(11, 16))
+    if (!target || target.getTime() <= Date.now() + 60 * 1000) { setReschedError('Pick a time in the future.'); return }
+    setReschedBusy(true); setReschedError('')
+    const res = await movePost({
+      accessToken, post: post._raw, dateKey: reschedWhen.slice(0, 10), time: reschedWhen.slice(11, 16),
+      webhooks: state.webhooks, workspaceId: activeWorkspaceId,
+    })
+    setReschedBusy(false)
+    if (res.error) { setReschedError(res.error); return }
+    setRescheduling(false)
+    onRescheduled?.()
+  }
+
+  async function handleCancelSchedule() {
+    setReschedBusy(true); setReschedError('')
+    const res = await unschedulePost({ accessToken, post: post._raw, webhooks: state.webhooks, workspaceId: activeWorkspaceId })
+    setReschedBusy(false)
+    if (res.error) { setReschedError(res.error); return }
+    onRescheduled?.()
+    onClose()
+  }
 
   // Built through composerFromPost + publishComposed, the same pair the
   // composer's Post now uses, so caption, media, options and validation are
@@ -881,7 +925,44 @@ function PostDetail({ post, state, webhookUrl, regenWebhookUrl, supabaseUrl, ano
                     : <><svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg> Approve & Publish</>}
                 </button>
               )}
-              {(sentToZernio || isLocked || post.status === 'published') && (
+              {canReschedule ? (
+                <div className="flex-1 min-w-0 space-y-2">
+                  {!rescheduling ? (
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="flex items-center gap-2 px-3 py-3 rounded-2xl text-sm font-bold bg-green-50 text-green-700 border-2 border-green-200">
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
+                        {post._raw?.scheduled_publish_at ? formatBrandDateTime(post._raw.scheduled_publish_at) : 'Scheduled'}
+                      </span>
+                      {onPublish && (
+                        <button type="button" onClick={() => onPublish(post)}
+                          className="px-4 py-3 rounded-2xl text-sm font-semibold border-2 border-border text-text-secondary hover:bg-surface-subtle transition-colors">
+                          ✎ Edit
+                        </button>
+                      )}
+                      <button onClick={startReschedule}
+                        className="px-4 py-3 rounded-2xl text-sm font-semibold border-2 border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors">
+                        🗓 Reschedule
+                      </button>
+                      <button onClick={handleCancelSchedule} disabled={reschedBusy}
+                        className="px-4 py-3 rounded-2xl text-sm font-semibold border-2 border-red-200 bg-red-50 text-red-600 hover:bg-red-100 transition-colors disabled:opacity-50">
+                        {reschedBusy ? 'Cancelling…' : 'Cancel schedule'}
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <input type="datetime-local" value={reschedWhen} onChange={e => setReschedWhen(e.target.value)} aria-label="New time"
+                        className="border border-border px-3 py-2.5 text-sm bg-white text-text focus:outline-none rounded-xl" />
+                      <span className="text-xs font-semibold text-text-tertiary">{BRAND_TIMEZONE_LABEL}</span>
+                      <button disabled={reschedBusy || !reschedWhen} onClick={handleReschedule}
+                        className="px-4 py-2.5 rounded-2xl text-sm font-semibold border-2 border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors disabled:opacity-50">
+                        {reschedBusy ? 'Moving…' : 'Confirm new time'}
+                      </button>
+                      <button onClick={() => setRescheduling(false)} className="text-xs text-text-tertiary hover:text-text">Cancel</button>
+                    </div>
+                  )}
+                  {reschedError && <p className="text-xs text-red-600">{reschedError}</p>}
+                </div>
+              ) : (sentToZernio || isLocked || post.status === 'published') && (
                 <div className="flex-1 flex items-center justify-center gap-2.5 py-3.5 rounded-2xl text-sm font-bold bg-green-50 text-green-700 border-2 border-green-200">
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
                   {post.publishStatus === 'publishing' ? 'Publishing…' : isLocked ? 'Published' : post.publishStatus === 'scheduled' || post.status === 'scheduled' ? 'Scheduled' : 'Published'}
@@ -1161,6 +1242,7 @@ function PostsList({ posts, loading = false, dispatch, state, updatePostStatus, 
           onImageUpdated={handleImageUpdated}
           onCaptionUpdated={handleCaptionUpdated}
           onDelete={handleDelete}
+          onRescheduled={onRefresh}
         />
       )}
 

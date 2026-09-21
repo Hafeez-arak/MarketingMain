@@ -4,6 +4,7 @@ import { Toggle, Spinner } from '../ui/index'
 import { optionsFor, setOption, composedCaption, captionStats } from '../../lib/composerState'
 import { limitsFor } from '../../lib/postFormats'
 import { searchInstagramAudio, supportsCatalogAudio } from '../../lib/zernioConnect'
+import { PreviewVideo } from './PreviewVideo'
 
 // ─── Instagram: the fields only Instagram has, and the preview ─────────────
 // Every field here maps to something in Zernio's platformSpecificData. The
@@ -453,7 +454,7 @@ export function InstagramPreview({ state, account }) {
       <div className={`${first?.type !== 'video' && first && !isStory && !isReel ? '' : ratioClass} bg-surface-subtle relative overflow-hidden`}>
         {first ? (
           first.type === 'video'
-            ? <video src={first.url} className="w-full h-full object-cover" muted playsInline preload="metadata" />
+            ? <PreviewVideo src={first.url} className="w-full h-full object-cover" />
             : (isStory || isReel)
               ? <img src={first.url} alt="" className="w-full h-full object-cover" />
               : <IgPicture src={first.url} />

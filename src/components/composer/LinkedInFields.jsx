@@ -1,6 +1,7 @@
 import { Toggle } from '../ui/index'
 import { optionsFor, setOption, composedCaption, capabilities } from '../../lib/composerState'
 import { limitsFor } from '../../lib/postFormats'
+import { PreviewVideo } from './PreviewVideo'
 
 // ─── LinkedIn: the panel and the feed preview ──────────────────────────────
 // LinkedIn is the platform in this composer where a post with NO media is the
@@ -182,11 +183,7 @@ function PreviewMedia({ media }) {
   if (first.type === 'video') {
     return (
       <div className="relative bg-stone-900 aspect-video">
-        <video src={`${first.url}#t=0.1`} className="w-full h-full object-cover"
-          muted playsInline preload="metadata" />
-        <span className="absolute inset-0 flex items-center justify-center pointer-events-none">
-          <span className="w-9 h-9 rounded-full bg-black/55 text-white text-xs flex items-center justify-center">▶</span>
-        </span>
+        <PreviewVideo src={`${first.url}#t=0.1`} className="w-full h-full object-cover" wrapperClassName="absolute inset-0" />
       </div>
     )
   }
