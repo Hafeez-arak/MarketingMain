@@ -427,7 +427,7 @@ export function Schedule() {
           <p className="text-sm text-text-secondary">
             {shownPending.length > 0
               ? 'The posts in the strip above are approved but have no time yet — open one to schedule it.'
-              : 'Approve a month in Content Generation and its posts are booked here automatically.'}
+              : 'Approve a month in Content Planning and its posts are booked here automatically.'}
           </p>
         </Card>
       )}

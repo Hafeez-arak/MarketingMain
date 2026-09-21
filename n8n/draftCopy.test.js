@@ -203,7 +203,38 @@ describe('Draft Copy — LinkedIn', () => {
   })
 
   it('treats an unknown platform as Instagram', async () => {
-    const { content } = await draft({ ...BASE, platform: 'tiktok', caption_only: true }, { caption_options: THREE_CAPTIONS.caption_options })
+    const { content } = await draft({ ...BASE, platform: 'snapchat', caption_only: true }, { caption_options: THREE_CAPTIONS.caption_options })
     expect(content[0].text).toContain('ONE Instagram post')
+  })
+})
+
+// ─── TikTok ────────────────────────────────────────────────────────────────
+describe('Draft Copy — TikTok', () => {
+  const TT_VIDEO = { ...BASE, platform: 'tiktok', format: 'video', media_type: 'video', caption_only: true }
+
+  it('writes for TikTok, with its rules, in the uncached half only', async () => {
+    const { content, text } = await draft(TT_VIDEO, { caption_options: THREE_CAPTIONS.caption_options })
+    expect(content[0].text).toContain('ONE TikTok post')
+    expect(content[0].text).not.toContain('HOW A TIKTOK POST WORKS')
+    expect(text).toContain('HOW A TIKTOK POST WORKS')
+    expect(text).toContain('The video is the star')
+    expect(text).not.toContain('LINKEDIN')
+  })
+
+  it('tells a photo carousel caption to invite the swipe, not the video advice', async () => {
+    const { text } = await draft({ ...TT_VIDEO, format: 'photo_carousel', media_type: 'image' }, { caption_options: THREE_CAPTIONS.caption_options })
+    expect(text).toContain('The photos are swiped through')
+    expect(text).not.toContain('The video is the star')
+  })
+
+  it('never puts a dash in the rules it adds', async () => {
+    const { text } = await draft(TT_VIDEO, { caption_options: THREE_CAPTIONS.caption_options })
+    const rules = text.slice(text.indexOf('HOW A TIKTOK POST WORKS'), text.indexOf('Write:'))
+    expect(rules).not.toMatch(/[–—]/)
+  })
+
+  it('leaves an Instagram prompt without any of it', async () => {
+    const { text } = await draft({ ...BASE, caption_only: true }, { caption_options: THREE_CAPTIONS.caption_options })
+    expect(text).not.toContain('TIKTOK')
   })
 })

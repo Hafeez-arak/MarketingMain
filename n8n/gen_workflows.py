@@ -516,7 +516,7 @@ function safeJson(t){
 const body = ($input.first().json.body) || {};
 const idea = body.idea || {};
 const instructions = body.instructions || '';
-const platformName = idea.platform === 'linkedin' ? 'LinkedIn' : 'Instagram';
+const platformName = idea.platform === 'linkedin' ? 'LinkedIn' : idea.platform === 'tiktok' ? 'TikTok' : 'Instagram';
 
 const cachedPrefix = `You are a senior social media strategist for ${brandPersona(body)}.
 
@@ -674,10 +674,10 @@ function safeJson(t){
 __DE_DASH_JS__
 const body     = ($input.first().json.body) || {};
 const planIdeaId = body.plan_idea_id || '';
-// Instagram or LinkedIn — the only two the planner writes for. Anything else
-// is written as Instagram, as every call was before LinkedIn joined.
-const platform = body.platform === 'linkedin' ? 'linkedin' : 'instagram';
-const platformName = platform === 'linkedin' ? 'LinkedIn' : 'Instagram';
+// Instagram, TikTok or LinkedIn — the only ones the planner writes for.
+// Anything else is written as Instagram, as every call was before LinkedIn joined.
+const platform = ['linkedin', 'tiktok'].includes(body.platform) ? body.platform : 'instagram';
+const platformName = platform === 'linkedin' ? 'LinkedIn' : platform === 'tiktok' ? 'TikTok' : 'Instagram';
 const lang     = body.caption_language || 'both';   // ar | en | both
 const format   = body.format || 'feed_image';
 const aspectRatio = body.aspect_ratio || '';
@@ -741,6 +741,19 @@ HOW A LINKEDIN POST WORKS. Follow all of these:
 - Emoji rarely, if at all.${mediaType === 'none' && !poll ? '\n- This is a text post: there is no picture or video, so never refer to one.' : ''}${poll ? `\n- This post is a POLL. The poll itself appears under the text, asking: "${poll.question}"${poll.options.length ? ` with the answers ${poll.options.map(o => `"${o}"`).join(', ')}` : ''}. The text sets the question up in a few lines, says why it matters to this audience, and invites people to vote. Do not repeat the answers as a list and do not ask a different question.` : ''}
 `;
 
+// TikTok is read on a phone, in motion, with the sound usually on. Sent only
+// for TikTok and only in the uncached half, like the LinkedIn rules, so an
+// Instagram prompt is byte-for-byte what it was.
+const tiktokRules = platform !== 'tiktok' ? '' : `
+HOW A TIKTOK POST WORKS. Follow all of these:
+- The caption sits under a full-screen ${mediaType === 'video' ? 'video' : 'photo carousel'} and is read in a second or two. Keep it short: one to three lines, well under 300 characters, though TikTok allows 2,200.
+- The first line is the hook. It must land on its own and make someone stay: a question, a surprising claim, a result, or a tension. Never open with the brand's name, a greeting, or "Check out".
+- Conversational and human, the way a person at the company would talk to a friend who works in the field. Not corporate, not a brochure.
+- Two to five hashtags at the end: one or two broad, the rest specific to the topic. No hashtag blocks.
+- No links; TikTok captions do not make them clickable. Point to the profile instead if there is somewhere to go.
+- Emoji sparingly, and only where they carry meaning.${mediaType === 'video' ? '\n- The video is the star. The caption adds context or a reason to watch to the end; it never repeats what the video shows.' : '\n- The photos are swiped through. The caption tells people why to swipe, and never describes each slide.'}
+`;
+
 const postFacts = `POST TOPIC: ${body.topic || ''}
 ANGLE: ${body.angle || ''}
 TONE: ${body.tone || ''}
@@ -772,7 +785,7 @@ const mediaLine = wantsMedia
     : '- This post has no image or video — return an empty media_prompt_options array.';
 
 const variableSuffix = `${postFacts}
-${linkedinRules}
+${linkedinRules}${tiktokRules}
 Write:
 ${wantsCaption ? `- 3 genuinely different ${platform === 'linkedin' ? 'LinkedIn post texts' : 'caption options'} for this post — vary the hook and the structure, not just the wording.` : "- This post has NO caption — return an empty caption_options array."}
 ${mediaLine}
@@ -2167,7 +2180,7 @@ const goalCategory = input.goal_category || '';
 // Only platforms this workflow knows how to plan for. Anything else asked for
 // is dropped here rather than passed to the model as a platform it would
 // then invent formats for; nothing left means Instagram, as before.
-const KNOWN_PLATFORMS = ['instagram', 'linkedin'];
+const KNOWN_PLATFORMS = ['instagram', 'tiktok', 'linkedin'];
 const askedPlatforms = (Array.isArray(input.platforms) ? input.platforms : []).filter(p => KNOWN_PLATFORMS.includes(p));
 const platforms    = askedPlatforms.length ? askedPlatforms : ['instagram'];
 const startDate    = input.start_date || '';
@@ -2383,12 +2396,14 @@ PLATFORMS: Plan ONLY for the platforms listed under PLATFORMS in the request. Wh
 
 INSTAGRAM posts are visual first: every one is a picture, a carousel or a reel, and the caption supports the image.
 
+TIKTOK posts are short vertical videos and swipeable photo carousels, always 9:16, made for a phone screen and a scrolling audience of homeowners, designers and tradespeople as much as buyers. Hook in the first second, show the result or the transformation before explaining it, keep it human and specific, and never make it look like a product brochure. Choose "video" for anything with motion (a before/after, a walkthrough, a process, a reveal, a quick tip) and "photo_carousel" for a set of stills people swipe through (a ranked list, a project in steps, a comparison). Plan TikTok posts at about two to four a week, and never plan the same post for TikTok as for Instagram: give it a different hook and a shorter, faster shape.
+
 LINKEDIN posts go out on the brand's company page, to a professional audience: developers, architects, consultants, contractors, facility and procurement teams, and people who work in the industry. Write for decisions and expertise, not for mood — project outcomes, specification and standards insight, how a problem was solved, lessons from a real job, team and company milestones, industry changes and what they mean. A LinkedIn post with no picture at all is normal and often the strongest choice: choose "text" when the value is in what is said, a poll when the audience's opinion is the point, and a picture only when it genuinely shows something. Plan fewer LinkedIn posts than Instagram ones — about one to three a week is right for a company page.
 
 IMPORTANT: For each Saudi seasonal/cultural moment that falls in the given date range, create at least one dedicated post tied to it and set its "occasion" accordingly. Vary the "content_pillar" across the month so it isn't all product pushes — mix the content pillars this brand actually uses (see the brand context above for its own recurring formats and pillars), its service or product range, educational content, brand story, and the seasonal moments.
 
 Each post needs:
-- "platform": exactly one of the platforms listed under PLATFORMS in the request ("instagram" or "linkedin")
+- "platform": exactly one of the platforms listed under PLATFORMS in the request ("instagram", "tiktok" or "linkedin")
 - "date": a date in YYYY-MM-DD format, within the given date range inclusive, and matching the posting-days constraint if one was given
 - "time": a time in HH:MM 24h format (KSA time), per the posting-time guidance given
 - "topic": a specific, concrete topic for that post
@@ -2401,12 +2416,13 @@ Each post needs:
 - "cta": a short, specific call-to-action matching the objective and platform — e.g. "DM us for a quote", "Save this for your next project", "Tag someone planning a renovation", "Visit our showroom this weekend", "Share your thoughts in the comments". Never generic filler like "Learn more" — make it concrete to this post.
 - "suggested_format": pick ONE, from the list for this post's platform —
   instagram: "post", "carousel", or "reel" (step-by-step/list -> carousel; motion/showcase -> reel; single strong visual -> post)
+  tiktok: "video" or "photo_carousel" (motion, a reveal, a process or a quick tip -> video; a swipeable set of stills -> photo_carousel)
   linkedin: "text", "image", "multi_image", "video", or "poll" (an insight, story or announcement -> text; one photo that proves the point -> image; a project in several shots -> multi_image; a walkthrough or demonstration -> video; asking the audience to choose -> poll)
 - "poll": ONLY on a linkedin post whose suggested_format is "poll", otherwise leave it out — { "question": at most 140 characters, "options": 2 to 4 short, distinct answers of at most 30 characters each }. Ask something this audience genuinely has an opinion on, and make the answers cover the real choices.
 - "tone": pick ONE — professional, inspirational, educational, casual, promotional
 - "suggested_style": how this specific post should actually look — pick ONE — photorealistic, dramatic, minimalist, warm_residential, cool_commercial, facade_exterior
   Base this on the topic and angle, not just the tone — e.g. a comparison/breakdown topic should usually be minimalist, a before/after topic should usually be dramatic, an exterior/landscape topic should usually be facade_exterior. Leave it "" for a linkedin text post or poll, which has no picture.
-- "suggested_aspect_ratio": pick ONE — instagram: 1:1, 4:5, 1.91:1; linkedin image or multi_image: 1.91:1, 1:1, 4:5; linkedin video: 16:9, 1:1, 9:16; "" for a linkedin text post or poll
+- "suggested_aspect_ratio": pick ONE — instagram: 1:1, 4:5, 1.91:1; tiktok: 9:16 always; linkedin image or multi_image: 1.91:1, 1:1, 4:5; linkedin video: 16:9, 1:1, 9:16; "" for a linkedin text post or poll
 - "series": a short recurring-series name if this post is a deliberate weekly/monthly repeat format (e.g. "Tip Tuesday"), or "" if it's a one-off. Check the previous-months history below before inventing a new series name -- continue an existing one if it fits.
 - "from_research": ONLY on a post you built from an idea listed under "IDEAS THE USER CHOSE FROM THE RESEARCH" (if that section is present at all). Set it to that idea's title, copied EXACTLY. Omit this field entirely on every other post — it is how the plan records which posts have evidence behind them, so a guess here is worse than leaving it out.
 - "design_tip": a real creative-direction note (2-4 full sentences) on how to actually design this post's visual — written the way you'd genuinely brief a photographer or designer, not a generic platitude. Cover the mood/lighting, the framing or composition, and what should be in or out of frame. This is the ONLY place visual guidance shows up to the user, so it needs to stand on its own without a separate style label next to it. For a linkedin text post or poll there is no visual: leave it "".
@@ -2523,6 +2539,11 @@ const igStyles = ['photorealistic', 'dramatic', 'minimalist', 'warm_residential'
 
 const igAspects = ['1:1', '4:5', '1.91:1'];
 
+// TikTok's two formats, the same catalog as src/lib/postFormats.js. Everything
+// on TikTok is vertical.
+const TT_FORMATS = ['video', 'photo_carousel'];
+const TT_ASPECTS = ['9:16'];
+
 // LinkedIn's formats, and the orientations each one takes — the same catalog
 // as src/lib/postFormats.js. A text post and a poll have none.
 const LI_FORMATS = ['text', 'image', 'multi_image', 'video', 'poll'];
@@ -2584,6 +2605,7 @@ const posts = (parsed.posts || [])
   .map(p => {
     const platform = p.platform;
     const isLinkedIn = platform === 'linkedin';
+    const isTikTok = platform === 'tiktok';
     let date = p.date;
     if (date < startDate) date = startDate;
     if (date > endDate) date = endDate;
@@ -2601,12 +2623,14 @@ const posts = (parsed.posts || [])
     // on LinkedIn that is the default, where on Instagram it is a picture.
     let format = isLinkedIn
       ? (LI_FORMATS.includes(p.suggested_format) ? p.suggested_format : 'text')
+      : isTikTok
+      ? (TT_FORMATS.includes(p.suggested_format) ? p.suggested_format : 'video')
       : (['post','carousel','reel'].includes(p.suggested_format) ? p.suggested_format : 'post');
     const poll = isLinkedIn && format === 'poll' ? cleanPoll(p.poll) : null;
     if (isLinkedIn && format === 'poll' && !poll) format = 'text';
     const noMedia = isLinkedIn && (format === 'text' || format === 'poll');
 
-    const aspectChoices = isLinkedIn ? (LI_ASPECTS[format] || []) : igAspects;
+    const aspectChoices = isLinkedIn ? (LI_ASPECTS[format] || []) : isTikTok ? TT_ASPECTS : igAspects;
     const suggestedAspectRatio = aspectChoices.includes(p.suggested_aspect_ratio)
       ? p.suggested_aspect_ratio
       : (aspectChoices[0] || '');
