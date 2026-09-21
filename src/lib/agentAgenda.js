@@ -191,3 +191,22 @@ export async function discoverCompetitors({ workspaceId, accessToken }) {
     return { ok: false, error: String(err?.message || err) }
   }
 }
+
+/**
+ * Ask Sonnet to reword one post idea. Returns the new wording and saves
+ * nothing — the caller shows it and the person decides.
+ */
+export async function reviseIdea({ workspaceId, accessToken, idea, instruction }) {
+  try {
+    const res = await fetch('/api/agent/reviseIdea', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+      body: JSON.stringify({ workspace_id: workspaceId, idea, instruction }),
+    })
+    const body = await res.json().catch(() => ({}))
+    if (!res.ok || body?.ok === false) return { ok: false, error: body?.error || `The rewrite returned ${res.status}.` }
+    return body
+  } catch (err) {
+    return { ok: false, error: String(err?.message || err) }
+  }
+}

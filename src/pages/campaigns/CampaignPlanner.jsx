@@ -10,7 +10,7 @@ import { fetchBrandSchema, fetchDirectoryRows } from '../../lib/brandSchema'
 import { fetchBrandAssets } from '../../lib/brandAssets'
 import { startCampaignPlan, normalizePlanPosts, elongateIdea, requestDraftCopy, triggerVideoRenders } from '../../lib/campaignPlanner'
 import {
-  formatsFor, defaultFormat, aspectRatiosFor, defaultAspectRatio, slideRange, aspectLabel,
+  formatsFor, defaultFormat, defaultAspectRatio, slideRange, aspectLabel,
   derivePostKind,
 } from '../../lib/postFormats'
 import { groupByWeek, monthOptions, normalizeAiIdea, distributeDates, formatTime, DEFAULT_POST_TIME, pollProblems, firstPlaceableDay } from './planModel'
@@ -20,7 +20,6 @@ import { IdeaCard } from './IdeaCard'
 import { CaptionCard } from './CaptionCard'
 import { GenerateMoreModal, CalendarView } from './plannerParts'
 import { momentsInRange, dbIdeaToDraft } from '../../lib/campaignPlan'
-import { ReferencePicker } from '../../components/ReferencePicker'
 import { PostComposer } from '../../components/composer/PostComposer'
 import { composerFromIdea, slidesFromComposerMedia, flatOptionsFromComposer } from '../../lib/composerState'
 import {
@@ -180,8 +179,6 @@ export function CampaignPlanner() {
   const [dayFilter,      setDayFilter]      = useState(null)     // 'YYYY-MM-DD' — set by clicking a calendar day
   function pickCalendarDay(dateKey) { setDayFilter(dateKey); setViewMode('list') }
 
-  // Which seed post's image picker is open on the setup step.
-  const [pickingSeedIdx, setPickingSeedIdx] = useState(null)
   // The Brand Brain picker is tucked away: the defaults are right for almost
   // every plan, and a row of chips plus a context dump was the most confusing
   // thing on the page.
@@ -446,19 +443,6 @@ export function CampaignPlanner() {
 
   const toggleSection  = s => update({ brandBrainSections: brandBrainSections.includes(s) ? brandBrainSections.filter(x => x !== s) : [...brandBrainSections, s] })
   const toggleDay      = d  => update({ postingDays: postingDays.includes(d) ? postingDays.filter(x => x !== d) : [...postingDays, d] })
-  // A seed post moved to another platform keeps its words and its date; its
-  // format, orientation and slides are that platform's defaults, and a
-  // picture is dropped when the new format has no room for one.
-  function seedForPlatform(sp, p) {
-    const fmt = defaultFormat(p)
-    const noMedia = formatsFor(p).find(f => f.id === fmt)?.media === 'none'
-    return {
-      ...sp, platform: p, postFormat: fmt, aspectRatio: defaultAspectRatio(p, fmt),
-      slideCount: slideRange(p, fmt)?.default || 1,
-      references: noMedia ? [] : sp.references,
-    }
-  }
-
   // ── Seed posts (specific posts the user already wants, optionally with an image) ──
   const addSeed = () => {
     const p = platforms[0] || 'instagram'
@@ -466,20 +450,12 @@ export function CampaignPlanner() {
     update({ seedPosts: [...seedPosts, {
       text: '', platform: p, date: '', references: [],
       postFormat: fmt, aspectRatio: defaultAspectRatio(p, fmt), slideCount: slideRange(p, fmt)?.default || 1,
-      // 'ai' preserves what this box has always meant — a topic to write from.
-      // Opting into 'own' is what turns the text into the post itself.
+      // A topic to write from. Captions are chosen or typed on their own step.
       copyMode: 'ai',
     }] })
   }
   const updateSeed = (i, patch)  => update({ seedPosts: seedPosts.map((s, idx) => idx === i ? { ...s, ...patch } : s) })
-  const moveSeed   = (i, p)      => update({ seedPosts: seedPosts.map((s, idx) => idx === i ? seedForPlatform(s, p) : s) })
   const removeSeed = i           => update({ seedPosts: seedPosts.filter((_, idx) => idx !== i) })
-  function saveSeedImages(urls) {
-    updateSeed(pickingSeedIdx, { references: urls })
-    setPickingSeedIdx(null)
-    return { ok: true }
-  }
-
   function pickMonth(ym) {
     const opt = months.find(m => m.value === ym)
     if (!opt) return
@@ -1056,7 +1032,7 @@ export function CampaignPlanner() {
   async function onIdeaCreate(tempIdea, patch) {
     const merged = { ...tempIdea, ...patch }
     const res = await insertIdeas(activeWorkspaceId, accessToken, planId, [{
-      platform: merged.platform, date: merged.date, time: merged.time || DEFAULT_POST_TIME, title: merged.topic || 'New idea',
+      platform: merged.platform, date: merged.date, time: merged.time || DEFAULT_POST_TIME, title: merged.title || merged.topic || 'New idea',
       topic: merged.topic, angle: merged.angle, tone: merged.tone,
       suggestedStyle: merged.suggestedStyle, imageIdea: merged.imageIdea,
       objective: merged.objective, cta: merged.cta,
@@ -1381,89 +1357,22 @@ export function CampaignPlanner() {
 
             {seedPosts.length > 0 && (
               <div className="space-y-2.5 mb-2.5">
-                {seedPosts.map((s, i) => {
-                  const refCount = (s.references || []).length
-                  const ownCopy = s.copyMode === 'own'
-                  const sFormat = s.postFormat || defaultFormat(s.platform)
-                  const sRatios = aspectRatiosFor(s.platform, sFormat)
-                  const sSlides = slideRange(s.platform, sFormat)
-                  const sNoMedia = formatsFor(s.platform).find(f => f.id === sFormat)?.media === 'none'
-                  function onFormatChange(fmt) {
-                    const noMedia = formatsFor(s.platform).find(f => f.id === fmt)?.media === 'none'
-                    updateSeed(i, {
-                      postFormat: fmt, aspectRatio: defaultAspectRatio(s.platform, fmt), slideCount: slideRange(s.platform, fmt)?.default || 1,
-                      // A text post or poll has no picture; one picked for an
-                      // image format before the switch would otherwise ride
-                      // along and be refused at finalize.
-                      ...(noMedia ? { references: [] } : {}),
-                    })
-                  }
-                  return (
-                    <div key={i} className="rounded-xl border border-border p-3 space-y-2 bg-white">
-                      <textarea
-                        className={`w-full rounded-lg border border-border px-3 py-2 text-sm focus:outline-none focus:border-amber-400 resize-none ${ownCopy ? 'font-medium' : ''}`}
-                        rows={ownCopy ? 4 : 2}
-                        placeholder={ownCopy
-                          ? 'Type the post exactly as it should go out.'
-                          : 'What is this post about? e.g. Announce the new Riyadh showroom opening'}
-                        value={s.text} onChange={e => updateSeed(i, { text: e.target.value })}
-                      />
-                      {/* Off by default: the box means "a topic I want
-                          covered", and reading everyone's notes as finished
-                          captions would publish notes-to-self. */}
-                      <label className="flex items-start gap-2 cursor-pointer select-none">
-                        <input type="checkbox" checked={ownCopy}
-                          onChange={e => updateSeed(i, { copyMode: e.target.checked ? 'own' : 'ai' })}
-                          className="mt-0.5 accent-amber-600" />
-                        <span className="text-[11px] leading-snug">
-                          <span className={ownCopy ? 'font-semibold text-amber-700' : 'text-text-secondary'}>
-                            This text is my final caption
-                          </span>
-                          <span className="block text-text-tertiary">
-                            {ownCopy
-                              ? 'Posted exactly as typed — no AI writes or rewrites it.'
-                              : 'Leave off and AI suggests 3 captions once the picture is ready.'}
-                          </span>
-                        </span>
-                      </label>
-                      <div className="flex items-center gap-2 flex-wrap">
-                        {platforms.length > 1 && (
-                          <select value={s.platform} onChange={e => moveSeed(i, e.target.value)} title="Which platform this post is for"
-                            className="rounded-lg border border-border px-2 py-1.5 text-xs bg-white focus:outline-none focus:border-amber-400">
-                            {platforms.map(p => <option key={p} value={p}>{targetLabel(p)}</option>)}
-                          </select>
-                        )}
-                        <select value={sFormat} onChange={e => onFormatChange(e.target.value)}
-                          className="rounded-lg border border-border px-2 py-1.5 text-xs bg-white focus:outline-none focus:border-amber-400">
-                          {formatsFor(s.platform).map(f => <option key={f.id} value={f.id}>{f.label}</option>)}
-                        </select>
-                        {sRatios.length > 1 && (
-                          <select value={s.aspectRatio || defaultAspectRatio(s.platform, sFormat)} onChange={e => updateSeed(i, { aspectRatio: e.target.value })}
-                            className="rounded-lg border border-border px-2 py-1.5 text-xs bg-white focus:outline-none focus:border-amber-400">
-                            {sRatios.map(r => <option key={r} value={r}>{aspectLabel(r)} ({r})</option>)}
-                          </select>
-                        )}
-                        {sSlides && (
-                          <input type="number" min={sSlides.min} max={sSlides.max} value={s.slideCount || sSlides.default}
-                            onChange={e => updateSeed(i, { slideCount: Number(e.target.value) || sSlides.default })}
-                            title="Number of slides" className="w-14 rounded-lg border border-border px-2 py-1.5 text-xs bg-white focus:outline-none focus:border-amber-400" />
-                        )}
-                        <input type="date" value={s.date || ''} min={dateMin || undefined} max={endDate || undefined}
-                          onChange={e => updateSeed(i, { date: e.target.value })}
-                          title="Only for a post that must go out on a specific day — otherwise leave empty and it is placed for you"
-                          className="rounded-lg border border-border px-2 py-1.5 text-xs bg-white focus:outline-none focus:border-amber-400" />
-                        {!sNoMedia && (
-                          <button onClick={() => setPickingSeedIdx(i)}
-                            className={`px-2.5 py-1.5 rounded-lg text-[11px] font-medium whitespace-nowrap transition-colors ${refCount > 0 ? 'text-sage-700 bg-sage-50 hover:bg-sage-100' : 'text-text-tertiary hover:text-text hover:bg-surface-subtle border border-border'}`}>
-                            {refCount > 0 ? `🖼 Image set${refCount > 1 ? ` (${refCount})` : ''}` : '🖼 Add image'}
-                          </button>
-                        )}
-                        <button onClick={() => removeSeed(i)} className="ml-auto text-[11px] px-2 py-1.5 text-text-tertiary hover:text-red-500" title="Remove">✕ Remove</button>
-                      </div>
-                      {!s.date && <p className="text-[10px] text-text-tertiary">No date — it will be placed in the month for you.</p>}
+                {seedPosts.map((s, i) => (
+                  // Only the idea itself. Platform, format, orientation, date
+                  // and pictures are each decided on a later step, so asking
+                  // for them here made the same choice in two places.
+                  <div key={i} className="rounded-xl border border-border p-3 bg-white">
+                    <textarea
+                      className="w-full rounded-lg border border-border px-3 py-2 text-sm focus:outline-none focus:border-amber-400 resize-none"
+                      rows={2}
+                      placeholder="What is this post about? e.g. Announce the new Riyadh showroom opening"
+                      value={s.text} onChange={e => updateSeed(i, { text: e.target.value })}
+                    />
+                    <div className="flex justify-end mt-1.5">
+                      <button onClick={() => removeSeed(i)} className="text-[11px] px-2 py-1 text-text-tertiary hover:text-red-500" title="Remove">✕ Remove</button>
                     </div>
-                  )
-                })}
+                  </div>
+                ))}
               </div>
             )}
             <button onClick={addSeed}
@@ -1708,7 +1617,7 @@ export function CampaignPlanner() {
                   </div>
                   {group.ideas.map(idea => (
                     <IdeaCard key={idea.id} idea={idea} index={ideas.indexOf(idea)} accessToken={accessToken} workspaceId={activeWorkspaceId}
-                      planPlatforms={platforms} todayKey={todayKey}
+                      todayKey={todayKey}
                       autoEdit={idea.id === autoEditId} lock={ideaLock(idea)}
                       onChange={onIdeaChange} onRemove={onIdeaRemove} onCreate={onIdeaCreate} />
                   ))}
@@ -2007,17 +1916,6 @@ export function CampaignPlanner() {
       )}
 
       {viewer && <MediaViewer {...viewer} onClose={() => setViewer(null)} />}
-
-      {/* Setup-step image picker — stored on the draft until the plan is created. */}
-      {pickingSeedIdx !== null && (
-        <ReferencePicker
-          asPost
-          value={seedPosts[pickingSeedIdx]?.references || []}
-          onSave={saveSeedImages}
-          onClose={() => setPickingSeedIdx(null)}
-          format={seedPosts[pickingSeedIdx]?.postFormat}
-        />
-      )}
     </div>
   )
 }

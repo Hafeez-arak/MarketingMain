@@ -1,6 +1,6 @@
 // ─── One idea, as a card and as an edit modal ──────────────────────────────
 // The review step's unit of work: deciding whether an idea is worth making —
-// approve, reject with a reason, retarget, edit the brief.
+// approve, reject with a reason, reword the idea.
 //
 // Deliberately nothing about the picture or the caption. Those are the next
 // two steps, and they used to be offered here too (an image picker, a Studio
@@ -12,19 +12,13 @@
 // owns the idea, the modal is how it gets edited.
 
 import { useState } from 'react'
-import { Button, Input, Textarea, Select, Spinner, Toggle, Modal } from '../../components/ui/index'
+import { Button, Input, Textarea, Spinner, Modal } from '../../components/ui/index'
 import { formatDate } from '../../lib/utils'
-import {
-  formatsFor, defaultFormat, aspectRatiosFor, defaultAspectRatio, slideRange,
-  aspectLabel, stylesFor, derivePostKind,
-} from '../../lib/postFormats'
+import { formatsFor, aspectLabel } from '../../lib/postFormats'
 import { logIdeaEvent, ideaSnapshot } from '../../lib/brandContext'
 import { updateIdea } from '../../lib/contentPlans'
-import { saveIdeaPlatforms } from '../../lib/studioBridge'
-import {
-  TARGET_PLATFORMS, targetLabel, IG_TONES, OBJECTIVES,
-  REJECT_REASONS, rejectReasonLabel,
-} from './planConstants'
+import { reviseIdea } from '../../lib/agentAgenda'
+import { targetLabel, REJECT_REASONS, rejectReasonLabel } from './planConstants'
 
 // Chip styling, and the review statuses an idea moves between. Local on
 // purpose: the status set here (proposed / approved / rejected) is a REVIEW
@@ -44,7 +38,7 @@ const STATUS_META = {
 const isOwnPost = idea => idea.copyMode === 'own'
 
 // ─── One idea in the review list, with inline approve/reject + edit ─────────
-export function IdeaCard({ idea, index, accessToken, workspaceId, onChange, onRemove, onCreate, autoEdit = false, planPlatforms = [], lock = null, todayKey = '' }) {
+export function IdeaCard({ idea, index, accessToken, workspaceId, onChange, onRemove, onCreate, autoEdit = false, lock = null, todayKey = '' }) {
   const [editing, setEditing] = useState(autoEdit)
   const [saving,  setSaving]  = useState(false)
   const [saveError, setSaveError] = useState('')
@@ -52,16 +46,6 @@ export function IdeaCard({ idea, index, accessToken, workspaceId, onChange, onRe
   const targets = idea.platforms?.length ? idea.platforms : [idea.platform]
   const own = isOwnPost(idea)
   const formatLabel = formatsFor(idea.platform).find(f => f.id === idea.postFormat)?.label || 'Feed image'
-
-  // Toggle one target. The primary platform can't be removed — it's what the
-  // format catalog, the tone list and every generation workflow read, so an
-  // idea with it deselected would be describing two different things.
-  async function toggleTarget(id) {
-    if (id === idea.platform) return
-    const next = targets.includes(id) ? targets.filter(t => t !== id) : [...targets, id]
-    const result = await saveIdeaPlatforms(accessToken, idea.id, next, idea.platform)
-    if (result.ok) onChange({ ...idea, platforms: result.platforms })
-  }
 
   async function setStatus(status, rejectReason = '') {
     setSaving(true)
@@ -84,8 +68,11 @@ export function IdeaCard({ idea, index, accessToken, workspaceId, onChange, onRe
     }
   }
 
+  // The idea's wording is all that is edited here. Platform, format, date and
+  // the rest are settled on the later steps, so a save writes nothing else.
   async function saveEdits(patch) {
     setSaving(true)
+    setSaveError('')
     // A card created via "+ Add idea" isn't in the database yet — it only
     // gets written on Save, so Cancel can discard it with zero backend trace.
     if (idea.isNew) {
@@ -95,49 +82,20 @@ export function IdeaCard({ idea, index, accessToken, workspaceId, onChange, onRe
       else setSaveError(result.error || 'Could not save idea.')
       return
     }
-    // Moving an idea to another platform moves its main platform and keeps
-    // any other targets it had, minus the one it left.
-    const movedPlatform = patch.platform && patch.platform !== idea.platform
-    const nextTargets = movedPlatform
-      ? [patch.platform, ...targets.filter(t => t !== idea.platform && t !== patch.platform)]
-      : null
-    if (movedPlatform) patch = { ...patch, platforms: nextTargets }
-    const dbPatch = {
-      ...(movedPlatform ? { platform: patch.platform, platforms: nextTargets } : {}),
-      topic: patch.topic, angle: patch.angle, tone: patch.tone,
-      scheduled_date: patch.date || null,
-      publish_time: patch.time || null,
-      suggested_style: patch.suggestedStyle || '', image_idea: patch.imageIdea || '',
-      objective: patch.objective || '', cta: patch.cta || '',
-      hashtags: patch.hashtags || '', first_comment: patch.firstComment || '',
-      series: patch.series || '',
-      // Format & orientation — the human-editable fields; post_kind stays
-      // derived (see postFormats.js#derivePostKind) so it can never drift
-      // from format/wants_caption into a nonsensical combination.
-      format: patch.postFormat, aspect_ratio: patch.aspectRatio, media_type: patch.mediaType,
-      wants_caption: patch.wantsCaption !== false,
-      post_kind: patch.postKind || 'caption_image',
-      slide_count: patch.slideCount || 1,
-      // Whose words go out, and the words themselves when they're the
-      // operator's. Written together so the mode can never disagree with the
-      // caption it describes.
-      copy_mode: patch.copyMode === 'own' ? 'own' : 'ai',
-      caption_en: patch.captionEn || '',
-      caption_ar: patch.captionAr || '',
-    }
-    const result = await updateIdea(accessToken, idea.id, dbPatch)
+    const result = await updateIdea(accessToken, idea.id, {
+      title: patch.title, topic: patch.topic, angle: patch.angle,
+    })
     setSaving(false)
-    if (result.ok) {
-      const before = ideaSnapshot(idea)
-      const after  = ideaSnapshot({ ...idea, ...patch })
-      onChange({ ...idea, ...patch }); setEditing(false)
-      // What a human changed about an AI's suggestion is the single most
-      // direct signal of where the brief was wrong — worth more than the
-      // final text on its own, which is why both sides are stored.
-      logIdeaEvent(workspaceId, accessToken, {
-        planId: idea.planId, ideaId: idea.id, event: 'edited', before, after,
-      })
-    }
+    if (!result.ok) { setSaveError('Could not save the change.'); return }
+    const before = ideaSnapshot(idea)
+    const after  = ideaSnapshot({ ...idea, ...patch })
+    onChange({ ...idea, ...patch }); setEditing(false)
+    // What a human changed about an AI's suggestion is the single most
+    // direct signal of where the brief was wrong — worth more than the
+    // final text on its own, which is why both sides are stored.
+    logIdeaEvent(workspaceId, accessToken, {
+      planId: idea.planId, ideaId: idea.id, event: 'edited', before, after,
+    })
   }
 
   const st = STATUS_META[idea.status] || STATUS_META.proposed
@@ -243,249 +201,84 @@ export function IdeaCard({ idea, index, accessToken, workspaceId, onChange, onRe
           </button>
         </div>
         )}
-
-        {/* ── Platforms, always open ─────────────────────────────────────
-            This was a "🎯 Targets" button that opened a picker. Two things
-            were wrong with it. It was named after the code's word, not the
-            user's — the row it opened already asked "Publish to?", and the
-            same button relabelled itself "2 platforms" as soon as you used
-            it, so the feature had two names and neither was "platforms".
-            And it was shut: cross-posting one idea to Instagram, TikTok and
-            LinkedIn is a normal thing to want on most ideas, and a control
-            you have to find first is one most posts never get.
-
-            The primary platform stays locked here. It sets the format, the
-            tone list and the aspect ratio, so an idea with it switched off
-            would be describing two different posts. Change it in Edit. */}
-        {!idea.isNew && !editing && (
-          <div className="flex items-center gap-1.5 mt-2.5 pl-8 flex-wrap">
-            <span className="text-[11px] text-text-tertiary mr-0.5">Platforms</span>
-            {TARGET_PLATFORMS.map(p => {
-              const on = targets.includes(p.id)
-              const locked = p.id === idea.platform
-              return (
-                <button key={p.id} onClick={() => toggleTarget(p.id)} disabled={locked || lock?.locked}
-                  title={locked
-                    ? 'The main platform — it sets the format, so change it in Edit'
-                    : on ? `Also publishing to ${p.label} — click to remove` : `Also publish to ${p.label}`}
-                  className={`text-[11px] font-medium px-2.5 py-1 rounded-lg border transition-colors ${
-                    on ? p.cls : 'border-border text-text-secondary hover:border-text-tertiary hover:bg-surface-subtle'
-                  } ${locked ? 'cursor-default' : ''}`}>
-                  {on ? '✓ ' : '+ '}{p.label}
-                </button>
-              )
-            })}
-          </div>
-        )}
       </div>
 
       {editing && (
-        <IdeaEditModal idea={idea} tones={IG_TONES} saving={saving} saveError={saveError} planPlatforms={planPlatforms} todayKey={todayKey}
+        <IdeaEditModal idea={idea} saving={saving} saveError={saveError} workspaceId={workspaceId} accessToken={accessToken}
           onClose={() => { if (idea.isNew) onRemove(idea); else setEditing(false) }} onSave={saveEdits} />
       )}
     </div>
   )
 }
 
-export function IdeaEditModal({ idea, tones, saving, saveError, onClose, onSave, planPlatforms = [], todayKey = '' }) {
-  // The platform decides which formats exist, so it is chosen first and a
-  // change resets the format to that platform's default.
-  const [platform, setPlatform] = useState(idea.platform || planPlatforms[0] || 'instagram')
-  const platformChoices = [...new Set([...planPlatforms, idea.platform].filter(Boolean))]
-  const [topic,     setTopic]     = useState(idea.topic || '')
-  const [angle,     setAngle]     = useState(idea.angle || '')
-  const [tone,      setTone]      = useState(idea.tone || tones[0].value)
-  const [date,      setDate]      = useState(idea.date || '')
-  // The AI decides this when it spreads the month; the box is the override.
-  // Empty means "whatever the plan's default is", not midnight.
-  const [time,      setTime]      = useState(idea.time || '')
-  const [style,     setStyle]     = useState(idea.suggestedStyle || '')
-  const [imageIdea, setImageIdea] = useState(idea.imageIdea || '')
-  const [objective, setObjective] = useState(idea.objective || '')
-  const [cta,       setCta]       = useState(idea.cta || '')
-  const [hashtags,  setHashtags]  = useState(idea.hashtags || '')
-  const [firstComment, setFirstComment] = useState(idea.firstComment || '')
-  const [series, setSeries] = useState(idea.series || '')
-  // Whose words go out. 'own' means the caption boxes below are the post,
-  // verbatim — the captions step shows them rather than writing options.
-  const [copyMode, setCopyMode] = useState(idea.copyMode === 'own' ? 'own' : 'ai')
-  const [captionEn, setCaptionEn] = useState(idea.captionEn || '')
-  const [captionAr, setCaptionAr] = useState(idea.captionAr || '')
+// Reword the idea by hand, or ask AI to. The AI never saves: it fills the
+// boxes, and the person reads them and presses Save like any other edit.
+export function IdeaEditModal({ idea, saving, saveError, onClose, onSave, workspaceId, accessToken }) {
+  const [title, setTitle] = useState(idea.title || idea.topic || '')
+  const [topic, setTopic] = useState(idea.topic || '')
+  const [angle, setAngle] = useState(idea.angle || '')
+  const [asking, setAsking] = useState(false)
+  const [instruction, setInstruction] = useState('')
+  const [revising, setRevising] = useState(false)
+  const [reviseError, setReviseError] = useState('')
 
-  // Format drives orientation and slide count from the catalog — pick a
-  // format, only the orientations/slide range it actually supports show up.
-  const [postFormat, setPostFormat] = useState(idea.postFormat || defaultFormat(idea.platform || platform))
-  const [aspectRatio, setAspectRatio] = useState(idea.aspectRatio || defaultAspectRatio(platform, postFormat))
-  const [slideCount, setSlideCount] = useState(idea.slideCount || slideRange(platform, postFormat)?.default || 3)
-  const [wantsCaption, setWantsCaption] = useState(idea.wantsCaption !== false)
-
-  const formats = formatsFor(platform)
-  const currentFormat = formats.find(f => f.id === postFormat) || formats[0]
-  const isVideo = currentFormat?.media === 'video'
-  const showsMediaFields = currentFormat?.media !== 'none'
-  const ratios = aspectRatiosFor(platform, postFormat)
-  const slides = slideRange(platform, postFormat)
-  const styles = stylesFor(platform)
-
-  function onPlatformChange(p) {
-    setPlatform(p)
-    const fmt = defaultFormat(p)
-    setPostFormat(fmt)
-    setAspectRatio(defaultAspectRatio(p, fmt))
-    setSlideCount(slideRange(p, fmt)?.default || 1)
+  async function askAi() {
+    if (!instruction.trim() || revising) return
+    setRevising(true); setReviseError('')
+    const res = await reviseIdea({ workspaceId, accessToken, idea: { title, topic, angle }, instruction })
+    setRevising(false)
+    if (!res.ok) { setReviseError(res.error || 'The rewrite failed.'); return }
+    if (res.title) setTitle(res.title)
+    if (res.topic) setTopic(res.topic)
+    setAngle(res.angle || '')
+    setAsking(false); setInstruction('')
   }
 
-  function onFormatChange(fmt) {
-    setPostFormat(fmt)
-    setAspectRatio(defaultAspectRatio(platform, fmt))
-    const s = slideRange(platform, fmt)
-    if (s) setSlideCount(s.default)
-  }
-
-  const derivedKind = derivePostKind({ platform: platform, format: postFormat, wantsCaption, slideCount })
+  // A brand-new idea has one box: what the post is about is also its title.
+  const fresh = idea.isNew
+  const empty = fresh ? !title.trim() : !title.trim() && !topic.trim()
 
   return (
-    <Modal open onClose={onClose} title={idea.isNew ? 'Add idea' : 'Edit idea'} width="max-w-xl">
+    <Modal open onClose={onClose} title={fresh ? 'Add idea' : 'Edit idea'} width="max-w-xl">
       <div className="p-6 space-y-4">
-        <Input label="Topic / what the post is about" value={topic} onChange={e => setTopic(e.target.value)} />
-        <Textarea label="Angle (optional)" rows={2} value={angle} onChange={e => setAngle(e.target.value)} />
+        {fresh ? (
+          <Textarea label="What is this post about?" rows={3} autoFocus value={title}
+            onChange={e => setTitle(e.target.value)} />
+        ) : (
+          <>
+            <Input label="Idea" value={title} onChange={e => setTitle(e.target.value)} />
+            <Textarea label="What it's about" rows={3} value={topic} onChange={e => setTopic(e.target.value)} />
+            <Textarea label="Angle (optional)" rows={2} value={angle} onChange={e => setAngle(e.target.value)} />
 
-        {platformChoices.length > 1 && (
-          <Select label="Platform" value={platform} onChange={e => onPlatformChange(e.target.value)}>
-            {platformChoices.map(p => <option key={p} value={p}>{targetLabel(p)}</option>)}
-          </Select>
-        )}
-
-        <div className="grid grid-cols-2 gap-3">
-          <Select label="Format" value={postFormat} onChange={e => onFormatChange(e.target.value)}>
-            {formats.map(f => <option key={f.id} value={f.id}>{f.label}</option>)}
-          </Select>
-          {ratios.length > 1 ? (
-            <Select label="Orientation" value={aspectRatio} onChange={e => setAspectRatio(e.target.value)}>
-              {ratios.map(r => <option key={r} value={r}>{aspectLabel(r)} ({r})</option>)}
-            </Select>
-          ) : ratios.length === 1 ? (
-            <div>
-              <p className="text-xs font-medium text-text-secondary mb-1.5">Orientation</p>
-              <p className="text-sm text-text-tertiary px-3 py-2 rounded-lg bg-surface-subtle border border-border">{aspectLabel(ratios[0])} ({ratios[0]})</p>
-            </div>
-          ) : null}
-        </div>
-
-        {slides && (
-          <Input label="How many slides?" type="number" min={slides.min} max={slides.max}
-            value={slideCount} onChange={e => setSlideCount(Number(e.target.value) || slides.default)} />
-        )}
-
-        {showsMediaFields && (
-          <Toggle checked={wantsCaption} onChange={e => setWantsCaption(e.target.checked)}
-            label="Include a caption with this post" />
-        )}
-
-        {/* Pre-fills the Studio composer if this idea's picture is made there. */}
-        {showsMediaFields && (
-          <Textarea
-            label={isVideo ? 'Your vision for the video (optional)' : 'Your vision for the image (optional)'}
-            rows={2}
-            placeholder="What you're imagining — used as the starting prompt if you make this one in the Studio."
-            value={imageIdea} onChange={e => setImageIdea(e.target.value)}
-          />
-        )}
-
-        <div className="grid grid-cols-2 gap-3">
-          <Input label="Date" type="date" value={date} min={todayKey || undefined} onChange={e => setDate(e.target.value)} />
-          <Input label="Time" type="time" value={time} onChange={e => setTime(e.target.value)}
-            hint="Left empty, the plan's default time is used." />
-          <Select label="Tone" value={tone} onChange={e => setTone(e.target.value)}>
-            {tones.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
-          </Select>
-          <Select label="Objective" value={objective} onChange={e => setObjective(e.target.value)}>
-            <option value="">Not set</option>
-            {OBJECTIVES.map(o => <option key={o} value={o}>{o}</option>)}
-          </Select>
-          {showsMediaFields && (
-            <Select label="Visual style" value={style} onChange={e => setStyle(e.target.value)}>
-              <option value="">AI decides</option>
-              {styles.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
-            </Select>
-          )}
-        </div>
-        <p className="text-[11px] text-text-tertiary -mt-2">The posting time is set on the captions step.</p>
-
-        {/* ── Who writes the caption ── */}
-        {wantsCaption && (
-          <div className="rounded-xl border border-border p-3 space-y-2.5">
-            <p className="text-xs font-medium text-text-secondary">Who writes the caption?</p>
-            <div className="flex gap-2">
-              {[
-                { id: 'ai',  label: 'AI suggests 3',  hint: 'Written from the picture, once it’s ready — you pick one' },
-                { id: 'own', label: "I'll write it",  hint: 'Posted exactly as typed' },
-              ].map(o => (
-                <button key={o.id} onClick={() => setCopyMode(o.id)}
-                  className={`flex-1 text-left px-3 py-2 rounded-xl border transition-all ${
-                    copyMode === o.id
-                      ? 'bg-amber-600 text-white border-amber-600'
-                      : 'bg-white border-border text-text-secondary hover:border-amber-400'}`}>
-                  <span className="block text-sm font-medium">{o.label}</span>
-                  <span className={`block text-[10px] leading-snug mt-0.5 ${copyMode === o.id ? 'opacity-80' : 'text-text-tertiary'}`}>{o.hint}</span>
-                </button>
-              ))}
-            </div>
-            {copyMode === 'own' && (
-              <>
-                <Textarea
-                  rows={4} autoGrow
-                  label="Your caption"
-                  placeholder="Type the post exactly as it should go out."
-                  value={captionEn} onChange={e => setCaptionEn(e.target.value)}
-                />
-                {/* Arabic gets its own box rather than being detected from the
-                    text: brands here post bilingually, and a single field would
-                    force a choice between the two that publishing doesn't make. */}
-                <Textarea
-                  rows={3} autoGrow dir="rtl"
-                  label="Arabic caption (optional)"
-                  placeholder="النص العربي كما سيُنشر"
-                  value={captionAr} onChange={e => setCaptionAr(e.target.value)}
-                />
-              </>
+            {asking ? (
+              <div className="rounded-xl border border-border bg-surface-subtle p-3 space-y-2">
+                <Textarea label="How do you want it changed?" rows={2} autoFocus
+                  placeholder="e.g. Make it about the Riyadh showroom, and less salesy"
+                  value={instruction} onChange={e => setInstruction(e.target.value)} />
+                {reviseError && <p className="text-xs text-red-600">{reviseError}</p>}
+                <div className="flex justify-end gap-2">
+                  <Button variant="secondary" size="xs" onClick={() => { setAsking(false); setReviseError('') }} disabled={revising}>Cancel</Button>
+                  <Button size="xs" onClick={askAi} disabled={revising || !instruction.trim()}>
+                    {revising ? <><Spinner size="sm" /> Rewriting…</> : 'Rewrite'}
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <button onClick={() => setAsking(true)}
+                className="text-[11px] font-semibold text-amber-700 hover:text-amber-800">
+                ✨ Change with AI
+              </button>
             )}
-          </div>
+          </>
         )}
-
-        <Input
-          label="Call-to-action (optional)"
-          placeholder="e.g. DM us for a quote"
-          value={cta} onChange={e => setCta(e.target.value)}
-        />
-        <Input
-          label="Hashtags (optional)"
-          placeholder="e.g. #ArakLighting #تصميم_اضاءة #LightingDesign"
-          value={hashtags} onChange={e => setHashtags(e.target.value)}
-        />
-        <Input
-          label="First comment (optional)"
-          placeholder="e.g. Tag a friend planning their villa lighting 💡"
-          value={firstComment} onChange={e => setFirstComment(e.target.value)}
-        />
-        <Input
-          label="Recurring series (optional)"
-          placeholder="e.g. Tip Tuesday — marks this as a deliberate repeat format, not a duplicate"
-          value={series} onChange={e => setSeries(e.target.value)}
-        />
 
         {saveError && <p className="text-xs text-red-600">{saveError}</p>}
         <div className="flex justify-end gap-3 pt-1">
-          <Button variant="secondary" onClick={onClose}>{idea.isNew ? 'Discard' : 'Cancel'}</Button>
-          <Button onClick={() => onSave({
-            platform,
-            topic, angle, tone, date, time, suggestedStyle: style, imageIdea, objective, cta, hashtags, firstComment, series,
-            postFormat, aspectRatio, mediaType: currentFormat?.media || 'image', wantsCaption, slideCount,
-            postKind: derivedKind,
-            // Trimmed on the way out so a box left with only whitespace can't
-            // make an idea look manually written when there is nothing to post.
-            copyMode, captionEn: captionEn.trim(), captionAr: captionAr.trim(),
-          })} disabled={saving || (idea.isNew && !topic.trim()) || (copyMode === 'own' && wantsCaption && !captionEn.trim() && !captionAr.trim())}>
+          <Button variant="secondary" onClick={onClose}>{fresh ? 'Discard' : 'Cancel'}</Button>
+          <Button disabled={saving || revising || empty}
+            onClick={() => onSave(fresh
+              ? { title: title.trim(), topic: title.trim(), angle: '' }
+              : { title: title.trim(), topic: topic.trim(), angle: angle.trim() })}>
             {saving ? <><Spinner size="sm" /> Saving…</> : 'Save'}
           </Button>
         </div>
