@@ -15,8 +15,7 @@ import {
 } from '../../lib/postFormats'
 import { groupByWeek, monthOptions, normalizeAiIdea, distributeDates, formatTime, DEFAULT_POST_TIME, pollProblems, firstPlaceableDay } from './planModel'
 import { brandTodayKey } from '../../lib/brandTime'
-import { GOALS, OTHER_GOAL, isCustomGoal, WEEKDAYS, DEFAULT_DRAFT, isUntouchedSelection, PLATFORMS, targetLabel } from './planConstants'
-import { isProtectedPlatform } from '../../lib/platformSafety'
+import { GOALS, OTHER_GOAL, isCustomGoal, WEEKDAYS, DEFAULT_DRAFT, isUntouchedSelection, targetLabel } from './planConstants'
 import { IdeaCard } from './IdeaCard'
 import { CaptionCard } from './CaptionCard'
 import { GenerateMoreModal, CalendarView } from './plannerParts'
@@ -447,18 +446,6 @@ export function CampaignPlanner() {
 
   const toggleSection  = s => update({ brandBrainSections: brandBrainSections.includes(s) ? brandBrainSections.filter(x => x !== s) : [...brandBrainSections, s] })
   const toggleDay      = d  => update({ postingDays: postingDays.includes(d) ? postingDays.filter(x => x !== d) : [...postingDays, d] })
-  // Which platforms this month is for. Never empty — the last one cannot be
-  // switched off. A post already added for a platform being switched off
-  // moves to one still on, in that platform's default format, rather than
-  // silently keeping a platform the plan no longer has.
-  function togglePlatform(id) {
-    if (platforms.includes(id) && platforms.length === 1) return
-    const next = platforms.includes(id) ? platforms.filter(x => x !== id) : PLATFORMS.filter(x => x === id || platforms.includes(x))
-    update({
-      platforms: next,
-      seedPosts: seedPosts.map(sp => next.includes(sp.platform) ? sp : seedForPlatform(sp, next[0])),
-    })
-  }
   // A seed post moved to another platform keeps its words and its date; its
   // format, orientation and slides are that platform's defaults, and a
   // picture is dropped when the new format has no room for one.
@@ -501,7 +488,6 @@ export function CampaignPlanner() {
 
   function validateSetup() {
     if (!month) return 'Pick which month this plan is for.'
-    if (!platforms.length) return 'Pick at least one platform.'
     const hasSeeds = seedPosts.some(s => s.text.trim())
     if (!aiAssist && !hasSeeds) return 'Add at least one post, or turn on "Also let AI suggest more posts."'
     return ''
@@ -1338,28 +1324,15 @@ export function CampaignPlanner() {
             </p>
           )}
 
-          {/* ── Platforms: which channels this month's posts are for ── */}
-          <div>
-            <p className="text-xs font-medium text-text-secondary mb-2">Which platforms is this month for?</p>
-            <div className="flex gap-2 flex-wrap">
-              {PLATFORMS.map(p => {
-                const on = platforms.includes(p)
-                return (
-                  <button key={p} onClick={() => togglePlatform(p)}
-                    title={on && platforms.length === 1 ? 'A plan needs at least one platform' : ''}
-                    className={`px-3 py-1.5 rounded-xl border text-sm font-medium transition-all ${on ? 'bg-amber-600 text-white border-amber-600' : 'bg-white border-border text-text-secondary hover:border-amber-400'}`}>
-                    {on ? '✓ ' : ''}{targetLabel(p)}
-                  </button>
-                )
-              })}
-            </div>
-            {platforms.some(isProtectedPlatform) && (
-              <p className="text-[11px] text-sky-800 bg-sky-50 border border-sky-100 px-3 py-2 mt-2">
-                LinkedIn posts are planned, pictured and captioned here like any other, and land in Approvals as drafts.
-                Nothing in this app posts to the LinkedIn page.
-              </p>
-            )}
-          </div>
+          {/* Which platform a post is FOR is chosen per post now — a seed's
+              own selector, an AI idea's own field, or the Pictures step's
+              Edit/Add images popup — not once for the whole month. A month
+              is never short a platform to plan for, so there is nothing to
+              ask here any more. */}
+          <p className="text-[11px] text-sky-800 bg-sky-50 border border-sky-100 px-3 py-2 -mt-2">
+            LinkedIn posts are planned, pictured and captioned here like any other, and land in Approvals as drafts.
+            Nothing in this app posts to the LinkedIn page.
+          </p>
 
           {/* ── Cadence: shared by your posts and AI posts alike ── */}
           <div>
