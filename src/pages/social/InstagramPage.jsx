@@ -847,7 +847,7 @@ function PostDetail({ post, state, webhookUrl, regenWebhookUrl, supabaseUrl, ano
 
                 {/* Meta */}
                 <div className="flex items-center gap-4 text-[11px] text-text-tertiary pt-2 border-t border-border flex-wrap">
-                  <span>🕐 {formatDateTime(post.createdAt)}</span>
+                  <span>🕐 Created {formatDateTime(post.createdAt)}</span>
                   {styleMeta && <span>{styleMeta.icon} {styleMeta.label}</span>}
                 </div>
               </div>
@@ -1215,7 +1215,13 @@ function PostsList({ posts, loading = false, dispatch, state, updatePostStatus, 
                     </div>
                     <p className="text-sm text-text line-clamp-2 leading-relaxed mb-1.5">{p.copy || 'No caption'}</p>
                     {p.hashtags && <p className="text-xs text-pink-500 line-clamp-1 mb-1.5">{p.hashtags}</p>}
-                    <p className="text-[11px] text-text-tertiary">{formatDateTime(p.createdAt)}{p.topic && <span className="ml-1.5 opacity-70">· {p.topic}</span>}</p>
+                    <p className="text-[11px] text-text-tertiary">
+                      {/* A queued post is about WHEN IT GOES OUT — the same KSA time
+                          the full view shows — not when it was drafted. */}
+                      {p._raw?.scheduled_publish_at && (p.status === 'scheduled' || p.status === 'publishing')
+                        ? <><span className="font-semibold text-sky-700">Goes out {formatBrandDateTime(p._raw.scheduled_publish_at)}</span></>
+                        : <>Created {formatDateTime(p.createdAt)}</>}
+                      {p.topic && <span className="ml-1.5 opacity-70">· {p.topic}</span>}</p>
                     <p className="text-[10px] text-text-tertiary mt-1 opacity-60">Click to open full view</p>
                   </div>
                 </div>
