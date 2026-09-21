@@ -8,7 +8,11 @@ import {
   capabilities, validateComposer,
 } from '../../lib/composerState'
 import { mayPublishTo, protectionReason } from '../../lib/platformSafety'
+import { uploadToMediaLibrary } from '../../lib/mediaLibrary'
+import { autoFit } from '../../lib/imageRender'
+import { useAuth } from '../../store/auth'
 import { MediaPicker } from './MediaPicker'
+import { ImageFitter } from '../media/ImageFitter'
 import { InstagramPanel, InstagramPreview } from './InstagramFields'
 import { TikTokPanel, TikTokPreview } from './TikTokFields'
 import { LinkedInPanel, LinkedInPreview } from './LinkedInFields'
@@ -101,7 +105,10 @@ function AccountPicker({ accounts, selected, onChange, platform, loading = false
 }
 
 // ── Media strip ───────────────────────────────────────────────────────────
-function MediaStrip({ media, onRemove, onReorder }) {
+// `onAdjust` opens the manual crop tool on a slide — offered only for images,
+// the same reason `onReorder` only appears past the first slide: a control
+// with nothing to do is a control that shouldn't be there.
+function MediaStrip({ media, onRemove, onReorder, onAdjust }) {
   if (!media.length) return null
   return (
     <div className="flex flex-wrap gap-2 mb-3">
@@ -121,6 +128,10 @@ function MediaStrip({ media, onRemove, onReorder }) {
             {i > 0 && (
               <button type="button" onClick={() => onReorder(i, i - 1)}
                 className="flex-1 bg-black/70 text-white text-[11px] py-0.5" title="Move earlier">←</button>
+            )}
+            {m.type === 'image' && (
+              <button type="button" onClick={() => onAdjust(i)}
+                className="flex-1 bg-black/70 text-white text-[11px] py-0.5" title="Adjust / crop">⛶</button>
             )}
             <button type="button" onClick={() => onRemove(i)}
               className="flex-1 bg-black/70 text-white text-[11px] py-0.5" title="Remove">✕</button>
@@ -191,10 +202,16 @@ export function PostComposer({
   captionAssist, variant = 'post', onSaveIdea, onDesignInStudio, saveError,
 }) {
   const isIdea = variant === 'idea'
+  const { accessToken } = useAuth()
   const [state, setState] = useState(() => ({ ...emptyComposer(platform), ...(initial || {}) }))
   const [picking, setPicking] = useState(false)
   const [scheduling, setScheduling] = useState(false)
   const [showEmoji, setShowEmoji] = useState(false)
+  // Index of the media slide open in the manual crop tool, or null. Optional,
+  // opt-in — Instagram already pads an out-of-range picture automatically at
+  // publish time, so nothing here is required for a post to go out.
+  const [adjusting, setAdjusting] = useState(null)
+  const [refitting, setRefitting] = useState(false)
   const captionRef = useRef(null)
   const hashtagRef = useRef(null)
 
@@ -249,6 +266,51 @@ export function PostComposer({
     const [m] = next.splice(from, 1)
     next.splice(to, 0, m)
     patch({ media: next })
+  }
+
+  // ── Putting every slide in one shape ──
+  //
+  // Instagram crops a carousel to the first slide's shape, so a mixed set
+  // loses edges silently. When the fitter is asked to apply its shape to the
+  // rest, each other slide is re-rendered centred and covering — the least
+  // opinionated placement — from its own original, and any of them can still
+  // be opened and adjusted by hand afterwards.
+  // Takes the list to work from rather than reading state, because it runs
+  // AFTER the adjusted slide has been put into it. Reading `state.media` here
+  // would read the array as it was before that — every upload in this function
+  // takes a second or two, and the wholesale setState at the end would then
+  // put the un-adjusted picture back, silently undoing the edit that started
+  // the whole thing.
+  async function refitOthers(media, keepIndex, ratioLabel, mode) {
+    setRefitting(true)
+    try {
+      const next = await Promise.all(media.map(async (m, i) => {
+        if (i === keepIndex || m.type !== 'image') return m
+        try {
+          const { blob, width, height } = await autoFit(m.url, ratioLabel, { mode })
+          const base = (m.name || 'image').replace(/\.[a-z0-9]+$/i, '')
+          const file = new File([blob], `${base}-${ratioLabel.replace(':', 'x')}.jpg`, { type: 'image/jpeg' })
+          const res = await uploadToMediaLibrary(workspaceId, accessToken, file, {
+            source: 'adjusted', tags: ['adjusted', state.platform, ratioLabel],
+          })
+          // A slide that could not be re-rendered is left exactly as it was.
+          // Half a carousel in one shape and half in another is worse than the
+          // mixture the user already had, and nothing here names which half.
+          if (res.error || !res.asset?.url) return m
+          return { ...m, url: res.asset.url, name: file.name, mimeType: 'image/jpeg', bytes: blob.size, width, height }
+        } catch { return m }
+      }))
+      setState(s => ({ ...s, media: next }))
+    } finally {
+      setRefitting(false)
+    }
+  }
+
+  const applyAdjusted = (fitted, { ratio, mode, applyToAll }) => {
+    const at = adjusting
+    const next = state.media.map((m, i) => (i === at ? fitted : m))
+    setState(s => ({ ...s, media: next }))
+    if (applyToAll) queueMicrotask(() => refitOthers(next, at, ratio, mode))
   }
 
   return (
@@ -405,10 +467,14 @@ export function PostComposer({
                 <div className="mt-4 pt-4 border-t border-border">
                   <MediaStrip media={state.media}
                     onRemove={i => patch({ media: state.media.filter((_, x) => x !== i) })}
-                    onReorder={reorder} />
-                  <Button variant="outline" size="sm" onClick={() => setPicking(true)}>
-                    {state.media.length ? 'Add more media' : 'Add media'}
-                  </Button>
+                    onReorder={reorder}
+                    onAdjust={setAdjusting} />
+                  <div className="flex items-center gap-2">
+                    <Button variant="outline" size="sm" onClick={() => setPicking(true)}>
+                      {state.media.length ? 'Add more media' : 'Add media'}
+                    </Button>
+                    {refitting && <span className="text-xs text-text-tertiary">Re-shaping the other slides…</span>}
+                  </div>
                 </div>
               )}
             </Section>
@@ -515,6 +581,17 @@ export function PostComposer({
         multiple={caps.carousel}
         kind={formatMedia === 'video' ? 'video' : 'all'}
         onDesignInStudio={onDesignInStudio}
+      />
+
+      <ImageFitter
+        open={adjusting != null}
+        onClose={() => setAdjusting(null)}
+        media={adjusting != null ? state.media[adjusting] : null}
+        platform={state.platform}
+        format={state.format}
+        index={adjusting}
+        total={state.media.length}
+        onApply={applyAdjusted}
       />
     </div>
   )
