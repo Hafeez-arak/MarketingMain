@@ -5,7 +5,7 @@ import { useAuth } from '../../store/auth'
 import { timeAgo } from '../../lib/utils'
 
 const titles = {
-  '/': 'Dashboard', '/brand-brain': 'Brand Brain', '/campaigns': 'Content Plans', '/campaigns/plan': 'Plan Campaign',
+  '/': 'Dashboard', '/brand-brain': 'Brand Brain', '/campaigns': 'Content Planning', '/campaigns/plan': 'Content Planning',
   '/schedule': 'Content Calendar', '/email': 'Email Flows',
   '/analytics': 'Analytics', '/agent': 'Assistant', '/insights': 'Research', '/media': 'Media Library', '/social': 'Social Media',
   '/social/instagram': 'Instagram',

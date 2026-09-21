@@ -316,6 +316,27 @@ describe('normalizeAiIdea — LinkedIn', () => {
   })
 })
 
+describe('normalizeAiIdea — TikTok', () => {
+  const tt = over => normalizeAiIdea({ platform: 'tiktok', ...over })
+
+  it('maps the planner\'s words onto TikTok\'s two formats', () => {
+    expect(tt({ format: 'video' }).postFormat).toBe('video')
+    expect(tt({ format: 'reel' }).postFormat).toBe('video')
+    expect(tt({ format: 'photo_carousel' }).postFormat).toBe('photo_carousel')
+    // Instagram's "carousel" used to fall through to an id TikTok does not have.
+    expect(tt({ format: 'carousel' }).postFormat).toBe('photo_carousel')
+    expect(tt({ format: 'post' }).postFormat).toBe('video')
+    expect(tt({}).postFormat).toBe('video')
+  })
+
+  it('is a vertical video with no slides, or a vertical carousel with several', () => {
+    const v = tt({ format: 'video' })
+    expect([v.aspectRatio, v.mediaType, v.slideCount, v.postKind]).toEqual(['9:16', 'video', 1, 'video'])
+    const c = tt({ format: 'photo_carousel', suggestedAspectRatio: '1:1' })
+    expect([c.aspectRatio, c.mediaType, c.slideCount, c.postKind]).toEqual(['9:16', 'image', 3, 'carousel'])
+  })
+})
+
 describe('cleanPlanPoll', () => {
   it('cuts long text, drops duplicates and blanks, and keeps at most four answers', () => {
     const out = cleanPlanPoll({ question: 'q'.repeat(200), options: ['A', 'a', '', 'x'.repeat(50), 'C', 'D', 'E'], duration: 'ONE_DAY' })

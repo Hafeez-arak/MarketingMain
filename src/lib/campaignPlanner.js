@@ -16,7 +16,7 @@ const INSTAGRAM_TONE_FALLBACK = 'professional'
 
 // The platforms the planning workflow can write ideas for. Kept in step with
 // PLATFORMS in pages/campaigns/planConstants.js and the workflow's own list.
-export const PLANNABLE_PLATFORMS = ['instagram', 'linkedin']
+export const PLANNABLE_PLATFORMS = ['instagram', 'tiktok', 'linkedin']
 
 // ─── Starting a plan, and reading one back ─────────────────────────────────
 // These were one function. `requestCampaignPlan` POSTed to n8n, WAITED for the

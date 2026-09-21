@@ -56,7 +56,7 @@ export function ContentPlans() {
 
   return (
     <div className="max-w-5xl space-y-5">
-      <PageHeader title="Content Plans" subtitle="Monthly plans and their approved ideas.">
+      <PageHeader title="Content Planning" subtitle="Monthly plans and their approved ideas.">
         <Button onClick={() => { dispatch(actions.setCampaignPlanDraft(null)); navigate('/campaigns/plan') }}>
           <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
           New monthly plan

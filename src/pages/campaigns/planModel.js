@@ -248,6 +248,8 @@ export function normalizeAiIdea(p) {
   const poll = platform === 'linkedin' && legacyFormat === 'poll' ? cleanPlanPoll(p.poll) : null
   const postFormat = platform === 'linkedin'
     ? linkedinFormatFor(legacyFormat, poll)
+    : platform === 'tiktok'
+    ? tiktokFormatFor(legacyFormat)
     : legacyFormat === 'carousel' ? 'carousel'
     : (legacyFormat === 'reel' && platform === 'instagram') ? 'reel'
     : defaultFormat(platform)
@@ -281,6 +283,17 @@ const LINKEDIN_FORMAT = {
 function linkedinFormatFor(legacy, poll) {
   if (legacy === 'poll') return poll ? 'poll' : 'text'
   return LINKEDIN_FORMAT[legacy] || defaultFormat('linkedin')
+}
+
+// The planner's TikTok vocabulary → the catalog's. TikTok has two formats, a
+// video and a photo carousel; Instagram's and LinkedIn's words are mapped too,
+// because a model planning several platforms at once will borrow them.
+const TIKTOK_FORMAT = {
+  video: 'video', reel: 'video', post: 'video',
+  photo_carousel: 'photo_carousel', carousel: 'photo_carousel', multi_image: 'photo_carousel',
+}
+function tiktokFormatFor(legacy) {
+  return TIKTOK_FORMAT[legacy] || defaultFormat('tiktok')
 }
 
 // A planned poll, narrowed to what LinkedIn accepts: a question of at most

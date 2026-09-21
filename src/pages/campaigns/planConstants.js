@@ -48,6 +48,7 @@ export function isCustomGoal(value) {
 // caption workflows know how to write for. LinkedIn joined Instagram on
 // 2026-09-15; it is still drafts-only (PROTECTED_PLATFORMS), so a LinkedIn
 // idea ends as a post in Approvals and never reaches the page from here.
+// TikTok joined them next: its ideas are 9:16 videos and photo carousels.
 export const PLATFORMS = PLANNABLE_PLATFORMS
 
 // Where one idea can be SENT. Distinct from PLATFORMS above, which is where

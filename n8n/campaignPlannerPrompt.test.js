@@ -90,9 +90,18 @@ describe('Campaign Planner prompt — platforms', () => {
   })
 
   it('drops platforms it cannot plan for, falling back to Instagram', async () => {
-    const out = await build({ platforms: ['tiktok', 'snapchat'] })
+    const out = await build({ platforms: ['snapchat', 'facebook'] })
     expect(out._platforms).toEqual(['instagram'])
-    expect((await build({ platforms: ['tiktok', 'linkedin'] }))._platforms).toEqual(['linkedin'])
+    expect((await build({ platforms: ['snapchat', 'linkedin'] }))._platforms).toEqual(['linkedin'])
+  })
+
+  it('plans for TikTok, and describes its formats in the cached rulebook', async () => {
+    const out = await build({ platforms: ['tiktok'] })
+    expect(out._platforms).toEqual(['tiktok'])
+    expect(out.prompt_variable).toContain('PLATFORMS: tiktok (every post\'s "platform" is "tiktok")')
+    expect(out.prompt_cached).toContain('tiktok: "video" or "photo_carousel"')
+    expect(out.prompt_cached).toContain('tiktok: 9:16 always')
+    expect((await build({ platforms: ['instagram', 'tiktok', 'linkedin'] }))._platforms).toEqual(['instagram', 'tiktok', 'linkedin'])
   })
 })
 
@@ -109,6 +118,39 @@ async function parse(posts, bounds = {}) {
 }
 
 const LI = { platform: 'linkedin', date: '2026-10-06', topic: 'SASO changes for contractors' }
+const TT = { platform: 'tiktok', date: '2026-10-08', topic: 'Before and after: a dark lobby' }
+
+describe('Campaign Planner — reading a plan with TikTok in it', () => {
+  const tt = over => parse([{ ...TT, ...over }], { _platforms: ['instagram', 'tiktok', 'linkedin'] }).then(p => p[0])
+
+  it('keeps a video and a photo carousel as they are', async () => {
+    expect((await tt({ suggested_format: 'video' })).suggested_format).toBe('video')
+    expect((await tt({ suggested_format: 'photo_carousel' })).suggested_format).toBe('photo_carousel')
+  })
+
+  it('turns any other format into a video', async () => {
+    expect((await tt({ suggested_format: 'reel' })).suggested_format).toBe('video')
+    expect((await tt({ suggested_format: 'poll' })).suggested_format).toBe('video')
+    expect((await tt({})).suggested_format).toBe('video')
+  })
+
+  it('is always vertical, and never carries a poll', async () => {
+    const post = await tt({ suggested_format: 'video', suggested_aspect_ratio: '1:1', poll: { question: 'q', options: ['a', 'b'] } })
+    expect(post.suggested_aspect_ratio).toBe('9:16')
+    expect(post.poll).toBeUndefined()
+  })
+
+  it('keeps its picture direction, unlike a LinkedIn text post', async () => {
+    const post = await tt({ suggested_format: 'video', design_tip: 'Open on the dark lobby, cut to the lit one.', suggested_style: 'dramatic' })
+    expect(post.design_tip).toContain('dark lobby')
+    expect(post.suggested_style).toBe('dramatic')
+  })
+
+  it('is dropped when the plan did not ask for it', async () => {
+    const posts = await parse([{ ...TT }, { platform: 'instagram', date: '2026-10-07', topic: 'Lobby' }], { _platforms: ['instagram'] })
+    expect(posts.map(p => p.platform)).toEqual(['instagram'])
+  })
+})
 
 describe('Campaign Planner — reading a plan with LinkedIn in it', () => {
   it('keeps each post on its own platform', async () => {
