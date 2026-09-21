@@ -7,7 +7,7 @@ import { ConnectAccounts } from '../../components/social/ConnectAccounts'
 import { AccountAnalytics } from '../../components/social/AccountAnalytics'
 import { useConnectedAccounts } from '../../lib/useConnectedAccounts'
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from '../../lib/supabaseClient'
-import FitImage from '../../components/FitImage'
+import FitImage, { IgPicture } from '../../components/FitImage'
 import { Card, Badge, Spinner, PostImage, Skeleton } from '../../components/ui/index'
 import { formatDateTime } from '../../lib/utils'
 import { useBrandProfileSync, logEditFeedback } from '../../lib/brandBrain'
@@ -552,9 +552,9 @@ function PostDetail({ post, state, webhookUrl, regenWebhookUrl, supabaseUrl, ano
             {/* Image */}
             <div className="flex-1 flex items-center justify-center p-6">
               <div style={{ width: '100%', position: 'relative' }}>
-                <div style={{ width: '100%', aspectRatio: arCss, borderRadius: '16px', overflow: 'hidden', position: 'relative' }}>
+                <div style={{ width: '100%', borderRadius: '16px', overflow: 'hidden', position: 'relative', ...(displayImage ? {} : { aspectRatio: arCss }) }}>
                   {displayImage
-                    ? <FitImage src={displayImage} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                    ? <IgPicture src={displayImage} fallback={arCss} />
                     : <div style={{ width: '100%', height: '100%', background: '#f5d0e8', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                         <svg style={{ width: 48, height: 48, color: '#d4699c' }} fill="none" stroke="currentColor" strokeWidth="1" viewBox="0 0 24 24">
                           <rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>
@@ -694,9 +694,7 @@ function PostDetail({ post, state, webhookUrl, regenWebhookUrl, supabaseUrl, ano
 
                 {/* Post image */}
                 {displayImage && (
-                  <div style={{ aspectRatio: arCss, overflow: 'hidden', background: '#f5f5f5' }}>
-                    <FitImage src={displayImage} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
-                  </div>
+                  <IgPicture src={displayImage} fallback={arCss} />
                 )}
 
                 {/* Action row */}

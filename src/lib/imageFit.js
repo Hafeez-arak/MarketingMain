@@ -88,12 +88,22 @@ export async function fitImageUrl(url, workspaceId) {
   return `${SUPABASE_URL}/storage/v1/object/public/brand-assets/${path}`
 }
 
-// What a preview needs to show the picture the way it will be published:
-// null when it goes out as it is, otherwise the padding colour. No upload.
-// A picture whose host blocks pixel reads still previews padded, on white.
+// The shape a picture will have on Instagram, for previews. Padded pictures
+// get the canvas they are padded onto; the rest keep their own ratio, held to
+// what the feed shows (4:5 to 1.91:1 - anything taller is cropped by the feed
+// itself). `colour` is the padding colour. null when it cannot be measured.
+export const FEED_MIN_RATIO = 0.8
+export function publishedRatio(width, height) {
+  const t = fitTarget(width, height)
+  if (t) return { ratio: t.canvasWidth / t.canvasHeight, padded: true }
+  const r = width / height
+  return { ratio: Math.min(IG_MAX_RATIO, Math.max(FEED_MIN_RATIO, r)), padded: false }
+}
+
 export async function previewFit(url) {
   let img
   try { img = await loadImage(url) } catch { return null }
-  if (!fitTarget(img.naturalWidth, img.naturalHeight)) return null
-  try { return { colour: cornerColour(img) } } catch { return { colour: '#ffffff' } }
+  const shape = publishedRatio(img.naturalWidth, img.naturalHeight)
+  if (!shape.padded) return shape
+  try { return { ...shape, colour: cornerColour(img) } } catch { return { ...shape, colour: '#ffffff' } }
 }

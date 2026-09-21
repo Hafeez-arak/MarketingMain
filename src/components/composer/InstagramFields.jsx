@@ -1,4 +1,4 @@
-import FitImage from '../FitImage'
+import { IgPicture } from '../FitImage'
 import { useRef, useState } from 'react'
 import { Toggle, Spinner } from '../ui/index'
 import { optionsFor, setOption, composedCaption, captionStats } from '../../lib/composerState'
@@ -450,11 +450,13 @@ export function InstagramPreview({ state, account }) {
         </span>
       </div>
 
-      <div className={`${ratioClass} bg-surface-subtle relative overflow-hidden`}>
+      <div className={`${first?.type !== 'video' && first && !isStory && !isReel ? '' : ratioClass} bg-surface-subtle relative overflow-hidden`}>
         {first ? (
           first.type === 'video'
             ? <video src={first.url} className="w-full h-full object-cover" muted playsInline preload="metadata" />
-            : <FitImage src={first.url} alt="" className="w-full h-full object-cover" />
+            : (isStory || isReel)
+              ? <img src={first.url} alt="" className="w-full h-full object-cover" />
+              : <IgPicture src={first.url} />
         ) : (
           <div className="w-full h-full flex items-center justify-center text-xs text-text-tertiary">
             Media appears here

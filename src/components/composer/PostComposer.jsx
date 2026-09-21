@@ -1,3 +1,4 @@
+import FitImage from '../FitImage'
 import { useMemo, useRef, useState } from 'react'
 import { Button, Spinner, Skeleton } from '../ui/index'
 import { PLATFORM_META } from '../../lib/utils'
@@ -108,7 +109,7 @@ function MediaStrip({ media, onRemove, onReorder }) {
         <div key={m.url + i} className="relative w-20 h-20 border border-border overflow-hidden group">
           {m.type === 'video'
             ? <video src={m.url} className="w-full h-full object-cover" muted playsInline preload="metadata" />
-            : <img src={m.url} alt="" className="w-full h-full object-cover" />}
+            : <FitImage src={m.url} alt="" className="w-full h-full object-cover" />}
 
           {media.length > 1 && (
             <span className="absolute top-0.5 left-0.5 w-4 h-4 bg-black/60 text-white text-[10px] font-bold flex items-center justify-center">
