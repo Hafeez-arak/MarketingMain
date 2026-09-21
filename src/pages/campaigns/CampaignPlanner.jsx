@@ -1830,7 +1830,6 @@ export function CampaignPlanner() {
               const ownMedia = hasOwnMedia(idea)
               const lock = ideaLock(idea)
               const st = lock ? 'sent' : hasMedia(idea) ? 'ready' : (idea.mediaStatus || 'none')
-              const sess = studioSessions[idea.id]
               const thumb = thumbFor(idea)
               const urls = mediaUrlsFor(idea)
               const refCount = (idea.references || []).length
@@ -1910,26 +1909,15 @@ export function CampaignPlanner() {
                         <span className="text-[10px] text-text-tertiary">Gone out — can’t be changed.</span>
                       </>
                     ) : (
-                      <>
-                        <Button size="xs" variant={st === 'ready' ? 'secondary' : 'primary'} onClick={() => setMediaPickIdea(idea)}>
-                          {ownMedia ? 'Change image' : 'Use my image'}
-                        </Button>
-                        <Button size="xs" variant="secondary" onClick={() => openStudio(idea)}>
-                          {idea.mediaStatus === 'ready' ? 'Edit in Studio' : sess ? 'Back to Studio' : 'Make in Studio'}
-                        </Button>
-                        {/* The same modal the review step opens. Format,
-                            orientation, slide count, date, time and platforms
-                            are all decisions you make WHILE looking at the
-                            picture — and until now they lived two steps back,
-                            so changing a carousel to a reel meant leaving the
-                            step and finding your place again. */}
-                        <Button size="xs" variant="secondary" onClick={() => setEditIdea(idea)}>Edit</Button>
-                        {idea.mediaStatus === 'ready' && (
-                          <button onClick={() => redoMedia(idea)}
-                            title="Start this one over — the picture is unset, the Studio session is kept"
-                            className="text-[11px] text-text-tertiary hover:text-red-500 transition-colors ml-auto">Reset</button>
-                        )}
-                      </>
+                      // One door in: the same modal the review step opens now
+                      // also picks the picture (Brand Brain or upload),
+                      // launches the Studio, and asks who writes the caption
+                      // — three buttons that each opened a different editor
+                      // for the same idea, down to the one that actually
+                      // matters here.
+                      <Button size="xs" variant={st === 'ready' ? 'secondary' : 'primary'} onClick={() => setEditIdea(idea)}>
+                        Edit/Add images
+                      </Button>
                     )}
                   </div>
                 </Card>
@@ -1939,11 +1927,24 @@ export function CampaignPlanner() {
 
           {error && <div className="rounded-xl bg-red-50 border border-red-100 px-4 py-3 text-xs text-red-600">{error}</div>}
 
-          {editIdea && (
-            <IdeaEditModal idea={editIdea} tones={IG_TONES} saving={editSaving} saveError={editError}
-              planPlatforms={platforms} todayKey={todayKey}
-              onClose={() => { setEditIdea(null); setEditError('') }} onSave={saveEditedIdea} />
-          )}
+          {editIdea && (() => {
+            // Re-read from the live ideas list rather than the snapshot the
+            // modal was opened with — a picture picked in the nested
+            // ReferencePicker below writes through onIdeaChange, and the
+            // thumbnails/status here need to reflect that without the modal
+            // being closed and reopened.
+            const live = ideas.find(i => i.id === editIdea.id) || editIdea
+            return (
+              <IdeaEditModal idea={editIdea} tones={IG_TONES} saving={editSaving} saveError={editError}
+                planPlatforms={platforms} todayKey={todayKey}
+                mediaUrls={mediaUrlsFor(live)} mediaStatus={live.mediaStatus} ownMedia={hasOwnMedia(live)}
+                sessionExists={!!studioSessions[live.id]}
+                onAddMedia={() => setMediaPickIdea(live)}
+                onOpenStudio={() => { setEditIdea(null); openStudio(live) }}
+                onResetMedia={() => redoMedia(live)}
+                onClose={() => { setEditIdea(null); setEditError('') }} onSave={saveEditedIdea} />
+            )
+          })()}
 
           <div className="sticky bottom-0 -mx-1 px-1 pb-1">
             <div className="flex items-center gap-3 bg-white/95 backdrop-blur-sm border border-border rounded-2xl shadow-dropdown px-5 py-3.5">
