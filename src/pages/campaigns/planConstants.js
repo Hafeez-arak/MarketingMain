@@ -120,7 +120,10 @@ export function isUntouchedSelection(sel = []) {
 export const DEFAULT_DRAFT = {
   // setup → review (ideas only) → media (pictures) → captions → done
   step: 'setup',
-  month: '', goal: '', goalCategory: '', platforms: ['instagram'],
+  // Every plannable platform, always — which platform a post targets is now
+  // chosen per post (the seed's own selector, an AI idea's own field, or the
+  // Pictures step's Edit/Add images popup), not once for the whole month.
+  month: '', goal: '', goalCategory: '', platforms: [...PLATFORMS],
   startDate: '', endDate: '', approxCount: '', includeHolidays: true,
   // Cadence: which weekdays this brand actually posts on (empty = any day).
   // There is no default-time field any more — every post starts at
