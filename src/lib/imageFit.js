@@ -87,3 +87,13 @@ export async function fitImageUrl(url, workspaceId) {
   if (!up.ok) throw new Error(`Could not save the resized picture: ${await up.text()}`)
   return `${SUPABASE_URL}/storage/v1/object/public/brand-assets/${path}`
 }
+
+// What a preview needs to show the picture the way it will be published:
+// null when it goes out as it is, otherwise the padding colour. No upload.
+// A picture whose host blocks pixel reads still previews padded, on white.
+export async function previewFit(url) {
+  let img
+  try { img = await loadImage(url) } catch { return null }
+  if (!fitTarget(img.naturalWidth, img.naturalHeight)) return null
+  try { return { colour: cornerColour(img) } } catch { return { colour: '#ffffff' } }
+}
