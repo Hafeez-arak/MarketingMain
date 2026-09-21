@@ -3055,7 +3055,60 @@
    "اراك",
    "أراك"
   ],
-  "lines": [],
+  "lines": [
+   {
+    "key": "lighting",
+    "label": "Lighting",
+    "paths": [
+     "/services/indoor-lighting",
+     "/services/facade-lighting",
+     "/services/outdoor-lighting",
+     "/services/lighting-design",
+     "/services/projection-mapping",
+     "/services/lighting-installation"
+    ],
+    "words": [
+     "lighting design",
+     "lighting consultant",
+     "facade",
+     "luminaire",
+     "architectural lighting",
+     "إنارة",
+     "إضاءة"
+    ]
+   },
+   {
+    "key": "controls",
+    "label": "Controls & automation",
+    "paths": [
+     "/services/lighting-controls",
+     "/services/home-automation"
+    ],
+    "words": [
+     "knx",
+     "dali",
+     "grms",
+     "guest room",
+     "building automation",
+     "home automation",
+     "أتمتة",
+     "تحكم"
+    ]
+   },
+   {
+    "key": "poles",
+    "label": "Smart poles",
+    "paths": [
+     "/services/smart-poles"
+    ],
+    "words": [
+     "smart pole",
+     "street light",
+     "lighting pole",
+     "عمود"
+    ]
+   }
+  ],
   "sitemaps": [
    {
     "path": "https://www.arak-sa.com/sitemap.xml",
@@ -3065,6 +3118,409 @@
     "isSitemapsIndex": true,
     "warnings": 2,
     "errors": 0
+   }
+  ],
+  "imageQueries": [
+   {
+    "clicks": 0,
+    "impressions": 2,
+    "ctr": 0,
+    "position": 34.5,
+    "query": "air arabia headquarters"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 11,
+    "query": "air arabia office riyadh"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 6,
+    "query": "air blue office in riyadh"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 24,
+    "query": "air india riyadh office"
+   },
+   {
+    "clicks": 0,
+    "impressions": 5,
+    "ctr": 0,
+    "position": 79.2,
+    "query": "almarai headquarters riyadh"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 86,
+    "query": "arak logo"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 34,
+    "query": "ceiling lights riyadh"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 74,
+    "query": "lighting control panel"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 24,
+    "query": "lighting design saudi arabia"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 1,
+    "query": "lighting riyadh"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 19,
+    "query": "lighting saudi arabia"
+   },
+   {
+    "clicks": 0,
+    "impressions": 2,
+    "ctr": 0,
+    "position": 58,
+    "query": "mahara company saudi arabia"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 40,
+    "query": "oss middle east"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 8,
+    "query": "outdoor lighting riyadh"
+   },
+   {
+    "clicks": 0,
+    "impressions": 17,
+    "ctr": 0,
+    "position": 70.82352941176471,
+    "query": "ritz carlton riyadh"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 20,
+    "query": "ritz carlton riyadh 2017"
+   },
+   {
+    "clicks": 0,
+    "impressions": 2,
+    "ctr": 0,
+    "position": 85.5,
+    "query": "ritz carlton riyadh lobby"
+   },
+   {
+    "clicks": 0,
+    "impressions": 2,
+    "ctr": 0,
+    "position": 80,
+    "query": "ritz carlton riyadh saudi arabia"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 49,
+    "query": "ritz riyadh"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 45,
+    "query": "ritz-carlton riyadh"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 80,
+    "query": "ritz-carlton riyadh lobby"
+   },
+   {
+    "clicks": 0,
+    "impressions": 4,
+    "ctr": 0,
+    "position": 83.25,
+    "query": "ritz-carlton, riyadh"
+   },
+   {
+    "clicks": 0,
+    "impressions": 2,
+    "ctr": 0,
+    "position": 6.5,
+    "query": "riyadh air corporate office"
+   },
+   {
+    "clicks": 0,
+    "impressions": 18,
+    "ctr": 0,
+    "position": 5.833333333333333,
+    "query": "riyadh air head office"
+   },
+   {
+    "clicks": 0,
+    "impressions": 6,
+    "ctr": 0,
+    "position": 19.333333333333332,
+    "query": "riyadh air headquarters"
+   },
+   {
+    "clicks": 0,
+    "impressions": 9,
+    "ctr": 0,
+    "position": 10.333333333333334,
+    "query": "riyadh air headquarters riyadh"
+   },
+   {
+    "clicks": 0,
+    "impressions": 5,
+    "ctr": 0,
+    "position": 17,
+    "query": "riyadh air hq"
+   },
+   {
+    "clicks": 0,
+    "impressions": 10,
+    "ctr": 0,
+    "position": 7.7,
+    "query": "riyadh air office"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 50,
+    "query": "riyadh air office in dhaka"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 41,
+    "query": "riyadh air office in lahore"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 5,
+    "query": "riyadh air office location"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 42,
+    "query": "riyadh project"
+   },
+   {
+    "clicks": 0,
+    "impressions": 2,
+    "ctr": 0,
+    "position": 21,
+    "query": "saudi lighting"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 61,
+    "query": "saudi lighting company"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 20,
+    "query": "saudi lighting company riyadh"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 5,
+    "query": "sheraton riyadh"
+   },
+   {
+    "clicks": 0,
+    "impressions": 16,
+    "ctr": 0,
+    "position": 56.0625,
+    "query": "solitaire mall"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 41,
+    "query": "solitaire mall logo"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 38,
+    "query": "solitaire mall photos"
+   },
+   {
+    "clicks": 0,
+    "impressions": 7,
+    "ctr": 0,
+    "position": 58.714285714285715,
+    "query": "solitaire mall riyadh"
+   }
+  ],
+  "imagePages": [
+   {
+    "clicks": 1,
+    "impressions": 230,
+    "ctr": 0.004347826086956522,
+    "position": 43.47826086956522,
+    "page": "https://arak-sa.com/"
+   },
+   {
+    "clicks": 0,
+    "impressions": 89,
+    "ctr": 0,
+    "position": 45.764044943820224,
+    "page": "https://arak-sa.com/ar"
+   },
+   {
+    "clicks": 0,
+    "impressions": 5,
+    "ctr": 0,
+    "position": 18.4,
+    "page": "https://arak-sa.com/ar/projects"
+   },
+   {
+    "clicks": 0,
+    "impressions": 14,
+    "ctr": 0,
+    "position": 49.57142857142857,
+    "page": "https://arak-sa.com/ar/projects/ritz-carlton"
+   },
+   {
+    "clicks": 0,
+    "impressions": 4,
+    "ctr": 0,
+    "position": 14.25,
+    "page": "https://arak-sa.com/ar/projects/riyadh-air"
+   },
+   {
+    "clicks": 0,
+    "impressions": 13,
+    "ctr": 0,
+    "position": 35.30769230769231,
+    "page": "https://arak-sa.com/ar/projects/solitaire-mall"
+   },
+   {
+    "clicks": 0,
+    "impressions": 5,
+    "ctr": 0,
+    "position": 43.8,
+    "page": "https://arak-sa.com/ar/services/indoor-lighting"
+   },
+   {
+    "clicks": 0,
+    "impressions": 3,
+    "ctr": 0,
+    "position": 61.666666666666664,
+    "page": "https://arak-sa.com/projects"
+   },
+   {
+    "clicks": 0,
+    "impressions": 2,
+    "ctr": 0,
+    "position": 9.5,
+    "page": "https://arak-sa.com/projects/delfino"
+   },
+   {
+    "clicks": 0,
+    "impressions": 133,
+    "ctr": 0,
+    "position": 56.57142857142857,
+    "page": "https://arak-sa.com/projects/ritz-carlton"
+   },
+   {
+    "clicks": 0,
+    "impressions": 173,
+    "ctr": 0,
+    "position": 21.77456647398844,
+    "page": "https://arak-sa.com/projects/riyadh-air"
+   },
+   {
+    "clicks": 0,
+    "impressions": 8,
+    "ctr": 0,
+    "position": 44.875,
+    "page": "https://arak-sa.com/projects/seder-hq"
+   },
+   {
+    "clicks": 0,
+    "impressions": 130,
+    "ctr": 0,
+    "position": 39.96153846153846,
+    "page": "https://arak-sa.com/projects/solitaire-mall"
+   },
+   {
+    "clicks": 0,
+    "impressions": 7,
+    "ctr": 0,
+    "position": 38.42857142857143,
+    "page": "https://arak-sa.com/services/indoor-lighting"
+   },
+   {
+    "clicks": 0,
+    "impressions": 76,
+    "ctr": 0,
+    "position": 36.10526315789474,
+    "page": "https://arak-sa.com/services/smart-poles"
+   },
+   {
+    "clicks": 0,
+    "impressions": 13,
+    "ctr": 0,
+    "position": 35.07692307692308,
+    "page": "https://www.arak-sa.com/"
+   },
+   {
+    "clicks": 0,
+    "impressions": 1,
+    "ctr": 0,
+    "position": 21,
+    "page": "https://www.arak-sa.com/ar"
    }
   ]
  },

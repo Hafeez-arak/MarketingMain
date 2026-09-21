@@ -3,6 +3,7 @@ import {
   daysBetween, dailySeries, rollingAverage, searchTypes, pageRows, hostSplit,
   queryRows, positionBands, queryCoverage, countryName, countryRows, deviceRows,
   appearanceRows, sitemapHealth, websiteSummary, change, asPercent, POSITION_BANDS, prettyPath,
+  imageSearch,
 } from './websiteAnalytics.js'
 
 // The windows the app actually asks for, and the shape the property actually
@@ -463,5 +464,67 @@ describe('pageRows label', () => {
     expect(rows[0].impressions).toBe(15)
     expect(rows[0].path).toBe('/%d8%ae%d8%af%d9%85%d8%a7%d8%aa%d9%86%d8%a7')
     expect(rows[0].label).toBe('/خدماتنا')
+  })
+})
+
+// ─── Image search ──────────────────────────────────────────────────────────
+
+describe('imageSearch', () => {
+  // The rows Google returned for this property on 2026-09-20. The three
+  // airline queries are the finding: photographs of buildings ARAK lit,
+  // ranking for the buildings.
+  const imageQueries = [
+    { query: 'air arabia headquarters', clicks: 0, impressions: 2, position: 34.5 },
+    { query: 'almarai headquarters riyadh', clicks: 0, impressions: 5, position: 79.2 },
+    { query: 'arak logo', clicks: 0, impressions: 1, position: 86 },
+    { query: 'smart poles', clicks: 1, impressions: 8, position: 22 },
+  ]
+  const imagePages = [
+    { page: 'https://arak-sa.com/', clicks: 1, impressions: 230, position: 43.4 },
+    { page: 'https://arak-sa.com/ar', clicks: 0, impressions: 89, position: 45.7 },
+    { page: 'https://arak-sa.com/ar/projects/ritz-carlton', clicks: 0, impressions: 14, position: 49.5 },
+  ]
+  const lines = [{ key: 'poles', label: 'Smart poles', paths: ['/services/smart-poles'], words: ['smart poles'] }]
+  const types = { image: { clicks: 1, impressions: 892, position: 39.9 } }
+
+  it('carries the surface totals and the queries that explain them', () => {
+    const img = imageSearch({ imageQueries, imagePages, brandTerms: ['arak'], lines, types })
+    expect(img).toMatchObject({ impressions: 892, clicks: 1, position: 39.9, namedQueries: 4 })
+    expect(img.queries[0].query).toBe('smart poles')
+  })
+
+  it('marks a query as unrelated only when it names neither us nor what we sell', () => {
+    const img = imageSearch({ imageQueries, imagePages, brandTerms: ['arak'], lines, types })
+    const by = Object.fromEntries(img.queries.map(q => [q.query, q]))
+    expect(by['arak logo'].unrelated).toBe(false)          // our own name
+    expect(by['smart poles'].unrelated).toBe(false)        // a business line
+    expect(by['air arabia headquarters'].unrelated).toBe(true)
+    expect(img.unrelated.impressions).toBe(7)
+  })
+
+  // A brand with no business lines configured has no vocabulary to match
+  // against, so every query would score as unrelated. The panel must be able
+  // to say "cannot tell" rather than "all of it".
+  it('says when the unrelated share cannot be measured', () => {
+    const img = imageSearch({ imageQueries, imagePages, brandTerms: ['arak'], lines: [], types })
+    expect(img.unrelated.measurable).toBe(false)
+  })
+
+  it('folds the host and language variants of a page, as every other panel does', () => {
+    const img = imageSearch({ imageQueries, imagePages, brandTerms: [], lines, types })
+    expect(img.pages[0]).toMatchObject({ path: '/', impressions: 319 })
+    expect(img.pages.map(p => p.path)).toEqual(['/', '/projects/ritz-carlton'])
+  })
+
+  // Google withholds rare queries on this surface too, so the table under a
+  // total of 892 adds up to 16.
+  it('reports what the named queries account for', () => {
+    const img = imageSearch({ imageQueries, imagePages, brandTerms: [], lines, types })
+    expect(img.named).toBe(16)
+    expect(img.impressions).toBe(892)
+  })
+
+  it('is an empty answer, not a crash, with nothing to report', () => {
+    expect(imageSearch()).toMatchObject({ impressions: 0, queries: [], pages: [] })
   })
 })

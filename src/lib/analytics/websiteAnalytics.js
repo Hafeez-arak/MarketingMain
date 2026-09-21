@@ -1,4 +1,4 @@
-import { pathOf, isBrandQuery, attachPages, totals, splitBrand } from '../agent/searchConsole.js'
+import { pathOf, isBrandQuery, attachPages, totals, splitBrand, lineOf } from '../agent/searchConsole.js'
 
 // ─── The website, as the Analytics page draws it ───────────────────────────
 //
@@ -504,6 +504,104 @@ export function sitemapHealth(sitemaps = [], { now = new Date(), site = '', stal
       isPending: !!s.isPending,
     }
   })
+}
+
+// ─── Image search, in words ────────────────────────────────────────────────
+
+/**
+ * What image search is actually being asked for, and which pages answer it.
+ *
+ * ── WHY A TOTAL WAS NOT ENOUGH ──
+ *
+ * The surfaces panel already says image search is a fifth of this property's
+ * visibility and earns almost nothing, and for months that was the whole
+ * story: a big number, a terrible position, no explanation. The queries say
+ * why, and the answer was not one anybody had guessed — the homepage takes
+ * 230 image impressions for `air arabia headquarters`, `almarai headquarters
+ * riyadh` and `air india riyadh office`. Photographs of buildings this company
+ * lit, ranking for the buildings.
+ *
+ * That is not a ranking problem and no amount of rewriting titles touches it.
+ * It is a filename and alt-text problem, and it is only visible in the words.
+ *
+ * ── WHAT `unrelated` CLAIMS, AND WHAT IT DOES NOT ──
+ *
+ * A query is counted as unrelated when it names neither the brand nor
+ * anything the brand sells — measured with the same `isBrandQuery` and
+ * `lineOf` the rest of the app uses, so it inherits the brand's own
+ * configuration rather than an opinion held here. It is a HINT, not a verdict:
+ * a brand with no business lines configured has no vocabulary to match
+ * against, so `lines` being empty makes the share meaningless and `measurable`
+ * says so rather than reporting everything as unrelated.
+ */
+export function imageSearch({ imageQueries = [], imagePages = [], brandTerms = [], lines = [], types = {} } = {}, { limit = 12 } = {}) {
+  const image = types.image || {}
+
+  const queries = imageQueries
+    .map(r => {
+      const brand = isBrandQuery(r.query, brandTerms)
+      const line = lineOf({ query: r.query }, lines)
+      return {
+        query: str(r.query),
+        clicks: num(r.clicks),
+        impressions: num(r.impressions),
+        position: num(r.position),
+        brand,
+        line,
+        // Neither our name nor our subject. See the note above: only
+        // meaningful when the brand has told us what its subjects are.
+        unrelated: !brand && !line,
+      }
+    })
+    .sort((a, b) => b.impressions - a.impressions)
+
+  const pages = foldByPath(imagePages).slice(0, limit)
+
+  const named = queries.reduce((n, r) => n + r.impressions, 0)
+  const unrelatedImpressions = queries.filter(r => r.unrelated).reduce((n, r) => n + r.impressions, 0)
+
+  return {
+    impressions: num(image.impressions),
+    clicks: num(image.clicks),
+    position: num(image.position) || null,
+    // The same withholding that applies to web queries applies here, and for
+    // the same reason it has to be said out loud: the panel shows a total and
+    // a table that will not add up to it.
+    named,
+    namedQueries: queries.length,
+    queries: queries.slice(0, limit),
+    pages,
+    unrelated: {
+      measurable: lines.length > 0,
+      impressions: unrelatedImpressions,
+      share: named ? (unrelatedImpressions / named) * 100 : 0,
+      rows: queries.filter(r => r.unrelated).slice(0, limit),
+    },
+  }
+}
+
+/** Impressions per page path, host and language variants folded — the same
+ *  group-by `pageRows` does, without the previous-window comparison, which
+ *  image search has no second call to supply. */
+function foldByPath(rows = []) {
+  const by = new Map()
+  for (const r of rows) {
+    const path = pathOf(r.page)
+    const seen = by.get(path) || { path, impressions: 0, clicks: 0, weighted: 0 }
+    seen.impressions += num(r.impressions)
+    seen.clicks += num(r.clicks)
+    seen.weighted += num(r.impressions) * num(r.position)
+    by.set(path, seen)
+  }
+  return [...by.values()]
+    .map(r => ({
+      path: r.path,
+      label: prettyPath(r.path),
+      impressions: r.impressions,
+      clicks: r.clicks,
+      position: r.impressions ? r.weighted / r.impressions : 0,
+    }))
+    .sort((a, b) => b.impressions - a.impressions)
 }
 
 // ─── The whole picture ─────────────────────────────────────────────────────

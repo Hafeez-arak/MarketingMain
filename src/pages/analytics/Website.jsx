@@ -14,6 +14,7 @@ import { Ga4Panels, BioLinkPanel } from './WebsiteGa4'
 import { useWebsiteAnalytics } from './useWebsiteAnalytics'
 import { RangePicker } from '../../components/analytics/RangePicker'
 import { isCustom, rangeLabel } from '../../lib/dateRange'
+import { ExplainPanel, ImageSearchPanel, IndexHealthPanel } from './WebsiteDetail'
 
 // ─── The Website tab ───────────────────────────────────────────────────────
 //
@@ -253,6 +254,7 @@ export function WebsiteAnalytics(w) {
     search, ga4, bio, usable, summary, daily, types, bands, coverage, queries,
     pages, hosts, countries, devices, appearance, sitemaps, recommendations, ga4Summary,
     arrivals, arrivalsSummary,
+    image, index, runIndexHealth, explain, runExplain, canExplain,
   } = w
 
   if (loading) return <WebsiteSkeleton />
@@ -352,6 +354,15 @@ export function WebsiteAnalytics(w) {
         <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 px-3 py-2">
           Some panels could not be loaded: {search.warnings.map(x => x.part).join(', ')}. Everything else on this page is complete.
         </p>
+      )}
+
+      {/* ── What this means ──
+          Above the numbers rather than below them, because it is the only
+          panel on the page written for somebody who does not already know how
+          to read the rest. It renders whatever state it is in — including
+          "not asked for yet", which is what it is on every page load. */}
+      {usable && summary && summary.impressions > 0 && (
+        <ExplainPanel explain={explain} onRun={runExplain} canRun={canExplain} />
       )}
 
       {noRows ? (
@@ -512,6 +523,12 @@ export function WebsiteAnalytics(w) {
             </Card>
           )}
 
+          {/* ── What image search is being asked for ──
+              Immediately under the surfaces panel, which is where the reader
+              has just been told image search is a fifth of their visibility
+              and earns nothing. The explanation belongs next to the claim. */}
+          <ImageSearchPanel image={image} />
+
           {/* ── What people searched ── */}
           <Card className="overflow-hidden">
             {/* The subtitle has two jobs and they move independently: how much
@@ -603,6 +620,13 @@ export function WebsiteAnalytics(w) {
               </ul>
             )}
           </Card>
+
+          {/* ── Is Google holding these pages at all ──
+              After the recommendations and before the page tables, because
+              it reframes both: a recommendation to rewrite a page Google has
+              never fetched is wasted work, and a page missing from the table
+              below may be missing from the index rather than from demand. */}
+          <IndexHealthPanel index={index} onRun={runIndexHealth} />
 
           {/* ── Pages, countries, devices ── */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
