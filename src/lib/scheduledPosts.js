@@ -90,6 +90,26 @@ export async function fetchScheduledPosts(workspaceId, accessToken, {
   } catch { return [] }
 }
 
+// How many posts each platform has, for the Social overview cards. Reads the
+// same view the platform pages read, plus Instagram's hand-made posts (a third
+// table the view does not union) — so a card and the page behind it agree.
+// Returns null on failure so the caller can tell "unknown" from "zero".
+export async function fetchPostCounts(workspaceId, accessToken) {
+  if (!workspaceId) return {}
+  const scope = `workspace_id=eq.${workspaceId}`
+  try {
+    const [viewRes, manualRes] = await Promise.all([
+      fetch(`${SUPABASE_URL}/rest/v1/scheduled_posts?${scope}&select=platform&limit=5000`, { headers: authHeaders(accessToken) }),
+      fetch(`${SUPABASE_URL}/rest/v1/instagram_manual_posts?${scope}&select=id&limit=5000`, { headers: authHeaders(accessToken) }),
+    ])
+    if (!viewRes.ok) return null
+    const counts = {}
+    for (const r of await viewRes.json()) counts[r.platform] = (counts[r.platform] || 0) + 1
+    if (manualRes.ok) counts.instagram = (counts.instagram || 0) + (await manualRes.json()).length
+    return counts
+  } catch { return null }
+}
+
 // Write back to the row's own table.
 export async function patchPost(accessToken, postTable, postId, patch) {
   if (!POST_TABLES.includes(postTable)) return { error: `Unknown post table: ${postTable}` }

@@ -1,6 +1,8 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { useApp, actions } from '../../store/app'
+import { useAuth } from '../../store/auth'
+import { fetchPostCounts } from '../../lib/scheduledPosts'
 import { Card, Button, Badge, Empty, PostImage, Skeleton } from '../../components/ui/index'
 import { PLATFORM_META, formatDateTime, isLivePlatform } from '../../lib/utils'
 import { useConnectedAccounts } from '../../lib/useConnectedAccounts'
@@ -13,7 +15,7 @@ import { ConnectAccounts } from '../../components/social/ConnectAccounts'
 // anything — so every card claimed success, and the first publish attempt was
 // where the truth arrived.
 
-function PlatformCard({ platformKey, meta, posts, accounts, loading, onOpen }) {
+function PlatformCard({ platformKey, meta, postCount, accounts, loading, onOpen }) {
   const live      = isLivePlatform(platformKey)
   const connected = accounts.some(a => a.is_active !== false)
 
@@ -43,7 +45,7 @@ function PlatformCard({ platformKey, meta, posts, accounts, loading, onOpen }) {
         <p className="text-sm text-text-secondary mb-1">
           {!live
             ? 'Publishing to Snapchat is not available yet.'
-            : posts.length === 0 ? 'No posts created yet.' : `${posts.length} post${posts.length === 1 ? '' : 's'} created`}
+            : postCount === null ? '' : postCount === 0 ? 'No posts created yet.' : `${postCount} post${postCount === 1 ? '' : 's'} created`}
         </p>
         <p className="text-xs text-text-tertiary mb-4 truncate min-h-[1rem]">
           {live && loading
@@ -76,9 +78,19 @@ function PlatformCard({ platformKey, meta, posts, accounts, loading, onOpen }) {
 }
 
 export function SocialOverview() {
-  const { state } = useApp()
   const navigate = useNavigate()
   const { allAccounts, loading, error, refresh } = useConnectedAccounts()
+  const { activeWorkspaceId, accessToken } = useAuth()
+  // Posts live in Supabase, not in state.posts — that store only holds what
+  // this browser session created, so counting it said "No posts created yet"
+  // for every post made before the page loaded. null = not answered yet.
+  const [counts, setCounts] = useState(null)
+  useEffect(() => {
+    let live = true
+    setCounts(null)
+    fetchPostCounts(activeWorkspaceId, accessToken).then(c => { if (live) setCounts(c ?? {}) })
+    return () => { live = false }
+  }, [activeWorkspaceId, accessToken])
 
   const platforms = Object.entries(PLATFORM_META)
 
@@ -97,7 +109,7 @@ export function SocialOverview() {
             key={key}
             platformKey={key}
             meta={meta}
-            posts={state.posts.filter(p => p.platform === key)}
+            postCount={counts === null ? null : (counts[key] || 0)}
             accounts={allAccounts.filter(a => a.platform === key)}
             loading={loading}
             onOpen={() => navigate(`/social/${key}`)}
