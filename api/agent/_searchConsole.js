@@ -209,12 +209,12 @@ export const SEARCH_TYPES = ['web', 'image', 'video', 'news', 'discover']
  * Run `jobs` with at most `limit` in flight.
  *
  * Search Console's per-site ceiling is 20 queries per second, and a full pull
- * is ~17 calls. Firing them all at once sits exactly on that line, where the
+ * is ~22 calls. Firing them all at once sits exactly on that line, where the
  * failure mode is a 429 on an arbitrary one of them — so the page would lose a
  * different panel each time it loaded. Six at a time is well under, and the
  * whole pull still finishes in three round trips' worth of wall clock.
  */
-async function mapLimit(jobs, limit, run) {
+export async function mapLimit(jobs, limit, run) {
   const out = new Array(jobs.length)
   let next = 0
   const workers = Array.from({ length: Math.min(limit, jobs.length) }, async () => {
@@ -232,7 +232,7 @@ async function mapLimit(jobs, limit, run) {
  *
  * ── WHY EVERY CALL IS ALLOWED TO FAIL ALONE ──
  *
- * Seventeen calls means seventeen chances to turn one empty panel into an
+ * Twenty-two calls means twenty-two chances to turn one empty panel into an
  * empty page. Each one is settled on its own and records its own error, so a
  * property that will not answer `searchAppearance` still shows its queries,
  * its pages and its countries — and the panel that failed says it failed
@@ -297,6 +297,19 @@ export async function fetchWebsiteData({
     // is giving us the whole answer box".
     { id: 'appearance', body: queryBody({ ...cur, dimensions: ['searchAppearance'], rowLimit: 50 }) },
 
+    // ── Image search, in words rather than as a total ──
+    //
+    // The surface totals below already count image search. They cannot say
+    // what it is FOR, and on this property that turned out to be the whole
+    // story: 230 of the homepage's image impressions came from searches for
+    // OTHER companies' offices — "air arabia headquarters", "almarai
+    // headquarters riyadh" — because project photographs of buildings we lit
+    // rank for the buildings rather than for the lighting. A fifth of the
+    // site's visibility, earning one click, and a total can only say it is
+    // quiet. Two extra calls say why.
+    { id: 'imageQueries', body: queryBody({ ...cur, dimensions: ['query'], rowLimit: 200, type: 'image' }) },
+    { id: 'imagePages', body: queryBody({ ...cur, dimensions: ['page'], rowLimit: 100, type: 'image' }) },
+
     // One row of totals per surface, per window. No dimensions, so these are
     // the cheapest calls in the pull and the only place image search has ever
     // been counted here.
@@ -360,6 +373,8 @@ export async function fetchWebsiteData({
     devices: rowsOf('devices', ['device']),
     previousDevices: rowsOf('previousDevices', ['device']),
     appearance: rowsOf('appearance', ['searchAppearance']),
+    imageQueries: rowsOf('imageQueries', ['query']),
+    imagePages: rowsOf('imagePages', ['page']),
     types,
   }
 }
@@ -402,5 +417,30 @@ export async function fetchSitemaps({ site, env = process.env } = {}) {
     }
   } catch (err) {
     return { ok: false, sitemaps: [], error: String(err?.message || err).slice(0, 300) }
+  }
+}
+
+/**
+ * Just the pages and what each took, in one call.
+ *
+ * fetchWebsiteData() already returns this and twenty-one other things. The
+ * index-health route needs ONLY this — to decide which URLs are worth an
+ * inspection first — and making it run the full pull to find out would put
+ * twenty-two Google calls in front of a button that already makes a hundred.
+ */
+export async function fetchPageTotals({ site, now = new Date(), days = 28, rowLimit = 500, env = process.env } = {}) {
+  const sa = serviceAccount(env)
+  const property = siteFor(site, env)
+  if (!sa || !property) return { ok: false, rows: [] }
+  try {
+    const token = await accessToken(sa)
+    const windows = searchWindows(now, { days })
+    const rows = await searchAnalytics(token, property, queryBody({ ...windows.current, dimensions: ['page'], rowLimit }))
+    return { ok: true, rows: normalizeRows(rows, ['page']) }
+  } catch (err) {
+    // Not fatal to the caller: without it the inspection order is the
+    // sitemap's own, which is worse but not wrong. An empty list here must
+    // never stop the pages being checked.
+    return { ok: false, rows: [], error: String(err?.message || err).slice(0, 300) }
   }
 }

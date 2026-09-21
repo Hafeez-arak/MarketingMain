@@ -18,7 +18,7 @@ import { normalizeRange, resolveRange, isCustom } from '../../src/lib/dateRange.
 //
 // /api/agent/search answers three calls' worth of questions and paints the
 // dashboard's Website card on every single visit to the home page. This route
-// makes seventeen Search Console calls and twelve GA4 reports. Putting both
+// makes twenty-two Search Console calls and twelve GA4 reports. Putting both
 // behind one handler with an `include` parameter would mean the cheap caller
 // pays for the expensive one's imports and the expensive one's bugs, and the
 // first slow dashboard would be traced back here.

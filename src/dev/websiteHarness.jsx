@@ -6,7 +6,9 @@ import { seoRecommendations } from '../lib/seoAdvice'
 import {
   websiteSummary, dailySeries, searchTypes, positionBands, pageRows, hostSplit,
   queryRows, countryRows, deviceRows, appearanceRows, sitemapHealth, queryCoverage,
+  imageSearch,
 } from '../lib/analytics/websiteAnalytics'
+import { indexHealth, normalizeInspection } from '../lib/agent/urlInspection'
 import { ga4Summary, platformArrivals, arrivalsSummary } from '../lib/agent/ga4'
 import fixture from './websiteFixture.json'
 import '../index.css'
@@ -27,7 +29,8 @@ import '../index.css'
 //     withholds the rare ones;
 //   · the homepage arrives as four separate URLs across two hosts;
 //   · queries are Arabic and English mixed, in one table, next to numbers;
-//   · image search is a fifth of all visibility and ranks at 39.9;
+//   · image search is a fifth of all visibility and ranks at 39.9, and the
+//     searches behind it are for OTHER companies' buildings;
 //   · the sitemap was last read in February 2025.
 //
 // Every one of those is a way the page can look wrong while the arithmetic is
@@ -220,8 +223,81 @@ const STATES = {
   Loading: { loading: true },
 }
 
+// ─── The two panels a recording cannot show ────────────────────────────────
+//
+// Index health and the written explanation are both asked for by a person, so
+// a recorded payload has nothing to say about them: on every real page load
+// they are `idle`, and the states that matter — forty seconds of waiting, a
+// workspace out of budget, a model that answered with nothing — cannot be
+// produced by looking at a live page at a convenient moment.
+//
+// The inspection rows are real answers from the live property, including the
+// one that matters most: Google has never seen /services/lighting-controls,
+// which is an entire business line with no page in the index.
+const INSPECTED = [
+  ['https://arak-sa.com/', 'PASS', 'Submitted and indexed', '2026-09-18T04:31:26Z', 1955,
+    ['https://aeroleads.com/in/ahmed', 'https://website-like.com/similar/arak-sa.com/', 'https://arak-sa.com/ar']],
+  ['https://arak-sa.com/services/smart-poles', 'PASS', 'Submitted and indexed', '2026-09-09T22:16:53Z', 255, ['https://arak-sa.com/']],
+  ['https://arak-sa.com/services/lighting-controls', 'NEUTRAL', 'URL is unknown to Google', '', 0, []],
+  ['https://arak-sa.com/ar/services/lighting-controls', 'NEUTRAL', 'URL is unknown to Google', '', 0, []],
+  ['https://arak-sa.com/services/lighting-design', 'NEUTRAL', 'URL is unknown to Google', '', 0, []],
+  ['https://arak-sa.com/ar/services/lighting-design', 'NEUTRAL', 'Discovered - currently not indexed', '', 0, []],
+  ['https://arak-sa.com/projects/ladun-center', 'NEUTRAL', 'Crawled - currently not indexed', '', 0, []],
+].map(([url, verdict, coverageState, lastCrawlTime, impressions, referringUrls]) => ({
+  ...normalizeInspection(url, {
+    indexStatusResult: {
+      verdict, coverageState, lastCrawlTime, referringUrls,
+      crawledAs: lastCrawlTime ? 'MOBILE' : undefined,
+      googleCanonical: verdict === 'PASS' ? url : '',
+      userCanonical: verdict === 'PASS' ? url : '',
+    },
+    richResultsResult: verdict === 'PASS' ? { verdict: 'PASS', detectedItems: [{ richResultType: 'Breadcrumbs' }] } : undefined,
+  }),
+  impressions,
+}))
+
+const INDEX_DONE = {
+  state: 'done',
+  error: '',
+  data: {
+    ok: true,
+    coverage: { inspected: INSPECTED.length, sitemap: 88, withImpressions: 50, capped: false },
+    sitemap: { sources: [{ path: 'https://arak-sa.com/sitemap.xml', ok: true, error: '' }], found: 88, error: '' },
+    health: indexHealth(INSPECTED, { site: 'sc-domain:arak-sa.com' }),
+  },
+}
+
+const POINTS = [
+  { text: 'Almost all clicks come from people already searching for Arak by name; 899 non-brand appearances produced three clicks.', kind: 'problem' },
+  { text: 'Google has never seen 24 of our pages, including every lighting services page — so the homepage ranks for everything instead.', kind: 'opportunity' },
+  { text: '"Lighting consultant riyadh" showed us 180 times at around position 18 with no clicks — real demand sitting just off page one.', kind: 'opportunity' },
+]
+
+const ON_DEMAND = {
+  'Neither asked for (every real page load)': {},
+  'Explanation written': { explain: { state: 'done', points: POINTS, error: '', cost: 0.0227 } },
+  'Explanation being written': { explain: { state: 'loading', points: [] } },
+  'Explanation: nothing to say': { explain: { state: 'done', points: [], error: '' } },
+  'Explanation: workspace out of budget': {
+    explain: {
+      state: 'error', points: [], capped: true,
+      error: 'This workspace has spent $15.02 of its $15.00 monthly cap.',
+    },
+  },
+  'Index checked': { index: INDEX_DONE },
+  'Index being checked': { index: { state: 'loading', data: null, error: '' } },
+  'Index check refused': {
+    index: {
+      state: 'error', data: null,
+      error: "User does not have sufficient permission for site 'sc-domain:arak-sa.com'.",
+    },
+  },
+  'Both answered': { explain: { state: 'done', points: POINTS, error: '', cost: 0.0227 }, index: INDEX_DONE },
+}
+
 export function WebsiteHarness() {
   const [name, setName] = useState(Object.keys(STATES)[0])
+  const [onDemand, setOnDemand] = useState(Object.keys(ON_DEMAND)[0])
   const [days, setDays] = useState(28)
   const state = STATES[name]
   const search = state.search
@@ -258,6 +334,19 @@ export function WebsiteHarness() {
     sitemaps: search?.sitemaps ? sitemapHealth(search.sitemaps, { site: search.site }) : [],
     recommendations: usable ? seoRecommendations({ ...search, limit: 10 }) : [],
     ga4Summary: ga4?.ok && ga4?.configured ? ga4Summary(ga4) : null,
+
+    image: usable ? imageSearch({
+      imageQueries: search.imageQueries, imagePages: search.imagePages,
+      brandTerms: search.brandTerms, lines: search.lines, types: search.types,
+    }) : null,
+
+    // The panels a person presses. `idle` is the default because it is what
+    // every real page load shows.
+    index: { state: 'idle', data: null, error: '', ...(ON_DEMAND[onDemand].index || {}) },
+    explain: { state: 'idle', points: [], error: '', cost: 0, ...(ON_DEMAND[onDemand].explain || {}) },
+    canExplain: true,
+    runIndexHealth: () => {},
+    runExplain: () => {},
   }
 
   return (
@@ -269,6 +358,11 @@ export function WebsiteHarness() {
             <select value={name} onChange={e => setName(e.target.value)}
               className="text-xs border border-border bg-white px-2 py-1.5">
               {Object.keys(STATES).map(k => <option key={k} value={k}>{k}</option>)}
+            </select>
+            <span className="text-xs font-semibold uppercase tracking-wide text-text-tertiary ml-2">On demand</span>
+            <select value={onDemand} onChange={e => setOnDemand(e.target.value)}
+              className="text-xs border border-border bg-white px-2 py-1.5">
+              {Object.keys(ON_DEMAND).map(k => <option key={k} value={k}>{k}</option>)}
             </select>
           </div>
           <WebsiteAnalytics {...props} />

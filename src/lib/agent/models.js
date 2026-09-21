@@ -53,6 +53,14 @@ export const JOBS = {
   synthesise:  'claude-opus-5',   // writes the brief people read
   chat:        'claude-opus-5',   // the assistant answering a real question
   review:      'claude-opus-5',   // critiquing a draft before it goes out
+  // Explaining a screen of numbers in three sentences. Small in tokens and
+  // large in consequence: it is the first thing read on the page, it sits
+  // directly above the figures it describes, and it is read by someone who
+  // will not check it. Judgement about what matters this month is the whole
+  // job, so it goes where judgement goes. Measured at $0.023 a press against
+  // the real payload on 2026-09-20 — Sonnet would save a cent and buy a
+  // worse first paragraph.
+  explain:     'claude-opus-5',
 
   // ── Sonnet: the long middle ──
   search:      'claude-sonnet-5', // the bounded read-and-gather loop
