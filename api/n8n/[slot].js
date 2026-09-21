@@ -157,6 +157,18 @@ export default async function handler(req, res) {
       })
     }
 
+    // A Code node that throws (the Webhook Secret Guard included, and any
+    // failure outside the publish workflow's own try/catch) makes n8n
+    // answer 500 {"message":"Error in workflow"} - no `error` field, so
+    // callers could only say "failed (500)". Name it.
+    if (upstream.status === 500 && /Error in workflow/i.test(text)) {
+      return res.status(502).json({
+        error: 'n8n hit an error before the workflow could answer. Most likely N8N_WEBHOOK_SECRET ' +
+               'here does not match the one n8n runs with, or the workflow just crashed - open ' +
+               'n8n > Executions to see which. Nothing was published.',
+      })
+    }
+
     const type = upstream.headers.get('content-type') || 'application/json'
     res.status(upstream.status)
     res.setHeader('Content-Type', type)
