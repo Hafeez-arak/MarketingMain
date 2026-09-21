@@ -23,7 +23,7 @@ import { GenerateMoreModal, CalendarView } from './plannerParts'
 import { momentsInRange, dbIdeaToDraft } from '../../lib/campaignPlan'
 import { ReferencePicker } from '../../components/ReferencePicker'
 import { PostComposer } from '../../components/composer/PostComposer'
-import { composerFromIdea, slidesFromComposerMedia } from '../../lib/composerState'
+import { composerFromIdea, slidesFromComposerMedia, flatOptionsFromComposer } from '../../lib/composerState'
 import {
   createPlan, insertIdeas, updateIdea, setAllIdeaStatus, deleteIdea, updatePlan, markIdeasProcessing,
   markIdeasGenerated, fetchPastIdeas, fetchPlanWithIdeas, markIdeasDrafting, fetchIdeaDrafts, markIdeaDraftFailed,
@@ -988,11 +988,14 @@ export function CampaignPlanner() {
     const legacy = legacyFieldsFor(nextSlides)
     const stale = pictureChanged ? staleCaptionPatch(idea) : { db: {}, local: {} }
     const aspectRatio = defaultAspectRatio(state.platform, state.format)
-    const firstComment = state.options?.[state.platform]?.firstComment || ''
+    // plan_ideas.platform_options is flat (scoped to the idea's one active
+    // platform), unlike generated_posts' — see composerFromIdea's comment.
+    const flatOptions = flatOptionsFromComposer(state)
+    const firstComment = flatOptions.firstComment || ''
     const result = await updateIdea(accessToken, idea.id, {
       platform: state.platform, format: state.format, aspect_ratio: aspectRatio,
       hashtags: state.hashtags || '', first_comment: firstComment,
-      platform_options: state.options || {},
+      platform_options: flatOptions,
       copy_mode: own ? 'own' : 'ai',
       caption_en: own ? state.caption.trim() : '',
       caption_ar: own ? (state.captionAr || '').trim() : '',
@@ -1006,7 +1009,7 @@ export function CampaignPlanner() {
       ...idea,
       platform: state.platform, postFormat: state.format, aspectRatio,
       hashtags: state.hashtags || '', firstComment,
-      platformOptions: state.options || {},
+      platformOptions: flatOptions,
       copyMode: own ? 'own' : 'ai',
       captionEn: own ? state.caption.trim() : '', captionAr: own ? (state.captionAr || '').trim() : '',
       slides: nextSlides,

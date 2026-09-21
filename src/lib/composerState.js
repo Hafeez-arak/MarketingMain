@@ -90,27 +90,41 @@ export function composerFromPost(row, { platform = row?.platform } = {}) {
 // same screen a real post is composed in rather than a second, form-shaped
 // editor. `copyMode`/`captionAr` are extra keys with no equivalent on a real
 // post — harmless there, since nothing reads them unless PostComposer is
-// rendered with variant="idea". `options` is passed straight through: an
-// idea's `platform_options` column is deliberately the same shape as
-// generated_posts' (see plan_ideas' schema comment), so first comment,
-// collaborators, alt text and the AI-disclosure toggle round-trip with no
-// translation layer, same as composerFromPost.
+// rendered with variant="idea".
+//
+// `platform_options` is NOT the same shape on the two tables. On
+// generated_posts it is keyed by platform (`{instagram:{...}}`), because a
+// draft can be retargeted between platforms without losing either set — see
+// composerFromPost above. On plan_ideas it is FLAT, scoped to the idea's one
+// active platform: the LinkedIn poll editor already reads and writes it as
+// `idea.platformOptions.poll`, not `.linkedin.poll`. So it is wrapped here
+// under the idea's own platform, purely so optionsFor/setOption — built for
+// the keyed shape every panel already uses — read and write it exactly like
+// a real post's; composerPatchFromIdea below unwraps it again on save.
 export function composerFromIdea(idea) {
   if (!idea) return emptyComposer()
   const media = slidesFor(idea).map(s => ({
     url: s.url, type: s.type, mimeType: '', bytes: null, seconds: null,
   }))
   const own = idea.copyMode === 'own'
+  const platform = idea.platform || 'instagram'
   return {
-    ...emptyComposer(idea.platform || 'instagram'),
-    format: idea.postFormat || defaultFormat(idea.platform || 'instagram'),
+    ...emptyComposer(platform),
+    format: idea.postFormat || defaultFormat(platform),
     caption: own ? (idea.captionEn || '') : '',
     captionAr: own ? (idea.captionAr || '') : '',
     hashtags: idea.hashtags || '',
     media,
-    options: idea.platformOptions && typeof idea.platformOptions === 'object' ? idea.platformOptions : {},
+    options: { [platform]: (idea.platformOptions && typeof idea.platformOptions === 'object') ? idea.platformOptions : {} },
     copyMode: own ? 'own' : 'ai',
   }
+}
+
+// The flat platform_options to write back to plan_ideas for whichever
+// platform is selected when Save is pressed — the reverse of the wrapping
+// composerFromIdea does above.
+export function flatOptionsFromComposer(state) {
+  return (state.options && state.options[state.platform]) || {}
 }
 
 // Rebuilds an idea's slide list from the composer's plain {url, type} media

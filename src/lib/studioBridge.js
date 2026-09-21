@@ -643,18 +643,45 @@ function manualMediaFor(idea) {
 // puts its link) and, on a poll, the poll itself — which must be complete,
 // because LinkedIn cannot edit a poll after it is published. { value } to
 // write, {} for nothing, { error } to refuse the row.
+// Only the idea's OWN platform carries anything through: `idea.platformOptions`
+// is flat, scoped to whichever platform tab the Pictures-step popup was last
+// showing (see composerFromIdea's comment in lib/composerState.js), so
+// applying it to a SECONDARY target in `idea.platforms` would put one
+// platform's fields on another platform's row.
+//
+// Wrapped under `{ [platform]: value }` because that is the shape every
+// READER of generated_posts.platform_options expects — composerFromPost,
+// optionsFor/setOption, Approvals' attentionReason — the same shape
+// ComposerHost writes when a post is composed by hand. Before this, only a
+// LinkedIn poll was ever forwarded here (everything else silently vanished
+// at finalize — a TikTok idea's privacy_level and consent included, so
+// booking always fails validateComposer and the post sits in Needs
+// attention forever), and what WAS forwarded was written flat instead of
+// keyed, which is its own bug: reopening a plan-finalized LinkedIn poll in
+// the composer read `state.options.linkedin`, found nothing, and silently
+// dropped it.
+//
+// consent_confirmed is synthesised rather than read from the idea: it is a
+// UI checkbox meant to be ticked immediately before ONE post goes out, and a
+// month-ahead plan has no such moment. The app already takes this stance for
+// TikTok's other two consent flags — tiktokSettings() sends
+// content_preview_confirmed/express_consent_given as true unconditionally —
+// so the operator approving a plan at the Captions step is treated as that
+// same review, rather than leaving every TikTok post permanently unbookable.
 function platformOptionsFor(platform, format, idea) {
-  if (platform !== 'linkedin') return {}
-  const value = {}
-  if ((idea.firstComment || '').trim()) value.firstComment = idea.firstComment.trim()
+  if (platform !== idea.platform) return {}
+  const flat = (idea.platformOptions && typeof idea.platformOptions === 'object') ? idea.platformOptions : {}
+  const value = { ...flat }
+  if (platform === 'tiktok') value.consent_confirmed = true
+  if ((idea.firstComment || '').trim() && !value.firstComment) value.firstComment = idea.firstComment.trim()
   if (format.id === 'poll') {
-    const poll = idea.platformOptions?.poll
+    const poll = flat.poll
     const question = String(poll?.question || '').trim()
     const answers = (poll?.options || []).map(o => String(o || '').trim()).filter(Boolean)
     if (!question || answers.length < 2) return { error: 'the poll needs a question and at least two answers.' }
     value.poll = { question, options: answers, duration: poll.duration || 'SEVEN_DAYS' }
   }
-  return Object.keys(value).length ? { value } : {}
+  return Object.keys(value).length ? { value: { [platform]: value } } : {}
 }
 
 // Write one post row per idea per target platform.

@@ -40,11 +40,24 @@ describe('publishIdeasAsPosts — LinkedIn', () => {
     })
   })
 
-  it('carries a complete poll and the first comment into platform_options', async () => {
+  it('carries a complete poll and the first comment into platform_options, keyed by platform', async () => {
     const poll = { question: 'Which matters most?', options: ['Energy', 'Glare'], duration: 'THREE_DAYS' }
     await publishIdeasAsPosts('ws-1', 'tok', 'plan-1', [idea({ postFormat: 'poll', firstComment: 'Details: arak-sa.com', platformOptions: { poll } })])
     expect(writes[0].body.format).toBe('poll')
-    expect(writes[0].body.platform_options).toEqual({ firstComment: 'Details: arak-sa.com', poll })
+    // Keyed by platform, not flat — the same shape composerFromPost and every
+    // other reader of generated_posts.platform_options expects.
+    expect(writes[0].body.platform_options).toEqual({ linkedin: { firstComment: 'Details: arak-sa.com', poll } })
+  })
+
+  it('carries a TikTok idea\'s privacy level through, with consent synthesised for the unattended booking path', async () => {
+    await publishIdeasAsPosts('ws-1', 'tok', 'plan-1', [idea({
+      platform: 'tiktok', postFormat: 'video', mediaType: 'video', previewVideoUrl: 'https://cdn.test/v.mp4',
+      platformOptions: { privacy_level: 'PUBLIC_TO_EVERYONE', allow_comment: false },
+    })])
+    expect(writes[0].body.platform).toBe('tiktok')
+    expect(writes[0].body.platform_options).toEqual({
+      tiktok: { privacy_level: 'PUBLIC_TO_EVERYONE', allow_comment: false, consent_confirmed: true },
+    })
   })
 
   it('refuses a poll with no question rather than write a post that cannot publish', async () => {
