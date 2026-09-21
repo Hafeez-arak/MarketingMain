@@ -1,6 +1,7 @@
 import { defaultFormat, getFormat, limitsFor, zernioFormatFields } from './postFormats'
 import { PLATFORM_META } from './utils'
 import { mediaOfPost, MAX_CAROUSEL_ITEMS, isMixed, countsOf } from './mediaOrder'
+import { slidesFor } from './planSlides'
 
 // ─── Composer state, as pure data ──────────────────────────────────────────
 // Everything the create-post screen knows, with no React in it. The screen is
@@ -82,6 +83,44 @@ export function composerFromPost(row, { platform = row?.platform } = {}) {
     postId: row.id,
     postTable: row.post_table || 'generated_posts',
   }
+}
+
+// ── Opening a plan idea in the composer ────────────────────────────────────
+// The Pictures step's Edit/Add images button, so an idea is shaped in the
+// same screen a real post is composed in rather than a second, form-shaped
+// editor. `copyMode`/`captionAr` are extra keys with no equivalent on a real
+// post — harmless there, since nothing reads them unless PostComposer is
+// rendered with variant="idea". `options` is passed straight through: an
+// idea's `platform_options` column is deliberately the same shape as
+// generated_posts' (see plan_ideas' schema comment), so first comment,
+// collaborators, alt text and the AI-disclosure toggle round-trip with no
+// translation layer, same as composerFromPost.
+export function composerFromIdea(idea) {
+  if (!idea) return emptyComposer()
+  const media = slidesFor(idea).map(s => ({
+    url: s.url, type: s.type, mimeType: '', bytes: null, seconds: null,
+  }))
+  const own = idea.copyMode === 'own'
+  return {
+    ...emptyComposer(idea.platform || 'instagram'),
+    format: idea.postFormat || defaultFormat(idea.platform || 'instagram'),
+    caption: own ? (idea.captionEn || '') : '',
+    captionAr: own ? (idea.captionAr || '') : '',
+    hashtags: idea.hashtags || '',
+    media,
+    options: idea.platformOptions && typeof idea.platformOptions === 'object' ? idea.platformOptions : {},
+    copyMode: own ? 'own' : 'ai',
+  }
+}
+
+// Rebuilds an idea's slide list from the composer's plain {url, type} media
+// array, keeping each url's existing source (studio/upload/library) where
+// that url was already on the idea and tagging anything new as 'upload' —
+// the same rule the Pictures step's own picker already used, generalised to
+// the composer's reorder/remove instead of only append.
+export function slidesFromComposerMedia(existingSlides, media) {
+  const by = new Map((existingSlides || []).map(s => [s.url, s]))
+  return (media || []).map(m => by.get(m.url) || { url: m.url, type: m.type || 'image', source: 'upload' })
 }
 
 // Defaults per platform. Applied when a platform is first touched rather than

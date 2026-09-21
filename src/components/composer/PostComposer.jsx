@@ -175,11 +175,21 @@ function ScheduleRow({ value, onChange }) {
   )
 }
 
+// `variant="idea"` is the Campaign Planner's Pictures step, editing a
+// plan_idea rather than a real, publishable post — this is deliberately the
+// SAME screen rather than a second composer, so a caption written here and
+// one written from the Instagram page never drift into two different UIs.
+// What changes is only what an idea genuinely has no room for yet: which
+// connected account it goes out as (decided when the plan is finalized, not
+// here), a campaign, team-only tags, and any notion of drafting/scheduling/
+// publishing right now. `onSaveIdea` replaces the whole draft/schedule/
+// publish footer with one Save.
 export function PostComposer({
   open, platform = 'instagram', accounts = [], accountsLoading = false, campaigns = [], workspaceId,
   initial, onClose, onSaveDraft, onSchedule, onPublish, busy = false,
-  captionAssist,
+  captionAssist, variant = 'post', onSaveIdea, onDesignInStudio, saveError,
 }) {
+  const isIdea = variant === 'idea'
   const [state, setState] = useState(() => ({ ...emptyComposer(platform), ...(initial || {}) }))
   const [picking, setPicking] = useState(false)
   const [scheduling, setScheduling] = useState(false)
@@ -190,7 +200,11 @@ export function PostComposer({
   const caps    = capabilities(state)
   const stats   = captionStats(state)
   const formats = formatsFor(state.platform)
-  const check   = useMemo(() => validateComposer(state), [state])
+  // Publish validation assumes a real account and an imminent send — neither
+  // is true of an idea being shaped ahead of the Captions step, so it simply
+  // doesn't run there.
+  const check   = useMemo(() => (isIdea ? { errors: [], warnings: [], ok: true } : validateComposer(state)), [state, isIdea])
+  const ownCaption = state.copyMode !== 'ai'
 
   if (!open) return null
 
@@ -254,21 +268,25 @@ export function PostComposer({
         <div className="flex-1 flex flex-col lg:flex-row min-h-0">
           <div className="flex-1 overflow-y-auto min-w-0">
 
-            <Section>
-              <FieldLabel hint="(optional)">Campaign</FieldLabel>
-              <select value={state.campaignId} onChange={e => patch({ campaignId: e.target.value })}
-                className="w-full border border-border px-3 py-2 text-sm bg-white text-text focus:outline-none focus:border-amber-600">
-                <option value="">No campaign</option>
-                {campaigns.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select>
-            </Section>
+            {!isIdea && (
+              <Section>
+                <FieldLabel hint="(optional)">Campaign</FieldLabel>
+                <select value={state.campaignId} onChange={e => patch({ campaignId: e.target.value })}
+                  className="w-full border border-border px-3 py-2 text-sm bg-white text-text focus:outline-none focus:border-amber-600">
+                  <option value="">No campaign</option>
+                  {campaigns.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              </Section>
+            )}
 
-            <Section>
-              <FieldLabel>Publish to</FieldLabel>
-              <AccountPicker accounts={platformAccounts} selected={state.accountIds}
-                platform={state.platform} loading={accountsLoading}
-                onChange={ids => patch({ accountIds: ids })} />
-            </Section>
+            {!isIdea && (
+              <Section>
+                <FieldLabel>Publish to</FieldLabel>
+                <AccountPicker accounts={platformAccounts} selected={state.accountIds}
+                  platform={state.platform} loading={accountsLoading}
+                  onChange={ids => patch({ accountIds: ids })} />
+              </Section>
+            )}
 
             <Section>
               <div className="flex items-center justify-between mb-3">
@@ -287,37 +305,87 @@ export function PostComposer({
                 </select>
               </div>
 
-              <textarea ref={captionRef} rows={6} value={state.caption}
-                onChange={e => patch({ caption: e.target.value })}
-                placeholder="Write your caption, then customise it for each platform"
-                className="w-full border border-border px-3 py-2 text-sm bg-white text-text resize-y focus:outline-none focus:border-amber-600" />
-
-              <div className="flex items-center justify-between mt-1.5 relative">
-                <span className={`text-xs ${stats.over ? 'text-red-600 font-semibold' : 'text-text-tertiary'}`}>
-                  {stats.used.toLocaleString()} / {stats.limit.toLocaleString()}
-                </span>
-                <div className="flex items-center gap-3">
-                  {captionAssist && (
-                    <button type="button" onClick={captionAssist}
-                      className="text-xs text-text-secondary hover:text-amber-700 flex items-center gap-1">
-                      <span aria-hidden>✨</span> Enhance with AI
-                    </button>
-                  )}
-                  <button type="button" onClick={() => setShowEmoji(v => !v)}
-                    className="text-text-tertiary hover:text-text" aria-label="Insert emoji">☺</button>
-                  <button type="button" onClick={() => hashtagRef.current?.focus()}
-                    className="text-text-tertiary hover:text-text font-semibold" aria-label="Hashtags">#</button>
-                </div>
-
-                {showEmoji && (
-                  <div className="absolute right-0 top-6 z-10 bg-white border border-border shadow-lg p-2 grid grid-cols-8 gap-1 w-64">
-                    {EMOJI.map(e => (
-                      <button key={e} type="button" onClick={() => insertEmoji(e)}
-                        className="text-lg hover:bg-surface-subtle rounded">{e}</button>
+              {/* Who writes it — an idea's caption may not exist yet, and
+                  asking here is what lets "AI suggests 3" mean something: the
+                  Captions step drafts those 3 from whichever picture this
+                  popup ends up saving, so this choice has to be made before
+                  that picture is even final. A real post being composed by
+                  hand has no such later step, so the choice doesn't apply. */}
+              {isIdea && (
+                <div className="mb-3 border border-border p-3 space-y-2.5">
+                  <p className="text-xs font-medium text-text-secondary">Who writes the caption?</p>
+                  <div className="flex gap-2">
+                    {[
+                      { id: 'ai',  label: 'AI suggests 3', hint: 'Written from the picture, once it’s ready — you pick one' },
+                      { id: 'own', label: "I'll write it",  hint: 'Posted exactly as typed' },
+                    ].map(o => (
+                      <button key={o.id} type="button" onClick={() => patch({ copyMode: o.id })}
+                        className={`flex-1 text-left px-3 py-2 border transition-all ${
+                          ownCaption === (o.id === 'own')
+                            ? 'bg-amber-600 text-white border-amber-600'
+                            : 'bg-white border-border text-text-secondary hover:border-amber-400'}`}>
+                        <span className="block text-sm font-medium">{o.label}</span>
+                        <span className={`block text-[10px] leading-snug mt-0.5 ${ownCaption === (o.id === 'own') ? 'opacity-80' : 'text-text-tertiary'}`}>{o.hint}</span>
+                      </button>
                     ))}
                   </div>
-                )}
-              </div>
+                </div>
+              )}
+
+              {(!isIdea || ownCaption) && (
+                <>
+                  <textarea ref={captionRef} rows={isIdea ? 4 : 6} value={state.caption}
+                    onChange={e => patch({ caption: e.target.value })}
+                    placeholder="Write your caption, then customise it for each platform"
+                    className="w-full border border-border px-3 py-2 text-sm bg-white text-text resize-y focus:outline-none focus:border-amber-600" />
+
+                  {/* Arabic gets its own box rather than being detected from
+                      the text: brands here post bilingually, and folding both
+                      into one field would force a choice publishing doesn't
+                      make. Idea-only — a real post's composer has never had a
+                      language split, and adding one is a bigger change than
+                      this popup is for. */}
+                  {isIdea && (
+                    <textarea rows={3} dir="rtl" value={state.captionAr || ''}
+                      onChange={e => patch({ captionAr: e.target.value })}
+                      placeholder="النص العربي (اختياري)"
+                      className="w-full mt-2 border border-border px-3 py-2 text-sm bg-white text-text resize-y focus:outline-none focus:border-amber-600" />
+                  )}
+
+                  <div className="flex items-center justify-between mt-1.5 relative">
+                    <span className={`text-xs ${stats.over ? 'text-red-600 font-semibold' : 'text-text-tertiary'}`}>
+                      {stats.used.toLocaleString()} / {stats.limit.toLocaleString()}
+                    </span>
+                    <div className="flex items-center gap-3">
+                      {captionAssist && (
+                        <button type="button" onClick={captionAssist}
+                          className="text-xs text-text-secondary hover:text-amber-700 flex items-center gap-1">
+                          <span aria-hidden>✨</span> Enhance with AI
+                        </button>
+                      )}
+                      <button type="button" onClick={() => setShowEmoji(v => !v)}
+                        className="text-text-tertiary hover:text-text" aria-label="Insert emoji">☺</button>
+                      <button type="button" onClick={() => hashtagRef.current?.focus()}
+                        className="text-text-tertiary hover:text-text font-semibold" aria-label="Hashtags">#</button>
+                    </div>
+
+                    {showEmoji && (
+                      <div className="absolute right-0 top-6 z-10 bg-white border border-border shadow-lg p-2 grid grid-cols-8 gap-1 w-64">
+                        {EMOJI.map(e => (
+                          <button key={e} type="button" onClick={() => insertEmoji(e)}
+                            className="text-lg hover:bg-surface-subtle rounded">{e}</button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+
+              {isIdea && !ownCaption && (
+                <p className="text-xs text-text-tertiary border border-dashed border-border px-3 py-2.5">
+                  AI will draft 3 captions from the picture once it's ready — pick one (or edit it) on the Captions step.
+                </p>
+              )}
 
               <div className="mt-3">
                 <FieldLabel hint="counted toward the caption limit">Hashtags</FieldLabel>
@@ -357,14 +425,16 @@ export function PostComposer({
               <LinkedInPanel state={state} setState={setState} caps={caps} />
             )}
 
-            <Section className="border-b-0">
-              <FieldLabel hint="(optional) — only your team sees these">Tags</FieldLabel>
-              <input
-                value={state.tags.join(', ')}
-                onChange={e => patch({ tags: e.target.value.split(',').map(t => t.trim()).filter(Boolean) })}
-                placeholder="ramadan, product-launch"
-                className="w-full border border-border px-3 py-2 text-sm bg-white text-text focus:outline-none focus:border-amber-600" />
-            </Section>
+            {!isIdea && (
+              <Section className="border-b-0">
+                <FieldLabel hint="(optional) — only your team sees these">Tags</FieldLabel>
+                <input
+                  value={state.tags.join(', ')}
+                  onChange={e => patch({ tags: e.target.value.split(',').map(t => t.trim()).filter(Boolean) })}
+                  placeholder="ramadan, product-launch"
+                  className="w-full border border-border px-3 py-2 text-sm bg-white text-text focus:outline-none focus:border-amber-600" />
+              </Section>
+            )}
           </div>
 
           <PreviewColumn state={state} accounts={platformAccounts} />
@@ -372,55 +442,68 @@ export function PostComposer({
 
         {/* Footer */}
         <div className="border-t border-border px-6 py-4 shrink-0 bg-white">
-          {blocked && (
+          {!isIdea && blocked && (
             <div className="mb-3 border border-amber-300 bg-amber-50 px-3 py-2.5">
               <p className="text-xs font-semibold text-amber-900 mb-0.5">Drafts only</p>
               <p className="text-xs text-amber-800">{protectionReason(blocked)}</p>
             </div>
           )}
 
-          {(check.errors.length > 0 || check.warnings.length > 0) && (
+          {!isIdea && (check.errors.length > 0 || check.warnings.length > 0) && (
             <div className="mb-3 space-y-1">
               {check.errors.map((e, i) => <p key={i} className="text-xs text-red-600">{e}</p>)}
               {check.warnings.map((w, i) => <p key={i} className="text-xs text-amber-700">{w}</p>)}
             </div>
           )}
 
-          {scheduling && (
+          {!isIdea && scheduling && (
             <div className="mb-3">
               <ScheduleRow value={state.scheduledFor} onChange={v => patch({ scheduledFor: v })} />
             </div>
           )}
 
-          <div className="flex items-center justify-end gap-2 flex-wrap">
-            <Button variant="ghost" size="sm" disabled={busy}
-              onClick={() => onSaveDraft?.(state)}>
-              Save as draft
-            </Button>
+          {isIdea && saveError && <p className="mb-3 text-xs text-red-600">{saveError}</p>}
 
-            {/* Scheduling is a publish with a delay, so it is refused on a
-                protected account for the same reason Post now is. Save as
-                draft stays available deliberately: composing and reviewing a
-                LinkedIn post is the whole point of this screen — only reaching
-                the platform is off. */}
-            {!scheduling ? (
-              <Button variant="secondary" size="sm" disabled={busy || !!blocked}
-                onClick={() => setScheduling(true)}>
-                Schedule for later
+          {isIdea ? (
+            <div className="flex items-center justify-end gap-2 flex-wrap">
+              <Button variant="ghost" size="sm" disabled={busy} onClick={onClose}>Cancel</Button>
+              <Button variant="primary" size="sm"
+                disabled={busy || (ownCaption && !(state.caption || '').trim() && !(state.captionAr || '').trim())}
+                onClick={() => onSaveIdea?.(state)}>
+                {busy ? <Spinner size="sm" /> : 'Save'}
               </Button>
-            ) : (
-              <Button variant="secondary" size="sm"
-                disabled={busy || !!blocked || !check.ok || !state.scheduledFor}
-                onClick={() => onSchedule?.(state)}>
-                {busy ? <Spinner size="sm" /> : 'Confirm schedule'}
+            </div>
+          ) : (
+            <div className="flex items-center justify-end gap-2 flex-wrap">
+              <Button variant="ghost" size="sm" disabled={busy}
+                onClick={() => onSaveDraft?.(state)}>
+                Save as draft
               </Button>
-            )}
 
-            <Button variant="primary" size="sm" disabled={busy || !!blocked || !check.ok}
-              onClick={() => onPublish?.(state)}>
-              {busy ? <Spinner size="sm" /> : 'Post now'}
-            </Button>
-          </div>
+              {/* Scheduling is a publish with a delay, so it is refused on a
+                  protected account for the same reason Post now is. Save as
+                  draft stays available deliberately: composing and reviewing a
+                  LinkedIn post is the whole point of this screen — only reaching
+                  the platform is off. */}
+              {!scheduling ? (
+                <Button variant="secondary" size="sm" disabled={busy || !!blocked}
+                  onClick={() => setScheduling(true)}>
+                  Schedule for later
+                </Button>
+              ) : (
+                <Button variant="secondary" size="sm"
+                  disabled={busy || !!blocked || !check.ok || !state.scheduledFor}
+                  onClick={() => onSchedule?.(state)}>
+                  {busy ? <Spinner size="sm" /> : 'Confirm schedule'}
+                </Button>
+              )}
+
+              <Button variant="primary" size="sm" disabled={busy || !!blocked || !check.ok}
+                onClick={() => onPublish?.(state)}>
+                {busy ? <Spinner size="sm" /> : 'Post now'}
+              </Button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -430,6 +513,7 @@ export function PostComposer({
         onSelect={addMedia}
         multiple={caps.carousel}
         kind={formatMedia === 'video' ? 'video' : 'all'}
+        onDesignInStudio={onDesignInStudio}
       />
     </div>
   )

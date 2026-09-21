@@ -12,7 +12,7 @@
 // owns the idea, the modal is how it gets edited.
 
 import { useState } from 'react'
-import { Button, Input, Textarea, Select, Spinner, Toggle, Modal, PostImage } from '../../components/ui/index'
+import { Button, Input, Textarea, Select, Spinner, Toggle, Modal } from '../../components/ui/index'
 import { formatDate } from '../../lib/utils'
 import {
   formatsFor, defaultFormat, aspectRatiosFor, defaultAspectRatio, slideRange,
@@ -287,14 +287,7 @@ export function IdeaCard({ idea, index, accessToken, workspaceId, onChange, onRe
   )
 }
 
-export function IdeaEditModal({
-  idea, tones, saving, saveError, onClose, onSave, planPlatforms = [], todayKey = '',
-  // Pictures-step extras — only the Pictures step's IdeaEditModal passes
-  // these, so the review step (which is deliberately about the brief, not
-  // the picture) renders exactly as it always has.
-  mediaUrls = [], mediaStatus, ownMedia = false, sessionExists = false,
-  onAddMedia, onOpenStudio, onResetMedia,
-}) {
+export function IdeaEditModal({ idea, tones, saving, saveError, onClose, onSave, planPlatforms = [], todayKey = '' }) {
   // The platform decides which formats exist, so it is chosen first and a
   // change resets the format to that platform's default.
   const [platform, setPlatform] = useState(idea.platform || planPlatforms[0] || 'instagram')
@@ -389,34 +382,7 @@ export function IdeaEditModal({
             label="Include a caption with this post" />
         )}
 
-        {showsMediaFields && onAddMedia && (
-          <div className="rounded-xl border border-border p-3 space-y-2.5">
-            <p className="text-xs font-medium text-text-secondary">Picture{mediaUrls.length > 1 ? 's' : ''}</p>
-            {mediaUrls.length > 0 && (
-              <div className="flex gap-2 flex-wrap">
-                {mediaUrls.map((url, i) => (
-                  <div key={`${url}-${i}`} className="w-16 h-16 rounded-lg overflow-hidden border border-border flex-shrink-0">
-                    <PostImage src={url} alt="" className="w-full h-full object-cover" />
-                  </div>
-                ))}
-              </div>
-            )}
-            <div className="flex items-center gap-2 flex-wrap">
-              <Button size="xs" variant="secondary" onClick={onAddMedia}>{ownMedia ? 'Change image' : 'Use my image'}</Button>
-              {onOpenStudio && (
-                <Button size="xs" variant="secondary" onClick={onOpenStudio}>
-                  {mediaStatus === 'ready' ? 'Edit in Studio' : sessionExists ? 'Back to Studio' : 'Make in Studio'}
-                </Button>
-              )}
-              {mediaStatus === 'ready' && onResetMedia && (
-                <button type="button" onClick={onResetMedia}
-                  title="Start this one over — the picture is unset, the Studio session is kept"
-                  className="text-[11px] text-text-tertiary hover:text-red-500 transition-colors ml-auto">Reset</button>
-              )}
-            </div>
-          </div>
-        )}
-
+        {/* Pre-fills the Studio composer if this idea's picture is made there. */}
         {showsMediaFields && (
           <Textarea
             label={isVideo ? 'Your vision for the video (optional)' : 'Your vision for the image (optional)'}

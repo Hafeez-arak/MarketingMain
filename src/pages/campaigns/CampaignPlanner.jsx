@@ -15,13 +15,15 @@ import {
 } from '../../lib/postFormats'
 import { groupByWeek, monthOptions, normalizeAiIdea, distributeDates, formatTime, DEFAULT_POST_TIME, pollProblems, firstPlaceableDay } from './planModel'
 import { brandTodayKey } from '../../lib/brandTime'
-import { GOALS, OTHER_GOAL, isCustomGoal, WEEKDAYS, DEFAULT_DRAFT, isUntouchedSelection, PLATFORMS, targetLabel, IG_TONES } from './planConstants'
+import { GOALS, OTHER_GOAL, isCustomGoal, WEEKDAYS, DEFAULT_DRAFT, isUntouchedSelection, PLATFORMS, targetLabel } from './planConstants'
 import { isProtectedPlatform } from '../../lib/platformSafety'
-import { IdeaCard, IdeaEditModal } from './IdeaCard'
+import { IdeaCard } from './IdeaCard'
 import { CaptionCard } from './CaptionCard'
 import { GenerateMoreModal, CalendarView } from './plannerParts'
 import { momentsInRange, dbIdeaToDraft } from '../../lib/campaignPlan'
 import { ReferencePicker } from '../../components/ReferencePicker'
+import { PostComposer } from '../../components/composer/PostComposer'
+import { composerFromIdea, slidesFromComposerMedia } from '../../lib/composerState'
 import {
   createPlan, insertIdeas, updateIdea, setAllIdeaStatus, deleteIdea, updatePlan, markIdeasProcessing,
   markIdeasGenerated, fetchPastIdeas, fetchPlanWithIdeas, markIdeasDrafting, fetchIdeaDrafts, markIdeaDraftFailed,
@@ -30,7 +32,7 @@ import {
 } from '../../lib/contentPlans'
 import { ResearchIdeaPicker } from './ResearchIdeaPicker'
 import { BrandContextPanel } from '../../components/BrandContextPanel'
-import { openStudioForIdea, fetchSessionsForIdeas, resetIdeaMedia, publishIdeasAsPosts } from '../../lib/studioBridge'
+import { openStudioForIdea, publishIdeasAsPosts } from '../../lib/studioBridge'
 import { slidesFor, slideUrls, legacyFieldsFor, hasOwnSlides } from '../../lib/planSlides'
 import { fetchScheduledPosts } from '../../lib/scheduledPosts'
 import { postLock } from '../../lib/postLock'
@@ -886,24 +888,6 @@ export function CampaignPlanner() {
     update({ ideas: ideas.map(i => i.id === updated.id ? updated : i) })
   }
 
-  // ── Creative Studio sessions opened from this plan ──────────────────────
-  // One call for the whole board rather than a lookup per card; only the
-  // newest session per idea is kept, which is what "Back to Studio" lands on.
-  const [studioSessions, setStudioSessions] = useState({})
-  const savedIdeaIds = ideas.filter(i => !i.isNew && !String(i.id).startsWith('new_')).map(i => i.id)
-  const savedIdsKey = savedIdeaIds.join(',')
-  useEffect(() => {
-    if (!savedIdsKey || !accessToken) return
-    let alive = true
-    fetchSessionsForIdeas(accessToken, savedIdsKey.split(',')).then(rows => {
-      if (!alive) return
-      const byIdea = {}
-      for (const r of rows) if (!byIdea[r.plan_idea_id]) byIdea[r.plan_idea_id] = r
-      setStudioSessions(byIdea)
-    })
-    return () => { alive = false }
-  }, [savedIdsKey, accessToken])
-
   // The pictures and captions steps work on approved ideas only.
   const approvedIdeas = ideas.filter(i => i.status === 'approved')
   // An idea using its own image already HAS its picture — it was attached, not
@@ -948,14 +932,6 @@ export function CampaignPlanner() {
     draftCaptions(ideas, todo.map(i => i.id))
   }, [step, accessToken, approvedDraftKey])
 
-  // Start one over. Clears the accepted version but keeps the Studio session
-  // and the last thumbnail — what was tried before is useful context.
-  async function redoMedia(idea) {
-    if (isLocked(idea)) return
-    const res = await resetIdeaMedia(accessToken, idea.id)
-    if (res.error) { setError(res.error); return }
-    onIdeaChange({ ...idea, mediaStatus: 'none', mediaVersionId: null })
-  }
 
   // A new picture makes caption options written for the old one stale. The
   // chosen caption is left alone — it may well still fit, and it is the
@@ -994,66 +970,57 @@ export function CampaignPlanner() {
   }
 
   // ── Editing a post from the pictures step ────────────────────────────────
-  // The same modal the review step opens, deliberately: format, orientation,
-  // slide count, date, time and platform are decisions made WHILE looking at
-  // the picture, and a second, slightly-different editor would be two places
-  // to keep in step and two things to learn.
+  // The same "Create a post" composer the Instagram page opens, deliberately
+  // — this popup and that one write captions in only one place, and the
+  // picture, the caption-authorship choice and the platform extras (first
+  // comment, collaborators, alt text, AI disclosure) are all decisions made
+  // WHILE looking at the picture.
   const [editIdea, setEditIdea] = useState(null)
   const [editSaving, setEditSaving] = useState(false)
   const [editError, setEditError] = useState('')
-  async function saveEditedIdea(patch) {
+  async function saveIdeaFromComposer(state) {
     const idea = editIdea
     if (!idea) return
     setEditSaving(true); setEditError('')
+    const nextSlides = slidesFromComposerMedia(slidesFor(idea), state.media)
+    const pictureChanged = slideUrls({ slides: nextSlides }).join('|') !== slideUrls(idea).join('|')
+    const own = state.copyMode === 'own'
+    const legacy = legacyFieldsFor(nextSlides)
+    const stale = pictureChanged ? staleCaptionPatch(idea) : { db: {}, local: {} }
+    const aspectRatio = defaultAspectRatio(state.platform, state.format)
+    const firstComment = state.options?.[state.platform]?.firstComment || ''
     const result = await updateIdea(accessToken, idea.id, {
-      topic: patch.topic, angle: patch.angle, tone: patch.tone, platform: patch.platform,
-      scheduled_date: patch.date || null,
-      publish_time: patch.time || null,
-      suggested_style: patch.suggestedStyle || '', image_idea: patch.imageIdea || '',
-      objective: patch.objective || '', cta: patch.cta || '',
-      hashtags: patch.hashtags || '', first_comment: patch.firstComment || '',
-      series: patch.series || '',
-      format: patch.postFormat, aspect_ratio: patch.aspectRatio, media_type: patch.mediaType,
-      wants_caption: patch.wantsCaption !== false,
-      post_kind: patch.postKind || 'caption_image',
-      slide_count: patch.slideCount || 1,
-      copy_mode: patch.copyMode === 'own' ? 'own' : 'ai',
-      caption_en: patch.captionEn || '', caption_ar: patch.captionAr || '',
+      platform: state.platform, format: state.format, aspect_ratio: aspectRatio,
+      hashtags: state.hashtags || '', first_comment: firstComment,
+      platform_options: state.options || {},
+      copy_mode: own ? 'own' : 'ai',
+      caption_en: own ? state.caption.trim() : '',
+      caption_ar: own ? (state.captionAr || '').trim() : '',
+      slides: nextSlides, ...legacy, ...stale.db,
     })
     setEditSaving(false)
     if (result.error) { setEditError(result.error); return }
     const before = ideaSnapshot(idea)
-    const after  = ideaSnapshot({ ...idea, ...patch })
-    onIdeaChange({ ...idea, ...patch })
+    const after  = { ...idea, platform: state.platform, postFormat: state.format, hashtags: state.hashtags, copyMode: own ? 'own' : 'ai' }
+    onIdeaChange({
+      ...idea,
+      platform: state.platform, postFormat: state.format, aspectRatio,
+      hashtags: state.hashtags || '', firstComment,
+      platformOptions: state.options || {},
+      copyMode: own ? 'own' : 'ai',
+      captionEn: own ? state.caption.trim() : '', captionAr: own ? (state.captionAr || '').trim() : '',
+      slides: nextSlides,
+      references: legacy.reference_image_urls, previewImageUrl: legacy.preview_image_url,
+      previewVideoUrl: legacy.preview_video_url, imageMode: legacy.image_mode,
+      mediaType: legacy.media_type, slideCount: legacy.slide_count,
+      ...stale.local,
+    })
     setEditIdea(null)
     // Same signal the review step records: what a human changed about the
     // AI's suggestion is worth more than the final text on its own.
     logIdeaEvent(activeWorkspaceId, accessToken, {
       planId: idea.planId, ideaId: idea.id, event: 'edited', before, after,
     })
-  }
-
-  // ── Attaching your own pictures ──────────────────────────────────────────
-  // The picker hands back urls. They join whatever the idea already has
-  // rather than replacing it — that is the point of the slide list. A Studio
-  // render already on the idea survives being given company, which is what
-  // "two AI images and two of my own" needs and what the old either/or
-  // model made impossible.
-  const [mediaPickIdea, setMediaPickIdea] = useState(null)
-  async function saveMediaImages(urls) {
-    const idea = mediaPickIdea
-    if (!idea) return { ok: true }
-    const existing = slidesFor(idea)
-    const studio = existing.filter(s => s.source === 'studio')
-    // Clearing every image is a real choice — it leaves whatever the Studio
-    // made and nothing else, rather than claiming pictures that aren't there.
-    const next = urls.length
-      ? [...studio, ...urls.map(url => ({ url, type: 'image', source: 'upload' }))]
-      : studio
-    const res = await saveSlides(idea, next)
-    if (res.error) return res
-    setMediaPickIdea(null)
-    return { ok: true }
   }
 
   // A carousel's slides, put in a new order from the pictures step. Saved at
@@ -1076,7 +1043,6 @@ export function CampaignPlanner() {
     if (result.error) { setError(result.error); return }
     onIdeaChange({ ...idea, imageMode: 'studio', mediaStatus: idea.mediaStatus === 'ready' ? 'ready' : 'in_studio' })
     if (result.session) {
-      setStudioSessions(prev => ({ ...prev, [idea.id]: result.session }))
       navigate(`/studio?session=${result.session.id}`)
     } else {
       navigate(`/studio?ideaId=${idea.id}`)
@@ -1927,24 +1893,18 @@ export function CampaignPlanner() {
 
           {error && <div className="rounded-xl bg-red-50 border border-red-100 px-4 py-3 text-xs text-red-600">{error}</div>}
 
-          {editIdea && (() => {
-            // Re-read from the live ideas list rather than the snapshot the
-            // modal was opened with — a picture picked in the nested
-            // ReferencePicker below writes through onIdeaChange, and the
-            // thumbnails/status here need to reflect that without the modal
-            // being closed and reopened.
-            const live = ideas.find(i => i.id === editIdea.id) || editIdea
-            return (
-              <IdeaEditModal idea={editIdea} tones={IG_TONES} saving={editSaving} saveError={editError}
-                planPlatforms={platforms} todayKey={todayKey}
-                mediaUrls={mediaUrlsFor(live)} mediaStatus={live.mediaStatus} ownMedia={hasOwnMedia(live)}
-                sessionExists={!!studioSessions[live.id]}
-                onAddMedia={() => setMediaPickIdea(live)}
-                onOpenStudio={() => { setEditIdea(null); openStudio(live) }}
-                onResetMedia={() => redoMedia(live)}
-                onClose={() => { setEditIdea(null); setEditError('') }} onSave={saveEditedIdea} />
-            )
-          })()}
+          {editIdea && (
+            <PostComposer
+              open variant="idea"
+              platform={editIdea.platform || 'instagram'}
+              accounts={connectedAccounts} accountsLoading={accountsLoading}
+              initial={composerFromIdea(editIdea)}
+              busy={editSaving} saveError={editError}
+              onClose={() => { setEditIdea(null); setEditError('') }}
+              onSaveIdea={saveIdeaFromComposer}
+              onDesignInStudio={() => { const idea = editIdea; setEditIdea(null); openStudio(idea) }}
+            />
+          )}
 
           <div className="sticky bottom-0 -mx-1 px-1 pb-1">
             <div className="flex items-center gap-3 bg-white/95 backdrop-blur-sm border border-border rounded-2xl shadow-dropdown px-5 py-3.5">
@@ -2071,17 +2031,6 @@ export function CampaignPlanner() {
       )}
 
       {viewer && <MediaViewer {...viewer} onClose={() => setViewer(null)} />}
-
-      {/* Pictures-step image picker — persists straight to the idea. */}
-      {mediaPickIdea && (
-        <ReferencePicker
-          asPost
-          value={mediaPickIdea.imageMode === 'use_reference' ? (mediaPickIdea.references || []) : []}
-          onSave={saveMediaImages}
-          onClose={() => setMediaPickIdea(null)}
-          format={mediaPickIdea.postFormat}
-        />
-      )}
 
       {/* Setup-step image picker — stored on the draft until the plan is created. */}
       {pickingSeedIdx !== null && (
