@@ -1,6 +1,7 @@
 import { defaultFormat, getFormat, limitsFor, zernioFormatFields } from './postFormats'
 import { PLATFORM_META } from './utils'
 import { mediaOfPost, MAX_CAROUSEL_ITEMS, isMixed, countsOf } from './mediaOrder'
+import { slidesFor } from './planSlides'
 
 // ─── Composer state, as pure data ──────────────────────────────────────────
 // Everything the create-post screen knows, with no React in it. The screen is
@@ -82,6 +83,58 @@ export function composerFromPost(row, { platform = row?.platform } = {}) {
     postId: row.id,
     postTable: row.post_table || 'generated_posts',
   }
+}
+
+// ── Opening a plan idea in the composer ────────────────────────────────────
+// The Pictures step's Edit/Add images button, so an idea is shaped in the
+// same screen a real post is composed in rather than a second, form-shaped
+// editor. `copyMode`/`captionAr` are extra keys with no equivalent on a real
+// post — harmless there, since nothing reads them unless PostComposer is
+// rendered with variant="idea".
+//
+// `platform_options` is NOT the same shape on the two tables. On
+// generated_posts it is keyed by platform (`{instagram:{...}}`), because a
+// draft can be retargeted between platforms without losing either set — see
+// composerFromPost above. On plan_ideas it is FLAT, scoped to the idea's one
+// active platform: the LinkedIn poll editor already reads and writes it as
+// `idea.platformOptions.poll`, not `.linkedin.poll`. So it is wrapped here
+// under the idea's own platform, purely so optionsFor/setOption — built for
+// the keyed shape every panel already uses — read and write it exactly like
+// a real post's; composerPatchFromIdea below unwraps it again on save.
+export function composerFromIdea(idea) {
+  if (!idea) return emptyComposer()
+  const media = slidesFor(idea).map(s => ({
+    url: s.url, type: s.type, mimeType: '', bytes: null, seconds: null,
+  }))
+  const own = idea.copyMode === 'own'
+  const platform = idea.platform || 'instagram'
+  return {
+    ...emptyComposer(platform),
+    format: idea.postFormat || defaultFormat(platform),
+    caption: own ? (idea.captionEn || '') : '',
+    captionAr: own ? (idea.captionAr || '') : '',
+    hashtags: idea.hashtags || '',
+    media,
+    options: { [platform]: (idea.platformOptions && typeof idea.platformOptions === 'object') ? idea.platformOptions : {} },
+    copyMode: own ? 'own' : 'ai',
+  }
+}
+
+// The flat platform_options to write back to plan_ideas for whichever
+// platform is selected when Save is pressed — the reverse of the wrapping
+// composerFromIdea does above.
+export function flatOptionsFromComposer(state) {
+  return (state.options && state.options[state.platform]) || {}
+}
+
+// Rebuilds an idea's slide list from the composer's plain {url, type} media
+// array, keeping each url's existing source (studio/upload/library) where
+// that url was already on the idea and tagging anything new as 'upload' —
+// the same rule the Pictures step's own picker already used, generalised to
+// the composer's reorder/remove instead of only append.
+export function slidesFromComposerMedia(existingSlides, media) {
+  const by = new Map((existingSlides || []).map(s => [s.url, s]))
+  return (media || []).map(m => by.get(m.url) || { url: m.url, type: m.type || 'image', source: 'upload' })
 }
 
 // Defaults per platform. Applied when a platform is first touched rather than
