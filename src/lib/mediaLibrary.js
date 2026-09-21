@@ -60,6 +60,55 @@ export async function saveToMediaLibrary(workspaceId, accessToken, { name, url, 
   }
 }
 
+// ─── How big is this picture? ──────────────────────────────────────────────
+// Instagram refuses an image whose proportions are outside 0.5625 to 1.91,
+// and until now the app had no way to know a picture's proportions before the
+// provider told it. Both of these answer that, and both answer `null` rather
+// than guessing: an unmeasured image must stay distinguishable from a
+// measured one, because the composer only refuses shapes it actually knows.
+//
+// Decoded rather than parsed. Reading the dimensions out of a JPEG or PNG
+// header by hand is a few lines until it meets a WebP, an EXIF-rotated phone
+// photo or a progressive JPEG; the browser already has a correct decoder and
+// it reports the ORIENTED size, which is the one that gets published.
+
+async function measureBitmap(source) {
+  // createImageBitmap is the cheap path — it decodes off the main thread and
+  // does not need an element in the document. Safari has had it since 15, but
+  // the <img> fallback stays because a failure here is silent otherwise.
+  if (typeof createImageBitmap === 'function') {
+    try {
+      const bmp = await createImageBitmap(source)
+      const size = { width: bmp.width, height: bmp.height }
+      bmp.close?.()
+      return size
+    } catch { /* fall through to the element */ }
+  }
+  return null
+}
+
+export async function measureImageFile(file) {
+  if (!file || !String(file.type || '').startsWith('image/')) return null
+  const bmp = await measureBitmap(file)
+  if (bmp) return bmp
+  const url = URL.createObjectURL(file)
+  try { return await measureImageUrl(url) } finally { URL.revokeObjectURL(url) }
+}
+
+export function measureImageUrl(url) {
+  if (!url) return Promise.resolve(null)
+  return new Promise(resolve => {
+    const img = new Image()
+    // Supabase Storage serves these with permissive CORS, and the fitter needs
+    // the same flag to read pixels back out of a canvas without tainting it.
+    // Set here too so one measured image is one network fetch, not two.
+    img.crossOrigin = 'anonymous'
+    img.onload  = () => resolve({ width: img.naturalWidth, height: img.naturalHeight })
+    img.onerror = () => resolve(null)
+    img.src = url
+  })
+}
+
 // ─── Uploading a file straight from the composer ───────────────────────────
 // The composer's media picker offers the library and Creative Studio. Neither
 // helps when the thing you want to post is a photo somebody took on a phone
@@ -76,7 +125,11 @@ export async function saveToMediaLibrary(workspaceId, accessToken, { name, url, 
 // that every listing query then read in full — see the comment in
 // src/pages/media/index.jsx, which does the same upload by hand and should
 // eventually call this instead.
-export async function uploadToMediaLibrary(workspaceId, accessToken, file) {
+// `source` and `tags` are open so the image fitter can save its render here
+// rather than growing a second, near-identical uploader: a re-shaped picture
+// is a new asset in the library like any other, and tagging it 'adjusted'
+// keeps the original findable beside it instead of replacing it.
+export async function uploadToMediaLibrary(workspaceId, accessToken, file, { source = 'upload', tags = [] } = {}) {
   if (!workspaceId) return { error: 'No workspace.' }
   if (!file) return { error: 'No file.' }
 
@@ -89,6 +142,12 @@ export async function uploadToMediaLibrary(workspaceId, accessToken, file) {
   // the earlier one — two posts can legitimately use "photo.jpg".
   const safeName = String(file.name || 'upload').replace(/[^a-zA-Z0-9._-]/g, '_')
   const path = `${workspaceId}/${Date.now()}_${safeName}`
+
+  // Before the bytes leave, because after them we would have to fetch the
+  // file back to learn something the browser already had in hand. Failure is
+  // not fatal: an upload that cannot be measured still uploads, and the
+  // composer measures it again when it is picked.
+  const size = await measureImageFile(file)
 
   try {
     const up = await fetch(`${SUPABASE_URL}/storage/v1/object/media-library/${path}`, {
@@ -107,9 +166,11 @@ export async function uploadToMediaLibrary(workspaceId, accessToken, file) {
       name: file.name || safeName,
       url,
       storage_path: path,
-      source: 'upload',
+      source,
+      ...(tags.length ? { tags } : {}),
       mime_type: file.type || 'application/octet-stream',
       size_bytes: file.size || 0,
+      ...(size ? { width: size.width, height: size.height } : {}),
     }
     const ins = await fetch(`${SUPABASE_URL}/rest/v1/media_library`, {
       method: 'POST',
@@ -122,4 +183,32 @@ export async function uploadToMediaLibrary(workspaceId, accessToken, file) {
   } catch (err) {
     return { error: err.message }
   }
+}
+
+// ─── Measuring what is already in a post ──────────────────────────────────
+//
+// Rows written before width/height existed carry neither, and an unmeasured
+// image is one the validator stays silent about — which is the bug, not the
+// safeguard. This fills them in from the browser, once, for whatever list it
+// is given, and returns the same list untouched when there is nothing to
+// learn so a caller can compare by identity and skip the state update.
+export async function measureMediaList(media = []) {
+  const wanted = media.filter(m => m?.type !== 'video' && (m?.width == null || m?.height == null))
+  if (!wanted.length) return media
+
+  let learned = false
+  const measured = await Promise.all(media.map(async m => {
+    if (m?.type === 'video' || (m?.width != null && m?.height != null)) return m
+    const size = await measureImageUrl(m?.url)
+    if (!size) return m
+    learned = true
+    return { ...m, ...size }
+  }))
+
+  // The SAME array back when nothing was learned, not a new one holding the
+  // same items. An image that cannot be measured — a dead URL, a bucket that
+  // refuses CORS — would otherwise hand back a fresh array on every call, and
+  // a caller comparing by identity to decide whether to store it would store,
+  // re-render, measure again, and never stop.
+  return learned ? measured : media
 }
