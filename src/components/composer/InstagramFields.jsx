@@ -1,3 +1,4 @@
+import FitImage from '../FitImage'
 import { useRef, useState } from 'react'
 import { Toggle, Spinner } from '../ui/index'
 import { optionsFor, setOption, composedCaption, captionStats } from '../../lib/composerState'
@@ -453,7 +454,7 @@ export function InstagramPreview({ state, account }) {
         {first ? (
           first.type === 'video'
             ? <video src={first.url} className="w-full h-full object-cover" muted playsInline preload="metadata" />
-            : <img src={first.url} alt="" className="w-full h-full object-cover" />
+            : <FitImage src={first.url} alt="" className="w-full h-full object-cover" />
         ) : (
           <div className="w-full h-full flex items-center justify-center text-xs text-text-tertiary">
             Media appears here
