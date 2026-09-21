@@ -6,6 +6,7 @@ import {
 } from './composerState'
 import { mayPublishTo, protectionReason } from './platformSafety'
 import { normaliseMedia } from './mediaOrder'
+import { fitImageUrl } from './imageFit'
 
 // ─── One publish path ──────────────────────────────────────────────────────
 // Every platform publishes through Zernio. The Meta Graph API path was removed
@@ -107,6 +108,19 @@ export async function publishComposed(state, opts = {}) {
   const check = validateComposer(state)
   if (!check.ok) return { error: check.errors[0], errors: check.errors }
 
-  const req = buildPublishRequest(state, opts)
+  // Instagram rejects a picture outside 0.5625–1.91 after the row is claimed.
+  // Pad it onto an accepted canvas first, on every path that publishes.
+  let fitted = state
+  if (state.platform === 'instagram' && state.media?.some(m => m.type === 'image')) {
+    try {
+      const media = await Promise.all(state.media.map(async m =>
+        m.type === 'image' ? { ...m, url: await fitImageUrl(m.url, opts.workspaceId) } : m))
+      fitted = { ...state, media }
+    } catch (err) {
+      return { error: err.message }
+    }
+  }
+
+  const req = buildPublishRequest(fitted, opts)
   return publishViaZernio(defaultWebhookUrl('publishPost'), req)
 }

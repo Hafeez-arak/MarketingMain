@@ -115,6 +115,18 @@ function devN8nProxy(baseUrl) {
                        'n8n/docker/.env does not match the running n8n.',
               }))
             }
+            // A Code node that throws (the Webhook Secret Guard included, and any
+            // failure outside the publish workflow's own try/catch) makes n8n
+            // answer 500 {"message":"Error in workflow"} - no `error` field, so
+            // callers could only say "failed (500)". Name it.
+            if (upstream.status === 500 && /Error in workflow/i.test(text)) {
+              res.statusCode = 502
+              return res.end(JSON.stringify({
+                error: 'n8n hit an error before the workflow could answer. Most likely ' +
+                       'N8N_WEBHOOK_SECRET in n8n/docker/.env does not match the running n8n, or ' +
+                       'the workflow just crashed - open n8n > Executions. Nothing was published.',
+              }))
+            }
             res.statusCode = upstream.status
             res.end(text)
           } catch (err) {
