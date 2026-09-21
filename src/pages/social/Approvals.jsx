@@ -777,6 +777,7 @@ export function Approvals() {
           onImageUpdated={() => {}}
           onCaptionUpdated={handleCaptionUpdated}
           onDelete={selectedLocked ? undefined : handleDelete}
+          onRescheduled={fetchAll}
         />
       )}
 

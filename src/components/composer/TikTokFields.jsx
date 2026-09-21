@@ -3,6 +3,7 @@ import { Toggle, Spinner } from '../ui/index'
 import { optionsFor, setOption, composedCaption } from '../../lib/composerState'
 import { fetchCreatorInfo } from '../../lib/zernioConnect'
 import { useAuth } from '../../store/auth'
+import { PreviewVideo } from './PreviewVideo'
 
 // ─── TikTok: privacy, consent, and the phone preview ───────────────────────
 // TikTok is the platform with genuine hard requirements rather than options.
@@ -171,7 +172,7 @@ export function TikTokPreview({ state, account }) {
     <div className="relative w-full max-w-[260px] mx-auto aspect-[9/16] bg-stone-800 overflow-hidden">
       {first ? (
         first.type === 'video'
-          ? <video src={first.url} className="absolute inset-0 w-full h-full object-cover" muted playsInline preload="metadata" />
+          ? <PreviewVideo src={first.url} className="absolute inset-0 w-full h-full object-cover" wrapperClassName="absolute inset-0" />
           : <img src={first.url} alt="" className="absolute inset-0 w-full h-full object-cover" />
       ) : (
         <div className="absolute inset-0 flex items-center justify-center text-xs text-white/50">
