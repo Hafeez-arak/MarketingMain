@@ -120,6 +120,15 @@ describe('a new brief uses what the agent wrote', () => {
     ] })
     expect(rows.map(r => r.name)).toEqual(['Nouran Lighting', 'Datacore'])
   })
+
+  it('a rejected rival leaves the list; an accepted one stays, marked as watched', () => {
+    const r = { new_competitors: [{ name: 'Tawridat Al Hadaf' }, { name: 'Nouran Lighting' }] }
+    const rows = newCompetitors({ report: r, agendaCompetitors: [
+      { id: 'a1', subject: 'Tawridat Al Hadaf', status: 'retired' },
+      { id: 'a2', subject: 'Nouran Lighting', status: 'active' },
+    ] })
+    expect(rows.map(x => [x.name, x.status])).toEqual([['Nouran Lighting', 'active']])
+  })
 })
 
 describe('the team filter', () => {

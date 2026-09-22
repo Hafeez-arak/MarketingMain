@@ -814,11 +814,17 @@ export function openItems({ runs = [], limit = 10, lookback = 6 } = {}) {
 /**
  * Candidates for a person to accept or dismiss: what this run surfaced, and
  * what earlier runs proposed that nobody has decided on yet.
+ *
+ * A rejected rival (status retired) is left out entirely: rejecting is how a
+ * person says "not this one", and a list that keeps showing it afterwards
+ * reads as though the click did nothing. The row itself stays in the table so
+ * the next run does not propose it again.
  */
 export function newCompetitors({ report = {}, agendaCompetitors = [] } = {}) {
   const out = []
   for (const c of report.new_competitors || []) {
     const row = (agendaCompetitors || []).find(a => nameKey(a.subject) === nameKey(c.name))
+    if (row?.status === 'retired') continue
     out.push({ name: c.name, why: c.why || '', url: c.source_url || '', agendaId: row?.id || null, status: row?.status || 'proposed', thisRun: true })
   }
   for (const a of agendaCompetitors || []) {
