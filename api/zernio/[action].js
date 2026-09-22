@@ -609,11 +609,36 @@ const handlers = {
       )
     }
 
+    // One post, or — when absent — every post on the account. Create-only:
+    // Zernio's PATCH does not take a post, so the editor shows it read-only
+    // once saved rather than offering a change that would be dropped.
+    const platformPostId = String(body.platform_post_id || '').trim()
+    const scope = platformPostId
+      ? { platformPostId, postTitle: String(body.post_title || '').trim().slice(0, 100) }
+      : {}
+
     const out = await z.request('comment-automations', {
       method: 'POST',
-      body: { profileId, accountId, ...fields },
+      body: { profileId, accountId, ...scope, ...fields },
     })
     return { automation: normalizeAutomation(out?.automation || out) }
+  },
+
+  // The account's posts, for "only on this post". Read from analytics because
+  // that list includes posts made directly in Instagram (external), not just
+  // the ones published through Zernio — a reply to a post somebody made in the
+  // app itself has to be pickable too. A year back, newest first; Zernio
+  // defaults to 90 days, which would hide an older evergreen post.
+  async auto_reply_posts(z, { ws, profileId, body }) {
+    const accountId = String(body.account_id || '').trim()
+    if (!accountId) return fail('account_id is required.', 400)
+    await requireOwnedAccount(z, { workspaceId: ws.id, profileId, accountId })
+
+    const from = new Date(Date.now() - 365 * 86400000).toISOString().slice(0, 10)
+    const out = await z.request('analytics', {
+      query: { accountId, fromDate: from, limit: 100, sortBy: 'date', order: 'desc' },
+    })
+    return { posts: postChoices(out, accountId) }
   },
 
   async auto_reply_delete(z, { ws, profileId, body }) {
@@ -734,6 +759,35 @@ function automationFields(body = {}) {
     alsoMatchInDms: body.also_match_in_dms === true,
     ...(body.is_active === undefined ? {} : { isActive: body.is_active !== false }),
   }
+}
+
+/**
+ * Analytics rows → the posts an automation can be pinned to.
+ *
+ * The id Zernio's comment matcher compares against is the PLATFORM's media id,
+ * which lives on the per-platform entry — the row's own `_id` is Zernio's and
+ * would be accepted at create and then never match a comment. Rows without a
+ * platform id for this account (still publishing, failed) cannot be targeted.
+ */
+function postChoices(out, accountId) {
+  const rows = Array.isArray(out?.posts) ? out.posts : []
+  const seen = new Set()
+  const posts = []
+  for (const p of rows) {
+    const entry = (p.platforms || []).find(x => String(x.accountId || '') === accountId) || {}
+    const id = String(entry.platformPostId || p.platformPostId || '')
+    if (!id || seen.has(id)) continue
+    seen.add(id)
+    posts.push({
+      platform_post_id: id,
+      caption: String(p.content || '').trim(),
+      thumbnail: String(p.thumbnailUrl || ''),
+      url: String(entry.platformPostUrl || p.platformPostUrl || ''),
+      published_at: p.publishedAt || null,
+      comments: Number(p.analytics?.comments) || 0,
+    })
+  }
+  return posts
 }
 
 /** Trimmed, de-duplicated, case-insensitively unique, blanks dropped. */
@@ -898,4 +952,4 @@ export default async function handler(req, res) {
 }
 
 export { qs, profileIdOf, CONNECTABLE }
-export { automationFields, cleanList, normalizeAutomation, AUTO_REPLY_PLATFORMS }
+export { automationFields, cleanList, normalizeAutomation, postChoices, AUTO_REPLY_PLATFORMS }

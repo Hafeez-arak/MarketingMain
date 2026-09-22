@@ -1,15 +1,15 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Card, Button, Input, Textarea, Select, Modal, Spinner, Empty, Skeleton,
-  PageHeader, Toggle, ConfirmDialog, PlatformPill,
+  PageHeader, Toggle, ConfirmDialog, PlatformPill, PostImage,
 } from '../../components/ui/index'
 import { useAuth } from '../../store/auth'
 import { useConnectedAccounts } from '../../lib/useConnectedAccounts'
 import { PLATFORM_META } from '../../lib/utils'
 import {
   fetchAutoReplies, saveAutoReply, deleteAutoReply, fetchAutoReplyLogs,
-  canAutoReply,
+  fetchAutoReplyPosts, canAutoReply,
 } from '../../lib/zernioConnect'
 
 // ─── Auto-replies ──────────────────────────────────────────────────────────
@@ -51,6 +51,9 @@ const BLANK = {
   comment_reply: '',
   also_match_in_dms: false,
   is_active: true,
+  // '' = every post on the account. Set once, at creation — see the editor.
+  platform_post_id: '',
+  post_title: '',
 }
 
 const DM_LIMIT = 1000
@@ -67,11 +70,18 @@ const toDraft = a => ({
   comment_reply: a.comment_reply || '',
   also_match_in_dms: !!a.also_match_in_dms,
   is_active: a.is_active !== false,
+  platform_post_id: a.platform_post_id || '',
+  post_title: a.post_title || '',
 })
 
 /** What the editor sends. The server splits and validates; this only shapes. */
 const fromDraft = (d, accountId) => ({
-  ...(d.id ? { id: d.id } : { account_id: accountId }),
+  // The post travels on create only: Zernio cannot move an automation to a
+  // different post afterwards, so sending it on update would be ignored.
+  ...(d.id ? { id: d.id } : {
+    account_id: accountId,
+    ...(d.platform_post_id ? { platform_post_id: d.platform_post_id, post_title: d.post_title } : {}),
+  }),
   name: d.name,
   keywords: d.keywords,
   match_mode: d.match_mode,
@@ -252,6 +262,7 @@ export default function AutoReplies() {
         <EditorModal
           draft={editing}
           accounts={usable}
+          workspaceId={activeWorkspaceId}
           saving={busyId === (editing.id || 'new')}
           onClose={() => setEditing(null)}
           onSave={persist} />
@@ -351,7 +362,7 @@ function Stat({ label, value, bad = false }) {
 
 // ─── The editor ────────────────────────────────────────────────────────────
 
-function EditorModal({ draft, accounts, saving, onClose, onSave }) {
+function EditorModal({ draft, accounts, workspaceId, saving, onClose, onSave }) {
   const [d, setD] = useState(draft)
   const [accountId, setAccountId] = useState(draft.account_id || accounts[0]?.zernio_account_id || '')
   const [err, setErr] = useState('')
@@ -360,10 +371,17 @@ function EditorModal({ draft, accounts, saving, onClose, onSave }) {
   const isNew = !d.id
   const over = d.dm_message.length > DM_LIMIT
   const noKeywords = !d.keywords.trim()
+  // Held apart from platform_post_id so "One post" can be chosen before a
+  // post is — otherwise the radio would snap back to "Every post".
+  const [onePost, setOnePost] = useState(!!draft.platform_post_id)
 
   async function submit() {
     setErr('')
-    const message = await onSave(d, accountId)
+    if (isNew && onePost && !d.platform_post_id) {
+      setErr('Pick the post this should run on, or switch to every post.')
+      return
+    }
+    const message = await onSave(isNew && !onePost ? { ...d, platform_post_id: '', post_title: '' } : d, accountId)
     if (message) setErr(message)
   }
 
@@ -373,7 +391,12 @@ function EditorModal({ draft, accounts, saving, onClose, onSave }) {
         {err && <p className="text-sm text-red-600 bg-red-50 border border-red-200 px-3 py-2">{err}</p>}
 
         {isNew && accounts.length > 1 && (
-          <Select label="Which account?" value={accountId} onChange={e => setAccountId(e.target.value)}>
+          <Select label="Which account?" value={accountId} onChange={e => {
+            setAccountId(e.target.value)
+            // A post belongs to one account; keeping it would pin the new
+            // automation to a post its account does not have.
+            setD(prev => ({ ...prev, platform_post_id: '', post_title: '' }))
+          }}>
             {accounts.map(a => (
               <option key={a.zernio_account_id} value={a.zernio_account_id}>
                 {(PLATFORM_META[a.platform]?.label || a.platform)} — {a.username ? `@${a.username}` : a.display_name}
@@ -381,6 +404,16 @@ function EditorModal({ draft, accounts, saving, onClose, onSave }) {
             ))}
           </Select>
         )}
+
+        <PostScope
+          isNew={isNew} onePost={onePost} setOnePost={setOnePost}
+          workspaceId={workspaceId} accountId={accountId}
+          postId={d.platform_post_id} postTitle={d.post_title}
+          onPick={p => setD(prev => ({
+            ...prev,
+            platform_post_id: p.platform_post_id,
+            post_title: (p.caption || '').replace(/\s+/g, ' ').slice(0, 100) || 'Untitled post',
+          }))} />
 
         <Input label="Name" placeholder="e.g. Catalogue requests"
           hint="Only you see this — it is how you find it in the list."
@@ -394,7 +427,8 @@ function EditorModal({ draft, accounts, saving, onClose, onSave }) {
             // Legal, and occasionally wanted — but it must never be reached by
             // accident, because it answers everybody.
             <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 px-2 py-1.5 mt-1.5">
-              With no trigger words, <strong>every comment</strong> on this account gets this message.
+              With no trigger words, <strong>every comment</strong> on{' '}
+              {(isNew ? onePost : !!d.platform_post_id) ? 'this post' : 'this account'} gets this message.
             </p>
           )}
         </div>
@@ -460,6 +494,109 @@ function EditorModal({ draft, accounts, saving, onClose, onSave }) {
         </Button>
       </div>
     </Modal>
+  )
+}
+
+// ─── Which posts ───────────────────────────────────────────────────────────
+//
+// Every post (the default, and what Zernio calls account-wide) or one post.
+// Only a NEW automation can choose: Zernio's update takes no post, so on an
+// existing one this is a statement, not a control — offering it would be a
+// switch whose change is silently dropped on save.
+
+function PostScope({ isNew, onePost, setOnePost, workspaceId, accountId, postId, postTitle, onPick }) {
+  const [state, setState] = useState({ for: '', loading: false, posts: [], error: '' })
+  // Which account's posts are loaded or loading. A ref, not a dependency: with
+  // `state.for` in the deps the effect re-ran on its own setState, and that
+  // re-run's cleanup cancelled the request still in flight — the grid then sat
+  // on its skeleton for good.
+  const loadedFor = useRef('')
+
+  // Fetched only once "One post" is chosen, and again when the account changes.
+  useEffect(() => {
+    if (!isNew || !onePost || !accountId || loadedFor.current === accountId) return
+    loadedFor.current = accountId
+    let alive = true, done = false
+    queueMicrotask(() => { if (alive) setState({ for: accountId, loading: true, posts: [], error: '' }) })
+    fetchAutoReplyPosts(workspaceId, accountId).then(res => {
+      done = true
+      if (!alive) return
+      setState({ for: accountId, loading: false, posts: res.posts || [], error: res.error || '' })
+    })
+    return () => {
+      alive = false
+      // Abandoned mid-flight (switched back to every post, or to another
+      // account): forget it, so coming back asks again instead of waiting on
+      // an answer that will be thrown away.
+      if (!done && loadedFor.current === accountId) loadedFor.current = ''
+    }
+  }, [isNew, onePost, accountId, workspaceId])
+
+  if (!isNew) {
+    return (
+      <div>
+        <p className="block eyebrow mb-1.5">Runs on</p>
+        <p className="text-sm text-text">{postId ? (postTitle || 'One post') : 'Every post on this account'}</p>
+        <p className="text-[11px] text-text-tertiary mt-1">
+          This cannot be changed after creating it. To run on different posts, create a new auto-reply.
+        </p>
+      </div>
+    )
+  }
+
+  const choice = (on, label) => (
+    <button type="button" onClick={() => setOnePost(on)}
+      className={`flex-1 px-3 py-2 text-xs font-medium border transition-colors
+        ${onePost === on ? 'border-text bg-text text-white' : 'border-border bg-white text-text-secondary hover:border-stone-400'}`}>
+      {label}
+    </button>
+  )
+
+  return (
+    <div>
+      <p className="block eyebrow mb-1.5">Which posts?</p>
+      <div className="flex">
+        {choice(false, 'Every post')}
+        {choice(true, 'One specific post')}
+      </div>
+      {!onePost ? (
+        <p className="text-[11px] text-text-tertiary mt-1.5">
+          Comments on any post — including ones published later — can trigger this.
+        </p>
+      ) : state.loading || state.for !== accountId ? (
+        <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 mt-2">
+          {[0, 1, 2, 3].map(i => <Skeleton key={i} className="aspect-square w-full" />)}
+        </div>
+      ) : state.error ? (
+        <p className="text-[11px] text-red-600 mt-1.5">{state.error}</p>
+      ) : state.posts.length === 0 ? (
+        <p className="text-[11px] text-text-tertiary mt-1.5">
+          No posts from the last year on this account yet. A post made in the last few minutes can take a while to appear.
+        </p>
+      ) : (
+        <>
+          <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 mt-2 max-h-72 overflow-y-auto pr-1">
+            {state.posts.map(p => {
+              const picked = p.platform_post_id === postId
+              return (
+                <button key={p.platform_post_id} type="button" onClick={() => onPick(p)}
+                  title={p.caption || 'No caption'}
+                  className={`text-left border-2 transition-colors ${picked ? 'border-text' : 'border-transparent hover:border-stone-300'}`}>
+                  <PostImage src={p.thumbnail} alt="" className="aspect-square w-full object-cover" />
+                  <p className="text-[10px] text-text-secondary line-clamp-2 leading-snug px-1 pt-1">
+                    {p.caption || <span className="italic text-text-tertiary">No caption</span>}
+                  </p>
+                  <p className="text-[10px] text-text-tertiary px-1 pb-1">{when(p.published_at)}</p>
+                </button>
+              )
+            })}
+          </div>
+          <p className="text-[11px] text-text-tertiary mt-1.5">
+            {postId ? <>Runs only on: <span className="text-text">{postTitle}</span></> : 'Tap a post to choose it.'}
+          </p>
+        </>
+      )}
+    </div>
   )
 }
 

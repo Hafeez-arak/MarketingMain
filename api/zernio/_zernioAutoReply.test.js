@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import fs from 'node:fs'
 import {
-  automationFields, cleanList, normalizeAutomation, AUTO_REPLY_PLATFORMS, isAction,
+  automationFields, cleanList, normalizeAutomation, postChoices, AUTO_REPLY_PLATFORMS, isAction,
 } from './[action].js'
 
 // ─── Keyword auto-replies ──────────────────────────────────────────────────
@@ -15,7 +15,7 @@ const ok = (over = {}) => automationFields({ name: 'Catalogue', dm_message: 'Her
 
 describe('the actions exist under the names the browser will call', () => {
   it('answers all four', () => {
-    for (const a of ['auto_replies', 'auto_reply_save', 'auto_reply_delete', 'auto_reply_logs']) {
+    for (const a of ['auto_replies', 'auto_reply_save', 'auto_reply_delete', 'auto_reply_logs', 'auto_reply_posts']) {
       expect(isAction(a)).toBe(true)
     }
   })
@@ -190,5 +190,45 @@ describe('zernio request paths', () => {
 
   it('never starts with a slash, which would also double it', () => {
     expect(paths.filter(p => p.startsWith('/'))).toEqual([])
+  })
+})
+
+describe('postChoices — the posts an auto-reply can be pinned to', () => {
+  const row = (over = {}) => ({
+    _id: 'zernio-row-id',
+    content: 'Lobby lighting',
+    thumbnailUrl: 'https://cdn/x.jpg',
+    publishedAt: '2026-09-21T10:00:00Z',
+    analytics: { comments: 3 },
+    platforms: [{ accountId: 'acc1', platformPostId: '1788', platformPostUrl: 'https://instagram.com/p/abc/' }],
+    ...over,
+  })
+
+  // Zernio's matcher compares against the platform media id. Its own row id
+  // is accepted at create and then never matches a comment.
+  it("uses the platform's media id, never Zernio's row id", () => {
+    const [p] = postChoices({ posts: [row()] }, 'acc1')
+    expect(p).toEqual({
+      platform_post_id: '1788', caption: 'Lobby lighting', thumbnail: 'https://cdn/x.jpg',
+      url: 'https://instagram.com/p/abc/', published_at: '2026-09-21T10:00:00Z', comments: 3,
+    })
+  })
+
+  it('takes the id from THIS account\'s entry on a cross-posted row', () => {
+    const r = row({ platforms: [
+      { accountId: 'other', platformPostId: 'fb-1' },
+      { accountId: 'acc1', platformPostId: 'ig-1' },
+    ] })
+    expect(postChoices({ posts: [r] }, 'acc1')[0].platform_post_id).toBe('ig-1')
+  })
+
+  it('drops rows with no platform id, and duplicates', () => {
+    const out = postChoices({ posts: [row(), row(), row({ platforms: [{ accountId: 'acc1' }] })] }, 'acc1')
+    expect(out).toHaveLength(1)
+  })
+
+  it('survives an empty or malformed response', () => {
+    expect(postChoices(null, 'acc1')).toEqual([])
+    expect(postChoices({ posts: 'nope' }, 'acc1')).toEqual([])
   })
 })
