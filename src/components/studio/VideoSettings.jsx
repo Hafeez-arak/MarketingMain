@@ -178,7 +178,7 @@ export function AudioToggle({ model, audio, onAudio }) {
     return <p className="text-[11px] text-text-tertiary">{model.label} always generates sound, invented by the model — it can't be turned off.</p>
   }
   return (
-    <Toggle checked={audio} onChange={e => onAudio(e.target.checked)}
+    <Toggle checked={audio} onChange={onAudio}
       label={model.audio === 'paid'
         ? 'Generate sound too (adds to the cost below)'
         : 'Generate sound too (free, but invented by the model)'} />

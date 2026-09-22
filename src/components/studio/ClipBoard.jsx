@@ -426,7 +426,7 @@ export function ClipBoard({
           <p className="text-[11px] text-text-tertiary">{model.label} doesn't generate audio.</p>
         ) : (
           <div>
-            <Toggle checked={!!storyboard.audio} onChange={e => onPatchBoard({ audio: e.target.checked })}
+            <Toggle checked={!!storyboard.audio} onChange={v => onPatchBoard({ audio: v })}
               label={model.audio === 'paid' ? 'Generate sound too (adds to the cost)' : 'Generate sound too (free)'} />
             <p className="text-[10px] text-text-tertiary mt-1 leading-snug">
               Left off for multi-clip: each clip would invent its own ambience, so every seam gets an audible jump.

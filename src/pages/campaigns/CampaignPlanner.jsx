@@ -1386,7 +1386,7 @@ export function CampaignPlanner() {
             </p>
           </div>
 
-          <Toggle checked={includeHolidays} onChange={e => update({ includeHolidays: e.target.checked })}
+          <Toggle checked={includeHolidays} onChange={v => update({ includeHolidays: v })}
             label="Flag Saudi seasonal & cultural moments in range (Ramadan, Eid al-Fitr, Eid al-Adha, Founding Day, National Day)" />
 
           {month && setupMoments.length > 0 && (
@@ -1442,7 +1442,7 @@ export function CampaignPlanner() {
 
           {/* ── SECONDARY: AI suggestions, off by default ── */}
           <div className="rounded-2xl border border-border bg-surface-subtle p-4 space-y-4">
-            <Toggle checked={aiAssist} onChange={e => update({ aiAssist: e.target.checked })}
+            <Toggle checked={aiAssist} onChange={v => update({ aiAssist: v })}
               label="Also let AI suggest more posts this month" />
             <p className="text-[11px] text-text-tertiary -mt-2.5">
               {aiAssist

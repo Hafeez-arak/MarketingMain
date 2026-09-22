@@ -442,7 +442,7 @@ function EditorModal({ draft, accounts, workspaceId, saving, onClose, onSave }) 
             {/* Zernio applies this to whole-word matching only, so offering it
                 the rest of the time would be a switch that does nothing. */}
             {d.match_mode === 'word' ? (
-              <Toggle checked={d.typo_tolerance} onChange={e => set('typo_tolerance', e.target.checked)}
+              <Toggle checked={d.typo_tolerance} onChange={v => set('typo_tolerance', v)}
                 label="Also catch close misspellings" />
             ) : (
               <p className="text-[11px] text-text-tertiary leading-snug">
@@ -471,13 +471,8 @@ function EditorModal({ draft, accounts, workspaceId, saving, onClose, onSave }) 
           value={d.comment_reply} onChange={e => set('comment_reply', e.target.value)} />
 
         <div className="pt-1 border-t border-border space-y-2">
-          {/* `e.target.checked`, not the bare argument: Toggle wires onChange
-              straight to its <input>, so it hands back an EVENT. Two other
-              callers in this repo pass `v => set(field, v)` and are storing a
-              SyntheticEvent — which is always truthy, so those toggles can
-              never be switched off. */}
           <Toggle checked={d.also_match_in_dms}
-            onChange={e => set('also_match_in_dms', e.target.checked)}
+            onChange={v => set('also_match_in_dms', v)}
             label="Also answer people who send the word as a message" />
           {d.also_match_in_dms && noKeywords && (
             <p className="text-[11px] text-red-600">
