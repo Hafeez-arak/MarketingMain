@@ -15,10 +15,10 @@ import {
 } from '../../lib/postFormats'
 import { groupByWeek, monthOptions, normalizeAiIdea, distributeDates, formatTime, DEFAULT_POST_TIME, pollProblems, firstPlaceableDay } from './planModel'
 import { brandTodayKey } from '../../lib/brandTime'
-import { GOALS, OTHER_GOAL, isCustomGoal, WEEKDAYS, DEFAULT_DRAFT, isUntouchedSelection, targetLabel } from './planConstants'
+import { WEEKDAYS, DEFAULT_DRAFT, isUntouchedSelection, targetLabel } from './planConstants'
 import { IdeaCard } from './IdeaCard'
 import { CaptionCard } from './CaptionCard'
-import { GenerateMoreModal, CalendarView } from './plannerParts'
+import { GenerateMoreModal, CalendarView, FocusCategoryPicker } from './plannerParts'
 import { momentsInRange, dbIdeaToDraft } from '../../lib/campaignPlan'
 import { PostComposer } from '../../components/composer/PostComposer'
 import { composerFromIdea, slidesFromComposerMedia, flatOptionsFromComposer } from '../../lib/composerState'
@@ -185,12 +185,6 @@ export function CampaignPlanner() {
   // every plan, and a row of chips plus a context dump was the most confusing
   // thing on the page.
   const [showBrainPicker, setShowBrainPicker] = useState(false)
-  // Whether the focus category is being typed rather than picked. Seeded from
-  // the draft: a reopened plan whose category isn't on the list is a custom
-  // one, and without this it would come back reading "General" while still
-  // carrying the old value.
-  const [customCategory, setCustomCategory] = useState(() => isCustomGoal(draft.goalCategory))
-
   // "Generate more ideas" — AI top-up on top of the existing plan.
   const [showMoreModal, setShowMoreModal] = useState(false)
   const [moreLoading,   setMoreLoading]   = useState(false)
@@ -1461,31 +1455,19 @@ export function CampaignPlanner() {
 
             {aiAssist && (
               <div className="space-y-4 pt-3 border-t border-border">
-                <div className="grid grid-cols-2 gap-4">
+                <div className="max-w-xs">
                   <Input
                     label="Roughly how many AI posts? (optional)"
                     type="number" min="1" placeholder="Let AI decide"
                     value={approxCount} onChange={e => update({ approxCount: e.target.value })} />
-                  <div className="space-y-2">
-                    <Select
-                      label="Focus category (optional)"
-                      value={customCategory ? OTHER_GOAL : goalCategory}
-                      onChange={e => {
-                        if (e.target.value === OTHER_GOAL) { setCustomCategory(true); update({ goalCategory: '' }) }
-                        else { setCustomCategory(false); update({ goalCategory: e.target.value }) }
-                      }}>
-                      <option value="">General</option>
-                      {GOALS.map(g => <option key={g} value={g}>{g}</option>)}
-                      <option value={OTHER_GOAL}>Other — write my own…</option>
-                    </Select>
-                    {customCategory && (
-                      <Input
-                        placeholder="Name this month's focus — e.g. 'Smart poles for municipalities'"
-                        value={goalCategory} onChange={e => update({ goalCategory: e.target.value })}
-                        autoFocus />
-                    )}
-                  </div>
                 </div>
+
+                {/* Its own row, not half a two-column grid: fourteen tick
+                    boxes wrap to three lines and would have shoved the number
+                    box off the top of its own cell. */}
+                <FocusCategoryPicker
+                  value={goalCategory}
+                  onChange={v => update({ goalCategory: v })} />
 
                 <Textarea
                   label="Focus for the month (optional)"
