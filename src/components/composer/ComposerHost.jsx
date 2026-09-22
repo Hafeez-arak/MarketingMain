@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Button } from '../ui/index'
 import { useAuth } from '../../store/auth'
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from '../../lib/supabaseClient'
@@ -111,6 +111,23 @@ export function ComposerHost({
   // booked at Zernio has to be RE-booked when it changes, or the edit lands in
   // our row and Zernio still sends the old version.
   const [openedRow, setOpenedRow] = useState(null)
+  // ── Every opening is a new composer ──
+  //
+  // PostComposer builds its state once, on mount, and stays mounted while
+  // closed. Keyed on the post id alone, a new post was always key 'new', so
+  // Create post reopened on the LAST post — caption, media, account — whether
+  // that one had published, failed, or was still being sent in the background.
+  // One stray click on Post now published it a second time. Bumping this on
+  // every open and close remounts it empty.
+  //
+  // The ref is the same number, readable after an await: a send that finishes
+  // after its composer was closed must not close the one opened since.
+  const [session, setSession] = useState(0)
+  const sessionRef = useRef(0)
+  const newSession = useCallback(() => {
+    sessionRef.current += 1
+    setSession(sessionRef.current)
+  }, [])
 
   // A post handed in from outside opens the composer prefilled. Converted
   // through composerFromPost rather than read field-by-field here, so the
@@ -128,21 +145,23 @@ export function ComposerHost({
         setNote(lock.reason)
         return
       }
+      newSession()
       setInitial(composerFromPost(openPost))
       setOpenedRow(openPost)
       setNote('')
       setOpen(true)
     })
     return () => { cancelled = true }
-  }, [openPost])
+  }, [openPost, newSession])
 
   const close = useCallback(() => {
     setOpen(false)
     setBusy(false)
     setInitial(null)
     setOpenedRow(null)
+    newSession()
     onOpenPostHandled?.()
-  }, [onOpenPostHandled])
+  }, [onOpenPostHandled, newSession])
 
   const booked = !!openedRow?.id && openedRow?.publish_status === 'scheduled'
 
@@ -154,18 +173,21 @@ export function ComposerHost({
       setNote('This post is scheduled — use Schedule (or Post now) to save your changes, or cancel its schedule in the Post Queue first.')
       return
     }
+    const mine = sessionRef.current
     setBusy(true)
     const { error } = await writePost(
       accessToken, rowFrom(state, activeWorkspaceId, 'draft'),
       { postId: state.postId, postTable: state.postTable })
-    setBusy(false)
+    const stillOpen = sessionRef.current === mine
+    if (stillOpen) setBusy(false)
     if (error) { setNote(error); return }
     setNote('Saved as a draft.')
-    close()
+    if (stillOpen) close()
     onDone?.()
   }, [accessToken, activeWorkspaceId, close, onDone, booked])
 
   const send = useCallback(async (state, { schedule }) => {
+    const mine = sessionRef.current
     setBusy(true)
     setNote('')
 
@@ -195,7 +217,11 @@ export function ComposerHost({
     const { post, error } = await writePost(
       accessToken, rowFrom(state, activeWorkspaceId, schedule ? 'scheduled' : 'pending_publish'),
       { postId: state.postId, postTable: state.postTable })
-    if (error || !post) { setBusy(false); setNote(error || 'Could not save the post.'); return }
+    if (error || !post) {
+      if (sessionRef.current === mine) setBusy(false)
+      setNote(error || 'Could not save the post.')
+      return
+    }
 
     const res = await publishComposed(state, {
       postId: post.id,
@@ -208,7 +234,10 @@ export function ComposerHost({
       // Already booked: cancel the old Zernio post and book this version.
       reschedule: booked && !!state.postId,
     })
-    setBusy(false)
+    // Closed mid-send: the result still reports below the button, but the
+    // composer on screen now (if any) is a different post and is left alone.
+    const stillOpen = sessionRef.current === mine
+    if (stillOpen) setBusy(false)
 
     if (res.error) {
       // The row survives deliberately. It is now a draft that failed to go
@@ -219,14 +248,14 @@ export function ComposerHost({
       return
     }
     setNote(schedule ? 'Scheduled.' : 'Published.')
-    close()
+    if (stillOpen) close()
     onDone?.()
   }, [accessToken, accounts, activeWorkspaceId, close, onDone, booked])
 
   return (
     <>
       {trigger && (
-        <Button onClick={() => { setNote(''); setInitial(null); setOpen(true) }}>
+        <Button onClick={() => { setNote(''); setInitial(null); setOpenedRow(null); newSession(); setOpen(true) }}>
           <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
             <path d="M12 5v14M5 12h14" />
           </svg>
@@ -238,7 +267,7 @@ export function ComposerHost({
 
       <PostComposer
         open={open}
-        key={initial?.postId || 'new'}
+        key={`${initial?.postId || 'new'}:${session}`}
         initial={initial}
         platform={initial?.platform || platform}
         accounts={accounts}
