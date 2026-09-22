@@ -125,14 +125,6 @@ export default function Dashboard() {
 
       <CreatePostDialog open={creating} onClose={() => setCreating(false)} />
 
-      {/* ── What the research found ──
-          Above the numbers, because the question somebody arrives with is not
-          "how many followers" — it is "what is going on". A summary and a way
-          through, not a to-do list: the ranked strip that stood here first came
-          out on real data as a calendar reminder, an admin nag and a repeat of
-          the Search Console card below it. */}
-      <ResearchCard runs={research.runs} loading={research.loading} />
-
       {nothingConnected ? (
         <Card className="p-6 border-dashed bg-surface-muted">
           <div className="flex items-start gap-4">
@@ -184,9 +176,12 @@ export default function Dashboard() {
       <WebsiteCard data={website.data} loading={website.loading} summary={website.summary}
         recommendations={website.recommendations} pages={website.pages} />
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
-        <QueueCards upcoming={queue.upcoming} attention={queue.attention} loading={queue.loading} />
-      </div>
+      <QueueCards attention={queue.attention} loading={queue.loading} />
+
+      {/* ── What the research found ──
+          At the bottom by the user's choice (2026-09-22): the numbers and the
+          things that need fixing come first, the market read after them. */}
+      <ResearchCard runs={research.runs} loading={research.loading} />
     </div>
   )
 }
