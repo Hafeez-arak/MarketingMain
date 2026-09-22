@@ -22,7 +22,7 @@ export async function loadIntel(workspaceId) {
   const ws = enc(workspaceId)
   const [signals, opportunities, events] = await Promise.all([
     db(`research_signals?workspace_id=eq.${ws}&order=last_seen_at.desc&limit=300` +
-       '&select=id,competitor,category,channel,summary,relevance,source_url,fingerprint,first_seen_at,last_seen_at,times_seen,last_run_id')
+       '&select=id,competitor,category,channel,summary,relevance,source_url,fingerprint,first_seen_at,last_seen_at,times_seen,last_run_id,line')
       .catch(logged('signals')),
     db(`research_opportunities?workspace_id=eq.${ws}&order=last_seen_at.desc&limit=200&select=*`)
       .catch(logged('opportunities')),

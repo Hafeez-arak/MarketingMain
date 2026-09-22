@@ -113,3 +113,29 @@ analytics tag at all. Nothing in this repo changes when it is turned on.
   account gets connected through Zernio, not Meta.
 - **Two unmerged branches**, one commit each: `access-invites`,
   `webhook-guard-response-docs`.
+
+## Website analytics — index health (raised 2026-09-20)
+
+Built and shipped: `/api/agent/indexHealth` inspects every sitemap URL against
+Google's index, on a button. Two decisions were deliberately NOT made while
+building it.
+
+- **It is not cached.** Each press is up to 120 Google calls and about forty
+  seconds, and Google's quota allows roughly sixteen presses a day on a site
+  this size — so a cache would pay for itself. What stopped it is the
+  invalidation rule: the honest one is "whenever Google changes its mind",
+  which is not observable, and a stored answer read as current on the day it
+  stops being true is worse than a slow button. A `checked_at` stamp with an
+  explicit "this is from Tuesday" label is the shape if this is revisited.
+- **It inspects one spelling of each page.** `http://www.example.com/x` folds
+  onto `https://example.com/x`, because the redirecting twin can only ever
+  answer "Page with redirect". On arak-sa.com that halved the wait — the 2021
+  `www` sitemap submission is still registered alongside the apex one, so
+  every page was in the list twice. Removing that stale submission in Search
+  Console is a one-click job nobody has done; until then the fold is carrying
+  it.
+
+Found by the first real run, not scheduled here because they are site work
+rather than code: **24 of 89 pages are unknown to Google**, including every
+lighting-services page and both `/services/lighting-controls` URLs — an entire
+business line with no page in the index.

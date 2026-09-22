@@ -536,6 +536,64 @@ export function categoryPrompt(brand, { agenda = [], language = '', intel = '' }
 }
 
 /**
+ * GLOBAL INDUSTRY — the world upstream of this market.
+ *
+ * Added 2026-09-17, because `category` cannot answer this and should not try.
+ * That lens is grounded in the brand's own geography and every finding it
+ * returned on 17 Sep was Saudi — SASO 2870, New Murabba, Qiddiya, municipal
+ * streetlight tenders. Correct, and the whole point of it.
+ *
+ * The consequence was that nothing upstream was ever looked at. Where fixtures
+ * are actually made, what the European and Chinese manufacturers are
+ * launching, which way component prices are moving, which standard is about to
+ * arrive — none of that produces a local search result until it has already
+ * landed here, at which point knowing about it is worth much less.
+ *
+ * So this lens is deliberately NOT given the brand's geography. `who()` still
+ * carries it, which is why the prompt says so out loud: the brand facts are
+ * there to say what is RELEVANT, never to bound where to look.
+ */
+export function globalPrompt(brand, { agenda = [], language = '' } = {}) {
+  return [
+    who(brand),
+    '',
+    'Research the WORLD industry this brand is part of — not their own market, and not their',
+    'local competitors. Another lens covers both of those and its findings are already in.',
+    '',
+    'The brand facts above tell you what is RELEVANT. They do NOT tell you where to look.',
+    'Look outside this brand\'s country on purpose: at the manufacturers, the standards bodies',
+    'and the trade press of the places this category is actually made and set.',
+    '',
+    'Look for:',
+    '- What the major international manufacturers are launching, retiring, acquiring or',
+    '  discontinuing — and which of it will reach this market.',
+    '- Technology moving from premium to standard, and the evidence it is actually moving',
+    '  rather than being marketed.',
+    '- Component, material and shipping prices, and which way they are heading.',
+    '- Standards and certification arriving elsewhere first. A requirement that lands in',
+    '  Europe usually arrives here later, and the brand that already has an answer wins',
+    '  the conversation.',
+    '- Where manufacturing and sourcing are shifting between regions, and what that does',
+    '  to lead times and to who can quote what.',
+    '',
+    'THE TEST FOR EVERY FINDING: could this brand DO something with it — start saying',
+    'something, stop offering something, change what they stock, get ahead of a rival who',
+    'has not noticed it yet? A world trend that changes nothing they do is not a finding,',
+    'however large it is. Write the "so what for them" into `suggested_action` every time.',
+    '',
+    'Name the region or country each finding comes from in the detail. "European" and',
+    '"Chinese" are different answers with different lead times, and a reader who cannot',
+    'tell which one this is cannot judge how long they have.',
+    '',
+    'Say plainly how established each one is. "Announced, with a date" and "being discussed',
+    'in the trade press" must not read the same.',
+    standing(agenda),
+    localLanguage(language),
+    CLOSING,
+  ].filter(Boolean).join('\n')
+}
+
+/**
  * COMPETITORS — what they are doing, across every channel, and what it means.
  *
  * Rewritten 2026-09-15. It used to lead with a board of follower counts and
@@ -622,7 +680,7 @@ export function competitorLine(n = {}) {
   return n.why ? `${head}\n       ${n.why}` : head
 }
 
-export function rivalsPrompt(brand, { competitors = [], notes = [], board = [], agenda = [], language = '', intel = '', searches = 0 }) {
+export function rivalsPrompt(brand, { competitors = [], notes = [], board = [], agenda = [], language = '', intel = '', searches = 0, line = '' }) {
   // Posting activity only, never follower counts: what they posted ABOUT is a
   // trace of what they are doing; how many people follow them is not a move.
   const activity = board
@@ -664,19 +722,44 @@ export function rivalsPrompt(brand, { competitors = [], notes = [], board = [], 
   // the exact failure the line split exists to prevent. The whole list is
   // rolled; the BUDGET decides how far down it gets, and the sentence below
   // says so honestly instead of promising one search per name it cannot keep.
-  // Only the lines this brand's own watchlist actually uses.
-  const axes = axesFor(notes.flatMap(n => n.lines || []))
+  // On a per-line pass, only THIS line's axes — the roster it was handed
+  // contains nothing else, so the other line's questions would be dead weight
+  // in the prompt and an invitation to answer them anyway.
+  const axes = axesFor(line ? [line] : notes.flatMap(n => n.lines || []))
 
   const roll = competitors.map((c, i) => {
     const n = noteFor.get(String(c).toLowerCase())
     return `  ${i + 1}. ${c}${n ? `\n       ${competitorLine(n)}` : ''}`
   }).join('\n')
 
+  // ── WHAT THIS PASS IS, AND WHAT IT IS NOT ──
+  //
+  // A per-line pass is not "the competitor lens with a filter on". It is a
+  // different question about a different set of companies, and saying so is
+  // what stops it answering the other line's question with the other line's
+  // rivals — which is exactly what one undivided pass did, every week, in
+  // favour of whichever line was typed into the watchlist first.
+  const scope = line
+    ? [
+        `THIS PASS IS ABOUT ONE BUSINESS LINE ONLY: ${line.toUpperCase()}.`,
+        `Every finding you return must be about ${line}. The brand sells other lines and`,
+        'they are researched by their own pass — a finding about one of those is waste here,',
+        'because the pass that wanted it has already run without it.',
+        '',
+        `Several companies below sell into ${line} AND into another line. For those, report`,
+        `only what they are doing in ${line}. That is not a narrowing of the question: it is`,
+        'the question. A rival we meet in two businesses is two different competitive',
+        'situations, and one paragraph covering both has always lost one of them.',
+      ].join('\n')
+    : ''
+
   return [
     who(brand),
+    scope,
+    scope ? '' : null,
     competitors.length
       ? [
-          `THE WATCHLIST, IN THE ORDER A PERSON PUT IT THERE. Cover these FIRST, in this order:`,
+          `THE WATCHLIST${line ? ` FOR ${line.toUpperCase()}` : ''}, IN THE ORDER A PERSON PUT IT THERE. Cover these FIRST, in this order:`,
           roll,
           searches
             ? (searches >= competitors.length
@@ -719,6 +802,14 @@ export function rivalsPrompt(brand, { competitors = [], notes = [], board = [], 
     '- TRADE PRESS and news: contracts won, projects completed, distribution agreements.',
     '- TENDER AWARDS and EXHIBITOR LISTS: a name on an award notice or a stand at an expo.',
     '- Pricing signals: public promotions, quoted rates in tender results.',
+    '- PAID AD ACTIVITY: Meta\'s Ad Library (facebook.com/ads/library) and Google\'s Ads Transparency',
+    '  Center show what a rival is CURRENTLY PAYING to promote — a stronger intent signal than an',
+    '  organic post, and every listing is a dated page you can cite directly. Search "[competitor',
+    '  name] ad library" if the library page itself will not load for you. File a finding here under',
+    '  channel "website" (there is no ads-specific value) and say in the detail what the ads promote',
+    '  and how long they have been running — a rival that has kept the same ad live for months has',
+    '  found something that works. If the library genuinely returns nothing or will not load, say so',
+    '  in one line rather than guessing what a rival is running.',
     '',
     'For every finding: set `competitor` to the name exactly as listed above, `channel` to where you',
     'saw it, and `category`. Put the "so what for us" in suggested_action — what our sales, marketing',
@@ -800,6 +891,7 @@ export const LENS_PROMPTS = {
   events: eventsPrompt,
   demand: demandPrompt,
   category: categoryPrompt,
+  global: globalPrompt,
   rivals: rivalsPrompt,
   craft: craftPrompt,
 }

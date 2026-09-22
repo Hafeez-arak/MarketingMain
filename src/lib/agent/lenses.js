@@ -280,7 +280,57 @@ export const LENSES = [
     // Eight searches rather than five, because it now reads many channels per
     // rival. Roughly +$0.35 a week over the monthly cadence.
     cadence: 'weekly',
-    budget: { searches: 8, maxTokens: 10_000, effort: 'medium' },
+    // ── ONE PASS PER BUSINESS LINE ──
+    //
+    // This lens runs once for EACH line the watchlist actually uses, as
+    // `rivals_lighting`, `rivals_controls`, and so on. The budget below is
+    // therefore PER PASS, not for the whole watchlist.
+    //
+    // It was one pass over one shared budget until 2026-09-17, and that is a
+    // bug the prompt could not fix. The roll is ordered by the sequence a
+    // person typed the names in; Arak entered lighting first; so with 17 names
+    // and 8 searches the lens reached seven rivals and reported five unreached
+    // — SAS Systems Engineering and Prime Star Technologies among them, both
+    // controls-only. The controls half of the business was structurally
+    // unresearchable, every week, and the report could only say it was quiet.
+    // A shared budget spent in list order always starves whichever line was
+    // entered last. Separate passes is the only fix that does not depend on a
+    // model choosing to ration itself.
+    //
+    // Six per pass rather than eight: two passes at six is twelve searches
+    // against today's eight, and the second pass is the one that was returning
+    // nothing at all.
+    perLine: true,
+    budget: { searches: 6, maxTokens: 10_000, effort: 'medium' },
+    universal: true,
+  },
+  {
+    key: 'global',
+    label: 'Global industry',
+    question: 'What is happening in the world industry — the manufacturers, technologies and prices upstream of our market?',
+    // Months, not weeks. A European standard or a Chinese price movement
+    // changes what we should be saying for a season, not for a Thursday.
+    perishability: SLOW,
+    // ── WHY THIS IS NOT THE CATEGORY LENS ──
+    //
+    // `category` researches THIS MARKET — it is grounded in the brand's own
+    // geography, and every finding it returned on 2026-09-17 was Saudi: SASO
+    // 2870, New Murabba, Qiddiya, municipal streetlight tenders. That is
+    // correct and it is the whole point of it.
+    //
+    // It means nothing upstream is ever looked at. Where fixtures are actually
+    // made, what the European and Chinese manufacturers are launching, which
+    // way component prices are moving, which standards are about to arrive —
+    // none of that has a Saudi search result until it is already here. This
+    // lens is deliberately NOT given the brand's geography, and asks the
+    // question the other one cannot.
+    cadence: 'weekly',
+    // Six, not five. `lenses.test.js` holds every searching lens at six or
+    // more, and the ledger is why: demand on four searches cost MORE than
+    // demand on six ($0.484 against $0.326) and returned nothing, because it
+    // exhausted its allowance and then burned tokens on calls the API answered
+    // with max_uses_exceeded. A starved lens is not a cheap lens.
+    budget: { searches: 6, maxTokens: 8_000, effort: 'medium' },
     universal: true,
   },
   {
@@ -294,8 +344,65 @@ export const LENSES = [
   },
 ]
 
+/**
+ * The lens a key names — including a per-line pass like `rivals_controls`.
+ *
+ * Exact match first, always, so a lens whose own key contains an underscore
+ * can never be mistaken for a pass of something else. Only if that fails is
+ * the key read as `<perLine lens>_<line>`.
+ */
 export function lensByKey(key) {
-  return LENSES.find(l => l.key === key) || null
+  const exact = LENSES.find(l => l.key === key) || null
+  if (exact) return exact
+  const base = baseKeyOf(key)
+  return base === key ? null : LENSES.find(l => l.key === base) || null
+}
+
+/** `rivals_controls` -> `rivals`. Any other key is returned unchanged. */
+export function baseKeyOf(key = '') {
+  const k = String(key || '')
+  const cut = k.indexOf('_')
+  if (cut < 1) return k
+  const head = k.slice(0, cut)
+  const lens = LENSES.find(l => l.key === head)
+  return lens?.perLine ? head : k
+}
+
+/** The business line a lens key is a pass for, or '' for an ordinary lens. */
+export function lineOfLensKey(key = '') {
+  const k = String(key || '')
+  const base = baseKeyOf(k)
+  return base === k ? '' : k.slice(base.length + 1)
+}
+
+/** One pass per line, for the lenses that take one. */
+export const lensKeyFor = (base, line) => (line ? `${base}_${line}` : base)
+
+/**
+ * Expand the per-line lenses into one entry per line this brand actually has
+ * rivals in.
+ *
+ * Driven by the WATCHLIST rather than by the configured lines, and that is the
+ * distinction that keeps this honest: Arak configures three lines but has no
+ * smart-pole rival on the list, so a `rivals_poles` pass would spend six
+ * searches to discover the empty set it was handed. A line nobody competes
+ * with us on is not a line to research; it is a line to write about.
+ *
+ * A brand with no lines configured, or whose watchlist records none, keeps the
+ * single undivided lens — which is every brand but this one today.
+ */
+export function expandPerLine(lenses = [], lineKeys = []) {
+  const lines = [...new Set((lineKeys || []).map(l => String(l || '').trim()).filter(Boolean))]
+  return (lenses || []).flatMap(l => {
+    if (!l?.perLine || !lines.length) return [l]
+    return lines.map(line => ({
+      ...l,
+      key: lensKeyFor(l.key, line),
+      base: l.key,
+      line,
+      label: `${l.label} — ${line}`,
+    }))
+  })
 }
 
 /**
@@ -414,7 +521,20 @@ export const FOR_WHOM = ['marketing', 'sales', 'both', 'technical']
  */
 export const isTechnicalOnly = f => f?.for_whom === 'technical'
 
-export function makeFinding(lensKey, raw = {}) {
+/**
+ * @param {string} lensKey
+ * @param {object} raw            what the model returned
+ * @param {string} [defaultLine]  the line this lens pass was researching
+ *
+ * `defaultLine` is evidence of the strongest kind available: a finding that
+ * came back from the controls pass is about controls because that is the only
+ * thing that pass was asked about and the only roster it was given. It beats
+ * the keyword stamp in lines.js, which has to guess from a headline — so it is
+ * applied here, at the source, and `lineForFinding` leaves an existing value
+ * alone. The model may still override it per finding, which is right for a
+ * rival that turns out to sell into the other line too.
+ */
+export function makeFinding(lensKey, raw = {}, defaultLine = '') {
   return {
     lens: lensKey,
     headline: String(raw.headline || '').trim(),
@@ -434,7 +554,7 @@ export function makeFinding(lensKey, raw = {}) {
     category: String(raw.category || '').trim(),
     lead: objectWithName(raw.lead),
     event: objectWithName(raw.event),
-    line: String(raw.line || '').trim(),
+    line: String(raw.line || defaultLine || '').trim(),
   }
 }
 
@@ -539,9 +659,15 @@ export function lensSummary(results) {
     const count = (r.findings || []).length
     const sources = (r.sources || []).length
     const allowance = lensByKey(r.lens)?.budget?.searches ?? 0
+    // A per-line pass carries its line in the label, or the report shows two
+    // rows both called "Competitors" and a reader cannot tell which business
+    // came back quiet.
+    const line = lineOfLensKey(r.lens)
+    const base = lensByKey(r.lens)?.label || r.lens
     return {
       lens: r.lens,
-      label: lensByKey(r.lens)?.label || r.lens,
+      line,
+      label: line ? `${base} — ${line}` : base,
       ran: r.ok !== false,
       count,
       sources,

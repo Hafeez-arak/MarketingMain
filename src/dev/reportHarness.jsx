@@ -8,6 +8,7 @@ import { ResearchReport } from '../pages/insights/ResearchReport'
 import { BusinessView } from '../pages/insights/BusinessView'
 import { Insights } from '../pages/insights/index'
 import { planStoreWrites } from '../lib/agent/intel'
+import { parseLines, stampLines } from '../lib/agent/lines'
 import fixture from './reportFixture.json'
 import runs from './runsFixture.json'
 import '../index.css'
@@ -60,7 +61,7 @@ window.fetch = async (url, init) => {
   // report is fed the same way production feeds it: a real research_runs
   // payload, captured from this workspace, findings and all.
   if (href.includes('research_runs')) {
-    return new Response(JSON.stringify(runs), {
+    return new Response(JSON.stringify(withLines(runs)), {
       status: 200, headers: { 'Content-Type': 'application/json' },
     })
   }
@@ -98,6 +99,35 @@ window.fetch = async (url, init) => {
     return new Response('[]', { status: 200, headers: { 'Content-Type': 'application/json' } })
   }
   return realFetch(url, init)
+}
+
+// ── `#brief-lines`: the report split by business line ──
+//
+// The captured 14 Sep run predates business lines and every finding on it
+// carries `line: ''`, so the grouped competitor view correctly collapses to a
+// single group — which is the right fallback and shows nothing about the
+// split. This mode stamps the lines using the REAL `stampLines` against Arak's
+// REAL `business_lines` configuration and the watchlist below, so what renders
+// is what the code will actually produce rather than a hand-written mock.
+//
+// Dev-only, and applied to a copy: nothing here writes to the fixture.
+const BUSINESS_LINES = [
+  'lighting | Lighting | /services/indoor-lighting, /services/facade-lighting, lighting design, lighting consultant, facade, luminaire, architectural lighting',
+  'controls | Controls & automation | /services/lighting-controls, knx, dali, grms, guest room, building automation, home automation',
+  'poles | Smart poles | /services/smart-poles, smart pole, street light, lighting pole',
+].join('\n')
+
+function withLines(rows) {
+  if (window.location.hash !== '#brief-lines') return rows
+  const lines = parseLines(BUSINESS_LINES)
+  const watchlist = demoWatchlist().map(c => ({ subject: c.subject, lines: c.lines }))
+  return rows.map(r => ({
+    ...r,
+    report: {
+      ...r.report,
+      findings: stampLines(r.report?.findings || [], { lines, watchlist }),
+    },
+  }))
 }
 
 // The live watchlist as it stands, so the business view can be looked at

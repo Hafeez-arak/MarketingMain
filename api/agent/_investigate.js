@@ -5,6 +5,7 @@ import { textIn, urlsFromResponse } from '../../src/lib/agent/loop.js'
 import { BRIEF_SCHEMA, SYNTHESISE_PROMPT, mergeBrief, withRefs, briefEmptiness } from '../../src/lib/agent/brief.js'
 import {
   lensesFor, motionOf, lensSummary, rankFindings, agendaFilterFor, lensByKey,
+  baseKeyOf, lineOfLensKey, expandPerLine,
 } from '../../src/lib/agent/lenses.js'
 import { LENS_PROMPTS } from '../../src/lib/agent/lensPrompts.js'
 import { runLens, runOurselvesLens, runCalendarLens, runSearchLens, markStage } from './_lenses.js'
@@ -188,7 +189,10 @@ export async function loadRunContext(workspaceId, runId, cadence = 'weekly') {
     agenda: dedupeQuestions(agenda || []),
     priorRuns: priorRuns || [],
     competitors, competitorNotes, alreadySaid: alreadySaid || [], motion, explicit, brandFacts, language,
-    lenses: lensesFor({ motion, cadence }),
+    // Expanded from the WATCHLIST's lines, not the brand's configured ones —
+    // see expandPerLine. A line nobody competes with us on gets no pass, so a
+    // brand that configures three lines and is rivalled on two runs two.
+    lenses: expandPerLine(lensesFor({ motion, cadence }), competitorNotes.flatMap(n => n.lines || [])),
   }
 }
 
@@ -219,7 +223,7 @@ export async function planLenses(workspaceId, runId, cadence = 'weekly') {
  * every lens's — the calendar's dates cost an API round trip, and fetching
  * them to run the demand lens would be waste repeated on every call.
  */
-async function argsForLens(key, { brandFacts, motion, competitors, competitorNotes = [], gathered, profile, ctx, agenda = [], language = '', workspaceId = '' }) {
+async function argsForLens(key, { brandFacts, motion, competitors, competitorNotes = [], gathered, profile, ctx, agenda = [], language = '', workspaceId = '', line = '' }) {
   // What the team already tracks, so the lens reports changes instead of
   // re-announcing last week. Read only for the three lenses that produce
   // leads, events or competitor signals; never fatal — an empty store is a
@@ -247,13 +251,51 @@ async function argsForLens(key, { brandFacts, motion, competitors, competitorNot
   // resolved once in loadRunContext rather than a second time here.
   if (key === 'category') return { args: [brandFacts, { agenda, language, intel }] }
   if (key === 'rivals') {
+    // ── ONE PASS, ONE LINE, ONE ROSTER ──
+    //
+    // The pass is handed only the rivals that compete in ITS line, so the
+    // budget cannot be spent on the other business before reaching them. A
+    // rival selling into both — Al Nasser, Nassli, Armada — appears in both
+    // passes on purpose: "Berker switch exclusivity" is a controls fact about
+    // a company we also meet on lighting, and asking one question about them
+    // produces one of those two answers and silently loses the other.
+    //
+    // A rival with no line recorded is researched in every pass rather than
+    // none. An unclassified name is an unfinished watchlist entry, and
+    // dropping it would make a data gap look like an absence of competition.
+    const inLine = n => !line || !(n.lines || []).length || (n.lines || []).includes(line)
+    // ── EXCLUSIVES FIRST, THEN THE ONES WE MEET TWICE ──
+    //
+    // Splitting the budget per line was not enough on its own. Measured against
+    // the real watchlist: the controls pass's first four names were all rivals
+    // who sell into BOTH lines — they were entered first — so six searches were
+    // gone before reaching SAS Systems Engineering and Prime Star Technologies,
+    // the two companies that exist ONLY in this pass. The starvation moved
+    // rather than ended.
+    //
+    // A rival who straddles gets a second chance in the other line's pass. A
+    // rival exclusive to this line has exactly this one. So exclusives go
+    // first, and a person's own ordering is preserved inside each group.
+    const exclusive = n => (n.lines || []).length === 1
+    const notes = line
+      ? [...competitorNotes.filter(n => inLine(n) && exclusive(n)),
+         ...competitorNotes.filter(n => inLine(n) && !exclusive(n))]
+      : competitorNotes
+    const order = new Map(notes.map((n, i) => [String(n.name).toLowerCase(), i]))
+    const roster = line
+      ? competitors
+          .filter(c => order.has(String(c).toLowerCase()))
+          .sort((a, b) => order.get(String(a).toLowerCase()) - order.get(String(b).toLowerCase()))
+      : competitors
+
     return {
       args: [brandFacts, {
-        competitors,
-        notes: competitorNotes,
+        competitors: roster,
+        notes,
         agenda,
         language,
         intel,
+        line,
         board: gathered?.competitor_board || [],
         // The lens is told its own budget so "one search per name on the
         // watchlist before anything else" is a number it can plan against
@@ -262,6 +304,7 @@ async function argsForLens(key, { brandFacts, motion, competitors, competitorNot
       }],
     }
   }
+  if (key === 'global') return { args: [brandFacts, { agenda, language }] }
   if (key === 'craft') {
     // Was `['instagram']`, hardcoded. That made the one lens whose entire job
     // is "which formats and platforms are working" research a single platform
@@ -328,13 +371,17 @@ export async function runSingleLens({ workspaceId, runId, lensKey, cadence = 'we
       const { calendar } = await argsForLens('calendar', ctxBundle)
       result = runCalendarLens({ calendar })
     } else {
-      const build = LENS_PROMPTS[lensKey]
-      const { args } = await argsForLens(lensKey, { ...ctxBundle, workspaceId })
+      // A per-line pass (`rivals_controls`) shares the base lens's prompt
+      // builder and args; the line only narrows WHAT it is handed.
+      const base = baseKeyOf(lensKey)
+      const line = lineOfLensKey(lensKey)
+      const build = LENS_PROMPTS[base]
+      const { args } = await argsForLens(base, { ...ctxBundle, workspaceId, line })
       if (!build || !args) {
         result = { lens: lensKey, ok: false, findings: [], sources: [], cost: 0, error: 'No prompt for this lens.' }
       } else {
         result = await runLens({
-          workspaceId, runId, lensKey,
+          workspaceId, runId, lensKey, line,
           prompt: build(...args), identity: IDENTITY, brand: ctxBundle.brand, deadline: limit,
         })
       }

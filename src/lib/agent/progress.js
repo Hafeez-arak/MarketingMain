@@ -23,7 +23,7 @@
 // spinning. A progress bar that keeps spinning after the run died is the same
 // spinner-that-never-closes failure the whole run design is built against.
 
-import { lensesFor, lensByKey } from './lenses'
+import { lensesFor, lensByKey, lineOfLensKey } from './lenses'
 import { num, numOr } from './num'
 
 /** The phases a run moves through, in the order a reader sees them. */
@@ -83,9 +83,13 @@ export function lensProgress(run = {}, lensRows = []) {
   return plannedLenses(report, lensRows, { live }).map(key => {
     const row = byLens.get(key)
     const meta = lensByKey(key)
+    // A per-line pass carries its line, or the progress list shows the same
+    // "Competitors" twice with no way to tell which business is still running.
+    const line = lineOfLensKey(key)
     const base = {
       key,
-      label: meta?.label || key,
+      line,
+      label: meta?.label ? (line ? `${meta.label} — ${line}` : meta.label) : key,
       question: meta?.question || '',
       // A lens with no search budget costs nothing and cannot fail for a
       // reason worth reporting. Saying so stops "free" looking like "broken".

@@ -3,7 +3,7 @@ import {
   LENSES, lensByKey, lensesFor, searchBudgetFor, motionOf, MOTIONS,
   makeFinding, daysLeft, rankFindings, lensSummary, agendaFilterFor,
   isTechnicalOnly, FOR_WHOM,
-  PERISHABLE, SLOW,
+  PERISHABLE, SLOW, expandPerLine,
 } from './lenses'
 import {
   openingsPrompt, eventsPrompt, demandPrompt, categoryPrompt, rivalsPrompt, craftPrompt, LENS_PROMPTS,
@@ -44,9 +44,17 @@ describe('the lens set is general, not lighting-shaped', () => {
     }
   })
 
-  it('covers the nine questions and no more', () => {
+  it('covers the ten questions and no more', () => {
     expect(LENSES.map(l => l.key).sort())
-      .toEqual(['calendar', 'category', 'craft', 'demand', 'events', 'openings', 'ourselves', 'rivals', 'search'])
+      .toEqual(['calendar', 'category', 'craft', 'demand', 'events', 'global', 'openings', 'ourselves', 'rivals', 'search'])
+  })
+
+  it('asks about the world industry somewhere other than the local market lens', () => {
+    // `category` is grounded in the brand's geography and answered entirely in
+    // Saudi terms on 2026-09-17 — SASO, New Murabba, Qiddiya, municipal
+    // tenders. Correct, and the reason nothing upstream was ever looked at.
+    expect(lensByKey('global').perishability).toBe(SLOW)
+    expect(lensByKey('category').key).not.toBe(lensByKey('global').key)
   })
 
   it('the weekly run covers growth AND what competitors are doing', () => {
@@ -174,7 +182,25 @@ describe('cadence keeps a monthly question off a weekly bill', () => {
     //
     // So this ceiling is a guard against sprawl, never a reason to cut a
     // working lens below the level it needs to answer at all.
-    expect(searchBudgetFor(lensesFor({ cadence: 'weekly' }))).toBeLessThanOrEqual(32)
+    //
+    // ── MEASURED ON THE EXPANDED LIST SINCE 2026-09-17 ──
+    //
+    // `lensesFor` returns `rivals` ONCE, and since that lens became per-line it
+    // actually runs once per business line the watchlist uses. Measuring the
+    // unexpanded list would have let this guard read 35 while the run spent 41,
+    // which is worse than having no guard: it would have gone on passing while
+    // the thing it exists to catch happened.
+    //
+    // Two lines is the real case (Arak: lighting and controls) and the most any
+    // brand here has rivals in.
+    //
+    // Raised 32 → 42 on 2026-09-17 for the controls pass (6) and the global
+    // industry lens (6). The controls pass is not sprawl — it is the half of
+    // the business that returned nothing at all while the two shared a budget
+    // spent in watchlist order. At ~$0.55 a rivals pass and ~$0.45 for global
+    // this puts a weekly run near $3.30, and a month of weekly runs near $14.
+    const weekly = expandPerLine(lensesFor({ cadence: 'weekly' }), ['lighting', 'controls'])
+    expect(searchBudgetFor(weekly)).toBeLessThanOrEqual(42)
   })
 })
 
@@ -793,5 +819,90 @@ describe('web tool budgets', () => {
       if (l.cadence === 'monthly') continue
       expect(l.budget.searches, l.key).toBeGreaterThanOrEqual(6)
     }
+  })
+})
+
+// ─── Per-line lens passes ──────────────────────────────────────────────────
+// The bug this exists to prevent, recorded on the 2026-09-17 run: one rivals
+// lens, one shared budget of 8, a watchlist of 17 ordered by the sequence a
+// person typed it, lighting entered first. The lens reached seven names and
+// reported five unreached — SAS Systems Engineering and Prime Star
+// Technologies among them, both controls-only. The controls half of the
+// business was structurally unresearchable and the report could only call it
+// quiet.
+
+describe('one research pass per business line', () => {
+  const weekly = () => lensesFor({ cadence: 'weekly' })
+
+  it('splits the competitor lens into one pass per line', () => {
+    const keys = expandPerLine(weekly(), ['lighting', 'controls']).map(l => l.key)
+    expect(keys).toContain('rivals_lighting')
+    expect(keys).toContain('rivals_controls')
+    expect(keys).not.toContain('rivals')
+  })
+
+  it('gives each line its OWN budget, so one cannot starve the other', () => {
+    const passes = expandPerLine(weekly(), ['lighting', 'controls'])
+      .filter(l => l.base === 'rivals')
+    expect(passes).toHaveLength(2)
+    for (const p of passes) expect(p.budget.searches).toBe(6)
+  })
+
+  it('leaves every other lens alone', () => {
+    const before = weekly().filter(l => l.key !== 'rivals').map(l => l.key)
+    const after = expandPerLine(weekly(), ['lighting', 'controls'])
+      .filter(l => l.base !== 'rivals').map(l => l.key)
+    expect(after).toEqual(before)
+  })
+
+  it('keeps one undivided lens for a brand with no lines — which is every other brand', () => {
+    expect(expandPerLine(weekly(), []).map(l => l.key)).toContain('rivals')
+    expect(expandPerLine(weekly(), []).map(l => l.key)).not.toContain('rivals_lighting')
+  })
+
+  it('resolves a pass key back to its lens, so budgets and labels still work', () => {
+    expect(lensByKey('rivals_controls').key).toBe('rivals')
+    expect(lensByKey('rivals_controls').budget.searches).toBe(6)
+  })
+
+  it('does not mistake an ordinary lens key for a pass', () => {
+    // Nothing here has an underscore today, and the day something does this
+    // test is why it keeps working.
+    for (const l of LENSES) expect(lensByKey(l.key).key).toBe(l.key)
+  })
+
+  it('refuses to invent a lens from an unknown prefix', () => {
+    expect(lensByKey('nonsense_controls')).toBeNull()
+    // `category` is not per-line, so this is not a pass of it.
+    expect(lensByKey('category_controls')).toBeNull()
+  })
+
+  it('names the line in the summary, or two rows both read "Competitors"', () => {
+    const rows = lensSummary([
+      { lens: 'rivals_controls', findings: [{}], sources: ['u'], ok: true },
+      { lens: 'rivals_lighting', findings: [], sources: [], ok: true },
+    ])
+    expect(rows[0].label).toBe('Competitors — controls')
+    expect(rows[0].line).toBe('controls')
+    expect(rows[1].label).toBe('Competitors — lighting')
+    // The allowance still resolves through the base lens.
+    expect(rows[0].allowance).toBe(6)
+  })
+
+  it('stamps the line on a finding from the pass that produced it', () => {
+    // The strongest evidence available: the controls pass was handed only
+    // controls rivals and asked only about controls. No keyword matching on a
+    // headline can beat that, and lines.js must not overwrite it.
+    const f = makeFinding('rivals_controls', { headline: 'They hired a KNX engineer.' }, 'controls')
+    expect(f.line).toBe('controls')
+  })
+
+  it('lets the model override the pass line for a rival that straddles', () => {
+    const f = makeFinding('rivals_controls', { headline: 'x', line: 'lighting' }, 'controls')
+    expect(f.line).toBe('lighting')
+  })
+
+  it('leaves a finding unstamped when there is no pass and no answer', () => {
+    expect(makeFinding('category', { headline: 'x' }).line).toBe('')
   })
 })
