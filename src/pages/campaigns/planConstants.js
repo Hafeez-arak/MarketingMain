@@ -34,15 +34,70 @@ export const GOALS = [
   'Company news & milestones',
 ]
 
-// The sentinel the "Focus category" select uses for "none of these". It is
-// never stored and never sent — picking it swaps the select for a text box,
-// and whatever is typed there becomes the goal category verbatim.
+// The sentinel the "Focus category" picker uses for "none of these". It is
+// never stored and never sent — ticking it reveals a text box, and whatever is
+// typed there joins the chosen categories verbatim.
 export const OTHER_GOAL = '__other__'
 
 /** True when a saved category is a typed-in one rather than a listed one. */
 export function isCustomGoal(value) {
   const v = String(value || '').trim()
   return !!v && !GOALS.includes(v)
+}
+
+// ─── Several focus categories, in one text column ──────────────────────────
+//
+// A month is rarely about one thing. "Brand awareness AND project showcase"
+// was unaskable while this was a single <select>: picking the second replaced
+// the first, so half of what the month was for went unsaid.
+//
+// Stored comma-joined in the SAME `content_plans.goal_category` text column,
+// deliberately, rather than promoted to `text[]`:
+//
+//   · the value is free text downstream — it is dropped into the planning
+//     prompt as prose, and "Brand awareness, Project showcase" reads correctly
+//     to the model with nothing taught about it;
+//   · the n8n planning workflow and `api/agent/_tools.js` both select this
+//     column as a scalar, and an array would arrive at them as something they
+//     have never parsed;
+//   · no plan in the database has a non-empty goal_category today, so there is
+//     nothing to migrate and nothing that can be misread — but a single stored
+//     value still parses to a one-item list, which is what keeps a draft saved
+//     before this change opening correctly after it.
+//
+// Comma is the separator because none of GOALS contains one. They contain "&"
+// ("Education & how-to", "Trust & social proof"), which is exactly why "&" was
+// not used. A typed-in category with a comma in it splits, and that is the one
+// honest cost of this choice — it becomes two categories rather than silently
+// corrupting the list.
+
+/** A stored value -> the categories in it. Always an array, never null. */
+export function parseCategories(value) {
+  return String(value || '')
+    .split(',')
+    .map(s => s.trim())
+    .filter(Boolean)
+}
+
+/** Categories -> the stored value. De-duplicated, order preserved. */
+export function joinCategories(list = []) {
+  return [...new Set(list.map(s => String(s || '').trim()).filter(Boolean))].join(', ')
+}
+
+/** The chosen categories that ARE on the list. */
+export function listedCategories(value) {
+  return parseCategories(value).filter(c => GOALS.includes(c))
+}
+
+/**
+ * The typed-in part of a stored value — everything not on GOALS, rejoined.
+ *
+ * One box rather than one per custom entry: somebody typing their own focus is
+ * describing a month in their own words, and splitting that back into chips
+ * they have to manage individually is more ceremony than the freedom is worth.
+ */
+export function customCategories(value) {
+  return joinCategories(parseCategories(value).filter(c => !GOALS.includes(c)))
 }
 // Where a plan's ideas can be GENERATED — the platforms the planning and
 // caption workflows know how to write for. LinkedIn joined Instagram on
