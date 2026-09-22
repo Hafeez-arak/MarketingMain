@@ -1,12 +1,13 @@
 import { useNavigate } from 'react-router-dom'
-import { Card, Button, Skeleton, IconBadge, Empty, PostImage, PlatformPill } from '../../components/ui/index'
+import { Card, Button, Skeleton, IconBadge, PlatformPill } from '../../components/ui/index'
 import { Icon } from '../../components/ui/icons'
-import { formatBrandDateTime } from '../../lib/brandTime'
-import { DAYS_AHEAD } from './useQueue'
 
-// ─── What is going out, and what is stuck ──────────────────────────────────
+// ─── What is stuck ─────────────────────────────────────────────────────────
 //
-// Both read Supabase directly through fetchScheduledPosts — the same function
+// "Going out next" was removed 2026-09-22 at the user's request — the
+// calendar (View calendar, top of the page) already answers that question.
+//
+// It reads Supabase directly through fetchScheduledPosts — the same function
 // the calendar and the Post Queue use, over the scheduled_posts view that
 // unions generated_posts and instagram_generated_posts.
 //
@@ -23,18 +24,6 @@ import { DAYS_AHEAD } from './useQueue'
 // through, which is the real version of the question the old card was asking.
 
 const textOf = p => (p.caption || p.topic || p.hook || '').replace(/\s+/g, ' ').trim()
-const mediaOf = p => (Array.isArray(p.image_urls) && p.image_urls.length ? p.image_urls[0] : p.image_url) || ''
-
-function Thumb({ post }) {
-  const src = mediaOf(post)
-  return src
-    ? <PostImage src={src} alt="" className="w-9 h-9 object-cover flex-shrink-0 border border-border" />
-    : (
-      <div className="w-9 h-9 bg-surface-subtle border border-border flex items-center justify-center flex-shrink-0 text-text-tertiary">
-        {Icon.image}
-      </div>
-    )
-}
 
 function ListSkeleton({ rows = 3 }) {
   return (
@@ -52,59 +41,11 @@ function ListSkeleton({ rows = 3 }) {
   )
 }
 
-export function QueueCards({ upcoming, attention, loading }) {
+export function QueueCards({ attention, loading }) {
   const navigate = useNavigate()
 
   return (
-    <>
-      <Card className="overflow-hidden">
-        <div className="flex items-center justify-between gap-4 px-4 py-3 border-b border-border">
-          <div className="flex items-center gap-2.5 min-w-0">
-            <IconBadge>{Icon.calendar}</IconBadge>
-            <div className="min-w-0">
-              <h3 className="font-semibold text-text text-sm leading-tight">Going out next</h3>
-              <p className="text-xs text-text-tertiary mt-0.5">Scheduled for the next {DAYS_AHEAD} days</p>
-            </div>
-          </div>
-          <Button variant="ghost" size="sm" onClick={() => navigate('/schedule')}>Calendar</Button>
-        </div>
-        {loading ? <ListSkeleton /> : upcoming.length === 0 ? (
-          <Empty
-            icon={Icon.calendar}
-            title="Nothing scheduled"
-            description={`No post is booked for the next ${DAYS_AHEAD} days.`}
-            action={<Button onClick={() => navigate('/campaigns')}>Plan a month</Button>} />
-        ) : (
-          <ul className="divide-y divide-border">
-            {upcoming.slice(0, 6).map(p => (
-              <li key={p.id}>
-                <button onClick={() => navigate('/schedule')}
-                  className="w-full text-left flex items-center gap-3 px-4 py-2.5 hover:bg-surface-subtle transition-colors">
-                  <Thumb post={p} />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm text-text truncate">{textOf(p) || 'No caption yet'}</p>
-                    <div className="flex items-center gap-2 mt-1">
-                      <PlatformPill platform={p.platform} />
-                      <span className="text-[10px] text-text-tertiary tabular-nums">
-                        {formatBrandDateTime(p.scheduled_publish_at)}
-                      </span>
-                    </div>
-                  </div>
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-        {upcoming.length > 6 && (
-          <div className="px-4 py-2.5 border-t border-border">
-            <Button variant="ghost" size="sm" className="w-full" onClick={() => navigate('/schedule')}>
-              {upcoming.length - 6} more scheduled
-            </Button>
-          </div>
-        )}
-      </Card>
-
-      <Card className="overflow-hidden">
+    <Card className="overflow-hidden">
         <div className="px-4 py-3 border-b border-border flex items-center justify-between gap-3">
           <div className="flex items-center gap-2.5 min-w-0">
             <IconBadge tone="rose">{Icon.approve}</IconBadge>
@@ -149,6 +90,5 @@ export function QueueCards({ upcoming, attention, loading }) {
           </Button>
         </div>
       </Card>
-    </>
   )
 }
