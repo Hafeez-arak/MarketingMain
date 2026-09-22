@@ -3,7 +3,7 @@ import { Button, Spinner } from '../../ui/index'
 import { ensureFontsLoaded, weightsFor } from '../fonts'
 
 import {
-  migrateDocument, newTextLayer, newShapeLayer, newImageLayer,
+  migrateDocument, newTextLayer, newShapeLayer, newImageLayer, cornerBox,
   patchLayers, removeLayers, reorderLayers, sendToExtreme, duplicateLayer,
   pickStyle, styleFor, cropPx, docSize, normalizeCrop, isFullFrame, FULL_CROP, DOC_VERSION,
 } from './model/document'
@@ -349,12 +349,24 @@ export function PhotoEditor({
 
   const addShape = useCallback(type => addLayer(newShapeLayer(type)), [addLayer])
 
+  const canvasRatio = doc?.width && doc?.height ? doc.width / doc.height : 1
+
   const addImage = useCallback(async url => {
     const img = await loadLayerImage(url)
     if (!img) { setError('That image could not be loaded.'); return }
     const ratio = img.naturalWidth / img.naturalHeight
-    addLayer(newImageLayer(url, { naturalRatio: ratio }))
-  }, [addLayer])
+    addLayer(newImageLayer(url, { naturalRatio: ratio, canvasRatio }))
+  }, [addLayer, canvasRatio])
+
+  // The logo, placed for you: a fixed size and a safe margin from the chosen
+  // corner. The exact file from Brand Brain, not an AI redraw — a model asked
+  // to "add our logo" repaints it, and a slightly-wrong logo is worse than none.
+  const addLogo = useCallback(async (url, corner) => {
+    const img = await loadLayerImage(url)
+    if (!img) { setError('That logo could not be loaded.'); return }
+    const ratio = img.naturalWidth / img.naturalHeight
+    addLayer(newImageLayer(url, { naturalRatio: ratio, ...cornerBox(corner, { naturalRatio: ratio, canvasRatio }) }))
+  }, [addLayer, canvasRatio])
 
   const deleteSelected = useCallback((ids = selectedIds) => {
     if (!ids.length) return
@@ -836,7 +848,7 @@ export function PhotoEditor({
           onOpenPanel={p => { if (p !== 'crop' && tool === 'crop') cancelCrop(); setPanel(p) }}>
           {panel === 'insert' && <InsertPanel onAddText={addText} onAddShape={addShape} />}
           {panel === 'uploads' && (
-            <UploadsPanel onUploadImage={onUploadImage} onAddImage={addImage} library={imageLibrary} workspaceId={workspaceId} accessToken={accessToken} />
+            <UploadsPanel onUploadImage={onUploadImage} onAddImage={addImage} onAddLogo={addLogo} library={imageLibrary} workspaceId={workspaceId} accessToken={accessToken} />
           )}
           {panel === 'adjust' && !isVideo && (
             <AdjustPanel adjust={doc.adjust} onBeginChange={begin}

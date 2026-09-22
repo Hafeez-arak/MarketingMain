@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import { Spinner } from '../../../ui/index'
 import { fetchMediaLibrary } from '../../../../lib/mediaLibrary'
+import { fetchBrandAssets } from '../../../../lib/brandAssets'
 import {
   ADJUST_GROUPS, ADJUST_LABELS, ADJUST_RANGE,
   FILTER_PRESETS, matchPreset, hasAdjustments,
 } from '../model/adjust'
-import { isFullFrame } from '../model/document'
+import { isFullFrame, CORNERS } from '../model/document'
 import { SliderField, PanelSection, ToolbarButton } from '../controls'
 import {
   IconAdjust, IconArrow, IconEllipse, IconImage, IconLayers, IconLine, IconPolygon,
@@ -101,17 +102,39 @@ export function InsertPanel({ onAddText, onAddShape }) {
 }
 
 // ── Images ─────────────────────────────────────────────────────────────────
-// Three sources: a file from the marketer's machine, anything already saved
+// Four sources, Brand Brain first: the logo is the thing people add most, and
+// before this it could only be reached by downloading it from Brand Brain and
+// uploading it again. Then a file from the marketer's machine, anything already saved
 // to THIS workspace's Media Library (its past uploads and generations, across
 // every session), and anything already generated in this session — which is the one
 // people actually reach for, to drop a logo or an earlier crop onto a new
 // background.
-export function UploadsPanel({ onUploadImage, onAddImage, library = [], workspaceId, accessToken }) {
+// Brand Brain kinds that are pictures. Music is an asset kind too, and has no
+// business on a canvas.
+const BRAND_IMAGE_KINDS = ['product_photo', 'project_photo', 'reference', 'other']
+
+const CORNER_ARROWS = { 'top-left': '↖', 'top-right': '↗', 'bottom-left': '↙', 'bottom-right': '↘' }
+
+export function UploadsPanel({ onUploadImage, onAddImage, onAddLogo, library = [], workspaceId, accessToken }) {
   const fileRef = useRef(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [mediaAssets, setMediaAssets] = useState([])
   const [mediaLoading, setMediaLoading] = useState(true)
+  const [brandAssets, setBrandAssets] = useState([])
+  const [brandLoading, setBrandLoading] = useState(true)
+
+  useEffect(() => {
+    let alive = true
+    fetchBrandAssets(workspaceId, accessToken).then(rows => {
+      if (!alive) return
+      setBrandAssets(rows.filter(a => a.public_url)); setBrandLoading(false)
+    })
+    return () => { alive = false }
+  }, [workspaceId, accessToken])
+
+  const logos = brandAssets.filter(a => a.kind === 'logo')
+  const brandImages = brandAssets.filter(a => BRAND_IMAGE_KINDS.includes(a.kind))
 
   useEffect(() => {
     let alive = true
@@ -136,6 +159,60 @@ export function UploadsPanel({ onUploadImage, onAddImage, library = [], workspac
 
   return (
     <div className="space-y-4">
+      <PanelSection title="Your logo">
+        {brandLoading ? (
+          <div className="flex justify-center py-4"><Spinner size="sm" /></div>
+        ) : logos.length === 0 ? (
+          <p className="text-[11px] text-text-tertiary">
+            No logo in Brand Brain yet. Add one there under Assets, kind “Logo”, and it appears here.
+          </p>
+        ) : (
+          <div className="space-y-2">
+            {logos.map(a => (
+              <div key={a.id} className="rounded-lg border border-border bg-white p-2">
+                {/* Mid-grey, not the usual light checkerboard: Arak's own logo
+                    is white and vanished on light. Grey shows white and dark
+                    marks alike. */}
+                <button type="button" onClick={() => onAddImage(a.public_url)}
+                  title="Add to the canvas, then drag it where you want"
+                  className="flex h-16 w-full items-center justify-center rounded-md bg-[repeating-conic-gradient(#9a9a9a_0%_25%,#a8a8a8_0%_50%)] bg-[length:12px_12px] hover:ring-1 hover:ring-amber-400">
+                  <img src={a.public_url} alt={a.title || 'Logo'} className="max-h-14 max-w-full object-contain" />
+                </button>
+                {onAddLogo && (
+                  <div className="mt-2 flex items-center justify-between gap-2">
+                    <span className="text-[10px] text-text-tertiary">Put in corner</span>
+                    <div className="grid grid-cols-2 gap-1">
+                      {CORNERS.map(corner => (
+                        <button key={corner} type="button" onClick={() => onAddLogo(a.public_url, corner)}
+                          title={`Add to the ${corner.replace('-', ' ')} corner`}
+                          aria-label={`Add logo to the ${corner.replace('-', ' ')} corner`}
+                          className="h-6 w-6 rounded border border-border text-[11px] text-text-secondary hover:border-amber-400 hover:bg-amber-50 hover:text-amber-800">
+                          {CORNER_ARROWS[corner]}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </PanelSection>
+
+      {brandImages.length > 0 && (
+        <PanelSection title="Brand Brain">
+          <div className="grid grid-cols-2 gap-1.5">
+            {brandImages.map(a => (
+              <button key={a.id} type="button" onClick={() => onAddImage(a.public_url)}
+                title={a.title || a.caption || 'Add to canvas'}
+                className="aspect-square overflow-hidden rounded-lg border border-border bg-surface-subtle hover:border-amber-400">
+                <img src={a.public_url} alt="" loading="lazy" className="h-full w-full object-cover" />
+              </button>
+            ))}
+          </div>
+        </PanelSection>
+      )}
+
       <PanelSection title="Upload">
         <button type="button" disabled={busy || !onUploadImage} onClick={() => fileRef.current?.click()}
           className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-border bg-white py-6 text-[11px] text-text-secondary hover:border-amber-400 hover:bg-amber-50 disabled:opacity-50">
