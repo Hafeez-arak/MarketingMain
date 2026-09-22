@@ -1,10 +1,16 @@
 # The research agent, next to n8n.
 #
-# Holds only what api/agent/*.js imports: the handlers, the Zernio client they
-# share, src/lib (the pure agent modules and the brand context cores), and the
-# one runtime dependency, the Anthropic SDK. No React, no Vite, no build step —
-# the handlers are plain ESM that run under Node as-is, which
+# Holds what the routes in server/agent.js import: the api/agent handlers, the
+# n8n-only ones in server/agentHandlers, the Zernio client they share, src/lib
+# (the pure agent modules and the brand context cores), and the one runtime
+# dependency, the Anthropic SDK. No React, no Vite, no build step — the
+# handlers are plain ESM that run under Node as-is, which
 # src/lib/agent/nodeBoundary.test.js already asserts.
+#
+# The COPY lines below are checked against the real import graph by
+# server/imageContents.test.js. A file that is reachable at runtime and missing
+# here fails only in the container, as a 404 on the first live call — which is
+# how server/agentHandlers went unshipped from #111 until 9a2c52f.
 #
 # Build context is the repo root (see n8n/docker/docker-compose.yml):
 #     docker compose up -d --build agent
