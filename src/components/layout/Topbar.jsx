@@ -13,6 +13,7 @@ const titles = {
   '/social/snapchat': 'Snapchat',
   '/social/linkedin': 'LinkedIn',
   '/social/approvals': 'Post Queue',
+  '/analytics/report': 'Performance Report', '/insights/report': 'Research Brief', '/insights/business': 'Business View',
   '/settings': 'Settings', '/integrations': 'Integrations', '/team': 'Team & Access',
 }
 

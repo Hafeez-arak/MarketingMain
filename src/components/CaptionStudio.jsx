@@ -121,7 +121,7 @@ export function CaptionStudio({ open, onClose, webhookUrl, platform, language = 
   const busy = loading !== false
 
   return (
-    <Modal open={open} onClose={onClose} title="✨ Rewrite caption" width="max-w-3xl">
+    <Modal open={open} onClose={onClose} title="Rewrite caption" width="max-w-3xl">
       <div className="p-6 space-y-5">
         {!webhookUrl && (
           <div className="rounded-xl bg-amber-50 border border-amber-100 px-4 py-3 text-xs text-amber-700">
@@ -150,7 +150,7 @@ export function CaptionStudio({ open, onClose, webhookUrl, platform, language = 
         )}
 
         <Button onClick={generateVariants} disabled={busy || !webhookUrl}>
-          {loading === 'variants' ? <><Spinner size="sm" /> Writing 3 options…</> : variants.length ? '↻ New 3 options' : '✨ Give me 3 options'}
+          {loading === 'variants' ? <><Spinner size="sm" /> Writing 3 options…</> : variants.length ? '↻ New 3 options' : 'Give me 3 options'}
         </Button>
 
         {error && <p className="text-xs text-red-600">{error}</p>}
@@ -166,7 +166,7 @@ export function CaptionStudio({ open, onClose, webhookUrl, platform, language = 
                   {v.hashtags && <p className="text-[11px] text-text-tertiary">{v.hashtags}</p>}
                 </div>
                 <div className="flex flex-wrap gap-1.5 pt-1">
-                  <button onClick={() => applyVariant(v)} className="text-[11px] font-semibold px-2 py-1 rounded-lg bg-violet-600 text-white hover:bg-violet-700 transition-colors">Use this</button>
+                  <button onClick={() => applyVariant(v)} className="text-[11px] font-semibold px-2 py-1 bg-amber-700 text-white hover:bg-amber-800 transition-colors">Use this</button>
                 </div>
               </div>
             ))}
@@ -174,23 +174,23 @@ export function CaptionStudio({ open, onClose, webhookUrl, platform, language = 
         )}
 
         {/* Working draft — what "Apply" will save. Per-piece regen lives here. */}
-        <div className="rounded-xl border border-violet-200 bg-violet-50/30 p-4 space-y-3">
-          <p className="text-[11px] font-bold text-violet-700 uppercase tracking-wide">Your draft</p>
+        <div className="rounded-xl border border-clay-200 bg-clay-50/30 p-4 space-y-3">
+          <p className="text-[11px] font-bold text-clay-700 uppercase tracking-wide">Your draft</p>
           <div className="space-y-1">
             <div className="flex items-center justify-between">
               <span className="text-[10px] font-semibold text-text-tertiary uppercase">Caption</span>
-              <button onClick={() => regeneratePiece('caption')} disabled={busy} className="text-[11px] font-medium text-violet-700 hover:text-violet-900 disabled:opacity-50">{(loading === 'body' || loading === 'caption') ? '…' : '↻ regenerate caption'}</button>
+              <button onClick={() => regeneratePiece('caption')} disabled={busy} className="text-[11px] font-medium text-clay-700 hover:text-clay-900 disabled:opacity-50">{(loading === 'body' || loading === 'caption') ? '…' : '↻ regenerate caption'}</button>
             </div>
             <textarea value={draft.body} onChange={e => setDraft(d => ({ ...d, body: e.target.value }))} rows={8}
-              dir={isArabic(draft.body) ? 'rtl' : 'ltr'} className="w-full text-sm bg-white border border-border rounded-lg px-3 py-2 resize-none focus:outline-none focus:border-violet-300" />
+              dir={isArabic(draft.body) ? 'rtl' : 'ltr'} className="w-full text-sm bg-white border border-border rounded-lg px-3 py-2 resize-none focus:outline-none focus:border-clay-300" />
           </div>
           <div className="space-y-1">
             <div className="flex items-center justify-between">
               <span className="text-[10px] font-semibold text-text-tertiary uppercase">Hashtags</span>
-              <button onClick={() => regeneratePiece('hashtags')} disabled={busy} className="text-[11px] font-medium text-violet-700 hover:text-violet-900 disabled:opacity-50">{loading === 'hashtags' ? '…' : '↻ regenerate hashtags'}</button>
+              <button onClick={() => regeneratePiece('hashtags')} disabled={busy} className="text-[11px] font-medium text-clay-700 hover:text-clay-900 disabled:opacity-50">{loading === 'hashtags' ? '…' : '↻ regenerate hashtags'}</button>
             </div>
             <textarea value={draft.hashtags} onChange={e => setDraft(d => ({ ...d, hashtags: e.target.value }))} rows={2}
-              className="w-full text-sm bg-white border border-border rounded-lg px-3 py-2 resize-none focus:outline-none focus:border-violet-300" />
+              className="w-full text-sm bg-white border border-border rounded-lg px-3 py-2 resize-none focus:outline-none focus:border-clay-300" />
           </div>
         </div>
 

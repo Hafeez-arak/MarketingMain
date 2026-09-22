@@ -27,8 +27,8 @@ function ToolTrace({ steps }) {
       {steps.map((s, i) => (
         <span
           key={i}
-          className={`text-[10px] px-1.5 py-0.5 rounded font-mono ${
-            s.ok === false ? 'bg-red-50 text-red-600' : 'bg-slate-100 text-slate-500'
+          className={`text-[10px] px-1.5 py-0.5 font-mono ${
+            s.ok === false ? 'bg-red-50 text-red-600' : 'bg-surface-muted text-text-secondary'
           }`}
         >
           {s.name}
@@ -141,36 +141,38 @@ export default function AgentPage() {
           or on two. */}
       <RunProgress run={latestRun} lensRows={lensRows} />
 
-      <Card className="p-4">
+      <Card>
         <SectionHead
           title="Weekly research"
           subtitle="Measures every competitor with a verified Instagram handle, then investigates what moved. The numbers are computed in code, never by a model."
         />
-        {runNote ? <p className="mt-2 text-sm text-slate-700">{runNote}</p> : null}
-        {!runsLoaded ? (
-          <div className="mt-3 space-y-2" aria-busy="true" aria-label="Loading runs">
-            {[0, 1, 2].map(i => <Skeleton key={i} className="h-4 w-full max-w-md" />)}
-          </div>
-        ) : runs.length === 0 ? (
-          <p className="mt-2 text-sm text-slate-500">No run has been started for this brand yet.</p>
-        ) : (
-          <ul className="mt-3 space-y-1.5">
-            {runs.map(r => (
-              <li key={r.id} className="text-sm flex items-baseline gap-2">
-                <span className={
-                  r.status === 'complete' ? 'text-emerald-600'
-                    : r.status === 'failed' ? 'text-red-600' : 'text-amber-600'
-                }>●</span>
-                <span className="text-slate-500 text-xs w-36 shrink-0">
-                  {new Date(r.started_at).toLocaleString()}
-                </span>
-                <span className="text-slate-700">
-                  {r.error || r.report?.headline || `${r.status} · ${r.stage || ''}`}
-                </span>
-              </li>
-            ))}
-          </ul>
-        )}
+        <div className="px-5 py-4 [&>*:first-child]:mt-0">
+          {runNote ? <p className="mt-2 text-sm text-text">{runNote}</p> : null}
+          {!runsLoaded ? (
+            <div className="mt-3 space-y-2" aria-busy="true" aria-label="Loading runs">
+              {[0, 1, 2].map(i => <Skeleton key={i} className="h-4 w-full max-w-md" />)}
+            </div>
+          ) : runs.length === 0 ? (
+            <p className="mt-2 text-sm text-text-secondary">No run has been started for this brand yet.</p>
+          ) : (
+            <ul className="mt-3 space-y-1.5">
+              {runs.map(r => (
+                <li key={r.id} className="text-sm flex items-baseline gap-2">
+                  <span className={
+                    r.status === 'complete' ? 'text-sage-600'
+                      : r.status === 'failed' ? 'text-red-600' : 'text-amber-600'
+                  }>●</span>
+                  <span className="text-text-secondary text-xs w-36 shrink-0">
+                    {new Date(r.started_at).toLocaleString()}
+                  </span>
+                  <span className="text-text">
+                    {r.error || r.report?.headline || `${r.status} · ${r.stage || ''}`}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       </Card>
 
       <AgentSteering />
@@ -178,7 +180,7 @@ export default function AgentPage() {
       <Card className="p-4">
         {turns.length === 0 ? (
           <div className="py-6">
-            <p className="text-sm text-slate-500 mb-3">
+            <p className="text-sm text-text-secondary mb-3">
               It reads this workspace only, answers from tools rather than memory,
               and will say when a sample is too small to mean anything. It can propose
               rules, ideas and drafts — it cannot publish or schedule anything.
@@ -188,7 +190,7 @@ export default function AgentPage() {
                 <button
                   key={s}
                   onClick={() => send(s)}
-                  className="text-xs px-2.5 py-1.5 rounded-full border border-slate-200 text-slate-600 hover:bg-slate-50"
+                  className="text-xs px-2.5 py-1.5 border border-border bg-white text-text-secondary hover:border-stone-400 hover:text-text transition-colors"
                 >
                   {s}
                 </button>
@@ -200,7 +202,7 @@ export default function AgentPage() {
             {turns.map((t, i) => (
               <div key={i} className={t.role === 'user' ? 'text-right' : ''}>
                 {t.role === 'user' ? (
-                  <div className="inline-block bg-slate-100 rounded-2xl px-3.5 py-2 text-sm text-slate-800 max-w-[85%] text-left whitespace-pre-wrap">
+                  <div className="inline-block bg-surface-muted px-3.5 py-2 text-sm text-text max-w-[85%] text-left whitespace-pre-wrap">
                     {t.text}
                   </div>
                 ) : (
@@ -212,7 +214,7 @@ export default function AgentPage() {
                 {t.error ? <div className="mt-1 text-sm text-red-600">{t.error}</div> : null}
                 {t.role === 'assistant' ? <ToolTrace steps={t.steps} /> : null}
                 {t.role === 'assistant' && t.cost ? (
-                  <div className="mt-1 text-[11px] text-slate-400">
+                  <div className="mt-1 text-[11px] text-text-tertiary">
                     ${t.cost.toFixed(4)}
                     {t.stoppedBy && t.stoppedBy !== 'answered' ? ` · stopped: ${t.stoppedBy}` : ''}
                   </div>
@@ -227,7 +229,7 @@ export default function AgentPage() {
             composer that has grown, rather than centring against it. */}
         <form
           onSubmit={e => { e.preventDefault(); send() }}
-          className="mt-4 flex gap-2 items-end border-t border-slate-100 pt-3"
+          className="mt-4 flex gap-2 items-end border-t border-border-light pt-3"
         >
           {/* Beside the composer rather than up in the page header: this is a
               thing you reach for while reading a conversation, not a page-level
@@ -241,7 +243,7 @@ export default function AgentPage() {
             disabled={!ready}
           />
           {busy ? (
-            <Button variant="ghost" onClick={stop}>Stop</Button>
+            <Button variant="secondary" onClick={stop}>Stop</Button>
           ) : (
             <Button type="submit" disabled={!question.trim() || !ready}>Ask</Button>
           )}

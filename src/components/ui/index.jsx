@@ -26,7 +26,7 @@ import { STATUS_META, PLATFORM_META } from '../../lib/utils'
 
 const FOCUS = 'focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-700 focus-visible:ring-offset-1 focus-visible:ring-offset-white'
 
-export function Button({ variant='primary', size='md', children, onClick, disabled, type='button', className='' }) {
+export function Button({ variant='primary', size='md', children, onClick, disabled, type='button', className='', ...rest }) {
   const base = `inline-flex items-center justify-center gap-2 font-semibold border transition-colors duration-150 cursor-pointer disabled:opacity-40 disabled:pointer-events-none ${FOCUS}`
   // Vertical padding is tuned per size so every variant lands on an exact
   // pixel height (28/32/38/44) — square corners make a half-pixel mismatch
@@ -46,7 +46,7 @@ export function Button({ variant='primary', size='md', children, onClick, disabl
     outline:   'bg-white text-text border-stone-400 hover:bg-amber-50 hover:border-amber-700 hover:text-amber-800',
   }
   return (
-    <button type={type} onClick={onClick} disabled={disabled}
+    <button {...rest} type={type} onClick={onClick} disabled={disabled}
       className={`${base} ${sizes[size]} ${variants[variant]} ${className}`}>
       {children}
     </button>
@@ -238,7 +238,7 @@ export function Empty({ icon, title, description, action }) {
 
 // Round on purpose — an avatar is a portrait slot, and squaring it turns a
 // list of people into a list of files.
-const avColors = ['bg-amber-100 text-amber-800','bg-clay-100 text-clay-800','bg-sage-100 text-sage-800','bg-stone-100 text-stone-800','bg-sky-100 text-sky-800','bg-purple-100 text-purple-800']
+const avColors = ['bg-amber-100 text-amber-800','bg-clay-100 text-clay-800','bg-sage-100 text-sage-800','bg-stone-100 text-stone-800','bg-sky-100 text-sky-800','bg-clay-100 text-clay-800']
 export function Avatar({ name='?', size='md', color }) {
   const initials = name.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase()
   const c = color || avColors[name.charCodeAt(0) % avColors.length]
@@ -409,7 +409,7 @@ export function InfoDot({ label, what, note, className = '' }) {
 const BADGE_TONES = {
   steel: 'bg-amber-50 text-amber-700 border-amber-200',
   sage:  'bg-sage-50 text-sage-700 border-sage-200',
-  rose:  'bg-rose-50 text-rose-600 border-rose-200',
+  rose:  'bg-red-50 text-red-600 border-red-200',
 }
 export function IconBadge({ children, tone = 'steel' }) {
   return (

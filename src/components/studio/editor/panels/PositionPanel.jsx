@@ -4,6 +4,21 @@ import { isPath, isBoxed, layerLabel } from '../model/document'
 import { ALIGN_MODES } from '../model/align'
 import { NumberField, PanelSection, ToolbarButton } from '../controls'
 
+// Inline, stroke-only, currentColor — the same idiom as every other icon in
+// the app, so these sit at the panel's text colour instead of rendering as
+// full-colour emoji that vary by OS.
+const EyeIcon = ({ off }) => (
+  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" aria-hidden="true">
+    <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>
+    {off && <path d="M3 3l18 18"/>}
+  </svg>
+)
+const LockIcon = ({ open }) => (
+  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" aria-hidden="true">
+    <rect x="4" y="11" width="16" height="10"/><path d={open ? 'M8 11V7a4 4 0 0 1 7.5-2' : 'M8 11V7a4 4 0 0 1 8 0v4'}/>
+  </svg>
+)
+
 // ─── Position: arrange, align, exact numbers, and the layer list ───────────
 // Canva puts all four of these behind one "Position" button, in two tabs
 // (Arrange and Layers). Same here, for the same reason: they're the things you
@@ -159,10 +174,10 @@ function LayersTab({ doc, selectedIds, onSelect, onToggleVisible, onToggleLock, 
             <span className="w-4 shrink-0 text-center opacity-60">{LAYER_ICON[l.type] || '◻'}</span>
             <span className="flex-1 truncate">{layerLabel(l)}</span>
             <IconAction title={l.visible === false ? 'Show' : 'Hide'} onClick={() => onToggleVisible(l.id)}>
-              {l.visible === false ? '🚫' : '👁'}
+              <EyeIcon off={l.visible === false} />
             </IconAction>
             <IconAction title={l.locked ? 'Unlock' : 'Lock'} onClick={() => onToggleLock(l.id)}>
-              {l.locked ? '🔒' : '🔓'}
+              <LockIcon open={!l.locked} />
             </IconAction>
             <IconAction title="Move up" disabled={idx === doc.layers.length - 1} onClick={() => onOrder(1, l.id)}>↑</IconAction>
             <IconAction title="Move down" disabled={idx === 0} onClick={() => onOrder(-1, l.id)}>↓</IconAction>

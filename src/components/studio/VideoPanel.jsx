@@ -103,7 +103,7 @@ export function VideoPanel({
             }}
             disabled={!prompt.trim() || !!enhancing || busy}
             className="inline-flex items-center gap-1.5 border border-border px-2.5 py-1 text-[11px] font-medium hover:border-amber-400 hover:bg-amber-50 disabled:opacity-40 disabled:hover:border-border disabled:hover:bg-transparent">
-            {enhancing ? <><Spinner size="sm" /> Enhancing…</> : '✨ Enhance motion'}
+            {enhancing ? <><Spinner size="sm" /> Enhancing…</> : 'Enhance motion'}
           </button>
         )}
       </div>
@@ -124,7 +124,7 @@ export function VideoPanel({
           to discover it: the clip is generated CLEAN and the words go on
           afterwards as real text. Changing that wording later is free and
           instant, so nobody needs to get the copy right before rendering. */}
-      <p className="text-[11px] leading-snug text-emerald-800 bg-emerald-50 border border-emerald-200 px-2.5 py-1.5">
+      <p className="text-[11px] leading-snug text-sage-800 bg-sage-50 border border-sage-200 px-2.5 py-1.5">
         The clip comes back without any words on it. You add text, logos and colours afterwards
         with <span className="font-semibold">Add text</span> — free, instant, and re-editable as often as you like,
         with Arabic rendered properly. Only changing what happens <em>inside</em> the scene costs another render.
@@ -135,7 +135,7 @@ export function VideoPanel({
         <div className="flex gap-2">
           <Button variant="secondary" onClick={onCancel}>Cancel</Button>
           <Button onClick={submit} disabled={busy || !prompt.trim()}>
-            {busy ? <><Spinner size="sm" /> Starting…</> : '🎬 Create video'}
+            {busy ? <><Spinner size="sm" /> Starting…</> : 'Create video'}
           </Button>
         </div>
       </div>

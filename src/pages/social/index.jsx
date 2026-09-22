@@ -20,13 +20,13 @@ function PlatformCard({ platformKey, meta, postCount, accounts, loading, onOpen 
   const connected = accounts.some(a => a.is_active !== false)
 
   return (
-    <Card className={`overflow-hidden transition-all ${live ? 'cursor-pointer hover:shadow-md hover:-translate-y-0.5' : ''}`}
+    <Card className={`overflow-hidden transition-all ${live ? 'cursor-pointer hover:border-stone-400' : ''}`}
       onClick={live ? onOpen : undefined}>
       <div className="h-1" style={{ background: meta.color }} />
       <div className="p-5">
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
-            <span className={`w-8 h-8 rounded-xl flex items-center justify-center text-xs font-bold ${meta.bg} ${meta.text}`}>{meta.abbr}</span>
+            <span className={`w-8 h-8 flex items-center justify-center text-xs font-bold ${meta.bg} ${meta.text}`}>{meta.abbr}</span>
             <span className="font-semibold text-text">{meta.label}</span>
           </div>
           {!live ? (
@@ -36,7 +36,7 @@ function PlatformCard({ platformKey, meta, postCount, accounts, loading, onOpen 
           ) : loading ? (
             <Skeleton className="h-[18px] w-20" />
           ) : (
-            <span className={`text-[10px] font-bold uppercase tracking-[0.08em] px-1.5 py-0.5 leading-[1.4] ${connected ? 'bg-green-50 text-green-700' : 'bg-surface-subtle text-text-tertiary'}`}>
+            <span className={`text-[10px] font-bold uppercase tracking-[0.08em] px-1.5 py-0.5 leading-[1.4] ${connected ? 'bg-sage-50 text-sage-700' : 'bg-surface-subtle text-text-tertiary'}`}>
               {connected ? 'Connected' : 'Not connected'}
             </span>
           )}

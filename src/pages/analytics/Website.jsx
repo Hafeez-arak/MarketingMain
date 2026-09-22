@@ -80,7 +80,7 @@ function Delta({ value, digits = 0, suffix = '', invert = false }) {
   if (Math.abs(value) < (digits ? 0.05 : 1)) return null
   const good = invert ? value < 0 : value > 0
   return (
-    <span className={`text-[11px] font-semibold tabular-nums ${good ? 'text-sage-700' : 'text-rose-600'}`}>
+    <span className={`text-[11px] font-semibold tabular-nums ${good ? 'text-sage-700' : 'text-red-600'}`}>
       {value > 0 ? '+' : '−'}{Math.abs(value).toFixed(digits)}{suffix}
     </span>
   )
@@ -168,7 +168,7 @@ export function SetupSteps({ title, description, steps = [], error, action }) {
   return (
     <div className="p-5">
       <p className="text-sm text-text-secondary mb-1">{description}</p>
-      {error && <p className="text-xs text-rose-600 mb-3">{error}</p>}
+      {error && <p className="text-xs text-red-600 mb-3">{error}</p>}
       {title && <p className="eyebrow mt-4 mb-2">{title}</p>}
       <ol className="space-y-1.5 mb-4">
         {steps.map((step, i) => (
@@ -185,7 +185,7 @@ export function SetupSteps({ title, description, steps = [], error, action }) {
 }
 
 const PRIORITY = {
-  high: { label: 'Now', classes: 'bg-rose-50 text-rose-600 border-rose-200' },
+  high: { label: 'Now', classes: 'bg-red-50 text-red-600 border-red-200' },
   medium: { label: 'Soon', classes: 'bg-amber-50 text-amber-700 border-amber-200' },
   low: { label: 'Watch', classes: 'bg-stone-100 text-stone-600 border-stone-300' },
 }
@@ -690,7 +690,7 @@ export function WebsiteAnalytics(w) {
                       <span className="text-xs text-text font-mono truncate">{s.path}</span>
                       {s.stale
                         ? <span className="text-[10px] font-bold uppercase tracking-[0.08em] px-1.5 py-0.5 border
-                            border-rose-200 bg-rose-50 text-rose-600 leading-[1.4] flex-shrink-0">Stale</span>
+                            border-red-200 bg-red-50 text-red-600 leading-[1.4] flex-shrink-0">Stale</span>
                         : <span className="text-[10px] font-bold uppercase tracking-[0.08em] px-1.5 py-0.5 border
                             border-sage-200 bg-sage-100 text-sage-800 leading-[1.4] flex-shrink-0">Read</span>}
                     </div>

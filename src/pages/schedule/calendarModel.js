@@ -59,13 +59,13 @@ export const platformColor = p => PLATFORM_COLORS[p]
 // about a green chip and it should not invite a click that offers to reschedule
 // something already on Instagram.
 export const STAGE_STYLE = {
-  booked:    { ring: '#2563eb', fill: '#eff6ff', label: 'Scheduled',  text: 'text-blue-700' },
+  booked:    { ring: '#2563eb', fill: '#eff6ff', label: 'Scheduled',  text: 'text-sky-700' },
   sending:   { ring: '#d97706', fill: '#fffbeb', label: 'Publishing', text: 'text-amber-700' },
-  published: { ring: '#16a34a', fill: '#f0fdf4', label: 'Published',  text: 'text-green-700' },
+  published: { ring: '#16a34a', fill: '#f0fdf4', label: 'Published',  text: 'text-sage-700' },
   // Gone, but unconfirmed — the same green, because the thing green MEANS
   // here is "nothing can be done about this", and that is equally true. The
   // label is what differs, and it is the only part making a claim.
-  sent:      { ring: '#16a34a', fill: '#f0fdf4', label: 'Sent',       text: 'text-green-700' },
+  sent:      { ring: '#16a34a', fill: '#f0fdf4', label: 'Sent',       text: 'text-sage-700' },
   pending:   { ring: '#dc2626', fill: '#fef2f2', label: 'Not booked', text: 'text-red-700' },
 }
 export const stageStyle = stage => STAGE_STYLE[stage] || STAGE_STYLE.pending

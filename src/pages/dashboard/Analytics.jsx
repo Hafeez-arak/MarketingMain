@@ -61,7 +61,7 @@ function Delta({ value, suffix = '', invert = false }) {
   if (typeof value !== 'number' || value === 0) return null
   const good = invert ? value < 0 : value > 0
   return (
-    <span className={`text-[11px] font-semibold tabular-nums ${good ? 'text-sage-700' : 'text-rose-600'}`}>
+    <span className={`text-[11px] font-semibold tabular-nums ${good ? 'text-sage-700' : 'text-red-600'}`}>
       {value > 0 ? '+' : ''}{fmt(Math.abs(value)) === '0' ? value : (value > 0 ? fmt(value) : `-${fmt(Math.abs(value))}`)}{suffix}
     </span>
   )
@@ -127,7 +127,7 @@ export function MetricPicker({ options, selected, onToggle }) {
               ${on ? 'border-stone-400 bg-surface-subtle text-text' : 'border-border text-text-tertiary hover:text-text'}
               ${last ? 'cursor-default' : ''}`}>
             <span className={`w-3 h-3 flex-shrink-0 border flex items-center justify-center
-              ${on ? 'bg-text border-text text-white' : 'border-border-strong'}`}>
+              ${on ? 'bg-amber-700 border-amber-700 text-white' : 'border-border-strong'}`}>
               {on && (
                 <svg viewBox="0 0 24 24" className="w-2.5 h-2.5" fill="none" stroke="currentColor" strokeWidth="4">
                   <path d="m5 13 4 4L19 7" />

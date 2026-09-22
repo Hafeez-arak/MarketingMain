@@ -152,7 +152,7 @@ export function ReferencePicker({ value = [], onSave, onClose, asPost = false, f
 
         {/* Tabs */}
         <div className="flex">
-          {[{ key: 'brain', label: '🧠 From Brand Brain' }, { key: 'upload', label: '⬆️ Upload my image' }].map(t => (
+          {[{ key: 'brain', label: 'From Brand Brain' }, { key: 'upload', label: 'Upload my image' }].map(t => (
             <button key={t.key} onClick={() => setTab(t.key)}
               className={`flex-1 py-1.5 border -ml-px first:ml-0 text-xs font-semibold transition-colors ${tab === t.key ? 'bg-amber-700 text-white border-amber-700 relative z-10' : 'bg-white text-text-secondary border-border hover:text-text hover:bg-surface-subtle'}`}>
               {t.label}
@@ -166,12 +166,12 @@ export function ReferencePicker({ value = [], onSave, onClose, asPost = false, f
             {kindsPresent.length > 1 && (
               <div className="flex gap-1.5 flex-wrap">
                 <button onClick={() => setKindFilter('all')}
-                  className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-colors ${kindFilter === 'all' ? 'bg-amber-600 text-white' : 'bg-white border border-border text-text-secondary hover:border-amber-300'}`}>
+                  className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-colors ${kindFilter === 'all' ? 'bg-amber-700 text-white border border-amber-700' : 'bg-white border border-border text-text-secondary hover:border-amber-300'}`}>
                   All
                 </button>
                 {REFERENCE_KINDS.filter(k => kindsPresent.includes(k.value)).map(k => (
                   <button key={k.value} onClick={() => setKindFilter(k.value)}
-                    className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-colors ${kindFilter === k.value ? 'bg-amber-600 text-white' : 'bg-white border border-border text-text-secondary hover:border-amber-300'}`}>
+                    className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-colors ${kindFilter === k.value ? 'bg-amber-700 text-white border border-amber-700' : 'bg-white border border-border text-text-secondary hover:border-amber-300'}`}>
                     {k.label}
                   </button>
                 ))}

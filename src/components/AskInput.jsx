@@ -124,8 +124,8 @@ export default function AskInput({
       // `break-words` so a pasted URL wraps instead of forcing a sideways
       // scrollbar, which is the exact failure this component replaces.
       className={
-        'flex-1 text-sm px-3 py-2 rounded-lg border border-slate-200 resize-none break-words ' +
-        'leading-5 focus:outline-none focus:ring-1 focus:ring-slate-400 disabled:bg-slate-50 ' +
+        'flex-1 text-sm px-3 py-2 border border-border bg-white placeholder-text-tertiary resize-none break-words ' +
+        'leading-5 focus:outline-none focus:ring-1 focus:ring-amber-700 focus:border-amber-700 disabled:bg-surface-subtle ' +
         className
       }
     />

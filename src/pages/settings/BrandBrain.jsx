@@ -901,9 +901,9 @@ function AssetLibrary({ section, structureMode, onEditSection }) {
         {/* Groups / Individual / All sub-filter — only meaningful for project photos */}
         {showingProjectPhotos && projectPhotos.length > 0 && (
           <div className="flex gap-1 flex-wrap border-t border-border pt-3">
-            <button onClick={() => setViewMode('groups')} className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-colors ${viewMode === 'groups' ? 'bg-stone-800 text-white' : 'text-text-tertiary hover:bg-surface-subtle'}`}>Groups ({groupNames.length})</button>
-            <button onClick={() => setViewMode('individual')} className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-colors ${viewMode === 'individual' ? 'bg-stone-800 text-white' : 'text-text-tertiary hover:bg-surface-subtle'}`}>Individual ({individualProjectPhotos.length})</button>
-            <button onClick={() => setViewMode('all')} className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-colors ${viewMode === 'all' ? 'bg-stone-800 text-white' : 'text-text-tertiary hover:bg-surface-subtle'}`}>All photos ({projectPhotos.length})</button>
+            <button onClick={() => setViewMode('groups')} className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-colors ${viewMode === 'groups' ? 'bg-amber-700 text-white' : 'text-text-tertiary hover:bg-surface-subtle'}`}>Groups ({groupNames.length})</button>
+            <button onClick={() => setViewMode('individual')} className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-colors ${viewMode === 'individual' ? 'bg-amber-700 text-white' : 'text-text-tertiary hover:bg-surface-subtle'}`}>Individual ({individualProjectPhotos.length})</button>
+            <button onClick={() => setViewMode('all')} className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-colors ${viewMode === 'all' ? 'bg-amber-700 text-white' : 'text-text-tertiary hover:bg-surface-subtle'}`}>All photos ({projectPhotos.length})</button>
           </div>
         )}
 
@@ -1718,7 +1718,7 @@ export function BrandBrain() {
 
       {!loading && (
         <div className="sticky bottom-0 -mx-1 px-1 pb-1">
-          <div className="flex items-center gap-3 bg-white/95 backdrop-blur-sm border border-border rounded-2xl shadow-dropdown px-5 py-3.5 flex-wrap">
+          <div className="flex items-center gap-3 bg-white border border-border shadow-dropdown px-5 py-3.5 flex-wrap">
             <Button onClick={handleSave} disabled={!isConfigured || saving || (!dirty && !!profile.updatedAt)}
               variant={dirty || !profile.updatedAt ? 'primary' : 'secondary'}>
               {saving ? 'Saving…' : dirty ? 'Save Brand Brain' : profile.updatedAt ? '✓ Saved' : 'Save Brand Brain'}

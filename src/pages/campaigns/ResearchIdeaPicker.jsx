@@ -98,7 +98,7 @@ export function ResearchIdeaPicker({ research, selectedKeys, onToggle, usedKeys 
                 <span
                   aria-hidden="true"
                   className={`mt-0.5 w-4 h-4 shrink-0 border flex items-center justify-center text-[10px] font-bold ${
-                    on ? 'bg-amber-600 border-amber-600 text-white' : 'bg-white border-border text-transparent'
+                    on ? 'bg-amber-700 border-amber-700 text-white' : 'bg-white border-border text-transparent'
                   }`}
                 >
                   ✓

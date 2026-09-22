@@ -97,7 +97,7 @@ export function RangePicker({
       )}
 
       {error
-        ? <span className="text-[11px] text-rose-600">{error}</span>
+        ? <span className="text-[11px] text-red-600">{error}</span>
         : custom && <span className="text-[11px] text-text-tertiary">{rangeLabel(value)}</span>}
     </div>
   )

@@ -40,16 +40,16 @@ function HandleRow({ row, accessToken, onChanged }) {
   }
 
   return (
-    <li className="py-2 border-b border-slate-100 last:border-0">
+    <li className="py-2 border-b border-border-light last:border-0">
       <div className="flex items-start gap-2">
         <span
           title={STATUS_LABEL[row.ig_status] || row.ig_status}
-          className={`mt-1 text-xs ${measurable ? 'text-emerald-600' : weak ? 'text-amber-500' : 'text-slate-300'}`}
+          className={`mt-1 text-xs ${measurable ? 'text-sage-600' : weak ? 'text-amber-500' : 'text-text-tertiary'}`}
         >
           ●
         </span>
         <div className="flex-1 min-w-0">
-          <div className="text-sm text-slate-800">{row.subject}</div>
+          <div className="text-sm text-text">{row.subject}</div>
           {editing ? (
             <div className="mt-1 flex gap-1.5">
               <input
@@ -58,12 +58,12 @@ function HandleRow({ row, accessToken, onChanged }) {
                 onChange={e => setValue(e.target.value)}
                 onKeyDown={e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') setEditing(false) }}
                 placeholder="their instagram handle"
-                className="flex-1 text-xs px-2 py-1 rounded border border-slate-300 focus:outline-none focus:ring-1 focus:ring-slate-400"
+                className="flex-1 text-xs px-2 py-1 rounded border border-stone-400 focus:outline-none focus:ring-1 focus:ring-amber-700 focus:border-amber-700"
               />
-              <button onClick={save} disabled={saving} className="text-xs px-2 text-slate-700 hover:underline">
+              <button onClick={save} disabled={saving} className="text-xs px-2 text-text hover:underline">
                 {saving ? '…' : 'Save'}
               </button>
-              <button onClick={() => setEditing(false)} className="text-xs px-1 text-slate-400">✕</button>
+              <button onClick={() => setEditing(false)} className="text-xs px-1 text-text-tertiary">✕</button>
             </div>
           ) : (
             <div className="mt-0.5 flex items-center gap-2 text-xs">
@@ -71,19 +71,19 @@ function HandleRow({ row, accessToken, onChanged }) {
                 <a
                   href={`https://instagram.com/${row.ig_handle}`}
                   target="_blank" rel="noreferrer"
-                  className="font-mono text-slate-600 hover:underline"
+                  className="font-mono text-text-secondary hover:underline"
                 >
                   @{row.ig_handle}
                 </a>
               ) : (
-                <span className="text-slate-400">no handle</span>
+                <span className="text-text-tertiary">no handle</span>
               )}
-              <span className={weak ? 'text-amber-600' : 'text-slate-400'}>
+              <span className={weak ? 'text-amber-600' : 'text-text-tertiary'}>
                 {STATUS_LABEL[row.ig_status] || row.ig_status}
                 {row.ig_confidence != null && !measurable ? ` · ${Number(row.ig_confidence).toFixed(2)}` : ''}
               </span>
               <button onClick={() => { setValue(row.ig_handle || ''); setEditing(true) }}
-                      className="text-slate-400 hover:text-slate-700">
+                      className="text-text-tertiary hover:text-text">
                 {row.ig_handle ? 'correct' : 'set'}
               </button>
             </div>
@@ -123,8 +123,8 @@ function SuggestionRow({ row, accessToken, onChanged }) {
     <li className="py-2 border-b border-amber-100 last:border-0">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="text-sm text-slate-800">{row.subject}</div>
-          {row.why ? <p className="mt-0.5 text-[11px] leading-relaxed text-slate-500 break-words">{row.why}</p> : null}
+          <div className="text-sm text-text">{row.subject}</div>
+          {row.why ? <p className="mt-0.5 text-[11px] leading-relaxed text-text-secondary break-words">{row.why}</p> : null}
           {error ? <p className="mt-0.5 text-[11px] text-red-600">{error}</p> : null}
         </div>
         <div className="flex gap-1.5 shrink-0">
@@ -241,7 +241,7 @@ export function AgentSteering() {
 
   return (
     <div className="grid gap-4 md:grid-cols-2">
-      <Card className="p-4">
+      <Card>
         <SectionHead
           title="Competitors it watches"
           subtitle={loaded ? readiness.note : 'Loading the watchlist…'}
@@ -256,102 +256,106 @@ export function AgentSteering() {
             </span>
           }
         />
-        {findNote ? <p className="mt-1 text-xs text-slate-600">{findNote}</p> : null}
-        {loaded ? (
-          <>
-            {suggested.length > 0 && (
-              <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50/60 px-3 py-2">
-                <p className="text-xs font-medium text-amber-800">
-                  Suggested by the agent — accept to watch, reject to drop
+        <div className="px-5 py-4 [&>*:first-child]:mt-0">
+          {findNote ? <p className="mt-1 text-xs text-text-secondary">{findNote}</p> : null}
+          {loaded ? (
+            <>
+              {suggested.length > 0 && (
+                <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50/60 px-3 py-2">
+                  <p className="text-xs font-medium text-amber-800">
+                    Suggested by the agent — accept to watch, reject to drop
+                  </p>
+                  <ul className="mt-1">
+                    {suggested.map(row => (
+                      <SuggestionRow key={row.id} row={row} accessToken={accessToken} onChanged={refresh} />
+                    ))}
+                  </ul>
+                </div>
+              )}
+              <ul className="mt-2">
+                {onList.map(row => (
+                  <HandleRow key={row.id} row={row} accessToken={accessToken} onChanged={refresh} />
+                ))}
+              </ul>
+              {retiredCount > 0 && (
+                // Counted rather than listed. Saying nothing at all would make a
+                // retired rival look like one that was never there, and the
+                // number is what tells someone the list was pruned on purpose.
+                <p className="mt-2 text-[11px] text-text-secondary">
+                  {retiredCount} retired {retiredCount === 1 ? 'competitor is' : 'competitors are'} hidden. We keep
+                  them on record so the agent does not find them again and suggest them back.
                 </p>
-                <ul className="mt-1">
-                  {suggested.map(row => (
-                    <SuggestionRow key={row.id} row={row} accessToken={accessToken} onChanged={refresh} />
-                  ))}
-                </ul>
-              </div>
-            )}
-            <ul className="mt-2">
-              {onList.map(row => (
-                <HandleRow key={row.id} row={row} accessToken={accessToken} onChanged={refresh} />
-              ))}
-            </ul>
-            {retiredCount > 0 && (
-              // Counted rather than listed. Saying nothing at all would make a
-              // retired rival look like one that was never there, and the
-              // number is what tells someone the list was pruned on purpose.
-              <p className="mt-2 text-[11px] text-slate-500">
-                {retiredCount} retired {retiredCount === 1 ? 'competitor is' : 'competitors are'} hidden. We keep
-                them on record so the agent does not find them again and suggest them back.
-              </p>
-            )}
-          </>
-        ) : <RowsSkeleton />}
-        <div className="mt-3 flex gap-2">
-          <input
-            value={newCompetitor}
-            onChange={e => setNewCompetitor(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && addCompetitor()}
-            placeholder="Add a competitor by name…"
-            className="flex-1 text-xs px-2.5 py-1.5 rounded-lg border border-slate-200 focus:outline-none focus:ring-1 focus:ring-slate-400"
-          />
-          <Button size="sm" variant="ghost" onClick={addCompetitor}>Add</Button>
+              )}
+            </>
+          ) : <RowsSkeleton />}
+          <div className="mt-3 flex gap-2">
+            <input
+              value={newCompetitor}
+              onChange={e => setNewCompetitor(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && addCompetitor()}
+              placeholder="Add a competitor by name…"
+              className="flex-1 text-xs px-2.5 py-1.5 rounded-lg border border-border focus:outline-none focus:ring-1 focus:ring-amber-700 focus:border-amber-700"
+            />
+            <Button size="sm" variant="ghost" onClick={addCompetitor}>Add</Button>
+          </div>
+          {/* Deliberately allowed to differ from the Brand Brain's competitor
+              directory. That difference is information, not a sync bug. */}
+          <p className="mt-2 text-[11px] text-text-tertiary">
+            This list is the agent's own and may differ from the Brand Brain directory.
+          </p>
         </div>
-        {/* Deliberately allowed to differ from the Brand Brain's competitor
-            directory. That difference is information, not a sync bug. */}
-        <p className="mt-2 text-[11px] text-slate-400">
-          This list is the agent's own and may differ from the Brand Brain directory.
-        </p>
       </Card>
 
-      <Card className="p-4">
+      <Card>
         <SectionHead
           title="Standing questions"
           subtitle="Asked every run, so one week stays comparable to the last."
         />
-        {!loaded ? (
-          <RowsSkeleton />
-        ) : agenda.questions.length === 0 ? (
-          <p className="mt-2 text-sm text-slate-500">
-            None yet. Without these the agent decides for itself what to chase each week.
-          </p>
-        ) : (
-          <ul className="mt-2">
-            {agenda.questions.map(q => (
-              <li key={q.id} className="py-2 border-b border-slate-100 last:border-0 flex items-start gap-2">
-                <span className={`mt-1 text-xs ${q.status === 'active' ? 'text-emerald-600' : 'text-slate-300'}`}>●</span>
-                <div className="flex-1 min-w-0">
-                  <div className="text-sm text-slate-800">{q.subject}</div>
-                  <div className="mt-0.5 flex items-center gap-2 text-xs text-slate-400">
-                    <span>{q.status}</span>
-                    {/* created_by is why this column exists: a question the
-                        agent proposed must never be mistaken for one a person
-                        asked for. */}
-                    {q.created_by === 'agent' ? <span className="text-slate-500">suggested by the agent</span> : null}
-                    {q.status !== 'active' ? (
-                      <button onClick={async () => { await setAgendaStatus(accessToken, q.id, 'active'); refresh() }}
-                              className="text-emerald-600 hover:underline">accept</button>
-                    ) : (
-                      <button onClick={async () => { await setAgendaStatus(accessToken, q.id, 'retired'); refresh() }}
-                              className="hover:text-slate-700">pause</button>
-                    )}
-                    <button onClick={async () => { await deleteAgendaRow(accessToken, q.id); refresh() }}
-                            className="hover:text-red-600">delete</button>
+        <div className="px-5 py-4 [&>*:first-child]:mt-0">
+          {!loaded ? (
+            <RowsSkeleton />
+          ) : agenda.questions.length === 0 ? (
+            <p className="mt-2 text-sm text-text-secondary">
+              None yet. Without these the agent decides for itself what to chase each week.
+            </p>
+          ) : (
+            <ul className="mt-2">
+              {agenda.questions.map(q => (
+                <li key={q.id} className="py-2 border-b border-border-light last:border-0 flex items-start gap-2">
+                  <span className={`mt-1 text-xs ${q.status === 'active' ? 'text-sage-600' : 'text-text-tertiary'}`}>●</span>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm text-text">{q.subject}</div>
+                    <div className="mt-0.5 flex items-center gap-2 text-xs text-text-tertiary">
+                      <span>{q.status}</span>
+                      {/* created_by is why this column exists: a question the
+                          agent proposed must never be mistaken for one a person
+                          asked for. */}
+                      {q.created_by === 'agent' ? <span className="text-text-secondary">suggested by the agent</span> : null}
+                      {q.status !== 'active' ? (
+                        <button onClick={async () => { await setAgendaStatus(accessToken, q.id, 'active'); refresh() }}
+                                className="text-sage-600 hover:underline">accept</button>
+                      ) : (
+                        <button onClick={async () => { await setAgendaStatus(accessToken, q.id, 'retired'); refresh() }}
+                                className="hover:text-text">pause</button>
+                      )}
+                      <button onClick={async () => { await deleteAgendaRow(accessToken, q.id); refresh() }}
+                              className="hover:text-red-600">delete</button>
+                    </div>
                   </div>
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
-        <div className="mt-3 flex gap-2">
-          <input
-            value={newQuestion}
-            onChange={e => setNewQuestion(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && addQuestion()}
-            placeholder="e.g. Is anyone pushing tunnel lighting?"
-            className="flex-1 text-xs px-2.5 py-1.5 rounded-lg border border-slate-200 focus:outline-none focus:ring-1 focus:ring-slate-400"
-          />
-          <Button size="sm" variant="ghost" onClick={addQuestion}>Add</Button>
+                </li>
+              ))}
+            </ul>
+          )}
+          <div className="mt-3 flex gap-2">
+            <input
+              value={newQuestion}
+              onChange={e => setNewQuestion(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && addQuestion()}
+              placeholder="e.g. Is anyone pushing tunnel lighting?"
+              className="flex-1 text-xs px-2.5 py-1.5 rounded-lg border border-border focus:outline-none focus:ring-1 focus:ring-amber-700 focus:border-amber-700"
+            />
+            <Button size="sm" variant="ghost" onClick={addQuestion}>Add</Button>
+          </div>
         </div>
       </Card>
     </div>

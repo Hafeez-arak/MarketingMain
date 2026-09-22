@@ -2,6 +2,15 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { autoDirectionPatch } from '../../overlayModel'
 import { buildTextBitmap } from '../model/textBitmap'
 
+// Inline, stroke-only, currentColor — the same idiom as every other icon in
+// the app, so these sit at the panel's text colour instead of rendering as
+// full-colour emoji that vary by OS.
+const LockIcon = ({ open }) => (
+  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" aria-hidden="true">
+    <rect x="4" y="11" width="16" height="10"/><path d={open ? 'M8 11V7a4 4 0 0 1 7.5-2' : 'M8 11V7a4 4 0 0 1 8 0v4'}/>
+  </svg>
+)
+
 // ─── HTML overlays that sit on top of the Konva canvas ─────────────────────
 // Plain DOM rather than Konva shapes: text and icons stay crisp at any zoom,
 // focus and keyboard behaviour come for free, and none of it has to be
@@ -42,7 +51,7 @@ export function FloatingToolbar({ box, toScreen, scale, locked, multiple, canFor
       <PillButton title="Send backward" onClick={onBackward} disabled={!canBackward}>↓</PillButton>
       <PillButton title="Bring forward" onClick={onForward} disabled={!canForward}>↑</PillButton>
       <span className="w-px h-4 bg-border mx-0.5" />
-      <PillButton title={locked ? 'Unlock' : 'Lock'} onClick={onToggleLock}>{locked ? '🔒' : '🔓'}</PillButton>
+      <PillButton title={locked ? 'Unlock' : 'Lock'} onClick={onToggleLock}><LockIcon open={!locked} /></PillButton>
       <PillButton title={multiple ? 'Duplicate selection' : 'Duplicate'} onClick={onDuplicate}>⧉</PillButton>
       <PillButton title="More actions" onClick={onMore}>⋯</PillButton>
       <span className="w-px h-4 bg-border mx-0.5" />

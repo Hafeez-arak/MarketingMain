@@ -33,7 +33,7 @@ const money = n => `$${n.toFixed(2)}`
 
 function StateDot({ state }) {
   const map = {
-    ready:   ['bg-emerald-500', 'Rendered'],
+    ready:   ['bg-sage-500', 'Rendered'],
     pending: ['bg-amber-400 animate-pulse', 'Rendering…'],
     failed:  ['bg-red-500', 'Failed'],
     missing: ['bg-stone-300', 'Not rendered yet'],
@@ -188,7 +188,7 @@ function ClipCard({
         <StateDot state={state} />
         <p className="text-xs font-semibold text-text">Clip {index + 1}</p>
         <span className="text-[10px] text-text-tertiary">{clip.duration}s · {money(cost)}</span>
-        {composited && <span className="text-[10px] text-emerald-700">· text added</span>}
+        {composited && <span className="text-[10px] text-sage-700">· text added</span>}
 
         {/* Reorder. Only between two shots that have no take: clip_index is
             positional and rendered rows are keyed by it, so moving a rendered
@@ -208,7 +208,7 @@ function ClipCard({
           // Real money is in flight. Whether cancelling saves it depends on
           // whether fal has started, which we can't know from here — the
           // dialog behind this says so rather than promising a refund.
-          <Button size="xs" variant="secondary" onClick={() => onCancel(index)}>✕ Cancel</Button>
+          <Button size="xs" variant="secondary" onClick={() => onCancel(index)}>Cancel</Button>
         )}
         {ready && (
           <>
@@ -528,7 +528,7 @@ export function ClipBoard({
               </span>
             </>
           ) : allReady ? (
-            <span className="text-[11px] text-emerald-700 font-medium">✓ Every clip is rendered</span>
+            <span className="text-[11px] text-sage-700 font-medium">✓ Every clip is rendered</span>
           ) : (
             <Button size="sm" onClick={() => setConfirming(true)}
               disabled={busy || blank.length > 0 || pending.length === 0}>
@@ -540,7 +540,7 @@ export function ClipBoard({
 
           <Button size="sm" variant="secondary" onClick={onStitch}
             disabled={!allReady || running || stitching}>
-            {stitching ? <><Spinner size="sm" /> Stitching…</> : '🎞 Stitch into one video'}
+            {stitching ? <><Spinner size="sm" /> Stitching…</> : 'Stitch into one video'}
           </Button>
         </div>
 

@@ -108,15 +108,15 @@ export function PostPanel({ post, busy, onClose, onBook, onCancel, onEdit }) {
             {media
               ? <PostImage src={media} alt="" className="w-28 h-28 object-cover flex-shrink-0 border border-border" />
               : (
-                <div className="w-28 h-28 flex items-center justify-center flex-shrink-0 border border-border text-2xl"
-                  style={{ background: pc.light }}>{post.video_url ? '🎬' : '📋'}</div>
+                <div className="w-28 h-28 flex items-center justify-center flex-shrink-0 border border-border text-2xl text-text-disabled"
+                  style={{ background: pc.light }}>{post.video_url ? '▶' : '¶'}</div>
               )}
             <div className="min-w-0 flex-1">
               <p className="text-xs text-text leading-relaxed whitespace-pre-wrap">
                 {text || <span className="text-text-tertiary">No caption yet.</span>}
               </p>
               {post.hashtags && (
-                <p className="text-[11px] text-blue-700 mt-2 leading-relaxed break-words">{post.hashtags}</p>
+                <p className="text-[11px] text-sky-700 mt-2 leading-relaxed break-words">{post.hashtags}</p>
               )}
               {/* Only when the header is not already carrying it: pendingReason
                   quotes publish_error for a failed post, and printing it twice

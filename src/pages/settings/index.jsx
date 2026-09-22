@@ -77,7 +77,7 @@ const WORKFLOW_CONFIGS = [
     platform: 'captionStudio',
     label: 'Caption Studio Workflow',
     placeholder: 'https://your-instance.app.n8n.cloud/webhook/arak-caption-studio',
-    description: 'Powers the ✨ Rewrite panel on the post review screen — 3 caption variants side by side, regenerate just the hook or hashtags, with length / hook-style / emoji / hashtag-count controls. On-demand only, so it never adds cost to normal generation.',
+    description: 'Powers the Rewrite panel on the post review screen — 3 caption variants side by side, regenerate just the hook or hashtags, with length / hook-style / emoji / hashtag-count controls. On-demand only, so it never adds cost to normal generation.',
     icon: (
       <div className="w-8 h-8 flex items-center justify-center flex-shrink-0" style={{ background: '#7c3aed' }}>
         <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24">
@@ -103,7 +103,7 @@ const WORKFLOW_CONFIGS = [
     platform: 'mediaOptions',
     label: 'Media Options Workflow',
     placeholder: 'https://your-instance.app.n8n.cloud/webhook/arak-media-options',
-    description: 'Powers "🖼 Generate image options" on the plan board — real spend (fal.ai), so it only fires when you click it. Returns 2-3 actual candidate images (or a video cover) to pick from before Finalize, not just more prompts.',
+    description: 'Powers "Generate image options" on the plan board — real spend (fal.ai), so it only fires when you click it. Returns 2-3 actual candidate images (or a video cover) to pick from before Finalize, not just more prompts.',
     icon: (
       <div className="w-8 h-8 flex items-center justify-center flex-shrink-0" style={{ background: '#f59e0b' }}>
         <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24">
@@ -235,7 +235,7 @@ const WORKFLOW_CONFIGS = [
     platform: 'creativeEnhance',
     label: 'Creative Studio — Enhance Prompt',
     placeholder: 'https://your-instance.app.n8n.cloud/webhook/arak-creative-enhance',
-    description: 'The ✨ button next to the prompt box — rewrites a rough brief into a fuller one (lighting, framing, materials) before you generate. Text only, no image spend. Claude call, ~2 seconds, always shown to you before anything renders.',
+    description: 'The Enhance button next to the prompt box — rewrites a rough brief into a fuller one (lighting, framing, materials) before you generate. Text only, no image spend. Claude call, ~2 seconds, always shown to you before anything renders.',
     icon: (
       <div className="w-8 h-8 flex items-center justify-center flex-shrink-0" style={{ background: '#f59e0b' }}>
         <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24">
@@ -397,7 +397,7 @@ function WorkflowWebhooks() {
                       ? <span className="text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 leading-[1.4] font-semibold">Not set</span>
                       : isDefault
                         ? <span className="text-[10px] bg-sage-100 text-sage-700 px-1.5 py-0.5 leading-[1.4] font-semibold">● Default</span>
-                        : <span className="text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 leading-[1.4] font-semibold">● Custom</span>
+                        : <span className="text-[10px] bg-sky-100 text-sky-700 px-1.5 py-0.5 leading-[1.4] font-semibold">● Custom</span>
                     }
                   </div>
                   <p className="text-xs text-text-tertiary mt-0.5">{cfg.description}</p>

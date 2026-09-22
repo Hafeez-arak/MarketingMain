@@ -189,13 +189,13 @@ export function BusinessView() {
   useReportFilename(`${activeWorkspace?.name || 'Brand'} — business view — ${now.toISOString().slice(0, 10)}`)
 
   if (state.loading) {
-    return <ReportDoc><ReportToolbar backTo="/insights" backLabel="Back to Research" /><Skeleton className="h-64 w-full" /></ReportDoc>
+    return <ReportDoc><ReportToolbar backTo="/insights" backLabel="Back to research" /><Skeleton className="h-64 w-full" /></ReportDoc>
   }
 
   if (!state.available) {
     return (
       <ReportDoc>
-        <ReportToolbar backTo="/insights" backLabel="Back to Research" />
+        <ReportToolbar backTo="/insights" backLabel="Back to research" />
         <Empty
           title="The competitor tables cannot be read"
           description="Either the database change has not been applied yet, or the request failed. We show nothing rather than an empty market, because that would be a claim built on a missing table."
@@ -206,7 +206,7 @@ export function BusinessView() {
 
   return (
     <ReportDoc>
-      <ReportToolbar backTo="/insights" backLabel="Back to Research">
+      <ReportToolbar backTo="/insights" backLabel="Back to research">
         {/* The one number on this page nobody can research. Put the way to add
             it next to the page that needs it, not on a settings screen
             somebody visits once. */}
