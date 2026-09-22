@@ -1,7 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Card, Button, PageHeader, Spinner, IconBadge } from '../components/ui/index'
-import { Icon } from '../components/ui/icons'
+import { Card, Button, PageHeader, Spinner } from '../components/ui/index'
 import { useConnectedAccounts, publishConnectedAccounts } from '../lib/useConnectedAccounts'
 import { syncAccounts, describeSync } from '../lib/zernioConnect'
 import { useAuth } from '../store/auth'
@@ -113,14 +112,6 @@ export default function Dashboard() {
   const hour = new Date().getHours()
   const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening'
 
-  // Brought back 2026-09-22 with only the two links the user asked for. It was
-  // deleted in #75 when every entry duplicated the sidebar; these two are kept
-  // on purpose, so do not add the rest back without asking.
-  const quickActions = [
-    { label: 'Plan a month',   icon: Icon.trending, path: '/campaigns' },
-    { label: 'View analytics', icon: Icon.activity, path: '/analytics' },
-  ]
-
   const nothingConnected = !loadingAccounts && allAccounts.length === 0
 
   return (
@@ -128,6 +119,10 @@ export default function Dashboard() {
       <PageHeader
         title={greeting}
         subtitle="Everything across your social accounts and the website, in one place.">
+        {/* Quick actions live up here, not in a card at the bottom: a quick
+            action nobody scrolls to is not quick (user's call, 2026-09-22). */}
+        <Button variant="secondary" onClick={() => navigate('/campaigns')}>Plan a month</Button>
+        <Button variant="secondary" onClick={() => navigate('/analytics')}>View analytics</Button>
         <Button variant="secondary" onClick={() => navigate('/schedule')}>View calendar</Button>
         <Button onClick={() => setCreating(true)}>Create post</Button>
       </PageHeader>
@@ -185,28 +180,7 @@ export default function Dashboard() {
       <WebsiteCard data={website.data} loading={website.loading} summary={website.summary}
         recommendations={website.recommendations} pages={website.pages} />
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
-        <div className="lg:col-span-2">
-          <QueueCards attention={queue.attention} loading={queue.loading} />
-        </div>
-
-        <Card className="overflow-hidden">
-          <div className="px-4 py-3 border-b border-border flex items-center gap-2.5">
-            <IconBadge tone="sage">{Icon.activity}</IconBadge>
-            <h3 className="font-semibold text-text text-sm">Quick actions</h3>
-          </div>
-          <div className="divide-y divide-border">
-            {quickActions.map(q => (
-              <button key={q.label} onClick={() => navigate(q.path)}
-                className="w-full text-left px-4 py-2.5 text-sm text-text-secondary
-                  hover:text-text hover:bg-surface-subtle transition-colors flex items-center gap-2.5">
-                <span className="text-text-tertiary flex-shrink-0">{q.icon}</span>
-                {q.label}
-              </button>
-            ))}
-          </div>
-        </Card>
-      </div>
+      <QueueCards attention={queue.attention} loading={queue.loading} />
 
       {/* ── What the research found ──
           At the bottom by the user's choice (2026-09-22): the numbers and the
