@@ -20,14 +20,19 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 // Not published to the internet. n8n reaches it as http://agent:3000; the only
 // host port is bound to 127.0.0.1 for health checks on the box itself.
 
-// The two on-demand Website checks used to be individual Vercel functions.
-// They live beside n8n now: the browser reaches one authenticated n8n
-// webhook, and n8n calls this private service over the Docker network. Keeping
-// them in this route allowlist means the public n8n gateway cannot become an
-// arbitrary internal HTTP proxy.
-export const ROUTES = ['run', 'lens', 'synthesise', 'resolve', 'discover', 'chat', 'indexHealth', 'websiteExplain']
+// The two on-demand Website checks, and the composer's post critique, used to
+// be individual Vercel functions. They live beside n8n now: the browser
+// reaches one authenticated n8n webhook, and n8n calls this private service
+// over the Docker network. Keeping them in this route allowlist means the
+// public n8n gateway cannot become an arbitrary internal HTTP proxy.
+//
+// Vercel Hobby allows 12 Serverless Functions per deployment and the repo was
+// already at 12. `critique` was the thirteenth, so adding it did not degrade
+// the deployment — it failed the BUILD outright, taking production down with
+// it. Anything new belongs here from now on, not in api/agent/.
+export const ROUTES = ['run', 'lens', 'synthesise', 'resolve', 'discover', 'chat', 'indexHealth', 'websiteExplain', 'critique']
 
-const N8N_HANDLERS = new Set(['indexHealth', 'websiteExplain'])
+const N8N_HANDLERS = new Set(['indexHealth', 'websiteExplain', 'critique'])
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 

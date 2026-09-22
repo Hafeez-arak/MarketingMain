@@ -1,0 +1,91 @@
+{
+  "name": "Arak Lighting – Composer Agent",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Composer Agent gateway\n\nReceives only the composer's on-demand post critique. Vercel Hobby allows 12 Serverless Functions per deployment and the repo was already at 12 — adding this one failed the BUILD and took production down, so it runs beside n8n instead.\n\nThe public Vercel proxy first verifies the signed-in browser; this workflow then forwards that same token to the private agent container, which enforces workspace membership.\n\nWebhook path: `/arak-agent-composer`. Allowed body actions: `critique`.",
+        "height": 240,
+        "width": 480
+      },
+      "id": "a23e95cf-79ac-5f5f-8858-2e1fb9cc261d",
+      "name": "Note: Composer Agent gateway",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -40,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "arak-agent-composer",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "5b262de7-8e84-5b17-9f11-0c165b0e25c5",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        280
+      ],
+      "webhookId": "arak-agent-composer"
+    },
+    {
+      "parameters": {
+        "jsCode": "const expected = String($env.N8N_WEBHOOK_SECRET || '').trim();\nif (expected) {\n  const headers = ($input.first().json || {}).headers || {};\n  const got = String(headers['x-webhook-secret'] || headers['X-Webhook-Secret'] || '').trim();\n  if (got !== expected) throw new Error('Unauthorized: missing or invalid webhook secret');\n}\nreturn $input.all();"
+      },
+      "id": "031e4770-41fa-520b-bf52-6b8e625d9716",
+      "name": "Webhook Secret Guard",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        280
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = ($input.first().json || {}).body || {};\nconst action = String(body.action || '').trim();\nconst allowed = new Set(['critique']);\nconst accessToken = String(body.access_token || '').trim();\n\nif (!allowed.has(action)) {\n  return [{ json: { ok: false, error: 'Unsupported composer action.' } }];\n}\nif (!accessToken) {\n  return [{ json: { ok: false, error: 'Sign in to analyse a post.' } }];\n}\n\n// The browser token is deliberately forwarded only to the private agent\n// container. That handler is the authority for workspace membership; n8n\n// never trusts the workspace id in this body by itself.\nconst request = { ...body };\ndelete request.action;\ndelete request.access_token;\n\ntry {\n  const response = await this.helpers.httpRequest({\n    method: 'POST',\n    url: `${$env.AGENT_BASE_URL}/api/agent/${action}`,\n    headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },\n    body: request,\n    json: true,\n    returnFullResponse: true,\n    ignoreHttpStatusErrors: true,\n    // One Opus call against a single draft. Generous enough for a slow model\n    // day, far below the app's own ceiling so the browser gives up first.\n    timeout: 180000,\n  });\n  const payload = response?.body && typeof response.body === 'object'\n    ? response.body\n    : { ok: false, error: `The agent returned ${response?.statusCode || 'an empty response'}.` };\n  return [{ json: payload }];\n} catch (err) {\n  return [{ json: { ok: false, error: `Could not reach the composer agent: ${String(err?.message || err).slice(0, 300)}` } }];\n}"
+      },
+      "id": "16d4fd8c-4238-547f-8356-93cbc376bdc6",
+      "name": "Forward to Composer Agent",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        280
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Webhook Secret Guard",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook Secret Guard": {
+      "main": [
+        [
+          {
+            "node": "Forward to Composer Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "active": false
+}

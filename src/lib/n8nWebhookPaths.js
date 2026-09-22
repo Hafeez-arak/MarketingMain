@@ -67,4 +67,9 @@ export const WEBHOOK_PATHS = {
   // Hobby-plan ceiling. Do not add unrelated agent routes here: this gateway
   // intentionally only allows index health and the written explanation.
   agentWebsite:     'arak-agent-website',
+  // The composer's "analyse this post". Its own gateway rather than a third
+  // action on agentWebsite: that one is a Website gateway and says so, and a
+  // composer critique arriving through it would be the first step in turning a
+  // named allowlist back into the generic proxy both of these exist to avoid.
+  agentComposer:    'arak-agent-composer',
 }
