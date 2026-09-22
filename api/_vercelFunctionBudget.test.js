@@ -26,6 +26,18 @@ import { fileURLToPath } from 'node:url'
 // reach it through an n8n gateway, the way indexHealth, websiteExplain and
 // critique already are — see server/agent.js. Raise it only when the account
 // actually moves to a Pro plan, and say so in the commit that does.
+//
+// ── THE UNDERSCORE IS THE ONLY EXEMPTION ──
+//
+// Vercel turns EVERY .js file under api/ into a function. The single exception
+// is a leading underscore on a file or directory name, which is why
+// api/agent/_provider.js and api/zernio/_zernio.test.js cost nothing.
+//
+// A `.test.js` suffix means nothing to Vercel. The first version of this file
+// assumed otherwise, excluded test files from its own count, and was itself
+// deployed as the thirteenth function — so it reported 12, passed, and broke
+// the build it existed to protect. It is `_vercelFunctionBudget.test.js` now,
+// and the rule below is Vercel's rule and nothing else.
 
 const HOBBY_FUNCTION_LIMIT = 12
 
@@ -34,10 +46,11 @@ const apiDir = path.join(path.dirname(fileURLToPath(import.meta.url)))
 /**
  * Every file Vercel turns into a function.
  *
- * A leading underscore marks a shared module, not a route, and Vercel ignores
- * it — that convention is the only reason api/agent/_provider.js and friends
- * do not each cost a function. Test files are excluded here but would not be
- * deployed either.
+ * Vercel's rule exactly: any .js under api/, unless a file or directory in its
+ * path begins with an underscore. Nothing else is exempt — not a `.test.js`
+ * suffix, not a name that obviously is not a route. Adding any cleverness here
+ * makes this file disagree with the platform, which is the one thing it must
+ * never do.
  */
 function functionFiles(dir) {
   const out = []
@@ -46,7 +59,6 @@ function functionFiles(dir) {
     const full = path.join(dir, entry.name)
     if (entry.isDirectory()) { out.push(...functionFiles(full)); continue }
     if (!entry.name.endsWith('.js')) continue
-    if (entry.name.endsWith('.test.js')) continue
     out.push(path.relative(apiDir, full))
   }
   return out
@@ -71,5 +83,32 @@ describe('Vercel function budget', () => {
     for (const moved of ['indexHealth.js', 'websiteExplain.js', 'critique.js']) {
       expect(files).not.toContain(path.join('agent', moved))
     }
+  })
+
+  // How this file itself broke the build once: a test under api/ without a
+  // leading underscore is deployed, and spends a function slot to do nothing.
+  it('has no deployable test files, including this one', () => {
+    const deployedTests = files.filter(f => f.endsWith('.test.js'))
+    expect(deployedTests, `rename with a leading underscore: ${deployedTests.join(', ')}`).toEqual([])
+  })
+
+  // Every function costs a slot whether or not anyone calls it, so the list is
+  // pinned. A new name here is a deliberate decision to spend the last slot,
+  // not something that happens because a file appeared.
+  it('is exactly the functions we mean to deploy', () => {
+    expect([...files].sort()).toEqual([
+      path.join('agent', 'chat.js'),
+      path.join('agent', 'discover.js'),
+      path.join('agent', 'lens.js'),
+      path.join('agent', 'performance.js'),
+      path.join('agent', 'resolve.js'),
+      path.join('agent', 'reviseIdea.js'),
+      path.join('agent', 'run.js'),
+      path.join('agent', 'search.js'),
+      path.join('agent', 'synthesise.js'),
+      path.join('agent', 'website.js'),
+      path.join('n8n', '[slot].js'),
+      path.join('zernio', '[action].js'),
+    ].sort())
   })
 })
