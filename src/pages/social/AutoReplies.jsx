@@ -505,7 +505,9 @@ function EditorModal({ draft, accounts, workspaceId, saving, onClose, onSave }) 
 // switch whose change is silently dropped on save.
 
 function PostScope({ isNew, onePost, setOnePost, workspaceId, accountId, postId, postTitle, onPick }) {
-  const [state, setState] = useState({ for: '', loading: false, posts: [], error: '' })
+  const [state, setState] = useState({
+    for: '', loading: false, posts: [], error: '', page: 0, hasMore: false, loadingMore: false, moreError: '',
+  })
   // Which account's posts are loaded or loading. A ref, not a dependency: with
   // `state.for` in the deps the effect re-ran on its own setState, and that
   // re-run's cleanup cancelled the request still in flight — the grid then sat
@@ -517,11 +519,16 @@ function PostScope({ isNew, onePost, setOnePost, workspaceId, accountId, postId,
     if (!isNew || !onePost || !accountId || loadedFor.current === accountId) return
     loadedFor.current = accountId
     let alive = true, done = false
-    queueMicrotask(() => { if (alive) setState({ for: accountId, loading: true, posts: [], error: '' }) })
-    fetchAutoReplyPosts(workspaceId, accountId).then(res => {
+    queueMicrotask(() => {
+      if (alive) setState({ for: accountId, loading: true, posts: [], error: '', page: 0, hasMore: false, loadingMore: false, moreError: '' })
+    })
+    fetchAutoReplyPosts(workspaceId, accountId, 1).then(res => {
       done = true
       if (!alive) return
-      setState({ for: accountId, loading: false, posts: res.posts || [], error: res.error || '' })
+      setState({
+        for: accountId, loading: false, posts: res.posts || [], error: res.error || '',
+        page: 1, hasMore: !res.error && res.hasMore, loadingMore: false, moreError: '',
+      })
     })
     return () => {
       alive = false
@@ -531,6 +538,45 @@ function PostScope({ isNew, onePost, setOnePost, workspaceId, accountId, postId,
       if (!done && loadedFor.current === accountId) loadedFor.current = ''
     }
   }, [isNew, onePost, accountId, workspaceId])
+
+  // ── The next page, when the bottom of the grid scrolls into view ──
+  // A ref guards against the observer firing twice before the first request's
+  // state lands; the account check drops a page that arrives after the account
+  // was switched.
+  const moreInFlight = useRef(false)
+  const loadMore = useCallback(async () => {
+    if (moreInFlight.current || !state.hasMore || state.for !== accountId) return
+    moreInFlight.current = true
+    const forAccount = accountId, next = state.page + 1
+    setState(s => ({ ...s, loadingMore: true, moreError: '' }))
+    const res = await fetchAutoReplyPosts(workspaceId, forAccount, next)
+    moreInFlight.current = false
+    setState(s => {
+      if (s.for !== forAccount) return s
+      if (res.error) return { ...s, loadingMore: false, moreError: res.error }
+      const seen = new Set(s.posts.map(p => p.platform_post_id))
+      return {
+        ...s,
+        loadingMore: false,
+        page: next,
+        hasMore: res.hasMore,
+        posts: [...s.posts, ...res.posts.filter(p => !seen.has(p.platform_post_id))],
+      }
+    })
+  }, [state.hasMore, state.for, state.page, accountId, workspaceId])
+
+  const scroller = useRef(null)
+  const sentinel = useRef(null)
+  useEffect(() => {
+    const el = sentinel.current
+    if (!el || !state.hasMore || state.moreError) return
+    const io = new IntersectionObserver(
+      entries => { if (entries.some(e => e.isIntersecting)) loadMore() },
+      { root: scroller.current, rootMargin: '0px 0px 240px 0px' },
+    )
+    io.observe(el)
+    return () => io.disconnect()
+  }, [loadMore, state.hasMore, state.moreError, state.posts.length])
 
   if (!isNew) {
     return (
@@ -575,14 +621,15 @@ function PostScope({ isNew, onePost, setOnePost, workspaceId, accountId, postId,
         </p>
       ) : (
         <>
-          <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 mt-2 max-h-72 overflow-y-auto pr-1">
+          <div ref={scroller} className="grid grid-cols-3 sm:grid-cols-4 gap-2 mt-2 max-h-72 overflow-y-auto pr-1">
             {state.posts.map(p => {
               const picked = p.platform_post_id === postId
               return (
                 <button key={p.platform_post_id} type="button" onClick={() => onPick(p)}
                   title={p.caption || 'No caption'}
                   className={`text-left border-2 transition-colors ${picked ? 'border-text' : 'border-transparent hover:border-stone-300'}`}>
-                  <PostImage src={p.thumbnail} alt="" className="aspect-square w-full object-cover" />
+                  <PostImage src={p.thumbnail} alt="" loading="lazy" decoding="async"
+                    className="aspect-square w-full object-cover" />
                   <p className="text-[10px] text-text-secondary line-clamp-2 leading-snug px-1 pt-1">
                     {p.caption || <span className="italic text-text-tertiary">No caption</span>}
                   </p>
@@ -590,6 +637,21 @@ function PostScope({ isNew, onePost, setOnePost, workspaceId, accountId, postId,
                 </button>
               )
             })}
+            {/* The tripwire for the next page, and what the bottom row says
+                while it loads or after it fails. */}
+            {state.hasMore && (
+              <div ref={sentinel} className="col-span-full py-2 text-center">
+                {state.moreError ? (
+                  <button type="button" onClick={loadMore} className="text-[11px] text-red-600 underline">
+                    Could not load more posts — try again
+                  </button>
+                ) : (
+                  <span className="inline-flex items-center gap-1.5 text-[11px] text-text-tertiary">
+                    <Spinner size="sm" /> Loading more posts…
+                  </span>
+                )}
+              </div>
+            )}
           </div>
           <p className="text-[11px] text-text-tertiary mt-1.5">
             {postId ? <>Runs only on: <span className="text-text">{postTitle}</span></> : 'Tap a post to choose it.'}

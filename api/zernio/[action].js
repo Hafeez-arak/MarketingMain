@@ -629,16 +629,21 @@ const handlers = {
   // the ones published through Zernio — a reply to a post somebody made in the
   // app itself has to be pickable too. A year back, newest first; Zernio
   // defaults to 90 days, which would hide an older evergreen post.
+  //
+  // One page at a time: the picker asks for the next page as it is scrolled,
+  // so an account with hundreds of posts costs one small read to open.
   async auto_reply_posts(z, { ws, profileId, body }) {
     const accountId = String(body.account_id || '').trim()
     if (!accountId) return fail('account_id is required.', 400)
     await requireOwnedAccount(z, { workspaceId: ws.id, profileId, accountId })
 
+    const page = Math.max(1, Math.floor(Number(body.page) || 1))
+    const limit = Math.min(Math.max(Math.floor(Number(body.limit) || POST_PAGE), 1), 100)
     const from = new Date(Date.now() - 365 * 86400000).toISOString().slice(0, 10)
     const out = await z.request('analytics', {
-      query: { accountId, fromDate: from, limit: 100, sortBy: 'date', order: 'desc' },
+      query: { accountId, fromDate: from, limit, page, sortBy: 'date', order: 'desc' },
     })
-    return { posts: postChoices(out, accountId) }
+    return { posts: postChoices(out, accountId), page, hasMore: hasMorePages(out, page, limit) }
   },
 
   async auto_reply_delete(z, { ws, profileId, body }) {
@@ -788,6 +793,20 @@ function postChoices(out, accountId) {
     })
   }
   return posts
+}
+
+const POST_PAGE = 24
+
+/**
+ * Whether another page exists. Zernio's `pages` when it sends one; otherwise a
+ * full page is taken to mean there may be more — one empty extra read is
+ * cheaper than a picker that silently stops short.
+ */
+function hasMorePages(out, page, limit) {
+  const pages = Number(out?.pagination?.pages)
+  if (Number.isFinite(pages) && pages > 0) return page < pages
+  const rows = Array.isArray(out?.posts) ? out.posts.length : 0
+  return rows >= limit
 }
 
 /** Trimmed, de-duplicated, case-insensitively unique, blanks dropped. */
@@ -952,4 +971,4 @@ export default async function handler(req, res) {
 }
 
 export { qs, profileIdOf, CONNECTABLE }
-export { automationFields, cleanList, normalizeAutomation, postChoices, AUTO_REPLY_PLATFORMS }
+export { automationFields, cleanList, normalizeAutomation, postChoices, hasMorePages, AUTO_REPLY_PLATFORMS }
