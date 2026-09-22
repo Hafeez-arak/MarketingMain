@@ -37,6 +37,8 @@ import { postLock } from '../../lib/postLock'
 import { schedulePlanPosts } from '../../lib/planScheduling'
 import { useConnectedAccounts } from '../../lib/useConnectedAccounts'
 import { MediaViewer, SlideStrip } from '../../components/PostMediaViewer'
+import { ImageFitter } from '../../components/media/ImageFitter'
+import { refitSlides } from '../../lib/refitSlides'
 
 // The five stages, in order. `media` is the pictures step and `captions` the
 // words written against them — captions come after the picture on purpose, so
@@ -998,6 +1000,69 @@ export function CampaignPlanner() {
     if (res.error) setError(`Couldn't save the slide order: ${res.error}`)
   }
 
+  // ── Adjusting one slide's shape, from the card ───────────────────────────
+  //
+  // A carousel went out to Instagram with a 1239 × 488 slide in it and came
+  // back refused — "Aspect ratio 2.5389:1 is outside Instagram's allowed range
+  // (0.5625 to 1.91)" — after the row had been claimed as pending_publish, and
+  // draft_status only ever closes from n8n, so the spinner outlived the error.
+  // The strip on this card is where you SEE that a slide is the wrong shape;
+  // until now the only way to fix it was to reopen the composer and find the
+  // slide again.
+  //
+  // Held as ids rather than as the idea object: the fitter's upload takes a
+  // second or two, a poll can replace the ideas array underneath it in that
+  // time, and applying the result to a captured stale object would write back
+  // a slide list that has since moved on.
+  const [adjusting, setAdjusting] = useState(null)   // { ideaId, index }
+  const [refitting, setRefitting] = useState(false)
+
+  const adjustingIdea = adjusting ? ideas.find(i => i.id === adjusting.ideaId) || null : null
+  const adjustingSlides = adjustingIdea ? slidesFor(adjustingIdea) : []
+  const adjustingSlide = adjusting ? adjustingSlides[adjusting.index] || null : null
+
+  async function applyAdjustedSlide(fitted, { ratio, mode, applyToAll }) {
+    const idea = adjustingIdea
+    const at = adjusting?.index
+    setAdjusting(null)
+    if (!idea || at == null) return
+
+    const current = slidesFor(idea)
+    // `source: 'library'` — the fitter uploaded the rendered result to the
+    // media library, so that is honestly where this picture now lives. Keeping
+    // 'studio' would send "reopen in Studio" back to a session that made the
+    // picture BEFORE it was cropped.
+    const next = current.map((s, i) => (i === at
+      ? { ...s, url: fitted.url, type: 'image', source: 'library' }
+      : s))
+
+    // clearStaleCaption: false, the same as reordering. A crop reframes the
+    // picture that was already there; it does not make a caption written about
+    // it wrong, and silently throwing away approved copy over a shape change
+    // is a worse surprise than a caption that is slightly loosely framed.
+    const res = await saveSlides(idea, next, { clearStaleCaption: false })
+    if (res.error) { setError(`Couldn't save the adjusted slide: ${res.error}`); return }
+    if (!applyToAll) return
+
+    // The fitter always offers "apply to every slide" here — this strip only
+    // draws at all past the first slide — so the tick has to mean something.
+    setRefitting(true)
+    try {
+      const refitted = await refitSlides(next, at, ratio, mode, {
+        workspaceId: activeWorkspaceId, accessToken, platform: idea.platform,
+      })
+      // Re-resolved through draftRef rather than reusing the `idea` captured
+      // above: every slide in there was just re-rendered and uploaded, which
+      // is seconds, and saveSlides writes the whole idea back. Saving the
+      // stale copy would revert anything the poll changed while we waited.
+      const live = draftRef.current?.ideas?.find(i => i.id === idea.id) || idea
+      const after = await saveSlides(live, refitted, { clearStaleCaption: false })
+      if (after.error) setError(`The other slides could not be saved: ${after.error}`)
+    } finally {
+      setRefitting(false)
+    }
+  }
+
   // Open (or reopen) Creative Studio for one idea. An idea with a session goes
   // straight to it; one without goes to ?ideaId=, where the Studio pre-fills
   // its composer and creates the session at the first generation. The Studio's
@@ -1683,6 +1748,10 @@ export function CampaignPlanner() {
               const st = lock ? 'sent' : hasMedia(idea) ? 'ready' : (idea.mediaStatus || 'none')
               const thumb = thumbFor(idea)
               const urls = mediaUrlsFor(idea)
+              // The records those urls came from, so the strip can be told
+              // which of them is the video without re-deriving the list once
+              // per thumbnail.
+              const slides = slidesFor(idea)
               const refCount = (idea.references || []).length
               const canOpen = urls.length > 0 || !!idea.previewVideoUrl
               return (
@@ -1742,14 +1811,19 @@ export function CampaignPlanner() {
                     </div>
                   </div>
                   {/* Every slide, in the order it goes out. Reordering is for
-                      your own images — a Studio picture is one image. */}
+                      your own images — a Studio picture is one image.
+                      Adjusting is NOT limited that way: a Studio render can be
+                      the wrong shape for the platform just as easily as an
+                      upload, and it is the shape Instagram refuses. */}
                   {urls.length > 1 && (
                     <div>
                       <p className="text-[10px] text-text-tertiary mb-1">
                         {lock ? 'Slides, as they went out' : ownMedia ? 'Slide order — drag or use ‹ › to move' : 'Slides'}
                       </p>
                       <SlideStrip urls={urls} onOpen={i => openMedia(idea, i)}
-                        onReorder={!lock && ownMedia ? next => reorderSlides(idea, next) : undefined} />
+                        onReorder={!lock && ownMedia ? next => reorderSlides(idea, next) : undefined}
+                        onAdjust={!lock ? i => setAdjusting({ ideaId: idea.id, index: i }) : undefined}
+                        canAdjust={i => slides[i]?.type === 'image'} />
                     </div>
                   )}
                   <div className="flex items-center gap-1.5 mt-auto pt-1 flex-wrap">
@@ -1916,6 +1990,30 @@ export function CampaignPlanner() {
       )}
 
       {viewer && <MediaViewer {...viewer} onClose={() => setViewer(null)} />}
+
+      {/* Cropping one slide of a carousel, opened from the strip on its card.
+          The same dialog the composer opens, deliberately — a second cropper
+          would be a second set of aspect ratios to keep in step with what each
+          platform actually accepts. */}
+      <ImageFitter
+        open={!!adjustingSlide}
+        onClose={() => setAdjusting(null)}
+        media={adjustingSlide}
+        platform={adjustingIdea?.platform || 'instagram'}
+        format={adjustingIdea?.postFormat || 'feed_image'}
+        index={adjusting?.index ?? null}
+        total={adjustingSlides.length}
+        onApply={applyAdjustedSlide} />
+
+      {/* The other slides are re-rendered and re-uploaded one at a time after
+          the dialog closes, which is seconds of work with nothing on screen to
+          show for it. Saying so beats a strip that changes on its own. */}
+      {refitting && (
+        <div className="fixed bottom-4 right-4 z-[60] bg-white border border-border shadow-lg px-4 py-3 flex items-center gap-2.5">
+          <Spinner size="sm" />
+          <span className="text-xs text-text-secondary">Matching the other slides to that shape…</span>
+        </div>
+      )}
     </div>
   )
 }

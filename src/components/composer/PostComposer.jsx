@@ -8,8 +8,7 @@ import {
   capabilities, validateComposer,
 } from '../../lib/composerState'
 import { mayPublishTo, protectionReason } from '../../lib/platformSafety'
-import { uploadToMediaLibrary } from '../../lib/mediaLibrary'
-import { autoFit } from '../../lib/imageRender'
+import { refitSlides } from '../../lib/refitSlides'
 import { useAuth } from '../../store/auth'
 import { MediaPicker } from './MediaPicker'
 import { ImageFitter } from '../media/ImageFitter'
@@ -268,38 +267,15 @@ export function PostComposer({
     patch({ media: next })
   }
 
-  // ── Putting every slide in one shape ──
-  //
-  // Instagram crops a carousel to the first slide's shape, so a mixed set
-  // loses edges silently. When the fitter is asked to apply its shape to the
-  // rest, each other slide is re-rendered centred and covering — the least
-  // opinionated placement — from its own original, and any of them can still
-  // be opened and adjusted by hand afterwards.
-  // Takes the list to work from rather than reading state, because it runs
-  // AFTER the adjusted slide has been put into it. Reading `state.media` here
-  // would read the array as it was before that — every upload in this function
-  // takes a second or two, and the wholesale setState at the end would then
-  // put the un-adjusted picture back, silently undoing the edit that started
-  // the whole thing.
+  // The shape-matching itself lives in src/lib/refitSlides.js — the planner's
+  // slide strip adjusts a carousel too, and the fitter's "apply to every
+  // slide" checkbox has to mean the same thing from both doors.
   async function refitOthers(media, keepIndex, ratioLabel, mode) {
     setRefitting(true)
     try {
-      const next = await Promise.all(media.map(async (m, i) => {
-        if (i === keepIndex || m.type !== 'image') return m
-        try {
-          const { blob, width, height } = await autoFit(m.url, ratioLabel, { mode })
-          const base = (m.name || 'image').replace(/\.[a-z0-9]+$/i, '')
-          const file = new File([blob], `${base}-${ratioLabel.replace(':', 'x')}.jpg`, { type: 'image/jpeg' })
-          const res = await uploadToMediaLibrary(workspaceId, accessToken, file, {
-            source: 'adjusted', tags: ['adjusted', state.platform, ratioLabel],
-          })
-          // A slide that could not be re-rendered is left exactly as it was.
-          // Half a carousel in one shape and half in another is worse than the
-          // mixture the user already had, and nothing here names which half.
-          if (res.error || !res.asset?.url) return m
-          return { ...m, url: res.asset.url, name: file.name, mimeType: 'image/jpeg', bytes: blob.size, width, height }
-        } catch { return m }
-      }))
+      const next = await refitSlides(media, keepIndex, ratioLabel, mode, {
+        workspaceId, accessToken, platform: state.platform,
+      })
       setState(s => ({ ...s, media: next }))
     } finally {
       setRefitting(false)
