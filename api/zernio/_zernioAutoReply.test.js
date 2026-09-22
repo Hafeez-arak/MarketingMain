@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import fs from 'node:fs'
 import {
-  automationFields, cleanList, normalizeAutomation, postChoices, AUTO_REPLY_PLATFORMS, isAction,
+  automationFields, cleanList, normalizeAutomation, postChoices, hasMorePages, AUTO_REPLY_PLATFORMS, isAction,
 } from './[action].js'
 
 // ─── Keyword auto-replies ──────────────────────────────────────────────────
@@ -230,5 +230,19 @@ describe('postChoices — the posts an auto-reply can be pinned to', () => {
   it('survives an empty or malformed response', () => {
     expect(postChoices(null, 'acc1')).toEqual([])
     expect(postChoices({ posts: 'nope' }, 'acc1')).toEqual([])
+  })
+})
+
+describe('hasMorePages — when the picker asks for another page', () => {
+  it("trusts Zernio's page count when it sends one", () => {
+    expect(hasMorePages({ pagination: { pages: 3 } }, 1, 24)).toBe(true)
+    expect(hasMorePages({ pagination: { pages: 3 } }, 3, 24)).toBe(false)
+    expect(hasMorePages({ pagination: { pages: 1 }, posts: new Array(24) }, 1, 24)).toBe(false)
+  })
+
+  it('without one, a full page means there may be more', () => {
+    expect(hasMorePages({ posts: new Array(24) }, 1, 24)).toBe(true)
+    expect(hasMorePages({ posts: new Array(5) }, 1, 24)).toBe(false)
+    expect(hasMorePages(null, 1, 24)).toBe(false)
   })
 })

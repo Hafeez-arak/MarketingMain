@@ -445,11 +445,11 @@ export async function saveAutoReply(workspaceId, fields) {
   return { automation: res.automation }
 }
 
-/** The account's posts, newest first, for pinning an auto-reply to one. */
-export async function fetchAutoReplyPosts(workspaceId, accountId) {
-  const res = await call('auto_reply_posts', { workspace_id: workspaceId, account_id: accountId })
-  if (res.error) return { error: res.error, posts: [] }
-  return { posts: res.posts || [] }
+/** One page of the account's posts, newest first, for pinning an auto-reply to one. */
+export async function fetchAutoReplyPosts(workspaceId, accountId, page = 1) {
+  const res = await call('auto_reply_posts', { workspace_id: workspaceId, account_id: accountId, page })
+  if (res.error) return { error: res.error, posts: [], hasMore: false }
+  return { posts: res.posts || [], hasMore: res.hasMore === true }
 }
 
 export async function deleteAutoReply(workspaceId, id) {
