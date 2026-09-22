@@ -25,6 +25,7 @@ COPY api/agent ./api/agent
 COPY api/zernio/_zernio.js ./api/zernio/_zernio.js
 COPY src/lib ./src/lib
 COPY server/agent.js ./server/agent.js
+COPY server/agentHandlers ./server/agentHandlers
 
 USER node
 EXPOSE 3000
