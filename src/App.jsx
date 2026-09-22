@@ -31,6 +31,7 @@ import { TikTokPage } from './pages/social/TikTokPage'
 import { LinkedInPage } from './pages/social/LinkedInPage'
 import { SnapchatPage } from './pages/social/SnapchatPage'
 import { Approvals as PostApprovals } from './pages/social/Approvals'
+import AutoReplies from './pages/social/AutoReplies'
 import { Settings, Integrations } from './pages/settings/index'
 import { Access } from './pages/settings/Access'
 import { BrandBrain } from './pages/settings/BrandBrain'
@@ -135,6 +136,7 @@ function ProtectedApp() {
             <Route path="/media"                 element={<MediaLibrary />} />
             <Route path="/social"                element={<SocialOverview />} />
             <Route path="/social/approvals"      element={<PostApprovals />} />
+            <Route path="/social/auto-replies"   element={<AutoReplies />} />
             <Route path="/social/instagram"      element={<InstagramPage />} />
             <Route path="/social/tiktok"         element={<TikTokPage />} />
             <Route path="/social/linkedin"       element={<LinkedInPage />} />
