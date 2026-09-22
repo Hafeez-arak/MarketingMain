@@ -42,4 +42,17 @@ cd .. && ./redeploy.sh "Arak Lighting – Website Agent"
 
 Then redeploy Vercel. The Vercel proxy still checks the signed-in browser and sends the webhook secret; n8n forwards the browser token only over the Docker network, where the agent continues to check the caller's membership in the requested workspace.
 
+## Composer Agent gateway — same reason, same shape
+
+`Arak Lighting – Composer Agent` carries the composer's **"Analyse this post"** critique. It was added as a Vercel function first and that was a mistake: Hobby allows **12** Serverless Functions per deployment, the repo was already at 12, and the thirteenth does not slow the deployment down — it fails the **build**, so production stayed on the previous version and every unrelated fix queued behind it. `api/vercelFunctionBudget.test.js` now fails locally before that can happen again.
+
+The workflow accepts one action, `critique`, and nothing else.
+
+```bash
+cd n8n/docker && docker compose up -d --build agent
+cd .. && ./redeploy.sh "Arak Lighting – Composer Agent"
+```
+
+Both gateways are deliberately separate. `arak-agent-website` is a Website gateway and says so in its own note; routing a composer critique through it would be the first step in turning a named allowlist back into the generic internal proxy both of them exist to prevent.
+
 The workflow Code nodes are covered by tests such as `zernioPublish.test.js` and `zernioSync.test.js`, which run the **generated JSON** — not a copy of the source — through `workflowHarness.js` with Instagram and Supabase stubbed. If you change a Code node, regenerate first (`python3 gen_workflows.py`) or the tests will still be checking the old one.

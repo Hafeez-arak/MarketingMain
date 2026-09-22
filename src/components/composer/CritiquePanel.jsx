@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Button, Spinner } from '../ui/index'
 import { useAuth } from '../../store/auth'
 import { optionsFor } from '../../lib/composerState'
+import { defaultWebhookUrl } from '../../lib/n8nWebhooks'
 
 // ─── "Would this post do better?" ──────────────────────────────────────────
 //
@@ -23,7 +24,7 @@ import { optionsFor } from '../../lib/composerState'
 // own reliability. See api/agent/critique.js.
 
 export function CritiquePanel({ state }) {
-  const { activeWorkspaceId } = useAuth()
+  const { activeWorkspaceId, accessToken } = useAuth()
   const [result, setResult] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -35,10 +36,22 @@ export function CritiquePanel({ state }) {
     setError('')
     setResult(null)
     try {
-      const res = await fetch('/api/agent/critique', {
+      // Through n8n, not a Vercel function. Vercel Hobby allows 12 Serverless
+      // Functions per deployment and the repo was already at 12 — this one
+      // took the BUILD down rather than merely being slow, so the handler
+      // lives in the private agent container beside n8n. `access_token` is in
+      // the body because n8n forwards it to that container, which is the
+      // authority on workspace membership; the Authorization header is what
+      // api/n8n itself checks.
+      const res = await fetch(defaultWebhookUrl('agentComposer'), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`,
+        },
         body: JSON.stringify({
+          action: 'critique',
+          access_token: accessToken,
           workspace_id: activeWorkspaceId,
           draft: {
             platform: state.platform,
