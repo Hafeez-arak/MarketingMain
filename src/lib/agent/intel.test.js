@@ -240,3 +240,75 @@ describe('planStoreWrites and brands', () => {
     expect(plan.brands.insert).toHaveLength(1)
   })
 })
+
+// ─── The business line crosses weeks ───────────────────────────────────────
+// The store is the half that outlives a run. Until the 2026-09-20 migration it
+// dropped the line on the way in, so a reader on Controls saw this week's
+// controls findings and none of the controls history or open leads behind
+// them — which reads as "nothing is happening in controls".
+
+describe('the store remembers which business a row belongs to', () => {
+  const controlsLead = {
+    ...mondrian, line: 'controls',
+    lead: { ...mondrian.lead, name: 'Guest room automation, Mondrian Riyadh' },
+  }
+
+  it('carries the line onto a signal', () => {
+    const sig = signalFromFinding({
+      lens: 'rivals_controls', headline: 'Futuron confirmed a KNX reference at an airport.',
+      competitor: 'Technolight', category: 'project', channel: 'website', relevance: 'high',
+      line: 'controls', sources: [{ url: 'https://futuron.sa/projects' }],
+    }, WATCH)
+    expect(sig.line).toBe('controls')
+  })
+
+  it('carries the line onto a lead', () => {
+    expect(opportunityFromFinding(controlsLead).line).toBe('controls')
+  })
+
+  it('leaves it empty rather than guessing when the finding has none', () => {
+    expect(opportunityFromFinding(mondrian).line).toBe('')
+    expect(signalFromFinding({
+      lens: 'rivals', headline: 'Something happened.', competitor: 'Technolight',
+      category: 'other', channel: 'website', sources: [{ url: 'https://x.com/a' }],
+    }, WATCH).line).toBe('')
+  })
+
+  it('fills a blank line on a row stored before the column existed', () => {
+    // Every row written before the migration carries '', and it was
+    // deliberately not backfilled — the evidence to stamp it lives in the run.
+    const stored = [{
+      id: 'o1', name: 'Guest room automation, Mondrian Riyadh', type: 'project',
+      line: '', first_run_id: 'r0', last_run_id: 'r0', times_seen: 1, status: 'new',
+    }]
+    const plan = planStoreWrites([controlsLead], { opportunities: stored }, { runId: 'r1', now: NOW })
+    expect(plan.opportunities.update[0].patch.line).toBe('controls')
+  })
+
+  it('does not report filling that blank as a market change', () => {
+    // A blank becoming 'controls' is us learning something about our own
+    // record, not a rival doing anything. Through `changes` it would print
+    // "line changed" on the report as though the market had moved.
+    // Identical to the stored row in every way EXCEPT the line, so nothing
+    // else can account for a `last_change`.
+    const stored = [{
+      id: 'o1', name: 'Guest room automation, Mondrian Riyadh', type: 'project',
+      stage: 'design', location: 'Al Malga, Riyadh',
+      line: '', first_run_id: 'r0', last_run_id: 'r0', times_seen: 1, status: 'new',
+    }]
+    const plan = planStoreWrites([controlsLead], { opportunities: stored }, { runId: 'r1', now: NOW })
+    expect(plan.opportunities.update[0].patch.line).toBe('controls')
+    expect(plan.opportunities.update[0].patch.last_change).toBeUndefined()
+  })
+
+  it('never overwrites a line that is already set', () => {
+    // The pass that set it had the roster in front of it; this one may be the
+    // other line's pass meeting the same rival.
+    const stored = [{
+      id: 'o1', name: 'Guest room automation, Mondrian Riyadh', type: 'project',
+      line: 'lighting', first_run_id: 'r0', last_run_id: 'r0', times_seen: 1, status: 'new',
+    }]
+    const plan = planStoreWrites([controlsLead], { opportunities: stored }, { runId: 'r1', now: NOW })
+    expect(plan.opportunities.update[0].patch.line).toBeUndefined()
+  })
+})

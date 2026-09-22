@@ -293,7 +293,7 @@ const webTools = ({ searches = 0, fetches = null } = {}) => (searches > 0
  * @returns {Promise<{lens,ok,findings,sources,cost,error}>}
  */
 export async function runLens({
-  workspaceId, runId, lensKey, prompt, identity, brand, deadline = null,
+  workspaceId, runId, lensKey, prompt, identity, brand, deadline = null, line = '',
 }) {
   const lens = lensByKey(lensKey)
   if (!lens) return { lens: lensKey, ok: false, findings: [], sources: [], cost: 0, error: 'Unknown lens.' }
@@ -357,7 +357,10 @@ export async function runLens({
     return {
       lens: lensKey,
       ok: true,
-      findings: parsed.map(f => makeFinding(lensKey, f)),
+      // `line` is the pass this lens was run as — see makeFinding. A finding
+      // from the controls pass is a controls finding without anyone having to
+      // recognise the word "KNX" in its headline.
+      findings: parsed.map(f => makeFinding(lensKey, f, line)),
       sources: [...allowed],
       cost: out.cost || 0,
       error: '',

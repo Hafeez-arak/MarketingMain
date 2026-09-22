@@ -8,7 +8,8 @@ import {
   partitionByClock, deadlineLabel, lensStates, lensHeadline, runEffort, emptiness, pct, marketDirection, basisLabel,
 } from '../../lib/researchBrief'
 import {
-  TEAMS, sectionVisible, forTeam, topThree, salesRows, competitorMoves, socialActivity, eventsView,
+  TEAMS, sectionVisible, forTeam, topThree, salesRows, competitorMoves, movesByLine,
+  globalView, lineView, socialActivity, eventsView,
   marketNotes, marketingRecommendations, newCompetitors, sourceList, domainOf, teamsOf,
   openItems, freshnessLabel, searchDemand, linesIn, forLine, linesOfRefs, matchesLine,
 } from '../../lib/marketReport'
@@ -16,6 +17,9 @@ import { fetchIntel, updateOpportunity, updateEventDecision } from '../../lib/ma
 import { fetchAgenda, setAgendaStatus } from '../../lib/agentAgenda'
 import { OPPORTUNITY_STATUSES, EVENT_DECISIONS } from '../../lib/agent/intel'
 import { isLive } from '../../lib/agent/progress'
+import { explainFacts } from '../../lib/agent/websiteExplain'
+import { fetchWebsiteExplanation } from '../../lib/websiteSearch'
+import { ExplainPoints } from '../analytics/WebsiteDetail'
 
 // ─── The Research tab — the weekly market report, for three teams ──────────
 // Marketing, sales and the technical team read this, and each needs a
@@ -587,6 +591,18 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
   const [agendaCompetitors, setAgendaCompetitors] = useState([])
   const [storeLoaded, setStoreLoaded] = useState(false)
   const [busyId, setBusyId] = useState(null)
+  // ── The one paid control on this page ──
+  //
+  // The search section's findings are already written by a model — the lens
+  // wrote them during the weekly run. What is missing above them is the
+  // sentence that says what they add up to, and that cannot be written during
+  // the run: the run produces one finding at a time and never sees the set.
+  //
+  // So it is a button, for about two cents, using the SAME route and the same
+  // renderer as the Analytics tab's — one prompt, one length limit, one look.
+  // Two implementations of "explain this in three sentences" would drift into
+  // two voices within a month.
+  const [explain, setExplain] = useState({ state: 'idle', points: [], error: '', cost: 0, capped: false, forRun: null })
   const [saveNote, setSaveNote] = useState('')
 
   useEffect(() => {
@@ -608,7 +624,12 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
     () => salesRows({ report, opportunities: intel.opportunities, runId: run?.id, now }),
     [report, intel.opportunities, run?.id, now],
   )
-  const moves = useMemo(() => competitorMoves(report), [report])
+  // The watchlist lines a rival whose only trace is an Instagram board read —
+  // Huda sells lighting and nothing else, and belongs under Lighting rather
+  // than under "Not tied to a business".
+  const moves = useMemo(
+    () => competitorMoves(report, { watchlist: agendaCompetitors }),
+    [report, agendaCompetitors])
   // Only the rivals still being watched. Passed explicitly rather than read
   // inside the selector, so a failed agenda load reads as "no filter" instead
   // of blanking the section.
@@ -624,6 +645,11 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
   // The second axis. Built from the run, so a brand with one undivided
   // business never sees a control that does nothing.
   const lines = useMemo(() => linesIn(report), [report])
+  // The world industry, and the one line nobody on the watchlist competes
+  // with us on. Both are their own sections rather than rows inside an
+  // existing one — see globalView and lineView.
+  const world = useMemo(() => globalView(report), [report])
+  const poles = useMemo(() => lineView(report, 'poles'), [report])
   // How much of the run carries no line at all. Shown rather than swallowed:
   // an untagged item appears only under "Everything", so without this a reader
   // switching to Controls sees sections empty out and reasonably concludes the
@@ -645,6 +671,43 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
   // never closed is exactly what a per-run caveats list cannot show.
   const open = useMemo(() => openItems({ runs }), [runs])
   const empty = useMemo(() => emptiness(report), [report])
+
+  // Stamped with the run it describes and checked on render, so switching to
+  // another week's report cannot leave last week's sentences sitting above it.
+  // A reset from an effect would paint one frame of the wrong answer first —
+  // the same rule the Website tab follows.
+  const explainFor = explain.forRun === run?.id ? explain : { state: 'idle', points: [], error: '', cost: 0, capped: false }
+
+  const runExplain = useCallback(async () => {
+    if (!activeWorkspaceId || !accessToken || !run?.id) return
+    // The lens's own totals, which hold impressions and clicks and genuinely
+    // do NOT hold CTR or average position — `totals()` never computed them,
+    // because the weekly report does not narrate either one. They arrive as
+    // null and must stay null: a zero there would be a model told the site
+    // ranks first for everything.
+    const facts = explainFacts({
+      summary: {
+        impressions: search.summary?.all?.impressions,
+        clicks: search.summary?.all?.clicks,
+        ctr: search.summary?.all?.ctr,
+        position: search.summary?.all?.position,
+        brand: search.summary?.brand,
+        nonBrand: search.summary?.nonBrand,
+        baseline: search.summary?.baseline,
+      },
+      findings: [...search.opportunities, ...search.movers],
+    })
+    setExplain({ state: 'loading', points: [], error: '', cost: 0, capped: false, forRun: run.id })
+    const res = await fetchWebsiteExplanation(activeWorkspaceId, accessToken, facts, 'research')
+    setExplain({
+      state: res?.ok ? 'done' : 'error',
+      points: res?.points || [],
+      error: res?.ok ? '' : (res?.error || 'The explanation could not be generated.'),
+      cost: res?.cost || 0,
+      capped: !!res?.capped,
+      forRun: run.id,
+    })
+  }, [activeWorkspaceId, accessToken, run, search])
   const { passed } = useMemo(() => partitionByClock(report.findings || [], now), [report, now])
   const live = isLive(run)
 
@@ -654,9 +717,19 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
   const visibleTop = top.items
     .filter(t => team === 'all' || t.team === team)
     .filter(t => matchesLine(line, linesOfRefs(t.refs, report)))
+  // `m.lines` rather than linesOfRefs: a move the agent wrote carries refs and
+  // both agree, but a move DERIVED in code carries no refs at all — so the ref
+  // lookup returned [] for every one of them and the whole section emptied the
+  // moment a reader picked a business. competitorMoves resolves the lines for
+  // both shapes.
   const visibleMoves = moves.items
     .filter(m => forTeam(team, m.teams))
-    .filter(m => matchesLine(line, linesOfRefs(m.refs, report)))
+    .filter(m => matchesLine(line, m.lines || []))
+  // Grouped for the "Everything" view. Picking a single business already
+  // narrows the list, so a lone heading repeating that choice is noise.
+  const moveGroups = useMemo(
+    () => (line === 'all' ? movesByLine(visibleMoves, lines) : []),
+    [line, visibleMoves, lines])
   // A lead carries its own line rather than refs, so it filters directly.
   // Memoised because the sections rail depends on it, and a fresh object every
   // render would rebuild that list on every keystroke elsewhere on the page.
@@ -675,13 +748,15 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
     { key: 'events', label: 'Events', count: events.count + events.dates.length },
     { key: 'search', label: 'Search demand', count: search.opportunities.length + search.movers.length },
     { key: 'market', label: 'Market & technical', count: visibleNotes.length },
+    { key: 'global', label: 'Global industry', count: world.items.length },
+    { key: 'poles', label: 'Smart poles', count: poles.items.length },
     { key: 'recs', label: 'Marketing recommendations', count: plan.blocks.length + plan.loose.length },
     { key: 'newcomp', label: 'New competitors', count: candidates.length },
     { key: 'sources', label: 'Sources', count: sources.length },
     { key: 'run', label: 'How this run went' },
     { key: 'watch', label: 'What it watches' },
   ].filter(s => ['run', 'watch'].includes(s.key) || sectionVisible(s.key, team)),
-  [team, visibleTop, visibleSales, visibleMoves, social, events, search, visibleNotes, plan, candidates, sources])
+  [team, visibleTop, visibleSales, visibleMoves, social, events, search, visibleNotes, plan, candidates, sources, world, poles])
 
   const [activeZone, setActiveZone] = useState('top')
   const rootRef = useRef(null)
@@ -833,7 +908,33 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
           ? 'Assembled from this report\'s competitor readings — it predates the agent combining signals across channels.'
           : 'What each competitor is doing, combined from small signals across their website, LinkedIn, job ads, social posts and the press — this week and earlier weeks.'}>
         {visibleMoves.length ? (
-          <div className="grid gap-2.5 md:grid-cols-2">{visibleMoves.map((m, i) => <CompetitorMove key={i} m={m} />)}</div>
+          /* Grouped by business line. Lighting is specified by an architect at
+             concept stage and controls by an MEP consultant months later, and
+             the rivals barely overlap — so an ungrouped list put a controls
+             integrator beside a lighting supplier, two companies that are
+             never in the same room. A rival selling into both appears under
+             both, which is what a cross-line rival actually is.
+             One unnamed group means this brand has one business, and then the
+             heading would be noise. */
+          moveGroups.length > 1
+            ? (
+              <div className="space-y-5">
+                {moveGroups.map(g => (
+                  <div key={g.key || 'unlined'}>
+                    <p className="text-[10px] font-semibold text-text-tertiary uppercase tracking-wide mb-2">
+                      {g.label}
+                      <span className="ml-1.5 font-normal normal-case tabular-nums">
+                        {g.items.length} rival{g.items.length === 1 ? '' : 's'}
+                      </span>
+                    </p>
+                    <div className="grid gap-2.5 md:grid-cols-2">
+                      {g.items.map((m, i) => <CompetitorMove key={i} m={m} />)}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )
+            : <div className="grid gap-2.5 md:grid-cols-2">{visibleMoves.map((m, i) => <CompetitorMove key={i} m={m} />)}</div>
         ) : <Quiet>No competitor did anything new that was found this week.</Quiet>}
         {!direction.derived && direction.items.length > 0 && (
           <div className="mt-4 pt-4 border-t border-border">
@@ -935,6 +1036,30 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
             </Quiet>
           ) : (
             <div className="space-y-3">
+              {/* What it adds up to, above the items it is about. Idle until
+                  asked: the weekly run already paid for the findings below,
+                  and nobody should be charged again just for opening the tab. */}
+              <div className="border border-border bg-surface-subtle">
+                <div className="px-3 py-2 flex items-center justify-between gap-3">
+                  <p className="text-[11px] text-text-tertiary">
+                    {explainFor.state === 'done' && explainFor.points.length
+                      ? `What this adds up to${explainFor.cost ? ` · $${explainFor.cost.toFixed(3)}` : ''}`
+                      : 'Read the section below in three sentences — about two cents'}
+                  </p>
+                  <Button size="sm" variant="secondary" onClick={runExplain} disabled={explainFor.state === 'loading'}>
+                    {explainFor.state === 'loading' ? 'Reading…' : (explainFor.state === 'idle' ? 'Explain' : 'Again')}
+                  </Button>
+                </div>
+                {explainFor.state === 'done' && (explainFor.points.length
+                  ? <div className="border-t border-border bg-surface"><ExplainPoints points={explainFor.points} /></div>
+                  : <p className="px-3 pb-2 text-[11px] text-text-tertiary">Nothing in this period adds up to more than the items below.</p>
+                )}
+                {explainFor.state === 'error' && (
+                  <p className={`px-3 pb-2 text-[11px] ${explainFor.capped ? 'text-amber-700' : 'text-rose-600'}`}>
+                    {explainFor.capped ? 'This workspace has reached its monthly agent budget. ' : ''}{explainFor.error}
+                  </p>
+                )}
+              </div>
               {search.note && <p className="text-sm text-text leading-snug" dir="auto">{search.note}</p>}
               {search.byLine.length > 0 && (
                 <div className="flex flex-wrap gap-1.5">
@@ -972,6 +1097,37 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
           {visibleNotes.length ? (
             <div className="space-y-2.5">{visibleNotes.map((note, i) => <Note key={i} n={note} now={now} />)}</div>
           ) : <Quiet>No regulation, technology or giga-project change this week.</Quiet>}
+        </Section>
+      )}
+
+      {/* Global industry */}
+      {sectionVisible('global', team) && (
+        <Section id="global" n={num('global')} title="Global industry"
+          note="The world upstream of our market — what the international manufacturers are doing, where component prices and standards are heading, and what reaches us later. Deliberately not searched in Saudi Arabia.">
+          {world.items.length ? (
+            <div className="space-y-2.5">{world.items.map((f, i) => <Note key={i} n={f} now={now} />)}</div>
+          ) : (
+            <Quiet>
+              Nothing from the world industry this week. This lens is new — a report from before it
+              existed has nothing here and is not missing anything.
+            </Quiet>
+          )}
+        </Section>
+      )}
+
+      {/* Smart poles */}
+      {sectionVisible('poles', team) && (
+        <Section id="poles" n={num('poles')} title="Smart poles"
+          note="The municipal line, on its own. Its buyer is a city rather than an architect or a consultant, so it is kept out of the two specification businesses.">
+          {poles.items.length ? (
+            <div className="space-y-2.5">{poles.items.map((f, i) => <Note key={i} n={f} now={now} />)}</div>
+          ) : (
+            <Quiet>
+              Nothing on smart poles this week.{poles.rivals === 0 && ' No company on the watchlist sells' +
+              ' poles, so there is no competitor research behind this section — what appears here comes' +
+              ' from the market and global industry lenses. Add a pole rival to the watchlist to change that.'}
+            </Quiet>
+          )}
         </Section>
       )}
 

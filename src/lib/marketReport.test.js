@@ -6,6 +6,7 @@ import {
   newCompetitors, sourceList, sectionVisible, dayLabel, resolveRefs,
   searchDemand,
   linesIn, forLine, linesOfRefs, matchesLine,
+  movesByLine, globalView, lineView,
 } from './marketReport'
 
 // The real 14 Sep 2026 Arak brief — written before any of the three-reader
@@ -423,5 +424,143 @@ describe('the business-line filter', () => {
   it('keeps an unclassified finding out of both lines', () => {
     expect(forLine('lighting', '')).toBe(false)
     expect(forLine('controls', '')).toBe(false)
+  })
+})
+
+// ─── Splitting the report by business line ─────────────────────────────────
+// Arak sells lighting, specified by an architect at concept stage, and
+// controls, specified by an MEP or ELV consultant months later. Of the 17
+// rivals on the watchlist, 8 sell only lighting and 4 only controls — so one
+// undifferentiated list of moves puts a controls integrator (Sela-PASS) in the
+// card next to a lighting supplier (ViaLighting), two companies that never
+// meet.
+
+describe('competitor moves, grouped by business line', () => {
+  const moves = [
+    { competitor: 'Sela-PASS', lines: ['controls'] },
+    { competitor: 'Huda Lighting', lines: ['lighting'] },
+    { competitor: 'Al Nasser Group', lines: ['lighting', 'controls'] },
+    { competitor: 'Mystery Co', lines: [] },
+  ]
+  const labels = [{ key: 'lighting', label: 'Lighting' }, { key: 'controls', label: 'Controls & automation' }]
+
+  it('puts each rival under the business it competes in', () => {
+    const groups = movesByLine(moves, labels)
+    const controls = groups.find(g => g.key === 'controls')
+    expect(controls.items.map(m => m.competitor)).toEqual(['Sela-PASS', 'Al Nasser Group'])
+    expect(groups.find(g => g.key === 'lighting').items.map(m => m.competitor))
+      .toEqual(['Huda Lighting', 'Al Nasser Group'])
+  })
+
+  it('shows a rival who sells into both under BOTH, rather than picking one', () => {
+    const groups = movesByLine(moves, labels)
+    const appearances = groups.filter(g => g.items.some(m => m.competitor === 'Al Nasser Group'))
+    expect(appearances).toHaveLength(2)
+  })
+
+  it('uses the run\'s own labels, so the page never hardcodes a line name', () => {
+    expect(movesByLine(moves, labels).find(g => g.key === 'controls').label)
+      .toBe('Controls & automation')
+    // And degrades to the key when the run carries no label for it.
+    expect(movesByLine(moves, []).find(g => g.key === 'controls').label).toBe('Controls')
+  })
+
+  it('keeps an unclassified move visible, in its own group, last', () => {
+    // Filing it under the wrong business is worse than showing it unclassified:
+    // someone acts on it either way.
+    const groups = movesByLine(moves, labels)
+    expect(groups[groups.length - 1].key).toBe('')
+    expect(groups[groups.length - 1].label).toBe('Not tied to a business')
+    expect(groups[groups.length - 1].items.map(m => m.competitor)).toEqual(['Mystery Co'])
+  })
+
+  it('makes one group for a brand with one undivided business', () => {
+    expect(movesByLine([{ competitor: 'A', lines: ['lighting'] }], labels)).toHaveLength(1)
+  })
+
+  it('survives a report with no lines at all — every brief before 2026-09-17', () => {
+    const groups = movesByLine(competitorMoves(runs[0].report).items, [])
+    expect(groups).toHaveLength(1)
+    expect(groups[0].key).toBe('')
+  })
+})
+
+describe('the world industry is its own section', () => {
+  const report = {
+    findings: [
+      { lens: 'global', headline: 'A European efficiency rule lands in 2027.', relevance: 'high' },
+      { lens: 'category', headline: 'SASO 2870 is being cited locally.', relevance: 'high' },
+      { lens: 'global', headline: 'Low value.', relevance: 'low' },
+    ],
+  }
+
+  it('takes the global lens and leaves the local market lens alone', () => {
+    const items = globalView(report).items
+    expect(items.map(f => f.headline)).toEqual(['A European efficiency rule lands in 2027.'])
+  })
+
+  it('is empty rather than throwing on a report from before the lens existed', () => {
+    expect(globalView(runs[0].report).items).toEqual([])
+    expect(globalView({}).items).toEqual([])
+  })
+})
+
+describe('a single line as its own small section', () => {
+  const report = {
+    findings: [
+      { lens: 'category', headline: 'A city tendered 4,000 poles.', line: 'poles', relevance: 'high' },
+      { lens: 'rivals', headline: 'Someone sells poles.', line: 'poles', competitor: 'X', relevance: 'medium' },
+      { lens: 'rivals', headline: 'Lighting thing.', line: 'lighting', competitor: 'Y', relevance: 'high' },
+    ],
+  }
+
+  it('picks up every finding on that line, whichever lens found it', () => {
+    expect(lineView(report, 'poles').items).toHaveLength(2)
+  })
+
+  it('counts how much came from a competitor, so an empty section can say why', () => {
+    expect(lineView(report, 'poles').rivals).toBe(1)
+    // Arak's real case: three lines configured, no pole rival on the watchlist.
+    expect(lineView({ findings: [{ lens: 'category', headline: 'h', line: 'poles' }] }, 'poles').rivals).toBe(0)
+  })
+
+  it('returns nothing for a line nobody asked about', () => {
+    expect(lineView(report, '').items).toEqual([])
+    expect(lineView(report, 'nonexistent').items).toEqual([])
+  })
+})
+
+describe('leads keep their business line', () => {
+  // The page filters these on `r.line`. Nothing set it, so EVERY tracked lead
+  // vanished the moment a reader picked a business — which reads as "no
+  // controls leads" when the truth was "the column was not read".
+  const opportunities = [
+    { id: 'o1', name: 'Mondrian GRMS', line: 'controls', status: 'new', relevance: 'high' },
+    { id: 'o2', name: 'Solitaire facade', line: 'lighting', status: 'new', relevance: 'high' },
+    { id: 'o3', name: 'Unclassified job', status: 'new', relevance: 'medium' },
+  ]
+
+  it('carries the line from the tracker', () => {
+    const rows = salesRows({ opportunities })
+    expect(rows.open.find(r => r.name === 'Mondrian GRMS').line).toBe('controls')
+    expect(rows.open.find(r => r.name === 'Solitaire facade').line).toBe('lighting')
+  })
+
+  it('reads a row stored before the column existed as unclassified, never undefined', () => {
+    // `forLine` compares strings; undefined would make the row invisible under
+    // every reading including "Everything".
+    expect(salesRows({ opportunities }).open.find(r => r.name === 'Unclassified job').line).toBe('')
+  })
+
+  it('carries the line from a lead found in this run', () => {
+    const report = {
+      findings: [{
+        lens: 'openings', line: 'controls', relevance: 'high', for_whom: 'sales',
+        headline: 'A hotel needs guest room automation.',
+        sources: [{ url: 'https://example.com/a' }],
+        lead: { name: 'Hotel GRMS package', type: 'project' },
+      }],
+    }
+    expect(salesRows({ report }).open[0].line).toBe('controls')
   })
 })

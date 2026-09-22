@@ -100,6 +100,10 @@ export const SECTIONS = [
   { key: 'events', label: 'Events', teams: ['marketing', 'sales'] },
   { key: 'search', label: 'Search demand', teams: ['marketing', 'sales'] },
   { key: 'market', label: 'Market & technical', teams: ['marketing', 'technical'] },
+  // The world industry is read by the technical team and by marketing for
+  // what to say; sales works this market, not Shenzhen's.
+  { key: 'global', label: 'Global industry', teams: ['marketing', 'technical'] },
+  { key: 'poles', label: 'Smart poles', teams: ['marketing', 'sales', 'technical'] },
   { key: 'recs', label: 'Marketing recommendations', teams: ['marketing'] },
   { key: 'newcomp', label: 'New competitors', teams: ['marketing', 'sales'] },
   { key: 'sources', label: 'Sources', teams: ['marketing', 'sales', 'technical'] },
@@ -322,6 +326,13 @@ export function salesRows({ report = {}, opportunities = [], runId = null, now =
     isNew: Boolean(runId) && o.first_run_id === runId,
     changed: Boolean(runId) && o.last_run_id === runId && o.first_run_id !== runId && str(o.last_change) ? o.last_change : '',
     firstSeen: String(o.first_seen_at || '').slice(0, 10),
+    // ── THE TRACKER HAS TO CARRY ITS LINE ──
+    //
+    // The page filters these on `r.line`, and nothing ever set it: every
+    // tracked lead vanished the moment a reader picked a business, which reads
+    // as "no controls leads" when the truth was "the column was not read".
+    // Stored since the 2026-09-20 migration; '' on every row written before it.
+    line: str(o.line),
     tracked: true,
   }))
 
@@ -347,6 +358,9 @@ export function salesRows({ report = {}, opportunities = [], runId = null, now =
         isNew: f.store?.state !== 'seen',
         changed: f.store?.state === 'changed' ? (f.store.changes || []).join('; ') : '',
         firstSeen: '',
+        // Straight off the finding — this run's leads are stamped before
+        // synthesis ever sees them.
+        line: str(f.line),
         tracked: false,
       }
     })
@@ -427,7 +441,36 @@ export const freshnessLabel = f =>
  * combined. Otherwise grouped in code from findings that name a competitor,
  * plus the per-rival reads older briefs carry.
  */
-export function competitorMoves(report = {}) {
+/**
+ * @param {object} report
+ * @param {object} [opts]
+ * @param {Array}  [opts.watchlist] research_agenda competitor rows, for the
+ *   line fallback below.
+ */
+export function competitorMoves(report = {}, { watchlist = [] } = {}) {
+  // ── THE LINE FALLBACK ──
+  //
+  // A rival whose only trace this week is an Instagram board read has no
+  // finding behind it, so there is nothing to read a line off — and Huda, who
+  // sells lighting and nothing else, would land under "Not tied to a business"
+  // beside a genuine unknown.
+  //
+  // Same rule as lineForFinding, and the same reason for its limit: a rival
+  // who sells into exactly ONE line settles the question by being named, and
+  // one who straddles settles nothing. Guessing from a straddler is precisely
+  // how a controls move ends up on the lighting board.
+  const soleLine = new Map(
+    (watchlist || [])
+      .map(c => [nameKey(c?.subject || c?.name), (c?.lines || []).filter(Boolean)])
+      .filter(([k, lines]) => k && lines.length === 1)
+      .map(([k, lines]) => [k, lines[0]]),
+  )
+  const linesFor = (name, found) => {
+    if (found.length) return found
+    const only = soleLine.get(nameKey(name))
+    return only ? [only] : []
+  }
+
   const written = (report.competitor_moves || []).filter(m => str(m?.competitor))
   if (written.length) {
     return {
@@ -440,6 +483,10 @@ export function competitorMoves(report = {}) {
           picture: m.picture || '',
           effect: m.effect_on_us || '',
           relevance: m.relevance || 'medium',
+          // Read back off the evidence, same as `teams`. A move citing two
+          // lines belongs to both and is shown under each — a rival we meet in
+          // two businesses is two competitive situations, not one.
+          lines: linesFor(m.competitor, linesOfRefs(m.refs, report)),
           freshness: freshnessOf(m.refs, report),
           // Derived from the findings it cites rather than asked for: the
           // schema field was dropped to keep the grammar under the API limit.
@@ -477,6 +524,7 @@ export function competitorMoves(report = {}) {
       picture: g.pieces.length > 1 ? `${g.pieces.length} pieces this run.` : '',
       effect: top?.suggested_action || '',
       relevance: top?.relevance || 'medium',
+      lines: linesFor(g.competitor, [...new Set(g.findings.map(f => str(f.line)).filter(Boolean))]),
       freshness: freshnessFromFindings(g.findings),
       teams: top ? teamsOf(top) : ['marketing'],
       pieces: g.pieces,
@@ -878,3 +926,85 @@ export function metaLine(item) {
 }
 
 export { isOpenOpportunity }
+
+// ─── Competitor moves, grouped by business line ────────────────────────────
+
+/** The label a line key reads as, from the run's own roll-up. */
+const labelForLine = (key, labels = []) =>
+  labels.find(l => l.key === key)?.label || (key ? key[0].toUpperCase() + key.slice(1) : '')
+
+/**
+ * The same moves, split into the businesses they belong to.
+ *
+ * Lighting is specified by an architect at concept stage; controls by an MEP
+ * or ELV consultant months later. The rivals barely overlap — of the 17 on
+ * Arak's watchlist, 8 sell only lighting and 4 only controls — so one
+ * undifferentiated list puts a controls integrator and a lighting supplier in
+ * adjacent cards when the two companies are never in the same room.
+ *
+ * A move belonging to BOTH lines appears under both, deliberately: that is a
+ * real property of a cross-line rival, and picking one for it would hide them
+ * from half the people who need to know.
+ *
+ * `unlined` is returned as its own trailing group rather than dropped or
+ * folded into one of the businesses. A move we could not tie to a line is a
+ * gap in what we know, and filing it under the wrong business is worse than
+ * leaving it visible as unclassified — someone acts on it either way.
+ */
+export function movesByLine(items = [], lineLabels = []) {
+  const order = []
+  const by = new Map()
+  const push = (key, m) => {
+    if (!by.has(key)) { by.set(key, []); order.push(key) }
+    by.get(key).push(m)
+  }
+  for (const m of items || []) {
+    const lines = (m.lines || []).filter(Boolean)
+    if (lines.length) for (const l of lines) push(l, m)
+    else push('', m)
+  }
+  // Named lines in the order they first appear; unclassified always last.
+  return order
+    .sort((a, b) => (a === '' ? 1 : 0) - (b === '' ? 1 : 0))
+    .map(key => ({
+      key,
+      label: key ? labelForLine(key, lineLabels) : 'Not tied to a business',
+      items: by.get(key),
+    }))
+}
+
+/**
+ * The world industry — the `global` lens, on its own.
+ *
+ * Kept out of "Market & technical" because that section is this market: every
+ * finding the category lens returned on 2026-09-17 was Saudi, correctly. A
+ * European standard and a Riyadh tender are read by different people for
+ * different reasons and should not share a list.
+ */
+export function globalView(report = {}) {
+  const items = (report.findings || [])
+    .filter(f => f?.lens === 'global' && isReportable(f) && str(f.headline))
+  return { items: rankFindings(items) }
+}
+
+/**
+ * One business line, on its own, as a small section.
+ *
+ * For a line nobody on the watchlist competes with us on, there is no
+ * competitor research to show and pretending otherwise would be dishonest —
+ * so this reads the market and industry findings that landed on the line
+ * instead, and says plainly when that is all there is.
+ */
+export function lineView(report = {}, key = '') {
+  const line = str(key)
+  if (!line) return { key: '', items: [], rivals: 0 }
+  const items = (report.findings || [])
+    .filter(f => str(f.line) === line && isReportable(f) && str(f.headline))
+  return {
+    key: line,
+    items: rankFindings(items),
+    // How many of them came from a competitor pass, so the section can say
+    // "nobody on the watchlist sells this" rather than showing an empty box.
+    rivals: items.filter(f => str(f.competitor)).length,
+  }
+}

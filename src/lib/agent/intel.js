@@ -145,6 +145,11 @@ export function signalFromFinding(f, watchlist = []) {
     source_url: src.url,
     source_title: src.title,
     event_date: cleanDate(f.event?.start_date) || cleanDate(f.perishable_until),
+    // Carried into the store so the line survives the run that found it. A
+    // signal is the half that crosses weeks, and until 2026-09-20 it dropped
+    // the line on the way in — so a reader on Controls saw this week's
+    // controls findings and none of the controls history behind them.
+    line: str(f.line),
     fingerprint: signalKey(competitor, summary),
   }
 }
@@ -204,6 +209,10 @@ export function opportunityFromFinding(f) {
     suggested_action: str(f.suggested_action),
     source_url: src.url,
     sources: (f.sources || []).slice(0, 5),
+    // Same reason as the signal. A lead found three weeks ago and still open
+    // belongs on today's list, and it can only stay on the CONTROLS list if
+    // the tracker remembers which business it was.
+    line: str(f.line),
     fingerprint: `opp|${nameKey(name)}`,
   }
 }
@@ -365,6 +374,23 @@ export function planStoreWrites(findings = [], existing = {}, { runId = null, no
       ...(kind !== 'events' ? { times_seen: (Number(hit.times_seen) || 1) + (hit.last_run_id === runId ? 0 : 1) } : {}),
       ...(changes.length && kind !== 'signals' ? { last_change: changes.join('; '), updated_at: stamp } : {}),
       ...(kind === 'events' ? { status: eventStatus({ ...hit, ...patch }, now) } : {}),
+      // ── FILLING A BLANK LINE IS NOT A CHANGE ──
+      //
+      // Every row written before 2026-09-20 carries line '' and the migration
+      // deliberately did not backfill one — the evidence needed to stamp it
+      // lives in the run, not in a stored summary. So a row re-seen by a pass
+      // that DOES know its line fills it in here, once, and the tracker stops
+      // hiding it from whoever reads that business.
+      //
+      // Deliberately outside `fieldChanges`: a blank becoming 'controls' is us
+      // learning something about our own record, not a rival doing anything.
+      // Routed through `changes` it would print "line changed" on the report
+      // as though the market had moved.
+      //
+      // Only ever fills a blank. A line already set is left alone, because the
+      // pass that set it had the roster in front of it and this one may be the
+      // other line's pass meeting the same rival.
+      ...(kind !== 'events' && !str(hit.line) && str(cand.line) ? { line: str(cand.line) } : {}),
     }
     out[kind].update.push({ id: hit.id, patch: touch })
     Object.assign(hit, touch)

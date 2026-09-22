@@ -10,7 +10,8 @@ import {
 import { useReportFilename } from '../../lib/reports/print'
 import { lensStates, lensHeadline, runEffort, pct } from '../../lib/researchBrief'
 import {
-  TEAMS, sectionVisible, forTeam, topThree, salesRows, competitorMoves, socialActivity, eventsView,
+  TEAMS, sectionVisible, forTeam, topThree, salesRows, competitorMoves, movesByLine,
+  globalView, lineView, linesIn, socialActivity, eventsView,
   marketNotes, marketingRecommendations, newCompetitors, sourceList, openItems, freshnessLabel,
   searchDemand,
 } from '../../lib/marketReport'
@@ -129,7 +130,14 @@ export function ResearchReport() {
   const report = useMemo(() => run?.report || {}, [run])
   const top = useMemo(() => topThree(report, now), [report, now])
   const sales = useMemo(() => salesRows({ report, opportunities: intel.opportunities, runId: run?.id, now }), [report, intel, run, now])
-  const moves = useMemo(() => competitorMoves(report), [report])
+  // The watchlist lines a rival known only from an Instagram board read, the
+  // same way the on-screen tab does — see competitorMoves.
+  const moves = useMemo(
+    () => competitorMoves(report, { watchlist: agendaCompetitors }),
+    [report, agendaCompetitors])
+  const lines = useMemo(() => linesIn(report), [report])
+  const world = useMemo(() => globalView(report), [report])
+  const poles = useMemo(() => lineView(report, 'poles'), [report])
   const social = useMemo(() => socialActivity({ report, signals: intel.signals, now }), [report, intel, now])
   const events = useMemo(() => eventsView({ report, events: intel.events, runId: run?.id, now }), [report, intel, run, now])
   const notes = useMemo(() => marketNotes(report, now), [report, now])
@@ -163,6 +171,10 @@ export function ResearchReport() {
 
   const topItems = top.items.filter(t => team === 'all' || t.team === team)
   const moveItems = moves.items.filter(m => forTeam(team, m.teams))
+  // Printed grouped, for the same reason the screen groups: a controls
+  // integrator and a lighting supplier are never in the same room, and on
+  // paper there is no filter to fall back on.
+  const moveGroups = movesByLine(moveItems, lines)
   const noteItems = notes.filter(x => forTeam(team, x.teams))
 
   return (
@@ -272,7 +284,14 @@ export function ResearchReport() {
               note={moves.derived ? 'Assembled from this report\'s competitor readings.' : 'Combined from small signals across websites, LinkedIn, job ads, social posts and the press, this week and earlier.'}>
               {moveItems.length ? (
                 <div className="space-y-3">
-                  {moveItems.map((m, i) => (
+                  {moveGroups.map(g => (
+                    <div key={g.key || 'unlined'} className="space-y-3">
+                      {moveGroups.length > 1 && (
+                        <p className="text-[10px] font-semibold uppercase tracking-wide text-text-tertiary">
+                          {g.label} · {g.items.length} rival{g.items.length === 1 ? '' : 's'}
+                        </p>
+                      )}
+                      {g.items.map((m, i) => (
                     <div key={i} data-print-keep className="border-l-2 border-text pl-3">
                       <p className="text-[13px] font-semibold text-text">{m.competitor}
                         <span className="ml-1.5 text-[10px] font-normal uppercase tracking-wide text-text-tertiary">
@@ -286,6 +305,8 @@ export function ResearchReport() {
                       {sourceLine(m.pieces.map(p => p.url).filter(Boolean)) && (
                         <p className="text-[10px] text-text-tertiary mt-0.5">{m.pieces.length} piece{m.pieces.length === 1 ? '' : 's'} · {sourceLine(m.pieces.map(p => p.url).filter(Boolean))}</p>
                       )}
+                    </div>
+                      ))}
                     </div>
                   ))}
                 </div>
@@ -420,6 +441,42 @@ export function ResearchReport() {
                       </p>
                       {x.action && <p><span className="font-semibold">Marketing: </span>{x.action}</p>}
                       {x.technicalNote && <p><span className="font-semibold">Technical: </span>{x.technicalNote}</p>}
+                      {sourceLine(x.sources) && <p className="text-[10px] text-text-tertiary">{sourceLine(x.sources)}</p>}
+                    </li>
+                  ))}
+                </ul>
+              </ReportSection>
+            )}
+
+            {/* ── Global industry ── */}
+            {/* Printed only when it has something. A paper report carries no
+                filters and no way to skip a heading, so an empty section is
+                pure cost — unlike on screen, where the empty state explains
+                why a reader clicked into nothing. */}
+            {show('global') && world.items.length > 0 && (
+              <ReportSection title="Global industry"
+                note="The world upstream of this market — manufacturers, component prices and standards arriving elsewhere first.">
+                <ul className="space-y-2">
+                  {world.items.slice(0, 8).map((x, i) => (
+                    <li key={i} data-print-keep className="text-[11px] text-text-secondary leading-relaxed">
+                      <p className="text-[12px] text-text font-medium leading-snug">{x.headline}</p>
+                      {x.suggested_action && <p><span className="font-semibold">For us: </span>{x.suggested_action}</p>}
+                      {sourceLine(x.sources) && <p className="text-[10px] text-text-tertiary">{sourceLine(x.sources)}</p>}
+                    </li>
+                  ))}
+                </ul>
+              </ReportSection>
+            )}
+
+            {/* ── Smart poles ── */}
+            {show('poles') && poles.items.length > 0 && (
+              <ReportSection title="Smart poles"
+                note="The municipal line, kept out of the two specification businesses because its buyer is a city.">
+                <ul className="space-y-2">
+                  {poles.items.slice(0, 8).map((x, i) => (
+                    <li key={i} data-print-keep className="text-[11px] text-text-secondary leading-relaxed">
+                      <p className="text-[12px] text-text font-medium leading-snug">{x.headline}</p>
+                      {x.suggested_action && <p><span className="font-semibold">Do: </span>{x.suggested_action}</p>}
                       {sourceLine(x.sources) && <p className="text-[10px] text-text-tertiary">{sourceLine(x.sources)}</p>}
                     </li>
                   ))}
