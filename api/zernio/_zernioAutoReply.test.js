@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest'
+import fs from 'node:fs'
 import {
   automationFields, cleanList, normalizeAutomation, AUTO_REPLY_PLATFORMS, isAction,
 } from './[action].js'
@@ -162,5 +163,32 @@ describe('which platforms can be automated', () => {
     expect(AUTO_REPLY_PLATFORMS).toEqual(['instagram', 'facebook'])
     expect(AUTO_REPLY_PLATFORMS).not.toContain('linkedin')
     expect(AUTO_REPLY_PLATFORMS).not.toContain('tiktok')
+  })
+})
+
+// ─── The base URL already carries the version ──────────────────────────────
+//
+// ZERNIO_BASE is 'https://zernio.com/api/v1' and request() does `${base}/${path}`.
+// Zernio's OpenAPI document lists its paths AS '/v1/comment-automations', so
+// copying one straight out of the spec produces /api/v1/v1/... and a "No such
+// API endpoint" that only appears against the live API — every unit test and
+// the whole build pass, because nothing local ever forms the URL.
+//
+// That is exactly what shipped in #118. This reads the route for request paths
+// and refuses any that start with a version segment.
+describe('zernio request paths', () => {
+  const source = fs.readFileSync(new URL('./[action].js', import.meta.url), 'utf8')
+  const paths = [...source.matchAll(/z\.request\(\s*[`'"]([^`'"$]*)/g)].map(m => m[1])
+
+  it('finds the call sites (guards the regex itself)', () => {
+    expect(paths.length).toBeGreaterThanOrEqual(6)
+  })
+
+  it('never repeats the version the base URL already has', () => {
+    expect(paths.filter(p => /^\/?v\d+\//.test(p))).toEqual([])
+  })
+
+  it('never starts with a slash, which would also double it', () => {
+    expect(paths.filter(p => p.startsWith('/'))).toEqual([])
   })
 })

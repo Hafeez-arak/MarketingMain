@@ -575,7 +575,7 @@ const handlers = {
     const accountId = String(body.account_id || '').trim()
     if (accountId) await requireOwnedAccount(z, { workspaceId: ws.id, profileId, accountId })
 
-    const out = await z.request('v1/comment-automations', { query: { profileId } })
+    const out = await z.request('comment-automations', { query: { profileId } })
     const all = Array.isArray(out?.automations) ? out.automations : []
     return {
       automations: (accountId ? all.filter(a => String(a.accountId || '') === accountId) : all)
@@ -593,7 +593,7 @@ const handlers = {
 
     if (id) {
       await requireOwnedAutomation(z, { workspaceId: ws.id, profileId, automationId: id })
-      const out = await z.request(`v1/comment-automations/${encodeURIComponent(id)}`, {
+      const out = await z.request(`comment-automations/${encodeURIComponent(id)}`, {
         method: 'PATCH', body: fields,
       })
       return { automation: normalizeAutomation(out?.automation || out) }
@@ -609,7 +609,7 @@ const handlers = {
       )
     }
 
-    const out = await z.request('v1/comment-automations', {
+    const out = await z.request('comment-automations', {
       method: 'POST',
       body: { profileId, accountId, ...fields },
     })
@@ -620,7 +620,7 @@ const handlers = {
     const id = String(body.id || '').trim()
     if (!id) return fail('id is required.', 400)
     await requireOwnedAutomation(z, { workspaceId: ws.id, profileId, automationId: id })
-    await z.request(`v1/comment-automations/${encodeURIComponent(id)}`, { method: 'DELETE' })
+    await z.request(`comment-automations/${encodeURIComponent(id)}`, { method: 'DELETE' })
     return { deleted: id }
   },
 
@@ -632,7 +632,7 @@ const handlers = {
     if (!id) return fail('id is required.', 400)
     await requireOwnedAutomation(z, { workspaceId: ws.id, profileId, automationId: id })
 
-    const out = await z.request(`v1/comment-automations/${encodeURIComponent(id)}/logs`, {
+    const out = await z.request(`comment-automations/${encodeURIComponent(id)}/logs`, {
       query: { limit: Math.min(Number(body.limit) || 50, 100), skip: Number(body.skip) || 0 },
     })
     return {
@@ -762,7 +762,7 @@ function cleanList(raw) {
  * an id. The read is one extra round trip and is not optional.
  */
 async function requireOwnedAutomation(z, { workspaceId, profileId, automationId }) {
-  const out = await z.request(`v1/comment-automations/${encodeURIComponent(automationId)}`)
+  const out = await z.request(`comment-automations/${encodeURIComponent(automationId)}`)
   const automation = out?.automation || out || {}
   const accountId = String(automation.accountId || '')
   if (!accountId) {
