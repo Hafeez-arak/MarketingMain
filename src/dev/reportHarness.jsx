@@ -52,7 +52,10 @@ const auth = {
 const realFetch = window.fetch.bind(window)
 window.fetch = async (url, init) => {
   const href = String(url)
-  if (href.includes('/api/agent/performance')) {
+  // The report moved behind the n8n reports gateway; matching both spellings
+  // keeps this harness working either way rather than silently falling through
+  // to the real network and rendering an empty report.
+  if (href.includes('/api/agent/performance') || href.includes('arak-agent-reports')) {
     return new Response(JSON.stringify(fixture), {
       status: 200, headers: { 'Content-Type': 'application/json' },
     })

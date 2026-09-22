@@ -1,6 +1,7 @@
-import { callerId, callerMayUseWorkspace, isConfigured } from './_supabase.js'
-import { callModel } from './_provider.js'
-import { loadBrandContext, IDENTITY } from './_context.js'
+import { Buffer } from 'node:buffer'
+import { callerId, callerMayUseWorkspace, isConfigured } from '../../api/agent/_supabase.js'
+import { callModel } from '../../api/agent/_provider.js'
+import { loadBrandContext, IDENTITY } from '../../api/agent/_context.js'
 import { textIn } from '../../src/lib/agent/loop.js'
 
 // ─── POST /api/agent/reviseIdea ────────────────────────────────────────────

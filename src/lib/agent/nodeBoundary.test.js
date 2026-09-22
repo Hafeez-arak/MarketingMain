@@ -98,7 +98,7 @@ describe('the agent runs in Node, not in a bundle', () => {
     'api/agent/run.js',
     'api/agent/resolve.js',
     'api/agent/discover.js',
-    'api/agent/reviseIdea.js',
+    'server/agentHandlers/reviseIdea.js',
     'api/agent/synthesise.js',
     'api/agent/lens.js',
   ]

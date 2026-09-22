@@ -30,9 +30,15 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 // already at 12. `critique` was the thirteenth, so adding it did not degrade
 // the deployment — it failed the BUILD outright, taking production down with
 // it. Anything new belongs here from now on, not in api/agent/.
-export const ROUTES = ['run', 'lens', 'synthesise', 'resolve', 'discover', 'chat', 'indexHealth', 'websiteExplain', 'critique']
+//
+// `performance` and `reviseIdea` followed for headroom rather than because
+// they were broken: at exactly 12 of 12 the next route to appear anywhere
+// under api/ fails the build again, and both of these are single-purpose,
+// neither streams, and neither is on a path a page waits on to first paint.
+// api/ now sits at 10.
+export const ROUTES = ['run', 'lens', 'synthesise', 'resolve', 'discover', 'chat', 'indexHealth', 'websiteExplain', 'critique', 'performance', 'reviseIdea']
 
-const N8N_HANDLERS = new Set(['indexHealth', 'websiteExplain', 'critique'])
+const N8N_HANDLERS = new Set(['indexHealth', 'websiteExplain', 'critique', 'performance', 'reviseIdea'])
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 

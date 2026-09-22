@@ -1,7 +1,7 @@
-import { isConfigured } from './_supabase.js'
-import { readAccounts, readOwnPosts, readAnalyticsFor } from './_ownData.js'
-import { gatherZernioOwn } from './_gather.js'
-import { authorise } from './_serviceAuth.js'
+import { isConfigured } from '../../api/agent/_supabase.js'
+import { readAccounts, readOwnPosts, readAnalyticsFor } from '../../api/agent/_ownData.js'
+import { gatherZernioOwn } from '../../api/agent/_gather.js'
+import { authorise } from '../../api/agent/_serviceAuth.js'
 import {
   ownChannels, priorPeriod, externalRows, postsIn, analyticsByPost,
 } from '../../src/lib/agent/ownChannels.js'

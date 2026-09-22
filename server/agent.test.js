@@ -32,7 +32,7 @@ describe('agent server', () => {
   })
 
   it('serves every agent route, and only those', () => {
-    expect(ROUTES).toEqual(['run', 'lens', 'synthesise', 'resolve', 'discover', 'chat', 'indexHealth', 'websiteExplain', 'critique'])
+    expect(ROUTES).toEqual(['run', 'lens', 'synthesise', 'resolve', 'discover', 'chat', 'indexHealth', 'websiteExplain', 'critique', 'performance', 'reviseIdea'])
   })
 
   it('calls the named handler with the body, the query and res.status().json()', async () => {

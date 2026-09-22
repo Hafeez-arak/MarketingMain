@@ -80,7 +80,8 @@ describe('Vercel function budget', () => {
   // The handlers that moved off Vercel must not drift back by being recreated
   // under api/ — each one would retake a slot and the build would fail again.
   it('keeps the n8n-hosted handlers out of api/', () => {
-    for (const moved of ['indexHealth.js', 'websiteExplain.js', 'critique.js']) {
+    for (const moved of ['indexHealth.js', 'websiteExplain.js', 'critique.js',
+      'performance.js', 'reviseIdea.js']) {
       expect(files).not.toContain(path.join('agent', moved))
     }
   })
@@ -100,9 +101,7 @@ describe('Vercel function budget', () => {
       path.join('agent', 'chat.js'),
       path.join('agent', 'discover.js'),
       path.join('agent', 'lens.js'),
-      path.join('agent', 'performance.js'),
       path.join('agent', 'resolve.js'),
-      path.join('agent', 'reviseIdea.js'),
       path.join('agent', 'run.js'),
       path.join('agent', 'search.js'),
       path.join('agent', 'synthesise.js'),

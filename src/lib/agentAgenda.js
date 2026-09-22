@@ -1,4 +1,5 @@
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './supabaseClient'
+import { defaultWebhookUrl } from './n8nWebhooks'
 
 // ─── The steering wheel ────────────────────────────────────────────────────
 // AGENT.md §5b: "everything it watches, asks and believes is editable by a
@@ -198,10 +199,17 @@ export async function discoverCompetitors({ workspaceId, accessToken }) {
  */
 export async function reviseIdea({ workspaceId, accessToken, idea, instruction }) {
   try {
-    const res = await fetch('/api/agent/reviseIdea', {
+    // Through the n8n composer gateway, not a Vercel function: api/ is at the
+    // Hobby plan's 12-function ceiling. `access_token` rides in the body
+    // because n8n forwards it to the private agent container, which is the
+    // authority on workspace membership; the header is what api/n8n checks.
+    const res = await fetch(defaultWebhookUrl('agentComposer'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
-      body: JSON.stringify({ workspace_id: workspaceId, idea, instruction }),
+      body: JSON.stringify({
+        action: 'reviseIdea', access_token: accessToken,
+        workspace_id: workspaceId, idea, instruction,
+      }),
     })
     const body = await res.json().catch(() => ({}))
     if (!res.ok || body?.ok === false) return { ok: false, error: body?.error || `The rewrite returned ${res.status}.` }
