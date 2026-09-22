@@ -12,6 +12,7 @@ import { refitSlides } from '../../lib/refitSlides'
 import { useAuth } from '../../store/auth'
 import { MediaPicker } from './MediaPicker'
 import { ImageFitter } from '../media/ImageFitter'
+import { CritiquePanel } from './CritiquePanel'
 import { InstagramPanel, InstagramPreview } from './InstagramFields'
 import { TikTokPanel, TikTokPreview } from './TikTokFields'
 import { LinkedInPanel, LinkedInPreview } from './LinkedInFields'
@@ -166,6 +167,11 @@ function PreviewColumn({ state, accounts }) {
         {!['instagram', 'tiktok', 'linkedin'].includes(state.platform) && (
           <p className="text-sm text-text-secondary">No preview for {meta.label} yet.</p>
         )}
+
+        {/* Under the preview on purpose: this is the one place in the composer
+            where you are LOOKING at the post rather than typing it, which is
+            when "would this actually do anything" occurs to anybody. */}
+        <CritiquePanel state={state} />
       </div>
     </div>
   )
