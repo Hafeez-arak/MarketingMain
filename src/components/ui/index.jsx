@@ -266,11 +266,30 @@ export function Skeleton({ className = '' }) {
 // a bordered track. Reads as a physical two-position selector rather than the
 // soft iOS pill, which is the only shape in the app that couldn't be squared
 // without becoming ambiguous — solved by keeping the travel visible.
+// ── onChange RECEIVES A BOOLEAN, NOT AN EVENT ──
+//
+// It used to be wired straight to the <input>, so it handed callers a
+// SyntheticEvent. Seven of the thirteen call sites wrote the obvious
+// `v => set(field, v)` and were storing that event object — which is always
+// truthy, so:
+//
+//   checked={opts.x !== false}   the toggle could never be switched OFF
+//   checked={opts.x === true}    the toggle could never be switched ON
+//
+// Both Instagram's and TikTok's "Made with AI" were the second kind. They are
+// the disclosure flags those platforms require, and neither could be ticked.
+// Nothing threw, nothing logged, and the switch animated back on its own.
+//
+// A toggle's value is a boolean. Handing out a DOM event invited the wrong
+// spelling and more than half the callers accepted the invitation, so the
+// component changed rather than the seven. `_toggleBoolean.test.js` fails on
+// any call site that goes back to reading `e.target`.
 export function Toggle({ checked, onChange, label }) {
   return (
     <label className="flex items-center gap-3 cursor-pointer group">
       <div className="relative flex-shrink-0">
-        <input type="checkbox" checked={checked} onChange={onChange} className="sr-only peer" />
+        <input type="checkbox" checked={checked} className="sr-only peer"
+          onChange={e => onChange?.(e.target.checked)} />
         <div className={`w-9 h-5 border transition-colors duration-150 peer-focus-visible:ring-2 peer-focus-visible:ring-amber-700 peer-focus-visible:ring-offset-1
           ${checked ? 'bg-amber-700 border-amber-700' : 'bg-white border-stone-400 group-hover:border-stone-500'}`} />
         <div className={`absolute top-1 w-3 h-3 transition-all duration-150
