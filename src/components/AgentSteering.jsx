@@ -30,10 +30,6 @@ function HandleRow({ row, accessToken, onChanged }) {
 
   const measurable = row.ig_status === 'resolved' || row.ig_status === 'human_set'
   const weak = row.ig_status === 'unresolved' && row.ig_handle
-  // A rival the agent proposed and nobody has accepted yet. It is NOT measured
-  // while in this state — gather filters on status=active — so the accept
-  // button below is the only thing that puts it on the board.
-  const pending = row.status === 'proposed'
 
   const save = async () => {
     setSaving(true)
@@ -101,27 +97,39 @@ function HandleRow({ row, accessToken, onChanged }) {
               or hand-set handle.
             </div>
           ) : null}
-          {/* Without this the discover step could propose a rival that nobody
-              could ever accept, and it would sit unmeasured forever. */}
-          {pending ? (
-            <div className="mt-1.5 flex items-center gap-2 text-[11px]">
-              <span className="text-slate-500">
-                {row.created_by === 'agent' ? 'The agent suggests watching this.' : 'Not yet accepted.'}
-              </span>
-              <button
-                onClick={async () => { await setAgendaStatus(accessToken, row.id, 'active'); onChanged() }}
-                className="text-emerald-600 hover:underline"
-              >
-                accept
-              </button>
-              <button
-                onClick={async () => { await setAgendaStatus(accessToken, row.id, 'retired'); onChanged() }}
-                className="text-slate-400 hover:text-slate-700"
-              >
-                dismiss
-              </button>
-            </div>
-          ) : null}
+        </div>
+      </div>
+    </li>
+  )
+}
+
+// A rival the agent proposed and nobody has decided on. It is NOT measured in
+// this state — gather filters on status=active — so Accept is the only thing
+// that puts it on the watchlist. Reject retires the row rather than deleting
+// it: the run checks every name on the agenda whatever its status, so a
+// retired row is what stops the same company being suggested again next week.
+function SuggestionRow({ row, accessToken, onChanged }) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const decide = async status => {
+    setBusy(true)
+    setError('')
+    const out = await setAgendaStatus(accessToken, row.id, status)
+    setBusy(false)
+    if (out?.error) { setError(`Could not save: ${out.error}`); return }
+    onChanged()
+  }
+  return (
+    <li className="py-2 border-b border-amber-100 last:border-0">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-sm text-slate-800">{row.subject}</div>
+          {row.why ? <p className="mt-0.5 text-[11px] leading-relaxed text-slate-500 break-words">{row.why}</p> : null}
+          {error ? <p className="mt-0.5 text-[11px] text-red-600">{error}</p> : null}
+        </div>
+        <div className="flex gap-1.5 shrink-0">
+          <Button size="sm" onClick={() => decide('active')} disabled={busy}>Accept</Button>
+          <Button size="sm" variant="ghost" onClick={() => decide('retired')} disabled={busy}>Reject</Button>
         </div>
       </div>
     </li>
@@ -181,6 +189,8 @@ export function AgentSteering() {
   // it again next week. Delete them and they come back.
   const watched = (agenda.competitors || []).filter(c => c.status !== 'retired')
   const retiredCount = (agenda.competitors || []).length - watched.length
+  const suggested = watched.filter(c => c.status === 'proposed')
+  const onList = watched.filter(c => c.status !== 'proposed')
 
   const readiness = watchlistReadiness(watched)
 
@@ -207,7 +217,7 @@ export function AgentSteering() {
     setFindNote(
       out.ok
         ? (out.proposed
-          ? `Proposed ${out.proposed} to accept below${out.already_watching ? `, ${out.already_watching} already watched` : ''}.`
+          ? `Suggested ${out.proposed} to accept or reject below${out.already_watching ? `, ${out.already_watching} already watched` : ''}.`
           : out.note || 'Nothing new found.')
         : out.error || 'Could not search.',
     )
@@ -249,8 +259,20 @@ export function AgentSteering() {
         {findNote ? <p className="mt-1 text-xs text-slate-600">{findNote}</p> : null}
         {loaded ? (
           <>
+            {suggested.length > 0 && (
+              <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50/60 px-3 py-2">
+                <p className="text-xs font-medium text-amber-800">
+                  Suggested by the agent — accept to watch, reject to drop
+                </p>
+                <ul className="mt-1">
+                  {suggested.map(row => (
+                    <SuggestionRow key={row.id} row={row} accessToken={accessToken} onChanged={refresh} />
+                  ))}
+                </ul>
+              </div>
+            )}
             <ul className="mt-2">
-              {watched.map(row => (
+              {onList.map(row => (
                 <HandleRow key={row.id} row={row} accessToken={accessToken} onChanged={refresh} />
               ))}
             </ul>

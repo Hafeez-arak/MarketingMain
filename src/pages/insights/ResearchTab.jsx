@@ -1005,7 +1005,7 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
       {/* 8 ── New competitors */}
       {sectionVisible('newcomp', team) && (
         <Section id="newcomp" n={num('newcomp')} title="New competitors to review"
-          note="Companies the agent found acting as competitors that are not on the watchlist. You decide — accepted ones are researched from the next run.">
+          note="Companies the agent found acting as competitors that are not on the watchlist. Accept adds one to the competitors it watches, from the next run; reject removes it and it is not suggested again.">
           {!storeLoaded ? <Skeleton className="h-10 w-full" /> : candidates.length ? (
             <ul className="divide-y divide-border">
               {candidates.map(c => (
@@ -1019,11 +1019,13 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
                   </div>
                   {c.agendaId && c.status === 'proposed' ? (
                     <div className="flex gap-1.5 shrink-0">
-                      <Button size="sm" onClick={() => onCandidate(c, 'active')} disabled={busyId === c.agendaId}>Watch</Button>
-                      <Button size="sm" variant="secondary" onClick={() => onCandidate(c, 'retired')} disabled={busyId === c.agendaId}>Dismiss</Button>
+                      <Button size="sm" onClick={() => onCandidate(c, 'active')} disabled={busyId === c.agendaId}>Accept</Button>
+                      <Button size="sm" variant="secondary" onClick={() => onCandidate(c, 'retired')} disabled={busyId === c.agendaId}>Reject</Button>
                     </div>
                   ) : (
-                    <span className="text-[10px] text-text-tertiary shrink-0">{c.agendaId ? c.status : 'added after the run saves'}</span>
+                    <span className="text-[10px] text-text-tertiary shrink-0">
+                      {!c.agendaId ? 'added after the run saves' : c.status === 'active' ? 'on the watchlist' : c.status}
+                    </span>
                   )}
                 </li>
               ))}
