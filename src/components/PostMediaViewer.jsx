@@ -72,7 +72,20 @@ export function MediaViewer({ urls = [], videoUrl = '', start = 0, onClose }) {
 
 // Numbered slides, reorderable. `onReorder(nextUrls)` receives the whole new
 // order; the caller persists it.
-export function SlideStrip({ urls = [], onOpen, onReorder, size = 'w-12 h-12' }) {
+//
+// `onAdjust(index)` puts the crop/shape fix on the slide itself, so a carousel
+// with one badly shaped picture in it can be fixed where you noticed it rather
+// than by reopening the composer. Offered only when a caller passes it, for
+// the same reason as onReorder: a post that has gone out shows its slides and
+// changes nothing.
+//
+// `canAdjust(index)` narrows that to the slides it actually means something
+// for. A predicate rather than a parallel `types` array because this strip's
+// one source of truth is `urls` — strings, in publish order — and the caller
+// already holds the richer records those urls came from. It is the caller that
+// knows a slide is the video, and asking it is cheaper than teaching this
+// component a second shape of the same list that could disagree with the first.
+export function SlideStrip({ urls = [], onOpen, onReorder, onAdjust, canAdjust, size = 'w-12 h-12' }) {
   const dragFrom = useRef(null)
   const [over, setOver] = useState(null)
   const list = urls.filter(Boolean)
@@ -102,6 +115,12 @@ export function SlideStrip({ urls = [], onOpen, onReorder, size = 'w-12 h-12' })
             <PostImage src={url} alt={`Slide ${i + 1}`} className="w-full h-full object-cover pointer-events-none" />
             <span className="absolute top-0 left-0 text-[9px] font-bold bg-black/70 text-white px-1 leading-[1.5]">{i + 1}</span>
           </button>
+          {onAdjust && (!canAdjust || canAdjust(i)) && (
+            <button type="button" onClick={() => onAdjust(i)} title={`Adjust slide ${i + 1}`}
+              className="text-[9px] font-semibold text-text-tertiary hover:text-amber-700 hover:bg-amber-50 px-1 leading-[1.6]">
+              adjust
+            </button>
+          )}
           {onReorder && (
             <span className="flex">
               <button type="button" onClick={() => move(i, i - 1)} disabled={i === 0} aria-label={`Move slide ${i + 1} earlier`}
