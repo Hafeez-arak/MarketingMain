@@ -551,6 +551,227 @@ const handlers = {
       })).filter(a => a.audioId),
     }
   },
+
+  // ── Auto-replies ─────────────────────────────────────────────────────────
+  //
+  // Keyword-triggered DMs: someone comments (or messages) a word, they get a
+  // reply. Zernio runs the whole thing — it holds the automations, watches the
+  // comments, sends the DMs and keeps the logs — so none of this is mirrored
+  // into Supabase. A local copy would be a second version of a record we do
+  // not own and cannot keep in step: Zernio's webhook fires on a comment we
+  // never see, and the row it writes would be invisible here until something
+  // re-read it anyway.
+  //
+  // ── ISOLATION ──
+  // `profileId` is per workspace (see ensureProfile), and Zernio's list is
+  // filtered by it, so listing cannot cross a workspace. Everything addressed
+  // by automation id goes through requireOwnedAutomation instead, because an
+  // id is guessable and the id alone says nothing about who owns it.
+  //
+  // Instagram and Facebook only — Zernio's own limit, not ours. The screen
+  // says so rather than offering an account the create call would reject.
+
+  async auto_replies(z, { ws, profileId, body }) {
+    const accountId = String(body.account_id || '').trim()
+    if (accountId) await requireOwnedAccount(z, { workspaceId: ws.id, profileId, accountId })
+
+    const out = await z.request('v1/comment-automations', { query: { profileId } })
+    const all = Array.isArray(out?.automations) ? out.automations : []
+    return {
+      automations: (accountId ? all.filter(a => String(a.accountId || '') === accountId) : all)
+        .map(normalizeAutomation),
+    }
+  },
+
+  // Create when there is no id, update when there is. One action rather than
+  // two because the editor is one form: splitting them would put the same
+  // twelve fields through two validations that have to agree.
+  async auto_reply_save(z, { ws, profileId, body }) {
+    const id = String(body.id || '').trim()
+    const fields = automationFields(body)
+    if (fields.__fail) return fields
+
+    if (id) {
+      await requireOwnedAutomation(z, { workspaceId: ws.id, profileId, automationId: id })
+      const out = await z.request(`v1/comment-automations/${encodeURIComponent(id)}`, {
+        method: 'PATCH', body: fields,
+      })
+      return { automation: normalizeAutomation(out?.automation || out) }
+    }
+
+    const accountId = String(body.account_id || '').trim()
+    if (!accountId) return fail('Pick the account this should run on.', 400)
+    const account = await requireOwnedAccount(z, { workspaceId: ws.id, profileId, accountId })
+    if (!AUTO_REPLY_PLATFORMS.includes(account.platform)) {
+      return fail(
+        `Auto-replies only work on Instagram and Facebook — ${account.platform} cannot be automated this way.`,
+        400,
+      )
+    }
+
+    const out = await z.request('v1/comment-automations', {
+      method: 'POST',
+      body: { profileId, accountId, ...fields },
+    })
+    return { automation: normalizeAutomation(out?.automation || out) }
+  },
+
+  async auto_reply_delete(z, { ws, profileId, body }) {
+    const id = String(body.id || '').trim()
+    if (!id) return fail('id is required.', 400)
+    await requireOwnedAutomation(z, { workspaceId: ws.id, profileId, automationId: id })
+    await z.request(`v1/comment-automations/${encodeURIComponent(id)}`, { method: 'DELETE' })
+    return { deleted: id }
+  },
+
+  // The logs AND the misses. `misses` is the only signal that a keyword is
+  // catching nothing — non-matching comments produce no log row — so it is
+  // fetched here rather than left for somebody to discover in the API.
+  async auto_reply_logs(z, { ws, profileId, body }) {
+    const id = String(body.id || '').trim()
+    if (!id) return fail('id is required.', 400)
+    await requireOwnedAutomation(z, { workspaceId: ws.id, profileId, automationId: id })
+
+    const out = await z.request(`v1/comment-automations/${encodeURIComponent(id)}/logs`, {
+      query: { limit: Math.min(Number(body.limit) || 50, 100), skip: Number(body.skip) || 0 },
+    })
+    return {
+      logs: (Array.isArray(out?.logs) ? out.logs : []).map(l => ({
+        id: String(l.id || ''),
+        commenterName: String(l.commenterName || ''),
+        commentText: String(l.commentText || ''),
+        source: String(l.source || 'comment'),
+        status: String(l.status || ''),
+        error: String(l.error || ''),
+        commentReplyStatus: String(l.commentReplyStatus || ''),
+        nextDueAt: l.nextDueAt || null,
+        createdAt: l.createdAt || null,
+      })),
+      misses: {
+        total: Number(out?.misses?.total) || 0,
+        retentionDays: Number(out?.misses?.retentionDays) || 0,
+        samples: (out?.misses?.samples || []).slice(0, 5).map(s =>
+          String(typeof s === 'string' ? s : (s?.commentText || s?.text || ''))).filter(Boolean),
+      },
+      pagination: out?.pagination || null,
+    }
+  },
+}
+
+// Zernio automates comments on these two and refuses the rest. LinkedIn — this
+// brand's best channel — is not among them, which the screen has to say out
+// loud rather than let somebody build an automation that never fires.
+const AUTO_REPLY_PLATFORMS = ['instagram', 'facebook']
+
+/** One automation, in this app's shape. Zernio omits fields rather than nulling them. */
+function normalizeAutomation(a = {}) {
+  const stats = a.stats || {}
+  return {
+    id: String(a.id || a._id || ''),
+    name: String(a.name || ''),
+    platform: String(a.platform || '').toLowerCase(),
+    account_id: String(a.accountId || ''),
+    trigger: String(a.trigger || 'comment'),
+    // Absent means account-wide — every post — which is the common case and
+    // must not be shown as "post (blank)".
+    platform_post_id: String(a.platformPostId || ''),
+    post_title: String(a.postTitle || ''),
+    keywords: Array.isArray(a.keywords) ? a.keywords.map(String) : [],
+    match_mode: String(a.matchMode || 'contains'),
+    exclude_keywords: Array.isArray(a.excludeKeywords) ? a.excludeKeywords.map(String) : [],
+    typo_tolerance: a.typoTolerance === true,
+    dm_message: String(a.dmMessage || ''),
+    comment_reply: String(a.commentReply || ''),
+    also_match_in_dms: a.alsoMatchInDms === true,
+    is_active: a.isActive !== false,
+    created_at: a.createdAt || null,
+    stats: {
+      triggered: Number(stats.triggered) || 0,
+      dmsSent: Number(stats.dmsSent) || 0,
+      dmsFailed: Number(stats.dmsFailed) || 0,
+      uniqueContacts: Number(stats.uniqueContacts) || 0,
+    },
+  }
+}
+
+/**
+ * The editable fields, validated once for both create and update.
+ *
+ * Zernio's own limits are enforced here rather than left to a 400 from it: a
+ * refusal that arrives after the request has crossed the internet reads as
+ * "something went wrong", and the thing that went wrong was a character count
+ * the browser could have counted.
+ */
+function automationFields(body = {}) {
+  const name = String(body.name || '').trim()
+  const dmMessage = String(body.dm_message || '').trim()
+  const keywords = cleanList(body.keywords)
+  const excludeKeywords = cleanList(body.exclude_keywords)
+  const matchMode = body.match_mode === 'word' ? 'word' : 'contains'
+
+  if (!name) return fail('Give this auto-reply a name, so you can find it later.', 400)
+  if (!dmMessage) return fail('Write the message that gets sent.', 400)
+  if (dmMessage.length > 1000) {
+    return fail(`The message is ${dmMessage.length} characters; Instagram allows about 1,000.`, 400)
+  }
+  // `alsoMatchInDms` on an empty keyword list would answer EVERY incoming
+  // message, which is a different product and not one anybody asked for.
+  if (body.also_match_in_dms && !keywords.length) {
+    return fail('Add at least one keyword before answering direct messages, or every message gets a reply.', 400)
+  }
+  // Only meaningful with whole-word matching; sending it otherwise is a silent
+  // no-op that looks switched on in the editor next time it opens.
+  const typoTolerance = matchMode === 'word' && body.typo_tolerance === true
+
+  return {
+    name,
+    keywords,
+    matchMode,
+    excludeKeywords,
+    typoTolerance,
+    dmMessage,
+    commentReply: String(body.comment_reply || '').trim(),
+    alsoMatchInDms: body.also_match_in_dms === true,
+    ...(body.is_active === undefined ? {} : { isActive: body.is_active !== false }),
+  }
+}
+
+/** Trimmed, de-duplicated, case-insensitively unique, blanks dropped. */
+function cleanList(raw) {
+  const seen = new Set()
+  const out = []
+  for (const item of Array.isArray(raw) ? raw : String(raw || '').split(',')) {
+    const v = String(item || '').trim()
+    if (!v) continue
+    const key = v.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(v)
+  }
+  return out
+}
+
+/**
+ * Prove an automation belongs to this workspace before touching it.
+ *
+ * Zernio scopes an automation to a profile, and a profile to a workspace — but
+ * the update, delete and log endpoints are addressed by automation id alone
+ * and will answer for any id the API key can see. The API key is the
+ * deployment's, not the workspace's, so without this a workspace could read
+ * another's logs (which contain commenter names and message text) by guessing
+ * an id. The read is one extra round trip and is not optional.
+ */
+async function requireOwnedAutomation(z, { workspaceId, profileId, automationId }) {
+  const out = await z.request(`v1/comment-automations/${encodeURIComponent(automationId)}`)
+  const automation = out?.automation || out || {}
+  const accountId = String(automation.accountId || '')
+  if (!accountId) {
+    const err = new Error('That auto-reply could not be found.')
+    err.httpStatus = 404
+    throw err
+  }
+  await requireOwnedAccount(z, { workspaceId, profileId, accountId })
+  return automation
 }
 
 // Both selection actions take the same arguments and make the same four
@@ -677,3 +898,4 @@ export default async function handler(req, res) {
 }
 
 export { qs, profileIdOf, CONNECTABLE }
+export { automationFields, cleanList, normalizeAutomation, AUTO_REPLY_PLATFORMS }

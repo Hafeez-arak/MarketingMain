@@ -414,3 +414,53 @@ export function tokenAge(account, now = Date.now()) {
     expired: days >= TOKEN_LIFETIME_DAYS,
   }
 }
+
+// ── Auto-replies ───────────────────────────────────────────────────────────
+// Keyword-triggered DMs. Zernio owns the automations, the matching, the
+// sending and the logs; nothing is stored on our side, so every one of these
+// is a straight round trip and there is no local copy to go stale.
+//
+// Instagram and Facebook only. `canAutoReply` is exported so a screen can say
+// why an account is missing from the picker instead of just omitting it.
+export const AUTO_REPLY_PLATFORMS = ['instagram', 'facebook']
+export const canAutoReply = account => AUTO_REPLY_PLATFORMS.includes(account?.platform)
+
+/** Every auto-reply on the workspace, or on one account. */
+export async function fetchAutoReplies(workspaceId, accountId = '') {
+  const res = await call('auto_replies', { workspace_id: workspaceId, account_id: accountId })
+  if (res.error) return { error: res.error, automations: [] }
+  return { automations: res.automations || [] }
+}
+
+/**
+ * Create or update one.
+ *
+ * `fields.id` present means update. The caller passes the same object either
+ * way — the editor is one form, and asking it which verb it is would be asking
+ * it to know something the id already says.
+ */
+export async function saveAutoReply(workspaceId, fields) {
+  const res = await call('auto_reply_save', { workspace_id: workspaceId, ...fields })
+  if (res.error) return { error: res.error }
+  return { automation: res.automation }
+}
+
+export async function deleteAutoReply(workspaceId, id) {
+  const res = await call('auto_reply_delete', { workspace_id: workspaceId, id })
+  return res.error ? { error: res.error } : { ok: true }
+}
+
+/**
+ * What this automation has actually done — and what it MISSED.
+ *
+ * `misses` counts comments that reached the automation and matched none of its
+ * keywords. Those produce no log row, so it is the only evidence that a
+ * keyword list is catching nothing — the difference between "nobody commented"
+ * and "everybody commented the wrong word", which are indistinguishable from
+ * an empty log.
+ */
+export async function fetchAutoReplyLogs(workspaceId, id) {
+  const res = await call('auto_reply_logs', { workspace_id: workspaceId, id })
+  if (res.error) return { error: res.error, logs: [], misses: null }
+  return { logs: res.logs || [], misses: res.misses || null, pagination: res.pagination || null }
+}

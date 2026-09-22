@@ -19,8 +19,9 @@ const nav = [
     { to: '/email',      label: 'Email Flows', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg> },
   ]},
   { section: 'Social', items: [
-    { to: '/social',           label: 'Social Media',   notUnder: '/social/approvals',   icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg> },
+    { to: '/social',           label: 'Social Media',   notUnder: ['/social/approvals', '/social/auto-replies'],   icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg> },
     { to: '/social/approvals', label: 'Post Queue', badge: 'pendingPosts', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg> },
+    { to: '/social/auto-replies', label: 'Auto-replies', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><polyline points="8 10 10.5 12.5 15 8"/></svg> },
   ]},
   { section: 'Insights', items: [
     { to: '/analytics', label: 'Analytics', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg> },
@@ -182,10 +183,14 @@ export function Sidebar() {
                 /* border-l-2 border-transparent on the base state reserves the
                    marker's column on EVERY item, so activating one doesn't
                    nudge its label 2px right of its neighbours. */
-                // `notUnder` carves a child route out of a prefix match: the
-                // Post Queue lives at /social/approvals but has its own entry,
-                // and two lit items is two answers to "where am I".
-                className={({ isActive: matched }) => { const isActive = matched && !(item.notUnder && pathname.startsWith(item.notUnder)); return `
+                // `notUnder` carves child routes out of a prefix match: the
+                // Post Queue and Auto-replies live under /social but have
+                // their own entries, and two lit items is two answers to
+                // "where am I". A list rather than one path, because the
+                // moment there was a second carve-out the string silently
+                // stopped covering it — and a nav that lights twice is the
+                // kind of wrong nobody files a bug for.
+                className={({ isActive: matched }) => { const carved = [].concat(item.notUnder || []); const isActive = matched && !carved.some(p => pathname.startsWith(p)); return `
                   flex items-center gap-2.5 pl-[18px] pr-4 py-1.5 text-[13px] w-full
                   border-l-2 border-transparent transition-colors duration-150
                   ${item.sub ? 'pl-7 text-xs' : ''}
