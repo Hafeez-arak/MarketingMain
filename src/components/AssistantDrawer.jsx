@@ -3,7 +3,7 @@ import { useLocation } from 'react-router-dom'
 import { useAuth } from '../store/auth'
 import { useAgentChat } from '../lib/useAgentChat'
 import { describePage, describeContextLabel, suggestionsFor } from '../lib/pageContext'
-import { Spinner } from './ui/index'
+import { Button, Spinner } from './ui/index'
 import PastConversations from './PastConversations'
 import { AgentMarkdown } from './AgentMarkdown'
 import AskInput from './AskInput'
@@ -22,12 +22,12 @@ function ToolTrace({ steps, busy }) {
       {steps.map((s, i) => (
         <span
           key={i}
-          className={`text-[10px] px-1.5 py-0.5 rounded font-mono ${
+          className={`text-[10px] px-1.5 py-0.5 font-mono ${
             s.ok === false
               ? 'bg-red-50 text-red-600'
               : s.ok === undefined && busy
                 ? 'bg-amber-50 text-amber-700'
-                : 'bg-slate-100 text-slate-500'
+                : 'bg-surface-muted text-text-secondary'
           }`}
         >
           {s.name}
@@ -93,8 +93,8 @@ export function AssistantDrawer() {
         <button
           onClick={() => setOpen(true)}
           title="Ask the assistant  (⌘K)"
-          className="fixed bottom-5 right-5 z-40 h-11 w-11 rounded-full bg-slate-900 text-white
-                     shadow-lg hover:bg-slate-800 flex items-center justify-center"
+          className="fixed bottom-5 right-5 z-40 h-11 w-11 bg-amber-700 text-white
+                     shadow-dropdown hover:bg-amber-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-700 focus-visible:ring-offset-2 flex items-center justify-center"
         >
           <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24">
             <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
@@ -106,33 +106,34 @@ export function AssistantDrawer() {
         <div className="fixed inset-0 z-50 flex justify-end">
           {/* Click-away rather than a modal: the person is meant to keep
               working with this open, so it must never trap focus. */}
-          <div className="flex-1 bg-slate-900/10" onClick={() => setOpen(false)} />
+          <div className="flex-1 bg-stone-900/10" onClick={() => setOpen(false)} />
 
-          <aside className="w-full max-w-md bg-white h-full shadow-2xl flex flex-col border-l border-slate-200">
-            <header className="px-4 py-3 border-b border-slate-100 flex items-start gap-2">
+          <aside className="w-full max-w-md bg-white h-full shadow-dropdown flex flex-col border-l border-border">
+            <header className="px-4 py-3 border-b border-border-light flex items-start gap-2">
               <div className="flex-1 min-w-0">
-                <div className="text-sm font-medium text-slate-900">Assistant</div>
-                <div className="text-xs text-slate-500 truncate">
+                <div className="text-sm font-semibold text-text">Assistant</div>
+                <div className="text-xs text-text-secondary truncate">
                   {activeWorkspace?.name || 'This brand'}
                   {/* Saying what it can see, rather than silently having it.
                       An assistant with invisible context is harder to trust. */}
-                  {contextLabel ? <> · can see <span className="text-slate-700">{contextLabel}</span></> : null}
+                  {contextLabel ? <> · can see <span className="text-text">{contextLabel}</span></> : null}
                 </div>
               </div>
               {turns.length ? (
-                <button onClick={reset} className="text-xs text-slate-400 hover:text-slate-700 px-1">
+                <button onClick={reset} className="text-xs font-semibold text-text-secondary hover:text-text px-2 py-1 border border-transparent hover:border-border transition-colors">
                   New
                 </button>
               ) : null}
-              <button onClick={() => setOpen(false)} className="text-slate-400 hover:text-slate-700 px-1">
-                ✕
+              <button onClick={() => setOpen(false)} aria-label="Close"
+                className="w-7 h-7 flex items-center justify-center text-text-tertiary border border-transparent hover:border-border hover:text-text transition-colors">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>
               </button>
             </header>
 
             <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
               {turns.length === 0 ? (
                 <div className="pt-2">
-                  <p className="text-xs text-slate-500 mb-2.5">
+                  <p className="text-xs text-text-secondary mb-2.5">
                     Answers come from your own data. It will say when a sample is too small
                     to mean anything, and it can propose rules and drafts — never publish.
                   </p>
@@ -141,8 +142,8 @@ export function AssistantDrawer() {
                       <button
                         key={s}
                         onClick={() => send(s)}
-                        className="block w-full text-left text-xs px-2.5 py-2 rounded-lg border
-                                   border-slate-200 text-slate-600 hover:bg-slate-50"
+                        className="block w-full text-left text-xs px-2.5 py-2 border transition-colors
+                                   border-border text-text-secondary hover:bg-surface-subtle"
                       >
                         {s}
                       </button>
@@ -154,8 +155,8 @@ export function AssistantDrawer() {
                   <div key={i}>
                     {t.role === 'user' ? (
                       <div className="text-right">
-                        <span className="inline-block bg-slate-100 rounded-2xl px-3 py-1.5 text-sm
-                                         text-slate-800 max-w-[90%] text-left">
+                        <span className="inline-block bg-surface-muted px-3 py-1.5 text-sm
+                                         text-text max-w-[90%] text-left">
                           {t.text}
                         </span>
                       </div>
@@ -168,7 +169,7 @@ export function AssistantDrawer() {
                         ) : null}
                         <ToolTrace steps={t.steps} busy={busy && i === turns.length - 1} />
                         {t.cost ? (
-                          <div className="mt-1 text-[10px] text-slate-400">
+                          <div className="mt-1 text-[10px] text-text-tertiary">
                             ${t.cost.toFixed(4)}
                             {t.stoppedBy && t.stoppedBy !== 'answered' ? ` · ${t.stoppedBy}` : ''}
                           </div>
@@ -186,7 +187,7 @@ export function AssistantDrawer() {
                 floating up the middle of it. */}
             <form
               onSubmit={e => { e.preventDefault(); send() }}
-              className="p-3 border-t border-slate-100 flex gap-2 items-end"
+              className="p-3 border-t border-border-light flex gap-2 items-end"
             >
               {/* The same way back the /agent page has. The popup portals to
                   the body rather than into this panel, so it is the same size
@@ -206,22 +207,9 @@ export function AssistantDrawer() {
                 disabled={!ready}
               />
               {busy ? (
-                <button
-                  type="button"
-                  onClick={stop}
-                  className="text-xs px-3 py-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"
-                >
-                  Stop
-                </button>
+                <Button variant="secondary" onClick={stop}>Stop</Button>
               ) : (
-                <button
-                  type="submit"
-                  disabled={!question.trim() || !ready}
-                  className="text-sm px-3 py-2 rounded-lg bg-slate-900 text-white
-                             disabled:bg-slate-200 disabled:text-slate-400"
-                >
-                  Ask
-                </button>
+                <Button type="submit" disabled={!question.trim() || !ready}>Ask</Button>
               )}
             </form>
           </aside>

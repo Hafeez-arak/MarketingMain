@@ -60,7 +60,7 @@ function Tile({ label, metric, value, hint, delta }) {
 function Delta({ value }) {
   if (typeof value !== 'number' || !Number.isFinite(value) || Math.abs(value) < 1) return null
   return (
-    <span className={`text-[11px] font-semibold tabular-nums ${value > 0 ? 'text-sage-700' : 'text-rose-600'}`}>
+    <span className={`text-[11px] font-semibold tabular-nums ${value > 0 ? 'text-sage-700' : 'text-red-600'}`}>
       {value > 0 ? '+' : '−'}{Math.abs(value).toFixed(0)}
     </span>
   )
@@ -117,7 +117,7 @@ export function Ga4Panels({ ga4, summary, days }) {
             from, which pages they read and whether they got in touch — only exists if a GA4 tag is on the site.
           </p>
           {(ga4.configError || ga4.error) && (
-            <p className="text-xs text-rose-600 mt-2">{ga4.configError || ga4.error}</p>
+            <p className="text-xs text-red-600 mt-2">{ga4.configError || ga4.error}</p>
           )}
           <p className="eyebrow mt-4 mb-2">To turn this on</p>
           <ol className="space-y-1.5 mb-4">
@@ -504,7 +504,7 @@ export function BioLinkPanel({ ga4, bio, arrivals = [], summary, days }) {
           </p>
         </div>
       ) : ga4.socialAvailable === false ? (
-        <p className="px-5 py-4 text-xs text-rose-600">
+        <p className="px-5 py-4 text-xs text-red-600">
           GA4 rejected the report that counts social sources, so the breakdown below is missing rather than
           empty. The site totals higher up the page are unaffected.
         </p>

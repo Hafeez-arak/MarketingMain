@@ -16,9 +16,9 @@ import {
 // it would be the loudest thing in a card whose subject is the answer being
 // read.
 
-const ROW = 'w-full text-left px-5 py-3 border-b border-slate-100 last:border-0'
+const ROW = 'w-full text-left px-5 py-3 border-b border-border-light last:border-0'
 const ICON_BTN = 'w-6 h-6 flex items-center justify-center rounded ' +
-  'text-slate-400 hover:bg-slate-200 hover:text-slate-700 transition-colors'
+  'text-text-tertiary hover:bg-stone-200 hover:text-text transition-colors'
 
 /**
  * One thread.
@@ -68,15 +68,15 @@ function ThreadRow({ chat, active, opening, busy, onPick, onRename, onDelete }) 
             if (e.key === 'Escape') { e.stopPropagation(); setMode('read') }
           }}
           disabled={saving}
-          className="flex-1 min-w-0 text-sm px-2 py-1 rounded border border-slate-300
-                     focus:outline-none focus:ring-1 focus:ring-slate-400 disabled:bg-slate-50"
+          className="flex-1 min-w-0 text-sm px-2 py-1 rounded border border-stone-400
+                     focus:outline-none focus:ring-1 focus:ring-amber-700 focus:border-amber-700 disabled:bg-surface-subtle"
         />
         {saving
           ? <Spinner size="sm" />
           : (
             <>
-              <button onClick={commit} className="text-xs text-slate-700 hover:underline px-1">Save</button>
-              <button onClick={() => setMode('read')} className="text-xs text-slate-400 hover:underline px-1">Cancel</button>
+              <button onClick={commit} className="text-xs text-text hover:underline px-1">Save</button>
+              <button onClick={() => setMode('read')} className="text-xs text-text-tertiary hover:underline px-1">Cancel</button>
             </>
           )}
       </div>
@@ -86,7 +86,7 @@ function ThreadRow({ chat, active, opening, busy, onPick, onRename, onDelete }) 
   if (mode === 'confirm') {
     return (
       <div className={`${ROW} flex items-center gap-3 bg-red-50/60`}>
-        <span className="flex-1 min-w-0 text-sm text-slate-700">
+        <span className="flex-1 min-w-0 text-sm text-text">
           Delete “{title}”? Its messages go with it.
         </span>
         {saving
@@ -94,7 +94,7 @@ function ThreadRow({ chat, active, opening, busy, onPick, onRename, onDelete }) 
           : (
             <>
               <button onClick={confirmDelete} className="text-xs font-medium text-red-600 hover:underline px-1">Delete</button>
-              <button onClick={() => setMode('read')} className="text-xs text-slate-500 hover:underline px-1">Keep</button>
+              <button onClick={() => setMode('read')} className="text-xs text-text-secondary hover:underline px-1">Keep</button>
             </>
           )}
       </div>
@@ -105,21 +105,21 @@ function ThreadRow({ chat, active, opening, busy, onPick, onRename, onDelete }) 
   // its children: a button inside a button is invalid, and the browser's
   // recovery from it is to drop one of them.
   return (
-    <div className={`${ROW} flex items-center gap-2 group ${active ? 'bg-slate-50' : 'hover:bg-slate-50'}`}>
+    <div className={`${ROW} flex items-center gap-2 group ${active ? 'bg-surface-subtle' : 'hover:bg-surface-subtle'}`}>
       <button
         onClick={() => onPick(chat)}
         disabled={busy}
         className="flex-1 min-w-0 text-left flex items-baseline gap-3 disabled:opacity-50"
       >
-        <span className="flex-1 min-w-0 text-sm text-slate-800 truncate">{title}</span>
-        {active ? <span className="text-[10px] text-slate-400 shrink-0">on screen</span> : null}
+        <span className="flex-1 min-w-0 text-sm text-text truncate">{title}</span>
+        {active ? <span className="text-[10px] text-text-tertiary shrink-0">on screen</span> : null}
         {opening
           ? <Spinner size="sm" />
           : (
             // The age, not the date. Nobody scanning old threads is looking for
             // a timestamp; they are looking for "the one from Tuesday".
             <span
-              className="text-xs text-slate-400 tabular-nums shrink-0"
+              className="text-xs text-text-tertiary tabular-nums shrink-0"
               title={new Date(chat.updated_at || chat.created_at).toLocaleString()}
             >
               {relativeAge(chat.updated_at || chat.created_at)}
@@ -217,9 +217,9 @@ export default function PastConversations({ activeThreadId, onOpen, onDeleteActi
         onClick={show}
         title="Earlier conversations"
         aria-label="Earlier conversations"
-        className="w-9 shrink-0 flex items-center justify-center rounded-lg border border-slate-200
-                   text-slate-500 hover:text-slate-800 hover:bg-slate-50 transition-colors
-                   focus:outline-none focus:ring-1 focus:ring-slate-400"
+        className="w-[38px] h-[38px] shrink-0 flex items-center justify-center border border-border bg-white
+                   text-text-secondary hover:text-text hover:bg-surface-subtle transition-colors
+                   focus:outline-none focus:ring-1 focus:ring-amber-700 focus:border-amber-700"
       >
         {Icon.clockRewind}
       </button>
@@ -228,7 +228,7 @@ export default function PastConversations({ activeThreadId, onOpen, onDeleteActi
         {loading ? (
           <div className="py-10 flex justify-center"><Spinner /></div>
         ) : chats.length === 0 ? (
-          <p className="px-5 py-8 text-sm text-slate-500 text-center">
+          <p className="px-5 py-8 text-sm text-text-secondary text-center">
             Nothing yet — this is the first conversation with this brand's assistant.
           </p>
         ) : (

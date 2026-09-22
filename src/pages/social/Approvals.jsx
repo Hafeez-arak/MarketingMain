@@ -224,7 +224,7 @@ function FailedCard({ idea, post, onRetry, retrying }) {
         <div className="flex-1 p-4 min-w-0">
           <div className="flex items-center gap-1.5 flex-wrap mb-2">
             <span className={`text-[10px] font-bold uppercase tracking-[0.08em] px-1.5 py-0.5 leading-[1.4] ${platformMeta.color}`}>{platformMeta.label}</span>
-            <span className="text-[10px] font-semibold px-1.5 py-0.5 leading-[1.4] bg-red-50 text-red-600">✕ Generation failed</span>
+            <span className="text-[10px] font-semibold px-1.5 py-0.5 leading-[1.4] bg-red-50 text-red-600">Generation failed</span>
           </div>
           <p className="text-sm text-text leading-relaxed">{idea.title || idea.topic || 'Untitled idea'}</p>
           <p className="text-[11px] text-red-600 mt-1 leading-relaxed">{idea.generation_error || 'Unknown error.'}</p>
@@ -277,7 +277,6 @@ function PlatformChip({ platform }) {
   return <span className={`text-[10px] font-bold uppercase tracking-[0.08em] px-1.5 py-0.5 leading-[1.4] ${m.bg} ${m.text}`}>{m.label}</span>
 }
 
-const btn = 'text-[11px] font-semibold px-2.5 py-1 rounded-lg border transition-colors disabled:opacity-40'
 
 // One post, whatever bucket it is in. The actions are the bucket's:
 //   upcoming   edit (re-books at Zernio), reschedule, cancel the booking
@@ -312,7 +311,7 @@ function QueueCard({ post, bucket, accounts, now, busy, onOpen, onOpenMedia, onE
           title={thumb ? 'Open the picture' : undefined}>
           {thumb
             ? <PostImage src={thumb} alt="" className="absolute inset-0 w-full h-full object-cover" />
-            : <span className="absolute inset-0 flex items-center justify-center text-text-disabled text-lg">{post.videoUrl ? '🎬' : '¶'}</span>}
+            : <span className="absolute inset-0 flex items-center justify-center text-text-disabled text-lg">{post.videoUrl ? '▶' : '¶'}</span>}
           {media.length > 1 && (
             <span className="absolute top-1 right-1 text-[9px] font-bold bg-black/65 text-white px-1.5 leading-[1.6]">{media.length}</span>
           )}
@@ -321,7 +320,7 @@ function QueueCard({ post, bucket, accounts, now, busy, onOpen, onOpenMedia, onE
         <div className="flex-1 p-4 min-w-0 space-y-2">
           <div className="flex items-center gap-1.5 flex-wrap">
             <PlatformChip platform={post.platform} />
-            {bucket === 'upcoming' && <span className="text-[10px] font-bold uppercase tracking-[0.08em] px-1.5 py-0.5 leading-[1.4] bg-indigo-50 text-indigo-700">🗓 {formatBrandDateTime(post.scheduledPublishAt)}</span>}
+            {bucket === 'upcoming' && <span className="text-[10px] font-bold uppercase tracking-[0.08em] px-1.5 py-0.5 leading-[1.4] bg-clay-50 text-clay-700">{formatBrandDateTime(post.scheduledPublishAt)}</span>}
             {bucket === 'published' && <span className="text-[10px] font-bold uppercase tracking-[0.08em] px-1.5 py-0.5 leading-[1.4] bg-sage-50 text-sage-700">{lock.state === 'publishing' ? '↗ Publishing…' : '✓ Published'}</span>}
             {bucket === 'attention' && post.publishStatus === 'failed' && <span className="text-[10px] font-bold uppercase tracking-[0.08em] px-1.5 py-0.5 leading-[1.4] bg-red-50 text-red-600">✕ Failed</span>}
             {protectedPost && <span className="text-[10px] font-bold uppercase tracking-[0.08em] px-1.5 py-0.5 leading-[1.4] bg-sky-50 text-sky-800">Draft only</span>}
@@ -360,38 +359,37 @@ function QueueCard({ post, bucket, accounts, now, busy, onOpen, onOpenMedia, onE
 
           {bucket !== 'published' && (
             <div className="flex items-center gap-2 flex-wrap pt-0.5">
-              <button onClick={() => onEdit(post)} className={`${btn} border-border text-text-secondary hover:bg-surface-subtle`}>
-                {needsComposer ? '↗ Finish in composer' : '✎ Edit'}
-              </button>
+              <Button size="xs" variant="secondary" onClick={() => onEdit(post)}>
+                {needsComposer ? 'Finish in composer' : 'Edit'}
+              </Button>
               {bucket === 'upcoming' && !picking && (
                 <>
-                  <button onClick={startPicking} disabled={busy} className={`${btn} border-border text-text-secondary hover:bg-surface-subtle`}>🗓 Reschedule</button>
-                  <button onClick={() => onCancel(post)} disabled={busy} className={`${btn} border-red-200 text-red-500 hover:bg-red-50`}>Cancel schedule</button>
+                  <Button size="xs" variant="secondary" onClick={startPicking} disabled={busy}>Reschedule</Button>
+                  <Button size="xs" variant="danger" onClick={() => onCancel(post)} disabled={busy}>Cancel schedule</Button>
                 </>
               )}
               {bucket === 'attention' && !protectedPost && !needsComposer && account && !picking && (
                 <>
-                  <button onClick={startPicking} disabled={busy} className={`${btn} border-amber-300 text-amber-800 bg-amber-50 hover:bg-amber-100`}>🗓 Schedule</button>
-                  <button onClick={() => onBook(post, '')} disabled={busy} className={`${btn} border-border text-text-secondary hover:bg-surface-subtle`}>↗ Post now</button>
+                  <Button size="xs" variant="primary" onClick={startPicking} disabled={busy}>Schedule</Button>
+                  <Button size="xs" variant="secondary" onClick={() => onBook(post, '')} disabled={busy}>↗ Post now</Button>
                 </>
               )}
               {/* Never booked at Zernio here — nothing to unschedule, so a
                   straight delete is safe. A booked post has to go through
                   "Cancel schedule" first, which drops it back to attention. */}
               {bucket === 'attention' && !picking && (
-                <button onClick={() => onDelete(post)} disabled={busy} className={`${btn} border-red-200 text-red-500 hover:bg-red-50`}>🗑 Delete</button>
+                <Button size="xs" variant="danger" onClick={() => onDelete(post)} disabled={busy}>Delete</Button>
               )}
               {picking && (
                 <>
                   <input type="datetime-local" value={when} onChange={e => setWhen(e.target.value)} aria-label="New time"
-                    className="text-[11px] border border-border rounded-lg px-2 py-1 bg-white" />
+                    className="text-[11px] border border-border px-2 py-1 bg-white focus:outline-none focus:border-amber-700 focus:ring-1 focus:ring-amber-700" />
                   <span className="text-[10px] font-semibold text-text-tertiary">{BRAND_TIMEZONE_LABEL}</span>
-                  <button disabled={busy || !future}
-                    onClick={async () => { const ok = bucket === 'upcoming' ? await onReschedule(post, when) : await onBook(post, when); if (ok) setPicking(false) }}
-                    className={`${btn} border-amber-300 text-amber-800 bg-amber-50 hover:bg-amber-100`}>
+                  <Button size="xs" variant="primary" disabled={busy || !future}
+                    onClick={async () => { const ok = bucket === 'upcoming' ? await onReschedule(post, when) : await onBook(post, when); if (ok) setPicking(false) }}>
                     {busy ? 'Working…' : bucket === 'upcoming' ? 'Move' : 'Schedule'}
-                  </button>
-                  <button onClick={() => setPicking(false)} className="text-[11px] text-text-tertiary hover:text-text">Cancel</button>
+                  </Button>
+                  <Button size="xs" variant="ghost" onClick={() => setPicking(false)}>Cancel</Button>
                   {when && !future && <span className="text-[10px] text-red-600">Pick a time in the future.</span>}
                 </>
               )}

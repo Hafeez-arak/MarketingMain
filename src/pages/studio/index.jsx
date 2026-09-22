@@ -1100,7 +1100,7 @@ export function CreativeStudio() {
     if (!canEditVideoDuration(base.duration)) {
       setError(
         `Kling O1 Edit only accepts 3–10s clips — this one is ${base.duration || '?'}s. `
-        + 'Use 🔄 Re-render for a fresh take instead.',
+        + 'Use Re-render for a fresh take instead.',
       )
       return
     }
@@ -1792,13 +1792,13 @@ export function CreativeStudio() {
               — not just on the trip in — so reopening this thread weeks later
               still gets you back to the board it was made for. */}
           {session && planLink && (
-            <div className="max-w-2xl border border-violet-200 bg-violet-50 px-4 py-2.5 flex items-center justify-between gap-3">
+            <div className="max-w-2xl border border-clay-200 bg-clay-50 px-4 py-2.5 flex items-center justify-between gap-3">
               <div className="min-w-0">
-                <p className="text-[11px] font-semibold text-violet-800 truncate">
+                <p className="text-[11px] font-semibold text-clay-800 truncate">
                   Part of {planLink.planName}
                 </p>
                 {planLink.ideaTitle && (
-                  <p className="text-[11px] text-violet-700 mt-0.5 truncate">For: {planLink.ideaTitle}</p>
+                  <p className="text-[11px] text-clay-700 mt-0.5 truncate">For: {planLink.ideaTitle}</p>
                 )}
               </div>
               <Button size="sm" variant="secondary" disabled={returning} onClick={returnToPlan}>
@@ -1808,11 +1808,11 @@ export function CreativeStudio() {
           )}
 
           {!session && planBrief && (
-            <div className="max-w-2xl border border-violet-200 bg-violet-50 px-4 py-2.5">
-              <p className="text-[11px] font-semibold text-violet-800">
+            <div className="max-w-2xl border border-clay-200 bg-clay-50 px-4 py-2.5">
+              <p className="text-[11px] font-semibold text-clay-800">
                 From plan: {planBrief.title || 'Untitled idea'}
               </p>
-              <p className="text-[11px] text-violet-700 mt-0.5 leading-relaxed">
+              <p className="text-[11px] text-clay-700 mt-0.5 leading-relaxed">
                 {[
                   planBrief.brief?.pillar,
                   planBrief.brief?.occasion,
@@ -1822,7 +1822,7 @@ export function CreativeStudio() {
                 ].filter(Boolean).join(' — ')}
               </p>
               {planBrief.brief?.cta && (
-                <p className="text-[11px] text-violet-700 mt-0.5"><span className="font-semibold">CTA:</span> {planBrief.brief.cta}</p>
+                <p className="text-[11px] text-clay-700 mt-0.5"><span className="font-semibold">CTA:</span> {planBrief.brief.cta}</p>
               )}
             </div>
           )}
@@ -1905,7 +1905,7 @@ export function CreativeStudio() {
                         ? 'Rewrite this into a fuller prompt — nothing generates yet'
                         : 'Rewrite again, replacing the current text'}
                       className="inline-flex items-center gap-1.5 border border-border px-2.5 py-1 text-[11px] font-medium hover:border-amber-400 hover:bg-amber-50 disabled:opacity-40 disabled:hover:border-border disabled:hover:bg-transparent">
-                      {enhancing === 'prompt' ? <><Spinner size="sm" /> Enhancing…</> : '✨ Enhance prompt'}
+                      {enhancing === 'prompt' ? <><Spinner size="sm" /> Enhancing…</> : 'Enhance prompt'}
                     </button>
                     {promptSource !== 'raw' && (
                       <span className="text-[10px] text-text-tertiary">
@@ -2036,7 +2036,7 @@ export function CreativeStudio() {
               )}
 
               <Button onClick={handleGenerate} disabled={busy === 'generate' || !prompt.trim()}>
-                {busy === 'generate' ? <><Spinner size="sm" /> Starting…</> : '✨ Generate'}
+                {busy === 'generate' ? <><Spinner size="sm" /> Starting…</> : 'Generate'}
               </Button>
             </Card>
           ) : openingId === session.id ? (

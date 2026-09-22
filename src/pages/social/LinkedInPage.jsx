@@ -38,7 +38,7 @@ export function LinkedInPage() {
         <div className="h-1" style={{ background: META.color }} />
         <div className="p-5 flex items-center justify-between flex-wrap gap-3">
           <div className="flex items-center gap-3">
-            <span className={`w-10 h-10 rounded-xl flex items-center justify-center text-sm font-bold ${META.bg} ${META.text}`}>{META.abbr}</span>
+            <span className={`w-10 h-10 flex items-center justify-center text-sm font-bold ${META.bg} ${META.text}`}>{META.abbr}</span>
             <div>
               <h2 className="font-semibold text-text">LinkedIn</h2>
               {loading

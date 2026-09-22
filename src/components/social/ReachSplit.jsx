@@ -77,7 +77,7 @@ export function ReachSplit({ payload, windowText = '' }) {
                 className={`text-xs font-medium px-2.5 py-1.5 border transition-colors flex items-center gap-1.5
                   ${on ? 'border-stone-400 bg-surface-subtle text-text' : 'border-border text-text-tertiary hover:text-text'}`}>
                 <span className={`w-3 h-3 flex-shrink-0 border flex items-center justify-center
-                  ${on ? 'bg-text border-text text-white' : 'border-border-strong'}`}>
+                  ${on ? 'bg-amber-700 border-amber-700 text-white' : 'border-border-strong'}`}>
                   {on && (
                     <svg viewBox="0 0 24 24" className="w-2.5 h-2.5" fill="none" stroke="currentColor" strokeWidth="4">
                       <path d="m5 13 4 4L19 7" />

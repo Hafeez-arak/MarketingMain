@@ -28,7 +28,7 @@ import { fmt } from '../analytics/format'
 // re-argues.
 
 const PRIORITY = {
-  high: { label: 'Now', classes: 'bg-rose-50 text-rose-600 border-rose-200' },
+  high: { label: 'Now', classes: 'bg-red-50 text-red-600 border-red-200' },
   medium: { label: 'Soon', classes: 'bg-amber-50 text-amber-700 border-amber-200' },
   low: { label: 'Watch', classes: 'bg-stone-100 text-stone-600 border-stone-300' },
 }
@@ -67,7 +67,7 @@ function Delta({ value, digits = 0, suffix = '', invert = false }) {
   if (typeof value !== 'number' || Math.abs(value) < (digits ? 0.05 : 1)) return null
   const good = invert ? value < 0 : value > 0
   return (
-    <span className={`text-[11px] font-semibold tabular-nums ${good ? 'text-sage-700' : 'text-rose-600'}`}>
+    <span className={`text-[11px] font-semibold tabular-nums ${good ? 'text-sage-700' : 'text-red-600'}`}>
       {value > 0 ? '+' : '−'}{Math.abs(value).toFixed(digits)}{suffix}
     </span>
   )

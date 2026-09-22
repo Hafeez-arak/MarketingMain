@@ -225,11 +225,11 @@ export function UseThisSheet({ open, onClose, version, session, workspaceId, acc
              schedule are stages of their own, run over the whole month once
              every picture is finished. */
           <div className="space-y-4">
-            <div className="border border-violet-200 bg-violet-50 px-4 py-3">
-              <p className="text-[11px] font-semibold text-violet-800">
+            <div className="border border-clay-200 bg-clay-50 px-4 py-3">
+              <p className="text-[11px] font-semibold text-clay-800">
                 For: {session?.brief?.title || session?.title || 'this plan idea'}
               </p>
-              <p className="text-[11px] text-violet-700 mt-0.5 leading-relaxed">
+              <p className="text-[11px] text-clay-700 mt-0.5 leading-relaxed">
                 This marks the picture done and attaches it to the planned post. The caption comes
                 later, once every idea in the plan has its media — so it can be written to match
                 what is actually in the shot.
@@ -283,7 +283,7 @@ export function UseThisSheet({ open, onClose, version, session, workspaceId, acc
                 <p className="text-xs font-medium text-text-secondary">Caption</p>
                 <button onClick={draftCaption} disabled={drafting}
                   className="text-[11px] font-medium text-amber-700 hover:text-amber-800 disabled:opacity-50">
-                  {drafting ? <><Spinner size="sm" /> Writing…</> : '✨ Draft it for me'}
+                  {drafting ? <><Spinner size="sm" /> Writing…</> : 'Draft it for me'}
                 </button>
               </div>
               {brandContext && (

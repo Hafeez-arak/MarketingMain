@@ -210,7 +210,7 @@ export function AdjustPanel({ adjust, onChange, onBeginChange, onResetAll, onPre
       <div className="flex gap-2">
         <ToolbarButton onClick={onAuto} className="flex-1 justify-center border border-border"
           title="Read the photo's histogram and balance its exposure">
-          ✨ Auto adjust
+          Auto adjust
         </ToolbarButton>
         <ToolbarButton onClick={onResetAll} disabled={!dirty}
           className="flex-1 justify-center border border-border" title="Back to no adjustments">

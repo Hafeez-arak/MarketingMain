@@ -33,7 +33,7 @@ export function RunProgress({ run, lensRows, now = new Date() }) {
   const stuck = looksStuck(run, now)
 
   return (
-    <Card className="p-4">
+    <Card>
       <SectionHead
         title={p.live ? 'Running now' : 'How the last run went'}
         subtitle={progressLine(p)}
@@ -43,64 +43,66 @@ export function RunProgress({ run, lensRows, now = new Date() }) {
             : null
         }
       />
+      <div className="px-5 py-4 [&>*:first-child]:mt-0">
 
-      {/* The bar. Deliberately never 100% until the run is genuinely finished. */}
-      <div className="mt-3 h-1 bg-surface-subtle overflow-hidden">
-        <div
-          className={`h-full transition-[width] duration-700 ${p.failed ? 'bg-red-400' : 'bg-sage-500'}`}
-          style={{ width: `${p.percent}%` }}
-        />
-      </div>
+        {/* The bar. Deliberately never 100% until the run is genuinely finished. */}
+        <div className="mt-3 h-1 bg-surface-subtle overflow-hidden">
+          <div
+            className={`h-full transition-[width] duration-700 ${p.failed ? 'bg-red-400' : 'bg-sage-500'}`}
+            style={{ width: `${p.percent}%` }}
+          />
+        </div>
 
-      {/* The three phases, so "why is it still going" has an answer. */}
-      <div className="mt-3 flex items-center gap-1 text-[10px] uppercase tracking-wide">
-        {PHASE_LABELS.filter(ph => ph.key !== 'complete').map((ph, i) => {
-          const reached = i <= p.phaseIndex
-          const current = ph.key === p.stage && p.live
-          return (
-            <span
-              key={ph.key}
-              title={ph.note}
-              className={`px-1.5 py-0.5 ${
-                current ? 'bg-amber-100 text-amber-800'
-                  : reached ? 'bg-sage-100 text-sage-700'
-                    : 'bg-surface-subtle text-text-tertiary'
-              }`}
-            >
-              {ph.label}
-            </span>
-          )
-        })}
-      </div>
-
-      {stuck && (
-        <p className="mt-3 text-xs text-amber-700 leading-relaxed">
-          This run has been going for over 20 minutes. It is probably dead — the next run
-          you start will sweep it and report it as timed out.
-        </p>
-      )}
-
-      <div className="mt-3 space-y-1.5">
-        {p.lenses.map(l => {
-          const s = STATE[l.state] || STATE.skipped
-          return (
-            <div key={l.key} className="flex items-baseline gap-2.5 text-xs">
-              <span className={`w-1.5 h-1.5 rounded-full shrink-0 translate-y-[-1px] ${s.dot} ${
-                l.state === 'running' ? 'animate-pulse' : ''
-              }`} />
-              <span className={`w-[130px] shrink-0 font-medium ${s.text}`}>{l.label}</span>
-              <span className="text-text-tertiary truncate flex-1" title={l.question}>
-                {l.error || l.question}
+        {/* The three phases, so "why is it still going" has an answer. */}
+        <div className="mt-3 flex items-center gap-1 text-[10px] uppercase tracking-wide">
+          {PHASE_LABELS.filter(ph => ph.key !== 'complete').map((ph, i) => {
+            const reached = i <= p.phaseIndex
+            const current = ph.key === p.stage && p.live
+            return (
+              <span
+                key={ph.key}
+                title={ph.note}
+                className={`px-1.5 py-0.5 ${
+                  current ? 'bg-amber-100 text-amber-800'
+                    : reached ? 'bg-sage-100 text-sage-700'
+                      : 'bg-surface-subtle text-text-tertiary'
+                }`}
+              >
+                {ph.label}
               </span>
-              <span className="text-[10px] text-text-tertiary shrink-0 tabular-nums">
-                {s.label(l.findings)}
-                {l.durationMs != null && ` · ${secs(l.durationMs)}`}
-                {/* Named so "free" does not read as "broken". */}
-                {l.computed && ' · computed'}
-              </span>
-            </div>
-          )
-        })}
+            )
+          })}
+        </div>
+
+        {stuck && (
+          <p className="mt-3 text-xs text-amber-700 leading-relaxed">
+            This run has been going for over 20 minutes. It is probably dead — the next run
+            you start will sweep it and report it as timed out.
+          </p>
+        )}
+
+        <div className="mt-3 space-y-1.5">
+          {p.lenses.map(l => {
+            const s = STATE[l.state] || STATE.skipped
+            return (
+              <div key={l.key} className="flex items-baseline gap-2.5 text-xs">
+                <span className={`w-1.5 h-1.5 rounded-full shrink-0 translate-y-[-1px] ${s.dot} ${
+                  l.state === 'running' ? 'animate-pulse' : ''
+                }`} />
+                <span className={`w-[130px] shrink-0 font-medium ${s.text}`}>{l.label}</span>
+                <span className="text-text-tertiary truncate flex-1" title={l.question}>
+                  {l.error || l.question}
+                </span>
+                <span className="text-[10px] text-text-tertiary shrink-0 tabular-nums">
+                  {s.label(l.findings)}
+                  {l.durationMs != null && ` · ${secs(l.durationMs)}`}
+                  {/* Named so "free" does not read as "broken". */}
+                  {l.computed && ' · computed'}
+                </span>
+              </div>
+            )
+          })}
+        </div>
       </div>
     </Card>
   )

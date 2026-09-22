@@ -1316,7 +1316,7 @@ export function CampaignPlanner() {
             <div className="flex gap-1.5">
               {WEEKDAYS.map(d => (
                 <button key={d.value} onClick={() => toggleDay(d.value)} title={d.weekend ? 'Saudi weekend' : ''}
-                  className={`w-9 h-9 rounded-xl border text-[11px] font-semibold transition-all ${postingDays.includes(d.value) ? 'bg-amber-600 text-white border-amber-600' : d.weekend ? 'bg-stone-50 border-border text-text-tertiary hover:border-amber-400' : 'bg-white border-border text-text-secondary hover:border-amber-400'}`}>
+                  className={`w-9 h-9 rounded-xl border text-[11px] font-semibold transition-all ${postingDays.includes(d.value) ? 'bg-amber-700 text-white border-amber-700' : d.weekend ? 'bg-stone-50 border-border text-text-tertiary hover:border-amber-400' : 'bg-white border-border text-text-secondary hover:border-amber-400'}`}>
                   {d.label}
                 </button>
               ))}
@@ -1369,7 +1369,7 @@ export function CampaignPlanner() {
                       value={s.text} onChange={e => updateSeed(i, { text: e.target.value })}
                     />
                     <div className="flex justify-end mt-1.5">
-                      <button onClick={() => removeSeed(i)} className="text-[11px] px-2 py-1 text-text-tertiary hover:text-red-500" title="Remove">✕ Remove</button>
+                      <button onClick={() => removeSeed(i)} className="text-[11px] px-2 py-1 text-text-tertiary hover:text-red-500" title="Remove">Remove</button>
                     </div>
                   </div>
                 ))}
@@ -1465,7 +1465,7 @@ export function CampaignPlanner() {
                     const active = brandBrainSections.includes(s.value)
                     return (
                       <button key={s.value} onClick={() => toggleSection(s.value)}
-                        className={`px-2.5 py-1 rounded-lg border text-xs font-medium transition-all ${active ? 'bg-amber-600 text-white border-amber-600' : 'bg-white border-border text-text-secondary hover:border-amber-400'}`}>
+                        className={`px-2.5 py-1 rounded-lg border text-xs font-medium transition-all ${active ? 'bg-amber-700 text-white border-amber-700' : 'bg-white border-border text-text-secondary hover:border-amber-400'}`}>
                         {s.label}{count > 0 && <span className={active ? 'opacity-75 ml-1' : 'text-text-tertiary ml-1'}>({count})</span>}
                       </button>
                     )
@@ -1555,7 +1555,7 @@ export function CampaignPlanner() {
             <div className="flex items-center gap-1.5 flex-wrap">
               {[['all', 'All', ideas.length], ['undecided', 'Undecided', proposedCount], ['approved', 'Approved', approvedCount], ['rejected', 'Rejected', rejectedCount]].map(([val, label, n]) => (
                 <button key={val} onClick={() => setStatusFilter(val)}
-                  className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-colors ${statusFilter === val ? 'bg-amber-600 text-white' : 'bg-white border border-border text-text-secondary hover:border-amber-300'}`}>
+                  className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-colors ${statusFilter === val ? 'bg-amber-700 text-white border border-amber-700' : 'bg-white border border-border text-text-secondary hover:border-amber-300'}`}>
                   {label}{n > 0 && <span className={statusFilter === val ? 'opacity-75 ml-1' : 'text-text-tertiary ml-1'}>{n}</span>}
                 </button>
               ))}
@@ -1567,18 +1567,18 @@ export function CampaignPlanner() {
               )}
               {dayFilter && (
                 <button onClick={() => setDayFilter(null)}
-                  className="px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-amber-600 text-white flex items-center gap-1">
+                  className="px-2.5 py-1 text-[11px] font-semibold bg-amber-700 text-white flex items-center gap-1">
                   {formatDate(dayFilter)} ✕
                 </button>
               )}
               <div className="flex items-center rounded-lg border border-border overflow-hidden ml-auto">
                 <button onClick={() => setViewMode('list')}
-                  className={`px-2.5 py-1 text-[11px] font-semibold transition-colors ${viewMode === 'list' ? 'bg-stone-800 text-white' : 'bg-white text-text-secondary hover:bg-surface-subtle'}`}>
-                  ☰ List
+                  className={`px-2.5 py-1 text-[11px] font-semibold transition-colors ${viewMode === 'list' ? 'bg-amber-700 text-white' : 'bg-white text-text-secondary hover:bg-surface-subtle'}`}>
+                  List
                 </button>
                 <button onClick={() => setViewMode('calendar')}
-                  className={`px-2.5 py-1 text-[11px] font-semibold transition-colors ${viewMode === 'calendar' ? 'bg-stone-800 text-white' : 'bg-white text-text-secondary hover:bg-surface-subtle'}`}>
-                  📅 Calendar
+                  className={`px-2.5 py-1 text-[11px] font-semibold transition-colors ${viewMode === 'calendar' ? 'bg-amber-700 text-white' : 'bg-white text-text-secondary hover:bg-surface-subtle'}`}>
+                  Calendar
                 </button>
               </div>
             </div>
@@ -1588,7 +1588,7 @@ export function CampaignPlanner() {
               <Button variant="secondary" size="xs" onClick={() => bulkStatus('approved')} disabled={busy}>Approve all</Button>
               <Button variant="secondary" size="xs" onClick={() => bulkStatus('rejected')} disabled={busy}>Reject all</Button>
               <Button variant="secondary" size="xs" onClick={() => bulkStatus('proposed')} disabled={busy}>Reset</Button>
-              <Button variant="ghost" size="xs" onClick={() => setShowMoreModal(true)} disabled={busy} className="ml-auto">✨ Suggest more with AI</Button>
+              <Button variant="ghost" size="xs" onClick={() => setShowMoreModal(true)} disabled={busy} className="ml-auto">Suggest more with AI</Button>
               <Button variant="ghost" size="xs" onClick={addIdea} disabled={busy}>+ Add idea</Button>
             </div>
           </Card>
@@ -1629,7 +1629,7 @@ export function CampaignPlanner() {
           {error && <div className="rounded-xl bg-red-50 border border-red-100 px-4 py-3 text-xs text-red-600">{error}</div>}
 
           <div className="sticky bottom-0 -mx-1 px-1 pb-1">
-            <div className="flex items-center gap-3 bg-white/95 backdrop-blur-sm border border-border rounded-2xl shadow-dropdown px-5 py-3.5">
+            <div className="flex items-center gap-3 bg-white border border-border shadow-dropdown px-5 py-3.5">
               {/* A plan opened from the list never had its setup filled in this
                   session — "back" to a blank setup form would be unrelated to
                   this plan, so those go back to the list. */}
@@ -1698,7 +1698,7 @@ export function CampaignPlanner() {
                       </button>
                     ) : (
                       <div className="w-20 h-20 border border-dashed border-border bg-surface-subtle flex items-center justify-center flex-shrink-0 text-text-disabled text-xl">
-                        {idea.mediaType === 'video' ? '🎬' : '🖼'}
+                        {idea.mediaType === 'video' ? '▶' : '▢'}
                       </div>
                     )}
                     <div className="min-w-0 flex-1">
@@ -1735,7 +1735,7 @@ export function CampaignPlanner() {
                       )}
                       <span className={`inline-block mt-1.5 text-[10px] font-bold px-1.5 py-0.5 leading-[1.4] ${
                         st === 'ready' || st === 'sent' ? 'bg-sage-100 text-sage-700'
-                        : st === 'in_studio' ? 'bg-violet-50 text-violet-700'
+                        : st === 'in_studio' ? 'bg-clay-50 text-clay-700'
                         : 'bg-stone-100 text-text-tertiary'}`}>
                         {lock ? (lock.state === 'publishing' ? '↗ Publishing' : '✓ Published') : ownMedia ? `✓ Your image${refCount > 1 ? `s (${refCount})` : ''}` : st === 'ready' ? '✓ Made in Studio' : st === 'in_studio' ? '🎬 In Studio' : 'Needs a picture'}
                       </span>
@@ -1792,7 +1792,7 @@ export function CampaignPlanner() {
           )}
 
           <div className="sticky bottom-0 -mx-1 px-1 pb-1">
-            <div className="flex items-center gap-3 bg-white/95 backdrop-blur-sm border border-border rounded-2xl shadow-dropdown px-5 py-3.5">
+            <div className="flex items-center gap-3 bg-white border border-border shadow-dropdown px-5 py-3.5">
               <Button variant="secondary" onClick={() => update({ step: 'review' })}>Back to ideas</Button>
               <Button onClick={() => { setError(''); update({ step: 'captions' }) }} disabled={approvedCount === 0}>
                 Next — captions
@@ -1848,7 +1848,7 @@ export function CampaignPlanner() {
           {error && <div className="rounded-xl bg-red-50 border border-red-100 px-4 py-3 text-xs text-red-600">{error}</div>}
 
           <div className="sticky bottom-0 -mx-1 px-1 pb-1">
-            <div className="flex items-center gap-3 bg-white/95 backdrop-blur-sm border border-border rounded-2xl shadow-dropdown px-5 py-3.5">
+            <div className="flex items-center gap-3 bg-white border border-border shadow-dropdown px-5 py-3.5">
               <Button variant="secondary" onClick={() => update({ step: afterReview === 'media' ? 'media' : 'review' })}>
                 {afterReview === 'media' ? 'Back to pictures' : 'Back to ideas'}
               </Button>

@@ -315,7 +315,7 @@ export function PostComposer({
 
   return (
     <div className="fixed inset-0 z-50 bg-black/40 flex items-stretch justify-center">
-      <div className="bg-white w-full max-w-6xl my-0 sm:my-6 flex flex-col shadow-xl">
+      <div className="bg-white w-full max-w-6xl my-0 sm:my-6 flex flex-col shadow-dropdown border border-border">
 
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-border shrink-0">
@@ -385,7 +385,7 @@ export function PostComposer({
                       <button key={o.id} type="button" onClick={() => patch({ copyMode: o.id })}
                         className={`flex-1 text-left px-3 py-2 border transition-all ${
                           ownCaption === (o.id === 'own')
-                            ? 'bg-amber-600 text-white border-amber-600'
+                            ? 'bg-amber-700 text-white border-amber-700'
                             : 'bg-white border-border text-text-secondary hover:border-amber-400'}`}>
                         <span className="block text-sm font-medium">{o.label}</span>
                         <span className={`block text-[10px] leading-snug mt-0.5 ${ownCaption === (o.id === 'own') ? 'opacity-80' : 'text-text-tertiary'}`}>{o.hint}</span>
@@ -423,7 +423,7 @@ export function PostComposer({
                       {captionAssist && (
                         <button type="button" onClick={captionAssist}
                           className="text-xs text-text-secondary hover:text-amber-700 flex items-center gap-1">
-                          <span aria-hidden>✨</span> Enhance with AI
+                          Enhance with AI
                         </button>
                       )}
                       <button type="button" onClick={() => setShowEmoji(v => !v)}
@@ -433,7 +433,7 @@ export function PostComposer({
                     </div>
 
                     {showEmoji && (
-                      <div className="absolute right-0 top-6 z-10 bg-white border border-border shadow-lg p-2 grid grid-cols-8 gap-1 w-64">
+                      <div className="absolute right-0 top-6 z-10 bg-white border border-border shadow-dropdown p-2 grid grid-cols-8 gap-1 w-64">
                         {EMOJI.map(e => (
                           <button key={e} type="button" onClick={() => insertEmoji(e)}
                             className="text-lg hover:bg-surface-subtle rounded">{e}</button>

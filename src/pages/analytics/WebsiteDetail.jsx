@@ -58,7 +58,7 @@ function PanelHead({ title, subtitle, icon = Icon.activity, tone = 'steel', righ
 
 const KIND = {
   good: { label: 'Working', classes: 'bg-sage-50 text-sage-700 border-sage-200' },
-  problem: { label: 'Problem', classes: 'bg-rose-50 text-rose-600 border-rose-200' },
+  problem: { label: 'Problem', classes: 'bg-red-50 text-red-600 border-red-200' },
   opportunity: { label: 'Opening', classes: 'bg-amber-50 text-amber-700 border-amber-200' },
   context: { label: 'Context', classes: 'bg-stone-100 text-stone-600 border-stone-300' },
 }
@@ -130,7 +130,7 @@ export function ExplainPanel({ explain, onRun, canRun = true, audience = 'analyt
 
       {state === 'error' && (
         <div className="px-5 py-4">
-          <p className={`text-xs leading-relaxed ${capped ? 'text-amber-700' : 'text-rose-600'}`}>
+          <p className={`text-xs leading-relaxed ${capped ? 'text-amber-700' : 'text-red-600'}`}>
             {capped ? 'This workspace has reached its monthly agent budget, so nothing was written. ' : ''}
             {error}
           </p>
@@ -246,9 +246,9 @@ export function ImageSearchPanel({ image }) {
 const STATE_TONE = {
   indexed: 'text-sage-700',
   excluded: 'text-amber-700',
-  unknown: 'text-rose-600',
+  unknown: 'text-red-600',
   other: 'text-text-secondary',
-  error: 'text-rose-600',
+  error: 'text-red-600',
   unchecked: 'text-text-tertiary',
 }
 

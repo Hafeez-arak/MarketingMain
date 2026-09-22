@@ -68,12 +68,12 @@ export function CaptionCard({
           </button>
         ) : textOnly ? (
           <div className="w-28 h-28 border border-border bg-surface-subtle flex flex-col items-center justify-center text-text-tertiary text-[10px] text-center px-2 gap-1">
-            <span className="text-lg">{isPoll ? '📊' : '¶'}</span>
+            <span className="text-lg">{isPoll ? '≡' : '¶'}</span>
             {isPoll ? 'Poll' : 'Text only'}
           </div>
         ) : (
           <div className="w-28 h-28 border border-dashed border-border bg-surface-subtle flex flex-col items-center justify-center text-text-disabled text-[10px] text-center px-2 gap-1">
-            <span className="text-lg">{isVideo ? '🎬' : '🖼'}</span>
+            <span className="text-lg">{isVideo ? '▶' : '▢'}</span>
             No picture
           </div>
         )}

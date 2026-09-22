@@ -34,7 +34,7 @@ export function SnapchatPage() {
       <Card className="overflow-hidden">
         <div className="h-1" style={{ background: META.color }} />
         <div className="p-8 text-center">
-          <div className="w-14 h-14 mx-auto mb-4 rounded-2xl flex items-center justify-center bg-yellow-50 text-yellow-600">
+          <div className="w-14 h-14 mx-auto mb-4 border border-border flex items-center justify-center bg-surface-subtle text-text-secondary">
             <GhostIcon />
           </div>
 

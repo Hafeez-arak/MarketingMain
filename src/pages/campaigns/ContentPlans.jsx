@@ -11,7 +11,7 @@ import { momentsInRange, planDraftFromPlan } from '../../lib/campaignPlan'
 const STATUS_STYLE = {
   draft:    'bg-stone-100 text-stone-600',
   approved: 'bg-sage-100 text-sage-700',
-  active:   'bg-blue-50 text-blue-600',
+  active:   'bg-sky-50 text-sky-600',
   archived: 'bg-stone-100 text-text-tertiary',
 }
 

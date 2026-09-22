@@ -49,19 +49,19 @@ const fmtDate = iso => {
 const TEAM_TONE = {
   marketing: 'bg-sage-50 text-sage-700 border-sage-200',
   sales: 'bg-amber-50 text-amber-800 border-amber-200',
-  technical: 'bg-slate-100 text-slate-700 border-slate-200',
+  technical: 'bg-surface-muted text-text border-border',
 }
 const RELEVANCE_TONE = {
   high: 'bg-red-50 text-red-700 border-red-200',
   medium: 'bg-amber-50 text-amber-700 border-amber-200',
-  low: 'bg-slate-50 text-slate-500 border-slate-200',
+  low: 'bg-surface-subtle text-text-secondary border-border',
 }
 const LENS_STATE = {
-  found: { tone: 'text-emerald-700 bg-emerald-50', label: 'found something' },
+  found: { tone: 'text-sage-700 bg-sage-50', label: 'found something' },
   // Amber, not grey: a lens that read forty pages and reported none of them
   // has not had a quiet week, it has thrown a pass away.
   searched: { tone: 'text-amber-700 bg-amber-50', label: 'read, reported nothing' },
-  quiet: { tone: 'text-slate-500 bg-slate-100', label: 'looked, found nothing' },
+  quiet: { tone: 'text-text-secondary bg-surface-muted', label: 'looked, found nothing' },
   failed: { tone: 'text-red-700 bg-red-50', label: 'could not answer' },
 }
 const CHANNEL_LABEL = {
@@ -69,7 +69,7 @@ const CHANNEL_LABEL = {
   news: 'News', jobs: 'Jobs', tender_portal: 'Tenders', event_site: 'Event site', government: 'Government', other: 'Other',
 }
 
-function Chip({ children, tone = 'bg-slate-50 text-slate-600 border-slate-200', title }) {
+function Chip({ children, tone = 'bg-surface-subtle text-text-secondary border-border', title }) {
   return (
     <span title={title} className={`inline-flex items-center max-w-full truncate px-1.5 py-0.5 rounded border text-[10px] font-medium whitespace-nowrap ${tone}`}>
       {children}
@@ -81,8 +81,8 @@ const TeamChip = ({ team }) => <Chip tone={TEAM_TONE[team]}>{team}</Chip>
 const RelevanceChip = ({ value }) => (value ? <Chip tone={RELEVANCE_TONE[value]}>{value}</Chip> : null)
 
 function NewChip({ isNew, changed }) {
-  if (changed) return <Chip tone="bg-blue-50 text-blue-700 border-blue-200" title={changed}>changed</Chip>
-  if (isNew) return <Chip tone="bg-emerald-50 text-emerald-700 border-emerald-200">new</Chip>
+  if (changed) return <Chip tone="bg-sky-50 text-sky-700 border-sky-200" title={changed}>changed</Chip>
+  if (isNew) return <Chip tone="bg-sage-50 text-sage-700 border-sage-200">new</Chip>
   return null
 }
 
@@ -99,7 +99,7 @@ function Sources({ sources, uncited }) {
         const url = typeof s === 'string' ? s : s.url
         return (
           <a key={i} href={url} target="_blank" rel="noopener noreferrer"
-            className="text-[10px] px-1.5 py-0.5 rounded border border-border text-text-tertiary hover:text-text hover:border-slate-400 truncate max-w-[220px]"
+            className="text-[10px] px-1.5 py-0.5 rounded border border-border text-text-tertiary hover:text-text hover:border-stone-400 truncate max-w-[220px]"
             title={(typeof s === 'string' ? s : s.quote || s.title || url) || ''}>
             {domainOf(url)}
           </a>
@@ -196,7 +196,7 @@ const Quiet = ({ children }) => <p className="text-xs text-text-tertiary leading
 
 function ReaderBar({ team, onTeam, lines = [], line = 'all', onLine, untagged = 0, sections, active, onJump }) {
   return (
-    <div className="sticky top-0 z-20 -mx-4 sm:-mx-6 px-4 sm:px-6 py-2 bg-surface-muted/95 backdrop-blur border-b border-border space-y-2">
+    <div className="sticky top-0 z-20 -mx-4 sm:-mx-6 px-4 sm:px-6 py-2 bg-surface-muted border-b border-border space-y-2">
       <div className="flex items-center gap-2 flex-wrap">
         <span className="text-[10px] font-semibold text-text-tertiary uppercase tracking-wide">Reading as</span>
         <div className="flex gap-1 flex-wrap">
@@ -218,7 +218,7 @@ function ReaderBar({ team, onTeam, lines = [], line = 'all', onLine, untagged = 
             {[{ key: 'all', label: 'Everything' }, ...lines].map(l => (
               <button key={l.key} onClick={() => onLine?.(l.key)} aria-pressed={line === l.key}
                 className={`px-2.5 py-1 text-xs font-semibold rounded-lg border transition-colors ${
-                  line === l.key ? 'bg-slate-700 text-white border-slate-700' : 'bg-white text-text-secondary border-border hover:text-text'}`}>
+                  line === l.key ? 'bg-amber-700 text-white border-amber-700' : 'bg-white text-text-secondary border-border hover:text-text'}`}>
                 {l.label}
               </button>
             ))}
@@ -252,7 +252,7 @@ function TopThree({ top }) {
     <ol className="space-y-3">
       {top.items.map((t, i) => (
         <li key={i} className="flex gap-3">
-          <span className="shrink-0 w-6 h-6 rounded-full bg-amber-700 text-white text-xs font-bold flex items-center justify-center tabular-nums">{i + 1}</span>
+          <span className="shrink-0 w-6 h-6 bg-amber-700 text-white text-xs font-bold flex items-center justify-center tabular-nums">{i + 1}</span>
           <div className="min-w-0 flex-1">
             <div className="flex items-start justify-between gap-2">
               <p className="text-sm font-semibold text-text leading-snug">{t.finding}</p>
@@ -301,7 +301,7 @@ function SalesTable({ rows, canEdit, onStatus, busyId }) {
                 </div>
                 <p className="text-[13px] font-semibold text-text leading-snug">{r.name}</p>
                 {r.headline && r.headline !== r.name && <p className="text-[11px] text-text-tertiary mt-1 leading-relaxed"><Clamp text={r.headline} lines={3} /></p>}
-                {r.changed && <p className="text-[11px] text-blue-700 mt-1">Changed: {r.changed}</p>}
+                {r.changed && <p className="text-[11px] text-sky-700 mt-1">Changed: {r.changed}</p>}
               </td>
               <td className="py-3 pr-3 text-text-secondary leading-relaxed">
                 {r.details.length ? r.details.map((d, j) => <div key={j}>{d}</div>) : <span className="text-text-tertiary">—</span>}
@@ -399,7 +399,7 @@ function OurChannel({ p }) {
       {p.state === 'measured' && (
         <div className="text-right shrink-0 tabular-nums">
           <p className="text-xs font-semibold text-text">{p.posts} posts · {p.avg_engagement ?? '—'}/post</p>
-          <p className={`text-[10px] ${p.change ? (p.change.direction === 'up' ? 'text-emerald-600' : 'text-red-600') : 'text-text-tertiary'}`}>
+          <p className={`text-[10px] ${p.change ? (p.change.direction === 'up' ? 'text-sage-600' : 'text-red-600') : 'text-text-tertiary'}`}>
             {p.change ? `${p.change.direction === 'up' ? '+' : '−'}${p.change.change_pct}% vs prior` : p.weak ? 'thin sample' : 'no comparison yet'}
           </p>
         </div>
@@ -1055,7 +1055,7 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
                   : <p className="px-3 pb-2 text-[11px] text-text-tertiary">Nothing in this period adds up to more than the items below.</p>
                 )}
                 {explainFor.state === 'error' && (
-                  <p className={`px-3 pb-2 text-[11px] ${explainFor.capped ? 'text-amber-700' : 'text-rose-600'}`}>
+                  <p className={`px-3 pb-2 text-[11px] ${explainFor.capped ? 'text-amber-700' : 'text-red-600'}`}>
                     {explainFor.capped ? 'This workspace has reached its monthly agent budget. ' : ''}{explainFor.error}
                   </p>
                 )}
@@ -1168,7 +1168,7 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
                 <li key={c.name} className="py-2.5 flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <p className="text-xs font-semibold text-text">
-                      {c.name}{c.thisRun && <span className="ml-1.5"><Chip tone="bg-emerald-50 text-emerald-700 border-emerald-200">this week</Chip></span>}
+                      {c.name}{c.thisRun && <span className="ml-1.5"><Chip tone="bg-sage-50 text-sage-700 border-sage-200">this week</Chip></span>}
                     </p>
                     {c.why && <p className="text-[11px] text-text-tertiary mt-0.5 leading-relaxed">{c.why}</p>}
                     {c.url && <a href={c.url} target="_blank" rel="noopener noreferrer" className="text-[10px] text-text-tertiary underline underline-offset-2">{domainOf(c.url)}</a>}

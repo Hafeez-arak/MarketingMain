@@ -25,7 +25,7 @@ import {
 
 function StatusTag({ status }) {
   const style = {
-    approved: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+    approved: 'bg-sage-50 text-sage-700 border-sage-200',
     pending:  'bg-amber-50 text-amber-700 border-amber-200',
     revoked:  'bg-stone-100 text-stone-500 border-stone-200',
   }[status] || 'bg-stone-100 text-stone-500 border-stone-200'
@@ -319,8 +319,8 @@ export function Access() {
         </div>
       )}
       {notice && (
-        <div className="border border-emerald-200 bg-emerald-50/60 px-5 py-3">
-          <p className="text-xs text-emerald-700">{notice}</p>
+        <div className="border border-sage-200 bg-sage-50/60 px-5 py-3">
+          <p className="text-xs text-sage-700">{notice}</p>
         </div>
       )}
 

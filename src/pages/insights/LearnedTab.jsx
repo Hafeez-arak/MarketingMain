@@ -28,8 +28,8 @@ const round1 = n => (Math.round(n * 10) / 10).toFixed(1)
 function Bar({ value, max }) {
   const w = max > 0 ? Math.max(2, (value / max) * 100) : 0
   return (
-    <span className="block h-1.5 rounded-full bg-surface-subtle overflow-hidden">
-      <span className="block h-full rounded-full bg-sage-400" style={{ width: `${w}%` }} />
+    <span className="block h-1.5 bg-surface-subtle overflow-hidden">
+      <span className="block h-full bg-sage-400" style={{ width: `${w}%` }} />
     </span>
   )
 }

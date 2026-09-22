@@ -81,7 +81,7 @@ export function CalendarView({ ideas, startDate, endDate, selectedDay, onDayClic
                   <div className="mt-1 space-y-0.5">
                     {dayIdeas.slice(0, 3).map(i => (
                       <div key={i.id} className={`text-[9px] px-1 py-0.5 rounded truncate border-l-2 ${i.status === 'approved' ? 'border-sage-400 bg-sage-50 text-sage-700' : i.status === 'rejected' ? 'border-red-300 bg-red-50 text-red-500 line-through' : 'border-stone-300 bg-stone-50 text-text-secondary'}`}>
-                        📷 {i.title || i.topic || 'Untitled'}
+                        {i.title || i.topic || 'Untitled'}
                       </div>
                     ))}
                     {dayIdeas.length > 3 && <div className="text-[9px] text-text-tertiary px-1">+{dayIdeas.length - 3} more</div>}

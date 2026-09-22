@@ -125,7 +125,7 @@ export function MediaPicker({ open, onClose, onSelect, multiple = false, kind = 
           browse rather than one you add to from here. */}
       {kind !== 'video' && (
         <div className="flex mb-3">
-          {[['library', '🖼 Media library'], ['brain', '🧠 Brand Brain']].map(([k, label]) => (
+          {[['library', 'Media library'], ['brain', 'Brand Brain']].map(([k, label]) => (
             <button key={k} type="button" onClick={() => setSource(k)}
               className={`flex-1 py-1.5 border -ml-px first:ml-0 text-xs font-semibold transition-colors ${
                 source === k ? 'bg-amber-700 text-white border-amber-700 relative z-10' : 'bg-white text-text-secondary border-border hover:bg-surface-subtle'}`}>

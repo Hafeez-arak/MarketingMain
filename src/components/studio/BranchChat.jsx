@@ -362,7 +362,7 @@ export function BranchChat({
               <div className="absolute bottom-2 right-2 flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
                 <button type="button" onClick={() => onZoom?.(stage)}
                   className="px-2.5 py-1 bg-white/95 text-text text-[10px] font-semibold shadow-dropdown hover:bg-white">
-                  🔍 Zoom
+                  Zoom
                 </button>
                 <button type="button" onClick={() => onOpenEditor(stage)}
                   className="px-2.5 py-1 bg-white/95 text-text text-[10px] font-semibold shadow-dropdown hover:bg-white">
@@ -483,7 +483,7 @@ export function BranchChat({
 
         {baseIsVideo && !editAllowed && (
           <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 px-2 py-1">
-            This clip is {base.duration || '?'}s — edits only work on 3–10s clips. Use 🔄 Re-render below for a fresh take instead.
+            This clip is {base.duration || '?'}s — edits only work on 3–10s clips. Use Re-render below for a fresh take instead.
           </p>
         )}
 
@@ -565,7 +565,7 @@ export function BranchChat({
           {stageIsVideo && onReRender && (
             <Button size="sm" onClick={() => onReRender(stage)}
               title="Same motion and settings, run against the lane's current still — generates new footage">
-              🔄 Re-render{reRenderCost ? ` · −$${reRenderCost(stage).toFixed(2)}` : ''}
+              ↻ Re-render{reRenderCost ? ` · −$${reRenderCost(stage).toFixed(2)}` : ''}
             </Button>
           )}
           {stageIsVideo && stage?.status === 'ready' && (

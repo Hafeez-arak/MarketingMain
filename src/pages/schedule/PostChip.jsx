@@ -157,7 +157,7 @@ export function UpcomingChip({ post, onOpen, pending, unseen = false }) {
         {stage !== 'booked' && (
           <span className={`text-[9px] font-bold uppercase tracking-wider ${sty.text}`}>{sty.label}</span>
         )}
-        {unseen && <span className="w-1.5 h-1.5 rounded-full bg-green-600 flex-shrink-0 ml-auto" />}
+        {unseen && <span className="w-1.5 h-1.5 rounded-full bg-sage-600 flex-shrink-0 ml-auto" />}
       </div>
 
       {/* The day and the time, in brand time, as the card's headline. */}

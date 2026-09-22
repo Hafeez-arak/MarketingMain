@@ -247,7 +247,7 @@ export function Schedule() {
       {(notice || error) && (
         <div className={`px-4 py-2.5 border text-xs flex items-start gap-2
           ${notice?.tone === 'ok'
-            ? 'bg-green-50 border-green-200 text-green-800'
+            ? 'bg-sage-50 border-sage-200 text-sage-800'
             : 'bg-red-50 border-red-200 text-red-700'}`}>
           <span className="flex-1">{error || notice.text}</span>
           {notice && (
@@ -259,13 +259,13 @@ export function Schedule() {
       {/* Newly published, since you last looked. The bell says it happened;
           this says how many and gets you to them. */}
       {unseenCount > 0 && (
-        <div className="px-4 py-2.5 border border-green-200 bg-green-50 text-xs flex items-center gap-2">
-          <span className="w-2 h-2 rounded-full bg-green-600 flex-shrink-0" />
-          <span className="flex-1 text-green-800">
+        <div className="px-4 py-2.5 border border-sage-200 bg-sage-50 text-xs flex items-center gap-2">
+          <span className="w-2 h-2 rounded-full bg-sage-600 flex-shrink-0" />
+          <span className="flex-1 text-sage-800">
             {unseenCount} post{unseenCount !== 1 ? 's' : ''} published since you last looked — shown in solid green below.
           </span>
           <button onClick={() => markAllSeen(activeWorkspaceId)}
-            className="font-semibold text-green-800 underline">Mark all seen</button>
+            className="font-semibold text-sage-800 underline">Mark all seen</button>
         </div>
       )}
 

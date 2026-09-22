@@ -31,7 +31,7 @@ export function TikTokPage() {
         <div className="h-1" style={{ background: META.color }} />
         <div className="p-5 flex items-center justify-between flex-wrap gap-3">
           <div className="flex items-center gap-3">
-            <span className={`w-10 h-10 rounded-xl flex items-center justify-center text-sm font-bold ${META.bg} ${META.text}`}>{META.abbr}</span>
+            <span className={`w-10 h-10 flex items-center justify-center text-sm font-bold ${META.bg} ${META.text}`}>{META.abbr}</span>
             <div>
               <h2 className="font-semibold text-text">TikTok</h2>
               <p className="text-xs text-text-secondary">
@@ -87,7 +87,7 @@ export function TikTokPage() {
                       {p.scheduledAt && <span className="text-xs text-text-tertiary">{formatDateTime(p.scheduledAt)}</span>}
                     </div>
                     <p className="text-sm text-text whitespace-pre-line line-clamp-3">{p.copy || 'No caption'}</p>
-                    {p.hashtags && <p className="text-xs text-amber-500 mt-1">{p.hashtags}</p>}
+                    {p.hashtags && <p className="text-xs text-amber-700 mt-1">{p.hashtags}</p>}
                     {p.mediaUrls?.length > 0 && (
                       <div className="flex gap-2 mt-3">
                         {p.mediaUrls.map((url, i) => <PostImage key={i} src={url} alt="" className="w-16 h-16 rounded-xl object-cover border border-border" />)}

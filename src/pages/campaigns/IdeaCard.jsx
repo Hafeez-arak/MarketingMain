@@ -25,7 +25,7 @@ import { targetLabel, REJECT_REASONS, rejectReasonLabel } from './planConstants'
 // state, not the publish state that utils.js exports under the same name.
 const OCCASION_STYLE = 'bg-amber-100 text-amber-800 border-amber-200'
 const RESEARCH_STYLE = 'bg-sage-100 text-sage-800 border-sage-200'
-const PILLAR_STYLE   = 'bg-purple-50 text-purple-700 border-purple-100'
+const PILLAR_STYLE   = 'bg-clay-50 text-clay-700 border-clay-100'
 const OWN_COPY_STYLE = 'bg-sage-100 text-sage-700 border-sage-200'
 const STATUS_META = {
   proposed: { label: 'Proposed', cls: 'bg-stone-100 text-stone-600' },
@@ -144,7 +144,7 @@ export function IdeaCard({ idea, index, accessToken, workspaceId, onChange, onRe
                 )}
                 {idea.occasion && <span className={`${chip} ${OCCASION_STYLE}`}>★ {idea.occasion}</span>}
                 {idea.pillar && <span className={`${chip} font-medium ${PILLAR_STYLE}`}>{idea.pillar}</span>}
-                {idea.series && <span className={`${chip} bg-violet-50 text-violet-700 border-violet-100`} title="Deliberate recurring series — not flagged as repetition across months">🔁 {idea.series}</span>}
+                {idea.series && <span className={`${chip} bg-clay-50 text-clay-700 border-clay-100`} title="Deliberate recurring series — not flagged as repetition across months">{idea.series}</span>}
                 {idea.objective && <span className={`${chip} font-medium bg-sky-50 text-sky-700 border-sky-100`}>{idea.objective}</span>}
               </div>
             )}
@@ -266,7 +266,7 @@ export function IdeaEditModal({ idea, saving, saveError, onClose, onSave, worksp
             ) : (
               <button onClick={() => setAsking(true)}
                 className="text-[11px] font-semibold text-amber-700 hover:text-amber-800">
-                ✨ Change with AI
+                Change with AI
               </button>
             )}
           </>

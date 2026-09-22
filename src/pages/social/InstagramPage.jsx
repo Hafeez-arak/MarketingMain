@@ -8,8 +8,10 @@ import { AccountAnalytics } from '../../components/social/AccountAnalytics'
 import { useConnectedAccounts } from '../../lib/useConnectedAccounts'
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from '../../lib/supabaseClient'
 import FitImage, { IgPicture } from '../../components/FitImage'
-import { Card, Badge, Spinner, PostImage, Skeleton } from '../../components/ui/index'
-import { formatDateTime } from '../../lib/utils'
+import { Card, Badge, Button, Spinner, Skeleton } from '../../components/ui/index'
+import { formatDateTime, PLATFORM_META } from '../../lib/utils'
+
+const IG_META = PLATFORM_META.instagram
 import { useBrandProfileSync, logEditFeedback } from '../../lib/brandBrain'
 import { useBrandContext } from '../../lib/brandContext'
 import { CaptionStudio } from '../../components/CaptionStudio'
@@ -103,7 +105,7 @@ function useSupabasePosts(supabaseUrl, anonKey, workspaceId) {
         publishStatus:       r.publish_status || 'not_published',
         publishError:        r.publish_error || '',
         source:              r.source || source,
-        // Drives the "✦ AI Generated" badge, so it has to be a fact rather
+        // Drives the "AI generated" badge, so it has to be a fact rather
         // than an assumption. A post written by hand (copy_mode='own' on the
         // plan idea, source='manual' on the row) has never been near a model,
         // and badging it AI misattributes the operator's own words.
@@ -229,38 +231,34 @@ export function InstagramPage() {
 
   return (
     <div className="max-w-7xl space-y-5">
-      {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-2xl flex items-center justify-center shadow-sm"
-            style={{ background: '#E1306C' }}>
-            <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24">
-              <rect x="2" y="2" width="20" height="20" rx="5"/>
-              <path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/>
-              <line x1="17.5" y1="6.5" x2="17.51" y2="6.5"/>
-            </svg>
+      {/* Same header card as the TikTok and LinkedIn pages: a thin rule in the
+          platform colour, the abbreviation tile, then the page's actions. */}
+      <Card className="overflow-hidden">
+        <div className="h-1" style={{ background: IG_META.color }} />
+        <div className="p-5 flex items-center justify-between flex-wrap gap-3">
+          <div className="flex items-center gap-3">
+            <span className={`w-10 h-10 flex items-center justify-center text-sm font-bold ${IG_META.bg} ${IG_META.text}`}>{IG_META.abbr}</span>
+            <div>
+              <h2 className="font-semibold text-text">Instagram</h2>
+              {firstLoad
+                ? <Skeleton className="h-3 w-14 mt-1" />
+                : <p className="text-xs text-text-secondary">{mergedPosts.length} post{mergedPosts.length !== 1 ? 's' : ''}</p>}
+            </div>
           </div>
-          <div>
-            <h2 className="font-bold text-text text-base tracking-tight">Instagram</h2>
-            {firstLoad
-              ? <Skeleton className="h-3 w-14 mt-1" />
-              : <p className="text-xs text-text-secondary">{mergedPosts.length} post{mergedPosts.length !== 1 ? 's' : ''}</p>}
+          <div className="flex items-center gap-2">
+            {supabaseUrl && anonKey && (
+              <Button variant="secondary" onClick={fetchRemotePosts} disabled={loadingPosts}>
+                {loadingPosts
+                  ? <Spinner size="sm" />
+                  : <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-.27-4.93"/></svg>}
+                {lastFetchedAt ? `Synced ${lastFetchedAt.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}` : 'Sync'}
+              </Button>
+            )}
+            <ComposerHost platform="instagram" campaigns={state.campaigns}
+              onDone={fetchRemotePosts} label="Create post" />
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          {supabaseUrl && anonKey && (
-            <button onClick={fetchRemotePosts} disabled={loadingPosts}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-border text-xs text-text-secondary hover:text-text hover:bg-surface-subtle transition-colors disabled:opacity-50">
-              {loadingPosts
-                ? <Spinner size="sm" />
-                : <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-.27-4.93"/></svg>}
-              {lastFetchedAt ? `Synced ${lastFetchedAt.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}` : 'Sync'}
-            </button>
-          )}
-          <ComposerHost platform="instagram" campaigns={state.campaigns}
-            onDone={fetchRemotePosts} label="Create Post" />
-        </div>
-      </div>
+      </Card>
 
       {/* Posts | Analytics. Analytics is one connected account's numbers —
           the same graphs as /analytics, scoped to that account. */}
@@ -548,11 +546,11 @@ function PostDetail({ post, state, webhookUrl, regenWebhookUrl, supabaseUrl, ano
   // these may be sent again from here — that is a double post.
   const sentToZernio = ['publishing', 'published', 'scheduled'].includes(post.publishStatus)
   const statusLabel =
-    post.publishStatus === 'publishing' ? '● Publishing…' :
-    post.publishStatus === 'failed'     ? '✕ Publish failed' :
-    isLocked || post.status === 'published' ? '✓ Published' :
-    post.publishStatus === 'scheduled' || post.status === 'scheduled' ? '⏰ Scheduled' :
-    post.status === 'draft'             ? '✎ Draft' : '● Pending Review'
+    post.publishStatus === 'publishing' ? 'Publishing…' :
+    post.publishStatus === 'failed'     ? 'Publish failed' :
+    isLocked || post.status === 'published' ? 'Published' :
+    post.publishStatus === 'scheduled' || post.status === 'scheduled' ? 'Scheduled' :
+    post.status === 'draft'             ? 'Draft' : 'Pending review'
 
   const arCss       = `${arParts[0]}/${arParts[1]}`
   const isPortrait  = arParts[1] > arParts[0]
@@ -569,19 +567,21 @@ function PostDetail({ post, state, webhookUrl, regenWebhookUrl, supabaseUrl, ano
         {/* ── Top bar ─────────────────────────────────────────────────── */}
         <div className="flex items-center justify-between px-8 py-5 border-b border-border flex-shrink-0">
           <div className="flex items-center gap-2.5 flex-wrap">
-            <span className={`text-xs font-bold px-2.5 py-1 leading-[1.4] tracking-wide ${
+            <span className={`tag-base ${
+              post.publishStatus === 'failed' ? 'bg-red-50 text-red-600' :
               !isLocked && post.status === 'pending_publish' ? 'bg-amber-100 text-amber-700' :
-              isLocked || post.status === 'published' ? 'bg-green-100 text-green-700' :
-                                                  'bg-blue-100 text-blue-700'}`}>
+              isLocked || post.status === 'published' ? 'bg-sage-100 text-sage-700' :
+                                                  'bg-sky-100 text-sky-700'}`}>
               {statusLabel}
             </span>
-            {post.source === 'plan'  && <span className="text-xs bg-emerald-50 text-emerald-600 border border-emerald-200 px-1.5 py-0.5 leading-[1.4] font-medium">📅 Monthly Schedule</span>}
-            {post.generatedByWorkflow && <span className="text-xs bg-purple-50 text-purple-600 border border-purple-200 px-1.5 py-0.5 leading-[1.4] font-medium">✦ AI Generated</span>}
-            {styleMeta && <span className="text-xs bg-stone-100 text-stone-600 px-1.5 py-0.5 leading-[1.4]">{styleMeta.icon} {styleMeta.label}</span>}
-            {campaign  && <span className="text-xs bg-amber-50 text-amber-600 border border-amber-100 px-1.5 py-0.5 leading-[1.4] font-medium">{campaign.name}</span>}
+            {post.source === 'plan'  && <span className="tag-base bg-surface-subtle text-text-secondary">Monthly plan</span>}
+            {post.generatedByWorkflow && <span className="tag-base bg-surface-subtle text-text-secondary">AI generated</span>}
+            {styleMeta && <span className="tag-base bg-surface-subtle text-text-secondary">{styleMeta.label}</span>}
+            {campaign  && <span className="tag-clay">{campaign.name}</span>}
           </div>
           <button onClick={onClose}
-            className="w-9 h-9 flex items-center justify-center rounded-xl text-text-tertiary hover:bg-stone-100 hover:text-text transition-colors ml-4 flex-shrink-0">
+            aria-label="Close"
+            className="w-8 h-8 flex items-center justify-center text-text-tertiary border border-transparent hover:border-border hover:text-text transition-colors ml-4 flex-shrink-0">
             <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>
           </button>
         </div>
@@ -596,7 +596,7 @@ function PostDetail({ post, state, webhookUrl, regenWebhookUrl, supabaseUrl, ano
             {/* Image */}
             <div className="flex-1 flex items-center justify-center p-6">
               <div style={{ width: '100%', position: 'relative' }}>
-                <div style={{ width: '100%', borderRadius: '16px', overflow: 'hidden', position: 'relative', ...(displayImage ? {} : { aspectRatio: arCss }) }}>
+                <div style={{ width: '100%', overflow: 'hidden', position: 'relative', ...(displayImage ? {} : { aspectRatio: arCss }) }}>
                   {displayImage
                     ? <IgPicture src={displayImage} fallback={arCss} />
                     : <div style={{ width: '100%', height: '100%', background: '#f5d0e8', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -639,7 +639,7 @@ function PostDetail({ post, state, webhookUrl, regenWebhookUrl, supabaseUrl, ano
                   <div style={{ display: 'flex', justifyContent: 'center', gap: 6, marginTop: 10 }}>
                     {allImages.map((_, i) => (
                       <button key={i} onClick={() => setCarouselIdx(i)}
-                        style={{ width: i === carouselIdx ? 20 : 7, height: 7, borderRadius: 4, border: 'none', cursor: 'pointer', transition: 'all 0.2s', background: i === carouselIdx ? '#E1306C' : 'rgba(188,24,136,0.25)' }} />
+                        style={{ width: i === carouselIdx ? 20 : 7, height: 7, borderRadius: 4, border: 'none', cursor: 'pointer', transition: 'all 0.2s', background: i === carouselIdx ? '#4c5e61' : 'rgba(76,94,97,0.25)' }} />
                     ))}
                   </div>
                 )}
@@ -652,17 +652,14 @@ function PostDetail({ post, state, webhookUrl, regenWebhookUrl, supabaseUrl, ano
               {/* Staged image: Save / Discard */}
               {stagedImage ? (
                 <div className="flex gap-2">
-                  <button onClick={handleSaveImage}
-                    className="flex-1 flex items-center justify-center gap-2 py-3 rounded-2xl text-sm font-bold text-white transition-all active:scale-95"
-                    style={{ background: '#16a34a' }}>
+                  <Button size="lg" onClick={handleSaveImage} className="flex-1">
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
-                    Save Image
-                  </button>
-                  <button onClick={handleDiscardImage}
-                    className="flex-1 flex items-center justify-center gap-2 py-3 rounded-2xl text-sm font-bold transition-all active:scale-95 border-2 text-[#b34d7a] hover:bg-pink-100" style={{ borderColor: '#e8a0bf' }}>
+                    Save image
+                  </Button>
+                  <Button size="lg" variant="secondary" onClick={handleDiscardImage} className="flex-1">
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>
                     Discard
-                  </button>
+                  </Button>
                 </div>
               ) : isLocked ? (
                 <p className="text-xs text-center text-text-tertiary leading-relaxed px-2">
@@ -673,40 +670,38 @@ function PostDetail({ post, state, webhookUrl, regenWebhookUrl, supabaseUrl, ano
                    post — the slot it used was never deployed. Creative Studio
                    is where a picture actually gets remade, so say that rather
                    than offering a button whose only outcome is an error. */
-                <p className="text-xs text-center text-[#b34d7a] leading-relaxed px-2">
+                <p className="text-xs text-center text-text-secondary leading-relaxed px-2">
                   To change this picture, open it in Creative Studio — that's where images are made and edited.
                 </p>
               ) : (
-                <button onClick={handleRegenImage} disabled={regenLoading}
-                  className="w-full flex items-center justify-center gap-2.5 py-3 rounded-2xl text-sm font-bold text-white disabled:opacity-50 transition-all active:scale-95"
-                  style={{ background: regenLoading ? '#e8b4cc' : '#E1306C' }}>
+                <Button size="lg" onClick={handleRegenImage} disabled={regenLoading} className="w-full">
                   {regenLoading
                     ? <><Spinner size="sm" /><span>Generating new image…</span></>
-                    : <><svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-.27-4.93"/></svg><span>Regenerate Image</span></>}
-                </button>
+                    : <><svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-.27-4.93"/></svg><span>Regenerate image</span></>}
+                </Button>
               )}
 
               {regenError && (
-                <div className="rounded-xl bg-red-50 border border-red-200 px-3 py-2 text-xs text-red-600 text-center">{regenError}</div>
+                <div className="bg-red-50 border border-red-200 px-3 py-2 text-xs text-red-600 text-center">{regenError}</div>
               )}
 
               {post.imagePrompt && (
-                <div className="rounded-xl border px-3 py-2.5" style={{ background: 'rgba(255,255,255,0.7)', borderColor: '#f0b8d4' }}>
-                  <p className="text-[10px] font-semibold uppercase tracking-wider mb-1" style={{ color: '#b05080' }}>Image Prompt</p>
-                  <p className="text-[11px] leading-relaxed line-clamp-4" style={{ color: '#7a3a5a' }}>{post.imagePrompt}</p>
+                <div className="border border-border bg-white px-3 py-2.5">
+                  <p className="eyebrow mb-1">Image prompt</p>
+                  <p className="text-[11px] leading-relaxed line-clamp-4 text-text-secondary">{post.imagePrompt}</p>
                 </div>
               )}
 
               {/* Aspect ratio + date chips */}
               <div className="flex gap-2 flex-wrap">
                 {post.aspectRatio && (
-                  <span className="text-[11px] px-2.5 py-1 rounded-lg font-mono" style={{ background: 'rgba(255,255,255,0.7)', border: '1px solid #f0b8d4', color: '#a0456e' }}>
+                  <span className="text-[11px] px-2 py-0.5 font-mono bg-white border border-border text-text-secondary">
                     {post.aspectRatio}
                   </span>
                 )}
                 {post.scheduledAt && (
-                  <span className="text-[11px] px-2.5 py-1 rounded-lg" style={{ background: 'rgba(255,255,255,0.7)', border: '1px solid #f0b8d4', color: '#a0456e' }}>
-                    📅 {post.scheduledAt}
+                  <span className="text-[11px] px-2 py-0.5 bg-white border border-border text-text-secondary">
+                    {post.scheduledAt}
                   </span>
                 )}
               </div>
@@ -799,33 +794,27 @@ function PostDetail({ post, state, webhookUrl, regenWebhookUrl, supabaseUrl, ano
                       <span className="text-[11px] text-text-tertiary">Gone out — read-only</span>
                     ) : !editingCaption ? (
                       <div className="flex gap-1.5">
-                        <button onClick={() => setStudioOpen(true)}
-                          className="flex items-center gap-1 text-xs text-violet-600 hover:text-violet-700 font-semibold px-2.5 py-1 rounded-lg hover:bg-violet-50 transition-colors">
-                          ✨ Rewrite
-                        </button>
-                        <button onClick={() => { setCaptionDraft(post.copy || ''); setEditingCaption(true) }}
-                          className="flex items-center gap-1 text-xs text-amber-600 hover:text-amber-700 font-semibold px-2.5 py-1 rounded-lg hover:bg-amber-50 transition-colors">
+                        <Button size="xs" variant="ghost" onClick={() => setStudioOpen(true)}>Rewrite</Button>
+                        <Button size="xs" variant="secondary" onClick={() => { setCaptionDraft(post.copy || ''); setEditingCaption(true) }}>
                           <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
                           Edit
-                        </button>
+                        </Button>
                       </div>
                     ) : (
                       <div className="flex gap-1.5">
-                        <button onClick={handleCancelCaption} className="text-xs text-text-tertiary hover:text-text px-2.5 py-1 rounded-lg hover:bg-surface-subtle transition-colors">Cancel</button>
-                        <button onClick={handleSaveCaption}
-                          className="flex items-center gap-1 text-xs text-white font-semibold px-3 py-1 rounded-lg transition-colors"
-                          style={{ background: '#16a34a' }}>
+                        <Button size="xs" variant="ghost" onClick={handleCancelCaption}>Cancel</Button>
+                        <Button size="xs" onClick={handleSaveCaption}>
                           <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
                           Save
-                        </button>
+                        </Button>
                       </div>
                     )}
                   </div>
-                  <div className="rounded-xl bg-stone-50 border border-stone-200 overflow-hidden">
+                  <div className="bg-surface-subtle border border-border overflow-hidden">
                     {editingCaption
                       ? <textarea value={captionDraft} onChange={e => setCaptionDraft(e.target.value)}
                           autoFocus rows={8}
-                          className="w-full text-sm text-text leading-loose p-4 resize-none focus:outline-none bg-transparent border-2 border-amber-400 rounded-xl"
+                          className="w-full text-sm text-text leading-loose p-4 resize-none focus:outline-none bg-white border border-amber-700 ring-1 ring-amber-700"
                           style={{ minHeight: '140px' }} />
                       : <div className="p-4 overflow-y-auto" style={{ maxHeight: '220px' }}>
                           <p className="text-sm text-text leading-loose whitespace-pre-line">{post.copy || 'No caption'}</p>
@@ -839,7 +828,7 @@ function PostDetail({ post, state, webhookUrl, regenWebhookUrl, supabaseUrl, ano
                     <p className="text-[11px] font-bold text-text-tertiary uppercase tracking-widest mb-2">Hashtags</p>
                     <div className="flex flex-wrap gap-1.5">
                       {post.hashtags.split(' ').filter(Boolean).map((tag, i) => (
-                        <span key={i} className="text-xs bg-pink-50 text-pink-600 border border-pink-100 px-1.5 py-0.5 leading-[1.4] font-medium">{tag}</span>
+                        <span key={i} className="text-xs bg-surface-subtle text-amber-800 border border-border px-1.5 py-0.5 leading-[1.4] font-medium">{tag}</span>
                       ))}
                     </div>
                   </div>
@@ -847,26 +836,26 @@ function PostDetail({ post, state, webhookUrl, regenWebhookUrl, supabaseUrl, ano
 
                 {/* Meta */}
                 <div className="flex items-center gap-4 text-[11px] text-text-tertiary pt-2 border-t border-border flex-wrap">
-                  <span>🕐 Created {formatDateTime(post.createdAt)}</span>
-                  {styleMeta && <span>{styleMeta.icon} {styleMeta.label}</span>}
+                  <span>Created {formatDateTime(post.createdAt)}</span>
+                  {styleMeta && <span>{styleMeta.label}</span>}
                 </div>
               </div>
             </div>
 
             {/* ── Action bar ─────────────────────────────────────────── */}
-            <div className="px-8 py-6 border-t border-border bg-stone-50/60 flex gap-3 flex-shrink-0">
+            <div className="px-8 py-5 border-t border-border bg-surface-subtle flex gap-2 flex-wrap items-start flex-shrink-0">
               {/* Approving used to only flip the row's status to 'published'
                   — nothing was ever sent, yet the post then read as live. With
                   onPublish it opens the composer on this post instead, the
                   same path Post now takes: row updated in place, then Zernio. */}
               {onPosted && !sentToZernio && !isLocked && (
-                <div className="flex-1 min-w-0 space-y-2">
+                <div className="basis-full min-w-0 space-y-2">
                   {usableAccounts.length === 0 && (
                     <p className="text-xs text-red-600">No Instagram account connected. Connect one on the Instagram page first.</p>
                   )}
                   {usableAccounts.length > 1 && (
                     <select value={pickedAccount} onChange={e => setPickedAccount(e.target.value)}
-                      className="w-full border border-border px-3 py-2 text-sm bg-white text-text focus:outline-none">
+                      className="w-full border border-border px-3 py-2 text-sm bg-white text-text focus:outline-none focus:border-amber-700 focus:ring-1 focus:ring-amber-700">
                       <option value="">Choose an account…</option>
                       {usableAccounts.map(a => (
                         <option key={a.zernio_account_id} value={a.zernio_account_id}>
@@ -878,27 +867,23 @@ function PostDetail({ post, state, webhookUrl, regenWebhookUrl, supabaseUrl, ano
                   {scheduling && (
                     <div className="flex items-center gap-2">
                       <input type="datetime-local" value={when} onChange={e => setWhen(e.target.value)}
-                        className="border border-border px-3 py-2 text-sm bg-white text-text focus:outline-none" />
+                        className="border border-border px-3 py-2 text-sm bg-white text-text focus:outline-none focus:border-amber-700 focus:ring-1 focus:ring-amber-700" />
                       <span className="text-xs text-text-tertiary">Riyadh time</span>
                     </div>
                   )}
-                  <div className="flex gap-3">
-                    <button disabled={sending || !accountId} onClick={() => sendPost('')}
-                      className="flex-1 py-3.5 rounded-2xl text-sm font-bold text-white transition-all active:scale-95 disabled:opacity-50"
-                      style={{ background: '#E1306C' }}>
+                  <div className="flex gap-2">
+                    <Button size="lg" disabled={sending || !accountId} onClick={() => sendPost('')} className="flex-1">
                       {sending && !scheduling ? 'Posting…' : 'Post now'}
-                    </button>
+                    </Button>
                     {!scheduling ? (
-                      <button disabled={sending || !accountId}
-                        onClick={() => { setWhen(composerFromPost(post._raw || {}, { platform: 'instagram' }).scheduledFor || ''); setScheduling(true) }}
-                        className="px-6 py-3.5 rounded-2xl text-sm font-semibold border-2 border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors disabled:opacity-50">
+                      <Button size="lg" variant="secondary" disabled={sending || !accountId}
+                        onClick={() => { setWhen(composerFromPost(post._raw || {}, { platform: 'instagram' }).scheduledFor || ''); setScheduling(true) }}>
                         Schedule
-                      </button>
+                      </Button>
                     ) : (
-                      <button disabled={sending || !accountId || !when} onClick={() => sendPost(when)}
-                        className="px-6 py-3.5 rounded-2xl text-sm font-semibold border-2 border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors disabled:opacity-50">
+                      <Button size="lg" variant="secondary" disabled={sending || !accountId || !when} onClick={() => sendPost(when)}>
                         {sending ? 'Scheduling…' : 'Confirm schedule'}
-                      </button>
+                      </Button>
                     )}
                   </div>
                   {sendError && <p className="text-xs text-red-600">{sendError}</p>}
@@ -914,85 +899,67 @@ function PostDetail({ post, state, webhookUrl, regenWebhookUrl, supabaseUrl, ano
                 </div>
               )}
               {!onPosted && !sentToZernio && !isLocked && post.status !== 'published' && (
-                <button
-                  onClick={() => { if (onPublish) { onPublish(post); return } onStatusChange(post, 'published'); setApproved(true) }}
-                  className="flex-1 flex items-center justify-center gap-2.5 py-3.5 rounded-2xl text-sm font-bold text-white transition-all active:scale-95"
-                  style={{
-                    background: approved ? '#16a34a' : '#E1306C',
-                  }}>
+                <Button size="lg" className="flex-1"
+                  onClick={() => { if (onPublish) { onPublish(post); return } onStatusChange(post, 'published'); setApproved(true) }}>
                   {approved
-                    ? <><svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg> Approved!</>
-                    : <><svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg> Approve & Publish</>}
-                </button>
+                    ? <><svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg> Approved</>
+                    : <>Approve & publish</>}
+                </Button>
               )}
               {canReschedule ? (
-                <div className="flex-1 min-w-0 space-y-2">
+                <div className="basis-full min-w-0 space-y-2">
                   {!rescheduling ? (
                     <div className="flex items-center gap-2 flex-wrap">
-                      <span className="flex items-center gap-2 px-3 py-3 rounded-2xl text-sm font-bold bg-green-50 text-green-700 border-2 border-green-200">
+                      <span className="flex items-center gap-2 px-3 py-2.5 text-sm font-semibold bg-sage-50 text-sage-700 border border-sage-200">
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
                         {post._raw?.scheduled_publish_at ? formatBrandDateTime(post._raw.scheduled_publish_at) : 'Scheduled'}
                       </span>
                       {onPublish && (
-                        <button type="button" onClick={() => onPublish(post)}
-                          className="px-4 py-3 rounded-2xl text-sm font-semibold border-2 border-border text-text-secondary hover:bg-surface-subtle transition-colors">
-                          ✎ Edit
-                        </button>
+                        <Button size="lg" variant="secondary" onClick={() => onPublish(post)}>Edit</Button>
                       )}
-                      <button onClick={startReschedule}
-                        className="px-4 py-3 rounded-2xl text-sm font-semibold border-2 border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors">
-                        🗓 Reschedule
-                      </button>
-                      <button onClick={handleCancelSchedule} disabled={reschedBusy}
-                        className="px-4 py-3 rounded-2xl text-sm font-semibold border-2 border-red-200 bg-red-50 text-red-600 hover:bg-red-100 transition-colors disabled:opacity-50">
+                      <Button size="lg" variant="secondary" onClick={startReschedule}>Reschedule</Button>
+                      <Button size="lg" variant="danger" onClick={handleCancelSchedule} disabled={reschedBusy}>
                         {reschedBusy ? 'Cancelling…' : 'Cancel schedule'}
-                      </button>
+                      </Button>
                     </div>
                   ) : (
                     <div className="flex items-center gap-2 flex-wrap">
                       <input type="datetime-local" value={reschedWhen} onChange={e => setReschedWhen(e.target.value)} aria-label="New time"
-                        className="border border-border px-3 py-2.5 text-sm bg-white text-text focus:outline-none rounded-xl" />
+                        className="border border-border px-3 py-2 text-sm bg-white text-text focus:outline-none focus:border-amber-700 focus:ring-1 focus:ring-amber-700" />
                       <span className="text-xs font-semibold text-text-tertiary">{BRAND_TIMEZONE_LABEL}</span>
-                      <button disabled={reschedBusy || !reschedWhen} onClick={handleReschedule}
-                        className="px-4 py-2.5 rounded-2xl text-sm font-semibold border-2 border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors disabled:opacity-50">
+                      <Button disabled={reschedBusy || !reschedWhen} onClick={handleReschedule}>
                         {reschedBusy ? 'Moving…' : 'Confirm new time'}
-                      </button>
-                      <button onClick={() => setRescheduling(false)} className="text-xs text-text-tertiary hover:text-text">Cancel</button>
+                      </Button>
+                      <Button variant="ghost" onClick={() => setRescheduling(false)}>Cancel</Button>
                     </div>
                   )}
                   {reschedError && <p className="text-xs text-red-600">{reschedError}</p>}
                 </div>
               ) : (sentToZernio || isLocked || post.status === 'published') && (
-                <div className="flex-1 flex items-center justify-center gap-2.5 py-3.5 rounded-2xl text-sm font-bold bg-green-50 text-green-700 border-2 border-green-200">
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
+                <div className="flex-1 flex items-center justify-center gap-2 py-2.5 text-sm font-semibold bg-sage-50 text-sage-700 border border-sage-200">
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
                   {post.publishStatus === 'publishing' ? 'Publishing…' : isLocked ? 'Published' : post.publishStatus === 'scheduled' || post.status === 'scheduled' ? 'Scheduled' : 'Published'}
                 </div>
               )}
               {!onPosted && !sentToZernio && !isLocked && post.status !== 'scheduled' && post.status !== 'published' && (
-                <button onClick={() => onPublish ? onPublish(post) : onStatusChange(post, 'scheduled')}
-                  className="px-6 py-3.5 rounded-2xl text-sm font-semibold border-2 border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors">
+                <Button size="lg" variant="secondary" onClick={() => onPublish ? onPublish(post) : onStatusChange(post, 'scheduled')}>
                   Schedule
-                </button>
+                </Button>
               )}
               {onDelete && !isLocked && (
-                <button onClick={() => { onDelete(post); onClose() }}
-                  className="px-6 py-3.5 rounded-2xl text-sm font-semibold border-2 border-red-200 bg-red-50 text-red-600 hover:bg-red-100 transition-colors">
+                <Button size="lg" variant="danger" onClick={() => { onDelete(post); onClose() }}>
                   Delete
-                </button>
+                </Button>
               )}
               {displayImage && (
-                <button onClick={handleSaveToMedia}
-                  title="Save image to Media Library"
-                  className={`px-4 py-3.5 rounded-2xl text-sm font-semibold border-2 transition-all flex items-center gap-2 ${savedToMedia ? 'border-green-300 bg-green-50 text-green-700' : 'border-stone-200 bg-white text-text-secondary hover:bg-stone-50 hover:border-stone-300'}`}>
+                <Button size="lg" variant="secondary" onClick={handleSaveToMedia} title="Save image to Media Library"
+                  className={savedToMedia ? '!border-sage-300 !bg-sage-50 !text-sage-700' : ''}>
                   {savedToMedia
-                    ? <><svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg> Saved!</>
-                    : <><svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg> Save to Library</>}
-                </button>
+                    ? <><svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg> Saved</>
+                    : <><svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg> Save to library</>}
+                </Button>
               )}
-              <button onClick={onClose}
-                className="px-6 py-3.5 rounded-2xl text-sm font-semibold border-2 border-border text-text-secondary hover:bg-stone-100 transition-colors">
-                Close
-              </button>
+              <Button size="lg" variant="ghost" onClick={onClose}>Close</Button>
             </div>
           </div>
         </div>
@@ -1132,20 +1099,16 @@ function PostsList({ posts, loading = false, dispatch, state, updatePostStatus, 
 
   return (
     <div className="space-y-4">
-      {/* Filter tabs — glowing active state */}
+      {/* Filter tabs */}
       <div className="flex gap-2 flex-wrap items-center justify-between">
         <div className="flex gap-2 flex-wrap">
           {FILTERS.map(f => (
             <button key={f.key} onClick={() => setFilter(f.key)}
-              className={`relative px-4 py-1.5 rounded-xl text-xs font-semibold transition-all duration-200 ${
+              className={`relative px-3 py-1.5 text-xs font-semibold border transition-colors duration-150 ${
                 filter === f.key
-                  ? 'text-white  scale-105'
-                  : 'text-text-secondary bg-white border border-border hover:border-stone-300 hover:text-text'
-              }`}
-              style={filter === f.key ? {
-                background: '#E1306C',
-                
-              } : {}}>
+                  ? 'bg-amber-700 border-amber-700 text-white'
+                  : 'text-text-secondary bg-white border-border hover:border-stone-400 hover:text-text'
+              }`}>
               {f.label}
               {!loading && f.count > 0 && (
                 <span className={`ml-1.5 text-[10px] px-1.5 py-0.5 leading-[1.4] font-bold ${
@@ -1163,14 +1126,13 @@ function PostsList({ posts, loading = false, dispatch, state, updatePostStatus, 
         <PostListSkeleton />
       ) : filtered.length === 0 ? (
         <Card className="p-12 text-center">
-          <div className="w-12 h-12 rounded-2xl mx-auto mb-4 flex items-center justify-center"
-            style={{ background: '#E1306C' }}>
-            <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
+          <div className="w-11 h-11 border border-border bg-surface-subtle mx-auto mb-4 flex items-center justify-center text-text-tertiary">
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
               <rect x="2" y="2" width="20" height="20" rx="5"/><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/><line x1="17.5" y1="6.5" x2="17.51" y2="6.5"/>
             </svg>
           </div>
-          <p className="font-medium text-text mb-1">No {filter !== 'all' ? FILTERS.find(f=>f.key===filter)?.label.toLowerCase()+' ' : ''}posts yet</p>
-          <p className="text-sm text-text-secondary">Use Create Post above to compose and publish one.</p>
+          <p className="text-sm font-semibold text-text mb-1">No {filter !== 'all' ? FILTERS.find(f=>f.key===filter)?.label.toLowerCase()+' ' : ''}posts yet</p>
+          <p className="text-xs text-text-secondary">Use Create post above to compose and publish one.</p>
         </Card>
       ) : (
         <div className="grid grid-cols-1 gap-3">
@@ -1181,7 +1143,7 @@ function PostsList({ posts, loading = false, dispatch, state, updatePostStatus, 
             const customMeta = CUSTOM_POST_TYPES.find(t => t.value === p.customType)
             return (
               <Card key={p.id}
-                className="overflow-hidden cursor-pointer hover:shadow-md hover:-translate-y-0.5 transition-all duration-150"
+                className="overflow-hidden cursor-pointer hover:border-stone-400 transition-colors duration-150"
                 onClick={() => setSelectedPost(p)}>
                 <div className="flex">
                   {/* Thumbnail */}
@@ -1202,11 +1164,11 @@ function PostsList({ posts, loading = false, dispatch, state, updatePostStatus, 
                     <div className="flex items-start justify-between gap-2 mb-2">
                       <div className="flex items-center gap-1.5 flex-wrap">
                         <Badge status={p.status === 'pending_publish' ? 'pending' : p.status} />
-                        {p.generatedByWorkflow && <span className="text-[10px] bg-purple-50 text-purple-600 px-1.5 py-0.5 leading-[1.4] font-medium">AI</span>}
-                        {p.source === 'plan' && <span className="text-[10px] bg-green-50 text-green-600 px-1.5 py-0.5 leading-[1.4] font-medium">📅 Monthly Schedule</span>}
-                        {customMeta && <span className="text-[10px] bg-surface-subtle text-text-secondary px-1.5 py-0.5 leading-[1.4]">{customMeta.icon} {customMeta.label}</span>}
-                        {!customMeta && styleMeta && <span className="text-[10px] bg-surface-subtle text-text-secondary px-1.5 py-0.5 leading-[1.4]">{styleMeta.icon} {styleMeta.label}</span>}
-                        {campaign && <span className="text-[10px] bg-amber-50 text-amber-600 px-1.5 py-0.5 leading-[1.4] font-medium">{campaign.name}</span>}
+                        {p.generatedByWorkflow && <span className="tag-base bg-surface-subtle text-text-secondary">AI</span>}
+                        {p.source === 'plan' && <span className="tag-base bg-surface-subtle text-text-secondary">Monthly plan</span>}
+                        {customMeta && <span className="tag-base bg-surface-subtle text-text-secondary">{customMeta.label}</span>}
+                        {!customMeta && styleMeta && <span className="tag-base bg-surface-subtle text-text-secondary">{styleMeta.label}</span>}
+                        {campaign && <span className="tag-clay">{campaign.name}</span>}
                       </div>
                       <button onClick={e => { e.stopPropagation(); handleDelete(p) }}
                         className="text-text-tertiary hover:text-red-500 transition-colors flex-shrink-0 p-1 -m-1">
@@ -1214,7 +1176,7 @@ function PostsList({ posts, loading = false, dispatch, state, updatePostStatus, 
                       </button>
                     </div>
                     <p className="text-sm text-text line-clamp-2 leading-relaxed mb-1.5">{p.copy || 'No caption'}</p>
-                    {p.hashtags && <p className="text-xs text-pink-500 line-clamp-1 mb-1.5">{p.hashtags}</p>}
+                    {p.hashtags && <p className="text-xs text-amber-700 line-clamp-1 mb-1.5">{p.hashtags}</p>}
                     <p className="text-[11px] text-text-tertiary">
                       {/* A queued post is about WHEN IT GOES OUT — the same KSA time
                           the full view shows — not when it was drafted. */}
