@@ -71,5 +71,11 @@ export const WEBHOOK_PATHS = {
   // action on agentWebsite: that one is a Website gateway and says so, and a
   // composer critique arriving through it would be the first step in turning a
   // named allowlist back into the generic proxy both of these exist to avoid.
+  // Also carries the planner's reword-an-idea call: both are AI acting on the
+  // WORDS of a post, so they share a gateway and its allowlist.
   agentComposer:    'arak-agent-composer',
+  // "How did our own posts do". Its own gateway because it is the one that
+  // forwards a GET with a query string — that is the handler's contract and
+  // moving it off Vercel should not change it.
+  agentReports:     'arak-agent-reports',
 }

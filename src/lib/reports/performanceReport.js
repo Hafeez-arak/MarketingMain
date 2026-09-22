@@ -1,3 +1,4 @@
+import { defaultWebhookUrl } from '../n8nWebhooks'
 // ─── The performance report, as data ───────────────────────────────────────
 // Pure. Turns the /api/agent/performance payload into the handful of strings
 // the report prints, so every decision about what a null means is testable
@@ -292,10 +293,20 @@ export function caveats(payload, { limit = 6 } = {}) {
 export async function fetchPerformanceReport({ workspaceId, accessToken, periodDays = 30 }) {
   if (!workspaceId) return { ok: false, error: 'No workspace selected.' }
   try {
-    const url = `/api/agent/performance?workspace_id=${encodeURIComponent(workspaceId)}` +
-      `&period_days=${encodeURIComponent(periodDays)}`
-    const res = await fetch(url, {
-      headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
+    // Through the n8n reports gateway, not a Vercel function: api/ is at the
+    // Hobby plan's 12-function ceiling. The gateway turns this body back into
+    // the query string the handler has always read, so the route's own
+    // contract is unchanged — see n8n/workflows/Arak Lighting – Reports Agent.
+    const res = await fetch(defaultWebhookUrl('agentReports'), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+      },
+      body: JSON.stringify({
+        action: 'performance', access_token: accessToken,
+        workspace_id: workspaceId, period_days: periodDays,
+      }),
     })
     const body = await res.json().catch(() => ({}))
     if (!res.ok) return { ok: false, error: body?.error || `The report could not be built (${res.status}).` }

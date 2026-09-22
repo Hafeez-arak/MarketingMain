@@ -53,6 +53,20 @@ cd n8n/docker && docker compose up -d --build agent
 cd .. && ./redeploy.sh "Arak Lighting – Composer Agent"
 ```
 
-Both gateways are deliberately separate. `arak-agent-website` is a Website gateway and says so in its own note; routing a composer critique through it would be the first step in turning a named allowlist back into the generic internal proxy both of them exist to prevent.
+Three gateways now, deliberately separate. `arak-agent-website` is a Website gateway and says so in its own note; routing a composer critique or a performance report through it would be the first step in turning a named allowlist back into the generic internal proxy all of them exist to prevent.
 
-The workflow Code nodes are covered by tests such as `zernioPublish.test.js` and `zernioSync.test.js`, which run the **generated JSON** — not a copy of the source — through `workflowHarness.js` with Instagram and Supabase stubbed. If you change a Code node, regenerate first (`python3 gen_workflows.py`) or the tests will still be checking the old one.
+## Reports Agent gateway — and two more routes off Vercel
+
+`Arak Lighting – Reports Agent` carries `performance` ("how did our own posts do"), and `reviseIdea` joined the Composer gateway alongside `critique` — both are AI acting on the words of a post.
+
+Neither was broken. They moved for **headroom**: `api/` sat at exactly 12 of 12, so the next route added anywhere under it would have failed the build again. It is at **10** now.
+
+One difference worth knowing: the Reports gateway forwards a **GET with a query string**, not a POST body, because that is what `performance` has always read. Moving a handler should not change its contract.
+
+```bash
+cd n8n/docker && docker compose up -d --build agent
+cd .. && ./redeploy.sh "Arak Lighting – Reports Agent"
+cd .. && ./redeploy.sh "Arak Lighting – Composer Agent"
+```
+
+The Composer one needs redeploying too — its allowlist changed.

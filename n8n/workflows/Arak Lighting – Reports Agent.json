@@ -1,0 +1,91 @@
+{
+  "name": "Arak Lighting – Reports Agent",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Reports Agent gateway\n\nHow our own posts actually did (`performance`). Reads Zernio behind ZERNIO_API_KEY, including posts made directly on a platform and the LinkedIn page's own totals, so it cannot run in the browser.\n\nVercel Hobby allows 12 Serverless Functions per deployment. The repo hit that ceiling, so this runs beside n8n instead — see n8n/README.md.\n\nUnlike the other two gateways this forwards a **GET with a query string**, because that is the handler's contract and moving it should not change it.\n\nWebhook path: `/arak-agent-reports`. Allowed body actions: `performance`.",
+        "height": 280,
+        "width": 480
+      },
+      "id": "69ac0417-80c4-5c30-a60b-a21bcc062b68",
+      "name": "Note: Reports Agent gateway",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -40,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "arak-agent-reports",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "6ac346a5-55a4-5287-876c-8e25e846566c",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        300
+      ],
+      "webhookId": "arak-agent-reports"
+    },
+    {
+      "parameters": {
+        "jsCode": "const expected = String($env.N8N_WEBHOOK_SECRET || '').trim();\nif (expected) {\n  const headers = ($input.first().json || {}).headers || {};\n  const got = String(headers['x-webhook-secret'] || headers['X-Webhook-Secret'] || '').trim();\n  if (got !== expected) throw new Error('Unauthorized: missing or invalid webhook secret');\n}\nreturn $input.all();"
+      },
+      "id": "9004fe01-5b41-594f-affd-f9be73443db5",
+      "name": "Webhook Secret Guard",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = ($input.first().json || {}).body || {};\nconst action = String(body.action || '').trim();\nconst allowed = new Set(['performance']);\nconst accessToken = String(body.access_token || '').trim();\n\nif (!allowed.has(action)) {\n  return [{ json: { ok: false, error: 'Unsupported report action.' } }];\n}\nif (!accessToken) {\n  return [{ json: { ok: false, error: 'Sign in to read the performance report.' } }];\n}\n\n// performance is a GET that reads its parameters from the query string — see\n// its params() helper. Forwarded that way rather than as a POST body so the\n// handler's contract is unchanged by having moved off Vercel.\nconst query = new URLSearchParams();\nfor (const [key, value] of Object.entries(body)) {\n  if (key === 'action' || key === 'access_token') continue;\n  if (value === undefined || value === null || value === '') continue;\n  query.set(key, String(value));\n}\n\ntry {\n  const response = await this.helpers.httpRequest({\n    method: 'GET',\n    url: `${$env.AGENT_BASE_URL}/api/agent/${action}?${query.toString()}`,\n    headers: { Authorization: `Bearer ${accessToken}` },\n    json: true,\n    returnFullResponse: true,\n    ignoreHttpStatusErrors: true,\n    // Several Zernio reads plus the analytics join. Generous, and still well\n    // under the browser's own patience.\n    timeout: 180000,\n  });\n  const payload = response?.body && typeof response.body === 'object'\n    ? response.body\n    : { ok: false, error: `The agent returned ${response?.statusCode || 'an empty response'}.` };\n  return [{ json: payload }];\n} catch (err) {\n  return [{ json: { ok: false, error: `Could not reach the reports agent: ${String(err?.message || err).slice(0, 300)}` } }];\n}"
+      },
+      "id": "0574cbe6-9acc-527b-bb2a-02ddcf6c76e6",
+      "name": "Forward to Reports Agent",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Webhook Secret Guard",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook Secret Guard": {
+      "main": [
+        [
+          {
+            "node": "Forward to Reports Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "active": false
+}
