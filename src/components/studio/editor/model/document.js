@@ -161,13 +161,46 @@ export const DASH_STYLES = [
 // layer can be inserted at its true aspect ratio without waiting for a
 // network round trip on reopen, and so a ratio-locked resize has something to
 // lock to when the image hasn't finished loading yet.
-export function newImageLayer(url, { naturalRatio = 1, ...overrides } = {}) {
+//
+// `canvasRatio` (width/height of the document) matters because x/w are
+// fractions of the canvas WIDTH and y/h fractions of its HEIGHT. Without it,
+// `h = w / naturalRatio` is only right on a square canvas — on a 4:5 post a
+// 2:1 logo came out 1.6:1, visibly squashed, which is the one thing a logo
+// must never be.
+export function newImageLayer(url, { naturalRatio = 1, canvasRatio = 1, ...overrides } = {}) {
   const w = 0.4
   return {
     id: newId('i'), type: 'image', url, naturalRatio,
-    x: 0.3, y: 0.3, w, h: w / (naturalRatio || 1),
+    x: 0.3, y: 0.3, w, h: (w * (canvasRatio || 1)) / (naturalRatio || 1),
     rotation: 0, opacity: 1, cornerRadius: 0, visible: true, locked: false,
     ...overrides,
+  }
+}
+
+export const CORNERS = ['top-left', 'top-right', 'bottom-left', 'bottom-right']
+
+// Where a logo goes when dropped into a corner: the box {x, y, w, h} in the
+// same canvas fractions a layer stores. Sized so the logo's WIDTH is `size`
+// of the canvas width, but never taller than `maxHeight` of the canvas — a
+// tall stacked logo at 20% width would otherwise eat a quarter of a story.
+// The margin is a fraction of the canvas's SHORTER side, applied equally in
+// pixels on both axes, so the gap to the edge looks the same horizontally and
+// vertically whatever the post's shape.
+export function cornerBox(corner, { naturalRatio = 1, canvasRatio = 1, size = 0.2, maxHeight = 0.12, margin = 0.04 } = {}) {
+  const nr = naturalRatio || 1, cr = canvasRatio || 1
+  let w = size
+  let h = (w * cr) / nr
+  if (h > maxHeight) { h = maxHeight; w = (h * nr) / cr }
+  // Margin in pixels = margin × shorter side. As fractions: of W it's
+  // margin × min(W,H)/W, of H it's margin × min(W,H)/H.
+  const mx = margin * Math.min(1, 1 / cr)
+  const my = margin * Math.min(1, cr)
+  const right = corner === 'top-right' || corner === 'bottom-right'
+  const bottom = corner === 'bottom-left' || corner === 'bottom-right'
+  return {
+    x: right ? 1 - mx - w : mx,
+    y: bottom ? 1 - my - h : my,
+    w, h,
   }
 }
 
