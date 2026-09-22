@@ -452,6 +452,13 @@ export async function fetchAutoReplyPosts(workspaceId, accountId, page = 1) {
   return { posts: res.posts || [], hasMore: res.hasMore === true }
 }
 
+/** The post an existing auto-reply is pinned to — picture, caption, link — or null. */
+export async function fetchAutoReplyPost(workspaceId, id) {
+  const res = await call('auto_reply_post', { workspace_id: workspaceId, id })
+  if (res.error) return { error: res.error, post: null }
+  return { post: res.post || null }
+}
+
 export async function deleteAutoReply(workspaceId, id) {
   const res = await call('auto_reply_delete', { workspace_id: workspaceId, id })
   return res.error ? { error: res.error } : { ok: true }

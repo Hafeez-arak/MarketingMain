@@ -15,7 +15,7 @@ const ok = (over = {}) => automationFields({ name: 'Catalogue', dm_message: 'Her
 
 describe('the actions exist under the names the browser will call', () => {
   it('answers all four', () => {
-    for (const a of ['auto_replies', 'auto_reply_save', 'auto_reply_delete', 'auto_reply_logs', 'auto_reply_posts']) {
+    for (const a of ['auto_replies', 'auto_reply_save', 'auto_reply_delete', 'auto_reply_logs', 'auto_reply_posts', 'auto_reply_post']) {
       expect(isAction(a)).toBe(true)
     }
   })
@@ -225,6 +225,12 @@ describe('postChoices — the posts an auto-reply can be pinned to', () => {
   it('drops rows with no platform id, and duplicates', () => {
     const out = postChoices({ posts: [row(), row(), row({ platforms: [{ accountId: 'acc1' }] })] }, 'acc1')
     expect(out).toHaveLength(1)
+  })
+
+  // The single-post read names the per-platform list differently.
+  it('reads the single-post shape too', () => {
+    const single = { content: 'easy post', thumbnailUrl: 't', platformAnalytics: [{ accountId: 'acc1', platformPostId: '1807', platformPostUrl: 'u' }] }
+    expect(postChoices({ posts: [single] }, 'acc1')[0]).toMatchObject({ platform_post_id: '1807', url: 'u', thumbnail: 't' })
   })
 
   it('survives an empty or malformed response', () => {

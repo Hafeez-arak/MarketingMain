@@ -9,7 +9,7 @@ import { useConnectedAccounts } from '../../lib/useConnectedAccounts'
 import { PLATFORM_META } from '../../lib/utils'
 import {
   fetchAutoReplies, saveAutoReply, deleteAutoReply, fetchAutoReplyLogs,
-  fetchAutoReplyPosts, canAutoReply,
+  fetchAutoReplyPosts, fetchAutoReplyPost, canAutoReply,
 } from '../../lib/zernioConnect'
 
 // ─── Auto-replies ──────────────────────────────────────────────────────────
@@ -406,7 +406,7 @@ function EditorModal({ draft, accounts, workspaceId, saving, onClose, onSave }) 
         )}
 
         <PostScope
-          isNew={isNew} onePost={onePost} setOnePost={setOnePost}
+          isNew={isNew} automationId={d.id} onePost={onePost} setOnePost={setOnePost}
           workspaceId={workspaceId} accountId={accountId}
           postId={d.platform_post_id} postTitle={d.post_title}
           onPick={p => setD(prev => ({
@@ -504,7 +504,7 @@ function EditorModal({ draft, accounts, workspaceId, saving, onClose, onSave }) 
 // existing one this is a statement, not a control — offering it would be a
 // switch whose change is silently dropped on save.
 
-function PostScope({ isNew, onePost, setOnePost, workspaceId, accountId, postId, postTitle, onPick }) {
+function PostScope({ isNew, automationId, onePost, setOnePost, workspaceId, accountId, postId, postTitle, onPick }) {
   const [state, setState] = useState({
     for: '', loading: false, posts: [], error: '', page: 0, hasMore: false, loadingMore: false, moreError: '',
   })
@@ -582,8 +582,10 @@ function PostScope({ isNew, onePost, setOnePost, workspaceId, accountId, postId,
     return (
       <div>
         <p className="block eyebrow mb-1.5">Runs on</p>
-        <p className="text-sm text-text">{postId ? (postTitle || 'One post') : 'Every post on this account'}</p>
-        <p className="text-[11px] text-text-tertiary mt-1">
+        {postId
+          ? <PinnedPost workspaceId={workspaceId} automationId={automationId} title={postTitle} />
+          : <p className="text-sm text-text">Every post on this account</p>}
+        <p className="text-[11px] text-text-tertiary mt-1.5">
           This cannot be changed after creating it. To run on different posts, create a new auto-reply.
         </p>
       </div>
@@ -658,6 +660,44 @@ function PostScope({ isNew, onePost, setOnePost, workspaceId, accountId, postId,
           </p>
         </>
       )}
+    </div>
+  )
+}
+
+// The post an existing auto-reply runs on: picture, caption, date and a link
+// to it on Instagram. The stored title shows at once and stays if the read
+// fails, so the editor never waits on or breaks over a preview.
+function PinnedPost({ workspaceId, automationId, title }) {
+  const [state, setState] = useState({ loading: true, post: null })
+
+  useEffect(() => {
+    let alive = true
+    fetchAutoReplyPost(workspaceId, automationId).then(res => {
+      if (alive) setState({ loading: false, post: res.post })
+    })
+    return () => { alive = false }
+  }, [workspaceId, automationId])
+
+  const { loading, post } = state
+  return (
+    <div className="flex items-start gap-3 border border-border bg-surface-subtle p-2.5">
+      {loading
+        ? <Skeleton className="w-20 h-20 flex-shrink-0" />
+        : <PostImage src={post?.thumbnail} alt="" className="w-20 h-20 object-cover flex-shrink-0" />}
+      <div className="min-w-0 flex-1">
+        <p className="text-sm text-text line-clamp-3 whitespace-pre-line">
+          {post?.caption || title || 'One post'}
+        </p>
+        {post?.published_at && (
+          <p className="text-[11px] text-text-tertiary mt-1">Posted {when(post.published_at)}</p>
+        )}
+        {post?.url && (
+          <a href={post.url} target="_blank" rel="noreferrer"
+            className="inline-block text-[11px] font-medium text-text underline mt-1">
+            Open the post
+          </a>
+        )}
+      </div>
     </div>
   )
 }
