@@ -646,6 +646,24 @@ const handlers = {
     return { posts: postChoices(out, accountId), page, hasMore: hasMorePages(out, page, limit) }
   },
 
+  // The one post an existing automation is pinned to, for the editor's
+  // "Runs on" preview. Addressed by AUTOMATION id, not post id: Zernio's
+  // single-post read answers for any post the deployment's key can see, so the
+  // post id is taken from an automation this workspace is proven to own.
+  async auto_reply_post(z, { ws, profileId, body }) {
+    const id = String(body.id || '').trim()
+    if (!id) return fail('id is required.', 400)
+    const automation = await requireOwnedAutomation(z, { workspaceId: ws.id, profileId, automationId: id })
+    const platformPostId = String(automation.platformPostId || '')
+    if (!platformPostId) return { post: null }
+
+    const out = await z.request('analytics', { query: { postId: platformPostId } })
+    // A post still syncing answers without a picture; the editor falls back to
+    // the stored title rather than failing.
+    const [post] = postChoices({ posts: [out] }, String(automation.accountId || ''))
+    return { post: post || null }
+  },
+
   async auto_reply_delete(z, { ws, profileId, body }) {
     const id = String(body.id || '').trim()
     if (!id) return fail('id is required.', 400)
@@ -779,7 +797,8 @@ function postChoices(out, accountId) {
   const seen = new Set()
   const posts = []
   for (const p of rows) {
-    const entry = (p.platforms || []).find(x => String(x.accountId || '') === accountId) || {}
+    // The list calls it `platforms`; the single-post read, `platformAnalytics`.
+    const entry = (p.platforms || p.platformAnalytics || []).find(x => String(x.accountId || '') === accountId) || {}
     const id = String(entry.platformPostId || p.platformPostId || '')
     if (!id || seen.has(id)) continue
     seen.add(id)
