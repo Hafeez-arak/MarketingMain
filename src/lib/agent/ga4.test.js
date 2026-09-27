@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   propertyPath, isoDate, normalizeReport, totalsOf, reportBody, reportPlan,
-  ga4Summary, ga4Config, delta, TOTAL_METRICS,
+  ga4Summary, ga4Config, delta, TOTAL_METRICS, collectionState, keyEventLabel, keyEventRows, GA4_EARLIEST,
   platformOf, platformArrivals, arrivalsSummary, isTagged, isBioCampaign, siteOrigin, bioLink,
 } from './ga4.js'
 
@@ -363,5 +363,111 @@ describe('reportPlan — the social report', () => {
   // the page — the same rule keyEvents established.
   it('is optional', () => {
     expect(social.optional).toBe(true)
+  })
+})
+
+describe('reportPlan — when the tag started', () => {
+  const plan = reportPlan({ current: { start: '2026-08-28', end: '2026-09-24' }, previous: { start: 'c', end: 'd' } })
+  const collected = plan.find(p => p.id === 'collected')
+
+  // Its whole job is finding a first day that may sit before OR after the
+  // window, so it must not be clipped to the window.
+  it('reads the whole history, not the window', () => {
+    expect(collected.body.dateRanges[0]).toEqual({ startDate: GA4_EARLIEST, endDate: 'today' })
+    expect(collected.body.orderBys[0].dimension.dimensionName).toBe('date')
+    expect(collected.body.orderBys[0].desc).toBe(false)
+  })
+
+  it('is optional, so a refusal falls back to the window rather than failing the page', () => {
+    expect(collected.optional).toBe(true)
+  })
+
+  it('asks for key events by event name as well as channel', () => {
+    const ke = plan.find(p => p.id === 'keyEvents')
+    expect(ke.body.dimensions.map(d => d.name)).toEqual(['eventName', 'sessionDefaultChannelGroup'])
+  })
+})
+
+describe('collectionState', () => {
+  const windows = { days: 28, current: { start: '2026-08-28', end: '2026-09-24' } }
+
+  // The real state of arak-sa.com on 2026-09-27: eleven visits on the tag's
+  // first morning, a window that ends three days earlier.
+  it('says the tag started after the window, and when it will enter it', () => {
+    expect(collectionState({
+      collected: [{ date: '2026-09-27', sessions: 11 }], windows, today: '2026-09-27',
+    })).toEqual({ state: 'after', firstDay: '2026-09-27', coveredDays: 0, sessionsSince: 11, readyOn: '2026-09-30' })
+  })
+
+  it('counts the days of a window the tag actually covers, inclusive', () => {
+    const s = collectionState({
+      collected: [{ date: '2026-09-20', sessions: 4 }, { date: '2026-09-22', sessions: 6 }], windows,
+    })
+    expect(s.state).toBe('partial')
+    expect(s.firstDay).toBe('2026-09-20')
+    expect(s.coveredDays).toBe(5)
+  })
+
+  it('treats a tag that starts on the window’s first day as full coverage', () => {
+    expect(collectionState({ collected: [{ date: '2026-08-28', sessions: 1 }], windows }).state).toBe('full')
+    expect(collectionState({ collected: [{ date: '2026-01-02', sessions: 1 }], windows }).coveredDays).toBe(28)
+  })
+
+  it('ignores zero-session days and row order when finding the first day', () => {
+    const s = collectionState({
+      collected: [{ date: '2026-09-22', sessions: 3 }, { date: '2026-09-01', sessions: 0 }, { date: '2026-09-10', sessions: 2 }],
+      windows,
+    })
+    expect(s.firstDay).toBe('2026-09-10')
+  })
+
+  it('names a property that has never recorded a visit', () => {
+    expect(collectionState({ collected: [], windows }).state).toBe('none')
+  })
+
+  // A refused report is not "never recorded a visit" — that would tell a
+  // working site its tag is missing.
+  it('is unknown when the report failed', () => {
+    expect(collectionState({ collected: [], collectedAvailable: false, windows }).state).toBe('unknown')
+  })
+
+  it('rides along on ga4Summary', () => {
+    const s = ga4Summary({
+      totals: {}, previousTotals: {}, collected: [{ date: '2026-09-27', sessions: 11 }],
+      collectedAvailable: true, windows, asOf: '2026-09-27',
+    })
+    expect(s.collection.state).toBe('after')
+  })
+
+  // Older payloads have no `collected` at all; they must render as before.
+  it('is unknown for a payload that predates the report', () => {
+    expect(ga4Summary({ totals: {}, previousTotals: {}, windows }).collection.state).toBe('unknown')
+  })
+})
+
+describe('keyEventLabel', () => {
+  it('turns a Google Ads conversion into its own name, and says where it came from', () => {
+    expect(keyEventLabel('ads_conversion_Contact_Us_1')).toEqual({ label: 'Contact Us', source: 'Google Ads conversion' })
+    expect(keyEventLabel('ads_conversion_Brochure')).toEqual({ label: 'Brochure', source: 'Google Ads conversion' })
+  })
+
+  it('names GA4’s recommended events and spaces out everything else', () => {
+    expect(keyEventLabel('generate_lead').label).toBe('Lead')
+    expect(keyEventLabel('whatsapp_click').label).toBe('Whatsapp click')
+    expect(keyEventLabel('').label).toBe('(not set)')
+  })
+})
+
+describe('keyEventRows', () => {
+  it('groups by event, keeps the channels, and drops the non-key rows GA4 includes', () => {
+    const rows = keyEventRows([
+      { eventName: 'ads_conversion_Contact_Us_1', sessionDefaultChannelGroup: 'Organic Search', keyEvents: 1 },
+      { eventName: 'ads_conversion_Contact_Us_1', sessionDefaultChannelGroup: 'Cross-network', keyEvents: 2 },
+      { eventName: 'form_submit', sessionDefaultChannelGroup: '', keyEvents: 1 },
+      { eventName: 'page_view', sessionDefaultChannelGroup: 'Direct', keyEvents: 0 },
+    ])
+    expect(rows.map(r => [r.eventName, r.keyEvents])).toEqual([['ads_conversion_Contact_Us_1', 3], ['form_submit', 1]])
+    expect(rows[0].channels).toEqual([{ channel: 'Cross-network', keyEvents: 2 }, { channel: 'Organic Search', keyEvents: 1 }])
+    expect(rows[1].channels[0].channel).toBe('Unassigned')
   })
 })

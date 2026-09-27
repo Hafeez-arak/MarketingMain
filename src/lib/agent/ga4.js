@@ -233,14 +233,36 @@ export function reportPlan({ current, previous } = {}) {
       }),
     },
     {
+      // By event AND channel. Channel alone said "Direct: 2 key events" and
+      // never which action that was — a contact-page view and a submitted
+      // form are both key events, and they are not worth the same.
       id: 'keyEvents',
       optional: true,
       body: reportBody({
-        ...current, dimensions: ['sessionDefaultChannelGroup'], metrics: ['keyEvents'], orderBy: 'keyEvents', limit: 15,
+        ...current, dimensions: ['eventName', 'sessionDefaultChannelGroup'], metrics: ['keyEvents'],
+        orderBy: 'keyEvents', limit: 50,
+      }),
+    },
+    {
+      // ── When the tag started ──
+      // Every day the property has ever recorded a session, from the earliest
+      // date the Data API accepts. Not the window: its whole job is to find
+      // the first day, which is usually BEFORE the window and occasionally —
+      // the week a tag is installed — after it. Without it, a window that
+      // predates the tag is indistinguishable from a site nobody visits.
+      // One row per active day, so a few hundred rows a year.
+      id: 'collected',
+      optional: true,
+      body: reportBody({
+        start: GA4_EARLIEST, end: 'today', dimensions: ['date'], metrics: ['sessions'],
+        orderBy: 'date', desc: false, limit: 5000,
       }),
     },
   ]
 }
+
+/** The earliest startDate the Data API accepts. */
+export const GA4_EARLIEST = '2015-08-14'
 
 // ─── Reading what came back ────────────────────────────────────────────────
 
@@ -250,6 +272,114 @@ export function delta(now, was, { hasPrevious = true } = {}) {
   const a = num(now), b = num(was)
   if (!b) return null
   return a - b
+}
+
+const DAY_MS = 86_400_000
+const dayNumber = isoDay => Math.round(new Date(`${isoDay}T00:00:00Z`).getTime() / DAY_MS)
+const addDays = (isoDay, n) => new Date((dayNumber(isoDay) + n) * DAY_MS).toISOString().slice(0, 10)
+
+/**
+ * Where the tag's history sits against the window the page is showing.
+ *
+ * GA4 is read over Search Console's window, which ends three days back (see
+ * `fetchGa4Data`). The week a tag goes live, that window ends BEFORE the tag's
+ * first day, so every report inside it is a truthful zero — and a strip of
+ * zero sessions for a site that had eleven visitors this morning is the one
+ * thing the panel promised never to print. For the month after that, the
+ * window is only partly covered, and "Last 28 days" over four days of data
+ * understates traffic sevenfold.
+ *
+ *   unknown  the `collected` report failed — fall back to the window as-is
+ *   none     the property answered and has never recorded a session
+ *   after    the tag's first day is after this window ends
+ *   partial  the tag started inside this window
+ *   full     the tag predates the window
+ *
+ * `readyOn` is the day a ROLLING window first reaches the tag's first day —
+ * the first day plus however far the window ends behind today.
+ */
+export function collectionState({ collected = [], collectedAvailable = true, windows = {}, today = '' } = {}) {
+  const start = str(windows.current?.start)
+  const end = str(windows.current?.end)
+  const days = num(windows.days)
+  if (!collectedAvailable || !start || !end) return { state: 'unknown', firstDay: '', coveredDays: days }
+
+  const active = collected.filter(r => num(r.sessions) > 0 && str(r.date)).sort((a, b) => (a.date < b.date ? -1 : 1))
+  const firstDay = active[0]?.date || ''
+  const sessionsSince = active.reduce((n, r) => n + num(r.sessions), 0)
+  if (!firstDay) return { state: 'none', firstDay: '', coveredDays: 0, sessionsSince: 0 }
+
+  if (firstDay > end) {
+    const lag = today ? Math.max(0, dayNumber(today) - dayNumber(end)) : 0
+    return {
+      state: 'after', firstDay, coveredDays: 0, sessionsSince,
+      readyOn: lag ? addDays(firstDay, lag) : '',
+    }
+  }
+  if (firstDay > start) {
+    return { state: 'partial', firstDay, coveredDays: dayNumber(end) - dayNumber(firstDay) + 1, sessionsSince }
+  }
+  return { state: 'full', firstDay, coveredDays: days, sessionsSince }
+}
+
+/**
+ * GA4's recommended event names, said the way a person would.
+ *
+ * Only the ones that are plausibly key events on a site like this. Anything
+ * else is shown with its underscores turned into spaces — never hidden, since
+ * a key event somebody configured is by definition one they care about.
+ */
+const KEY_EVENT_NAMES = {
+  generate_lead: 'Lead',
+  form_submit: 'Form submitted',
+  form_start: 'Form started',
+  file_download: 'File downloaded',
+  click: 'Outbound link click',
+  sign_up: 'Sign-up',
+  purchase: 'Purchase',
+  close_convert_lead: 'Lead converted',
+  qualify_lead: 'Lead qualified',
+  contact: 'Contact',
+}
+
+/**
+ * A key event's name, and where it came from.
+ *
+ * `ads_conversion_Contact_Us_1` is what GA4 records when a conversion is set
+ * up in Google Ads through the Google tag: the Ads conversion's own name, with
+ * Google's numeric suffix. It is a real key event and is counted — but its
+ * name says nothing about WHAT triggers it (a page load and a form submit are
+ * both possible), so the source is kept beside the label rather than lost.
+ */
+export function keyEventLabel(eventName) {
+  const raw = str(eventName)
+  const ads = raw.match(/^ads_conversion_(.+?)(?:_\d+)?$/i)
+  if (ads) return { label: ads[1].replace(/_+/g, ' ').trim(), source: 'Google Ads conversion' }
+  if (KEY_EVENT_NAMES[raw]) return { label: KEY_EVENT_NAMES[raw], source: '' }
+  const words = raw.replace(/_+/g, ' ').trim()
+  return { label: words ? words[0].toUpperCase() + words.slice(1) : '(not set)', source: '' }
+}
+
+/**
+ * Key events, one row per event, each with the channels that produced it.
+ *
+ * Takes the `keyEvents` report's rows (eventName × sessionDefaultChannelGroup).
+ * Rows with zero key events are the non-key events GA4 includes anyway and are
+ * dropped here.
+ */
+export function keyEventRows(rows = []) {
+  const by = new Map()
+  for (const r of rows) {
+    const n = num(r.keyEvents)
+    if (n <= 0) continue
+    const name = str(r.eventName)
+    const row = by.get(name) || { eventName: name, ...keyEventLabel(name), keyEvents: 0, channels: [] }
+    row.keyEvents += n
+    row.channels.push({ channel: str(r.sessionDefaultChannelGroup) || 'Unassigned', keyEvents: n })
+    by.set(name, row)
+  }
+  for (const row of by.values()) row.channels.sort((a, b) => b.keyEvents - a.keyEvents)
+  return [...by.values()].sort((a, b) => b.keyEvents - a.keyEvents)
 }
 
 /**
@@ -262,9 +392,14 @@ export function delta(now, was, { hasPrevious = true } = {}) {
  * installation date as a collapse in traffic. Search Console's half of this
  * page draws the same distinction and calls it `baseline`.
  */
-export function ga4Summary({ totals = {}, previousTotals = {} } = {}) {
+export function ga4Summary({
+  totals = {}, previousTotals = {}, collected = [], collectedAvailable = false, windows = {}, asOf = '',
+  keyEvents = [],
+} = {}) {
   const hasPrevious = num(previousTotals.sessions) > 0
   return {
+    collection: collectionState({ collected, collectedAvailable, windows, today: asOf }),
+    keyEventRows: keyEventRows(keyEvents),
     sessions: num(totals.sessions),
     users: num(totals.totalUsers),
     newUsers: num(totals.newUsers),
