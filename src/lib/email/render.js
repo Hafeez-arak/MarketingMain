@@ -68,13 +68,13 @@ export function escapeHtml(s) {
 
 // Only http(s) and mailto links survive. A javascript: URL in an email body
 // is not something any sender needs.
-function safeHref(url) {
+export function safeHref(url) {
   const u = String(url || '').trim()
   return /^(https?:\/\/|mailto:)/i.test(u) ? u : ''
 }
 
 /** Inline formatting on ONE already-escaped-safe line. */
-function inline(line, { linkStyle = '' } = {}) {
+export function inline(line, { linkStyle = '' } = {}) {
   let out = escapeHtml(line)
   out = out.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (whole, label, url) => {
     const href = safeHref(url.replace(/&amp;/g, '&'))
@@ -85,7 +85,7 @@ function inline(line, { linkStyle = '' } = {}) {
 }
 
 /** Body text → blocks of paragraphs and bullet lists. */
-function blocks(text) {
+export function blocks(text) {
   const out = []
   for (const chunk of String(text || '').replace(/\r\n/g, '\n').split(/\n{2,}/)) {
     const lines = chunk.split('\n').map(l => l.trimEnd()).filter(l => l.trim())
@@ -110,7 +110,7 @@ export function toPlainText(text) {
     .trim()
 }
 
-const FOOTER_COPY = {
+export const FOOTER_COPY = {
   en: {
     why: name => `You are receiving this because you are in touch with ${name}.`,
     unsubscribe: 'Unsubscribe',
@@ -166,7 +166,7 @@ export function renderEmail({
   const address = String(sender.company_address || '').trim()
   const linkStyle = 'color:#1a1a1a;text-decoration:underline'
   const content = blocks(filledBody).map(b => b.type === 'list'
-    ? `<ul style="margin:0 0 16px;padding-${rtl ? 'right' : 'left'}:20px">${b.items.map(i => `<li style="margin:0 0 6px">${inline(i, { linkStyle })}</li>`).join('')}</ul>`
+    ? `<ul style="margin:0 0 16px;padding-${rtl ? 'right' : 'left'}:20px;list-style-type:disc">${b.items.map(i => `<li style="margin:0 0 6px">${inline(i, { linkStyle })}</li>`).join('')}</ul>`
     : `<p style="margin:0 0 16px">${b.lines.map(l => inline(l, { linkStyle })).join('<br>')}</p>`).join('\n')
 
   const footerLines = [

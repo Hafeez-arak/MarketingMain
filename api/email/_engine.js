@@ -1,6 +1,7 @@
 import crypto from 'node:crypto'
 import { pickRecipients, blockReason } from '../../src/lib/email/contacts.js'
 import { renderEmail, marketingProblems } from '../../src/lib/email/render.js'
+import { renderDesign, designChecks, hasDesign } from '../../src/lib/email/design.js'
 import { dailyCap } from '../../src/lib/email/warmup.js'
 import { brandDateKey, brandWallToUtcISO } from '../../src/lib/brandTime.js'
 
@@ -57,7 +58,12 @@ export async function launchCampaign({ db }, { workspaceId, campaignId, when, sc
   if (!['draft', 'paused', 'scheduled'].includes(campaign.status)) {
     return { error: `This campaign is already ${campaign.status}.`, status: 409 }
   }
-  const problems = marketingProblems({ subject: campaign.subject, body: campaign.body, sender: settings })
+  const designed = hasDesign(campaign.design)
+  const problems = [
+    // A designed email has no `body` to check; its blocks are checked instead.
+    ...marketingProblems({ subject: campaign.subject, body: designed ? 'designed' : campaign.body, sender: settings }),
+    ...(designed ? designChecks(campaign.design).problems : []),
+  ]
   if (problems.length) return { error: problems.join(' '), status: 400 }
   if (!campaign.group_ids?.length) return { error: 'Choose at least one group to send to.', status: 400 }
 
@@ -211,17 +217,20 @@ export async function dispatch(deps, { workspaceId, baseUrl, now = new Date() })
         company_address: settings.company_address,
       }
       const unsub = unsubscribeUrl(baseUrl, contact.unsubscribe_token)
-      const rendered = renderEmail({
-        audience: 'marketing',
+      const common = {
         subject: s.subject || campaign.subject,
         preheader: campaign.preheader,
-        body: s.body || campaign.body,
         // The campaign's language, not the contact's: it is the language the
         // body is written in, and an English letter laid out right-to-left
         // with an Arabic footer reads as broken.
         language: campaign.language,
         contact, sender, unsubscribeUrl: unsub,
-      })
+      }
+      // A per-recipient body override is plain text by definition, so it wins
+      // over the design; otherwise a designed campaign sends its design.
+      const rendered = hasDesign(campaign.design) && !s.body
+        ? renderDesign({ ...common, design: campaign.design })
+        : renderEmail({ ...common, audience: 'marketing', body: s.body || campaign.body })
       outgoing.push({
         send: s, contact,
         email: {

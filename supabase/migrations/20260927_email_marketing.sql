@@ -122,6 +122,11 @@ create table if not exists public.email_campaigns (
   -- "- " bullets) and merge tags. Rendered to HTML at send time by
   -- src/lib/email/render.js, so what the preview shows is what goes out.
   body            text not null default '',
+  -- The drag-and-drop design: { version, style, blocks[] }, rendered by
+  -- src/lib/email/design.js. Null means the email is the plain `body`.
+  -- `body` is kept either way: it is what the AI writes and what a plain
+  -- email sends.
+  design          jsonb,
   -- The language the email is WRITTEN in. It sets the layout (right-to-left
   -- for Arabic) and the footer, whatever the recipient prefers.
   language        text not null default 'en' check (language in ('en','ar')),

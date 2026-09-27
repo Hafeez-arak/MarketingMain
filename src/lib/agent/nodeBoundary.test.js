@@ -96,6 +96,7 @@ describe('the agent runs in Node, not in a bundle', () => {
     'src/lib/email/render.js',
     'src/lib/email/warmup.js',
     'src/lib/email/draft.js',
+    'src/lib/email/design.js',
     'api/email/_engine.js',
     'api/email/_resend.js',
     'api/email/[action].js',
