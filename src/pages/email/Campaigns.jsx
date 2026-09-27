@@ -137,9 +137,8 @@ function CampaignList({ audience, data, loading, setTab, workspaceId, reload }) 
 function ColdLaneNotice() {
   return (
     <Notice tone="sky" title="Cold outreach is written here, but not sent yet">
-      Cold emails never go through Resend: its terms forbid emailing people who did not opt in, and a suspension would stop your customer newsletter too.
-      They will send from a separate outreach domain and mailbox (about $12/year plus $7/month) with a small daily limit, follow-ups that stop on a reply, and an opt-out in every email.
-      Until that mailbox exists you can build groups, write and personalise emails, send yourself a test, and export them to send by hand.
+      Cold emails never go out through the marketing sender, so a complaint here can never affect your newsletters.
+      Sending opens once the separate outreach mailbox is connected. Until then you can build groups, write and personalise emails, send yourself a test, and export them to send by hand.
     </Notice>
   )
 }
@@ -410,7 +409,7 @@ function Composer({ audience, campaign, data, workspaceId, reload, setTab, statu
                 {sending ? 'Sending…' : 'Send test'}
               </Button>
             </div>
-            {!status?.configured?.resend && <p className="text-[11px] text-text-tertiary">Tests need RESEND_API_KEY on the server (see Settings).</p>}
+            {!status?.configured?.resend && <p className="text-[11px] text-text-tertiary">Sending is not switched on yet.</p>}
 
             {cold ? (
               <div className="flex flex-wrap gap-2 pt-1 border-t border-border">

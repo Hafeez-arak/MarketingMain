@@ -12,10 +12,10 @@ export function explainResendError(status, body) {
   const msg = String(body?.message || body?.error || '').trim()
   const name = String(body?.name || '')
   if (status === 401 || name === 'missing_api_key' || name === 'invalid_api_key') {
-    return 'Resend rejected the API key. Check RESEND_API_KEY in the Vercel project settings.'
+    return 'The email service rejected the sending key.'
   }
   if (status === 403 && /domain/i.test(msg)) {
-    return `Resend will not send from this address yet: ${msg} Verify the sending domain in Resend (Domains → Add domain) and add its DNS records in GoDaddy.`
+    return `The sending domain is not verified yet, so this address cannot send. (${msg})`
   }
   if (status === 403 && /testing emails|own email/i.test(msg)) {
     return `${msg} Until your domain is verified, Resend only lets you send test emails to the address you signed up with.`

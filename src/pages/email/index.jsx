@@ -20,7 +20,7 @@ import { Notice } from './parts'
 //   Marketing  campaigns to people who know us, sent through Resend
 //   Cold       outreach to prospects: written here, sent from the outreach
 //              mailbox once it exists (never through Resend)
-//   Settings   sender, footer, limits, warm-up, and the setup steps
+//   Settings   sender, footer, limits, warm-up
 //
 // All data for the section loads once, here, and is handed down. At the
 // sizes this is built for (a few thousand contacts) that is simpler and
@@ -28,12 +28,12 @@ import { Notice } from './parts'
 // every tab agree with each other.
 
 const TABS = [
-  { key: 'overview', label: 'Overview', note: 'How sending is going, and anything that needs doing' },
+  { key: 'overview', label: 'Overview', note: 'How sending is going' },
   { key: 'contacts', label: 'Contacts', note: 'Everyone you can email: add, import, tag, group' },
   { key: 'groups', label: 'Groups', note: 'Named lists that campaigns are sent to' },
   { key: 'marketing', label: 'Marketing', note: 'Newsletters and updates to people who know us, sent through Resend' },
   { key: 'cold', label: 'Cold outreach', note: 'Personal first emails to prospects, sent from the separate outreach mailbox' },
-  { key: 'settings', label: 'Settings', note: 'Sender, footer, sending limits, warm-up and setup' },
+  { key: 'settings', label: 'Settings', note: 'Sender, footer, sending limits and warm-up' },
 ]
 
 export function EmailFlows() {
@@ -127,7 +127,7 @@ export function EmailFlows() {
 
       {error && (
         <Notice tone="red" title="Could not load email data">
-          {error}. If this says a table does not exist, the database migration has not been applied.
+          {error}
         </Notice>
       )}
 
