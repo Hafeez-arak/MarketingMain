@@ -28,7 +28,7 @@ function check({ data, error }) {
 
 export async function fetchEmailData(ws) {
   const since = new Date(Date.now() - 30 * 86_400_000).toISOString()
-  const [contacts, groups, members, campaigns, stats, settingsRows, sends] = await Promise.all([
+  const [contacts, groups, members, campaigns, stats, settingsRows, sends, aiDrafts] = await Promise.all([
     all(() => supabase.from('email_contacts').select('*').eq('workspace_id', ws).order('created_at', { ascending: false })),
     all(() => supabase.from('email_groups').select('*').eq('workspace_id', ws).order('name')),
     all(() => supabase.from('email_group_members').select('group_id,contact_id').eq('workspace_id', ws)),
@@ -38,8 +38,13 @@ export async function fetchEmailData(ws) {
     all(() => supabase.from('email_sends')
       .select('campaign_id,sent_at,opened_at,clicked_at,bounced_at,complained_at')
       .eq('workspace_id', ws).gte('sent_at', since)),
+    // The latest weekly AI drafts. A failure here (say, the table not yet
+    // migrated) must not blank the whole section, so it degrades to none.
+    supabase.from('email_ai_drafts').select('*').eq('workspace_id', ws)
+      .order('week_of', { ascending: false }).limit(1)
+      .then(r => r.data || [], () => []),
   ])
-  return { contacts, groups, members, campaigns, stats, settings: settingsRows[0] || null, recentSends: sends }
+  return { contacts, groups, members, campaigns, stats, settings: settingsRows[0] || null, recentSends: sends, aiDrafts: aiDrafts[0] || null }
 }
 
 // ── Contacts ──
@@ -215,4 +220,13 @@ export async function duplicateCampaign(ws, campaign) {
   for (const k of CAMPAIGN_FIELDS) if (campaign[k] !== undefined) copy[k] = campaign[k]
   copy.name = `${campaign.name || campaign.subject || 'Untitled'} (copy)`
   return saveCampaign(ws, copy)
+}
+
+// ── Weekly AI drafts ──
+
+/** Record what happened to one option (used → which campaign; or dismissed). */
+export async function markWeeklyOption(ws, row, index, patch) {
+  const options = (row.options || []).map((o, i) => (i === index ? { ...o, ...patch } : o))
+  return check(await supabase.from('email_ai_drafts').update({ options, updated_at: new Date().toISOString() })
+    .eq('id', row.id).eq('workspace_id', ws).select().single())
 }
