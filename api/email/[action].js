@@ -1,3 +1,4 @@
+import crypto from 'node:crypto'
 import { db, isConfigured } from '../agent/_supabase.js'
 import { callModel } from '../agent/_provider.js'
 import { loadBrandContext } from '../agent/_context.js'
@@ -12,6 +13,10 @@ import {
   launchCampaign, dispatch, applyEvent, unsubscribe, verifySvix, loadSettings,
   sendingStats, fromHeader, closeFinished,
 } from './_engine.js'
+import { launchColdCampaign, coldTick } from './_cold.js'
+import { sealSecret, openSecret } from './_secrets.js'
+import { verifyMailbox, sendFromMailbox } from './_mailbox.js'
+import { mailboxDomainProblem, domainOf, HARD_MAX_PER_MAILBOX } from '../../src/lib/email/cold.js'
 
 // ─── /api/email/<action> ───────────────────────────────────────────────────
 // One Vercel function for the whole Email section. The Hobby plan builds at
@@ -30,6 +35,8 @@ import {
 //   the public         GET/POST /unsubscribe?t=<token>. The token is the only
 //                      key, and all it can do is unsubscribe its own address.
 //   Vercel Cron        GET /cron with Bearer CRON_SECRET: the morning run.
+//   n8n (the box)      GET /cold-tick with Bearer CRON_SECRET, every 10
+//                      minutes: the cold lane's sending run.
 
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || ''
 const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || ''
@@ -114,6 +121,15 @@ async function isMember(workspaceId, token) {
 
 const deps = () => ({ db, count, resend: createResend({ apiKey: RESEND_KEY }) })
 
+// The cold lane's IO: our own mailboxes over SMTP, never Resend.
+const coldDeps = () => ({
+  db, count,
+  mail: { send: sendFromMailbox },
+  open: sealed => openSecret(sealed, SERVICE_KEY),
+  uuid: () => crypto.randomUUID(),
+  random: Math.random,
+})
+
 function needResend() {
   return RESEND_KEY ? null
     // Said plainly, without setup instructions: those live in
@@ -132,6 +148,8 @@ const actions = {
     const stats = await sendingStats({ count }, { workspaceId })
     const cap = dailyCap({ settings, today: stats.today, sentToday: stats.sentToday, sentThisMonth: stats.sentThisMonth, recent: stats.recent })
     return {
+      // cron covers both the morning marketing run and the cold sending run:
+      // n8n calls /cold-tick with the same secret.
       configured: { resend: Boolean(RESEND_KEY), webhook: Boolean(WEBHOOK_SECRET), cron: Boolean(CRON_SECRET) },
       settings, stats, cap,
     }
@@ -165,11 +183,19 @@ const actions = {
   },
 
   async launch({ workspaceId, body }) {
-    const missing = needResend(); if (missing) return fail(missing, 503)
     if (!isUuid(body.campaign_id)) return fail('campaign_id is required.')
-    const settings = await loadSettings({ db }, workspaceId)
     const when = body.when === 'schedule' ? 'schedule' : 'now'
     if (when === 'schedule' && !/^\d{4}-\d{2}-\d{2}$/.test(String(body.date || ''))) return fail('Pick a date to schedule for.')
+    const [lane] = await db(`email_campaigns?id=eq.${body.campaign_id}&workspace_id=eq.${workspaceId}&select=audience`) || []
+    if (lane?.audience === 'cold') {
+      // Cold goes out from our own mailboxes on the next sending runs, never
+      // through Resend, so it needs no Resend key and sends nothing here.
+      const out = await launchColdCampaign({ db }, { workspaceId, campaignId: body.campaign_id, when, scheduleDate: body.date })
+      if (out.error) return fail(out.error, out.status || 400)
+      return out
+    }
+    const missing = needResend(); if (missing) return fail(missing, 503)
+    const settings = await loadSettings({ db }, workspaceId)
     const out = await launchCampaign({ db }, { workspaceId, campaignId: body.campaign_id, when, scheduleDate: body.date, settings })
     if (out.error) return fail(out.error, out.status || 400)
     let dispatched = null
@@ -260,6 +286,137 @@ const actions = {
     const parsed = parseDrafts(textIn(out.response))
     if (!parsed.ok) return fail(parsed.error, 502)
     return { options: parsed.options, cost: out.cost || 0 }
+  },
+
+  // ── Outreach mailboxes ──
+  // Every write goes through here (RLS lets people only read them): the
+  // domain is checked, the login is proven before anything is stored, and
+  // the password is stored sealed, in a table nobody but the server reads.
+
+  async mailbox_save({ workspaceId, body, user }) {
+    const input = body.mailbox || {}
+    const id = isUuid(input.id) ? input.id : null
+    const [existing] = id ? await db(`email_mailboxes?id=eq.${id}&workspace_id=eq.${workspaceId}&select=*`) || [] : []
+    if (id && !existing) return fail('That mailbox is not in this workspace.', 404)
+
+    const email = normalizeEmail(input.email ?? existing?.email)
+    const settings = await loadSettings({ db }, workspaceId)
+    const problem = mailboxDomainProblem(email, [settings.from_email, settings.reply_to, user?.email].map(domainOf))
+    if (problem) return fail(problem)
+
+    const row = {
+      email,
+      from_name: String(input.from_name ?? existing?.from_name ?? '').replace(/[<>"]/g, '').trim().slice(0, 100),
+      signature: String(input.signature ?? existing?.signature ?? '').slice(0, 1000),
+      smtp_host: String(input.smtp_host ?? existing?.smtp_host ?? '').trim().toLowerCase(),
+      smtp_port: Number(input.smtp_port ?? existing?.smtp_port ?? 465),
+      imap_host: String(input.imap_host ?? existing?.imap_host ?? '').trim().toLowerCase(),
+      imap_port: Number(input.imap_port ?? existing?.imap_port ?? 993),
+      username: normalizeEmail(input.username ?? existing?.username ?? '') || email,
+      daily_limit: Math.max(0, Math.min(HARD_MAX_PER_MAILBOX, Math.round(Number(input.daily_limit ?? existing?.daily_limit ?? 15)) || 0)),
+      warmup_started_on: /^\d{4}-\d{2}-\d{2}$/.test(String(input.warmup_started_on || ''))
+        ? input.warmup_started_on
+        : (input.warmup_started_on === null || input.warmup_started_on === '' ? null : existing?.warmup_started_on ?? null),
+    }
+    if (!/^[a-z0-9.-]+\.[a-z]{2,}$/.test(row.smtp_host) || !/^[a-z0-9.-]+\.[a-z]{2,}$/.test(row.imap_host)) {
+      return fail('Enter the sending (SMTP) and reading (IMAP) server names.')
+    }
+    if (![row.smtp_port, row.imap_port].every(p => Number.isInteger(p) && p > 0 && p < 65536)) return fail('The ports must be numbers.')
+
+    // Google shows app passwords in groups of four; the spaces are not part of it.
+    const typed = String(body.password || '')
+    const given = row.smtp_host === 'smtp.gmail.com' ? typed.replace(/\s+/g, '') : typed
+    const connectionChanged = !existing || ['email', 'username', 'smtp_host', 'smtp_port', 'imap_host', 'imap_port']
+      .some(k => String(row[k]) !== String(existing[k]))
+    const stored = existing ? openSecret((await db(`email_mailbox_secrets?mailbox_id=eq.${existing.id}&select=secret`) || [])[0]?.secret, SERVICE_KEY) : null
+    const password = given || stored
+    if (!password) return fail(existing ? 'Paste the app password again to reconnect this mailbox.' : 'Paste the mailbox\'s app password.')
+
+    const now = new Date().toISOString()
+    if (given || connectionChanged || existing?.status === 'error') {
+      const check = await verifyMailbox(row, password)
+      if (!check.ok) return fail(check.error)
+      Object.assign(row, { last_checked_at: now, last_error: '' })
+      // A mailbox that failed its login is fixed by a login that works.
+      if (!existing || existing.status === 'error') Object.assign(row, { status: 'active', status_reason: '' })
+    }
+
+    let saved
+    if (existing) {
+      ;[saved] = await db(`email_mailboxes?id=eq.${existing.id}&workspace_id=eq.${workspaceId}`, {
+        method: 'PATCH', prefer: 'return=representation', body: { ...row, updated_at: now },
+      }) || []
+    } else {
+      const dupe = await db(`email_mailboxes?workspace_id=eq.${workspaceId}&email=eq.${encodeURIComponent(email)}&select=id`) || []
+      if (dupe.length) return fail('That mailbox is already connected.')
+      ;[saved] = await db('email_mailboxes', {
+        method: 'POST', prefer: 'return=representation',
+        body: { ...row, workspace_id: workspaceId, provider: 'smtp', created_by: user?.id || null },
+      }) || []
+    }
+    if (!saved) return fail('The mailbox could not be saved.', 500)
+    if (given) {
+      await db('email_mailbox_secrets?on_conflict=mailbox_id', {
+        method: 'POST', prefer: 'resolution=merge-duplicates,return=minimal',
+        body: { mailbox_id: saved.id, workspace_id: workspaceId, secret: sealSecret(given, SERVICE_KEY), updated_at: now },
+      })
+    }
+    return { mailbox: saved, verified: Boolean(row.last_checked_at) }
+  },
+
+  async mailbox_pause({ workspaceId, body, user }) {
+    if (!isUuid(body.mailbox_id)) return fail('mailbox_id is required.')
+    const [mb] = await db(`email_mailboxes?id=eq.${body.mailbox_id}&workspace_id=eq.${workspaceId}&select=id,status`) || []
+    if (!mb) return fail('That mailbox is not in this workspace.', 404)
+    if (!body.paused && mb.status === 'error') return fail('This mailbox\'s login stopped working. Reconnect it with a new app password to resume.')
+    await db(`email_mailboxes?id=eq.${mb.id}&workspace_id=eq.${workspaceId}`, {
+      method: 'PATCH', prefer: 'return=minimal',
+      body: body.paused
+        ? { status: 'paused', status_reason: `Paused by ${user?.email || 'a person'}.`, updated_at: new Date().toISOString() }
+        : { status: 'active', status_reason: '', updated_at: new Date().toISOString() },
+    })
+    return { mailbox_id: mb.id, paused: Boolean(body.paused) }
+  },
+
+  async mailbox_delete({ workspaceId, body }) {
+    if (!isUuid(body.mailbox_id)) return fail('mailbox_id is required.')
+    const now = new Date().toISOString()
+    // Follow-ups belong to their thread's mailbox; without it they cannot go.
+    await db(`email_sends?workspace_id=eq.${workspaceId}&mailbox_id=eq.${body.mailbox_id}&status=eq.queued`, {
+      method: 'PATCH', prefer: 'return=minimal', body: { status: 'cancelled', error: 'Mailbox removed', updated_at: now },
+    })
+    await db(`email_mailboxes?id=eq.${body.mailbox_id}&workspace_id=eq.${workspaceId}`, { method: 'DELETE', prefer: 'return=minimal' })
+    return { deleted: body.mailbox_id }
+  },
+
+  /** One email from a mailbox to the person asking: proves it lands, sends nothing to prospects. */
+  async mailbox_test({ workspaceId, body, user }) {
+    if (!isUuid(body.mailbox_id)) return fail('Choose a mailbox to send the test from.')
+    const [mb] = await db(`email_mailboxes?id=eq.${body.mailbox_id}&workspace_id=eq.${workspaceId}&select=*`) || []
+    if (!mb) return fail('That mailbox is not in this workspace.', 404)
+    const to = normalizeEmail(body.to || user?.email)
+    if (!isValidEmail(to)) return fail('Enter a valid address to send the test to.')
+    const password = openSecret((await db(`email_mailbox_secrets?mailbox_id=eq.${mb.id}&select=secret`) || [])[0]?.secret, SERVICE_KEY)
+    if (!password) return fail('This mailbox\'s password can no longer be read. Reconnect it.')
+    const sample = { first_name: body.sample?.first_name || 'Sara', last_name: body.sample?.last_name || '', company: body.sample?.company || 'Example Co', job_title: '', city: 'Riyadh', email: to }
+    const rendered = renderEmail({
+      audience: 'cold',
+      subject: `[TEST] ${body.subject || 'Outreach mailbox check'}`,
+      body: body.body || 'Hi {{first_name|there}},\n\nThis is a test from the outreach mailbox. If it arrived in the inbox (not spam or Promotions), this mailbox is ready.',
+      language: body.language === 'ar' ? 'ar' : 'en', contact: sample, signature: mb.signature,
+    })
+    const r = await sendFromMailbox(mb, password, {
+      from: { name: mb.from_name || '', address: mb.email }, to: { name: '', address: to },
+      subject: rendered.subject, text: rendered.text, html: rendered.html,
+      messageId: `<${crypto.randomUUID()}@${domainOf(mb.email)}>`,
+    })
+    if (!r.ok) return fail(String(r.error?.response || r.error?.message || 'The test could not be sent.').slice(0, 300), 502)
+    return { sent_to: to, from: mb.email }
+  },
+
+  /** "What goes out next": the sending run, decided but not done. */
+  async cold_preview({ workspaceId }) {
+    return { preview: await coldTick(coldDeps(), { dryRun: true, workspaceId }) }
   },
 
   /** Is the campaign ready to send? The same check launch makes. */
@@ -361,6 +518,12 @@ async function handleCron(req, res) {
   return res.status(200).json({ ok: true, workspaces: workspaces.length, results })
 }
 
+async function handleColdTick(req, res) {
+  if (!CRON_SECRET || bearerOf(req) !== CRON_SECRET) return res.status(401).json({ ok: false })
+  const out = await coldTick(coldDeps())
+  return res.status(200).json({ ok: true, ...out })
+}
+
 // ─── Entry ─────────────────────────────────────────────────────────────────
 
 export const isAction = name => Object.prototype.hasOwnProperty.call(actions, name)
@@ -375,6 +538,7 @@ export default async function handler(req, res) {
     if (action === 'unsubscribe') return await handleUnsubscribe(req, res)
     if (action === 'webhook') return await handleWebhook(req, res)
     if (action === 'cron') return await handleCron(req, res)
+    if (action === 'cold-tick') return await handleColdTick(req, res)
   } catch (err) {
     return res.status(500).json({ ok: false, error: String(err.message || err).slice(0, 300) })
   }

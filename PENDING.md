@@ -143,16 +143,30 @@ business line with no page in the index.
 The section is live (contacts, groups, marketing campaigns through Resend,
 cold outreach written but not sent, warm-up, webhooks, unsubscribe). Parked:
 
-- **Cold sending.** Needs a separate domain (not arak-sa.com, not a subdomain
-  of it) and a Google Workspace mailbox, warmed for 2–3 weeks before the first
-  cold send. Then: send through the mailbox's API at 20–40/day, follow-ups on
-  `delay_days`, stop on reply (needs inbox read access to see replies).
-  Until then the Cold tab exports personalised emails as CSV.
+- **Cold sending — built 2026-09-29 (sending half).** Outreach mailboxes
+  (Google, app password, SMTP), the 10-minute sending run driven by the n8n
+  workflow "Email — cold sender", ramp 5 → 10 → limit, working hours, threaded
+  follow-ups, 90-day re-contact rule, bounce brake, master switch. Rules in
+  `src/lib/email/cold.js`, engine in `api/email/_cold.js`. Setup owed by the
+  owner: docs/EMAIL-SETUP.md sections 12–16. Still to build:
+  - **Reading the inboxes (next).** IMAP sync per mailbox: a reply sets
+    `replied_at` (on the contact and the send) and cancels queued follow-ups;
+    a bounce notice (mailer-daemon, DSN) bounces the contact; "stop / remove
+    me / إلغاء" unsubscribes; AI sorts the rest into interested / not now /
+    out of office. `imapflow` and `mailparser` are already installed, and
+    `email_sends.message_id` is stored for matching. Until then replies are
+    marked by hand (Contacts → "They replied").
+  - **Instantly as a second sender.** `email_mailboxes.provider` allows
+    'instantly'; nothing uses it yet.
+  - **Stuck 'sending' rows.** A run that dies after the SMTP server took the
+    email leaves the row 'sending' forever, on purpose (no duplicate cold
+    email). Nothing surfaces these yet.
 - **Research leads → cold contacts.** `email_contacts.opportunity_id` exists and
   the draft prompt uses it, but nothing yet turns a research lead into people
   with addresses. Needs an email-finding source (Hunter/Apollo or manual).
 - **Website sign-up.** A catalogue-download form on arak-sa.com that inserts a
   marketing contact with `consent = 'opted_in'`, `source = 'website'`.
-- **Address verification** before a first send to an old list (ZeroBounce or
-  similar, ~$0.008/address). The importer rejects malformed addresses only.
+- **Address verification** before a first send to an old list, and before
+  importing any bought cold list (MillionVerifier, ZeroBounce, ~$0.002–0.008
+  per address). The importer rejects malformed addresses only.
 

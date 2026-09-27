@@ -135,11 +135,12 @@ export const FOOTER_COPY = {
  * @param {object} [args.contact]
  * @param {object} [args.sender]         { from_name, company_address }
  * @param {string} [args.unsubscribeUrl]
+ * @param {string} [args.signature]      cold only: the sending mailbox's signature
  * @returns {{ subject: string, html: string, text: string }}
  */
 export function renderEmail({
   audience, subject, preheader = '', body, language = 'en', contact = null,
-  sender = {}, unsubscribeUrl = '',
+  sender = {}, unsubscribeUrl = '', signature = '',
 }) {
   const rtl = language === 'ar'
   const dir = rtl ? 'rtl' : 'ltr'
@@ -154,11 +155,14 @@ export function renderEmail({
     const optOut = language === 'ar'
       ? 'إذا لم تكن الشخص المناسب أو لا ترغب في رسائل أخرى، يكفي أن ترد بكلمة "توقف".'
       : 'If this is not relevant to you, just reply "stop" and I will not email again.'
-    const text = `${toPlainText(filledBody)}\n\n${optOut}`
+    // The sending mailbox's signature (name, role, phone), as typed text.
+    const sig = String(signature || '').replace(/\r\n/g, '\n').trim()
+    const text = `${toPlainText(filledBody)}${sig ? `\n\n${sig}` : ''}\n\n${optOut}`
     const paras = blocks(filledBody).map(b => b.type === 'list'
       ? `<ul>${b.items.map(i => `<li>${inline(i)}</li>`).join('')}</ul>`
       : `<p>${b.lines.map(l => inline(l)).join('<br>')}</p>`).join('\n')
-    const html = `<div dir="${dir}" style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.5;color:#222;text-align:${align}">\n${paras}\n<p style="color:#777;font-size:12px">${escapeHtml(optOut)}</p>\n</div>`
+    const sigHtml = sig ? `\n<p>${sig.split('\n').map(escapeHtml).join('<br>')}</p>` : ''
+    const html = `<div dir="${dir}" style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.5;color:#222;text-align:${align}">\n${paras}${sigHtml}\n<p style="color:#777;font-size:12px">${escapeHtml(optOut)}</p>\n</div>`
     return { subject: filledSubject, html, text }
   }
 

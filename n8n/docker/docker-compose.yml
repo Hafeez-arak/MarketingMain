@@ -88,6 +88,10 @@ services:
       # Vercel: the "Agent — weekly research run" workflow calls
       # $env.AGENT_BASE_URL/api/agent/{run,lens,synthesise}.
       - AGENT_BASE_URL=http://agent:3000
+      # The app on Vercel, for the "Email — cold sender" workflow's call to
+      # /api/email/cold-tick every 10 minutes. Not a secret; the secret it
+      # sends (CRON_SECRET) lives in .env with the same value as on Vercel.
+      - APP_BASE_URL=https://marketing-main-ten.vercel.app
     volumes:
       - arak_marketing_n8n_data:/home/node/.n8n
       - ../workflows:/workflows:ro

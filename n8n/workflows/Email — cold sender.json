@@ -1,0 +1,136 @@
+{
+  "name": "Email — cold sender",
+  "nodes": [
+    {
+      "id": "note",
+      "name": "Note: cold sender",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -660,
+        -40
+      ],
+      "parameters": {
+        "content": "## Email — cold sender\n\nEvery 10 minutes, calls the app's cold sending run on Vercel: `GET $APP_BASE_URL/api/email/cold-tick` with `Bearer $CRON_SECRET`.\n\nThe run itself decides everything (src/lib/email/cold.js): it sends only Sunday–Thursday 09:00–17:00 Riyadh, at most ONE email per outreach mailbox per call, within each mailbox's ramp and daily limit, and only for workspaces whose cold switch is on (Email → Settings). Outside those hours a call returns at once and sends nothing, so this schedule does not need to know them.\n\n**Never add retryOnFail to the HTTP node.** A retry of a call whose email already left would be refused by the row claim, but there is nothing to gain.\n\nNeeds on the box: `CRON_SECRET` in n8n/docker/.env (the same value as on Vercel), and `APP_BASE_URL` (set in docker-compose.yml).",
+        "height": 380,
+        "width": 620
+      }
+    },
+    {
+      "id": "trigger_every_10",
+      "name": "Every 10 minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -620,
+        420
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "*/10 * * * *"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "trigger_manual",
+      "name": "Run now",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -620,
+        600
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "tick",
+      "name": "GET /api/email/cold-tick",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -380,
+        500
+      ],
+      "onError": "continueRegularOutput",
+      "notes": "Sends real email. No retryOnFail on purpose.",
+      "parameters": {
+        "method": "GET",
+        "url": "={{ ($env.APP_BASE_URL || 'https://marketing-main-ten.vercel.app').replace(/\\/$/, '') }}/api/email/cold-tick",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.CRON_SECRET }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 280000,
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "report",
+      "name": "What happened",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -140,
+        500
+      ],
+      "parameters": {
+        "jsCode": "// The line a person reads when checking on this in n8n.\n// $input, not $json: this Code node runs once for all items.\nconst r = $input.first().json || {};\nif (!String($env.CRON_SECRET || '').trim()) {\n  return [{ json: { summary: 'CRON_SECRET is not set on the box, so the app refuses this call. Add it to n8n/docker/.env (the same value as on Vercel) and restart n8n.' } }];\n}\nif (r.ok !== true) {\n  return [{ json: { summary: `The app refused or failed (${r.statusCode || r.error || 'no answer'}). Check CRON_SECRET matches Vercel's.`, ...r } }];\n}\nif (!r.window) {\n  return [{ json: { summary: `Outside sending hours. Next window: ${r.nextWindow || 'unknown'}.` } }];\n}\nconst lines = (r.workspaces || []).flatMap(w => (w.mailboxes || []).map(m => `${m.mailbox}: ${m.reason}`));\nreturn [{ json: { summary: `Sent ${r.sent || 0}, skipped ${r.skipped || 0}, failed ${r.failed || 0}.`, mailboxes: lines, ...r } }];\n"
+      }
+    }
+  ],
+  "connections": {
+    "Every 10 minutes": {
+      "main": [
+        [
+          {
+            "node": "GET /api/email/cold-tick",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run now": {
+      "main": [
+        [
+          {
+            "node": "GET /api/email/cold-tick",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GET /api/email/cold-tick": {
+      "main": [
+        [
+          {
+            "node": "What happened",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}

@@ -12,7 +12,7 @@ export const AUDIENCES = {
   },
   cold: {
     label: 'Cold',
-    hint: 'Never opted in: prospects found through research. Sent only from the separate outreach mailbox.',
+    hint: 'Never opted in: prospects found through research. Sent only from the outreach mailboxes, one at a time.',
   },
 }
 
