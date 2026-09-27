@@ -61,6 +61,11 @@ export const JOBS = {
   // the real payload on 2026-09-20 — Sonnet would save a cent and buy a
   // worse first paragraph.
   explain:     'claude-opus-5',
+  // Drafting an email that goes to customers or prospects under the company's
+  // name. A person edits it, but the draft sets the tone they start from, and
+  // three options a person would not send cost more in rewriting than the
+  // model saves. A few calls a week.
+  email:       'claude-opus-5',
 
   // ── Sonnet: the long middle ──
   search:      'claude-sonnet-5', // the bounded read-and-gather loop

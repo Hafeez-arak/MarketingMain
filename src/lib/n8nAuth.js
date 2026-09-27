@@ -29,7 +29,7 @@ import { supabase } from './supabaseClient'
 // disconnect real social accounts. They verify the token AND check that the
 // caller is a member of the workspace named in the body, so an unsigned call
 // cannot reach another tenant's accounts.
-const PREFIXES = ['/api/n8n/', '/api/zernio/']
+const PREFIXES = ['/api/n8n/', '/api/zernio/', '/api/email/']
 
 function isProxyCall(input) {
   try {

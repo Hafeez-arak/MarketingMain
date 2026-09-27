@@ -3,9 +3,21 @@
   "functions": {
     "api/n8n/[slot].js": {
       "maxDuration": 300
+    },
+    "api/email/[action].js": {
+      "maxDuration": 300
     }
   },
   "rewrites": [
-    { "source": "/((?!api/).*)", "destination": "/index.html" }
+    {
+      "source": "/((?!api/).*)",
+      "destination": "/index.html"
+    }
+  ],
+  "crons": [
+    {
+      "path": "/api/email/cron",
+      "schedule": "0 6 * * *"
+    }
   ]
 }

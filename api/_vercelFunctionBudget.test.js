@@ -106,6 +106,9 @@ describe('Vercel function budget', () => {
       path.join('agent', 'search.js'),
       path.join('agent', 'synthesise.js'),
       path.join('agent', 'website.js'),
+      // The whole Email section: signed-in actions, the Resend webhook, the
+      // unsubscribe page and the morning cron, behind one dynamic route.
+      path.join('email', '[action].js'),
       path.join('n8n', '[slot].js'),
       path.join('zernio', '[action].js'),
     ].sort())
