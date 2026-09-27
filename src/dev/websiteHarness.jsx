@@ -103,11 +103,45 @@ const GA4_LIVE = {
     { eventName: 'scroll', eventCount: 96, totalUsers: 61 },
     { eventName: 'form_submit', eventCount: 4, totalUsers: 4 },
   ],
+  // eventName × channel, and including a non-key event with zero, which GA4
+  // returns too. The Ads conversion is the name arak-sa.com's real one has.
   keyEvents: [
-    { sessionDefaultChannelGroup: 'Organic Search', keyEvents: 3 },
-    { sessionDefaultChannelGroup: 'Direct', keyEvents: 1 },
+    { eventName: 'ads_conversion_Contact_Us_1', sessionDefaultChannelGroup: 'Organic Search', keyEvents: 3 },
+    { eventName: 'ads_conversion_Contact_Us_1', sessionDefaultChannelGroup: 'Cross-network', keyEvents: 2 },
+    { eventName: 'form_submit', sessionDefaultChannelGroup: 'Direct', keyEvents: 1 },
+    { eventName: 'page_view', sessionDefaultChannelGroup: 'Direct', keyEvents: 0 },
   ],
   keyEventsAvailable: true,
+  // The tag predates the window: one early day, then the window's own days.
+  collected: [{ date: '2026-06-01', sessions: 2 }, ...dailyGa4().filter(d => d.sessions > 0)],
+  collectedAvailable: true,
+  asOf: '2026-09-20',
+}
+
+// The week a tag goes live, recorded from arak-sa.com on 2026-09-27: eleven
+// visits on its first morning, and a window that ends three days before it.
+// Every report inside the window is a truthful zero.
+const EMPTY_TOTALS = {
+  sessions: 0, totalUsers: 0, newUsers: 0, screenPageViews: 0,
+  engagedSessions: 0, engagementRate: 0, bounceRate: 0, averageSessionDuration: 0,
+}
+const GA4_BEFORE_TAG = {
+  ...GA4_LIVE,
+  totals: EMPTY_TOTALS, previousTotals: EMPTY_TOTALS,
+  daily: [], channels: [], sources: [], social: [], pages: [], landings: [],
+  countries: [], devices: [], events: [], keyEvents: [],
+  collected: [{ date: '2026-09-20', sessions: 11 }],
+}
+
+// Five days into the same window: the tag started on 2026-09-13.
+const GA4_PARTIAL = {
+  ...GA4_LIVE,
+  totals: {
+    sessions: 23, totalUsers: 19, newUsers: 18, screenPageViews: 51,
+    engagedSessions: 12, engagementRate: 0.5217, bounceRate: 0.4783, averageSessionDuration: 81.2,
+  },
+  daily: dailyGa4().map(d => (d.date < '2026-09-13' ? { ...d, sessions: 0, totalUsers: 0, screenPageViews: 0 } : d)),
+  collected: dailyGa4().filter(d => d.date >= '2026-09-13'),
 }
 
 // The same property a fortnight after the tagged link went into the bio: the
@@ -167,6 +201,8 @@ function dailyGa4() {
 const STATES = {
   'Live — Search Console, GA4 not connected': { search: fixture.search, ga4: fixture.ga4 },
   'Live — both connected': { search: fixture.search, ga4: GA4_LIVE, bio: BIO },
+  'GA4 — tag live after this window': { search: fixture.search, ga4: GA4_BEFORE_TAG, bio: BIO },
+  'GA4 — tag started inside this window': { search: fixture.search, ga4: GA4_PARTIAL, bio: BIO },
   'Bio link — tagged, both platforms': { search: fixture.search, ga4: GA4_TAGGED, bio: BIO },
   'Bio link — 90-day window, no taps': {
     search: fixture.search, ga4: GA4_TAGGED, bio: { ...BIO, taps: TAPS_CAPPED },

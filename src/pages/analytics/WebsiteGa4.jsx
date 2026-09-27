@@ -15,13 +15,11 @@ import { fmt, pct, duration, plural } from './format'
 // what they did next, because what they did next happened on our site. This is
 // that half.
 //
-// ── WHY THIS PANEL SHIPS BEFORE THE DATA DOES ──
+// ── WHY THIS PANEL SHIPPED BEFORE THE DATA DID ──
 //
-// arak-sa.com carries no analytics tag at all — no GA4, no GTM, no Clarity in
-// the served HTML — so this panel has nothing to draw on the day it is
-// written, and will keep having nothing until somebody installs one.
-//
-// It ships anyway, showing the four steps that would make it work, because the
+// arak-sa.com carried no analytics tag when this was written; its GA4 tag went
+// live on 2026-09-27. Until a property exists this panel shows the four steps
+// that would make it work, because the
 // alternative was the state this replaced: a dashboard card carrying a comment
 // explaining why sessions and bounce rate are absent, which nobody reading the
 // app ever sees. A panel that says "here is what is missing and here is how to
@@ -96,12 +94,57 @@ function Head({ title, subtitle, right }) {
   )
 }
 
+// ── Connected, but nothing to show for this window ──
+//
+// Two states that must not be drawn as zero sessions. `none`: the property
+// answers and has never recorded a visit — the tag is missing or not firing,
+// which is a setup problem. `after`: the tag is working and started after
+// this window ends. That second one is the normal first three days of any new
+// tag here, because the window ends three days back to match Search Console.
+function Ga4NotInWindow({ ga4, collection, custom }) {
+  if (collection.state === 'none') {
+    return (
+      <Card className="overflow-hidden">
+        <Head title="Website visits — connected, nothing recorded yet" subtitle={ga4.property} />
+        <div className="p-5">
+          <p className="text-sm text-text-secondary">
+            GA4 answers, and this property has never recorded a single visit. That is not a quiet month — it
+            means the tag is not on the site, or is not firing. Check GA4 → Reports → Realtime while you open the
+            website: if you do not see yourself within a minute, the tag is missing from the page.
+          </p>
+        </div>
+      </Card>
+    )
+  }
+  const since = shortDate(collection.firstDay)
+  return (
+    <Card className="overflow-hidden">
+      <ScopeBanner
+        title={`Google Analytics 4 · collecting since ${since}`}
+        subtitle="The tag is working. None of what it has recorded falls inside this window yet." />
+      <div className="grid grid-cols-1 sm:grid-cols-[auto_1fr] divide-y sm:divide-y-0 sm:divide-x divide-border">
+        <Tile label="Visits so far" metric="web.sessions" value={fmt(collection.sessionsSince)}
+          hint={`Since ${since}, outside this window`} />
+        <div className="p-4 flex items-center">
+          <p className="text-xs text-text-secondary leading-relaxed">
+            {custom
+              ? `This window ends before ${since}, the day the tag went live. GA4 cannot backfill, so it has nothing for these dates.`
+              : `This page reads GA4 over the same dates as Search Console, whose data settles three days late — so
+                the window ends ${shortDate(ga4.windows?.current?.end)}, before the tag's first day.${collection.readyOn
+                  ? ` GA4's numbers start appearing here on ${shortDate(collection.readyOn)}.` : ''}`}
+          </p>
+        </div>
+      </div>
+    </Card>
+  )
+}
+
 const shareOf = (rows, key) => {
   const all = rows.reduce((n, r) => n + (Number(r[key]) || 0), 0)
   return v => (all ? ((Number(v) || 0) / all) * 100 : 0)
 }
 
-export function Ga4Panels({ ga4, summary, days }) {
+export function Ga4Panels({ ga4, summary, days, custom = false }) {
   const navigate = useNavigate()
   if (!ga4) return null
 
@@ -154,15 +197,34 @@ export function Ga4Panels({ ga4, summary, days }) {
 
   if (!summary) return null
 
+  // ── Connected, and the window has nothing in it for a reason ──
+  // Either the tag has never sent a session, or it started after this window
+  // ends. Both would otherwise render as a page of zero sessions, which reads
+  // as a dead website — see `collectionState`.
+  const collection = summary.collection || { state: 'unknown' }
+  if (collection.state === 'none' || collection.state === 'after') {
+    return <Ga4NotInWindow ga4={ga4} collection={collection} custom={custom} />
+  }
+
   // Inclusive, and stated by the server — see the note in Website.jsx. GA4 is
   // handed the same window as Search Console on purpose, so this label and
-  // that one must never differ.
-  const label = `Last ${ga4.windows?.days || days} days`
+  // that one must never differ. When the tag started inside the window, the
+  // label says how much of it GA4 actually covers: four days of visits under
+  // "Last 28 days" reads as a quiet month.
+  const windowDays = ga4.windows?.days || days
+  const partial = collection.state === 'partial'
+  const label = partial
+    ? `Since ${shortDate(collection.firstDay)} · ${collection.coveredDays} of ${windowDays} days`
+    : `Last ${windowDays} days`
+  // The days before the tag existed are not quiet days; drawing them as a
+  // flat zero draws a launch as a surge.
+  const daily = partial ? (ga4.daily || []).filter(d => d.date >= collection.firstDay) : (ga4.daily || [])
   const channelShare = shareOf(ga4.channels || [], 'sessions')
   const pageShare = shareOf(ga4.pages || [], 'screenPageViews')
   const countryShare = shareOf(ga4.countries || [], 'sessions')
   const deviceShare = shareOf(ga4.devices || [], 'sessions')
-  const keyEventRows = (ga4.keyEvents || []).filter(r => Number(r.keyEvents) > 0)
+  const keyEventRows = summary.keyEventRows || []
+  const keyEventShare = shareOf(keyEventRows, 'keyEvents')
 
   return (
     <div className="space-y-4">
@@ -180,7 +242,13 @@ export function Ga4Panels({ ga4, summary, days }) {
           <Tile label="Avg visit" metric="web.avg_session" value={duration(summary.avgSessionSeconds)}
             hint={`${summary.pagesPerSession.toFixed(1)} pages per visit`} />
         </div>
-        {summary.baseline && (
+        {partial ? (
+          <p className="px-5 py-2.5 text-[11px] text-text-tertiary border-t border-border bg-surface-subtle">
+            GA4 has been collecting since {shortDate(collection.firstDay)}, so these numbers cover{' '}
+            {plural(collection.coveredDays, 'day')} of this {windowDays}-day window — Search Console's figures
+            above cover all of it. Nothing here is a rise or a fall; GA4 cannot backfill the days before the tag.
+          </p>
+        ) : summary.baseline && (
           <p className="px-5 py-2.5 text-[11px] text-text-tertiary border-t border-border bg-surface-subtle">
             The previous period holds no sessions, so nothing here is a rise or a fall. If the tag went live
             recently that is expected — GA4 cannot backfill the days before it existed.
@@ -188,7 +256,7 @@ export function Ga4Panels({ ga4, summary, days }) {
         )}
       </Card>
 
-      {(ga4.daily || []).length > 0 && (
+      {daily.length > 1 && (
         <Card className="p-5">
           <div className="flex items-start gap-2.5 mb-4">
             <IconBadge tone="steel">{Icon.trending}</IconBadge>
@@ -201,7 +269,7 @@ export function Ga4Panels({ ga4, summary, days }) {
             </div>
           </div>
           <ResponsiveContainer width="100%" height={240}>
-            <ComposedChart data={ga4.daily}>
+            <ComposedChart data={daily}>
               <CartesianGrid strokeDasharray="3 3" stroke="#e8e6e1" vertical={false} />
               <XAxis dataKey="date" tick={axisTick} tickLine={false} axisLine={{ stroke: '#e8e6e1' }}
                 tickFormatter={shortDate} minTickGap={28} />
@@ -316,8 +384,9 @@ export function Ga4Panels({ ga4, summary, days }) {
           ) : (
             <ul className="divide-y divide-border">
               {keyEventRows.map(r => (
-                <ShareRow key={r.sessionDefaultChannelGroup} label={r.sessionDefaultChannelGroup || 'Unassigned'}
-                  share={100} right={plural(r.keyEvents, 'key event')} color="#325130" />
+                <ShareRow key={r.eventName} label={r.source ? `${r.label} · ${r.source}` : r.label}
+                  share={keyEventShare(r.keyEvents)} right={plural(r.keyEvents, 'key event')} color="#325130"
+                  sub={`${r.eventName} · ${r.channels.map(c => `${c.channel} ${fmt(c.keyEvents)}`).join(' · ')}`} />
               ))}
             </ul>
           )}
@@ -383,7 +452,7 @@ function CopyField({ url }) {
   )
 }
 
-export function BioLinkPanel({ ga4, bio, arrivals = [], summary, days }) {
+export function BioLinkPanel({ ga4, bio, arrivals = [], summary, days, collection }) {
   // ── WHY THIS IS NOT GATED ON GA4 ──
   //
   // It was, for one commit, and the panel was invisible on the only site it
@@ -406,10 +475,17 @@ export function BioLinkPanel({ ga4, bio, arrivals = [], summary, days }) {
   // not an empty one. Printing 0 arrivals for either would say the bio link
   // sent nobody, which is the one sentence this panel must never say by
   // accident.
-  const counted = ga4Live && ga4.socialAvailable !== false
+  // A window that predates the tag is the same trap: its zero arrivals are
+  // true and mean nothing.
+  const beforeTag = collection?.state === 'after' || collection?.state === 'none'
+  const counted = ga4Live && ga4.socialAvailable !== false && !beforeTag
   const uncountedBecause = !ga4Live
     ? 'No analytics tag on the site, so arrivals cannot be counted.'
-    : 'GA4 rejected the report that counts this.'
+    : beforeTag
+      ? (collection.firstDay
+        ? `The tag went live on ${shortDate(collection.firstDay)}, after this window ends.`
+        : 'GA4 has not recorded any visits yet.')
+      : 'GA4 rejected the report that counts this.'
   const label = `Last ${(ga4Live && ga4.windows?.days) || days} days`
   const share = shareOf(arrivals, 'sessions')
   const untaggedOnly = summary && summary.sessions > 0 && !summary.anyTagged
@@ -503,6 +579,11 @@ export function BioLinkPanel({ ga4, bio, arrivals = [], summary, days }) {
             but nothing will be counted arriving on them.
           </p>
         </div>
+      ) : beforeTag ? (
+        <p className="px-5 py-4 text-xs text-text-tertiary">
+          Arrivals are counted from the tag's first day onward — the GA4 panel above says when they start
+          appearing in this window.
+        </p>
       ) : ga4.socialAvailable === false ? (
         <p className="px-5 py-4 text-xs text-red-600">
           GA4 rejected the report that counts social sources, so the breakdown below is missing rather than

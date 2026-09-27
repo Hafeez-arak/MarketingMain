@@ -12,12 +12,11 @@ import { fmt } from '../analytics/format'
 //
 // ── WHY THERE ARE NO SESSIONS, USERS OR BOUNCE RATE ──
 //
-// There is no analytics tag on the site — no GA4, no GTM, no Clarity in the
-// served HTML. Those numbers do not exist to be read, by this card or by
-// anyone. Showing an empty "Sessions" tile would imply a working integration
-// with no traffic behind it, which is the opposite of true. What it would take
-// to have them is written down in changes_suggested.md rather than hinted at
-// by a permanently blank tile.
+// When this card was written there was no analytics tag on the site. GA4 has
+// been live since 2026-09-27, and its numbers belong to the Website tab on
+// /analytics, which reads them over the same window as Search Console. This
+// card stays three Search Console calls on purpose — it paints on every
+// home-page visit.
 //
 // ── WHY CLICKS ARE NOT THE HEADLINE ──
 //

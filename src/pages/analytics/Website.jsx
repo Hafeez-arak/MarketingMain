@@ -311,8 +311,9 @@ export function WebsiteAnalytics(w) {
             error={search.error} steps={search.setup || []}
             action={<Button size="sm" variant="secondary" onClick={() => navigate('/brand-brain')}>Open Brand Brain</Button>} />
         </Card>
-        <Ga4Panels ga4={ga4} summary={ga4Summary} days={days} />
-      <BioLinkPanel ga4={ga4} bio={bio} arrivals={arrivals} summary={arrivalsSummary} days={days} />
+        <Ga4Panels ga4={ga4} summary={ga4Summary} days={days} custom={isCustom(range)} />
+      <BioLinkPanel ga4={ga4} bio={bio} arrivals={arrivals} summary={arrivalsSummary} days={days}
+        collection={ga4Summary?.collection} />
       </div>
     )
   }
@@ -332,8 +333,9 @@ export function WebsiteAnalytics(w) {
               action={<Button size="sm" variant="secondary" onClick={refresh}>Try again</Button>} />
           </div>
         </Card>
-        <Ga4Panels ga4={ga4} summary={ga4Summary} days={days} />
-      <BioLinkPanel ga4={ga4} bio={bio} arrivals={arrivals} summary={arrivalsSummary} days={days} />
+        <Ga4Panels ga4={ga4} summary={ga4Summary} days={days} custom={isCustom(range)} />
+      <BioLinkPanel ga4={ga4} bio={bio} arrivals={arrivals} summary={arrivalsSummary} days={days}
+        collection={ga4Summary?.collection} />
       </div>
     )
   }
@@ -742,8 +744,9 @@ export function WebsiteAnalytics(w) {
       )}
 
       {/* ── The website's own numbers ── */}
-      <Ga4Panels ga4={ga4} summary={ga4Summary} days={days} />
-      <BioLinkPanel ga4={ga4} bio={bio} arrivals={arrivals} summary={arrivalsSummary} days={days} />
+      <Ga4Panels ga4={ga4} summary={ga4Summary} days={days} custom={isCustom(range)} />
+      <BioLinkPanel ga4={ga4} bio={bio} arrivals={arrivals} summary={arrivalsSummary} days={days}
+        collection={ga4Summary?.collection} />
     </div>
   )
 }

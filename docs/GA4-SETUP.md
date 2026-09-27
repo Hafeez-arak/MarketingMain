@@ -7,7 +7,14 @@ results — who searched, where we ranked, whether they chose us. It stops at
 the click, because the next thing that happens happens on our site, which is
 not Google's to report.
 
-**GA4** is the other half, and it is not connected. It answers how many people
+> **Status, 2026-09-27: connected.** Property `554520325` is set on Arak's
+> Brand Brain and the tag went live on arak-sa.com on 27 September. The steps
+> below are kept for any other workspace. Until a new tag's first day enters
+> the page's window (three days, because the window ends where Search
+> Console's does), the panel says "collecting since …" rather than showing
+> zeroes.
+
+**GA4** is the other half, and it was not connected when this was written. It answers how many people
 arrived, by which route, what they read, how long they stayed, and whether they
 got in touch. Until it is connected, that panel shows these steps instead of
 numbers — never zeroes, because a website with visitors reading "0 sessions"
