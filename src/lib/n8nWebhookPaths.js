@@ -78,4 +78,9 @@ export const WEBHOOK_PATHS = {
   // forwards a GET with a query string — that is the handler's contract and
   // moving it off Vercel should not change it.
   agentReports:     'arak-agent-reports',
+  // "Write this week's drafts" in the Email section's Marketing tab. The
+  // "Agent — weekly email drafts" workflow answers it: the same workflow that
+  // writes them every Monday, forwarding the caller's token to the agent
+  // container, which checks membership. One action only; not a proxy.
+  emailWeekly:      'arak-email-weekly',
 }

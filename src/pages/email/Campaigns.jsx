@@ -7,6 +7,7 @@ import { brandTodayKey } from '../../lib/brandTime'
 import { saveCampaign, deleteCampaign, fetchCampaignSends, emailApi, fetchBrandKit, duplicateCampaign } from '../../lib/email/client'
 import { renderDesign, designChecks, designFromText, hasDesign, templates } from '../../lib/email/design'
 import { DesignEditor } from './DesignEditor'
+import { WeeklyDrafts, WeeklyDraftsSkeleton } from './WeeklyDrafts'
 import { AudienceTag, CampaignStatus, Notice, Stat, EIcon } from './parts'
 import { pct, shortDate, dateTime, download } from './format'
 
@@ -64,6 +65,7 @@ function CampaignList({ audience, data, loading, setTab, workspaceId, reload }) 
   return (
     <div className="space-y-3">
       {cold && <ColdLaneNotice />}
+      {!cold && (loading ? <WeeklyDraftsSkeleton /> : <WeeklyDrafts workspaceId={workspaceId} data={data} reload={reload} setTab={setTab} />)}
       <Card>
         <SectionHead
           title={cold ? 'Outreach campaigns' : 'Marketing campaigns'}

@@ -20,7 +20,16 @@ const db = {
     { id: 'a1', workspace_id: WS, kind: 'logo', title: 'arak-logo-black', created_at: now(), public_url: 'https://vxjhfvehccftvajgtqtv.supabase.co/storage/v1/object/public/brand-assets/00000000-0000-0000-0000-000000000001/logo/1789976769585_arak-logo-black.png' },
     { id: 'a2', workspace_id: WS, kind: 'project_photo', title: 'Project photo', created_at: now(), public_url: 'https://vxjhfvehccftvajgtqtv.supabase.co/storage/v1/object/public/brand-assets/00000000-0000-0000-0000-000000000001/project_photo/1782973356066_WhatsApp_Image_2026-07-01_at_15.37.37.jpeg' },
   ],
-  brand_profile: [{ workspace_id: WS, brand_colors: 'Steel #4c5e61 primary, warm gold #8a7a5c accent', contact_info: 'Website: https://arak-sa.com' }],
+  // One ready week of AI drafts, for the Marketing tab's panel.
+  email_ai_drafts: [{
+    id: 'wk1', workspace_id: WS, week_of: (() => { const d = new Date(); d.setUTCDate(d.getUTCDate() - d.getUTCDay()); return d.toISOString().slice(0, 10) })(),
+    status: 'ready', note: 'Research is 10 days old, so these lean on standards and the calendar.', finished_at: now(), options: [
+      { angle: 'SASO 2870 explained', why_now: 'Research: the standard is being cited in tenders.', audience: 'Customers', subject: 'What SASO 2870 means for your next fit-out', preheader: 'Certified luminaires are becoming the default', body: 'Hi {{first_name|there}},\n\nSASO 2870 is showing up in more specifications.\n\n- What it covers\n- What to ask a supplier', cta_label: 'Talk to our design team', cta_url: 'https://arak-sa.com/services/lighting-design', ar_subject: 'ما يعنيه SASO 2870', ar_preheader: '', ar_body: 'مرحباً،\n\nيظهر معيار SASO 2870 في المزيد من المواصفات.', ar_cta_label: 'تحدث إلى فريقنا' },
+      { angle: 'Reading a photometric report', why_now: 'Extends last week\'s Instagram post.', audience: 'Consultants', subject: 'Three numbers that decide a lighting bill', preheader: 'Lux, uniformity and connected load', body: 'Hi {{first_name|there}},\n\nBefore a fixture is ordered, three numbers decide the energy bill.', cta_label: '', cta_url: '', ar_subject: '', ar_preheader: '', ar_body: '', ar_cta_label: '' },
+      { angle: 'Cityscape in November', why_now: 'Event on 16 Nov; we are visiting.', audience: 'All marketing contacts', subject: 'See you at Cityscape Global?', preheader: '16–19 November, Riyadh', body: 'Hi {{first_name|there}},\n\nOur team will be at Cityscape Global.', cta_label: '', cta_url: '', ar_subject: '', ar_preheader: '', ar_body: '', ar_cta_label: '' },
+    ],
+  }],
+  brand_profile: [{ workspace_id: WS, brand_colors: 'Steel #4c5e61 primary, warm gold #8a7a5c accent', contact_info: '', custom_fields: { website: 'arak-sa.com' } }],
   email_settings: [{
     workspace_id: WS, from_name: 'Arak Lighting', from_email: 'updates@email.arak-sa.com', reply_to: 'marketing@arak-sa.com',
     company_address: 'ARAK Lighting\nRiyadh, Saudi Arabia', warmup_started_on: daysAgo(9).slice(0, 10), warmup_enabled: true,

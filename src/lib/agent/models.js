@@ -73,6 +73,11 @@ export const JOBS = {
   extract:     'claude-sonnet-5', // pulling shaped data out of fetched pages
   title:       'claude-sonnet-5', // naming a chat thread
   revise:      'claude-sonnet-5', // rewording one post idea on a person's instruction
+  // The Monday email drafts (server/agentHandlers/emailWeekly.js). Sonnet by
+  // choice: three options a person picks from and edits, once a week, from a
+  // context that is already curated down to what matters. The on-demand
+  // "Write with AI" in the composer stays on Opus (`email`).
+  email_weekly: 'claude-sonnet-5',
   // Compacting the agent's memory. Sonnet rather than a third, cheaper tier:
   // this runs roughly ten times a month, so the saving would be pennies, and
   // the job is genuinely lossy — deciding what the agent never sees again is

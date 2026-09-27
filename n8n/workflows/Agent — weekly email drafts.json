@@ -1,0 +1,232 @@
+{
+  "name": "Agent — weekly email drafts",
+  "nodes": [
+    {
+      "id": "note",
+      "name": "Note: weekly email drafts",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -660,
+        -40
+      ],
+      "parameters": {
+        "content": "## Agent — weekly email drafts\n\nEvery Monday 07:30 UTC (10:30 Riyadh), after the research run at 06:00, the agent container writes three marketing-email options for the week into `email_ai_drafts`. The Marketing tab shows them.\n\nHandler: `server/agentHandlers/emailWeekly.js` (Claude Sonnet, job `email_weekly`). What the model is given, and why: `src/lib/email/weekly.js`.\n\n**Never add retryOnFail to the HTTP node**: it is a paid call, and n8n retries re-send it.\n\nWebhook `/arak-email-weekly`: the app's \"Write this week's drafts\" button, through the signed Vercel proxy. The caller's token is forwarded; the agent checks membership.",
+        "height": 300,
+        "width": 560
+      }
+    },
+    {
+      "id": "trigger_weekly",
+      "name": "Monday 07:30 UTC",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -620,
+        320
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "30 7 * * 1"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "trigger_manual",
+      "name": "Run now",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -620,
+        500
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "workspaces",
+      "name": "Which brands",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -400,
+        400
+      ],
+      "parameters": {
+        "jsCode": "// One item per brand. Listed here rather than fetched so a brand can be\n// paused by editing one line, without a deploy.\n//\n// Arak only: it is the one workspace with an email list. The handler skips a\n// workspace with no marketing contacts anyway, so adding one here that has no\n// list costs nothing until it has one.\nreturn [\n  { json: { workspace_id: '00000000-0000-0000-0000-000000000001', name: 'Arak Lighting' } },\n];\n"
+      }
+    },
+    {
+      "id": "write",
+      "name": "POST /api/agent/emailWeekly",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -180,
+        400
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.AGENT_BASE_URL }}/api/agent/emailWeekly",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.AGENT_RUN_SECRET }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ workspace_id: $json.workspace_id, trigger: 'scheduled' }) }}",
+        "options": {
+          "timeout": 300000,
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "onError": "continueRegularOutput",
+      "notes": "A paid Sonnet call. No retryOnFail on purpose: a retry re-sends it. A second call in the same week answers 'already written' or 409 and spends nothing."
+    },
+    {
+      "id": "report",
+      "name": "What happened",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        40,
+        400
+      ],
+      "parameters": {
+        "jsCode": "// The line a person reads when checking on this in n8n.\n// $input, not $json: this Code node runs once for all items, where $json\n// is not defined.\nconst r = $input.first().json || {};\nconst code = r.statusCode || (r.ok === false ? 'error' : 200);\nconst bits = [\n  r.ok === true && r.skipped ? `Skipped: ${r.skipped}` : '',\n  r.ok === true && !r.skipped ? `Wrote ${r.options} draft option(s) for the week of ${r.week_of}` : '',\n  r.ok === false ? `Not written (${code}): ${r.error || 'unknown error'}` : '',\n  r.capped ? 'The workspace hit its monthly AI budget.' : '',\n  r.cost != null ? `$${Number(r.cost).toFixed(3)}` : '',\n].filter(Boolean);\nreturn [{ json: { summary: bits.join(' · ') || 'No answer from the agent.', ...r } }];\n"
+      }
+    },
+    {
+      "id": "webhook",
+      "name": "Button (app)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -620,
+        760
+      ],
+      "webhookId": "arak-email-weekly",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "arak-email-weekly",
+        "responseMode": "lastNode",
+        "options": {}
+      }
+    },
+    {
+      "id": "guard",
+      "name": "Webhook Secret Guard",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -400,
+        760
+      ],
+      "parameters": {
+        "jsCode": "const expected = String($env.N8N_WEBHOOK_SECRET || '').trim();\nif (expected) {\n  const headers = ($input.first().json || {}).headers || {};\n  const got = String(headers['x-webhook-secret'] || headers['X-Webhook-Secret'] || '').trim();\n  if (got !== expected) throw new Error('Unauthorized: missing or invalid webhook secret');\n}\nreturn $input.all();"
+      }
+    },
+    {
+      "id": "forward",
+      "name": "Forward to the agent",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -180,
+        760
+      ],
+      "parameters": {
+        "jsCode": "const body = ($input.first().json || {}).body || {};\nconst accessToken = String(body.access_token || '').trim();\nconst workspaceId = String(body.workspace_id || '').trim();\n\nif (!accessToken) {\n  return [{ json: { ok: false, error: 'Sign in to do this.' } }];\n}\n\n// The browser token goes only to the private agent container, which checks\n// that this person belongs to the workspace. n8n never trusts the workspace\n// id in this body by itself. One route, fixed here: this gateway is not a\n// general proxy to the agent.\ntry {\n  const response = await this.helpers.httpRequest({\n    method: 'POST',\n    url: `${$env.AGENT_BASE_URL}/api/agent/emailWeekly`,\n    headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },\n    body: { workspace_id: workspaceId, trigger: 'manual' },\n    json: true,\n    returnFullResponse: true,\n    ignoreHttpStatusErrors: true,\n    // One Sonnet call plus the reads before it. Well under the app proxy's\n    // 300s, so the browser hears an answer rather than a gateway timeout.\n    timeout: 240000,\n  });\n  const payload = response?.body && typeof response.body === 'object'\n    ? response.body\n    : { ok: false, error: `The agent returned ${response?.statusCode || 'an empty response'}.` };\n  return [{ json: payload }];\n} catch (err) {\n  return [{ json: { ok: false, error: `Could not reach the agent: ${err.message}` } }];\n}\n"
+      }
+    }
+  ],
+  "connections": {
+    "Monday 07:30 UTC": {
+      "main": [
+        [
+          {
+            "node": "Which brands",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run now": {
+      "main": [
+        [
+          {
+            "node": "Which brands",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Which brands": {
+      "main": [
+        [
+          {
+            "node": "POST /api/agent/emailWeekly",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "POST /api/agent/emailWeekly": {
+      "main": [
+        [
+          {
+            "node": "What happened",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Button (app)": {
+      "main": [
+        [
+          {
+            "node": "Webhook Secret Guard",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook Secret Guard": {
+      "main": [
+        [
+          {
+            "node": "Forward to the agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}

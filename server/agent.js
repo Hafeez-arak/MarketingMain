@@ -36,9 +36,12 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 // under api/ fails the build again, and both of these are single-purpose,
 // neither streams, and neither is on a path a page waits on to first paint.
 // api/ now sits at 10.
-export const ROUTES = ['run', 'lens', 'synthesise', 'resolve', 'discover', 'chat', 'indexHealth', 'websiteExplain', 'critique', 'performance', 'reviseIdea']
+//
+// `emailWeekly` (the Monday email drafts) was born here: it is scheduled work
+// that only n8n drives, and it has no business on Vercel.
+export const ROUTES = ['run', 'lens', 'synthesise', 'resolve', 'discover', 'chat', 'indexHealth', 'websiteExplain', 'critique', 'performance', 'reviseIdea', 'emailWeekly']
 
-const N8N_HANDLERS = new Set(['indexHealth', 'websiteExplain', 'critique', 'performance', 'reviseIdea'])
+const N8N_HANDLERS = new Set(['indexHealth', 'websiteExplain', 'critique', 'performance', 'reviseIdea', 'emailWeekly'])
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 

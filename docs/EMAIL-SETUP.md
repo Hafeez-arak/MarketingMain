@@ -15,6 +15,7 @@ Status as of 2026-09-27.
 | 8 | Test email + deliverability score | App + mail-tester.com | To do |
 | 9 | Tighten DMARC on arak-sa.com | GoDaddy | Recommended |
 | 10 | Google Postmaster Tools | Google | Recommended |
+| 11 | Weekly AI drafts on the n8n box | WSL box | To do (after merge) |
 
 ---
 
@@ -144,6 +145,48 @@ change `p=none` to `p=quarantine`.
 https://postmaster.google.com → add `email.arak-sa.com` → verify with the TXT
 record it gives you (GoDaddy, same as step 3). After a few days of sending it
 shows Gmail's view of the domain's reputation and the spam-report rate.
+
+## 11. Weekly AI drafts on the n8n box
+
+The Monday drafts run only on the box: n8n workflow **Agent — weekly email
+drafts** (Monday 07:30 UTC = 10:30 Riyadh, after the 06:00 research run) calls
+the agent container's `/api/agent/emailWeekly`, which uses Claude Sonnet. The
+app's "Write this week's drafts now" button goes through the same workflow.
+
+On the box (WSL, in the repo folder), after the PR is merged:
+
+```bash
+git pull
+```
+
+```bash
+(cd n8n/docker && docker compose up -d --build agent)
+```
+
+```bash
+./n8n/redeploy.sh "Agent — weekly email drafts"
+```
+
+Check it is registered (anything but 404 means yes):
+
+```bash
+curl -s -o /dev/null -w "%{http_code}\n" -X POST http://localhost:5680/webhook/arak-email-weekly
+```
+
+And that the rebuilt agent has the new route (400 "workspace_id is required"
+means yes; 404 means the agent was not rebuilt):
+
+```bash
+curl -s -X POST http://127.0.0.1:5690/api/agent/emailWeekly -d '{}'
+```
+
+Needs nothing new: it uses the `AGENT_RUN_SECRET`, `AGENT_BASE_URL` and
+`ANTHROPIC_API_KEY` the research run already uses. Cost: a few cents a week,
+counted against the workspace's monthly AI cap.
+
+First run: n8n → Agent — weekly email drafts → **Execute workflow** (Run now),
+or the button in App → Email → Marketing. The drafts appear at the top of the
+Marketing tab.
 
 ---
 

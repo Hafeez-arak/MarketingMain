@@ -148,9 +148,6 @@ cold outreach written but not sent, warm-up, webhooks, unsubscribe). Parked:
   cold send. Then: send through the mailbox's API at 20–40/day, follow-ups on
   `delay_days`, stop on reply (needs inbox read access to see replies).
   Until then the Cold tab exports personalised emails as CSV.
-- **Weekly automatic drafts.** The AI writes three options on demand today. The
-  "every week, from the research run" part is an n8n schedule calling
-  `/api/email/draft` after the Sunday run — not built.
 - **Research leads → cold contacts.** `email_contacts.opportunity_id` exists and
   the draft prompt uses it, but nothing yet turns a research lead into people
   with addresses. Needs an email-finding source (Hunter/Apollo or manual).

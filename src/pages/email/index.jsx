@@ -92,7 +92,7 @@ export function EmailFlows() {
   const loading = loadedFor !== activeWorkspaceId
   const ctx = useMemo(() => ({
     workspaceId: activeWorkspaceId,
-    data: data || { contacts: [], groups: [], members: [], campaigns: [], stats: [], settings: null, recentSends: [] },
+    data: data || { contacts: [], groups: [], members: [], campaigns: [], stats: [], settings: null, recentSends: [], aiDrafts: null },
     status,
     loading,
     reload,
