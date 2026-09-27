@@ -14,6 +14,13 @@ const db = {
   email_group_members: [],
   email_campaigns: [],
   email_sends: [],
+  // Arak's real public logo and a project photo, so the design editor's
+  // picture picker has something to show. Read-only public URLs.
+  brand_assets: [
+    { id: 'a1', workspace_id: WS, kind: 'logo', title: 'arak-logo-black', created_at: now(), public_url: 'https://vxjhfvehccftvajgtqtv.supabase.co/storage/v1/object/public/brand-assets/00000000-0000-0000-0000-000000000001/logo/1789976769585_arak-logo-black.png' },
+    { id: 'a2', workspace_id: WS, kind: 'project_photo', title: 'Project photo', created_at: now(), public_url: 'https://vxjhfvehccftvajgtqtv.supabase.co/storage/v1/object/public/brand-assets/00000000-0000-0000-0000-000000000001/project_photo/1782973356066_WhatsApp_Image_2026-07-01_at_15.37.37.jpeg' },
+  ],
+  brand_profile: [{ workspace_id: WS, brand_colors: 'Steel #4c5e61 primary, warm gold #8a7a5c accent', contact_info: 'Website: https://arak-sa.com' }],
   email_settings: [{
     workspace_id: WS, from_name: 'Arak Lighting', from_email: 'updates@email.arak-sa.com', reply_to: 'marketing@arak-sa.com',
     company_address: 'ARAK Lighting\nRiyadh, Saudi Arabia', warmup_started_on: daysAgo(9).slice(0, 10), warmup_enabled: true,

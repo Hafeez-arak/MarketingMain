@@ -21,14 +21,14 @@ function stubDb(routes) {
 }
 
 describe('dispatch', () => {
-  function world({ sends, contacts, sentToday = 0, resendOk = true }) {
+  function world({ sends, contacts, sentToday = 0, resendOk = true, campaign = CAMPAIGN }) {
     let served = false
     const { db, calls } = stubDb([
       { method: 'GET', match: /^email_settings/, reply: [SETTINGS] },
       { method: 'GET', match: /^email_sends\?workspace_id=.*status=eq\.queued/, reply: () => (served ? [] : ((served = true), sends)) },
       { method: 'PATCH', match: /^email_sends\?id=in\..*status=eq\.queued/, reply: () => sends.map(s => ({ ...s, status: 'sending' })) },
       { method: 'GET', match: /^email_contacts/, reply: contacts },
-      { method: 'GET', match: /^email_campaigns\?id=eq/, reply: [CAMPAIGN] },
+      { method: 'GET', match: /^email_campaigns\?id=eq/, reply: [campaign] },
     ])
     const batches = []
     const resend = {
@@ -66,6 +66,20 @@ describe('dispatch', () => {
     const html = w.batches[0].emails[0].html
     expect(html).toContain('dir="ltr"')
     expect(html).toContain('Unsubscribe')
+  })
+
+  it('sends the drag-and-drop design when the campaign has one', async () => {
+    const design = { blocks: [
+      { id: 'h', type: 'heading', text: 'Designed for {{first_name}}' },
+      { id: 'b', type: 'button', label: 'Open', href: 'https://arak-sa.com' },
+    ] }
+    const w = world({ sends: [send('a')], contacts: [contact('a')], campaign: { ...CAMPAIGN, design } })
+    await dispatch(w.deps, { workspaceId: WS, baseUrl: 'https://app.test', now })
+    const email = w.batches[0].emails[0]
+    expect(email.html).toContain('Designed for A')
+    expect(email.html).toContain('href="https://arak-sa.com"')
+    expect(email.html).toContain('unsubscribe?t=tok-a')
+    expect(email.text).toContain('Open: https://arak-sa.com')
   })
 
   it('skips someone who unsubscribed after launch instead of emailing them', async () => {

@@ -4,6 +4,7 @@ import { loadBrandContext } from '../agent/_context.js'
 import { textIn } from '../../src/lib/agent/loop.js'
 import { DRAFT_IDENTITY, DRAFT_SCHEMA, draftPrompt, parseDrafts } from '../../src/lib/email/draft.js'
 import { renderEmail, marketingProblems } from '../../src/lib/email/render.js'
+import { renderDesign, designChecks, hasDesign } from '../../src/lib/email/design.js'
 import { isValidEmail, normalizeEmail } from '../../src/lib/email/contacts.js'
 import { dailyCap } from '../../src/lib/email/warmup.js'
 import { createResend } from './_resend.js'
@@ -146,11 +147,15 @@ const actions = {
     const audience = body.audience === 'cold' ? 'cold' : 'marketing'
     if (!settings.from_email) return fail('Set the sender address in Email → Settings first.')
     const sample = { first_name: body.sample?.first_name || 'Sara', last_name: '', company: body.sample?.company || 'Example Co', job_title: '', city: 'Riyadh', email: to }
-    const rendered = renderEmail({
-      audience, subject: `[TEST] ${body.subject || ''}`, preheader: body.preheader || '', body: body.body || '',
+    const common = {
+      subject: `[TEST] ${body.subject || ''}`, preheader: body.preheader || '',
       language: body.language === 'ar' ? 'ar' : 'en', contact: sample,
       sender: settings, unsubscribeUrl: `${baseUrlOf(this.req)}/api/email/unsubscribe?t=test`,
-    })
+    }
+    // Cold email is never designed: it must look typed by a person.
+    const rendered = audience === 'marketing' && hasDesign(body.design)
+      ? renderDesign({ ...common, design: body.design })
+      : renderEmail({ ...common, audience, body: body.body || '' })
     const r = await deps().resend.send({
       from: fromHeader(settings), to: [to], subject: rendered.subject, html: rendered.html, text: rendered.text,
       ...(settings.reply_to ? { reply_to: settings.reply_to } : {}),
@@ -260,7 +265,11 @@ const actions = {
   /** Is the campaign ready to send? The same check launch makes. */
   async check({ workspaceId, body }) {
     const settings = await loadSettings({ db }, workspaceId)
-    return { problems: marketingProblems({ subject: body.subject, body: body.body, sender: settings }) }
+    const designed = hasDesign(body.design)
+    return { problems: [
+      ...marketingProblems({ subject: body.subject, body: designed ? 'designed' : body.body, sender: settings }),
+      ...(designed ? designChecks(body.design).problems : []),
+    ] }
   },
 }
 

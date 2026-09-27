@@ -134,7 +134,7 @@ export async function setContactGroups(ws, contactId, groupIds, currentIds) {
 
 // ── Campaigns ──
 
-const CAMPAIGN_FIELDS = ['audience', 'name', 'subject', 'preheader', 'body', 'language', 'language_only', 'group_ids', 'follow_ups']
+const CAMPAIGN_FIELDS = ['audience', 'name', 'subject', 'preheader', 'body', 'language', 'language_only', 'group_ids', 'follow_ups', 'design']
 
 export async function saveCampaign(ws, campaign, id = null) {
   const row = { workspace_id: ws, updated_at: new Date().toISOString() }
@@ -186,4 +186,33 @@ export async function emailApi(action, workspaceId, payload = {}) {
   } catch (err) {
     return { error: `Could not reach the server: ${err.message}` }
   }
+}
+
+// ── Brand kit for the design editor ──
+// The logo and photos come from Brand Brain's asset library, which lives in
+// the PUBLIC brand-assets bucket: an email image must be reachable by any
+// inbox without signing in, and those URLs already are.
+export async function fetchBrandKit(ws) {
+  const [assets, profile] = await Promise.all([
+    supabase.from('brand_assets').select('id,kind,title,public_url,created_at').eq('workspace_id', ws)
+      .order('created_at', { ascending: false }).limit(200),
+    supabase.from('brand_profile').select('brand_colors,contact_info').eq('workspace_id', ws).limit(1),
+  ])
+  const rows = (assets.data || []).filter(a => /^https:\/\//.test(a.public_url || '') && a.kind !== 'music')
+  const p = profile.data?.[0] || {}
+  return {
+    logos: rows.filter(a => a.kind === 'logo'),
+    photos: rows.filter(a => a.kind !== 'logo'),
+    brandColors: p.brand_colors || '',
+    // The first web address written in the Brand Brain's contact details.
+    website: (String(p.contact_info || '').match(/https?:\/\/[^\s,;)]+/) || [''])[0],
+  }
+}
+
+/** Copy a campaign into a new draft: same wording, design and groups. */
+export async function duplicateCampaign(ws, campaign) {
+  const copy = {}
+  for (const k of CAMPAIGN_FIELDS) if (campaign[k] !== undefined) copy[k] = campaign[k]
+  copy.name = `${campaign.name || campaign.subject || 'Untitled'} (copy)`
+  return saveCampaign(ws, copy)
 }

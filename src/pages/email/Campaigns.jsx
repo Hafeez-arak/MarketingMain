@@ -4,7 +4,9 @@ import { useAuth } from '../../store/auth'
 import { pickRecipients, displayName } from '../../lib/email/contacts'
 import { renderEmail, marketingProblems, unknownMergeTags, MERGE_TAGS, applyMergeTags, toPlainText } from '../../lib/email/render'
 import { brandTodayKey } from '../../lib/brandTime'
-import { saveCampaign, deleteCampaign, fetchCampaignSends, emailApi } from '../../lib/email/client'
+import { saveCampaign, deleteCampaign, fetchCampaignSends, emailApi, fetchBrandKit, duplicateCampaign } from '../../lib/email/client'
+import { renderDesign, designChecks, designFromText, hasDesign, templates } from '../../lib/email/design'
+import { DesignEditor } from './DesignEditor'
 import { AudienceTag, CampaignStatus, Notice, Stat, EIcon } from './parts'
 import { pct, shortDate, dateTime, download } from './format'
 
@@ -115,9 +117,16 @@ function CampaignList({ audience, data, loading, setTab, workspaceId, reload }) 
                       <td className="px-3 py-2.5 text-right tabular-nums">{pct(Number(st.clicked || 0), sent)}</td>
                       <td className="px-3 py-2.5 text-right tabular-nums">{pct(Number(st.bounced || 0), sent)}</td>
                       <td className="px-3 py-2.5 text-right" onClick={e => e.stopPropagation()}>
-                        {['draft', 'cancelled'].includes(c.status) && (
-                          <Button size="xs" variant="ghost" onClick={() => setDeleting(c)} aria-label="Delete"><EIcon name="trash" /></Button>
-                        )}
+                        <div className="flex justify-end gap-1">
+                          <Button size="xs" variant="ghost" title="Duplicate" onClick={async () => {
+                            const copy = await duplicateCampaign(workspaceId, c)
+                            await reload()
+                            setTab(audience, { campaign: copy.id })
+                          }}>Duplicate</Button>
+                          {['draft', 'cancelled'].includes(c.status) && (
+                            <Button size="xs" variant="ghost" onClick={() => setDeleting(c)} aria-label="Delete"><EIcon name="trash" /></Button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   )
@@ -161,6 +170,16 @@ function Composer({ audience, campaign, data, workspaceId, reload, setTab, statu
   const [editingStep, setEditingStep] = useState(0)   // cold: 0 = first email, n = follow-up n
   const bodyRef = useRef(null)
   const settings = data.settings || status?.settings || {}
+  // A new marketing email starts at the template gallery, the way Brevo's does.
+  const [choosing, setChoosing] = useState(() => !campaign && !cold)
+  const [kit, setKit] = useState(null)
+  useEffect(() => {
+    let live = true
+    fetchBrandKit(workspaceId)
+      .then(k => { if (live) setKit(k) })
+      .catch(() => { if (live) setKit({ logos: [], photos: [], brandColors: '', website: '' }) })
+    return () => { live = false }
+  }, [workspaceId])
 
   const set = (k, v) => { setForm(f => ({ ...f, [k]: v })); setDirty(true) }
   const laneGroups = data.groups.filter(g => g.audience === audience)
@@ -192,6 +211,9 @@ function Composer({ audience, campaign, data, workspaceId, reload, setTab, statu
   }
   const setCurrent = (k, v) => updateCurrent({ [k]: v })
 
+  const designed = !cold && hasDesign(form.design)
+  const setDesign = design => { setForm(f => ({ ...f, design })); setDirty(true) }
+
   const sample = useMemo(() => recipients.eligible[previewIdx] || recipients.eligible[0] || SAMPLE_CONTACT, [recipients.eligible, previewIdx])
   const preview = useMemo(() => renderEmail({
     audience, subject: current.subject, preheader: step ? '' : form.preheader, body: current.body,
@@ -200,10 +222,12 @@ function Composer({ audience, campaign, data, workspaceId, reload, setTab, statu
     unsubscribeUrl: cold ? '' : '#unsubscribe',
   }), [audience, current.subject, current.body, form.preheader, form.language, sample, settings.from_name, settings.company_address, cold, step])
 
+  const checks = designed ? designChecks(form.design) : { problems: [], warnings: [] }
   const problems = cold
     ? [!form.subject.trim() && 'Add a subject line.', !form.body.trim() && 'Write the first email.',
        ...unknownMergeTags(`${form.subject} ${form.body}`).map(t => `Unknown merge tag {{${t}}}.`)].filter(Boolean)
-    : marketingProblems({ subject: form.subject, body: form.body, sender: settings })
+    : [...marketingProblems({ subject: form.subject, body: designed ? 'designed' : form.body, sender: settings }), ...checks.problems]
+  const warnings = checks.warnings
 
   async function save({ quiet = false } = {}) {
     setSaving(true)
@@ -234,6 +258,7 @@ function Composer({ audience, campaign, data, workspaceId, reload, setTab, statu
     setSending(true); setMessage(null)
     const r = await emailApi('send_test', workspaceId, {
       to: testTo, audience, subject: current.subject, preheader: step ? '' : form.preheader, body: current.body,
+      design: designed && !step ? form.design : undefined,
       language: form.language, sample: recipients.eligible[previewIdx] || null,
     })
     setSending(false)
@@ -253,7 +278,97 @@ function Composer({ audience, campaign, data, workspaceId, reload, setTab, statu
   }
 
   const [confirmLaunch, setConfirmLaunch] = useState(false)
+  const [confirmPlain, setConfirmPlain] = useState(false)
   const [aiOpen, setAiOpen] = useState(false)
+
+  const audienceCard = (
+    <Card className="p-5 space-y-4">
+      <Input label="Campaign name (internal)" value={form.name} onChange={e => set('name', e.target.value)}
+        placeholder={cold ? 'e.g. Riyadh hotel projects, October' : 'e.g. October update: new projects'} />
+      <div>
+        <p className="eyebrow mb-1.5">Send to</p>
+        {laneGroups.length === 0 ? (
+          <p className="text-xs text-text-tertiary">No {cold ? 'cold' : 'marketing'} groups yet. <button className="underline" onClick={() => setTab('groups')}>Create one</button>.</p>
+        ) : (
+          <div className="flex flex-wrap gap-2">
+            {laneGroups.map(g => {
+              const on = form.group_ids.includes(g.id)
+              const n = data.members.filter(m => m.group_id === g.id).length
+              return (
+                <label key={g.id} className={`flex items-center gap-1.5 text-xs border px-2 py-1 cursor-pointer ${on ? 'border-amber-700 bg-amber-50 text-text' : 'border-border text-text-secondary hover:border-stone-400'}`}>
+                  <input type="checkbox" checked={on}
+                    onChange={() => set('group_ids', on ? form.group_ids.filter(x => x !== g.id) : [...form.group_ids, g.id])} />
+                  {g.name} <span className="text-text-tertiary">({n})</span>
+                </label>
+              )
+            })}
+          </div>
+        )}
+        {form.group_ids.length > 0 && (
+          <p className="text-xs mt-2 text-text-secondary">
+            <strong className="text-text">{recipients.eligible.length.toLocaleString()}</strong> will receive it
+            {recipients.skipped.length > 0 && <> · {recipients.skipped.length} skipped ({skippedReasons.map(([r, n]) => `${n} ${r.toLowerCase()}`).join('; ')})</>}
+          </p>
+        )}
+      </div>
+      <div className="grid sm:grid-cols-2 gap-3 items-end">
+        <Select label="Written in" value={form.language} onChange={e => set('language', e.target.value)}
+          hint="Sets the layout (right-to-left for Arabic) and the footer.">
+          <option value="en">English</option>
+          <option value="ar">Arabic</option>
+        </Select>
+        <label className="flex items-start gap-2 text-xs text-text-secondary pb-5 cursor-pointer">
+          <input type="checkbox" className="mt-0.5" checked={form.language_only} onChange={e => set('language_only', e.target.checked)} />
+          <span>Only send to contacts who prefer {form.language === 'ar' ? 'Arabic' : 'English'}. Write a second campaign in the other language for the rest.</span>
+        </label>
+      </div>
+    </Card>
+  )
+
+  const sendCard = (
+    <Card className="p-4 space-y-3">
+      {problems.length > 0 && (
+        <ul className="text-xs text-amber-800 space-y-0.5">{problems.map(p => <li key={p}>• {p}</li>)}</ul>
+      )}
+      {warnings.length > 0 && (
+        <ul className="text-[11px] text-text-tertiary space-y-0.5">{warnings.map(w => <li key={w}>Tip: {w}</li>)}</ul>
+      )}
+      <div className="flex flex-wrap items-end gap-2">
+        <Input className="flex-1 min-w-[180px]" label="Send a test to" value={testTo} onChange={e => setTestTo(e.target.value)} />
+        <Button variant="secondary" onClick={sendTest} disabled={sending || !testTo || !status?.configured?.resend}>
+          {sending ? 'Sending…' : 'Send test'}
+        </Button>
+      </div>
+      {!status?.configured?.resend && <p className="text-[11px] text-text-tertiary">Sending is not switched on yet.</p>}
+
+      {cold ? (
+        <div className="flex flex-wrap gap-2 pt-1 border-t border-border">
+          <Button variant="secondary" disabled={!recipients.eligible.length || !form.body.trim()}
+            onClick={() => download(`outreach-${(form.name || 'campaign').replace(/\W+/g, '-').toLowerCase()}.csv`, coldExport(form, recipients.eligible))}>
+            Export personalised emails (CSV)
+          </Button>
+          <Button disabled title="Needs the outreach mailbox">Start sequence</Button>
+        </div>
+      ) : (
+        <div className="flex flex-wrap gap-2 pt-1 border-t border-border">
+          <Button onClick={async () => { const s = await save({ quiet: true }); if (s) setConfirmLaunch(true) }}
+            disabled={problems.length > 0 || !recipients.eligible.length || saving}>
+            Send or schedule…
+          </Button>
+        </div>
+      )}
+    </Card>
+  )
+
+  if (choosing) {
+    return (
+      <TemplatePicker
+        kit={kit}
+        onBack={() => setTab(audience)}
+        onPick={design => { setForm(f => ({ ...f, design })); setDirty(true); setChoosing(false) }}
+      />
+    )
+  }
 
   return (
     <div className="space-y-3">
@@ -269,50 +384,54 @@ function Composer({ audience, campaign, data, workspaceId, reload, setTab, statu
       {cold && <ColdLaneNotice />}
       {message && <Notice tone={message.tone}>{message.text}</Notice>}
 
+      {designed ? (
+        <>
+          <div className="grid xl:grid-cols-[minmax(0,1fr)_380px] gap-4 items-start">
+            <div className="space-y-4">
+              {audienceCard}
+              <Card className="p-5 space-y-3">
+                <div className="grid md:grid-cols-2 gap-3">
+                  <Input label="Subject" value={form.subject} onChange={e => set('subject', e.target.value)} maxLength={120}
+                    hint={`${form.subject.length}/60 characters is the most that shows on a phone.`} />
+                  <Input label="Preview line" value={form.preheader} onChange={e => set('preheader', e.target.value)} maxLength={140}
+                    hint="The grey line after the subject in the inbox." />
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button size="xs" variant="outline" onClick={() => setAiOpen(true)}><EIcon name="spark" /> Write with AI</Button>
+                  <Button size="xs" variant="ghost" onClick={() => setConfirmPlain(true)}>Switch to plain text</Button>
+                </div>
+              </Card>
+            </div>
+            <div className="space-y-4 xl:sticky xl:top-4">
+              {recipients.eligible.length > 0 && (
+                <Card className="px-4 py-2.5 flex items-center justify-between gap-2">
+                  <p className="text-xs text-text-secondary">Merge fields shown as</p>
+                  <select className="text-[11px] border border-border bg-white px-1.5 py-1 text-text-secondary max-w-[200px]" value={previewIdx}
+                    onChange={e => setPreviewIdx(Number(e.target.value))}>
+                    {recipients.eligible.slice(0, 50).map((c, i) => <option key={c.id} value={i}>{displayName(c)}</option>)}
+                  </select>
+                </Card>
+              )}
+              {sendCard}
+            </div>
+          </div>
+          <DesignEditor
+            design={form.design}
+            onChange={setDesign}
+            language={form.language}
+            kit={kit}
+            sample={sample}
+            sender={{ from_name: settings.from_name, company_address: settings.company_address }}
+            subject={form.subject}
+            preheader={form.preheader}
+            onReplaceFromTemplate={() => setChoosing(true)}
+          />
+        </>
+      ) : (
       <div className="grid xl:grid-cols-2 gap-4 items-start">
         {/* ── Left: what to send, to whom ── */}
         <div className="space-y-4">
-          <Card className="p-5 space-y-4">
-            <Input label="Campaign name (internal)" value={form.name} onChange={e => set('name', e.target.value)}
-              placeholder={cold ? 'e.g. Riyadh hotel projects, October' : 'e.g. October update: new projects'} />
-            <div>
-              <p className="eyebrow mb-1.5">Send to</p>
-              {laneGroups.length === 0 ? (
-                <p className="text-xs text-text-tertiary">No {cold ? 'cold' : 'marketing'} groups yet. <button className="underline" onClick={() => setTab('groups')}>Create one</button>.</p>
-              ) : (
-                <div className="flex flex-wrap gap-2">
-                  {laneGroups.map(g => {
-                    const on = form.group_ids.includes(g.id)
-                    const n = data.members.filter(m => m.group_id === g.id).length
-                    return (
-                      <label key={g.id} className={`flex items-center gap-1.5 text-xs border px-2 py-1 cursor-pointer ${on ? 'border-amber-700 bg-amber-50 text-text' : 'border-border text-text-secondary hover:border-stone-400'}`}>
-                        <input type="checkbox" checked={on}
-                          onChange={() => set('group_ids', on ? form.group_ids.filter(x => x !== g.id) : [...form.group_ids, g.id])} />
-                        {g.name} <span className="text-text-tertiary">({n})</span>
-                      </label>
-                    )
-                  })}
-                </div>
-              )}
-              {form.group_ids.length > 0 && (
-                <p className="text-xs mt-2 text-text-secondary">
-                  <strong className="text-text">{recipients.eligible.length.toLocaleString()}</strong> will receive it
-                  {recipients.skipped.length > 0 && <> · {recipients.skipped.length} skipped ({skippedReasons.map(([r, n]) => `${n} ${r.toLowerCase()}`).join('; ')})</>}
-                </p>
-              )}
-            </div>
-            <div className="grid sm:grid-cols-2 gap-3 items-end">
-              <Select label="Written in" value={form.language} onChange={e => set('language', e.target.value)}
-                hint="Sets the layout (right-to-left for Arabic) and the footer.">
-                <option value="en">English</option>
-                <option value="ar">Arabic</option>
-              </Select>
-              <label className="flex items-start gap-2 text-xs text-text-secondary pb-5 cursor-pointer">
-                <input type="checkbox" className="mt-0.5" checked={form.language_only} onChange={e => set('language_only', e.target.checked)} />
-                <span>Only send to contacts who prefer {form.language === 'ar' ? 'Arabic' : 'English'}. Write a second campaign in the other language for the rest.</span>
-              </label>
-            </div>
-          </Card>
+          {audienceCard}
 
           <Card className="p-5 space-y-3">
             {cold && (
@@ -360,6 +479,11 @@ function Composer({ audience, campaign, data, workspaceId, reload, setTab, statu
                   {MERGE_TAGS.map(t => <option key={t} value={t}>{t.replace('_', ' ')}</option>)}
                 </select>
                 <div className="flex-1" />
+                {!cold && !step && (
+                  <Button size="xs" variant="ghost" onClick={() => {
+                    setDesign(designFromText({ body: form.body, logo: kit?.logos?.[0]?.public_url || '' }))
+                  }}>Use drag &amp; drop design</Button>
+                )}
                 <Button size="xs" variant="outline" onClick={() => setAiOpen(true)}><EIcon name="spark" /> Write with AI</Button>
               </div>
               <Textarea rows={cold ? 10 : 14} value={current.body} onChange={e => setCurrent('body', e.target.value)}
@@ -399,51 +523,39 @@ function Composer({ audience, campaign, data, workspaceId, reload, setTab, statu
             <iframe title="Email preview" srcDoc={preview.html} sandbox="" className="w-full h-[460px] bg-white" />
           </Card>
 
-          <Card className="p-4 space-y-3">
-            {problems.length > 0 && (
-              <ul className="text-xs text-amber-800 space-y-0.5">{problems.map(p => <li key={p}>• {p}</li>)}</ul>
-            )}
-            <div className="flex flex-wrap items-end gap-2">
-              <Input className="flex-1 min-w-[180px]" label="Send a test to" value={testTo} onChange={e => setTestTo(e.target.value)} />
-              <Button variant="secondary" onClick={sendTest} disabled={sending || !testTo || !status?.configured?.resend}>
-                {sending ? 'Sending…' : 'Send test'}
-              </Button>
-            </div>
-            {!status?.configured?.resend && <p className="text-[11px] text-text-tertiary">Sending is not switched on yet.</p>}
-
-            {cold ? (
-              <div className="flex flex-wrap gap-2 pt-1 border-t border-border">
-                <Button variant="secondary" disabled={!recipients.eligible.length || !form.body.trim()}
-                  onClick={() => download(`outreach-${(form.name || 'campaign').replace(/\W+/g, '-').toLowerCase()}.csv`, coldExport(form, recipients.eligible))}>
-                  Export personalised emails (CSV)
-                </Button>
-                <Button disabled title="Needs the outreach mailbox">Start sequence</Button>
-              </div>
-            ) : (
-              <div className="flex flex-wrap gap-2 pt-1 border-t border-border">
-                <Button onClick={async () => { const s = await save({ quiet: true }); if (s) setConfirmLaunch(true) }}
-                  disabled={problems.length > 0 || !recipients.eligible.length || saving}>
-                  Send or schedule…
-                </Button>
-              </div>
-            )}
-          </Card>
+          {sendCard}
         </div>
       </div>
+      )}
 
       {aiOpen && (
         <AiDrafts
           workspaceId={workspaceId} audience={audience} language={form.language}
           current={current} contacts={cold ? recipients.eligible : []}
           onClose={() => setAiOpen(false)}
-          onUse={opt => {
+          designed={designed}
+          onUse={(opt, { textOnly = false } = {}) => {
             if (step) updateCurrent({ subject: opt.subject, body: opt.body })
-            else setForm(f => ({ ...f, subject: opt.subject, body: opt.body, preheader: cold ? '' : (opt.preheader || f.preheader), name: f.name || opt.angle }))
+            else setForm(f => {
+              const next = { ...f, subject: opt.subject, body: opt.body, preheader: cold ? '' : (opt.preheader || f.preheader), name: f.name || opt.angle }
+              // In a design, the option's text becomes the blocks — keeping the
+              // logo and the chosen style — unless only the subject was wanted.
+              if (hasDesign(f.design) && !textOnly) {
+                const logo = f.design.blocks.find(b => b.type === 'logo')?.src || kit?.logos?.[0]?.public_url || ''
+                next.design = designFromText({ body: opt.body, logo, style: f.design.style })
+              }
+              if (textOnly) { next.body = f.body }
+              return next
+            })
             setDirty(true)
             setAiOpen(false)
           }}
         />
       )}
+
+      <ConfirmDialog open={confirmPlain} onClose={() => setConfirmPlain(false)} title="Switch to plain text?"
+        message="The design is removed and the email becomes the plain text below. Pictures, buttons and layout are lost. The text you last got from the AI stays."
+        onConfirm={() => setDesign(null)} />
 
       {confirmLaunch && id && (
         <LaunchModal
@@ -452,6 +564,56 @@ function Composer({ audience, campaign, data, workspaceId, reload, setTab, statu
           onDone={async msg => { setConfirmLaunch(false); await reload(); setTab(audience, { campaign: id, view: '1' }); setMessage(msg) }}
         />
       )}
+    </div>
+  )
+}
+
+// ─── Template gallery ──────────────────────────────────────────────────────
+// Where a new marketing email starts. Each card is a real render of the
+// template (same renderer as the send), with the Brand Brain logo already in.
+
+function TemplatePicker({ kit, onPick, onBack }) {
+  const list = useMemo(() => templates({
+    logo: kit?.logos?.[0]?.public_url || '',
+    website: kit?.website || 'https://arak-sa.com',
+  }), [kit])
+  const sender = { from_name: '', company_address: '' }
+  return (
+    <div className="space-y-3">
+      <Button variant="ghost" size="sm" onClick={onBack}><EIcon name="back" /> All marketing campaigns</Button>
+      <Card>
+        <SectionHead title="Choose a starting point" subtitle="Every template is fully editable: drag blocks in, move them, change colours. Your logo is already in." />
+        {!kit ? (
+          <div className="p-5 grid sm:grid-cols-2 lg:grid-cols-5 gap-4">{[0, 1, 2, 3, 4].map(i => <Skeleton key={i} className="h-72 w-full" />)}</div>
+        ) : (
+          <div className="p-5 grid sm:grid-cols-2 lg:grid-cols-5 gap-4">
+            {list.map(t => (
+              <button key={t.key} type="button" onClick={() => onPick(t.design)}
+                className="text-left border border-border hover:border-amber-700 group flex flex-col">
+                <div className="h-56 overflow-hidden bg-surface-muted relative pointer-events-none">
+                  <iframe title={t.label} tabIndex={-1} sandbox=""
+                    srcDoc={renderDesign({ design: t.design, subject: t.label, contact: { first_name: 'Sara' }, sender }).html}
+                    style={{ width: 640, height: 900, transform: 'scale(0.36)', transformOrigin: 'top left', border: 0 }} />
+                </div>
+                <div className="px-3 py-2.5 border-t border-border">
+                  <p className="text-sm font-semibold text-text group-hover:text-amber-800">{t.label}</p>
+                  <p className="text-[11px] text-text-tertiary mt-0.5 leading-snug">{t.hint}</p>
+                </div>
+              </button>
+            ))}
+            <button type="button" onClick={() => onPick(null)}
+              className="text-left border border-dashed border-border hover:border-amber-700 group flex flex-col">
+              <div className="h-56 flex items-center justify-center bg-white text-text-tertiary text-xs px-6 text-center">
+                Just text, like a personal email. No design.
+              </div>
+              <div className="px-3 py-2.5 border-t border-border">
+                <p className="text-sm font-semibold text-text group-hover:text-amber-800">Plain text</p>
+                <p className="text-[11px] text-text-tertiary mt-0.5 leading-snug">Quickest to write. You can switch to a design later.</p>
+              </div>
+            </button>
+          </div>
+        )}
+      </Card>
     </div>
   )
 }
@@ -474,7 +636,7 @@ function coldExport(form, contacts) {
 
 // ─── AI drafts ─────────────────────────────────────────────────────────────
 
-function AiDrafts({ workspaceId, audience, language, current, contacts, onClose, onUse }) {
+function AiDrafts({ workspaceId, audience, language, current, contacts, onClose, onUse, designed = false }) {
   const [brief, setBrief] = useState('')
   const [contactId, setContactId] = useState('')
   const [improve, setImprove] = useState(Boolean(current.body?.trim()))
@@ -498,6 +660,7 @@ function AiDrafts({ workspaceId, audience, language, current, contacts, onClose,
         <p className="text-xs text-text-secondary leading-relaxed">
           Written from your Brand Brain{cold ? ' and, for one prospect, their details and research lead' : ' and what the research agent found this week'}. Three different angles; pick one and edit it.
           Counts against the monthly AI budget (a few cents per draft).
+          {designed && ' “Use in the design” replaces the blocks with the new text, keeping your logo and colours; Undo in the editor does not reach back past it, so save first if you like the current layout.'}
         </p>
         <Textarea label="What should this email do?" rows={3} value={brief} onChange={e => setBrief(e.target.value)}
           placeholder={cold
@@ -531,7 +694,10 @@ function AiDrafts({ workspaceId, audience, language, current, contacts, onClose,
                   {o.preheader && <p className="text-[11px] text-text-tertiary mt-0.5" dir={language === 'ar' ? 'rtl' : 'ltr'}>{o.preheader}</p>}
                 </div>
                 <p className="px-3 py-2 text-xs text-text-secondary whitespace-pre-wrap flex-1 max-h-64 overflow-y-auto scrollbar-thin" dir={language === 'ar' ? 'rtl' : 'ltr'}>{o.body}</p>
-                <div className="px-3 py-2 border-t border-border"><Button size="xs" onClick={() => onUse(o)}>Use this one</Button></div>
+                <div className="px-3 py-2 border-t border-border flex flex-wrap gap-2">
+                  <Button size="xs" onClick={() => onUse(o)}>{designed ? 'Use in the design' : 'Use this one'}</Button>
+                  {designed && <Button size="xs" variant="ghost" onClick={() => onUse(o, { textOnly: true })}>Subject only</Button>}
+                </div>
               </div>
             ))}
           </div>
@@ -626,12 +792,15 @@ function CampaignDetail({ audience, campaign, data, workspaceId, reload, setTab 
 
   const groupNames = campaign.group_ids.map(id => data.groups.find(g => g.id === id)?.name).filter(Boolean)
   const shownSends = (sends || []).filter(s => !filter || s.status === filter)
-  const preview = renderEmail({
-    audience, subject: campaign.subject, preheader: campaign.preheader, body: campaign.body, language: campaign.language,
+  const shown = {
+    subject: campaign.subject, preheader: campaign.preheader, language: campaign.language,
     contact: { first_name: 'Sara', company: 'Example Co' },
     sender: { from_name: campaign.from_name || data.settings?.from_name, company_address: data.settings?.company_address },
     unsubscribeUrl: audience === 'cold' ? '' : '#unsubscribe',
-  })
+  }
+  const preview = audience === 'marketing' && hasDesign(campaign.design)
+    ? renderDesign({ ...shown, design: campaign.design })
+    : renderEmail({ ...shown, audience, body: campaign.body })
 
   return (
     <div className="space-y-3">
@@ -644,6 +813,12 @@ function CampaignDetail({ audience, campaign, data, workspaceId, reload, setTab 
             <Button size="sm" onClick={() => act('resume')} disabled={!!busy}>Resume sending</Button>
           </>}
           {['sending', 'scheduled', 'paused'].includes(campaign.status) && <Button size="sm" variant="danger" onClick={() => setConfirmCancel(true)} disabled={!!busy}>Cancel the rest</Button>}
+          <Button size="sm" variant="secondary" disabled={!!busy} onClick={async () => {
+            setBusy('duplicate')
+            try { const copy = await duplicateCampaign(workspaceId, campaign); await reload(); setTab(audience, { campaign: copy.id }) }
+            catch (err) { setError(err.message) }
+            finally { setBusy('') }
+          }}>Duplicate</Button>
         </div>
       </div>
       {error && <Notice tone="red">{error}</Notice>}
