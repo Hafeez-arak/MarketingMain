@@ -115,7 +115,9 @@ const deps = () => ({ db, count, resend: createResend({ apiKey: RESEND_KEY }) })
 
 function needResend() {
   return RESEND_KEY ? null
-    : 'RESEND_API_KEY is not set on this deployment. Add it in Vercel → Project → Settings → Environment Variables, then redeploy.'
+    // Said plainly, without setup instructions: those live in
+    // docs/EMAIL-SETUP.md, not in front of everyone who uses the app.
+    : 'Email sending is not switched on yet.'
 }
 
 const isUuid = v => /^[0-9a-f-]{36}$/i.test(String(v || ''))

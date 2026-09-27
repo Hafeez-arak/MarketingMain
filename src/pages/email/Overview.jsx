@@ -7,38 +7,16 @@ import { Stat, CampaignStatus, AudienceTag, Notice } from './parts'
 import { pct, shortDate } from './format'
 
 // ─── Overview ──────────────────────────────────────────────────────────────
-// The first screen answers three questions, in this order:
-//   1. Is anything stopping email from going out?   (setup checklist)
-//   2. How much can go out today, and why that much? (the cap and its reason)
-//   3. How is it landing?                            (rates over 30 days)
-
-function setupSteps({ status, data }) {
-  const s = data.settings || {}
-  const everSent = (data.recentSends || []).length > 0 || (data.stats || []).some(x => Number(x.sent) > 0)
-  const marketingGroups = data.groups.filter(g => g.audience === 'marketing')
-  const grouped = new Set(data.members.filter(m => marketingGroups.some(g => g.id === m.group_id)).map(m => m.contact_id))
-  return [
-    { key: 'key', done: Boolean(status?.configured?.resend), label: 'Resend API key added to Vercel',
-      how: 'Vercel → marketing-main → Settings → Environment Variables → RESEND_API_KEY, then redeploy.' },
-    { key: 'sender', done: Boolean(s.from_email && s.company_address), label: 'Sender address and company address set',
-      how: 'Email → Settings. The address goes in every footer.', tab: 'settings' },
-    { key: 'domain', done: everSent, label: 'Sending domain verified in Resend',
-      how: 'Add email.arak-sa.com in Resend → Domains, paste its DNS records into GoDaddy, then send a test from Settings.', tab: 'settings' },
-    { key: 'webhook', done: Boolean(status?.configured?.webhook), label: 'Resend webhook connected (opens, clicks, bounces)',
-      how: 'Without it, sending works but opens, clicks, bounces and spam reports are not recorded. Steps in Settings.', tab: 'settings' },
-    { key: 'cron', done: Boolean(status?.configured?.cron), label: 'Morning sending run switched on',
-      how: 'Add CRON_SECRET in Vercel. Without it, scheduled and spread-out sends go out only when someone opens this page.', tab: 'settings' },
-    { key: 'list', done: grouped.size > 0, label: 'At least one marketing group with contacts',
-      how: 'Import your customers in Contacts, and put them in a group.', tab: 'contacts' },
-  ]
-}
+// The first screen answers two questions, in this order:
+//   1. How much can go out today, and why that much? (the cap and its reason)
+//   2. How is it landing?                            (rates over 30 days)
+// One-time setup (Resend, DNS, Vercel) is deliberately NOT shown anywhere in
+// the app; it lives in docs/EMAIL-SETUP.md for the person who runs it.
 
 export function Overview({ data, status, loading, setTab }) {
   // Read once per mount: the chart's 14 days end today, and "today" changing
   // under an open page is not worth a re-render.
   const [now] = useState(() => Date.now())
-  const steps = setupSteps({ status, data })
-  const pending = steps.filter(s => !s.done)
 
   const counts = useMemo(() => {
     const c = { marketing: 0, cold: 0, inactive: 0, total: data.contacts.length }
@@ -89,24 +67,6 @@ export function Overview({ data, status, loading, setTab }) {
 
   return (
     <div className="space-y-4">
-      {!loading && pending.length > 0 && (
-        <Card>
-          <SectionHead title="Setup" subtitle={`${steps.length - pending.length} of ${steps.length} done. Email can only go out once the first three are done.`} />
-          <ul className="divide-y divide-border">
-            {steps.map(s => (
-              <li key={s.key} className="px-5 py-2.5 flex items-start gap-3">
-                <span className={`mt-0.5 w-4 h-4 flex-shrink-0 flex items-center justify-center border text-[10px] font-bold ${s.done ? 'bg-sage-600 border-sage-600 text-white' : 'border-stone-400 text-transparent'}`}>✓</span>
-                <div className="min-w-0 flex-1">
-                  <p className={`text-sm ${s.done ? 'text-text-tertiary line-through' : 'text-text font-medium'}`}>{s.label}</p>
-                  {!s.done && <p className="text-xs text-text-tertiary mt-0.5">{s.how}</p>}
-                </div>
-                {!s.done && s.tab && <Button variant="ghost" size="xs" onClick={() => setTab(s.tab)}>Open</Button>}
-              </li>
-            ))}
-          </ul>
-        </Card>
-      )}
-
       {cap?.health?.state === 'paused' && (
         <Notice tone="red" title="Marketing sending is paused">{cap.health.reason}</Notice>
       )}
