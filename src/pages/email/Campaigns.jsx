@@ -2,8 +2,9 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Card, Button, Input, Select, Textarea, Modal, ConfirmDialog, Empty, Skeleton, SectionHead } from '../../components/ui/index'
 import { useAuth } from '../../store/auth'
 import { pickRecipients, displayName } from '../../lib/email/contacts'
-import { renderEmail, marketingProblems, unknownMergeTags, MERGE_TAGS, applyMergeTags, toPlainText } from '../../lib/email/render'
+import { renderEmail, marketingProblems, MERGE_TAGS, applyMergeTags, toPlainText } from '../../lib/email/render'
 import { brandTodayKey } from '../../lib/brandTime'
+import { mailboxReadiness, mailboxCap, coldProblems } from '../../lib/email/cold'
 import { saveCampaign, deleteCampaign, fetchCampaignSends, emailApi, fetchBrandKit, duplicateCampaign } from '../../lib/email/client'
 import { renderDesign, designChecks, designFromText, hasDesign, templates } from '../../lib/email/design'
 import { DesignEditor } from './DesignEditor'
@@ -16,7 +17,7 @@ import { pct, shortDate, dateTime, download } from './format'
 //
 //              Marketing                    Cold
 //   look       branded letter + footer      plain, like a typed email
-//   sent by    Resend, from the subdomain   the outreach mailbox (not yet set up)
+//   sent by    Resend, from the subdomain   our outreach mailboxes, one at a time
 //   follow-ups none                         up to three, stopped by a reply
 //   AI         three options                three options, or one written for
 //                                            a single prospect
@@ -24,7 +25,7 @@ import { pct, shortDate, dateTime, download } from './format'
 const EMPTY = {
   marketing: { name: '', subject: '', preheader: '', body: '', language: 'en', language_only: false, group_ids: [], follow_ups: [] },
   cold: {
-    name: '', subject: '', preheader: '', body: '', language: 'en', language_only: false, group_ids: [],
+    name: '', subject: '', preheader: '', body: '', language: 'en', language_only: false, group_ids: [], mailbox_ids: [],
     follow_ups: [
       { delay_days: 3, subject: '', body: '' },
       { delay_days: 5, subject: '', body: '' },
@@ -64,7 +65,7 @@ function CampaignList({ audience, data, loading, setTab, workspaceId, reload }) 
 
   return (
     <div className="space-y-3">
-      {cold && <ColdLaneNotice />}
+      {cold && !loading && <ColdLaneNotice data={data} setTab={setTab} />}
       {!cold && (loading ? <WeeklyDraftsSkeleton /> : <WeeklyDrafts workspaceId={workspaceId} data={data} reload={reload} setTab={setTab} />)}
       <Card>
         <SectionHead
@@ -145,12 +146,40 @@ function CampaignList({ audience, data, loading, setTab, workspaceId, reload }) 
   )
 }
 
-function ColdLaneNotice() {
+/** Why outreach would not go out right now, if it would not. Silent when all is well. */
+function ColdLaneNotice({ data, setTab }) {
+  const today = brandTodayKey()
+  const mailboxes = data.mailboxes || []
+  const toSettings = <Button size="sm" variant="secondary" onClick={() => setTab('settings')}>Mailboxes</Button>
+  if (!mailboxes.length) {
+    return (
+      <Notice tone="sky" title="No outreach mailbox is connected" action={toSettings}>
+        Outreach can be written, tested on yourself and exported, but it is only sent from an outreach mailbox, never from the marketing sender.
+      </Notice>
+    )
+  }
+  const ready = mailboxes.filter(m => mailboxReadiness(m, today).ready)
+  if (!ready.length) {
+    const dates = mailboxes.map(m => mailboxReadiness(m, today).readyOn).filter(Boolean).sort()
+    return (
+      <Notice tone="sky" title="The outreach mailboxes are not ready yet" action={toSettings}>
+        {dates.length ? `The first one can start sending on ${dates[0]}, when its warm-up is done.` : 'None of them has a warm-up start date, or they are paused.'}
+        {' '}Campaigns can be written and started now; they wait until then.
+      </Notice>
+    )
+  }
+  if (!data.settings?.cold_sending_enabled) {
+    return (
+      <Notice tone="amber" title="Outreach sending is off" action={toSettings}>
+        Running outreach campaigns send nothing until it is switched on.
+      </Notice>
+    )
+  }
+  const perDay = ready.reduce((n, m) => n + mailboxCap(m, today).cap, 0)
   return (
-    <Notice tone="sky" title="Cold outreach is written here, but not sent yet">
-      Cold emails never go out through the marketing sender, so a complaint here can never affect your newsletters.
-      Sending opens once the separate outreach mailbox is connected. Until then you can build groups, write and personalise emails, send yourself a test, and export them to send by hand.
-    </Notice>
+    <p className="text-[11px] text-text-tertiary">
+      Sending from {ready.length} mailbox{ready.length === 1 ? '' : 'es'}, up to {perDay} emails today, Sunday–Thursday 9:00–17:00 Riyadh.
+    </p>
   )
 }
 
@@ -185,6 +214,10 @@ function Composer({ audience, campaign, data, workspaceId, reload, setTab, statu
 
   const set = (k, v) => { setForm(f => ({ ...f, [k]: v })); setDirty(true) }
   const laneGroups = data.groups.filter(g => g.audience === audience)
+  // Cold: the mailboxes it may send from. None ticked means all of them.
+  const allMailboxes = data.mailboxes || []
+  const chosenIds = form.mailbox_ids || []
+  const sendingMailboxes = cold ? (chosenIds.length ? allMailboxes.filter(m => chosenIds.includes(m.id)) : allMailboxes) : []
 
   const recipients = useMemo(() => pickRecipients({
     contacts: data.contacts, memberships: data.members, groupIds: form.group_ids, audience,
@@ -217,17 +250,18 @@ function Composer({ audience, campaign, data, workspaceId, reload, setTab, statu
   const setDesign = design => { setForm(f => ({ ...f, design })); setDirty(true) }
 
   const sample = useMemo(() => recipients.eligible[previewIdx] || recipients.eligible[0] || SAMPLE_CONTACT, [recipients.eligible, previewIdx])
+  const signature = cold ? (sendingMailboxes[0]?.signature || '') : ''
   const preview = useMemo(() => renderEmail({
     audience, subject: current.subject, preheader: step ? '' : form.preheader, body: current.body,
     language: form.language, contact: sample,
     sender: { from_name: settings.from_name, company_address: settings.company_address },
-    unsubscribeUrl: cold ? '' : '#unsubscribe',
-  }), [audience, current.subject, current.body, form.preheader, form.language, sample, settings.from_name, settings.company_address, cold, step])
+    unsubscribeUrl: cold ? '' : '#unsubscribe', signature,
+  }), [audience, current.subject, current.body, form.preheader, form.language, sample, settings.from_name, settings.company_address, cold, step, signature])
 
   const checks = designed ? designChecks(form.design) : { problems: [], warnings: [] }
+  // Cold: the same check the server makes at launch, follow-ups included.
   const problems = cold
-    ? [!form.subject.trim() && 'Add a subject line.', !form.body.trim() && 'Write the first email.',
-       ...unknownMergeTags(`${form.subject} ${form.body}`).map(t => `Unknown merge tag {{${t}}}.`)].filter(Boolean)
+    ? coldProblems(form)
     : [...marketingProblems({ subject: form.subject, body: designed ? 'designed' : form.body, sender: settings }), ...checks.problems]
   const warnings = checks.warnings
 
@@ -258,6 +292,16 @@ function Composer({ audience, campaign, data, workspaceId, reload, setTab, statu
 
   async function sendTest() {
     setSending(true); setMessage(null)
+    // Cold, with a mailbox connected: the test goes out from it, the real way.
+    if (cold && sendingMailboxes.length) {
+      const r = await emailApi('mailbox_test', workspaceId, {
+        mailbox_id: sendingMailboxes[0].id, to: testTo, subject: current.subject, body: current.body,
+        language: form.language, sample: recipients.eligible[previewIdx] || null,
+      })
+      setSending(false)
+      setMessage(r.error ? { tone: 'red', text: r.error } : { tone: 'sage', text: `Test sent from ${r.from} to ${r.sent_to}. Check the inbox and the spam folder.` })
+      return
+    }
     const r = await emailApi('send_test', workspaceId, {
       to: testTo, audience, subject: current.subject, preheader: step ? '' : form.preheader, body: current.body,
       design: designed && !step ? form.design : undefined,
@@ -313,6 +357,27 @@ function Composer({ audience, campaign, data, workspaceId, reload, setTab, statu
           </p>
         )}
       </div>
+      {cold && allMailboxes.length > 0 && (
+        <div>
+          <p className="eyebrow mb-1.5">Send from</p>
+          <div className="flex flex-wrap gap-2">
+            {allMailboxes.map(m => {
+              const on = chosenIds.includes(m.id)
+              return (
+                <label key={m.id} className={`flex items-center gap-1.5 text-xs border px-2 py-1 cursor-pointer ${on ? 'border-amber-700 bg-amber-50 text-text' : 'border-border text-text-secondary hover:border-stone-400'}`}>
+                  <input type="checkbox" checked={on}
+                    onChange={() => set('mailbox_ids', on ? chosenIds.filter(x => x !== m.id) : [...chosenIds, m.id])} />
+                  {m.from_name ? `${m.from_name} · ` : ''}{m.email}
+                </label>
+              )
+            })}
+          </div>
+          <p className="text-[11px] text-text-tertiary mt-1">
+            {chosenIds.length ? 'Only the ticked mailboxes send this campaign.' : 'None ticked: every ready mailbox shares the work.'}
+            {' '}Each prospect's follow-ups come from the mailbox that wrote to them first, in the same thread.
+          </p>
+        </div>
+      )}
       <div className="grid sm:grid-cols-2 gap-3 items-end">
         <Select label="Written in" value={form.language} onChange={e => set('language', e.target.value)}
           hint="Sets the layout (right-to-left for Arabic) and the footer.">
@@ -337,11 +402,12 @@ function Composer({ audience, campaign, data, workspaceId, reload, setTab, statu
       )}
       <div className="flex flex-wrap items-end gap-2">
         <Input className="flex-1 min-w-[180px]" label="Send a test to" value={testTo} onChange={e => setTestTo(e.target.value)} />
-        <Button variant="secondary" onClick={sendTest} disabled={sending || !testTo || !status?.configured?.resend}>
+        <Button variant="secondary" onClick={sendTest} disabled={sending || !testTo || !(status?.configured?.resend || sendingMailboxes.length)}>
           {sending ? 'Sending…' : 'Send test'}
         </Button>
       </div>
-      {!status?.configured?.resend && <p className="text-[11px] text-text-tertiary">Sending is not switched on yet.</p>}
+      {!(status?.configured?.resend || sendingMailboxes.length) && <p className="text-[11px] text-text-tertiary">Sending is not switched on yet.</p>}
+      {cold && sendingMailboxes.length > 0 && <p className="text-[11px] text-text-tertiary">Sent from {sendingMailboxes[0].email}, only to the address above.</p>}
 
       {cold ? (
         <div className="flex flex-wrap gap-2 pt-1 border-t border-border">
@@ -349,7 +415,11 @@ function Composer({ audience, campaign, data, workspaceId, reload, setTab, statu
             onClick={() => download(`outreach-${(form.name || 'campaign').replace(/\W+/g, '-').toLowerCase()}.csv`, coldExport(form, recipients.eligible))}>
             Export personalised emails (CSV)
           </Button>
-          <Button disabled title="Needs the outreach mailbox">Start sequence</Button>
+          <Button onClick={async () => { const saved = await save({ quiet: true }); if (saved) setConfirmLaunch(true) }}
+            disabled={problems.length > 0 || !recipients.eligible.length || saving || !allMailboxes.length}
+            title={!allMailboxes.length ? 'Connect an outreach mailbox first' : undefined}>
+            Start sequence…
+          </Button>
         </div>
       ) : (
         <div className="flex flex-wrap gap-2 pt-1 border-t border-border">
@@ -383,7 +453,7 @@ function Composer({ audience, campaign, data, workspaceId, reload, setTab, statu
         </div>
       </div>
 
-      {cold && <ColdLaneNotice />}
+      {cold && <ColdLaneNotice data={data} setTab={setTab} />}
       {message && <Notice tone={message.tone}>{message.text}</Notice>}
 
       {designed ? (
@@ -519,7 +589,9 @@ function Composer({ audience, campaign, data, workspaceId, reload, setTab, statu
               )}
             </div>
             <div className="px-4 py-2 border-b border-border text-xs space-y-0.5">
-              <p className="text-text-tertiary">From <span className="text-text">{cold ? (settings.cold_from_email || 'outreach mailbox (not set up)') : (settings.from_name ? `${settings.from_name} <${settings.from_email || '…'}>` : (settings.from_email || 'Set the sender in Settings'))}</span></p>
+              <p className="text-text-tertiary">From <span className="text-text">{cold
+                ? (sendingMailboxes.length ? sendingMailboxes.map(m => m.email).join(', ') : 'an outreach mailbox (none connected)')
+                : (settings.from_name ? `${settings.from_name} <${settings.from_email || '…'}>` : (settings.from_email || 'Set the sender in Settings'))}</span></p>
               <p className="text-text-tertiary">Subject <span className="text-text font-medium">{preview.subject || '—'}</span></p>
             </div>
             <iframe title="Email preview" srcDoc={preview.html} sandbox="" className="w-full h-[460px] bg-white" />
@@ -559,7 +631,15 @@ function Composer({ audience, campaign, data, workspaceId, reload, setTab, statu
         message="The design is removed and the email becomes the plain text below. Pictures, buttons and layout are lost. The text you last got from the AI stays."
         onConfirm={() => setDesign(null)} />
 
-      {confirmLaunch && id && (
+      {confirmLaunch && id && cold && (
+        <ColdLaunchModal
+          workspaceId={workspaceId} campaignId={id} recipients={recipients} mailboxes={sendingMailboxes}
+          followUps={form.follow_ups.length} enabled={Boolean(settings.cold_sending_enabled)}
+          onClose={() => setConfirmLaunch(false)}
+          onDone={async msg => { setConfirmLaunch(false); await reload(); setTab(audience, { campaign: id, view: '1' }); setMessage(msg) }}
+        />
+      )}
+      {confirmLaunch && id && !cold && (
         <LaunchModal
           workspaceId={workspaceId} campaignId={id} recipients={recipients} status={status}
           onClose={() => setConfirmLaunch(false)}
@@ -767,6 +847,65 @@ function LaunchModal({ workspaceId, campaignId, recipients, status, onClose, onD
   )
 }
 
+/** Starting a cold sequence: nothing is sent here; the sending runs pick it up. */
+function ColdLaunchModal({ workspaceId, campaignId, recipients, mailboxes, followUps, enabled, onClose, onDone }) {
+  const [when, setWhen] = useState('now')
+  const [date, setDate] = useState(() => brandTodayKey())
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const today = brandTodayKey()
+  const ready = mailboxes.filter(m => mailboxReadiness(m, today).ready)
+  const perDay = ready.reduce((sum, m) => sum + mailboxCap(m, today).cap, 0)
+  const n = recipients.eligible.length
+  // First emails only; follow-ups share the same daily limit later on.
+  const days = perDay ? Math.ceil(n / perDay) : null
+
+  async function go() {
+    setBusy(true); setError('')
+    const r = await emailApi('launch', workspaceId, { campaign_id: campaignId, when, date: when === 'schedule' ? date : undefined })
+    setBusy(false)
+    if (r.error) { setError(r.error); return }
+    onDone({
+      tone: 'sage',
+      text: `${r.queued} prospects queued${r.recontact ? ` (${r.recontact} left out: written to by another outreach campaign in the last 90 days)` : ''}. `
+        + (enabled ? `First emails go out from ${r.mailboxes} mailbox${r.mailboxes === 1 ? '' : 'es'}, about ${r.perDay} a day to start, in working hours.` : 'Nothing goes out until outreach sending is switched on in Settings.'),
+    })
+  }
+
+  return (
+    <Modal open onClose={onClose} title="Start outreach sequence" width="max-w-md">
+      <div className="p-5 space-y-4">
+        <div className="text-sm text-text-secondary space-y-1.5">
+          <p><strong className="text-text">{n.toLocaleString()}</strong> prospects get the first email{followUps ? `, then up to ${followUps} follow-up${followUps === 1 ? '' : 's'} unless they reply` : ''}.</p>
+          {ready.length > 0 ? (
+            <p className="text-xs">
+              From {ready.length} ready mailbox{ready.length === 1 ? '' : 'es'}, up to <strong className="text-text">{perDay}</strong> a day at first
+              {days ? `, so the first emails take about ${days} working day${days === 1 ? '' : 's'}` : ''}. Sending grows as each mailbox's ramp allows.
+            </p>
+          ) : (
+            <p className="text-xs text-amber-800">None of these mailboxes is ready yet, so it cannot start.</p>
+          )}
+          <p className="text-xs">Anyone another outreach campaign wrote to in the last 90 days is left out. A reply stops their follow-ups.</p>
+          {!enabled && <p className="text-xs text-amber-800">Outreach sending is off: it will be queued, and nothing goes out until it is switched on.</p>}
+        </div>
+        <div className="space-y-2">
+          <label className="flex items-center gap-2 text-sm"><input type="radio" checked={when === 'now'} onChange={() => setWhen('now')} /> Start now</label>
+          <label className="flex items-center gap-2 text-sm"><input type="radio" checked={when === 'schedule'} onChange={() => setWhen('schedule')} /> Start on a day</label>
+          {when === 'schedule' && (
+            <Input type="date" value={date} min={brandTodayKey()} onChange={e => setDate(e.target.value)}
+              hint="From 9:00 Riyadh that day. Sunday to Thursday only." />
+          )}
+        </div>
+        {error && <Notice tone="red">{error}</Notice>}
+        <div className="flex justify-end gap-2">
+          <Button variant="secondary" onClick={onClose}>Cancel</Button>
+          <Button onClick={go} disabled={busy || !n || !ready.length}>{busy ? 'Working…' : 'Start'}</Button>
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
 // ─── Detail (after launch) ─────────────────────────────────────────────────
 
 function CampaignDetail({ audience, campaign, data, workspaceId, reload, setTab }) {
@@ -841,6 +980,16 @@ function CampaignDetail({ audience, campaign, data, workspaceId, reload, setTab 
         </div>
       </Card>
 
+      {audience === 'cold' ? (
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-px bg-border border border-border">
+        <Stat label="Prospects" value={Number(campaign.recipients || 0).toLocaleString()} hint={`${Number(st.queued || 0)} emails still queued`} />
+        <Stat label="Emails sent" value={sent.toLocaleString()} hint="First emails and follow-ups" />
+        <Stat label="Replied" value={pct(Number(st.replied || 0), Number(campaign.recipients || 0))} hint={`${Number(st.replied || 0)} people`}
+          info="Outreach carries no tracking pixel or tracked links, so replies are the measure. A reply stops that person's follow-ups." />
+        <Stat label="Bounced" value={pct(Number(st.bounced || 0), sent)} hint={`${Number(st.bounced || 0)} addresses`} tone={Number(st.bounced || 0) / (sent || 1) >= 0.03 && sent >= 20 ? 'text-red-600' : ''} />
+        <Stat label="Stopped" value={Number(st.failed || 0).toLocaleString()} hint="Skipped: replied, opted out or bounced elsewhere" />
+      </div>
+      ) : (
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-px bg-border border border-border">
         <Stat label="Recipients" value={Number(st.total || campaign.recipients || 0).toLocaleString()} hint={`${Number(st.queued || 0)} still queued`} />
         <Stat label="Sent" value={sent.toLocaleString()} hint={`${Number(st.delivered || 0)} confirmed delivered`} />
@@ -849,6 +998,7 @@ function CampaignDetail({ audience, campaign, data, workspaceId, reload, setTab 
         <Stat label="Bounced" value={pct(Number(st.bounced || 0), sent)} hint={`${Number(st.bounced || 0)} addresses`} tone={Number(st.bounced || 0) / (sent || 1) >= 0.02 && sent >= 20 ? 'text-red-600' : ''} />
         <Stat label="Spam reports" value={Number(st.complained || 0).toLocaleString()} hint={`${Number(st.failed || 0)} failed or skipped`} tone={Number(st.complained || 0) ? 'text-red-600' : ''} />
       </div>
+      )}
 
       <div className="grid xl:grid-cols-2 gap-4 items-start">
         <Card>
@@ -856,7 +1006,9 @@ function CampaignDetail({ audience, campaign, data, workspaceId, reload, setTab 
             <p className="text-xs font-semibold text-text">Recipients</p>
             <select className="text-[11px] border border-border bg-white px-1.5 py-1" value={filter} onChange={e => setFilter(e.target.value)}>
               <option value="">All</option>
-              {['queued', 'sent', 'delivered', 'opened', 'clicked', 'bounced', 'complained', 'failed', 'skipped', 'cancelled'].map(s => <option key={s} value={s}>{s}</option>)}
+              {(audience === 'cold'
+                ? ['queued', 'sending', 'sent', 'bounced', 'failed', 'skipped', 'cancelled']
+                : ['queued', 'sent', 'delivered', 'opened', 'clicked', 'bounced', 'complained', 'failed', 'skipped', 'cancelled']).map(s => <option key={s} value={s}>{s}</option>)}
             </select>
           </div>
           {sends === null ? <div className="p-4"><Skeleton className="h-32 w-full" /></div> : (
@@ -866,8 +1018,9 @@ function CampaignDetail({ audience, campaign, data, workspaceId, reload, setTab 
                   {shownSends.slice(0, 500).map(s => (
                     <tr key={s.id} className="border-b border-border last:border-0">
                       <td className="px-4 py-1.5 text-text truncate max-w-[220px]">{s.email}</td>
-                      <td className="px-2 py-1.5 capitalize text-text-secondary">{s.status}</td>
-                      <td className="px-2 py-1.5 text-text-tertiary">{s.error || (s.clicked_at ? `clicked ${dateTime(s.clicked_at)}` : s.opened_at ? `opened ${dateTime(s.opened_at)}` : s.sent_at ? dateTime(s.sent_at) : s.status === 'queued' ? `due ${dateTime(s.due_at)}` : '')}</td>
+                      {audience === 'cold' && <td className="px-2 py-1.5 text-text-tertiary whitespace-nowrap">{s.step ? `Follow-up ${s.step}` : 'First'}</td>}
+                      <td className="px-2 py-1.5 capitalize text-text-secondary">{s.replied_at ? 'replied' : s.status}</td>
+                      <td className="px-2 py-1.5 text-text-tertiary">{(audience === 'cold' && s.mailbox_id && s.sent_at ? `${mailboxEmail(data, s.mailbox_id)} · ` : '')}{s.error || (s.clicked_at ? `clicked ${dateTime(s.clicked_at)}` : s.opened_at ? `opened ${dateTime(s.opened_at)}` : s.sent_at ? dateTime(s.sent_at) : s.status === 'queued' ? `due ${dateTime(s.due_at)}` : '')}</td>
                     </tr>
                   ))}
                   {shownSends.length === 0 && <tr><td className="px-4 py-4 text-text-tertiary">Nobody here.</td></tr>}
@@ -886,4 +1039,8 @@ function CampaignDetail({ audience, campaign, data, workspaceId, reload, setTab 
         message="Emails already sent stay sent. Everything still queued is cancelled and will not go out." onConfirm={() => act('cancel')} />
     </div>
   )
+}
+
+function mailboxEmail(data, id) {
+  return (data.mailboxes || []).find(m => m.id === id)?.email || 'a removed mailbox'
 }

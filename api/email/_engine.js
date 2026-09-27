@@ -51,7 +51,7 @@ export async function launchCampaign({ db }, { workspaceId, campaignId, when, sc
   if (!campaign) return { error: 'Campaign not found.', status: 404 }
   if (campaign.audience !== 'marketing') {
     return {
-      error: 'Cold outreach is not sent through Resend. It needs the separate outreach domain and mailbox, which are not connected yet.',
+      error: 'Outreach is never sent through the marketing sender. It goes out from the outreach mailboxes.',
       status: 409,
     }
   }
@@ -142,7 +142,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   from_name: '', from_email: '', reply_to: '', company_address: '',
   warmup_started_on: null, warmup_enabled: true,
   provider_daily_limit: 100, provider_monthly_limit: 3000,
-  cold_from_name: '', cold_from_email: '', cold_daily_limit: 20,
+  cold_sending_enabled: false,
 })
 
 export async function loadSettings({ db }, workspaceId) {

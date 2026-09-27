@@ -18,9 +18,9 @@ import { Notice } from './parts'
 //   Contacts   the address book: add, import, edit, delete, group, export
 //   Groups     named lists a campaign is sent to
 //   Marketing  campaigns to people who know us, sent through Resend
-//   Cold       outreach to prospects: written here, sent from the outreach
-//              mailbox once it exists (never through Resend)
-//   Settings   sender, footer, limits, warm-up
+//   Cold       outreach to prospects: written here, sent one at a time from
+//              our own outreach mailboxes (never through Resend)
+//   Settings   sender, footer, limits, warm-up, outreach mailboxes
 //
 // All data for the section loads once, here, and is handed down. At the
 // sizes this is built for (a few thousand contacts) that is simpler and
@@ -32,7 +32,7 @@ const TABS = [
   { key: 'contacts', label: 'Contacts', note: 'Everyone you can email: add, import, tag, group' },
   { key: 'groups', label: 'Groups', note: 'Named lists that campaigns are sent to' },
   { key: 'marketing', label: 'Marketing', note: 'Newsletters and updates to people who know us, sent through Resend' },
-  { key: 'cold', label: 'Cold outreach', note: 'Personal first emails to prospects, sent from the separate outreach mailbox' },
+  { key: 'cold', label: 'Cold outreach', note: 'Personal first emails and follow-ups to prospects, sent from your outreach mailboxes' },
   { key: 'settings', label: 'Settings', note: 'Sender, footer, sending limits and warm-up' },
 ]
 
@@ -92,7 +92,7 @@ export function EmailFlows() {
   const loading = loadedFor !== activeWorkspaceId
   const ctx = useMemo(() => ({
     workspaceId: activeWorkspaceId,
-    data: data || { contacts: [], groups: [], members: [], campaigns: [], stats: [], settings: null, recentSends: [], aiDrafts: null },
+    data: data || { contacts: [], groups: [], members: [], campaigns: [], stats: [], settings: null, recentSends: [], aiDrafts: null, mailboxes: [] },
     status,
     loading,
     reload,

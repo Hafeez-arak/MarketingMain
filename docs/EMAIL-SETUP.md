@@ -16,6 +16,11 @@ Status as of 2026-09-27.
 | 9 | Tighten DMARC on arak-sa.com | GoDaddy | Recommended |
 | 10 | Google Postmaster Tools | Google | Recommended |
 | 11 | Weekly AI drafts on the n8n box | WSL box | To do (after merge) |
+| 12 | Outreach (cold) mailboxes: domain, Google mailboxes, DNS, app passwords | Registrar + Google | To do |
+| 13 | Warm-up service on each outreach mailbox | TrulyInbox (or similar) | To do |
+| 14 | Connect the mailboxes in the app | App → Email → Settings | To do |
+| 15 | Cold sender schedule on the n8n box | WSL box | To do (after merge) |
+| 16 | Switch outreach sending on, 14 days after warm-up starts | App → Email → Settings | Later |
 
 ---
 
@@ -200,12 +205,119 @@ Marketing tab.
 - **Marketing lane = people who know us.** No bought or scraped lists in it.
 - **Cold lane never goes through Resend.**
 
-## Later: cold outreach setup (not started)
+## 12. Outreach mailboxes (the cold lane)
 
-1. Buy a separate domain (not a subdomain of arak-sa.com), e.g. `araklighting.com`, ~$12/year.
-2. Point its website at arak-sa.com.
-3. Google Workspace mailbox on it (~$7/month). Not in the company Microsoft 365.
-4. SPF, DKIM and DMARC for that domain (Google Workspace shows the records).
-5. Warm the mailbox for 2–3 weeks with normal, low-volume email before any cold send.
-6. App → Email → Settings → Cold outreach sender: fill in the address, keep 20–40/day.
-7. Then the cold sender gets built and connected (see PENDING.md).
+Cold email never goes through Resend and never from arak-sa.com. It goes out
+from real Google mailboxes on a **separate domain**, one email at a time. The
+app refuses a mailbox on the marketing domain, on the signed-in person's
+domain, or on gmail.com / outlook.com.
+
+1. **Domain.** Buy one or two domains that are clearly Arak but not
+   arak-sa.com, e.g. `araklighting.com`, `arak-lighting.co` (~$12–15/year
+   each). Point each one's website at https://arak-sa.com (a redirect), so a
+   prospect who types it lands on the real site.
+2. **Mailboxes.** 2–5 mailboxes with real people's names (`ahmed@…`), never
+   `info@` or `sales@`. Either:
+   - Google Workspace Business Starter (~$7–8/user/month), a NEW Workspace
+     account, not connected to the company Microsoft 365; or
+   - a reseller of Google mailboxes (Zapmail via Smartlead or Instantly,
+     ~$4.50–5/month). Choose the option **with admin access**, so app
+     passwords can be turned on.
+3. **DNS on the outreach domain** (at its registrar):
+   - SPF, TXT on `@`: `v=spf1 include:_spf.google.com ~all`
+   - DKIM: Google Admin → Apps → Google Workspace → Gmail → Authenticate email
+     → Generate new record → add the TXT it shows (`google._domainkey`) →
+     back in Google Admin, **Start authentication**.
+   - DMARC, TXT on `_dmarc`: `v=DMARC1; p=none; rua=mailto:<a mailbox you read>`
+4. **App passwords.** Google Admin → Security → Authentication → 2-Step
+   Verification → allow users to turn it on. Then, signed in as each mailbox:
+   https://myaccount.google.com/signinoptions/twosv (turn on), then
+   https://myaccount.google.com/apppasswords → name it "Arak outreach" → copy
+   the 16 letters. That is what the app asks for; the account password never
+   leaves Google.
+   If Google ever stops accepting app passwords for Workspace, the mailbox
+   shows "Needs reconnecting" in the app and the send is not lost: it waits.
+
+## 13. Warm-up service
+
+Warm-up needs a network of thousands of other mailboxes, so it cannot be built
+into the app. Use TrulyInbox (~$29/month, unlimited mailboxes) or any warm-up
+service, connect every outreach mailbox to it **the day it is created**, and
+leave it running for as long as the mailbox sends. Note the date: the app asks
+for it.
+
+## 14. Connect the mailboxes in the app
+
+App → Email → Settings → Outreach mailboxes → **Connect mailbox**: address,
+sender name, app password, signature, most per day (15 is a good start), the
+warm-up start date. The app logs in to both sending (SMTP) and reading (IMAP)
+before it stores anything, and stores the password encrypted where no page
+can read it.
+
+Then **Send test** on each mailbox: it should reach your inbox, not spam or
+Promotions. Also send one to the address shown at https://www.mail-tester.com
+(the Composer's "Send a test to" box works for this) and aim for 9/10.
+
+The password is encrypted with a key derived from `SUPABASE_SERVICE_ROLE_KEY`.
+If that key is ever rotated, every mailbox shows "Needs reconnecting": paste
+its app password again.
+
+## 15. Cold sender schedule on the n8n box
+
+The app's sending run is `GET /api/email/cold-tick`, called every 10 minutes by
+the n8n workflow **Email — cold sender**. It needs `CRON_SECRET` on Vercel
+(section 7) AND the same value on the box.
+
+On the box (WSL, in the repo folder), after the PR is merged:
+
+```bash
+git pull
+```
+
+Add the secret to the box's n8n environment (same value as Vercel's
+`CRON_SECRET`):
+
+```bash
+nano n8n/docker/.env
+```
+
+Line to add: `CRON_SECRET=<the same long string>`
+
+Restart n8n so it picks up `CRON_SECRET` and the new `APP_BASE_URL`
+(docker-compose.yml):
+
+```bash
+(cd n8n/docker && docker compose up -d n8n)
+```
+
+```bash
+./n8n/redeploy.sh "Email — cold sender"
+```
+
+Then n8n → Email — cold sender → make sure it is **Active** → **Execute
+workflow** once. "What happened" should say "Outside sending hours…" or list
+each mailbox. "CRON_SECRET is not set on the box" or "The app refused" means
+the secret is missing or different.
+
+## 16. Switch outreach sending on
+
+Only once at least one mailbox shows **Ready** (14 days after its warm-up
+started): App → Email → Settings → Outreach mailboxes → **Switch on**. The same
+button is the emergency stop.
+
+How sending behaves, all enforced in code (`src/lib/email/cold.js`):
+
+- Sunday–Thursday, 09:00–17:00 Riyadh only; one email per mailbox per run,
+  with a random gap so a day's emails are spread out.
+- Per mailbox: 5/day in its first week of real sending, 10/day in the second,
+  then its own limit. Never more than 40/day per mailbox or 200/day in total,
+  whatever is typed in.
+- Follow-ups go from the same mailbox, in the same thread, after their wait.
+  A contact marked as replied, unsubscribed or bounced gets nothing more.
+- Nobody gets a second outreach sequence within 90 days.
+- A mailbox pauses itself if 5% of its week's emails bounce, and stops if its
+  login is refused. **Verify every bought list** (MillionVerifier, ZeroBounce)
+  before importing it: bounces are the fastest way to burn a domain.
+- Reading replies and bounces from the inboxes is the next build (PENDING.md).
+  Until then, mark a contact who replied as replied by hand, so their
+  follow-ups stop.

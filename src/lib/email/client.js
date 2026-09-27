@@ -29,7 +29,7 @@ function check({ data, error }) {
 
 export async function fetchEmailData(ws) {
   const since = new Date(Date.now() - 30 * 86_400_000).toISOString()
-  const [contacts, groups, members, campaigns, stats, settingsRows, sends, aiDrafts] = await Promise.all([
+  const [contacts, groups, members, campaigns, stats, settingsRows, sends, aiDrafts, mailboxes] = await Promise.all([
     all(() => supabase.from('email_contacts').select('*').eq('workspace_id', ws).order('created_at', { ascending: false })),
     all(() => supabase.from('email_groups').select('*').eq('workspace_id', ws).order('name')),
     all(() => supabase.from('email_group_members').select('group_id,contact_id').eq('workspace_id', ws)),
@@ -44,8 +44,15 @@ export async function fetchEmailData(ws) {
     supabase.from('email_ai_drafts').select('*').eq('workspace_id', ws)
       .order('week_of', { ascending: false }).limit(1)
       .then(r => r.data || [], () => []),
+    // Outreach mailboxes. Their passwords live in another table this session
+    // cannot read at all. Degrades to none, like the drafts.
+    supabase.from('email_mailboxes').select('*').eq('workspace_id', ws).order('created_at')
+      .then(r => r.data || [], () => []),
   ])
-  return { contacts, groups, members, campaigns, stats, settings: settingsRows[0] || null, recentSends: sends, aiDrafts: aiDrafts[0] || null }
+  return {
+    contacts, groups, members, campaigns, stats, settings: settingsRows[0] || null, recentSends: sends,
+    aiDrafts: aiDrafts[0] || null, mailboxes,
+  }
 }
 
 // ── Contacts ──
@@ -140,7 +147,7 @@ export async function setContactGroups(ws, contactId, groupIds, currentIds) {
 
 // ── Campaigns ──
 
-const CAMPAIGN_FIELDS = ['audience', 'name', 'subject', 'preheader', 'body', 'language', 'language_only', 'group_ids', 'follow_ups', 'design']
+const CAMPAIGN_FIELDS = ['audience', 'name', 'subject', 'preheader', 'body', 'language', 'language_only', 'group_ids', 'follow_ups', 'design', 'mailbox_ids']
 
 export async function saveCampaign(ws, campaign, id = null) {
   const row = { workspace_id: ws, updated_at: new Date().toISOString() }
@@ -161,14 +168,14 @@ export async function deleteCampaign(ws, id) {
 
 export async function fetchCampaignSends(ws, campaignId) {
   return all(() => supabase.from('email_sends')
-    .select('id,email,step,status,error,sent_at,delivered_at,opened_at,clicked_at,bounced_at,complained_at,due_at,contact_id')
+    .select('id,email,step,status,error,sent_at,delivered_at,opened_at,clicked_at,bounced_at,complained_at,replied_at,due_at,contact_id,mailbox_id')
     .eq('workspace_id', ws).eq('campaign_id', campaignId).order('created_at'))
 }
 
 // ── Settings ──
 
 const SETTINGS_FIELDS = ['from_name', 'from_email', 'reply_to', 'company_address', 'warmup_enabled',
-  'provider_daily_limit', 'provider_monthly_limit', 'cold_from_name', 'cold_from_email', 'cold_daily_limit']
+  'provider_daily_limit', 'provider_monthly_limit', 'cold_sending_enabled']
 
 export async function saveSettings(ws, settings) {
   const row = { workspace_id: ws, updated_at: new Date().toISOString() }

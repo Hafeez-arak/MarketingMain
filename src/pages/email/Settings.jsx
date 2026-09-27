@@ -4,6 +4,7 @@ import { useAuth } from '../../store/auth'
 import { isValidEmail } from '../../lib/email/contacts'
 import { saveSettings, emailApi } from '../../lib/email/client'
 import { Notice } from './parts'
+import { OutreachMailboxes } from './Mailboxes'
 
 // ─── Settings ──────────────────────────────────────────────────────────────
 // Who the email is from, what every footer says, and how fast sending may
@@ -38,9 +39,6 @@ function SettingsForm({ workspaceId, data, status, reload, initial: s }) {
     warmup_enabled: s.warmup_enabled !== false,
     provider_daily_limit: s.provider_daily_limit ?? 100,
     provider_monthly_limit: s.provider_monthly_limit ?? 3000,
-    cold_from_name: s.cold_from_name || '',
-    cold_from_email: s.cold_from_email || '',
-    cold_daily_limit: s.cold_daily_limit ?? 20,
   }))
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState(null)
@@ -51,10 +49,7 @@ function SettingsForm({ workspaceId, data, status, reload, initial: s }) {
   const errors = {
     from_email: form.from_email && !isValidEmail(form.from_email) ? 'Not a valid address' : '',
     reply_to: form.reply_to && !isValidEmail(form.reply_to) ? 'Not a valid address' : '',
-    cold_from_email: form.cold_from_email && !isValidEmail(form.cold_from_email) ? 'Not a valid address' : '',
   }
-  const sameDomain = form.cold_from_email && form.from_email
-    && form.cold_from_email.split('@')[1]?.toLowerCase().endsWith((form.from_email.split('@')[1] || '').toLowerCase().split('.').slice(-2).join('.'))
   const plan = PLANS.find(p => p.daily === Number(form.provider_daily_limit) && p.monthly === Number(form.provider_monthly_limit))?.key || 'custom'
 
   async function save() {
@@ -65,10 +60,8 @@ function SettingsForm({ workspaceId, data, status, reload, initial: s }) {
         ...form,
         from_email: form.from_email.trim().toLowerCase(),
         reply_to: form.reply_to.trim().toLowerCase(),
-        cold_from_email: form.cold_from_email.trim().toLowerCase(),
         provider_daily_limit: Math.max(0, Number(form.provider_daily_limit) || 0),
         provider_monthly_limit: Math.max(0, Number(form.provider_monthly_limit) || 0),
-        cold_daily_limit: Math.max(0, Math.min(50, Number(form.cold_daily_limit) || 0)),
       })
       setMessage({ tone: 'sage', text: 'Settings saved.' })
       await reload()
@@ -133,22 +126,6 @@ function SettingsForm({ workspaceId, data, status, reload, initial: s }) {
         </div>
       </Card>
 
-      <Card>
-        <SectionHead title="Cold outreach sender" subtitle="For later. Nothing is sent from here until the outreach mailbox is connected." />
-        <div className="p-5 grid md:grid-cols-3 gap-4">
-          <Input label="From name" value={form.cold_from_name} onChange={e => set('cold_from_name', e.target.value)} placeholder="Ahmed from ARAK Lighting" />
-          <Input label="Outreach address" value={form.cold_from_email} onChange={e => set('cold_from_email', e.target.value)} error={errors.cold_from_email}
-            placeholder="ahmed@araklighting.com" />
-          <Input label="Per day (max 50)" type="number" min={0} max={50} value={form.cold_daily_limit} onChange={e => set('cold_daily_limit', e.target.value)}
-            hint="20–40 per mailbox is the safe range." />
-          {sameDomain && (
-            <div className="md:col-span-3">
-              <Notice tone="red">The outreach address is on the same domain as your marketing and staff email. Use a separate domain (e.g. araklighting.com) so a cold campaign can never damage arak-sa.com.</Notice>
-            </div>
-          )}
-        </div>
-      </Card>
-
       <div className="flex justify-end">
         <Button onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save settings'}</Button>
       </div>
@@ -163,6 +140,8 @@ function SettingsForm({ workspaceId, data, status, reload, initial: s }) {
           {!data.settings?.from_email && <p className="w-full text-[11px] text-text-tertiary">Save a From address above first.</p>}
         </div>
       </Card>
+
+      <OutreachMailboxes workspaceId={workspaceId} data={data} status={status} reload={reload} />
     </div>
   )
 }

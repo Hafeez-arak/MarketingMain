@@ -3,6 +3,8 @@
 // the client is created, so the stand-in has to be in place before anything
 // imports supabaseClient.
 
+import { mailboxReadiness, mailboxCap, mailboxDomainProblem, domainOf } from '../lib/email/cold.js'
+
 export const WS = '00000000-0000-0000-0000-00000000e1a1'
 const uid = () => crypto.randomUUID()
 const now = () => new Date().toISOString()
@@ -14,6 +16,11 @@ const db = {
   email_group_members: [],
   email_campaigns: [],
   email_sends: [],
+  // One mailbox past its warm-up, one still warming.
+  email_mailboxes: [
+    { id: 'mb-ready', workspace_id: WS, provider: 'smtp', email: 'ahmed@araklighting.com', from_name: 'Ahmed Al-Harbi', signature: 'Ahmed Al-Harbi\nProject Sales, ARAK Lighting', smtp_host: 'smtp.gmail.com', smtp_port: 465, imap_host: 'imap.gmail.com', imap_port: 993, username: 'ahmed@araklighting.com', daily_limit: 20, warmup_started_on: daysAgo(20).slice(0, 10), first_sent_on: daysAgo(3).slice(0, 10), last_sent_at: daysAgo(1), next_send_at: null, status: 'active', status_reason: '', last_error: '', created_at: daysAgo(21), updated_at: now() },
+    { id: 'mb-warm', workspace_id: WS, provider: 'smtp', email: 'sara@arak-lighting.co', from_name: 'Sara Nasser', signature: '', smtp_host: 'smtp.gmail.com', smtp_port: 465, imap_host: 'imap.gmail.com', imap_port: 993, username: 'sara@arak-lighting.co', daily_limit: 15, warmup_started_on: daysAgo(5).slice(0, 10), first_sent_on: null, last_sent_at: null, next_send_at: null, status: 'active', status_reason: '', last_error: '', created_at: daysAgo(5), updated_at: now() },
+  ],
   // Arak's real public logo and a project photo, so the design editor's
   // picture picker has something to show. Read-only public URLs.
   brand_assets: [
@@ -33,7 +40,7 @@ const db = {
   email_settings: [{
     workspace_id: WS, from_name: 'Arak Lighting', from_email: 'updates@email.arak-sa.com', reply_to: 'marketing@arak-sa.com',
     company_address: 'ARAK Lighting\nRiyadh, Saudi Arabia', warmup_started_on: daysAgo(9).slice(0, 10), warmup_enabled: true,
-    provider_daily_limit: 100, provider_monthly_limit: 3000, cold_from_name: '', cold_from_email: '', cold_daily_limit: 20, updated_at: now(),
+    provider_daily_limit: 100, provider_monthly_limit: 3000, cold_sending_enabled: false, updated_at: now(),
   }],
 }
 
@@ -185,6 +192,46 @@ function api(action, body) {
     })
   }
   if (action === 'send_test') return json({ ok: true, sent_to: body.to, id: 're_test' })
+  if (action === 'mailbox_test') {
+    const mb = db.email_mailboxes.find(m => m.id === body.mailbox_id)
+    return json({ ok: true, sent_to: body.to || 'hafeez@arak-sa.com', from: mb?.email })
+  }
+  if (action === 'mailbox_save') {
+    const input = body.mailbox || {}
+    const problem = mailboxDomainProblem(input.email, [settings.from_email, settings.reply_to, 'hafeez@arak-sa.com'].map(domainOf))
+    if (problem) return json({ ok: false, error: problem }, 400)
+    if (!input.id && !body.password) return json({ ok: false, error: 'Paste the mailbox\'s app password.' }, 400)
+    return new Promise(r => setTimeout(r, 600)).then(() => {
+      let mb = db.email_mailboxes.find(m => m.id === input.id)
+      if (mb) Object.assign(mb, input, { status: mb.status === 'error' ? 'active' : mb.status, updated_at: now() })
+      else {
+        mb = { id: uid(), workspace_id: WS, provider: 'smtp', first_sent_on: null, last_sent_at: null, next_send_at: null, status: 'active', status_reason: '', last_error: '', created_at: now(), ...input, email: String(input.email).toLowerCase() }
+        db.email_mailboxes.push(mb)
+      }
+      return json({ ok: true, mailbox: mb, verified: true })
+    })
+  }
+  if (action === 'mailbox_pause') {
+    const mb = db.email_mailboxes.find(m => m.id === body.mailbox_id)
+    Object.assign(mb, body.paused ? { status: 'paused', status_reason: 'Paused by hafeez@arak-sa.com.' } : { status: 'active', status_reason: '' })
+    return json({ ok: true })
+  }
+  if (action === 'mailbox_delete') {
+    db.email_mailboxes = db.email_mailboxes.filter(m => m.id !== body.mailbox_id)
+    return json({ ok: true })
+  }
+  if (action === 'cold_preview') {
+    const today = now().slice(0, 10)
+    const queued = db.email_sends.find(x => x.status === 'queued' && x.step === 0)
+    return json({ ok: true, preview: { window: true, workspaces: [{ mailboxes: db.email_mailboxes.map(mb => {
+      const r = mailboxReadiness(mb, today)
+      if (!r.ready) return { mailbox: mb.email, action: 'wait', reason: r.reason }
+      const cap = mailboxCap(mb, today).cap
+      return queued
+        ? { mailbox: mb.email, action: 'send', reason: 'Would send now.', sentToday: 2, capToday: cap, next: { email: queued.email, step: 0, campaign: 'Riyadh hotels' } }
+        : { mailbox: mb.email, action: 'wait', reason: 'Nothing due for this mailbox right now.', sentToday: 2, capToday: cap }
+    }) }] } })
+  }
   if (action === 'dispatch') return json({ ok: true, dispatched: { sent: 0 } })
   if (action === 'draft') {
     return new Promise(r => setTimeout(r, 700)).then(() => json({
@@ -198,6 +245,13 @@ function api(action, body) {
   }
   if (action === 'launch') {
     const c = db.email_campaigns.find(x => x.id === body.campaign_id)
+    if (c.audience === 'cold') {
+      const members = db.email_group_members.filter(m => c.group_ids.includes(m.group_id))
+      const prospects = members.map(m => db.email_contacts.find(x => x.id === m.contact_id)).filter(x => x && x.status === 'active' && x.audience === 'cold')
+      for (const k of prospects) db.email_sends.push({ id: uid(), workspace_id: WS, campaign_id: c.id, contact_id: k.id, email: k.email, step: 0, status: 'queued', sent_at: null, due_at: now(), error: '', mailbox_id: null, created_at: now() })
+      Object.assign(c, { status: 'sending', recipients: prospects.length, launched_at: now(), from_email: 'ahmed@araklighting.com' })
+      return json({ ok: true, queued: prospects.length, recontact: 0, scheduled: false, mailboxes: 1, perDay: 10 })
+    }
     const members = db.email_group_members.filter(m => c.group_ids.includes(m.group_id))
     const contacts = members.map(m => db.email_contacts.find(x => x.id === m.contact_id)).filter(x => x && x.status === 'active' && x.audience === 'marketing')
     for (const k of contacts) db.email_sends.push({ id: uid(), workspace_id: WS, campaign_id: c.id, contact_id: k.id, email: k.email, step: 0, status: 'sent', sent_at: now(), due_at: now(), error: '', created_at: now() })
