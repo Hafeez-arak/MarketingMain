@@ -8,12 +8,12 @@ import { textIn } from '../../src/lib/agent/loop.js'
 import { modelFor } from '../../src/lib/agent/models.js'
 import { brandDateKey } from '../../src/lib/brandTime.js'
 import {
-  WEEKLY_IDENTITY, WEEKLY_SCHEMA, WEEKLY_MAX, weekOf, daysBetweenIso, marketingFindings, audienceSummary,
-  weeklyPrompt, inputsSummary, parseWeekly, wantsArabic,
+  WEEKLY_IDENTITY, WEEKLY_SCHEMA, WEEKLY_MAX, weekOf, daysBetweenIso, marketingFindings, storyPosts, audienceSummary,
+  weeklyPrompt, inputsSummary, parseWeekly, wantsArabic, websiteOf, sitePages, explainModelError,
 } from '../../src/lib/email/weekly.js'
 
 // ─── POST /api/agent/emailWeekly ───────────────────────────────────────────
-// Writes this week's three marketing-email options for one workspace and
+// Writes this week's (Sunday-start, Riyadh) three marketing-email options for one workspace and
 // stores them in email_ai_drafts. Runs ONLY in the agent container beside
 // n8n: the "Agent — weekly email drafts" workflow calls it every Monday after
 // the research run, and the Marketing tab's "Write this week's drafts" button
@@ -56,10 +56,10 @@ export async function gatherWeeklyInputs(workspaceId, { now = new Date(), brand 
     safe(db(`email_group_members?workspace_id=eq.${ws}&select=group_id&limit=50000`)),
     safe(db(`email_campaigns?workspace_id=eq.${ws}&audience=eq.marketing&status=in.(sending,sent)&order=launched_at.desc.nullslast&limit=${WEEKLY_MAX.campaigns}&select=id,subject,launched_at,recipients`)),
     safe(db(`email_ai_drafts?workspace_id=eq.${ws}&week_of=lt.${week}&status=eq.ready&order=week_of.desc&limit=1&select=options`)),
-    safe(db(`generated_posts?workspace_id=eq.${ws}&publish_status=eq.published&published_at=gte.${since30}&order=published_at.desc&limit=${WEEKLY_MAX.posts}&select=platform,topic,caption,caption_en,published_at`)),
+    safe(db(`generated_posts?workspace_id=eq.${ws}&publish_status=eq.published&published_at=gte.${since30}&order=published_at.desc&limit=30&select=platform,topic,caption,caption_en,published_at`)),
     safe(db(`research_runs?workspace_id=eq.${ws}&status=eq.complete&order=finished_at.desc&limit=1&select=id,finished_at,headline:report->>headline,findings:report->findings`)),
     safe(db(`research_events?workspace_id=eq.${ws}&status=in.(upcoming,tbc)&relevance=in.(high,medium)&or=(start_date.is.null,and(start_date.gte.${today},start_date.lte.${horizon}))&order=start_date.asc.nullslast&limit=${WEEKLY_MAX.events}&select=name,start_date,city,recommendation,decision`)),
-    safe(db(`research_opportunities?workspace_id=eq.${ws}&status=in.(new,assigned,pursued)&relevance=eq.high&order=last_seen_at.desc&limit=${WEEKLY_MAX.leads}&select=name,headline,location,stage`)),
+    safe(db(`research_opportunities?workspace_id=eq.${ws}&status=in.(new,assigned,pursued)&relevance=eq.high&order=last_seen_at.desc&limit=${WEEKLY_MAX.leads}&select=name,client,headline,location,stage`)),
   ])
 
   const stats = campaigns.length
@@ -81,12 +81,13 @@ export async function gatherWeeklyInputs(workspaceId, { now = new Date(), brand 
   }
 
   const run = runs[0] || null
-  const website = (String(brand?.profile?.contactInfo || '').match(/https?:\/\/[^\s,;)]+/) || [''])[0]
+  const website = websiteOf(brand?.profile)
 
   return {
     today,
     weekOf: week,
     website,
+    pages: sitePages(brand?.profile, website),
     audience: audienceSummary({ contacts, groups, members }),
     campaigns: campaigns.map(c => {
       const s = statById.get(c.id) || {}
@@ -96,16 +97,16 @@ export async function gatherWeeklyInputs(workspaceId, { now = new Date(), brand 
       }
     }),
     lastWeek: (lastWeekRows[0]?.options || []).map(o => `${o.angle}: ${o.subject}`).slice(0, WEEKLY_MAX.lastWeek),
-    posts: posts.map(p => ({
+    posts: storyPosts(posts.map(p => ({
       date: String(p.published_at || '').slice(0, 10), platform: p.platform || '',
       topic: p.topic || '', caption: p.caption_en || p.caption || '',
-    })),
+    }))),
     research: run ? {
       id: run.id,
       finished_on: String(run.finished_at || '').slice(0, 10),
       age_days: daysBetweenIso(run.finished_at, now.toISOString()) ?? 0,
       headline: run.headline || '',
-      findings: marketingFindings(run.findings),
+      findings: marketingFindings(run.findings, { today }),
     } : null,
     calendar,
     events: events.map(e => ({ name: e.name, start_date: e.start_date, city: e.city, recommendation: e.recommendation, decision: e.decision })),
@@ -179,7 +180,7 @@ export default async function handler(req, res) {
     })
 
     if (!out.ok) {
-      const error = out.error || 'The drafts could not be written.'
+      const error = explainModelError(out.error)
       await finish({ status: 'failed', error: error.slice(0, 500), cost_usd: out.cost || 0 })
       return res.status(out.refused ? 200 : 502).json({ ok: false, capped: Boolean(out.refused), error })
     }

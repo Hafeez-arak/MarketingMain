@@ -113,6 +113,14 @@ describe('POST /api/agent/emailWeekly', () => {
     const { status, json } = await run({ workspace_id: WS })
     expect(status).toBe(200)
     expect(json).toMatchObject({ ok: false, capped: true })
+  })
+
+  it('stores a readable reason when the AI account is out of credit', async () => {
+    state.modelReply = { ok: false, error: '400 {"type":"error","error":{"message":"Your credit balance is too low to access the Anthropic API."}}' }
+    const { json } = await run({ workspace_id: WS })
+    expect(json.error).toMatch(/run out of credit/)
+    const failed = state.calls.find(c => c.method === 'PATCH' && c.body?.status === 'failed')
+    expect(failed.body.error).toMatch(/run out of credit/)
     expect(state.calls.find(c => c.method === 'PATCH' && c.body?.status === 'failed')).toBeTruthy()
   })
 

@@ -1,4 +1,5 @@
 import { supabase } from '../supabaseClient'
+import { websiteOf } from './weekly'
 
 // ─── Email: the browser's data layer ───────────────────────────────────────
 // Plain table reads and writes go straight to Supabase with the person's own
@@ -201,7 +202,7 @@ export async function fetchBrandKit(ws) {
   const [assets, profile] = await Promise.all([
     supabase.from('brand_assets').select('id,kind,title,public_url,created_at').eq('workspace_id', ws)
       .order('created_at', { ascending: false }).limit(200),
-    supabase.from('brand_profile').select('brand_colors,contact_info').eq('workspace_id', ws).limit(1),
+    supabase.from('brand_profile').select('brand_colors,contact_info,custom_fields').eq('workspace_id', ws).limit(1),
   ])
   const rows = (assets.data || []).filter(a => /^https:\/\//.test(a.public_url || '') && a.kind !== 'music')
   const p = profile.data?.[0] || {}
@@ -209,8 +210,9 @@ export async function fetchBrandKit(ws) {
     logos: rows.filter(a => a.kind === 'logo'),
     photos: rows.filter(a => a.kind !== 'logo'),
     brandColors: p.brand_colors || '',
-    // The first web address written in the Brand Brain's contact details.
-    website: (String(p.contact_info || '').match(/https?:\/\/[^\s,;)]+/) || [''])[0],
+    // Brand Brain keeps the site as a custom field ("arak-sa.com"); older
+    // profiles have it in the contact details. Same rule as the weekly drafts.
+    website: websiteOf({ customFields: p.custom_fields || {}, contactInfo: p.contact_info || '' }),
   }
 }
 

@@ -16,7 +16,7 @@
 create table if not exists public.email_ai_drafts (
   id               uuid primary key default gen_random_uuid(),
   workspace_id     uuid not null references public.workspaces(id) on delete cascade,
-  -- The Monday (Riyadh) of the week these are for.
+  -- The Sunday (Riyadh) that starts the working week these are for.
   week_of          date not null,
   status           text not null default 'running' check (status in ('running','ready','failed')),
   -- [{ angle, why_now, audience, subject, preheader, body, cta_label, cta_url,
