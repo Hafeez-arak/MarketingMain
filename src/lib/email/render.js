@@ -1,0 +1,219 @@
+// ─── Turning a written email into what is sent ─────────────────────────────
+// ONE renderer for the preview and the send, so what a person approved on
+// screen is byte-for-byte what leaves. Pure, so the server can import it.
+//
+// The body is plain text with a little formatting — the format a person (or
+// the AI) can write without an editor:
+//
+//   blank line          new paragraph
+//   **bold**            bold
+//   [label](https://…)  link
+//   - item              bullet list
+//   {{first_name}}      merge tag; {{first_name|there}} gives a fallback
+//
+// Two looks, one per lane:
+//   marketing  a branded, simple HTML letter with a real footer: company
+//              address, why you are receiving this, and unsubscribe.
+//   cold       what a person would type. No template, no images, no tracking
+//              pixels in the design — a cold email that looks like a
+//              newsletter is read as one, by people and by filters.
+
+const MERGE_FIELDS = {
+  first_name: c => c?.first_name,
+  last_name: c => c?.last_name,
+  full_name: c => [c?.first_name, c?.last_name].filter(Boolean).join(' '),
+  company: c => c?.company,
+  job_title: c => c?.job_title,
+  city: c => c?.city,
+  email: c => c?.email,
+}
+
+export const MERGE_TAGS = Object.keys(MERGE_FIELDS)
+
+/**
+ * Fill {{tags}}. An unknown tag is left exactly as written so a typo is
+ * visible in the preview rather than silently becoming empty. A known tag with
+ * no value and no fallback becomes empty, and the whitespace it leaves is
+ * tidied ("Hi {{first_name}}," with no name → "Hi,").
+ */
+export function applyMergeTags(text, contact) {
+  return String(text || '')
+    .replace(/\{\{\s*([a-z_]+)\s*(?:\|\s*([^}]*?)\s*)?\}\}/gi, (whole, key, fallback) => {
+      const get = MERGE_FIELDS[key.toLowerCase()]
+      if (!get) return whole
+      const value = String(get(contact) || '').trim()
+      return value || (fallback ?? '')
+    })
+    .replace(/ +([,.!?،])/g, '$1')
+    .replace(/ {2,}/g, ' ')
+}
+
+/** Tags that are written but not known — shown as a warning in the composer. */
+export function unknownMergeTags(text) {
+  const out = new Set()
+  for (const m of String(text || '').matchAll(/\{\{\s*([a-z_]+)[^}]*\}\}/gi)) {
+    if (!MERGE_FIELDS[m[1].toLowerCase()]) out.add(m[1])
+  }
+  return [...out]
+}
+
+export function escapeHtml(s) {
+  return String(s ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
+// Only http(s) and mailto links survive. A javascript: URL in an email body
+// is not something any sender needs.
+function safeHref(url) {
+  const u = String(url || '').trim()
+  return /^(https?:\/\/|mailto:)/i.test(u) ? u : ''
+}
+
+/** Inline formatting on ONE already-escaped-safe line. */
+function inline(line, { linkStyle = '' } = {}) {
+  let out = escapeHtml(line)
+  out = out.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (whole, label, url) => {
+    const href = safeHref(url.replace(/&amp;/g, '&'))
+    return href ? `<a href="${escapeHtml(href)}"${linkStyle ? ` style="${linkStyle}"` : ''}>${label}</a>` : label
+  })
+  out = out.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+  return out
+}
+
+/** Body text → blocks of paragraphs and bullet lists. */
+function blocks(text) {
+  const out = []
+  for (const chunk of String(text || '').replace(/\r\n/g, '\n').split(/\n{2,}/)) {
+    const lines = chunk.split('\n').map(l => l.trimEnd()).filter(l => l.trim())
+    if (!lines.length) continue
+    if (lines.every(l => /^\s*[-•]\s+/.test(l))) {
+      out.push({ type: 'list', items: lines.map(l => l.replace(/^\s*[-•]\s+/, '')) })
+    } else {
+      out.push({ type: 'p', lines })
+    }
+  }
+  return out
+}
+
+/** Body text → plain text, links written as "label (url)". */
+export function toPlainText(text) {
+  return String(text || '')
+    .replace(/\r\n/g, '\n')
+    .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, '$1 ($2)')
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/^\s*•\s+/gm, '- ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
+
+const FOOTER_COPY = {
+  en: {
+    why: name => `You are receiving this because you are in touch with ${name}.`,
+    unsubscribe: 'Unsubscribe',
+    view: 'Stop these emails',
+  },
+  ar: {
+    why: name => `تصلك هذه الرسالة لأنك على تواصل مع ${name}.`,
+    unsubscribe: 'إلغاء الاشتراك',
+    view: 'إيقاف هذه الرسائل',
+  },
+}
+
+/**
+ * Render one email for one contact.
+ *
+ * @param {object} args
+ * @param {'marketing'|'cold'} args.audience
+ * @param {string} args.subject
+ * @param {string} [args.preheader]      marketing only: the grey line inbox previews show
+ * @param {string} args.body
+ * @param {'en'|'ar'} [args.language]
+ * @param {object} [args.contact]
+ * @param {object} [args.sender]         { from_name, company_address }
+ * @param {string} [args.unsubscribeUrl]
+ * @returns {{ subject: string, html: string, text: string }}
+ */
+export function renderEmail({
+  audience, subject, preheader = '', body, language = 'en', contact = null,
+  sender = {}, unsubscribeUrl = '',
+}) {
+  const rtl = language === 'ar'
+  const dir = rtl ? 'rtl' : 'ltr'
+  const align = rtl ? 'right' : 'left'
+  const filledSubject = applyMergeTags(subject, contact).trim()
+  const filledBody = applyMergeTags(body, contact)
+  const brand = String(sender.from_name || '').trim()
+
+  if (audience === 'cold') {
+    // As plain as a hand-typed email. The opt-out is a sentence, the way a
+    // person would write it, and it is always there.
+    const optOut = language === 'ar'
+      ? 'إذا لم تكن الشخص المناسب أو لا ترغب في رسائل أخرى، يكفي أن ترد بكلمة "توقف".'
+      : 'If this is not relevant to you, just reply "stop" and I will not email again.'
+    const text = `${toPlainText(filledBody)}\n\n${optOut}`
+    const paras = blocks(filledBody).map(b => b.type === 'list'
+      ? `<ul>${b.items.map(i => `<li>${inline(i)}</li>`).join('')}</ul>`
+      : `<p>${b.lines.map(l => inline(l)).join('<br>')}</p>`).join('\n')
+    const html = `<div dir="${dir}" style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.5;color:#222;text-align:${align}">\n${paras}\n<p style="color:#777;font-size:12px">${escapeHtml(optOut)}</p>\n</div>`
+    return { subject: filledSubject, html, text }
+  }
+
+  const copy = FOOTER_COPY[language] || FOOTER_COPY.en
+  const address = String(sender.company_address || '').trim()
+  const linkStyle = 'color:#1a1a1a;text-decoration:underline'
+  const content = blocks(filledBody).map(b => b.type === 'list'
+    ? `<ul style="margin:0 0 16px;padding-${rtl ? 'right' : 'left'}:20px">${b.items.map(i => `<li style="margin:0 0 6px">${inline(i, { linkStyle })}</li>`).join('')}</ul>`
+    : `<p style="margin:0 0 16px">${b.lines.map(l => inline(l, { linkStyle })).join('<br>')}</p>`).join('\n')
+
+  const footerLines = [
+    brand ? escapeHtml(copy.why(brand)) : '',
+    address ? escapeHtml(address).replace(/\n/g, '<br>') : '',
+    unsubscribeUrl ? `<a href="${escapeHtml(unsubscribeUrl)}" style="color:#888;text-decoration:underline">${copy.unsubscribe}</a>` : '',
+  ].filter(Boolean)
+
+  const html = `<!doctype html>
+<html lang="${language}" dir="${dir}">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(filledSubject)}</title></head>
+<body style="margin:0;padding:0;background:#f4f3f0">
+${preheader ? `<div style="display:none;max-height:0;overflow:hidden;opacity:0">${escapeHtml(applyMergeTags(preheader, contact))}</div>` : ''}
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f4f3f0"><tr><td align="center" style="padding:24px 12px">
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:600px;background:#ffffff;border-radius:8px">
+${brand ? `<tr><td dir="${dir}" style="padding:24px 32px 0;font-family:Arial,Helvetica,sans-serif;font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:#8a7a5c;text-align:${align}">${escapeHtml(brand)}</td></tr>` : ''}
+<tr><td dir="${dir}" style="padding:20px 32px 12px;font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.6;color:#1a1a1a;text-align:${align}">
+${content}
+</td></tr>
+</table>
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:600px"><tr><td dir="${dir}" style="padding:16px 32px;font-family:Arial,Helvetica,sans-serif;font-size:12px;line-height:1.5;color:#888;text-align:${align}">
+${footerLines.join('<br>\n')}
+</td></tr></table>
+</td></tr></table>
+</body>
+</html>`
+
+  const text = [
+    toPlainText(filledBody),
+    '',
+    '—',
+    brand ? copy.why(brand) : '',
+    address,
+    unsubscribeUrl ? `${copy.view}: ${unsubscribeUrl}` : '',
+  ].filter((l, i) => l || i < 3).join('\n').trim()
+
+  return { subject: filledSubject, html, text }
+}
+
+/** What a marketing email is missing before it may be sent. Empty = ready. */
+export function marketingProblems({ subject, body, sender }) {
+  const out = []
+  if (!String(subject || '').trim()) out.push('Add a subject line.')
+  if (!String(body || '').trim()) out.push('Write the email body.')
+  if (!String(sender?.from_email || '').trim()) out.push('Set the sender address in Settings.')
+  if (!String(sender?.company_address || '').trim()) out.push('Add the company address in Settings. It goes in every footer.')
+  const unknown = [...unknownMergeTags(subject), ...unknownMergeTags(body)]
+  if (unknown.length) out.push(`Unknown merge tag: ${unknown.map(t => `{{${t}}}`).join(', ')}.`)
+  return out
+}

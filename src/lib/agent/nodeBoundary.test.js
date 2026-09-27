@@ -91,6 +91,14 @@ describe('the agent runs in Node, not in a bundle', () => {
     'api/agent/_lenses.js',
     'api/agent/_web.js',
     'api/agent/_intel.js',
+    'src/lib/brandTime.js',
+    'src/lib/email/contacts.js',
+    'src/lib/email/render.js',
+    'src/lib/email/warmup.js',
+    'src/lib/email/draft.js',
+    'api/email/_engine.js',
+    'api/email/_resend.js',
+    'api/email/[action].js',
     // The endpoints themselves. Vercel imports these files directly, so if one
     // cannot load under Node the route is a 500 before any of the above
     // matters.

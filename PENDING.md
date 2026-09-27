@@ -12,8 +12,6 @@ four-platform publishing work go first.
 - **Insights + Analytics merge.** Two screens already report performance and
   the research agent is about to be a third. Insights' two run buttons are
   slated to collapse into one link at the agent's page regardless.
-- **Email flows** (`src/pages/email/index.jsx`, 80 lines). A route with nothing
-  behind it. Delete, or build — currently neither.
 - **Studio and Brand Brain** (2,279 and 1,789 lines). The other two giants.
   Not known to be broken; listed for size, not for fault.
 
@@ -139,3 +137,25 @@ Found by the first real run, not scheduled here because they are site work
 rather than code: **24 of 89 pages are unknown to Google**, including every
 lighting-services page and both `/services/lighting-controls` URLs — an entire
 business line with no page in the index.
+
+## Email — built 2026-09-27, what is still owed
+
+The section is live (contacts, groups, marketing campaigns through Resend,
+cold outreach written but not sent, warm-up, webhooks, unsubscribe). Parked:
+
+- **Cold sending.** Needs a separate domain (not arak-sa.com, not a subdomain
+  of it) and a Google Workspace mailbox, warmed for 2–3 weeks before the first
+  cold send. Then: send through the mailbox's API at 20–40/day, follow-ups on
+  `delay_days`, stop on reply (needs inbox read access to see replies).
+  Until then the Cold tab exports personalised emails as CSV.
+- **Weekly automatic drafts.** The AI writes three options on demand today. The
+  "every week, from the research run" part is an n8n schedule calling
+  `/api/email/draft` after the Sunday run — not built.
+- **Research leads → cold contacts.** `email_contacts.opportunity_id` exists and
+  the draft prompt uses it, but nothing yet turns a research lead into people
+  with addresses. Needs an email-finding source (Hunter/Apollo or manual).
+- **Website sign-up.** A catalogue-download form on arak-sa.com that inserts a
+  marketing contact with `consent = 'opted_in'`, `source = 'website'`.
+- **Address verification** before a first send to an old list (ZeroBounce or
+  similar, ~$0.008/address). The importer rejects malformed addresses only.
+

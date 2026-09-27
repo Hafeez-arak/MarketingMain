@@ -1,80 +1,142 @@
-import { useState } from 'react'
-import { useApp, actions } from '../../store/app'
-import { Card, Button, Badge, Empty, ConfirmDialog, Toggle, PageHeader } from '../../components/ui/index'
-import { formatDate } from '../../lib/utils'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
+import { useAuth } from '../../store/auth'
+import { PageHeader, Button, Spinner } from '../../components/ui/index'
+import { fetchEmailData, emailApi } from '../../lib/email/client'
+import { Overview } from './Overview'
+import { Contacts } from './Contacts'
+import { Groups } from './Groups'
+import { Campaigns } from './Campaigns'
+import { EmailSettings } from './Settings'
+import { Notice } from './parts'
+
+// ─── Email ─────────────────────────────────────────────────────────────────
+// One section, six tabs. The tab lives in the URL (?tab=contacts) so a link
+// to the contact list is a link to the contact list.
+//
+//   Overview   what is happening: sends, rates, today's limit, what is missing
+//   Contacts   the address book: add, import, edit, delete, group, export
+//   Groups     named lists a campaign is sent to
+//   Marketing  campaigns to people who know us, sent through Resend
+//   Cold       outreach to prospects: written here, sent from the outreach
+//              mailbox once it exists (never through Resend)
+//   Settings   sender, footer, limits, warm-up, and the setup steps
+//
+// All data for the section loads once, here, and is handed down. At the
+// sizes this is built for (a few thousand contacts) that is simpler and
+// faster than every tab fetching its own slice, and it means the counts on
+// every tab agree with each other.
+
+const TABS = [
+  { key: 'overview', label: 'Overview', note: 'How sending is going, and anything that needs doing' },
+  { key: 'contacts', label: 'Contacts', note: 'Everyone you can email: add, import, tag, group' },
+  { key: 'groups', label: 'Groups', note: 'Named lists that campaigns are sent to' },
+  { key: 'marketing', label: 'Marketing', note: 'Newsletters and updates to people who know us, sent through Resend' },
+  { key: 'cold', label: 'Cold outreach', note: 'Personal first emails to prospects, sent from the separate outreach mailbox' },
+  { key: 'settings', label: 'Settings', note: 'Sender, footer, sending limits, warm-up and setup' },
+]
 
 export function EmailFlows() {
-  const { state, dispatch } = useApp()
-  const [deleteId, setDeleteId] = useState(null)
+  const { activeWorkspaceId } = useAuth()
+  const [params, setParams] = useSearchParams()
+  const tab = TABS.some(t => t.key === params.get('tab')) ? params.get('tab') : 'overview'
+  const setTab = useCallback((key, extra = {}) => setParams(() => {
+    const n = new URLSearchParams()
+    n.set('tab', key)
+    for (const [k, v] of Object.entries(extra)) if (v) n.set(k, v)
+    return n
+  }), [setParams])
 
-  function toggleStatus(flow) {
-    dispatch(actions.updateEmailFlow({ id: flow.id, status: flow.status === 'active' ? 'paused' : 'active' }))
-  }
+  const [data, setData] = useState(null)
+  const [loadedFor, setLoadedFor] = useState(null)
+  const [error, setError] = useState('')
+  const [status, setStatus] = useState(null)
+  const [refreshing, setRefreshing] = useState(false)
+  const dispatchedFor = useRef(null)
+
+  const reload = useCallback(async () => {
+    if (!activeWorkspaceId) return
+    const ws = activeWorkspaceId
+    setRefreshing(true)
+    try {
+      const [d, s] = await Promise.all([fetchEmailData(ws), emailApi('status', ws)])
+      setData(d)
+      setStatus(s.error ? { error: s.error } : s)
+      setError('')
+      setLoadedFor(ws)
+    } catch (err) {
+      setError(err.message || String(err))
+      setLoadedFor(ws)
+    } finally {
+      setRefreshing(false)
+    }
+  }, [activeWorkspaceId])
+
+  // Switching workspace needs no reset: `loading` is derived from loadedFor,
+  // so every tab shows skeletons (not the previous company's contacts) until
+  // this workspace's answer lands.
+  useEffect(() => { queueMicrotask(reload) }, [reload])
+
+  // Opening the section sends anything that is due — a scheduled campaign
+  // whose morning has passed, or the rest of yesterday's warm-up. The daily
+  // cron does the same; this is what makes it not depend on the cron alone.
+  useEffect(() => {
+    if (!activeWorkspaceId || loadedFor !== activeWorkspaceId || dispatchedFor.current === activeWorkspaceId) return
+    if (!status?.configured?.resend) return
+    const hasWork = (data?.campaigns || []).some(c => c.status === 'sending' || c.status === 'scheduled')
+    dispatchedFor.current = activeWorkspaceId
+    if (!hasWork) return
+    emailApi('dispatch', activeWorkspaceId).then(r => { if (r?.dispatched?.sent) reload() })
+  }, [activeWorkspaceId, loadedFor, status, data, reload])
+
+  const loading = loadedFor !== activeWorkspaceId
+  const ctx = useMemo(() => ({
+    workspaceId: activeWorkspaceId,
+    data: data || { contacts: [], groups: [], members: [], campaigns: [], stats: [], settings: null, recentSends: [] },
+    status,
+    loading,
+    reload,
+    setTab,
+    params,
+  }), [activeWorkspaceId, data, status, loading, reload, setTab, params])
 
   return (
     <div className="max-w-7xl space-y-4">
-      <PageHeader title="Email Flows" subtitle="Automated email sequences triggered by subscriber actions." />
+      <PageHeader title="Email" subtitle="Marketing email to people who know us, and personal outreach to prospects. Kept on separate lanes so one can never damage the other.">
+        <Button variant="secondary" size="sm" onClick={reload} disabled={refreshing || !activeWorkspaceId}>
+          {refreshing ? <Spinner size="sm" /> : null}
+          Refresh
+        </Button>
+      </PageHeader>
 
-      {state.emailFlows.length === 0 ? (
-        <Card>
-          <Empty
-            icon={<svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>}
-            title="No email flows yet"
-            description="Not built yet — this section is a placeholder for automated email sequences."
-          />
-        </Card>
-      ) : (
-        <div className="space-y-3">
-          {state.emailFlows.map(flow => (
-            <Card key={flow.id} className="p-5">
-              <div className="flex items-start gap-4">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-1">
-                    <h3 className="font-semibold text-text">{flow.name}</h3>
-                    <Badge status={flow.status} />
-                  </div>
-                  <p className="text-xs text-text-secondary mb-2">Trigger: <span className="text-text">{flow.trigger}</span></p>
-                  {flow.description && <p className="text-xs text-text-tertiary">{flow.description}</p>}
-                  <div className="flex items-center gap-4 mt-3 text-xs text-text-tertiary">
-                    <span>{flow.steps?.length || 0} steps</span>
-                    <span>Created {formatDate(flow.createdAt)}</span>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2 flex-shrink-0">
-                  <Toggle checked={flow.status === 'active'} onChange={() => toggleStatus(flow)} />
-                  <Button variant="ghost" size="xs" onClick={() => setDeleteId(flow.id)}>
-                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/></svg>
-                  </Button>
-                </div>
-              </div>
+      <div className="flex overflow-x-auto scrollbar-thin">
+        {TABS.map(t => (
+          <button
+            key={t.key} onClick={() => setTab(t.key)} title={t.note}
+            className={`flex-1 min-w-[96px] py-2 px-3 border -ml-px first:ml-0 text-xs font-semibold whitespace-nowrap transition-colors ${
+              tab === t.key
+                ? 'bg-amber-700 text-white border-amber-700 relative z-10'
+                : 'bg-white text-text-secondary border-border hover:text-text hover:bg-surface-subtle'
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+      <p className="text-[11px] text-text-tertiary -mt-2">{TABS.find(t => t.key === tab)?.note}</p>
 
-              {/* Steps preview */}
-              {flow.steps?.length > 0 && (
-                <div className="mt-4 pt-4 border-t border-border">
-                  <p className="text-xs font-medium text-text-secondary mb-2">Flow steps</p>
-                  <div className="flex items-center gap-1 flex-wrap">
-                    {flow.steps.map((step, i) => (
-                      <span key={i} className="flex items-center gap-1">
-                        <span className="px-2.5 py-1 bg-surface-subtle rounded-lg text-xs text-text border border-border">{step.type}: {step.label}</span>
-                        {i < flow.steps.length - 1 && <span className="text-text-tertiary text-xs">→</span>}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </Card>
-          ))}
-        </div>
+      {error && (
+        <Notice tone="red" title="Could not load email data">
+          {error}. If this says a table does not exist, the database migration has not been applied.
+        </Notice>
       )}
 
-      <ConfirmDialog
-        open={!!deleteId}
-        onClose={() => setDeleteId(null)}
-        onConfirm={() => dispatch(actions.deleteEmailFlow(deleteId))}
-        title="Delete email flow"
-        message="This will permanently delete this email flow and stop all active sends."
-        danger
-      />
+      {tab === 'overview' && <Overview {...ctx} />}
+      {tab === 'contacts' && <Contacts {...ctx} />}
+      {tab === 'groups' && <Groups {...ctx} />}
+      {tab === 'marketing' && <Campaigns {...ctx} audience="marketing" />}
+      {tab === 'cold' && <Campaigns {...ctx} audience="cold" />}
+      {tab === 'settings' && <EmailSettings {...ctx} />}
     </div>
   )
 }
