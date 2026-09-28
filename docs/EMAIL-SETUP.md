@@ -355,7 +355,8 @@ registration lives in another directory and is not used.)
    **Value** (not the Secret ID). Note its expiry date: when it expires,
    Microsoft mailboxes stop sending until a new one is set on Vercel.
 4. **API permissions → Add a permission → Microsoft Graph → Delegated**:
-   `Mail.Send`, `Mail.Read`, `offline_access`, `openid`, `profile`, `email`
+   `Mail.Send`, `Mail.Read`, `Mail.ReadWrite`, `offline_access`, `openid`,
+   `profile`, `email`
    (`User.Read` is there already). Then **Grant admin consent for
    ARAK-SA.COM**; every row shows a green tick.
 5. Authentication: leave implicit grant unticked and public client flows off.

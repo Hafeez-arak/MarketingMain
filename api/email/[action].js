@@ -433,7 +433,7 @@ const actions = {
       subject: rendered.subject, text: rendered.text, html: rendered.html,
       messageId: `<${crypto.randomUUID()}@${domainOf(mb.email)}>`,
     })
-    if (!r.ok) return fail(String(r.error?.response || r.error?.message || 'The test could not be sent.').slice(0, 300), 502)
+    if (!r.ok) return fail(String(r.error?.reason || r.error?.response || r.error?.message || 'The test could not be sent.').slice(0, 300), 502)
     return { sent_to: to, from: mb.email }
   },
 
