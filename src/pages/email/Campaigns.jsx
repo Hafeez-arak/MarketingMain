@@ -548,7 +548,7 @@ function Composer({ audience, campaign, data, workspaceId, reload, setTab, statu
                 <ToolButton onClick={() => insertAtCursor(sel => `**${sel || 'bold text'}**`)}>Bold</ToolButton>
                 {!cold && <ToolButton onClick={() => insertAtCursor(sel => `[${sel || 'link text'}](https://)`)}>Link</ToolButton>}
                 {cold && (
-                  <ToolButton onClick={() => insertAtCursor(sel => `\n\n${subscribeButton(sel || (form.language === 'ar' ? 'أرسلوا لي الدليل المجاني ←' : 'Send me the free guide →'))}\n\n`)}>
+                  <ToolButton onClick={() => insertAtCursor(sel => `\n\n${subscribeButton(sel || (form.language === 'ar' ? 'أرسلوا لي الدليل ←' : 'Send me the guide →'))}\n\n`)}>
                     Sign-up button
                   </ToolButton>
                 )}
