@@ -174,6 +174,41 @@ describe('createGraphMail.send', () => {
   })
 })
 
+describe('createGraphMail: a permission granted after connecting', () => {
+  it('a 403 ErrorAccessDenied on a cached token renews it (asking for every scope) and retries once', async () => {
+    let drafts = 0
+    const { f, calls } = fakeFetch([
+      { method: 'POST', match: '/token', reply: { status: 200, json: { access_token: 'WITH_RW', refresh_token: 'RT2', expires_in: 3600 } } },
+      { method: 'POST', match: '/send', reply: { status: 202 } },
+      { method: 'POST', match: '/me/messages', reply: () => (++drafts === 1
+        ? { status: 403, json: { error: { code: 'ErrorAccessDenied', message: 'Access is denied. Check credentials and try again.' } } }
+        : { status: 201, json: { id: 'd', internetMessageId: '<x@y>', conversationId: 'c' } }) },
+    ])
+    const saved = []
+    const mail = createGraphMail({ config: CONFIG, fetch: f, now: () => NOW, save: async (mb, p) => saved.push(p) })
+    const out = await mail.send(MB, packTokens({ rt: 'RT', at: 'OLD_SCOPES', exp: NOW + 3_600_000 }), {
+      from: { name: '', address: MB.email }, to: { name: '', address: 'a@b.sa' }, subject: 's', text: 't', html: '<p>t</p>', messageId: '<m@arak-sa.com>',
+    })
+    expect(out.ok).toBe(true)
+    expect(drafts).toBe(2)
+    expect(new URLSearchParams(calls.find(c => c.url.includes('/token')).body).get('scope')).toContain('Mail.ReadWrite')
+    expect(unpackTokens(saved[0]).at).toBe('WITH_RW')
+  })
+
+  it('still refused after a fresh token: the permission really is missing, and it says so', async () => {
+    const { f } = fakeFetch([
+      { method: 'POST', match: '/token', reply: { status: 200, json: { access_token: 'NEW', refresh_token: 'RT2', expires_in: 3600 } } },
+      { method: 'POST', match: '/me/messages', reply: { status: 403, json: { error: { code: 'ErrorAccessDenied', message: 'Access is denied.' } } } },
+    ])
+    const mail = createGraphMail({ config: CONFIG, fetch: f, now: () => NOW, save: async () => {} })
+    const out = await mail.send(MB, packTokens({ rt: 'RT', at: 'OLD', exp: NOW + 3_600_000 }), {
+      from: { name: '', address: MB.email }, to: { name: '', address: 'a@b.sa' }, subject: 's', text: 't', html: '<p>t</p>', messageId: '<m@arak-sa.com>',
+    })
+    expect(out.ok).toBe(false)
+    expect(out.error.reason).toMatch(/Mail\.ReadWrite/)
+  })
+})
+
 describe('createGraphMail.inbox', () => {
   it('asks for the inbox since the mark, oldest first, and flattens the sender', async () => {
     const { f, calls } = fakeFetch([
