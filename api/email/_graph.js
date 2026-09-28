@@ -237,12 +237,20 @@ export function createGraphMail({ config, save, fetch: f = fetch, now = () => Da
     }
   }
 
-  /** One Graph call with a token, renewing once on a 401 from a cached token. */
+  /**
+   * One Graph call with a token. A cached token that is refused (401 expired,
+   * or 403 ErrorAccessDenied) is renewed once and the call retried: the
+   * renewal asks for every scope in SCOPES, so a permission an admin granted
+   * after the mailbox connected is picked up without signing in again. That
+   * was the Mail.ReadWrite case of 2026-09-28: tokens from before the scope
+   * existed kept being refused for their remaining hour.
+   */
   async function withToken(mb, plain, call) {
     let tok = await tokenFor(mb, plain)
     if (tok.error) return { ok: false, error: tok.error }
     let res = await call(tok.token)
-    if (!res.ok && res.status === 401 && !tok.fresh) {
+    const refused = res.status === 401 || /AccessDenied/i.test(res.error?.code || '')
+    if (!res.ok && refused && !tok.fresh) {
       tok = await tokenFor(mb, plain, { force: true })
       if (tok.error) return { ok: false, error: tok.error }
       res = await call(tok.token)
