@@ -43,6 +43,10 @@ export const SOURCES = {
 
 export const LANGUAGES = { en: 'English', ar: 'Arabic' }
 
+// The marketing group a prospect joins by pressing the sign-up button in an
+// outreach email (api/email/_engine.js, subscribe). Made on the first sign-up.
+export const SUBSCRIBERS_GROUP = 'Newsletter subscribers'
+
 /** Lower-cased, trimmed, with a mailto: or angle brackets stripped. */
 export function normalizeEmail(raw) {
   return String(raw || '')

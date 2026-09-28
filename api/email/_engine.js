@@ -1,5 +1,5 @@
 import crypto from 'node:crypto'
-import { pickRecipients, blockReason } from '../../src/lib/email/contacts.js'
+import { pickRecipients, blockReason, SUBSCRIBERS_GROUP } from '../../src/lib/email/contacts.js'
 import { renderEmail, marketingProblems } from '../../src/lib/email/render.js'
 import { renderDesign, designChecks, hasDesign } from '../../src/lib/email/design.js'
 import { dailyCap } from '../../src/lib/email/warmup.js'
@@ -36,6 +36,12 @@ export function fromHeader(settings) {
 
 export function unsubscribeUrl(baseUrl, token) {
   return `${String(baseUrl || '').replace(/\/$/, '')}/api/email/unsubscribe?t=${encodeURIComponent(token)}`
+}
+
+/** The newsletter sign-up link a cold email carries. The same per-contact token. */
+export function subscribeUrl(baseUrl, token) {
+  if (!baseUrl || !token) return ''
+  return `${String(baseUrl).replace(/\/$/, '')}/api/email/subscribe?t=${encodeURIComponent(token)}`
 }
 
 const inList = ids => `(${ids.map(id => `"${id}"`).join(',')})`
@@ -143,6 +149,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   warmup_started_on: null, warmup_enabled: true,
   provider_daily_limit: 100, provider_monthly_limit: 3000,
   cold_sending_enabled: false,
+  newsletter_name: '', subscribe_offer: '', subscribe_gift_url: '',
 })
 
 export async function loadSettings({ db }, workspaceId) {
@@ -437,4 +444,74 @@ export async function unsubscribe({ db }, token, now = new Date()) {
     method: 'PATCH', prefer: 'return=minimal', body: { status: 'cancelled', error: 'Unsubscribed', updated_at: now.toISOString() },
   })
   return { ok: true, email: contact.email }
+}
+
+// ─── Subscribe ─────────────────────────────────────────────────────────────
+// A cold prospect pressed the sign-up button in an outreach email and then
+// confirmed on the page. That is an opt-in, so the contact changes lanes:
+//
+//   • audience cold → marketing, consent → opted_in, subscribed_at stamped
+//   • added to the marketing group SUBSCRIBERS_GROUP (made if missing), and
+//     taken out of its cold groups, so outreach can never reach it again
+//   • its queued outreach follow-ups are cancelled
+//   • the outreach email it answered gets subscribed_at, so the campaign
+//     can count sign-ups the way it counts replies
+//
+// Pressing it twice changes nothing the second time.
+
+export async function subscribe({ db }, token, now = new Date()) {
+  if (!/^[0-9a-f-]{36}$/i.test(String(token || ''))) return { ok: false }
+  const [contact] = await db(`email_contacts?unsubscribe_token=eq.${token}&select=id,workspace_id,email,status,subscribed_at`) || []
+  if (!contact) return { ok: false }
+  const ws = contact.workspace_id
+  const nowIso = now.toISOString()
+  const already = Boolean(contact.subscribed_at)
+
+  // The outreach email that brought them: the latest one we sent.
+  const [send] = await db(`email_sends?contact_id=eq.${contact.id}&workspace_id=eq.${ws}&sent_at=not.is.null&select=id,campaign_id,subscribed_at&order=sent_at.desc&limit=1`) || []
+
+  await db(`email_contacts?id=eq.${contact.id}&workspace_id=eq.${ws}`, {
+    method: 'PATCH', prefer: 'return=minimal',
+    body: {
+      audience: 'marketing', consent: 'opted_in', status: 'active',
+      ...(already ? {} : { subscribed_at: nowIso, subscribed_campaign_id: send?.campaign_id || null }),
+      updated_at: nowIso,
+    },
+  })
+  if (send && !send.subscribed_at) {
+    await db(`email_sends?id=eq.${send.id}`, { method: 'PATCH', prefer: 'return=minimal', body: { subscribed_at: nowIso, updated_at: nowIso } })
+  }
+  await db(`email_sends?contact_id=eq.${contact.id}&workspace_id=eq.${ws}&status=eq.queued`, {
+    method: 'PATCH', prefer: 'return=minimal', body: { status: 'cancelled', error: 'Subscribed to the newsletter', updated_at: nowIso },
+  })
+
+  const groups = await db(`email_groups?workspace_id=eq.${ws}&select=id,name,audience`) || []
+  const cold = groups.filter(g => g.audience === 'cold').map(g => g.id)
+  if (cold.length) {
+    await db(`email_group_members?workspace_id=eq.${ws}&contact_id=eq.${contact.id}&group_id=in.${inList(cold)}`, {
+      method: 'DELETE', prefer: 'return=minimal',
+    })
+  }
+  // Names are unique per workspace ignoring case (email_groups_ws_name_idx).
+  let list = groups.find(g => g.audience === 'marketing' && String(g.name).toLowerCase() === SUBSCRIBERS_GROUP.toLowerCase())
+  if (!list) {
+    try {
+      ;[list] = await db('email_groups', {
+        method: 'POST', prefer: 'return=representation',
+        body: { workspace_id: ws, name: SUBSCRIBERS_GROUP, audience: 'marketing', description: 'Signed up from an outreach email.' },
+      }) || []
+    } catch {
+      // Two sign-ups at the same moment: the other one made it.
+      ;[list] = await db(`email_groups?workspace_id=eq.${ws}&name=ilike.${encodeURIComponent(SUBSCRIBERS_GROUP)}&audience=eq.marketing&select=id`) || []
+    }
+  }
+  if (list) {
+    await db('email_group_members?on_conflict=group_id,contact_id', {
+      method: 'POST', prefer: 'resolution=ignore-duplicates,return=minimal',
+      body: [{ group_id: list.id, contact_id: contact.id, workspace_id: ws }],
+    })
+  }
+
+  const settings = await loadSettings({ db }, ws)
+  return { ok: true, email: contact.email, already, settings }
 }

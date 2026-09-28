@@ -4,13 +4,13 @@ import { callModel } from '../agent/_provider.js'
 import { loadBrandContext } from '../agent/_context.js'
 import { textIn } from '../../src/lib/agent/loop.js'
 import { DRAFT_IDENTITY, DRAFT_SCHEMA, draftPrompt, parseDrafts } from '../../src/lib/email/draft.js'
-import { renderEmail, marketingProblems } from '../../src/lib/email/render.js'
+import { renderEmail, marketingProblems, escapeHtml, safeHref } from '../../src/lib/email/render.js'
 import { renderDesign, designChecks, hasDesign } from '../../src/lib/email/design.js'
 import { isValidEmail, normalizeEmail } from '../../src/lib/email/contacts.js'
 import { dailyCap } from '../../src/lib/email/warmup.js'
 import { createResend } from './_resend.js'
 import {
-  launchCampaign, dispatch, applyEvent, unsubscribe, verifySvix, loadSettings,
+  launchCampaign, dispatch, applyEvent, unsubscribe, subscribe, verifySvix, loadSettings,
   sendingStats, fromHeader, closeFinished,
 } from './_engine.js'
 import { launchColdCampaign, coldTick, readReplies } from './_cold.js'
@@ -37,6 +37,8 @@ import { mailboxDomainProblem, domainOf, HARD_MAX_PER_MAILBOX } from '../../src/
 //                      webhook is refused.
 //   the public         GET/POST /unsubscribe?t=<token>. The token is the only
 //                      key, and all it can do is unsubscribe its own address.
+//                      GET/POST /subscribe?t=<token>, the same token: all it
+//                      can do is sign its own address up to the newsletter.
 //   Vercel Cron        GET /cron with Bearer CRON_SECRET: the morning run.
 //   n8n (the box)      GET /cold-tick with Bearer CRON_SECRET, every 10
 //                      minutes: the cold lane's sending run.
@@ -142,9 +144,10 @@ const sendBy = (mb, secret, message) => (mb.provider === 'microsoft'
   ? graphMail().send(mb, secret, message)
   : sendFromMailbox(mb, secret, message))
 
-// The cold lane's IO: our own mailboxes, never Resend.
-const coldDeps = () => ({
-  db, count,
+// The cold lane's IO: our own mailboxes, never Resend. `baseUrl` builds each
+// email's newsletter sign-up link.
+const coldDeps = (req = null) => ({
+  db, count, baseUrl: req ? baseUrlOf(req) : '',
   mail: { send: sendBy, inbox: (mb, secret, since) => graphMail().inbox(mb, secret, since) },
   open: sealed => openSecret(sealed, SERVICE_KEY),
   uuid: () => crypto.randomUUID(),
@@ -190,6 +193,7 @@ const actions = {
       subject: `[TEST] ${body.subject || ''}`, preheader: body.preheader || '',
       language: body.language === 'ar' ? 'ar' : 'en', contact: sample,
       sender: settings, unsubscribeUrl: `${baseUrlOf(this.req)}/api/email/unsubscribe?t=test`,
+      subscribeUrl: `${baseUrlOf(this.req)}/api/email/subscribe?t=test`,
     }
     // Cold email is never designed: it must look typed by a person.
     const rendered = audience === 'marketing' && hasDesign(body.design)
@@ -427,6 +431,7 @@ const actions = {
       subject: `[TEST] ${body.subject || 'Outreach mailbox check'}`,
       body: body.body || 'Hi {{first_name|there}},\n\nThis is a test from the outreach mailbox. If it arrived in the inbox (not spam or Promotions), this mailbox is ready.',
       language: body.language === 'ar' ? 'ar' : 'en', contact: sample, signature: mb.signature,
+      subscribeUrl: `${baseUrlOf(this.req)}/api/email/subscribe?t=test`,
     })
     const r = await sendBy(mb, password, {
       from: { name: mb.from_name || '', address: mb.email }, to: { name: '', address: to },
@@ -536,6 +541,58 @@ async function handleUnsubscribe(req, res) {
   }))
 }
 
+// ─── Newsletter sign-up from an outreach email ─────────────────────────────
+// The button in a cold email links here with the contact's own token. Like
+// unsubscribe, GET only asks: a corporate link scanner opening every link
+// must not sign a whole company up. The person's press on the page POSTs.
+
+function subscribeCopy(settings = {}) {
+  const e = s => escapeHtml(String(s || '').trim())
+  const name = e(settings.newsletter_name) || (e(settings.from_name) ? `the ${e(settings.from_name)} newsletter` : 'our newsletter')
+  const offer = e(settings.subscribe_offer)
+  return { name, offer, gift: safeHref(settings.subscribe_gift_url) }
+}
+
+async function handleSubscribe(req, res) {
+  const url = new URL(req.url || '/', 'http://x')
+  const token = String(req.query?.t || url.searchParams.get('t') || '')
+  if (token === 'test') {
+    return html(res, 200, unsubscribePage({ title: 'This is a test email', message: 'In a real email, this button signs up the person it was sent to.' }))
+  }
+  const safe = encodeURIComponent(token)
+  if (req.method === 'GET') {
+    const [contact] = /^[0-9a-f-]{36}$/i.test(token)
+      ? await db(`email_contacts?unsubscribe_token=eq.${token}&select=workspace_id,subscribed_at`) || []
+      : []
+    if (!contact) {
+      return html(res, 404, unsubscribePage({ title: 'Link not recognised', message: 'This sign-up link is not valid. Reply to the email and we will add you by hand.' }))
+    }
+    const c = subscribeCopy(await loadSettings({ db }, contact.workspace_id))
+    return html(res, 200, unsubscribePage({
+      title: `Join ${c.name}`,
+      message: c.offer
+        ? `Confirm below and we will send you <strong>${c.offer}</strong>, then our newsletter. Unsubscribe any time.`
+        : 'Confirm below to get our emails. Unsubscribe any time.',
+      form: `<form method="post" action="?t=${safe}"><button type="submit">Yes, subscribe me</button></form>
+<p class="ar">اضغط الزر أعلاه لتأكيد اشتراكك. يمكنك إلغاء الاشتراك في أي وقت.</p>`,
+    }))
+  }
+  if (req.method !== 'POST') return res.status(405).send('')
+  const out = await subscribe({ db }, token)
+  if (!out.ok) {
+    return html(res, 404, unsubscribePage({ title: 'Link not recognised', message: 'This sign-up link is not valid. Reply to the email and we will add you by hand.' }))
+  }
+  const c = subscribeCopy(out.settings)
+  const gift = c.gift
+    ? `<p><a href="${escapeHtml(c.gift)}" style="display:inline-block;background:#1a1a1a;color:#fff;border-radius:6px;padding:12px 18px;text-decoration:none">${c.offer ? 'Download the guide' : 'Open your gift'}</a></p>`
+    : ''
+  return html(res, 200, unsubscribePage({
+    title: out.already ? 'You are already subscribed' : 'You are subscribed',
+    message: `${escapeHtml(out.email)} is on the list for ${c.name}.${c.offer && !c.gift ? ` We will email you ${c.offer} shortly.` : ''}`,
+    form: `${gift}<p class="ar">تم تأكيد اشتراكك. شكراً لك!</p>`,
+  }))
+}
+
 async function handleWebhook(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ ok: false })
   if (!WEBHOOK_SECRET) {
@@ -587,7 +644,7 @@ async function handleColdTick(req, res) {
   let inbox
   try { inbox = MS.configured ? await readReplies(coldDeps()) : { skipped: 'Microsoft sign-in is not configured.' } }
   catch (err) { inbox = { error: String(err?.message || err).slice(0, 300) } }
-  const out = await coldTick(coldDeps())
+  const out = await coldTick(coldDeps(req))
   return res.status(200).json({ ok: true, ...out, inbox })
 }
 
@@ -684,6 +741,7 @@ export default async function handler(req, res) {
 
   try {
     if (action === 'unsubscribe') return await handleUnsubscribe(req, res)
+    if (action === 'subscribe') return await handleSubscribe(req, res)
     if (action === 'webhook') return await handleWebhook(req, res)
     if (action === 'cron') return await handleCron(req, res)
     if (action === 'cold-tick') return await handleColdTick(req, res)

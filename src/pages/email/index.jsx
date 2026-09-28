@@ -8,10 +8,11 @@ import { Contacts } from './Contacts'
 import { Groups } from './Groups'
 import { Campaigns } from './Campaigns'
 import { EmailSettings } from './Settings'
+import { Subscribers } from './Subscribers'
 import { Notice } from './parts'
 
 // ─── Email ─────────────────────────────────────────────────────────────────
-// One section, six tabs. The tab lives in the URL (?tab=contacts) so a link
+// One section, seven tabs. The tab lives in the URL (?tab=contacts) so a link
 // to the contact list is a link to the contact list.
 //
 //   Overview   what is happening: sends, rates, today's limit, what is missing
@@ -20,6 +21,7 @@ import { Notice } from './parts'
 //   Marketing  campaigns to people who know us, sent through Resend
 //   Cold       outreach to prospects: written here, sent one at a time from
 //              our own outreach mailboxes (never through Resend)
+//   Subscribers  prospects who signed up from an outreach email's button
 //   Settings   sender, footer, limits, warm-up, outreach mailboxes
 //
 // All data for the section loads once, here, and is handed down. At the
@@ -33,6 +35,7 @@ const TABS = [
   { key: 'groups', label: 'Groups', note: 'Named lists that campaigns are sent to' },
   { key: 'marketing', label: 'Marketing', note: 'Newsletters and updates to people who know us, sent through Resend' },
   { key: 'cold', label: 'Cold outreach', note: 'Personal first emails and follow-ups to prospects, sent from your outreach mailboxes' },
+  { key: 'subscribers', label: 'Subscribers', note: 'Prospects who signed up to the newsletter from an outreach email' },
   { key: 'settings', label: 'Settings', note: 'Sender, footer, sending limits and warm-up' },
 ]
 
@@ -136,6 +139,7 @@ export function EmailFlows() {
       {tab === 'groups' && <Groups {...ctx} />}
       {tab === 'marketing' && <Campaigns {...ctx} audience="marketing" />}
       {tab === 'cold' && <Campaigns {...ctx} audience="cold" />}
+      {tab === 'subscribers' && <Subscribers {...ctx} />}
       {tab === 'settings' && <EmailSettings {...ctx} />}
     </div>
   )

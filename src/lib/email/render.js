@@ -30,20 +30,40 @@ const MERGE_FIELDS = {
 
 export const MERGE_TAGS = Object.keys(MERGE_FIELDS)
 
+// Links made per recipient at send time, not contact fields. Written as the
+// target of a link: [Send me the guide]({{subscribe_url}}). Not offered in the
+// "Insert field" list; the composer has its own button for it.
+const LINK_FIELDS = {
+  // The one-click newsletter sign-up (api/email/[action].js, /subscribe).
+  subscribe_url: links => links?.subscribeUrl,
+}
+
+export const LINK_TAGS = Object.keys(LINK_FIELDS)
+
+/** The sign-up button a cold email carries: label → link to {{subscribe_url}}. */
+export function subscribeButton(label) {
+  return `[${String(label || '').replace(/[[\]]/g, '').trim() || 'Subscribe'}]({{subscribe_url}})`
+}
+
 /**
  * Fill {{tags}}. An unknown tag is left exactly as written so a typo is
  * visible in the preview rather than silently becoming empty. A known tag with
  * no value and no fallback becomes empty, and the whitespace it leaves is
  * tidied ("Hi {{first_name}}," with no name → "Hi,").
+ * @param {object} [links]  { subscribeUrl } for the link tags
  */
-export function applyMergeTags(text, contact) {
+export function applyMergeTags(text, contact, links = {}) {
   return String(text || '')
     .replace(/\{\{\s*([a-z_]+)\s*(?:\|\s*([^}]*?)\s*)?\}\}/gi, (whole, key, fallback) => {
-      const get = MERGE_FIELDS[key.toLowerCase()]
-      if (!get) return whole
+      const k = key.toLowerCase()
+      const get = MERGE_FIELDS[k]
+      if (!get) return LINK_FIELDS[k] ? String(LINK_FIELDS[k](links) || '') : whole
       const value = String(get(contact) || '').trim()
       return value || (fallback ?? '')
     })
+    // A link whose target came out empty (no sign-up link for this send) is
+    // left as its words, never as "[label]()".
+    .replace(/\[([^\]]+)\]\(\s*\)/g, '$1')
     .replace(/ +([,.!?،])/g, '$1')
     .replace(/ {2,}/g, ' ')
 }
@@ -52,7 +72,8 @@ export function applyMergeTags(text, contact) {
 export function unknownMergeTags(text) {
   const out = new Set()
   for (const m of String(text || '').matchAll(/\{\{\s*([a-z_]+)[^}]*\}\}/gi)) {
-    if (!MERGE_FIELDS[m[1].toLowerCase()]) out.add(m[1])
+    const k = m[1].toLowerCase()
+    if (!MERGE_FIELDS[k] && !LINK_FIELDS[k]) out.add(m[1])
   }
   return [...out]
 }
@@ -99,6 +120,25 @@ export function blocks(text) {
   return out
 }
 
+// The direction of one paragraph, from its first letter: Arabic (or Hebrew)
+// reads right to left, a Latin letter left to right. This is what lets one
+// email carry an English half and an Arabic half, each laid out correctly,
+// in Outlook too (which ignores dir="auto").
+const RTL_CHAR = /[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF]/
+const LTR_CHAR = /[A-Za-z\u00C0-\u024F]/
+export function textDirection(text, fallback = 'ltr') {
+  // Link targets and tags are not what a reader sees first.
+  const seen = String(text || '').replace(/\]\([^)]*\)/g, ']').replace(/\{\{[^}]*\}\}/g, '')
+  for (const ch of seen) {
+    if (RTL_CHAR.test(ch)) return 'rtl'
+    if (LTR_CHAR.test(ch)) return 'ltr'
+  }
+  return fallback
+}
+
+/** A paragraph that is one link and nothing else: shown as a button. */
+const BUTTON_LINE = /^\s*\[([^\]]+)\]\(([^)\s]+)\)\s*$/
+
 /** Body text → plain text, links written as "label (url)". */
 export function toPlainText(text) {
   return String(text || '')
@@ -136,33 +176,53 @@ export const FOOTER_COPY = {
  * @param {object} [args.sender]         { from_name, company_address }
  * @param {string} [args.unsubscribeUrl]
  * @param {string} [args.signature]      cold only: the sending mailbox's signature
+ * @param {string} [args.subscribeUrl]   cold only: this recipient's newsletter sign-up link
  * @returns {{ subject: string, html: string, text: string }}
  */
 export function renderEmail({
   audience, subject, preheader = '', body, language = 'en', contact = null,
-  sender = {}, unsubscribeUrl = '', signature = '',
+  sender = {}, unsubscribeUrl = '', signature = '', subscribeUrl = '',
 }) {
   const rtl = language === 'ar'
   const dir = rtl ? 'rtl' : 'ltr'
   const align = rtl ? 'right' : 'left'
-  const filledSubject = applyMergeTags(subject, contact).trim()
-  const filledBody = applyMergeTags(body, contact)
+  const links = { subscribeUrl }
+  const filledSubject = applyMergeTags(subject, contact, links).trim()
+  const filledBody = applyMergeTags(body, contact, links)
   const brand = String(sender.from_name || '').trim()
 
   if (audience === 'cold') {
-    // As plain as a hand-typed email. The opt-out is a sentence, the way a
-    // person would write it, and it is always there.
-    const optOut = language === 'ar'
-      ? 'إذا لم تكن الشخص المناسب أو لا ترغب في رسائل أخرى، يكفي أن ترد بكلمة "توقف".'
-      : 'If this is not relevant to you, just reply "stop" and I will not email again.'
+    // As plain as a hand-typed email: no images, no pixel, no layout. Each
+    // paragraph takes its own direction, so an email written in English and
+    // then Arabic reads right in both halves.
+    const parts = blocks(filledBody)
+    const dirOf = b => textDirection(b.type === 'list' ? b.items[0] : b.lines[0], dir)
+    const dirs = new Set(parts.map(dirOf))
+    // The opt-out is a sentence, the way a person would write it, and it is
+    // always there, in every language the email is written in.
+    const OPT_OUT = {
+      en: 'If this is not relevant to you, just reply "stop" and I will not email again.',
+      ar: 'إذا لم تكن الشخص المناسب أو لا ترغب في رسائل أخرى، يكفي أن ترد بكلمة "توقف".',
+    }
+    const optOuts = dirs.size > 1 ? [OPT_OUT.en, OPT_OUT.ar] : [rtl ? OPT_OUT.ar : OPT_OUT.en]
     // The sending mailbox's signature (name, role, phone), as typed text.
     const sig = String(signature || '').replace(/\r\n/g, '\n').trim()
-    const text = `${toPlainText(filledBody)}${sig ? `\n\n${sig}` : ''}\n\n${optOut}`
-    const paras = blocks(filledBody).map(b => b.type === 'list'
-      ? `<ul>${b.items.map(i => `<li>${inline(i)}</li>`).join('')}</ul>`
-      : `<p>${b.lines.map(l => inline(l)).join('<br>')}</p>`).join('\n')
-    const sigHtml = sig ? `\n<p>${sig.split('\n').map(escapeHtml).join('<br>')}</p>` : ''
-    const html = `<div dir="${dir}" style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.5;color:#222;text-align:${align}">\n${paras}${sigHtml}\n<p style="color:#777;font-size:12px">${escapeHtml(optOut)}</p>\n</div>`
+    const text = `${toPlainText(filledBody)}${sig ? `\n\n${sig}` : ''}\n\n${optOuts.join('\n')}`
+    const attrs = d => `dir="${d}" style="text-align:${d === 'rtl' ? 'right' : 'left'}"`
+    const paras = parts.map(b => {
+      const d = dirOf(b)
+      if (b.type === 'list') return `<ul ${attrs(d)}>${b.items.map(i => `<li>${inline(i)}</li>`).join('')}</ul>`
+      // A paragraph that is only a link is the email's one call to action.
+      const btn = b.lines.length === 1 && b.lines[0].match(BUTTON_LINE)
+      const href = btn && safeHref(btn[2])
+      if (href) {
+        return `<p ${attrs(d)}><a href="${escapeHtml(href)}" style="display:inline-block;padding:10px 18px;background:#1a1a1a;color:#ffffff;text-decoration:none;border-radius:4px;font-weight:bold">${escapeHtml(btn[1])}</a></p>`
+      }
+      return `<p ${attrs(d)}>${b.lines.map(l => inline(l)).join('<br>')}</p>`
+    }).join('\n')
+    const sigHtml = sig ? `\n<p ${attrs(textDirection(sig, dir))}>${sig.split('\n').map(escapeHtml).join('<br>')}</p>` : ''
+    const optHtml = optOuts.map(o => `<p dir="${textDirection(o)}" style="color:#777;font-size:12px;text-align:${textDirection(o) === 'rtl' ? 'right' : 'left'}">${escapeHtml(o)}</p>`).join('\n')
+    const html = `<div dir="${dir}" style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.5;color:#222;text-align:${align}">\n${paras}${sigHtml}\n${optHtml}\n</div>`
     return { subject: filledSubject, html, text }
   }
 
