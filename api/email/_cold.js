@@ -6,7 +6,7 @@ import {
   nextWindowStart, gapMinutes, mailboxHealthProblem, followUpSubject, makeMessageId, classifySmtpError, coldProblems,
   SENDING_PROVIDERS, inboxMessageKind,
 } from '../../src/lib/email/cold.js'
-import { closeFinished } from './_engine.js'
+import { closeFinished, subscribeUrl } from './_engine.js'
 
 export { coldProblems }
 
@@ -23,6 +23,8 @@ export { coldProblems }
 //                              sign-in → string | null
 //   deps.uuid()                a fresh id for Message-IDs
 //   deps.random()              0..1, for the gap between sends
+//   deps.baseUrl               the app's address, for each email's
+//                              newsletter sign-up link ({{subscribe_url}})
 //
 // What a launch does: queue step 0 for every eligible prospect, with NO
 // mailbox yet. The run gives each row to whichever ready mailbox is free, so
@@ -328,6 +330,7 @@ async function sendOne(deps, { ws, mb, row, campaign, now, cap }) {
 
   const rendered = renderEmail({
     audience: 'cold', subject, body, language: campaign.language, contact, signature: mb.signature,
+    subscribeUrl: subscribeUrl(deps.baseUrl, contact.unsubscribe_token),
   })
   const res = await deps.mail.send(mb, password, {
     from: { name: mb.from_name || '', address: mb.email },

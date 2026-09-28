@@ -168,14 +168,15 @@ export async function deleteCampaign(ws, id) {
 
 export async function fetchCampaignSends(ws, campaignId) {
   return all(() => supabase.from('email_sends')
-    .select('id,email,step,status,error,sent_at,delivered_at,opened_at,clicked_at,bounced_at,complained_at,replied_at,due_at,contact_id,mailbox_id')
+    .select('id,email,step,status,error,sent_at,delivered_at,opened_at,clicked_at,bounced_at,complained_at,replied_at,subscribed_at,due_at,contact_id,mailbox_id')
     .eq('workspace_id', ws).eq('campaign_id', campaignId).order('created_at'))
 }
 
 // ── Settings ──
 
 const SETTINGS_FIELDS = ['from_name', 'from_email', 'reply_to', 'company_address', 'warmup_enabled',
-  'provider_daily_limit', 'provider_monthly_limit', 'cold_sending_enabled']
+  'provider_daily_limit', 'provider_monthly_limit', 'cold_sending_enabled',
+  'newsletter_name', 'subscribe_offer', 'subscribe_gift_url']
 
 export async function saveSettings(ws, settings) {
   const row = { workspace_id: ws, updated_at: new Date().toISOString() }

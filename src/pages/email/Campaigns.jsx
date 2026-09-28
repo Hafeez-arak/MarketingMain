@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Card, Button, Input, Select, Textarea, Modal, ConfirmDialog, Empty, Skeleton, SectionHead } from '../../components/ui/index'
 import { useAuth } from '../../store/auth'
 import { pickRecipients, displayName } from '../../lib/email/contacts'
-import { renderEmail, marketingProblems, MERGE_TAGS, applyMergeTags, toPlainText } from '../../lib/email/render'
+import { renderEmail, marketingProblems, MERGE_TAGS, applyMergeTags, toPlainText, subscribeButton } from '../../lib/email/render'
 import { brandTodayKey } from '../../lib/brandTime'
 import { mailboxReadiness, mailboxCap, coldProblems } from '../../lib/email/cold'
 import { saveCampaign, deleteCampaign, fetchCampaignSends, emailApi, fetchBrandKit, duplicateCampaign } from '../../lib/email/client'
@@ -34,6 +34,9 @@ const EMPTY = {
 }
 
 const SAMPLE_CONTACT = { first_name: 'Sara', company: 'Example Co', email: 'sara@example.com' }
+
+// In previews the sign-up button opens the test page, never a real sign-up.
+const TEST_SUBSCRIBE_URL = typeof window === 'undefined' ? '' : `${window.location.origin}/api/email/subscribe?t=test`
 
 export function Campaigns(props) {
   const { params, setTab, audience, data, loading } = props
@@ -255,7 +258,7 @@ function Composer({ audience, campaign, data, workspaceId, reload, setTab, statu
     audience, subject: current.subject, preheader: step ? '' : form.preheader, body: current.body,
     language: form.language, contact: sample,
     sender: { from_name: settings.from_name, company_address: settings.company_address },
-    unsubscribeUrl: cold ? '' : '#unsubscribe', signature,
+    unsubscribeUrl: cold ? '' : '#unsubscribe', signature, subscribeUrl: cold ? TEST_SUBSCRIBE_URL : '',
   }), [audience, current.subject, current.body, form.preheader, form.language, sample, settings.from_name, settings.company_address, cold, step, signature])
 
   const checks = designed ? designChecks(form.design) : { problems: [], warnings: [] }
@@ -544,6 +547,11 @@ function Composer({ audience, campaign, data, workspaceId, reload, setTab, statu
                 <span className="eyebrow mr-2">{step ? `Follow-up ${editingStep}` : 'Email'}</span>
                 <ToolButton onClick={() => insertAtCursor(sel => `**${sel || 'bold text'}**`)}>Bold</ToolButton>
                 {!cold && <ToolButton onClick={() => insertAtCursor(sel => `[${sel || 'link text'}](https://)`)}>Link</ToolButton>}
+                {cold && (
+                  <ToolButton onClick={() => insertAtCursor(sel => `\n\n${subscribeButton(sel || (form.language === 'ar' ? 'أرسلوا لي الدليل المجاني ←' : 'Send me the free guide →'))}\n\n`)}>
+                    Sign-up button
+                  </ToolButton>
+                )}
                 <ToolButton onClick={() => insertAtCursor('\n- ')}>Bullet</ToolButton>
                 <select className="text-[11px] border border-border bg-white px-1.5 py-1 text-text-secondary" value=""
                   onChange={e => { if (e.target.value) insertAtCursor(`{{${e.target.value}${e.target.value === 'first_name' ? '|there' : ''}}}`) }}>
@@ -565,7 +573,9 @@ function Composer({ audience, campaign, data, workspaceId, reload, setTab, statu
                   : 'Hi {{first_name|there}},\n\nA quick update from Arak: …\n\n[See the project](https://arak-sa.com/...)'} />
               <p className="text-[11px] text-text-tertiary mt-1">
                 Blank line = new paragraph. **bold**, [text](link), “- ” for bullets. {'{{first_name|there}}'} uses “there” when a name is missing.
-                {cold ? ' The opt-out sentence is added automatically.' : ' The footer with your address and the unsubscribe link is added automatically.'}
+                {cold
+                  ? ' The opt-out sentence is added automatically. A Sign-up button lets the reader join your newsletter in one click; they move to the Subscribers tab and get no more outreach. English and Arabic may share one email: each paragraph takes its own direction.'
+                  : ' The footer with your address and the unsubscribe link is added automatically.'}
               </p>
               {step && (
                 <div className="flex justify-end mt-2">
@@ -708,11 +718,14 @@ function ToolButton({ onClick, children }) {
 function coldExport(form, contacts) {
   const cell = v => { const s = String(v ?? ''); return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s }
   const header = ['email', 'name', 'company', 'subject', 'body', ...form.follow_ups.flatMap((_, i) => [`follow_up_${i + 1}_after_days`, `follow_up_${i + 1}_body`])]
-  const rows = contacts.map(c => [
-    c.email, displayName(c), c.company,
-    applyMergeTags(form.subject, c), toPlainText(applyMergeTags(form.body, c)),
-    ...form.follow_ups.flatMap(f => [f.delay_days, toPlainText(applyMergeTags(f.body, c))]),
-  ])
+  const rows = contacts.map(c => {
+    const links = { subscribeUrl: c.unsubscribe_token ? `${window.location.origin}/api/email/subscribe?t=${c.unsubscribe_token}` : '' }
+    return [
+      c.email, displayName(c), c.company,
+      applyMergeTags(form.subject, c, links), toPlainText(applyMergeTags(form.body, c, links)),
+      ...form.follow_ups.flatMap(f => [f.delay_days, toPlainText(applyMergeTags(f.body, c, links))]),
+    ]
+  })
   return `\uFEFF${[header, ...rows].map(r => r.map(cell).join(',')).join('\r\n')}`
 }
 
@@ -938,6 +951,7 @@ function CampaignDetail({ audience, campaign, data, workspaceId, reload, setTab 
     contact: { first_name: 'Sara', company: 'Example Co' },
     sender: { from_name: campaign.from_name || data.settings?.from_name, company_address: data.settings?.company_address },
     unsubscribeUrl: audience === 'cold' ? '' : '#unsubscribe',
+    subscribeUrl: audience === 'cold' ? TEST_SUBSCRIBE_URL : '',
   }
   const preview = audience === 'marketing' && hasDesign(campaign.design)
     ? renderDesign({ ...shown, design: campaign.design })
@@ -981,11 +995,13 @@ function CampaignDetail({ audience, campaign, data, workspaceId, reload, setTab 
       </Card>
 
       {audience === 'cold' ? (
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-px bg-border border border-border">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-px bg-border border border-border">
         <Stat label="Prospects" value={Number(campaign.recipients || 0).toLocaleString()} hint={`${Number(st.queued || 0)} emails still queued`} />
         <Stat label="Emails sent" value={sent.toLocaleString()} hint="First emails and follow-ups" />
         <Stat label="Replied" value={pct(Number(st.replied || 0), Number(campaign.recipients || 0))} hint={`${Number(st.replied || 0)} people`}
           info="Outreach carries no tracking pixel or tracked links, so replies are the measure. A reply stops that person's follow-ups." />
+        <Stat label="Subscribed" value={pct(Number(st.subscribed || 0), Number(campaign.recipients || 0))} hint={`${Number(st.subscribed || 0)} people`}
+          info="Pressed the Sign-up button and confirmed. They are now in the Subscribers tab and get no more outreach." />
         <Stat label="Bounced" value={pct(Number(st.bounced || 0), sent)} hint={`${Number(st.bounced || 0)} addresses`} tone={Number(st.bounced || 0) / (sent || 1) >= 0.03 && sent >= 20 ? 'text-red-600' : ''} />
         <Stat label="Stopped" value={Number(st.failed || 0).toLocaleString()} hint="Skipped: replied, opted out or bounced elsewhere" />
       </div>
@@ -1019,7 +1035,7 @@ function CampaignDetail({ audience, campaign, data, workspaceId, reload, setTab 
                     <tr key={s.id} className="border-b border-border last:border-0">
                       <td className="px-4 py-1.5 text-text truncate max-w-[220px]">{s.email}</td>
                       {audience === 'cold' && <td className="px-2 py-1.5 text-text-tertiary whitespace-nowrap">{s.step ? `Follow-up ${s.step}` : 'First'}</td>}
-                      <td className="px-2 py-1.5 capitalize text-text-secondary">{s.replied_at ? 'replied' : s.status}</td>
+                      <td className="px-2 py-1.5 capitalize text-text-secondary">{s.subscribed_at ? 'subscribed' : s.replied_at ? 'replied' : s.status}</td>
                       <td className="px-2 py-1.5 text-text-tertiary">{(audience === 'cold' && s.mailbox_id && s.sent_at ? `${mailboxEmail(data, s.mailbox_id)} · ` : '')}{s.error || (s.clicked_at ? `clicked ${dateTime(s.clicked_at)}` : s.opened_at ? `opened ${dateTime(s.opened_at)}` : s.sent_at ? dateTime(s.sent_at) : s.status === 'queued' ? `due ${dateTime(s.due_at)}` : '')}</td>
                     </tr>
                   ))}
