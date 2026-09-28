@@ -21,7 +21,11 @@ const MailComposer = MailComposerModule.default || MailComposerModule
 //
 // Every call takes `fetch` injected, so the tests never touch Microsoft.
 
-export const SCOPES = 'openid profile email offline_access User.Read Mail.Send Mail.Read'
+// Mail.ReadWrite, not just Mail.Send: an email is created as a draft (so our
+// Message-ID and threading headers survive) and then sent, and Microsoft
+// counts creating a draft as writing to the mailbox. Without it the draft is
+// refused with ErrorAccessDenied (found on the first real send, 2026-09-28).
+export const SCOPES = 'openid profile email offline_access User.Read Mail.Send Mail.Read Mail.ReadWrite'
 const GRAPH = 'https://graph.microsoft.com/v1.0'
 
 export function msConfig(env = process.env) {
@@ -143,7 +147,10 @@ export function classifyGraphError(status, code = '', message = '') {
   if (/ErrorMessageSubmissionBlocked|SubmissionBlocked|SendAsDenied|OutboundSpam/i.test(text)) {
     return { kind: 'auth', reason: 'Microsoft has blocked this mailbox from sending, usually after spam reports. A Microsoft 365 admin must release it (Defender portal → Restricted entities) before it sends again.' }
   }
-  if (status === 401 || /InvalidAuthenticationToken|AccessDenied|ErrorAccessDenied/i.test(text)) {
+  if (/ErrorAccessDenied|AccessDenied/i.test(text)) {
+    return { kind: 'auth', reason: 'Microsoft refused access to this mailbox: the app is missing a permission (Mail.ReadWrite) or its sign-in was withdrawn. Once the permission is granted, connect the mailbox again.' }
+  }
+  if (status === 401 || /InvalidAuthenticationToken/i.test(text)) {
     return { kind: 'auth', reason: 'Microsoft refused this mailbox\'s sign-in. Reconnect it.' }
   }
   if (status === 429 || /ErrorExceededMessageLimit|QuotaExceeded|ApplicationThrottled|ErrorServerBusy/i.test(text)) {

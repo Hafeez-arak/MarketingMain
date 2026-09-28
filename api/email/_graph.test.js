@@ -51,6 +51,8 @@ describe('authorizeUrl', () => {
     expect(u.searchParams.get('scope')).toBe(SCOPES)
     expect(SCOPES).toContain('offline_access')
     expect(SCOPES).toContain('Mail.Send')
+    // Creating the draft that is then sent is a write: Mail.Send alone is refused.
+    expect(SCOPES).toContain('Mail.ReadWrite')
     expect(u.searchParams.get('prompt')).toBe('select_account')
     expect(u.searchParams.get('login_hint')).toBe('sales1@arak-sa.com')
   })
@@ -64,6 +66,11 @@ describe('classifyGraphError', () => {
   })
   it('reads a Microsoft sending block as stop-the-mailbox', () => {
     expect(classifyGraphError(403, 'ErrorMessageSubmissionBlocked', '').kind).toBe('auth')
+  })
+  it('reads ErrorAccessDenied as a missing permission, not a bad password', () => {
+    const r = classifyGraphError(403, 'ErrorAccessDenied', 'Access is denied. Check credentials and try again.')
+    expect(r.kind).toBe('auth')
+    expect(r.reason).toMatch(/Mail\.ReadWrite/)
   })
   it('reads throttling as a limit and bad addresses as the recipient', () => {
     expect(classifyGraphError(429, 'ApplicationThrottled', '').kind).toBe('limit')
