@@ -999,7 +999,7 @@ function CampaignDetail({ audience, campaign, data, workspaceId, reload, setTab 
         <Stat label="Prospects" value={Number(campaign.recipients || 0).toLocaleString()} hint={`${Number(st.queued || 0)} emails still queued`} />
         <Stat label="Emails sent" value={sent.toLocaleString()} hint="First emails and follow-ups" />
         <Stat label="Replied" value={pct(Number(st.replied || 0), Number(campaign.recipients || 0))} hint={`${Number(st.replied || 0)} people`}
-          info="Outreach carries no tracking pixel or tracked links, so replies are the measure. A reply stops that person's follow-ups." />
+          info="Outreach carries no tracking pixel, so replies are the measure. A reply stops that person's follow-ups and moves them to the marketing group “Replied to outreach”. A reply that says stop, unsubscribe or not interested unsubscribes them instead." />
         <Stat label="Subscribed" value={pct(Number(st.subscribed || 0), Number(campaign.recipients || 0))} hint={`${Number(st.subscribed || 0)} people`}
           info="Pressed the Sign-up button and confirmed. They are now in the Subscribers tab and get no more outreach." />
         <Stat label="Bounced" value={pct(Number(st.bounced || 0), sent)} hint={`${Number(st.bounced || 0)} addresses`} tone={Number(st.bounced || 0) / (sent || 1) >= 0.03 && sent >= 20 ? 'text-red-600' : ''} />

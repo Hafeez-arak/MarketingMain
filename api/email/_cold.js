@@ -1,4 +1,4 @@
-import { pickRecipients, blockReason, fullName } from '../../src/lib/email/contacts.js'
+import { pickRecipients, blockReason, fullName, REPLIES_GROUP } from '../../src/lib/email/contacts.js'
 import { renderEmail, applyMergeTags } from '../../src/lib/email/render.js'
 import { brandDateKey, brandWallToUtcISO } from '../../src/lib/brandTime.js'
 import {
@@ -6,7 +6,7 @@ import {
   nextWindowStart, gapMinutes, mailboxHealthProblem, followUpSubject, makeMessageId, classifySmtpError, coldProblems,
   SENDING_PROVIDERS, inboxMessageKind,
 } from '../../src/lib/email/cold.js'
-import { closeFinished, subscribeUrl } from './_engine.js'
+import { closeFinished, subscribeUrl, moveToMarketing } from './_engine.js'
 
 export { coldProblems }
 
@@ -401,19 +401,24 @@ async function secretOf(db, mailboxId) {
 // ─── Reading replies and bounces (Microsoft 365 mailboxes) ─────────────────
 // Every run, before sending, each connected Microsoft mailbox's inbox is read
 // from where the last run stopped. A message in the thread of one of our
-// sends is one of three things (src/lib/email/cold.js, inboxMessageKind):
+// sends is one of four things (src/lib/email/cold.js, inboxMessageKind):
 //
 //   reply   the prospect (or a colleague on the thread) answered: the send
-//           and the contact get replied_at, and every queued email to that
-//           person is cancelled. blockReason() keeps them out of outreach
-//           from then on.
+//           and the contact get replied_at, every queued email to that
+//           person is cancelled, and they move to the marketing lane as a
+//           business contact, into the group REPLIES_GROUP. They have
+//           written to us, so they may hear from us.
+//   optout  a reply that says stop, unsubscribe, not interested (English or
+//           Arabic): marked replied too, but the contact is unsubscribed and
+//           stays out of every lane.
 //   bounce  the address does not exist: the send and the contact bounce, and
 //           the bounce brake counts it.
 //   auto    an out-of-office: ignored, the sequence carries on.
 //
-// Only the sender, subject and thread are read, never the body. It runs
-// whether or not outreach sending is switched on: an answer to an email we
-// already sent must stop the follow-ups either way.
+// Read: the sender, subject, thread and the reply's first ~255 characters.
+// Stored: none of the reply's words, only what it meant. It runs whether or
+// not outreach sending is switched on: an answer to an email we already sent
+// must stop the follow-ups either way.
 
 const INBOX_LOOKBACK_MS = 3 * DAY
 const INBOX_OVERLAP_MS = 60_000
@@ -422,13 +427,15 @@ export async function readReplies(deps, { now = new Date(), workspaceId = null }
   const { db } = deps
   const filter = workspaceId ? `&workspace_id=eq.${workspaceId}` : ''
   const mailboxes = await db(`email_mailboxes?provider=eq.microsoft&status=in.(active,paused)${filter}&select=*`) || []
-  const out = { mailboxes: 0, replies: 0, bounces: 0, errors: [] }
+  const out = { mailboxes: 0, replies: 0, bounces: 0, optOuts: 0, movedToMarketing: 0, errors: [] }
   for (const mb of mailboxes) {
     try {
       const r = await readMailbox(deps, mb, now)
       out.mailboxes++
       out.replies += r.replies
       out.bounces += r.bounces
+      out.optOuts += r.optOuts
+      out.movedToMarketing += r.moved
     } catch (err) {
       out.errors.push(`${mb.email}: ${String(err?.message || err).slice(0, 200)}`)
     }
@@ -460,6 +467,8 @@ async function readMailbox(deps, mb, now) {
   const msgs = (res.messages || []).filter(m => m.threadId && m.from !== own)
   let replies = 0
   let bounces = 0
+  let optOuts = 0
+  let moved = 0
   if (msgs.length) {
     const threads = [...new Set(msgs.map(m => m.threadId))]
     const rows = []
@@ -479,8 +488,13 @@ async function readMailbox(deps, mb, now) {
       const at = m.receivedAt || nowIso
       if (kind === 'bounce') {
         if (await markBounced(db, row, at, nowIso)) bounces++
-      } else if (await markReplied(db, row, at, nowIso)) {
-        replies++
+        continue
+      }
+      if (await markReplied(db, row, at, nowIso)) replies++
+      if (kind === 'optout') {
+        if (await markOptedOut(db, row, at, nowIso)) optOuts++
+      } else if (await moveReplierToMarketing(deps, row, now)) {
+        moved++
       }
     }
   }
@@ -489,7 +503,32 @@ async function readMailbox(deps, mb, now) {
   const page = res.messages || []
   const mark = page.length >= 50 ? page[page.length - 1].receivedAt : nowIso
   await patchMailbox(db, mb.id, { inbox_checked_at: mark })
-  return { replies, bounces }
+  return { replies, bounces, optOuts, moved }
+}
+
+/** A "stop" reply: the person is unsubscribed, in every lane. */
+async function markOptedOut(db, row, at, nowIso) {
+  const changed = await db(`email_contacts?id=eq.${row.contact_id}&workspace_id=eq.${row.workspace_id}&status=eq.active`, {
+    method: 'PATCH', prefer: 'return=representation', body: { status: 'unsubscribed', unsubscribed_at: at, updated_at: nowIso },
+  }) || []
+  return changed.length > 0
+}
+
+/**
+ * Any other reply: the prospect wrote to us, so they become a business
+ * contact in the marketing lane. Only a cold, still-active contact moves:
+ * someone who said stop in an earlier message stays unsubscribed, and a
+ * subscriber keeps their stronger opt-in.
+ */
+async function moveReplierToMarketing({ db }, row, now) {
+  const [contact] = await db(`email_contacts?id=eq.${row.contact_id}&workspace_id=eq.${row.workspace_id}&select=id,workspace_id,audience,status`) || []
+  if (!contact || contact.audience !== 'cold' || contact.status !== 'active') return false
+  await moveToMarketing({ db }, contact, {
+    patch: { consent: 'business_contact' },
+    group: REPLIES_GROUP, groupDescription: 'Replied to an outreach email.',
+    reason: 'Replied', now,
+  })
+  return true
 }
 
 async function cancelQueued(db, row, reason, nowIso) {

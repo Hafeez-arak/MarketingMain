@@ -47,6 +47,10 @@ export const LANGUAGES = { en: 'English', ar: 'Arabic' }
 // outreach email (api/email/_engine.js, subscribe). Made on the first sign-up.
 export const SUBSCRIBERS_GROUP = 'Newsletter subscribers'
 
+// The marketing group a prospect joins by replying to an outreach email with
+// anything but "stop" (api/email/_cold.js, readReplies). Made on the first one.
+export const REPLIES_GROUP = 'Replied to outreach'
+
 /** Lower-cased, trimmed, with a mailto: or angle brackets stripped. */
 export function normalizeEmail(raw) {
   return String(raw || '')

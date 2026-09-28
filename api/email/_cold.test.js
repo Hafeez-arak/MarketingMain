@@ -323,6 +323,10 @@ describe('readReplies', () => {
       { method: 'GET', match: /^email_mailbox_secrets/, reply: [{ secret: 'sealed' }] },
       { method: 'GET', match: /^email_sends\?mailbox_id=eq\.mb-ms&thread_id=in\./, reply: rows },
       { method: 'PATCH', match: /^email_sends\?id=eq\..*(replied_at|bounced_at)=is\.null/, reply: [{ id: 's-a' }] },
+      { method: 'PATCH', match: /^email_contacts\?id=eq\.a&.*status=eq\.active/, reply: [{ id: 'a' }] },
+      { method: 'GET', match: /^email_contacts\?id=eq\.a/, reply: [contact('a')] },
+      { method: 'GET', match: /^email_groups\?/, reply: [{ id: 'g-cold', name: 'Hotels', audience: 'cold' }] },
+      { method: 'POST', match: /^email_groups$/, reply: [{ id: 'g-replied' }] },
     ])
     const asked = []
     const deps = {
@@ -345,6 +349,33 @@ describe('readReplies', () => {
     expect(patches(w.calls, /^email_contacts\?id=eq\.a&.*replied_at=is\.null/)[0].body).toMatchObject({ replied_at: '2026-09-27T08:05:00Z' })
     expect(patches(w.calls, /^email_sends\?workspace_id=.*contact_id=eq\.a&status=eq\.queued/)[0].body).toMatchObject({ status: 'cancelled', error: 'Replied' })
     expect(patches(w.calls, /^email_mailboxes\?id=eq\.mb-ms/).at(-1).body).toEqual({ inbox_checked_at: SUNDAY_11.toISOString() })
+  })
+
+  it('a reply moves the prospect to marketing, into "Replied to outreach", out of cold groups', async () => {
+    const w = inboxWorld([msg({ preview: 'Yes please, send the guide. Thanks, Sara' })])
+    const out = await readReplies(w.deps, { now: SUNDAY_11 })
+    expect(out).toMatchObject({ replies: 1, optOuts: 0, movedToMarketing: 1 })
+    expect(patches(w.calls, /^email_contacts\?id=eq\.a&workspace_id=eq\.[^&]+$/)[0].body).toMatchObject({ audience: 'marketing', consent: 'business_contact' })
+    expect(w.calls.find(c => c.method === 'DELETE').path).toContain('group_id=in.("g-cold")')
+    expect(posts(w.calls, /^email_groups$/)[0].body).toMatchObject({ name: 'Replied to outreach', audience: 'marketing' })
+    expect(posts(w.calls, /^email_group_members/)[0].body).toEqual([{ group_id: 'g-replied', contact_id: 'a', workspace_id: WS }])
+  })
+
+  it('a "stop" reply unsubscribes the prospect and never moves them to marketing', async () => {
+    for (const preview of ['Stop emailing me.', 'please remove me from your list', 'Not interested, thanks', 'توقف عن مراسلتي', 'نحن غير مهتمين']) {
+      const w = inboxWorld([msg({ preview })])
+      const out = await readReplies(w.deps, { now: SUNDAY_11 })
+      expect(out, preview).toMatchObject({ replies: 1, optOuts: 1, movedToMarketing: 0 })
+      expect(patches(w.calls, /^email_contacts\?id=eq\.a&.*status=eq\.active/)[0].body).toMatchObject({ status: 'unsubscribed' })
+      expect(w.calls.some(c => c.method === 'POST' && /^email_group/.test(c.path))).toBe(false)
+    }
+  })
+
+  it('our own "reply stop" line in the quoted email is not read as the prospect saying stop', async () => {
+    const preview = 'Sounds good, call me Sunday. From: Hafeez <hafeez@arak-sa.com> Sent: Sunday Hi Sara, ... If this is not relevant to you, just reply "stop"'
+    const w = inboxWorld([msg({ preview })])
+    const out = await readReplies(w.deps, { now: SUNDAY_11 })
+    expect(out).toMatchObject({ optOuts: 0, movedToMarketing: 1 })
   })
 
   it('a non-delivery report bounces the send and the contact', async () => {

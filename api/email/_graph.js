@@ -290,7 +290,9 @@ export function createGraphMail({ config, save, fetch: f = fetch, now = () => Da
         $filter: `receivedDateTime ge ${sinceIso}`,
         $orderby: 'receivedDateTime asc',
         $top: '50',
-        $select: 'id,conversationId,internetMessageId,from,subject,receivedDateTime',
+        // bodyPreview: the first ~255 characters, enough to tell "stop" from
+        // "yes, send it". Sorted in _cold.js and never stored.
+        $select: 'id,conversationId,internetMessageId,from,subject,receivedDateTime,bodyPreview',
       })
       const res = await withToken(mb, plain, token => graphCall(f, token, `/me/mailFolders/inbox/messages?${q}`))
       if (!res.ok) return { ok: false, error: res.error }
@@ -300,6 +302,7 @@ export function createGraphMail({ config, save, fetch: f = fetch, now = () => Da
         from: String(m.from?.emailAddress?.address || '').toLowerCase(),
         fromName: String(m.from?.emailAddress?.name || ''),
         subject: String(m.subject || ''),
+        preview: String(m.bodyPreview || ''),
         receivedAt: m.receivedDateTime,
       }))
       return { ok: true, messages }
