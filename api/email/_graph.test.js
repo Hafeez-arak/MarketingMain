@@ -213,15 +213,16 @@ describe('createGraphMail.inbox', () => {
   it('asks for the inbox since the mark, oldest first, and flattens the sender', async () => {
     const { f, calls } = fakeFetch([
       { method: 'GET', match: '/me/mailFolders/inbox/messages', reply: { status: 200, json: { value: [
-        { id: 'm1', conversationId: 'conv-1', from: { emailAddress: { address: 'Sara@Hotel.sa', name: 'Sara' } }, subject: 'RE: Lighting', receivedDateTime: '2026-09-28T07:00:00Z' },
+        { id: 'm1', conversationId: 'conv-1', from: { emailAddress: { address: 'Sara@Hotel.sa', name: 'Sara' } }, subject: 'RE: Lighting', receivedDateTime: '2026-09-28T07:00:00Z', bodyPreview: 'Yes please, send it.' },
       ] } } },
     ])
     const mail = createGraphMail({ config: CONFIG, fetch: f, now: () => NOW, save: async () => {} })
     const out = await mail.inbox(MB, packTokens({ rt: 'RT', at: 'LIVE', exp: NOW + 3_600_000 }), '2026-09-28T06:00:00.000Z')
-    expect(out.messages).toEqual([{ id: 'm1', threadId: 'conv-1', from: 'sara@hotel.sa', fromName: 'Sara', subject: 'RE: Lighting', receivedAt: '2026-09-28T07:00:00Z' }])
+    expect(out.messages).toEqual([{ id: 'm1', threadId: 'conv-1', from: 'sara@hotel.sa', fromName: 'Sara', subject: 'RE: Lighting', preview: 'Yes please, send it.', receivedAt: '2026-09-28T07:00:00Z' }])
     const q = new URL(calls[0].url).searchParams
     expect(q.get('$filter')).toBe('receivedDateTime ge 2026-09-28T06:00:00.000Z')
     expect(q.get('$orderby')).toBe('receivedDateTime asc')
+    expect(q.get('$select')).toContain('bodyPreview')
   })
 })
 

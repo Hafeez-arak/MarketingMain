@@ -177,18 +177,48 @@ export function followUpSubject(stepSubject, firstSubject) {
 }
 
 // ─── Reading the inbox ─────────────────────────────────────────────────────
-// What a message arriving in an outreach thread means. Checked on the sender
-// and subject only: the body is never read or stored.
+// What a message arriving in an outreach thread means. Judged on the sender,
+// the subject and the first lines of the reply (Microsoft's ~255-character
+// preview). Nothing of the reply is stored: it is read, sorted, and dropped.
 
 const BOUNCE_SENDER = /^(postmaster|mailer-daemon|mail-daemon|microsoftexchange[0-9a-f]*)@/i
 const BOUNCE_SUBJECT = /^(undeliverable|undelivered mail|delivery (status notification|has failed|failure)|mail delivery (failed|subsystem)|returned mail|failure notice|لم يتم التسليم|تعذر التسليم)/i
 const AUTO_SUBJECT = /^(automatic reply|auto(matic)?[- ]?(reply|response)|out of (the )?office|ooo\b|away from (the )?office|رد تلقائي|الرد التلقائي|خارج المكتب)/i
 
-/** @returns {'bounce'|'auto'|'reply'} */
-export function inboxMessageKind({ from = '', subject = '' } = {}) {
+// A reply asking us to go away. Leaning towards "stop" is the safe mistake:
+// a keen prospect wrongly unsubscribed can be moved back by hand, a person
+// who said stop and got a newsletter cannot be un-emailed.
+const OPT_OUT_EN = /\b(stop|unsubscribe|opt[\s-]?out|remove me|take me off|not interested|no,? thanks?|no thank you|(don'?t|do not|please don'?t) (e-?mail|contact|message|write to) (me|us)|leave me alone)\b/i
+// Arabic has no \b, so each phrase must start a word: "يتوقف على" ("it
+// depends on") and "منازل" ("houses") must not read as a request to stop.
+const OPT_OUT_AR = new RegExp(`(^|[\\s،.!?؟"'«»(])(${[
+  'توقف', 'أوقف', 'اوقف', 'إلغاء الاشتراك', 'الغاء الاشتراك', 'احذف', 'إزالة', 'ازالة',
+  'لا أرغب', 'لا ارغب', 'لا نرغب', 'غير مهتم', 'لا تراسل', 'لا ترسل',
+].join('|')})`)
+
+// Where the quoted original starts. Our own email ends with 'reply "stop"',
+// so the quote must never be read as the prospect's words.
+const QUOTE_START = /(^|\s)(from:|sent:|on .{3,80} wrote:|-{2,} ?original message|_{5,}|من:|أرسل:|تم الإرسال:|كتب .{0,80}:|sent from my|get outlook for)/i
+
+/** The prospect's own words at the top of a reply, without the quoted email. */
+export function replyText(preview) {
+  const text = String(preview || '').replace(/\s+/g, ' ').trim()
+  const cut = text.search(QUOTE_START)
+  return (cut >= 0 ? text.slice(0, cut) : text).trim()
+}
+
+/** Does this reply ask us to stop? Checked on the prospect's own words only. */
+export function isOptOutReply(preview) {
+  const own = replyText(preview)
+  return OPT_OUT_EN.test(own) || OPT_OUT_AR.test(own)
+}
+
+/** @returns {'bounce'|'auto'|'optout'|'reply'} */
+export function inboxMessageKind({ from = '', subject = '', preview = '' } = {}) {
   const subj = String(subject || '').trim()
   if (BOUNCE_SENDER.test(String(from || '')) || BOUNCE_SUBJECT.test(subj)) return 'bounce'
   if (AUTO_SUBJECT.test(subj)) return 'auto'
+  if (isOptOutReply(preview)) return 'optout'
   return 'reply'
 }
 

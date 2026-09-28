@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
-  inSendingWindow, nextWindowStart, gapMinutes, mailboxDomainProblem, mailboxCap, mailboxReadiness, inboxMessageKind,
+  inSendingWindow, nextWindowStart, gapMinutes, mailboxDomainProblem, mailboxCap, mailboxReadiness, inboxMessageKind, isOptOutReply, replyText,
   classifySmtpError, followUpSubject, HARD_MAX_PER_MAILBOX,
 } from './cold.js'
 
@@ -100,5 +100,24 @@ describe('inboxMessageKind', () => {
   it('anything else in the thread is a reply', () => {
     expect(inboxMessageKind({ from: 'a@hotel.sa', subject: 'RE: Lighting for Hotel Co' })).toBe('reply')
     expect(inboxMessageKind({ from: 'a@hotel.sa', subject: '' })).toBe('reply')
+  })
+})
+
+describe('reading what a reply means', () => {
+  it('hears "stop" in English and Arabic', () => {
+    for (const p of ['STOP', 'Please unsubscribe me', 'Take me off your list', "Don't email me again", 'No thanks', 'أرجو إلغاء الاشتراك', 'لا أرغب في هذه الرسائل', 'احذفوا بريدي']) {
+      expect(isOptOutReply(p), p).toBe(true)
+    }
+  })
+  it('does not hear it in ordinary business replies', () => {
+    for (const p of ['Yes, send it over', 'Interested. Can you share the price list?', 'السعر يتوقف على الكمية', 'نعمل على منازل في الرياض، أرسل الدليل']) {
+      expect(isOptOutReply(p), p).toBe(false)
+    }
+  })
+  it('reads only the prospect\'s own words, not the quoted email', () => {
+    expect(replyText('Great, thanks! From: Arak <a@arak-sa.com> Sent: ... reply "stop"')).toBe('Great, thanks!')
+    expect(replyText('ممتاز من: أراك ... توقف')).toBe('ممتاز')
+    expect(inboxMessageKind({ from: 'a@hotel.sa', subject: 'RE: x', preview: 'On Sun, 28 Sep 2026 Hafeez wrote: reply "stop"' })).toBe('reply')
+    expect(inboxMessageKind({ from: 'a@hotel.sa', subject: 'RE: x', preview: 'stop' })).toBe('optout')
   })
 })

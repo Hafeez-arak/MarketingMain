@@ -470,19 +470,37 @@ export async function subscribe({ db }, token, now = new Date()) {
   // The outreach email that brought them: the latest one we sent.
   const [send] = await db(`email_sends?contact_id=eq.${contact.id}&workspace_id=eq.${ws}&sent_at=not.is.null&select=id,campaign_id,subscribed_at&order=sent_at.desc&limit=1`) || []
 
-  await db(`email_contacts?id=eq.${contact.id}&workspace_id=eq.${ws}`, {
-    method: 'PATCH', prefer: 'return=minimal',
-    body: {
-      audience: 'marketing', consent: 'opted_in', status: 'active',
-      ...(already ? {} : { subscribed_at: nowIso, subscribed_campaign_id: send?.campaign_id || null }),
-      updated_at: nowIso,
-    },
-  })
   if (send && !send.subscribed_at) {
     await db(`email_sends?id=eq.${send.id}`, { method: 'PATCH', prefer: 'return=minimal', body: { subscribed_at: nowIso, updated_at: nowIso } })
   }
+  await moveToMarketing({ db }, contact, {
+    patch: {
+      consent: 'opted_in', status: 'active',
+      ...(already ? {} : { subscribed_at: nowIso, subscribed_campaign_id: send?.campaign_id || null }),
+    },
+    group: SUBSCRIBERS_GROUP, groupDescription: 'Signed up from an outreach email.',
+    reason: 'Subscribed to the newsletter', now,
+  })
+
+  const settings = await loadSettings({ db }, ws)
+  return { ok: true, email: contact.email, already, settings }
+}
+
+/**
+ * Move a prospect out of outreach and into the marketing lane: audience
+ * marketing (plus `patch`), queued outreach cancelled, out of every cold
+ * group, into the marketing group `group` (made if missing). Used by the
+ * sign-up button and by a reply that is not a "stop".
+ * @param {object} contact  { id, workspace_id }
+ */
+export async function moveToMarketing({ db }, contact, { patch = {}, group, groupDescription = '', reason, now = new Date() }) {
+  const ws = contact.workspace_id
+  const nowIso = now.toISOString()
+  await db(`email_contacts?id=eq.${contact.id}&workspace_id=eq.${ws}`, {
+    method: 'PATCH', prefer: 'return=minimal', body: { audience: 'marketing', ...patch, updated_at: nowIso },
+  })
   await db(`email_sends?contact_id=eq.${contact.id}&workspace_id=eq.${ws}&status=eq.queued`, {
-    method: 'PATCH', prefer: 'return=minimal', body: { status: 'cancelled', error: 'Subscribed to the newsletter', updated_at: nowIso },
+    method: 'PATCH', prefer: 'return=minimal', body: { status: 'cancelled', error: reason, updated_at: nowIso },
   })
 
   const groups = await db(`email_groups?workspace_id=eq.${ws}&select=id,name,audience`) || []
@@ -493,16 +511,16 @@ export async function subscribe({ db }, token, now = new Date()) {
     })
   }
   // Names are unique per workspace ignoring case (email_groups_ws_name_idx).
-  let list = groups.find(g => g.audience === 'marketing' && String(g.name).toLowerCase() === SUBSCRIBERS_GROUP.toLowerCase())
+  let list = groups.find(g => g.audience === 'marketing' && String(g.name).toLowerCase() === group.toLowerCase())
   if (!list) {
     try {
       ;[list] = await db('email_groups', {
         method: 'POST', prefer: 'return=representation',
-        body: { workspace_id: ws, name: SUBSCRIBERS_GROUP, audience: 'marketing', description: 'Signed up from an outreach email.' },
+        body: { workspace_id: ws, name: group, audience: 'marketing', description: groupDescription },
       }) || []
     } catch {
-      // Two sign-ups at the same moment: the other one made it.
-      ;[list] = await db(`email_groups?workspace_id=eq.${ws}&name=ilike.${encodeURIComponent(SUBSCRIBERS_GROUP)}&audience=eq.marketing&select=id`) || []
+      // Two at the same moment: the other one made it.
+      ;[list] = await db(`email_groups?workspace_id=eq.${ws}&name=ilike.${encodeURIComponent(group)}&audience=eq.marketing&select=id`) || []
     }
   }
   if (list) {
@@ -511,7 +529,4 @@ export async function subscribe({ db }, token, now = new Date()) {
       body: [{ group_id: list.id, contact_id: contact.id, workspace_id: ws }],
     })
   }
-
-  const settings = await loadSettings({ db }, ws)
-  return { ok: true, email: contact.email, already, settings }
 }
