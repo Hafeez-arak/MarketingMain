@@ -340,34 +340,36 @@ stops that person's follow-ups, a bounce marks the address bad.
 
 ### The app registration (Microsoft Entra, once)
 
-The same app registration the Lighting app uses for Outlook
-(client ID `dfb057d7-261d-435c-a09f-c0d62368a804`,
-tenant `33f5304e-e5d7-4fb4-a585-92d5b0666820`).
+Its own app registration in the ARAK-SA.COM tenant. (The Lighting app's
+registration lives in another directory and is not used.)
 
-1. https://entra.microsoft.com → App registrations → All applications → that
-   app.
-2. **Authentication → Add a platform → Web.** Redirect URI, exactly:
+1. https://entra.microsoft.com → Entra ID → App registrations → **New
+   registration**. Name `Arak Marketing Outreach`; account types **this
+   organizational directory only (single tenant)**; Redirect URI platform
+   **Web** (not single-page, not public client), URL exactly
    `https://marketing-main-ten.vercel.app/api/email/ms-callback`
-   (if the app moves to another address, add that one too:
-   `<address>/api/email/ms-callback`). Leave the "Single-page application"
-   entry alone: Lighting uses it.
+   (if the app moves, add `<address>/api/email/ms-callback` under
+   Authentication). **Register.**
+2. Overview: copy **Application (client) ID** and **Directory (tenant) ID**.
 3. **Certificates & secrets → New client secret**, 24 months. Copy the
    **Value** (not the Secret ID). Note its expiry date: when it expires,
    Microsoft mailboxes stop sending until a new one is set on Vercel.
-4. **API permissions** → Microsoft Graph, delegated: `Mail.Send`,
-   `Mail.Read`, `User.Read`, `offline_access`, `openid`, `profile`, `email`.
-   Then **Grant admin consent for the organisation**.
+4. **API permissions → Add a permission → Microsoft Graph → Delegated**:
+   `Mail.Send`, `Mail.Read`, `offline_access`, `openid`, `profile`, `email`
+   (`User.Read` is there already). Then **Grant admin consent for
+   ARAK-SA.COM**; every row shows a green tick.
+5. Authentication: leave implicit grant unticked and public client flows off.
 
-Why the Web platform and not Lighting's single-page one: a refresh token
+Why a Web (confidential) app and not a single-page one: a refresh token
 issued to a single-page app expires after 24 hours and can only be used from
 a browser. The sender runs on a server every 10 minutes, so it needs the web
 flow's, which lasts 90 days and renews itself with every use.
 
 ### Vercel (Production), then redeploy
 
-- `MICROSOFT_CLIENT_ID` = `dfb057d7-261d-435c-a09f-c0d62368a804`
-- `MICROSOFT_TENANT_ID` = `33f5304e-e5d7-4fb4-a585-92d5b0666820`
-- `MICROSOFT_CLIENT_SECRET` = the Value from step 3
+- `MICROSOFT_CLIENT_ID` = the Application (client) ID
+- `MICROSOFT_TENANT_ID` = the Directory (tenant) ID
+- `MICROSOFT_CLIENT_SECRET` = the secret's Value
 
 Until all three are set, "Connect Microsoft 365" is greyed out.
 
