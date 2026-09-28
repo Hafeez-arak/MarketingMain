@@ -10,7 +10,15 @@
 //     mailbox's own limit — never above HARD_MAX_PER_MAILBOX,
 //   • only Sunday–Thursday, 09:00–17:00 Riyadh, one email at a time with a
 //     random gap, so a day's emails are spread the way a person's would be,
-//   • never from the company's own domain or a free-mail address.
+//   • never from a free-mail address, and a Google (app password) mailbox
+//     never from the company's own domain.
+//
+// Microsoft 365 mailboxes are the exception to that last rule, by the
+// owner's decision (2026-09-28): the company's own arak-sa.com accounts,
+// renamed from former employees, connected by signing in. They sit on an
+// aged domain with years of normal mail behind it, so they need no warm-up
+// service, but the ramp and every ceiling below apply to them unchanged:
+// a burst from arak-sa.com risks every colleague's mail, not just outreach.
 //
 // The hard numbers below are not settings. A bug elsewhere, a typo in a
 // limit, or an edited request can lower them but never raise them.
@@ -21,6 +29,8 @@ import { normalizeEmail, isValidEmail } from './contacts.js'
 import { unknownMergeTags } from './render.js'
 
 export const HARD_MAX_PER_MAILBOX = 40      // per day, whatever daily_limit says
+// The providers the sending run uses. 'instantly' is reserved, not built.
+export const SENDING_PROVIDERS = ['smtp', 'microsoft']
 export const HARD_MAX_PER_WORKSPACE = 200   // per day, across all mailboxes
 export const WARMUP_DAYS = 14               // warm-up before the first cold email
 export const MIN_GAP_MINUTES = 4
@@ -92,6 +102,9 @@ export function mailboxReadiness(mailbox, today) {
   if (mailbox.status === 'paused') return { ready: false, reason: mailbox.status_reason || 'Paused.', readyOn: null }
   if (mailbox.status === 'error') return { ready: false, reason: mailbox.status_reason || mailbox.last_error || 'The login stopped working.', readyOn: null }
   if (!mailbox.warmup_started_on) {
+    // An established company mailbox has its warm-up behind it; the ramp
+    // still starts it at 5 a day.
+    if (mailbox.provider === 'microsoft') return { ready: true, reason: '', readyOn: null }
     return { ready: false, reason: 'Warm-up has not been started. Start it in your warm-up service, then enter the date here.', readyOn: null }
   }
   const readyOn = addDays(mailbox.warmup_started_on, WARMUP_DAYS)
@@ -161,6 +174,22 @@ export function followUpSubject(stepSubject, firstSubject) {
   if (own) return own
   const first = String(firstSubject || '').trim()
   return /^re:/i.test(first) ? first : `Re: ${first}`
+}
+
+// ─── Reading the inbox ─────────────────────────────────────────────────────
+// What a message arriving in an outreach thread means. Checked on the sender
+// and subject only: the body is never read or stored.
+
+const BOUNCE_SENDER = /^(postmaster|mailer-daemon|mail-daemon|microsoftexchange[0-9a-f]*)@/i
+const BOUNCE_SUBJECT = /^(undeliverable|undelivered mail|delivery (status notification|has failed|failure)|mail delivery (failed|subsystem)|returned mail|failure notice|لم يتم التسليم|تعذر التسليم)/i
+const AUTO_SUBJECT = /^(automatic reply|auto(matic)?[- ]?(reply|response)|out of (the )?office|ooo\b|away from (the )?office|رد تلقائي|الرد التلقائي|خارج المكتب)/i
+
+/** @returns {'bounce'|'auto'|'reply'} */
+export function inboxMessageKind({ from = '', subject = '' } = {}) {
+  const subj = String(subject || '').trim()
+  if (BOUNCE_SENDER.test(String(from || '')) || BOUNCE_SUBJECT.test(subj)) return 'bounce'
+  if (AUTO_SUBJECT.test(subj)) return 'auto'
+  return 'reply'
 }
 
 /** A Message-ID on the mailbox's own domain. */

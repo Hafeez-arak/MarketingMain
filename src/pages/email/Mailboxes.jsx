@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { Card, SectionHead, Button, Input, Textarea, Select, Modal, ConfirmDialog, Empty } from '../../components/ui/index'
 import { useAuth } from '../../store/auth'
 import { saveSettings, emailApi } from '../../lib/email/client'
@@ -9,10 +10,15 @@ import {
 import { Notice, EIcon } from './parts'
 
 // ─── Outreach mailboxes ────────────────────────────────────────────────────
-// The cold lane's senders: real mailboxes on a separate outreach domain,
-// connected with an app password. Everything that writes goes through the
-// server (/api/email/mailbox_*), which proves the login before storing
-// anything and keeps the password sealed where this page cannot read it.
+// The cold lane's senders, two kinds:
+//   Microsoft 365   the company's own accounts, connected by signing in to
+//                   Microsoft as the mailbox (no password reaches the app);
+//                   sends and reads replies through Microsoft Graph.
+//   Google          a mailbox on a separate outreach domain, connected with
+//                   an app password, over SMTP/IMAP.
+// Everything that writes goes through the server (/api/email/mailbox_* and
+// ms_connect_start), which proves the login before storing anything and
+// keeps the secret sealed where this page cannot read it.
 //
 // What a person sees per mailbox is what the sender will do with it today:
 // warming up until a date, or ready with today's limit (the ramp included).
@@ -25,10 +31,28 @@ export function OutreachMailboxes({ workspaceId, data, status, reload }) {
   const today = brandTodayKey()
   const [editing, setEditing] = useState(null)        // mailbox | 'new'
   const [removing, setRemoving] = useState(null)
-  const [message, setMessage] = useState(null)
+  const [params, setParams] = useSearchParams()
+  // Back from Microsoft: the callback's verdict is in the URL, read once.
+  const [message, setMessage] = useState(() => msOutcome(params))
   const [busy, setBusy] = useState('')
   const [preview, setPreview] = useState(null)
   const [confirmOn, setConfirmOn] = useState(false)
+  const microsoftOn = Boolean(status?.configured?.microsoft)
+
+  // Then drop the verdict from the URL, so a reload does not repeat it.
+  useEffect(() => {
+    if (!params.has('ms') && !params.has('ms_error')) return
+    const connected = params.has('ms')
+    setParams(p => { const n = new URLSearchParams(p); n.delete('ms'); n.delete('ms_error'); return n }, { replace: true })
+    if (connected) reload()
+  }, [params, setParams, reload])
+
+  async function connectMicrosoft(mailboxId) {
+    setBusy(`ms:${mailboxId || 'new'}`); setMessage(null)
+    const r = await emailApi('ms_connect_start', workspaceId, mailboxId ? { mailbox_id: mailboxId } : {})
+    if (r.error || !r.url) { setBusy(''); setMessage({ tone: 'red', text: r.error || 'Microsoft sign-in could not start.' }); return }
+    window.location.assign(r.url)
+  }
 
   async function setEnabled(on) {
     setBusy('switch'); setMessage(null)
@@ -66,8 +90,16 @@ export function OutreachMailboxes({ workspaceId, data, status, reload }) {
       <Card>
         <SectionHead
           title="Outreach mailboxes"
-          subtitle="Cold emails go out from these, one at a time, Sunday to Thursday 9:00–17:00 Riyadh. Never from your marketing sender or your company domain."
-          action={<Button size="sm" onClick={() => setEditing('new')}><EIcon name="plus" /> Connect mailbox</Button>}
+          subtitle="Cold emails go out from these, one at a time, Sunday to Thursday 9:00–17:00 Riyadh. Never from your marketing sender."
+          action={(
+            <div className="flex flex-wrap gap-1.5">
+              <Button size="sm" onClick={() => connectMicrosoft()} disabled={!microsoftOn || !!busy}
+                title={microsoftOn ? 'Sign in to Microsoft as the mailbox' : 'Microsoft sign-in is not switched on yet'}>
+                <EIcon name="plus" /> {busy === 'ms:new' ? 'Opening Microsoft…' : 'Connect Microsoft 365'}
+              </Button>
+              <Button size="sm" variant="secondary" onClick={() => setEditing('new')}>Connect Google</Button>
+            </div>
+          )}
         />
         <div className="px-5 py-3 border-b border-border flex flex-wrap items-center justify-between gap-3">
           <div className="min-w-0">
@@ -86,20 +118,22 @@ export function OutreachMailboxes({ workspaceId, data, status, reload }) {
 
         {mailboxes.length === 0 ? (
           <Empty icon={<EIcon name="mail" />} title="No outreach mailbox yet"
-            description={`Connect a mailbox on your outreach domain. Outreach from it can begin ${WARMUP_DAYS} days after its warm-up starts.`}
-            action={<Button size="sm" onClick={() => setEditing('new')}>Connect the first one</Button>} />
+            description={`Sign in with a company Microsoft 365 mailbox, or connect a Google mailbox on an outreach domain (outreach from it begins ${WARMUP_DAYS} days after its warm-up starts).`}
+            action={<Button size="sm" onClick={() => connectMicrosoft()} disabled={!microsoftOn || !!busy}>Connect Microsoft 365</Button>} />
         ) : (
           <div className="divide-y divide-border">
             {mailboxes.map(mb => {
               const ready = mailboxReadiness(mb, today)
               const cap = mailboxCap(mb, today)
               const paused = mb.status === 'paused'
+              const microsoft = mb.provider === 'microsoft'
               return (
                 <div key={mb.id} className="px-5 py-3 flex flex-wrap items-start justify-between gap-3">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
                       <p className="text-sm font-semibold text-text truncate">{mb.from_name ? `${mb.from_name} <${mb.email}>` : mb.email}</p>
                       <MailboxState mailbox={mb} ready={ready} />
+                      <span className="text-[10px] text-text-tertiary">{microsoft ? 'Microsoft 365' : 'Google / app password'}</span>
                     </div>
                     <p className="text-[11px] text-text-tertiary mt-0.5">
                       {ready.ready
@@ -114,7 +148,13 @@ export function OutreachMailboxes({ workspaceId, data, status, reload }) {
                       onClick={() => act('mailbox_test', { mailbox_id: mb.id, to: user?.email }, r => `Test sent from ${r.from} to ${r.sent_to}. Check it arrived in the inbox, not spam or Promotions.`)}>
                       {busy === `mailbox_test:${mb.id}` ? 'Sending…' : 'Send test'}
                     </Button>
-                    <Button size="xs" variant="secondary" onClick={() => setEditing(mb)}>{mb.status === 'error' ? 'Reconnect' : 'Edit'}</Button>
+                    {microsoft && mb.status === 'error' ? (
+                      <Button size="xs" variant="secondary" disabled={!microsoftOn || !!busy} onClick={() => connectMicrosoft(mb.id)}>
+                        {busy === `ms:${mb.id}` ? 'Opening Microsoft…' : 'Reconnect'}
+                      </Button>
+                    ) : (
+                      <Button size="xs" variant="secondary" onClick={() => setEditing(mb)}>{mb.status === 'error' ? 'Reconnect' : 'Edit'}</Button>
+                    )}
                     {mb.status !== 'error' && (
                       <Button size="xs" variant="ghost" disabled={!!busy}
                         onClick={() => act('mailbox_pause', { mailbox_id: mb.id, paused: !paused }, () => (paused ? 'Mailbox resumed.' : 'Mailbox paused.'))}>
@@ -159,13 +199,39 @@ export function OutreachMailboxes({ workspaceId, data, status, reload }) {
           onSaved={async text => { setEditing(null); setMessage({ tone: 'sage', text }); await reload() }} />
       )}
       <ConfirmDialog open={!!removing} onClose={() => setRemoving(null)} danger title={`Remove ${removing?.email}?`}
-        message="Its password is deleted and its follow-ups still waiting are cancelled (they belong to its threads). First emails still queued go out from the other mailboxes. Emails already sent stay in the history."
+        message="Its stored login is deleted and its follow-ups still waiting are cancelled (they belong to its threads). First emails still queued go out from the other mailboxes. Emails already sent stay in the history."
         onConfirm={() => act('mailbox_delete', { mailbox_id: removing.id }, () => 'Mailbox removed.')} />
       <ConfirmDialog open={confirmOn} onClose={() => setConfirmOn(false)} title="Switch outreach sending on?"
         message="Running outreach campaigns start sending to prospects from the ready mailboxes, within each mailbox's daily limit, on the next run (every 10 minutes, working hours only)."
         onConfirm={() => setEnabled(true)} />
     </div>
   )
+}
+
+// Why the Microsoft sign-in came back without a mailbox. The callback sends
+// a code, never text or an address, in the URL.
+const MS_ERRORS = {
+  expired: 'The Microsoft sign-in took too long. Start it again.',
+  browser: 'The Microsoft sign-in has to finish in the same browser it started in. Start it again.',
+  consent: 'Microsoft needs an administrator to approve this app for the organisation before mailboxes can connect.',
+  denied: 'The Microsoft sign-in was cancelled.',
+  config: 'Microsoft sign-in is not switched on yet.',
+  token: 'Microsoft did not complete the sign-in. Start it again.',
+  no_mailbox: 'That account has no Microsoft 365 mailbox. It needs an Exchange Online licence first.',
+  graph: 'Microsoft signed in, but its mailbox could not be reached. Try again in a minute.',
+  personal: 'That is a personal Microsoft account. Sign in with a company mailbox.',
+  gone: 'That mailbox was removed while you were signing in.',
+  wrong_account: 'You signed in as a different account from the mailbox being reconnected. Sign in as that mailbox.',
+  taken: 'That address is already connected with an app password. Remove it first to connect it through Microsoft.',
+  save: 'The mailbox could not be saved. Try again.',
+}
+
+function msOutcome(params) {
+  if (params.get('ms') === 'connected') {
+    return { tone: 'sage', text: 'Microsoft 365 mailbox connected. It starts at 5 emails a day and ramps up from there.' }
+  }
+  const err = params.get('ms_error')
+  return err ? { tone: 'red', text: MS_ERRORS[err] || 'The Microsoft sign-in did not finish. Try again.' } : null
 }
 
 function MailboxState({ mailbox, ready }) {
@@ -200,8 +266,9 @@ function MailboxForm({ workspaceId, mailbox, settings, userEmail, onClose, onSav
 
   // The same check the server makes, early, so nobody types a password for a
   // mailbox that will be refused.
-  const domainProblem = form.email ? mailboxDomainProblem(form.email, [settings.from_email, settings.reply_to, userEmail].map(domainOf)) : ''
-  const reconnect = mailbox?.status === 'error'
+  const microsoft = mailbox?.provider === 'microsoft'
+  const domainProblem = form.email && !microsoft ? mailboxDomainProblem(form.email, [settings.from_email, settings.reply_to, userEmail].map(domainOf)) : ''
+  const reconnect = mailbox?.status === 'error' && !microsoft
 
   function choosePreset(key) {
     setPreset(key)
@@ -210,7 +277,12 @@ function MailboxForm({ workspaceId, mailbox, settings, userEmail, onClose, onSav
 
   async function save() {
     setSaving(true); setError('')
-    const r = await emailApi('mailbox_save', workspaceId, {
+    const r = await emailApi('mailbox_save', workspaceId, microsoft ? {
+      mailbox: {
+        id: mailbox.id, from_name: form.from_name, signature: form.signature,
+        daily_limit: Number(form.daily_limit), warmup_started_on: form.warmup_started_on || null,
+      },
+    } : {
       mailbox: {
         ...form, id: mailbox?.id,
         username: form.username.trim() || form.email.trim(),
@@ -235,16 +307,22 @@ function MailboxForm({ workspaceId, mailbox, settings, userEmail, onClose, onSav
           </p>
         )}
         <div className="grid md:grid-cols-2 gap-4">
-          <Select label="Provider" value={preset} onChange={e => choosePreset(e.target.value)}>
-            {Object.entries(PRESETS).map(([k, p]) => <option key={k} value={k}>{p.label}</option>)}
-          </Select>
+          {microsoft ? (
+            <Input label="Provider" value="Microsoft 365 (signed in)" disabled />
+          ) : (
+            <Select label="Provider" value={preset} onChange={e => choosePreset(e.target.value)}>
+              {Object.entries(PRESETS).map(([k, p]) => <option key={k} value={k}>{p.label}</option>)}
+            </Select>
+          )}
           <Input label="Mailbox address" value={form.email} onChange={e => set('email', e.target.value)} placeholder="ahmed@araklighting.com"
             error={domainProblem} disabled={!!mailbox && !reconnect} />
           <Input label="Sender name" value={form.from_name} onChange={e => set('from_name', e.target.value)} placeholder="Ahmed Al-Harbi"
             hint="A real person's name. Prospects answer people, not companies." />
-          <Input label={mailbox ? 'App password (only to change it)' : 'App password'} type="password" autoComplete="new-password"
-            value={password} onChange={e => setPassword(e.target.value)} placeholder="abcd efgh ijkl mnop"
-            hint="The app password made for this mailbox, not its account password." />
+          {!microsoft && (
+            <Input label={mailbox ? 'App password (only to change it)' : 'App password'} type="password" autoComplete="new-password"
+              value={password} onChange={e => setPassword(e.target.value)} placeholder="abcd efgh ijkl mnop"
+              hint="The app password made for this mailbox, not its account password." />
+          )}
           <Textarea label="Signature" rows={3} value={form.signature} onChange={e => set('signature', e.target.value)}
             placeholder={'Ahmed Al-Harbi\nProject Sales, ARAK Lighting\n+966 5x xxx xxxx'} hint="Added under every email from this mailbox, as plain text." />
           <div className="space-y-4">
@@ -253,11 +331,13 @@ function MailboxForm({ workspaceId, mailbox, settings, userEmail, onClose, onSav
               hint="The first week sends 5 a day and the second 10, whatever this says. 15–30 is the safe range." />
             <Input label="Warm-up started on" type="date" value={form.warmup_started_on} max={brandTodayKey()}
               onChange={e => set('warmup_started_on', e.target.value)}
-              hint={`The day your warm-up service began on this mailbox. Outreach starts ${WARMUP_DAYS} days later.`} />
+              hint={microsoft
+                ? `Optional for a company mailbox. Leave empty to start now at 5 a day; a date makes it wait ${WARMUP_DAYS} days from then.`
+                : `The day your warm-up service began on this mailbox. Outreach starts ${WARMUP_DAYS} days later.`} />
           </div>
         </div>
 
-        {preset === 'custom' && (
+        {preset === 'custom' && !microsoft && (
           <div className="grid md:grid-cols-4 gap-3 border-t border-border pt-4">
             <Input className="md:col-span-3" label="Sending server (SMTP)" value={form.smtp_host} onChange={e => set('smtp_host', e.target.value)} placeholder="smtp.example.com" />
             <Input label="Port" type="number" value={form.smtp_port} onChange={e => set('smtp_port', e.target.value)} />

@@ -156,6 +156,12 @@ cold outreach written but not sent, warm-up, webhooks, unsubscribe). Parked:
     out of office. `imapflow` and `mailparser` are already installed, and
     `email_sends.message_id` is stored for matching. Until then replies are
     marked by hand (Contacts → "They replied").
+  - **Microsoft 365 mailboxes — built 2026-09-28.** Company arak-sa.com
+    accounts connected by signing in (Graph, `api/email/_graph.js`), sending
+    through Graph and reading replies/bounces from their inboxes every run
+    (`readReplies` in `api/email/_cold.js`). Setup owed: docs/EMAIL-SETUP.md
+    §17 (Entra redirect URI + client secret, three Vercel env vars). The
+    inbox reader below is now only owed for Google mailboxes.
   - **Instantly as a second sender.** `email_mailboxes.provider` allows
     'instantly'; nothing uses it yet.
   - **Stuck 'sending' rows.** A run that dies after the SMTP server took the
