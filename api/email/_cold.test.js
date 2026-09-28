@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { coldTick, launchColdCampaign, coldProblems } from './_cold.js'
+import { coldTick, launchColdCampaign, coldProblems, readReplies } from './_cold.js'
 import { sealSecret, openSecret } from './_secrets.js'
 
 const WS = '11111111-1111-1111-1111-111111111111'
@@ -279,5 +279,101 @@ describe('sealed mailbox passwords', () => {
     const flipped = Buffer.from(tag, 'base64'); flipped[0] ^= 1
     expect(openSecret([v, iv, flipped.toString('base64'), ct].join(':'), 'service-key-1')).toBeNull()
     expect(openSecret('', 'service-key-1')).toBeNull()
+  })
+})
+
+describe('Microsoft 365 mailboxes in the sending run', () => {
+  const MS_MAILBOX = {
+    ...MAILBOX, id: 'mb-1', provider: 'microsoft', email: 'sales1@arak-sa.com', from_name: 'Sales',
+    smtp_host: '', imap_host: '', warmup_started_on: null,
+  }
+
+  it('the run asks for both kinds of mailbox', async () => {
+    const w = world({ mailbox: MS_MAILBOX })
+    await coldTick(w.deps, { now: SUNDAY_11 })
+    const read = w.calls.find(c => c.method === 'GET' && /^email_mailboxes\?workspace_id=/.test(c.path))
+    expect(read.path).toContain('provider=in.(smtp,microsoft)')
+  })
+
+  it('sends from a company mailbox with no warm-up date, and keeps Microsoft\'s own Message-ID and thread', async () => {
+    const w = world({ mailbox: MS_MAILBOX, sendResult: { ok: true, messageId: '<real@arak-sa.com>', threadId: 'conv-9' } })
+    const out = await coldTick(w.deps, { now: SUNDAY_11 })
+    expect(out.sent).toBe(1)
+    expect(w.sent[0].msg.from).toEqual({ name: 'Sales', address: 'sales1@arak-sa.com' })
+    const sent = patches(w.calls, /^email_sends\?id=eq\.s-a$/).at(-1).body
+    expect(sent).toMatchObject({ status: 'sent', message_id: '<real@arak-sa.com>', thread_id: 'conv-9', provider_id: '<real@arak-sa.com>' })
+  })
+
+  it('a mailbox Microsoft blocked stops with Microsoft\'s reason, and the email waits', async () => {
+    const err = Object.assign(new Error('ErrorMessageSubmissionBlocked'), { kind: 'auth', reason: 'Microsoft has blocked this mailbox from sending.' })
+    const w = world({ mailbox: MS_MAILBOX, sendResult: { ok: false, error: err } })
+    await coldTick(w.deps, { now: SUNDAY_11 })
+    expect(patches(w.calls, /^email_mailboxes\?id=eq\.mb-1$/).at(-1).body).toMatchObject({ status: 'error', status_reason: 'Microsoft has blocked this mailbox from sending.' })
+    expect(patches(w.calls, /^email_sends\?id=eq\.s-a$/).at(-1).body).toMatchObject({ status: 'queued', mailbox_id: null })
+  })
+})
+
+describe('readReplies', () => {
+  const MB = { id: 'mb-ms', workspace_id: WS, provider: 'microsoft', email: 'sales1@arak-sa.com', status: 'active', inbox_checked_at: '2026-09-27T07:50:00.000Z', created_at: '2026-09-20T00:00:00Z' }
+  const ROW = { id: 's-a', workspace_id: WS, contact_id: 'a', thread_id: 'conv/+1=', step: 1 }
+
+  function inboxWorld(messages, { rows = [ROW], inbox } = {}) {
+    const { db, calls } = stubDb([
+      { method: 'GET', match: /^email_mailboxes\?provider=eq\.microsoft/, reply: [MB] },
+      { method: 'GET', match: /^email_mailbox_secrets/, reply: [{ secret: 'sealed' }] },
+      { method: 'GET', match: /^email_sends\?mailbox_id=eq\.mb-ms&thread_id=in\./, reply: rows },
+      { method: 'PATCH', match: /^email_sends\?id=eq\..*(replied_at|bounced_at)=is\.null/, reply: [{ id: 's-a' }] },
+    ])
+    const asked = []
+    const deps = {
+      db, open: s => (s === 'sealed' ? '{"rt":"x"}' : null),
+      mail: { inbox: async (mb, pw, since) => { asked.push(since); return inbox || { ok: true, messages } } },
+    }
+    return { deps, calls, asked }
+  }
+  const msg = over => ({ id: 'm', threadId: 'conv/+1=', from: 'a@hotel.sa', subject: 'RE: Lighting', receivedAt: '2026-09-27T08:05:00Z', ...over })
+
+  it('a reply marks the send and the contact, and cancels everything still queued for them', async () => {
+    const w = inboxWorld([msg()])
+    const out = await readReplies(w.deps, { now: SUNDAY_11 })
+    expect(out).toMatchObject({ mailboxes: 1, replies: 1, bounces: 0 })
+    // Read from a minute before the last mark, so nothing on the boundary is missed.
+    expect(w.asked[0]).toBe('2026-09-27T07:49:00.000Z')
+    // The thread id is URL-encoded inside the filter.
+    expect(w.calls.find(c => /thread_id=in/.test(c.path)).path).toContain('thread_id=in.("conv%2F%2B1%3D")')
+    expect(patches(w.calls, /^email_sends\?id=eq\.s-a&replied_at=is\.null/)[0].body).toMatchObject({ replied_at: '2026-09-27T08:05:00Z' })
+    expect(patches(w.calls, /^email_contacts\?id=eq\.a&.*replied_at=is\.null/)[0].body).toMatchObject({ replied_at: '2026-09-27T08:05:00Z' })
+    expect(patches(w.calls, /^email_sends\?workspace_id=.*contact_id=eq\.a&status=eq\.queued/)[0].body).toMatchObject({ status: 'cancelled', error: 'Replied' })
+    expect(patches(w.calls, /^email_mailboxes\?id=eq\.mb-ms/).at(-1).body).toEqual({ inbox_checked_at: SUNDAY_11.toISOString() })
+  })
+
+  it('a non-delivery report bounces the send and the contact', async () => {
+    const w = inboxWorld([msg({ from: 'postmaster@araksa.onmicrosoft.com', subject: 'Undeliverable: Lighting for Hotel Co' })])
+    const out = await readReplies(w.deps, { now: SUNDAY_11 })
+    expect(out).toMatchObject({ replies: 0, bounces: 1 })
+    expect(patches(w.calls, /^email_sends\?id=eq\.s-a&bounced_at=is\.null/)[0].body).toMatchObject({ status: 'bounced' })
+    expect(patches(w.calls, /^email_contacts\?id=eq\.a&.*status=eq\.active/)[0].body).toMatchObject({ status: 'bounced' })
+  })
+
+  it('an out-of-office changes nothing, and mail outside our threads is left alone', async () => {
+    const w = inboxWorld([msg({ subject: 'Automatic reply: Lighting' }), msg({ threadId: 'someone-else' })], { rows: [ROW] })
+    const out = await readReplies(w.deps, { now: SUNDAY_11 })
+    expect(out).toMatchObject({ replies: 0, bounces: 0 })
+    expect(patches(w.calls, /^email_(sends|contacts)/)).toEqual([])
+  })
+
+  it('a refused login stops the mailbox with the reason, and the error is reported', async () => {
+    const err = Object.assign(new Error('invalid_grant'), { kind: 'auth', reason: 'Microsoft no longer accepts this mailbox\'s sign-in. Reconnect it.' })
+    const w = inboxWorld([], { inbox: { ok: false, error: err } })
+    const out = await readReplies(w.deps, { now: SUNDAY_11 })
+    expect(out.errors[0]).toMatch(/sales1@arak-sa\.com/)
+    expect(patches(w.calls, /^email_mailboxes\?id=eq\.mb-ms/)[0].body).toMatchObject({ status: 'error' })
+  })
+
+  it('a full page carries on next time from its last message', async () => {
+    const page = Array.from({ length: 50 }, (_, i) => msg({ id: `m${i}`, threadId: `t${i}`, receivedAt: `2026-09-27T08:${String(i).padStart(2, '0')}:00Z` }))
+    const w = inboxWorld(page, { rows: [] })
+    await readReplies(w.deps, { now: SUNDAY_11 })
+    expect(patches(w.calls, /^email_mailboxes\?id=eq\.mb-ms/).at(-1).body).toEqual({ inbox_checked_at: '2026-09-27T08:49:00Z' })
   })
 })

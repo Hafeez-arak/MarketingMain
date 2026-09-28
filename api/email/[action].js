@@ -13,9 +13,12 @@ import {
   launchCampaign, dispatch, applyEvent, unsubscribe, verifySvix, loadSettings,
   sendingStats, fromHeader, closeFinished,
 } from './_engine.js'
-import { launchColdCampaign, coldTick } from './_cold.js'
+import { launchColdCampaign, coldTick, readReplies } from './_cold.js'
 import { sealSecret, openSecret } from './_secrets.js'
 import { verifyMailbox, sendFromMailbox } from './_mailbox.js'
+import {
+  msConfig, signState, openState, authorizeUrl, exchangeCode, whoAmI, packTokens, createGraphMail,
+} from './_graph.js'
 import { mailboxDomainProblem, domainOf, HARD_MAX_PER_MAILBOX } from '../../src/lib/email/cold.js'
 
 // ─── /api/email/<action> ───────────────────────────────────────────────────
@@ -37,6 +40,9 @@ import { mailboxDomainProblem, domainOf, HARD_MAX_PER_MAILBOX } from '../../src/
 //   Vercel Cron        GET /cron with Bearer CRON_SECRET: the morning run.
 //   n8n (the box)      GET /cold-tick with Bearer CRON_SECRET, every 10
 //                      minutes: the cold lane's sending run.
+//   Microsoft          GET /ms-callback?code&state after someone signs in as
+//                      a Microsoft 365 mailbox. The signed state (and the
+//                      cookie set by /ms_connect_start) is the only proof.
 
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || ''
 const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || ''
@@ -44,6 +50,7 @@ const ANON_KEY = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON
 const RESEND_KEY = process.env.RESEND_API_KEY || ''
 const WEBHOOK_SECRET = process.env.RESEND_WEBHOOK_SECRET || ''
 const CRON_SECRET = process.env.CRON_SECRET || ''
+const MS = msConfig()
 
 // ─── Plumbing ──────────────────────────────────────────────────────────────
 
@@ -121,10 +128,24 @@ async function isMember(workspaceId, token) {
 
 const deps = () => ({ db, count, resend: createResend({ apiKey: RESEND_KEY }) })
 
-// The cold lane's IO: our own mailboxes over SMTP, never Resend.
+// Microsoft 365 mailboxes: Graph, with renewed tokens sealed back as they come.
+const graphMail = () => createGraphMail({
+  config: MS,
+  save: (mb, plain) => db('email_mailbox_secrets?on_conflict=mailbox_id', {
+    method: 'POST', prefer: 'resolution=merge-duplicates,return=minimal',
+    body: { mailbox_id: mb.id, workspace_id: mb.workspace_id, secret: sealSecret(plain, SERVICE_KEY), updated_at: new Date().toISOString() },
+  }),
+})
+
+/** Send by the mailbox's provider: Microsoft through Graph, the rest over SMTP. */
+const sendBy = (mb, secret, message) => (mb.provider === 'microsoft'
+  ? graphMail().send(mb, secret, message)
+  : sendFromMailbox(mb, secret, message))
+
+// The cold lane's IO: our own mailboxes, never Resend.
 const coldDeps = () => ({
   db, count,
-  mail: { send: sendFromMailbox },
+  mail: { send: sendBy, inbox: (mb, secret, since) => graphMail().inbox(mb, secret, since) },
   open: sealed => openSecret(sealed, SERVICE_KEY),
   uuid: () => crypto.randomUUID(),
   random: Math.random,
@@ -150,7 +171,7 @@ const actions = {
     return {
       // cron covers both the morning marketing run and the cold sending run:
       // n8n calls /cold-tick with the same secret.
-      configured: { resend: Boolean(RESEND_KEY), webhook: Boolean(WEBHOOK_SECRET), cron: Boolean(CRON_SECRET) },
+      configured: { resend: Boolean(RESEND_KEY), webhook: Boolean(WEBHOOK_SECRET), cron: Boolean(CRON_SECRET), microsoft: MS.configured },
       settings, stats, cap,
     }
   },
@@ -298,6 +319,8 @@ const actions = {
     const id = isUuid(input.id) ? input.id : null
     const [existing] = id ? await db(`email_mailboxes?id=eq.${id}&workspace_id=eq.${workspaceId}&select=*`) || [] : []
     if (id && !existing) return fail('That mailbox is not in this workspace.', 404)
+    if (existing?.provider === 'microsoft') return saveMicrosoftSettings({ workspaceId, existing, input })
+    if (input.provider === 'microsoft') return fail('A Microsoft 365 mailbox is connected by signing in: use "Connect Microsoft 365".')
 
     const email = normalizeEmail(input.email ?? existing?.email)
     const settings = await loadSettings({ db }, workspaceId)
@@ -368,7 +391,7 @@ const actions = {
     if (!isUuid(body.mailbox_id)) return fail('mailbox_id is required.')
     const [mb] = await db(`email_mailboxes?id=eq.${body.mailbox_id}&workspace_id=eq.${workspaceId}&select=id,status`) || []
     if (!mb) return fail('That mailbox is not in this workspace.', 404)
-    if (!body.paused && mb.status === 'error') return fail('This mailbox\'s login stopped working. Reconnect it with a new app password to resume.')
+    if (!body.paused && mb.status === 'error') return fail('This mailbox\'s login stopped working. Reconnect it to resume.')
     await db(`email_mailboxes?id=eq.${mb.id}&workspace_id=eq.${workspaceId}`, {
       method: 'PATCH', prefer: 'return=minimal',
       body: body.paused
@@ -397,7 +420,7 @@ const actions = {
     const to = normalizeEmail(body.to || user?.email)
     if (!isValidEmail(to)) return fail('Enter a valid address to send the test to.')
     const password = openSecret((await db(`email_mailbox_secrets?mailbox_id=eq.${mb.id}&select=secret`) || [])[0]?.secret, SERVICE_KEY)
-    if (!password) return fail('This mailbox\'s password can no longer be read. Reconnect it.')
+    if (!password) return fail('This mailbox\'s login can no longer be read. Reconnect it.')
     const sample = { first_name: body.sample?.first_name || 'Sara', last_name: body.sample?.last_name || '', company: body.sample?.company || 'Example Co', job_title: '', city: 'Riyadh', email: to }
     const rendered = renderEmail({
       audience: 'cold',
@@ -405,13 +428,34 @@ const actions = {
       body: body.body || 'Hi {{first_name|there}},\n\nThis is a test from the outreach mailbox. If it arrived in the inbox (not spam or Promotions), this mailbox is ready.',
       language: body.language === 'ar' ? 'ar' : 'en', contact: sample, signature: mb.signature,
     })
-    const r = await sendFromMailbox(mb, password, {
+    const r = await sendBy(mb, password, {
       from: { name: mb.from_name || '', address: mb.email }, to: { name: '', address: to },
       subject: rendered.subject, text: rendered.text, html: rendered.html,
       messageId: `<${crypto.randomUUID()}@${domainOf(mb.email)}>`,
     })
     if (!r.ok) return fail(String(r.error?.response || r.error?.message || 'The test could not be sent.').slice(0, 300), 502)
     return { sent_to: to, from: mb.email }
+  },
+
+  /**
+   * Start signing in as a Microsoft 365 mailbox. Returns the Microsoft URL
+   * to send the browser to, and sets the cookie the callback checks.
+   * body.mailbox_id: reconnect that mailbox (the same account must sign in).
+   */
+  async ms_connect_start({ workspaceId, body, user }) {
+    if (!MS.configured) return fail('Microsoft sign-in is not switched on yet.', 503)
+    let loginHint = ''
+    if (body.mailbox_id) {
+      if (!isUuid(body.mailbox_id)) return fail('mailbox_id is not valid.')
+      const [mb] = await db(`email_mailboxes?id=eq.${body.mailbox_id}&workspace_id=eq.${workspaceId}&provider=eq.microsoft&select=id,email`) || []
+      if (!mb) return fail('That Microsoft mailbox is not in this workspace.', 404)
+      loginHint = mb.email
+    }
+    const nonce = crypto.randomBytes(16).toString('base64url')
+    const state = signState({ ws: workspaceId, uid: user.id, mb: body.mailbox_id || null, n: nonce }, SERVICE_KEY)
+    const secure = /^https:/.test(baseUrlOf(this.req)) ? '; Secure' : ''
+    this.res.setHeader('Set-Cookie', `ms_oauth=${nonce}; Path=/api/email; HttpOnly; SameSite=Lax; Max-Age=900${secure}`)
+    return { url: authorizeUrl({ config: MS, redirectUri: `${baseUrlOf(this.req)}/api/email/ms-callback`, state, loginHint }) }
   },
 
   /** "What goes out next": the sending run, decided but not done. */
@@ -432,6 +476,24 @@ const actions = {
 
 function fail(error, status = 400) {
   return { __fail: true, status, error }
+}
+
+/** A Microsoft mailbox's editable settings. Its address and login come from Microsoft. */
+async function saveMicrosoftSettings({ workspaceId, existing, input }) {
+  const row = {
+    from_name: String(input.from_name ?? existing.from_name ?? '').replace(/[<>"]/g, '').trim().slice(0, 100),
+    signature: String(input.signature ?? existing.signature ?? '').slice(0, 1000),
+    daily_limit: Math.max(0, Math.min(HARD_MAX_PER_MAILBOX, Math.round(Number(input.daily_limit ?? existing.daily_limit ?? 15)) || 0)),
+    warmup_started_on: /^\d{4}-\d{2}-\d{2}$/.test(String(input.warmup_started_on || ''))
+      ? input.warmup_started_on
+      : (input.warmup_started_on === null || input.warmup_started_on === '' ? null : existing.warmup_started_on ?? null),
+    updated_at: new Date().toISOString(),
+  }
+  const [saved] = await db(`email_mailboxes?id=eq.${existing.id}&workspace_id=eq.${workspaceId}`, {
+    method: 'PATCH', prefer: 'return=representation', body: row,
+  }) || []
+  if (!saved) return fail('The mailbox could not be saved.', 500)
+  return { mailbox: saved, verified: false }
 }
 
 // ─── Public endpoints ──────────────────────────────────────────────────────
@@ -520,8 +582,94 @@ async function handleCron(req, res) {
 
 async function handleColdTick(req, res) {
   if (!CRON_SECRET || bearerOf(req) !== CRON_SECRET) return res.status(401).json({ ok: false })
+  // Replies first: an answer that arrived since the last run must stop its
+  // follow-up before this run could send it.
+  let inbox
+  try { inbox = MS.configured ? await readReplies(coldDeps()) : { skipped: 'Microsoft sign-in is not configured.' } }
+  catch (err) { inbox = { error: String(err?.message || err).slice(0, 300) } }
   const out = await coldTick(coldDeps())
-  return res.status(200).json({ ok: true, ...out })
+  return res.status(200).json({ ok: true, ...out, inbox })
+}
+
+// ─── Microsoft sign-in callback ────────────────────────────────────────────
+// Microsoft sends the browser here after someone signs in as a mailbox. The
+// state proves which member of which workspace started it; the cookie proves
+// it is the same browser. The mailbox is stored only once Microsoft has
+// given tokens AND the account has a working mailbox. Errors travel back as
+// a short code, never as text or an address in the URL.
+
+function cookieOf(req, name) {
+  const raw = String(req.headers?.cookie || '')
+  for (const part of raw.split(';')) {
+    const [k, ...v] = part.trim().split('=')
+    if (k === name) return v.join('=')
+  }
+  return ''
+}
+
+async function handleMsCallback(req, res) {
+  const base = baseUrlOf(req)
+  const url = new URL(req.url || '/', 'http://x')
+  const q = key => String(req.query?.[key] ?? url.searchParams.get(key) ?? '')
+  res.setHeader('Set-Cookie', 'ms_oauth=; Path=/api/email; HttpOnly; SameSite=Lax; Max-Age=0')
+  res.setHeader('Cache-Control', 'no-store')
+  const back = params => {
+    res.setHeader('Location', `${base}/email?tab=settings&${new URLSearchParams(params)}`)
+    return res.status(302).end()
+  }
+
+  const claims = openState(q('state'), SERVICE_KEY)
+  if (!claims) return back({ ms_error: 'expired' })
+  const nonce = cookieOf(req, 'ms_oauth')
+  if (!nonce || nonce !== claims.n) return back({ ms_error: 'browser' })
+  if (q('error')) return back({ ms_error: /consent/i.test(q('error') + q('error_description')) ? 'consent' : 'denied' })
+  if (!q('code') || !MS.configured) return back({ ms_error: 'config' })
+
+  let tokens
+  try {
+    tokens = await exchangeCode({ config: MS, code: q('code'), redirectUri: `${base}/api/email/ms-callback` })
+  } catch {
+    return back({ ms_error: 'token' })
+  }
+  if (!tokens.refresh_token) return back({ ms_error: 'token' })
+
+  const me = await whoAmI({ accessToken: tokens.access_token })
+  if (!me.ok) return back({ ms_error: /licence|mailbox/i.test(me.error?.reason || '') ? 'no_mailbox' : 'graph' })
+  const email = normalizeEmail(me.email)
+  // A personal Outlook.com account is never an outreach sender. The company
+  // domain is allowed here, by the owner's decision (see cold.js).
+  if (!isValidEmail(email) || mailboxDomainProblem(email, [])) return back({ ms_error: 'personal' })
+
+  const now = new Date().toISOString()
+  const ws = claims.ws
+  let [mb] = claims.mb
+    ? await db(`email_mailboxes?id=eq.${claims.mb}&workspace_id=eq.${ws}&select=*`) || []
+    : await db(`email_mailboxes?workspace_id=eq.${ws}&email=eq.${encodeURIComponent(email)}&select=*`) || []
+  if (claims.mb && !mb) return back({ ms_error: 'gone' })
+  if (mb && mb.email !== email) return back({ ms_error: 'wrong_account' })
+  if (mb && mb.provider !== 'microsoft') return back({ ms_error: 'taken' })
+
+  if (mb) {
+    ;[mb] = await db(`email_mailboxes?id=eq.${mb.id}&workspace_id=eq.${ws}`, {
+      method: 'PATCH', prefer: 'return=representation',
+      body: { status: 'active', status_reason: '', last_error: '', last_checked_at: now, updated_at: now },
+    }) || []
+  } else {
+    ;[mb] = await db('email_mailboxes', {
+      method: 'POST', prefer: 'return=representation',
+      body: {
+        workspace_id: ws, provider: 'microsoft', email, username: email,
+        from_name: me.displayName.replace(/[<>"]/g, '').slice(0, 100),
+        daily_limit: 15, status: 'active', last_checked_at: now, created_by: claims.uid || null,
+      },
+    }) || []
+  }
+  if (!mb) return back({ ms_error: 'save' })
+  await db('email_mailbox_secrets?on_conflict=mailbox_id', {
+    method: 'POST', prefer: 'resolution=merge-duplicates,return=minimal',
+    body: { mailbox_id: mb.id, workspace_id: ws, secret: sealSecret(packTokens(tokens), SERVICE_KEY), updated_at: now },
+  })
+  return back({ ms: 'connected' })
 }
 
 // ─── Entry ─────────────────────────────────────────────────────────────────
@@ -539,6 +687,7 @@ export default async function handler(req, res) {
     if (action === 'webhook') return await handleWebhook(req, res)
     if (action === 'cron') return await handleCron(req, res)
     if (action === 'cold-tick') return await handleColdTick(req, res)
+    if (action === 'ms-callback') return await handleMsCallback(req, res)
   } catch (err) {
     return res.status(500).json({ ok: false, error: String(err.message || err).slice(0, 300) })
   }
@@ -557,7 +706,7 @@ export default async function handler(req, res) {
   if (!member) return res.status(403).json({ ok: false, error: 'You do not have access to that workspace.' })
 
   try {
-    const out = await actions[action].call({ req }, { workspaceId, body, user })
+    const out = await actions[action].call({ req, res }, { workspaceId, body, user })
     if (out && out.__fail) return res.status(out.status).json({ ok: false, error: out.error })
     return res.status(200).json({ ok: true, ...out })
   } catch (err) {

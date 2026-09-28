@@ -207,10 +207,18 @@ Marketing tab.
 
 ## 12. Outreach mailboxes (the cold lane)
 
-Cold email never goes through Resend and never from arak-sa.com. It goes out
-from real Google mailboxes on a **separate domain**, one email at a time. The
-app refuses a mailbox on the marketing domain, on the signed-in person's
-domain, or on gmail.com / outlook.com.
+Cold email never goes through Resend. There are two kinds of outreach mailbox:
+
+- **Microsoft 365, the company's own accounts** (section 17): renamed
+  arak-sa.com accounts, connected by signing in. No domain to buy, no warm-up
+  service. The owner chose this on 2026-09-28, knowing that outreach from
+  arak-sa.com puts the company domain's reputation on the line.
+- **Google, on a separate outreach domain** (this section): an app password,
+  SMTP/IMAP. The app refuses a Google mailbox on the marketing domain, on the
+  signed-in person's domain, or on gmail.com / outlook.com.
+
+Either kind sends one email at a time, within the ramp and ceilings of
+section 16.
 
 1. **Domain.** Buy one or two domains that are clearly Arak but not
    arak-sa.com, e.g. `araklighting.com`, `arak-lighting.co` (~$12–15/year
@@ -321,3 +329,76 @@ How sending behaves, all enforced in code (`src/lib/email/cold.js`):
 - Reading replies and bounces from the inboxes is the next build (PENDING.md).
   Until then, mark a contact who replied as replied by hand, so their
   follow-ups stop.
+
+## 17. Microsoft 365 mailboxes (company accounts)
+
+Former employees' arak-sa.com accounts, renamed, send outreach through
+Microsoft Graph. Someone signs in as each one once; the app keeps Microsoft's
+refresh token (encrypted, like an app password) and never sees a password.
+Replies and bounces are read from each inbox on every sending run: a reply
+stops that person's follow-ups, a bounce marks the address bad.
+
+### The app registration (Microsoft Entra, once)
+
+The same app registration the Lighting app uses for Outlook
+(client ID `dfb057d7-261d-435c-a09f-c0d62368a804`,
+tenant `33f5304e-e5d7-4fb4-a585-92d5b0666820`).
+
+1. https://entra.microsoft.com → App registrations → All applications → that
+   app.
+2. **Authentication → Add a platform → Web.** Redirect URI, exactly:
+   `https://marketing-main-ten.vercel.app/api/email/ms-callback`
+   (if the app moves to another address, add that one too:
+   `<address>/api/email/ms-callback`). Leave the "Single-page application"
+   entry alone: Lighting uses it.
+3. **Certificates & secrets → New client secret**, 24 months. Copy the
+   **Value** (not the Secret ID). Note its expiry date: when it expires,
+   Microsoft mailboxes stop sending until a new one is set on Vercel.
+4. **API permissions** → Microsoft Graph, delegated: `Mail.Send`,
+   `Mail.Read`, `User.Read`, `offline_access`, `openid`, `profile`, `email`.
+   Then **Grant admin consent for the organisation**.
+
+Why the Web platform and not Lighting's single-page one: a refresh token
+issued to a single-page app expires after 24 hours and can only be used from
+a browser. The sender runs on a server every 10 minutes, so it needs the web
+flow's, which lasts 90 days and renews itself with every use.
+
+### Vercel (Production), then redeploy
+
+- `MICROSOFT_CLIENT_ID` = `dfb057d7-261d-435c-a09f-c0d62368a804`
+- `MICROSOFT_TENANT_ID` = `33f5304e-e5d7-4fb4-a585-92d5b0666820`
+- `MICROSOFT_CLIENT_SECRET` = the Value from step 3
+
+Until all three are set, "Connect Microsoft 365" is greyed out.
+
+### Each account (Microsoft 365 admin center)
+
+https://admin.microsoft.com → Users → Active users → the account:
+
+1. Rename it: display name and primary address, e.g. "Sales Team",
+   `sales1@arak-sa.com`. A real current person's name reads best.
+2. **Manage email aliases:** remove the former employee's old address, or
+   their old contacts keep writing into the outreach inbox.
+3. **Licenses:** Exchange Online (Plan 1) or Business Basic. Without one
+   there is no mailbox, and connecting says so.
+4. Unblock sign-in if it was blocked when the person left, and reset the
+   password to one you hold (you sign in once to connect it).
+5. Old mail: export it rather than delete it; it may be under retention.
+
+### Connect in the app
+
+App → Email → Settings → Outreach mailboxes → **Connect Microsoft 365** → sign
+in as the mailbox (not as yourself: the screen asks which account). It comes
+back connected, named from Microsoft; **Edit** sets the signature and the
+daily limit. **Send test** to yourself before switching outreach on.
+
+Company mailboxes need no warm-up date: they start at 5 a day and ramp up as
+in section 16. Keep the limit at 15–30: a burst of cold email from arak-sa.com
+can get the account blocked by Microsoft, and complaints hurt every
+colleague's mail on the domain. If Microsoft blocks one, the app stops it
+and says so; a Microsoft 365 admin releases it in the Defender portal →
+Restricted entities.
+
+"Needs reconnecting" on a Microsoft mailbox (password changed, access
+removed, 90 days unused, or the client secret expired and was replaced):
+press **Reconnect** and sign in as that mailbox again.

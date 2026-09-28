@@ -4,6 +4,7 @@ import { brandDateKey, brandWallToUtcISO } from '../../src/lib/brandTime.js'
 import {
   HARD_MAX_PER_WORKSPACE, RECONTACT_DAYS, mailboxReadiness, mailboxCap, inSendingWindow,
   nextWindowStart, gapMinutes, mailboxHealthProblem, followUpSubject, makeMessageId, classifySmtpError, coldProblems,
+  SENDING_PROVIDERS, inboxMessageKind,
 } from '../../src/lib/email/cold.js'
 import { closeFinished } from './_engine.js'
 
@@ -15,8 +16,11 @@ export { coldProblems }
 //
 //   deps.db(path, init)        PostgREST (service key)
 //   deps.count(path)           exact row count
-//   deps.mail.send(mb, pw, m)  one email over SMTP → { ok, messageId } | { ok:false, error }
-//   deps.open(sealed)          decrypt a stored app password → string | null
+//   deps.mail.send(mb, pw, m)  one email, by the mailbox's provider (SMTP or
+//                              Microsoft Graph) → { ok, messageId, threadId? } | { ok:false, error }
+//   deps.mail.inbox(mb, pw, since)  Microsoft only: inbox messages since then
+//   deps.open(sealed)          decrypt a stored app password or Microsoft
+//                              sign-in → string | null
 //   deps.uuid()                a fresh id for Message-IDs
 //   deps.random()              0..1, for the gap between sends
 //
@@ -38,6 +42,12 @@ export { coldProblems }
 
 const DAY = 86_400_000
 const inList = ids => `(${ids.map(id => `"${id}"`).join(',')})`
+const providerFilter = `provider=in.(${SENDING_PROVIDERS.join(',')})`
+
+/** What fixes a mailbox whose login stopped working, by provider. */
+const reconnectHint = mb => (mb.provider === 'microsoft'
+  ? 'Reconnect it: sign in to Microsoft as this mailbox again.'
+  : 'Reconnect it with a new app password.')
 
 /**
  * Start a cold campaign.
@@ -56,7 +66,7 @@ export async function launchColdCampaign({ db }, { workspaceId, campaignId, when
 
   // Mailboxes first: with none ready, nothing is queued at all.
   const today = brandDateKey(now)
-  const all = await db(`email_mailboxes?workspace_id=eq.${workspaceId}&provider=eq.smtp&select=*&order=email.asc`) || []
+  const all = await db(`email_mailboxes?workspace_id=eq.${workspaceId}&${providerFilter}&select=*&order=email.asc`) || []
   const chosen = campaign.mailbox_ids?.length ? all.filter(m => campaign.mailbox_ids.includes(m.id)) : all
   if (!chosen.length) return { error: 'No outreach mailbox is connected. Add one in Email → Settings.', status: 409 }
   const ready = chosen.filter(m => mailboxReadiness(m, today).ready)
@@ -174,7 +184,7 @@ async function runWorkspace(deps, { ws, now, dryRun, out, result }) {
     })
   }
   const campaigns = await db(`email_campaigns?workspace_id=eq.${ws}&audience=eq.cold&status=eq.sending&select=*`) || []
-  const mailboxes = await db(`email_mailboxes?workspace_id=eq.${ws}&provider=eq.smtp&select=*&order=last_sent_at.asc.nullsfirst`) || []
+  const mailboxes = await db(`email_mailboxes?workspace_id=eq.${ws}&${providerFilter}&select=*&order=last_sent_at.asc.nullsfirst`) || []
   if (!campaigns.length && !dryRun) return
 
   const today = brandDateKey(now)
@@ -310,7 +320,7 @@ async function sendOne(deps, { ws, mb, row, campaign, now, cap }) {
   if (!password) {
     await requeue({})
     await patchMailbox(db, mb.id, {
-      status: 'error', status_reason: 'Its app password can no longer be read. Reconnect this mailbox.',
+      status: 'error', status_reason: `Its ${mb.provider === 'microsoft' ? 'Microsoft sign-in' : 'app password'} can no longer be read. ${reconnectHint(mb)}`,
       next_send_at: mb.next_send_at || null, updated_at: nowIso,
     })
     return { action: 'failed', reason: 'Password unreadable; mailbox needs reconnecting.' }
@@ -329,7 +339,8 @@ async function sendOne(deps, { ws, mb, row, campaign, now, cap }) {
   })
 
   if (!res.ok) {
-    const kind = classifySmtpError(res.error)
+    // Graph errors arrive already classified; SMTP ones are read here.
+    const kind = res.error?.kind || classifySmtpError(res.error)
     const message = String(res.error?.response || res.error?.message || res.error || 'Send failed').slice(0, 300)
     if (kind === 'recipient') {
       await patchSend(db, row.id, { status: 'bounced', bounced_at: nowIso, error: message, updated_at: nowIso })
@@ -340,7 +351,7 @@ async function sendOne(deps, { ws, mb, row, campaign, now, cap }) {
     }
     await requeue({ error: message })
     if (kind === 'auth') {
-      await patchMailbox(db, mb.id, { status: 'error', status_reason: 'The login was refused. Reconnect it with a new app password.', last_error: message, updated_at: nowIso })
+      await patchMailbox(db, mb.id, { status: 'error', status_reason: res.error?.reason || `The login was refused. ${reconnectHint(mb)}`, last_error: message, updated_at: nowIso })
     } else if (kind === 'limit') {
       const tomorrow = nextWindowStart(new Date(Date.parse(brandWallToUtcISO(today, '23:59'))))
       await patchMailbox(db, mb.id, { next_send_at: tomorrow?.toISOString() || nextAt, last_error: message, updated_at: nowIso })
@@ -352,6 +363,10 @@ async function sendOne(deps, { ws, mb, row, campaign, now, cap }) {
 
   await patchSend(db, row.id, {
     status: 'sent', sent_at: nowIso, provider_id: res.messageId || messageId, subject: rendered.subject, error: '', updated_at: nowIso,
+    // The real Message-ID (Microsoft may assign its own) is what follow-ups
+    // must reply to; the thread is how the inbox reader finds answers.
+    ...(res.messageId && res.messageId !== messageId ? { message_id: res.messageId } : {}),
+    ...(res.threadId ? { thread_id: res.threadId } : {}),
   })
   await db(`email_contacts?id=eq.${contact.id}&workspace_id=eq.${ws}`, { method: 'PATCH', prefer: 'return=minimal', body: { last_sent_at: nowIso } })
   await patchMailbox(db, mb.id, {
@@ -379,3 +394,126 @@ async function secretOf(db, mailboxId) {
   return row?.secret || ''
 }
 
+
+// ─── Reading replies and bounces (Microsoft 365 mailboxes) ─────────────────
+// Every run, before sending, each connected Microsoft mailbox's inbox is read
+// from where the last run stopped. A message in the thread of one of our
+// sends is one of three things (src/lib/email/cold.js, inboxMessageKind):
+//
+//   reply   the prospect (or a colleague on the thread) answered: the send
+//           and the contact get replied_at, and every queued email to that
+//           person is cancelled. blockReason() keeps them out of outreach
+//           from then on.
+//   bounce  the address does not exist: the send and the contact bounce, and
+//           the bounce brake counts it.
+//   auto    an out-of-office: ignored, the sequence carries on.
+//
+// Only the sender, subject and thread are read, never the body. It runs
+// whether or not outreach sending is switched on: an answer to an email we
+// already sent must stop the follow-ups either way.
+
+const INBOX_LOOKBACK_MS = 3 * DAY
+const INBOX_OVERLAP_MS = 60_000
+
+export async function readReplies(deps, { now = new Date(), workspaceId = null } = {}) {
+  const { db } = deps
+  const filter = workspaceId ? `&workspace_id=eq.${workspaceId}` : ''
+  const mailboxes = await db(`email_mailboxes?provider=eq.microsoft&status=in.(active,paused)${filter}&select=*`) || []
+  const out = { mailboxes: 0, replies: 0, bounces: 0, errors: [] }
+  for (const mb of mailboxes) {
+    try {
+      const r = await readMailbox(deps, mb, now)
+      out.mailboxes++
+      out.replies += r.replies
+      out.bounces += r.bounces
+    } catch (err) {
+      out.errors.push(`${mb.email}: ${String(err?.message || err).slice(0, 200)}`)
+    }
+  }
+  return out
+}
+
+async function readMailbox(deps, mb, now) {
+  const { db } = deps
+  const nowIso = now.toISOString()
+  const since = mb.inbox_checked_at
+    ? new Date(Date.parse(mb.inbox_checked_at) - INBOX_OVERLAP_MS)
+    : new Date(Math.max(Date.parse(mb.created_at || nowIso) || 0, now.getTime() - INBOX_LOOKBACK_MS))
+
+  const plain = deps.open(await secretOf(db, mb.id))
+  if (!plain) return { replies: 0, bounces: 0 }   // the sending run flags it
+  const res = await deps.mail.inbox(mb, plain, since.toISOString())
+  if (!res.ok) {
+    if (res.error?.kind === 'auth') {
+      await patchMailbox(db, mb.id, {
+        status: 'error', status_reason: res.error.reason || `The login was refused. ${reconnectHint(mb)}`,
+        last_error: String(res.error.message || '').slice(0, 300), updated_at: nowIso,
+      })
+    }
+    throw res.error || new Error('The inbox could not be read.')
+  }
+
+  const own = String(mb.email || '').toLowerCase()
+  const msgs = (res.messages || []).filter(m => m.threadId && m.from !== own)
+  let replies = 0
+  let bounces = 0
+  if (msgs.length) {
+    const threads = [...new Set(msgs.map(m => m.threadId))]
+    const rows = []
+    for (let i = 0; i < threads.length; i += 50) {
+      const list = threads.slice(i, i + 50).map(t => `"${encodeURIComponent(t)}"`).join(',')
+      rows.push(...(await db(
+        `email_sends?mailbox_id=eq.${mb.id}&thread_id=in.(${list})&sent_at=not.is.null` +
+        '&select=id,workspace_id,contact_id,thread_id,step&order=step.desc',
+      ) || []))
+    }
+    for (const m of msgs) {
+      // The latest step in the thread is the email being answered.
+      const row = rows.find(r => r.thread_id === m.threadId)
+      if (!row) continue
+      const kind = inboxMessageKind(m)
+      if (kind === 'auto') continue
+      const at = m.receivedAt || nowIso
+      if (kind === 'bounce') {
+        if (await markBounced(db, row, at, nowIso)) bounces++
+      } else if (await markReplied(db, row, at, nowIso)) {
+        replies++
+      }
+    }
+  }
+
+  // A full page means there may be more: carry on from its last message.
+  const page = res.messages || []
+  const mark = page.length >= 50 ? page[page.length - 1].receivedAt : nowIso
+  await patchMailbox(db, mb.id, { inbox_checked_at: mark })
+  return { replies, bounces }
+}
+
+async function cancelQueued(db, row, reason, nowIso) {
+  await db(`email_sends?workspace_id=eq.${row.workspace_id}&contact_id=eq.${row.contact_id}&status=eq.queued`, {
+    method: 'PATCH', prefer: 'return=minimal', body: { status: 'cancelled', error: reason, updated_at: nowIso },
+  })
+}
+
+/** @returns {Promise<boolean>} true if this is news (not seen by an earlier run) */
+async function markReplied(db, row, at, nowIso) {
+  const changed = await db(`email_sends?id=eq.${row.id}&replied_at=is.null`, {
+    method: 'PATCH', prefer: 'return=representation', body: { replied_at: at, updated_at: nowIso },
+  }) || []
+  await db(`email_contacts?id=eq.${row.contact_id}&workspace_id=eq.${row.workspace_id}&replied_at=is.null`, {
+    method: 'PATCH', prefer: 'return=minimal', body: { replied_at: at, updated_at: nowIso },
+  })
+  await cancelQueued(db, row, 'Replied', nowIso)
+  return changed.length > 0
+}
+
+async function markBounced(db, row, at, nowIso) {
+  const changed = await db(`email_sends?id=eq.${row.id}&bounced_at=is.null`, {
+    method: 'PATCH', prefer: 'return=representation', body: { status: 'bounced', bounced_at: at, updated_at: nowIso },
+  }) || []
+  await db(`email_contacts?id=eq.${row.contact_id}&workspace_id=eq.${row.workspace_id}&status=eq.active`, {
+    method: 'PATCH', prefer: 'return=minimal', body: { status: 'bounced', updated_at: nowIso },
+  })
+  await cancelQueued(db, row, 'Address bounced', nowIso)
+  return changed.length > 0
+}

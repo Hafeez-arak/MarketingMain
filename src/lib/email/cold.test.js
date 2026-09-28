@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
-  inSendingWindow, nextWindowStart, gapMinutes, mailboxDomainProblem, mailboxCap, mailboxReadiness,
+  inSendingWindow, nextWindowStart, gapMinutes, mailboxDomainProblem, mailboxCap, mailboxReadiness, inboxMessageKind,
   classifySmtpError, followUpSubject, HARD_MAX_PER_MAILBOX,
 } from './cold.js'
 
@@ -60,6 +60,10 @@ describe('how much a mailbox may send today', () => {
     expect(mailboxReadiness({ status: 'active', warmup_started_on: '2026-09-13' }, '2026-09-27').ready).toBe(true)
     expect(mailboxReadiness({ status: 'active', warmup_started_on: '2026-09-14' }, '2026-09-27')).toMatchObject({ ready: false, readyOn: '2026-09-28' })
     expect(mailboxReadiness({ status: 'active', warmup_started_on: null }, '2026-09-27').ready).toBe(false)
+    // A company Microsoft 365 mailbox needs no warm-up service; a date, if given, still holds it.
+    expect(mailboxReadiness({ status: 'active', provider: 'microsoft', warmup_started_on: null }, '2026-09-27').ready).toBe(true)
+    expect(mailboxReadiness({ status: 'active', provider: 'microsoft', warmup_started_on: '2026-09-20' }, '2026-09-27').ready).toBe(false)
+    expect(mailboxReadiness({ status: 'error', provider: 'microsoft', warmup_started_on: null }, '2026-09-27').ready).toBe(false)
     expect(mailboxReadiness({ status: 'paused', status_reason: 'Paused by x', warmup_started_on: '2026-01-01' }, '2026-09-27')).toMatchObject({ ready: false, reason: 'Paused by x' })
   })
 })
@@ -79,5 +83,22 @@ describe('follow-up subjects', () => {
     expect(followUpSubject('', 'Lighting for Hotel Co')).toBe('Re: Lighting for Hotel Co')
     expect(followUpSubject('', 'Re: already')).toBe('Re: already')
     expect(followUpSubject('A new angle', 'Lighting')).toBe('A new angle')
+  })
+})
+
+describe('inboxMessageKind', () => {
+  it('knows a bounce by its sender or subject, in English or Arabic', () => {
+    expect(inboxMessageKind({ from: 'postmaster@araksa.onmicrosoft.com', subject: 'Undeliverable: Hi' })).toBe('bounce')
+    expect(inboxMessageKind({ from: 'mailer-daemon@googlemail.com', subject: 'Delivery Status Notification (Failure)' })).toBe('bounce')
+    expect(inboxMessageKind({ from: 'someone@x.com', subject: 'لم يتم التسليم: عرض' })).toBe('bounce')
+  })
+  it('knows an out-of-office', () => {
+    expect(inboxMessageKind({ from: 'a@hotel.sa', subject: 'Automatic reply: Lighting' })).toBe('auto')
+    expect(inboxMessageKind({ from: 'a@hotel.sa', subject: 'Out of Office: back Sunday' })).toBe('auto')
+    expect(inboxMessageKind({ from: 'a@hotel.sa', subject: 'رد تلقائي: الإضاءة' })).toBe('auto')
+  })
+  it('anything else in the thread is a reply', () => {
+    expect(inboxMessageKind({ from: 'a@hotel.sa', subject: 'RE: Lighting for Hotel Co' })).toBe('reply')
+    expect(inboxMessageKind({ from: 'a@hotel.sa', subject: '' })).toBe('reply')
   })
 })

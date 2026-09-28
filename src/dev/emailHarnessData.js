@@ -19,6 +19,8 @@ const db = {
   // One mailbox past its warm-up, one still warming.
   email_mailboxes: [
     { id: 'mb-ready', workspace_id: WS, provider: 'smtp', email: 'ahmed@araklighting.com', from_name: 'Ahmed Al-Harbi', signature: 'Ahmed Al-Harbi\nProject Sales, ARAK Lighting', smtp_host: 'smtp.gmail.com', smtp_port: 465, imap_host: 'imap.gmail.com', imap_port: 993, username: 'ahmed@araklighting.com', daily_limit: 20, warmup_started_on: daysAgo(20).slice(0, 10), first_sent_on: daysAgo(3).slice(0, 10), last_sent_at: daysAgo(1), next_send_at: null, status: 'active', status_reason: '', last_error: '', created_at: daysAgo(21), updated_at: now() },
+    // A company Microsoft 365 account, signed in: no warm-up date, ramping.
+    { id: 'mb-ms', workspace_id: WS, provider: 'microsoft', email: 'sales1@arak-sa.com', from_name: 'Sales Team', signature: 'Sales Team\nARAK Lighting', smtp_host: '', smtp_port: 465, imap_host: '', imap_port: 993, username: 'sales1@arak-sa.com', daily_limit: 15, warmup_started_on: null, first_sent_on: daysAgo(2).slice(0, 10), last_sent_at: daysAgo(0), next_send_at: null, status: 'active', status_reason: '', last_error: '', created_at: daysAgo(2), updated_at: now() },
     { id: 'mb-warm', workspace_id: WS, provider: 'smtp', email: 'sara@arak-lighting.co', from_name: 'Sara Nasser', signature: '', smtp_host: 'smtp.gmail.com', smtp_port: 465, imap_host: 'imap.gmail.com', imap_port: 993, username: 'sara@arak-lighting.co', daily_limit: 15, warmup_started_on: daysAgo(5).slice(0, 10), first_sent_on: null, last_sent_at: null, next_send_at: null, status: 'active', status_reason: '', last_error: '', created_at: daysAgo(5), updated_at: now() },
   ],
   // Arak's real public logo and a project photo, so the design editor's
@@ -186,7 +188,7 @@ function api(action, body) {
   const settings = db.email_settings[0]
   if (action === 'status') {
     return json({
-      ok: true, configured: { resend: true, webhook: false, cron: false }, settings,
+      ok: true, configured: { resend: true, webhook: false, cron: false, microsoft: true }, settings,
       stats: { today: now().slice(0, 10), sentToday: 12, sentThisMonth: 40, recent: { sent: 40, bounced: 0, complained: 0 } },
       cap: { cap: 100, remaining: 88, day: 9, limitedBy: 'warm-up', health: { state: 'ok', reason: '' } },
     })
@@ -198,7 +200,8 @@ function api(action, body) {
   }
   if (action === 'mailbox_save') {
     const input = body.mailbox || {}
-    const problem = mailboxDomainProblem(input.email, [settings.from_email, settings.reply_to, 'hafeez@arak-sa.com'].map(domainOf))
+    const isMicrosoft = db.email_mailboxes.find(m => m.id === input.id)?.provider === 'microsoft'
+    const problem = isMicrosoft ? '' : mailboxDomainProblem(input.email, [settings.from_email, settings.reply_to, 'hafeez@arak-sa.com'].map(domainOf))
     if (problem) return json({ ok: false, error: problem }, 400)
     if (!input.id && !body.password) return json({ ok: false, error: 'Paste the mailbox\'s app password.' }, 400)
     return new Promise(r => setTimeout(r, 600)).then(() => {
@@ -211,6 +214,8 @@ function api(action, body) {
       return json({ ok: true, mailbox: mb, verified: true })
     })
   }
+  // No Microsoft here: come straight back as if the sign-in failed, to show the message.
+  if (action === 'ms_connect_start') return json({ ok: true, url: '/dev-email.html?tab=settings&ms_error=wrong_account' })
   if (action === 'mailbox_pause') {
     const mb = db.email_mailboxes.find(m => m.id === body.mailbox_id)
     Object.assign(mb, body.paused ? { status: 'paused', status_reason: 'Paused by hafeez@arak-sa.com.' } : { status: 'active', status_reason: '' })
