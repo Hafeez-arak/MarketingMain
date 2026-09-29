@@ -164,14 +164,16 @@ cold outreach written but not sent, warm-up, webhooks, unsubscribe). Parked:
     inbox reader below is now only owed for Google mailboxes.
   - **Instantly as a second sender.** `email_mailboxes.provider` allows
     'instantly'; nothing uses it yet.
-  - **Stuck 'sending' rows.** A run that dies after the SMTP server took the
-    email leaves the row 'sending' forever, on purpose (no duplicate cold
-    email). Nothing surfaces these yet.
-- **Research leads → cold contacts.** `email_contacts.opportunity_id` exists and
-  the draft prompt uses it, but nothing yet turns a research lead into people
-  with addresses. Needs an email-finding source (Hunter/Apollo or manual).
-- **Website sign-up.** A catalogue-download form on arak-sa.com that inserts a
-  marketing contact with `consent = 'opted_in'`, `source = 'website'`.
+  - **Stuck 'sending' rows — built 2026-09-29 (#146).** Settled from a
+    Microsoft mailbox's Sent Items / Drafts every run; the rest are listed on
+    Overview and the campaign page for a person (went out / send again / drop).
+- **Research leads → cold contacts — built by hand 2026-09-29 (#147).** Contacts
+  tab lists open leads with search links and "Add contact" (tied by
+  opportunity_id). An email-finding service (Hunter/Apollo) is still not wired.
+- **Website sign-up — built 2026-09-29 (#148).** The contact form's quiet "i"
+  holds a pre-ticked marketing box; ticked enquiries become opted-in marketing
+  contacts in "Website enquiries". Website side: 055-Junaid/arak-lighting-website#4,
+  **not merged** (merging deploys the live site). See EMAIL-SETUP.md §18.
 - **Address verification** before a first send to an old list, and before
   importing any bought cold list (MillionVerifier, ZeroBounce, ~$0.002–0.008
   per address). The importer rejects malformed addresses only.
