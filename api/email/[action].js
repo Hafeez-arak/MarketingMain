@@ -11,7 +11,7 @@ import { dailyCap } from '../../src/lib/email/warmup.js'
 import { createResend } from './_resend.js'
 import {
   launchCampaign, dispatch, applyEvent, unsubscribe, subscribe, verifySvix, loadSettings,
-  sendingStats, fromHeader, closeFinished,
+  sendingStats, fromHeader, closeFinished, websiteSignup,
 } from './_engine.js'
 import { launchColdCampaign, coldTick, readReplies, resolveStuck, resolveStuckByHand } from './_cold.js'
 import { sealSecret, openSecret } from './_secrets.js'
@@ -42,6 +42,9 @@ import { mailboxDomainProblem, domainOf, HARD_MAX_PER_MAILBOX } from '../../src/
 //   Vercel Cron        GET /cron with Bearer CRON_SECRET: the morning run.
 //   n8n (the box)      GET /cold-tick with Bearer CRON_SECRET, every 10
 //                      minutes: the cold lane's sending run.
+//   the website        POST /website-signup from arak-sa.com's contact form,
+//                      with the form's key. All it can do is add or file one
+//                      marketing contact who ticked the marketing box.
 //   Microsoft          GET /ms-callback?code&state after someone signs in as
 //                      a Microsoft 365 mailbox. The signed state (and the
 //                      cookie set by /ms_connect_start) is the only proof.
@@ -606,6 +609,28 @@ async function handleSubscribe(req, res) {
   }))
 }
 
+// Where the website's contact form may post from. The key in the body is
+// what picks the workspace; this only stops other sites' pages using it.
+const SIGNUP_ORIGINS = [/^https:\/\/(www\.)?arak-sa\.com$/, /^http:\/\/localhost(:\d+)?$/]
+
+async function handleWebsiteSignup(req, res) {
+  const origin = String(req.headers?.origin || '')
+  if (SIGNUP_ORIGINS.some(re => re.test(origin))) {
+    res.setHeader('Access-Control-Allow-Origin', origin)
+    res.setHeader('Vary', 'Origin')
+    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS')
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
+  } else if (origin) {
+    return res.status(403).json({ ok: false, error: 'Not allowed from this site.' })
+  }
+  if (req.method === 'OPTIONS') return res.status(204).end()
+  if (req.method !== 'POST') return res.status(405).json({ ok: false })
+  // Sent as text/plain by the site (no preflight); the body is JSON either way.
+  const body = await readJson(req)
+  const out = await websiteSignup({ db }, { key: body.key, input: body })
+  return res.status(out.ok ? 200 : out.status || 400).json(out.ok ? { ok: true, added: out.added } : { ok: false, error: out.error })
+}
+
 async function handleWebhook(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ ok: false })
   if (!WEBHOOK_SECRET) {
@@ -762,6 +787,7 @@ export default async function handler(req, res) {
     if (action === 'unsubscribe') return await handleUnsubscribe(req, res)
     if (action === 'subscribe') return await handleSubscribe(req, res)
     if (action === 'webhook') return await handleWebhook(req, res)
+    if (action === 'website-signup') return await handleWebsiteSignup(req, res)
     if (action === 'cron') return await handleCron(req, res)
     if (action === 'cold-tick') return await handleColdTick(req, res)
     if (action === 'ms-callback') return await handleMsCallback(req, res)

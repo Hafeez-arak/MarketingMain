@@ -51,6 +51,10 @@ export const SUBSCRIBERS_GROUP = 'Newsletter subscribers'
 // anything but "stop" (api/email/_cold.js, readReplies). Made on the first one.
 export const REPLIES_GROUP = 'Replied to outreach'
 
+// The marketing group someone joins by sending an enquiry from the website
+// with the marketing box ticked (api/email/_engine.js, websiteSignup).
+export const WEBSITE_GROUP = 'Website enquiries'
+
 /** Lower-cased, trimmed, with a mailto: or angle brackets stripped. */
 export function normalizeEmail(raw) {
   return String(raw || '')

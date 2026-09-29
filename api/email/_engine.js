@@ -1,5 +1,5 @@
 import crypto from 'node:crypto'
-import { pickRecipients, blockReason, SUBSCRIBERS_GROUP } from '../../src/lib/email/contacts.js'
+import { pickRecipients, blockReason, SUBSCRIBERS_GROUP, WEBSITE_GROUP, normalizeEmail, isValidEmail } from '../../src/lib/email/contacts.js'
 import { renderEmail, marketingProblems } from '../../src/lib/email/render.js'
 import { renderDesign, designChecks, hasDesign } from '../../src/lib/email/design.js'
 import { dailyCap } from '../../src/lib/email/warmup.js'
@@ -529,4 +529,68 @@ export async function moveToMarketing({ db }, contact, { patch = {}, group, grou
       body: [{ group_id: list.id, contact_id: contact.id, workspace_id: ws }],
     })
   }
+}
+
+
+// ─── Website enquiries → marketing contacts ────────────────────────────────
+// The contact form on arak-sa.com posts here as well as to its enquiries
+// Sheet. The form carries a small "i" that opens a box, ticked by default,
+// agreeing to marketing email; only an enquiry sent with it ticked arrives
+// with consent: true, and only those are added.
+//
+//   new address         a marketing contact: opted in, source 'website',
+//                       in the group WEBSITE_GROUP
+//   a cold prospect     moves to marketing the same way; outreach stops
+//   a marketing contact joins the group, consent raised to opted in
+//   unsubscribed, bounced or marked spam: left exactly as it is. A ticked
+//                       box on an enquiry never overrides someone's "stop".
+//
+// The key is not a secret (it is in the website's page); it only says which
+// workspace the website belongs to, and can be changed to cut a site off.
+
+const clip = (v, n) => String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, n)
+
+export async function websiteSignup({ db }, { key, input = {}, now = new Date() }) {
+  if (!/^[A-Za-z0-9_-]{16,80}$/.test(String(key || ''))) return { ok: false, status: 403, error: 'Unknown form.' }
+  const [settings] = await db(`email_settings?website_signup_key=eq.${encodeURIComponent(key)}&select=workspace_id`) || []
+  if (!settings) return { ok: false, status: 403, error: 'Unknown form.' }
+  const ws = settings.workspace_id
+  if (input.consent !== true) return { ok: true, added: false, reason: 'no consent' }
+  const email = normalizeEmail(input.email)
+  if (!isValidEmail(email)) return { ok: false, status: 400, error: 'That email address is not valid.' }
+
+  const nowIso = now.toISOString()
+  const name = clip(input.name, 200)
+  const [first, ...rest] = name.split(/\s+/)
+  const note = clip(`Website enquiry ${nowIso.slice(0, 10)}${input.projectType ? `: ${clip(input.projectType, 80)}` : ''}`, 300)
+
+  const find = async () => (await db(`email_contacts?workspace_id=eq.${ws}&email=eq.${encodeURIComponent(email)}&select=id,workspace_id,audience,status,consent,notes`) || [])[0]
+  const group = { group: WEBSITE_GROUP, groupDescription: 'Sent an enquiry from the website and agreed to marketing email.', reason: 'Enquired on the website', now }
+
+  let contact = await find()
+  if (!contact) {
+    const [created] = await db('email_contacts?on_conflict=workspace_id,email', {
+      method: 'POST', prefer: 'resolution=ignore-duplicates,return=representation',
+      body: [{
+        workspace_id: ws, email, first_name: clip(first, 100), last_name: clip(rest.join(' '), 100),
+        company: clip(input.company, 200), phone: clip(input.phone, 50),
+        language: input.lang === 'ar' ? 'ar' : 'en', audience: 'marketing', consent: 'opted_in',
+        status: 'active', source: 'website', notes: note,
+      }],
+    }) || []
+    if (created) {
+      await moveToMarketing({ db }, created, group)
+      return { ok: true, added: true, created: true }
+    }
+    // The same address arrived twice at once: the other insert won.
+    contact = await find()
+  }
+  if (!contact) return { ok: false, status: 500, error: 'The contact could not be saved.' }
+  if (contact.status !== 'active') return { ok: true, added: false, reason: contact.status }
+
+  await moveToMarketing({ db }, contact, {
+    ...group,
+    patch: { consent: 'opted_in', notes: [contact.notes, note].filter(Boolean).join('\n').slice(0, 2000) },
+  })
+  return { ok: true, added: true, created: false, moved: contact.audience === 'cold' }
 }
