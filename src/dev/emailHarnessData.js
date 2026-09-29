@@ -38,6 +38,12 @@ const db = {
       { angle: 'Cityscape in November', why_now: 'Event on 16 Nov; we are visiting.', audience: 'All marketing contacts', subject: 'See you at Cityscape Global?', preheader: '16–19 November, Riyadh', body: 'Hi {{first_name|there}},\n\nOur team will be at Cityscape Global.', cta_label: '', cta_url: '', ar_subject: '', ar_preheader: '', ar_body: '', ar_cta_label: '' },
     ],
   }],
+  // Research leads: companies, no people. One high, one with a list of consultants, one already won.
+  research_opportunities: [
+    { id: '0000000a-0000-4000-8000-000000000001', workspace_id: WS, type: 'project', name: 'Westin Riyadh Hotel Project', headline: 'A 300-key hotel inside New Murabba, design stage', client: 'New Murabba Development Company (NMDC)', contractor: '', consultant: 'Dar Al-Handasah; Atkins', location: 'Riyadh, Saudi Arabia', deadline: null, relevance: 'high', status: 'new', source_url: 'https://example.com/westin', last_seen_at: daysAgo(1), outreach_dismissed_at: null },
+    { id: '0000000a-0000-4000-8000-000000000002', workspace_id: WS, type: 'tender', name: 'Tuwaiq Palace Hotel', headline: 'Interior lighting package tender', client: 'Qiddiya Investment Company (QIC)', contractor: 'Unknown', consultant: '', location: 'Qiddiya', deadline: '2026-10-20', relevance: 'medium', status: 'new', source_url: 'https://example.com/tuwaiq', last_seen_at: daysAgo(2), outreach_dismissed_at: null },
+    { id: '0000000a-0000-4000-8000-000000000003', workspace_id: WS, type: 'lead', name: 'Won already', headline: '', client: 'Someone', contractor: '', consultant: '', location: '', deadline: null, relevance: 'low', status: 'won', source_url: '', last_seen_at: daysAgo(9), outreach_dismissed_at: null },
+  ],
   brand_profile: [{ workspace_id: WS, brand_colors: 'Steel #4c5e61 primary, warm gold #8a7a5c accent', contact_info: '', custom_fields: { website: 'arak-sa.com' } }],
   email_settings: [{
     workspace_id: WS, from_name: 'Arak Lighting', from_email: 'updates@email.arak-sa.com', reply_to: 'marketing@arak-sa.com',
@@ -122,6 +128,7 @@ function matches(row, params) {
     }
     if (op === 'gte' && !(cell && cell >= val)) return false
     if (op === 'lt' && !(cell && cell < val)) return false
+    if (op === 'is' && val === 'null' && cell != null) return false
   }
   return true
 }

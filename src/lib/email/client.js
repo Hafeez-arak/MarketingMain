@@ -178,6 +178,23 @@ export async function fetchCampaignSends(ws, campaignId) {
     .eq('workspace_id', ws).eq('campaign_id', campaignId).order('created_at'))
 }
 
+// ── Research leads (Contacts tab) ──
+
+/** Open research leads, for finding people to write to. Degrades to none. */
+export async function fetchResearchLeads(ws) {
+  const { data, error } = await supabase.from('research_opportunities')
+    .select('id,type,name,headline,client,contractor,consultant,location,deadline,relevance,status,source_url,last_seen_at,outreach_dismissed_at')
+    .eq('workspace_id', ws).in('status', ['new', 'assigned', 'pursued']).is('outreach_dismissed_at', null)
+    .order('last_seen_at', { ascending: false }).limit(100)
+  if (error) return []
+  return data || []
+}
+
+/** "Not for outreach": the lead leaves the Contacts tab, and stays a lead in Insights. */
+export async function dismissLeadForOutreach(ws, id) {
+  check(await supabase.from('research_opportunities').update({ outreach_dismissed_at: new Date().toISOString() }).eq('id', id).eq('workspace_id', ws).select('id'))
+}
+
 // ── Settings ──
 
 const SETTINGS_FIELDS = ['from_name', 'from_email', 'reply_to', 'company_address', 'warmup_enabled',
