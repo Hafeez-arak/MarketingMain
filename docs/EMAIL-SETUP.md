@@ -405,3 +405,20 @@ Restricted entities.
 "Needs reconnecting" on a Microsoft mailbox (password changed, access
 removed, 90 days unused, or the client secret expired and was replaced):
 press **Reconnect** and sign in as that mailbox again.
+
+## 18. Website enquiries → marketing contacts
+
+The contact form on arak-sa.com (repo `055-Junaid/arak-lighting-website`) posts
+every enquiry to its Sheet, and, when the marketing box is ticked, also to
+`POST https://marketing-main-ten.vercel.app/api/email/website-signup` with the
+workspace's `email_settings.website_signup_key`. The contact lands in the
+marketing lane, opted in, in the group **Website enquiries**. Anyone who is
+unsubscribed, bounced or marked us as spam is left as they are.
+
+- Arak's key is set (2026-09-29). Read it with
+  `select website_signup_key from email_settings where workspace_id = '00000000-0000-0000-0000-000000000001'`.
+- The website carries the URL and key as defaults in `src/lib/enquiry.ts`.
+  Override them with `NEXT_PUBLIC_SIGNUP_ENDPOINT` / `NEXT_PUBLIC_SIGNUP_KEY`.
+- Only `https://arak-sa.com`, `https://www.arak-sa.com` and `http://localhost:*`
+  may post (CORS, in `api/email/[action].js`).
+- To cut the site off: set a new key in the table, then change it on the website.
