@@ -13,7 +13,7 @@ import {
   launchCampaign, dispatch, applyEvent, unsubscribe, subscribe, verifySvix, loadSettings,
   sendingStats, fromHeader, closeFinished,
 } from './_engine.js'
-import { launchColdCampaign, coldTick, readReplies } from './_cold.js'
+import { launchColdCampaign, coldTick, readReplies, resolveStuck, resolveStuckByHand } from './_cold.js'
 import { sealSecret, openSecret } from './_secrets.js'
 import { verifyMailbox, sendFromMailbox } from './_mailbox.js'
 import {
@@ -148,7 +148,11 @@ const sendBy = (mb, secret, message) => (mb.provider === 'microsoft'
 // email's newsletter sign-up link.
 const coldDeps = (req = null) => ({
   db, count, baseUrl: req ? baseUrlOf(req) : '',
-  mail: { send: sendBy, inbox: (mb, secret, since) => graphMail().inbox(mb, secret, since) },
+  mail: {
+    send: sendBy,
+    inbox: (mb, secret, since) => graphMail().inbox(mb, secret, since),
+    findSent: (mb, secret, q) => graphMail().findSent(mb, secret, q),
+  },
   open: sealed => openSecret(sealed, SERVICE_KEY),
   uuid: () => crypto.randomUUID(),
   random: Math.random,
@@ -463,6 +467,15 @@ const actions = {
     return { url: authorizeUrl({ config: MS, redirectUri: `${baseUrlOf(this.req)}/api/email/ms-callback`, state, loginHint }) }
   },
 
+  /** A person's answer for an email stuck in 'sending': it went out, send it again, or drop it. */
+  async stuck_resolve({ workspaceId, body, user }) {
+    if (!isUuid(body.send_id)) return fail('send_id is required.')
+    if (!['sent', 'retry', 'drop'].includes(body.outcome)) return fail('Choose sent, retry or drop.')
+    const out = await resolveStuckByHand({ db }, { workspaceId, sendId: body.send_id, outcome: body.outcome, by: user?.email || '' })
+    if (out.error) return fail(out.error, out.status || 400)
+    return out
+  },
+
   /** "What goes out next": the sending run, decided but not done. */
   async cold_preview({ workspaceId }) {
     return { preview: await coldTick(coldDeps(), { dryRun: true, workspaceId }) }
@@ -644,8 +657,14 @@ async function handleColdTick(req, res) {
   let inbox
   try { inbox = MS.configured ? await readReplies(coldDeps()) : { skipped: 'Microsoft sign-in is not configured.' } }
   catch (err) { inbox = { error: String(err?.message || err).slice(0, 300) } }
+  // Then emails a dead run left half-sent: settled from Sent Items where the
+  // mailbox can say, otherwise marked for a person. Before sending, so a
+  // stuck first email that did leave queues its follow-up on time.
+  let stuck
+  try { stuck = await resolveStuck(coldDeps()) }
+  catch (err) { stuck = { error: String(err?.message || err).slice(0, 300) } }
   const out = await coldTick(coldDeps(req))
-  return res.status(200).json({ ok: true, ...out, inbox })
+  return res.status(200).json({ ok: true, ...out, inbox, stuck })
 }
 
 // ─── Microsoft sign-in callback ────────────────────────────────────────────

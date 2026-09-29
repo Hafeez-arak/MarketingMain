@@ -3,7 +3,7 @@
 // the client is created, so the stand-in has to be in place before anything
 // imports supabaseClient.
 
-import { mailboxReadiness, mailboxCap, mailboxDomainProblem, domainOf } from '../lib/email/cold.js'
+import { mailboxReadiness, mailboxCap, mailboxDomainProblem, domainOf, STUCK_NEEDS_PERSON } from '../lib/email/cold.js'
 
 export const WS = '00000000-0000-0000-0000-00000000e1a1'
 const uid = () => crypto.randomUUID()
@@ -86,6 +86,25 @@ function seed() {
       bounced_at: null, complained_at: null, created_at: daysAgo(3), updated_at: daysAgo(3),
     })
   })
+
+  // A running outreach campaign where a sending run died mid-send twice:
+  // once on the Microsoft mailbox (checked, in neither folder) and once on
+  // an SMTP one (nothing to check). Both wait for a person.
+  const cold = {
+    id: uid(), workspace_id: WS, audience: 'cold', name: 'Riyadh hotels', subject: 'Lighting for {{company}}', preheader: '',
+    body: 'Hi {{first_name}},\n\nA question about your project.', language: 'en', group_ids: [g3.id],
+    follow_ups: [{ delay_days: 3, subject: '', body: 'Following up.' }], status: 'sending', scheduled_for: null, from_name: '', from_email: 'sales1@arak-sa.com',
+    reply_to: '', recipients: 2, launched_at: daysAgo(1), completed_at: null, created_at: daysAgo(2), updated_at: daysAgo(1),
+  }
+  db.email_campaigns.push(cold)
+  db.email_contacts.filter(c => c.audience === 'cold').forEach((c, i) => {
+    db.email_sends.push({
+      id: uid(), workspace_id: WS, campaign_id: cold.id, contact_id: c.id, email: c.email, step: 0, status: 'sending',
+      due_at: daysAgo(1), subject: '', body: '', provider_id: '', mailbox_id: i === 0 ? 'mb-ms' : 'mb-ready',
+      error: i === 0 ? STUCK_NEEDS_PERSON.microsoft : STUCK_NEEDS_PERSON.smtp, sent_at: null, created_at: daysAgo(1),
+      updated_at: new Date(Date.now() - (i === 0 ? 3 : 50) * 3_600_000).toISOString(),
+    })
+  })
 }
 seed()
 
@@ -102,6 +121,7 @@ function matches(row, params) {
       if (!list.includes(String(cell))) return false
     }
     if (op === 'gte' && !(cell && cell >= val)) return false
+    if (op === 'lt' && !(cell && cell < val)) return false
   }
   return true
 }
@@ -238,6 +258,15 @@ function api(action, body) {
     }) }] } })
   }
   if (action === 'dispatch') return json({ ok: true, dispatched: { sent: 0 } })
+  if (action === 'stuck_resolve') {
+    const row = db.email_sends.find(x => x.id === body.send_id && x.status === 'sending')
+    if (!row) return json({ ok: false, error: 'That email is no longer stuck.' }, 409)
+    if (body.outcome === 'sent') Object.assign(row, { status: 'sent', sent_at: row.updated_at, error: '' })
+    if (body.outcome === 'retry') Object.assign(row, { status: 'queued', mailbox_id: null, error: 'Sent again by hafeez@arak-sa.com.' })
+    if (body.outcome === 'drop') Object.assign(row, { status: 'skipped', error: 'Dropped by hafeez@arak-sa.com: not sent.' })
+    row.updated_at = now()
+    return json({ ok: true, send_id: row.id, outcome: body.outcome })
+  }
   if (action === 'draft') {
     return new Promise(r => setTimeout(r, 700)).then(() => json({
       ok: true, cost: 0.041,

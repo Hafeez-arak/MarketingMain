@@ -226,6 +226,61 @@ describe('createGraphMail.inbox', () => {
   })
 })
 
+describe('createGraphMail.findSent', () => {
+  const tokens = packTokens({ rt: 'RT', at: 'LIVE', exp: NOW + 3_600_000 })
+  const Q = { messageId: '<u1@arak-sa.com>', to: 'sara@hotel.sa', since: '2026-09-28T07:00:00.000Z' }
+  const mail = f => createGraphMail({ config: CONFIG, fetch: f, now: () => NOW, save: async () => {} })
+
+  it('finds it in Sent Items by our Message-ID, in the hour after the claim', async () => {
+    const { f, calls } = fakeFetch([
+      { method: 'GET', match: '/mailFolders/sentitems/messages', reply: { status: 200, json: { value: [
+        { id: 's1', internetMessageId: '<u1@arak-sa.com>', conversationId: 'conv-9', subject: 'Lighting for Hotel Co', sentDateTime: '2026-09-28T07:00:05Z', toRecipients: [] },
+      ] } } },
+    ])
+    const out = await mail(f).findSent(MB, tokens, Q)
+    expect(out).toEqual({ ok: true, state: 'sent', messageId: '<u1@arak-sa.com>', threadId: 'conv-9', subject: 'Lighting for Hotel Co', sentAt: '2026-09-28T07:00:05Z' })
+    const q = new URL(calls[0].url).searchParams
+    expect(q.get('$filter')).toBe('sentDateTime ge 2026-09-28T06:58:00.000Z and sentDateTime le 2026-09-28T08:00:00.000Z')
+    expect(calls).toHaveLength(1)
+  })
+
+  it('falls back to the recipient when Microsoft replaced the Message-ID', async () => {
+    const { f } = fakeFetch([
+      { method: 'GET', match: '/mailFolders/sentitems/messages', reply: { status: 200, json: { value: [
+        { id: 's1', internetMessageId: '<other@outlook.com>', conversationId: 'conv-9', toRecipients: [{ emailAddress: { address: 'Sara@Hotel.sa' } }] },
+      ] } } },
+    ])
+    const out = await mail(f).findSent(MB, tokens, Q)
+    expect(out).toMatchObject({ state: 'sent', messageId: '<other@outlook.com>' })
+  })
+
+  it('a leftover draft means it never left: the draft is deleted', async () => {
+    const { f, calls } = fakeFetch([
+      { method: 'GET', match: '/mailFolders/sentitems/messages', reply: { status: 200, json: { value: [] } } },
+      { method: 'GET', match: '/mailFolders/drafts/messages', reply: { status: 200, json: { value: [{ id: 'd1', internetMessageId: '<u1@arak-sa.com>' }] } } },
+      { method: 'DELETE', match: '/me/messages/d1', reply: { status: 204 } },
+    ])
+    expect(await mail(f).findSent(MB, tokens, Q)).toEqual({ ok: true, state: 'draft' })
+    expect(calls.map(c => c.method)).toEqual(['GET', 'GET', 'DELETE'])
+  })
+
+  it('in neither folder, it says so and deletes nothing', async () => {
+    const { f, calls } = fakeFetch([
+      { method: 'GET', match: '/mailFolders/sentitems/messages', reply: { status: 200, json: { value: [{ id: 'x', internetMessageId: '<x@y>', toRecipients: [{ emailAddress: { address: 'someone@else.sa' } }] }] } } },
+      { method: 'GET', match: '/mailFolders/drafts/messages', reply: { status: 200, json: { value: [] } } },
+    ])
+    expect(await mail(f).findSent(MB, tokens, Q)).toEqual({ ok: true, state: 'none' })
+    expect(calls.some(c => c.method === 'DELETE')).toBe(false)
+  })
+
+  it('a refused read is an error, never a verdict', async () => {
+    const { f } = fakeFetch([
+      { method: 'GET', match: '/mailFolders/sentitems/messages', reply: { status: 503, json: { error: { code: 'ServiceUnavailable' } } } },
+    ])
+    expect(await mail(f).findSent(MB, tokens, Q)).toMatchObject({ ok: false })
+  })
+})
+
 describe('whoAmI', () => {
   it('uses the mailbox address, lower-cased, and proves the inbox exists', async () => {
     const { f } = fakeFetch([

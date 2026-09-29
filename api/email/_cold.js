@@ -4,7 +4,7 @@ import { brandDateKey, brandWallToUtcISO } from '../../src/lib/brandTime.js'
 import {
   HARD_MAX_PER_WORKSPACE, RECONTACT_DAYS, mailboxReadiness, mailboxCap, inSendingWindow,
   nextWindowStart, gapMinutes, mailboxHealthProblem, followUpSubject, makeMessageId, classifySmtpError, coldProblems,
-  SENDING_PROVIDERS, inboxMessageKind,
+  SENDING_PROVIDERS, inboxMessageKind, STUCK_AFTER_MINUTES, STUCK_NEEDS_PERSON, isStuckSend,
 } from '../../src/lib/email/cold.js'
 import { closeFinished, subscribeUrl, moveToMarketing } from './_engine.js'
 
@@ -364,32 +364,50 @@ async function sendOne(deps, { ws, mb, row, campaign, now, cap }) {
     return { action: 'failed', reason: `${kind}: ${message}` }
   }
 
-  await patchSend(db, row.id, {
-    status: 'sent', sent_at: nowIso, provider_id: res.messageId || messageId, subject: rendered.subject, error: '', updated_at: nowIso,
+  await recordSent(db, {
+    ws, mb, row, campaign, contactId: contact.id, email: contact.email, now,
+    subject: rendered.subject, providerId: res.messageId || messageId,
     // The real Message-ID (Microsoft may assign its own) is what follow-ups
     // must reply to; the thread is how the inbox reader finds answers.
-    ...(res.messageId && res.messageId !== messageId ? { message_id: res.messageId } : {}),
-    ...(res.threadId ? { thread_id: res.threadId } : {}),
+    messageId: res.messageId && res.messageId !== messageId ? res.messageId : '',
+    threadId: res.threadId || '',
   })
-  await db(`email_contacts?id=eq.${contact.id}&workspace_id=eq.${ws}`, { method: 'PATCH', prefer: 'return=minimal', body: { last_sent_at: nowIso } })
   await patchMailbox(db, mb.id, {
     last_sent_at: nowIso, first_sent_on: mb.first_sent_on || today, last_error: '', updated_at: nowIso,
   })
+  return { action: 'sent', reason: `Sent ${row.step === 0 ? 'first email' : `follow-up ${row.step}`} to ${row.email}.` }
+}
 
-  // The next step is queued now, on this mailbox, due after its wait.
-  const next = (campaign.follow_ups || [])[row.step]
+/**
+ * Everything that follows an email leaving: the row is sent, the contact was
+ * last written to now, and the campaign's next step is queued on the same
+ * mailbox, due after its wait. Shared by the sending run and by the stuck-row
+ * check, which finds an email that left after all.
+ */
+async function recordSent(db, { ws, mb, row, campaign, contactId, email, now, sentAt = null, subject, providerId, messageId = '', threadId = '' }) {
+  const nowIso = now.toISOString()
+  const at = sentAt || nowIso
+  await patchSend(db, row.id, {
+    status: 'sent', sent_at: at, error: '', updated_at: nowIso,
+    ...(subject ? { subject } : {}),
+    ...(providerId ? { provider_id: providerId } : {}),
+    ...(messageId ? { message_id: messageId } : {}),
+    ...(threadId ? { thread_id: threadId } : {}),
+  })
+  await db(`email_contacts?id=eq.${contactId}&workspace_id=eq.${ws}`, { method: 'PATCH', prefer: 'return=minimal', body: { last_sent_at: at } })
+
+  const next = (campaign?.follow_ups || [])[row.step]
   if (next && String(next.body || '').trim()) {
     const days = Math.min(30, Math.max(1, Number(next.delay_days) || 3))
     await db('email_sends?on_conflict=campaign_id,contact_id,step', {
       method: 'POST', prefer: 'resolution=ignore-duplicates,return=minimal',
       body: [{
-        workspace_id: ws, campaign_id: campaign.id, contact_id: contact.id, email: contact.email,
+        workspace_id: ws, campaign_id: row.campaign_id, contact_id: contactId, email,
         step: row.step + 1, status: 'queued', mailbox_id: mb.id,
-        due_at: new Date(now.getTime() + days * DAY).toISOString(),
+        due_at: new Date(Date.parse(at) + days * DAY).toISOString(),
       }],
     })
   }
-  return { action: 'sent', reason: `Sent ${row.step === 0 ? 'first email' : `follow-up ${row.step}`} to ${row.email}.` }
 }
 
 async function secretOf(db, mailboxId) {
@@ -558,4 +576,118 @@ async function markBounced(db, row, at, nowIso) {
   })
   await cancelQueued(db, row, 'Address bounced', nowIso)
   return changed.length > 0
+}
+
+
+// ─── Emails stuck in 'sending' ─────────────────────────────────────────────
+// A run that dies after claiming a row and before recording the outcome
+// leaves it 'sending'. It is never retried blindly (see the top of this
+// file). Every run looks at rows stuck longer than STUCK_AFTER_MINUTES:
+//
+//   Microsoft mailbox  the mailbox itself says what happened. The email is in
+//                      Sent Items → it left: recorded as sent, and its
+//                      follow-up is queued. It is still a draft → it never
+//                      left: the draft is deleted and the row waits for the
+//                      next run. Neither → a person decides (below).
+//   any other mailbox  there is nothing to ask, so a person decides.
+//
+// A person decides in the app (resolveStuckByHand): it went out, send it
+// again, or drop it. Only a row that is stuck can be touched, so a send in
+// progress is never second-guessed.
+
+const stuckCutoff = now => new Date(now.getTime() - STUCK_AFTER_MINUTES * 60_000).toISOString()
+const STUCK_COLS = 'id,workspace_id,campaign_id,contact_id,email,step,mailbox_id,message_id,subject,updated_at,error'
+
+/** The row waits for the next run: a first email may go from any mailbox, a follow-up only from its thread's. */
+const requeueBody = (row, nowIso, error = '') => ({
+  status: 'queued', mailbox_id: row.step === 0 ? null : row.mailbox_id, message_id: null, error, updated_at: nowIso,
+})
+
+export async function resolveStuck(deps, { now = new Date(), workspaceId = null } = {}) {
+  const { db } = deps
+  const nowIso = now.toISOString()
+  const filter = workspaceId ? `&workspace_id=eq.${workspaceId}` : ''
+  const rows = await db(`email_sends?status=eq.sending&updated_at=lt.${stuckCutoff(now)}&mailbox_id=not.is.null${filter}&select=${STUCK_COLS}&order=updated_at.asc&limit=50`) || []
+  const out = { checked: 0, sent: 0, requeued: 0, needsPerson: 0, errors: [] }
+  if (!rows.length) return out
+
+  const mbIds = [...new Set(rows.map(r => r.mailbox_id))]
+  const mailboxes = await db(`email_mailboxes?id=in.${inList(mbIds)}&select=*`) || []
+  const campaignIds = [...new Set(rows.map(r => r.campaign_id))]
+  const campaigns = await db(`email_campaigns?id=in.${inList(campaignIds)}&select=id,follow_ups`) || []
+
+  // Said once: a row already waiting for a person is not rewritten every run.
+  const askPerson = async (row, text) => {
+    if (row.error === text) return
+    await patchSend(db, row.id, { error: text })
+    out.needsPerson++
+  }
+
+  for (const row of rows) {
+    out.checked++
+    const mb = mailboxes.find(m => m.id === row.mailbox_id)
+    if (!mb || mb.provider !== 'microsoft' || !deps.mail.findSent) {
+      await askPerson(row, STUCK_NEEDS_PERSON.smtp)
+      continue
+    }
+    try {
+      const plain = deps.open(await secretOf(db, mb.id))
+      if (!plain) continue   // the sending run flags the mailbox; try again once it is reconnected
+      const found = await deps.mail.findSent(mb, plain, { messageId: row.message_id, to: row.email, since: row.updated_at })
+      if (!found.ok) { out.errors.push(`${mb.email}: ${String(found.error?.message || found.error || 'check failed').slice(0, 200)}`); continue }
+      if (found.state === 'sent') {
+        await recordSent(db, {
+          ws: row.workspace_id, mb, row, campaign: campaigns.find(c => c.id === row.campaign_id),
+          contactId: row.contact_id, email: row.email, now, sentAt: found.sentAt || row.updated_at,
+          subject: found.subject || '', providerId: found.messageId || row.message_id,
+          messageId: found.messageId && found.messageId !== row.message_id ? found.messageId : '', threadId: found.threadId || '',
+        })
+        out.sent++
+      } else if (found.state === 'draft') {
+        await patchSend(db, row.id, requeueBody(row, nowIso, 'The last attempt stopped before sending; it goes out on a later run.'))
+        out.requeued++
+      } else {
+        await askPerson(row, STUCK_NEEDS_PERSON.microsoft)
+      }
+    } catch (err) {
+      out.errors.push(`${mb.email}: ${String(err?.message || err).slice(0, 200)}`)
+    }
+  }
+  return out
+}
+
+/**
+ * A person's answer for one stuck row.
+ * @param {object} args { workspaceId, sendId, outcome: 'sent'|'retry'|'drop', by, now }
+ */
+export async function resolveStuckByHand({ db }, { workspaceId, sendId, outcome, by = '', now = new Date() }) {
+  const nowIso = now.toISOString()
+  const [row] = await db(`email_sends?id=eq.${sendId}&workspace_id=eq.${workspaceId}&select=${STUCK_COLS},status`) || []
+  if (!row) return { error: 'That email is not in this workspace.', status: 404 }
+  if (!isStuckSend(row, now.getTime())) return { error: 'That email is no longer stuck: it was sent, or is being sent right now.', status: 409 }
+  // The same "only if still stuck" condition on the write, so two people
+  // (or a person and the run) cannot both answer.
+  const guard = `email_sends?id=eq.${row.id}&workspace_id=eq.${workspaceId}&status=eq.sending&updated_at=eq.${encodeURIComponent(row.updated_at)}`
+  const claim = async body => ((await db(guard, { method: 'PATCH', prefer: 'return=representation', body }) || []).length > 0)
+
+  if (outcome === 'retry') {
+    if (!await claim(requeueBody(row, nowIso, `Sent again by ${by || 'a person'}.`))) return { error: 'Someone else answered this one first.', status: 409 }
+    return { send_id: row.id, outcome }
+  }
+  if (outcome === 'drop') {
+    if (!await claim({ status: 'skipped', error: `Dropped by ${by || 'a person'}: not sent.`, updated_at: nowIso })) return { error: 'Someone else answered this one first.', status: 409 }
+    return { send_id: row.id, outcome }
+  }
+  if (outcome === 'sent') {
+    // Claim first (the run must not also pick it up), then record the send.
+    if (!await claim({ updated_at: nowIso })) return { error: 'Someone else answered this one first.', status: 409 }
+    const [campaign] = await db(`email_campaigns?id=eq.${row.campaign_id}&workspace_id=eq.${workspaceId}&select=id,follow_ups`) || []
+    const [mb] = await db(`email_mailboxes?id=eq.${row.mailbox_id}&workspace_id=eq.${workspaceId}&select=id`) || []
+    await recordSent(db, {
+      ws: workspaceId, mb: mb || { id: row.mailbox_id }, row, campaign, contactId: row.contact_id, email: row.email,
+      now, sentAt: row.updated_at, providerId: row.message_id,
+    })
+    return { send_id: row.id, outcome }
+  }
+  return { error: 'Choose sent, retry or drop.', status: 400 }
 }

@@ -282,6 +282,47 @@ export function createGraphMail({ config, save, fetch: f = fetch, now = () => Da
     },
 
     /**
+     * Did an email this mailbox was handing over actually leave? For a row
+     * stuck in 'sending' (see resolveStuck in _cold.js). Looks in Sent Items,
+     * then Drafts, in the hour after the row was claimed, and matches by our
+     * Message-ID or, when Microsoft replaced it, by the recipient.
+     *   { ok, state: 'sent', messageId, threadId, subject, sentAt }
+     *   { ok, state: 'draft' }   it was never sent; the draft is deleted
+     *   { ok, state: 'none' }    in neither folder
+     */
+    async findSent(mb, plain, { messageId = '', to = '', since }) {
+      const from = new Date(Date.parse(since) - 2 * 60_000).toISOString()
+      const until = new Date(Date.parse(since) + 60 * 60_000).toISOString()
+      const want = String(to || '').toLowerCase()
+      const matches = m => (messageId && m.internetMessageId === messageId)
+        || (want && (m.toRecipients || []).some(r => String(r?.emailAddress?.address || '').toLowerCase() === want))
+      const list = (folder, field) => {
+        const q = new URLSearchParams({
+          $filter: `${field} ge ${from} and ${field} le ${until}`,
+          $top: '50',
+          $select: 'id,internetMessageId,conversationId,subject,sentDateTime,toRecipients',
+        })
+        return withToken(mb, plain, token => graphCall(f, token, `/me/mailFolders/${folder}/messages?${q}`))
+      }
+
+      const sent = await list('sentitems', 'sentDateTime')
+      if (!sent.ok) return { ok: false, error: sent.error }
+      const hit = (sent.data?.value || []).find(matches)
+      if (hit) {
+        return { ok: true, state: 'sent', messageId: hit.internetMessageId || messageId, threadId: hit.conversationId || '', subject: hit.subject || '', sentAt: hit.sentDateTime || null }
+      }
+
+      const drafts = await list('drafts', 'createdDateTime')
+      if (!drafts.ok) return { ok: false, error: drafts.error }
+      const draft = (drafts.data?.value || []).find(matches)
+      if (!draft) return { ok: true, state: 'none' }
+      // Deleted, so nobody opening Drafts can send it by accident later.
+      const del = await graphCall(f, drafts.token, `/me/messages/${encodeURIComponent(draft.id)}`, { method: 'DELETE' })
+      if (!del.ok && del.status !== 404) return { ok: false, error: del.error }
+      return { ok: true, state: 'draft' }
+    },
+
+    /**
      * Inbox messages received at or after `sinceIso`, oldest first, at most 50.
      * @returns {Promise<{ ok: true, messages: Array } | { ok: false, error: Error }>}
      */

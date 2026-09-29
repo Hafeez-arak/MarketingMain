@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { coldTick, launchColdCampaign, coldProblems, readReplies } from './_cold.js'
+import { coldTick, launchColdCampaign, coldProblems, readReplies, resolveStuck, resolveStuckByHand } from './_cold.js'
+import { STUCK_NEEDS_PERSON } from '../../src/lib/email/cold.js'
 import { sealSecret, openSecret } from './_secrets.js'
 
 const WS = '11111111-1111-1111-1111-111111111111'
@@ -406,5 +407,138 @@ describe('readReplies', () => {
     const w = inboxWorld(page, { rows: [] })
     await readReplies(w.deps, { now: SUNDAY_11 })
     expect(patches(w.calls, /^email_mailboxes\?id=eq\.mb-ms/).at(-1).body).toEqual({ inbox_checked_at: '2026-09-27T08:49:00Z' })
+  })
+})
+
+
+describe('resolveStuck: emails a dead run left in sending', () => {
+  const NOW = new Date('2026-09-27T09:00:00Z')
+  const MS_MB = { ...MAILBOX, id: 'mb-ms', provider: 'microsoft', email: 'sales1@arak-sa.com' }
+  const stuckRow = (over = {}) => ({
+    id: 's-1', workspace_id: WS, campaign_id: 'camp-1', contact_id: 'a', email: 'a@hotel.sa', step: 0,
+    mailbox_id: 'mb-ms', message_id: '<u1@arak-sa.com>', subject: null, updated_at: '2026-09-27T08:00:00+00:00', error: '', ...over,
+  })
+  function stuckWorld({ rows = [stuckRow()], mailbox = MS_MB, found = { ok: true, state: 'sent', messageId: '<u1@arak-sa.com>', threadId: 'conv-1', subject: 'Lighting', sentAt: '2026-09-27T08:00:04Z' } } = {}) {
+    const { db, calls } = stubDb([
+      { method: 'GET', match: /^email_sends\?status=eq\.sending&updated_at=lt\./, reply: rows },
+      { method: 'GET', match: /^email_mailboxes\?id=in\./, reply: [mailbox] },
+      { method: 'GET', match: /^email_campaigns\?id=in\./, reply: [CAMPAIGN] },
+      { method: 'GET', match: /^email_mailbox_secrets/, reply: [{ secret: 'sealed' }] },
+    ])
+    const asked = []
+    const deps = {
+      db, open: s => (s === 'sealed' ? 'tokens' : null),
+      mail: { findSent: async (mb, pw, q) => { asked.push(q); return found } },
+    }
+    return { deps, calls, asked }
+  }
+
+  it('only looks at rows claimed more than 30 minutes ago', async () => {
+    const w = stuckWorld({ rows: [] })
+    await resolveStuck(w.deps, { now: NOW })
+    expect(w.calls[0].path).toContain('updated_at=lt.2026-09-27T08:30:00.000Z')
+  })
+
+  it('found in Sent Items: recorded as sent, and its follow-up queued from the real send time', async () => {
+    const w = stuckWorld()
+    const out = await resolveStuck(w.deps, { now: NOW })
+    expect(out.sent).toBe(1)
+    expect(w.asked[0]).toEqual({ messageId: '<u1@arak-sa.com>', to: 'a@hotel.sa', since: '2026-09-27T08:00:00+00:00' })
+    const sent = patches(w.calls, /^email_sends\?id=eq\.s-1/)[0].body
+    expect(sent).toMatchObject({ status: 'sent', sent_at: '2026-09-27T08:00:04Z', thread_id: 'conv-1', error: '' })
+    const [next] = posts(w.calls, /^email_sends\?on_conflict/)[0].body
+    expect(next).toMatchObject({ step: 1, status: 'queued', mailbox_id: 'mb-ms', due_at: '2026-09-30T08:00:04.000Z' })
+  })
+
+  it('still a draft: it never left, so it goes back in the queue for any mailbox', async () => {
+    const w = stuckWorld({ found: { ok: true, state: 'draft' } })
+    const out = await resolveStuck(w.deps, { now: NOW })
+    expect(out.requeued).toBe(1)
+    expect(patches(w.calls, /^email_sends\?id=eq\.s-1/)[0].body).toMatchObject({ status: 'queued', mailbox_id: null, message_id: null })
+    expect(posts(w.calls, /^email_sends\?on_conflict/)).toHaveLength(0)
+  })
+
+  it('a stuck follow-up that never left keeps its thread\'s mailbox', async () => {
+    const w = stuckWorld({ rows: [stuckRow({ step: 1 })], found: { ok: true, state: 'draft' } })
+    await resolveStuck(w.deps, { now: NOW })
+    expect(patches(w.calls, /^email_sends\?id=eq\.s-1/)[0].body).toMatchObject({ status: 'queued', mailbox_id: 'mb-ms' })
+  })
+
+  it('in neither folder: never resent by itself; a person is asked, once', async () => {
+    const w = stuckWorld({ found: { ok: true, state: 'none' } })
+    expect((await resolveStuck(w.deps, { now: NOW })).needsPerson).toBe(1)
+    const p = patches(w.calls, /^email_sends\?id=eq\.s-1/)
+    expect(p).toHaveLength(1)
+    expect(p[0].body).toEqual({ error: STUCK_NEEDS_PERSON.microsoft })
+
+    const again = stuckWorld({ rows: [stuckRow({ error: STUCK_NEEDS_PERSON.microsoft })], found: { ok: true, state: 'none' } })
+    await resolveStuck(again.deps, { now: NOW })
+    expect(patches(again.calls, /^email_sends/)).toHaveLength(0)
+  })
+
+  it('an SMTP mailbox cannot be asked, so a person decides', async () => {
+    const w = stuckWorld({ mailbox: MAILBOX, rows: [stuckRow({ mailbox_id: 'mb-1' })] })
+    await resolveStuck(w.deps, { now: NOW })
+    expect(w.asked).toHaveLength(0)
+    expect(patches(w.calls, /^email_sends\?id=eq\.s-1/)[0].body).toEqual({ error: STUCK_NEEDS_PERSON.smtp })
+  })
+
+  it('a failed look changes nothing', async () => {
+    const w = stuckWorld({ found: { ok: false, error: new Error('503') } })
+    const out = await resolveStuck(w.deps, { now: NOW })
+    expect(out.errors).toHaveLength(1)
+    expect(patches(w.calls, /^email_sends/)).toHaveLength(0)
+  })
+})
+
+describe('resolveStuckByHand', () => {
+  const NOW = new Date('2026-09-27T09:00:00Z')
+  const row = (over = {}) => ({
+    id: 's-1', workspace_id: WS, campaign_id: 'camp-1', contact_id: 'a', email: 'a@hotel.sa', step: 0, status: 'sending',
+    mailbox_id: 'mb-1', message_id: '<u1@x>', updated_at: '2026-09-27T08:00:00+00:00', error: '', ...over,
+  })
+  function handWorld({ found = row(), claimed = true } = {}) {
+    const { db, calls } = stubDb([
+      { method: 'GET', match: /^email_sends\?id=eq\.s-1&workspace_id/, reply: found ? [found] : [] },
+      { method: 'PATCH', match: /status=eq\.sending&updated_at=eq\./, reply: claimed ? [{ id: 's-1' }] : [] },
+      { method: 'GET', match: /^email_campaigns\?id=eq\./, reply: [CAMPAIGN] },
+      { method: 'GET', match: /^email_mailboxes\?id=eq\./, reply: [{ id: 'mb-1' }] },
+    ])
+    return { deps: { db }, calls }
+  }
+  const run = (w, outcome) => resolveStuckByHand(w.deps, { workspaceId: WS, sendId: 's-1', outcome, by: 'hafeez@arak-sa.com', now: NOW })
+
+  it('refuses a row that is not stuck: a send in progress is never second-guessed', async () => {
+    const w = handWorld({ found: row({ updated_at: '2026-09-27T08:50:00+00:00' }) })
+    expect(await run(w, 'retry')).toMatchObject({ status: 409 })
+    expect(patches(w.calls, /^email_sends/)).toHaveLength(0)
+  })
+
+  it('send again: back in the queue, guarded so only one answer wins', async () => {
+    const w = handWorld()
+    expect(await run(w, 'retry')).toEqual({ send_id: 's-1', outcome: 'retry' })
+    const [p] = patches(w.calls, /^email_sends/)
+    expect(p.path).toContain('updated_at=eq.2026-09-27T08%3A00%3A00%2B00%3A00')
+    expect(p.body).toMatchObject({ status: 'queued', mailbox_id: null, message_id: null })
+  })
+
+  it('drop: skipped, and says who dropped it', async () => {
+    const w = handWorld()
+    await run(w, 'drop')
+    expect(patches(w.calls, /^email_sends/)[0].body).toMatchObject({ status: 'skipped', error: 'Dropped by hafeez@arak-sa.com: not sent.' })
+  })
+
+  it('it went out: recorded as sent at the claim time, and the follow-up queued', async () => {
+    const w = handWorld()
+    await run(w, 'sent')
+    const p = patches(w.calls, /^email_sends\?id=eq\.s-1/)
+    expect(p.at(-1).body).toMatchObject({ status: 'sent', sent_at: '2026-09-27T08:00:00+00:00' })
+    expect(posts(w.calls, /^email_sends\?on_conflict/)[0].body[0]).toMatchObject({ step: 1, mailbox_id: 'mb-1' })
+  })
+
+  it('two answers at once: the second is told someone else answered', async () => {
+    const w = handWorld({ claimed: false })
+    expect(await run(w, 'sent')).toMatchObject({ status: 409 })
+    expect(posts(w.calls, /^email_sends/)).toHaveLength(0)
   })
 })
