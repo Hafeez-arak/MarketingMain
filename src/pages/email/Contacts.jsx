@@ -10,6 +10,7 @@ import {
 } from '../../lib/email/client'
 import { AudienceTag, ContactStatus, GroupChip, Notice, EIcon } from './parts'
 import { download, shortDate } from './format'
+import { ResearchLeads } from './ResearchLeads'
 
 const PAGE = 100
 
@@ -31,6 +32,7 @@ export function Contacts({ workspaceId, data, loading, reload, params, setTab })
   const setType = filterSetter(setTypeRaw)
   const setGroup = v => { setTab('contacts', { group: v }); setShown(PAGE) }
   const [editing, setEditing] = useState(null)      // contact | 'new' | null
+  const [prefill, setPrefill] = useState(null)      // a new contact's starting values, from a research lead
   const [importing, setImporting] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [busy, setBusy] = useState('')
@@ -125,6 +127,8 @@ export function Contacts({ workspaceId, data, loading, reload, params, setTab })
 
       {error && <Notice tone="red" title="That did not work">{error}</Notice>}
 
+      {!loading && <ResearchLeads workspaceId={workspaceId} contacts={data.contacts} onAdd={values => { setPrefill(values); setEditing('new') }} />}
+
       {selected.size > 0 && (
         <BulkBar
           count={selected.size} groups={data.groups} busy={busy} mixedLanes={mixedLanes}
@@ -208,12 +212,13 @@ export function Contacts({ workspaceId, data, loading, reload, params, setTab })
         <ContactModal
           workspaceId={workspaceId}
           contact={editing === 'new' ? null : editing}
+          prefill={editing === 'new' ? prefill : null}
           groups={data.groups}
           currentGroups={editing === 'new' ? [] : (groupsOf.get(editing.id) || [])}
           types={types}
           existingEmails={data.contacts}
-          onClose={() => setEditing(null)}
-          onSaved={async () => { setEditing(null); await reload() }}
+          onClose={() => { setEditing(null); setPrefill(null) }}
+          onSaved={async () => { setEditing(null); setPrefill(null); await reload() }}
         />
       )}
 
@@ -281,11 +286,12 @@ function BulkBar({ count, groups, busy, mixedLanes, onClear, onAddGroup, onRemov
   )
 }
 
-function ContactModal({ workspaceId, contact, groups, currentGroups, types, existingEmails, onClose, onSaved }) {
+function ContactModal({ workspaceId, contact, prefill = null, groups, currentGroups, types, existingEmails, onClose, onSaved }) {
   const [form, setForm] = useState(() => ({
     email: '', first_name: '', last_name: '', company: '', job_title: '', phone: '', city: '', country: 'Saudi Arabia',
     contact_type: '', audience: 'marketing', language: 'en', consent: 'business_contact', notes: '', source: 'manual',
     status: 'active',
+    ...(prefill || {}),
     ...(contact || {}),
   }))
   const [groupIds, setGroupIds] = useState(currentGroups)

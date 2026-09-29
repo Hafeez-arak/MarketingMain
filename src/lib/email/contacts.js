@@ -160,5 +160,8 @@ export function cleanContact(input, defaults = {}) {
     // the statement that they did not opt in.
     consent: audience === 'cold' ? 'none' : (consent === 'none' ? 'business_contact' : consent),
     source,
+    // Tied to the research lead it came from, when it did. Only sent when
+    // set, so saving an edit never unties a contact.
+    ...(/^[0-9a-f-]{36}$/i.test(String(input?.opportunity_id || '')) ? { opportunity_id: input.opportunity_id } : {}),
   }
 }
