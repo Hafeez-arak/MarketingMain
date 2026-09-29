@@ -153,9 +153,11 @@ export function classifyGraphError(status, code = '', message = '') {
   if (status === 401 || /InvalidAuthenticationToken/i.test(text)) {
     return { kind: 'auth', reason: 'Microsoft refused this mailbox\'s sign-in. Reconnect it.' }
   }
-  if (status === 429 || /ErrorExceededMessageLimit|QuotaExceeded|ApplicationThrottled|ErrorServerBusy/i.test(text)) {
-    return { kind: 'limit', reason: '' }
-  }
+  // The day's sending quota is spent: nothing more goes today.
+  if (/ErrorExceededMessageLimit|QuotaExceeded/i.test(text)) return { kind: 'limit', reason: '' }
+  // Throttling (429, busy) clears within minutes, not by tomorrow: the
+  // mailbox waits one short pause, like any other passing failure.
+  if (status === 429 || /ApplicationThrottled|ErrorServerBusy|MailboxConcurrency/i.test(text)) return { kind: 'transient', reason: '' }
   if (/ErrorInvalidRecipients|InvalidRecipients|ErrorInvalidEmailAddress/i.test(text)) return { kind: 'recipient', reason: '' }
   return { kind: 'transient', reason: '' }
 }

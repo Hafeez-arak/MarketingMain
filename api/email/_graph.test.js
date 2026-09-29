@@ -72,8 +72,10 @@ describe('classifyGraphError', () => {
     expect(r.kind).toBe('auth')
     expect(r.reason).toMatch(/Mail\.ReadWrite/)
   })
-  it('reads throttling as a limit and bad addresses as the recipient', () => {
-    expect(classifyGraphError(429, 'ApplicationThrottled', '').kind).toBe('limit')
+  it('reads a spent daily quota as a limit, throttling as a short pause, bad addresses as the recipient', () => {
+    expect(classifyGraphError(403, 'ErrorExceededMessageLimit', '').kind).toBe('limit')
+    // Throttling clears in minutes; it must not park a mailbox until tomorrow.
+    expect(classifyGraphError(429, 'ApplicationThrottled', '').kind).toBe('transient')
     expect(classifyGraphError(400, 'ErrorInvalidRecipients', '').kind).toBe('recipient')
     expect(classifyGraphError(503, 'ServiceUnavailable', '').kind).toBe('transient')
   })

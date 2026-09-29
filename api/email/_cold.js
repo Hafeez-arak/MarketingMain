@@ -185,6 +185,14 @@ async function runWorkspace(deps, { ws, now, dryRun, out, result }) {
       method: 'PATCH', prefer: 'return=minimal', body: { status: 'sending', updated_at: nowIso },
     })
   }
+  if (!dryRun) {
+    // A deleted contact's queued emails keep their row (the foreign key sets
+    // contact_id to null). Nobody is left to send them to: they are
+    // cancelled, as the delete dialog promises, before a run can claim one.
+    await db(`email_sends?workspace_id=eq.${ws}&status=eq.queued&contact_id=is.null`, {
+      method: 'PATCH', prefer: 'return=minimal', body: { status: 'cancelled', error: 'Contact deleted', updated_at: nowIso },
+    })
+  }
   const campaigns = await db(`email_campaigns?workspace_id=eq.${ws}&audience=eq.cold&status=eq.sending&select=*`) || []
   const mailboxes = await db(`email_mailboxes?workspace_id=eq.${ws}&${providerFilter}&select=*&order=last_sent_at.asc.nullsfirst`) || []
   if (!campaigns.length && !dryRun) return
@@ -232,7 +240,15 @@ async function runWorkspace(deps, { ws, now, dryRun, out, result }) {
     }
     if (dryRun) { line.action = 'send'; line.reason = 'Would send now.'; continue }
 
-    const outcome = await sendOne(deps, { ws, mb, row, campaign: allowed.find(c => c.id === row.campaign_id), now, cap })
+    // One mailbox's crash (a dropped connection mid-send) is that mailbox's
+    // alone: the others still send this run. Its row stays 'sending', which
+    // the stuck-row check settles later, so nothing is sent twice.
+    let outcome
+    try {
+      outcome = await sendOne(deps, { ws, mb, row, campaign: allowed.find(c => c.id === row.campaign_id), now, cap })
+    } catch (err) {
+      outcome = { action: 'failed', reason: `Stopped mid-send: ${String(err?.message || err).slice(0, 200)}. It is checked again in ${STUCK_AFTER_MINUTES} minutes.` }
+    }
     line.action = outcome.action
     line.reason = outcome.reason
     if (outcome.action === 'sent') { result.sent++; out.sent++; wsSentToday++ }
@@ -245,7 +261,7 @@ async function runWorkspace(deps, { ws, now, dryRun, out, result }) {
 
 /** A due follow-up for this mailbox first (it is part of a thread), then the next first email. */
 async function nextRow(db, { ws, mb, campaignIds, nowIso }) {
-  const base = `email_sends?workspace_id=eq.${ws}&status=eq.queued&due_at=lte.${nowIso}&campaign_id=in.${inList(campaignIds)}`
+  const base = `email_sends?workspace_id=eq.${ws}&status=eq.queued&due_at=lte.${nowIso}&contact_id=not.is.null&campaign_id=in.${inList(campaignIds)}`
   const cols = '&select=id,campaign_id,contact_id,email,step,subject,body,mailbox_id'
   const [followUp] = await db(`${base}&mailbox_id=eq.${mb.id}&step=gt.0${cols}&order=due_at.asc&limit=1`) || []
   if (followUp) return followUp
@@ -354,7 +370,10 @@ async function sendOne(deps, { ws, mb, row, campaign, now, cap }) {
     }
     await requeue({ error: message })
     if (kind === 'auth') {
-      await patchMailbox(db, mb.id, { status: 'error', status_reason: res.error?.reason || `The login was refused. ${reconnectHint(mb)}`, last_error: message, updated_at: nowIso })
+      // Nothing left, so the gap claimed for this attempt is handed back: a
+      // mailbox reconnected ten minutes later sends on the next run instead
+      // of sitting out a gap for an email it never sent.
+      await patchMailbox(db, mb.id, { status: 'error', status_reason: res.error?.reason || `The login was refused. ${reconnectHint(mb)}`, last_error: message, next_send_at: mb.next_send_at || null, updated_at: nowIso })
     } else if (kind === 'limit') {
       const tomorrow = nextWindowStart(new Date(Date.parse(brandWallToUtcISO(today, '23:59'))))
       await patchMailbox(db, mb.id, { next_send_at: tomorrow?.toISOString() || nextAt, last_error: message, updated_at: nowIso })
