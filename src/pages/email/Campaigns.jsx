@@ -11,6 +11,7 @@ import { DesignEditor } from './DesignEditor'
 import { WeeklyDrafts, WeeklyDraftsSkeleton } from './WeeklyDrafts'
 import { AudienceTag, CampaignStatus, Notice, Stat, EIcon } from './parts'
 import { pct, shortDate, dateTime, download } from './format'
+import { StuckSends } from './StuckSends'
 
 // ─── Campaigns: Marketing and Cold ─────────────────────────────────────────
 // The same screens for both lanes, with the differences made explicit:
@@ -977,6 +978,7 @@ function CampaignDetail({ audience, campaign, data, workspaceId, reload, setTab 
         </div>
       </div>
       {error && <Notice tone="red">{error}</Notice>}
+      {audience === 'cold' && <StuckSends data={data} workspaceId={workspaceId} reload={reload} campaignId={campaign.id} />}
 
       <Card className="p-5">
         <div className="flex flex-wrap items-start justify-between gap-3">

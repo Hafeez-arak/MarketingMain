@@ -1,5 +1,6 @@
 import { supabase } from '../supabaseClient'
 import { websiteOf } from './weekly'
+import { STUCK_AFTER_MINUTES } from './cold'
 
 // ─── Email: the browser's data layer ───────────────────────────────────────
 // Plain table reads and writes go straight to Supabase with the person's own
@@ -29,7 +30,8 @@ function check({ data, error }) {
 
 export async function fetchEmailData(ws) {
   const since = new Date(Date.now() - 30 * 86_400_000).toISOString()
-  const [contacts, groups, members, campaigns, stats, settingsRows, sends, aiDrafts, mailboxes] = await Promise.all([
+  const stuckBefore = new Date(Date.now() - STUCK_AFTER_MINUTES * 60_000).toISOString()
+  const [contacts, groups, members, campaigns, stats, settingsRows, sends, aiDrafts, mailboxes, stuckSends] = await Promise.all([
     all(() => supabase.from('email_contacts').select('*').eq('workspace_id', ws).order('created_at', { ascending: false })),
     all(() => supabase.from('email_groups').select('*').eq('workspace_id', ws).order('name')),
     all(() => supabase.from('email_group_members').select('group_id,contact_id').eq('workspace_id', ws)),
@@ -48,10 +50,14 @@ export async function fetchEmailData(ws) {
     // cannot read at all. Degrades to none, like the drafts.
     supabase.from('email_mailboxes').select('*').eq('workspace_id', ws).order('created_at')
       .then(r => r.data || [], () => []),
+    // Emails a dead sending run left half-sent, for a person to settle.
+    supabase.from('email_sends').select('id,campaign_id,email,step,mailbox_id,status,updated_at,error')
+      .eq('workspace_id', ws).eq('status', 'sending').lt('updated_at', stuckBefore).order('updated_at').limit(200)
+      .then(r => r.data || [], () => []),
   ])
   return {
     contacts, groups, members, campaigns, stats, settings: settingsRows[0] || null, recentSends: sends,
-    aiDrafts: aiDrafts[0] || null, mailboxes,
+    aiDrafts: aiDrafts[0] || null, mailboxes, stuckSends,
   }
 }
 

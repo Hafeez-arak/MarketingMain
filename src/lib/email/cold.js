@@ -222,6 +222,27 @@ export function inboxMessageKind({ from = '', subject = '', preview = '' } = {})
   return 'reply'
 }
 
+// ─── Emails that never finished sending ────────────────────────────────────
+// A row is claimed ('sending') a moment before its email is handed over. If
+// the run dies in between, nobody knows whether it left, and it is never
+// retried by itself: a duplicate cold email is worse than a lost one. After
+// this long a row in 'sending' is no longer a send in progress but a question.
+export const STUCK_AFTER_MINUTES = 30
+
+/** Is this send row stuck: claimed, and not finished within STUCK_AFTER_MINUTES? */
+export function isStuckSend(row, now = Date.now()) {
+  if (row?.status !== 'sending') return false
+  const at = Date.parse(row.updated_at || '')
+  return Number.isFinite(at) && now - at >= STUCK_AFTER_MINUTES * 60_000
+}
+
+// What the error column says while a stuck row waits for a person. The UI
+// shows it; the automatic check writes it once and then leaves the row alone.
+export const STUCK_NEEDS_PERSON = {
+  microsoft: 'Not found in the mailbox\'s Sent Items or Drafts, so it most likely never left. Send it again, or drop it.',
+  smtp: 'The sending run stopped while handing this email over. Look in the mailbox\'s Sent folder: if it is there, mark it sent; if not, send it again.',
+}
+
 /** A Message-ID on the mailbox's own domain. */
 export function makeMessageId(mailboxEmail, uuid) {
   return `<${uuid}@${domainOf(mailboxEmail) || 'localhost'}>`

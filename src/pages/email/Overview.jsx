@@ -5,6 +5,7 @@ import { brandDateKey } from '../../lib/brandTime'
 import { WARMUP_STEPS } from '../../lib/email/warmup'
 import { Stat, CampaignStatus, AudienceTag, Notice } from './parts'
 import { pct, shortDate } from './format'
+import { StuckSends } from './StuckSends'
 
 // ─── Overview ──────────────────────────────────────────────────────────────
 // The first screen answers two questions, in this order:
@@ -13,7 +14,7 @@ import { pct, shortDate } from './format'
 // One-time setup (Resend, DNS, Vercel) is deliberately NOT shown anywhere in
 // the app; it lives in docs/EMAIL-SETUP.md for the person who runs it.
 
-export function Overview({ data, status, loading, setTab }) {
+export function Overview({ data, status, loading, setTab, workspaceId, reload }) {
   // Read once per mount: the chart's 14 days end today, and "today" changing
   // under an open page is not worth a re-render.
   const [now] = useState(() => Date.now())
@@ -67,6 +68,7 @@ export function Overview({ data, status, loading, setTab }) {
 
   return (
     <div className="space-y-4">
+      <StuckSends data={data} workspaceId={workspaceId} reload={reload} />
       {cap?.health?.state === 'paused' && (
         <Notice tone="red" title="Marketing sending is paused">{cap.health.reason}</Notice>
       )}
