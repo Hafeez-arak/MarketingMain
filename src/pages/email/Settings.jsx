@@ -3,16 +3,16 @@ import { Card, SectionHead, Button, Input, Textarea, Toggle, Skeleton } from '..
 import { isValidEmail } from '../../lib/email/contacts'
 import { saveSettings } from '../../lib/email/client'
 import { Notice } from './parts'
-import { OutreachMailboxes } from './Mailboxes'
 
 // ─── Settings ──────────────────────────────────────────────────────────────
-// Who the email is from, what every footer says, and how fast sending may
-// grow. One-time setup outside the app (Resend, DNS, Vercel) is not shown
+// The newsletter lane only: who it is from, what every footer says, and how
+// fast sending may grow. Outreach has its own settings where the work is
+// (Outreach → Mailboxes), so nothing here can be mistaken for them. One-time setup outside the app (Resend, DNS, Vercel) is not shown
 // here on purpose; it lives in docs/EMAIL-SETUP.md.
 
 const PLANS = [
-  { key: 'free', label: 'Resend Free', daily: 100, monthly: 3000 },
-  { key: 'pro', label: 'Resend Pro ($20/mo)', daily: 50000, monthly: 50000 },
+  { key: 'free', label: 'Free plan', daily: 100, monthly: 3000 },
+  { key: 'pro', label: 'Paid plan ($20/mo)', daily: 50000, monthly: 50000 },
 ]
 
 export function EmailSettings(props) {
@@ -28,7 +28,7 @@ export function EmailSettings(props) {
   return <SettingsForm {...props} key={workspaceId} initial={s} />
 }
 
-function SettingsForm({ workspaceId, data, status, reload, initial: s }) {
+function SettingsForm({ workspaceId, reload, initial: s }) {
   const [form, setForm] = useState(() => ({
     from_name: s.from_name || 'Arak Lighting',
     from_email: s.from_email || '',
@@ -73,7 +73,7 @@ function SettingsForm({ workspaceId, data, status, reload, initial: s }) {
       {message && <Notice tone={message.tone}>{message.text}</Notice>}
 
       <Card>
-        <SectionHead title="Marketing sender" subtitle="Who newsletters come from. Sent through Resend, from a subdomain so your staff mailboxes are never affected." />
+        <SectionHead title="Newsletter sender" subtitle="Who newsletters come from. They go out from a separate address, so staff mailboxes and outreach are never affected. Outreach mailboxes are under Outreach → Mailboxes." />
         <div className="p-5 grid md:grid-cols-2 gap-4">
           <Input label="From name" value={form.from_name} onChange={e => set('from_name', e.target.value)} hint="What people see in their inbox." />
           <Input label="From address" value={form.from_email} onChange={e => set('from_email', e.target.value)} error={errors.from_email}
@@ -81,16 +81,16 @@ function SettingsForm({ workspaceId, data, status, reload, initial: s }) {
           <Input label="Replies go to" value={form.reply_to} onChange={e => set('reply_to', e.target.value)} error={errors.reply_to}
             placeholder="marketing@arak-sa.com" hint="A real inbox someone reads. Replies are good for your reputation." />
           <Textarea label="Company address (footer)" rows={3} value={form.company_address} onChange={e => set('company_address', e.target.value)}
-            placeholder={'ARAK Lighting\nStreet, District\nRiyadh, Saudi Arabia'} hint="Printed in every marketing email. Required by anti-spam rules." />
+            placeholder={'ARAK Lighting\nStreet, District\nRiyadh, Saudi Arabia'} hint="Printed in every newsletter. Required by anti-spam rules." />
         </div>
       </Card>
 
       <Card>
-        <SectionHead title="Sending limits and warm-up" subtitle="The daily limit is the lowest of warm-up, the health brake, and your Resend plan." />
+        <SectionHead title="Newsletter limits and warm-up" subtitle="How many newsletters may go out a day: the lowest of the warm-up step, the health brake, and the email service's plan." />
         <div className="p-5 space-y-4">
           <div className="grid md:grid-cols-3 gap-4 items-end">
             <div>
-              <p className="eyebrow mb-1.5">Resend plan</p>
+              <p className="eyebrow mb-1.5">Email service plan</p>
               <div className="flex">
                 {PLANS.map(p => (
                   <button key={p.key} type="button" onClick={() => setForm(f => ({ ...f, provider_daily_limit: p.daily, provider_monthly_limit: p.monthly }))}
@@ -114,8 +114,6 @@ function SettingsForm({ workspaceId, data, status, reload, initial: s }) {
       <div className="flex justify-end">
         <Button onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save settings'}</Button>
       </div>
-
-      <OutreachMailboxes workspaceId={workspaceId} data={data} status={status} reload={reload} />
     </div>
   )
 }

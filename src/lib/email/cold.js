@@ -10,6 +10,8 @@
 //     mailbox's own limit — never above HARD_MAX_PER_MAILBOX,
 //   • only Sunday–Thursday, 09:00–17:00 Riyadh, one email at a time with a
 //     random gap, so a day's emails are spread the way a person's would be,
+//   • never two in the same moment, even from different mailboxes (see
+//     "One run's rhythm" below),
 //   • never from a free-mail address, and a Google (app password) mailbox
 //     never from the company's own domain.
 //
@@ -152,6 +154,28 @@ export function gapMinutes(cap, random = Math.random()) {
   const avg = WINDOW_MINUTES / Math.max(1, cap)
   const mins = avg * (0.6 + 0.8 * Math.min(1, Math.max(0, random)))
   return Math.round(Math.min(MAX_GAP_MINUTES, Math.max(MIN_GAP_MINUTES, mins)))
+}
+
+// ─── One run's rhythm ──────────────────────────────────────────────────────
+// n8n starts a sending run on a 10-minute clock. Left alone, every email
+// would leave at :00, :10, :20…, and three ready mailboxes on one domain
+// would send in the same second. So within a run, per company:
+//
+//   • at most MAX_SENDS_PER_RUN emails, the rest go on the next run,
+//   • the first after a random pause of 0–2 minutes, so sends land anywhere
+//     in the ten minutes, not on the clock,
+//   • each later one 40–100 seconds after the one before,
+//   • nothing new is started once RUN_BUDGET_SECONDS have passed (n8n
+//     waits 280 seconds for the run to answer).
+export const MAX_SENDS_PER_RUN = 2
+export const FIRST_PAUSE_SECONDS = [0, 120]
+export const NEXT_PAUSE_SECONDS = [40, 100]
+export const RUN_BUDGET_SECONDS = 200
+
+/** Milliseconds to wait before this run's next email. */
+export function pauseBeforeSend(sentThisRun, random = Math.random()) {
+  const [lo, hi] = sentThisRun > 0 ? NEXT_PAUSE_SECONDS : FIRST_PAUSE_SECONDS
+  return Math.round((lo + (hi - lo) * Math.min(1, Math.max(0, random))) * 1000)
 }
 
 /**

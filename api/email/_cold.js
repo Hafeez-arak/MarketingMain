@@ -5,6 +5,7 @@ import {
   HARD_MAX_PER_WORKSPACE, RECONTACT_DAYS, mailboxReadiness, mailboxCap, inSendingWindow,
   nextWindowStart, gapMinutes, mailboxHealthProblem, followUpSubject, makeMessageId, classifySmtpError, coldProblems,
   SENDING_PROVIDERS, inboxMessageKind, STUCK_AFTER_MINUTES, STUCK_NEEDS_PERSON, isStuckSend,
+  MAX_SENDS_PER_RUN, RUN_BUDGET_SECONDS, pauseBeforeSend,
 } from '../../src/lib/email/cold.js'
 import { closeFinished, subscribeUrl, moveToMarketing } from './_engine.js'
 
@@ -23,6 +24,9 @@ export { coldProblems }
 //                              sign-in → string | null
 //   deps.uuid()                a fresh id for Message-IDs
 //   deps.random()              0..1, for the gap between sends
+//   deps.sleep(ms)             optional: wait before a send (the run's
+//                              rhythm). Without it nothing waits, which is
+//                              what tests want; the server passes a real one.
 //   deps.baseUrl               the app's address, for each email's
 //                              newsletter sign-up link ({{subscribe_url}})
 //
@@ -34,7 +38,9 @@ export { coldProblems }
 // switch is on, for each ready mailbox whose gap has passed and whose day
 // still has room, send ONE email — a due follow-up first (same mailbox, same
 // thread), otherwise the next first email. Then set the mailbox's next
-// moment a random gap ahead. That is the whole pacing model.
+// moment a random gap ahead. At most MAX_SENDS_PER_RUN per company per run,
+// each after a random pause, so no two leave together and none lands on
+// n8n's clock. That is the whole pacing model.
 //
 // Never twice: the mailbox is claimed (next_send_at moved forward, only if
 // it had passed) and then the row (queued → sending, only if still queued),
@@ -154,6 +160,9 @@ export async function launchColdCampaign({ db }, { workspaceId, campaignId, when
 export async function coldTick(deps, { now = new Date(), dryRun = false, workspaceId = null } = {}) {
   const { db } = deps
   const result = { sent: 0, skipped: 0, failed: 0, window: inSendingWindow(now), nextWindow: null, workspaces: [] }
+  // The run's own clock, for its pauses: shared by every workspace, so the
+  // whole run stays inside RUN_BUDGET_SECONDS.
+  const pace = deps.sleep && !dryRun ? { startedAt: Date.now(), slept: 0 } : null
   if (!result.window) {
     result.nextWindow = nextWindowStart(now)?.toISOString() || null
     // A dry run still explains each mailbox; a real run has nothing to do.
@@ -169,7 +178,7 @@ export async function coldTick(deps, { now = new Date(), dryRun = false, workspa
     const out = { workspaceId: ws, sent: 0, mailboxes: [] }
     result.workspaces.push(out)
     try {
-      await runWorkspace(deps, { ws, now, dryRun, out, result })
+      await runWorkspace(deps, { ws, now, dryRun, out, result, pace })
     } catch (err) {
       out.error = String(err?.message || err).slice(0, 300)
     }
@@ -177,7 +186,7 @@ export async function coldTick(deps, { now = new Date(), dryRun = false, workspa
   return result
 }
 
-async function runWorkspace(deps, { ws, now, dryRun, out, result }) {
+async function runWorkspace(deps, { ws, now, dryRun, out, result, pace }) {
   const { db, count } = deps
   const nowIso = now.toISOString()
   if (!dryRun) {
@@ -201,6 +210,7 @@ async function runWorkspace(deps, { ws, now, dryRun, out, result }) {
   const dayStart = brandWallToUtcISO(today, '00:00')
   const weekAgo = new Date(now.getTime() - 7 * DAY).toISOString()
   let wsSentToday = await count(`email_sends?workspace_id=eq.${ws}&mailbox_id=not.is.null&sent_at=gte.${dayStart}&select=id`)
+  let sendsThisRun = 0   // sent, or would be in a dry run
 
   for (const mb of mailboxes) {
     const line = { mailbox: mb.email, action: 'wait', reason: '', next: null }
@@ -238,20 +248,41 @@ async function runWorkspace(deps, { ws, now, dryRun, out, result }) {
       line.reason = `Waiting for its gap, until ${mb.next_send_at}.`
       continue
     }
-    if (dryRun) { line.action = 'send'; line.reason = 'Would send now.'; continue }
+    if (sendsThisRun >= MAX_SENDS_PER_RUN) {
+      line.reason = `Goes on the next run: ${MAX_SENDS_PER_RUN} emails already went this run, and they never leave together.`
+      continue
+    }
+    if (dryRun) { line.action = 'send'; line.reason = 'Would send now.'; sendsThisRun++; continue }
+
+    // The pause before this email. The moment it actually leaves is the
+    // run's start plus the time waited, and the window is checked again at
+    // that moment.
+    let at = now
+    if (pace) {
+      const pause = pauseBeforeSend(sendsThisRun, deps.random ? deps.random() : Math.random())
+      const spent = Math.max(Date.now() - pace.startedAt, pace.slept)
+      if (spent + pause > RUN_BUDGET_SECONDS * 1000) {
+        line.reason = 'Goes on the next run: this run\'s time is used up.'
+        continue
+      }
+      await deps.sleep(pause)
+      pace.slept += pause
+      at = new Date(now.getTime() + Math.max(Date.now() - pace.startedAt, pace.slept))
+      if (!inSendingWindow(at)) { line.reason = 'Sending hours ended while it waited.'; continue }
+    }
 
     // One mailbox's crash (a dropped connection mid-send) is that mailbox's
     // alone: the others still send this run. Its row stays 'sending', which
     // the stuck-row check settles later, so nothing is sent twice.
     let outcome
     try {
-      outcome = await sendOne(deps, { ws, mb, row, campaign: allowed.find(c => c.id === row.campaign_id), now, cap })
+      outcome = await sendOne(deps, { ws, mb, row, campaign: allowed.find(c => c.id === row.campaign_id), now: at, cap })
     } catch (err) {
       outcome = { action: 'failed', reason: `Stopped mid-send: ${String(err?.message || err).slice(0, 200)}. It is checked again in ${STUCK_AFTER_MINUTES} minutes.` }
     }
     line.action = outcome.action
     line.reason = outcome.reason
-    if (outcome.action === 'sent') { result.sent++; out.sent++; wsSentToday++ }
+    if (outcome.action === 'sent') { result.sent++; out.sent++; wsSentToday++; sendsThisRun++ }
     else if (outcome.action === 'skipped') result.skipped++
     else if (outcome.action === 'failed') result.failed++
   }

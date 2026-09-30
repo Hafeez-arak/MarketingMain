@@ -40,12 +40,12 @@ function stubDb(routes) {
 function world({
   mailbox = MAILBOX, campaign = CAMPAIGN, row = { id: 's-a', campaign_id: 'camp-1', contact_id: 'a', email: 'a@hotel.sa', step: 0, subject: '', body: '', mailbox_id: null },
   person = contact('a'), counts = {}, sendResult = { ok: true, messageId: '<m1@araklighting.com>' },
-  mailboxClaim = true, prior = [], secret = 'sealed',
+  mailboxClaim = true, prior = [], secret = 'sealed', mailboxes = null,
 } = {}) {
   const { db, calls } = stubDb([
     { method: 'GET', match: /^email_settings\?cold_sending_enabled/, reply: [{ workspace_id: WS }] },
     { method: 'GET', match: /^email_campaigns\?workspace_id=.*audience=eq\.cold&status=eq\.sending/, reply: [campaign] },
-    { method: 'GET', match: /^email_mailboxes\?workspace_id=/, reply: [mailbox] },
+    { method: 'GET', match: /^email_mailboxes\?workspace_id=/, reply: mailboxes || [mailbox] },
     { method: 'GET', match: /^email_sends\?workspace_id=.*mailbox_id=eq\..*step=gt\.0/, reply: row && row.step > 0 ? [row] : [] },
     { method: 'GET', match: /^email_sends\?workspace_id=.*mailbox_id=is\.null&step=eq\.0/, reply: row && row.step === 0 ? [row] : [] },
     { method: 'GET', match: /^email_sends\?campaign_id=.*step=lt\./, reply: prior },
@@ -74,6 +74,59 @@ function world({
 
 const patches = (calls, re) => calls.filter(c => c.method === 'PATCH' && re.test(c.path))
 const posts = (calls, re) => calls.filter(c => c.method === 'POST' && re.test(c.path))
+
+describe('coldTick: the run\'s rhythm', () => {
+  const three = ['mb-1', 'mb-2', 'mb-3'].map((id, i) => ({ ...MAILBOX, id, email: `rep${i + 1}@araklighting.com` }))
+
+  it('sends at most two emails a run, however many mailboxes are ready', async () => {
+    const w = world({ mailboxes: three })
+    const out = await coldTick(w.deps, { now: SUNDAY_11 })
+    expect(out.sent).toBe(2)
+    expect(w.sent.map(s => s.mb.id)).toEqual(['mb-1', 'mb-2'])
+    expect(out.workspaces[0].mailboxes[2].reason).toMatch(/next run/)
+  })
+
+  it('waits a random 0–2 minutes before the first email and 40–100 seconds before the next', async () => {
+    const waits = []
+    const w = world({ mailboxes: three })
+    w.deps.sleep = async ms => { waits.push(ms) }
+    await coldTick(w.deps, { now: SUNDAY_11 })
+    expect(waits).toEqual([60_000, 70_000])   // random() = 0.5
+    // Each email carries the moment it actually left, not the run's start.
+    const sentAt = patches(w.calls, /^email_sends\?id=eq\./).filter(p => p.body.status === 'sent').map(p => p.body.sent_at)
+    expect(sentAt).toEqual(['2026-09-27T08:01:00.000Z', '2026-09-27T08:02:10.000Z'])
+  })
+
+  it('starts nothing that would run past the run\'s time budget', async () => {
+    const waits = []
+    const w = world({ mailboxes: three })
+    w.deps.random = () => 1   // the longest pauses: 120 s, then 100 s → 220 s > 200 s
+    w.deps.sleep = async ms => { waits.push(ms) }
+    const out = await coldTick(w.deps, { now: SUNDAY_11 })
+    expect(waits).toEqual([120_000])
+    expect(out.sent).toBe(1)
+    expect(out.workspaces[0].mailboxes[1].reason).toMatch(/time is used up/)
+  })
+
+  it('does not send if the pause runs past 17:00', async () => {
+    const w = world()
+    w.deps.random = () => 1
+    w.deps.sleep = async () => {}
+    const out = await coldTick(w.deps, { now: new Date('2026-09-27T13:59:00Z') })  // 16:59 Riyadh
+    expect(out.sent).toBe(0)
+    expect(w.sent).toEqual([])
+    expect(out.workspaces[0].mailboxes[0].reason).toMatch(/hours ended/)
+  })
+
+  it('a check (dry run) never waits, and says which mailbox goes on the next run', async () => {
+    const w = world({ mailboxes: three })
+    let waited = false
+    w.deps.sleep = async () => { waited = true }
+    const out = await coldTick(w.deps, { now: SUNDAY_11, dryRun: true, workspaceId: WS })
+    expect(waited).toBe(false)
+    expect(out.workspaces[0].mailboxes.map(m => m.action)).toEqual(['send', 'send', 'wait'])
+  })
+})
 
 describe('coldTick: when it sends', () => {
   it('does nothing at all outside Sunday–Thursday working hours', async () => {

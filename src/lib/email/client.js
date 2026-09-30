@@ -39,7 +39,7 @@ export async function fetchEmailData(ws) {
     all(() => supabase.from('email_campaign_stats').select('*').eq('workspace_id', ws)),
     all(() => supabase.from('email_settings').select('*').eq('workspace_id', ws)),
     all(() => supabase.from('email_sends')
-      .select('campaign_id,sent_at,opened_at,clicked_at,bounced_at,complained_at')
+      .select('campaign_id,sent_at,opened_at,clicked_at,bounced_at,complained_at,replied_at,subscribed_at')
       .eq('workspace_id', ws).gte('sent_at', since)),
     // The latest weekly AI drafts. A failure here (say, the table not yet
     // migrated) must not blank the whole section, so it degrades to none.

@@ -7,12 +7,12 @@
 // The two lanes. A contact is in exactly one.
 export const AUDIENCES = {
   marketing: {
-    label: 'Marketing',
-    hint: 'Knows us: customers, partners, sign-ups, people met at events. Sent through Resend.',
+    label: 'Newsletter',
+    hint: 'Knows us: customers, partners, people who signed up or replied, people met at events. They get newsletters.',
   },
   cold: {
-    label: 'Cold',
-    hint: 'Never opted in: prospects found through research. Sent only from the outreach mailboxes, one at a time.',
+    label: 'Outreach',
+    hint: 'Prospects who have not opted in yet. Written to only from the outreach mailboxes, a few a day. A reply or a sign-up moves them to Newsletter.',
   },
 }
 

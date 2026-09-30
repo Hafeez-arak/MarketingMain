@@ -18,9 +18,9 @@ Status as of 2026-09-27.
 | 11 | Weekly AI drafts on the n8n box | WSL box | To do (after merge) |
 | 12 | Outreach (cold) mailboxes: domain, Google mailboxes, DNS, app passwords | Registrar + Google | To do |
 | 13 | Warm-up service on each outreach mailbox | TrulyInbox (or similar) | To do |
-| 14 | Connect the mailboxes in the app | App → Email → Settings | To do |
+| 14 | Connect the mailboxes in the app | App → Email → Outreach → Mailboxes | To do |
 | 15 | Cold sender schedule on the n8n box | WSL box | To do (after merge) |
-| 16 | Switch outreach sending on, 14 days after warm-up starts | App → Email → Settings | Later |
+| 16 | Switch outreach sending on, 14 days after warm-up starts | App → Email → Outreach → Mailboxes | Later |
 
 ---
 
@@ -86,7 +86,7 @@ Resend → Domains → `email.arak-sa.com` → turn on **Open tracking** and
 
 ## 5. Sender details in the app
 
-App → Email → Settings → Marketing sender:
+App → Email → Settings → Newsletter sender:
 
 - From name: `Arak Lighting`
 - From address: `updates@email.arak-sa.com` (any name, but it must end in
@@ -192,8 +192,8 @@ Needs nothing new: it uses the `AGENT_RUN_SECRET`, `AGENT_BASE_URL` and
 counted against the workspace's monthly AI cap.
 
 First run: n8n → Agent — weekly email drafts → **Execute workflow** (Run now),
-or the button in App → Email → Marketing. The drafts appear at the top of the
-Marketing tab.
+or the button in App → Email → Newsletters. The drafts appear at the top of the
+Newsletters tab.
 
 ---
 
@@ -258,7 +258,7 @@ for it.
 
 ## 14. Connect the mailboxes in the app
 
-App → Email → Settings → Outreach mailboxes → **Connect mailbox**: address,
+App → Email → Outreach → Mailboxes → **Connect mailbox**: address,
 sender name, app password, signature, most per day (15 is a good start), the
 warm-up start date. The app logs in to both sending (SMTP) and reading (IMAP)
 before it stores anything, and stores the password encrypted where no page
@@ -312,13 +312,18 @@ the secret is missing or different.
 ## 16. Switch outreach sending on
 
 Only once at least one mailbox shows **Ready** (14 days after its warm-up
-started): App → Email → Settings → Outreach mailboxes → **Switch on**. The same
+started): App → Email → Outreach → Mailboxes → **Switch on**. The same
 button is the emergency stop.
 
 How sending behaves, all enforced in code (`src/lib/email/cold.js`):
 
 - Sunday–Thursday, 09:00–17:00 Riyadh only; one email per mailbox per run,
   with a random gap so a day's emails are spread out.
+- At most 2 emails per company per run, never together: the first after a
+  random 0–2 minute pause, the second 40–100 seconds later. So no email lands
+  on n8n's 10-minute clock and two mailboxes never send in the same second.
+  The pauses happen inside the Vercel function (it waits up to ~200 s per
+  run); nothing on the n8n box changes for this.
 - Per mailbox: 5/day in its first week of real sending, 10/day in the second,
   then its own limit. Never more than 40/day per mailbox or 200/day in total,
   whatever is typed in.
@@ -392,7 +397,7 @@ https://admin.microsoft.com → Users → Active users → the account:
 
 ### Connect in the app
 
-App → Email → Settings → Outreach mailboxes → **Connect Microsoft 365** → sign
+App → Email → Outreach → Mailboxes → **Connect Microsoft 365** → sign
 in as the mailbox (not as yourself: the screen asks which account). It comes
 back connected, named from Microsoft; **Edit** sets the signature and the
 daily limit. Before switching outreach on, send one email by hand from the

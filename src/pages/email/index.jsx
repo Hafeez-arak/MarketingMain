@@ -9,20 +9,24 @@ import { Groups } from './Groups'
 import { Campaigns } from './Campaigns'
 import { EmailSettings } from './Settings'
 import { Subscribers } from './Subscribers'
-import { Notice } from './parts'
+import { Notice, SubTabs } from './parts'
+import { OutreachMailboxes } from './Mailboxes'
 
 // ─── Email ─────────────────────────────────────────────────────────────────
-// One section, seven tabs. The tab lives in the URL (?tab=contacts) so a link
-// to the contact list is a link to the contact list.
+// One section, five tabs, in the order the work is done. The tab lives in the
+// URL (?tab=contacts) so a link to the contact list is a link to it.
 //
-//   Overview   what is happening: sends, rates, today's limit, what is missing
-//   Contacts   the address book: add, import, edit, delete, group, export
-//   Groups     named lists a campaign is sent to
-//   Marketing  campaigns to people who know us, sent through Resend
-//   Cold       outreach to prospects: written here, sent one at a time from
-//              our own outreach mailboxes (never through Resend)
-//   Subscribers  prospects who signed up from an outreach email's button
-//   Settings   sender, footer, limits, warm-up, outreach mailboxes
+//   Overview     what is happening today, in both lanes, and what needs you
+//   Contacts     People (add, import, edit, group) and Groups
+//   Outreach     everything for prospects in one place: Campaigns, the
+//                Mailboxes they are sent from (and the on/off switch), and
+//                the People who replied or signed up
+//   Newsletters  campaigns to people who know us (the marketing lane)
+//   Settings     the newsletter sender, footer and limits
+//
+// Internally the two lanes keep their old names, 'marketing' and 'cold' (the
+// database, the server and the URL keys use them), but a person never sees
+// "cold": outreach is outreach, and marketing email is a newsletter.
 //
 // All data for the section loads once, here, and is handed down. At the
 // sizes this is built for (a few thousand contacts) that is simpler and
@@ -30,25 +34,66 @@ import { Notice } from './parts'
 // every tab agree with each other.
 
 const TABS = [
-  { key: 'overview', label: 'Overview', note: 'How sending is going' },
-  { key: 'contacts', label: 'Contacts', note: 'Everyone you can email: add, import, tag, group' },
-  { key: 'groups', label: 'Groups', note: 'Named lists that campaigns are sent to' },
-  { key: 'marketing', label: 'Marketing', note: 'Newsletters and updates to people who know us, sent through Resend' },
-  { key: 'cold', label: 'Cold outreach', note: 'Personal first emails and follow-ups to prospects, sent from your outreach mailboxes' },
-  { key: 'subscribers', label: 'Subscribers', note: 'Prospects who signed up to the newsletter from an outreach email' },
-  { key: 'settings', label: 'Settings', note: 'Sender, footer, sending limits and warm-up' },
+  { key: 'overview', label: 'Overview', note: 'What is going out today, what came back, and anything that needs you' },
+  { key: 'contacts', label: 'Contacts', note: 'Everyone you can email, and the groups campaigns are sent to' },
+  { key: 'cold', label: 'Outreach', note: 'Personal emails to prospects from your outreach mailboxes, a few at a time' },
+  { key: 'marketing', label: 'Newsletters', note: 'Newsletters and updates to people who know us or signed up' },
+  { key: 'settings', label: 'Settings', note: 'Who newsletters come from, the footer, and sending limits' },
 ]
+
+const SECTIONS = {
+  contacts: [
+    { key: '', label: 'People' },
+    { key: 'groups', label: 'Groups' },
+  ],
+  cold: [
+    { key: '', label: 'Campaigns' },
+    { key: 'mailboxes', label: 'Mailboxes' },
+    { key: 'people', label: 'Replied & signed up' },
+  ],
+}
+
+// Old tab names, from bookmarks and links sent before the regroup. The
+// Microsoft sign-in callback also used to come back to ?tab=settings.
+const MOVED = {
+  groups: ['contacts', 'groups'],
+  subscribers: ['cold', 'people'],
+}
+function whereIs(params) {
+  const raw = params.get('tab') || ''
+  if (MOVED[raw]) return MOVED[raw]
+  if (raw === 'settings' && (params.has('ms') || params.has('ms_error'))) return ['cold', 'mailboxes']
+  const tab = TABS.some(t => t.key === raw) ? raw : 'overview'
+  const section = (SECTIONS[tab] || []).some(x => x.key === params.get('section')) ? params.get('section') : ''
+  return [tab, section]
+}
 
 export function EmailFlows() {
   const { activeWorkspaceId } = useAuth()
   const [params, setParams] = useSearchParams()
-  const tab = TABS.some(t => t.key === params.get('tab')) ? params.get('tab') : 'overview'
+  const [tab, section] = whereIs(params)
   const setTab = useCallback((key, extra = {}) => setParams(() => {
+    const [to, movedSection] = MOVED[key] || [key, '']
     const n = new URLSearchParams()
-    n.set('tab', key)
+    n.set('tab', to)
+    if (movedSection) n.set('section', movedSection)
     for (const [k, v] of Object.entries(extra)) if (v) n.set(k, v)
     return n
   }), [setParams])
+
+  // An old address is rewritten to the new one, keeping the rest of it (a
+  // Microsoft sign-in's verdict, which the mailbox list reads and then clears).
+  useEffect(() => {
+    const raw = params.get('tab') || ''
+    if (raw === tab && (params.get('section') || '') === section) return
+    if (!MOVED[raw] && raw !== 'settings') return
+    setParams(p => {
+      const n = new URLSearchParams(p)
+      n.set('tab', tab)
+      if (section) n.set('section', section); else n.delete('section')
+      return n
+    }, { replace: true })
+  }, [params, tab, section, setParams])
 
   const [data, setData] = useState(null)
   const [loadedFor, setLoadedFor] = useState(null)
@@ -105,7 +150,7 @@ export function EmailFlows() {
 
   return (
     <div className="max-w-7xl space-y-4">
-      <PageHeader title="Email" subtitle="Marketing email to people who know us, and personal outreach to prospects. Kept on separate lanes so one can never damage the other.">
+      <PageHeader title="Email" subtitle="Personal outreach to prospects, and newsletters to people who know us. Kept apart, so a problem with one can never hurt the other.">
         <Button variant="secondary" size="sm" onClick={reload} disabled={refreshing || !activeWorkspaceId}>
           {refreshing ? <Spinner size="sm" /> : null}
           Refresh
@@ -134,12 +179,18 @@ export function EmailFlows() {
         </Notice>
       )}
 
+      {/* A campaign open on screen is its own page: no sub-tabs above it. */}
+      {SECTIONS[tab] && !params.get('campaign') && (
+        <SubTabs items={SECTIONS[tab]} value={section} onChange={key => setTab(tab, { section: key })} />
+      )}
+
       {tab === 'overview' && <Overview {...ctx} />}
-      {tab === 'contacts' && <Contacts {...ctx} />}
-      {tab === 'groups' && <Groups {...ctx} />}
+      {tab === 'contacts' && section === '' && <Contacts {...ctx} />}
+      {tab === 'contacts' && section === 'groups' && <Groups {...ctx} />}
+      {tab === 'cold' && section === '' && <Campaigns {...ctx} audience="cold" />}
+      {tab === 'cold' && section === 'mailboxes' && <OutreachMailboxes {...ctx} />}
+      {tab === 'cold' && section === 'people' && <Subscribers {...ctx} />}
       {tab === 'marketing' && <Campaigns {...ctx} audience="marketing" />}
-      {tab === 'cold' && <Campaigns {...ctx} audience="cold" />}
-      {tab === 'subscribers' && <Subscribers {...ctx} />}
       {tab === 'settings' && <EmailSettings {...ctx} />}
     </div>
   )

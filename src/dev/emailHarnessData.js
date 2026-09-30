@@ -64,6 +64,10 @@ function seed() {
     ['khalid@hotelgroup.example', 'Khalid', 'Al Otaibi', 'Riyadh Hotels Co', 'Project Director', 'Developer', 'cold', 'ar'],
     ['anna@fitout.example', 'Anna', 'Marsh', 'Interiors Fit-out', 'Design Manager', 'Interior designer', 'cold', 'en'],
     ['old@bounce.example', 'Old', 'Address', 'Gone Ltd', '', 'Customer', 'marketing', 'en'],
+    // Two prospects who answered outreach: one pressed Sign-up, one replied.
+    // Both have moved to the newsletter lane, as the server moves them.
+    ['faisal@towers.example', 'Faisal', 'Al Harbi', 'Towers Development', 'Project Manager', 'Developer', 'marketing', 'ar'],
+    ['maya@studio.example', 'Maya', 'Saleh', 'Studio M', 'Architect', 'Architect', 'marketing', 'en'],
   ]
   people.forEach(([email, first_name, last_name, company, job_title, contact_type, audience, language], i) => {
     const c = {
@@ -73,6 +77,8 @@ function seed() {
       unsubscribe_token: uid(), unsubscribed_at: null, last_sent_at: i < 3 ? daysAgo(2) : null, last_opened_at: null, last_clicked_at: null,
       created_at: daysAgo(10 - i), updated_at: now(),
     }
+    if (email.startsWith('faisal@')) Object.assign(c, { consent: 'opted_in', subscribed_at: daysAgo(1), source: 'reply' })
+    if (email.startsWith('maya@')) Object.assign(c, { consent: 'business_contact', replied_at: daysAgo(2), source: 'reply' })
     db.email_contacts.push(c)
     const g = audience === 'cold' ? g3 : (contact_type === 'Consultant' ? g2 : g1)
     db.email_group_members.push({ group_id: g.id, contact_id: c.id, workspace_id: WS, added_at: now() })
@@ -242,7 +248,7 @@ function api(action, body) {
     })
   }
   // No Microsoft here: come straight back as if the sign-in failed, to show the message.
-  if (action === 'ms_connect_start') return json({ ok: true, url: '/dev-email.html?tab=settings&ms_error=wrong_account' })
+  if (action === 'ms_connect_start') return json({ ok: true, url: '/dev-email.html?tab=cold&section=mailboxes&ms_error=wrong_account' })
   if (action === 'mailbox_pause') {
     const mb = db.email_mailboxes.find(m => m.id === body.mailbox_id)
     Object.assign(mb, body.paused ? { status: 'paused', status_reason: 'Paused by hafeez@arak-sa.com.' } : { status: 'active', status_reason: '' })
