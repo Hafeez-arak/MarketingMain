@@ -98,7 +98,7 @@ export function ResearchReport() {
     // No setLoaded(false) here: `loaded` starts false, this effect runs once
     // per workspace, and switching workspaces remounts the whole subtree.
     Promise.all([
-      fetchRuns(activeWorkspaceId, accessToken, 12),
+      fetchRuns(activeWorkspaceId, accessToken, 12, { throwOnError: true }),
       fetchIntel(activeWorkspaceId, accessToken),
       fetchAgenda(activeWorkspaceId, accessToken),
     ])

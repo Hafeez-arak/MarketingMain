@@ -3,6 +3,7 @@ import { useApp, actions } from '../../store/app'
 import { Card, Button, Badge, Empty, PostImage, Skeleton } from '../../components/ui/index'
 import { PLATFORM_META, formatDateTime } from '../../lib/utils'
 import { useConnectedAccounts } from '../../lib/useConnectedAccounts'
+import { usePlatformPosts } from '../../lib/usePlatformPosts'
 import { ConnectAccounts } from '../../components/social/ConnectAccounts'
 import { AccountAnalytics } from '../../components/social/AccountAnalytics'
 import { ComposerHost } from '../../components/composer/ComposerHost'
@@ -28,7 +29,13 @@ export function LinkedInPage() {
   const [tab, setTab] = useState(() =>
     new URLSearchParams(window.location.search).get('tab') === 'analytics' ? 'analytics' : 'posts')
 
-  const posts = state.posts.filter(p => p.platform === 'linkedin')
+  // The database's posts (plans, the composer) plus any older browser-only
+  // ones, by id. Counted only once the database has answered.
+  const remote = usePlatformPosts('linkedin')
+  const remoteIds = new Set(remote.posts.map(p => p.id))
+  const posts = [...remote.posts, ...state.posts.filter(p => p.platform === 'linkedin' && !remoteIds.has(p.id))]
+    .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))
+  const counting = !remote.loaded
   const connected = accounts.some(a => a.is_active !== false)
   const filtered = filter === 'all' ? posts : posts.filter(p => p.status === filter)
 
@@ -41,11 +48,11 @@ export function LinkedInPage() {
             <span className={`w-10 h-10 flex items-center justify-center text-sm font-bold ${META.bg} ${META.text}`}>{META.abbr}</span>
             <div>
               <h2 className="font-semibold text-text">LinkedIn</h2>
-              {loading
+              {loading || counting
                 ? <Skeleton className="h-3 w-32 mt-1" />
                 : (
                   <p className="text-xs text-text-secondary">
-                    {posts.length} post{posts.length === 1 ? '' : 's'} · {connected ? 'Connected' : 'Not connected'}
+                    {remote.error ? 'Posts not loaded' : `${posts.length} post${posts.length === 1 ? '' : 's'}`} · {connected ? 'Connected' : 'Not connected'}
                   </p>
                 )}
             </div>
@@ -74,9 +81,9 @@ export function LinkedInPage() {
               loading={loading} error={error} refresh={refresh} />
           </div>
           <div className="grid grid-cols-3 divide-x divide-border border-t border-border">
-            <div className="p-4 text-center"><p className="font-semibold text-text">{posts.length}</p><p className="text-xs text-text-secondary">Total posts</p></div>
-            <div className="p-4 text-center"><p className="font-semibold text-text">{posts.filter(p => p.status === 'scheduled').length}</p><p className="text-xs text-text-secondary">Scheduled</p></div>
-            <div className="p-4 text-center"><p className="font-semibold text-text">{posts.filter(p => p.status === 'published').length}</p><p className="text-xs text-text-secondary">Published</p></div>
+            <div className="p-4 text-center">{counting ? <Skeleton className="h-4 w-6 mx-auto mb-1" /> : <p className="font-semibold text-text">{remote.error ? "—" : posts.length}</p>}<p className="text-xs text-text-secondary">Total posts</p></div>
+            <div className="p-4 text-center">{counting ? <Skeleton className="h-4 w-6 mx-auto mb-1" /> : <p className="font-semibold text-text">{remote.error ? "—" : posts.filter(p => p.status === 'scheduled').length}</p>}<p className="text-xs text-text-secondary">Scheduled</p></div>
+            <div className="p-4 text-center">{counting ? <Skeleton className="h-4 w-6 mx-auto mb-1" /> : <p className="font-semibold text-text">{remote.error ? "—" : posts.filter(p => p.status === 'published').length}</p>}<p className="text-xs text-text-secondary">Published</p></div>
           </div>
         </Card>
 
@@ -89,7 +96,16 @@ export function LinkedInPage() {
           ))}
         </div>
 
-        {filtered.length === 0 ? (
+        {counting ? (
+        <Card className="p-5 space-y-2" aria-busy="true" aria-label="Loading posts">
+          {[0, 1, 2].map(i => <Skeleton key={i} className="h-4 w-full" />)}
+        </Card>
+      ) : remote.error && filtered.length === 0 ? (
+        <Card className="p-4 flex items-center gap-3 border-red-200 bg-red-50">
+          <p className="text-xs flex-1 text-red-600">The posts could not be loaded ({remote.error}). Nothing has been lost.</p>
+          <Button size="sm" variant="secondary" onClick={remote.reload}>Try again</Button>
+        </Card>
+      ) : filtered.length === 0 ? (
           <Card>
             <Empty
               icon={<svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /></svg>}
@@ -118,9 +134,9 @@ export function LinkedInPage() {
                       )}
                     </div>
                     <div className="flex gap-1 flex-shrink-0">
-                      <Button variant="ghost" size="xs" onClick={() => dispatch(actions.deletePost(p.id))}>
+                      {!p._fromSupabase && <Button variant="ghost" size="xs" onClick={() => dispatch(actions.deletePost(p.id))}>
                         <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14H6L5 6" /></svg>
-                      </Button>
+                      </Button>}
                     </div>
                   </div>
                 </Card>

@@ -76,16 +76,16 @@ export function useCalendarPosts({ workspaceId, accessToken, from, to, webhooks,
         const nowISO = new Date().toISOString()
         const [booked, unbooked, next] = await Promise.all([
           fetchScheduledPosts(workspaceId, accessToken, {
-            from, to, publishStatus: ON_CALENDAR_STATUSES,
+            from, to, publishStatus: ON_CALENDAR_STATUSES, throwOnError: true,
           }),
           fetchScheduledPosts(workspaceId, accessToken, {
-            publishStatus: PENDING_STATUSES, status: APPROVED_STATUSES, limit: 120,
+            publishStatus: PENDING_STATUSES, status: APPROVED_STATUSES, limit: 120, throwOnError: true,
           }),
           // `from` alone, with no `to`: everything still ahead of us. Passing
           // from also flips the ordering to scheduled_publish_at ascending,
           // which is exactly the order the strip wants — soonest first.
           fetchScheduledPosts(workspaceId, accessToken, {
-            from: nowISO, publishStatus: ['scheduled', 'publishing'], limit: UPCOMING_LIMIT,
+            from: nowISO, publishStatus: ['scheduled', 'publishing'], limit: UPCOMING_LIMIT, throwOnError: true,
           }),
         ])
         if (cancelled || latest.current !== wantKey) return

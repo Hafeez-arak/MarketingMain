@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
 import { useApp } from '../../store/app'
 import { useAuth } from '../../store/auth'
-import { Card, PageHeader, Button, Empty, Spinner } from '../../components/ui/index'
+import { Card, PageHeader, Button, Empty, Skeleton } from '../../components/ui/index'
 import { fetchBrandMemory, updateBrandMemory, deleteBrandMemory } from '../../lib/brandContext'
 import { runHealth, scheduleNeverRan } from '../../lib/agent/runHealth'
 import {
@@ -95,7 +95,7 @@ export function Insights() {
       fetchIdeasForInsights(activeWorkspaceId, accessToken),
       fetchPerformance(activeWorkspaceId, accessToken),
       fetchBrandMemory(activeWorkspaceId, accessToken, { status: 'all' }),
-      fetchRuns(activeWorkspaceId, accessToken, 12),
+      fetchRuns(activeWorkspaceId, accessToken, 12, { throwOnError: true }),
     ]).then(async ([e, i, p, m, r]) => {
       if (!alive) return
       setEvents(e); setIdeas(i); setPerf(p); setMemory(m); setRuns(r || [])
@@ -190,7 +190,20 @@ export function Insights() {
   if (!activeWorkspaceId) {
     return <Empty title="No workspace selected" description="Pick a brand to see its research." />
   }
-  if (loading) return <div className="p-8 flex justify-center"><Spinner /></div>
+  if (loading) {
+    // The page's own frame, with its cards as skeletons: a lone spinner on a
+    // blank page reads as broken, and a card drawn over no data reads as a
+    // claim ("no research has run").
+    return (
+      <div className="space-y-4" aria-busy="true" aria-label="Loading research">
+        <PageHeader title="Research" subtitle={`What is happening around ${activeWorkspace?.name || 'this brand'}, and what we have learned from it.`} />
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          {[0, 1, 2, 3].map(i => <Card key={i} className="p-4 space-y-2"><Skeleton className="h-3 w-24" /><Skeleton className="h-6 w-12" /><Skeleton className="h-3 w-full" /></Card>)}
+        </div>
+        <Card className="p-5 space-y-2">{[0, 1, 2, 3].map(i => <Skeleton key={i} className="h-4 w-full" />)}</Card>
+      </div>
+    )
+  }
   if (loadError) {
     return (
       <Card className="p-6">

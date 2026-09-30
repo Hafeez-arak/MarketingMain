@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import { Link } from 'react-router-dom'
 import { useApp, actions } from '../../store/app'
 import { useAuth } from '../../store/auth'
-import { Card, WarmCard, Button, Textarea, Input, Select, ConfirmDialog, Modal } from '../../components/ui/index'
+import { Card, WarmCard, Button, Textarea, Input, Select, ConfirmDialog, Modal, Skeleton } from '../../components/ui/index'
 import {
   DEFAULT_BRAND_PROFILE, fetchBrandProfile, saveBrandProfile,
   buildInstructionsString, isBrandProfileEmpty,
@@ -1257,6 +1257,7 @@ export function BrandBrain() {
 
   // Everything is keyed on the workspace, so switching companies must refetch
   // rather than leave the previous brand's structure on screen.
+  const [reloadKey, setReloadKey] = useState(0)
   useEffect(() => {
     if (!activeWorkspaceId) return
     let alive = true
@@ -1273,9 +1274,13 @@ export function BrandBrain() {
       if (p) { setProfile(p); dispatch(actions.setBrandProfile(p)) }
       setDirty(false)
       setLoadedFor(activeWorkspaceId)
+    }).catch(() => {
+      if (!alive) return
+      setSchema({ sections: [], fields: [], columns: [], failed: true })
+      setLoadedFor(activeWorkspaceId)
     })
     return () => { alive = false }
-  }, [activeWorkspaceId, accessToken, dispatch])
+  }, [activeWorkspaceId, accessToken, dispatch, reloadKey])
 
   // Learned rules for this brand. All statuses fetched — a human reviewing
   // proposals is the whole point of the section, so filtering to active here
@@ -1530,11 +1535,16 @@ export function BrandBrain() {
                   style={{ transition: 'stroke-dashoffset 0.6s ease' }} />
               </svg>
               <div className="absolute inset-0 flex items-center justify-center">
-                <span className="text-lg font-bold text-amber-800">{pct}%</span>
+                {/* Not a 0% before the brand has loaded: that is a claim. */}
+                {loading || schema.failed
+                  ? <Skeleton className="h-5 w-9" />
+                  : <span className="text-lg font-bold text-amber-800">{pct}%</span>}
               </div>
             </div>
             <div className="leading-tight">
-              <p className="text-sm font-bold text-stone-900">{filledFields}<span className="text-text-tertiary font-medium">/{totalFields}</span></p>
+              {loading || schema.failed
+                ? <Skeleton className="h-4 w-10 mb-1" />
+                : <p className="text-sm font-bold text-stone-900">{filledFields}<span className="text-text-tertiary font-medium">/{totalFields}</span></p>}
               <p className="text-[11px] text-text-tertiary">fields<br/>trained</p>
             </div>
           </div>
@@ -1557,7 +1567,17 @@ export function BrandBrain() {
         <div className="flex items-center justify-center py-16 text-text-tertiary text-sm">Loading your brand profile…</div>
       )}
 
-      {!loading && isConfigured && schema.sections.length === 0 && (
+      {!loading && schema.failed && (
+        <Card className="p-8 text-center space-y-3">
+          <p className="text-sm font-semibold text-text">The Brand Brain could not be loaded.</p>
+          <p className="text-xs text-text-tertiary max-w-md mx-auto">
+            This is a connection problem, not an empty brain: nothing has been lost. Try again in a moment.
+          </p>
+          <Button variant="secondary" onClick={() => { setLoadedFor(null); setReloadKey(k => k + 1) }}>Try again</Button>
+        </Card>
+      )}
+
+      {!loading && !schema.failed && isConfigured && schema.sections.length === 0 && (
         <Card className="p-8 text-center space-y-3">
           <p className="text-sm font-semibold text-text">This brand's brain has no structure yet.</p>
           <p className="text-xs text-text-tertiary max-w-md mx-auto">

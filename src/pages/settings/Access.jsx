@@ -210,6 +210,12 @@ export function Access() {
         setError(e || '')
         setLoading(false)
       })
+      .catch(err => {
+        // Without this a failed read left both lists on "Loading…" forever.
+        if (cancelled) return
+        setError(String(err?.message || err))
+        setLoading(false)
+      })
     return () => { cancelled = true }
   }, [])
 
@@ -304,13 +310,18 @@ export function Access() {
 
   const pending  = rows.filter(r => r.status === 'pending')
   const approved = rows.filter(r => r.status === 'approved')
+  // The lists could not be read at all (as opposed to an action failing on a
+  // list that is on screen): say so rather than "No requests waiting".
+  const unread = !loading && !!error && rows.length === 0
   const removed  = rows.filter(r => r.status === 'revoked')
 
   return (
     <div className="max-w-3xl space-y-4">
       <PageHeader
         title="Team & Access"
-        subtitle={`Who can sign in, and which of the ${companies.length} ${companies.length === 1 ? 'company' : 'companies'} each of them gets.`}
+        subtitle={loading || unread
+          ? 'Who can sign in, and which companies each of them gets.'
+          : `Who can sign in, and which of the ${companies.length} ${companies.length === 1 ? 'company' : 'companies'} each of them gets.`}
       />
 
       {error && (
@@ -399,6 +410,8 @@ export function Access() {
         </div>
         {loading ? (
           <div className="px-6 py-8 text-center text-xs text-text-tertiary">Loading…</div>
+        ) : unread ? (
+          <div className="px-6 py-8 text-center text-sm text-text-secondary">Not loaded: see the error above.</div>
         ) : pending.length === 0 ? (
           <div className="px-6 py-8 text-center text-sm text-text-secondary">No requests waiting.</div>
         ) : (
@@ -421,6 +434,8 @@ export function Access() {
         </div>
         {loading ? (
           <div className="px-6 py-8 text-center text-xs text-text-tertiary">Loading…</div>
+        ) : unread ? (
+          <div className="px-6 py-8 text-center text-sm text-text-secondary">Not loaded: see the error above.</div>
         ) : (
           <ul className="divide-y divide-border">
             {approved.map(row => (

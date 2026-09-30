@@ -41,19 +41,24 @@ export async function startResearchRun({ workspaceId, accessToken, periodDays = 
 }
 
 /** The most recent runs for a workspace, newest first. */
-export async function fetchRuns(workspaceId, accessToken, limit = 5) {
+export async function fetchRuns(workspaceId, accessToken, limit = 5, { throwOnError = false } = {}) {
   const url = `${SUPABASE_URL}/rest/v1/research_runs?workspace_id=eq.${workspaceId}` +
     `&order=started_at.desc&limit=${limit}` +
     `&select=id,status,stage,started_at,finished_at,report,error`
+  let failure
   try {
     const res = await fetch(url, {
       headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${accessToken || SUPABASE_ANON_KEY}` },
     })
-    if (!res.ok) return []
-    return await res.json()
-  } catch {
-    return []
+    if (res.ok) return await res.json()
+    failure = new Error(`The research runs could not be read (${res.status})`)
+  } catch (err) {
+    failure = err
   }
+  // A page that says "no research has run yet" must know the list really is
+  // empty: with throwOnError a failed read is an error, not an empty list.
+  if (throwOnError) throw failure
+  return []
 }
 
 /**

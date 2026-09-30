@@ -110,6 +110,7 @@ function useApprovalPosts(accessToken, workspaceId) {
   // effect, which runs after the first paint — so with `loading` alone that
   // paint showed "Nothing to review" before anything had been asked.
   const [loaded,  setLoaded]  = useState(false)
+  const [loadError, setLoadError] = useState('')
 
   const fetchAll = useCallback(async () => {
     if (!accessToken) return
@@ -126,13 +127,18 @@ function useApprovalPosts(accessToken, workspaceId) {
       // appeared on this screen. Adding a platform is now a change in the view
       // and in lib/scheduledPosts.js, not here.
       const [rows, approvalsData] = await Promise.all([
-        fetchScheduledPosts(workspaceId, accessToken),
+        fetchScheduledPosts(workspaceId, accessToken, { throwOnError: true }),
         fetchApprovalsData(workspaceId, accessToken),
       ])
 
       setPosts(rows.map(r => normalizePost(r, r.platform)))
       setIdeas(approvalsData.ideas || [])
       setPlans(approvalsData.plans || [])
+      setLoadError('')
+    } catch (err) {
+      // What is on screen stays; the page says the refresh failed instead of
+      // turning a failed read into "No posts yet".
+      setLoadError(String(err?.message || err))
     } finally {
       setLoading(false)
       setLoaded(true)
@@ -152,7 +158,7 @@ function useApprovalPosts(accessToken, workspaceId) {
     setPosts(prev => prev.map(p => p.id === post.id && p.platform === post.platform ? { ...p, status } : p))
   }
 
-  return { posts, ideas, plans, loading, loaded, fetchAll, updateStatus, setIdeas }
+  return { posts, ideas, plans, loading, loaded, loadError, fetchAll, updateStatus, setIdeas }
 }
 
 // Shaped like a plan group with its first cards open, so the page keeps its
@@ -411,7 +417,7 @@ function sortItems(items, tab) {
 export function Approvals() {
   const { state } = useApp()
   const { activeWorkspaceId, accessToken } = useAuth()
-  const { posts, ideas, plans, loading, loaded, fetchAll, setIdeas } = useApprovalPosts(accessToken, activeWorkspaceId)
+  const { posts, ideas, plans, loading, loaded, loadError, fetchAll, setIdeas } = useApprovalPosts(accessToken, activeWorkspaceId)
   const { allAccounts: accounts } = useConnectedAccounts()
   const [tab,           setTab]           = useState(null)   // null until the first load picks one
   const [selectedPost,  setSelectedPost]  = useState(null)
@@ -703,9 +709,16 @@ export function Approvals() {
         ))}
       </div>
 
+      {loadError && (
+        <Card className="p-3 flex items-start gap-3 border-red-200 bg-red-50">
+          <p className="text-xs flex-1 text-red-600">The posts could not be loaded ({loadError}). Nothing has been lost.</p>
+          <Button size="sm" variant="secondary" onClick={fetchAll} disabled={loading}>Try again</Button>
+        </Card>
+      )}
+
       {(loading || !loaded) && items.length === 0 ? (
         <ApprovalsSkeleton />
-      ) : grouped.length === 0 ? (
+      ) : loadError && items.length === 0 ? null : grouped.length === 0 ? (
         <Card>
           <Empty
             icon={<svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>}
