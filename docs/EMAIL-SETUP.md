@@ -124,7 +124,9 @@ Without it, due emails still go out, but only when someone opens the Email page.
 
 ## 8. Test
 
-App → Email → Settings → Test sending → your address → **Send test**.
+The app has no test-send button (removed for production, 2026-09-30). Check
+with the first real marketing campaign: put yourself in a small group of your
+own addresses and send it to that group first.
 
 - Arrived in the inbox (not spam): done.
 - Error "domain is not verified": step 3 is not finished yet.
@@ -262,9 +264,9 @@ warm-up start date. The app logs in to both sending (SMTP) and reading (IMAP)
 before it stores anything, and stores the password encrypted where no page
 can read it.
 
-Then **Send test** on each mailbox: it should reach your inbox, not spam or
-Promotions. Also send one to the address shown at https://www.mail-tester.com
-(the Composer's "Send a test to" box works for this) and aim for 9/10.
+To check a mailbox lands in the inbox (the app has no test-send button any
+more), send one email by hand from it, in Outlook or Gmail, to your own
+address and to the one shown at https://www.mail-tester.com, and aim for 9/10.
 
 The password is encrypted with a key derived from `SUPABASE_SERVICE_ROLE_KEY`.
 If that key is ever rotated, every mailbox shows "Needs reconnecting": paste
@@ -393,7 +395,8 @@ https://admin.microsoft.com → Users → Active users → the account:
 App → Email → Settings → Outreach mailboxes → **Connect Microsoft 365** → sign
 in as the mailbox (not as yourself: the screen asks which account). It comes
 back connected, named from Microsoft; **Edit** sets the signature and the
-daily limit. **Send test** to yourself before switching outreach on.
+daily limit. Before switching outreach on, send one email by hand from the
+mailbox (in Outlook) to your own address to check it lands in the inbox.
 
 Company mailboxes need no warm-up date: they start at 5 a day and ramp up as
 in section 16. Keep the limit at 15–30: a burst of cold email from arak-sa.com

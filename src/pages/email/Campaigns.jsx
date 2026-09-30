@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Card, Button, Input, Select, Textarea, Modal, ConfirmDialog, Empty, Skeleton, SectionHead } from '../../components/ui/index'
-import { useAuth } from '../../store/auth'
 import { pickRecipients, displayName } from '../../lib/email/contacts'
 import { renderEmail, marketingProblems, MERGE_TAGS, applyMergeTags, toPlainText, subscribeButton } from '../../lib/email/render'
 import { brandTodayKey } from '../../lib/brandTime'
@@ -197,7 +196,6 @@ function ColdLaneNotice({ data, setTab }) {
 // ─── Composer ──────────────────────────────────────────────────────────────
 
 function Composer({ audience, campaign, data, workspaceId, reload, setTab, status }) {
-  const { user } = useAuth()
   const cold = audience === 'cold'
   const [form, setForm] = useState(() => campaign
     ? { ...EMPTY[audience], ...campaign, follow_ups: Array.isArray(campaign.follow_ups) ? campaign.follow_ups : [] }
@@ -206,8 +204,6 @@ function Composer({ audience, campaign, data, workspaceId, reload, setTab, statu
   const [dirty, setDirty] = useState(false)
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState(null)   // { tone, text }
-  const [testTo, setTestTo] = useState(user?.email || '')
-  const [sending, setSending] = useState(false)
   const [previewIdx, setPreviewIdx] = useState(0)
   const [editingStep, setEditingStep] = useState(0)   // cold: 0 = first email, n = follow-up n
   const bodyRef = useRef(null)
@@ -301,27 +297,6 @@ function Composer({ audience, campaign, data, workspaceId, reload, setTab, statu
     }
   }
 
-  async function sendTest() {
-    setSending(true); setMessage(null)
-    // Cold, with a mailbox connected: the test goes out from it, the real way.
-    if (cold && sendingMailboxes.length) {
-      const r = await emailApi('mailbox_test', workspaceId, {
-        mailbox_id: sendingMailboxes[0].id, to: testTo, subject: current.subject, body: current.body,
-        language: form.language, sample: recipients.eligible[previewIdx] || null,
-      })
-      setSending(false)
-      setMessage(r.error ? { tone: 'red', text: r.error } : { tone: 'sage', text: `Test sent from ${r.from} to ${r.sent_to}. Check the inbox and the spam folder.` })
-      return
-    }
-    const r = await emailApi('send_test', workspaceId, {
-      to: testTo, audience, subject: current.subject, preheader: step ? '' : form.preheader, body: current.body,
-      design: designed && !step ? form.design : undefined,
-      language: form.language, sample: recipients.eligible[previewIdx] || null,
-    })
-    setSending(false)
-    setMessage(r.error ? { tone: 'red', text: r.error } : { tone: 'sage', text: `Test sent to ${r.sent_to}. Check the inbox and the spam folder.` })
-  }
-
   function insertAtCursor(text) {
     const el = bodyRef.current?.querySelector('textarea')
     const value = current.body || ''
@@ -411,17 +386,10 @@ function Composer({ audience, campaign, data, workspaceId, reload, setTab, statu
       {warnings.length > 0 && (
         <ul className="text-[11px] text-text-tertiary space-y-0.5">{warnings.map(w => <li key={w}>Tip: {w}</li>)}</ul>
       )}
-      <div className="flex flex-wrap items-end gap-2">
-        <Input className="flex-1 min-w-[180px]" label="Send a test to" value={testTo} onChange={e => setTestTo(e.target.value)} />
-        <Button variant="secondary" onClick={sendTest} disabled={sending || !testTo || !(status?.configured?.resend || sendingMailboxes.length)}>
-          {sending ? 'Sending…' : 'Send test'}
-        </Button>
-      </div>
       {!(status?.configured?.resend || sendingMailboxes.length) && <p className="text-[11px] text-text-tertiary">Sending is not switched on yet.</p>}
-      {cold && sendingMailboxes.length > 0 && <p className="text-[11px] text-text-tertiary">Sent from {sendingMailboxes[0].email}, only to the address above.</p>}
 
       {cold ? (
-        <div className="flex flex-wrap gap-2 pt-1 border-t border-border">
+        <div className="flex flex-wrap gap-2">
           <Button variant="secondary" disabled={!recipients.eligible.length || !form.body.trim()}
             onClick={() => download(`outreach-${(form.name || 'campaign').replace(/\W+/g, '-').toLowerCase()}.csv`, coldExport(form, recipients.eligible))}>
             Export personalised emails (CSV)
