@@ -53,7 +53,7 @@ export function Groups({ workspaceId, data, loading, reload, setTab }) {
             {loading ? (
               <div className="p-5 space-y-2"><Skeleton className="h-10 w-full" /><Skeleton className="h-10 w-full" /></div>
             ) : groups.length === 0 ? (
-              <Empty icon={<EIcon name="folder" />} title={`No ${lane} groups yet`}
+              <Empty icon={<EIcon name="folder" />} title={`No ${AUDIENCES[lane].label.toLowerCase()} groups yet`}
                 description={lane === 'marketing'
                   ? 'For example: Customers, Consultants, Contractors, Riyadh partners, Arabic-speaking contacts.'
                   : 'For example: Hotel projects Riyadh, MEP contractors, Tender contacts. One group per outreach campaign works well.'}

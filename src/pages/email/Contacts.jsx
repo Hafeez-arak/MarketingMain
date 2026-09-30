@@ -91,9 +91,9 @@ export function Contacts({ workspaceId, data, loading, reload, params, setTab })
         <div className="flex flex-wrap items-end gap-2">
           <Input className="flex-1 min-w-[200px]" placeholder="Search name, email, company, city…" value={q} onChange={e => setQ(e.target.value)} />
           <Select value={audience} onChange={e => setAudience(e.target.value)} className="w-36">
-            <option value="">All lanes</option>
-            <option value="marketing">Marketing</option>
-            <option value="cold">Cold</option>
+            <option value="">Everyone</option>
+            <option value="marketing">Newsletter</option>
+            <option value="cold">Outreach</option>
           </Select>
           <Select value={group} onChange={e => setGroup(e.target.value)} className="w-44">
             <option value="">All groups</option>
@@ -264,8 +264,8 @@ function BulkBar({ count, groups, busy, mixedLanes, onClear, onAddGroup, onRemov
         <optgroup label="Add to group">{groups.map(g => <option key={g.id} value={`add:${g.id}`}>{g.name} ({g.audience})</option>)}</optgroup>
         <optgroup label="Remove from group">{groups.map(g => <option key={g.id} value={`remove:${g.id}`}>{g.name}</option>)}</optgroup>
         <optgroup label="Lane">
-          <option value="audience:marketing">Move to Marketing (they know us)</option>
-          <option value="audience:cold">Move to Cold (prospects)</option>
+          <option value="audience:marketing">Move to Newsletter (they know us)</option>
+          <option value="audience:cold">Move to Outreach (prospects)</option>
         </optgroup>
         <optgroup label="Language">
           <option value="lang:en">English</option>
@@ -277,7 +277,7 @@ function BulkBar({ count, groups, busy, mixedLanes, onClear, onAddGroup, onRemov
           <option value="status:active">Mark active again</option>
         </optgroup>
       </select>
-      {mixedLanes && <span className="text-[11px] text-white/80">Selection mixes Marketing and Cold contacts.</span>}
+      {mixedLanes && <span className="text-[11px] text-white/80">Selection mixes Newsletter and Outreach contacts.</span>}
       {busy && <span className="text-xs text-white/80">Working…</span>}
       <div className="flex-1" />
       <button onClick={onDelete} className="text-xs font-semibold underline underline-offset-2">Delete</button>
@@ -415,7 +415,7 @@ function ContactModal({ workspaceId, contact, prefill = null, groups, currentGro
         )}
 
         <Textarea label="Notes" rows={2} value={form.notes} onChange={e => set('notes', e.target.value)}
-          hint="Private. The AI uses notes when writing a personal cold email to this contact." />
+          hint="Private. The AI uses notes when writing a personal outreach email to this contact." />
 
         {contact && (
           <p className="text-[11px] text-text-tertiary">
@@ -510,10 +510,10 @@ function ImportModal({ workspaceId, groups, types, existing, onClose, onDone, on
               placeholder={'Email,First name,Company\nali@example.com,Ali,Example Contracting'} />
 
             <div className="grid sm:grid-cols-4 gap-3">
-              <Select label="Lane" value={defaults.audience}
+              <Select label="Who they are" value={defaults.audience}
                 onChange={e => { const v = e.target.value; setDefaults(d => ({ ...d, audience: v, consent: v === 'cold' ? 'none' : 'business_contact' })); setGroupChoice('') }}>
-                <option value="marketing">Marketing (know us)</option>
-                <option value="cold">Cold (prospects)</option>
+                <option value="marketing">Newsletter (know us)</option>
+                <option value="cold">Outreach (prospects)</option>
               </Select>
               <Select label="Why we may email them" value={defaults.consent} onChange={e => setD('consent', e.target.value)} disabled={defaults.audience === 'cold'}>
                 {Object.entries(CONSENT).filter(([k]) => defaults.audience === 'cold' ? k === 'none' : k !== 'none')
@@ -540,7 +540,7 @@ function ImportModal({ workspaceId, groups, types, existing, onClose, onDone, on
 
             {defaults.audience === 'marketing' && (
               <Notice tone="amber">
-                Only import people who know Arak: customers, partners, people who emailed you or gave you a card. A bought or scraped list in this lane is how a sending domain gets blocked in its first week. Prospects go in the Cold lane.
+                Only import people who know Arak: customers, partners, people who emailed you or gave you a card. A bought or scraped list in this lane is how a sending domain gets blocked in its first week. Prospects go in Outreach.
               </Notice>
             )}
 

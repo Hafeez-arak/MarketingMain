@@ -72,8 +72,8 @@ function CampaignList({ audience, data, loading, setTab, workspaceId, reload }) 
       {!cold && (loading ? <WeeklyDraftsSkeleton /> : <WeeklyDrafts workspaceId={workspaceId} data={data} reload={reload} setTab={setTab} />)}
       <Card>
         <SectionHead
-          title={cold ? 'Outreach campaigns' : 'Marketing campaigns'}
-          subtitle={cold ? 'A first email and follow-ups, personal and plain, to a cold group.' : 'One email to one or more marketing groups.'}
+          title={cold ? 'Outreach campaigns' : 'Newsletters'}
+          subtitle={cold ? 'A first email and follow-ups, personal and plain, to a group of prospects.' : 'One email to one or more newsletter groups.'}
           action={<Button size="sm" onClick={() => setTab(audience, { campaign: 'new' })} disabled={loading}><EIcon name="plus" /> New campaign</Button>}
         />
         {loading ? (
@@ -160,11 +160,11 @@ function CampaignList({ audience, data, loading, setTab, workspaceId, reload }) 
 function ColdLaneNotice({ data, setTab }) {
   const today = brandTodayKey()
   const mailboxes = data.mailboxes || []
-  const toSettings = <Button size="sm" variant="secondary" onClick={() => setTab('settings')}>Mailboxes</Button>
+  const toSettings = <Button size="sm" variant="secondary" onClick={() => setTab('cold', { section: 'mailboxes' })}>Mailboxes</Button>
   if (!mailboxes.length) {
     return (
       <Notice tone="sky" title="No outreach mailbox is connected" action={toSettings}>
-        Outreach can be written, tested on yourself and exported, but it is only sent from an outreach mailbox, never from the marketing sender.
+        Outreach can be written, tested on yourself and exported, but it is only sent from an outreach mailbox, never from the newsletter sender.
       </Notice>
     )
   }
@@ -320,7 +320,7 @@ function Composer({ audience, campaign, data, workspaceId, reload, setTab, statu
       <div>
         <p className="eyebrow mb-1.5">Send to</p>
         {laneGroups.length === 0 ? (
-          <p className="text-xs text-text-tertiary">No {cold ? 'cold' : 'marketing'} groups yet. <button className="underline" onClick={() => setTab('groups')}>Create one</button>.</p>
+          <p className="text-xs text-text-tertiary">No {cold ? 'outreach' : 'newsletter'} groups yet. <button className="underline" onClick={() => setTab('groups')}>Create one</button>.</p>
         ) : (
           <div className="flex flex-wrap gap-2">
             {laneGroups.map(g => {
@@ -424,7 +424,7 @@ function Composer({ audience, campaign, data, workspaceId, reload, setTab, statu
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <Button variant="ghost" size="sm" onClick={() => setTab(audience)}><EIcon name="back" /> All {cold ? 'outreach' : 'marketing'} campaigns</Button>
+        <Button variant="ghost" size="sm" onClick={() => setTab(audience)}><EIcon name="back" /> All {cold ? 'outreach campaigns' : 'newsletters'}</Button>
         <div className="flex items-center gap-2">
           {campaign?.status === 'paused' && <CampaignStatus status="paused" />}
           {dirty && <span className="text-[11px] text-text-tertiary">Unsaved changes</span>}
@@ -648,7 +648,7 @@ function TemplatePicker({ kit, onPick, onBack }) {
   const sender = { from_name: '', company_address: '' }
   return (
     <div className="space-y-3">
-      <Button variant="ghost" size="sm" onClick={onBack}><EIcon name="back" /> All marketing campaigns</Button>
+      <Button variant="ghost" size="sm" onClick={onBack}><EIcon name="back" /> All newsletters</Button>
       <Card>
         <SectionHead title="Choose a starting point" subtitle="Every template is fully editable: drag blocks in, move them, change colours. Your logo is already in." />
         {!kit ? (
@@ -809,7 +809,7 @@ function LaunchModal({ workspaceId, campaignId, recipients, status, onClose, onD
       <div className="p-5 space-y-4">
         <div className="text-sm text-text-secondary space-y-1">
           <p><strong className="text-text">{n.toLocaleString()}</strong> people will receive this email.</p>
-          {recipients.skipped.length > 0 && <p className="text-xs">{recipients.skipped.length} in these groups are skipped (unsubscribed, bounced, or in the cold lane).</p>}
+          {recipients.skipped.length > 0 && <p className="text-xs">{recipients.skipped.length} in these groups are skipped (unsubscribed, bounced, or prospects in Outreach).</p>}
           {cap && (
             <p className="text-xs">
               Today's limit leaves room for <strong className="text-text">{cap.remaining}</strong> more
@@ -976,7 +976,7 @@ function CampaignDetail({ audience, campaign, data, workspaceId, reload, setTab 
         <Stat label="Prospects" value={Number(campaign.recipients || 0).toLocaleString()} hint={`${Number(st.queued || 0)} emails still queued`} />
         <Stat label="Emails sent" value={sent.toLocaleString()} hint="First emails and follow-ups" />
         <Stat label="Replied" value={pct(Number(st.replied || 0), Number(campaign.recipients || 0))} hint={`${Number(st.replied || 0)} people`}
-          info="Outreach carries no tracking pixel, so replies are the measure. A reply stops that person's follow-ups and moves them to the marketing group “Replied to outreach”. A reply that says stop, unsubscribe or not interested unsubscribes them instead." />
+          info="Outreach carries no tracking pixel, so replies are the measure. A reply stops that person's follow-ups and moves them into the newsletter group “Replied to outreach”. A reply that says stop, unsubscribe or not interested unsubscribes them instead." />
         <Stat label="Subscribed" value={pct(Number(st.subscribed || 0), Number(campaign.recipients || 0))} hint={`${Number(st.subscribed || 0)} people`}
           info="Pressed the Sign-up button and confirmed. They are now in the Subscribers tab and get no more outreach." />
         <Stat label="Bounced" value={pct(Number(st.bounced || 0), sent)} hint={`${Number(st.bounced || 0)} addresses`} tone={Number(st.bounced || 0) / (sent || 1) >= 0.03 && sent >= 20 ? 'text-red-600' : ''} />

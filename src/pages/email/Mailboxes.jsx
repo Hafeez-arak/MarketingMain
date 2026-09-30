@@ -90,7 +90,7 @@ export function OutreachMailboxes({ workspaceId, data, status, reload }) {
       <Card>
         <SectionHead
           title="Outreach mailboxes"
-          subtitle="Cold emails go out from these, one at a time, Sunday to Thursday 9:00–17:00 Riyadh. Never from your marketing sender."
+          subtitle="Outreach emails go out from these: never two at once, at uneven times, Sunday to Thursday 9:00–17:00 Riyadh, and never from the newsletter sender."
           action={(
             <div className="flex flex-wrap gap-1.5">
               <Button size="sm" onClick={() => connectMicrosoft()} disabled={!microsoftOn || !!busy}

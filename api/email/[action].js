@@ -159,6 +159,10 @@ const coldDeps = (req = null) => ({
   open: sealed => openSecret(sealed, SERVICE_KEY),
   uuid: () => crypto.randomUUID(),
   random: Math.random,
+  // The run's rhythm: a real wait before each outreach email. Only the
+  // sending run uses it. EMAIL_COLD_NO_PAUSE=1 is for the e2e harness, which
+  // runs this handler and must not wait minutes per test.
+  sleep: process.env.EMAIL_COLD_NO_PAUSE === '1' ? undefined : ms => new Promise(r => setTimeout(r, ms)),
 })
 
 function needResend() {
@@ -661,7 +665,7 @@ async function handleMsCallback(req, res) {
   res.setHeader('Set-Cookie', 'ms_oauth=; Path=/api/email; HttpOnly; SameSite=Lax; Max-Age=0')
   res.setHeader('Cache-Control', 'no-store')
   const back = params => {
-    res.setHeader('Location', `${base}/email?tab=settings&${new URLSearchParams(params)}`)
+    res.setHeader('Location', `${base}/email?tab=cold&section=mailboxes&${new URLSearchParams(params)}`)
     return res.status(302).end()
   }
 

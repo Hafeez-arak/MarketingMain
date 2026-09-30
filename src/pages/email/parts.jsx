@@ -12,7 +12,7 @@ const AUDIENCE_TAG = {
 export function AudienceTag({ audience }) {
   return (
     <span className={`inline-flex px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-[0.08em] leading-[1.4] whitespace-nowrap ${AUDIENCE_TAG[audience] || 'bg-stone-100 text-stone-600'}`}>
-      {audience === 'cold' ? 'Cold' : 'Marketing'}
+      {audience === 'cold' ? 'Outreach' : 'Newsletter'}
     </span>
   )
 }
@@ -65,6 +65,21 @@ export function Stat({ label, value, hint, info, loading = false, tone = '' }) {
         ? <Skeleton className="h-6 w-16 mt-1" />
         : <p className={`text-lg font-bold mt-0.5 tabular-nums ${tone || 'text-text'}`}>{value}</p>}
       <p className="text-[10px] text-text-tertiary mt-0.5 leading-relaxed">{hint}</p>
+    </div>
+  )
+}
+
+/** The second row of tabs inside a tab (Contacts: People / Groups). */
+export function SubTabs({ items, value, onChange }) {
+  return (
+    <div className="flex gap-4 border-b border-border">
+      {items.map(it => (
+        <button key={it.key || 'main'} type="button" onClick={() => onChange(it.key)}
+          className={`pb-2 -mb-px text-xs font-semibold border-b-2 transition-colors ${value === it.key
+            ? 'border-amber-700 text-text' : 'border-transparent text-text-tertiary hover:text-text'}`}>
+          {it.label}
+        </button>
+      ))}
     </div>
   )
 }

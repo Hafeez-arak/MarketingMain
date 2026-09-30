@@ -75,7 +75,7 @@ describe('A. connecting Microsoft 365 mailboxes', () => {
   it('A1 signing in as a mailbox stores it, active, with its sign-in sealed', async () => {
     const r = await app.connectMicrosoft('sales1@arak-sa.com')
     expect(r.status).toBe(302)
-    expect(r.headers.location).toBe('https://app.test/email?tab=settings&ms=connected')
+    expect(r.headers.location).toBe('https://app.test/email?tab=cold&section=mailboxes&ms=connected')
     const [mb] = await mailboxes()
     expect(mb).toMatchObject({ provider: 'microsoft', email: 'sales1@arak-sa.com', status: 'active', from_name: 'Sales One', daily_limit: 15 })
     const [secret] = await app.q('select secret from email_mailbox_secrets where mailbox_id = $1', [mb.id])

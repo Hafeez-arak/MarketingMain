@@ -19,6 +19,8 @@ export const ENV = {
   MICROSOFT_TENANT_ID: 'tenant-e2e',
   MICROSOFT_CLIENT_SECRET: 'secret-e2e',
   PUBLIC_APP_URL: 'https://app.test',
+  // The real run waits 0–2 minutes before an email; tests cannot.
+  EMAIL_COLD_NO_PAUSE: '1',
 }
 
 export const WS = '00000000-0000-0000-0000-00000000aaaa'
