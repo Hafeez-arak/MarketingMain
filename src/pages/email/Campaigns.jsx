@@ -95,8 +95,10 @@ function CampaignList({ audience, data, loading, setTab, workspaceId, reload }) 
                   <th className="text-left font-semibold px-3 py-2">Status</th>
                   <th className="text-right font-semibold px-3 py-2">Recipients</th>
                   <th className="text-right font-semibold px-3 py-2">Sent</th>
-                  <th className="text-right font-semibold px-3 py-2">Opened</th>
-                  <th className="text-right font-semibold px-3 py-2">Clicked</th>
+                  {/* Outreach carries no tracking pixel: replies and sign-ups
+                      are its numbers, the same two its detail page leads with. */}
+                  <th className="text-right font-semibold px-3 py-2">{audience === 'cold' ? 'Replied' : 'Opened'}</th>
+                  <th className="text-right font-semibold px-3 py-2">{audience === 'cold' ? 'Subscribed' : 'Clicked'}</th>
                   <th className="text-right font-semibold px-3 py-2">Bounced</th>
                   <th className="px-3 py-2" />
                 </tr>
@@ -120,8 +122,13 @@ function CampaignList({ audience, data, loading, setTab, workspaceId, reload }) 
                       <td className="px-3 py-2.5"><CampaignStatus status={c.status} /></td>
                       <td className="px-3 py-2.5 text-right tabular-nums">{c.recipients ? c.recipients.toLocaleString() : '—'}</td>
                       <td className="px-3 py-2.5 text-right tabular-nums">{sent.toLocaleString()}</td>
-                      <td className="px-3 py-2.5 text-right tabular-nums">{pct(Number(st.opened || 0), sent)}</td>
-                      <td className="px-3 py-2.5 text-right tabular-nums">{pct(Number(st.clicked || 0), sent)}</td>
+                      {audience === 'cold' ? <>
+                        <td className="px-3 py-2.5 text-right tabular-nums">{pct(Number(st.replied || 0), Number(c.recipients || 0))}</td>
+                        <td className="px-3 py-2.5 text-right tabular-nums">{pct(Number(st.subscribed || 0), Number(c.recipients || 0))}</td>
+                      </> : <>
+                        <td className="px-3 py-2.5 text-right tabular-nums">{pct(Number(st.opened || 0), sent)}</td>
+                        <td className="px-3 py-2.5 text-right tabular-nums">{pct(Number(st.clicked || 0), sent)}</td>
+                      </>}
                       <td className="px-3 py-2.5 text-right tabular-nums">{pct(Number(st.bounced || 0), sent)}</td>
                       <td className="px-3 py-2.5 text-right" onClick={e => e.stopPropagation()}>
                         <div className="flex justify-end gap-1">
@@ -601,7 +608,7 @@ function Composer({ audience, campaign, data, workspaceId, reload, setTab, statu
             </div>
             <div className="px-4 py-2 border-b border-border text-xs space-y-0.5">
               <p className="text-text-tertiary">From <span className="text-text">{cold
-                ? (sendingMailboxes.length ? sendingMailboxes.map(m => m.email).join(', ') : 'an outreach mailbox (none connected)')
+                ? <ColdSenders mailboxes={sendingMailboxes} />
                 : (settings.from_name ? `${settings.from_name} <${settings.from_email || '…'}>` : (settings.from_email || 'Set the sender in Settings'))}</span></p>
               <p className="text-text-tertiary">Subject <span className="text-text font-medium">{preview.subject || '—'}</span></p>
             </div>
@@ -1061,4 +1068,18 @@ function CampaignDetail({ audience, campaign, data, workspaceId, reload, setTab 
 
 function mailboxEmail(data, id) {
   return (data.mailboxes || []).find(m => m.id === id)?.email || 'a removed mailbox'
+}
+
+/**
+ * Who a cold campaign will actually come from. A warming-up, paused or
+ * disconnected mailbox is skipped by every sending run, so it is named as
+ * waiting, never as the sender.
+ */
+function ColdSenders({ mailboxes }) {
+  if (!mailboxes.length) return 'an outreach mailbox (none connected)'
+  const today = brandTodayKey()
+  const ready = mailboxes.filter(m => mailboxReadiness(m, today).ready).map(m => m.email)
+  const waiting = mailboxes.map(m => m.email).filter(e => !ready.includes(e))
+  if (!ready.length) return `no mailbox is ready yet (${waiting.join(', ')})`
+  return `${ready.join(', ')}${waiting.length ? ` (not yet: ${waiting.join(', ')})` : ''}`
 }
