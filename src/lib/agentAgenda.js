@@ -29,7 +29,7 @@ async function call(url, accessToken, init = {}) {
 
 /** Everything on the agenda for one workspace — questions and competitors. */
 export async function fetchAgenda(workspaceId, accessToken) {
-  const { data } = await call(
+  const { data, error } = await call(
     `${SUPABASE_URL}/rest/v1/research_agenda?workspace_id=eq.${workspaceId}` +
     `&order=kind.asc,subject.asc&select=*`,
     accessToken,
@@ -38,6 +38,9 @@ export async function fetchAgenda(workspaceId, accessToken) {
   return {
     questions: rows.filter(r => r.kind === 'question'),
     competitors: rows.filter(r => r.kind === 'competitor'),
+    // Set when the read failed, so "nothing is being watched" is only ever
+    // said about an agenda that was actually read.
+    error: error || '',
   }
 }
 

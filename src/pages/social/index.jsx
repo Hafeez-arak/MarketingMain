@@ -88,7 +88,9 @@ export function SocialOverview() {
   useEffect(() => {
     let live = true
     setCounts(null)
-    fetchPostCounts(activeWorkspaceId, accessToken).then(c => { if (live) setCounts(c ?? {}) })
+    // null back means the count failed: kept as `failed`, so each card says
+    // nothing about its posts rather than "No posts created yet".
+    fetchPostCounts(activeWorkspaceId, accessToken).then(c => { if (live) setCounts(c ?? { failed: true }) })
     return () => { live = false }
   }, [activeWorkspaceId, accessToken])
 
@@ -109,7 +111,7 @@ export function SocialOverview() {
             key={key}
             platformKey={key}
             meta={meta}
-            postCount={counts === null ? null : (counts[key] || 0)}
+            postCount={counts === null || counts.failed ? null : (counts[key] || 0)}
             accounts={allAccounts.filter(a => a.platform === key)}
             loading={loading}
             onOpen={() => navigate(`/social/${key}`)}

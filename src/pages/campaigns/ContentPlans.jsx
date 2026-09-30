@@ -27,18 +27,23 @@ export function ContentPlans() {
   const [loadedFor, setLoadedFor] = useState(null)
   const [opening, setOpening] = useState(null)
   const [deleteTarget, setDeleteTarget] = useState(null)
+  const [loadError, setLoadError] = useState('')
+  const [reloadKey, setReloadKey] = useState(0)
 
   const loading = !!activeWorkspaceId && loadedFor !== activeWorkspaceId
 
   useEffect(() => {
     if (!activeWorkspaceId) return
     let alive = true
-    fetchPlans(activeWorkspaceId, accessToken).then(p => {
+    fetchPlans(activeWorkspaceId, accessToken, { throwOnError: true }).then(p => {
       if (!alive) return
-      setPlans(p); setLoadedFor(activeWorkspaceId)
+      setPlans(p); setLoadError(''); setLoadedFor(activeWorkspaceId)
+    }).catch(err => {
+      if (!alive) return
+      setLoadError(String(err?.message || err)); setLoadedFor(activeWorkspaceId)
     })
     return () => { alive = false }
-  }, [activeWorkspaceId, accessToken])
+  }, [activeWorkspaceId, accessToken, reloadKey])
 
   async function openPlan(plan) {
     setOpening(plan.id)
@@ -82,6 +87,14 @@ export function ContentPlans() {
             </Card>
           ))}
         </div>
+      ) : loadError && plans.length === 0 ? (
+        <Card className="shadow-none border-border">
+          <Empty
+            title="The plans could not be loaded"
+            description={`${loadError}. This is a connection problem, not an empty list: nothing has been lost.`}
+            action={<Button variant="secondary" onClick={() => { setLoadedFor(null); setReloadKey(k => k + 1) }}>Try again</Button>}
+          />
+        </Card>
       ) : plans.length === 0 ? (
         <Card className="shadow-none border-border">
           <Empty

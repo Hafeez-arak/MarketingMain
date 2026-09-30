@@ -12,16 +12,22 @@ function authHeaders(accessToken) {
 }
 
 // ── Plans ──
-export async function fetchPlans(workspaceId, accessToken) {
+export async function fetchPlans(workspaceId, accessToken, { throwOnError = false } = {}) {
   if (!workspaceId) return []
+  let failure
   try {
     const res = await fetch(
       `${SUPABASE_URL}/rest/v1/content_plans?workspace_id=eq.${workspaceId}&select=*&order=created_at.desc`,
       { headers: authHeaders(accessToken) }
     )
-    if (!res.ok) return []
-    return await res.json()
-  } catch { return [] }
+    if (res.ok) return await res.json()
+    failure = new Error(`The plans could not be read (${res.status})`)
+  } catch (err) {
+    failure = err
+  }
+  // "No content plans yet" is only true of a list that was actually read.
+  if (throwOnError) throw failure
+  return []
 }
 
 // ─── Waiting for a plan n8n is still writing ───────────────────────────────

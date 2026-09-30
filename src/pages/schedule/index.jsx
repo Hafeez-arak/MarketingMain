@@ -296,7 +296,8 @@ export function Schedule() {
               </div>
               {loading
                 ? <Skeleton className="h-6 w-10" />
-                : <p className="text-2xl font-bold text-text leading-none tabular-nums">{s.value}</p>}
+                // A failed read is not a count of zero: the error line above says why.
+                : <p className="text-2xl font-bold text-text leading-none tabular-nums">{error ? '—' : s.value}</p>}
               {!loading && s.note && (
                 <p className="text-[10px] text-text-tertiary mt-1.5">{s.note}</p>
               )}
@@ -421,7 +422,7 @@ export function Schedule() {
         )}
       </Card>
 
-      {!loading && shown.length === 0 && (
+      {!loading && !error && shown.length === 0 && (
         <Card className="p-12 text-center">
           <p className="font-semibold text-text text-sm mb-1">Nothing booked in this period</p>
           <p className="text-sm text-text-secondary">

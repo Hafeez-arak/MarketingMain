@@ -195,7 +195,7 @@ export function AccountAnalytics({ platform, accounts = [], loadingAccounts = fa
               </div>
               {/* Instagram's only follower/non-follower split, directly under
                   the Reach tile it divides. */}
-              <ReachSplit payload={current?.reachByFollowType}
+              <ReachSplit payload={current?.reachByFollowType} loading={!current} failed={Boolean(current?.error)}
                 windowText={windowLabel(current?.insightsFrom, current?.toDate, Math.min(days, 29))} />
 
               <div className="px-5 py-2.5 border-t border-border flex items-center gap-2 text-[11px] text-text-tertiary">

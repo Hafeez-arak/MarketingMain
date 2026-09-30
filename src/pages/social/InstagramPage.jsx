@@ -57,6 +57,8 @@ function useSupabasePosts(supabaseUrl, anonKey, workspaceId) {
   // lastFetchedAt, which a failed fetch never sets — keying the first-load
   // skeleton on that would leave it up forever after one bad request.
   const [settled,       setSettled]       = useState(false)
+  // A read that failed, so the page can say so instead of "0 posts".
+  const [loadError,     setLoadError]     = useState('')
 
   async function fetchRemotePosts() {
     if (!supabaseUrl || !anonKey || !workspaceId) return
@@ -76,7 +78,7 @@ function useSupabasePosts(supabaseUrl, anonKey, workspaceId) {
       // made since, including posts from this page's own Create Post composer.
       // The view unions both and is security_invoker, so RLS still applies.
       const [schedRows, manualRes] = await Promise.all([
-        fetchScheduledPosts(workspaceId, anonKey, { platform: 'instagram', limit: 100 }),
+        fetchScheduledPosts(workspaceId, anonKey, { platform: 'instagram', limit: 100, throwOnError: true }),
         fetch(`${supabaseUrl}/rest/v1/instagram_manual_posts?${scope}&select=*&order=created_at.desc&limit=100`, { headers }),
       ])
       const manualRows = manualRes.ok ? await manualRes.json() : []
@@ -127,9 +129,12 @@ function useSupabasePosts(supabaseUrl, anonKey, workspaceId) {
         ...manualRows.map(r => normalize(r, 'manual')),
       ].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)))
       setLastFetchedAt(new Date())
-    } catch {
-      // Fail silently — the locally-held posts still render, so a fetch that
-      // didn't land is a stale list rather than an empty screen.
+      setLoadError('')
+    } catch (err) {
+      // Whatever is on screen stays (a failed poll is a stale list, not an
+      // empty one), but the page says the read failed rather than letting
+      // an empty first load read as "0 posts".
+      setLoadError(String(err?.message || err))
     } finally {
       setLoadingPosts(false)
       setSettled(true)
@@ -156,7 +161,7 @@ function useSupabasePosts(supabaseUrl, anonKey, workspaceId) {
   // "No posts yet" and then filled in.
   const firstLoad = !settled && !!(supabaseUrl && anonKey && workspaceId)
 
-  return { remotePosts, loadingPosts, firstLoad, lastFetchedAt, fetchRemotePosts, updatePostStatus }
+  return { remotePosts, loadingPosts, firstLoad, loadError, lastFetchedAt, fetchRemotePosts, updatePostStatus }
 }
 
 export function InstagramPage() {
@@ -168,7 +173,7 @@ export function InstagramPage() {
   const supabaseUrl = SUPABASE_URL
   const anonKey     = accessToken || ''
 
-  const { remotePosts, loadingPosts, firstLoad, lastFetchedAt, fetchRemotePosts, updatePostStatus } =
+  const { remotePosts, loadingPosts, firstLoad, loadError, lastFetchedAt, fetchRemotePosts, updatePostStatus } =
     useSupabasePosts(supabaseUrl, anonKey, activeWorkspaceId)
 
   // Merge: remote posts first (newest), deduplicate by id against local
@@ -242,7 +247,7 @@ export function InstagramPage() {
               <h2 className="font-semibold text-text">Instagram</h2>
               {firstLoad
                 ? <Skeleton className="h-3 w-14 mt-1" />
-                : <p className="text-xs text-text-secondary">{mergedPosts.length} post{mergedPosts.length !== 1 ? 's' : ''}</p>}
+                : <p className="text-xs text-text-secondary">{loadError && !remotePosts.length ? 'Posts not loaded' : `${mergedPosts.length} post${mergedPosts.length !== 1 ? 's' : ''}`}</p>}
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -307,14 +312,20 @@ export function InstagramPage() {
           <Card key={s.label} className="p-4 text-center">
             {firstLoad
               ? <Skeleton className="h-8 w-10 mx-auto" />
-              : <p className="text-2xl font-bold text-text">{s.value}</p>}
+              : <p className="text-2xl font-bold text-text">{loadError && !remotePosts.length ? '—' : s.value}</p>}
             <p className="text-xs text-text-secondary mt-0.5">{s.label}</p>
           </Card>
         ))}
       </div>
 
-      <PostsList posts={mergedPosts} loading={firstLoad} dispatch={dispatch} state={state} updatePostStatus={updatePostStatus} onRefresh={fetchRemotePosts}
-        accounts={igAccounts.accounts} onPosted={handlePosted} webhookUrl="" regenWebhookUrl="" />
+      {loadError && (
+        <Card className="p-3 flex items-center gap-3 border-red-200 bg-red-50">
+          <p className="text-xs flex-1 text-red-600">The posts could not be loaded ({loadError}). Nothing has been lost.</p>
+          <Button size="sm" variant="secondary" onClick={fetchRemotePosts} disabled={loadingPosts}>Try again</Button>
+        </Card>
+      )}
+      {loadError && !mergedPosts.length ? null : <PostsList posts={mergedPosts} loading={firstLoad} dispatch={dispatch} state={state} updatePostStatus={updatePostStatus} onRefresh={fetchRemotePosts}
+        accounts={igAccounts.accounts} onPosted={handlePosted} webhookUrl="" regenWebhookUrl="" />}
       </>)}
     </div>
   )

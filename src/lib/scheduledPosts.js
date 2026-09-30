@@ -36,7 +36,7 @@ export const POST_TABLES = [
 // get the review queue's view of the world (everything, by creation).
 export async function fetchScheduledPosts(workspaceId, accessToken, {
   from, to, platform, publishStatus, status, unscheduled = false, limit = 400,
-  planIdeaIds, ids, publishedSince, order,
+  planIdeaIds, ids, publishedSince, order, throwOnError = false,
 } = {}) {
   if (!workspaceId) return []
   const q = [
@@ -82,12 +82,20 @@ export async function fetchScheduledPosts(workspaceId, accessToken, {
   // Ordered by when it goes out when that is what was asked for, otherwise by
   // when it was made — a review queue and a calendar want different spines.
   q.push(`order=${order || (from || to ? 'scheduled_publish_at.asc' : 'created_at.desc')}`)
+  let failure
   try {
     const res = await fetch(`${SUPABASE_URL}/rest/v1/scheduled_posts?${q.join('&')}`, {
       headers: authHeaders(accessToken),
     })
-    return res.ok ? await res.json() : []
-  } catch { return [] }
+    if (res.ok) return await res.json()
+    failure = new Error(`The posts could not be read (${res.status})`)
+  } catch (err) {
+    failure = err
+  }
+  // A screen that would say "No posts yet" asks for throwOnError, so a failed
+  // read shows as a failure instead of as an empty list.
+  if (throwOnError) throw failure
+  return []
 }
 
 // How many posts each platform has, for the Social overview cards. Reads the

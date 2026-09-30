@@ -47,6 +47,7 @@ export default function AgentPage() {
   // Separate from `runs.length`, which is also 0 before the first answer — and
   // the page used to say "No run has been started" in that gap.
   const [runsLoaded, setRunsLoaded] = useState(false)
+  const [runsError, setRunsError] = useState('')
   const [lensRows, setLensRows] = useState([])
   const [running, setRunning] = useState(false)
   const [runNote, setRunNote] = useState('')
@@ -66,16 +67,22 @@ export default function AgentPage() {
   useEffect(() => {
     if (!activeWorkspaceId || !accessToken) return undefined
     let cancelled = false
-    fetchRuns(activeWorkspaceId, accessToken).then(async rows => {
+    fetchRuns(activeWorkspaceId, accessToken, 5, { throwOnError: true }).then(async rows => {
       // Guarded so a slow response cannot land after the page has gone, or
       // after the person has switched to another brand.
       if (cancelled) return
       setRuns(rows)
+      setRunsError('')
       setRunsLoaded(true)
       const latest = rows?.[0]
       if (!latest) { setLensRows([]); return }
       const lr = await fetchLensResults(activeWorkspaceId, latest.id, accessToken)
       if (!cancelled) setLensRows(lr)
+    }).catch(err => {
+      // A failed read is not "no run has been started".
+      if (cancelled) return
+      setRunsError(String(err?.message || err))
+      setRunsLoaded(true)
     })
     return () => { cancelled = true }
   }, [activeWorkspaceId, accessToken, reload])
@@ -152,6 +159,9 @@ export default function AgentPage() {
             <div className="mt-3 space-y-2" aria-busy="true" aria-label="Loading runs">
               {[0, 1, 2].map(i => <Skeleton key={i} className="h-4 w-full max-w-md" />)}
             </div>
+          ) : runsError && runs.length === 0 ? (
+            <p className="mt-2 text-sm text-text-secondary">The runs could not be loaded ({runsError}). Nothing has been lost.{' '}
+              <button type="button" className="underline" onClick={loadRuns}>Try again</button></p>
           ) : runs.length === 0 ? (
             <p className="mt-2 text-sm text-text-secondary">No run has been started for this brand yet.</p>
           ) : (

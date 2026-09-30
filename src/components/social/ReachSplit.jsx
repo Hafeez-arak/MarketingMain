@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Icon } from '../ui/icons'
-import { IconBadge } from '../ui/index'
+import { IconBadge, Skeleton } from '../ui/index'
 import { MetricInfoDot } from '../analytics/MetricLabel'
 import { fmt, pct } from '../../pages/analytics/format'
 import { splitReach, reachFor, shareOf, FOLLOWER, NON_FOLLOWER } from '../../lib/followType'
@@ -31,7 +31,7 @@ const SIDES = [
   { key: NON_FOLLOWER, label: 'Non-followers', hint: 'Reached without following' },
 ]
 
-export function ReachSplit({ payload, windowText = '' }) {
+export function ReachSplit({ payload, windowText = '', loading = false, failed = false }) {
   const [sides, setSides] = useState(() => new Set([FOLLOWER, NON_FOLLOWER]))
 
   const split = splitReach(payload)
@@ -87,8 +87,8 @@ export function ReachSplit({ payload, windowText = '' }) {
                 {s.label}
                 {/* A side nobody measured says so rather than showing 0. */}
                 <span className="tabular-nums text-text-tertiary">
-                  {typeof value === 'number' ? fmt(value) : '—'}
-                  {pctValue === null ? '' : ` · ${pct(pctValue)}`}
+                  {loading ? '…' : typeof value === 'number' ? fmt(value) : '—'}
+                  {loading || pctValue === null ? '' : ` · ${pct(pctValue)}`}
                 </span>
               </button>
             )
@@ -96,16 +96,20 @@ export function ReachSplit({ payload, windowText = '' }) {
         </div>
 
         <div className="text-right">
-          <p className="text-xl font-bold text-text tabular-nums leading-none">
-            {typeof shown === 'number' ? fmt(shown) : '—'}
-          </p>
+          {loading
+            ? <Skeleton className="h-5 w-14 ml-auto" />
+            : <p className="text-xl font-bold text-text tabular-nums leading-none">{typeof shown === 'number' ? fmt(shown) : '—'}</p>}
           <p className="text-[10px] text-text-tertiary mt-1">
             {sides.size === 2 ? 'people reached' : sides.size === 1 ? 'of those reached' : 'nothing selected'}
           </p>
         </div>
       </div>
 
-      {split.error ? (
+      {/* Nothing to say before Instagram has answered: "not reported" is a
+          claim about an answer that has not arrived yet. */}
+      {/* A failed load is reported where the analytics are; saying "not
+          reported" here would blame Instagram for our request failing. */}
+      {loading || failed ? null : split.error ? (
         <p className="px-5 pb-3 text-[11px] text-text-tertiary">
           Instagram did not report the split: {split.error}
         </p>

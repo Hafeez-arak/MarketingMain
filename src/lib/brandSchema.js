@@ -21,12 +21,17 @@ function authHeaders(accessToken) {
 }
 
 async function getJson(url, accessToken) {
+  return (await getJsonOrNull(url, accessToken)) || []
+}
+
+/** The rows, or null when the request failed (as opposed to finding none). */
+async function getJsonOrNull(url, accessToken) {
   try {
     const res = await fetch(url, { headers: authHeaders(accessToken) })
-    if (!res.ok) return []
+    if (!res.ok) return null
     return await res.json()
   } catch {
-    return []
+    return null
   }
 }
 
@@ -63,11 +68,13 @@ export async function fetchBrandSchema(workspaceId, accessToken) {
   if (!workspaceId) return { sections: [], fields: [], columns: [] }
   const base = `${SUPABASE_URL}/rest/v1`
   const [sections, fields, columns] = await Promise.all([
-    getJson(`${base}/brand_sections?workspace_id=eq.${workspaceId}&select=*&order=sort_order.asc`, accessToken),
-    getJson(`${base}/brand_fields?workspace_id=eq.${workspaceId}&select=*&order=sort_order.asc`, accessToken),
-    getJson(`${base}/brand_directory_columns?workspace_id=eq.${workspaceId}&select=*&order=sort_order.asc`, accessToken),
+    getJsonOrNull(`${base}/brand_sections?workspace_id=eq.${workspaceId}&select=*&order=sort_order.asc`, accessToken),
+    getJsonOrNull(`${base}/brand_fields?workspace_id=eq.${workspaceId}&select=*&order=sort_order.asc`, accessToken),
+    getJsonOrNull(`${base}/brand_directory_columns?workspace_id=eq.${workspaceId}&select=*&order=sort_order.asc`, accessToken),
   ])
-  return { sections, fields, columns }
+  // `failed` separates "could not read it" from "this brand has none": the
+  // Brand Brain page offers to build a structure only in the second case.
+  return { sections: sections || [], fields: fields || [], columns: columns || [], failed: !sections || !fields || !columns }
 }
 
 // Just the field definitions — what buildInstructionsString needs to flatten

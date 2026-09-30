@@ -244,7 +244,7 @@ export function AgentSteering() {
       <Card>
         <SectionHead
           title="Competitors it watches"
-          subtitle={loaded ? readiness.note : 'Loading the watchlist…'}
+          subtitle={!loaded ? 'Loading the watchlist…' : agenda.error ? `The watchlist could not be loaded (${agenda.error}). Nothing has been lost.` : readiness.note}
           action={
             <span className="flex gap-1">
               <Button size="sm" variant="ghost" onClick={findRivals} disabled={finding}>
@@ -314,6 +314,11 @@ export function AgentSteering() {
         <div className="px-5 py-4 [&>*:first-child]:mt-0">
           {!loaded ? (
             <RowsSkeleton />
+          ) : agenda.error ? (
+            <p className="mt-2 text-sm text-text-secondary">
+              The questions could not be loaded. Nothing has been lost.{' '}
+              <button type="button" className="underline" onClick={refresh}>Try again</button>
+            </p>
           ) : agenda.questions.length === 0 ? (
             <p className="mt-2 text-sm text-text-secondary">
               None yet. Without these the agent decides for itself what to chase each week.

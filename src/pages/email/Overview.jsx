@@ -88,9 +88,9 @@ export function Overview({ data, status, loading, setTab, workspaceId, reload })
 
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-px bg-border border border-border">
         <Stat loading={loading} label="Sent (30 days)" value={rates.sent.toLocaleString()} hint="Marketing emails that left" />
-        <Stat loading={loading} label="Open rate" value={pct(rates.opened, rates.sent)} hint={`${rates.opened} opened`}
+        <Stat loading={loading} label="Open rate" value={pct(rates.opened, rates.sent)} hint={loading ? 'People who opened' : `${rates.opened} opened`}
           info="Apple Mail opens every email automatically to protect privacy, so opens run high and are a rough signal. Clicks and replies are the honest numbers." />
-        <Stat loading={loading} label="Click rate" value={pct(rates.clicked, rates.sent)} hint={`${rates.clicked} clicked a link`} />
+        <Stat loading={loading} label="Click rate" value={pct(rates.clicked, rates.sent)} hint={loading ? 'People who clicked' : `${rates.clicked} clicked a link`} />
         <Stat loading={loading} label="Bounce rate" value={pct(rates.bounced, rates.sent)} hint="Keep under 2%"
           tone={rates.sent >= 20 && rates.bounced / rates.sent >= 0.02 ? 'text-red-600' : ''} />
         <Stat loading={loading} label="Spam reports" value={pct(rates.complained, rates.sent)} hint="Keep under 0.1%"
