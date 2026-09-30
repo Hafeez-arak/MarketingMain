@@ -1,8 +1,7 @@
 import { useState } from 'react'
 import { Card, SectionHead, Button, Input, Textarea, Toggle, Skeleton } from '../../components/ui/index'
-import { useAuth } from '../../store/auth'
 import { isValidEmail } from '../../lib/email/contacts'
-import { saveSettings, emailApi } from '../../lib/email/client'
+import { saveSettings } from '../../lib/email/client'
 import { Notice } from './parts'
 import { OutreachMailboxes } from './Mailboxes'
 
@@ -30,7 +29,6 @@ export function EmailSettings(props) {
 }
 
 function SettingsForm({ workspaceId, data, status, reload, initial: s }) {
-  const { user } = useAuth()
   const [form, setForm] = useState(() => ({
     from_name: s.from_name || 'Arak Lighting',
     from_email: s.from_email || '',
@@ -42,8 +40,6 @@ function SettingsForm({ workspaceId, data, status, reload, initial: s }) {
   }))
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState(null)
-  const [testTo, setTestTo] = useState(user?.email || '')
-  const [testing, setTesting] = useState(false)
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
   const errors = {
@@ -71,17 +67,6 @@ function SettingsForm({ workspaceId, data, status, reload, initial: s }) {
       setSaving(false)
     }
   }
-
-  async function test() {
-    setTesting(true); setMessage(null)
-    const r = await emailApi('send_test', workspaceId, {
-      to: testTo, audience: 'marketing', subject: 'Sending check',
-      body: 'Hi {{first_name|there}},\n\nThis is a test from the Email section. If it arrived in the inbox (not spam), sending is set up correctly.\n\n- Sender and domain: working\n- Footer and unsubscribe link: below',
-    })
-    setTesting(false)
-    setMessage(r.error ? { tone: 'red', text: r.error } : { tone: 'sage', text: `Test sent to ${r.sent_to}.` })
-  }
-
 
   return (
     <div className="space-y-4">
@@ -129,17 +114,6 @@ function SettingsForm({ workspaceId, data, status, reload, initial: s }) {
       <div className="flex justify-end">
         <Button onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save settings'}</Button>
       </div>
-
-      <Card>
-        <SectionHead title="Test sending" subtitle="Sends one email, with this sender and footer, to the address below." />
-        <div className="p-5 flex flex-wrap items-end gap-2">
-          <Input className="min-w-[260px]" value={testTo} onChange={e => setTestTo(e.target.value)} placeholder="you@arak-sa.com" />
-          <Button variant="secondary" onClick={test} disabled={testing || !status?.configured?.resend || !data.settings?.from_email}>
-            {testing ? 'Sending…' : 'Send test'}
-          </Button>
-          {!data.settings?.from_email && <p className="w-full text-[11px] text-text-tertiary">Save a From address above first.</p>}
-        </div>
-      </Card>
 
       <OutreachMailboxes workspaceId={workspaceId} data={data} status={status} reload={reload} />
     </div>

@@ -144,10 +144,6 @@ export function OutreachMailboxes({ workspaceId, data, status, reload }) {
                     {mb.last_error && mb.status !== 'active' && <p className="text-[11px] text-red-600 mt-0.5">{mb.last_error}</p>}
                   </div>
                   <div className="flex flex-wrap gap-1">
-                    <Button size="xs" variant="secondary" disabled={!!busy}
-                      onClick={() => act('mailbox_test', { mailbox_id: mb.id, to: user?.email }, r => `Test sent from ${r.from} to ${r.sent_to}. Check it arrived in the inbox, not spam or Promotions.`)}>
-                      {busy === `mailbox_test:${mb.id}` ? 'Sending…' : 'Send test'}
-                    </Button>
                     {microsoft && mb.status === 'error' ? (
                       <Button size="xs" variant="secondary" disabled={!microsoftOn || !!busy} onClick={() => connectMicrosoft(mb.id)}>
                         {busy === `ms:${mb.id}` ? 'Opening Microsoft…' : 'Reconnect'}

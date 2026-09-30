@@ -120,13 +120,11 @@ describe('A. connecting Microsoft 365 mailboxes', () => {
     expect(forged.headers.location).toMatch(/ms_error=expired/)
   })
 
-  it('A8 a test email goes to the person asking, from that mailbox only', async () => {
+  it('A8 there is no test-send in production: the actions are gone', async () => {
     const [mb] = await mailboxes()
-    const r = await app.call('mailbox_test', { body: { mailbox_id: mb.id, to: 'hafeez@arak-sa.com' } })
-    expect(r.status).toBe(200)
-    const sent = app.world.accounts.get('sales1@arak-sa.com').sent.at(-1)
-    expect(sent.to).toEqual(['hafeez@arak-sa.com'])
-    expect(sent.subject).toMatch(/^\[TEST\]/)
+    expect((await app.call('mailbox_test', { body: { mailbox_id: mb.id, to: 'hafeez@arak-sa.com' } })).status).toBe(404)
+    expect((await app.call('send_test', { body: { to: 'hafeez@arak-sa.com' } })).status).toBe(404)
+    expect(app.world.log.filter(l => l.kind === 'sent')).toHaveLength(0)
   })
 
   it('A9 the name and signature can be edited; the address and login cannot', async () => {
@@ -212,7 +210,7 @@ describe('B/C. prospects, groups and launching a campaign', () => {
     const lines = r.body.preview.workspaces[0].mailboxes
     expect(lines.map(l => l.action)).toEqual(['send', 'send'])
     expect(lines[0].next).toMatchObject({ step: 0, campaign: 'Hotels + MEP' })
-    expect(app.world.log.filter(l => l.kind === 'sent')).toHaveLength(1)   // only A8's test
+    expect(app.world.log.filter(l => l.kind === 'sent')).toHaveLength(0)
   })
 })
 

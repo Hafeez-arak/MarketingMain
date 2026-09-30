@@ -4,14 +4,14 @@ import { callModel } from '../agent/_provider.js'
 import { loadBrandContext } from '../agent/_context.js'
 import { textIn } from '../../src/lib/agent/loop.js'
 import { DRAFT_IDENTITY, DRAFT_SCHEMA, draftPrompt, parseDrafts } from '../../src/lib/email/draft.js'
-import { renderEmail, marketingProblems, escapeHtml, safeHref } from '../../src/lib/email/render.js'
-import { renderDesign, designChecks, hasDesign } from '../../src/lib/email/design.js'
+import { marketingProblems, escapeHtml, safeHref } from '../../src/lib/email/render.js'
+import { designChecks, hasDesign } from '../../src/lib/email/design.js'
 import { isValidEmail, normalizeEmail } from '../../src/lib/email/contacts.js'
 import { dailyCap } from '../../src/lib/email/warmup.js'
 import { createResend } from './_resend.js'
 import {
   launchCampaign, dispatch, applyEvent, unsubscribe, subscribe, verifySvix, loadSettings,
-  sendingStats, fromHeader, closeFinished, websiteSignup,
+  sendingStats, closeFinished, websiteSignup,
 } from './_engine.js'
 import { launchColdCampaign, coldTick, readReplies, resolveStuck, resolveStuckByHand } from './_cold.js'
 import { sealSecret, openSecret } from './_secrets.js'
@@ -184,34 +184,6 @@ const actions = {
       configured: { resend: Boolean(RESEND_KEY), webhook: Boolean(WEBHOOK_SECRET), cron: Boolean(CRON_SECRET), microsoft: MS.configured },
       settings, stats, cap,
     }
-  },
-
-  async send_test({ workspaceId, body, user }) {
-    const missing = needResend(); if (missing) return fail(missing, 503)
-    const to = normalizeEmail(body.to || user?.email)
-    if (!isValidEmail(to)) return fail('Enter a valid address to send the test to.')
-    const settings = await loadSettings({ db }, workspaceId)
-    // A cold draft may be tested too: one email to ourselves is not outreach.
-    // What Resend's terms forbid is sending it to the prospects.
-    const audience = body.audience === 'cold' ? 'cold' : 'marketing'
-    if (!settings.from_email) return fail('Set the sender address in Email → Settings first.')
-    const sample = { first_name: body.sample?.first_name || 'Sara', last_name: '', company: body.sample?.company || 'Example Co', job_title: '', city: 'Riyadh', email: to }
-    const common = {
-      subject: `[TEST] ${body.subject || ''}`, preheader: body.preheader || '',
-      language: body.language === 'ar' ? 'ar' : 'en', contact: sample,
-      sender: settings, unsubscribeUrl: `${baseUrlOf(this.req)}/api/email/unsubscribe?t=test`,
-      subscribeUrl: `${baseUrlOf(this.req)}/api/email/subscribe?t=test`,
-    }
-    // Cold email is never designed: it must look typed by a person.
-    const rendered = audience === 'marketing' && hasDesign(body.design)
-      ? renderDesign({ ...common, design: body.design })
-      : renderEmail({ ...common, audience, body: body.body || '' })
-    const r = await deps().resend.send({
-      from: fromHeader(settings), to: [to], subject: rendered.subject, html: rendered.html, text: rendered.text,
-      ...(settings.reply_to ? { reply_to: settings.reply_to } : {}),
-    })
-    if (!r.ok) return fail(r.error, r.status >= 400 && r.status < 600 ? r.status : 502)
-    return { sent_to: to, id: r.id }
   },
 
   async launch({ workspaceId, body }) {
@@ -421,32 +393,6 @@ const actions = {
     })
     await db(`email_mailboxes?id=eq.${body.mailbox_id}&workspace_id=eq.${workspaceId}`, { method: 'DELETE', prefer: 'return=minimal' })
     return { deleted: body.mailbox_id }
-  },
-
-  /** One email from a mailbox to the person asking: proves it lands, sends nothing to prospects. */
-  async mailbox_test({ workspaceId, body, user }) {
-    if (!isUuid(body.mailbox_id)) return fail('Choose a mailbox to send the test from.')
-    const [mb] = await db(`email_mailboxes?id=eq.${body.mailbox_id}&workspace_id=eq.${workspaceId}&select=*`) || []
-    if (!mb) return fail('That mailbox is not in this workspace.', 404)
-    const to = normalizeEmail(body.to || user?.email)
-    if (!isValidEmail(to)) return fail('Enter a valid address to send the test to.')
-    const password = openSecret((await db(`email_mailbox_secrets?mailbox_id=eq.${mb.id}&select=secret`) || [])[0]?.secret, SERVICE_KEY)
-    if (!password) return fail('This mailbox\'s login can no longer be read. Reconnect it.')
-    const sample = { first_name: body.sample?.first_name || 'Sara', last_name: body.sample?.last_name || '', company: body.sample?.company || 'Example Co', job_title: '', city: 'Riyadh', email: to }
-    const rendered = renderEmail({
-      audience: 'cold',
-      subject: `[TEST] ${body.subject || 'Outreach mailbox check'}`,
-      body: body.body || 'Hi {{first_name|there}},\n\nThis is a test from the outreach mailbox. If it arrived in the inbox (not spam or Promotions), this mailbox is ready.',
-      language: body.language === 'ar' ? 'ar' : 'en', contact: sample, signature: mb.signature,
-      subscribeUrl: `${baseUrlOf(this.req)}/api/email/subscribe?t=test`,
-    })
-    const r = await sendBy(mb, password, {
-      from: { name: mb.from_name || '', address: mb.email }, to: { name: '', address: to },
-      subject: rendered.subject, text: rendered.text, html: rendered.html,
-      messageId: `<${crypto.randomUUID()}@${domainOf(mb.email)}>`,
-    })
-    if (!r.ok) return fail(String(r.error?.reason || r.error?.response || r.error?.message || 'The test could not be sent.').slice(0, 300), 502)
-    return { sent_to: to, from: mb.email }
   },
 
   /**
