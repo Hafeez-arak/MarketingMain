@@ -144,9 +144,18 @@ insert into public.brand_fields
    '', 'textarea', 6, 'offers_ctas', 'Calls-to-action to push', true, 30, array['plan','caption','chat']),
   (ws, 'knowledge_centre', 'contact_info', 'Contact', 'Phone, WhatsApp, email, office and website.',
    '', 'textarea', 5, 'contact_info', 'Contact details', true, 40, array['caption','chat']),
-  -- Read by the weekly email builder (weekly.js websiteOf) for its links.
-  (ws, 'knowledge_centre', 'website', 'Website', 'The public website address.',
-   'https://www.example.com', 'text', 1, '', '', false, 50, '{}'),
+  -- The two fields that connect the website (docs/WEBSITE-SETUP.md). There is
+  -- no connect button: the Website tab reads Search Console and Google
+  -- Analytics for whatever these two say. `website` is a bare hostname on
+  -- purpose — propertyId() turns that into the sc-domain: property, where a
+  -- full URL would be taken as a URL-prefix property and answer 403. The
+  -- weekly email builder (weekly.js websiteOf) reads the same value for links.
+  (ws, 'knowledge_centre', 'website', 'Website (Search Console property)',
+   'The site address exactly as it is verified in Google Search Console: no https://, no www. Also used for the links in emails.',
+   'e.g. example.com', 'text', 1, '', '', false, 50, '{}'),
+  (ws, 'knowledge_centre', 'ga4_property_id', 'Google Analytics Property ID',
+   'The digits-only Property ID from Google Analytics: Admin, then Property settings. Not the G- measurement id.',
+   'e.g. 123456789', 'text', 1, '', '', false, 55, '{}'),
   (ws, 'knowledge_centre', 'compliance_notes', 'Compliance', 'Opt-in and unsubscribe rules. Needed before WhatsApp or email campaigns go out.',
    'e.g. WhatsApp: opt-in required, add "Reply STOP to unsubscribe".', 'textarea', 3,
    'compliance_notes', 'Compliance rules (esp. WhatsApp/email)', true, 60, '{}')
@@ -389,7 +398,7 @@ Hospitality and tourism: hotel arrivals, resorts and guest-facing gardens
 Each sector has its own rules, budgets and users; the design and the build are adjusted to fit them.$t$,
     'geography',    'Riyadh first, with projects across Saudi Arabia',
     'sales_motion', 'specification',
-    'website',      'https://www.ghusnsa.com',
+    'website',      'ghusnsa.com',
     'arabic_rendering', $t$Arabic text on AI-generated images must be added as a manual overlay or checked letter by letter. Image models get Arabic letter-joining and right-to-left order wrong, and they misspell the brand name in both scripts.
 Use El Messiri for Arabic headlines and IBM Plex Sans Arabic for text, to match the website.$t$
   ),
