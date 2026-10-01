@@ -53,7 +53,7 @@ export function Signup() {
     <AuthLayout
       eyebrow="Get started"
       title="Request access"
-      subtitle="Creating an account sends a request to the administrator. Once approved, you get every company with the same full access as the rest of the team."
+      subtitle="Creating an account sends a request to the administrator. Once approved, you get full access to the companies they give you."
     >
       <form onSubmit={handleSubmit}>
         <AuthInput

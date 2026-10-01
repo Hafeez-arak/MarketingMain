@@ -25,9 +25,10 @@ export function RequireAuth({ children }) {
     return <PendingApproval />
   }
 
-  // Approved but no companies exist at all. Only reachable if every company
-  // was deleted, since approval joins you to all of them; the onboarding
-  // page just creates the first one back.
+  // Approved, but holding no company. The ordinary case for someone who was
+  // just approved: approval lets you sign in and gives you nothing until the
+  // admin ticks a company for you. The onboarding page says that — or, for
+  // the admin with no companies at all, offers to create the first one.
   if (workspaces.length === 0) {
     return <Navigate to="/onboarding" replace />
   }
