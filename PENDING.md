@@ -178,3 +178,34 @@ cold outreach written but not sent, warm-up, webhooks, unsubscribe). Parked:
   importing any bought cold list (MillionVerifier, ZeroBounce, ~$0.002–0.008
   per address). The importer rejects malformed addresses only.
 
+
+## Ghusn Brand Brain — what the sources did not supply (raised 2026-10-01)
+
+Built from the Ghusn website repository and the 20-page company profile, and
+live in the Ghusn workspace (`supabase/seed_brand_brain_ghusn.sql`). These are
+the gaps left on purpose rather than filled with a guess.
+
+- **No social handles.** Neither the site nor the profile prints an Instagram,
+  Snapchat, TikTok or LinkedIn handle, so Contact carries phone, email, office
+  and website only.
+- **Competitor Watch is empty.** No source names a rival. "Find rivals" on the
+  Insights page proposes them; nothing was invented.
+- **Compliance is blank.** Opt-in and unsubscribe wording is needed before any
+  WhatsApp or email campaign goes out for Ghusn.
+- **The Asset Library is empty.** The logo (light and dark) and the project
+  photography are in the website repository under `dist/assets/`; uploading
+  them needs a signed-in session or the service key, so it was left for a
+  decision. Until then the picture models have the palette and the style
+  rules but no real Ghusn photo to work from.
+- **Projects: 25+ or 5+?** The website says 25+ projects; the profile PDF
+  prints "+05". The Brand Brain follows the website. If the PDF is the right
+  one, Company Facts needs one line changed.
+- **"A greener arrival" does not name its client in captions.** The site copy
+  says "a recognizable international brand" although the photo and the client
+  list both show McDonald's. The project entry keeps the site's wording until
+  someone confirms the name may be used.
+- **Two market lines are general knowledge**, labelled as such in Market
+  Context: the national green-space programmes, and the cool-season note.
+- **Website address.** Contact uses `www.ghusnsa.com`, from the profile. The
+  rebuilt site's README says it does not modify that domain, so the address
+  is right only once the new site is pointed at it.
