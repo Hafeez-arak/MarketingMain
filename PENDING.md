@@ -192,11 +192,11 @@ the gaps left on purpose rather than filled with a guess.
   Insights page proposes them; nothing was invented.
 - **Compliance is blank.** Opt-in and unsubscribe wording is needed before any
   WhatsApp or email campaign goes out for Ghusn.
-- **The Asset Library is empty.** The logo (light and dark) and the project
-  photography are in the website repository under `dist/assets/`; uploading
-  them needs a signed-in session or the service key, so it was left for a
-  decision. Until then the picture models have the palette and the style
-  rules but no real Ghusn photo to work from.
+- **The Asset Library holds the two logos and nothing else.** Light and dark
+  lettering, uploaded 2026-10-01. The project photography in the website
+  repository (`dist/assets/`) was left out by the owner's choice, so the
+  picture models have the palette and the style rules but no real Ghusn photo
+  to work from.
 - **Projects: 25+ or 5+?** The website says 25+ projects; the profile PDF
   prints "+05". The Brand Brain follows the website. If the PDF is the right
   one, Company Facts needs one line changed.
