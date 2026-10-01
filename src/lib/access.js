@@ -49,8 +49,8 @@ export async function fetchPendingCount() {
   return count || 0
 }
 
-// Approve: joins them to every company that exists, and the roster trigger
-// keeps them joined to every company created later.
+// Approve: lets them sign in, and nothing more. They hold no company until
+// one is ticked for them with setUserCompanies below.
 export async function approveAccess(userId) {
   const { error } = await supabase.rpc('approve_access', { target_user: userId })
   return error ? error.message : null
@@ -69,7 +69,7 @@ export async function revokeAccess(userId) {
 export async function fetchInvites() {
   const { data, error } = await supabase
     .from('access_invites')
-    .select('email, invited_at')
+    .select('email, invited_at, workspace_ids')
     .order('invited_at', { ascending: false })
   if (error) return { invites: [], error: error.message }
   return { invites: data || [], error: null }
@@ -81,8 +81,14 @@ export async function fetchInvites() {
 //   'approved' — they had signed up already, and are now in
 //   'invited'  — no account yet; they're cleared for when they sign up
 //   'already'  — nothing to do, they already had access
-export async function inviteAccess(email) {
-  const { data, error } = await supabase.rpc('invite_access', { target_email: email })
+// workspaceIds are the companies ticked on the form. They are applied now for
+// 'approved', kept on the invite for 'invited', and ignored for 'already' —
+// someone who is in has their companies edited on their own row.
+export async function inviteAccess(email, workspaceIds = []) {
+  const { data, error } = await supabase.rpc('invite_access', {
+    target_email: email,
+    ws_ids: workspaceIds,
+  })
   if (error) return { outcome: null, error: error.message }
   return { outcome: data, error: null }
 }
@@ -105,7 +111,7 @@ export async function cancelInvite(email) {
 export async function fetchAllCompanies() {
   const { data, error } = await supabase
     .from('workspaces')
-    .select('id, name, admin_only')
+    .select('id, name')
     .order('name')
   if (error) return { companies: [], error: error.message }
   return { companies: data || [], error: null }
@@ -135,4 +141,17 @@ export async function setUserCompanies(userId, workspaceIds) {
     ws_ids: workspaceIds,
   })
   return error ? error.message : null
+}
+
+// Create a company and say who gets it. The administrators and the person
+// creating it are always joined (the roster trigger does that); memberIds is
+// everyone else. Only the access admin may pass any — the function raises for
+// a member who tries, so the form simply does not offer it to them.
+export async function createCompany(name, memberIds = []) {
+  const { data, error } = await supabase.rpc('create_company', {
+    company_name: name,
+    member_ids: memberIds,
+  })
+  if (error) return { id: null, error: error.message }
+  return { id: data, error: null }
 }

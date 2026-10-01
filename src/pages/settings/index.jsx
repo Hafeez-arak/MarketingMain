@@ -4,6 +4,7 @@ import { mergeWebhooks, defaultWebhookUrl } from '../../lib/n8nWebhooks'
 import { useAuth } from '../../store/auth'
 import { supabase } from '../../lib/supabaseClient'
 import { fetchWorkspaceWebhooks, saveWorkspaceWebhooks } from '../../lib/workspaceWebhooks'
+import { createCompany, fetchAllAccess } from '../../lib/access'
 import { Card, Button, PageHeader } from '../../components/ui/index'
 import { uid, PLATFORM_META } from '../../lib/utils'
 
@@ -473,9 +474,18 @@ function WorkflowWebhooks() {
 // localStorage appStore — so creating a company here makes a real, isolated
 // tenant that shows up in the sidebar switcher and gets its own brain/plans.
 export function Settings() {
-  const { user, workspaces, activeWorkspaceId, switchWorkspace, refreshWorkspaces } = useAuth()
+  const { user, isAccessAdmin, workspaces, activeWorkspaceId, switchWorkspace, refreshWorkspaces } = useAuth()
   const [showCreate, setShowCreate] = useState(false)
   const [newWsName, setNewWsName]   = useState('')
+  // Who else gets the company being created. A new company reaches the
+  // administrators and its creator and nobody else, so the form asks rather
+  // than leaving the admin to go and find Team & Access afterwards.
+  // `people` is null until the list has loaded, and stays null if it could
+  // not be read — the form then says so instead of showing an empty list
+  // that would read as "there is nobody to add".
+  const [people, setPeople]         = useState(null)
+  const [peopleError, setPeopleError] = useState('')
+  const [picked, setPicked]         = useState(() => new Set())
   const [editingId, setEditingId]   = useState(null)
   const [editName, setEditName]     = useState('')
   const [confirmDelete, setConfirmDelete] = useState(null)
@@ -484,15 +494,36 @@ export function Settings() {
 
   const activeId = activeWorkspaceId
 
+  async function openCreate() {
+    setShowCreate(true); setNewWsName(''); setError(''); setPicked(new Set())
+    // Choosing who gets a company is the admin's call (the database refuses
+    // anyone else), so only the admin is shown the list.
+    if (!isAccessAdmin) return
+    setPeople(null); setPeopleError('')
+    const { rows, error: e } = await fetchAllAccess()
+    if (e) { setPeopleError(e); return }
+    // Administrators are joined to every company already, and the person
+    // creating it is joined too — listing them would be a tick that does nothing.
+    setPeople(rows.filter(r => r.status === 'approved' && r.role !== 'admin' && r.user_id !== user?.id))
+  }
+
+  function togglePerson(id) {
+    setPicked(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id); else next.add(id)
+      return next
+    })
+  }
+
   async function handleCreate() {
     const name = newWsName.trim()
     if (!name || !user) return
     setBusy(true); setError('')
-    // create_company() (SECURITY DEFINER) atomically makes the company + the
-    // caller's owner membership, then we refresh and drop into the new one.
-    const { data: newId, error: rpcError } = await supabase
-      .rpc('create_company', { company_name: name })
-    if (rpcError) { setError(rpcError.message); setBusy(false); return }
+    // create_company() (SECURITY DEFINER) makes the company; its roster
+    // trigger joins the administrators and the caller, and the ids passed
+    // here are joined on top. Then we refresh and drop into the new one.
+    const { id: newId, error: createError } = await createCompany(name, [...picked])
+    if (createError) { setError(createError); setBusy(false); return }
     await refreshWorkspaces()
     if (newId) switchWorkspace(newId)
     setNewWsName(''); setShowCreate(false); setBusy(false)
@@ -529,9 +560,9 @@ export function Settings() {
         <div className="px-5 py-4 border-b border-border flex items-center justify-between gap-4">
           <div>
             <h3 className="font-semibold text-text text-sm">Companies</h3>
-            <p className="text-xs text-text-tertiary mt-0.5">Each company keeps its own brand brain, content, plans, and posts. Everyone on the team can see and edit all of them — add or remove people under Team &amp; Access.</p>
+            <p className="text-xs text-text-tertiary mt-0.5">Each company keeps its own brand brain, content, plans, and posts. A company is only seen by the people it has been given to — change who that is under Team &amp; Access.</p>
           </div>
-          <Button size="sm" onClick={() => { setShowCreate(true); setNewWsName(''); setError('') }}>
+          <Button size="sm" onClick={openCreate}>
             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
             Add company
           </Button>
@@ -559,6 +590,46 @@ export function Settings() {
               <Button size="sm" onClick={handleCreate} disabled={!newWsName.trim() || busy}>{busy ? 'Creating…' : 'Create'}</Button>
               <Button size="sm" variant="secondary" onClick={() => setShowCreate(false)}>Cancel</Button>
             </div>
+
+            {/* Who gets it. Nothing is ticked to begin with: a new company
+                going to nobody is the safe default, and a tick is a decision. */}
+            <p className="text-xs font-semibold text-text-secondary mt-4 mb-1">Who should have access?</p>
+            {!isAccessAdmin ? (
+              <p className="text-xs text-text-tertiary leading-relaxed">
+                You and the administrator. The administrator can add other people afterwards under Team &amp; Access.
+              </p>
+            ) : peopleError ? (
+              <p className="text-xs text-red-600 leading-relaxed">
+                The list of people could not be loaded ({peopleError}). You can still create the company — only
+                administrators will get it — and add people afterwards under Team &amp; Access.
+              </p>
+            ) : people === null ? (
+              <p className="text-xs text-text-tertiary">Loading people…</p>
+            ) : (
+              <>
+                <p className="text-xs text-text-tertiary leading-relaxed mb-2">
+                  Administrators always have it. Tick anyone else who should see this company, or leave everyone
+                  unticked and add them later under Team &amp; Access.
+                </p>
+                {people.length === 0 ? (
+                  <p className="text-xs text-text-tertiary">Nobody else has been approved yet.</p>
+                ) : (
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+                    {people.map(p => (
+                      <label key={p.user_id} className="flex items-center gap-2 text-sm text-text cursor-pointer py-0.5 min-w-0">
+                        <input
+                          type="checkbox"
+                          checked={picked.has(p.user_id)}
+                          onChange={() => togglePerson(p.user_id)}
+                          className="accent-amber-500 flex-shrink-0"
+                        />
+                        <span className="truncate">{p.full_name || p.email}</span>
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
           </div>
         )}
 

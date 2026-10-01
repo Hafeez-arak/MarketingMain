@@ -33,8 +33,7 @@ export function PendingApproval() {
               Your request for{' '}
               <span className="font-semibold" style={{ color: PALETTE.carbon }}>{user?.email}</span>{' '}
               has been sent to the administrator. Once it's approved you'll
-              have access to every company in the workspace — nothing else to
-              set up.
+              see the companies they give you — nothing else to set up.
             </>
           )}
         </p>
