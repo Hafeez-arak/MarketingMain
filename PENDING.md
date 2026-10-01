@@ -206,6 +206,9 @@ the gaps left on purpose rather than filled with a guess.
   someone confirms the name may be used.
 - **Two market lines are general knowledge**, labelled as such in Market
   Context: the national green-space programmes, and the cool-season note.
-- **Website address.** Contact uses `www.ghusnsa.com`, from the profile. The
-  rebuilt site's README says it does not modify that domain, so the address
-  is right only once the new site is pointed at it.
+- **The website is not connected yet.** The address is set (`ghusnsa.com`),
+  but the Website tab stays empty until Google is told to let the app read:
+  the service account has to be added in Search Console and in Google
+  Analytics, and the Analytics property id typed into the Brand Brain. The
+  live site carries no Analytics tag, so that half has nothing to read until
+  one is installed. Steps in `docs/WEBSITE-SETUP.md`.
