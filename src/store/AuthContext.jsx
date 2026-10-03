@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback, useRef } from 'react'
 import { AuthContext } from './auth'
 import { supabase } from '../lib/supabaseClient'
 import { fetchMyAccess } from '../lib/access'
+import { pickActiveWorkspace, rememberWorkspace, rememberedWorkspace } from '../lib/activeWorkspace'
 
 // ─── Auth + workspace context ──────────────────────────────────────────────
 // Phase 0: real accounts, real session, and a real workspace resolved from
@@ -46,7 +47,9 @@ export function AuthProvider({ children }) {
       .filter(row => row.workspaces)
       .map(row => ({ ...row.workspaces, role: row.role }))
     setWorkspaces(ws)
-    setActiveWorkspaceId(prev => prev && ws.some(w => w.id === prev) ? prev : (ws[0]?.id || null))
+    // The company open before a refresh, if this person still holds it —
+    // otherwise the first one. See lib/activeWorkspace.js.
+    setActiveWorkspaceId(prev => pickActiveWorkspace(prev, rememberedWorkspace(userId), ws))
   }, [])
 
   useEffect(() => {
@@ -97,6 +100,14 @@ export function AuthProvider({ children }) {
 
   const activeWorkspace = workspaces.find(w => w.id === activeWorkspaceId) || null
 
+  // Switching is the only place a choice is saved. The fallback picked on
+  // load is not written back, so losing access to a company does not
+  // overwrite the record of a deliberate choice with an accident.
+  const switchWorkspace = useCallback(id => {
+    setActiveWorkspaceId(id)
+    rememberWorkspace(session?.user?.id, id)
+  }, [session?.user?.id])
+
   const value = {
     session,
     user: session?.user || null,
@@ -118,7 +129,7 @@ export function AuthProvider({ children }) {
     workspaces,
     activeWorkspace,
     activeWorkspaceId,
-    switchWorkspace: setActiveWorkspaceId,
+    switchWorkspace,
     authError,
     signUp,
     signIn,
