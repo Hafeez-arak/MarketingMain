@@ -26,6 +26,11 @@ const MailComposer = MailComposerModule.default || MailComposerModule
 // counts creating a draft as writing to the mailbox. Without it the draft is
 // refused with ErrorAccessDenied (found on the first real send, 2026-09-28).
 export const SCOPES = 'openid profile email offline_access User.Read Mail.Send Mail.Read Mail.ReadWrite'
+
+// The lead agent only READS a mailbox (info@): it asks for no send and no
+// write, at sign-in and at every renewal, so the token it holds cannot send,
+// move or delete anything even if it leaked. See api/leads/_mail.js.
+export const READ_SCOPES = 'openid profile email offline_access User.Read Mail.Read'
 const GRAPH = 'https://graph.microsoft.com/v1.0'
 
 export function msConfig(env = process.env) {
@@ -73,13 +78,13 @@ export function openState(state, serviceKey, now = Date.now()) {
   return claims
 }
 
-export function authorizeUrl({ config, redirectUri, state, loginHint = '' }) {
+export function authorizeUrl({ config, redirectUri, state, loginHint = '', scopes = SCOPES }) {
   const params = new URLSearchParams({
     client_id: config.clientId,
     response_type: 'code',
     redirect_uri: redirectUri,
     response_mode: 'query',
-    scope: SCOPES,
+    scope: scopes,
     state,
     // Always ask which account: the person connecting is usually signed in
     // to Microsoft as themselves, not as the outreach mailbox.
@@ -105,11 +110,11 @@ export function unpackTokens(plain) {
   } catch { return null }
 }
 
-async function tokenCall(fetchImpl, config, form) {
+async function tokenCall(fetchImpl, config, form, scopes = SCOPES) {
   const res = await fetchImpl(`${loginBase(config)}/token`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({ client_id: config.clientId, client_secret: config.secret, scope: SCOPES, ...form }).toString(),
+    body: new URLSearchParams({ client_id: config.clientId, client_secret: config.secret, scope: scopes, ...form }).toString(),
   })
   let body = {}
   try { body = await res.json() } catch { /* not JSON */ }
@@ -125,12 +130,12 @@ async function tokenCall(fetchImpl, config, form) {
   return body
 }
 
-export function exchangeCode({ config, code, redirectUri, fetch: f = fetch }) {
-  return tokenCall(f, config, { grant_type: 'authorization_code', code, redirect_uri: redirectUri })
+export function exchangeCode({ config, code, redirectUri, fetch: f = fetch, scopes = SCOPES }) {
+  return tokenCall(f, config, { grant_type: 'authorization_code', code, redirect_uri: redirectUri }, scopes)
 }
 
-export function refreshTokens({ config, refreshToken, fetch: f = fetch }) {
-  return tokenCall(f, config, { grant_type: 'refresh_token', refresh_token: refreshToken })
+export function refreshTokens({ config, refreshToken, fetch: f = fetch, scopes = SCOPES }) {
+  return tokenCall(f, config, { grant_type: 'refresh_token', refresh_token: refreshToken }, scopes)
 }
 
 // ─── Graph calls ───────────────────────────────────────────────────────────

@@ -91,8 +91,25 @@ export async function intakeWebsite(deps, { key, rows = [] }) {
   const batch = (Array.isArray(rows) ? rows : []).slice(0, MAX_ROWS_PER_CALL)
     .map((r) => ({ row: r.row, env: toEnvelope('website_form', r) }))
     .filter((x) => x.env.email || x.env.phone || x.env.message)
-  if (!batch.length) return { status: 200, results: [] }
+  // The Sheet calls every five minutes and waits at most a minute for the
+  // answer, so the work fits a budget: website rows first, then the mailboxes
+  // (deps.checkMail, the same five-minute heartbeat). Whatever does not fit
+  // waits, unanswered, for the next round.
+  const started = (deps.clock || Date.now)()
+  const results = batch.length ? await qualifyRows(deps, { workspaceId, batch, now, started }) : []
+  let mail = null
+  if (deps.checkMail) {
+    try { mail = await deps.checkMail({ workspaceId, deadline: started + TOTAL_BUDGET_MS }) } catch (err) { mail = { error: String(err.message || err).slice(0, 300) } }
+  }
+  return { status: 200, results, mail }
+}
 
+/** Time the website rows may take in one call, and the call as a whole. */
+export const WEBSITE_BUDGET_MS = 30_000
+export const TOTAL_BUDGET_MS = 45_000
+
+async function qualifyRows(deps, { workspaceId, batch, now, started }) {
+  const clock = deps.clock || Date.now
   // What we already know: the same rows from an earlier pass, and the last
   // week's leads for the duplicate check.
   const since = new Date(now.getTime() - (DUPLICATE_DAYS + 1) * 86_400_000).toISOString()
@@ -129,6 +146,7 @@ export async function intakeWebsite(deps, { key, rows = [] }) {
       continue
     }
 
+    if (clock() - started > WEBSITE_BUDGET_MS) { results.push({ row, error: 'Waiting for the next round.' }); continue }
     brand ||= await loadBrand(deps.db, workspaceId)
     if (spent === null) spent = await monthSpent(deps.db, workspaceId, now)
     const cap = capDecision({ cap: brand.cap, spent, estimate: 0.001 })
@@ -155,10 +173,10 @@ export async function intakeWebsite(deps, { key, rows = [] }) {
     known.push({ id: saved?.id, sourceRef: env.sourceRef, email: env.email, phone: env.phone, message: env.message, receivedAt: base.received_at })
     results.push({ row, cells: sheetColumns(v) })
   }
-  return { status: 200, results }
+  return results
 }
 
-async function upsertLead(db, row) {
+export async function upsertLead(db, row) {
   const [saved] = await db('leads?on_conflict=workspace_id,source,source_ref', {
     method: 'POST', prefer: 'resolution=merge-duplicates,return=representation', body: row,
   }) || []
