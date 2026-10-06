@@ -20,6 +20,8 @@ import {
   msConfig, signState, openState, authorizeUrl, exchangeCode, whoAmI, packTokens, createGraphMail,
 } from './_graph.js'
 import { mailboxDomainProblem, domainOf, HARD_MAX_PER_MAILBOX } from '../../src/lib/email/cold.js'
+import { finishConnect as finishLeadMailConnect, checkAllMail as checkAllLeadMail } from '../leads/_mail.js'
+import { leadDeps } from '../leads/_deps.js'
 
 // ─── /api/email/<action> ───────────────────────────────────────────────────
 // One Vercel function for the whole Email section. The Hobby plan builds at
@@ -606,7 +608,12 @@ async function handleWebhook(req, res) {
 
 async function handleCron(req, res) {
   if (!CRON_SECRET || bearerOf(req) !== CRON_SECRET) return res.status(401).json({ ok: false })
-  if (!RESEND_KEY) return res.status(503).json({ ok: false, error: 'RESEND_API_KEY is not set.' })
+  // The lead agent's daily safety run over the mailboxes it reads. Their
+  // five-minute heartbeat is the website Sheet's call; this catches a day it
+  // missed. First, and on its own, so a newsletter problem cannot stop it.
+  let leadMail
+  try { leadMail = await checkAllLeadMail(leadDeps()) } catch (err) { leadMail = { error: String(err?.message || err).slice(0, 300) } }
+  if (!RESEND_KEY) return res.status(503).json({ ok: false, error: 'RESEND_API_KEY is not set.', leadMail })
   // Every workspace with something due. Distinct in code: PostgREST has no
   // DISTINCT, and the list is small.
   const now = new Date().toISOString()
@@ -622,7 +629,7 @@ async function handleCron(req, res) {
   for (const workspaceId of new Set(sending.map(r => r.workspace_id))) {
     await closeFinished({ db, count }, { workspaceId }).catch(() => {})
   }
-  return res.status(200).json({ ok: true, workspaces: workspaces.length, results })
+  return res.status(200).json({ ok: true, workspaces: workspaces.length, results, leadMail })
 }
 
 async function handleColdTick(req, res) {
@@ -664,17 +671,30 @@ async function handleMsCallback(req, res) {
   const q = key => String(req.query?.[key] ?? url.searchParams.get(key) ?? '')
   res.setHeader('Set-Cookie', 'ms_oauth=; Path=/api/email; HttpOnly; SameSite=Lax; Max-Age=0')
   res.setHeader('Cache-Control', 'no-store')
+  // A sign-in started from the Lead Agent page (claims.p === 'leads') goes
+  // back there; everything else is an outreach mailbox.
+  let toLeads = false
   const back = params => {
-    res.setHeader('Location', `${base}/email?tab=cold&section=mailboxes&${new URLSearchParams(params)}`)
+    res.setHeader('Location', toLeads
+      ? `${base}/leads?${new URLSearchParams(params)}`
+      : `${base}/email?tab=cold&section=mailboxes&${new URLSearchParams(params)}`)
     return res.status(302).end()
   }
 
   const claims = openState(q('state'), SERVICE_KEY)
   if (!claims) return back({ ms_error: 'expired' })
+  toLeads = claims.p === 'leads'
   const nonce = cookieOf(req, 'ms_oauth')
   if (!nonce || nonce !== claims.n) return back({ ms_error: 'browser' })
   if (q('error')) return back({ ms_error: /consent/i.test(q('error') + q('error_description')) ? 'consent' : 'denied' })
   if (!q('code') || !MS.configured) return back({ ms_error: 'config' })
+
+  // The lead agent reading a mailbox: a READ-ONLY token, kept in its own
+  // tables, never an outreach sender. See api/leads/_mail.js.
+  if (toLeads) {
+    const out = await finishLeadMailConnect(leadDeps(), { claims, code: q('code'), redirectUri: `${base}/api/email/ms-callback` })
+    return back(out.ok ? { ms: 'connected', mailbox: out.email } : { ms_error: out.error })
+  }
 
   let tokens
   try {

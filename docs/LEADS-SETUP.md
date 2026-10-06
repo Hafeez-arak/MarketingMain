@@ -14,10 +14,11 @@ sidebar.
 | The agent (masking, duplicates, rules, storing) | Vercel, `api/leads/[action].js` | Yes. It wakes for each call. |
 | The model | OpenRouter → GPT-6 Luna (OpenAI, Azure or Amazon) | Yes. |
 | What it decided | Supabase, table `leads` | Yes. |
+| Reading info@ | Vercel, woken by the Sheet's call (and the daily job) | Yes. |
 
-The n8n box at home is **not** involved, so the website path keeps working if
-that PC is off. The info@ mailbox (next step) will need a clock to read mail
-and will use the box's 10-minute tick, like outreach does.
+The n8n box at home is **not** involved, so everything keeps working if that
+PC is off. The website Sheet's call is also the info@ mailbox's five-minute
+heartbeat (section 3), with the app's daily job as a backup.
 
 Names, email addresses and phone numbers are masked before the model sees an
 enquiry (`src/lib/leads/qualify.js`). Each call is recorded in `agent_usage`,
@@ -48,6 +49,47 @@ Done when two columns, **AI verdict** and **AI reason**, appear after Status
 and fill within a minute, and the Lead Agent page shows "Checked … ago". The
 first run reads the existing rows 20 at a time, so a backlog takes a few
 5-minute rounds.
+
+## 3. Connect the info@ mailbox (about 1 minute)
+
+The owner's decision (2026-10-06): info@arak-sa.com only, **read only**.
+
+1. Lead Agent page → Connection → **Connect a mailbox**.
+2. Microsoft asks which account: sign in **as info@arak-sa.com** (its own
+   password), not as yourself.
+3. You come back to the page with "info@arak-sa.com is connected".
+
+What happens then:
+
+- The last 7 days of its inbox are read first, 8 emails per round, then new
+  mail as it arrives. A round runs with every website Sheet call (every 5
+  minutes, on Google's servers) and once more each morning from the app's
+  daily job, as a backup.
+- Free filters in code skip, without storing anything: colleagues
+  (@arak-sa.com), automatic senders (no-reply, notifications…), newsletters
+  (List-Unsubscribe / List-Id), out-of-office and delivery failures, calendar
+  replies, the website form's own copies ("Lighting enquiry — …", already in
+  the Sheet), and replies in a conversation already sorted.
+- What is left goes through the same qualifier as the website. Email leads
+  show on the Lead Agent page with the mailbox and an **Open in Outlook** link.
+
+Security:
+
+- The sign-in asks Microsoft for `Mail.Read` only, and every renewal asks for
+  the same (`READ_SCOPES` in `api/email/_graph.js`). The stored token cannot
+  send, move, flag or delete mail. Attachments are never downloaded.
+- It is not an outreach mailbox: it lives in `lead_mailboxes`, apart from
+  `email_mailboxes`, so the outreach sender can never pick it up.
+- The token is sealed in `lead_mailbox_secrets`, which no signed-in person
+  can read. **Disconnect** on the page deletes it; revoking the app in
+  Microsoft 365 (or changing info@'s password) also stops it at once, and the
+  page then says "Connect it again".
+- The model sees the masked text only (names, emails, phones, links hidden),
+  like the website path.
+
+No Entra change is needed: it uses the existing "Arak Marketing Outreach" app
+registration and its registered callback (`/api/email/ms-callback`), which
+already has delegated `Mail.Read` with admin consent.
 
 ## Changing or stopping it
 

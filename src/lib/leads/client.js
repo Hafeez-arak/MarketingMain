@@ -7,7 +7,7 @@ import { supabase } from '../supabaseClient'
 // Every query carries its own workspace_id filter: RLS is membership, not
 // isolation.
 
-const LEAD_COLUMNS = 'id,source,received_at,name,company,email,phone,subject,message,language,verdict,category,confidence,reason,summary,details,ask_next,duplicate_of,model,cost_usd,error,human_verdict,reviewed_at,created_at'
+const LEAD_COLUMNS = 'id,source,received_at,name,company,email,phone,subject,message,language,verdict,category,confidence,reason,summary,details,ask_next,duplicate_of,model,cost_usd,error,human_verdict,reviewed_at,created_at,mailbox,link'
 
 export async function fetchLeads(ws, { limit = 500 } = {}) {
   const { data, error } = await supabase.from('leads').select(LEAD_COLUMNS)
