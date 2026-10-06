@@ -6,6 +6,9 @@
     },
     "api/email/[action].js": {
       "maxDuration": 300
+    },
+    "api/leads/[action].js": {
+      "maxDuration": 300
     }
   },
   "rewrites": [

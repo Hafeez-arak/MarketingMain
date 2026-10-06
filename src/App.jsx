@@ -24,6 +24,7 @@ import { Insights }                from './pages/insights/index'
 import { ResearchReport }          from './pages/insights/ResearchReport'
 import { BusinessView }            from './pages/insights/BusinessView'
 import AgentPage                  from './pages/agent/index'
+import LeadAgent                  from './pages/leads/index'
 import { MediaLibrary }            from './pages/media/index'
 import { SocialOverview, SocialPlatform } from './pages/social/index'
 import { InstagramPage } from './pages/social/InstagramPage'
@@ -133,6 +134,8 @@ function ProtectedApp() {
                 path still resolves, for links already sent. */}
             <Route path="/insights/research"     element={<Navigate to="/insights" replace />} />
             <Route path="/agent"                 element={<AgentPage />} />
+            {/* Admin only: the page sends anyone else to the dashboard. */}
+            <Route path="/leads"                 element={<LeadAgent />} />
             <Route path="/media"                 element={<MediaLibrary />} />
             <Route path="/social"                element={<SocialOverview />} />
             <Route path="/social/approvals"      element={<PostApprovals />} />

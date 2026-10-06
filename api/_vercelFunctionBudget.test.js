@@ -109,6 +109,10 @@ describe('Vercel function budget', () => {
       // The whole Email section: signed-in actions, the Resend webhook, the
       // unsubscribe page and the morning cron, behind one dynamic route.
       path.join('email', '[action].js'),
+      // The lead agent, the twelfth and last slot (2026-10-06): the website
+      // Sheet's intake, the admin page, and later the info@ mailbox, all
+      // behind one dynamic route. The next handler goes to n8n, not here.
+      path.join('leads', '[action].js'),
       path.join('n8n', '[slot].js'),
       path.join('zernio', '[action].js'),
     ].sort())
