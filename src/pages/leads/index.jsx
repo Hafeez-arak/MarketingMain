@@ -302,8 +302,10 @@ function TryIt({ workspaceId }) {
 function Connection({ workspaceId, status, loading, onChange, onError, onReload, now }) {
   const [key, setKey] = useState('')
   const [busy, setBusy] = useState('')
-  const [copied, setCopied] = useState(false)
+  const [copied, setCopied] = useState('')
   const intakeKey = status?.settings?.intake_key || ''
+  const exportKey = status?.settings?.export_key || ''
+  const master = sheetHealth(status?.settings?.last_export_at, now)
 
   async function connectMailbox() {
     setBusy('connect')
@@ -337,16 +339,16 @@ function Connection({ workspaceId, status, loading, onChange, onError, onReload,
     onChange((s) => ({ ...s, key: { ...s?.key, ...r.key, fromDeployment: false } }))
   }
 
-  async function rotate() {
-    setBusy('rotate')
-    const r = await leadsApi('rotate_intake_key', workspaceId)
+  async function rotate(which = 'intake') {
+    setBusy(`rotate:${which}`)
+    const r = await leadsApi(which === 'export' ? 'rotate_export_key' : 'rotate_intake_key', workspaceId)
     setBusy('')
     if (r.error) return onError(r.error)
     onChange((s) => ({ ...s, settings: r.settings }))
   }
 
-  async function copy() {
-    try { await navigator.clipboard.writeText(intakeKey); setCopied(true); setTimeout(() => setCopied(false), 1500) } catch { /* the key is selectable */ }
+  async function copy(which, value) {
+    try { await navigator.clipboard.writeText(value); setCopied(which); setTimeout(() => setCopied(''), 1500) } catch { /* the key is selectable */ }
   }
 
   return (
@@ -391,12 +393,27 @@ function Connection({ workspaceId, status, loading, onChange, onError, onReload,
         {loading ? <Skeleton className="h-8 w-full" /> : (
           <div className="flex gap-2">
             <code className="flex-1 min-w-0 truncate px-2 py-1.5 bg-surface-subtle border border-border text-[11px] select-all">{intakeKey || '—'}</code>
-            <Button size="xs" variant="secondary" onClick={copy} disabled={!intakeKey}>{copied ? 'Copied' : 'Copy'}</Button>
+            <Button size="xs" variant="secondary" onClick={() => copy('intake', intakeKey)} disabled={!intakeKey}>{copied === 'intake' ? 'Copied' : 'Copy'}</Button>
           </div>
         )}
         <div className="flex items-center justify-between gap-2">
           <p className="text-[10px] text-text-tertiary">The Sheet's script sends this with every call.</p>
-          <Button size="xs" variant="ghost" onClick={rotate} disabled={busy === 'rotate' || loading}>New key</Button>
+          <Button size="xs" variant="ghost" onClick={() => rotate('intake')} disabled={busy === 'rotate:intake' || loading}>New key</Button>
+        </div>
+      </div>
+      <div className="space-y-1.5">
+        <p className="eyebrow">Master Sheet key</p>
+        {loading ? <Skeleton className="h-8 w-full" /> : (
+          <div className="flex gap-2">
+            <code className="flex-1 min-w-0 truncate px-2 py-1.5 bg-surface-subtle border border-border text-[11px] select-all">{exportKey || '—'}</code>
+            <Button size="xs" variant="secondary" onClick={() => copy('export', exportKey)} disabled={!exportKey}>{copied === 'export' ? 'Copied' : 'Copy'}</Button>
+          </div>
+        )}
+        <div className="flex items-center justify-between gap-2">
+          <p className={`text-[10px] ${master.state === 'stale' ? 'text-amber-800' : 'text-text-tertiary'}`}>
+            {master.state === 'never' ? 'The leads workbook has not connected yet.' : `Leads workbook: ${master.label.toLowerCase()}.`} It can read every lead.
+          </p>
+          <Button size="xs" variant="ghost" onClick={() => rotate('export')} disabled={busy === 'rotate:export' || loading}>New key</Button>
         </div>
       </div>
       <div className="space-y-1.5">

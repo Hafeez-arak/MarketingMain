@@ -4,6 +4,7 @@ import { sealSecret } from '../email/_secrets.js'
 import { signState, authorizeUrl, READ_SCOPES } from '../email/_graph.js'
 import { intakeWebsite, tryIt, QUALIFIER_MODEL } from './_intake.js'
 import { checkMail } from './_mail.js'
+import { exportLeads } from './_export.js'
 import { leadDeps, openRouterKey, hasDeploymentKey } from './_deps.js'
 
 // ─── /api/leads/<action> ───────────────────────────────────────────────────
@@ -18,6 +19,9 @@ import { leadDeps, openRouterKey, hasDeploymentKey } from './_deps.js'
 //                       get two cells back for each row. It is also the
 //                       mailboxes' five-minute heartbeat: Google runs it, so
 //                       no computer of ours needs to be on.
+//   the master workbook POST /export with its own export key, every five
+//                       minutes: every lead that changed since its cursor, as
+//                       the workbook's rows. Read only.
 //   the admin           POST /<action>, Bearer token, workspace_id in the body.
 //                       Signed in, a member of that workspace (asked with the
 //                       caller's own token, so RLS answers) and the access
@@ -141,6 +145,14 @@ const actions = {
     return { settings: row }
   },
 
+  async rotate_export_key({ workspaceId }) {
+    await settingsFor(workspaceId)
+    const [row] = await db(`lead_agent_settings?workspace_id=eq.${workspaceId}`, {
+      method: 'PATCH', prefer: 'return=representation', body: { export_key: crypto.randomUUID(), updated_at: new Date().toISOString() },
+    }) || []
+    return { settings: row }
+  },
+
   async rotate_intake_key({ workspaceId }) {
     await settingsFor(workspaceId)
     const [row] = await db(`lead_agent_settings?workspace_id=eq.${workspaceId}`, {
@@ -176,7 +188,8 @@ const actions = {
     if (verdict !== null && !['qualified', 'unqualified', 'needs_review'].includes(verdict)) return fail(400, 'Unknown verdict.')
     const [row] = await db(`leads?id=eq.${body.lead_id}&workspace_id=eq.${workspaceId}`, {
       method: 'PATCH', prefer: 'return=representation',
-      body: { human_verdict: verdict, reviewed_by: verdict ? user.id : null, reviewed_at: verdict ? new Date().toISOString() : null },
+      // updated_at moves too, so the master Sheet picks the correction up.
+      body: { human_verdict: verdict, reviewed_by: verdict ? user.id : null, reviewed_at: verdict ? new Date().toISOString() : null, updated_at: new Date().toISOString() },
     }) || []
     if (!row) return fail(404, 'That lead is not in this company.')
     return { lead: row }
@@ -231,6 +244,17 @@ export default async function handler(req, res) {
       const out = await intakeWebsite(leadDeps(), { key: body.key, rows: body.rows })
       if (out.error) return res.status(out.status).json({ ok: false, error: out.error })
       return res.status(200).json({ ok: true, off: Boolean(out.off), results: out.results, mail: out.mail || null })
+    } catch (err) {
+      return res.status(500).json({ ok: false, error: String(err.message || err).slice(0, 300) })
+    }
+  }
+
+  // The master workbook's script: every lead, by its own key, read only.
+  if (action === 'export') {
+    try {
+      const out = await exportLeads(leadDeps(), { key: body.key, cursor: body.cursor })
+      if (out.error) return res.status(out.status).json({ ok: false, error: out.error })
+      return res.status(200).json({ ok: true, leads: out.leads, next: out.next, more: out.more })
     } catch (err) {
       return res.status(500).json({ ok: false, error: String(err.message || err).slice(0, 300) })
     }

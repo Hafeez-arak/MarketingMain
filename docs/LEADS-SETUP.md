@@ -91,6 +91,44 @@ No Entra change is needed: it uses the existing "Arak Marketing Outreach" app
 registration and its registered callback (`/api/email/ms-callback`), which
 already has delegated `Mail.Read` with admin consent.
 
+## 4. The master leads workbook (about 3 minutes)
+
+One Google workbook with every lead from every source, kept up to date every
+5 minutes (the owner's decisions, 2026-10-07):
+
+- **All enquiries**: every lead (website, email, later sources), whatever the
+  verdict.
+- **Qualified**: the qualified leads only. The sales team works from this tab.
+
+Columns on both tabs: Received · Source · Name · Company · Email · Phone ·
+Brief · AI verdict · Type · AI reason · Link · **Status · Assigned to ·
+Notes** · Lead ID (hidden).
+
+The script writes Received to Link. It never writes Status, Assigned to or
+Notes. Brief is everything they wrote (an email's subject and body; a website
+enquiry's project type and brief). Source says where it came from, such as
+"Website" or "Email (info@arak-sa.com)". AI verdict shows a correction made
+on the Lead Agent page, if there is one. One-way: what the team types in the
+workbook does not go back.
+
+1. Create a new, empty Google Sheet, for example "ARAK Leads".
+2. **Extensions → Apps Script**, delete what is there, paste all of
+   `scripts/lead-qualifier/LeadsMaster.gs`.
+3. Replace `PASTE-THE-MASTER-SHEET-KEY-HERE` with Lead Agent → Connection →
+   **Master Sheet key** (Copy). Save.
+4. Choose `installLeadsMaster` → **Run** → allow Google's prompt.
+
+Done when both tabs appear and fill with every lead so far, and the Lead
+Agent page says "Leads workbook: checked … ago".
+
+- Sort and filter freely: rows are matched by the hidden Lead ID.
+- A qualified lead later corrected to something else stays on Qualified with
+  the new verdict shown, so nobody's notes vanish.
+- `resyncLeadsMaster` refreshes every agent column from scratch; team columns
+  are kept.
+- Share it as **Restricted**: it holds clients' contact details. The master
+  key can read every lead; **New key** on the page cuts an old copy off.
+
 ## Changing or stopping it
 
 - **Pause:** the On/Off switch on the Lead Agent page. Rows wait, blank, and
