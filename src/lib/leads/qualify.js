@@ -206,6 +206,8 @@ Rules:
 - Short is not junk. "Outdoor lighting" or "need price" from anyone is product_enquiry.
 - Free email (Gmail, Hotmail) is not junk. Many real buyers use it.
 - A company introducing itself and then ASKING US for prices or products is a buyer. A company introducing itself and OFFERING its products, workers or services is a pitch.
+- A company inviting us to register as their supplier, or to quote on their RFQs or tenders, is a buyer.
+- Students, researchers and journalists asking questions for their own study or article are not customers: use not_an_enquiry.
 - Something we do not sell is still a buyer if they want to buy; say so in the reason.
 - Use low confidence when the enquiry could reasonably be read two ways.
 - Personal details were replaced with [NAME], [EMAIL], [PHONE], [LINK]. Ignore that.
@@ -271,6 +273,33 @@ export function buildMessages(env, brand = {}) {
     { role: 'system', content: systemPrompt(brand) },
     { role: 'user', content: userPrompt(maskedEnquiry(env)) },
   ]
+}
+
+/**
+ * The model, chosen by the 6 Oct 2026 bake-off: 68/68 on 14 real and 20 hard
+ * made-up enquiries run twice, no buyer lost, about $0.00016 a lead. GLM 5.3
+ * Flash and DeepSeek V4.1 Flash scored the same; Luna won on where it runs
+ * (OpenAI, Azure, Bedrock; API data is not trained on). Re-run
+ * scripts/lead-qualifier/bakeoff.mjs before changing it.
+ */
+export const QUALIFIER_MODEL = 'openai/gpt-6-luna'
+
+/**
+ * The body for OpenRouter's /chat/completions. No temperature: Luna is a
+ * thinking model and refuses one, and with require_parameters an unsupported
+ * setting rules out every provider. Thinking is kept low because it is billed
+ * as output, and providers that keep or train on prompts are excluded.
+ */
+export function openRouterRequest(env, brand = {}, { model = QUALIFIER_MODEL } = {}) {
+  return {
+    model,
+    messages: buildMessages(env, brand),
+    max_tokens: 4000,
+    response_format: { type: 'json_schema', json_schema: VERDICT_SCHEMA },
+    reasoning: { effort: 'low', exclude: true },
+    provider: { data_collection: 'deny', require_parameters: true },
+    usage: { include: true },
+  }
 }
 
 /**

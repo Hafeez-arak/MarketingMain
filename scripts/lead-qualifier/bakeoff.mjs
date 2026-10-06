@@ -30,18 +30,26 @@ const arg = (name, fallback) => {
   return i > 0 ? process.argv[i + 1] : fallback
 }
 
+// The newest cheap model from each provider on 6 Oct 2026, plus the winner
+// of the first run (Mistral Small 3.2) as the baseline to beat.
 const DEFAULT_MODELS = [
-  'google/gemini-3.1-flash-lite',
-  'google/gemini-2.5-flash-lite',
+  'openai/gpt-6-luna',
+  'google/gemini-3.5-flash-lite',
+  'google/gemini-3.8-flash',
+  'mistralai/mistral-small-2603',
+  'deepseek/deepseek-v4.1-flash',
+  'qwen/qwen3.8-flash',
+  'z-ai/glm-5.3-flash',
+  'xiaomi/mimo-v2.6-flash',
+  'cohere/command-a-plus',
+  'nvidia/nemotron-3.5-lightning',
   'mistralai/mistral-small-3.2-24b-instruct',
-  'openai/gpt-4.1-nano',
-  'openai/gpt-4.1-mini',
-  'qwen/qwen3.7-flash',
-  'deepseek/deepseek-v4-flash',
-  'anthropic/claude-haiku-4.5',
 ]
 const models = arg('models', DEFAULT_MODELS.join(',')).split(',').map((s) => s.trim()).filter(Boolean)
 const only = arg('only', 'all')
+// Run every case this many times: a model that flips its answer between
+// identical runs is not one to trust with a mailbox.
+const repeat = Math.max(1, Number(arg('repeat', '1')) || 1)
 const key = process.env.OPENROUTER_API_KEY
 if (!key) { console.error('Set OPENROUTER_API_KEY first.'); process.exit(1) }
 
@@ -66,23 +74,43 @@ async function offering() {
   return row.product_index
 }
 
-async function prices() {
+// Price and abilities per model: whether it enforces a JSON schema or only
+// "some JSON", and whether it thinks before answering.
+async function catalogue() {
   const r = await fetch('https://openrouter.ai/api/v1/models')
   const { data } = await r.json()
-  return new Map(data.map((m) => [m.id, { in: Number(m.pricing?.prompt || 0), out: Number(m.pricing?.completion || 0) }]))
+  return new Map(data.map((m) => {
+    const sp = m.supported_parameters || []
+    return [m.id, {
+      in: Number(m.pricing?.prompt || 0),
+      out: Number(m.pricing?.completion || 0),
+      schema: sp.includes('structured_outputs'),
+      json: sp.includes('response_format'),
+      reasons: sp.includes('reasoning'),
+      // OpenAI's thinking models refuse temperature, and with
+      // require_parameters an unsupported one rules out every provider.
+      temperature: sp.includes('temperature'),
+    }]
+  }))
 }
 
-async function ask(model, messages) {
+async function ask(model, messages, info = {}) {
   const started = Date.now()
+  // Strict schema where the model supports it, plain JSON where it only
+  // supports that (the prompt spells out the fields either way).
+  const response_format = info.schema || !info.json ? { type: 'json_schema', json_schema: VERDICT_SCHEMA } : { type: 'json_object' }
   const r = await fetch('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',
     headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', 'X-Title': 'Arak lead qualifier bake-off' },
     body: JSON.stringify({
       model,
       messages,
-      temperature: 0,
-      max_tokens: 1200,
-      response_format: { type: 'json_schema', json_schema: VERDICT_SCHEMA },
+      ...(info.temperature === false ? {} : { temperature: 0 }),
+      // Thinking tokens count against this on some providers, so leave room.
+      max_tokens: 4000,
+      response_format,
+      // Sorting an enquiry needs little thought; thinking is billed as output.
+      ...(info.reasons ? { reasoning: { effort: 'low', exclude: true } } : {}),
       provider: { data_collection: 'deny', require_parameters: true },
       usage: { include: true },
     }),
@@ -101,41 +129,69 @@ async function pool(items, size, fn) {
 }
 
 const brand = { companyName: 'ARAK Lighting', offering: await offering() }
-const priceOf = await prices()
+const models$ = await catalogue()
 const isBuyer = (c) => c.accept.length === 1 && c.accept[0] === 'qualified'
 const summary = []; const detail = []
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+
+// New OpenRouter accounts are rate-limited per model; wait and retry that
+// ONE request (never a batch) a few times before calling it an error.
+async function askPatiently(model, messages, info) {
+  for (let attempt = 0; ; attempt++) {
+    const res = await ask(model, messages, info)
+    if (!res.error || !/rate limit/i.test(res.error) || attempt >= 4) return res
+    await sleep(15000)
+  }
+}
 
 for (const model of models) {
+  const info = models$.get(model)
+  if (!info) { console.log(`${model} … not on OpenRouter, skipped`); continue }
   process.stdout.write(`${model} … `)
-  const results = await pool(cases, 4, async (c) => {
-    const res = await ask(model, buildMessages(c.env, brand))
-    if (res.error) return { id: c.id, error: res.error, ms: res.ms }
+  const jobs = []
+  for (let run = 0; run < repeat; run++) for (const c of cases) jobs.push({ c, run })
+  const results = await pool(jobs, 4, async ({ c, run }) => {
+    const res = await askPatiently(model, buildMessages(c.env, brand), info)
+    if (res.error) return { id: c.id, run, error: res.error, ms: res.ms }
     const v = parseVerdict(res.text)
-    const p = priceOf.get(model) || { in: 0, out: 0 }
-    const cost = typeof res.usage.cost === 'number' ? res.usage.cost : (res.usage.prompt_tokens || 0) * p.in + (res.usage.completion_tokens || 0) * p.out
-    return { id: c.id, accept: c.accept, verdict: v.verdict, category: v.category, confidence: v.confidence, reason: v.reason, valid: v.valid, ok: c.accept.includes(v.verdict), buyerLost: isBuyer(c) && v.verdict === 'unqualified', cost, ms: res.ms, tokensIn: res.usage.prompt_tokens, tokensOut: res.usage.completion_tokens }
+    const cost = typeof res.usage.cost === 'number' ? res.usage.cost : (res.usage.prompt_tokens || 0) * info.in + (res.usage.completion_tokens || 0) * info.out
+    return { id: c.id, run, accept: c.accept, verdict: v.verdict, category: v.category, confidence: v.confidence, reason: v.reason, valid: v.valid, ok: c.accept.includes(v.verdict), buyerLost: isBuyer(c) && v.verdict === 'unqualified', cost, ms: res.ms, tokensIn: res.usage.prompt_tokens, tokensOut: res.usage.completion_tokens, thinking: res.usage.completion_tokens_details?.reasoning_tokens || 0 }
   })
   const done = results.filter((r) => !r.error)
   const errors = results.filter((r) => r.error)
+  // Cases whose verdict differed between runs.
+  const byCase = new Map()
+  for (const r of done) { if (!byCase.has(r.id)) byCase.set(r.id, new Set()); byCase.get(r.id).add(r.verdict) }
+  const flips = [...byCase.entries()].filter(([, s]) => s.size > 1).map(([id]) => id)
   const row = {
     model,
-    right: `${done.filter((r) => r.ok).length}/${cases.length}`,
+    right: `${done.filter((r) => r.ok).length}/${jobs.length}`,
+    rightPct: jobs.length ? done.filter((r) => r.ok).length / jobs.length : 0,
     buyersLost: done.filter((r) => r.buyerLost).length,
+    flips: flips.length,
     badJson: done.filter((r) => !r.valid).length,
     errors: errors.length,
     perLead: done.length ? done.reduce((s, r) => s + r.cost, 0) / done.length : 0,
     total: done.reduce((s, r) => s + r.cost, 0),
     avgMs: done.length ? Math.round(done.reduce((s, r) => s + r.ms, 0) / done.length) : 0,
+    avgOut: done.length ? Math.round(done.reduce((s, r) => s + (r.tokensOut || 0), 0) / done.length) : 0,
   }
   summary.push(row); detail.push({ model, results })
-  console.log(`${row.right} right, ${row.buyersLost} buyers lost, ${row.errors} errors, $${row.total.toFixed(4)}`)
+  console.log(`${row.right} right, ${row.buyersLost} buyers lost, ${row.flips} flips, ${row.errors} errors, $${row.total.toFixed(4)}`)
   if (errors.length) console.log(`   first error: ${errors[0].error}`)
-  for (const r of done.filter((x) => !x.ok)) console.log(`   ✗ ${r.id}: said ${r.verdict} (${r.category}, ${r.confidence}), wanted ${r.accept.join('/')} — ${r.reason}`)
+  const seen = new Set()
+  for (const r of done.filter((x) => !x.ok)) {
+    const k = `${r.id}|${r.verdict}`
+    if (seen.has(k)) continue
+    seen.add(k)
+    console.log(`   ✗ ${r.id}: said ${r.verdict} (${r.category}, ${r.confidence}), wanted ${r.accept.join('/')} — ${r.reason}`)
+  }
+  if (flips.length) console.log(`   ↺ changed its answer between runs on: ${flips.join(', ')}`)
 }
 
-console.log('\nModel'.padEnd(46) + 'Right   Lost  BadJSON  Err   $/lead     $ total   avg ms')
-for (const r of summary.sort((a, b) => b.right.localeCompare(a.right, undefined, { numeric: true }) || a.perLead - b.perLead)) {
-  console.log(r.model.padEnd(45), r.right.padEnd(7), String(r.buyersLost).padEnd(5), String(r.badJson).padEnd(8), String(r.errors).padEnd(5), r.perLead.toFixed(6).padEnd(10), r.total.toFixed(4).padEnd(9), r.avgMs)
+console.log('\nModel'.padEnd(46) + 'Right     Lost  Flips  BadJSON  Err   $/lead     $ total   avg ms  out tok')
+for (const r of summary.sort((a, b) => b.rightPct - a.rightPct || a.buyersLost - b.buyersLost || a.perLead - b.perLead)) {
+  console.log(r.model.padEnd(45), r.right.padEnd(9), String(r.buyersLost).padEnd(5), String(r.flips).padEnd(6), String(r.badJson).padEnd(8), String(r.errors).padEnd(5), r.perLead.toFixed(6).padEnd(10), r.total.toFixed(4).padEnd(9), String(r.avgMs).padEnd(7), r.avgOut)
 }
 const spent = summary.reduce((s, r) => s + r.total, 0)
 console.log(`\nSpent on this run: $${spent.toFixed(4)}`)
