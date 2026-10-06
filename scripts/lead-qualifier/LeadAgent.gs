@@ -48,8 +48,11 @@ function leadSheet_() {
 function leadColumns_(sheet) {
   var width = Math.max(sheet.getLastColumn(), 1);
   var headers = sheet.getRange(1, 1, 1, width).getDisplayValues()[0].map(function (h) { return String(h).trim(); });
-  var last = 0;
-  headers.forEach(function (h, i) { if (h) last = i + 1; });
+  // New columns go after the last column holding ANY data, not the last
+  // named one: on Arak's Sheet a salesperson had typed notes into an
+  // unnamed column after Status, and the first version put "AI verdict" on
+  // top of it.
+  var last = width;
   [VERDICT_HEADER, REASON_HEADER].forEach(function (name) {
     if (headers.indexOf(name) === -1) {
       last += 1;
