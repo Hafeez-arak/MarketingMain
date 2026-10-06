@@ -9,6 +9,12 @@ const nav = [
   { section: 'Overview', items: [
     { to: '/', label: 'Dashboard', exact: true, icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg> },
   ]},
+  // Admin only for now (2026-10-06): the lead agent reads clients' names,
+  // emails and phone numbers. `adminOnly` items and sections are dropped for
+  // everyone else at render.
+  { section: 'Sales', adminOnly: true, items: [
+    { to: '/leads', label: 'Lead Agent', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"/></svg> },
+  ]},
   { section: 'Brand', items: [
     { to: '/brand-brain', label: 'Brand Brain', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><path d="M9.5 2A3.5 3.5 0 0 0 6 5.5v.5a3 3 0 0 0-2 2.83V10a3 3 0 0 0 1 2.24V14a3 3 0 0 0 2.5 2.96V18a3 3 0 0 0 3 3h3a3 3 0 0 0 3-3v-1.04A3 3 0 0 0 19 14v-1.76A3 3 0 0 0 20 10V8.83a3 3 0 0 0-2-2.83v-.5A3.5 3.5 0 0 0 14.5 2 3.5 3.5 0 0 0 12 3.17 3.5 3.5 0 0 0 9.5 2z"/></svg> },
   ]},
@@ -175,7 +181,7 @@ export function Sidebar() {
           flush against the sidebar's own border. Inset nav pills would put the
           marker in the middle of a gutter, floating. */}
       <nav className="flex-1 overflow-y-auto scrollbar-thin py-3">
-        {nav.map((group, gi) => (
+        {nav.filter(group => isAccessAdmin || !group.adminOnly).map((group, gi) => (
           <div key={group.section} className={gi > 0 ? 'mt-5' : ''}>
             <p className="px-5 mb-1.5 eyebrow text-text-disabled">{group.section}</p>
             {group.items.map(item => (
