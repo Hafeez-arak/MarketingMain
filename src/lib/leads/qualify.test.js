@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   toEnvelope, emailKind, maskText, maskedEnquiry, findDuplicate, parseTime,
   systemPrompt, userPrompt, buildMessages, parseVerdict, sheetColumns, CATEGORIES, VERDICT_SCHEMA,
+  openRouterRequest, QUALIFIER_MODEL,
 } from './qualify.js'
 
 // Made-up enquiries only: this repo is public, real ones never go in it.
@@ -111,6 +112,21 @@ describe('prompts', () => {
   })
   it('schema enum is exactly the category list', () => {
     expect(VERDICT_SCHEMA.schema.properties.category.enum).toEqual(Object.keys(CATEGORIES))
+  })
+})
+
+describe('openRouterRequest', () => {
+  it('asks GPT-6 Luna, privately, for the schema, with no temperature and no personal details', () => {
+    const body = openRouterRequest(form(), { companyName: 'ARAK', offering: 'Indoor lighting' })
+    expect(body.model).toBe(QUALIFIER_MODEL)
+    expect(QUALIFIER_MODEL).toBe('openai/gpt-6-luna')
+    expect(body).not.toHaveProperty('temperature')
+    expect(body.provider).toEqual({ data_collection: 'deny', require_parameters: true })
+    expect(body.response_format.json_schema).toBe(VERDICT_SCHEMA)
+    expect(JSON.stringify(body)).not.toMatch(/Omar|Haddad|omar@|111 2233/)
+  })
+  it('lets a caller try another model', () => {
+    expect(openRouterRequest(form(), {}, { model: 'z-ai/glm-5.3-flash' }).model).toBe('z-ai/glm-5.3-flash')
   })
 })
 
