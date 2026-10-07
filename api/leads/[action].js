@@ -114,7 +114,22 @@ async function settingsFor(workspaceId) {
   return row
 }
 
-const MAILBOX_COLUMNS = 'id,email,display_name,status,read_from,last_checked_at,last_error,last_counts,created_at'
+/**
+ * Microsoft's admin-consent link for another organisation. Its admin approves
+ * the app's read-only permissions for their whole Microsoft 365 once; the
+ * answer comes back to the callback, which only shows a message.
+ */
+function consentUrl(ms, base) {
+  const q = new URLSearchParams({
+    client_id: ms.clientId,
+    scope: 'https://graph.microsoft.com/Mail.Read https://graph.microsoft.com/User.Read openid profile email offline_access',
+    redirect_uri: `${base}/api/email/ms-callback`,
+    state: 'leads-consent',
+  })
+  return `https://login.microsoftonline.com/organizations/v2.0/adminconsent?${q}`
+}
+
+const MAILBOX_COLUMNS = 'id,email,label,tenant,display_name,status,read_from,last_checked_at,last_error,last_counts,history_from,history_until,history_cursor,history_done,created_at'
 const fail = (status, error) => ({ __fail: true, status, error })
 
 // ─── Admin actions ─────────────────────────────────────────────────────────
@@ -128,10 +143,14 @@ const actions = {
       db(`lead_mailboxes?workspace_id=eq.${workspaceId}&select=${MAILBOX_COLUMNS}&order=created_at`).then((r) => r || []),
     ])
     const key = await openRouterKey(workspaceId)
+    const ms = leadDeps().ms
     return {
       settings,
       model: QUALIFIER_MODEL,
-      microsoft: leadDeps().ms.configured,
+      microsoft: ms.configured,
+      // For a mailbox on another Microsoft 365 (clb-sa.com): its admin opens
+      // this once to allow the app there. It comes back to the Lead Agent page.
+      consentUrl: ms.configured ? consentUrl(ms, baseUrlOf(this.req)) : '',
       mailboxes,
       key: { saved: Boolean(secret), savedAt: secret?.updated_at || null, fromDeployment: !secret && hasDeploymentKey, ...(key ? await describeKey(key) : { valid: false }) },
     }
@@ -200,15 +219,19 @@ const actions = {
    * The answer comes back to /api/email/ms-callback (the registered address),
    * which sees `p: 'leads'` in the signed state and hands it to _mail.js.
    */
-  async mail_connect_start({ workspaceId, user }) {
+  async mail_connect_start({ workspaceId, body, user }) {
     const ms = leadDeps().ms
     if (!ms.configured) return fail(503, 'Microsoft sign-in is not switched on for this app yet.')
     const nonce = crypto.randomBytes(16).toString('base64url')
-    const state = signState({ ws: workspaceId, uid: user.id, p: 'leads', n: nonce }, SERVICE_KEY)
+    // other_org: a mailbox on another Microsoft 365 (clb-sa.com). It signs in
+    // at the shared "organizations" endpoint instead of our own tenant's.
+    const otherOrg = Boolean(body.other_org)
+    const state = signState({ ws: workspaceId, uid: user.id, p: 'leads', o: otherOrg ? 1 : 0, n: nonce }, SERVICE_KEY)
     const secure = /^https:/.test(baseUrlOf(this.req)) ? '; Secure' : ''
     // Path /api/email: that is where the callback reads it.
     this.res.setHeader('Set-Cookie', `ms_oauth=${nonce}; Path=/api/email; HttpOnly; SameSite=Lax; Max-Age=900${secure}`)
-    return { url: authorizeUrl({ config: ms, redirectUri: `${baseUrlOf(this.req)}/api/email/ms-callback`, state, scopes: READ_SCOPES }) }
+    const config = otherOrg ? { ...ms, tenant: 'organizations' } : ms
+    return { url: authorizeUrl({ config, redirectUri: `${baseUrlOf(this.req)}/api/email/ms-callback`, state, scopes: READ_SCOPES }) }
   },
 
   /** Read the connected mailboxes now, instead of waiting for the next round. */

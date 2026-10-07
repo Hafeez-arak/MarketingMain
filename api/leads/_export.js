@@ -9,6 +9,22 @@
 /** Rows per answer; the script asks again until it has everything. */
 export const EXPORT_PAGE = 200
 
+/**
+ * The workbook's two tabs, by when a lead arrived (the owner's decision,
+ * 2026-10-07): "New leads" from 1 October 2026, "Jul–Sep 2026" for 1 July to
+ * 30 September. Anything older is not shown.
+ */
+export const NEW_FROM = Date.parse('2026-10-01T00:00:00+03:00')
+export const HISTORY_FROM = Date.parse('2026-07-01T00:00:00+03:00')
+
+export function periodOf(iso) {
+  const t = Date.parse(iso || '')
+  if (Number.isNaN(t)) return 'new'
+  if (t >= NEW_FROM) return 'new'
+  if (t >= HISTORY_FROM) return 'history'
+  return ''
+}
+
 const isUuid = (v) => /^[0-9a-f-]{36}$/i.test(String(v || ''))
 
 const SOURCE = { website_form: 'Website', email: 'Email' }
@@ -34,6 +50,7 @@ export function toRow(lead) {
     : [lead.subject ? `Project type: ${lead.subject}` : '', lead.message].filter(Boolean).join('\n\n')
   return {
     id: lead.id,
+    period: periodOf(lead.received_at || lead.created_at),
     received: riyadhTime(lead.received_at || lead.created_at),
     source: (SOURCE[lead.source] || lead.source) + (lead.mailbox ? ` (${lead.mailbox})` : ''),
     name: lead.name || '',

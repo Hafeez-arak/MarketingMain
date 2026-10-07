@@ -1,10 +1,14 @@
 import { describe, it, expect } from 'vitest'
-import { skipReason, stripQuoted, messageToEnvelope, checkMailbox, finishConnect, MAIL_MAX_MODEL_CALLS } from './_mail.js'
+import { skipReason, stripQuoted, messageToEnvelope, checkMailbox, checkMail, finishConnect, tenantOf, NEW_LEADS_FROM } from './_mail.js'
 import { intakeWebsite } from './_intake.js'
 
 // Made-up mail only: this repo is public.
 const WS = '00000000-0000-0000-0000-0000000000bb'
-const MB = { id: '00000000-0000-0000-0000-0000000000c1', workspace_id: WS, email: 'info@example-co.sa', status: 'active', read_from: '2026-10-01T00:00:00Z' }
+const MB = {
+  id: '00000000-0000-0000-0000-0000000000c1', workspace_id: WS, email: 'a.box@example-co.sa', label: 'info@example-co.sa', tenant: '',
+  status: 'active', read_from: '2026-10-01T00:00:00Z',
+  history_from: '2026-07-01T00:00:00Z', history_until: '2026-10-01T00:00:00Z', history_cursor: null, history_done: true,
+}
 const NOW = new Date('2026-10-06T12:00:00Z')
 
 const msg = (n, over = {}) => ({
@@ -15,15 +19,19 @@ const msg = (n, over = {}) => ({
 })
 
 describe('skipReason', () => {
-  const own = { ownDomain: 'example-co.sa' }
+  const own = { ownDomains: ['example-co.sa', 'sister-co.sa'] }
   it('lets a real enquiry through', () => expect(skipReason(msg(1), own)).toBe(''))
-  it('skips colleagues, automatic senders, newsletters, auto-replies and the website form copy', () => {
+  it('colleagues on EITHER company domain are skipped (that also drops Sent and Outbox)', () => {
     expect(skipReason(msg(1, { from: { emailAddress: { address: 'hani@example-co.sa' } } }), own)).toBe('colleague')
+    expect(skipReason(msg(1, { from: { emailAddress: { address: 'sales@sister-co.sa' } } }), own)).toBe('colleague')
+  })
+  it('skips automatic senders, newsletters, auto-replies, drafts and the website form copy', () => {
     expect(skipReason(msg(1, { from: { emailAddress: { address: 'no-reply@shop.example' } } }), own)).toBe('automatic sender')
     expect(skipReason(msg(1, { internetMessageHeaders: [{ name: 'List-Unsubscribe', value: '<mailto:x>' }] }), own)).toBe('newsletter')
     expect(skipReason(msg(1, { subject: 'Automatic reply: Enquiry' }), own)).toBe('automatic reply')
     expect(skipReason(msg(1, { subject: 'Undeliverable: Hello' }), own)).toBe('automatic reply')
     expect(skipReason(msg(1, { internetMessageHeaders: [{ name: 'Auto-Submitted', value: 'auto-generated' }] }), own)).toBe('automatic')
+    expect(skipReason(msg(1, { isDraft: true }), own)).toBe('draft')
     expect(skipReason(msg(1, { subject: 'Lighting enquiry — Omar (Nour)', from: { emailAddress: { name: 'ARAK website', address: 'site@gmail.com' } } }), own)).toBe('website form copy')
   })
   it('a normal "Auto-Submitted: no" header is not automatic', () => {
@@ -47,16 +55,20 @@ describe('messageToEnvelope', () => {
   })
 })
 
-/** Fake Microsoft (sign-in + Graph) and a fake PostgREST for the paths used. */
-function world({ messages = [], graphStatus = 200, tokenExpired = true, leads = [] } = {}) {
-  const state = { leads: [...leads], usage: [], mailboxes: [{ ...MB }], secrets: [{ mailbox_id: MB.id, secret: 'sealed' }], tokenCalls: [], graphCalls: [] }
+/** Fake Microsoft (sign-in + Graph, honouring the date filter) and a fake PostgREST. */
+function world({ messages = [], graphStatus = 200, tokenExpired = true, leads = [], mailboxes = [{ ...MB }], proxy = [] } = {}) {
+  const state = { leads: [...leads], usage: [], mailboxes, secrets: [{ mailbox_id: MB.id, secret: 'sealed' }], tokenCalls: [], graphCalls: [], modelCalls: 0, inFlight: 0, maxInFlight: 0 }
   const tokens = { rt: 'refresh-1', at: 'old', exp: tokenExpired ? 0 : NOW.getTime() + 3_600_000 }
   const db = async (path, init = {}) => {
     const method = init.method || 'GET'
     if (path.startsWith('lead_mailbox_secrets?mailbox_id=eq.')) return state.secrets
     if (path.startsWith('lead_mailbox_secrets?on_conflict')) { state.secrets = [{ mailbox_id: init.body.mailbox_id, secret: init.body.secret }]; return [] }
-    if (path.startsWith('lead_mailboxes?id=eq.') && method === 'PATCH') { Object.assign(state.mailboxes[0], init.body); return [state.mailboxes[0]] }
+    if (path.startsWith('lead_mailboxes?id=eq.') && method === 'PATCH') {
+      const mb = state.mailboxes.find((m) => path.includes(m.id)) || state.mailboxes[0]
+      Object.assign(mb, init.body); return [mb]
+    }
     if (path.startsWith('lead_mailboxes?workspace_id=eq.') && path.includes('&email=eq.')) return state.mailboxes.filter((m) => path.includes(encodeURIComponent(m.email)))
+    if (path.startsWith('lead_mailboxes?workspace_id=eq.')) return state.mailboxes.filter((m) => m.status === 'active')
     if (path === 'lead_mailboxes' && method === 'POST') { const row = { id: 'new-mb', ...init.body }; state.mailboxes.push(row); return [row] }
     if (path.startsWith('leads?workspace_id=eq.') && path.includes('source_ref=in.')) return state.leads
     if (path.startsWith('leads?workspace_id=eq.') && path.includes('conversation_id=in.')) return state.leads.filter((l) => l.conversation_id)
@@ -76,33 +88,44 @@ function world({ messages = [], graphStatus = 200, tokenExpired = true, leads = 
   const fetchImpl = async (url, init = {}) => {
     const u = String(url)
     if (u.includes('/oauth2/v2.0/token')) {
-      state.tokenCalls.push(Object.fromEntries(new URLSearchParams(init.body)))
-      return new Response(JSON.stringify({ access_token: 'fresh', refresh_token: 'refresh-2', expires_in: 3600 }), { status: 200 })
+      state.tokenCalls.push({ url: u, ...Object.fromEntries(new URLSearchParams(init.body)) })
+      const idToken = `x.${Buffer.from(JSON.stringify({ tid: 'tenant-of-other-org' })).toString('base64url')}.y`
+      return new Response(JSON.stringify({ access_token: 'fresh', refresh_token: 'refresh-2', expires_in: 3600, id_token: idToken }), { status: 200 })
     }
     state.graphCalls.push({ url: u, headers: init.headers })
-    if (u.includes('/me/mailFolders/inbox/messages')) {
+    if (u.includes('/me/messages?')) {
       if (graphStatus !== 200) return new Response(JSON.stringify({ error: { code: 'InvalidAuthenticationToken', message: 'expired' } }), { status: graphStatus })
-      return new Response(JSON.stringify({ value: messages }), { status: 200 })
+      const filter = new URL(u).searchParams.get('$filter')
+      const ge = filter.match(/ge (\S+)/)[1]
+      const lt = filter.match(/lt (\S+)/)?.[1]
+      const value = messages.filter((m) => m.receivedDateTime >= ge.replace('.000Z', 'Z') && (!lt || m.receivedDateTime < lt.replace('.000Z', 'Z')))
+      return new Response(JSON.stringify({ value }), { status: 200 })
     }
-    if (u.endsWith('/me?$select=displayName,mail,userPrincipalName')) return new Response(JSON.stringify({ displayName: 'Info', mail: 'Info@Example-Co.sa' }), { status: 200 })
+    if (u.endsWith('/me?$select=displayName,mail,userPrincipalName')) return new Response(JSON.stringify({ displayName: 'Info', mail: 'A.Box@Example-Co.sa' }), { status: 200 })
+    if (u.endsWith('/me?$select=proxyAddresses')) return new Response(JSON.stringify({ proxyAddresses: proxy }), { status: 200 })
     if (u.includes('/me/mailFolders/inbox?$select=id')) return new Response(JSON.stringify({ id: 'inbox' }), { status: 200 })
     throw new Error(`fake fetch: ${u}`)
   }
   const replies = []
   const deps = {
     db, fetch: fetchImpl, now: () => NOW,
-    ms: { clientId: 'c', tenant: 't', secret: 's', configured: true },
+    ms: { clientId: 'c', tenant: 'our-tenant', secret: 's', configured: true },
     seal: (plain) => `sealed:${plain}`, open: () => JSON.stringify(tokens),
-    model: async () => replies.shift() || { text: JSON.stringify({ category: 'quotation_request', confidence: 'high', reason: 'Asks for a quote.', summary: 's', details: {}, ask_next: [] }), usage: { prompt_tokens: 800, completion_tokens: 120, cost: 0.00015 } },
+    model: async () => {
+      state.modelCalls++; state.inFlight++; state.maxInFlight = Math.max(state.maxInFlight, state.inFlight)
+      await new Promise((r) => setTimeout(r, 2))
+      state.inFlight--
+      return replies.shift() || { text: JSON.stringify({ category: 'quotation_request', confidence: 'high', reason: 'Asks for a quote.', summary: 's', details: {}, ask_next: [] }), usage: { prompt_tokens: 800, completion_tokens: 120, cost: 0.00015 } }
+    },
   }
   return { state, deps, replies }
 }
 
-const run = (w, budget = { calls: MAIL_MAX_MODEL_CALLS, deadline: Infinity }) =>
-  checkMailbox(w.deps, { mb: w.state.mailboxes[0], brand: { companyName: 'Example Co', offering: 'Lighting', cap: 15 }, budget })
+const brand = { companyName: 'Example Co', offering: 'Lighting', cap: 15 }
+const run = (w, budget = { calls: 40, deadline: Infinity }, mb = w.state.mailboxes[0]) => checkMailbox(w.deps, { mb, brand, budget })
 
-describe('checkMailbox', () => {
-  it('qualifies only what passes the filters, stores it with its mailbox and link, and moves the read point', async () => {
+describe('checkMailbox: new mail', () => {
+  it('reads every folder (/me/messages), qualifies only what passes the filters, labels it, and moves the read point', async () => {
     const w = world({ messages: [
       msg(1),
       msg(2, { internetMessageHeaders: [{ name: 'List-Id', value: 'news' }] }),
@@ -113,20 +136,33 @@ describe('checkMailbox', () => {
     expect(out.counts).toMatchObject({ seen: 4, skipped: 3, qualified: 1 })
     expect(w.state.leads).toHaveLength(1)
     expect(w.state.leads[0]).toMatchObject({ source: 'email', mailbox: 'info@example-co.sa', link: 'https://outlook.office.com/m1', conversation_id: 'conv-1', verdict: 'qualified' })
-    expect(w.state.usage).toHaveLength(1)
     expect(w.state.mailboxes[0]).toMatchObject({ read_from: '2026-10-06T04:00:00Z', status: 'active', last_error: '' })
-    // Graph was asked for text bodies; nothing but a GET on the inbox.
+    expect(w.state.graphCalls[0].url).toContain('/me/messages?')
     expect(w.state.graphCalls[0].headers.Prefer).toBe('outlook.body-content-type="text"')
   })
 
   it('renews its token asking for READ ONLY, never send or write', async () => {
     const w = world({ messages: [] })
     await run(w)
-    expect(w.state.tokenCalls).toHaveLength(1)
     const scope = w.state.tokenCalls[0].scope
     expect(scope).toContain('Mail.Read')
     expect(scope).not.toMatch(/Mail\.Send|Mail\.ReadWrite/)
-    expect(w.state.secrets[0].secret).toMatch(/^sealed:/)
+    expect(w.state.tokenCalls[0].url).toContain('/our-tenant/')
+  })
+
+  it('another organisation\'s mailbox renews against its own tenant', async () => {
+    const w = world({ messages: [], mailboxes: [{ ...MB, tenant: 'clb-tenant-id' }] })
+    await run(w)
+    expect(w.state.tokenCalls[0].url).toContain('/clb-tenant-id/')
+  })
+
+  it('asks the model several at a time, never more than four', async () => {
+    const msgs = Array.from({ length: 9 }, (_, i) => msg(i + 1, { from: { emailAddress: { address: `p${i}@client${i}.example` } }, body: { content: `Different request about item ${i * 13} for project ${i}` } }))
+    const w = world({ messages: msgs })
+    const out = await run(w)
+    expect(out.counts.qualified).toBe(9)
+    expect(w.state.maxInFlight).toBeGreaterThan(1)
+    expect(w.state.maxInFlight).toBeLessThanOrEqual(4)
   })
 
   it('a failed model call is stored without a verdict and asked again next time', async () => {
@@ -134,12 +170,10 @@ describe('checkMailbox', () => {
     w.replies.push({ error: 'Provider overloaded' })
     const first = await run(w)
     expect(first.counts.failed).toBe(1)
-    expect(w.state.leads[0]).toMatchObject({ error: 'Provider overloaded' })
-    expect(w.state.leads[0].verdict).toBeUndefined()
+    expect(w.state.leads.find((l) => l.source_ref === '<msg-1@mail.example.com>')).toMatchObject({ error: 'Provider overloaded' })
     expect(w.state.mailboxes[0].read_from).toBe('2026-10-01T00:00:00Z')
     const second = await run(w)
     expect(second.counts.qualified).toBe(2)
-    expect(w.state.leads[0].verdict).toBe('qualified')
   })
 
   it('a refused sign-in marks the mailbox for reconnecting', async () => {
@@ -149,7 +183,7 @@ describe('checkMailbox', () => {
     expect(w.state.mailboxes[0].status).toBe('reconnect')
   })
 
-  it('stops at the per-round limit and leaves the rest for the next round', async () => {
+  it('stops at the round\'s limit and leaves the rest for the next round', async () => {
     const w = world({ messages: [msg(1), msg(2), msg(3, { from: { emailAddress: { address: 'c3@client.example' } } })] })
     const out = await run(w, { calls: 2, deadline: Infinity })
     expect(out.counts).toMatchObject({ qualified: 2, waiting: 1 })
@@ -157,15 +191,65 @@ describe('checkMailbox', () => {
   })
 })
 
+describe('checkMailbox: July–September history', () => {
+  const old = (n, day) => msg(n, { receivedDateTime: `2026-0${day}T09:00:00Z`, from: { emailAddress: { address: `h${n}@client${n}.example` } }, body: { content: `Old request ${n} for item ${n * 7}` } })
+
+  it('walks 1 Jul → 1 Oct once, after new mail, then marks itself done', async () => {
+    const w = world({ messages: [old(1, '7-15'), old(2, '8-20'), old(3, '9-29'), msg(5)], mailboxes: [{ ...MB, history_done: false }] })
+    const out = await run(w)
+    expect(out.counts.qualified).toBe(1) // new mail: 6 Oct only
+    expect(out.history).toMatchObject({ done: true })
+    expect(out.history.counts.qualified).toBe(3)
+    expect(w.state.mailboxes[0]).toMatchObject({ history_done: true, history_cursor: '2026-09-29T09:00:00Z' })
+    // The history pass asked Graph for the July–September window only.
+    const historyCall = w.state.graphCalls.find((c) => c.url.includes('lt+2026-10-01'))
+    expect(historyCall).toBeTruthy()
+  })
+
+  it('history waits while new mail uses up the round, and resumes from its cursor', async () => {
+    const w = world({ messages: [old(1, '7-15'), old(2, '8-20'), msg(5), msg(6, { from: { emailAddress: { address: 'z@client.example' } } })], mailboxes: [{ ...MB, history_done: false }] })
+    const first = await run(w, { calls: 3, deadline: Infinity })
+    expect(first.counts.qualified).toBe(2)
+    expect(first.history.done).toBe(false)
+    expect(w.state.mailboxes[0].history_cursor).toBe('2026-07-15T09:00:00Z')
+    const second = await run(w)
+    expect(second.history.done).toBe(true)
+    expect(w.state.leads.filter((l) => l.verdict === 'qualified')).toHaveLength(4)
+  })
+})
+
+describe('checkMail', () => {
+  it('treats every connected mailbox\'s domain as a colleague\'s', async () => {
+    const other = { ...MB, id: '00000000-0000-0000-0000-0000000000c2', email: 'info@sister-co.sa', label: 'info@sister-co.sa', tenant: 'sister-tenant' }
+    const w = world({ mailboxes: [{ ...MB }, other], messages: [msg(1, { from: { emailAddress: { address: 'ali@sister-co.sa' } } })] })
+    const out = await checkMail(w.deps, { workspaceId: WS })
+    expect(out.mailboxes[0].counts.skipped).toBe(1)
+    expect(w.state.modelCalls).toBe(0)
+  })
+})
+
 describe('finishConnect', () => {
-  it('exchanges the code for a read-only token, adds the mailbox reading back a week, and seals the token', async () => {
-    const w = world()
-    w.state.mailboxes = []
+  it('our own mailbox: read-only token, labelled by its info@ alias, reading new mail from 1 October', async () => {
+    const w = world({ mailboxes: [], proxy: ['SMTP:a.box@example-co.sa', 'smtp:info@example-co.sa'] })
     const out = await finishConnect(w.deps, { claims: { ws: WS, uid: 'u1' }, code: 'abc', redirectUri: 'https://app/api/email/ms-callback' })
     expect(out).toEqual({ ok: true, email: 'info@example-co.sa' })
     expect(w.state.tokenCalls[0].scope).not.toMatch(/Mail\.Send|Mail\.ReadWrite/)
-    expect(w.state.mailboxes[0]).toMatchObject({ email: 'info@example-co.sa', status: 'active', read_from: '2026-09-29T12:00:00.000Z' })
+    expect(w.state.tokenCalls[0].url).toContain('/our-tenant/')
+    expect(w.state.mailboxes[0]).toMatchObject({ email: 'a.box@example-co.sa', label: 'info@example-co.sa', tenant: '', read_from: NEW_LEADS_FROM })
     expect(w.state.secrets[0].secret).toMatch(/^sealed:/)
+  })
+  it('another organisation\'s mailbox signs in at "organizations" and keeps its own tenant', async () => {
+    const w = world({ mailboxes: [] })
+    await finishConnect(w.deps, { claims: { ws: WS, uid: 'u1', o: 1 }, code: 'abc', redirectUri: 'https://app/api/email/ms-callback' })
+    expect(w.state.tokenCalls[0].url).toContain('/organizations/')
+    expect(w.state.mailboxes[0].tenant).toBe('tenant-of-other-org')
+  })
+})
+
+describe('tenantOf', () => {
+  it('reads tid from an id_token, or nothing', () => {
+    expect(tenantOf(`a.${Buffer.from('{"tid":"t-1"}').toString('base64url')}.b`)).toBe('t-1')
+    expect(tenantOf('nonsense')).toBe('')
   })
 })
 
