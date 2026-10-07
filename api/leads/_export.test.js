@@ -43,6 +43,11 @@ describe('toRow', () => {
     expect(toRow({ verdict: 'duplicate' }).type).toBe('duplicate')
     expect(toRow({ verdict: null, error: 'Provider overloaded' }).verdict).toBe('Not checked yet')
   })
+  it('the Sheet shows qualified and doubtful leads, nothing else', () => {
+    expect(toRow({ verdict: 'needs_review' })).toMatchObject({ verdict: 'Needs review', show: true, qualified: true })
+    expect(toRow({ verdict: 'qualified', human_verdict: 'needs_review' })).toMatchObject({ show: true })
+    for (const v of ['unqualified', 'duplicate', null]) expect(toRow({ verdict: v }).show).toBe(false)
+  })
 })
 
 describe('riyadhTime', () => {

@@ -5,12 +5,13 @@
  * then run installLeadsMaster once. Steps: docs/LEADS-SETUP.md, section 4.
  *
  * Two tabs, kept up to date every 5 minutes on Google's servers, with the
- * QUALIFIED leads from the website, info@arak-sa.com and info@clb-sa.com:
- *   "New leads"     qualified leads that arrived from 1 October 2026
- *   "Jul–Sep 2026"  qualified leads from 1 July to 30 September 2026 (the
- *                   history, filled in by the agent's background import)
- * Pitches, job seekers, spam, duplicates and "needs review" stay out; they
- * are on the Lead Agent page. A lead corrected to qualified there appears.
+ * QUALIFIED and the doubtful ("Needs review", in yellow) leads from the
+ * website, info@arak-sa.com and info@clb-sa.com:
+ *   "New leads"     leads that arrived from 1 October 2026
+ *   "Jul–Sep 2026"  leads from 1 July to 30 September 2026 (the history,
+ *                   filled in by the agent's background import)
+ * The team decides the yellow ones with Status. Pitches, job seekers, spam
+ * and duplicates stay out; they are on the Lead Agent page.
  *
  * Laid out as a clean table by the script itself: dark frozen header, filter
  * buttons, alternating rows of equal height, newest first, "Open email"
@@ -137,17 +138,10 @@ function formatTab_(sheet) {
   // Widths; the Lead ID column stays hidden.
   Object.keys(WIDTHS).forEach(function (h) { if (col[h]) sheet.setColumnWidth(col[h], WIDTHS[h]); });
   if (col['Lead ID']) sheet.hideColumns(col['Lead ID']);
-  // AI verdict: green and bold when qualified; a row kept for its notes after
-  // its verdict changed shows the new verdict in plain grey.
+  // Colour rules, in order: the first that matches a cell wins.
   var rules = [];
-  if (col['AI verdict']) {
-    var verdict = sheet.getRange(2, col['AI verdict'], rows - 1, 1);
-    verdict.setFontColor('#5f6368');
-    rules.push(SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo('Qualified')
-      .setBold(true).setFontColor('#0d652d').setRanges([verdict]).build());
-  }
 
-  // Status: a dropdown, coloured by value.
+  // Status: a dropdown, coloured by value (first, so it shows on any row).
   if (col['Status']) {
     var status = sheet.getRange(2, col['Status'], rows - 1, 1);
     status.setDataValidation(SpreadsheetApp.newDataValidation()
@@ -156,6 +150,21 @@ function formatTab_(sheet) {
       rules.push(SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo(s[0])
         .setBackground(s[1]).setFontColor(s[2]).setRanges([status]).build());
     });
+  }
+
+  // AI verdict: green when qualified, bold amber when doubtful; anything else
+  // (a row kept for its notes after its verdict changed) in plain grey.
+  if (col['AI verdict']) {
+    var verdict = sheet.getRange(2, col['AI verdict'], rows - 1, 1);
+    verdict.setFontColor('#5f6368');
+    rules.push(SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo('Qualified')
+      .setBold(true).setFontColor('#0d652d').setRanges([verdict]).build());
+    rules.push(SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo('Needs review')
+      .setBold(true).setFontColor('#8a5300').setBackground('#ffe8a3').setRanges([verdict]).build());
+    // The whole row in light yellow, so a doubtful lead stands out for the team.
+    var letter = columnLetter_(col['AI verdict']);
+    rules.push(SpreadsheetApp.newConditionalFormatRule().whenFormulaSatisfied('=$' + letter + '2="Needs review"')
+      .setBackground('#fff8e1').setRanges([sheet.getRange(2, 1, rows - 1, width)]).build());
   }
   sheet.setConditionalFormatRules(rules);
 
@@ -224,6 +233,22 @@ function cell_(header, value) {
   return v;
 }
 
+/**
+ * Does this lead belong in the Sheet? Qualified leads and the doubtful ones
+ * ("Needs review", shown in yellow for the team to decide). `qualified` is
+ * the older name the agent still sends with the same meaning.
+ */
+function inSheet_(lead) {
+  return lead.show !== undefined ? Boolean(lead.show) : Boolean(lead.qualified);
+}
+
+/** "H" for column 8. */
+function columnLetter_(n) {
+  var s = '';
+  while (n > 0) { var m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = Math.floor((n - 1) / 26); }
+  return s;
+}
+
 /** True when a person has written in the row's Status, Assigned to or Notes. `data` is the tab read once, from row 2. */
 function teamTouched_(data, col, row) {
   var values = data[row - 2] || [];
@@ -253,7 +278,7 @@ function apply_(leads) {
     leads.forEach(function (lead) {
       var row = byId[lead.id];
       if (row) {
-        if (!lead.qualified && !teamTouched_(data, col, row)) { remove.push(row); return; }
+        if (!inSheet_(lead) && !teamTouched_(data, col, row)) { remove.push(row); return; }
         // Known: refresh only the agent's cells.
         Object.keys(FIELD).forEach(function (h) {
           if (col[h] && h !== 'Lead ID') sheet.getRange(row, col[h]).setValue(cell_(h, lead[FIELD[h]]));
@@ -261,7 +286,7 @@ function apply_(leads) {
         changed = true;
         return;
       }
-      if (!lead.qualified || TAB_FOR[lead.period] !== tabName) return;
+      if (!inSheet_(lead) || TAB_FOR[lead.period] !== tabName) return;
       var values = new Array(width).fill('');
       Object.keys(FIELD).forEach(function (h) { if (col[h]) values[col[h] - 1] = cell_(h, lead[FIELD[h]]); });
       fresh.push(values);
