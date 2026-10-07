@@ -59,7 +59,12 @@ export function toRow(lead) {
     phone: lead.phone || '',
     brief: brief.slice(0, 45_000), // a Sheets cell holds 50,000 characters
     verdict: verdict ? VERDICT[verdict] || verdict : (lead.error ? 'Not checked yet' : ''),
-    qualified: verdict === 'qualified',
+    // In the Sheet: qualified leads AND the doubtful ones ("Needs review"), so
+    // the team decides (the owner's decision, 2026-10-07). `qualified` is the
+    // flag workbook scripts already pasted read for "goes in the Sheet", so it
+    // carries the same meaning as `show`.
+    show: verdict === 'qualified' || verdict === 'needs_review',
+    qualified: verdict === 'qualified' || verdict === 'needs_review',
     type: lead.verdict === 'duplicate' ? 'duplicate' : String(lead.category || '').replace(/_/g, ' '),
     reason: lead.reason || '',
     link: lead.link || '',

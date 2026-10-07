@@ -136,11 +136,14 @@ info@clb-sa.com, kept up to date every 5 minutes (the owner's decisions,
   as the background history import runs. (The website form went live on
   27 August, so its history starts then.)
 
-**Qualified leads only** (the owner's decision, 2026-10-07): pitches, job
-seekers, spam, duplicates and "needs review" stay out of the workbook and
-remain on the Lead Agent page. A lead corrected to qualified there appears; a
-lead that stops being qualified is removed, unless someone has written in its
-Status, Assigned to or Notes, in which case it stays with its new verdict.
+**Qualified and doubtful leads** (the owner's decisions, 2026-10-07): the
+workbook shows qualified leads and those the agent was unsure about ("Needs
+review", the whole row in light yellow), so the team decides those with the
+Status column. Pitches, job seekers, spam and duplicates stay out of the
+workbook and remain on the Lead Agent page. A lead corrected there to
+qualified or needs review appears; one that leaves both is removed, unless
+someone has written in its Status, Assigned to or Notes, in which case it
+stays with its new verdict.
 Tabs from the first version ("All enquiries", "Qualified") are left alone;
 delete them once the new tabs are filled.
 
