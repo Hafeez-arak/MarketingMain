@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { skipReason, stripQuoted, messageToEnvelope, checkMailbox, checkMail, finishConnect, tenantOf, NEW_LEADS_FROM } from './_mail.js'
+import { skipReason, stripQuoted, requestKey, messageToEnvelope, checkMailbox, checkMail, finishConnect, tenantOf, NEW_LEADS_FROM } from './_mail.js'
 import { intakeWebsite } from './_intake.js'
 
 // Made-up mail only: this repo is public.
@@ -46,6 +46,24 @@ describe('stripQuoted', () => {
     expect(stripQuoted('نعم\nمن: المبيعات\nالتاريخ: الاثنين\nقديم')).toBe('نعم')
   })
   it('caps a very long body', () => expect(stripQuoted('a'.repeat(10_000))).toHaveLength(6000))
+  it('keeps the whole text when everything looks quoted, instead of sending nothing', () => {
+    const fwd = 'From: Factory <f@x.cn>\nSent: Monday\nWe make rechargeable LED lamps, MOQ 500.'
+    expect(stripQuoted(fwd)).toContain('rechargeable LED lamps')
+  })
+})
+
+describe('requestKey', () => {
+  it('matches the same referenced request from the same company, through Re:/FW:', () => {
+    const a = requestKey('waseem@condor.example', 'REQUEST FOR QUOTATION # CA-26-1618')
+    expect(a).toBe('condor.example|request for quotation # ca-26-1618')
+    expect(requestKey('other@condor.example', 'FW: Re: REQUEST FOR QUOTATION # CA-26-1618')).toBe(a)
+  })
+  it('never keys a generic subject, a different reference, or another company', () => {
+    expect(requestKey('a@ritz.example', 'Request for Quotation')).toBe('')
+    expect(requestKey('a@x.example', 'RFQ')).toBe('')
+    expect(requestKey('a@condor.example', 'REQUEST FOR QUOTATION # CA-26-1619')).not.toBe(requestKey('a@condor.example', 'REQUEST FOR QUOTATION # CA-26-1618'))
+    expect(requestKey('a@other.example', 'REQUEST FOR QUOTATION # CA-26-1618')).not.toBe(requestKey('a@condor.example', 'REQUEST FOR QUOTATION # CA-26-1618'))
+  })
 })
 
 describe('messageToEnvelope', () => {
@@ -139,6 +157,16 @@ describe('checkMailbox: new mail', () => {
     expect(w.state.mailboxes[0]).toMatchObject({ read_from: '2026-10-06T04:00:00Z', status: 'active', last_error: '' })
     expect(w.state.graphCalls[0].url).toContain('/me/messages?')
     expect(w.state.graphCalls[0].headers.Prefer).toBe('outlook.body-content-type="text"')
+  })
+
+  it('a reminder for the same referenced RFQ is not a new lead, even in a new conversation', async () => {
+    const w = world({ messages: [
+      msg(1, { subject: 'REQUEST FOR QUOTATION # CA-26-1618', from: { emailAddress: { address: 'waseem@condor.example' } } }),
+      msg(2, { subject: 'FW: REQUEST FOR QUOTATION # CA-26-1618', conversationId: 'conv-other', from: { emailAddress: { address: 'waseem@condor.example' } }, body: { content: 'Soft reminder!' } }),
+    ] })
+    const out = await run(w)
+    expect(out.counts).toMatchObject({ qualified: 1, skipped: 1 })
+    expect(w.state.modelCalls).toBe(1)
   })
 
   it('renews its token asking for READ ONLY, never send or write', async () => {
