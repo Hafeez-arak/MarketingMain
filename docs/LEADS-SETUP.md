@@ -87,7 +87,7 @@ app must be allowed there first. Three steps, once:
 - New mail from **1 October 2026** onwards is read every round (the
   workbook's "New leads" tab starts there). A round runs with every website
   Sheet call (every 5 minutes, on Google's servers) and once more each morning
-  from the app's daily job, as a backup. Up to 40 model calls per round,
+  from the app's daily job, as a backup. Up to 18 model calls per round (OpenRouter allows a new account 20 a minute),
   4 at a time.
 - **July–September 2026 history** is imported in the background with
   whatever budget a round has left after new mail, oldest first, until done.

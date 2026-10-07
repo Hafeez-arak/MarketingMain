@@ -27,8 +27,13 @@ import { askModel, loadBrand, monthSpent, upsertLead } from './_intake.js'
 //   deps.ms                           msConfig()
 //   deps.seal(plain) / deps.open(s)   the sealed-token helpers
 
-/** Model calls one round may make across every mailbox and both passes. */
-export const MAIL_CALLS_PER_ROUND = 40
+/**
+ * Model calls one round may make across every mailbox and both passes. Kept
+ * under OpenRouter's limit for new accounts, 20 requests a minute per model
+ * (seen 2026-10-07 on the first history round): a call over it is refused,
+ * the email waits for the next round, and the page shows it as not checked.
+ */
+export const MAIL_CALLS_PER_ROUND = 18
 
 /** Model calls in flight at once. */
 const CONCURRENCY = 4
@@ -362,7 +367,7 @@ export async function checkAllMail(deps) {
   for (const ws of [...new Set(rows.map((r) => r.workspace_id))]) {
     const [settings] = await deps.db(`lead_agent_settings?workspace_id=eq.${ws}&select=enabled`) || []
     if (settings && settings.enabled === false) continue
-    out.push({ workspaceId: ws, ...(await checkMail(deps, { workspaceId: ws, calls: 120, deadline: Date.now() + 200_000 })) })
+    out.push({ workspaceId: ws, ...(await checkMail(deps, { workspaceId: ws, calls: MAIL_CALLS_PER_ROUND, deadline: Date.now() + 200_000 })) })
   }
   return out
 }
