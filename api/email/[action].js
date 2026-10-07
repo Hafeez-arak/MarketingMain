@@ -613,6 +613,13 @@ async function handleCron(req, res) {
   // missed. First, and on its own, so a newsletter problem cannot stop it.
   let leadMail
   try { leadMail = await checkAllLeadMail(leadDeps()) } catch (err) { leadMail = { error: String(err?.message || err).slice(0, 300) } }
+  // And the lead agent's health check, for the day both Sheets' timers stop.
+  try {
+    const ld = leadDeps()
+    for (const s of await db('lead_agent_settings?select=workspace_id') || []) {
+      await ld.health({ workspaceId: s.workspace_id, force: true }).catch(() => {})
+    }
+  } catch { /* the newsletter run below must still happen */ }
   if (!RESEND_KEY) return res.status(503).json({ ok: false, error: 'RESEND_API_KEY is not set.', leadMail })
   // Every workspace with something due. Distinct in code: PostgREST has no
   // DISTINCT, and the list is small.

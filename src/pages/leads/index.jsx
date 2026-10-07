@@ -309,6 +309,37 @@ function Connection({ workspaceId, status, loading, onChange, onError, onReload,
   const intakeKey = status?.settings?.intake_key || ''
   const exportKey = status?.settings?.export_key || ''
   const master = sheetHealth(status?.settings?.last_export_at, now)
+  const [alertInput, setAlertInput] = useState(null)
+  const [alertNote, setAlertNote] = useState('')
+  const alertEmails = (status?.settings?.alert_emails || []).join(', ')
+  // Problems the health check has emailed about and that are not fixed yet.
+  const openProblems = Object.values(status?.settings?.alert_state || {}).filter((p) => p.sentAt)
+
+  async function saveAlerts() {
+    setBusy('alerts')
+    const r = await leadsApi('set_alert_emails', workspaceId, { alert_emails: alertInput ?? alertEmails })
+    setBusy('')
+    if (r.error) return onError(r.error)
+    setAlertInput(null)
+    onChange((s) => ({ ...s, settings: r.settings }))
+  }
+
+  async function testAlert() {
+    setBusy('test-alert'); setAlertNote('')
+    const r = await leadsApi('test_alert', workspaceId)
+    setBusy('')
+    if (r.error) return onError(r.error)
+    setAlertNote(`Test alert sent from ${r.sentFrom} to ${r.to.join(', ')}.`)
+  }
+
+  async function checkHealth() {
+    setBusy('health'); setAlertNote('')
+    const r = await leadsApi('health_check_now', workspaceId)
+    setBusy('')
+    if (r.error) return onError(r.error)
+    setAlertNote(r.issues.length ? `${r.issues.length} problem(s) found${r.sent ? ' and emailed' : ''}: ${r.issues.map((i) => i.title).join('; ')}` : 'Everything is working.')
+    onReload()
+  }
 
   async function connectMailbox(otherOrg = false) {
     setBusy(otherOrg ? 'connect-other' : 'connect')
@@ -405,6 +436,25 @@ function Connection({ workspaceId, status, loading, onChange, onError, onReload,
             <p className="text-[10px] text-text-tertiary">Approval link for another organisation's Microsoft 365 admin (once, before its mailboxes connect). Sign in as the mailbox. The agent can only read it: it cannot send, move or delete anything.</p>
           </>
         )}
+      </div>
+      <div className="space-y-1.5">
+        <p className="eyebrow">Health alerts</p>
+        {openProblems.length > 0 && (
+          <ul className="text-[11px] text-red-600 list-disc pl-4 space-y-0.5">
+            {openProblems.map((p) => <li key={p.title}>{p.title}</li>)}
+          </ul>
+        )}
+        <div className="flex gap-2">
+          <input id="lead-alert-emails" type="text" placeholder="name@arak-sa.com" value={alertInput ?? alertEmails} onChange={(e) => setAlertInput(e.target.value)}
+            className="flex-1 min-w-0 px-2 py-1.5 border border-border text-xs focus:outline-none focus:border-amber-700" />
+          <Button size="xs" onClick={saveAlerts} disabled={busy === 'alerts' || alertInput === null}>{busy === 'alerts' ? <Spinner size="sm" /> : 'Save'}</Button>
+        </div>
+        <div className="flex gap-2">
+          <Button size="xs" variant="secondary" onClick={testAlert} disabled={busy === 'test-alert' || !alertEmails}>{busy === 'test-alert' ? <Spinner size="sm" /> : null}Send test alert</Button>
+          <Button size="xs" variant="ghost" onClick={checkHealth} disabled={busy === 'health'}>{busy === 'health' ? <Spinner size="sm" /> : null}Check now</Button>
+        </div>
+        {alertNote && <p className="text-[11px] text-text-secondary">{alertNote}</p>}
+        <p className="text-[10px] text-text-tertiary">Emailed when a Sheet stops, a mailbox needs reconnecting, the AI fails, or credit runs low; again daily until fixed, and once when it works again. Sent from a connected Microsoft 365 mailbox.</p>
       </div>
       <div className="space-y-1.5">
         <p className="eyebrow">Website Sheet key</p>

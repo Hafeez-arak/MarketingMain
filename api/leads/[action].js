@@ -5,7 +5,7 @@ import { signState, authorizeUrl, READ_SCOPES } from '../email/_graph.js'
 import { intakeWebsite, tryIt, QUALIFIER_MODEL } from './_intake.js'
 import { checkMail } from './_mail.js'
 import { exportLeads } from './_export.js'
-import { leadDeps, openRouterKey, hasDeploymentKey } from './_deps.js'
+import { leadDeps, openRouterKey, hasDeploymentKey, describeKey, sendAlert } from './_deps.js'
 
 // ─── /api/leads/<action> ───────────────────────────────────────────────────
 // One Vercel function for the lead agent: the last of the twelve the Hobby
@@ -54,16 +54,6 @@ function baseUrlOf(req) {
   const host = req.headers?.['x-forwarded-host'] || req.headers?.host || ''
   const proto = req.headers?.['x-forwarded-proto'] || (/^localhost|^127\./.test(host) ? 'http' : 'https')
   return host ? `${proto}://${host}` : ''
-}
-
-/** What OpenRouter says about a key: valid, its label, credit left. Free. */
-async function describeKey(key) {
-  try {
-    const r = await fetch('https://openrouter.ai/api/v1/key', { headers: { Authorization: `Bearer ${key}` } })
-    const j = await r.json().catch(() => ({}))
-    if (!r.ok || !j.data) return { valid: false }
-    return { valid: true, label: j.data.label || '', limitRemaining: j.data.limit_remaining ?? null, usage: j.data.usage ?? null }
-  } catch { return { valid: false } }
 }
 
 // ─── Who is calling ────────────────────────────────────────────────────────
@@ -154,6 +144,39 @@ const actions = {
       mailboxes,
       key: { saved: Boolean(secret), savedAt: secret?.updated_at || null, fromDeployment: !secret && hasDeploymentKey, ...(key ? await describeKey(key) : { valid: false }) },
     }
+  },
+
+  /** Who gets health alerts. Comma- or space-separated addresses. */
+  async set_alert_emails({ workspaceId, body }) {
+    const list = [...new Set(String(body.alert_emails || '').split(/[\s,;]+/).map((a) => a.trim().toLowerCase()).filter(Boolean))]
+    const bad = list.filter((a) => !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(a))
+    if (bad.length) return fail(400, `Not an email address: ${bad.join(', ')}`)
+    await settingsFor(workspaceId)
+    const [row] = await db(`lead_agent_settings?workspace_id=eq.${workspaceId}`, {
+      method: 'PATCH', prefer: 'return=representation', body: { alert_emails: list, updated_at: new Date().toISOString() },
+    }) || []
+    return { settings: row }
+  },
+
+  /** Send a test alert now, so you know the email arrives. */
+  async test_alert({ workspaceId }) {
+    const settings = await settingsFor(workspaceId)
+    const to = settings?.alert_emails || []
+    if (!to.length) return fail(400, 'Add an alert email first.')
+    const out = await sendAlert({
+      workspaceId, to,
+      subject: '✅ Lead agent: test alert',
+      text: 'This is a test. If something in the lead agent stops working, an email like this one says what and how to fix it.',
+      html: '<p>This is a test. If something in the lead agent stops working, an email like this one says what and how to fix it.</p>',
+    })
+    if (!out.ok) return fail(502, `The test alert was not sent: ${out.error?.reason || out.error?.message || out.error}`)
+    return { sentFrom: out.from, to }
+  },
+
+  /** Run the health check now (and email if something is wrong). */
+  async health_check_now({ workspaceId }) {
+    const out = await leadDeps().health({ workspaceId, force: true })
+    return { issues: (out.issues || []).map((i) => ({ key: i.key, title: i.title })), sent: Boolean(out.sent?.ok), error: out.error || '' }
   },
 
   async set_enabled({ workspaceId, body }) {
