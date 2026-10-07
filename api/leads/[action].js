@@ -4,7 +4,7 @@ import { sealSecret } from '../email/_secrets.js'
 import { signState, authorizeUrl, READ_SCOPES } from '../email/_graph.js'
 import { intakeWebsite, tryIt, QUALIFIER_MODEL } from './_intake.js'
 import { checkMail } from './_mail.js'
-import { exportLeads } from './_export.js'
+import { exportLeads, applySheetDecisions } from './_export.js'
 import { leadDeps, openRouterKey, hasDeploymentKey, describeKey, sendAlert } from './_deps.js'
 
 // ─── /api/leads/<action> ───────────────────────────────────────────────────
@@ -290,6 +290,17 @@ export default async function handler(req, res) {
       const out = await intakeWebsite(leadDeps(), { key: body.key, rows: body.rows })
       if (out.error) return res.status(out.status).json({ ok: false, error: out.error })
       return res.status(200).json({ ok: true, off: Boolean(out.off), results: out.results, mail: out.mail || null })
+    } catch (err) {
+      return res.status(500).json({ ok: false, error: String(err.message || err).slice(0, 300) })
+    }
+  }
+
+  // The workbook's Decision column: the team settles leads from the Sheet.
+  if (action === 'sheet_decisions') {
+    try {
+      const out = await applySheetDecisions(leadDeps(), { key: body.key, decisions: body.decisions })
+      if (out.error) return res.status(out.status).json({ ok: false, error: out.error })
+      return res.status(200).json({ ok: true, applied: out.applied })
     } catch (err) {
       return res.status(500).json({ ok: false, error: String(err.message || err).slice(0, 300) })
     }

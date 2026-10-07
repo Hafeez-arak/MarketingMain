@@ -138,12 +138,18 @@ info@clb-sa.com, kept up to date every 5 minutes (the owner's decisions,
 
 **Qualified and doubtful leads** (the owner's decisions, 2026-10-07): the
 workbook shows qualified leads and those the agent was unsure about ("Needs
-review", the whole row in light yellow), so the team decides those with the
-Status column. Pitches, job seekers, spam and duplicates stay out of the
-workbook and remain on the Lead Agent page. A lead corrected there to
-qualified or needs review appears; one that leaves both is removed, unless
-someone has written in its Status, Assigned to or Notes, in which case it
-stays with its new verdict.
+review", the whole row in light yellow). Pitches, partnership and
+collaboration offers, commission deals, job seekers, spam and duplicates stay
+out of the workbook and remain on the Lead Agent page.
+
+**The team decides in the Sheet** with the **Decision** column, right after
+AI verdict: **Unqualified** removes the row at the next update (within 5
+minutes), **Qualified** keeps it and turns it green. Each choice is sent to
+the lead agent as a person's correction (`/api/leads/sheet_decisions`, by the
+workbook's key), exactly like "Is the agent right?" on the Lead Agent page,
+so it counts in the accuracy figures. A lead the agent itself later moves out
+of the Sheet is removed unless someone wrote in its Status, Assigned to or
+Notes; a person's Unqualified always removes it.
 Tabs from the first version ("All enquiries", "Qualified") are left alone;
 delete them once the new tabs are filled.
 

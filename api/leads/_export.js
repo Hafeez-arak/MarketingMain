@@ -64,6 +64,10 @@ export function toRow(lead) {
     // flag workbook scripts already pasted read for "goes in the Sheet", so it
     // carries the same meaning as `show`.
     show: verdict === 'qualified' || verdict === 'needs_review',
+    // A person decided (in the Sheet's Decision column or on the Lead Agent
+    // page): when that takes it out of the Sheet, its row goes even if the
+    // team wrote in it.
+    byPerson: Boolean(lead.human_verdict),
     qualified: verdict === 'qualified' || verdict === 'needs_review',
     type: lead.verdict === 'duplicate' ? 'duplicate' : String(lead.category || '').replace(/_/g, ' '),
     reason: lead.reason || '',
@@ -100,4 +104,33 @@ export async function exportLeads(deps, { key, cursor = '' }) {
     next: last ? `${last.updated_at}|${last.id}` : cursor,
     more: rows.length === EXPORT_PAGE,
   }
+}
+
+const DECISIONS = { qualified: 'qualified', unqualified: 'unqualified', 'needs review': 'needs_review', needs_review: 'needs_review' }
+
+/**
+ * The team's choices from the workbook's Decision column (the owner's
+ * decision, 2026-10-07: the Sheet can settle "Needs review" leads). Each is
+ * stored as a person's correction, exactly like "Is the agent right?" on the
+ * Lead Agent page, and moves updated_at so the workbook's next read brings
+ * the result back: an Unqualified row disappears, a Qualified one turns green.
+ */
+export async function applySheetDecisions(deps, { key, decisions = [] }) {
+  if (!isUuid(key)) return { status: 401, error: 'This workbook is not connected to the lead agent (bad key).' }
+  const [settings] = await deps.db(`lead_agent_settings?export_key=eq.${key}&select=workspace_id`) || []
+  if (!settings) return { status: 401, error: 'This workbook is not connected to the lead agent (unknown key).' }
+  const ws = settings.workspace_id
+  const now = deps.now().toISOString()
+  let applied = 0
+  for (const d of (Array.isArray(decisions) ? decisions : []).slice(0, 200)) {
+    const verdict = DECISIONS[String(d?.verdict || '').trim().toLowerCase()]
+    if (!isUuid(d?.id) || !verdict) continue
+    // workspace_id in the filter: a key can only touch its own company's leads.
+    const rows = await deps.db(`leads?id=eq.${d.id}&workspace_id=eq.${ws}`, {
+      method: 'PATCH', prefer: 'return=representation',
+      body: { human_verdict: verdict, reviewed_by: null, reviewed_at: now, updated_at: now },
+    }) || []
+    applied += rows.length
+  }
+  return { status: 200, applied }
 }
