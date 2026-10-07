@@ -25,6 +25,7 @@ import { ResearchReport }          from './pages/insights/ResearchReport'
 import { BusinessView }            from './pages/insights/BusinessView'
 import AgentPage                  from './pages/agent/index'
 import LeadAgent                  from './pages/leads/index'
+import Targets                    from './pages/sales/Targets'
 import { MediaLibrary }            from './pages/media/index'
 import { SocialOverview, SocialPlatform } from './pages/social/index'
 import { InstagramPage } from './pages/social/InstagramPage'
@@ -136,6 +137,7 @@ function ProtectedApp() {
             <Route path="/agent"                 element={<AgentPage />} />
             {/* Admin only: the page sends anyone else to the dashboard. */}
             <Route path="/leads"                 element={<LeadAgent />} />
+            <Route path="/targets"               element={<Targets />} />
             <Route path="/media"                 element={<MediaLibrary />} />
             <Route path="/social"                element={<SocialOverview />} />
             <Route path="/social/approvals"      element={<PostApprovals />} />

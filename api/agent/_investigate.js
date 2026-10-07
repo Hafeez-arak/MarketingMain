@@ -23,6 +23,7 @@ import {
 import { LIVE_PLATFORMS } from '../../src/lib/utils.js'
 import { ownPostingFacts } from '../../src/lib/agent/ownChannels.js'
 import { loadIntel } from './_intel.js'
+import { hasIcp, normaliseIcp, icpPromptText } from '../../src/lib/sales/icp.js'
 import {
   knownIntelPrompt, planStoreWrites, annotateFindings, signalHistory, isOpenOpportunity, nameKey,
 } from '../../src/lib/agent/intel.js'
@@ -105,7 +106,7 @@ function lookahead(weeks = 8, now = new Date()) {
  * warm.
  */
 export async function loadRunContext(workspaceId, runId, cadence = 'weekly') {
-  const [{ brand, ctx, profile }, agenda, priorRuns, competitorRows, alreadySaid, runRows] =
+  const [{ brand, ctx, profile }, agenda, priorRuns, competitorRows, alreadySaid, runRows, icp] =
     await Promise.all([
       loadBrandContext(workspaceId, 'research'),
       db(`research_agenda?workspace_id=eq.${workspaceId}&kind=eq.question&status=eq.active` +
@@ -133,6 +134,7 @@ export async function loadRunContext(workspaceId, runId, cadence = 'weekly') {
          `&order=tier.asc.nullslast,created_at.asc`),
       priorIdeas(workspaceId),
       db(`research_runs?id=eq.${runId}&workspace_id=eq.${workspaceId}&select=report,stage,status&limit=1`),
+      loadIcp(workspaceId),
     ])
 
   const gathered = runRows?.[0]?.report || {}
@@ -192,7 +194,28 @@ export async function loadRunContext(workspaceId, runId, cadence = 'weekly') {
     // Expanded from the WATCHLIST's lines, not the brand's configured ones —
     // see expandPerLine. A line nobody competes with us on gets no pass, so a
     // brand that configures three lines and is rivalled on two runs two.
-    lenses: expandPerLine(lensesFor({ motion, cadence }), competitorNotes.flatMap(n => n.lines || [])),
+    lenses: expandPerLine(
+      lensesFor({ motion, cadence }).filter(l => l.requires !== 'icp' || hasIcp(icp)),
+      competitorNotes.flatMap(n => n.lines || []),
+    ),
+    icp,
+  }
+}
+
+/**
+ * The company's ideal customer profile, or null.
+ *
+ * Never fatal: an unreadable ICP means the targets lens does not run this
+ * week, which is the same as a company that has not written one. The rest of
+ * the run is unaffected.
+ */
+async function loadIcp(workspaceId) {
+  try {
+    const rows = await db(`sales_icp?workspace_id=eq.${workspaceId}&select=config&limit=1`)
+    return rows?.[0]?.config || null
+  } catch (err) {
+    console.error('[agent/run] loadIcp:', err?.message || err)
+    return null
   }
 }
 
@@ -212,7 +235,7 @@ export async function planLenses(workspaceId, runId, cadence = 'weekly') {
     // committed. The driver gets the default set for this cadence and finds
     // out per lens.
     console.error('[agent/run] planLenses:', err?.message || err)
-    return { lenses: lensesFor({ cadence }).map(l => l.key), motion: '', explicit: false }
+    return { lenses: lensesFor({ cadence }).filter(l => !l.requires).map(l => l.key), motion: '', explicit: false }
   }
 }
 
@@ -223,12 +246,12 @@ export async function planLenses(workspaceId, runId, cadence = 'weekly') {
  * every lens's — the calendar's dates cost an API round trip, and fetching
  * them to run the demand lens would be waste repeated on every call.
  */
-async function argsForLens(key, { brandFacts, motion, competitors, competitorNotes = [], gathered, profile, ctx, agenda = [], language = '', workspaceId = '', line = '' }) {
+async function argsForLens(key, { brandFacts, motion, competitors, competitorNotes = [], gathered, profile, ctx, agenda = [], language = '', workspaceId = '', line = '', icp = null }) {
   // What the team already tracks, so the lens reports changes instead of
   // re-announcing last week. Read only for the three lenses that produce
   // leads, events or competitor signals; never fatal — an empty store is a
   // first run, not an error.
-  const intel = ['openings', 'events', 'category', 'rivals'].includes(key) && workspaceId
+  const intel = ['openings', 'targets', 'events', 'category', 'rivals'].includes(key) && workspaceId
     ? knownIntelPrompt(await loadIntel(workspaceId), {
         competitors: key === 'rivals' ? competitors : null,
       })
@@ -245,6 +268,21 @@ async function argsForLens(key, { brandFacts, motion, competitors, competitorNot
   // the lenses already found and cannot look anything up, so a standing question
   // could change the write-up and never change what was searched for.
   if (key === 'openings') return { args: [brandFacts, { motion, agenda, language, intel }] }
+  if (key === 'targets') {
+    // The ICP is rendered as plain briefing lines, and the split between the
+    // two tracks travels as numbers so the prompt can turn it into searches.
+    const norm = normaliseIcp(icp)
+    return {
+      args: [brandFacts, {
+        icp: icpPromptText(norm),
+        mix: norm.mix,
+        searches: lensByKey('targets')?.budget?.searches || 8,
+        agenda,
+        language,
+        intel,
+      }],
+    }
+  }
   if (key === 'events') return { args: [brandFacts, { motion, competitors, agenda, language, intel }] }
   if (key === 'demand') return { args: [brandFacts, { competitors, agenda, language }] }
   // The market it researches rides in brandFacts like every other brand fact,

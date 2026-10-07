@@ -44,9 +44,9 @@ describe('the lens set is general, not lighting-shaped', () => {
     }
   })
 
-  it('covers the ten questions and no more', () => {
+  it('covers the eleven questions and no more', () => {
     expect(LENSES.map(l => l.key).sort())
-      .toEqual(['calendar', 'category', 'craft', 'demand', 'events', 'global', 'openings', 'ourselves', 'rivals', 'search'])
+      .toEqual(['calendar', 'category', 'craft', 'demand', 'events', 'global', 'openings', 'ourselves', 'rivals', 'search', 'targets'])
   })
 
   it('asks about the world industry somewhere other than the local market lens', () => {
@@ -199,8 +199,14 @@ describe('cadence keeps a monthly question off a weekly bill', () => {
     // the business that returned nothing at all while the two shared a budget
     // spent in watchlist order. At ~$0.55 a rivals pass and ~$0.45 for global
     // this puts a weekly run near $3.30, and a month of weekly runs near $14.
+    //
+    // Raised 42 → 50 on 2026-10-07 for the targets lens (8): Sales → Targets,
+    // asked for by the owner after the CRM + email analysis, at about +$0.45 a
+    // run. Eight rather than six because it splits its searches between two
+    // tracks, and a track left with three is the starved-lens failure above.
+    // It only runs for a company that has written an ICP.
     const weekly = expandPerLine(lensesFor({ cadence: 'weekly' }), ['lighting', 'controls'])
-    expect(searchBudgetFor(weekly)).toBeLessThanOrEqual(42)
+    expect(searchBudgetFor(weekly)).toBeLessThanOrEqual(50)
   })
 })
 

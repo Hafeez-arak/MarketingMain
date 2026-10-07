@@ -52,7 +52,7 @@ export const MOTIONS = {
   specification: {
     label: 'Specification sale',
     note: 'Long cycle. Won by being named in a spec before the tender. Buyers are professionals, not consumers.',
-    leads: ['openings', 'events', 'rivals'],
+    leads: ['openings', 'targets', 'events', 'rivals'],
   },
   local_service: {
     label: 'Local service',
@@ -144,6 +144,36 @@ export const LENSES = [
     // Six searches, down from eight on 2026-09-15: its events job moved to the
     // events lens, so every search it has now goes to projects.
     budget: { searches: 6, maxTokens: 10_000, effort: 'medium' },
+    universal: true,
+  },
+  {
+    key: 'targets',
+    label: 'Sales targets',
+    question: 'Which named projects and companies fit our ideal customer, and who do we call?',
+    perishability: PERISHABLE,
+    cadence: 'weekly',
+    // Added 2026-10-07 for Sales → Targets. Openings asks "who is about to
+    // need what we sell" from the market's side; this asks it from OURS — the
+    // ideal customer profile the company wrote from its own won and lost
+    // deals. Openings finds projects; this finds the ones we tend to win, and
+    // the buyer we should be talking to on each.
+    //
+    // Two tracks in one lens, split by the ICP's own `mix`: the core track
+    // hunts what our history says we win, the broader track what we want to
+    // grow into. One lens rather than two so the split is a number a person
+    // sets, not a second budget line that drifts on its own.
+    //
+    // Eight searches, not six: half go to each track, and a track starved to
+    // three is the demand lens's failure again (see its note above).
+    budget: { searches: 8, fetches: 10, maxTokens: 12_000, effort: 'medium' },
+    // Its own output shape — a target, not a generic finding — so the shared
+    // schema every other lens uses is not pushed toward the size the API
+    // refuses. A refusal here costs this lens, never the run.
+    schema: 'targets',
+    // Only runs for a company that has written an ICP. Without one there is
+    // nothing to target against, and the openings lens already covers the
+    // general question.
+    requires: 'icp',
     universal: true,
   },
   {
@@ -555,6 +585,31 @@ export function makeFinding(lensKey, raw = {}, defaultLine = '') {
     lead: objectWithName(raw.lead),
     event: objectWithName(raw.event),
     line: String(raw.line || defaultLine || '').trim(),
+  }
+}
+
+/**
+ * A targets-lens answer in the shape every other lens returns.
+ *
+ * The lens has its own schema (see TARGETS_SCHEMA) so it can ask for the
+ * buyer, the package size and the fit without growing the shared one. This
+ * folds it back: the target becomes the finding's `lead`, which is what the
+ * store, the research report and Sales → Targets all already read. It is
+ * always for sales — the whole lens is a list of people to call.
+ */
+export function targetFinding(raw = {}) {
+  const t = raw?.target && typeof raw.target === 'object' ? raw.target : {}
+  const kind = String(t.kind || '').trim()
+  return {
+    ...raw,
+    for_whom: 'sales',
+    competitor: '',
+    channel: 'other',
+    category: kind === 'tender' ? 'tender' : 'project',
+    lead: {
+      ...t,
+      type: kind === 'tender' ? 'tender' : kind === 'company' ? 'lead' : 'project',
+    },
   }
 }
 
