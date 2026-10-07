@@ -184,8 +184,10 @@ export function alertEmail({ fresh = [], remind = [], fixed = [], company = 'Ara
     }
   }
   if (fixed.length) {
-    lines.push('Working again:', ...fixed.map((f) => `• ${f.title}`), '')
-    html.push(`<p><b>Working again:</b><br>${fixed.map((f) => esc(f.title)).join('<br>')}</p>`)
+    // The title names the problem ("…has stopped updating"), so say plainly
+    // that it is over; "Working again: …has stopped" read backwards.
+    lines.push('Fixed, nothing to do:', ...fixed.map((f) => `• ✓ ${f.title} — this problem is over, it works again.`), '')
+    html.push(`<p><b>Fixed, nothing to do:</b><br>${fixed.map((f) => `✓ ${esc(f.title)} — this problem is over, it works again.`).join('<br>')}</p>`)
   }
   if (pageUrl) { lines.push(`Lead Agent page: ${pageUrl}`); html.push(`<p><a href="${esc(pageUrl)}">Open the Lead Agent page</a></p>`) }
   return { subject, text: lines.join('\n'), html: html.join('\n') }
