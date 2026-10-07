@@ -86,17 +86,43 @@ function resyncLeadsMaster() {
 
 /** Lays both tabs out again (header, widths, colours, dropdown, filter). Safe to run any time. */
 function formatLeadsMaster() {
-  var book = SpreadsheetApp.getActiveSpreadsheet();
-  [NEW_TAB, HISTORY_TAB].forEach(function (name) { var s = book.getSheetByName(name); if (s) formatTab_(s); });
+  [NEW_TAB, HISTORY_TAB].forEach(function (name) { var s = findTab_(name); if (s) formatTab_(s); });
+}
+
+// ── Finding the tabs, even after someone renames them ──────────────────────
+// Each tab carries a hidden tag saying which one it is, so renaming it
+// ("New leads" -> "New leads from Oct 1st 2026") changes nothing. A tab
+// without a tag yet is found by its name, or by how its name starts.
+var TAB_TAG = 'arakLeadsTab';
+var TAB_STARTS = {};
+TAB_STARTS[NEW_TAB] = /^\s*new leads/i;
+TAB_STARTS[HISTORY_TAB] = /^\s*jul/i;
+
+function tagOf_(sheet) {
+  var found = sheet.getDeveloperMetadata().filter(function (m) { return m.getKey() === TAB_TAG; });
+  return found.length ? found[0].getValue() : '';
+}
+
+/** The tab for NEW_TAB or HISTORY_TAB, or null. Tags it when found by name. */
+function findTab_(name) {
+  var sheets = SpreadsheetApp.getActiveSpreadsheet().getSheets();
+  var tagged = sheets.filter(function (s) { return tagOf_(s) === name; });
+  if (tagged.length) return tagged[0];
+  var untagged = sheets.filter(function (s) { return !tagOf_(s); });
+  var match = untagged.filter(function (s) { return s.getName() === name; })[0]
+    || untagged.filter(function (s) { return TAB_STARTS[name].test(s.getName()); })[0];
+  if (match) match.addDeveloperMetadata(TAB_TAG, name);
+  return match || null;
 }
 
 function setupTab_(name) {
   var book = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = book.getSheetByName(name);
+  var sheet = findTab_(name);
   if (!sheet) {
     // The first tab of a brand-new workbook is reused for "New leads".
     var first = book.getSheets()[0];
-    sheet = (name === NEW_TAB && first.getLastRow() === 0 && first.getName() !== HISTORY_TAB) ? first.setName(name) : book.insertSheet(name);
+    sheet = (name === NEW_TAB && first.getLastRow() === 0 && !tagOf_(first)) ? first.setName(name) : book.insertSheet(name);
+    sheet.addDeveloperMetadata(TAB_TAG, name);
   }
   var width = Math.max(sheet.getLastColumn(), 1);
   var headers = sheet.getRange(1, 1, 1, width).getDisplayValues()[0].map(function (h) { return String(h).trim(); });
@@ -266,7 +292,7 @@ function apply_(leads) {
   if (!leads.length) return;
   var book = SpreadsheetApp.getActiveSpreadsheet();
   [NEW_TAB, HISTORY_TAB].forEach(function (tabName) {
-    var sheet = book.getSheetByName(tabName);
+    var sheet = findTab_(tabName);
     if (!sheet) return;
     var col = columns_(sheet);
     var width = sheet.getLastColumn();
