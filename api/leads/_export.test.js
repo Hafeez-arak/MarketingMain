@@ -1,5 +1,15 @@
 import { describe, it, expect } from 'vitest'
-import { exportLeads, toRow, riyadhTime, EXPORT_PAGE } from './_export.js'
+import { exportLeads, toRow, riyadhTime, periodOf, EXPORT_PAGE } from './_export.js'
+
+describe('periodOf', () => {
+  it('splits by arrival in Riyadh time: New leads from 1 Oct, history from 1 Jul, older not shown', () => {
+    expect(periodOf('2026-09-30T20:59:00Z')).toBe('history') // 23:59 Riyadh, 30 Sep
+    expect(periodOf('2026-09-30T21:00:00Z')).toBe('new') // 00:00 Riyadh, 1 Oct
+    expect(periodOf('2026-07-01T00:00:00Z')).toBe('history')
+    expect(periodOf('2026-06-30T20:59:00Z')).toBe('')
+    expect(periodOf('')).toBe('new')
+  })
+})
 
 // Made-up leads only: this repo is public.
 const WS = '00000000-0000-0000-0000-0000000000ee'

@@ -681,6 +681,14 @@ async function handleMsCallback(req, res) {
     return res.status(302).end()
   }
 
+  // Another organisation's admin approving the lead agent's read-only access
+  // (the consent link on the Lead Agent page). Nothing is stored here; it only
+  // says how it went. No nonce: the admin is usually on their own computer.
+  if (q('state') === 'leads-consent') {
+    toLeads = true
+    return back(q('error') ? { ms_error: 'consent_denied' } : { ms: 'approved' })
+  }
+
   const claims = openState(q('state'), SERVICE_KEY)
   if (!claims) return back({ ms_error: 'expired' })
   toLeads = claims.p === 'leads'

@@ -37,6 +37,7 @@ const MS_ERRORS = {
   no_mailbox: 'That account has no Exchange mailbox.',
   graph: 'Microsoft would not let the agent open that mailbox. Try again, or check the account.',
   save: 'The mailbox could not be saved. Try again.',
+  consent_denied: 'The other organisation\'s admin did not approve the app.',
 }
 
 const money = (n) => `$${(Number(n) || 0).toFixed(n && n < 0.1 ? 4 : 2)}`
@@ -68,6 +69,7 @@ export default function LeadAgent() {
   // Back from Microsoft's sign-in (Connect a mailbox): ?ms=connected or ?ms_error=…
   const [params] = useSearchParams()
   const msBack = params.get('ms') === 'connected' ? { ok: true, mailbox: params.get('mailbox') || 'The mailbox' }
+    : params.get('ms') === 'approved' ? { ok: true, approved: true }
     : params.get('ms_error') ? { ok: false, code: params.get('ms_error') } : null
   // "Now" for the month and the Sheet's last call, taken when data loads
   // rather than during render.
@@ -123,7 +125,8 @@ export default function LeadAgent() {
         </Button>
       </PageHeader>
 
-      {msBack?.ok && <Notice tone="sage" title={`${msBack.mailbox} is connected`}>The agent reads its new mail every 5 minutes, read only. The last week's mail is read first, a few at a time.</Notice>}
+      {msBack?.ok && msBack.approved && <Notice tone="sage" title="The other organisation approved the app">Its mailboxes can now be connected with "Connect a mailbox from another Microsoft 365".</Notice>}
+      {msBack?.ok && !msBack.approved && <Notice tone="sage" title={`${msBack.mailbox} is connected`}>The agent reads its new mail every 5 minutes, read only, from 1 October, and imports July to September in the background.</Notice>}
       {msBack && !msBack.ok && <Notice tone="red" title="The mailbox was not connected">{MS_ERRORS[msBack.code] || 'Microsoft did not finish the sign-in. Try again.'}</Notice>}
       {error && <Notice tone="red" title="Something went wrong">{error}</Notice>}
       {status?.error && <Notice tone="red" title="Could not load the agent's settings">{status.error}</Notice>}
@@ -307,9 +310,9 @@ function Connection({ workspaceId, status, loading, onChange, onError, onReload,
   const exportKey = status?.settings?.export_key || ''
   const master = sheetHealth(status?.settings?.last_export_at, now)
 
-  async function connectMailbox() {
-    setBusy('connect')
-    const r = await leadsApi('mail_connect_start', workspaceId)
+  async function connectMailbox(otherOrg = false) {
+    setBusy(otherOrg ? 'connect-other' : 'connect')
+    const r = await leadsApi('mail_connect_start', workspaceId, { other_org: otherOrg })
     if (r.error) { setBusy(''); return onError(r.error) }
     window.location.assign(r.url)
   }
@@ -365,18 +368,23 @@ function Connection({ workspaceId, status, loading, onChange, onError, onReload,
               return (
                 <div key={mb.id} className="border border-border px-2.5 py-2 space-y-1">
                   <div className="flex items-center justify-between gap-2">
-                    <p className="text-xs font-semibold text-text truncate">{mb.email}</p>
+                    <p className="text-xs font-semibold text-text truncate" title={mb.label && mb.label !== mb.email ? `Signed in as ${mb.email}` : ''}>
+                      {mb.label || mb.email}{mb.tenant ? <span className="font-normal text-text-tertiary"> · other Microsoft 365</span> : null}
+                    </p>
                     <Button size="xs" variant="ghost" onClick={() => disconnect(mb)} disabled={busy === `off:${mb.id}`}>Disconnect</Button>
                   </div>
                   {mb.status === 'reconnect'
                     ? <p className="text-[11px] text-red-600">Microsoft no longer accepts its sign-in. Connect it again. {mb.last_error}</p>
                     : <p className={`text-[11px] ${health.state === 'stale' ? 'text-amber-800' : 'text-text-tertiary'}`}>{mb.last_checked_at ? health.label.replace('Checked', 'Read') : 'Not read yet'}{c.seen != null ? ` · last round: ${c.seen} new, ${c.skipped || 0} skipped as not enquiries` : ''}</p>}
                   {mb.status !== 'reconnect' && mb.last_error && <p className="text-[11px] text-red-600">{mb.last_error}</p>}
+                  <p className="text-[11px] text-text-tertiary">
+                    Jul–Sep history: {mb.history_done ? 'imported' : mb.history_cursor ? `importing, up to ${String(mb.history_cursor).slice(0, 10)}` : 'starts with the next round'}
+                  </p>
                 </div>
               )
             })}
             <div className="flex gap-2">
-              <Button size="xs" variant="secondary" onClick={connectMailbox} disabled={busy === 'connect' || status?.microsoft === false}>
+              <Button size="xs" variant="secondary" onClick={() => connectMailbox(false)} disabled={busy === 'connect' || status?.microsoft === false}>
                 {busy === 'connect' ? <Spinner size="sm" /> : null}
                 {(status?.mailboxes || []).length ? 'Connect another' : 'Connect a mailbox'}
               </Button>
@@ -384,7 +392,17 @@ function Connection({ workspaceId, status, loading, onChange, onError, onReload,
                 <Button size="xs" variant="ghost" onClick={checkNow} disabled={busy === 'check'}>{busy === 'check' ? <Spinner size="sm" /> : null}Check now</Button>
               )}
             </div>
-            <p className="text-[10px] text-text-tertiary">Sign in as the mailbox. The agent can only read it: it cannot send, move or delete anything.</p>
+            <Button size="xs" variant="ghost" onClick={() => connectMailbox(true)} disabled={busy === 'connect-other' || status?.microsoft === false}>
+              {busy === 'connect-other' ? <Spinner size="sm" /> : null}
+              Connect a mailbox from another Microsoft 365
+            </Button>
+            {status?.consentUrl && (
+              <div className="flex gap-2 items-center">
+                <code className="flex-1 min-w-0 truncate px-2 py-1 bg-surface-subtle border border-border text-[10px] select-all">{status.consentUrl}</code>
+                <Button size="xs" variant="secondary" onClick={() => copy('consent', status.consentUrl)}>{copied === 'consent' ? 'Copied' : 'Copy'}</Button>
+              </div>
+            )}
+            <p className="text-[10px] text-text-tertiary">Approval link for another organisation's Microsoft 365 admin (once, before its mailboxes connect). Sign in as the mailbox. The agent can only read it: it cannot send, move or delete anything.</p>
           </>
         )}
       </div>

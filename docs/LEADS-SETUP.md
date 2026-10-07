@@ -50,26 +50,58 @@ and fill within a minute, and the Lead Agent page shows "Checked … ago". The
 first run reads the existing rows 20 at a time, so a backlog takes a few
 5-minute rounds.
 
-## 3. Connect the info@ mailbox (about 1 minute)
+## 3. Connect the mailboxes (about 1 minute each)
 
-The owner's decision (2026-10-06): info@arak-sa.com only, **read only**.
+The owner's decisions (2026-10-06/07): **info@arak-sa.com** and
+**info@clb-sa.com**, **read only**, every folder including Junk.
+
+### info@arak-sa.com (our own Microsoft 365)
 
 1. Lead Agent page → Connection → **Connect a mailbox**.
-2. Microsoft asks which account: sign in **as info@arak-sa.com** (its own
-   password), not as yourself.
-3. You come back to the page with "info@arak-sa.com is connected".
+2. Microsoft asks which account: sign in **as the mailbox** (its own
+   password), not as yourself. info@arak-sa.com is an alias of
+   a.rak@arak-sa.com, so that is the account; the page shows it as
+   info@arak-sa.com.
+3. You come back to the page with "… is connected".
 
-What happens then:
+### info@clb-sa.com (a different Microsoft 365)
 
-- The last 7 days of its inbox are read first, 8 emails per round, then new
-  mail as it arrives. A round runs with every website Sheet call (every 5
-  minutes, on Google's servers) and once more each morning from the app's
-  daily job, as a backup.
-- Free filters in code skip, without storing anything: colleagues
-  (@arak-sa.com), automatic senders (no-reply, notifications…), newsletters
-  (List-Unsubscribe / List-Id), out-of-office and delivery failures, calendar
-  replies, the website form's own copies ("Lighting enquiry — …", already in
-  the Sheet), and replies in a conversation already sorted.
+clb-sa.com is part of Arak but its email is on its own Microsoft 365, so the
+app must be allowed there first. Three steps, once:
+
+1. **Arak's Entra admin** (arak-sa.com): Entra admin center → App
+   registrations → **Arak Marketing Outreach** → Authentication → Supported
+   account types → **Accounts in any organizational directory (Multitenant)**
+   → Save. Outreach is unaffected: it still signs in at Arak's own tenant.
+2. **CLB's Microsoft 365 admin**: open the approval link from Lead Agent →
+   Connection (Copy, under "Connect a mailbox from another Microsoft 365"),
+   sign in as a CLB admin, and **Accept**. It grants read-only mail access
+   (Mail.Read) for the accounts that later sign in; nothing else. They come
+   back to the Lead Agent page with "The other organisation approved the app"
+   (an Arak admin login is not needed for that message).
+3. Lead Agent → **Connect a mailbox from another Microsoft 365** → sign in as
+   info@clb-sa.com.
+
+### What happens then
+
+- New mail from **1 October 2026** onwards is read every round (the
+  workbook's "New leads" tab starts there). A round runs with every website
+  Sheet call (every 5 minutes, on Google's servers) and once more each morning
+  from the app's daily job, as a backup. Up to 40 model calls per round,
+  4 at a time.
+- **July–September 2026 history** is imported in the background with
+  whatever budget a round has left after new mail, oldest first, until done.
+  The page shows how far it has got ("importing, up to 2026-08-14" →
+  "imported").
+- **Every folder is read** (/me/messages), Junk and Deleted Items included,
+  because good enquiries land in Junk too. Sent, Outbox and Drafts are ours:
+  their mail is from our own domain or is a draft, and is skipped.
+- Free filters in code skip, without storing anything: colleagues on **any
+  connected company domain** (arak-sa.com and clb-sa.com), automatic senders
+  (no-reply, notifications…), newsletters (List-Unsubscribe / List-Id),
+  out-of-office and delivery failures, calendar replies, the website form's
+  own copies ("Lighting enquiry — …", already in the Sheet), and replies in a
+  conversation already sorted.
 - What is left goes through the same qualifier as the website. Email leads
   show on the Lead Agent page with the mailbox and an **Open in Outlook** link.
 
@@ -87,18 +119,26 @@ Security:
 - The model sees the masked text only (names, emails, phones, links hidden),
   like the website path.
 
-No Entra change is needed: it uses the existing "Arak Marketing Outreach" app
-registration and its registered callback (`/api/email/ms-callback`), which
-already has delegated `Mail.Read` with admin consent.
+It uses the existing "Arak Marketing Outreach" app registration and its
+registered callback (`/api/email/ms-callback`), which already has delegated
+`Mail.Read` with admin consent in Arak's tenant. Only clb-sa.com needs the
+multitenant switch and CLB's approval (above). A mailbox from another
+organisation keeps its tenant id and renews its token there.
 
-## 4. The master leads workbook (about 3 minutes)
+## 4. The leads workbook (about 3 minutes)
 
-One Google workbook with every lead from every source, kept up to date every
-5 minutes (the owner's decisions, 2026-10-07):
+One Google workbook with every lead from the website, info@arak-sa.com and
+info@clb-sa.com, kept up to date every 5 minutes (the owner's decisions,
+2026-10-07):
 
-- **All enquiries**: every lead (website, email, later sources), whatever the
-  verdict.
-- **Qualified**: the qualified leads only. The sales team works from this tab.
+- **New leads**: everything that arrived from 1 October 2026.
+- **Jul–Sep 2026**: everything from 1 July to 30 September 2026, filled in
+  as the background history import runs. (The website form went live on
+  27 August, so its history starts then.)
+
+Each row carries its AI verdict; filter that column for qualified only.
+Tabs from the first version ("All enquiries", "Qualified") are left alone;
+delete them once the new tabs are filled.
 
 Columns on both tabs: Received · Source · Name · Company · Email · Phone ·
 Brief · AI verdict · Type · AI reason · Link · **Status · Assigned to ·
@@ -111,7 +151,8 @@ enquiry's project type and brief). Source says where it came from, such as
 on the Lead Agent page, if there is one. One-way: what the team types in the
 workbook does not go back.
 
-1. Create a new, empty Google Sheet, for example "ARAK Leads".
+1. Use the workbook made for the first version, or create a new, empty
+   Google Sheet (for example "ARAK Leads").
 2. **Extensions → Apps Script**, delete what is there, paste all of
    `scripts/lead-qualifier/LeadsMaster.gs`.
 3. Replace `PASTE-THE-MASTER-SHEET-KEY-HERE` with Lead Agent → Connection →
@@ -122,8 +163,10 @@ Done when both tabs appear and fill with every lead so far, and the Lead
 Agent page says "Leads workbook: checked … ago".
 
 - Sort and filter freely: rows are matched by the hidden Lead ID.
-- A qualified lead later corrected to something else stays on Qualified with
-  the new verdict shown, so nobody's notes vanish.
+- If the page says "Leads workbook: last checked … ago" (more than 20
+  minutes), the 5-minute timer is not running: in Apps Script open
+  **Triggers** (the clock icon) and check that `syncLeads` is listed, or run
+  `installLeadsMaster` again.
 - `resyncLeadsMaster` refreshes every agent column from scratch; team columns
   are kept.
 - Share it as **Restricted**: it holds clients' contact details. The master

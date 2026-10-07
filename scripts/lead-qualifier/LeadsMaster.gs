@@ -1,26 +1,31 @@
 /**
- * ARAK lead agent -> the master leads workbook.
+ * ARAK lead agent -> the leads workbook.
  *
- * Paste this into a NEW, empty Google Sheet (Extensions -> Apps Script),
- * set LEADS_KEY, then run installLeadsMaster once. Steps: docs/LEADS-SETUP.md.
+ * Paste this into a Google Sheet (Extensions -> Apps Script), set LEADS_KEY,
+ * then run installLeadsMaster once. Steps: docs/LEADS-SETUP.md, section 4.
  *
- * Two tabs, kept up to date every 5 minutes on Google's servers:
- *   "All enquiries"  every lead from every source (website, email, ...)
- *   "Qualified"      the qualified ones: the tab the sales team works from
+ * Two tabs, kept up to date every 5 minutes on Google's servers, with every
+ * lead from the website, info@arak-sa.com and info@clb-sa.com:
+ *   "New leads"     leads that arrived from 1 October 2026
+ *   "Jul–Sep 2026"  leads from 1 July to 30 September 2026 (the history,
+ *                   filled in by the agent's background import)
+ * Each row carries its AI verdict; filter that column to see qualified only.
  *
  * The script writes Received .. Link. It NEVER writes Status, Assigned to or
  * Notes: those are the team's. Rows are found by the hidden Lead ID column,
- * so sorting, filtering and moving rows is fine. A lead that is qualified
- * and later corrected stays on "Qualified" with its new verdict shown, so no
- * one's notes disappear. One-way: what you type here does not go back.
+ * so sorting, filtering and moving rows is fine. One-way: what you type here
+ * does not go back. Tabs from an older version ("All enquiries",
+ * "Qualified") are left alone; delete them when you no longer need them.
  */
 
 var LEADS_URL = 'https://marketing-main-ten.vercel.app/api/leads/export';
 // Lead Agent page -> Connection -> Master Sheet key. Keep it out of anything public.
 var LEADS_KEY = 'PASTE-THE-MASTER-SHEET-KEY-HERE';
 
-var ALL_TAB = 'All enquiries';
-var QUALIFIED_TAB = 'Qualified';
+var NEW_TAB = 'New leads';
+var HISTORY_TAB = 'Jul–Sep 2026';
+// The agent's "period" for each lead -> its tab.
+var TAB_FOR = { 'new': NEW_TAB, 'history': HISTORY_TAB };
 var HEADERS = ['Received', 'Source', 'Name', 'Company', 'Email', 'Phone', 'Brief', 'AI verdict', 'Type', 'AI reason', 'Link', 'Status', 'Assigned to', 'Notes', 'Lead ID'];
 // Header -> field in the lead agent's answer. Only these are ever written.
 var FIELD = {
@@ -28,11 +33,14 @@ var FIELD = {
   'Brief': 'brief', 'AI verdict': 'verdict', 'Type': 'type', 'AI reason': 'reason', 'Link': 'link', 'Lead ID': 'id',
 };
 
-/** Run once, by hand: makes both tabs and starts the 5-minute timer. */
+/** Run once, by hand: makes both tabs, reads every lead, and starts the 5-minute timer. */
 function installLeadsMaster() {
   uninstallLeadsMaster();
-  setupTab_(ALL_TAB);
-  setupTab_(QUALIFIED_TAB);
+  setupTab_(NEW_TAB);
+  setupTab_(HISTORY_TAB);
+  // A fresh read, so leads already shown on an older version's tabs also
+  // land on these two.
+  PropertiesService.getScriptProperties().deleteProperty('leadsCursor');
   ScriptApp.newTrigger('syncLeads').timeBased().everyMinutes(5).create();
   syncLeads();
   console.log('Leads workbook installed: updating every 5 minutes.');
@@ -55,9 +63,9 @@ function setupTab_(name) {
   var book = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = book.getSheetByName(name);
   if (!sheet) {
-    // The first tab of a brand-new workbook is reused for "All enquiries".
+    // The first tab of a brand-new workbook is reused for "New leads".
     var first = book.getSheets()[0];
-    sheet = (name === ALL_TAB && first.getLastRow() === 0 && first.getName() !== QUALIFIED_TAB) ? first.setName(name) : book.insertSheet(name);
+    sheet = (name === NEW_TAB && first.getLastRow() === 0 && first.getName() !== HISTORY_TAB) ? first.setName(name) : book.insertSheet(name);
   }
   var width = Math.max(sheet.getLastColumn(), 1);
   var headers = sheet.getRange(1, 1, 1, width).getDisplayValues()[0].map(function (h) { return String(h).trim(); });
@@ -132,12 +140,12 @@ function cell_(header, value) {
   return v;
 }
 
-/** Adds new leads and refreshes known ones, on both tabs. */
+/** Adds new leads and refreshes known ones, each on the tab for when it arrived. */
 function apply_(leads) {
   if (!leads.length) return;
   var book = SpreadsheetApp.getActiveSpreadsheet();
-  var tabs = [book.getSheetByName(ALL_TAB), book.getSheetByName(QUALIFIED_TAB)];
-  tabs.forEach(function (sheet, t) {
+  [NEW_TAB, HISTORY_TAB].forEach(function (tabName) {
+    var sheet = book.getSheetByName(tabName);
     if (!sheet) return;
     var col = columns_(sheet);
     var width = sheet.getLastColumn();
@@ -152,7 +160,7 @@ function apply_(leads) {
         });
         return;
       }
-      if (t === 1 && !lead.qualified) return; // "Qualified" takes qualified leads only
+      if (TAB_FOR[lead.period] !== tabName) return;
       var values = new Array(width).fill('');
       Object.keys(FIELD).forEach(function (h) { if (col[h]) values[col[h] - 1] = cell_(h, lead[FIELD[h]]); });
       fresh.push(values);
