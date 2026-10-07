@@ -32,7 +32,13 @@ var NEW_TAB = 'New leads';
 var HISTORY_TAB = 'Jul–Sep 2026';
 // The agent's "period" for each lead -> its tab.
 var TAB_FOR = { 'new': NEW_TAB, 'history': HISTORY_TAB };
-var HEADERS = ['Received', 'Source', 'Name', 'Company', 'Email', 'Phone', 'Brief', 'AI verdict', 'Type', 'AI reason', 'Link', 'Status', 'Assigned to', 'Notes', 'Lead ID'];
+var HEADERS = ['Received', 'Source', 'Name', 'Company', 'Email', 'Phone', 'Brief', 'AI verdict', 'Decision', 'Type', 'AI reason', 'Link', 'Status', 'Assigned to', 'Notes', 'Lead ID'];
+// The team's say on a lead (the owner's decision, 2026-10-07). Picking
+// Unqualified removes the row; Qualified keeps it and turns it green. Sent to
+// the lead agent as a person's correction; never written by this script.
+var DECISION = 'Decision';
+var DECISION_CHOICES = ['Qualified', 'Unqualified'];
+var DECISIONS_URL = LEADS_URL.replace(/\/export$/, '/sheet_decisions');
 // The team's columns: never written, and a row with anything in them is never removed.
 var TEAM = ['Status', 'Assigned to', 'Notes'];
 // Header -> field in the lead agent's answer. Only these are ever written.
@@ -130,7 +136,14 @@ function setupTab_(name) {
     sheet.getRange(1, 1, 1, HEADERS.length).setValues([HEADERS]);
     return sheet;
   }
-  // An existing tab keeps its own column order; missing columns go at the end.
+  // An existing tab keeps its own column order. Decision goes right after AI
+  // verdict, where the team looks; anything else missing goes at the end.
+  var verdictAt = headers.indexOf('AI verdict');
+  if (headers.indexOf(DECISION) === -1 && verdictAt !== -1) {
+    sheet.insertColumnAfter(verdictAt + 1);
+    sheet.getRange(1, verdictAt + 2).setValue(DECISION);
+    headers.splice(verdictAt + 1, 0, DECISION);
+  }
   var last = sheet.getLastColumn();
   HEADERS.forEach(function (h) {
     if (headers.indexOf(h) === -1) { last += 1; sheet.getRange(1, last).setValue(h); }
@@ -166,6 +179,18 @@ function formatTab_(sheet) {
   if (col['Lead ID']) sheet.hideColumns(col['Lead ID']);
   // Colour rules, in order: the first that matches a cell wins.
   var rules = [];
+
+  // Decision: the team's Qualified / Unqualified dropdown.
+  if (col[DECISION]) {
+    var decision = sheet.getRange(2, col[DECISION], rows - 1, 1);
+    decision.setDataValidation(SpreadsheetApp.newDataValidation()
+      .requireValueInList(DECISION_CHOICES, true).setAllowInvalid(false).build());
+    sheet.setColumnWidth(col[DECISION], 120);
+    rules.push(SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo('Qualified')
+      .setBackground('#e6f4ea').setFontColor('#0d652d').setBold(true).setRanges([decision]).build());
+    rules.push(SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo('Unqualified')
+      .setBackground('#eeeeee').setFontColor('#5f6368').setRanges([decision]).build());
+  }
 
   // Status: a dropdown, coloured by value (first, so it shows on any row).
   if (col['Status']) {
@@ -225,6 +250,8 @@ function syncLeads() {
   try {
     var props = PropertiesService.getScriptProperties();
     var started = Date.now();
+    // The team's decisions first, so this same run brings their result back.
+    pushDecisions_();
     for (var page = 0; page < 20 && Date.now() - started < 4 * 60 * 1000; page++) {
       var res = UrlFetchApp.fetch(LEADS_URL, {
         method: 'post', contentType: 'application/json', muteHttpExceptions: true,
@@ -275,6 +302,33 @@ function columnLetter_(n) {
   return s;
 }
 
+/**
+ * Sends the Decision column's new choices to the lead agent: any row whose
+ * Decision differs from its AI verdict. Once applied, the AI verdict shows
+ * the decision, so the same choice is never sent twice.
+ */
+function pushDecisions_() {
+  var decisions = [];
+  [NEW_TAB, HISTORY_TAB].forEach(function (name) {
+    var sheet = findTab_(name);
+    if (!sheet || sheet.getLastRow() < 2) return;
+    var col = columns_(sheet);
+    if (!col[DECISION] || !col['AI verdict'] || !col['Lead ID']) return;
+    var rows = sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getLastColumn()).getDisplayValues();
+    rows.forEach(function (r) {
+      var choice = String(r[col[DECISION] - 1] || '').trim();
+      var id = String(r[col['Lead ID'] - 1] || '').trim();
+      if (choice && id && choice !== String(r[col['AI verdict'] - 1] || '').trim()) decisions.push({ id: id, verdict: choice });
+    });
+  });
+  if (!decisions.length) return;
+  var res = UrlFetchApp.fetch(DECISIONS_URL, {
+    method: 'post', contentType: 'application/json', muteHttpExceptions: true,
+    payload: JSON.stringify({ key: LEADS_KEY, decisions: decisions }),
+  });
+  if (res.getResponseCode() !== 200) console.error('Decisions not saved (' + res.getResponseCode() + '): ' + res.getContentText().slice(0, 300));
+}
+
 /** True when a person has written in the row's Status, Assigned to or Notes. `data` is the tab read once, from row 2. */
 function teamTouched_(data, col, row) {
   var values = data[row - 2] || [];
@@ -304,7 +358,10 @@ function apply_(leads) {
     leads.forEach(function (lead) {
       var row = byId[lead.id];
       if (row) {
-        if (!inSheet_(lead) && !teamTouched_(data, col, row)) { remove.push(row); return; }
+        // Out of the Sheet now: removed, unless the team wrote in the row and
+        // it was not a person who took it out (a person's Unqualified always
+        // removes it).
+        if (!inSheet_(lead) && (lead.byPerson || !teamTouched_(data, col, row))) { remove.push(row); return; }
         // Known: refresh only the agent's cells.
         Object.keys(FIELD).forEach(function (h) {
           if (col[h] && h !== 'Lead ID') sheet.getRange(row, col[h]).setValue(cell_(h, lead[FIELD[h]]));

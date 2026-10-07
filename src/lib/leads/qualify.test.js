@@ -135,12 +135,18 @@ describe('parseVerdict', () => {
   it('derives the verdict from the category', () => {
     expect(parseVerdict(reply()).verdict).toBe('qualified')
     expect(parseVerdict(reply({ category: 'vendor_pitch' })).verdict).toBe('unqualified')
-    expect(parseVerdict(reply({ category: 'partnership_offer' })).verdict).toBe('needs_review')
+    expect(parseVerdict(reply({ category: 'partnership_offer' })).verdict).toBe('unqualified')
+    expect(parseVerdict(reply({ category: 'existing_customer_support' })).verdict).toBe('needs_review')
   })
   it('low confidence either way goes to a person instead', () => {
     expect(parseVerdict(reply({ category: 'job_or_recruitment', confidence: 'low' })).verdict).toBe('needs_review')
     expect(parseVerdict(reply({ category: 'project_enquiry', confidence: 'low' })).verdict).toBe('needs_review')
     expect(parseVerdict(reply({ category: 'project_enquiry', confidence: 'medium' })).verdict).toBe('qualified')
+  })
+  it('pitches, partnerships and marketing offers stay unqualified even when unsure', () => {
+    for (const category of ['vendor_pitch', 'marketing_pitch', 'partnership_offer']) {
+      expect(parseVerdict(reply({ category, confidence: 'low' })).verdict).toBe('unqualified')
+    }
   })
   it('fills missing detail keys, trims ask_next to three, and strips code fences', () => {
     const v = parseVerdict('```json\n' + reply() + '\n```')

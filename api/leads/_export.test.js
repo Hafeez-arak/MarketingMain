@@ -1,5 +1,30 @@
 import { describe, it, expect } from 'vitest'
-import { exportLeads, toRow, riyadhTime, periodOf, EXPORT_PAGE } from './_export.js'
+import { exportLeads, toRow, riyadhTime, periodOf, applySheetDecisions, EXPORT_PAGE } from './_export.js'
+
+describe('applySheetDecisions', () => {
+  const KEY2 = '22222222-3333-4444-5555-666666666666'
+  const ID = '00000000-0000-0000-0000-0000000000f1'
+  function fake() {
+    const patches = []
+    const db = async (path, init = {}) => {
+      if (path.startsWith('lead_agent_settings?export_key=eq.')) return path.includes(KEY2) ? [{ workspace_id: 'ws-1' }] : []
+      if (path.startsWith('leads?id=eq.') && init.method === 'PATCH') { patches.push({ path, body: init.body }); return path.includes(ID) ? [{ id: ID }] : [] }
+      throw new Error(path)
+    }
+    return { db, patches, deps: { db, now: () => new Date('2026-10-07T13:00:00Z') } }
+  }
+  it('stores the team\'s choice as a correction, only on its own company\'s leads, and moves updated_at', async () => {
+    const f = fake()
+    const out = await applySheetDecisions(f.deps, { key: KEY2, decisions: [{ id: ID, verdict: 'Unqualified' }, { id: ID, verdict: 'Qualified' }, { id: 'nope', verdict: 'Qualified' }, { id: ID, verdict: 'maybe' }] })
+    expect(out).toEqual({ status: 200, applied: 2 })
+    expect(f.patches[0].path).toContain('&workspace_id=eq.ws-1')
+    expect(f.patches[0].body).toMatchObject({ human_verdict: 'unqualified', updated_at: '2026-10-07T13:00:00.000Z' })
+    expect(f.patches[1].body.human_verdict).toBe('qualified')
+  })
+  it('refuses a wrong key', async () => {
+    expect((await applySheetDecisions(fake().deps, { key: 'x' })).status).toBe(401)
+  })
+})
 
 describe('periodOf', () => {
   it('splits by arrival in Riyadh time: New leads from 1 Oct, history from 1 Jul, older not shown', () => {

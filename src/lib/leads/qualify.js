@@ -23,11 +23,16 @@ export const CATEGORIES = {
   spam: 'unqualified',
   not_an_enquiry: 'unqualified',
   existing_customer_support: 'needs_review',
-  partnership_offer: 'needs_review',
+  // Not a buyer: someone wanting something from us (the owner, 2026-10-07:
+  // partnerships, collaborations, commission deals are not to be listed).
+  partnership_offer: 'unqualified',
   unclear: 'needs_review',
 }
 
 export const VERDICTS = ['qualified', 'unqualified', 'needs_review']
+
+/** Someone selling or promoting to us: never listed, however unsure the model is. */
+const PITCHES = new Set(['vendor_pitch', 'marketing_pitch', 'partnership_offer'])
 
 const CONFIDENCE = ['high', 'medium', 'low']
 
@@ -199,7 +204,7 @@ Pick exactly one category:
 - spam: gibberish, scams, prizes, links with no real request.
 - not_an_enquiry: newsletters, notifications, receipts, internal or automatic messages.
 - existing_customer_support: a customer reporting a fault, warranty claim or complaint about something we supplied or installed.
-- partnership_offer: proposes a partnership, referral deal, agency or sponsorship.
+- partnership_offer: proposes a partnership, collaboration, alliance, joint package, dealership or agency, a referral or commission deal (for example "we bring you orders for a 1% commission"), profit sharing, sponsorship, or otherwise promotes their own business to us. Not a buyer.
 - unclear: you genuinely cannot tell.
 
 Rules:
@@ -325,7 +330,9 @@ export function parseVerdict(text) {
   // Low confidence either way goes to a person: a doubtful "unqualified" may
   // hide a buyer, and a doubtful "qualified" would put junk in the sales
   // Sheet (audit 2026-10-07: a scam "Teams meeting" request got in this way).
-  if (verdict !== 'needs_review' && confidence === 'low') verdict = 'needs_review'
+  // Pitches stay out even when unsure: the owner wants self-promotion,
+  // partnerships and marketing offers not listed at all (2026-10-07).
+  if (verdict !== 'needs_review' && confidence === 'low' && !PITCHES.has(category)) verdict = 'needs_review'
   const str = (v) => (typeof v === 'string' ? v.trim() : '')
   const d = data?.details && typeof data.details === 'object' ? data.details : {}
   return {
