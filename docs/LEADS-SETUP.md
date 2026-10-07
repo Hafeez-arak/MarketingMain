@@ -166,6 +166,12 @@ workbook does not go back.
 Done when both tabs appear and fill with every lead so far, and the Lead
 Agent page says "Leads workbook: checked … ago".
 
+- The script lays the tabs out itself: a dark frozen header with filter
+  buttons, alternating rows of equal height (about three lines; click a cell
+  to read all of it), newest first, "Open email" links, and a **Status**
+  dropdown (New · Contacted · Quotation sent · Won · Lost · Not relevant),
+  coloured by value. `formatLeadsMaster` re-applies the layout if someone
+  changes it by accident.
 - Sort and filter freely: rows are matched by the hidden Lead ID.
 - If the page says "Leads workbook: last checked … ago" (more than 20
   minutes), the 5-minute timer is not running: in Apps Script open

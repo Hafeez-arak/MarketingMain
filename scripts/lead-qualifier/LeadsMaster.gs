@@ -12,6 +12,10 @@
  * Pitches, job seekers, spam, duplicates and "needs review" stay out; they
  * are on the Lead Agent page. A lead corrected to qualified there appears.
  *
+ * Laid out as a clean table by the script itself: dark frozen header, filter
+ * buttons, alternating rows of equal height, newest first, "Open email"
+ * links, and a coloured Status dropdown for the team.
+ *
  * The script writes Received .. Link. It NEVER writes Status, Assigned to or
  * Notes: those are the team's. Rows are found by the hidden Lead ID column,
  * so sorting, filtering and moving rows is fine. One-way: what you type here
@@ -36,11 +40,28 @@ var FIELD = {
   'Brief': 'brief', 'AI verdict': 'verdict', 'Type': 'type', 'AI reason': 'reason', 'Link': 'link', 'Lead ID': 'id',
 };
 
-/** Run once, by hand: makes both tabs, reads every lead, and starts the 5-minute timer. */
+// ── Look ───────────────────────────────────────────────────────────────────
+var WIDTHS = {
+  'Received': 130, 'Source': 190, 'Name': 150, 'Company': 170, 'Email': 210, 'Phone': 130, 'Brief': 400,
+  'AI verdict': 100, 'Type': 150, 'AI reason': 300, 'Link': 95, 'Status': 130, 'Assigned to': 130, 'Notes': 240,
+};
+var ROW_HEIGHT = 63; // about three lines of text; click a cell to read all of it
+var HEADER_BG = '#1f2a37';
+var HEADER_FG = '#ffffff';
+// The team's Status dropdown, and the colour each one gets.
+var STATUSES = [
+  ['New', '#e8f0fe', '#174ea6'],
+  ['Contacted', '#fef7e0', '#7a4f01'],
+  ['Quotation sent', '#e6f4ea', '#0d652d'],
+  ['Won', '#b7e1c1', '#0d652d'],
+  ['Lost', '#eeeeee', '#5f6368'],
+  ['Not relevant', '#eeeeee', '#5f6368'],
+];
+
+/** Run once, by hand: makes both tabs, lays them out, reads every lead, and starts the 5-minute timer. */
 function installLeadsMaster() {
   uninstallLeadsMaster();
-  setupTab_(NEW_TAB);
-  setupTab_(HISTORY_TAB);
+  [NEW_TAB, HISTORY_TAB].forEach(function (name) { formatTab_(setupTab_(name)); });
   // A fresh read, so leads already shown on an older version's tabs also
   // land on these two.
   PropertiesService.getScriptProperties().deleteProperty('leadsCursor');
@@ -62,6 +83,12 @@ function resyncLeadsMaster() {
   syncLeads();
 }
 
+/** Lays both tabs out again (header, widths, colours, dropdown, filter). Safe to run any time. */
+function formatLeadsMaster() {
+  var book = SpreadsheetApp.getActiveSpreadsheet();
+  [NEW_TAB, HISTORY_TAB].forEach(function (name) { var s = book.getSheetByName(name); if (s) formatTab_(s); });
+}
+
 function setupTab_(name) {
   var book = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = book.getSheetByName(name);
@@ -73,18 +100,70 @@ function setupTab_(name) {
   var width = Math.max(sheet.getLastColumn(), 1);
   var headers = sheet.getRange(1, 1, 1, width).getDisplayValues()[0].map(function (h) { return String(h).trim(); });
   if (!headers.some(function (h) { return h; })) {
-    sheet.getRange(1, 1, 1, HEADERS.length).setValues([HEADERS]).setFontWeight('bold');
-    sheet.setFrozenRows(1);
-    sheet.setColumnWidth(7, 420);  // Brief
-    sheet.setColumnWidth(10, 320); // AI reason
-    sheet.hideColumns(HEADERS.length); // Lead ID
-    return;
+    sheet.getRange(1, 1, 1, HEADERS.length).setValues([HEADERS]);
+    return sheet;
   }
   // An existing tab keeps its own column order; missing columns go at the end.
   var last = sheet.getLastColumn();
   HEADERS.forEach(function (h) {
-    if (headers.indexOf(h) === -1) { last += 1; sheet.getRange(1, last).setValue(h).setFontWeight('bold'); }
+    if (headers.indexOf(h) === -1) { last += 1; sheet.getRange(1, last).setValue(h); }
   });
+  return sheet;
+}
+
+/**
+ * The clean-table look. Applied to whole columns, so rows added later look
+ * the same without being touched again.
+ */
+function formatTab_(sheet) {
+  var col = columns_(sheet);
+  var width = sheet.getLastColumn();
+  var rows = sheet.getMaxRows();
+  var all = sheet.getRange(1, 1, rows, width);
+
+  // Header: dark, bold, white, frozen, a little taller.
+  sheet.getRange(1, 1, 1, width)
+    .setBackground(HEADER_BG).setFontColor(HEADER_FG).setFontWeight('bold')
+    .setVerticalAlignment('middle').setWrap(true);
+  sheet.setRowHeight(1, 36);
+  sheet.setFrozenRows(1);
+
+  // Body: top-aligned, wrapped, one font size; alternating row colours.
+  sheet.getRange(2, 1, rows - 1, width).setVerticalAlignment('top').setWrap(true).setFontSize(10);
+  sheet.getBandings().forEach(function (b) { b.remove(); });
+  all.applyRowBanding(SpreadsheetApp.BandingTheme.LIGHT_GREY, true, false)
+    .setHeaderRowColor(HEADER_BG).setFirstRowColor('#ffffff').setSecondRowColor('#f5f7fa');
+
+  // Widths; the Lead ID column stays hidden.
+  Object.keys(WIDTHS).forEach(function (h) { if (col[h]) sheet.setColumnWidth(col[h], WIDTHS[h]); });
+  if (col['Lead ID']) sheet.hideColumns(col['Lead ID']);
+  // AI verdict: green and bold when qualified; a row kept for its notes after
+  // its verdict changed shows the new verdict in plain grey.
+  var rules = [];
+  if (col['AI verdict']) {
+    var verdict = sheet.getRange(2, col['AI verdict'], rows - 1, 1);
+    verdict.setFontColor('#5f6368');
+    rules.push(SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo('Qualified')
+      .setBold(true).setFontColor('#0d652d').setRanges([verdict]).build());
+  }
+
+  // Status: a dropdown, coloured by value.
+  if (col['Status']) {
+    var status = sheet.getRange(2, col['Status'], rows - 1, 1);
+    status.setDataValidation(SpreadsheetApp.newDataValidation()
+      .requireValueInList(STATUSES.map(function (s) { return s[0]; }), true).setAllowInvalid(true).build());
+    STATUSES.forEach(function (s) {
+      rules.push(SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo(s[0])
+        .setBackground(s[1]).setFontColor(s[2]).setRanges([status]).build());
+    });
+  }
+  sheet.setConditionalFormatRules(rules);
+
+  // Filter buttons on the header.
+  if (!sheet.getFilter()) all.createFilter();
+
+  // Equal row heights for what is already there.
+  if (sheet.getLastRow() > 1) sheet.setRowHeightsForced(2, sheet.getLastRow() - 1, ROW_HEIGHT);
 }
 
 /** Column number by header, for one tab. */
@@ -134,11 +213,13 @@ function syncLeads() {
 /**
  * A value as Sheets should keep it: as typed. Without the apostrophe, Sheets
  * reads "+966 55..." as a formula, drops the 0 from "0553...", and treats an
- * enquiry that starts with "=" as a formula.
+ * enquiry that starts with "=" as a formula. The Outlook link becomes a short
+ * clickable "Open email".
  */
 function cell_(header, value) {
   var v = value == null ? '' : String(value);
   if (!v) return '';
+  if (header === 'Link') return /^https:\/\//.test(v) ? '=HYPERLINK("' + v.replace(/"/g, '%22') + '","Open email")' : '';
   if (header === 'Phone' || /^[=+\-@]/.test(v)) return "'" + v;
   return v;
 }
@@ -154,7 +235,7 @@ function teamTouched_(data, col, row) {
  * is added to the tab for when it arrived, or refreshed if it is there. A
  * lead that is not (or no longer) qualified is removed, unless someone has
  * written in its Status, Assigned to or Notes; then it stays, with its new
- * verdict showing, so nobody's work disappears.
+ * verdict showing, so nobody's work disappears. Newest first afterwards.
  */
 function apply_(leads) {
   if (!leads.length) return;
@@ -168,6 +249,7 @@ function apply_(leads) {
     var data = sheet.getLastRow() > 1 ? sheet.getRange(2, 1, sheet.getLastRow() - 1, width).getValues() : [];
     var fresh = [];
     var remove = [];
+    var changed = false;
     leads.forEach(function (lead) {
       var row = byId[lead.id];
       if (row) {
@@ -176,6 +258,7 @@ function apply_(leads) {
         Object.keys(FIELD).forEach(function (h) {
           if (col[h] && h !== 'Lead ID') sheet.getRange(row, col[h]).setValue(cell_(h, lead[FIELD[h]]));
         });
+        changed = true;
         return;
       }
       if (!lead.qualified || TAB_FOR[lead.period] !== tabName) return;
@@ -185,6 +268,15 @@ function apply_(leads) {
     });
     // Bottom up, so earlier deletions do not move the rows still to delete.
     remove.sort(function (a, b) { return b - a; }).forEach(function (row) { sheet.deleteRow(row); });
-    if (fresh.length) sheet.getRange(sheet.getLastRow() + 1, 1, fresh.length, width).setValues(fresh);
+    if (fresh.length) {
+      var at = sheet.getLastRow() + 1;
+      if (at + fresh.length - 1 > sheet.getMaxRows()) sheet.insertRowsAfter(sheet.getMaxRows(), at + fresh.length - 1 - sheet.getMaxRows() + 50);
+      sheet.getRange(at, 1, fresh.length, width).setValues(fresh);
+      sheet.setRowHeightsForced(at, fresh.length, ROW_HEIGHT);
+    }
+    // Newest first. "Received" is "YYYY-MM-DD HH:mm", so text order is time order.
+    if ((fresh.length || remove.length || changed) && col['Received'] && sheet.getLastRow() > 2) {
+      sheet.getRange(2, 1, sheet.getLastRow() - 1, width).sort({ column: col['Received'], ascending: false });
+    }
   });
 }
