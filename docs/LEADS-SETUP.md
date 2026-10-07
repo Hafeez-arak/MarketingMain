@@ -185,6 +185,27 @@ Agent page says "Leads workbook: checked … ago".
 - Share it as **Restricted**: it holds clients' contact details. The master
   key can read every lead; **New key** on the page cuts an old copy off.
 
+## 5. Health alerts
+
+When something stops, an email goes to the alert address (Lead Agent →
+Connection → Health alerts; junaid@arak-sa.com, the owner's choice on
+2026-10-07). Again once a day while it lasts, and once when it works again.
+
+It checks: either Sheet silent for 30+ minutes; a mailbox needing reconnecting,
+failing to read (20 minutes' grace, as Microsoft is sometimes briefly busy),
+or unread for 45+ minutes; enquiries the AI could not check; OpenRouter
+refusing the key or credit under $5; the month's AI budget at 80% or used up.
+
+Who checks: the website Sheet's 5-minute call checks on the workbook, the
+workbook's call checks on the website Sheet (each catches the other
+stopping), and the app's daily job checks everything in case both stop. At
+most one check runs per 10 minutes (`lead_agent_settings.last_health_at`).
+
+The email is sent through a connected Microsoft 365 outreach mailbox (the
+alert address's own if connected, else the first), via Graph; it shows in
+that mailbox's Sent Items. **Send test alert** on the page proves the path;
+**Check now** runs the check on the spot.
+
 ## Changing or stopping it
 
 - **Pause:** the On/Off switch on the Lead Agent page. Rows wait, blank, and

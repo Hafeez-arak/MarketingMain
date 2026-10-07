@@ -91,6 +91,9 @@ export async function exportLeads(deps, { key, cursor = '' }) {
     : ''
   const rows = await deps.db(`leads?workspace_id=eq.${ws}${after}&select=id,source,received_at,created_at,updated_at,name,company,email,phone,subject,message,verdict,human_verdict,category,reason,link,mailbox,error&order=updated_at.asc,id.asc&limit=${EXPORT_PAGE}`) || []
   const last = rows[rows.length - 1]
+  // The workbook's timer is the other watchman: it checks on the website
+  // Sheet (and everything else) at most every 10 minutes. See _health.js.
+  if (deps.health) await deps.health({ workspaceId: ws }).catch(() => {})
   return {
     status: 200,
     leads: rows.map(toRow),
