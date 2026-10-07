@@ -137,8 +137,10 @@ describe('parseVerdict', () => {
     expect(parseVerdict(reply({ category: 'vendor_pitch' })).verdict).toBe('unqualified')
     expect(parseVerdict(reply({ category: 'partnership_offer' })).verdict).toBe('needs_review')
   })
-  it('a low-confidence "unqualified" goes to a person instead', () => {
+  it('low confidence either way goes to a person instead', () => {
     expect(parseVerdict(reply({ category: 'job_or_recruitment', confidence: 'low' })).verdict).toBe('needs_review')
+    expect(parseVerdict(reply({ category: 'project_enquiry', confidence: 'low' })).verdict).toBe('needs_review')
+    expect(parseVerdict(reply({ category: 'project_enquiry', confidence: 'medium' })).verdict).toBe('qualified')
   })
   it('fills missing detail keys, trims ask_next to three, and strips code fences', () => {
     const v = parseVerdict('```json\n' + reply() + '\n```')

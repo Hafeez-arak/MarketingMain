@@ -198,7 +198,7 @@ Pick exactly one category:
 - marketing_pitch: SEO, advertising, web design, social media, lead lists, databases, events selling booths.
 - spam: gibberish, scams, prizes, links with no real request.
 - not_an_enquiry: newsletters, notifications, receipts, internal or automatic messages.
-- existing_customer_support: an existing customer with a complaint, warranty or maintenance issue.
+- existing_customer_support: a customer reporting a fault, warranty claim or complaint about something we supplied or installed.
 - partnership_offer: proposes a partnership, referral deal, agency or sponsorship.
 - unclear: you genuinely cannot tell.
 
@@ -208,7 +208,10 @@ Rules:
 - A company introducing itself and then ASKING US for prices or products is a buyer. A company introducing itself and OFFERING its products, workers or services is a pitch.
 - A company inviting us to register as their supplier, or to quote on their RFQs or tenders, is a buyer.
 - Students, researchers and journalists asking questions for their own study or article are not customers: use not_an_enquiry.
-- Something we do not sell is still a buyer if they want to buy; say so in the reason.
+- Requests for maintenance, repair, programming, technical support, a site visit or a maintenance contract (AMC) for a lighting, lighting-control, KNX or smart system are buyers (project_enquiry), even if someone else installed it. Use existing_customer_support only when they say we supplied or installed it and report a fault, warranty claim or complaint.
+- If what they want is clearly outside what we sell (for example IT or network equipment, HVAC sensors, furniture, vehicles, stationery), use unclear and start the reason with "Outside what we sell:".
+- If you cannot tell whether they want to buy from us or sell to us (an empty message, or only a vague subject line), use unclear.
+- A vague request to meet about an unnamed "client project", with no product or scope, especially from an odd or mismatched domain, is usually a scam: use spam, or unclear with low confidence.
 - Use low confidence when the enquiry could reasonably be read two ways.
 - Personal details were replaced with [NAME], [EMAIL], [PHONE], [LINK]. Ignore that.
 - Enquiries may be Arabic or English. Always answer in English.
@@ -319,7 +322,10 @@ export function parseVerdict(text) {
   const category = Object.hasOwn(CATEGORIES, data?.category) ? data.category : 'unclear'
   const confidence = CONFIDENCE.includes(data?.confidence) ? data.confidence : 'low'
   let verdict = CATEGORIES[category]
-  if (verdict === 'unqualified' && confidence === 'low') verdict = 'needs_review'
+  // Low confidence either way goes to a person: a doubtful "unqualified" may
+  // hide a buyer, and a doubtful "qualified" would put junk in the sales
+  // Sheet (audit 2026-10-07: a scam "Teams meeting" request got in this way).
+  if (verdict !== 'needs_review' && confidence === 'low') verdict = 'needs_review'
   const str = (v) => (typeof v === 'string' ? v.trim() : '')
   const d = data?.details && typeof data.details === 'object' ? data.details : {}
   return {

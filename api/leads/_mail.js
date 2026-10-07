@@ -107,7 +107,29 @@ export function stripQuoted(text) {
     const m = re.exec(t)
     if (m && m.index > 0 && m.index < end) end = m.index
   }
-  return t.slice(0, end).trim().slice(0, MAX_BODY)
+  // Everything looked like a quote (a forward, or a reply typed below the
+  // quote): keep the whole text rather than send the model an empty message.
+  const fresh = t.slice(0, end).trim()
+  return (fresh || t.trim()).slice(0, MAX_BODY)
+}
+
+/**
+ * "sender's domain | subject without Re:/Fw:", for subjects that carry a
+ * reference number ("REQUEST FOR QUOTATION # CA-26-1618"); '' for generic
+ * ones ("RFQ", "Request for Quotation"), where two different requests from
+ * one company would look the same.
+ */
+export function requestKey(email, subject) {
+  const domain = lower(email).split('@')[1] || ''
+  let s = lower(subject)
+  for (let i = 0; i < 5; i++) {
+    const next = s.replace(/^\s*(re|fw|fwd|aw|wg|tr|رد|إعادة توجيه|اعادة توجيه)\s*:\s*/i, '')
+    if (next === s) break
+    s = next
+  }
+  s = s.replace(/\s+/g, ' ').trim()
+  if (!domain || s.length < 10 || !/\d/.test(s)) return ''
+  return `${domain}|${s}`
 }
 
 /** A Graph message → the qualifier's envelope. */
@@ -210,16 +232,21 @@ async function readPage(deps, ctx, { mb, token, from, until, budget }) {
 
   const refs = msgs.map((m) => m.internetMessageId || m.id)
   const convIds = [...new Set(msgs.map((m) => m.conversationId).filter(Boolean))]
-  const since = new Date(Date.parse(msgs[0]?.receivedDateTime || now.toISOString()) - 8 * 86_400_000).toISOString()
+  const since = new Date(Date.parse(msgs[0]?.receivedDateTime || now.toISOString()) - 31 * 86_400_000).toISOString()
   const [byRef, byConv, recent] = await Promise.all([
     refs.length ? deps.db(`leads?workspace_id=eq.${mb.workspace_id}&source=eq.email&source_ref=in.(${encodeURIComponent(quoteIn(refs))})&select=source_ref,verdict`) : [],
     convIds.length ? deps.db(`leads?workspace_id=eq.${mb.workspace_id}&conversation_id=in.(${encodeURIComponent(quoteIn(convIds))})&select=conversation_id,source_ref`) : [],
-    msgs.length ? deps.db(`leads?workspace_id=eq.${mb.workspace_id}&source=eq.email&received_at=gte.${since}&select=id,source_ref,email,phone,message,received_at&limit=1000`) : [],
+    msgs.length ? deps.db(`leads?workspace_id=eq.${mb.workspace_id}&source=eq.email&received_at=gte.${since}&select=id,source_ref,email,phone,subject,message,received_at&limit=2000`) : [],
   ])
   // A message whose model call failed has a row with no verdict: not decided.
   const decided = new Set((byRef || []).filter((l) => l.verdict).map((l) => l.source_ref))
   const threads = new Map((byConv || []).map((l) => [l.conversation_id, l.source_ref]))
   const known = (recent || []).map((l) => ({ id: l.id, sourceRef: l.source_ref, email: l.email, phone: l.phone, message: l.message, receivedAt: l.received_at }))
+  // The same RFQ again (a reminder, a forward) from the same company, under the
+  // same reference: "FW: REQUEST FOR QUOTATION # CA-26-1618" twice from
+  // condorarabia.com was two "new leads" in the 2026-10-07 audit.
+  const requests = new Map()
+  for (const l of recent || []) { const k = requestKey(l.email, l.subject); if (k && !requests.has(k)) requests.set(k, l.source_ref) }
 
   // 1. Plan, in order. Planning stops at the first message the budget cannot cover.
   const plan = []
@@ -228,7 +255,9 @@ async function readPage(deps, ctx, { mb, token, from, until, budget }) {
     const ref = m.internetMessageId || m.id
     if (decided.has(ref)) { plan.push({ m, kind: 'seen' }); continue }
     const sameThread = m.conversationId && threads.has(m.conversationId) && threads.get(m.conversationId) !== ref
-    if (skipReason(m, { ownDomains: ctx.ownDomains }) || sameThread) { plan.push({ m, kind: 'skip' }); continue }
+    const key = requestKey(senderOf(m).address, m.subject)
+    const sameRequest = key && requests.has(key) && requests.get(key) !== ref
+    if (skipReason(m, { ownDomains: ctx.ownDomains }) || sameThread || sameRequest) { plan.push({ m, kind: 'skip' }); continue }
     const env = messageToEnvelope(m)
     const dup = findDuplicate(env, known.filter((k) => k.sourceRef !== ref), { days: 7 })
     if (dup) { plan.push({ m, kind: 'dup', env, dup }); continue }
@@ -236,6 +265,7 @@ async function readPage(deps, ctx, { mb, token, from, until, budget }) {
     asks++
     plan.push({ m, kind: 'ask', env })
     threads.set(m.conversationId, ref)
+    if (key) requests.set(key, ref)
     known.push({ id: null, sourceRef: ref, email: env.email, phone: '', message: env.message, receivedAt: m.receivedDateTime })
   }
 
