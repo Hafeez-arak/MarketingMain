@@ -4,12 +4,13 @@
  * Paste this into a Google Sheet (Extensions -> Apps Script), set LEADS_KEY,
  * then run installLeadsMaster once. Steps: docs/LEADS-SETUP.md, section 4.
  *
- * Two tabs, kept up to date every 5 minutes on Google's servers, with every
- * lead from the website, info@arak-sa.com and info@clb-sa.com:
- *   "New leads"     leads that arrived from 1 October 2026
- *   "Jul–Sep 2026"  leads from 1 July to 30 September 2026 (the history,
- *                   filled in by the agent's background import)
- * Each row carries its AI verdict; filter that column to see qualified only.
+ * Two tabs, kept up to date every 5 minutes on Google's servers, with the
+ * QUALIFIED leads from the website, info@arak-sa.com and info@clb-sa.com:
+ *   "New leads"     qualified leads that arrived from 1 October 2026
+ *   "Jul–Sep 2026"  qualified leads from 1 July to 30 September 2026 (the
+ *                   history, filled in by the agent's background import)
+ * Pitches, job seekers, spam, duplicates and "needs review" stay out; they
+ * are on the Lead Agent page. A lead corrected to qualified there appears.
  *
  * The script writes Received .. Link. It NEVER writes Status, Assigned to or
  * Notes: those are the team's. Rows are found by the hidden Lead ID column,
@@ -27,6 +28,8 @@ var HISTORY_TAB = 'Jul–Sep 2026';
 // The agent's "period" for each lead -> its tab.
 var TAB_FOR = { 'new': NEW_TAB, 'history': HISTORY_TAB };
 var HEADERS = ['Received', 'Source', 'Name', 'Company', 'Email', 'Phone', 'Brief', 'AI verdict', 'Type', 'AI reason', 'Link', 'Status', 'Assigned to', 'Notes', 'Lead ID'];
+// The team's columns: never written, and a row with anything in them is never removed.
+var TEAM = ['Status', 'Assigned to', 'Notes'];
 // Header -> field in the lead agent's answer. Only these are ever written.
 var FIELD = {
   'Received': 'received', 'Source': 'source', 'Name': 'name', 'Company': 'company', 'Email': 'email', 'Phone': 'phone',
@@ -140,7 +143,19 @@ function cell_(header, value) {
   return v;
 }
 
-/** Adds new leads and refreshes known ones, each on the tab for when it arrived. */
+/** True when a person has written in the row's Status, Assigned to or Notes. `data` is the tab read once, from row 2. */
+function teamTouched_(data, col, row) {
+  var values = data[row - 2] || [];
+  return TEAM.some(function (h) { return col[h] && String(values[col[h] - 1] == null ? '' : values[col[h] - 1]).trim() !== ''; });
+}
+
+/**
+ * Qualified leads only (the owner's decision, 2026-10-07): a qualified lead
+ * is added to the tab for when it arrived, or refreshed if it is there. A
+ * lead that is not (or no longer) qualified is removed, unless someone has
+ * written in its Status, Assigned to or Notes; then it stays, with its new
+ * verdict showing, so nobody's work disappears.
+ */
 function apply_(leads) {
   if (!leads.length) return;
   var book = SpreadsheetApp.getActiveSpreadsheet();
@@ -150,21 +165,26 @@ function apply_(leads) {
     var col = columns_(sheet);
     var width = sheet.getLastColumn();
     var byId = rowsById_(sheet, col);
+    var data = sheet.getLastRow() > 1 ? sheet.getRange(2, 1, sheet.getLastRow() - 1, width).getValues() : [];
     var fresh = [];
+    var remove = [];
     leads.forEach(function (lead) {
       var row = byId[lead.id];
       if (row) {
+        if (!lead.qualified && !teamTouched_(data, col, row)) { remove.push(row); return; }
         // Known: refresh only the agent's cells.
         Object.keys(FIELD).forEach(function (h) {
           if (col[h] && h !== 'Lead ID') sheet.getRange(row, col[h]).setValue(cell_(h, lead[FIELD[h]]));
         });
         return;
       }
-      if (TAB_FOR[lead.period] !== tabName) return;
+      if (!lead.qualified || TAB_FOR[lead.period] !== tabName) return;
       var values = new Array(width).fill('');
       Object.keys(FIELD).forEach(function (h) { if (col[h]) values[col[h] - 1] = cell_(h, lead[FIELD[h]]); });
       fresh.push(values);
     });
+    // Bottom up, so earlier deletions do not move the rows still to delete.
+    remove.sort(function (a, b) { return b - a; }).forEach(function (row) { sheet.deleteRow(row); });
     if (fresh.length) sheet.getRange(sheet.getLastRow() + 1, 1, fresh.length, width).setValues(fresh);
   });
 }
