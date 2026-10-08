@@ -50,6 +50,28 @@ const events = [
   { id: 'e2', name: 'Hospitality Summit', start_date: null, end_date: null, venue: '', city: '', organizer: '', url: '', exhibitor_deadline: null, competitors_exhibiting: [], relevance: 'medium', recommendation: 'Confirm the dates.', status: 'tbc', decision: 'undecided' },
 ]
 
+// The Agent Brief page's answer (?page=brief), made up.
+const lens = (key, label, question, searches, extra = {}) => ({
+  key, base: key, line: '', label, question, cadence: 'weekly', searches, runs: true, why_not: '', computed: '',
+  prompt: searches ? `Brand: Harness Co\n\nOne question: ${question.toUpperCase()}\n\n(the full prompt the lens receives)` : '', error: '', ...extra,
+})
+const brief = {
+  ok: true,
+  motion: 'specification',
+  language: 'Arabic',
+  agenda: [{ subject: 'Hotel fit-outs in the capital' }],
+  brandContext: 'BRAND CONTEXT\nHarness Co sells lighting to contractors.',
+  marketingIcp: { personas: 'Contractors\nDevelopers', icp_summary: icp.summary, client_pains: 'Submittals take weeks → complete submittal packs' },
+  salesIcp: icp,
+  lenses: [
+    lens('openings', 'Projects & openings', 'Who is about to need what we sell, and can we still reach them?', 6),
+    lens('targets', 'Sales targets', 'Which named projects and companies fit our ideal customer, and who do we call?', 8),
+    lens('events', 'Events & expos', 'Which expos should our teams attend?', 6),
+    lens('calendar', 'Calendar', 'What is coming in the next 2–8 weeks?', 0, { computed: 'No web search. Dates computed from free calendars.' }),
+    lens('craft', 'Craft', 'Which formats are working?', 3, { cadence: 'monthly', runs: false }),
+  ],
+}
+
 const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
 const original = window.fetch.bind(window)
 
@@ -58,6 +80,7 @@ window.fetch = async (input, init = {}) => {
   if (url.includes('/src/') || url.includes('/node_modules/') || url.includes('/@')) return original(input, init)
   if (mode === 'hang') return new Promise(() => {})
   if (mode === 'fail') return Promise.reject(new TypeError('Failed to fetch'))
+  if (url.includes('/api/leads/lens_preview')) return json(brief)
   const method = (init.method || 'GET').toUpperCase()
   if (url.includes('/auth/v1/user')) return json({ id: 'u1', email: 'admin@example.com' })
   if (method !== 'GET') return new Response(null, { status: 204 })

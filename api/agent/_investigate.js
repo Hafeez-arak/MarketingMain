@@ -386,6 +386,79 @@ function competitorRecordsOf(ctxBundle = {}) {
   return (ctxBundle.competitorNotes || []).map(n => ({ subject: n.name, lines: n.lines || [] }))
 }
 
+// What each computed lens reads instead of searching, for the preview.
+const COMPUTED_SOURCES = {
+  calendar: 'No web search. Dates computed from free calendars: the Hijri calendar (Aladhan) and public holidays (Nager.Date plus a built-in Gulf table), 8 weeks ahead.',
+  ourselves: 'No web search. Our own posting numbers from the connected social accounts, computed in code.',
+  search: 'No web search. What people typed into Google on the way to our website (Google Search Console), both languages.',
+}
+
+/**
+ * Exactly what every lens would be asked on the next run — built by the same
+ * code a run uses, with no model call and nothing written.
+ *
+ * For the admin's Agent Brief page: "what are we actually searching for"
+ * should be answered by the prompt itself, not by a description of it that
+ * can drift from what is sent. Monthly lenses are included and marked, and a
+ * lens that will not run (no ICP yet) says why rather than vanishing.
+ */
+export async function previewLenses(workspaceId) {
+  const runId = '00000000-0000-0000-0000-000000000000'
+  const ctxBundle = await loadRunContext(workspaceId, runId, 'monthly')
+  const running = new Set(ctxBundle.lenses.map(l => l.key))
+  const weekly = new Set(
+    expandPerLine(lensesFor({ motion: ctxBundle.motion, cadence: 'weekly' }), ctxBundle.competitorNotes.flatMap(n => n.lines || []))
+      .map(l => l.key),
+  )
+  const all = expandPerLine(lensesFor({ motion: ctxBundle.motion, cadence: 'monthly' }), ctxBundle.competitorNotes.flatMap(n => n.lines || []))
+
+  const lenses = []
+  for (const l of all) {
+    const base = baseKeyOf(l.key)
+    const row = {
+      key: l.key,
+      base,
+      line: lineOfLensKey(l.key),
+      label: l.label,
+      question: l.question,
+      cadence: weekly.has(l.key) ? 'weekly' : 'monthly',
+      searches: l.budget?.searches || 0,
+      runs: running.has(l.key),
+      why_not: running.has(l.key) ? '' : l.requires === 'icp' ? 'Waits for an ideal customer profile (Sales → Targets).' : '',
+      computed: COMPUTED_SOURCES[base] || '',
+      prompt: '',
+      error: '',
+    }
+    if (!row.computed) {
+      try {
+        const { args } = await argsForLens(base, { ...ctxBundle, workspaceId, line: row.line })
+        row.prompt = args && LENS_PROMPTS[base] ? LENS_PROMPTS[base](...args) : ''
+      } catch (err) {
+        row.error = String(err?.message || err).slice(0, 300)
+      }
+    }
+    lenses.push(row)
+  }
+  return {
+    motion: ctxBundle.motion,
+    brandFacts: ctxBundle.brandFacts,
+    language: ctxBundle.language,
+    agenda: ctxBundle.agenda,
+    // The cached brand block every searching lens also receives, ahead of its
+    // question. Shown so the admin can see what the agent knows about us.
+    brandContext: typeof ctxBundle.brand === 'string' ? ctxBundle.brand : JSON.stringify(ctxBundle.brand || ''),
+    // What marketing writes from (Brand Brain → Audience) and what sales
+    // targets are scored against (Sales → Targets).
+    marketingIcp: {
+      personas: String(ctxBundle.profile?.targetPersonas || ''),
+      icp_summary: String(ctxBundle.profile?.customFields?.icp_summary || ''),
+      client_pains: String(ctxBundle.profile?.customFields?.client_pains || ''),
+    },
+    salesIcp: ctxBundle.icp || null,
+    lenses,
+  }
+}
+
 export async function runSingleLens({ workspaceId, runId, lensKey, cadence = 'weekly', deadline }) {
   const startedAt = Date.now()
   const limit = deadline || deadlineFor('lens', startedAt)
