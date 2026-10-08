@@ -22,6 +22,12 @@
 // service, but the ramp and every ceiling below apply to them unchanged:
 // a burst from arak-sa.com risks every colleague's mail, not just outreach.
 //
+// A mailbox a warm-up service (Instantly) is still running on sends its
+// warm-up emails too, every day, for good. They count: today's outreach is
+// what is left of HARD_MAX_TOTAL_PER_MAILBOX after them, and a mailbox on a
+// brand-new domain warms up for longer (warmup_days) before its first one.
+// Its domain must also pass the DNS check (domainCheck.js): SPF, DKIM, MX.
+//
 // The hard numbers below are not settings. A bug elsewhere, a typo in a
 // limit, or an edited request can lower them but never raise them.
 
@@ -29,12 +35,18 @@ import { utcToBrandParts, brandDateKey, brandWallToUtcISO } from '../brandTime.j
 import { daysBetween } from './warmup.js'
 import { normalizeEmail, isValidEmail } from './contacts.js'
 import { unknownMergeTags } from './render.js'
+import { dnsBlockReason } from './domainCheck.js'
 
 export const HARD_MAX_PER_MAILBOX = 40      // per day, whatever daily_limit says
 // The providers the sending run uses. 'instantly' is reserved, not built.
 export const SENDING_PROVIDERS = ['smtp', 'microsoft']
 export const HARD_MAX_PER_WORKSPACE = 200   // per day, across all mailboxes
-export const WARMUP_DAYS = 14               // warm-up before the first cold email
+// Warm-up and outreach together, per mailbox per day: what a person writes.
+export const HARD_MAX_TOTAL_PER_MAILBOX = 50
+export const WARMUP_DAYS = 14               // warm-up before the first cold email (aged domain)
+export const WARMUP_DAYS_MAX = 60
+// The choices offered: an aged domain, a young one, a brand-new one.
+export const WARMUP_DAY_CHOICES = [14, 21, 28]
 export const MIN_GAP_MINUTES = 4
 export const MAX_GAP_MINUTES = 180
 // A person already written to by another cold campaign is left alone this long.
@@ -103,27 +115,47 @@ export function mailboxReadiness(mailbox, today) {
   if (!mailbox) return { ready: false, reason: 'No mailbox.', readyOn: null }
   if (mailbox.status === 'paused') return { ready: false, reason: mailbox.status_reason || 'Paused.', readyOn: null }
   if (mailbox.status === 'error') return { ready: false, reason: mailbox.status_reason || mailbox.last_error || 'The login stopped working.', readyOn: null }
+  const dns = dnsBlockReason(mailbox)
+  if (dns) return { ready: false, reason: dns, readyOn: null, dns: true }
   if (!mailbox.warmup_started_on) {
     // An established company mailbox has its warm-up behind it; the ramp
     // still starts it at 5 a day.
     if (mailbox.provider === 'microsoft') return { ready: true, reason: '', readyOn: null }
     return { ready: false, reason: 'Warm-up has not been started. Start it in your warm-up service, then enter the date here.', readyOn: null }
   }
-  const readyOn = addDays(mailbox.warmup_started_on, WARMUP_DAYS)
-  if (daysBetween(mailbox.warmup_started_on, today) < WARMUP_DAYS) {
+  const days = warmupDaysOf(mailbox)
+  const readyOn = addDays(mailbox.warmup_started_on, days)
+  if (daysBetween(mailbox.warmup_started_on, today) < days) {
     return { ready: false, reason: `Warming up. Ready for outreach on ${readyOn}.`, readyOn }
   }
   return { ready: true, reason: '', readyOn }
 }
 
-/** Today's limit for one mailbox: the ramp, its own limit, the hard ceiling. */
+/** How many days this mailbox warms up before outreach: its own choice, within bounds. */
+export function warmupDaysOf(mailbox) {
+  const n = Math.round(Number(mailbox?.warmup_days) || WARMUP_DAYS)
+  return Math.min(WARMUP_DAYS_MAX, Math.max(WARMUP_DAYS, n))
+}
+
+/** Warm-up emails a day the warm-up service sends from this mailbox. */
+export function warmupPerDayOf(mailbox) {
+  return Math.max(0, Math.min(HARD_MAX_PER_MAILBOX, Math.round(Number(mailbox?.warmup_per_day) || 0)))
+}
+
+/**
+ * Today's limit for one mailbox: the ramp, its own limit, the hard ceiling,
+ * and what the warm-up service leaves of the day's total.
+ */
 export function mailboxCap(mailbox, today) {
   const own = Math.max(0, Math.min(HARD_MAX_PER_MAILBOX, Number(mailbox?.daily_limit ?? 15) || 0))
   const day = mailbox?.first_sent_on ? daysBetween(mailbox.first_sent_on, today) : 0
   let step = RAMP[0]
   for (const s of RAMP) if (day >= s.fromDay) step = s
   const ramp = step.perDay
-  return { cap: Math.min(own, ramp), own, day, ramping: ramp < own }
+  const warmup = warmupPerDayOf(mailbox)
+  const room = Math.max(0, HARD_MAX_TOTAL_PER_MAILBOX - warmup)
+  const cap = Math.min(own, ramp, room)
+  return { cap, own, day, ramping: ramp < Math.min(own, room), warmup, room, warmupLimits: room < Math.min(own, ramp) }
 }
 
 /** Is this moment inside the sending window (brand time)? */

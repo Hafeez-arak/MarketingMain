@@ -68,8 +68,8 @@ export async function bootApp() {
   const tick = () => call('cold-tick', { method: 'GET', token: 'cron-secret' })
 
   /** Sign in as a Microsoft mailbox, the way a person does from Settings. */
-  async function connectMicrosoft(email, { mailboxId = null } = {}) {
-    const start = await call('ms_connect_start', { body: mailboxId ? { mailbox_id: mailboxId } : {} })
+  async function connectMicrosoft(email, { mailboxId = null, otherOrg = false } = {}) {
+    const start = await call('ms_connect_start', { body: mailboxId ? { mailbox_id: mailboxId } : { other_org: otherOrg } })
     if (start.status !== 200) return start
     const state = new URL(start.body.url).searchParams.get('state')
     const cookie = String(start.headers['set-cookie']).split(';')[0]

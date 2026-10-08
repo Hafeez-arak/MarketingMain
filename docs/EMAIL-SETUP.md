@@ -250,7 +250,7 @@ section 16.
 
 ## 13. Warm-up service
 
-Warm-up needs a network of thousands of other mailboxes, so it cannot be built
+(2026-10-08: Instantly, warm-up only; see §19.) Warm-up needs a network of thousands of other mailboxes, so it cannot be built
 into the app. Use TrulyInbox (~$29/month, unlimited mailboxes) or any warm-up
 service, connect every outreach mailbox to it **the day it is created**, and
 leave it running for as long as the mailbox sends. Note the date: the app asks
@@ -430,3 +430,74 @@ unsubscribed, bounced or marked us as spam is left as they are.
 - Only `https://arak-sa.com`, `https://www.arak-sa.com` and `http://localhost:*`
   may post (CORS, in `api/email/[action].js`).
 - To cut the site off: set a new key in the table, then change it on the website.
+
+## 19. Three company senders: araklighting.com, clb-sa.com, ghusnsa.com (2026-10-08)
+
+The plan: one outreach mailbox per company, each on that company's own
+Microsoft 365, warmed up by Instantly and sent from this app.
+
+| Sender | Company in the app | Domain |
+|---|---|---|
+| info@araklighting.com | Arak | new: buy it first |
+| info@clb-sa.com | CLB | existing (GoDaddy Microsoft 365) |
+| info@ghusnsa.com | Ghusn | existing |
+
+### The new domain (araklighting.com)
+
+1. Buy it, and point it at the arak-sa.com website (a redirect is enough). A
+   sending domain with no website looks like spam to people and to filters.
+2. Microsoft 365 Business Basic as a **new, separate organisation**, bought
+   from Microsoft, not GoDaddy, and **not** added to arak-sa.com's Microsoft
+   365. If outreach ever gets that organisation restricted for spam,
+   arak-sa.com's own email is untouched.
+3. Create info@araklighting.com as a licensed user, not a shared mailbox.
+4. DNS, then switch DKIM on in the Microsoft Defender portal (Email &
+   collaboration → Policies → Email authentication settings → DKIM):
+   - MX and the autodiscover record Microsoft shows
+   - SPF: `v=spf1 include:spf.protection.outlook.com -all`
+   - DKIM: the two `selector1._domainkey` / `selector2._domainkey` CNAMEs
+     Microsoft shows
+   - DMARC: `_dmarc` TXT `v=DMARC1; p=none; rua=mailto:info@araklighting.com`
+
+### clb-sa.com and ghusnsa.com
+
+- Switch **DKIM** on in each one's Microsoft 365 (same place as above) and add
+  its two CNAMEs. Neither had DKIM on 2026-10-08, so the app will not send from
+  them until it is there.
+- ghusnsa.com also lists two Hostinger mail servers beside Outlook. Remove
+  them once Ghusn confirms nobody uses Hostinger mail, or some replies land
+  there.
+
+### Each organisation's approval (once)
+
+App → Email → Outreach → Mailboxes shows an **approval link** under the
+mailbox list. An admin of the other organisation (CLB, Ghusn, the new
+araklighting.com one) opens it, signs in as admin, and approves. It asks to
+send email and read the replies. This is separate from the lead agent's
+read-only approval for info@clb-sa.com.
+
+### Instantly (warm-up only)
+
+1. Instantly Growth. Connect each mailbox (Microsoft OAuth; that organisation's
+   admin may have to approve Instantly once too).
+2. Warm-up on: **daily limit 20, increase 1 a day, reply rate 30%**. Leave it
+   running for as long as the mailbox sends.
+3. Add the Outlook rule Instantly shows (warm-up tag → move to a folder), so
+   people reading info@ do not see warm-up mail.
+4. Note each mailbox's **warm-up tag** and the date warm-up started.
+
+### Connect in the app
+
+1. Switch to that company's workspace, then Email → Outreach → Mailboxes →
+   **Another organisation**, and sign in as the mailbox.
+2. **Edit** it: warm-up started on (the Instantly date), warm up for (28 days
+   for araklighting.com, 14 for clb-sa.com and ghusnsa.com), warm-up emails a
+   day (20), most per day (15 to start). Warm-up and outreach together never
+   pass 50 a day; the app subtracts the warm-up number.
+3. **Check domain** on it. "Domain not ready" names what is missing.
+4. info@clb-sa.com is also read by the lead agent (Arak workspace): Lead
+   Agent → Connection → its **Warm-up tag to skip** = the Instantly tag. Warm-up
+   emails are then skipped before any AI call.
+
+The sending run re-checks every domain every 12 hours and stops a mailbox the
+moment its SPF, DKIM or MX goes missing.

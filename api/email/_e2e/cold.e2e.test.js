@@ -822,6 +822,99 @@ describe('H. edges', () => {
   })
 })
 
+// ═══ I. Other organisations, warm-up, the domain check ════════════════════
+// The 2026-10-08 plan: info@ mailboxes on CLB's and Ghusn's own Microsoft
+// 365, warmed up by Instantly, sent from here.
+
+describe('I. other organisations, warm-up and the sending domain', () => {
+  const later2h = () => later(2 * 60 * MIN)
+  beforeAll(async () => {
+    app.world.account('info@clb.example', { displayName: 'CLB', tenant: 'clb-tenant' })
+    app.world.account('info@nodns.example', { displayName: 'No DNS', tenant: 'nodns-tenant' })
+    app.world.dnsBroken.add('nodns.example')
+  })
+
+  it('I1 our own "Connect Microsoft 365" cannot sign in another organisation\'s account', async () => {
+    const r = await app.connectMicrosoft('info@clb.example')
+    expect(r.headers.location).toMatch(/ms_error=token/)
+    expect((await mailboxes()).some(m => m.email === 'info@clb.example')).toBe(false)
+  })
+
+  it('I2 "Another organisation" signs in at organizations, keeps its tenant, and checks its domain', async () => {
+    const r = await app.connectMicrosoft('info@clb.example', { otherOrg: true })
+    expect(r.headers.location).toMatch(/ms=connected/)
+    const mb = (await mailboxes()).find(m => m.email === 'info@clb.example')
+    expect(mb).toMatchObject({ provider: 'microsoft', tenant: 'clb-tenant', status: 'active' })
+    expect(mb.dns_check).toMatchObject({ domain: 'clb.example', blocking: [] })
+    expect(mb.dns_checked_at).not.toBeNull()
+    expect(app.world.logins.filter(l => l.grant === 'authorization_code').at(-1).tenant).toBe('organizations')
+  })
+
+  it('I3 its renewals go to its own tenant, and it sends', async () => {
+    const mb = (await mailboxes()).find(m => m.email === 'info@clb.example')
+    const x = await addContact({ email: 'buyer@clb-prospect.sa', company: 'Prospect', audience: 'cold' })
+    const g = await addGroup('CLB prospects', 'cold', [x])
+    const c = await addCampaign({ name: 'CLB', group_ids: [g.id], follow_ups: [], mailbox_ids: [mb.id] })
+    expect((await app.call('launch', { body: { campaign_id: c.id } })).status).toBe(200)
+    // Only this campaign's email is waiting: earlier blocks left others queued.
+    await app.q(`update email_sends set status = 'cancelled' where status = 'queued' and campaign_id <> $1`, [c.id])
+    later2h()   // the access token from sign-in has expired
+    await app.q('update email_mailboxes set next_send_at = null')
+    const before = app.world.logins.length
+    await app.tick()
+    expect((await sends(c.id))[0]).toMatchObject({ status: 'sent', mailbox_id: mb.id })
+    // Every mailbox renews in this run; CLB's went to CLB's own tenant.
+    const renewals = app.world.logins.slice(before).filter(l => l.grant === 'refresh_token')
+    expect(renewals.map(l => l.tenant)).toContain('clb-tenant')
+  })
+
+  it('I4 a mailbox whose domain has no MX, SPF or DKIM sends nothing, and says so', async () => {
+    await app.connectMicrosoft('info@nodns.example', { otherOrg: true })
+    const mb = (await mailboxes()).find(m => m.email === 'info@nodns.example')
+    expect(mb.dns_check.blocking.join(' ')).toMatch(/no MX.*no SPF.*no DKIM/)
+    const launch = async () => {
+      const x = await addContact({ email: `p${Date.now()}@nodns-prospect.sa`, company: 'P', audience: 'cold' })
+      const g = await addGroup(`NoDNS ${Date.now()}`, 'cold', [x])
+      const c = await addCampaign({ name: 'NoDNS', group_ids: [g.id], follow_ups: [], mailbox_ids: [mb.id] })
+      return app.call('launch', { body: { campaign_id: c.id } })
+    }
+    const r = await launch()
+    expect(r.status).toBe(409)
+    expect(r.body.error).toMatch(/not ready for outreach/)
+    const preview = await app.call('cold_preview', { body: {} })
+    expect(preview.body.preview.workspaces[0].mailboxes.find(l => l.mailbox === 'info@nodns.example').reason).toMatch(/no DKIM/)
+  })
+
+  it('I5 once the records exist, "Check domain" clears it', async () => {
+    app.world.dnsBroken.delete('nodns.example')
+    const mb = (await mailboxes()).find(m => m.email === 'info@nodns.example')
+    const r = await app.call('mailbox_check_domain', { body: { mailbox_id: mb.id } })
+    expect(r.status).toBe(200)
+    expect(r.body.dns_check.blocking).toEqual([])
+  })
+
+  it('I6 warm-up settings are saved, bounded, and shape today\'s limit', async () => {
+    const mb = (await mailboxes()).find(m => m.email === 'info@clb.example')
+    const day = n => new Date(clock + n * DAY).toISOString().slice(0, 10)
+    const r = await app.call('mailbox_save', { body: { mailbox: { id: mb.id, warmup_started_on: day(-3), warmup_per_day: 99, warmup_days: 28, daily_limit: 40 } } })
+    expect(r.status).toBe(200)
+    expect(r.body.mailbox).toMatchObject({ warmup_started_on: day(-3), warmup_per_day: 40, warmup_days: 28 })
+    await app.q('update email_mailboxes set next_send_at = null')
+    const preview = await app.call('cold_preview', { body: {} })
+    expect(preview.body.preview.workspaces[0].mailboxes.find(l => l.mailbox === 'info@clb.example').reason).toBe(`Warming up. Ready for outreach on ${day(25)}.`)
+  })
+
+  it('I7 another organisation\'s admin gets an approval link that asks to send', async () => {
+    const r = await app.call('status', { body: {} })
+    const url = new URL(r.body.outreachConsentUrl)
+    expect(url.pathname).toBe('/organizations/v2.0/adminconsent')
+    expect(url.searchParams.get('scope')).toMatch(/Mail\.Send/)
+    expect(url.searchParams.get('state')).toBe('outreach-consent')
+    const back = await app.call('ms-callback', { method: 'GET', token: null, query: { state: 'outreach-consent', admin_consent: 'True' } })
+    expect(back.headers.location).toMatch(/ms=approved/)
+  })
+})
+
 describe('Z. over the whole run', () => {
   it('Z1 not one database request was refused, even ones the app swallowed', () => {
     expect(dbErrors()).toEqual([])

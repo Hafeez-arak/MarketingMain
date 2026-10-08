@@ -21,6 +21,11 @@ const db = {
     { id: 'mb-ready', workspace_id: WS, provider: 'smtp', email: 'ahmed@araklighting.com', from_name: 'Ahmed Al-Harbi', signature: 'Ahmed Al-Harbi\nProject Sales, ARAK Lighting', smtp_host: 'smtp.gmail.com', smtp_port: 465, imap_host: 'imap.gmail.com', imap_port: 993, username: 'ahmed@araklighting.com', daily_limit: 20, warmup_started_on: daysAgo(20).slice(0, 10), first_sent_on: daysAgo(3).slice(0, 10), last_sent_at: daysAgo(1), next_send_at: null, status: 'active', status_reason: '', last_error: '', created_at: daysAgo(21), updated_at: now() },
     // A company Microsoft 365 account, signed in: no warm-up date, ramping.
     { id: 'mb-ms', workspace_id: WS, provider: 'microsoft', email: 'sales1@arak-sa.com', from_name: 'Sales Team', signature: 'Sales Team\nARAK Lighting', smtp_host: '', smtp_port: 465, imap_host: '', imap_port: 993, username: 'sales1@arak-sa.com', daily_limit: 15, warmup_started_on: null, first_sent_on: daysAgo(2).slice(0, 10), last_sent_at: daysAgo(0), next_send_at: null, status: 'active', status_reason: '', last_error: '', created_at: daysAgo(2), updated_at: now() },
+    // Another organisation's Microsoft 365, warmed up by Instantly (20 a day),
+    // on a domain that passed the check with a warning.
+    { id: 'mb-clb', workspace_id: WS, provider: 'microsoft', tenant: 'clb-tenant', email: 'info@clb-sa.com', from_name: 'CLB Sales', signature: '', smtp_host: '', smtp_port: 465, imap_host: '', imap_port: 993, username: 'info@clb-sa.com', daily_limit: 25, warmup_started_on: daysAgo(30).slice(0, 10), warmup_days: 14, warmup_per_day: 20, first_sent_on: daysAgo(20).slice(0, 10), last_sent_at: daysAgo(0), next_send_at: null, status: 'active', status_reason: '', last_error: '', dns_check: { domain: 'clb-sa.com', blocking: [], warnings: ['clb-sa.com has no DMARC record. Add one (v=DMARC1; p=none; rua=mailto:…) to receive reports.'], checked_at: daysAgo(0) }, dns_checked_at: daysAgo(0), created_at: daysAgo(30), updated_at: now() },
+    // A domain with no DKIM yet (ghusnsa.com on 2026-10-08): it cannot send.
+    { id: 'mb-ghusn', workspace_id: WS, provider: 'microsoft', tenant: 'ghusn-tenant', email: 'info@ghusnsa.com', from_name: 'Ghusn', signature: '', smtp_host: '', smtp_port: 465, imap_host: '', imap_port: 993, username: 'info@ghusnsa.com', daily_limit: 15, warmup_started_on: daysAgo(3).slice(0, 10), warmup_days: 21, warmup_per_day: 10, first_sent_on: null, last_sent_at: null, next_send_at: null, status: 'active', status_reason: '', last_error: '', dns_check: { domain: 'ghusnsa.com', blocking: ['ghusnsa.com has no DKIM record, so its emails are unsigned.'], warnings: ['ghusnsa.com also lists mx1.hostinger.com, mx2.hostinger.com as mail servers, so some replies may be delivered there instead of to Microsoft 365. Remove them if nobody uses them.'], checked_at: daysAgo(0) }, dns_checked_at: daysAgo(0), created_at: daysAgo(3), updated_at: now() },
     { id: 'mb-warm', workspace_id: WS, provider: 'smtp', email: 'sara@arak-lighting.co', from_name: 'Sara Nasser', signature: '', smtp_host: 'smtp.gmail.com', smtp_port: 465, imap_host: 'imap.gmail.com', imap_port: 993, username: 'sara@arak-lighting.co', daily_limit: 15, warmup_started_on: daysAgo(5).slice(0, 10), first_sent_on: null, last_sent_at: null, next_send_at: null, status: 'active', status_reason: '', last_error: '', created_at: daysAgo(5), updated_at: now() },
   ],
   // Arak's real public logo and a project photo, so the design editor's
@@ -222,6 +227,7 @@ function api(action, body) {
   if (action === 'status') {
     return json({
       ok: true, configured: { resend: true, webhook: false, cron: false, microsoft: true }, settings,
+      outreachConsentUrl: 'https://login.microsoftonline.com/organizations/v2.0/adminconsent?client_id=dev&state=outreach-consent',
       stats: { today: now().slice(0, 10), sentToday: 12, sentThisMonth: 40, recent: { sent: 40, bounced: 0, complained: 0 } },
       cap: { cap: 100, remaining: 88, day: 9, limitedBy: 'warm-up', health: { state: 'ok', reason: '' } },
     })
@@ -249,6 +255,12 @@ function api(action, body) {
   }
   // No Microsoft here: come straight back as if the sign-in failed, to show the message.
   if (action === 'ms_connect_start') return json({ ok: true, url: '/dev-email.html?tab=cold&section=mailboxes&ms_error=wrong_account' })
+  if (action === 'mailbox_check_domain') {
+    const mb = db.email_mailboxes.find(m => m.id === body.mailbox_id)
+    const check = mb.dns_check?.checked_at ? { ...mb.dns_check, checked_at: now() } : { domain: domainOf(mb.email), blocking: [], warnings: [], checked_at: now() }
+    Object.assign(mb, { dns_check: check, dns_checked_at: now() })
+    return new Promise(r => setTimeout(r, 400)).then(() => json({ ok: true, mailbox_id: mb.id, dns_check: check, dns_checked_at: mb.dns_checked_at }))
+  }
   if (action === 'mailbox_pause') {
     const mb = db.email_mailboxes.find(m => m.id === body.mailbox_id)
     Object.assign(mb, body.paused ? { status: 'paused', status_reason: 'Paused by hafeez@arak-sa.com.' } : { status: 'active', status_reason: '' })

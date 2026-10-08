@@ -14,6 +14,9 @@ import { postgrest } from './postgrest.js'
 //                                sent to another address in the world is
 //                                delivered to its inbox, in the same thread
 //   api.resend.com               the marketing sender
+//   dns.google                   DNS over HTTPS: every domain is set up for
+//                                Microsoft 365 (MX, SPF, DKIM, DMARC) unless
+//                                dnsBroken has it, which has none of them
 //
 // Knobs on each account make Microsoft misbehave the ways it does in real
 // life (refused permission, throttling, no licence, a send that dies after
@@ -31,6 +34,8 @@ export function createWorld(pg) {
   const codes = new Map()        // sign-in code → email
   const resendSent = []
   const log = []                 // every outside call, for assertions
+  const logins = []              // { tenant, grant } per token request
+  const dnsBroken = new Set()    // domains with no mail DNS at all
   let seq = 0
   const nextId = p => `${p}-${++seq}`
   const nowIso = () => new Date().toISOString()
@@ -39,6 +44,9 @@ export function createWorld(pg) {
     const a = {
       email, displayName: opts.displayName || email.split('@')[0],
       licensed: opts.licensed ?? true,
+      // Another organisation's Microsoft 365: its tenant id, and only the
+      // shared "organizations" endpoint (sign-in) or its own (renewal) know it.
+      tenant: opts.tenant || 'tenant-e2e',
       // Knobs, each read at the moment it matters:
       denyDrafts: false,        // 403 ErrorAccessDenied on creating a draft (missing Mail.ReadWrite)
       throttle: false,          // 429 on send
@@ -72,7 +80,8 @@ export function createWorld(pg) {
   function issueTokens(a) {
     const at = `at-${a.email}-${++seq}`
     a.tokens.add(at)
-    return { access_token: at, refresh_token: a.refresh, expires_in: 3600, token_type: 'Bearer' }
+    const idToken = `h.${Buffer.from(JSON.stringify({ tid: a.tenant })).toString('base64url')}.s`
+    return { access_token: at, refresh_token: a.refresh, expires_in: 3600, token_type: 'Bearer', id_token: idToken }
   }
 
   // Threads: a conversation per first Message-ID; a reply joins the thread of
@@ -204,18 +213,39 @@ export function createWorld(pg) {
 
   async function login(url, init) {
     const form = new URLSearchParams(String(init.body))
+    const tenant = url.pathname.split('/')[1]
+    logins.push({ tenant, grant: form.get('grant_type') })
     if (form.get('grant_type') === 'authorization_code') {
       const email = codes.get(form.get('code'))
       if (!email) return jsonRes(400, { error: 'invalid_grant', error_description: 'AADSTS70000: code expired' })
       codes.delete(form.get('code'))
-      return jsonRes(200, issueTokens(accounts.get(email)))
+      const a = accounts.get(email)
+      // AADSTS50020: our own tenant does not know another organisation's user.
+      if (tenant !== a.tenant && tenant !== 'organizations') return jsonRes(400, { error: 'invalid_grant', error_description: 'AADSTS50020: user account does not exist in tenant' })
+      return jsonRes(200, issueTokens(a))
     }
     if (form.get('grant_type') === 'refresh_token') {
       const a = [...accounts.values()].find(x => x.refresh === form.get('refresh_token'))
       if (!a || a.revoked) return jsonRes(400, { error: 'invalid_grant', error_description: 'AADSTS50173: the grant has expired.' })
+      if (tenant !== a.tenant) return jsonRes(400, { error: 'invalid_grant', error_description: 'AADSTS50020: user account does not exist in tenant' })
       return jsonRes(200, issueTokens(a))
     }
     return jsonRes(400, { error: 'unsupported_grant_type' })
+  }
+
+  function dns(url) {
+    const name = String(url.searchParams.get('name') || '').toLowerCase()
+    const type = url.searchParams.get('type')
+    const domain = name.replace(/^(_dmarc|[a-z0-9-]+\._domainkey)\./, '')
+    const answer = (t, data) => jsonRes(200, { Status: 0, Answer: [{ name, type: t, data }] })
+    if (dnsBroken.has(domain)) return jsonRes(200, { Status: 3 })
+    if (type === 'MX') return answer(15, `0 ${domain.replace(/\./g, '-')}.mail.protection.outlook.com.`)
+    if (type !== 'TXT') return jsonRes(200, { Status: 0 })
+    if (name.startsWith('_dmarc.')) return answer(16, '"v=DMARC1; p=none"')
+    if (/^selector[12]\._domainkey\./.test(name)) return answer(16, '"v=DKIM1; k=rsa; p=MIIBIjANBgkq"')
+    if (name === 'spf.protection.outlook.com') return answer(16, '"v=spf1 ip4:40.92.0.0/15 -all"')
+    if (name.includes('_domainkey')) return jsonRes(200, { Status: 0 })
+    return answer(16, '"v=spf1 include:spf.protection.outlook.com -all"')
   }
 
   async function fetchImpl(input, init = {}) {
@@ -238,6 +268,7 @@ export function createWorld(pg) {
     }
     if (url.hostname === 'login.microsoftonline.com') return login(url, init)
     if (url.hostname === 'graph.microsoft.com') return graph(method, url, init)
+    if (url.hostname === 'dns.google' || url.hostname === 'cloudflare-dns.com') return dns(url)
     if (url.hostname === 'api.resend.com') {
       const body = JSON.parse(init.body)
       if (url.pathname === '/emails/batch') {
@@ -251,5 +282,5 @@ export function createWorld(pg) {
     throw new Error(`The e2e world has no answer for ${method} ${url}`)
   }
 
-  return { pg, fetch: fetchImpl, account, accounts, user, signInCode, reply, resendSent, log }
+  return { pg, fetch: fetchImpl, account, accounts, user, signInCode, reply, resendSent, log, dnsBroken, logins }
 }

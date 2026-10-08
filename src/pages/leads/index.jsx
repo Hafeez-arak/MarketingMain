@@ -302,6 +302,35 @@ function TryIt({ workspaceId }) {
   )
 }
 
+/**
+ * A mailbox the agent reads may also be warmed up for outreach (info@clb-sa
+ * .com). The warm-up service's tag marks its emails; the agent skips them.
+ */
+function WarmupTag({ workspaceId, mailbox, onError, onReload }) {
+  const [value, setValue] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const saved = mailbox.warmup_tag || ''
+  const typed = value ?? saved
+
+  async function save() {
+    setBusy(true)
+    const r = await leadsApi('mail_set_warmup_tag', workspaceId, { mailbox_id: mailbox.id, warmup_tag: typed })
+    setBusy(false)
+    if (r.error) return onError(r.error)
+    setValue(null)
+    onReload()
+  }
+
+  return (
+    <div className="flex gap-2 items-center">
+      <label htmlFor={`warmup-tag-${mailbox.id}`} className="text-[11px] text-text-tertiary whitespace-nowrap">Warm-up tag to skip</label>
+      <input id={`warmup-tag-${mailbox.id}`} type="text" value={typed} onChange={(e) => setValue(e.target.value)} placeholder="None"
+        className="flex-1 min-w-0 px-2 py-1 border border-border text-[11px] focus:outline-none focus:border-amber-700" />
+      {value !== null && value !== saved && <Button size="xs" onClick={save} disabled={busy}>{busy ? <Spinner size="sm" /> : 'Save'}</Button>}
+    </div>
+  )
+}
+
 function Connection({ workspaceId, status, loading, onChange, onError, onReload, now }) {
   const [key, setKey] = useState('')
   const [busy, setBusy] = useState('')
@@ -411,6 +440,7 @@ function Connection({ workspaceId, status, loading, onChange, onError, onReload,
                   <p className="text-[11px] text-text-tertiary">
                     Jul–Sep history: {mb.history_done ? 'imported' : mb.history_cursor ? `importing, up to ${String(mb.history_cursor).slice(0, 10)}` : 'starts with the next round'}
                   </p>
+                  <WarmupTag workspaceId={workspaceId} mailbox={mb} onError={onError} onReload={onReload} />
                 </div>
               )
             })}
