@@ -42,6 +42,19 @@ export function msConfig(env = process.env) {
 
 const loginBase = config => `https://login.microsoftonline.com/${encodeURIComponent(config.tenant)}/oauth2/v2.0`
 
+/**
+ * The sign-in settings for one mailbox. A mailbox on another organisation's
+ * Microsoft 365 (clb-sa.com, ghusnsa.com) signed in at the shared
+ * "organizations" endpoint; its own tenant id is kept and its renewals go
+ * there, since our own tenant does not know its account.
+ */
+export const configForMailbox = (config, mb) => (mb?.tenant ? { ...config, tenant: mb.tenant } : config)
+
+/** The tenant id inside Microsoft's id_token, or ''. */
+export function tenantOf(idToken) {
+  try { return JSON.parse(Buffer.from(String(idToken || '').split('.')[1], 'base64url').toString('utf8')).tid || '' } catch { return '' }
+}
+
 // ─── The sign-in's state ───────────────────────────────────────────────────
 // Microsoft hands `state` back untouched. It carries who started the sign-in
 // and for which workspace, signed, so the callback (which has no session of
@@ -235,7 +248,7 @@ export function createGraphMail({ config, save, fetch: f = fetch, now = () => Da
       return { error: Object.assign(new Error('Microsoft sign-in is not configured on the server.'), { kind: 'transient' }) }
     }
     try {
-      const got = await refreshTokens({ config, refreshToken: t.rt, fetch: f })
+      const got = await refreshTokens({ config: configForMailbox(config, mb), refreshToken: t.rt, fetch: f })
       const packed = packTokens({ ...got, refresh_token: got.refresh_token || t.rt }, now())
       await save(mb, packed)
       return { token: got.access_token, fresh: true }

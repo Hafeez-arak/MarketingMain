@@ -45,7 +45,8 @@ function world({
   const { db, calls } = stubDb([
     { method: 'GET', match: /^email_settings\?cold_sending_enabled/, reply: [{ workspace_id: WS }] },
     { method: 'GET', match: /^email_campaigns\?workspace_id=.*audience=eq\.cold&status=eq\.sending/, reply: [campaign] },
-    { method: 'GET', match: /^email_mailboxes\?workspace_id=/, reply: mailboxes || [mailbox] },
+    // Fresh copies each time, as the database gives: the run updates its rows in place.
+    { method: 'GET', match: /^email_mailboxes\?workspace_id=/, reply: () => (mailboxes || [mailbox]).map(m => ({ ...m })) },
     { method: 'GET', match: /^email_sends\?workspace_id=.*mailbox_id=eq\..*step=gt\.0/, reply: row && row.step > 0 ? [row] : [] },
     { method: 'GET', match: /^email_sends\?workspace_id=.*mailbox_id=is\.null&step=eq\.0/, reply: row && row.step === 0 ? [row] : [] },
     { method: 'GET', match: /^email_sends\?campaign_id=.*step=lt\./, reply: prior },
@@ -593,5 +594,71 @@ describe('resolveStuckByHand', () => {
     const w = handWorld({ claimed: false })
     expect(await run(w, 'sent')).toMatchObject({ status: 409 })
     expect(posts(w.calls, /^email_sends/)).toHaveLength(0)
+  })
+})
+
+describe('coldTick: the sending domain\'s DNS check', () => {
+  const GOOD = { domain: 'araklighting.com', blocking: [], warnings: [], checked_at: '2026-09-27T08:00:00.000Z' }
+  const BAD = { domain: 'araklighting.com', blocking: ['araklighting.com has no DKIM record, so its emails are unsigned.'], warnings: [], checked_at: '2026-09-27T08:00:00.000Z' }
+
+  it('looks the domain up before the first send, stores it, and sends when it passes', async () => {
+    const { deps, calls, sent } = world()
+    const asked = []
+    deps.dns = async (domain, kind) => { asked.push([domain, kind]); return GOOD }
+    await coldTick(deps, { now: SUNDAY_11 })
+    expect(asked).toEqual([['araklighting.com', 'google']])
+    expect(patches(calls, /^email_mailboxes\?id=eq\.mb-1$/).some(c => c.body.dns_check === GOOD && c.body.dns_checked_at)).toBe(true)
+    expect(sent).toHaveLength(1)
+  })
+
+  it('a domain with no DKIM sends nothing, and says why', async () => {
+    const { deps, sent } = world()
+    deps.dns = async () => BAD
+    const out = await coldTick(deps, { now: SUNDAY_11 })
+    expect(sent).toHaveLength(0)
+    expect(out.workspaces[0].mailboxes[0].reason).toMatch(/not ready for outreach: araklighting\.com has no DKIM/)
+  })
+
+  it('a check from the last 12 hours is trusted, not repeated', async () => {
+    const { deps, sent } = world({ mailbox: { ...MAILBOX, dns_check: GOOD, dns_checked_at: '2026-09-27T02:00:00Z' } })
+    let asked = 0
+    deps.dns = async () => { asked++; return BAD }
+    await coldTick(deps, { now: SUNDAY_11 })
+    expect(asked).toBe(0)
+    expect(sent).toHaveLength(1)
+  })
+
+  it('a lookup that fails outright keeps the last verdict, so a slow resolver never clears a bad domain', async () => {
+    const { deps, sent } = world({ mailbox: { ...MAILBOX, dns_check: BAD, dns_checked_at: '2026-09-25T02:00:00Z' } })
+    deps.dns = async () => { throw new Error('fetch failed') }
+    await coldTick(deps, { now: SUNDAY_11 })
+    expect(sent).toHaveLength(0)
+  })
+
+  it('three mailboxes on one domain: one lookup', async () => {
+    const three = ['mb-1', 'mb-2', 'mb-3'].map((id, i) => ({ ...MAILBOX, id, email: `rep${i + 1}@araklighting.com` }))
+    const { deps } = world({ mailboxes: three })
+    let asked = 0
+    deps.dns = async () => { asked++; return GOOD }
+    await coldTick(deps, { now: SUNDAY_11 })
+    expect(asked).toBe(1)
+  })
+
+  it('a dry run checks but stores nothing', async () => {
+    const { deps, calls } = world()
+    deps.dns = async () => BAD
+    const out = await coldTick(deps, { now: SUNDAY_11, dryRun: true, workspaceId: WS })
+    expect(out.workspaces[0].mailboxes[0].reason).toMatch(/not ready for outreach/)
+    expect(patches(calls, /^email_mailboxes\?id=eq\.mb-1$/)).toHaveLength(0)
+  })
+})
+
+describe('coldTick: a warm-up service on the mailbox', () => {
+  it('warm-up emails count against the day: 20 warm-up and a limit of 40 leave 30', async () => {
+    const mb = { ...MAILBOX, daily_limit: 40, first_sent_on: '2026-08-01', warmup_per_day: 20 }
+    const { deps, sent } = world({ mailbox: mb, counts: { today: 30 } })
+    const out = await coldTick(deps, { now: SUNDAY_11 })
+    expect(sent).toHaveLength(0)
+    expect(out.workspaces[0].mailboxes[0]).toMatchObject({ capToday: 30, reason: 'Today\'s 30 sent. More tomorrow.' })
   })
 })

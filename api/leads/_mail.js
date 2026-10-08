@@ -1,4 +1,4 @@
-import { READ_SCOPES, refreshTokens, exchangeCode, whoAmI, packTokens, unpackTokens, classifyGraphError } from '../email/_graph.js'
+import { READ_SCOPES, refreshTokens, exchangeCode, whoAmI, packTokens, unpackTokens, classifyGraphError, tenantOf } from '../email/_graph.js'
 import { toEnvelope, findDuplicate } from '../../src/lib/leads/qualify.js'
 import { capDecision } from '../../src/lib/agent/budget.js'
 import { askModel, loadBrand, monthSpent, upsertLead } from './_intake.js'
@@ -69,8 +69,11 @@ const senderOf = (msg) => msg?.from?.emailAddress || msg?.sender?.emailAddress |
  * are the company's own (arak-sa.com, clb-sa.com): mail from them is a
  * colleague's, and that includes everything in Sent and Outbox.
  */
-export function skipReason(msg, { ownDomains = [], ownDomain = '' } = {}) {
+export function skipReason(msg, { ownDomains = [], ownDomain = '', warmupTags = [] } = {}) {
   if (msg?.isDraft) return 'draft'
+  // A warm-up service's email (Instantly, 2026-10-08: info@clb-sa.com is
+  // both read here and warmed up). Its tag is in the subject and the body.
+  if (isWarmupEmail(msg, warmupTags)) return 'warm-up email'
   const from = lower(senderOf(msg).address)
   if (!from || !from.includes('@')) return 'no sender'
   const [local, domain] = from.split('@')
@@ -86,6 +89,19 @@ export function skipReason(msg, { ownDomains = [], ownDomain = '' } = {}) {
   const auto = header(msg, 'auto-submitted')
   if (auto && !/^no$/i.test(auto.trim())) return 'automatic'
   return ''
+}
+
+/** The warm-up tags in force: each at least 4 characters, so a stray letter cannot hide real mail. */
+export function cleanWarmupTags(tags) {
+  return [...new Set((tags || []).map((t) => String(t || '').trim().toLowerCase()).filter((t) => t.length >= 4))]
+}
+
+/** Does this email carry one of the warm-up service's tags? */
+export function isWarmupEmail(msg, warmupTags = []) {
+  const tags = cleanWarmupTags(warmupTags)
+  if (!tags.length) return false
+  const text = `${msg?.subject || ''}\n${msg?.body?.content || ''}\n${msg?.bodyPreview || ''}`.toLowerCase()
+  return tags.some((t) => text.includes(t))
 }
 
 /**
@@ -257,7 +273,7 @@ async function readPage(deps, ctx, { mb, token, from, until, budget }) {
     const sameThread = m.conversationId && threads.has(m.conversationId) && threads.get(m.conversationId) !== ref
     const key = requestKey(senderOf(m).address, m.subject)
     const sameRequest = key && requests.has(key) && requests.get(key) !== ref
-    if (skipReason(m, { ownDomains: ctx.ownDomains }) || sameThread || sameRequest) { plan.push({ m, kind: 'skip' }); continue }
+    if (skipReason(m, { ownDomains: ctx.ownDomains, warmupTags: ctx.warmupTags }) || sameThread || sameRequest) { plan.push({ m, kind: 'skip' }); continue }
     const env = messageToEnvelope(m)
     const dup = findDuplicate(env, known.filter((k) => k.sourceRef !== ref), { days: 7 })
     if (dup) { plan.push({ m, kind: 'dup', env, dup }); continue }
@@ -350,7 +366,7 @@ async function readPass(deps, ctx, { mb, token, from, until, budget }) {
  */
 export async function checkMailbox(deps, { mb, brand, budget, ctx: shared }) {
   const now = deps.now()
-  const ctx = shared || { brand, ownDomains: [domainOf(mb.email), domainOf(mb.label)].filter(Boolean), spent: await monthSpent(deps.db, mb.workspace_id, now) }
+  const ctx = shared || { brand, ownDomains: [domainOf(mb.email), domainOf(mb.label)].filter(Boolean), warmupTags: cleanWarmupTags([mb.warmup_tag]), spent: await monthSpent(deps.db, mb.workspace_id, now) }
   const tok = await accessToken(deps, mb)
   const fail = async (err) => {
     const auth = err.kind === 'auth'
@@ -383,7 +399,10 @@ export async function checkMail(deps, { workspaceId, calls = MAIL_CALLS_PER_ROUN
   if (!mailboxes.length) return { mailboxes: [] }
   const brand = await loadBrand(deps.db, workspaceId)
   const ownDomains = [...new Set(mailboxes.flatMap((mb) => [domainOf(mb.email), domainOf(mb.label)]).filter(Boolean))]
-  const ctx = { brand, ownDomains, spent: await monthSpent(deps.db, workspaceId, deps.now()) }
+  // Any connected mailbox's warm-up tag is skipped in all of them: a warm-up
+  // email is never an enquiry, wherever it lands.
+  const warmupTags = cleanWarmupTags(mailboxes.map((mb) => mb.warmup_tag))
+  const ctx = { brand, ownDomains, warmupTags, spent: await monthSpent(deps.db, workspaceId, deps.now()) }
   const budget = { calls, deadline }
   const out = []
   for (const mb of mailboxes) out.push(await checkMailbox(deps, { mb, budget, ctx }))
@@ -402,10 +421,7 @@ export async function checkAllMail(deps) {
   return out
 }
 
-/** The tenant id inside Microsoft's id_token, or ''. */
-export function tenantOf(idToken) {
-  try { return JSON.parse(Buffer.from(String(idToken || '').split('.')[1], 'base64url').toString('utf8')).tid || '' } catch { return '' }
-}
+export { tenantOf }
 
 /**
  * The end of "Connect a mailbox": Microsoft sent back a code. Exchange it for

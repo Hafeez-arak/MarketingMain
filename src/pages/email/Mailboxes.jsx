@@ -5,7 +5,8 @@ import { useAuth } from '../../store/auth'
 import { saveSettings, emailApi } from '../../lib/email/client'
 import { brandTodayKey, formatBrandDateTime } from '../../lib/brandTime'
 import {
-  PRESETS, HARD_MAX_PER_MAILBOX, WARMUP_DAYS, mailboxReadiness, mailboxCap, mailboxDomainProblem, domainOf,
+  PRESETS, HARD_MAX_PER_MAILBOX, HARD_MAX_TOTAL_PER_MAILBOX, WARMUP_DAYS, WARMUP_DAY_CHOICES, mailboxReadiness, mailboxCap,
+  mailboxDomainProblem, domainOf, warmupDaysOf,
 } from '../../lib/email/cold'
 import { Notice, EIcon } from './parts'
 
@@ -21,7 +22,13 @@ import { Notice, EIcon } from './parts'
 // keeps the secret sealed where this page cannot read it.
 //
 // What a person sees per mailbox is what the sender will do with it today:
-// warming up until a date, or ready with today's limit (the ramp included).
+// warming up until a date, or ready with today's limit (the ramp included),
+// and whether its domain passed the DNS check (SPF, DKIM, MX) that every
+// sending run makes.
+//
+// A mailbox on another organisation's Microsoft 365 (CLB, Ghusn, the new
+// araklighting.com) connects through "Another organisation"; that
+// organisation's admin approves the app once with the link shown here.
 
 export function OutreachMailboxes({ workspaceId, data, status, reload }) {
   const { user } = useAuth()
@@ -47,9 +54,9 @@ export function OutreachMailboxes({ workspaceId, data, status, reload }) {
     if (connected) reload()
   }, [params, setParams, reload])
 
-  async function connectMicrosoft(mailboxId) {
-    setBusy(`ms:${mailboxId || 'new'}`); setMessage(null)
-    const r = await emailApi('ms_connect_start', workspaceId, mailboxId ? { mailbox_id: mailboxId } : {})
+  async function connectMicrosoft(mailboxId, otherOrg = false) {
+    setBusy(`ms:${mailboxId || (otherOrg ? 'other' : 'new')}`); setMessage(null)
+    const r = await emailApi('ms_connect_start', workspaceId, mailboxId ? { mailbox_id: mailboxId } : { other_org: otherOrg })
     if (r.error || !r.url) { setBusy(''); setMessage({ tone: 'red', text: r.error || 'Microsoft sign-in could not start.' }); return }
     window.location.assign(r.url)
   }
@@ -76,6 +83,22 @@ export function OutreachMailboxes({ workspaceId, data, status, reload }) {
     await reload()
   }
 
+  async function checkDomain(mb) {
+    setBusy(`dns:${mb.id}`); setMessage(null)
+    const r = await emailApi('mailbox_check_domain', workspaceId, { mailbox_id: mb.id })
+    setBusy('')
+    if (r.error) { setMessage({ tone: 'red', text: r.error }); return }
+    const blocking = r.dns_check?.blocking || []
+    setMessage(blocking.length
+      ? { tone: 'red', text: `${domainOf(mb.email)} is not ready: ${blocking.join(' ')}` }
+      : { tone: 'sage', text: `${domainOf(mb.email)} passed: SPF, DKIM and MX are in place.` })
+    await reload()
+  }
+
+  async function copyConsent() {
+    try { await navigator.clipboard.writeText(status?.outreachConsentUrl || ''); setMessage({ tone: 'sage', text: 'Approval link copied.' }) } catch { /* the link is selectable */ }
+  }
+
   async function runPreview() {
     setBusy('preview')
     const r = await emailApi('cold_preview', workspaceId)
@@ -96,6 +119,10 @@ export function OutreachMailboxes({ workspaceId, data, status, reload }) {
               <Button size="sm" onClick={() => connectMicrosoft()} disabled={!microsoftOn || !!busy}
                 title={microsoftOn ? 'Sign in to Microsoft as the mailbox' : 'Microsoft sign-in is not switched on yet'}>
                 <EIcon name="plus" /> {busy === 'ms:new' ? 'Opening Microsoft…' : 'Connect Microsoft 365'}
+              </Button>
+              <Button size="sm" variant="secondary" onClick={() => connectMicrosoft(null, true)} disabled={!microsoftOn || !!busy}
+                title="A mailbox on another organisation's Microsoft 365, such as CLB or Ghusn">
+                {busy === 'ms:other' ? 'Opening Microsoft…' : 'Another organisation'}
               </Button>
               <Button size="sm" variant="secondary" onClick={() => setEditing('new')}>Connect Google</Button>
             </div>
@@ -133,14 +160,13 @@ export function OutreachMailboxes({ workspaceId, data, status, reload }) {
                     <div className="flex items-center gap-2 flex-wrap">
                       <p className="text-sm font-semibold text-text truncate">{mb.from_name ? `${mb.from_name} <${mb.email}>` : mb.email}</p>
                       <MailboxState mailbox={mb} ready={ready} />
-                      <span className="text-[10px] text-text-tertiary">{microsoft ? 'Microsoft 365' : 'Google / app password'}</span>
+                      <span className="text-[10px] text-text-tertiary">{microsoft ? (mb.tenant ? 'Microsoft 365 · other organisation' : 'Microsoft 365') : 'Google / app password'}</span>
                     </div>
-                    <p className="text-[11px] text-text-tertiary mt-0.5">
-                      {ready.ready
-                        ? `Today: up to ${cap.cap}${cap.ramping ? ` (ramping up; its limit is ${cap.own})` : ''}.`
-                        : ready.reason}
+                    <p className={`text-[11px] mt-0.5 ${ready.dns ? 'text-red-600' : 'text-text-tertiary'}`}>
+                      {ready.ready ? todayLine(cap) : ready.reason}
                       {mb.last_sent_at && ` Last sent ${formatBrandDateTime(mb.last_sent_at)}.`}
                     </p>
+                    <DomainLine mailbox={mb} />
                     {mb.last_error && mb.status !== 'active' && <p className="text-[11px] text-red-600 mt-0.5">{mb.last_error}</p>}
                   </div>
                   <div className="flex flex-wrap gap-1">
@@ -157,11 +183,26 @@ export function OutreachMailboxes({ workspaceId, data, status, reload }) {
                         {paused ? 'Resume' : 'Pause'}
                       </Button>
                     )}
+                    <Button size="xs" variant="ghost" disabled={!!busy} onClick={() => checkDomain(mb)}>
+                      {busy === `dns:${mb.id}` ? 'Checking…' : 'Check domain'}
+                    </Button>
                     <Button size="xs" variant="ghost" onClick={() => setRemoving(mb)} aria-label="Remove"><EIcon name="trash" /></Button>
                   </div>
                 </div>
               )
             })}
+          </div>
+        )}
+        {microsoftOn && status?.outreachConsentUrl && (
+          <div className="px-5 py-3 border-t border-border space-y-1.5">
+            <p className="text-[11px] text-text-secondary">
+              A mailbox on another organisation's Microsoft 365 needs that organisation's admin to approve this app once, before it connects.
+              Send them this link. It asks to send email and read the replies; it is not the lead agent's read-only approval.
+            </p>
+            <div className="flex gap-2 items-center">
+              <code className="flex-1 min-w-0 truncate px-2 py-1 bg-surface-subtle border border-border text-[10px] select-all">{status.outreachConsentUrl}</code>
+              <Button size="xs" variant="secondary" onClick={copyConsent}>Copy</Button>
+            </div>
           </div>
         )}
       </Card>
@@ -207,6 +248,7 @@ export function OutreachMailboxes({ workspaceId, data, status, reload }) {
 // Why the Microsoft sign-in came back without a mailbox. The callback sends
 // a code, never text or an address, in the URL.
 const MS_ERRORS = {
+  consent_denied: 'The other organisation\'s admin did not approve the app.',
   expired: 'The Microsoft sign-in took too long. Start it again.',
   browser: 'The Microsoft sign-in has to finish in the same browser it started in. Start it again.',
   consent: 'Microsoft needs an administrator to approve this app for the organisation before mailboxes can connect.',
@@ -224,15 +266,44 @@ const MS_ERRORS = {
 
 function msOutcome(params) {
   if (params.get('ms') === 'connected') {
-    return { tone: 'sage', text: 'Microsoft 365 mailbox connected. It starts at 5 emails a day and ramps up from there.' }
+    return { tone: 'sage', text: 'Microsoft 365 mailbox connected. If a warm-up service runs on it, open Edit and enter its warm-up start date and emails a day; outreach then waits for it.' }
+  }
+  if (params.get('ms') === 'approved') {
+    return { tone: 'sage', text: 'Approved. That organisation\'s mailboxes can now connect with "Another organisation".' }
   }
   const err = params.get('ms_error')
   return err ? { tone: 'red', text: MS_ERRORS[err] || 'The Microsoft sign-in did not finish. Try again.' } : null
 }
 
+/** Today's line for a ready mailbox: outreach, plus the warm-up that shares its day. */
+function todayLine(cap) {
+  const warm = cap.warmup ? ` plus ${cap.warmup} warm-up` : ''
+  const why = cap.warmupLimits ? ` (warm-up and outreach together stay within ${HARD_MAX_TOTAL_PER_MAILBOX})`
+    : cap.ramping ? ` (ramping up; its limit is ${cap.own})` : ''
+  return `Today: up to ${cap.cap} outreach${warm}${why}.`
+}
+
+/** The sending domain's last DNS check, when it has something to say. */
+function DomainLine({ mailbox }) {
+  const check = mailbox.dns_check || {}
+  if (!check.checked_at) return <p className="text-[11px] text-text-tertiary mt-0.5">Domain not checked yet: it is checked before the first send.</p>
+  const warnings = check.warnings || []
+  // What blocks is said by the readiness line; only the warnings are left to say.
+  if ((check.blocking || []).length) {
+    return warnings.length ? <p className="text-[11px] text-amber-800 mt-0.5">Also: {warnings.join(' ')}</p> : null
+  }
+  return (
+    <p className={`text-[11px] mt-0.5 ${warnings.length ? 'text-amber-800' : 'text-text-tertiary'}`}>
+      {warnings.length ? warnings.join(' ') : `${check.domain || domainOf(mailbox.email)}: SPF, DKIM and MX in place.`}
+      {' '}Checked {formatBrandDateTime(check.checked_at)}.
+    </p>
+  )
+}
+
 function MailboxState({ mailbox, ready }) {
   const [label, cls] = mailbox.status === 'error' ? ['Needs reconnecting', 'bg-red-50 text-red-600']
     : mailbox.status === 'paused' ? ['Paused', 'bg-stone-100 text-stone-600']
+    : ready.dns ? ['Domain not ready', 'bg-red-50 text-red-600']
     : ready.ready ? ['Ready', 'bg-sage-100 text-sage-700']
     : ['Warming up', 'bg-sky-50 text-sky-700']
   return <span className={`inline-flex px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-[0.08em] leading-[1.4] whitespace-nowrap ${cls}`}>{label}</span>
@@ -249,6 +320,8 @@ function MailboxForm({ workspaceId, mailbox, settings, userEmail, onClose, onSav
     signature: mailbox?.signature || '',
     daily_limit: mailbox?.daily_limit ?? 15,
     warmup_started_on: mailbox?.warmup_started_on || '',
+    warmup_per_day: mailbox?.warmup_per_day ?? 0,
+    warmup_days: warmupDaysOf(mailbox),
     username: mailbox?.username && mailbox.username !== mailbox.email ? mailbox.username : '',
     smtp_host: mailbox?.smtp_host || PRESETS.google.smtp_host,
     smtp_port: mailbox?.smtp_port || PRESETS.google.smtp_port,
@@ -277,6 +350,7 @@ function MailboxForm({ workspaceId, mailbox, settings, userEmail, onClose, onSav
       mailbox: {
         id: mailbox.id, from_name: form.from_name, signature: form.signature,
         daily_limit: Number(form.daily_limit), warmup_started_on: form.warmup_started_on || null,
+        warmup_per_day: Number(form.warmup_per_day), warmup_days: Number(form.warmup_days),
       },
     } : {
       mailbox: {
@@ -285,6 +359,7 @@ function MailboxForm({ workspaceId, mailbox, settings, userEmail, onClose, onSav
         daily_limit: Number(form.daily_limit),
         smtp_port: Number(form.smtp_port), imap_port: Number(form.imap_port),
         warmup_started_on: form.warmup_started_on || null,
+        warmup_per_day: Number(form.warmup_per_day), warmup_days: Number(form.warmup_days),
       },
       password,
     })
@@ -328,8 +403,16 @@ function MailboxForm({ workspaceId, mailbox, settings, userEmail, onClose, onSav
             <Input label="Warm-up started on" type="date" value={form.warmup_started_on} max={brandTodayKey()}
               onChange={e => set('warmup_started_on', e.target.value)}
               hint={microsoft
-                ? `Optional for a company mailbox. Leave empty to start now at 5 a day; a date makes it wait ${WARMUP_DAYS} days from then.`
-                : `The day your warm-up service began on this mailbox. Outreach starts ${WARMUP_DAYS} days later.`} />
+                ? 'The day the warm-up service began on it. Leave empty only for an established company mailbox with no warm-up service: it then starts now at 5 a day.'
+                : 'The day your warm-up service began on this mailbox.'} />
+            <Select label="Warm up for" value={form.warmup_days} onChange={e => set('warmup_days', e.target.value)}>
+              {WARMUP_DAY_CHOICES.map(d => (
+                <option key={d} value={d}>{d} days{d === WARMUP_DAYS ? ' (a domain with years of email)' : d === 28 ? ' (a brand-new domain)' : ''}</option>
+              ))}
+            </Select>
+            <Input label="Warm-up emails a day" type="number" min={0} max={HARD_MAX_PER_MAILBOX}
+              value={form.warmup_per_day} onChange={e => set('warmup_per_day', e.target.value)}
+              hint={`The daily warm-up limit set in the warm-up service. Keep it running after outreach starts; warm-up and outreach together never pass ${HARD_MAX_TOTAL_PER_MAILBOX} a day.`} />
           </div>
         </div>
 

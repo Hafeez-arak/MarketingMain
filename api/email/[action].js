@@ -13,13 +13,16 @@ import {
   launchCampaign, dispatch, applyEvent, unsubscribe, subscribe, verifySvix, loadSettings,
   sendingStats, closeFinished, websiteSignup,
 } from './_engine.js'
-import { launchColdCampaign, coldTick, readReplies, resolveStuck, resolveStuckByHand } from './_cold.js'
+import { launchColdCampaign, coldTick, readReplies, resolveStuck, resolveStuckByHand, refreshDomainCheck } from './_cold.js'
+import { lookupDomain } from './_dns.js'
 import { sealSecret, openSecret } from './_secrets.js'
 import { verifyMailbox, sendFromMailbox } from './_mailbox.js'
 import {
-  msConfig, signState, openState, authorizeUrl, exchangeCode, whoAmI, packTokens, createGraphMail,
+  msConfig, signState, openState, authorizeUrl, exchangeCode, whoAmI, packTokens, createGraphMail, tenantOf, SCOPES,
 } from './_graph.js'
-import { mailboxDomainProblem, domainOf, HARD_MAX_PER_MAILBOX } from '../../src/lib/email/cold.js'
+import {
+  mailboxDomainProblem, domainOf, HARD_MAX_PER_MAILBOX, WARMUP_DAYS, WARMUP_DAYS_MAX,
+} from '../../src/lib/email/cold.js'
 import { finishConnect as finishLeadMailConnect, checkAllMail as checkAllLeadMail } from '../leads/_mail.js'
 import { leadDeps } from '../leads/_deps.js'
 
@@ -159,6 +162,7 @@ const coldDeps = (req = null) => ({
     findSent: (mb, secret, q) => graphMail().findSent(mb, secret, q),
   },
   open: sealed => openSecret(sealed, SERVICE_KEY),
+  dns: (domain, kind) => lookupDomain(domain, kind),
   uuid: () => crypto.randomUUID(),
   random: Math.random,
   // The run's rhythm: a real wait before each outreach email. Only the
@@ -189,6 +193,8 @@ const actions = {
       // n8n calls /cold-tick with the same secret.
       configured: { resend: Boolean(RESEND_KEY), webhook: Boolean(WEBHOOK_SECRET), cron: Boolean(CRON_SECRET), microsoft: MS.configured },
       settings, stats, cap,
+      // For another organisation's admin: approve sending once, for all its mailboxes.
+      outreachConsentUrl: MS.configured ? outreachConsentUrl(baseUrlOf(this.req)) : '',
     }
   },
 
@@ -326,9 +332,7 @@ const actions = {
       imap_port: Number(input.imap_port ?? existing?.imap_port ?? 993),
       username: normalizeEmail(input.username ?? existing?.username ?? '') || email,
       daily_limit: Math.max(0, Math.min(HARD_MAX_PER_MAILBOX, Math.round(Number(input.daily_limit ?? existing?.daily_limit ?? 15)) || 0)),
-      warmup_started_on: /^\d{4}-\d{2}-\d{2}$/.test(String(input.warmup_started_on || ''))
-        ? input.warmup_started_on
-        : (input.warmup_started_on === null || input.warmup_started_on === '' ? null : existing?.warmup_started_on ?? null),
+      ...warmupFields(input, existing),
     }
     if (!/^[a-z0-9.-]+\.[a-z]{2,}$/.test(row.smtp_host) || !/^[a-z0-9.-]+\.[a-z]{2,}$/.test(row.imap_host)) {
       return fail('Enter the sending (SMTP) and reading (IMAP) server names.')
@@ -367,6 +371,7 @@ const actions = {
       }) || []
     }
     if (!saved) return fail('The mailbox could not be saved.', 500)
+    if (!existing || existing.email !== saved.email) await refreshDomainCheck(coldDeps(), saved, { force: true }).catch(() => {})
     if (given) {
       await db('email_mailbox_secrets?on_conflict=mailbox_id', {
         method: 'POST', prefer: 'resolution=merge-duplicates,return=minimal',
@@ -409,17 +414,32 @@ const actions = {
   async ms_connect_start({ workspaceId, body, user }) {
     if (!MS.configured) return fail('Microsoft sign-in is not switched on yet.', 503)
     let loginHint = ''
+    // other_org: a mailbox on another organisation's Microsoft 365 (CLB,
+    // Ghusn, araklighting.com). It signs in at the shared "organizations"
+    // endpoint; reconnecting one does the same.
+    let otherOrg = Boolean(body.other_org)
     if (body.mailbox_id) {
       if (!isUuid(body.mailbox_id)) return fail('mailbox_id is not valid.')
-      const [mb] = await db(`email_mailboxes?id=eq.${body.mailbox_id}&workspace_id=eq.${workspaceId}&provider=eq.microsoft&select=id,email`) || []
+      const [mb] = await db(`email_mailboxes?id=eq.${body.mailbox_id}&workspace_id=eq.${workspaceId}&provider=eq.microsoft&select=id,email,tenant`) || []
       if (!mb) return fail('That Microsoft mailbox is not in this workspace.', 404)
       loginHint = mb.email
+      otherOrg = Boolean(mb.tenant)
     }
     const nonce = crypto.randomBytes(16).toString('base64url')
-    const state = signState({ ws: workspaceId, uid: user.id, mb: body.mailbox_id || null, n: nonce }, SERVICE_KEY)
+    const state = signState({ ws: workspaceId, uid: user.id, mb: body.mailbox_id || null, o: otherOrg ? 1 : 0, n: nonce }, SERVICE_KEY)
     const secure = /^https:/.test(baseUrlOf(this.req)) ? '; Secure' : ''
     this.res.setHeader('Set-Cookie', `ms_oauth=${nonce}; Path=/api/email; HttpOnly; SameSite=Lax; Max-Age=900${secure}`)
-    return { url: authorizeUrl({ config: MS, redirectUri: `${baseUrlOf(this.req)}/api/email/ms-callback`, state, loginHint }) }
+    const config = otherOrg ? { ...MS, tenant: 'organizations' } : MS
+    return { url: authorizeUrl({ config, redirectUri: `${baseUrlOf(this.req)}/api/email/ms-callback`, state, loginHint }) }
+  },
+
+  /** Look the mailbox's sending domain up now: SPF, DKIM, DMARC, MX. */
+  async mailbox_check_domain({ workspaceId, body }) {
+    if (!isUuid(body.mailbox_id)) return fail('mailbox_id is required.')
+    const [mb] = await db(`email_mailboxes?id=eq.${body.mailbox_id}&workspace_id=eq.${workspaceId}&select=*`) || []
+    if (!mb) return fail('That mailbox is not in this workspace.', 404)
+    const check = await refreshDomainCheck(coldDeps(), mb, { force: true })
+    return { mailbox_id: mb.id, dns_check: check, dns_checked_at: mb.dns_checked_at }
   },
 
   /** A person's answer for an email stuck in 'sending': it went out, send it again, or drop it. */
@@ -451,15 +471,43 @@ function fail(error, status = 400) {
   return { __fail: true, status, error }
 }
 
+/**
+ * The warm-up settings of a mailbox, as typed: the day the warm-up service
+ * started, how many warm-up emails it sends a day (they count against the
+ * day's total), and how long to wait before outreach. Kept when not sent.
+ */
+function warmupFields(input, existing) {
+  const date = input.warmup_started_on
+  const intIn = (v, lo, hi, keep) => (v === undefined || v === null || v === ''
+    ? keep
+    : Math.max(lo, Math.min(hi, Math.round(Number(v)) || lo)))
+  return {
+    warmup_started_on: /^\d{4}-\d{2}-\d{2}$/.test(String(date || ''))
+      ? date
+      : (date === null || date === '' ? null : existing?.warmup_started_on ?? null),
+    warmup_per_day: intIn(input.warmup_per_day, 0, HARD_MAX_PER_MAILBOX, existing?.warmup_per_day ?? 0),
+    warmup_days: intIn(input.warmup_days, WARMUP_DAYS, WARMUP_DAYS_MAX, existing?.warmup_days ?? WARMUP_DAYS),
+  }
+}
+
+/**
+ * Microsoft's admin-consent link for another organisation's outreach
+ * mailboxes: its admin approves sending (and reading the replies) once.
+ * The answer comes back to the callback, which only shows a message.
+ */
+function outreachConsentUrl(base) {
+  const scope = SCOPES.split(/\s+/).map(s => (/^(openid|profile|email|offline_access)$/.test(s) ? s : `https://graph.microsoft.com/${s}`)).join(' ')
+  const q = new URLSearchParams({ client_id: MS.clientId, scope, redirect_uri: `${base}/api/email/ms-callback`, state: 'outreach-consent' })
+  return `https://login.microsoftonline.com/organizations/v2.0/adminconsent?${q}`
+}
+
 /** A Microsoft mailbox's editable settings. Its address and login come from Microsoft. */
 async function saveMicrosoftSettings({ workspaceId, existing, input }) {
   const row = {
     from_name: String(input.from_name ?? existing.from_name ?? '').replace(/[<>"]/g, '').trim().slice(0, 100),
     signature: String(input.signature ?? existing.signature ?? '').slice(0, 1000),
     daily_limit: Math.max(0, Math.min(HARD_MAX_PER_MAILBOX, Math.round(Number(input.daily_limit ?? existing.daily_limit ?? 15)) || 0)),
-    warmup_started_on: /^\d{4}-\d{2}-\d{2}$/.test(String(input.warmup_started_on || ''))
-      ? input.warmup_started_on
-      : (input.warmup_started_on === null || input.warmup_started_on === '' ? null : existing.warmup_started_on ?? null),
+    ...warmupFields(input, existing),
     updated_at: new Date().toISOString(),
   }
   const [saved] = await db(`email_mailboxes?id=eq.${existing.id}&workspace_id=eq.${workspaceId}`, {
@@ -695,6 +743,9 @@ async function handleMsCallback(req, res) {
     toLeads = true
     return back(q('error') ? { ms_error: 'consent_denied' } : { ms: 'approved' })
   }
+  if (q('state') === 'outreach-consent') {
+    return back(q('error') ? { ms_error: 'consent_denied' } : { ms: 'approved' })
+  }
 
   const claims = openState(q('state'), SERVICE_KEY)
   if (!claims) return back({ ms_error: 'expired' })
@@ -711,13 +762,18 @@ async function handleMsCallback(req, res) {
     return back(out.ok ? { ms: 'connected', mailbox: out.email } : { ms_error: out.error })
   }
 
+  // Another organisation's mailbox: redeemed where it signed in, and its own
+  // tenant kept for every renewal after (configForMailbox in _graph.js).
+  const otherOrg = Boolean(claims.o)
   let tokens
   try {
-    tokens = await exchangeCode({ config: MS, code: q('code'), redirectUri: `${base}/api/email/ms-callback` })
+    tokens = await exchangeCode({ config: otherOrg ? { ...MS, tenant: 'organizations' } : MS, code: q('code'), redirectUri: `${base}/api/email/ms-callback` })
   } catch {
     return back({ ms_error: 'token' })
   }
   if (!tokens.refresh_token) return back({ ms_error: 'token' })
+  const tenant = otherOrg ? tenantOf(tokens.id_token) : ''
+  if (otherOrg && !tenant) return back({ ms_error: 'token' })
 
   const me = await whoAmI({ accessToken: tokens.access_token })
   if (!me.ok) return back({ ms_error: /licence|mailbox/i.test(me.error?.reason || '') ? 'no_mailbox' : 'graph' })
@@ -738,13 +794,13 @@ async function handleMsCallback(req, res) {
   if (mb) {
     ;[mb] = await db(`email_mailboxes?id=eq.${mb.id}&workspace_id=eq.${ws}`, {
       method: 'PATCH', prefer: 'return=representation',
-      body: { status: 'active', status_reason: '', last_error: '', last_checked_at: now, updated_at: now },
+      body: { status: 'active', status_reason: '', last_error: '', last_checked_at: now, tenant: tenant || mb.tenant || '', updated_at: now },
     }) || []
   } else {
     ;[mb] = await db('email_mailboxes', {
       method: 'POST', prefer: 'return=representation',
       body: {
-        workspace_id: ws, provider: 'microsoft', email, username: email,
+        workspace_id: ws, provider: 'microsoft', email, username: email, tenant,
         from_name: me.displayName.replace(/[<>"]/g, '').slice(0, 100),
         daily_limit: 15, status: 'active', last_checked_at: now, created_by: claims.uid || null,
       },
@@ -755,6 +811,8 @@ async function handleMsCallback(req, res) {
     method: 'POST', prefer: 'resolution=merge-duplicates,return=minimal',
     body: { mailbox_id: mb.id, workspace_id: ws, secret: sealSecret(packTokens(tokens), SERVICE_KEY), updated_at: now },
   })
+  // Its domain checked now, so the page says at once whether it can send.
+  await refreshDomainCheck(coldDeps(), mb, { force: true }).catch(() => {})
   return back({ ms: 'connected' })
 }
 

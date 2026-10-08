@@ -5,9 +5,10 @@ import {
   HARD_MAX_PER_WORKSPACE, RECONTACT_DAYS, mailboxReadiness, mailboxCap, inSendingWindow,
   nextWindowStart, gapMinutes, mailboxHealthProblem, followUpSubject, makeMessageId, classifySmtpError, coldProblems,
   SENDING_PROVIDERS, inboxMessageKind, STUCK_AFTER_MINUTES, STUCK_NEEDS_PERSON, isStuckSend,
-  MAX_SENDS_PER_RUN, RUN_BUDGET_SECONDS, pauseBeforeSend,
+  MAX_SENDS_PER_RUN, RUN_BUDGET_SECONDS, pauseBeforeSend, domainOf,
 } from '../../src/lib/email/cold.js'
 import { closeFinished, subscribeUrl, moveToMarketing } from './_engine.js'
+import { isDnsStale, providerKind } from '../../src/lib/email/domainCheck.js'
 
 export { coldProblems }
 
@@ -29,6 +30,9 @@ export { coldProblems }
 //                              what tests want; the server passes a real one.
 //   deps.baseUrl               the app's address, for each email's
 //                              newsletter sign-up link ({{subscribe_url}})
+//   deps.dns(domain, kind)     optional: the sending domain's DNS check
+//                              (api/email/_dns.js lookupDomain). Without it
+//                              the last stored check stands.
 //
 // What a launch does: queue step 0 for every eligible prospect, with NO
 // mailbox yet. The run gives each row to whichever ready mailbox is free, so
@@ -209,6 +213,9 @@ async function runWorkspace(deps, { ws, now, dryRun, out, result, pace }) {
   const today = brandDateKey(now)
   const dayStart = brandWallToUtcISO(today, '00:00')
   const weekAgo = new Date(now.getTime() - 7 * DAY).toISOString()
+  // Each domain looked up at most once a run, however many mailboxes share it.
+  const dnsSeen = new Map()
+  for (const mb of mailboxes) await refreshDomainCheck(deps, mb, { now, save: !dryRun, seen: dnsSeen })
   let wsSentToday = await count(`email_sends?workspace_id=eq.${ws}&mailbox_id=not.is.null&sent_at=gte.${dayStart}&select=id`)
   let sendsThisRun = 0   // sent, or would be in a dry run
 
@@ -298,6 +305,35 @@ async function nextRow(db, { ws, mb, campaignIds, nowIso }) {
   if (followUp) return followUp
   const [first] = await db(`${base}&mailbox_id=is.null&step=eq.0${cols}&order=due_at.asc,created_at.asc&limit=1`) || []
   return first || null
+}
+
+/**
+ * Look the mailbox's sending domain up again if its last check is older than
+ * DNS_STALE_HOURS (or `force`), store it on the mailbox and update `mb` in
+ * place. A lookup that failed outright keeps the previous verdict: a slow
+ * resolver must neither stop a good domain nor clear a bad one.
+ * @returns the check now on the mailbox (or null without deps.dns)
+ */
+export async function refreshDomainCheck(deps, mb, { now = new Date(), save = true, force = false, seen = new Map() } = {}) {
+  if (!deps.dns) return null
+  if (!force && !isDnsStale(mb, now)) return mb.dns_check
+  const domain = domainOf(mb.email)
+  if (!domain) return null
+  const kind = providerKind(mb)
+  const key = `${domain}|${kind}`
+  if (!seen.has(key)) seen.set(key, deps.dns(domain, kind).catch(err => ({ error: String(err?.message || err) })))
+  const found = await seen.get(key)
+  const hadOne = Boolean(mb.dns_check?.checked_at)
+  const unusable = found?.error || (found?.failed?.length >= 3)
+  if (!found || (unusable && hadOne)) return mb.dns_check
+  const check = found.error
+    ? { domain, kind, blocking: [], warnings: ['The domain could not be checked just now; it is checked again on a later run.'], checked_at: now.toISOString(), failed: ['all'] }
+    : found
+  mb.dns_check = check
+  // A failed first lookup is retried on the next run, not 12 hours later.
+  mb.dns_checked_at = unusable ? null : now.toISOString()
+  if (save) await patchMailbox(deps.db, mb.id, { dns_check: check, dns_checked_at: mb.dns_checked_at })
+  return check
 }
 
 async function patchMailbox(db, id, body) {

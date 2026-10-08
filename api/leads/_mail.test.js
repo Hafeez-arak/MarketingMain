@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { skipReason, stripQuoted, requestKey, messageToEnvelope, checkMailbox, checkMail, finishConnect, tenantOf, NEW_LEADS_FROM } from './_mail.js'
+import { skipReason, stripQuoted, requestKey, messageToEnvelope, checkMailbox, checkMail, finishConnect, tenantOf, NEW_LEADS_FROM, isWarmupEmail } from './_mail.js'
 import { intakeWebsite } from './_intake.js'
 
 // Made-up mail only: this repo is public.
@@ -36,6 +36,16 @@ describe('skipReason', () => {
   })
   it('a normal "Auto-Submitted: no" header is not automatic', () => {
     expect(skipReason(msg(1, { internetMessageHeaders: [{ name: 'auto-submitted', value: 'no' }] }), own)).toBe('')
+  })
+  it('skips a warm-up service\'s email by its tag, in the subject or the body, any case', () => {
+    const tags = { ...own, warmupTags: ['K7QZ2 MX9'] }
+    expect(skipReason(msg(1, { subject: 'Quick catch-up k7qz2 mx9' }), tags)).toBe('warm-up email')
+    expect(skipReason(msg(1, { body: { content: 'Hope your week is going well.\n\nK7QZ2 MX9' } }), tags)).toBe('warm-up email')
+    expect(skipReason(msg(1), tags)).toBe('')
+  })
+  it('a tag shorter than 4 characters is ignored, so it cannot hide real enquiries', () => {
+    expect(isWarmupEmail(msg(1), ['a'])).toBe(false)
+    expect(isWarmupEmail(msg(1), ['', '  '])).toBe(false)
   })
 })
 
@@ -247,6 +257,15 @@ describe('checkMailbox: July–September history', () => {
 })
 
 describe('checkMail', () => {
+  it('skips warm-up emails before any model call, with any connected mailbox\'s tag', async () => {
+    const other = { ...MB, id: '00000000-0000-0000-0000-0000000000c2', email: 'info@sister-co.sa', label: 'info@sister-co.sa', tenant: 'sister-tenant', warmup_tag: 'K7QZ2 MX9' }
+    const w = world({ mailboxes: [{ ...MB }, other], messages: [msg(1, { subject: 'Following up K7QZ2 MX9' })] })
+    const out = await checkMail(w.deps, { workspaceId: WS })
+    expect(out.mailboxes[0].counts.skipped).toBe(1)
+    expect(w.state.modelCalls).toBe(0)
+    expect(w.state.leads).toHaveLength(0)
+  })
+
   it('treats every connected mailbox\'s domain as a colleague\'s', async () => {
     const other = { ...MB, id: '00000000-0000-0000-0000-0000000000c2', email: 'info@sister-co.sa', label: 'info@sister-co.sa', tenant: 'sister-tenant' }
     const w = world({ mailboxes: [{ ...MB }, other], messages: [msg(1, { from: { emailAddress: { address: 'ali@sister-co.sa' } } })] })

@@ -119,7 +119,7 @@ function consentUrl(ms, base) {
   return `https://login.microsoftonline.com/organizations/v2.0/adminconsent?${q}`
 }
 
-const MAILBOX_COLUMNS = 'id,email,label,tenant,display_name,status,read_from,last_checked_at,last_error,last_counts,history_from,history_until,history_cursor,history_done,created_at'
+const MAILBOX_COLUMNS = 'id,email,label,tenant,warmup_tag,display_name,status,read_from,last_checked_at,last_error,last_counts,history_from,history_until,history_cursor,history_done,created_at'
 const fail = (status, error) => ({ __fail: true, status, error })
 
 // ─── Admin actions ─────────────────────────────────────────────────────────
@@ -261,6 +261,21 @@ const actions = {
   async mail_check_now({ workspaceId }) {
     const out = await checkMail(leadDeps(), { workspaceId, calls: 15, deadline: Date.now() + 120_000 })
     return out
+  },
+
+  /**
+   * The warm-up service's tag for a mailbox it also warms up (Instantly shows
+   * it per mailbox). Emails carrying it are skipped before any model call.
+   */
+  async mail_set_warmup_tag({ workspaceId, body }) {
+    if (!isUuid(body.mailbox_id)) return fail(400, 'mailbox_id is required.')
+    const tag = String(body.warmup_tag || '').trim().slice(0, 100)
+    if (tag && tag.length < 4) return fail(400, 'The warm-up tag is at least 4 characters. Copy it from the warm-up service.')
+    const saved = await db(`lead_mailboxes?id=eq.${body.mailbox_id}&workspace_id=eq.${workspaceId}`, {
+      method: 'PATCH', prefer: 'return=representation', body: { warmup_tag: tag, updated_at: new Date().toISOString() },
+    }) || []
+    if (!saved.length) return fail(404, 'That mailbox is not connected in this company.')
+    return { mailbox_id: body.mailbox_id, warmup_tag: tag }
   },
 
   /** Stop reading a mailbox: its stored sign-in is deleted, its leads stay. */
