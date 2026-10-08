@@ -5,6 +5,7 @@ import { PageHeader, Button, Spinner, Skeleton } from '../../components/ui/index
 import { Notice, SubTabs } from '../email/parts'
 import { leadsApi } from '../../lib/leads/client'
 import { normaliseIcp, buyerLabel, formatAmount } from '../../lib/sales/icp'
+import BattleCards from './BattleCards'
 
 // ─── Admin → Agent Brief ───────────────────────────────────────────────────
 // What the research agent will actually be asked on its next run, lens by
@@ -15,8 +16,12 @@ import { normaliseIcp, buyerLabel, formatAmount } from '../../lib/sales/icp'
 //
 // Admin only (the owner's decision, 2026-10-08): the prompts carry the
 // tracked leads, the competitor watchlist and the sales ICP.
+//
+// Battle cards (2026-10-08) sit here too, first: the outbound and inbound
+// cards a salesperson fills on a deal, empty and as a filled example.
 
 const TABS = [
+  { key: 'cards', label: 'Battle cards' },
   { key: 'sales', label: 'Sales search' },
   { key: 'lenses', label: 'All research questions' },
   { key: 'marketing', label: 'Marketing ICP' },
@@ -26,7 +31,7 @@ const TABS = [
 export default function AgentBrief() {
   const { isAccessAdmin, activeWorkspaceId } = useAuth()
   const [params, setParams] = useSearchParams()
-  const tab = TABS.some(t => t.key === params.get('tab')) ? params.get('tab') : 'sales'
+  const tab = TABS.some(t => t.key === params.get('tab')) ? params.get('tab') : 'cards'
   const setTab = key => setParams(prev => { const n = new URLSearchParams(prev); n.set('tab', key); return n }, { replace: true })
   const [data, setData] = useState(null)
   const [error, setError] = useState('')
@@ -61,7 +66,9 @@ export default function AgentBrief() {
 
       <div className="bg-white border border-border min-w-0">
         <div className="px-4 pt-3"><SubTabs items={TABS} value={tab} onChange={setTab} /></div>
-        {loading ? (
+        {tab === 'cards' ? (
+          <BattleCards workspaceId={activeWorkspaceId} />
+        ) : loading ? (
           <div className="p-4 space-y-3">{[0, 1, 2, 3].map(i => <Skeleton key={i} className="h-14 w-full" />)}</div>
         ) : !data ? (
           <p className="px-4 py-10 text-sm text-text-tertiary text-center">Nothing to show.</p>
