@@ -23,6 +23,7 @@ import {
 import { LIVE_PLATFORMS } from '../../src/lib/utils.js'
 import { ownPostingFacts } from '../../src/lib/agent/ownChannels.js'
 import { loadIntel } from './_intel.js'
+import { hasIcp, normaliseIcp, icpPromptText } from '../../src/lib/sales/icp.js'
 import {
   knownIntelPrompt, planStoreWrites, annotateFindings, signalHistory, isOpenOpportunity, nameKey,
 } from '../../src/lib/agent/intel.js'
@@ -105,7 +106,7 @@ function lookahead(weeks = 8, now = new Date()) {
  * warm.
  */
 export async function loadRunContext(workspaceId, runId, cadence = 'weekly') {
-  const [{ brand, ctx, profile }, agenda, priorRuns, competitorRows, alreadySaid, runRows] =
+  const [{ brand, ctx, profile }, agenda, priorRuns, competitorRows, alreadySaid, runRows, icp] =
     await Promise.all([
       loadBrandContext(workspaceId, 'research'),
       db(`research_agenda?workspace_id=eq.${workspaceId}&kind=eq.question&status=eq.active` +
@@ -133,6 +134,7 @@ export async function loadRunContext(workspaceId, runId, cadence = 'weekly') {
          `&order=tier.asc.nullslast,created_at.asc`),
       priorIdeas(workspaceId),
       db(`research_runs?id=eq.${runId}&workspace_id=eq.${workspaceId}&select=report,stage,status&limit=1`),
+      loadIcp(workspaceId),
     ])
 
   const gathered = runRows?.[0]?.report || {}
@@ -192,7 +194,28 @@ export async function loadRunContext(workspaceId, runId, cadence = 'weekly') {
     // Expanded from the WATCHLIST's lines, not the brand's configured ones —
     // see expandPerLine. A line nobody competes with us on gets no pass, so a
     // brand that configures three lines and is rivalled on two runs two.
-    lenses: expandPerLine(lensesFor({ motion, cadence }), competitorNotes.flatMap(n => n.lines || [])),
+    lenses: expandPerLine(
+      lensesFor({ motion, cadence }).filter(l => l.requires !== 'icp' || hasIcp(icp)),
+      competitorNotes.flatMap(n => n.lines || []),
+    ),
+    icp,
+  }
+}
+
+/**
+ * The company's ideal customer profile, or null.
+ *
+ * Never fatal: an unreadable ICP means the targets lens does not run this
+ * week, which is the same as a company that has not written one. The rest of
+ * the run is unaffected.
+ */
+async function loadIcp(workspaceId) {
+  try {
+    const rows = await db(`sales_icp?workspace_id=eq.${workspaceId}&select=config&limit=1`)
+    return rows?.[0]?.config || null
+  } catch (err) {
+    console.error('[agent/run] loadIcp:', err?.message || err)
+    return null
   }
 }
 
@@ -212,7 +235,7 @@ export async function planLenses(workspaceId, runId, cadence = 'weekly') {
     // committed. The driver gets the default set for this cadence and finds
     // out per lens.
     console.error('[agent/run] planLenses:', err?.message || err)
-    return { lenses: lensesFor({ cadence }).map(l => l.key), motion: '', explicit: false }
+    return { lenses: lensesFor({ cadence }).filter(l => !l.requires).map(l => l.key), motion: '', explicit: false }
   }
 }
 
@@ -223,12 +246,12 @@ export async function planLenses(workspaceId, runId, cadence = 'weekly') {
  * every lens's — the calendar's dates cost an API round trip, and fetching
  * them to run the demand lens would be waste repeated on every call.
  */
-async function argsForLens(key, { brandFacts, motion, competitors, competitorNotes = [], gathered, profile, ctx, agenda = [], language = '', workspaceId = '', line = '' }) {
+async function argsForLens(key, { brandFacts, motion, competitors, competitorNotes = [], gathered, profile, ctx, agenda = [], language = '', workspaceId = '', line = '', icp = null }) {
   // What the team already tracks, so the lens reports changes instead of
   // re-announcing last week. Read only for the three lenses that produce
   // leads, events or competitor signals; never fatal — an empty store is a
   // first run, not an error.
-  const intel = ['openings', 'events', 'category', 'rivals'].includes(key) && workspaceId
+  const intel = ['openings', 'targets', 'events', 'category', 'rivals'].includes(key) && workspaceId
     ? knownIntelPrompt(await loadIntel(workspaceId), {
         competitors: key === 'rivals' ? competitors : null,
       })
@@ -245,6 +268,21 @@ async function argsForLens(key, { brandFacts, motion, competitors, competitorNot
   // the lenses already found and cannot look anything up, so a standing question
   // could change the write-up and never change what was searched for.
   if (key === 'openings') return { args: [brandFacts, { motion, agenda, language, intel }] }
+  if (key === 'targets') {
+    // The ICP is rendered as plain briefing lines, and the split between the
+    // two tracks travels as numbers so the prompt can turn it into searches.
+    const norm = normaliseIcp(icp)
+    return {
+      args: [brandFacts, {
+        icp: icpPromptText(norm),
+        mix: norm.mix,
+        searches: lensByKey('targets')?.budget?.searches || 8,
+        agenda,
+        language,
+        intel,
+      }],
+    }
+  }
   if (key === 'events') return { args: [brandFacts, { motion, competitors, agenda, language, intel }] }
   if (key === 'demand') return { args: [brandFacts, { competitors, agenda, language }] }
   // The market it researches rides in brandFacts like every other brand fact,
@@ -346,6 +384,79 @@ async function argsForLens(key, { brandFacts, motion, competitors, competitorNot
  */
 function competitorRecordsOf(ctxBundle = {}) {
   return (ctxBundle.competitorNotes || []).map(n => ({ subject: n.name, lines: n.lines || [] }))
+}
+
+// What each computed lens reads instead of searching, for the preview.
+const COMPUTED_SOURCES = {
+  calendar: 'No web search. Dates computed from free calendars: the Hijri calendar (Aladhan) and public holidays (Nager.Date plus a built-in Gulf table), 8 weeks ahead.',
+  ourselves: 'No web search. Our own posting numbers from the connected social accounts, computed in code.',
+  search: 'No web search. What people typed into Google on the way to our website (Google Search Console), both languages.',
+}
+
+/**
+ * Exactly what every lens would be asked on the next run — built by the same
+ * code a run uses, with no model call and nothing written.
+ *
+ * For the admin's Agent Brief page: "what are we actually searching for"
+ * should be answered by the prompt itself, not by a description of it that
+ * can drift from what is sent. Monthly lenses are included and marked, and a
+ * lens that will not run (no ICP yet) says why rather than vanishing.
+ */
+export async function previewLenses(workspaceId) {
+  const runId = '00000000-0000-0000-0000-000000000000'
+  const ctxBundle = await loadRunContext(workspaceId, runId, 'monthly')
+  const running = new Set(ctxBundle.lenses.map(l => l.key))
+  const weekly = new Set(
+    expandPerLine(lensesFor({ motion: ctxBundle.motion, cadence: 'weekly' }), ctxBundle.competitorNotes.flatMap(n => n.lines || []))
+      .map(l => l.key),
+  )
+  const all = expandPerLine(lensesFor({ motion: ctxBundle.motion, cadence: 'monthly' }), ctxBundle.competitorNotes.flatMap(n => n.lines || []))
+
+  const lenses = []
+  for (const l of all) {
+    const base = baseKeyOf(l.key)
+    const row = {
+      key: l.key,
+      base,
+      line: lineOfLensKey(l.key),
+      label: l.label,
+      question: l.question,
+      cadence: weekly.has(l.key) ? 'weekly' : 'monthly',
+      searches: l.budget?.searches || 0,
+      runs: running.has(l.key),
+      why_not: running.has(l.key) ? '' : l.requires === 'icp' ? 'Waits for an ideal customer profile (Sales → Targets).' : '',
+      computed: COMPUTED_SOURCES[base] || '',
+      prompt: '',
+      error: '',
+    }
+    if (!row.computed) {
+      try {
+        const { args } = await argsForLens(base, { ...ctxBundle, workspaceId, line: row.line })
+        row.prompt = args && LENS_PROMPTS[base] ? LENS_PROMPTS[base](...args) : ''
+      } catch (err) {
+        row.error = String(err?.message || err).slice(0, 300)
+      }
+    }
+    lenses.push(row)
+  }
+  return {
+    motion: ctxBundle.motion,
+    brandFacts: ctxBundle.brandFacts,
+    language: ctxBundle.language,
+    agenda: ctxBundle.agenda,
+    // The cached brand block every searching lens also receives, ahead of its
+    // question. Shown so the admin can see what the agent knows about us.
+    brandContext: typeof ctxBundle.brand === 'string' ? ctxBundle.brand : JSON.stringify(ctxBundle.brand || ''),
+    // What marketing writes from (Brand Brain → Audience) and what sales
+    // targets are scored against (Sales → Targets).
+    marketingIcp: {
+      personas: String(ctxBundle.profile?.targetPersonas || ''),
+      icp_summary: String(ctxBundle.profile?.customFields?.icp_summary || ''),
+      client_pains: String(ctxBundle.profile?.customFields?.client_pains || ''),
+    },
+    salesIcp: ctxBundle.icp || null,
+    lenses,
+  }
 }
 
 export async function runSingleLens({ workspaceId, runId, lensKey, cadence = 'weekly', deadline }) {

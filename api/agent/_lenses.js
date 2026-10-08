@@ -1,7 +1,7 @@
 import { callModel } from './_provider.js'
 import { db } from './_supabase.js'
 import { textIn, urlsFromResponse } from '../../src/lib/agent/loop.js'
-import { lensByKey, makeFinding } from '../../src/lib/agent/lenses.js'
+import { lensByKey, makeFinding, targetFinding } from '../../src/lib/agent/lenses.js'
 import { findingsFromEvents } from '../../src/lib/agent/calendar.js'
 import { ownChannelFindings } from '../../src/lib/agent/ownChannels.js'
 import { CHANNELS, SIGNAL_CATEGORIES } from '../../src/lib/agent/intel.js'
@@ -257,6 +257,95 @@ export const FINDINGS_SCHEMA = {
 }
 
 /**
+ * What the targets lens returns: one target per finding.
+ *
+ * Its own schema rather than more fields on FINDINGS_SCHEMA. That one is at
+ * 41 properties, and the compiled-grammar limit was measured between 48 and
+ * 53 — the buyer, size, fit and contact fields would have pushed every lens
+ * toward a refusal that takes the whole run down with it (2026-09-15). Here a
+ * refusal costs this one lens.
+ *
+ * Every target field is required with an empty string meaning "not
+ * established", the pattern that keeps the optional count low. The three
+ * optional fields are the ones with no honest empty value: an expiry date and
+ * a source's title and quote.
+ */
+export const TARGETS_SCHEMA = {
+  type: 'json_schema',
+  schema: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['findings'],
+    properties: {
+      findings: {
+        type: 'array',
+        description:
+          'One finding per target, with an honest confidence on each. A low-confidence target is ' +
+          'worth reporting; an empty array is indistinguishable from never having looked.',
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['headline', 'detail', 'confidence', 'suggested_action', 'relevance', 'target', 'sources'],
+          properties: {
+            headline: { type: 'string', description: 'One sentence a salesperson understands at a glance.' },
+            detail: { type: 'string', description: 'What the sources say, and how strongly.' },
+            confidence: { type: 'number', description: '0 to 1. Be honest; a low number is useful.' },
+            perishable_until: { type: 'string', description: 'ISO date the window closes. Omit if unknown. Never invent one.' },
+            suggested_action: { type: 'string', description: 'Who to call, and what to open with.' },
+            relevance: { type: 'string', enum: ['high', 'medium', 'low'] },
+            target: {
+              type: 'object',
+              additionalProperties: false,
+              required: [
+                'name', 'kind', 'track', 'segment', 'buyer', 'client', 'contractor', 'consultant',
+                'location', 'stage', 'scope', 'value_sar', 'deadline', 'timing', 'why_fit', 'red_flags', 'contact',
+              ],
+              properties: {
+                name: { type: 'string', description: 'The project\'s or company\'s OWN name, stable week to week. Never a sentence.' },
+                kind: { type: 'string', enum: ['project', 'company', 'tender'] },
+                track: { type: 'string', enum: ['core', 'broader'] },
+                segment: { type: 'string', description: 'The ICP segment key it belongs to, or a short new label.' },
+                buyer: {
+                  type: 'string',
+                  enum: ['contractor_awarded', 'contractor_bidding', 'owner_developer', 'fitout', 'operator', 'consultant', 'other', ''],
+                },
+                client: { type: 'string' },
+                contractor: { type: 'string' },
+                consultant: { type: 'string' },
+                location: { type: 'string' },
+                stage: { type: 'string', description: 'e.g. announced, design, tender, awarded, construction, fit-out.' },
+                scope: { type: 'string' },
+                value_sar: { type: 'string', description: 'The value as written on the source, or empty.' },
+                deadline: { type: 'string', description: 'ISO date, only when established.' },
+                timing: { type: 'string', enum: ['open', 'closed', 'unconfirmed', ''] },
+                why_fit: { type: 'string', description: 'Which part of the ICP it matches, in one sentence.' },
+                red_flags: { type: 'string', description: 'Any ICP red flag seen, or empty.' },
+                contact: { type: 'string', description: 'Public contact only: website, general email or phone, company page, role to ask for.' },
+              },
+            },
+            sources: {
+              type: 'array',
+              items: {
+                type: 'object',
+                additionalProperties: false,
+                required: ['url'],
+                properties: {
+                  url: { type: 'string' },
+                  title: { type: 'string' },
+                  quote: { type: 'string', description: 'The supporting sentence, when the page has one. Never paraphrase into quotes.' },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+}
+
+const SCHEMAS = { targets: TARGETS_SCHEMA }
+
+/**
  * Server-side web search and fetch, bounded by the lens's own budget.
  *
  * ── SEARCHING AND READING ARE NOT THE SAME BUDGET ──
@@ -312,7 +401,7 @@ export async function runLens({
       messages: [{ role: 'user', content: prompt }],
       maxTokens: lens.budget.maxTokens || 8_000,
       effort: lens.budget.effort || 'medium',
-      outputFormat: FINDINGS_SCHEMA,
+      outputFormat: SCHEMAS[lens.schema] || FINDINGS_SCHEMA,
       // On Vercel Hobby the function ceiling is 300s and cannot be raised, and
       // this lens was measured at 380s. Stopping ourselves lets us report what
       // happened; being stopped by the platform writes nothing at all.
@@ -360,7 +449,7 @@ export async function runLens({
       // `line` is the pass this lens was run as — see makeFinding. A finding
       // from the controls pass is a controls finding without anyone having to
       // recognise the word "KNX" in its headline.
-      findings: parsed.map(f => makeFinding(lensKey, f, line)),
+      findings: parsed.map(f => makeFinding(lensKey, lens.schema === 'targets' ? targetFinding(f) : f, line)),
       sources: [...allowed],
       cost: out.cost || 0,
       error: '',

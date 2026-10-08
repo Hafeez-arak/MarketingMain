@@ -1,5 +1,6 @@
 import { fingerprint, similarity, REPEAT_AT } from './memory.js'
 import { isComputedLens } from './novelty.js'
+import { parseAmount } from '../sales/icp.js'
 
 // ─── The market-intelligence store, in pure functions ──────────────────────
 // A lens returns findings for ONE run. The store keeps three kinds of thing
@@ -213,8 +214,34 @@ export function opportunityFromFinding(f) {
     // belongs on today's list, and it can only stay on the CONTROLS list if
     // the tracker remembers which business it was.
     line: str(f.line),
+    // What the targets lens adds so Sales → Targets can score a lead against
+    // the ICP. Empty on every other lens's leads, which is honest: the fit is
+    // then judged from the name and scope alone.
+    segment: str(lead.segment),
+    buyer: pick(lead.buyer, TARGET_BUYERS, ''),
+    value_sar: parseAmount(lead.value_sar),
+    track: pick(lead.track, ['core', 'broader'], ''),
+    why_fit: str(lead.why_fit).slice(0, 600),
+    red_flags: str(lead.red_flags).slice(0, 600),
+    contact: str(lead.contact).slice(0, 400),
     fingerprint: `opp|${nameKey(name)}`,
   }
+}
+
+const TARGET_BUYERS = ['contractor_awarded', 'contractor_bidding', 'owner_developer', 'fitout', 'operator', 'consultant', 'other']
+
+// Filled once and never treated as news: a lead first found by the openings
+// lens and later by the targets lens gains its ICP fields without the report
+// saying the project "changed".
+const OPP_BLANK_FILLS = ['segment', 'buyer', 'value_sar', 'track', 'why_fit', 'red_flags', 'contact']
+
+const isBlank = v => v === null || v === undefined || String(v).trim() === ''
+
+/** The fields a new sighting can fill on a stored row whose copy is still blank. */
+export function blankFills(row = {}, cand = {}, keys = OPP_BLANK_FILLS) {
+  const out = {}
+  for (const k of keys) if (isBlank(row[k]) && !isBlank(cand[k])) out[k] = cand[k]
+  return out
 }
 
 const yearOf = d => (d ? String(d).slice(0, 4) : '')
@@ -391,6 +418,7 @@ export function planStoreWrites(findings = [], existing = {}, { runId = null, no
       // pass that set it had the roster in front of it and this one may be the
       // other line's pass meeting the same rival.
       ...(kind !== 'events' && !str(hit.line) && str(cand.line) ? { line: str(cand.line) } : {}),
+      ...(kind === 'opportunities' ? blankFills(hit, cand) : {}),
     }
     out[kind].update.push({ id: hit.id, patch: touch })
     Object.assign(hit, touch)

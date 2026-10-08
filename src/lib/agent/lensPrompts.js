@@ -410,6 +410,83 @@ export function eventsPrompt(brand, { motion, competitors = [], agenda = [], lan
 }
 
 /**
+ * TARGETS — named projects and companies that fit the ideal customer.
+ *
+ * Added 2026-10-07 for Sales → Targets. The ICP arrives as text the company
+ * wrote from its own won and lost deals (icpPromptText in src/lib/sales/icp.js),
+ * so nothing here names an industry: a hotel, a clinic chain or a wedding
+ * planner is just a segment in someone's ICP.
+ *
+ * Two tracks, split by the ICP's own mix. The core track is told to stay close
+ * to what the company wins; the broader track is told in so many words that
+ * being unlike the past is the point — otherwise a model reading "we win small
+ * packages" would quietly stop looking at anything large, and the company asked
+ * for the opposite.
+ */
+export function targetsPrompt(brand, { icp = '', mix = { core: 50, broader: 50 }, searches = 8, agenda = [], language = '', intel = '' }) {
+  const coreSearches = Math.max(1, Math.round((searches * (mix.core ?? 50)) / 100))
+  const broaderSearches = Math.max(0, searches - coreSearches)
+  return [
+    who(brand),
+    '',
+    'One question: WHICH NAMED PROJECTS AND COMPANIES FIT OUR IDEAL CUSTOMER RIGHT NOW, AND WHO DO WE CALL?',
+    '',
+    'This list goes straight to the sales team. Every finding is one target they can phone this week.',
+    '',
+    icp || 'No ideal customer profile is written yet. Use who the brand sells to, above.',
+    '',
+    `SPLIT YOUR ${searches} SEARCHES BETWEEN TWO TRACKS:`,
+    `- CORE (about ${coreSearches} searches): targets that look like what we already win — the core`,
+    '  segments, the good buyers, the package sizes we win most. Set target.track to "core".',
+    `- BROADER (about ${broaderSearches} searches): targets in the broader segments, larger packages,`,
+    '  and kinds of buyer we have not sold to much yet. Being unlike our past wins is the POINT of this',
+    '  track — do not skip a target because it is bigger or newer than what we usually do. Set',
+    '  target.track to "broader".',
+    '',
+    'WHAT COUNTS AS A TARGET:',
+    '- A PROJECT with a name: one that has just been awarded to a contractor, is in design, is in',
+    '  fit-out, or has been announced with a budget. Name the buyer we would actually sell to.',
+    '- A COMPANY: one that has just won work in our segments (a contractor or fit-out company that',
+    '  announced an award), a developer or operator launching projects, or a company newly arrived',
+    '  in our market. Set target.kind to "company" and name what makes them a buyer now.',
+    '- A TENDER that is open and inside our scope. Set target.kind to "tender".',
+    '',
+    'FOR EVERY TARGET, fill `target`:',
+    '- name — the project\'s or company\'s OWN name, the same every week. Never a sentence.',
+    '- kind — project | company | tender.',
+    '- track — core | broader.',
+    '- segment — the segment key from the ICP above that it belongs to, or a short new label.',
+    '- buyer — who would buy from us: contractor_awarded (already holds the job), contractor_bidding',
+    '  (still bidding the main contract), owner_developer, fitout, operator, consultant, other.',
+    '- client, contractor, consultant — names you established; empty string if not.',
+    '- location, stage, scope — what the source says.',
+    '- value_sar — the package or project value as written (e.g. "SAR 45 million"), or empty.',
+    '- deadline — a real ISO date only; timing — open | closed | unconfirmed.',
+    '- why_fit — one sentence: which part of the ICP it matches.',
+    '- red_flags — any ICP red flag you saw (e.g. a specified brand, a contractor not yet awarded);',
+    '  empty when none. A red flag never removes a target — the salesperson needs to see it.',
+    '- contact — PUBLIC contact only: the company website, its general or procurement email, its main',
+    '  phone, its company page, and the role to ask for. Never a private person\'s details.',
+    '',
+    'headline: one sentence a salesperson understands at a glance. suggested_action: who to call and',
+    'what to open with. relevance: high when it fits the ICP well and the window is open now.',
+    '',
+    'Rules:',
+    '- REPORT WHAT YOU FOUND, with an honest confidence. A target you are 40% sure of is a finding at',
+    '  confidence 0.4. An empty list looks exactly like not having looked.',
+    '- Every finding needs a source you actually read. No source, no finding.',
+    '- A target the team already tracks (listed below) is reported again only if something about it',
+    '  changed — a contractor named, an award, a new package. Spend your searches on new names.',
+    '- Never invent a date, a value or a contact.',
+    '- Plan your searches before you spend them and never repeat one. If you run out, report what you',
+    '  already confirmed.',
+    known(intel),
+    standing(agenda),
+    localLanguage(language),
+  ].join('\n')
+}
+
+/**
  * DEMAND — what people actually want.
  *
  * The richest single source is complaints about competitors: an unmet need,
@@ -888,6 +965,7 @@ export const LENS_PROMPTS = {
   // computed, the "what should we do about it" judgement moved to synthesis,
   // and its trade-show hunt moved into openings.
   openings: openingsPrompt,
+  targets: targetsPrompt,
   events: eventsPrompt,
   demand: demandPrompt,
   category: categoryPrompt,

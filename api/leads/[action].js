@@ -6,6 +6,7 @@ import { intakeWebsite, tryIt, QUALIFIER_MODEL } from './_intake.js'
 import { checkMail } from './_mail.js'
 import { exportLeads, applySheetDecisions } from './_export.js'
 import { leadDeps, openRouterKey, hasDeploymentKey, describeKey, sendAlert } from './_deps.js'
+import { previewLenses } from '../agent/_investigate.js'
 
 // ─── /api/leads/<action> ───────────────────────────────────────────────────
 // One Vercel function for the lead agent: the last of the twelve the Hobby
@@ -276,6 +277,16 @@ const actions = {
     }) || []
     if (!saved.length) return fail(404, 'That mailbox is not connected in this company.')
     return { mailbox_id: body.mailbox_id, warmup_tag: tag }
+  },
+
+  /**
+   * The Agent Brief page: exactly what every research lens would be asked on
+   * the next run, plus the ICPs it works from. Read only, no model call. It
+   * lives here only because this is the admin-checked function and the plan
+   * allows no thirteenth.
+   */
+  async lens_preview({ workspaceId }) {
+    return previewLenses(workspaceId)
   },
 
   /** Stop reading a mailbox: its stored sign-in is deleted, its leads stay. */
