@@ -50,6 +50,36 @@ const events = [
   { id: 'e2', name: 'Hospitality Summit', start_date: null, end_date: null, venue: '', city: '', organizer: '', url: '', exhibitor_deadline: null, competitors_exhibiting: [], relevance: 'medium', recommendation: 'Confirm the dates.', status: 'tbc', decision: 'undecided' },
 ]
 
+// Battle cards (?page=brief, first tab), made up.
+const battleCards = {
+  outbound: {
+    title: 'Outbound battle card — when we contact the client',
+    purpose: 'Fill the first part before you call, the middle on the call, the last part after it.',
+    example_label: 'A made-up project.',
+    sections: [
+      { key: 'who', title: 'Who and what', phase: 'before', intro: 'Ten minutes of homework.', fields: [
+        { label: 'Company', required: true, example: 'Harbour Contracting Co' },
+        { label: 'Buyer type', type: 'choice', required: true, options: ['Contractor holding the job', 'Owner / developer', 'Fit-out'], example: 'Contractor holding the job' },
+        { label: 'Our history with them', type: 'long', hint: 'Orders, open deals, past losses.', example: 'Two small orders in 2024.' },
+      ] },
+      { key: 'opening', title: 'Our opening', phase: 'before', fields: [
+        { label: 'What we bring', type: 'check', options: ['Sample board', 'Lux study', 'Submittal pack'], example: 'Sample board, lux study' },
+      ] },
+      { key: 'qualify', title: 'Ask these first', phase: 'during', intro: 'The answers that decide whether to estimate.', fields: [
+        { label: 'Target price or budget', required: true, example: 'About 1.2M; our estimate 1.45M.' },
+        { label: 'Specified brand or vendor list?', required: true, example: '"Or approved equal".' },
+      ] },
+      { key: 'next', title: 'Next steps and dates', phase: 'after', fields: [
+        { label: 'Quote due, before their deadline', required: true, example: '17 Oct.' },
+      ] },
+    ],
+    objections: [
+      { objection: 'Your price is higher.', why: 'Local makers are cheaper.', answer: 'Ask their target first, then value-engineer.', proof: 'Comparison sheet.', walk_away: 'Gap above 20%.', example: 'Gap closed to 4%.' },
+    ],
+  },
+  inbound: {},
+}
+
 // The Agent Brief page's answer (?page=brief), made up.
 const lens = (key, label, question, searches, extra = {}) => ({
   key, base: key, line: '', label, question, cadence: 'weekly', searches, runs: true, why_not: '', computed: '',
@@ -84,7 +114,7 @@ window.fetch = async (input, init = {}) => {
   const method = (init.method || 'GET').toUpperCase()
   if (url.includes('/auth/v1/user')) return json({ id: 'u1', email: 'admin@example.com' })
   if (method !== 'GET') return new Response(null, { status: 204 })
-  if (url.includes('/rest/v1/sales_icp')) return json([{ config: icp, updated_at: '2026-10-07T10:00:00Z' }])
+  if (url.includes('/rest/v1/sales_icp')) return json([{ config: icp, battle_cards: battleCards, updated_at: '2026-10-07T10:00:00Z' }])
   if (url.includes('/rest/v1/sales_accounts')) return json(accounts)
   if (url.includes('/rest/v1/research_opportunities')) return json(opportunities)
   if (url.includes('/rest/v1/research_events')) return json(events)

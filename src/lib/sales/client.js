@@ -55,6 +55,13 @@ export async function fetchTargets(ws) {
   }
 }
 
+/** The two battle cards, { outbound, inbound }. Admin only by RLS. */
+export async function fetchBattleCards(ws) {
+  const { data, error } = await supabase.from('sales_icp').select('battle_cards').eq('workspace_id', ws).limit(1)
+  if (error) return { error: error.message }
+  return { cards: data?.[0]?.battle_cards || {} }
+}
+
 export async function saveIcp(ws, config) {
   const { data: { user } = {} } = await supabase.auth.getUser()
   const { error } = await supabase.from('sales_icp').upsert({
