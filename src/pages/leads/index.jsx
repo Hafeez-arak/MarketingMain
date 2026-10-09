@@ -1,11 +1,12 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Navigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../../store/auth'
 import { PageHeader, Button, Spinner, Skeleton, Input, Textarea, Toggle } from '../../components/ui/index'
 import { Notice, Stat, SubTabs } from '../email/parts'
-import { fetchLeads, leadsApi } from '../../lib/leads/client'
+import { fetchLeadsPage, fetchMonthLeads, leadsApi } from '../../lib/leads/client'
 import {
-  VERDICT_LABEL, VERDICT_TONE, SOURCE_LABEL, effectiveVerdict, monthStats, filterLeads, sheetHealth, modelName,
+  VERDICT_LABEL, VERDICT_TONE, SOURCE_LABEL, effectiveVerdict, monthStats, sheetHealth, modelName,
+  PAGE_SIZE, pageLabel, pageCount,
 } from '../../lib/leads/view'
 
 // ─── Lead Agent ────────────────────────────────────────────────────────────
@@ -59,12 +60,19 @@ function when(iso) {
 
 export default function LeadAgent() {
   const { isAccessAdmin, activeWorkspaceId } = useAuth()
-  const [leads, setLeads] = useState([])
+  // This month's leads, for the counts; the list below reads its own page.
+  const [monthLeads, setMonthLeads] = useState([])
   const [status, setStatus] = useState(null)
   const [loadedFor, setLoadedFor] = useState(null)
   const [error, setError] = useState('')
   const [refreshing, setRefreshing] = useState(false)
   const [tab, setTab] = useState('all')
+  const [page, setPage] = useState(0)
+  // The page on screen, and which workspace|tab|page it is for. A newer
+  // request wins over a slower older one.
+  const [list, setList] = useState({ key: null, rows: [], total: 0, error: '' })
+  const listWanted = useRef('')
+  const listTop = useRef(null)
   const [open, setOpen] = useState(null)
   // Back from Microsoft's sign-in (Connect a mailbox): ?ms=connected or ?ms_error=…
   const [params] = useSearchParams()
@@ -80,8 +88,8 @@ export default function LeadAgent() {
     const ws = activeWorkspaceId
     setRefreshing(true)
     try {
-      const [rows, s] = await Promise.all([fetchLeads(ws), leadsApi('status', ws)])
-      setLeads(rows)
+      const [rows, s] = await Promise.all([fetchMonthLeads(ws), leadsApi('status', ws)])
+      setMonthLeads(rows)
       setNow(new Date())
       setStatus(s.error ? { error: s.error } : s)
       setError('')
@@ -93,11 +101,30 @@ export default function LeadAgent() {
     }
   }, [activeWorkspaceId])
 
+  const listKey = `${activeWorkspaceId}|${tab}|${page}`
+  const loadList = useCallback(async () => {
+    if (!activeWorkspaceId) return
+    const key = `${activeWorkspaceId}|${tab}|${page}`
+    listWanted.current = key
+    try {
+      const r = await fetchLeadsPage(activeWorkspaceId, { tab, page })
+      if (listWanted.current !== key) return
+      // Past the end (leads moved tab since): go to the last page instead.
+      if (!r.rows.length && r.total && page > 0) return setPage(pageCount(r.total) - 1)
+      setList({ key, ...r, error: '' })
+    } catch (err) {
+      if (listWanted.current === key) setList({ key, rows: [], total: 0, error: err.message || String(err) })
+    }
+  }, [activeWorkspaceId, tab, page])
+
   useEffect(() => { if (isAccessAdmin) queueMicrotask(reload) }, [reload, isAccessAdmin])
+  useEffect(() => { if (isAccessAdmin) queueMicrotask(loadList) }, [loadList, isAccessAdmin])
 
   const loading = loadedFor !== activeWorkspaceId
-  const stats = useMemo(() => monthStats(leads, now), [leads, now])
-  const shown = useMemo(() => filterLeads(leads, tab), [leads, tab])
+  const listLoading = list.key !== listKey
+  const stats = useMemo(() => monthStats(monthLeads, now), [monthLeads, now])
+  const shown = list.rows
+  const pages = pageCount(list.total)
 
   if (!isAccessAdmin) return <Navigate to="/" replace />
 
@@ -113,13 +140,35 @@ export default function LeadAgent() {
   async function review(lead, verdict) {
     const r = await leadsApi('review', activeWorkspaceId, { lead_id: lead.id, verdict })
     if (r.error) return setError(r.error)
-    setLeads((ls) => ls.map((l) => (l.id === lead.id ? { ...l, ...r.lead } : l)))
+    // It stays on this page, tagged as corrected, until the next load moves it.
+    const patch = (ls) => ls.map((l) => (l.id === lead.id ? { ...l, ...r.lead } : l))
+    setList((s) => ({ ...s, rows: patch(s.rows) }))
+    setMonthLeads(patch)
+  }
+
+  function refresh() {
+    reload()
+    loadList()
+  }
+
+  function chooseTab(t) {
+    setTab(t)
+    setPage(0)
+    setOpen(null)
+  }
+
+  function goTo(p) {
+    setPage(p)
+    setOpen(null)
+    // Back to the top of the list, not the bottom of a long page.
+    const top = listTop.current?.getBoundingClientRect().top
+    if (top != null && top < 0) listTop.current.scrollIntoView({ block: 'start' })
   }
 
   return (
     <div className="max-w-7xl space-y-4">
       <PageHeader title="Lead Agent" subtitle="Reads every enquiry and says whether it is a real buyer, so salespeople only open the ones worth their time. Admin only.">
-        <Button variant="secondary" size="sm" onClick={reload} disabled={refreshing || !activeWorkspaceId}>
+        <Button variant="secondary" size="sm" onClick={refresh} disabled={refreshing || !activeWorkspaceId}>
           {refreshing ? <Spinner size="sm" /> : null}
           Refresh
         </Button>
@@ -172,15 +221,18 @@ export default function LeadAgent() {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
         {/* ── The leads ── */}
-        <div className="lg:col-span-2 bg-white border border-border min-w-0">
-          <div className="px-4 pt-3"><SubTabs items={TABS} value={tab} onChange={setTab} /></div>
-          {loading ? (
+        <div ref={listTop} className="lg:col-span-2 bg-white border border-border min-w-0 scroll-mt-4">
+          <div className="px-4 pt-3"><SubTabs items={TABS} value={tab} onChange={chooseTab} /></div>
+          {listLoading ? (
             <div className="p-4 space-y-3">{[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-12 w-full" />)}</div>
+          ) : list.error ? (
+            <p className="px-4 py-10 text-sm text-red-600 text-center">Could not load the enquiries: {list.error}</p>
           ) : !shown.length ? (
             <p className="px-4 py-10 text-sm text-text-tertiary text-center">
-              {leads.length ? 'No enquiries in this tab.' : 'No enquiries yet. They appear here once the website Sheet sends them.'}
+              {tab === 'all' ? 'No enquiries yet. They appear here once the website Sheet sends them.' : 'No enquiries in this tab.'}
             </p>
           ) : (
+            <>
             <ul className="divide-y divide-border">
               {shown.map((l) => {
                 const v = effectiveVerdict(l)
@@ -206,6 +258,8 @@ export default function LeadAgent() {
                 )
               })}
             </ul>
+            <Pager page={page} pages={pages} label={pageLabel(page, PAGE_SIZE, list.total)} onGo={goTo} />
+            </>
           )}
         </div>
 
@@ -214,6 +268,23 @@ export default function LeadAgent() {
           <Connection workspaceId={activeWorkspaceId} status={status} loading={loading} onChange={setStatus} onError={setError} onReload={reload} now={now} />
         </div>
       </div>
+    </div>
+  )
+}
+
+function Pager({ page, pages, label, onGo }) {
+  return (
+    <div className="flex items-center justify-between gap-2 px-4 py-2.5 border-t border-border">
+      <p className="text-[11px] text-text-tertiary tabular-nums">{label}</p>
+      {pages > 1 && (
+        <div className="flex items-center gap-1.5">
+          <Button size="xs" variant="ghost" onClick={() => onGo(0)} disabled={page === 0}>First</Button>
+          <Button size="xs" variant="secondary" onClick={() => onGo(page - 1)} disabled={page === 0}>Previous</Button>
+          <span className="text-[11px] text-text-secondary tabular-nums px-1">Page {page + 1} of {pages}</span>
+          <Button size="xs" variant="secondary" onClick={() => onGo(page + 1)} disabled={page >= pages - 1}>Next</Button>
+          <Button size="xs" variant="ghost" onClick={() => onGo(pages - 1)} disabled={page >= pages - 1}>Last</Button>
+        </div>
+      )}
     </div>
   )
 }

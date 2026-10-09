@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { effectiveVerdict, monthStats, filterLeads, sheetHealth, modelName } from './view.js'
+import { effectiveVerdict, monthStats, sheetHealth, modelName, verdictFilter, pageRange, pageLabel, pageCount } from './view.js'
 
 const now = new Date('2026-10-20T10:00:00Z')
 const lead = (o) => ({ received_at: '2026-10-05T10:00:00Z', created_at: '2026-10-06T10:00:00Z', cost_usd: 0.0002, ...o })
@@ -27,14 +27,6 @@ describe('monthStats', () => {
   })
 })
 
-describe('filterLeads', () => {
-  it('filters on the effective verdict', () => {
-    const ls = [lead({ verdict: 'qualified' }), lead({ verdict: 'unqualified', human_verdict: 'qualified' }), lead({ verdict: 'unqualified' })]
-    expect(filterLeads(ls, 'qualified')).toHaveLength(2)
-    expect(filterLeads(ls, 'all')).toHaveLength(3)
-  })
-})
-
 describe('sheetHealth', () => {
   it('never, fresh and stale', () => {
     expect(sheetHealth(null, now).state).toBe('never')
@@ -47,5 +39,23 @@ describe('modelName', () => {
   it('names the model plainly', () => {
     expect(modelName('openai/gpt-6-luna')).toBe('GPT-6 Luna')
     expect(modelName('z-ai/glm-5.3-flash')).toBe('glm-5.3-flash')
+  })
+})
+
+describe('paging', () => {
+  it('turns a tab into a filter on the effective verdict', () => {
+    expect(verdictFilter('all')).toBeNull()
+    expect(verdictFilter('qualified')).toBe('human_verdict.eq.qualified,and(human_verdict.is.null,verdict.eq.qualified)')
+    expect(verdictFilter('pending')).toBe('and(human_verdict.is.null,verdict.is.null)')
+  })
+
+  it('ranges, labels and counts pages', () => {
+    expect(pageRange(0, 25)).toEqual({ from: 0, to: 24 })
+    expect(pageRange(2, 25)).toEqual({ from: 50, to: 74 })
+    expect(pageLabel(0, 25, 542)).toBe('1–25 of 542')
+    expect(pageLabel(21, 25, 542)).toBe('526–542 of 542')
+    expect(pageLabel(0, 25, 0)).toBe('0 of 0')
+    expect(pageCount(542, 25)).toBe(22)
+    expect(pageCount(0, 25)).toBe(1)
   })
 })

@@ -17,6 +17,32 @@ const leads = [
   { id: 'l6', source: 'website_form', received_at: iso(6, 9), created_at: iso(6, 9), name: 'Test', company: 'Example Hotels', email: 'buyer@example-hotels.com', phone: '', subject: 'Hotel / hospitality', message: 'KNX lighting control for 120 guest rooms.', language: 'en', verdict: null, category: '', confidence: '', reason: '', summary: '', details: {}, ask_next: [], model: 'openai/gpt-6-luna', cost_usd: 0, error: 'Provider overloaded', human_verdict: null },
 ]
 
+// Enough older made-up pitches to page through (September, so they stay out
+// of this month's counts).
+for (let i = 1; i <= 60; i++) {
+  const day = String(1 + (i % 28)).padStart(2, '0')
+  leads.push({ id: `old${String(i).padStart(2, '0')}`, source: 'email', mailbox: 'info@example-co.sa', link: '', received_at: `2026-09-${day}T${String(i % 24).padStart(2, '0')}:00:00Z`, created_at: '2026-10-07T10:00:00Z', name: `Sender ${i}`, company: `Example Vendor ${i}`, email: `sales${i}@example-vendor.com`, phone: '', subject: 'Our catalogue', message: `Made-up vendor pitch number ${i}.`, language: 'en', verdict: i % 10 === 0 ? 'qualified' : 'unqualified', category: 'vendor_pitch', confidence: 'high', reason: 'A vendor offering its own products.', summary: `Vendor pitch ${i}`, details: {}, ask_next: [], model: 'openai/gpt-6-luna', cost_usd: 0.00015, error: '', human_verdict: null })
+}
+
+// What PostgREST would answer: the tab's `or` filter (only the shapes
+// verdictFilter makes), the received_at/created_at month filter, newest
+// first, the offset/limit page, and the exact count in Content-Range.
+function restLeads(url) {
+  const p = new URL(url, window.location.origin).searchParams
+  const or = p.get('or') || ''
+  const eff = (l) => l.human_verdict || l.verdict || 'pending'
+  let rows = leads
+  const tab = or.match(/^\(human_verdict\.eq\.(\w+),/)?.[1] || (or.includes('verdict.is.null') ? 'pending' : null)
+  if (tab) rows = rows.filter((l) => eff(l) === tab)
+  const since = or.match(/received_at\.gte\.([^,)]+)/)?.[1]
+  if (since) rows = rows.filter((l) => l.received_at >= since || l.created_at >= since)
+  rows = [...rows].sort((a, b) => (b.received_at || '').localeCompare(a.received_at || '') || b.id.localeCompare(a.id))
+  const offset = Number(p.get('offset') || 0)
+  const limit = p.has('limit') ? Number(p.get('limit')) : rows.length
+  const page = rows.slice(offset, offset + limit)
+  return new Response(JSON.stringify(page), { status: 200, headers: { 'Content-Type': 'application/json', 'Content-Range': `${offset}-${offset + page.length - 1}/${rows.length}` } })
+}
+
 const status = {
   ok: true,
   model: 'openai/gpt-6-luna',
@@ -34,7 +60,7 @@ window.fetch = async (input, init = {}) => {
   if (url.includes('/src/') || url.includes('/node_modules/') || url.includes('/@')) return original(input, init)
   if (mode === 'hang') return new Promise(() => {})
   if (mode === 'fail') return Promise.reject(new TypeError('Failed to fetch'))
-  if (url.includes('/rest/v1/leads')) return json(leads)
+  if (url.includes('/rest/v1/leads')) return restLeads(url)
   if (url.includes('/api/leads/status')) return json(status)
   if (url.includes('/api/leads/set_enabled')) {
     const { enabled } = JSON.parse(init.body || '{}')
