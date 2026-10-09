@@ -51,12 +51,6 @@ export function monthStats(leads = [], now = new Date()) {
   return out
 }
 
-/** The list's filter tabs. */
-export function filterLeads(leads = [], tab = 'all') {
-  if (tab === 'all') return leads
-  return leads.filter((l) => effectiveVerdict(l) === tab)
-}
-
 /**
  * How the website Sheet's timer is doing, from the last time it called in.
  * It calls every five minutes, so more than twenty minutes of silence means
@@ -74,3 +68,34 @@ export function modelName(id = '') {
   const known = { 'openai/gpt-6-luna': 'GPT-6 Luna' }
   return known[id] || id.split('/').pop() || ''
 }
+
+// ─── Paging ────────────────────────────────────────────────────────────────
+// The list is read one page at a time from Supabase, filtered there, so
+// every lead is reachable however many there are.
+
+export const PAGE_SIZE = 25
+
+/**
+ * A tab as a PostgREST `or` filter on the effective verdict (a person's
+ * correction wins). null for "all".
+ */
+export function verdictFilter(tab = 'all') {
+  if (tab === 'all') return null
+  if (tab === 'pending') return 'and(human_verdict.is.null,verdict.is.null)'
+  return `human_verdict.eq.${tab},and(human_verdict.is.null,verdict.eq.${tab})`
+}
+
+/** The first and last row (inclusive) of a 0-based page. */
+export function pageRange(page = 0, size = PAGE_SIZE) {
+  const from = Math.max(0, page) * size
+  return { from, to: from + size - 1 }
+}
+
+/** "26–50 of 542". */
+export function pageLabel(page, size, total) {
+  if (!total) return '0 of 0'
+  const { from, to } = pageRange(page, size)
+  return `${from + 1}–${Math.min(to + 1, total)} of ${total}`
+}
+
+export const pageCount = (total, size = PAGE_SIZE) => Math.max(1, Math.ceil((Number(total) || 0) / size))
