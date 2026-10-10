@@ -37,6 +37,34 @@ describe('healthIssues', () => {
   })
 })
 
+describe('the weekly research', () => {
+  const CREDIT = '400 {"error":{"message":"Your credit balance is too low to access the Anthropic API."}}'
+  const dead = [{ status: 'complete', stage: 'gather', error: CREDIT, trigger: 'scheduled', started_at: minsAgo(2 * 24 * 60) }]
+
+  it('a run that researched nothing is an issue, in plain words', () => {
+    const [i] = healthIssues({ settings: healthy, researchRuns: dead, now: NOW })
+    expect(i.key).toBe('research_run')
+    expect(i.title).toBe('Weekly research: The last run did not research anything: the Anthropic AI credit has run out')
+    expect(i.fix).toMatch(/Plans & Billing/)
+  })
+
+  it('a good run, or no research at all, is quiet', () => {
+    const good = [{ status: 'complete', stage: 'synthesise', error: '', trigger: 'scheduled', started_at: minsAgo(60) }]
+    expect(healthIssues({ settings: healthy, researchRuns: good, now: NOW })).toEqual([])
+    expect(healthIssues({ settings: healthy, researchRuns: [], now: NOW })).toEqual([])
+  })
+
+  it('is reminded weekly, not daily', () => {
+    const [i] = healthIssues({ settings: healthy, researchRuns: dead, now: NOW })
+    const first = plan([i], {}, NOW)
+    expect(first.fresh).toHaveLength(1)
+    const nextDay = plan([i], first.state, new Date(NOW.getTime() + REMIND_MS + 1))
+    expect(nextDay.remind).toHaveLength(0)
+    const nextWeek = plan([i], first.state, new Date(NOW.getTime() + 7 * 24 * 3_600_000 + 1))
+    expect(nextWeek.remind).toHaveLength(1)
+  })
+})
+
 describe('plan', () => {
   const issue = (key, extra = {}) => ({ key, title: key, detail: '', fix: '', ...extra })
   it('a new problem is emailed once, then stays quiet', () => {
@@ -65,10 +93,10 @@ describe('plan', () => {
 describe('alertEmail', () => {
   it('names the problem in the subject and says what to do', () => {
     const m = alertEmail({ fresh: [{ key: 'workbook', title: 'The leads workbook has stopped updating', detail: 'D', fix: 'F' }], pageUrl: 'https://app/leads' })
-    expect(m.subject).toBe('⚠️ Lead agent: The leads workbook has stopped updating')
+    expect(m.subject).toBe('⚠️ Arak agents: The leads workbook has stopped updating')
     expect(m.text).toContain('What to do: F')
     expect(m.html).toContain('href="https://app/leads"')
-    expect(alertEmail({ fixed: [{ title: 'A' }, { title: 'B' }] }).subject).toBe('✅ Lead agent: 2 problems fixed')
+    expect(alertEmail({ fixed: [{ title: 'A' }, { title: 'B' }] }).subject).toBe('✅ Arak agents: 2 problems fixed')
   })
 })
 
