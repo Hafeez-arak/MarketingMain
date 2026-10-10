@@ -1,4 +1,5 @@
 import { monthSpent } from './_intake.js'
+import { runHealth as researchHealth } from '../../src/lib/agent/runHealth.js'
 
 // ─── Lead agent: is everything still working? ──────────────────────────────
 // The owner's decision (2026-10-07): when any part stops, email
@@ -32,7 +33,7 @@ const ago = (ms) => {
  * The problems right now, from plain facts. Each has a stable key (so the
  * same problem is not emailed twice), a title, what it means, and the fix.
  */
-export function healthIssues({ settings = {}, mailboxes = [], failed = [], spent = 0, cap = null, key = null, now = new Date() }) {
+export function healthIssues({ settings = {}, mailboxes = [], failed = [], spent = 0, cap = null, key = null, researchRuns = [], now = new Date() }) {
   const issues = []
   const t = now.getTime()
   const since = (iso) => (iso ? t - Date.parse(iso) : null)
@@ -116,6 +117,25 @@ export function healthIssues({ settings = {}, mailboxes = [], failed = [], spent
     })
   }
 
+  // ── The weekly research ──
+  // Added 2026-10-10. The research runs on the n8n box once a week and had no
+  // alarm of its own: on 2026-09-28 and 10-05 both runs died on "credit
+  // balance is too low", were saved as complete, and nobody heard for two
+  // weeks. The same judgement the Research page shows, emailed here. Reminded
+  // weekly, not daily: a research problem only matters once per run.
+  const research = researchHealth(researchRuns, now)
+  if (research) {
+    issues.push({
+      key: 'research_run',
+      // A run that is merely slow clears by itself; the page already says so.
+      grace: research.level === 'stuck' ? 30 * 60_000 : 0,
+      remindEvery: 7 * 24 * 3_600_000,
+      title: `Weekly research: ${research.headline.replace(/\.$/, '')}`,
+      detail: research.detail || '',
+      fix: research.action || 'Open the Research page.',
+    })
+  }
+
   if (cap != null && Number(cap) > 0) {
     if (spent >= Number(cap)) {
       issues.push({
@@ -156,7 +176,7 @@ export function plan(issues, state = {}, now = new Date()) {
       if (t - Date.parse(since) >= (i.grace || 0)) { fresh.push(i); next[i.key] = { since, sentAt: iso, title: i.title } } else next[i.key] = { since, sentAt: null, title: i.title }
       continue
     }
-    if (t - Date.parse(was.sentAt) >= REMIND_MS) { remind.push(i); next[i.key] = { ...was, sentAt: iso, title: i.title }; continue }
+    if (t - Date.parse(was.sentAt) >= (i.remindEvery || REMIND_MS)) { remind.push(i); next[i.key] = { ...was, sentAt: iso, title: i.title }; continue }
     next[i.key] = { ...was, title: i.title }
   }
   // "Fixed" only for problems someone was told about.
@@ -170,13 +190,13 @@ const esc = (s) => String(s || '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<
 export function alertEmail({ fresh = [], remind = [], fixed = [], company = 'Arak Lighting', pageUrl = '' }) {
   const problems = [...fresh, ...remind]
   const subject = problems.length
-    ? `⚠️ Lead agent: ${problems.length === 1 ? problems[0].title : `${problems.length} problems need attention`}`
-    : `✅ Lead agent: ${fixed.length === 1 ? `fixed — ${fixed[0].title}` : `${fixed.length} problems fixed`}`
+    ? `⚠️ Arak agents: ${problems.length === 1 ? problems[0].title : `${problems.length} problems need attention`}`
+    : `✅ Arak agents: ${fixed.length === 1 ? `fixed — ${fixed[0].title}` : `${fixed.length} problems fixed`}`
   const lines = []
   const html = []
   if (problems.length) {
-    lines.push(`The lead agent for ${company} needs attention:`, '')
-    html.push(`<p>The lead agent for ${esc(company)} needs attention:</p>`)
+    lines.push(`The agents for ${company} need attention:`, '')
+    html.push(`<p>The agents for ${esc(company)} need attention:</p>`)
     for (const p of problems) {
       const tag = remind.includes(p) ? ' (still not fixed)' : ''
       lines.push(`• ${p.title}${tag}`, `  ${p.detail}`, `  What to do: ${p.fix}`, '')
@@ -208,14 +228,17 @@ export async function runHealth(deps, { workspaceId, force = false, pageUrl = ''
   if (settings.enabled === false) return { off: true }
 
   const failedSince = new Date(now.getTime() - 30 * 60_000).toISOString()
-  const [mailboxes, failed, [ws], key] = await Promise.all([
+  const [mailboxes, failed, [ws], key, researchRuns] = await Promise.all([
     deps.db(`lead_mailboxes?workspace_id=eq.${workspaceId}&select=email,label,status,last_checked_at,last_error`).then((r) => r || []),
     deps.db(`leads?workspace_id=eq.${workspaceId}&verdict=is.null&error=neq.&created_at=lt.${encodeURIComponent(failedSince)}&select=error&order=updated_at.desc&limit=50`).then((r) => r || []),
     deps.db(`workspaces?id=eq.${workspaceId}&select=name,agent_monthly_cap_usd`).then((r) => r || []),
     deps.keyInfo ? deps.keyInfo(workspaceId).catch(() => null) : null,
+    // Never allowed to break the lead checks: no research, no research issue.
+    deps.db(`research_runs?workspace_id=eq.${workspaceId}&select=status,stage,error,trigger,started_at,finished_at&order=started_at.desc&limit=10`)
+      .then((r) => r || []).catch(() => []),
   ])
   const spent = await monthSpent(deps.db, workspaceId, now)
-  const issues = healthIssues({ settings, mailboxes, failed, spent, cap: ws?.agent_monthly_cap_usd ?? null, key, now })
+  const issues = healthIssues({ settings, mailboxes, failed, spent, cap: ws?.agent_monthly_cap_usd ?? null, key, researchRuns, now })
   const p = plan(issues, settings.alert_state || {}, now)
 
   let sent = null

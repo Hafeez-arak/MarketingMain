@@ -1,5 +1,39 @@
 import { describe, it, expect } from 'vitest'
-import { runHealth, scheduleNeverRan, silentLensNote, STALE_DAYS, STUCK_MINUTES, SILENT_SOURCE_FLOOR } from './runHealth.js'
+import { runHealth, scheduleNeverRan, silentLensNote, explainRunError, STALE_DAYS, STUCK_MINUTES, SILENT_SOURCE_FLOOR } from './runHealth.js'
+
+describe('a run that completed without researching', () => {
+  const CREDIT = '400 {"type":"error","error":{"type":"invalid_request_error","message":"Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits."}}'
+  const at = new Date('2026-10-10T08:00:00Z')
+
+  it('is reported, not read as healthy (the 2026-09-28 and 10-05 runs)', () => {
+    const h = runHealth([{ status: 'complete', stage: 'gather', error: CREDIT, trigger: 'scheduled', started_at: '2026-10-05T09:03:00Z' }], at)
+    expect(h.level).toBe('failed')
+    expect(h.headline).toBe('The last run did not research anything: the Anthropic AI credit has run out.')
+    expect(h.action).toMatch(/Plans & Billing/)
+  })
+
+  it('a fully synthesised run is healthy', () => {
+    expect(runHealth([{ status: 'complete', stage: 'synthesise', error: '', started_at: '2026-10-05T09:03:00Z' }], at)).toBeNull()
+  })
+
+  it('names the spend cap in plain words', () => {
+    expect(explainRunError('This workspace has used its $15.00 agent budget for the month ($15.10 spent).').key).toBe('cap')
+  })
+
+  it('keeps an unknown error visible', () => {
+    const e = explainRunError('Something odd happened')
+    expect(e.key).toBe('other')
+    expect(e.detail).toBe('Something odd happened')
+  })
+
+  it('says "started by hand" only when it is true', () => {
+    const old = [
+      { status: 'complete', stage: 'synthesise', trigger: 'scheduled', started_at: '2026-09-17T07:00:00Z' },
+      { status: 'complete', stage: 'synthesise', trigger: 'manual', started_at: '2026-09-15T07:00:00Z' },
+    ]
+    expect(runHealth(old, at).detail).not.toMatch(/by hand/)
+  })
+})
 
 const NOW = new Date('2026-09-13T12:00:00Z')
 const run = (extra = {}) => ({

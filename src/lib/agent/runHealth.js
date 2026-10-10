@@ -80,6 +80,25 @@ export function runHealth(runs = [], now = new Date()) {
     }
   }
 
+  // ── "COMPLETE" WITHOUT ANY RESEARCH ──
+  //
+  // A run whose AI calls all fail is still written `complete` at stage
+  // `gather`: the measured numbers are real and worth keeping, and a cap-cut
+  // run must stay recoverable (synthesise.js says why). But it researched
+  // nothing, and this check used to read it as healthy. On 2026-09-28 and
+  // 2026-10-05 both weekly runs died on "credit balance is too low" — every
+  // call refused, $0 spent, nothing found — and the page said nothing for two
+  // weeks.
+  if (newest.status === 'complete' && newest.stage !== 'synthesise' && String(newest.error || '').trim()) {
+    const why = explainRunError(newest.error)
+    return {
+      level: 'failed',
+      headline: `The last run did not research anything: ${why.short}.`,
+      detail: why.detail,
+      action: why.action,
+    }
+  }
+
   const lastComplete = list.find(r => r.status === 'complete')
   if (!lastComplete) return null
 
@@ -88,12 +107,58 @@ export function runHealth(runs = [], now = new Date()) {
     return {
       level: 'stale',
       headline: `No research has completed in ${days} days.`,
-      detail: 'The weekly schedule may not be running. Every run in this workspace was started by hand.',
+      // Only claim "started by hand" when it is true. Since the box took over
+      // scheduling, runs are `scheduled`, and this line was a false statement.
+      detail: scheduleNeverRan(list)
+        ? 'The weekly schedule may not be running. Every run in this workspace was started by hand.'
+        : 'The weekly schedule may have stopped, or its runs are failing before they write anything.',
       action: 'Check that the weekly workflow is imported and active, or run it now.',
     }
   }
 
   return null
+}
+
+/**
+ * A run's error in words a person can act on.
+ *
+ * The stored error is the provider's raw 400, JSON and request id included —
+ * true, and useless to someone deciding what to do. The common causes each
+ * get their own sentence; anything else keeps the raw text so nothing is
+ * hidden.
+ */
+export function explainRunError(error = '') {
+  const raw = String(error || '')
+  if (/credit balance is too low|insufficient.?credit|purchase credits/i.test(raw)) {
+    return {
+      key: 'credit',
+      short: 'the Anthropic AI credit has run out',
+      detail: 'Every AI call was refused, so nothing was searched and nothing was charged. The measured numbers (our own posts and website) are still saved.',
+      action: 'Add credit at console.anthropic.com → Plans & Billing. The next weekly run will then work by itself, or press Run research.',
+    }
+  }
+  if (/agent budget for the month|monthly budget|spend cap|cap (reached|exceeded)/i.test(raw)) {
+    return {
+      key: 'cap',
+      short: 'this month\'s AI spending limit was reached',
+      detail: 'The run stopped before researching so it would not go over the company\'s monthly limit.',
+      action: 'Raise the monthly limit (agent_monthly_cap_usd), or wait for next month.',
+    }
+  }
+  if (/overloaded|rate.?limit|529|timeout|timed out/i.test(raw)) {
+    return {
+      key: 'busy',
+      short: 'the AI service was busy',
+      detail: raw.slice(0, 300),
+      action: 'Press Run research again; it usually works on the next try.',
+    }
+  }
+  return {
+    key: 'other',
+    short: 'the research step failed',
+    detail: raw.slice(0, 300) || 'No error was recorded.',
+    action: 'Read what it did manage, then run it again.',
+  }
 }
 
 /**
