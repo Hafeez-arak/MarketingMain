@@ -915,6 +915,171 @@ describe('I. other organisations, warm-up and the sending domain', () => {
   })
 })
 
+// ═══ J. What a cold-email platform does: wording, versions, lists ══════════
+
+describe('J. wording per prospect, A/B versions, list columns, late joiners, dead domains', () => {
+  const K = {}
+  const bodyOf = m => String(m.html || m.body?.content || '')
+  const sentTo = address => [...acct('sales1@arak-sa.com').sent, ...acct('sales2@arak-sa.com').sent].filter(m => m.to.includes(address))
+  /** Sending runs 40 minutes apart until this campaign has nothing due, or `max` runs. */
+  async function drain(campaignId, max = 20) {
+    for (let i = 0; i < max; i++) {
+      const queued = (await sends(campaignId)).filter(s => s.status === 'queued' && s.step === 0)
+      if (!queued.length) return
+      await app.q('update email_mailboxes set next_send_at = null')
+      await app.tick()
+      later(40 * MIN)
+    }
+  }
+
+  beforeAll(async () => {
+    at(Date.parse('2026-11-15T06:30:00Z'))   // Sunday 15 November, 09:30
+    await app.q("update email_sends set status = 'cancelled' where status in ('queued','sending')")
+    await app.q("update email_campaigns set status = 'sent' where status in ('sending','scheduled','paused')")
+    for (const email of ['sales1@arak-sa.com', 'sales2@arak-sa.com']) {
+      Object.assign(acct(email), { denyDrafts: false, throttle: false, blocked: false, revoked: false, rejectRecipient: null })
+      await app.connectMicrosoft(email)
+    }
+    await app.q("update email_mailboxes set status = 'active', status_reason = '', last_error = '', next_send_at = null where email in ('sales1@arak-sa.com','sales2@arak-sa.com')")
+    K.boxes = (await mailboxes()).filter(m => m.email.startsWith('sales')).map(m => m.id)
+    K.people = []
+    for (let i = 0; i < 8; i++) {
+      const c = await addContact({ email: `p${i}@jeddah${i}.sa`, first_name: `P${i}`, company: `Jeddah ${i}`, audience: 'cold' })
+      // The list's own column; the last prospect's row left it empty, one has no such column at all.
+      const custom = i === 7 ? {} : { ice_breaker: i === 6 ? '' : `Saw your tower number ${i}.` }
+      await app.q('update email_contacts set custom = $2::jsonb where id = $1', [c.id, JSON.stringify(custom)])
+      K.people.push(c)
+    }
+    K.group = await addGroup('Jeddah list', 'cold', K.people)
+  })
+
+  it('J1 a tag that is not a field or a list column, and a choice left open, stop the launch', async () => {
+    const a = await addCampaign({ name: 'Bad tag', group_ids: [K.group.id], mailbox_ids: K.boxes, body: 'Hi {{nickname}}', follow_ups: [] })
+    const r = await app.call('launch', { body: { campaign_id: a.id } })
+    expect(r.status).toBe(400)
+    expect(r.body.error).toMatch(/Unknown merge tag: \{\{nickname\}\}/)
+    const b = await addCampaign({ name: 'Open choice', group_ids: [K.group.id], mailbox_ids: K.boxes, body: '{Hi|Hello there', follow_ups: [] })
+    expect((await app.call('launch', { body: { campaign_id: b.id } })).body.error).toMatch(/not closed/)
+    expect(await sends(a.id)).toEqual([])
+  })
+
+  it('J2 each prospect gets one version and their own wording, list columns filled, never a raw tag or brace', async () => {
+    const c = await addCampaign({
+      name: 'Jeddah A/B', group_ids: [K.group.id], mailbox_ids: K.boxes,
+      subject: '{Lighting|Lights} for {{company}}',
+      body: '{Hi|Hello|Good morning} {{first_name|there}},\n\n{{ice_breaker|I came across your project.}}\n\n{Worth a short call|Open to a quick call}?',
+      follow_ups: [{ delay_days: 3, subject: '', body: 'Following up, {{first_name|there}}.' }],
+    })
+    await app.q(`update email_campaigns set variants = $2::jsonb where id = $1`, [c.id, JSON.stringify([
+      { subject: 'Version B for {{company}}', body: 'Hello {{first_name}}, a different opening. {{ice_breaker}}' },
+    ])])
+    K.ab = c
+    const r = await app.call('launch', { body: { campaign_id: c.id } })
+    expect(r.body).toMatchObject({ queued: 8 })
+    const rows = await sends(c.id)
+    const versions = new Set(rows.map(s => s.variant))
+    expect(versions).toEqual(new Set([0, 1]))   // 8 prospects, both versions used
+    await drain(c.id)
+    for (const s of await sends(c.id)) {
+      if (s.step !== 0) continue
+      expect(s.status).toBe('sent')
+      const [m] = sentTo(s.email)
+      const text = `${m.subject} ${bodyOf(m)}`
+      expect(text).not.toMatch(/\{\{|\}\}/)
+      expect(m.subject).not.toMatch(/[{}|]/)
+      const i = Number(s.email.match(/^p(\d)/)[1])
+      if (s.variant === 1) {
+        expect(m.subject).toBe(`Version B for Jeddah ${i}`)
+        expect(bodyOf(m)).toMatch(/a different opening/)
+      } else {
+        expect(m.subject).toMatch(new RegExp(`^(Lighting|Lights) for Jeddah ${i}$`))
+        expect(bodyOf(m)).toMatch(/^[\s\S]*(Hi|Hello|Good morning) P\d/)
+        // An empty cell, or no such column: the fallback, never the tag.
+        if (i >= 6) expect(bodyOf(m)).toMatch(/I came across your project\./)
+      }
+      if (i < 6) expect(bodyOf(m)).toContain(`Saw your tower number ${i}.`)
+    }
+    // Eight emails, not eight copies of one.
+    const firstLines = new Set((await sends(c.id)).filter(s => s.variant === 0).map(s => sentTo(s.email)[0].subject + bodyOf(sentTo(s.email)[0]).replace(/P\d|Jeddah \d|number \d|Saw your tower number \d\./g, '')))
+    expect(firstLines.size).toBeGreaterThan(1)
+  })
+
+  it('J3 the follow-up goes to the same thread whichever version a prospect had', async () => {
+    later(3 * DAY)
+    at(Date.parse('2026-11-18T06:30:00Z'))   // Wednesday 09:30
+    for (let i = 0; i < 12; i++) {
+      await app.q('update email_mailboxes set next_send_at = null')
+      await app.tick()
+      later(40 * MIN)
+    }
+    const fu = (await sends(K.ab.id)).filter(s => s.step === 1)
+    expect(fu.length).toBe(8)
+    expect(fu.filter(s => s.status === 'sent').length).toBeGreaterThan(0)
+    for (const s of fu.filter(x => x.status === 'sent')) {
+      const m = sentTo(s.email).find(x => x.inReplyTo)
+      expect(m.subject).toMatch(/^Re: /)
+    }
+  })
+
+  it('J4 someone put in a running campaign\'s group joins it on the next run; someone in another outreach does not', async () => {
+    at(Date.parse('2026-11-22T06:30:00Z'))   // Sunday 22 November, 09:30
+    const c = await addCampaign({ name: 'Late list', group_ids: [], mailbox_ids: K.boxes, follow_ups: [{ delay_days: 5, subject: '', body: 'Any thoughts?' }] })
+    const g = await addGroup('Late list', 'cold', [await addContact({ email: 'first@late.sa', first_name: 'First', company: 'Late', audience: 'cold' })])
+    await app.q('update email_campaigns set group_ids = $2::uuid[] where id = $1', [c.id, `{${g.id}}`])
+    expect((await app.call('launch', { body: { campaign_id: c.id } })).body).toMatchObject({ queued: 1 })
+    // The list arrives later: one new prospect, and one already in the Jeddah campaign.
+    const newcomer = await addContact({ email: 'newcomer@late.sa', first_name: 'New', company: 'Late', audience: 'cold' })
+    await app.q('insert into email_group_members (group_id,contact_id,workspace_id) values ($1,$2,$3),($1,$4,$3)', [g.id, newcomer.id, WS, K.people[0].id])
+    await app.q('update email_mailboxes set next_send_at = null')
+    const t = await app.tick()
+    expect(t.status).toBe(200)
+    expect(t.body.workspaces.find(w => w.workspaceId === WS).joined).toBe(1)
+    const rows = await sends(c.id)
+    expect(rows.filter(s => s.step === 0).map(s => s.email).sort()).toEqual(['first@late.sa', 'newcomer@late.sa'])
+    expect((await app.q('select recipients from email_campaigns where id = $1', [c.id]))[0].recipients).toBe(2)
+    // The next run adds nobody twice.
+    later(40 * MIN)
+    await app.q('update email_mailboxes set next_send_at = null')
+    expect((await app.tick()).body.workspaces.find(w => w.workspaceId === WS).joined).toBe(0)
+    await drain(c.id)
+    expect(sentTo('newcomer@late.sa')).toHaveLength(1)
+  })
+
+  it('J5 a prospect at a domain that cannot receive email is skipped before writing, and marked bounced', async () => {
+    app.world.dnsBroken.add('gone-company.sa')
+    const dead = await addContact({ email: 'ceo@gone-company.sa', first_name: 'Gone', company: 'Gone', audience: 'cold' })
+    const live = await addContact({ email: 'ceo@alive-company.sa', first_name: 'Alive', company: 'Alive', audience: 'cold' })
+    const g = await addGroup('Mixed domains', 'cold', [dead, live])
+    const c = await addCampaign({ name: 'Mixed domains', group_ids: [g.id], mailbox_ids: K.boxes, follow_ups: [{ delay_days: 3, subject: '', body: 'Again.' }] })
+    expect((await app.call('launch', { body: { campaign_id: c.id } })).body).toMatchObject({ queued: 2 })
+    await drain(c.id)
+    const rows = await sends(c.id)
+    const deadRow = rows.find(s => s.email === 'ceo@gone-company.sa' && s.step === 0)
+    expect(deadRow).toMatchObject({ status: 'skipped', error: 'The domain gone-company.sa does not accept email' })
+    expect(deadRow.bounced_at).toBeNull()   // it never left, so the mailbox's bounce rate is untouched
+    expect(rows.filter(s => s.email === 'ceo@gone-company.sa' && s.step > 0)).toEqual([])
+    expect((await contactOf('ceo@gone-company.sa')).status).toBe('bounced')
+    expect(sentTo('ceo@gone-company.sa')).toEqual([])
+    expect(sentTo('ceo@alive-company.sa')).toHaveLength(1)
+  })
+
+  it('J6 a list longer than one database page (1,050 people) is queued in full', async () => {
+    const values = Array.from({ length: 1050 }, (_, i) => `('${WS}', 'bulk${i}@bulk${i % 40}.sa', 'B${i}', 'cold', 'none', 'import')`).join(',')
+    const made = await app.q(`insert into email_contacts (workspace_id,email,first_name,audience,consent,source) values ${values} returning id`)
+    const g = await addGroup('Bulk 1050', 'cold')
+    await app.q(`insert into email_group_members (group_id,contact_id,workspace_id) select $1, id, $2 from email_contacts where workspace_id = $2 and email like 'bulk%'`, [g.id, WS])
+    expect(made).toHaveLength(1050)
+    const c = await addCampaign({ name: 'Bulk', group_ids: [g.id], mailbox_ids: K.boxes, follow_ups: [] })
+    const r = await app.call('launch', { body: { campaign_id: c.id } })
+    expect(r.body).toMatchObject({ queued: 1050 })
+    expect((await app.q('select count(*)::int as n from email_sends where campaign_id = $1', [c.id]))[0].n).toBe(1050)
+    // And the every-run top-up, which pages too, finds nobody new among them.
+    await app.q('update email_mailboxes set next_send_at = null')
+    expect((await app.tick()).body.workspaces.find(w => w.workspaceId === WS).joined).toBe(0)
+    await app.call('cancel', { body: { campaign_id: c.id } })
+  })
+})
+
 describe('Z. over the whole run', () => {
   it('Z1 not one database request was refused, even ones the app swallowed', () => {
     expect(dbErrors()).toEqual([])

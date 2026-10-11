@@ -21,6 +21,7 @@ export const EMAIL_MIGRATIONS = [
   '20261002_research_outreach_dismissed',
   '20261003_website_signup_key',
   '20261009_outreach_warmup_safety',
+  '20261011_outreach_variation',
 ]
 
 const PRELUDE = `
