@@ -1,6 +1,6 @@
 import {
   toEnvelope, findDuplicate, openRouterRequest, parseVerdict, sheetColumns, parseTime, QUALIFIER_MODEL,
-  websiteDomain, verdictColumns, emailKind,
+  websiteDomain, verdictColumns, emailKind, phonesFromImagesRequest, parsePhones, extractPhones, mergePhones,
 } from '../../src/lib/leads/qualify.js'
 import { spentInMonth, capDecision } from '../../src/lib/agent/budget.js'
 
@@ -84,6 +84,27 @@ export async function askModel(deps, { workspaceId, env, brand, surface = 'lead_
   }).catch(() => {})
   if (res.error) return { error: String(res.error).slice(0, 300), cost, model: body.model, site }
   return { verdict: parseVerdict(res.text), cost, model: body.model, site }
+}
+
+/**
+ * The phone numbers in a signature picture (qualify.js explains why). One
+ * model call for up to three images, recorded like any other. Never throws:
+ * a failure is simply no numbers.
+ */
+export async function askPhonesInImages(deps, { workspaceId, images }) {
+  if (!images?.length) return []
+  const body = phonesFromImagesRequest(images)
+  const res = await deps.model(body, workspaceId).catch((err) => ({ error: err.message }))
+  const usage = res.usage || {}
+  await deps.db('agent_usage', {
+    method: 'POST', prefer: 'return=minimal',
+    body: {
+      workspace_id: workspaceId, surface: 'lead_phones', model: body.model,
+      tokens_in: usage.prompt_tokens || 0, tokens_out: usage.completion_tokens || 0,
+      cost_usd: Number(usage.cost) || 0, error: res.error ? String(res.error).slice(0, 300) : '',
+    },
+  }).catch(() => {})
+  return res.error ? [] : parsePhones(res.text)
 }
 
 /**
@@ -184,7 +205,7 @@ async function qualifyRows(deps, { workspaceId, batch, now, started }) {
     const v = out.verdict
     const saved = await upsertLead(deps.db, {
       ...base, ...verdictColumns(v, { site: out.site, folder: 'website', email: env.email }),
-      model: out.model, cost_usd: out.cost, error: '',
+      phones: mergePhones([env.phone], extractPhones(env.message)), model: out.model, cost_usd: out.cost, error: '',
     })
     // Later rows in this same batch can be duplicates of this one.
     known.push({ id: saved?.id, sourceRef: env.sourceRef, email: env.email, phone: env.phone, message: env.message, receivedAt: base.received_at })

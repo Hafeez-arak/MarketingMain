@@ -236,3 +236,36 @@ describe('the website line in the prompt', () => {
     expect(sent).toContain('Website checked: nourcontracting.sa')
   })
 })
+
+describe('extractPhones', () => {
+  it('lists every number in a signature once, in order, keeping how it was written', async () => {
+    const { extractPhones } = await import('./qualify.js')
+    const sig = 'Best regards,\nOmar\nT: +966 11 465 0000 | M: 055 325 1417\nMob. 0553251417\nFax 011-465-0001'
+    expect(extractPhones(sig)).toEqual(['+966 11 465 0000', '055 325 1417', '011-465-0001'])
+  })
+  it('reads Arabic digits and Arabic labels', async () => {
+    const { extractPhones } = await import('./qualify.js')
+    expect(extractPhones('جوال: ٠٥٥٣٢٥١٤١٧')).toEqual(['0553251417'])
+  })
+  it('leaves RFQ, PO and product numbers, dates and quantities alone', async () => {
+    const { extractPhones } = await import('./qualify.js')
+    expect(extractPhones('RFQ 4500997042, PO 450099, item WTSTD14-27-90-10-1050, deadline 2026-10-20, 300 pcs')).toEqual([])
+  })
+})
+
+describe('phones from signature pictures', () => {
+  it('asks for the numbers in at most three images, privately, by schema', async () => {
+    const { phonesFromImagesRequest, PHONES_SCHEMA } = await import('./qualify.js')
+    const body = phonesFromImagesRequest([1, 2, 3, 4].map((i) => ({ contentType: 'image/png', base64: `AAA${i}` })))
+    expect(body.messages[0].content.filter((c) => c.type === 'image_url')).toHaveLength(3)
+    expect(body.messages[0].content[1].image_url.url).toBe('data:image/png;base64,AAA1')
+    expect(body.provider.data_collection).toBe('deny')
+    expect(body.response_format.json_schema).toBe(PHONES_SCHEMA)
+  })
+  it('keeps only real numbers from the reply, and merges lists without repeats', async () => {
+    const { parsePhones, mergePhones } = await import('./qualify.js')
+    expect(parsePhones('{"phones":["+966 55 325 1417","2026-10-20","Riyadh"]}')).toEqual(['+966 55 325 1417'])
+    expect(parsePhones('not json')).toEqual([])
+    expect(mergePhones(['+966553251417'], ['055 325 1417', '011 465 0000'])).toEqual(['+966553251417', '011 465 0000'])
+  })
+})

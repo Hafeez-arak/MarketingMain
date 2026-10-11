@@ -3,7 +3,7 @@ import { Button, Skeleton, Input, Select } from '../../components/ui/index'
 import { fetchLeadsPage } from '../../lib/leads/client'
 import {
   SHOW_OPTIONS, EMPTY_FILTERS, activeFilterCount, effectiveVerdict, PAGE_SIZE, pageLabel, pageCount, when,
-  SENDER_LABEL, PROJECT_LABEL, REQUEST_LABEL, FOLDER_LABEL, PHILIPS_LABEL,
+  SENDER_LABEL, PROJECT_LABEL, REQUEST_LABEL, FOLDER_LABEL, PHILIPS_LABEL, channelLabel, brandOf, phonesOf,
 } from '../../lib/leads/view'
 import { VerdictTag, LeadDetail } from './parts'
 
@@ -45,15 +45,17 @@ function Row({ lead, open, onToggle, onReview, workspaceId }) {
         className={`w-full text-left px-4 py-3 hover:bg-surface-subtle transition-colors grid grid-cols-2 gap-x-3 gap-y-1.5 ${GRID}`}>
         <Cell label="Received" className="col-span-2 md:col-span-1">
           <span className="text-[11px] text-text-secondary tabular-nums">{when(lead.received_at || lead.created_at)}</span>
-          <span className={`block text-[10px] mt-0.5 ${junk ? 'text-red-600 font-semibold' : 'text-text-tertiary'}`}>
-            {FOLDER_LABEL[lead.folder] || (lead.source === 'website_form' ? 'Website form' : 'Email')}
-          </span>
+          <span className="block text-[10px] mt-0.5 text-text-secondary font-semibold">{channelLabel(lead)}</span>
+          {lead.source === 'email' && lead.folder && (
+            <span className={`block text-[10px] ${junk ? 'text-red-600 font-semibold' : 'text-text-tertiary'}`}>{FOLDER_LABEL[lead.folder] || lead.folder}</span>
+          )}
         </Cell>
         <Cell label="From" className="col-span-2 md:col-span-1">
           <span className="text-sm font-semibold text-text truncate block" dir="auto">{lead.company || lead.name || lead.email || 'Unknown sender'}</span>
           <span className="text-[11px] text-text-tertiary truncate block">
-            {lead.email ? lead.email.split('@')[1] : lead.phone || ''}{lead.email_kind === 'free' ? ' · free email' : ''}
+            {lead.email ? lead.email.split('@')[1] : ''}{lead.email_kind === 'free' ? ' · free email' : ''}
           </span>
+          {phonesOf(lead)[0] && <span className="text-[11px] text-text-secondary truncate block tabular-nums" dir="ltr">{phonesOf(lead)[0]}{phonesOf(lead).length > 1 ? ` +${phonesOf(lead).length - 1}` : ''}</span>}
         </Cell>
         <Cell label="Wants" className="col-span-2 md:col-span-1">
           <span className="text-xs text-text line-clamp-2" dir="auto">{lead.summary || lead.subject || lead.message}</span>
@@ -86,7 +88,7 @@ function Row({ lead, open, onToggle, onReview, workspaceId }) {
   )
 }
 
-export default function LeadsBoard({ workspaceId, onReview, refreshKey = 0 }) {
+export default function LeadsBoard({ workspaceId, onReview, refreshKey = 0, mailboxes = [] }) {
   const [filters, setFilters] = useState(EMPTY_FILTERS)
   // The search box waits for a pause in typing before it asks the database.
   const [searchText, setSearchText] = useState('')
@@ -141,9 +143,14 @@ export default function LeadsBoard({ workspaceId, onReview, refreshKey = 0 }) {
   return (
     <div ref={top} className="bg-white border border-border min-w-0 scroll-mt-4">
       {/* ── Filters ── */}
-      <div className="p-4 border-b border-border grid grid-cols-2 md:grid-cols-4 xl:grid-cols-[1.3fr_1fr_1fr_1fr_1fr_1fr_1.5fr] gap-3 items-end">
+      <div className="p-4 border-b border-border grid grid-cols-2 md:grid-cols-4 xl:grid-cols-[1.3fr_1.1fr_1fr_1fr_1fr_1fr_1fr_1.5fr] gap-3 items-end">
         <Select label="Show" value={filters.show} onChange={set('show')} className="col-span-2 md:col-span-1">
           {SHOW_OPTIONS.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
+        </Select>
+        <Select label="Came in" value={filters.channel} onChange={set('channel')}>
+          <option value="">Anywhere</option>
+          <option value="website">{channelLabel({ source: 'website_form' })}</option>
+          {mailboxes.map((m) => <option key={m.id} value={m.label || m.email}>{brandOf(m.label || m.email)} email ({m.label || m.email})</option>)}
         </Select>
         <Select label="Who" value={filters.sender} onChange={set('sender')}>
           <option value="">Anyone</option>
@@ -157,8 +164,8 @@ export default function LeadsBoard({ workspaceId, onReview, refreshKey = 0 }) {
           <option value="">Any</option>
           {REQUEST_OPTIONS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
         </Select>
-        <Select label="Where it landed" value={filters.folder} onChange={set('folder')}>
-          <option value="">Anywhere</option>
+        <Select label="Folder" value={filters.folder} onChange={set('folder')}>
+          <option value="">Any</option>
           {FOLDER_OPTIONS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
         </Select>
         <Select label="Email" value={filters.emailKind} onChange={set('emailKind')}>

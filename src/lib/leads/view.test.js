@@ -93,3 +93,24 @@ describe('leadFilters', () => {
     expect(activeFilterCount({ ...EMPTY_FILTERS, search: 'x', folder: 'junk' })).toBe(2)
   })
 })
+
+describe('where a lead came in', () => {
+  it('says Arak website, Arak email or CLB email', async () => {
+    const { channelLabel, brandOf } = await import('./view.js')
+    expect(channelLabel({ source: 'website_form' })).toBe('Arak website')
+    expect(channelLabel({ source: 'email', mailbox: 'info@arak-sa.com' })).toBe('Arak email')
+    expect(channelLabel({ source: 'email', mailbox: 'info@clb-sa.com' })).toBe('CLB email')
+    expect(brandOf('info@ghusn.com')).toBe('Ghusn')
+  })
+  it('filters by the website or one mailbox', async () => {
+    const { leadFilters, EMPTY_FILTERS } = await import('./view.js')
+    expect(leadFilters({ ...EMPTY_FILTERS, channel: 'website' }).eqs).toEqual([['source', 'website_form']])
+    expect(leadFilters({ ...EMPTY_FILTERS, channel: 'info@clb-sa.com' }).eqs).toEqual([['mailbox', 'info@clb-sa.com']])
+  })
+  it('lists the stored phones, else the form\'s phone', async () => {
+    const { phonesOf } = await import('./view.js')
+    expect(phonesOf({ phones: ['055 1', '011 2'], phone: 'x' })).toEqual(['055 1', '011 2'])
+    expect(phonesOf({ phones: [], phone: '0550000000' })).toEqual(['0550000000'])
+    expect(phonesOf({})).toEqual([])
+  })
+})
