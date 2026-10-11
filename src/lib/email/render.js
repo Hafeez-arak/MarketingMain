@@ -18,6 +18,8 @@
 //              pixels in the design — a cold email that looks like a
 //              newsletter is read as one, by people and by filters.
 
+import { spin } from './variation.js'
+
 const MERGE_FIELDS = {
   first_name: c => c?.first_name,
   last_name: c => c?.last_name,
@@ -45,19 +47,43 @@ export function subscribeButton(label) {
   return `[${String(label || '').replace(/[[\]]/g, '').trim() || 'Subscribe'}]({{subscribe_url}})`
 }
 
+// Columns of an imported list beyond the standard ones (an icebreaker line,
+// an industry, a project name) are kept on the contact as `custom` and merge
+// like any field: {{icebreaker}}. A key is lower-case letters, digits and _.
+export const CUSTOM_KEY = /^[a-z][a-z0-9_]{0,39}$/
+
+/** The custom field keys across these contacts, sorted. */
+export function customKeysOf(contacts) {
+  const keys = new Set()
+  for (const c of contacts || []) {
+    for (const k of Object.keys(c?.custom || {})) if (CUSTOM_KEY.test(k) && !MERGE_FIELDS[k]) keys.add(k)
+  }
+  return [...keys].sort()
+}
+
 /**
  * Fill {{tags}}. An unknown tag is left exactly as written so a typo is
  * visible in the preview rather than silently becoming empty. A known tag with
  * no value and no fallback becomes empty, and the whitespace it leaves is
  * tidied ("Hi {{first_name}}," with no name → "Hi,").
+ *
+ * A custom field is known when this contact has it. With `anyCustom` (the
+ * sending run, after launch checked every tag) any other tag is taken as a
+ * custom field this contact lacks, so it becomes its fallback or nothing and
+ * a raw "{{tag}}" can never reach a prospect.
  * @param {object} [links]  { subscribeUrl } for the link tags
  */
-export function applyMergeTags(text, contact, links = {}) {
+export function applyMergeTags(text, contact, links = {}, { anyCustom = false } = {}) {
+  const custom = contact?.custom && typeof contact.custom === 'object' ? contact.custom : {}
   return String(text || '')
-    .replace(/\{\{\s*([a-z_]+)\s*(?:\|\s*([^}]*?)\s*)?\}\}/gi, (whole, key, fallback) => {
+    .replace(/\{\{\s*([a-z0-9_]+)\s*(?:\|\s*([^}]*?)\s*)?\}\}/gi, (whole, key, fallback) => {
       const k = key.toLowerCase()
       const get = MERGE_FIELDS[k]
-      if (!get) return LINK_FIELDS[k] ? String(LINK_FIELDS[k](links) || '') : whole
+      if (!get && LINK_FIELDS[k]) return String(LINK_FIELDS[k](links) || '')
+      if (!get && (Object.hasOwn(custom, k) || anyCustom)) {
+        return String(custom[k] ?? '').trim() || (fallback ?? '')
+      }
+      if (!get) return whole
       const value = String(get(contact) || '').trim()
       return value || (fallback ?? '')
     })
@@ -68,12 +94,16 @@ export function applyMergeTags(text, contact, links = {}) {
     .replace(/ {2,}/g, ' ')
 }
 
-/** Tags that are written but not known — shown as a warning in the composer. */
-export function unknownMergeTags(text) {
+/**
+ * Tags that are written but not known — shown as a warning in the composer.
+ * @param {string[]} [customKeys]  custom fields the recipients have
+ */
+export function unknownMergeTags(text, customKeys = []) {
+  const custom = new Set(customKeys)
   const out = new Set()
-  for (const m of String(text || '').matchAll(/\{\{\s*([a-z_]+)[^}]*\}\}/gi)) {
+  for (const m of String(text || '').matchAll(/\{\{\s*([a-z0-9_]+)[^}]*\}\}/gi)) {
     const k = m[1].toLowerCase()
-    if (!MERGE_FIELDS[k] && !LINK_FIELDS[k]) out.add(m[1])
+    if (!MERGE_FIELDS[k] && !LINK_FIELDS[k] && !custom.has(k)) out.add(m[1])
   }
   return [...out]
 }
@@ -177,18 +207,22 @@ export const FOOTER_COPY = {
  * @param {string} [args.unsubscribeUrl]
  * @param {string} [args.signature]      cold only: the sending mailbox's signature
  * @param {string} [args.subscribeUrl]   cold only: this recipient's newsletter sign-up link
+ * @param {string} [args.spinSeed]       cold only: resolves {a|b} choices (variation.js);
+ *                                       the same seed always gives the same wording
+ * @param {boolean} [args.anyCustom]     the sending run: unknown tags are custom fields this contact lacks
  * @returns {{ subject: string, html: string, text: string }}
  */
 export function renderEmail({
   audience, subject, preheader = '', body, language = 'en', contact = null,
-  sender = {}, unsubscribeUrl = '', signature = '', subscribeUrl = '',
+  sender = {}, unsubscribeUrl = '', signature = '', subscribeUrl = '', spinSeed = '', anyCustom = false,
 }) {
   const rtl = language === 'ar'
   const dir = rtl ? 'rtl' : 'ltr'
   const align = rtl ? 'right' : 'left'
   const links = { subscribeUrl }
-  const filledSubject = applyMergeTags(subject, contact, links).trim()
-  const filledBody = applyMergeTags(body, contact, links)
+  const spun = (text, part) => (audience === 'cold' && spinSeed ? spin(text, `${spinSeed}:${part}`) : text)
+  const filledSubject = applyMergeTags(spun(subject, 'subject'), contact, links, { anyCustom }).trim()
+  const filledBody = applyMergeTags(spun(body, 'body'), contact, links, { anyCustom })
   const brand = String(sender.from_name || '').trim()
 
   if (audience === 'cold') {

@@ -1,5 +1,6 @@
 import { pickRecipients, blockReason, fullName, REPLIES_GROUP } from '../../src/lib/email/contacts.js'
-import { renderEmail, applyMergeTags } from '../../src/lib/email/render.js'
+import { renderEmail, applyMergeTags, customKeysOf } from '../../src/lib/email/render.js'
+import { spinSeed, pickVersion, versionsOf } from '../../src/lib/email/variation.js'
 import { brandDateKey, brandWallToUtcISO } from '../../src/lib/brandTime.js'
 import {
   HARD_MAX_PER_WORKSPACE, RECONTACT_DAYS, mailboxReadiness, mailboxCap, inSendingWindow,
@@ -72,8 +73,9 @@ export async function launchColdCampaign({ db }, { workspaceId, campaignId, when
   if (!['draft', 'paused', 'scheduled'].includes(campaign.status)) {
     return { error: `This campaign is already ${campaign.status}.`, status: 409 }
   }
-  const problems = coldProblems(campaign)
-  if (problems.length) return { error: problems.join(' '), status: 400 }
+  // Every check but the merge tags, which need the recipients' list columns.
+  const early = coldProblems(campaign).filter(p => !p.startsWith('Unknown merge tag'))
+  if (early.length) return { error: early.join(' '), status: 400 }
   if (!campaign.group_ids?.length) return { error: 'Choose at least one group to send to.', status: 400 }
 
   // Mailboxes first: with none ready, nothing is queued at all.
@@ -87,34 +89,9 @@ export async function launchColdCampaign({ db }, { workspaceId, campaignId, when
     return { error: `No chosen mailbox can send yet. ${why}`, status: 409 }
   }
 
-  const groups = await db(`email_groups?workspace_id=eq.${workspaceId}&id=in.${inList(campaign.group_ids)}&select=id,audience`) || []
-  const usable = groups.filter(g => g.audience === 'cold').map(g => g.id)
-  if (!usable.length) return { error: 'None of the chosen groups is a cold group.', status: 400 }
-
-  const memberships = await db(`email_group_members?workspace_id=eq.${workspaceId}&group_id=in.${inList(usable)}&select=group_id,contact_id`) || []
-  const contactIds = [...new Set(memberships.map(m => m.contact_id))]
-  const contacts = []
-  for (let i = 0; i < contactIds.length; i += 200) {
-    const slice = contactIds.slice(i, i + 200)
-    contacts.push(...(await db(`email_contacts?workspace_id=eq.${workspaceId}&id=in.${inList(slice)}&select=*`) || []))
-  }
-  const { eligible, skipped } = pickRecipients({
-    contacts, memberships, groupIds: usable, audience: 'cold',
-    language: campaign.language_only ? campaign.language : null,
-  })
-
-  // Nobody gets two sequences at once, or a second one within 90 days.
-  const since = new Date(now.getTime() - RECONTACT_DAYS * DAY).toISOString()
-  const busy = new Set()
-  for (let i = 0; i < eligible.length; i += 200) {
-    const slice = eligible.slice(i, i + 200).map(c => c.id)
-    const rows = await db(
-      `email_sends?workspace_id=eq.${workspaceId}&contact_id=in.${inList(slice)}&campaign_id=neq.${campaign.id}` +
-      `&or=(sent_at.gte.${since},status.in.(queued,sending))&select=contact_id`,
-    ) || []
-    for (const r of rows) busy.add(r.contact_id)
-  }
-  const recipients = eligible.filter(c => !busy.has(c.id))
+  const picked = await pickColdRecipients(db, { ws: workspaceId, campaign, now })
+  if (picked.error) return { error: picked.error, status: 400 }
+  const { recipients, skipped, busy } = picked
   if (!recipients.length) {
     return {
       error: busy.size
@@ -123,19 +100,13 @@ export async function launchColdCampaign({ db }, { workspaceId, campaignId, when
       status: 400, skipped: skipped.length, recontact: busy.size,
     }
   }
+  const problems = coldProblems(campaign, { customKeys: customKeysOf(recipients) })
+  if (problems.length) return { error: problems.join(' '), status: 400 }
 
   const dueAt = when === 'schedule' && scheduleDate ? brandWallToUtcISO(scheduleDate, '09:00') : now.toISOString()
   if (!dueAt) return { error: 'That start date is not valid.', status: 400 }
 
-  const rows = recipients.map(c => ({
-    workspace_id: workspaceId, campaign_id: campaign.id, contact_id: c.id,
-    email: c.email, step: 0, status: 'queued', due_at: dueAt,
-  }))
-  for (let i = 0; i < rows.length; i += 500) {
-    await db('email_sends?on_conflict=campaign_id,contact_id,step', {
-      method: 'POST', body: rows.slice(i, i + 500), prefer: 'resolution=ignore-duplicates,return=minimal',
-    })
-  }
+  await queueFirstEmails(db, { ws: workspaceId, campaign, recipients, dueAt })
 
   const scheduled = when === 'schedule' && Date.parse(dueAt) > now.getTime()
   await db(`email_campaigns?id=eq.${campaign.id}&workspace_id=eq.${workspaceId}`, {
@@ -152,6 +123,112 @@ export async function launchColdCampaign({ db }, { workspaceId, campaignId, when
   })
   const perDay = ready.reduce((n, m) => n + mailboxCap(m, today).cap, 0)
   return { queued: recipients.length, skipped: skipped.length, recontact: busy.size, scheduled, dueAt, mailboxes: ready.length, perDay }
+}
+
+const PAGE = 1000
+
+/**
+ * Every row of a read, page by page. PostgREST answers at most its max-rows
+ * (1,000 on Supabase) per request, so a single read of a 2,500-person group
+ * would quietly return the first 1,000. `path` must carry an order.
+ */
+export async function readAll(db, path) {
+  const out = []
+  for (let offset = 0; ; offset += PAGE) {
+    const rows = await db(`${path}&limit=${PAGE}&offset=${offset}`) || []
+    out.push(...rows)
+    if (rows.length < PAGE) return out
+  }
+}
+
+/**
+ * Who a cold campaign may write to now: everyone in its cold groups who can
+ * receive outreach, minus anyone another campaign wrote to in the last 90
+ * days or is writing to now. With `onlyNew`, people this campaign already
+ * has are left out before anything else is read, which is what keeps the
+ * every-run top-up cheap.
+ * @returns {{ recipients, skipped, busy: Set } | { error }}
+ */
+export async function pickColdRecipients(db, { ws, campaign, now = new Date(), onlyNew = false }) {
+  const groups = await db(`email_groups?workspace_id=eq.${ws}&id=in.${inList(campaign.group_ids || [])}&select=id,audience`) || []
+  const usable = groups.filter(g => g.audience === 'cold').map(g => g.id)
+  if (!usable.length) return { error: 'None of the chosen groups is a cold group.' }
+
+  let memberships = await readAll(db, `email_group_members?workspace_id=eq.${ws}&group_id=in.${inList(usable)}&select=group_id,contact_id&order=contact_id.asc,group_id.asc`)
+  if (onlyNew) {
+    const have = new Set((await readAll(db, `email_sends?campaign_id=eq.${campaign.id}&step=eq.0&contact_id=not.is.null&select=contact_id&order=contact_id.asc`)).map(r => r.contact_id))
+    memberships = memberships.filter(m => !have.has(m.contact_id))
+    if (!memberships.length) return { recipients: [], skipped: [], busy: new Set() }
+  }
+  const contactIds = [...new Set(memberships.map(m => m.contact_id))]
+  const contacts = []
+  for (let i = 0; i < contactIds.length; i += 200) {
+    const slice = contactIds.slice(i, i + 200)
+    contacts.push(...(await db(`email_contacts?workspace_id=eq.${ws}&id=in.${inList(slice)}&select=*`) || []))
+  }
+  const { eligible, skipped } = pickRecipients({
+    contacts, memberships, groupIds: usable, audience: 'cold',
+    language: campaign.language_only ? campaign.language : null,
+  })
+
+  // Nobody gets two sequences at once, or a second one within 90 days.
+  const since = new Date(now.getTime() - RECONTACT_DAYS * DAY).toISOString()
+  const busy = new Set()
+  for (let i = 0; i < eligible.length; i += 200) {
+    const slice = eligible.slice(i, i + 200).map(c => c.id)
+    const rows = await db(
+      `email_sends?workspace_id=eq.${ws}&contact_id=in.${inList(slice)}&campaign_id=neq.${campaign.id}` +
+      `&or=(sent_at.gte.${since},status.in.(queued,sending))&select=contact_id`,
+    ) || []
+    for (const r of rows) busy.add(r.contact_id)
+  }
+  return { recipients: eligible.filter(c => !busy.has(c.id)), skipped, busy }
+}
+
+/**
+ * Queue step 0 for these prospects, each given its version of the first
+ * email (A/B/C) for good. Never twice: the unique (campaign, contact, step)
+ * makes a repeat a no-op. Returns how many rows were new.
+ */
+async function queueFirstEmails(db, { ws, campaign, recipients, dueAt }) {
+  const versions = 1 + versionsOf(campaign).length
+  const rows = recipients.map(c => ({
+    workspace_id: ws, campaign_id: campaign.id, contact_id: c.id,
+    email: c.email, step: 0, status: 'queued', due_at: dueAt,
+    variant: pickVersion(campaign.id, c.id, versions),
+  }))
+  let added = 0
+  for (let i = 0; i < rows.length; i += 500) {
+    const made = await db('email_sends?on_conflict=campaign_id,contact_id,step&select=id', {
+      method: 'POST', body: rows.slice(i, i + 500), prefer: 'resolution=ignore-duplicates,return=representation',
+    }) || []
+    added += made.length
+  }
+  return added
+}
+
+/**
+ * People put into a running campaign's groups after it started join it: the
+ * list that arrives next week is written to by the same sequence, at the
+ * same pace, without starting anything again. The same rules as a launch
+ * (lane, status, the 90-day rule), and a person never joins twice.
+ * @returns {number} how many joined
+ */
+export async function enrollNewMembers(db, { ws, campaign, now = new Date() }) {
+  if (campaign.status !== 'sending' || !campaign.group_ids?.length) return 0
+  const picked = await pickColdRecipients(db, { ws, campaign, now, onlyNew: true })
+  if (picked.error || !picked.recipients.length) return 0
+  // A list column the email needs that these newcomers' list does not have
+  // merges as empty (the run's anyCustom), so it cannot block them.
+  const added = await queueFirstEmails(db, { ws, campaign, recipients: picked.recipients, dueAt: now.toISOString() })
+  if (added) {
+    await db(`email_campaigns?id=eq.${campaign.id}&workspace_id=eq.${ws}`, {
+      method: 'PATCH', prefer: 'return=minimal',
+      body: { recipients: Number(campaign.recipients || 0) + added, updated_at: now.toISOString() },
+    })
+    campaign.recipients = Number(campaign.recipients || 0) + added
+  }
+  return added
 }
 
 /**
@@ -209,6 +286,17 @@ async function runWorkspace(deps, { ws, now, dryRun, out, result, pace }) {
   const campaigns = await db(`email_campaigns?workspace_id=eq.${ws}&audience=eq.cold&status=eq.sending&select=*`) || []
   const mailboxes = await db(`email_mailboxes?workspace_id=eq.${ws}&${providerFilter}&select=*&order=last_sent_at.asc.nullsfirst`) || []
   if (!campaigns.length && !dryRun) return
+  if (!dryRun) {
+    // New people in a running campaign's groups join it before anything is
+    // picked, so they are in the queue this very run. One campaign's failure
+    // never stops the sending.
+    out.joined = 0
+    for (const c of campaigns) {
+      try { out.joined += await enrollNewMembers(db, { ws, campaign: c, now }) } catch (err) {
+        out.joinError = String(err?.message || err).slice(0, 200)
+      }
+    }
+  }
 
   const today = brandDateKey(now)
   const dayStart = brandWallToUtcISO(today, '00:00')
@@ -300,7 +388,7 @@ async function runWorkspace(deps, { ws, now, dryRun, out, result, pace }) {
 /** A due follow-up for this mailbox first (it is part of a thread), then the next first email. */
 async function nextRow(db, { ws, mb, campaignIds, nowIso }) {
   const base = `email_sends?workspace_id=eq.${ws}&status=eq.queued&due_at=lte.${nowIso}&contact_id=not.is.null&campaign_id=in.${inList(campaignIds)}`
-  const cols = '&select=id,campaign_id,contact_id,email,step,subject,body,mailbox_id'
+  const cols = '&select=id,campaign_id,contact_id,email,step,subject,body,mailbox_id,variant'
   const [followUp] = await db(`${base}&mailbox_id=eq.${mb.id}&step=gt.0${cols}&order=due_at.asc&limit=1`) || []
   if (followUp) return followUp
   const [first] = await db(`${base}&mailbox_id=is.null&step=eq.0${cols}&order=due_at.asc,created_at.asc&limit=1`) || []
@@ -383,9 +471,31 @@ async function sendOne(deps, { ws, mb, row, campaign, now, cap }) {
     return { action: 'skipped', reason: `${row.email}: ${blocked}` }
   }
 
-  // ── What to send.
-  let subject = row.subject || campaign.subject
-  let body = row.body || campaign.body
+  // ── A first email to a domain that cannot receive mail can only bounce.
+  // Checked by DNS before the email is written; a lookup that fails or
+  // finds no MX record sends as before.
+  if (row.step === 0 && deps.mx) {
+    const domain = domainOf(contact.email)
+    const verdict = await deps.mx(domain).catch(() => 'unknown')
+    if (verdict === 'no') {
+      const why = `The domain ${domain} does not accept email`
+      await patchSend(db, row.id, { status: 'skipped', error: why, updated_at: nowIso })
+      await db(`email_contacts?id=eq.${contact.id}&workspace_id=eq.${ws}&status=eq.active`, {
+        method: 'PATCH', prefer: 'return=minimal', body: { status: 'bounced', updated_at: nowIso },
+      })
+      await db(`email_sends?workspace_id=eq.${ws}&contact_id=eq.${contact.id}&status=eq.queued`, {
+        method: 'PATCH', prefer: 'return=minimal', body: { status: 'cancelled', error: why, updated_at: nowIso },
+      })
+      await releaseMailbox()
+      return { action: 'skipped', reason: `${row.email}: ${why.toLowerCase()}; nothing was sent.` }
+    }
+  }
+
+  // ── What to send. The first email in this prospect's version (A, B or C).
+  const version = row.step === 0 && row.variant > 0 ? versionsOf(campaign)[row.variant - 1] : null
+  const opener = version && String(version.body || '').trim() ? version : campaign
+  let subject = row.subject || opener.subject
+  let body = row.body || opener.body
   let references = []
   if (row.step > 0) {
     const fu = (campaign.follow_ups || [])[row.step - 1]
@@ -414,6 +524,9 @@ async function sendOne(deps, { ws, mb, row, campaign, now, cap }) {
   const rendered = renderEmail({
     audience: 'cold', subject, body, language: campaign.language, contact, signature: mb.signature,
     subscribeUrl: subscribeUrl(deps.baseUrl, contact.unsubscribe_token),
+    // The prospect's own wording of every {a|b} choice; list columns this
+    // contact lacks merge as their fallback or nothing, never as raw tags.
+    spinSeed: spinSeed(campaign.id, row.step, contact), anyCustom: true,
   })
   const res = await deps.mail.send(mb, password, {
     from: { name: mb.from_name || '', address: mb.email },

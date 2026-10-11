@@ -65,6 +65,31 @@ function defaultResolver() {
   return dohResolver()
 }
 
+/**
+ * Can this RECIPIENT domain receive email at all? Checked before a first
+ * outreach email, the free half of address checking: a prospect at a domain
+ * that does not exist, or that publishes a "null MX" (RFC 7505: "0 ."), can
+ * only bounce, and every bounce costs the sending domain.
+ *
+ *   'no'       the domain does not exist, or says it takes no mail
+ *   'yes'      it has a mail server
+ *   'unknown'  no MX (mail may still go to its A record) or the lookup
+ *              failed: the email is sent, as it would have been before
+ */
+export async function acceptsMail(domain, { resolver = defaultResolver() } = {}) {
+  const d = String(domain || '').trim().toLowerCase()
+  if (!d || !d.includes('.')) return 'no'
+  try {
+    const mx = await resolver.resolveMx(d)
+    const real = (mx || []).filter(r => r.exchange && r.exchange !== '.')
+    if (real.length) return 'yes'
+    return (mx || []).length ? 'no' : 'unknown'
+  } catch (err) {
+    if (err?.code === 'ENOTFOUND' || err?.code === 'NXDOMAIN') return 'no'
+    return 'unknown'
+  }
+}
+
 /** [] when the record is absent; throws only when the lookup itself failed. */
 async function ask(fn) {
   try { return await fn() } catch (err) {

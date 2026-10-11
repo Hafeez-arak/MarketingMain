@@ -36,6 +36,7 @@ import { daysBetween } from './warmup.js'
 import { normalizeEmail, isValidEmail } from './contacts.js'
 import { unknownMergeTags } from './render.js'
 import { dnsBlockReason } from './domainCheck.js'
+import { spinProblem, versionsOf, versionLetter } from './variation.js'
 
 export const HARD_MAX_PER_MAILBOX = 40      // per day, whatever daily_limit says
 // The providers the sending run uses. 'instantly' is reserved, not built.
@@ -327,19 +328,42 @@ export function addDays(dateKey, n) {
   return new Date(t + n * 86_400_000).toISOString().slice(0, 10)
 }
 
-/** What a cold campaign is missing before it may start. Empty = ready. */
-export function coldProblems(campaign) {
+/**
+ * What a cold campaign is missing before it may start. Empty = ready.
+ * @param {object} [opts]
+ * @param {string[]} [opts.customKeys]  custom fields the recipients have ({{icebreaker}})
+ */
+export function coldProblems(campaign, { customKeys = [] } = {}) {
   const out = []
   if (!String(campaign?.subject || '').trim()) out.push('Add a subject line.')
   if (!String(campaign?.body || '').trim()) out.push('Write the first email.')
+  const versions = versionsOf(campaign)
+  versions.forEach((v, i) => {
+    const name = `Version ${versionLetter(i + 1)}`
+    if (!String(v?.subject || '').trim()) out.push(`${name} needs a subject line.`)
+    if (!String(v?.body || '').trim()) out.push(`${name} is empty: write it or remove it.`)
+  })
   const followUps = Array.isArray(campaign?.follow_ups) ? campaign.follow_ups : []
   followUps.forEach((f, i) => {
     if (!String(f?.body || '').trim()) out.push(`Follow-up ${i + 1} is empty: write it or remove it.`)
     const d = Number(f?.delay_days)
     if (!Number.isFinite(d) || d < 1 || d > 30) out.push(`Follow-up ${i + 1} needs a wait of 1 to 30 days.`)
   })
-  const text = [campaign?.subject, campaign?.body, ...followUps.flatMap(f => [f?.subject, f?.body])].join(' ')
-  const unknown = unknownMergeTags(text)
-  if (unknown.length) out.push(`Unknown merge tag: ${unknown.map(t => `{{${t}}}`).join(', ')}.`)
+  const parts = [
+    ['the first email', campaign?.subject, campaign?.body],
+    ...versions.map((v, i) => [`version ${versionLetter(i + 1)}`, v?.subject, v?.body]),
+    ...followUps.map((f, i) => [`follow-up ${i + 1}`, f?.subject, f?.body]),
+  ]
+  for (const [name, subject, body] of parts) {
+    const problem = spinProblem(subject) || spinProblem(body)
+    if (problem) out.push(`In ${name}: ${problem}`)
+  }
+  const text = parts.flatMap(([, s, b]) => [s, b]).join(' ')
+  const unknown = unknownMergeTags(text, customKeys)
+  if (unknown.length) {
+    out.push(`Unknown merge tag: ${unknown.map(t => `{{${t}}}`).join(', ')}. ${customKeys.length
+      ? 'Use a standard field or a column from your imported list.'
+      : 'Import a list with that column first, or use a standard field.'}`)
+  }
   return out
 }

@@ -14,7 +14,7 @@ import {
   sendingStats, closeFinished, websiteSignup,
 } from './_engine.js'
 import { launchColdCampaign, coldTick, readReplies, resolveStuck, resolveStuckByHand, refreshDomainCheck } from './_cold.js'
-import { lookupDomain } from './_dns.js'
+import { lookupDomain, acceptsMail } from './_dns.js'
 import { sealSecret, openSecret } from './_secrets.js'
 import { verifyMailbox, sendFromMailbox } from './_mailbox.js'
 import {
@@ -152,6 +152,18 @@ const sendBy = (mb, secret, message) => (mb.provider === 'microsoft'
   ? graphMail().send(mb, secret, message)
   : sendFromMailbox(mb, secret, message))
 
+// Recipient domains already looked up, for an hour: a list of 500 people at
+// 40 companies costs 40 lookups, not 500.
+const mxSeen = new Map()
+function recipientDomainOk(domain) {
+  const hit = mxSeen.get(domain)
+  if (hit && Date.now() - hit.at < 3_600_000) return hit.verdict
+  const verdict = acceptsMail(domain)
+  mxSeen.set(domain, { verdict, at: Date.now() })
+  if (mxSeen.size > 5000) mxSeen.delete(mxSeen.keys().next().value)
+  return verdict
+}
+
 // The cold lane's IO: our own mailboxes, never Resend. `baseUrl` builds each
 // email's newsletter sign-up link.
 const coldDeps = (req = null) => ({
@@ -163,6 +175,8 @@ const coldDeps = (req = null) => ({
   },
   open: sealed => openSecret(sealed, SERVICE_KEY),
   dns: (domain, kind) => lookupDomain(domain, kind),
+  // Can a prospect's domain receive email at all? Checked before a first email.
+  mx: domain => recipientDomainOk(domain),
   uuid: () => crypto.randomUUID(),
   random: Math.random,
   // The run's rhythm: a real wait before each outreach email. Only the

@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Card, Button, Input, Select, Textarea, Modal, ConfirmDialog, Empty, Skeleton, SectionHead } from '../../components/ui/index'
 import { pickRecipients, displayName } from '../../lib/email/contacts'
-import { renderEmail, marketingProblems, MERGE_TAGS, applyMergeTags, toPlainText, subscribeButton } from '../../lib/email/render'
+import { renderEmail, marketingProblems, MERGE_TAGS, applyMergeTags, toPlainText, subscribeButton, customKeysOf } from '../../lib/email/render'
+import { spin, spinSeed, wordingCount, versionsOf, versionLetter, versionResults, pickVersion, MAX_VERSIONS } from '../../lib/email/variation'
 import { brandTodayKey } from '../../lib/brandTime'
 import { mailboxReadiness, mailboxCap, coldProblems } from '../../lib/email/cold'
 import { saveCampaign, deleteCampaign, fetchCampaignSends, emailApi, fetchBrandKit, duplicateCampaign } from '../../lib/email/client'
@@ -25,7 +26,7 @@ import { StuckSends } from './StuckSends'
 const EMPTY = {
   marketing: { name: '', subject: '', preheader: '', body: '', language: 'en', language_only: false, group_ids: [], follow_ups: [] },
   cold: {
-    name: '', subject: '', preheader: '', body: '', language: 'en', language_only: false, group_ids: [], mailbox_ids: [],
+    name: '', subject: '', preheader: '', body: '', language: 'en', language_only: false, group_ids: [], mailbox_ids: [], variants: [],
     follow_ups: [
       { delay_days: 3, subject: '', body: '' },
       { delay_days: 5, subject: '', body: '' },
@@ -198,7 +199,7 @@ function ColdLaneNotice({ data, setTab }) {
 function Composer({ audience, campaign, data, workspaceId, reload, setTab, status }) {
   const cold = audience === 'cold'
   const [form, setForm] = useState(() => campaign
-    ? { ...EMPTY[audience], ...campaign, follow_ups: Array.isArray(campaign.follow_ups) ? campaign.follow_ups : [] }
+    ? { ...EMPTY[audience], ...campaign, follow_ups: Array.isArray(campaign.follow_ups) ? campaign.follow_ups : [], variants: versionsOf(campaign) }
     : { ...EMPTY[audience] })
   const [id, setId] = useState(campaign?.id || null)
   const [dirty, setDirty] = useState(false)
@@ -206,6 +207,8 @@ function Composer({ audience, campaign, data, workspaceId, reload, setTab, statu
   const [message, setMessage] = useState(null)   // { tone, text }
   const [previewIdx, setPreviewIdx] = useState(0)
   const [editingStep, setEditingStep] = useState(0)   // cold: 0 = first email, n = follow-up n
+  const [editingVersion, setEditingVersion] = useState(0)   // cold first email: 0 = A, 1 = B, 2 = C
+  const [wordingNonce, setWordingNonce] = useState(0)   // "Another wording" on the sample contact
   const bodyRef = useRef(null)
   const settings = data.settings || status?.settings || {}
   // A new marketing email starts at the template gallery, the way Brevo's does.
@@ -237,16 +240,22 @@ function Composer({ audience, campaign, data, workspaceId, reload, setTab, statu
     return [...m.entries()]
   }, [recipients.skipped])
 
-  // What is being edited: the first email or one follow-up.
+  // What is being edited: the first email (version A, B or C) or one follow-up.
   const step = cold && editingStep > 0 ? form.follow_ups[editingStep - 1] : null
+  const version = cold && !step && editingVersion > 0 ? (form.variants || [])[editingVersion - 1] : null
   const current = step
     ? { subject: step.subject || `Re: ${form.subject}`, body: step.body }
-    : { subject: form.subject, body: form.body }
+    : version ? { subject: version.subject, body: version.body } : { subject: form.subject, body: form.body }
   // Functional updates throughout: applying an AI draft sets subject and body
   // in one go, and two updates built from the same stale `form` would each
   // undo the other.
   function updateCurrent(patch) {
     setDirty(true)
+    if (version) {
+      const vi = editingVersion - 1
+      setForm(f => ({ ...f, variants: (f.variants || []).map((x, i) => (i === vi ? { ...x, ...patch } : x)) }))
+      return
+    }
     if (!step) { setForm(f => ({ ...f, ...patch })); return }
     const idx = editingStep - 1
     setForm(f => ({ ...f, follow_ups: f.follow_ups.map((x, i) => (i === idx ? { ...x, ...patch } : x)) }))
@@ -256,19 +265,27 @@ function Composer({ audience, campaign, data, workspaceId, reload, setTab, statu
   const designed = !cold && hasDesign(form.design)
   const setDesign = design => { setForm(f => ({ ...f, design })); setDirty(true) }
 
-  const sample = useMemo(() => recipients.eligible[previewIdx] || recipients.eligible[0] || SAMPLE_CONTACT, [recipients.eligible, previewIdx])
+  const sample = useMemo(() => recipients.eligible[previewIdx] || recipients.eligible[0] || { ...SAMPLE_CONTACT, id: `sample-${wordingNonce}` },
+    [recipients.eligible, previewIdx, wordingNonce])
+  // The list columns these prospects have, for "Insert field" and the tag check.
+  const customKeys = useMemo(() => customKeysOf(cold ? recipients.eligible : []), [cold, recipients.eligible])
+  const wordings = cold ? wordingCount(current.subject) * wordingCount(current.body) : 1
+  // The sample's own version of the first email, to say whether this preview is what they get.
+  const sampleVersion = cold && sample.id ? pickVersion(id || 'new', sample.id, 1 + (form.variants || []).length) : 0
   const signature = cold ? (sendingMailboxes[0]?.signature || '') : ''
   const preview = useMemo(() => renderEmail({
     audience, subject: current.subject, preheader: step ? '' : form.preheader, body: current.body,
     language: form.language, contact: sample,
     sender: { from_name: settings.from_name, company_address: settings.company_address },
     unsubscribeUrl: cold ? '' : '#unsubscribe', signature, subscribeUrl: cold ? TEST_SUBSCRIBE_URL : '',
-  }), [audience, current.subject, current.body, form.preheader, form.language, sample, settings.from_name, settings.company_address, cold, step, signature])
+    // The same seed the sending run uses, so this is the wording this prospect gets.
+    spinSeed: cold ? spinSeed(id, editingStep, sample) : '',
+  }), [audience, current.subject, current.body, form.preheader, form.language, sample, settings.from_name, settings.company_address, cold, step, signature, id, editingStep])
 
   const checks = designed ? designChecks(form.design) : { problems: [], warnings: [] }
   // Cold: the same check the server makes at launch, follow-ups included.
   const problems = cold
-    ? coldProblems(form)
+    ? coldProblems(form, { customKeys })
     : [...marketingProblems({ subject: form.subject, body: designed ? 'designed' : form.body, sender: settings }), ...checks.problems]
   const warnings = checks.warnings
 
@@ -391,7 +408,7 @@ function Composer({ audience, campaign, data, workspaceId, reload, setTab, statu
       {cold ? (
         <div className="flex flex-wrap gap-2">
           <Button variant="secondary" disabled={!recipients.eligible.length || !form.body.trim()}
-            onClick={() => download(`outreach-${(form.name || 'campaign').replace(/\W+/g, '-').toLowerCase()}.csv`, coldExport(form, recipients.eligible))}>
+            onClick={() => download(`outreach-${(form.name || 'campaign').replace(/\W+/g, '-').toLowerCase()}.csv`, coldExport(form, recipients.eligible, id))}>
             Export personalised emails (CSV)
           </Button>
           <Button onClick={async () => { const saved = await save({ quiet: true }); if (saved) setConfirmLaunch(true) }}
@@ -488,7 +505,7 @@ function Composer({ audience, campaign, data, workspaceId, reload, setTab, statu
             {cold && (
               <div className="flex flex-wrap gap-0">
                 {[0, ...form.follow_ups.map((_, i) => i + 1)].map(i => (
-                  <button key={i} onClick={() => setEditingStep(i)}
+                  <button key={i} onClick={() => { setEditingStep(i); setEditingVersion(0) }}
                     className={`px-3 py-1.5 text-xs font-semibold border -ml-px first:ml-0 ${editingStep === i ? 'bg-amber-700 text-white border-amber-700 relative z-10' : 'bg-white text-text-secondary border-border hover:bg-surface-subtle'}`}>
                     {i === 0 ? 'First email' : `Follow-up ${i}`}
                   </button>
@@ -496,6 +513,38 @@ function Composer({ audience, campaign, data, workspaceId, reload, setTab, statu
                 {form.follow_ups.length < 3 && (
                   <button onClick={() => { set('follow_ups', [...form.follow_ups, { delay_days: 4, subject: '', body: '' }]); setEditingStep(form.follow_ups.length + 1) }}
                     className="px-3 py-1.5 text-xs border border-dashed border-border -ml-px text-text-tertiary hover:text-text">+ Follow-up</button>
+                )}
+              </div>
+            )}
+
+            {cold && !step && (
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-[11px] text-text-tertiary">Versions</span>
+                {[0, ...(form.variants || []).map((_, i) => i + 1)].map(v => (
+                  <button key={v} onClick={() => setEditingVersion(v)}
+                    className={`px-2 py-0.5 text-[11px] font-semibold border ${editingVersion === v ? 'border-amber-700 bg-amber-50 text-text' : 'border-border text-text-secondary hover:border-stone-400'}`}>
+                    {versionLetter(v)}
+                  </button>
+                ))}
+                {(form.variants || []).length < MAX_VERSIONS - 1 && (
+                  <button className="px-2 py-0.5 text-[11px] border border-dashed border-border text-text-tertiary hover:text-text"
+                    onClick={() => {
+                      const n = (form.variants || []).length + 1
+                      set('variants', [...(form.variants || []), { subject: form.subject, body: form.body }])
+                      setEditingVersion(n)
+                    }}>
+                    + Version {versionLetter((form.variants || []).length + 1)} to test
+                  </button>
+                )}
+                {version && (
+                  <button className="text-[11px] text-text-tertiary underline hover:text-text" onClick={() => {
+                    set('variants', (form.variants || []).filter((_, i) => i !== editingVersion - 1)); setEditingVersion(0)
+                  }}>Remove version {versionLetter(editingVersion)}</button>
+                )}
+                {(form.variants || []).length > 0 && (
+                  <span className="text-[11px] text-text-tertiary w-full">
+                    Prospects are split evenly between {[0, ...(form.variants || []).map((_, i) => i + 1)].map(versionLetter).join(', ')}; follow-ups are the same for all. The campaign page compares their reply rates.
+                  </span>
                 )}
               </div>
             )}
@@ -509,8 +558,9 @@ function Composer({ audience, campaign, data, workspaceId, reload, setTab, statu
               </div>
             ) : (
               <>
-                <Input label="Subject" value={form.subject} onChange={e => set('subject', e.target.value)} maxLength={120}
-                  hint={`${form.subject.length}/60 characters is the most that shows on a phone.`} />
+                <Input label={version ? `Subject (version ${versionLetter(editingVersion)})` : 'Subject'} value={current.subject || ''}
+                  onChange={e => setCurrent('subject', e.target.value)} maxLength={160}
+                  hint={`${String(current.subject || '').length}/60 characters is the most that shows on a phone.`} />
                 {!cold && (
                   <Input label="Preview line" value={form.preheader} onChange={e => set('preheader', e.target.value)} maxLength={140}
                     hint="The grey line after the subject in the inbox. Add to the subject; do not repeat it." />
@@ -529,10 +579,20 @@ function Composer({ audience, campaign, data, workspaceId, reload, setTab, statu
                   </ToolButton>
                 )}
                 <ToolButton onClick={() => insertAtCursor('\n- ')}>Bullet</ToolButton>
+                {cold && (
+                  <ToolButton onClick={() => insertAtCursor(sel => `{${sel || (form.language === 'ar' ? 'مرحباً' : 'Hi')}|${form.language === 'ar' ? 'أهلاً' : 'Hello'}}`)}>
+                    Vary wording
+                  </ToolButton>
+                )}
                 <select className="text-[11px] border border-border bg-white px-1.5 py-1 text-text-secondary" value=""
                   onChange={e => { if (e.target.value) insertAtCursor(`{{${e.target.value}${e.target.value === 'first_name' ? '|there' : ''}}}`) }}>
                   <option value="">Insert field…</option>
                   {MERGE_TAGS.map(t => <option key={t} value={t}>{t.replace('_', ' ')}</option>)}
+                  {customKeys.length > 0 && (
+                    <optgroup label="From your imported list">
+                      {customKeys.map(t => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}
+                    </optgroup>
+                  )}
                 </select>
                 <div className="flex-1" />
                 {!cold && !step && (
@@ -550,9 +610,14 @@ function Composer({ audience, campaign, data, workspaceId, reload, setTab, statu
               <p className="text-[11px] text-text-tertiary mt-1">
                 Blank line = new paragraph. **bold**, [text](link), “- ” for bullets. {'{{first_name|there}}'} uses “there” when a name is missing.
                 {cold
-                  ? ' The opt-out sentence is added automatically. A Sign-up button lets the reader join your newsletter in one click; they move to the Subscribers tab and get no more outreach. English and Arabic may share one email: each paragraph takes its own direction.'
+                  ? ' {Hi|Hello|Good morning} gives each prospect one of the options, so no two emails are word for word the same (select words and press Vary wording). The opt-out sentence is added automatically. A Sign-up button lets the reader join your newsletter in one click; they move to the Subscribers tab and get no more outreach. English and Arabic may share one email: each paragraph takes its own direction.'
                   : ' The footer with your address and the unsubscribe link is added automatically.'}
               </p>
+              {cold && wordings > 1 && (
+                <p className="text-[11px] text-sage-700 mt-1">
+                  This {step ? 'follow-up' : 'email'} can come out {wordings >= 1_000_000 ? 'over a million' : wordings.toLocaleString()} different ways. Each prospect always gets the same one.
+                </p>
+              )}
               {step && (
                 <div className="flex justify-end mt-2">
                   <Button size="xs" variant="ghost" onClick={() => { set('follow_ups', form.follow_ups.filter((_, i) => i !== editingStep - 1)); setEditingStep(0) }}>Remove this follow-up</Button>
@@ -566,14 +631,27 @@ function Composer({ audience, campaign, data, workspaceId, reload, setTab, statu
         <div className="space-y-4 xl:sticky xl:top-4">
           <Card>
             <div className="px-4 py-2.5 border-b border-border flex flex-wrap items-center justify-between gap-2">
-              <p className="text-xs font-semibold text-text">Preview</p>
-              {recipients.eligible.length > 0 && (
-                <select className="text-[11px] border border-border bg-white px-1.5 py-1 text-text-secondary max-w-[220px]" value={previewIdx}
-                  onChange={e => setPreviewIdx(Number(e.target.value))}>
-                  {recipients.eligible.slice(0, 50).map((c, i) => <option key={c.id} value={i}>As {displayName(c)}</option>)}
-                </select>
-              )}
+              <p className="text-xs font-semibold text-text">Preview{cold && !step && (form.variants || []).length > 0 ? ` · version ${versionLetter(editingVersion)}` : ''}</p>
+              <div className="flex items-center gap-2">
+                {cold && wordings > 1 && (
+                  <Button size="xs" variant="ghost" onClick={() => {
+                    if (recipients.eligible.length > 1) setPreviewIdx(i => (i + 1) % Math.min(50, recipients.eligible.length))
+                    else setWordingNonce(n => n + 1)
+                  }}>Another wording</Button>
+                )}
+                {recipients.eligible.length > 0 && (
+                  <select className="text-[11px] border border-border bg-white px-1.5 py-1 text-text-secondary max-w-[220px]" value={previewIdx}
+                    onChange={e => setPreviewIdx(Number(e.target.value))}>
+                    {recipients.eligible.slice(0, 50).map((c, i) => <option key={c.id} value={i}>As {displayName(c)}</option>)}
+                  </select>
+                )}
+              </div>
             </div>
+            {cold && !step && (form.variants || []).length > 0 && recipients.eligible.length > 0 && sampleVersion !== editingVersion && (
+              <p className="px-4 py-1.5 border-b border-border text-[11px] text-text-tertiary">
+                {displayName(sample)} is given version {versionLetter(sampleVersion)}; this shows them version {versionLetter(editingVersion)} only to check the wording.
+              </p>
+            )}
             <div className="px-4 py-2 border-b border-border text-xs space-y-0.5">
               <p className="text-text-tertiary">From <span className="text-text">{cold
                 ? <ColdSenders mailboxes={sendingMailboxes} />
@@ -595,7 +673,7 @@ function Composer({ audience, campaign, data, workspaceId, reload, setTab, statu
           onClose={() => setAiOpen(false)}
           designed={designed}
           onUse={(opt, { textOnly = false } = {}) => {
-            if (step) updateCurrent({ subject: opt.subject, body: opt.body })
+            if (step || version) updateCurrent({ subject: opt.subject, body: opt.body })
             else setForm(f => {
               const next = { ...f, subject: opt.subject, body: opt.body, preheader: cold ? '' : (opt.preheader || f.preheader), name: f.name || opt.angle }
               // In a design, the option's text becomes the blocks — keeping the
@@ -691,15 +769,19 @@ function ToolButton({ onClick, children }) {
 }
 
 /** One row per prospect, first email merged, for sending by hand until the mailbox exists. */
-function coldExport(form, contacts) {
+function coldExport(form, contacts, campaignId) {
   const cell = v => { const s = String(v ?? ''); return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s }
-  const header = ['email', 'name', 'company', 'subject', 'body', ...form.follow_ups.flatMap((_, i) => [`follow_up_${i + 1}_after_days`, `follow_up_${i + 1}_body`])]
+  const versions = [form, ...versionsOf(form)]
+  const header = ['email', 'name', 'company', 'version', 'subject', 'body', ...form.follow_ups.flatMap((_, i) => [`follow_up_${i + 1}_after_days`, `follow_up_${i + 1}_body`])]
   const rows = contacts.map(c => {
     const links = { subscribeUrl: c.unsubscribe_token ? `${window.location.origin}/api/email/subscribe?t=${c.unsubscribe_token}` : '' }
+    // Exactly what the sending run would write: this prospect's version and wording.
+    const v = pickVersion(campaignId || 'new', c.id, versions.length)
+    const fill = (text, step, part) => applyMergeTags(spin(text, `${spinSeed(campaignId, step, c)}:${part}`), c, links, { anyCustom: true })
     return [
-      c.email, displayName(c), c.company,
-      applyMergeTags(form.subject, c, links), toPlainText(applyMergeTags(form.body, c, links)),
-      ...form.follow_ups.flatMap(f => [f.delay_days, toPlainText(applyMergeTags(f.body, c, links))]),
+      c.email, displayName(c), c.company, versionLetter(v),
+      fill(versions[v].subject, 0, 'subject'), toPlainText(fill(versions[v].body, 0, 'body')),
+      ...form.follow_ups.flatMap((f, i) => [f.delay_days, toPlainText(fill(f.body, i + 1, 'body'))]),
     ]
   })
   return `\uFEFF${[header, ...rows].map(r => r.map(cell).join(',')).join('\r\n')}`
@@ -921,6 +1003,8 @@ function CampaignDetail({ audience, campaign, data, workspaceId, reload, setTab 
   }
 
   const groupNames = campaign.group_ids.map(id => data.groups.find(g => g.id === id)?.name).filter(Boolean)
+  const extraVersions = audience === 'cold' ? versionsOf(campaign) : []
+  const byVersion = extraVersions.length && sends ? versionResults(sends, 1 + extraVersions.length) : null
   const shownSends = (sends || []).filter(s => !filter || s.status === filter)
   const shown = {
     subject: campaign.subject, preheader: campaign.preheader, language: campaign.language,
@@ -928,6 +1012,8 @@ function CampaignDetail({ audience, campaign, data, workspaceId, reload, setTab 
     sender: { from_name: campaign.from_name || data.settings?.from_name, company_address: data.settings?.company_address },
     unsubscribeUrl: audience === 'cold' ? '' : '#unsubscribe',
     subscribeUrl: audience === 'cold' ? TEST_SUBSCRIBE_URL : '',
+    // One of the wordings, as an example prospect would get it.
+    spinSeed: audience === 'cold' ? spinSeed(campaign.id, 0, { id: 'example' }) : '',
   }
   const preview = audience === 'marketing' && hasDesign(campaign.design)
     ? renderDesign({ ...shown, design: campaign.design })
@@ -993,6 +1079,35 @@ function CampaignDetail({ audience, campaign, data, workspaceId, reload, setTab 
       </div>
       )}
 
+      {byVersion && (
+        <Card>
+          <div className="px-4 py-2.5 border-b border-border">
+            <p className="text-xs font-semibold text-text">Versions of the first email</p>
+            <p className="text-[11px] text-text-tertiary">Replies count for the version of the prospect's first email, whichever email they answered. Wait for about 100 sent per version before picking a winner.</p>
+          </div>
+          <table className="w-full text-xs">
+            <thead className="text-text-tertiary text-left">
+              <tr><th className="px-4 py-1.5 font-normal">Version</th><th className="px-2 py-1.5 font-normal">Subject</th><th className="px-2 py-1.5 font-normal">Sent</th><th className="px-2 py-1.5 font-normal">Replied</th><th className="px-2 py-1.5 font-normal">Subscribed</th><th className="px-2 py-1.5 font-normal">Bounced</th></tr>
+            </thead>
+            <tbody>
+              {byVersion.map(r => {
+                const best = r.sent >= 20 && byVersion.every(o => o === r || r.replied / (r.sent || 1) > o.replied / (o.sent || 1))
+                return (
+                  <tr key={r.version} className="border-t border-border">
+                    <td className="px-4 py-1.5 font-semibold text-text">{r.letter}{best && <span className="ml-1.5 text-[10px] font-normal text-sage-700">leading</span>}</td>
+                    <td className="px-2 py-1.5 text-text-secondary truncate max-w-[280px]">{(r.version ? extraVersions[r.version - 1] : campaign)?.subject}</td>
+                    <td className="px-2 py-1.5">{r.sent} <span className="text-text-tertiary">of {r.prospects}</span></td>
+                    <td className="px-2 py-1.5">{pct(r.replied, r.sent)} <span className="text-text-tertiary">({r.replied})</span></td>
+                    <td className="px-2 py-1.5">{pct(r.subscribed, r.sent)} <span className="text-text-tertiary">({r.subscribed})</span></td>
+                    <td className="px-2 py-1.5">{pct(r.bounced, r.sent)}</td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </Card>
+      )}
+
       <div className="grid xl:grid-cols-2 gap-4 items-start">
         <Card>
           <div className="px-4 py-2.5 border-b border-border flex items-center justify-between gap-2">
@@ -1011,7 +1126,7 @@ function CampaignDetail({ audience, campaign, data, workspaceId, reload, setTab 
                   {shownSends.slice(0, 500).map(s => (
                     <tr key={s.id} className="border-b border-border last:border-0">
                       <td className="px-4 py-1.5 text-text truncate max-w-[220px]">{s.email}</td>
-                      {audience === 'cold' && <td className="px-2 py-1.5 text-text-tertiary whitespace-nowrap">{s.step ? `Follow-up ${s.step}` : 'First'}</td>}
+                      {audience === 'cold' && <td className="px-2 py-1.5 text-text-tertiary whitespace-nowrap">{s.step ? `Follow-up ${s.step}` : `First${extraVersions.length ? ` · ${versionLetter(s.variant)}` : ''}`}</td>}
                       <td className="px-2 py-1.5 capitalize text-text-secondary">{s.subscribed_at ? 'subscribed' : s.replied_at ? 'replied' : s.status}</td>
                       <td className="px-2 py-1.5 text-text-tertiary">{(audience === 'cold' && s.mailbox_id && s.sent_at ? `${mailboxEmail(data, s.mailbox_id)} · ` : '')}{s.error || (s.clicked_at ? `clicked ${dateTime(s.clicked_at)}` : s.opened_at ? `opened ${dateTime(s.opened_at)}` : s.sent_at ? dateTime(s.sent_at) : s.status === 'queued' ? `due ${dateTime(s.due_at)}` : '')}</td>
                     </tr>
