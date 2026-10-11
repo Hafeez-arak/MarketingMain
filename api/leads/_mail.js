@@ -171,7 +171,7 @@ const authError = (reason) => Object.assign(new Error(reason), { kind: 'auth', r
 const configFor = (deps, mb) => (mb?.tenant ? { ...deps.ms, tenant: mb.tenant } : deps.ms)
 
 /** A usable read-only access token for the mailbox, renewed (with READ_SCOPES) when near expiry. */
-async function accessToken(deps, mb) {
+export async function accessToken(deps, mb) {
   const [row] = await deps.db(`lead_mailbox_secrets?mailbox_id=eq.${mb.id}&select=secret`) || []
   if (!row) return { error: authError('No stored sign-in for this mailbox. Connect it again.') }
   let t = null

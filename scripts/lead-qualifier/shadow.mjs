@@ -33,7 +33,7 @@ const out = path.join(dir, arg('out', `shadow-${new Date().toISOString().slice(0
 
 // OpenRouter lets a new account make 20 calls a minute per model: stay under.
 const PER_MINUTE = 18
-const CONCURRENCY = 3
+const CONCURRENCY = Number(arg('concurrency', '3')) || 3
 
 const deps = leadDeps()
 const brand = await loadBrand(db, WS)
