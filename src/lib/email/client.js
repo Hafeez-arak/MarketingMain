@@ -153,7 +153,7 @@ export async function setContactGroups(ws, contactId, groupIds, currentIds) {
 
 // ── Campaigns ──
 
-const CAMPAIGN_FIELDS = ['audience', 'name', 'subject', 'preheader', 'body', 'language', 'language_only', 'group_ids', 'follow_ups', 'design', 'mailbox_ids']
+const CAMPAIGN_FIELDS = ['audience', 'name', 'subject', 'preheader', 'body', 'language', 'language_only', 'group_ids', 'follow_ups', 'design', 'mailbox_ids', 'variants']
 
 export async function saveCampaign(ws, campaign, id = null) {
   const row = { workspace_id: ws, updated_at: new Date().toISOString() }
@@ -174,7 +174,7 @@ export async function deleteCampaign(ws, id) {
 
 export async function fetchCampaignSends(ws, campaignId) {
   return all(() => supabase.from('email_sends')
-    .select('id,email,step,status,error,sent_at,delivered_at,opened_at,clicked_at,bounced_at,complained_at,replied_at,subscribed_at,due_at,contact_id,mailbox_id')
+    .select('id,email,step,status,error,sent_at,delivered_at,opened_at,clicked_at,bounced_at,complained_at,replied_at,subscribed_at,due_at,contact_id,mailbox_id,variant')
     .eq('workspace_id', ws).eq('campaign_id', campaignId).order('created_at'))
 }
 

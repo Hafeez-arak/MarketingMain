@@ -1,4 +1,5 @@
 import { cleanContact, isValidEmail, normalizeEmail } from './contacts.js'
+import { CUSTOM_KEY, MERGE_TAGS } from './render.js'
 
 // ─── CSV in and out ────────────────────────────────────────────────────────
 // Import is where a new sending domain is most often ruined: one bad
@@ -63,6 +64,22 @@ export function headerKey(h) {
   return HEADER_MAP[k] || ''
 }
 
+export const MAX_CUSTOM_COLUMNS = 30
+const MAX_CUSTOM_VALUE = 1000
+
+/**
+ * A column we have no field for → the merge-tag key it is kept under:
+ * "Ice breaker" → ice_breaker, "Project name" → project_name. '' when the header has no
+ * Latin letters to make a tag from (an Arabic header, say).
+ */
+export function customKey(header) {
+  const k = String(header || '').toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 40)
+  if (!k) return ''
+  const key = /^[a-z]/.test(k) ? k : `col_${k}`.slice(0, 40)
+  return CUSTOM_KEY.test(key) && !MERGE_TAGS.includes(key) ? key : ''
+}
+
 function languageOf(raw) {
   const v = String(raw || '').trim().toLowerCase()
   if (['ar', 'arabic', 'عربي', 'العربية'].includes(v)) return 'ar'
@@ -76,7 +93,8 @@ function languageOf(raw) {
  * @param {string[][]} rows   parseCsv output; the first row is the header
  * @param {object} defaults   { audience, language, consent, contact_type }
  * @param {Set<string>} [existing] emails already in the workspace
- * @returns {{ contacts: object[], rejected: {row:number, email:string, reason:string}[], columns: string[] }}
+ * @returns {{ contacts: object[], rejected: {row:number, email:string, reason:string}[], columns: string[],
+ *             custom: {index:number, key:string, header:string}[], dropped: string[] }}
  */
 export function rowsToContacts(rows, defaults = {}, existing = new Set()) {
   const [header = [], ...body] = rows || []
@@ -96,13 +114,30 @@ export function rowsToContacts(rows, defaults = {}, existing = new Set()) {
   const rejected = []
   const seen = new Set()
   if (!columns.includes('email')) {
-    return { contacts, rejected: [{ row: 1, email: '', reason: 'No email column found. Name a column "Email".' }], columns }
+    return { contacts, rejected: [{ row: 1, email: '', reason: 'No email column found. Name a column "Email".' }], columns, custom: [], dropped: [] }
+  }
+
+  // Every other named column is kept as a custom field ({{ice_breaker}}).
+  // Each contact from this file gets every one of them, empty where the cell
+  // is, so a tag that exists for the list never reaches anyone raw.
+  const custom = []      // [{ index, key, header }]
+  const dropped = []     // headers that could not become a tag
+  if (dataRows !== rows) {
+    header.forEach((h, index) => {
+      if (columns[index] || !String(h || '').trim()) return
+      const key = customKey(h)
+      if (!key || custom.some(c => c.key === key) || custom.length >= MAX_CUSTOM_COLUMNS) { dropped.push(String(h).trim()); return }
+      custom.push({ index, key, header: String(h).trim() })
+    })
   }
 
   dataRows.forEach((cells, i) => {
     const rowNo = i + (dataRows === rows ? 1 : 2)
     const raw = {}
     columns.forEach((key, c) => { if (key && cells[c] !== undefined && !raw[key]) raw[key] = String(cells[c]).trim() })
+    if (custom.length) {
+      raw.custom = Object.fromEntries(custom.map(c => [c.key, String(cells[c.index] ?? '').trim().slice(0, MAX_CUSTOM_VALUE)]))
+    }
     if (raw.full_name && !raw.first_name && !raw.last_name) {
       const parts = raw.full_name.split(/\s+/)
       raw.first_name = parts.shift() || ''
@@ -125,7 +160,7 @@ export function rowsToContacts(rows, defaults = {}, existing = new Set()) {
       source: 'import',
     }, defaults))
   })
-  return { contacts, rejected, columns }
+  return { contacts, rejected, columns, custom, dropped }
 }
 
 function cell(v) {

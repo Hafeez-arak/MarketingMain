@@ -9,8 +9,10 @@
 // on_conflict and ignore/merge-duplicates), PATCH, DELETE; return=minimal
 // and return=representation.
 //
-// Two things it copies from the real one on purpose, because they are
+// Three things it copies from the real one on purpose, because they are
 // where bugs hide:
+//   • a GET returns at most 1,000 rows (Supabase's max-rows), so a list
+//     read without paging loses everyone after the thousandth here too.
 //   • '+' in a query string is a space (as in PostgREST), so an unencoded
 //     timestamp like …+00:00 breaks here just as it would in production.
 //   • Rows come back through Postgres's own JSON, so timestamps look exactly
@@ -21,6 +23,7 @@
 // `workspaces`) is filtered by workspace_members, so a non-member is refused.
 
 const IDENT = /^[a-z_][a-z0-9_]*$/
+export const MAX_ROWS = 1000
 const RESERVED = new Set(['select', 'order', 'limit', 'offset', 'on_conflict', 'columns'])
 // Embedded tables the email code joins, by the column that points at them.
 const EMBED_FK = { email_campaigns: 'campaign_id', email_contacts: 'contact_id', email_mailboxes: 'mailbox_id', email_groups: 'group_id' }
@@ -204,7 +207,11 @@ export async function postgrest(pg, { method, table, search, body, prefer = '', 
         const n = c.rows[0].n
         if (method === 'HEAD') return { status: 200, headers: { 'content-range': `0-0/${n}` } }
       }
-      const sql = `select ${list} ${base} ${orderBy(q)} ${q.limit != null ? `limit ${Number(q.limit)}` : ''} ${q.offset != null ? `offset ${Number(q.offset)}` : ''}`
+      // Supabase's max-rows: one request never returns more than 1,000 rows,
+      // whatever limit it asks for. A read that forgets to page is cut here
+      // exactly as it is in production.
+      const limit = Math.min(MAX_ROWS, q.limit != null ? Number(q.limit) : MAX_ROWS)
+      const sql = `select ${list} ${base} ${orderBy(q)} limit ${limit} ${q.offset != null ? `offset ${Number(q.offset)}` : ''}`
       return { status: 200, body: await rows(pg, sql) }
     }
 

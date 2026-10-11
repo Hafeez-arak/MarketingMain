@@ -494,7 +494,7 @@ function ImportModal({ workspaceId, groups, types, existing, onClose, onDone, on
         ) : (
           <>
             <div className="text-xs text-text-secondary leading-relaxed space-y-1">
-              <p>A CSV with an <strong>Email</strong> column. Optional columns are picked up by name: First name, Last name (or Name), Company, Job title, Phone, City, Country, Type, Language, Notes. Arabic headers work too.</p>
+              <p>A CSV with an <strong>Email</strong> column. Optional columns are picked up by name: First name, Last name (or Name), Company, Job title, Phone, City, Country, Type, Language, Notes. Arabic headers work too. Any other column (an opening line, a project, an industry) is kept as a field an outreach email can use, like {'{{ice_breaker}}'}.</p>
               <p>From Outlook: File → Open &amp; Export → Import/Export → Export to a file → CSV. From Excel: Save As → CSV UTF-8.</p>
             </div>
 
@@ -551,6 +551,16 @@ function ImportModal({ workspaceId, groups, types, existing, onClose, onDone, on
                   <span><strong className="text-text">{parsed.rejected.length.toLocaleString()}</strong> left out</span>
                   <span className="text-text-tertiary">Columns found: {parsed.columns.filter(Boolean).join(', ') || 'none'}</span>
                 </div>
+                {(parsed.custom?.length > 0 || parsed.dropped?.length > 0) && (
+                  <div className="px-4 py-2 border-t border-border text-[11px] text-text-secondary space-y-0.5">
+                    {parsed.custom.length > 0 && (
+                      <p>Kept as fields you can put in an email: {parsed.custom.map(c => <code key={c.key} className="mx-0.5 px-1 bg-surface-subtle text-text">{`{{${c.key}}}`}</code>)}</p>
+                    )}
+                    {parsed.dropped.length > 0 && (
+                      <p className="text-text-tertiary">Not kept (rename the column in English letters to keep it): {parsed.dropped.join(', ')}</p>
+                    )}
+                  </div>
+                )}
                 {parsed.contacts.length > 0 && (
                   <div className="max-h-40 overflow-y-auto scrollbar-thin">
                     <table className="w-full text-xs">

@@ -164,6 +164,13 @@ export function cleanContact(input, defaults = {}) {
     // the statement that they did not opt in.
     consent: audience === 'cold' ? 'none' : (consent === 'none' ? 'business_contact' : consent),
     source,
+    // Extra columns from an imported list (src/lib/email/csv.js). Only sent
+    // when given, so saving an edit never wipes them.
+    ...(input?.custom && typeof input.custom === 'object' && !Array.isArray(input.custom)
+      ? { custom: Object.fromEntries(Object.entries(input.custom)
+        .filter(([k]) => /^[a-z][a-z0-9_]{0,39}$/.test(k)).slice(0, 30)
+        .map(([k, v]) => [k, String(v ?? '').trim().slice(0, 1000)])) }
+      : {}),
     // Tied to the research lead it came from, when it did. Only sent when
     // set, so saving an edit never unties a contact.
     ...(/^[0-9a-f-]{36}$/i.test(String(input?.opportunity_id || '')) ? { opportunity_id: input.opportunity_id } : {}),
