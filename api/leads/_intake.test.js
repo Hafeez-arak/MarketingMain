@@ -36,7 +36,7 @@ function fakeDb({ enabled = true, cap = null, spent = 0, leads = [] } = {}) {
 }
 
 const answer = (category, reason = 'Because.') => ({
-  text: JSON.stringify({ category, confidence: 'high', reason, summary: 's', details: {}, ask_next: [] }),
+  text: JSON.stringify({ category, confidence: 'high', reason, summary: 's', details: {}, ask_next: [], source_check: 'verified', sender_type: 'contractor', sender_confidence: 'high' }),
   usage: { prompt_tokens: 900, completion_tokens: 150, cost: 0.00016 },
 })
 

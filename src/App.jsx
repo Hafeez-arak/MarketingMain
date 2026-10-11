@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
+import { isLeadsHost } from './lib/leadsHost'
 import { AppProvider } from './store/appStore'
 import { useApp, actions } from './store/app'
 import { AuthProvider } from './store/AuthContext'
@@ -106,7 +107,8 @@ function ProtectedApp() {
               pin the error screen in place for every page after it. */}
           <ErrorBoundary key={pathname}>
           <Routes>
-            <Route path="/"                      element={<Dashboard />} />
+            {/* leads.arak-sa.com opens straight onto the leads page. */}
+            <Route path="/"                      element={isLeadsHost() ? <Navigate to="/leads" replace /> : <Dashboard />} />
             <Route path="/brand-brain"           element={<BrandBrain />} />
             <Route path="/studio"                element={<CreativeStudio />} />
             {/* Two routes, not four. `/campaigns` was a menu whose only job

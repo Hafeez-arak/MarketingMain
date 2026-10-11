@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   toEnvelope, emailKind, maskText, maskedEnquiry, findDuplicate, parseTime,
   systemPrompt, userPrompt, buildMessages, parseVerdict, sheetColumns, CATEGORIES, VERDICT_SCHEMA,
-  openRouterRequest, QUALIFIER_MODEL,
+  openRouterRequest, QUALIFIER_MODEL, verdictColumns, websiteDomain, websiteLine, PHILIPS, CRITERIA_VERSION,
 } from './qualify.js'
 
 // Made-up enquiries only: this repo is public, real ones never go in it.
@@ -35,7 +35,7 @@ describe('emailKind', () => {
 describe('maskText', () => {
   it('removes emails, links and phone numbers in every common shape', () => {
     const t = maskText('Mail me at x.y@firm.com or see www.firm.com, call +966 55 325 1417, 0553251417 or 011-465-0000.')
-    expect(t).toBe('Mail me at [EMAIL] or see [LINK] call [PHONE], [PHONE] or [PHONE].')
+    expect(t).toBe('Mail me at [EMAIL@firm.com] or see [LINK:firm.com], call [PHONE], [PHONE] or [PHONE].')
   })
   it('keeps product codes, quantities, voltages and dates', () => {
     const t = 'Product Code: EE-TA-WT/WTSTD14-27-90-10-1050, Qty: 4 PCS, 110-220VAC, 2160LM, 300 PCS, deadline 2026-10-20'
@@ -131,7 +131,7 @@ describe('openRouterRequest', () => {
 })
 
 describe('parseVerdict', () => {
-  const reply = (o) => JSON.stringify({ category: 'quotation_request', confidence: 'high', reason: 'Asks for prices.', summary: '40 downlights', details: { products: 'downlights', quantity: '40' }, ask_next: ['a', 'b', 'c', 'd'], ...o })
+  const reply = (o) => JSON.stringify({ category: 'quotation_request', confidence: 'high', reason: 'Asks for prices.', summary: '40 downlights', details: { products: 'downlights', quantity: '40' }, ask_next: ['a', 'b', 'c', 'd'], source_check: 'verified', sender_type: 'contractor', sender_confidence: 'high', philips: 'none', ...o })
   it('derives the verdict from the category', () => {
     expect(parseVerdict(reply()).verdict).toBe('qualified')
     expect(parseVerdict(reply({ category: 'vendor_pitch' })).verdict).toBe('unqualified')
@@ -165,5 +165,74 @@ describe('sheetColumns', () => {
     expect(sheetColumns(parseVerdict(JSON.stringify({ category: 'vendor_pitch', confidence: 'high', reason: 'Sells chandeliers to us.' }))))
       .toEqual(['unqualified', 'vendor pitch: Sells chandeliers to us.'])
     expect(sheetColumns(null, { receivedAt: '2026-09-13 11:32:33' })[0]).toBe('duplicate')
+  })
+})
+
+describe('the sales team\'s criteria (2026-10-11)', () => {
+  const reply = (o) => JSON.stringify({
+    category: 'quotation_request', confidence: 'high', reason: 'Asks for prices.', summary: 's', details: {}, ask_next: [],
+    sender_type: 'contractor', sender_confidence: 'high', sender_evidence: 'Procurement, Nour Contracting',
+    source_check: 'verified', source_evidence: 'signature', project_type: 'not_stated', project_evidence: '',
+    request_type: 'requirement', philips: 'none', ...o,
+  })
+  it('Philips only is not a lead; Philips with other items, or "or equivalent", is', () => {
+    expect(parseVerdict(reply({ philips: 'only' }))).toMatchObject({ verdict: 'unqualified', rule: 'philips_only' })
+    expect(parseVerdict(reply({ philips: 'mixed' })).verdict).toBe('qualified')
+    expect(parseVerdict(reply({ philips: 'or_equivalent' })).verdict).toBe('qualified')
+  })
+  it('a trader from the market is a lead, labelled as one (the owner, 2026-10-11)', () => {
+    expect(parseVerdict(reply({ sender_type: 'trader' }))).toMatchObject({ verdict: 'qualified', rule: '', senderType: 'trader' })
+  })
+  it('a source nobody can verify goes to a person, never out', () => {
+    expect(parseVerdict(reply({ source_check: 'not_verified' }))).toMatchObject({ verdict: 'needs_review', rule: 'unverified' })
+    expect(parseVerdict(reply({ source_check: undefined })).verdict).toBe('needs_review')
+  })
+  it('the rules only touch would-be leads: a pitch stays a pitch', () => {
+    expect(parseVerdict(reply({ category: 'vendor_pitch', philips: 'only', source_check: 'not_verified' }))).toMatchObject({ verdict: 'unqualified', rule: '' })
+  })
+  it('a phase with no words behind it is not stated; unknown values fall back safely', () => {
+    expect(parseVerdict(reply({ project_type: 'tender', project_evidence: '' })).projectType).toBe('not_stated')
+    expect(parseVerdict(reply({ project_type: 'jih', project_evidence: 'project awarded' })).projectType).toBe('jih')
+    expect(parseVerdict(reply({ sender_type: 'wizard', request_type: 'x', philips: 'maybe' }))).toMatchObject({ senderType: 'unknown', requestType: 'none', philips: 'none' })
+  })
+  it('the stored columns: empty phase for sales to fill, the rule in the reason, folder and email kind', () => {
+    const v = parseVerdict(reply({ source_check: 'not_verified', request_type: 'inquiry' }))
+    const c = verdictColumns(v, { site: { domain: 'nour.sa', ok: true }, folder: 'junk', email: 'a@gmail.com' })
+    expect(c).toMatchObject({ verdict: 'needs_review', rule: 'unverified', project_type: '', request_type: 'inquiry', website: 'nour.sa', folder: 'junk', email_kind: 'free', criteria_version: CRITERIA_VERSION })
+    expect(c.reason).toBe('Source not verified. Asks for prices.')
+  })
+  it('the schema asks for every criteria field', () => {
+    for (const k of ['sender_type', 'source_check', 'project_type', 'request_type', 'philips']) expect(VERDICT_SCHEMA.schema.required).toContain(k)
+    expect(VERDICT_SCHEMA.schema.properties.philips.enum).toEqual(PHILIPS)
+  })
+})
+
+describe('websiteDomain', () => {
+  const env = (email, message = '') => toEnvelope('email', { sourceRef: 'x', email, message })
+  it("is the sender's own domain when it is a company address", () => {
+    expect(websiteDomain(env('buyer@Besix.com'))).toBe('besix.com')
+  })
+  it('for a free-mail sender, is the company site named in the signature, skipping social links', () => {
+    expect(websiteDomain(env('ali@gmail.com', 'Regards\nlinkedin.com/in/ali\nwww.nour-contracting.sa'))).toBe('nour-contracting.sa')
+    expect(websiteDomain(env('ali@gmail.com', 'Regards, Ali (ali.n@nour-contracting.sa)'))).toBe('nour-contracting.sa')
+    expect(websiteDomain(env('ali@gmail.com', 'need price'))).toBe('')
+  })
+  it('never one of our own domains', () => {
+    expect(websiteDomain(env('ali@gmail.com', 'sent to info@example-co.sa'), { ownDomains: ['example-co.sa'] })).toBe('')
+  })
+})
+
+describe('the website line in the prompt', () => {
+  it('says what was checked, or why nothing was', () => {
+    expect(websiteLine(null)).toContain('(none')
+    expect(websiteLine({ domain: 'x.sa', ok: false })).toBe('Website checked: x.sa (could not be opened)')
+    expect(websiteLine({ domain: 'x.sa', ok: true, title: 'Nour Contracting', description: 'MEP contractor', text: 'Projects' })).toContain('Website says: Nour Contracting | MEP contractor | Projects')
+  })
+  it('reaches the model with domains kept but personal details masked', () => {
+    const sent = JSON.stringify(buildMessages(form({ brief: 'Omar Haddad, omar@nourcontracting.sa, www.nourcontracting.sa' }), {}, { domain: 'nourcontracting.sa', ok: true, title: 'Nour' }))
+    expect(sent).not.toMatch(/Omar|Haddad|omar@/)
+    expect(sent).toContain('[EMAIL@nourcontracting.sa]')
+    expect(sent).toContain('[LINK:nourcontracting.sa]')
+    expect(sent).toContain('Website checked: nourcontracting.sa')
   })
 })

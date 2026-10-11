@@ -1,5 +1,5 @@
 import { READ_SCOPES, refreshTokens, exchangeCode, whoAmI, packTokens, unpackTokens, classifyGraphError, tenantOf } from '../email/_graph.js'
-import { toEnvelope, findDuplicate } from '../../src/lib/leads/qualify.js'
+import { toEnvelope, findDuplicate, verdictColumns, emailKind } from '../../src/lib/leads/qualify.js'
 import { capDecision } from '../../src/lib/agent/budget.js'
 import { askModel, loadBrand, monthSpent, upsertLead } from './_intake.js'
 
@@ -171,7 +171,7 @@ const authError = (reason) => Object.assign(new Error(reason), { kind: 'auth', r
 const configFor = (deps, mb) => (mb?.tenant ? { ...deps.ms, tenant: mb.tenant } : deps.ms)
 
 /** A usable read-only access token for the mailbox, renewed (with READ_SCOPES) when near expiry. */
-async function accessToken(deps, mb) {
+export async function accessToken(deps, mb) {
   const [row] = await deps.db(`lead_mailbox_secrets?mailbox_id=eq.${mb.id}&select=secret`) || []
   if (!row) return { error: authError('No stored sign-in for this mailbox. Connect it again.') }
   let t = null
@@ -204,7 +204,7 @@ async function listMail(deps, token, { from, until }) {
     $filter: filter,
     $orderby: 'receivedDateTime asc',
     $top: String(PAGE),
-    $select: 'id,internetMessageId,conversationId,subject,from,sender,receivedDateTime,body,bodyPreview,internetMessageHeaders,webLink,isDraft',
+    $select: 'id,internetMessageId,conversationId,parentFolderId,subject,from,sender,receivedDateTime,body,bodyPreview,internetMessageHeaders,webLink,isDraft',
   })
   const res = await deps.fetch(`${GRAPH}/me/messages?${q}`, {
     headers: { Authorization: `Bearer ${token}`, Prefer: 'outlook.body-content-type="text"' },
@@ -219,6 +219,30 @@ async function listMail(deps, token, { from, until }) {
   }
   return { messages: Array.isArray(data?.value) ? data.value : [] }
 }
+
+// Microsoft's names for the folders worth naming. Everything else is "other".
+const WELL_KNOWN_FOLDERS = { inbox: 'inbox', junkemail: 'junk', deleteditems: 'deleted', archive: 'archive' }
+
+/**
+ * This mailbox's folder ids → "inbox" / "junk" / "deleted" / "archive", so a
+ * lead can say where it sits: a real enquiry in Junk is one nobody saw (the
+ * sales team asked for this column, 2026-10-11). One small call per folder;
+ * a folder that cannot be read is simply not named.
+ */
+export async function folderNames(deps, token) {
+  const out = {}
+  await Promise.all(Object.entries(WELL_KNOWN_FOLDERS).map(async ([wellKnown, label]) => {
+    try {
+      const r = await deps.fetch(`${GRAPH}/me/mailFolders/${wellKnown}?$select=id`, { headers: { Authorization: `Bearer ${token}` } })
+      const j = r.ok ? await r.json() : null
+      if (j?.id) out[j.id] = label
+    } catch { /* unnamed: "other" */ }
+  }))
+  return out
+}
+
+/** Where a message sits, by its parentFolderId: a named folder, "other", or '' when Graph did not say. */
+export const folderOf = (msg, names = {}) => (msg?.parentFolderId ? names[msg.parentFolderId] || 'other' : '')
 
 const quoteIn = (values) => values.map((v) => `"${String(v).replace(/"/g, '\\"')}"`).join(',')
 
@@ -238,7 +262,7 @@ const emptyCounts = () => ({ seen: 0, skipped: 0, qualified: 0, unqualified: 0, 
  * message stays ahead of it and is read again next round.
  * Returns { to, counts, finishedPage, listedFull }.
  */
-async function readPage(deps, ctx, { mb, token, from, until, budget }) {
+async function readPage(deps, ctx, { mb, token, from, until, budget, folders }) {
   const counts = emptyCounts()
   const listed = await listMail(deps, token, { from, until })
   if (listed.error) return { error: listed.error, counts }
@@ -308,7 +332,7 @@ async function readPage(deps, ctx, { mb, token, from, until, budget }) {
       workspace_id: mb.workspace_id, source: 'email', source_ref: m.internetMessageId || m.id, received_at: m.receivedDateTime || null,
       name: p.env.name, company: '', email: p.env.email, phone: '', subject: p.env.subject, message: p.env.message,
       language: p.env.language, mailbox: mb.label || mb.email, link: m.webLink || '', conversation_id: m.conversationId || '',
-      updated_at: now.toISOString(),
+      folder: folderOf(m, folders), email_kind: emailKind(p.env.email), updated_at: now.toISOString(),
     })
     if (p.kind === 'seen') { to = m.receivedDateTime; continue }
     if (p.kind === 'skip') { counts.skipped++; to = m.receivedDateTime; continue }
@@ -327,8 +351,8 @@ async function readPage(deps, ctx, { mb, token, from, until, budget }) {
     }
     const v = p.out.verdict
     await upsertLead(deps.db, {
-      ...base(), verdict: v.verdict, category: v.category, confidence: v.confidence, reason: v.reason,
-      summary: v.summary, details: v.details, ask_next: v.ask_next, model: p.out.model, cost_usd: p.out.cost, error: '',
+      ...base(), ...verdictColumns(v, { site: p.out.site, folder: folderOf(m, folders), email: p.env.email }),
+      model: p.out.model, cost_usd: p.out.cost, error: '',
     })
     counts[v.verdict]++
     to = m.receivedDateTime
@@ -341,11 +365,11 @@ async function readPage(deps, ctx, { mb, token, from, until, budget }) {
 const addCounts = (a, b) => { for (const k of Object.keys(a)) a[k] += b[k] || 0; return a }
 
 /** Pages through one pass until it is caught up or the budget runs out. */
-async function readPass(deps, ctx, { mb, token, from, until, budget }) {
+async function readPass(deps, ctx, { mb, token, from, until, budget, folders }) {
   const counts = emptyCounts()
   let cursor = from
   for (let page = 0; page < 20; page++) {
-    const r = await readPage(deps, ctx, { mb, token, from: cursor, until, budget })
+    const r = await readPage(deps, ctx, { mb, token, from: cursor, until, budget, folders })
     if (r.error) return { error: r.error, counts, to: cursor, caughtUp: false }
     addCounts(counts, r.counts)
     const moved = r.to && Date.parse(r.to) > Date.parse(cursor)
@@ -374,15 +398,16 @@ export async function checkMailbox(deps, { mb, brand, budget, ctx: shared }) {
     return { email: mb.label || mb.email, error: err.reason || err.message, counts: emptyCounts() }
   }
   if (tok.error) return fail(tok.error)
+  const folders = await folderNames(deps, tok.token)
 
-  const live = await readPass(deps, ctx, { mb, token: tok.token, from: mb.read_from, until: null, budget })
+  const live = await readPass(deps, ctx, { mb, token: tok.token, from: mb.read_from, until: null, budget, folders })
   if (live.error) return fail(live.error)
   await setMailbox(deps, mb, { read_from: live.to, last_checked_at: now.toISOString(), last_error: '', status: 'active', last_counts: live.counts })
 
   let history = null
   if (!mb.history_done && budget.calls > 0 && deps.now().getTime() <= budget.deadline) {
     const from = mb.history_cursor || mb.history_from
-    const h = await readPass(deps, ctx, { mb, token: tok.token, from, until: mb.history_until, budget })
+    const h = await readPass(deps, ctx, { mb, token: tok.token, from, until: mb.history_until, budget, folders })
     if (!h.error) {
       await setMailbox(deps, mb, { history_cursor: h.to, history_done: h.caughtUp })
       history = { counts: h.counts, done: h.caughtUp, upTo: h.to }
@@ -477,4 +502,35 @@ export async function finishConnect(deps, { claims, code, redirectUri }) {
     body: { mailbox_id: mb.id, workspace_id: claims.ws, secret: deps.seal(packTokens(tokens, now.getTime())), updated_at: now.toISOString() },
   })
   return { ok: true, email: label }
+}
+
+/** Vercel answers at most 4.5 MB; leave room for headers. */
+export const MAX_EMAIL_FILE = 4_300_000
+
+/**
+ * The original email of a lead, exactly as it arrived (MIME, attachments
+ * included), so a salesperson opens it in the Outlook app with the BOQ
+ * attached. Read only: the token is Mail.Read and nothing in the mailbox
+ * changes. Found by its Message-ID in the mailbox that read it.
+ * Returns { bytes, filename } or { error, status }.
+ */
+export async function emailFile(deps, { workspaceId, leadId }) {
+  const [lead] = await deps.db(`leads?id=eq.${leadId}&workspace_id=eq.${workspaceId}&source=eq.email&select=id,mailbox,source_ref,subject,received_at`) || []
+  if (!lead) return { status: 404, error: 'That email is not a lead of this company.' }
+  const mailboxes = await deps.db(`lead_mailboxes?workspace_id=eq.${workspaceId}&select=*`) || []
+  const mb = mailboxes.find((m) => lower(m.label) === lower(lead.mailbox) || lower(m.email) === lower(lead.mailbox))
+  if (!mb) return { status: 404, error: `The mailbox ${lead.mailbox || ''} is no longer connected.` }
+  const tok = await accessToken(deps, mb)
+  if (tok.error) return { status: 502, error: tok.error.reason || tok.error.message }
+  const auth = { Authorization: `Bearer ${tok.token}` }
+  const q = new URLSearchParams({ $filter: `internetMessageId eq '${String(lead.source_ref).replace(/'/g, "''")}'`, $select: 'id' })
+  const found = await deps.fetch(`${GRAPH}/me/messages?${q}`, { headers: auth })
+  const msg = found.ok ? (await found.json())?.value?.[0] : null
+  if (!msg?.id) return { status: 404, error: 'The email is no longer in the mailbox (it may have been deleted).' }
+  const raw = await deps.fetch(`${GRAPH}/me/messages/${encodeURIComponent(msg.id)}/$value`, { headers: auth })
+  if (!raw.ok) return { status: 502, error: `Microsoft answered ${raw.status} for the email file.` }
+  const bytes = Buffer.from(await raw.arrayBuffer())
+  if (bytes.length > MAX_EMAIL_FILE) return { status: 413, error: 'This email is too large to download here (big attachments). Open it in Outlook on the web.' }
+  const name = (String(lead.subject || 'email').replace(/[\\/:*?"<>|\r\n]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80) || 'email')
+  return { bytes, filename: `${name}.eml` }
 }

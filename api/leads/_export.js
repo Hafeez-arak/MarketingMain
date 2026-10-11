@@ -5,6 +5,13 @@
 // that arrived late, or a correction on the Lead Agent page all reach it.
 // One-way: nothing the team types in the Sheet comes back (the owner's
 // decision, 2026-10-07).
+//
+// The sales team's criteria (2026-10-11) ride in the existing Type column
+// ("quotation request · Contractor · Verified · Tender · Junk"), so pasted
+// workbook scripts show them without a re-paste; the leads page replaces the
+// workbook later.
+
+import { criteriaLabels } from '../../src/lib/leads/view.js'
 
 /** Rows per answer; the script asks again until it has everything. */
 export const EXPORT_PAGE = 200
@@ -69,7 +76,7 @@ export function toRow(lead) {
     // team wrote in it.
     byPerson: Boolean(lead.human_verdict),
     qualified: verdict === 'qualified' || verdict === 'needs_review',
-    type: lead.verdict === 'duplicate' ? 'duplicate' : String(lead.category || '').replace(/_/g, ' '),
+    type: lead.verdict === 'duplicate' ? 'duplicate' : [String(lead.category || '').replace(/_/g, ' '), ...criteriaLabels(lead)].filter(Boolean).join(' · '),
     reason: lead.reason || '',
     link: lead.link || '',
   }
@@ -93,7 +100,7 @@ export async function exportLeads(deps, { key, cursor = '' }) {
   const after = ts && !Number.isNaN(Date.parse(ts))
     ? `&or=(updated_at.gt.${encodeURIComponent(ts)},and(updated_at.eq.${encodeURIComponent(ts)},id.gt.${isUuid(id) ? id : '00000000-0000-0000-0000-000000000000'}))`
     : ''
-  const rows = await deps.db(`leads?workspace_id=eq.${ws}${after}&select=id,source,received_at,created_at,updated_at,name,company,email,phone,subject,message,verdict,human_verdict,category,reason,link,mailbox,error&order=updated_at.asc,id.asc&limit=${EXPORT_PAGE}`) || []
+  const rows = await deps.db(`leads?workspace_id=eq.${ws}${after}&select=id,source,received_at,created_at,updated_at,name,company,email,phone,subject,message,verdict,human_verdict,category,reason,link,mailbox,error,sender_type,source_check,project_type,request_type,philips,folder,email_kind,criteria_version&order=updated_at.asc,id.asc&limit=${EXPORT_PAGE}`) || []
   const last = rows[rows.length - 1]
   // The workbook's timer is the other watchman: it checks on the website
   // Sheet (and everything else) at most every 10 minutes. See _health.js.

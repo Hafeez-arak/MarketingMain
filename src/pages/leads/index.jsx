@@ -3,10 +3,12 @@ import { Navigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../../store/auth'
 import { PageHeader, Button, Spinner, Skeleton, Input, Textarea, Toggle } from '../../components/ui/index'
 import { Notice, Stat, SubTabs } from '../email/parts'
-import { fetchLeadsPage, fetchMonthLeads, leadsApi } from '../../lib/leads/client'
+import { fetchLeadsPage, fetchMonthLeads, leadsApi, downloadEmailFile } from '../../lib/leads/client'
+import { RULE_LABELS } from '../../lib/leads/qualify'
 import {
   VERDICT_LABEL, VERDICT_TONE, SOURCE_LABEL, effectiveVerdict, monthStats, sheetHealth, modelName,
   PAGE_SIZE, pageLabel, pageCount,
+  criteriaLabels,
 } from '../../lib/leads/view'
 
 // ─── Lead Agent ────────────────────────────────────────────────────────────
@@ -248,12 +250,13 @@ export default function LeadAgent() {
                       <div className="min-w-0 flex-1">
                         <p className="text-sm font-semibold text-text truncate">{l.company || l.name || l.email || 'Unknown sender'}</p>
                         <p className="text-xs text-text-secondary mt-0.5 line-clamp-2" dir="auto">{l.summary || l.message}</p>
+                        <CriteriaChips lead={l} />
                         {l.reason && <p className="text-[11px] text-text-tertiary mt-1 line-clamp-1">{l.reason}</p>}
                         {!l.verdict && l.error && <p className="text-[11px] text-red-600 mt-1 line-clamp-1">{l.error}</p>}
                       </div>
                       <div className="flex-shrink-0"><VerdictTag verdict={v} corrected={Boolean(l.human_verdict && l.human_verdict !== l.verdict)} /></div>
                     </button>
-                    {isOpen && <LeadDetail lead={l} onReview={review} />}
+                    {isOpen && <LeadDetail lead={l} onReview={review} workspaceId={activeWorkspaceId} />}
                   </li>
                 )
               })}
@@ -289,7 +292,13 @@ function Pager({ page, pages, label, onGo }) {
   )
 }
 
-function LeadDetail({ lead, onReview }) {
+function LeadDetail({ lead, onReview, workspaceId }) {
+  const [fileState, setFileState] = useState({ busy: false, error: '' })
+  async function openInApp() {
+    setFileState({ busy: true, error: '' })
+    const r = await downloadEmailFile(workspaceId, lead)
+    setFileState({ busy: false, error: r.error || '' })
+  }
   const d = lead.details || {}
   const facts = [['Products', d.products], ['Brands', d.brands], ['Quantity', d.quantity], ['Location', d.location], ['Stage', d.stage], ['Urgency', d.urgency]].filter(([, v]) => v)
   const asks = Array.isArray(lead.ask_next) ? lead.ask_next : []
@@ -302,6 +311,7 @@ function LeadDetail({ lead, onReview }) {
       </div>
       {lead.subject && <p className="text-text-tertiary">{lead.subject}</p>}
       <p className="whitespace-pre-wrap text-text leading-relaxed border-l-2 border-border pl-3" dir="auto">{lead.message}</p>
+      <Evidence lead={lead} />
       {facts.length > 0 && (
         <div className="flex flex-wrap gap-x-4 gap-y-1">
           {facts.map(([k, v]) => <p key={k}><span className="text-text-tertiary">{k} </span><span className="text-text">{v}</span></p>)}
@@ -326,9 +336,45 @@ function LeadDetail({ lead, onReview }) {
         </div>
       )}
       <div className="flex flex-wrap items-center gap-3">
-        {lead.link && <a href={lead.link} target="_blank" rel="noreferrer" className="text-[11px] font-semibold text-amber-800 hover:underline">Open in Outlook</a>}
+        {lead.source === 'email' && (
+          <Button size="xs" variant="secondary" onClick={openInApp} disabled={fileState.busy}
+            title="Downloads the original email with its attachments; open it to see it in the Outlook app">
+            {fileState.busy ? <Spinner size="sm" /> : null}Open in Outlook app
+          </Button>
+        )}
+        {lead.link && <a href={lead.link} target="_blank" rel="noreferrer" className="text-[11px] font-semibold text-amber-800 hover:underline">Open in Outlook on the web</a>}
+        {fileState.error && <p className="text-[11px] text-red-600">{fileState.error}</p>}
         <p className="text-[10px] text-text-tertiary">{lead.mailbox ? `${lead.mailbox} · ` : ''}{lead.model ? `${modelName(lead.model)} · ${money(lead.cost_usd)}` : ''}{lead.confidence ? ` · ${lead.confidence} confidence` : ''}</p>
       </div>
+    </div>
+  )
+}
+
+/** The sales team's criteria as small chips. Junk and Philips only are red: someone must look. */
+const CHIP_TONE = { Junk: 'bg-red-50 text-red-600', 'Philips only': 'bg-red-50 text-red-600', Trader: 'bg-amber-100 text-amber-800', 'Not verified': 'bg-amber-100 text-amber-800' }
+function CriteriaChips({ lead }) {
+  const labels = criteriaLabels(lead)
+  if (!labels.length) return null
+  return (
+    <div className="flex flex-wrap gap-1 mt-1">
+      {labels.map((t) => (
+        <span key={t} className={`text-[10px] px-1.5 py-0.5 ${CHIP_TONE[t] || 'bg-stone-100 text-stone-600'}`}>{t}</span>
+      ))}
+    </div>
+  )
+}
+
+/** Why the agent read the sender, the source and the phase the way it did. */
+function Evidence({ lead }) {
+  const rows = [
+    ['Sender', lead.sender_evidence],
+    ['Source', [lead.source_evidence, lead.website ? `website checked: ${lead.website}` : ''].filter(Boolean).join(' · ')],
+    ['Phase', lead.project_evidence],
+  ].filter(([, v]) => v)
+  if (!rows.length) return null
+  return (
+    <div className="space-y-0.5">
+      {rows.map(([k, v]) => <p key={k}><span className="text-text-tertiary">{k} </span><span className="text-text" dir="auto">{v}</span></p>)}
     </div>
   )
 }
@@ -363,7 +409,8 @@ function TryIt({ workspaceId }) {
       {v && (
         <div className="border-t border-border pt-3 space-y-1.5 text-xs">
           <div className="flex items-center gap-2"><VerdictTag verdict={v.verdict} /><span className="text-text-tertiary">{v.category.replace(/_/g, ' ')} · {v.confidence} confidence</span></div>
-          <p className="text-text">{v.reason}</p>
+          <p className="text-text">{RULE_LABELS[v.rule] ? `${RULE_LABELS[v.rule]}. ` : ''}{v.reason}</p>
+          <CriteriaChips lead={{ criteria_version: 2, sender_type: v.senderType, source_check: v.sourceCheck, project_type: v.projectType === 'not_stated' ? '' : v.projectType, request_type: v.requestType === 'none' ? '' : v.requestType, philips: v.philips }} />
           {v.summary && <p className="text-text-secondary">{v.summary}</p>}
           {v.ask_next?.length > 0 && <ul className="list-disc pl-4 text-text-secondary">{v.ask_next.map((a) => <li key={a}>{a}</li>)}</ul>}
           <p className="text-[10px] text-text-tertiary">{modelName(out.model)} · {money(out.cost)}</p>

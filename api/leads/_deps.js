@@ -3,6 +3,7 @@ import { sealSecret, openSecret } from '../email/_secrets.js'
 import { msConfig, createGraphMail } from '../email/_graph.js'
 import { checkMail } from './_mail.js'
 import { runHealth } from './_health.js'
+import { checkWebsite } from './_website.js'
 
 // ─── The lead agent's real IO, in one place ────────────────────────────────
 // Used by api/leads/[action].js and, for the two things that must live in
@@ -102,6 +103,7 @@ export function leadDeps() {
     sendAlert,
   }
   deps.checkMail = (args) => checkMail(deps, args)
+  deps.website = (domain) => checkWebsite(deps, domain)
   deps.health = (args) => runHealth(deps, { pageUrl: `${APP_URL}/leads`, ...args })
   return deps
 }

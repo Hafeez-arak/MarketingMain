@@ -1,5 +1,6 @@
 import {
   toEnvelope, findDuplicate, openRouterRequest, parseVerdict, sheetColumns, parseTime, QUALIFIER_MODEL,
+  websiteDomain, verdictColumns, emailKind,
 } from '../../src/lib/leads/qualify.js'
 import { spentInMonth, capDecision } from '../../src/lib/agent/budget.js'
 
@@ -12,6 +13,7 @@ import { spentInMonth, capDecision } from '../../src/lib/agent/budget.js'
 //   deps.db(path, init)     PostgREST with the service key (api/agent/_supabase.js)
 //   deps.model(body, ws)    one OpenRouter call with that company's key → { text, usage, error }
 //   deps.now()              the clock
+//   deps.website(domain)    what the sender's website says (_website.js), cached per domain
 //
 // A model call that fails stores the lead with `error` and NO verdict, and
 // the Sheet gets no cells for it, so the next pass tries again. Nothing is
@@ -25,16 +27,23 @@ const DUPLICATE_DAYS = 7
 
 const isUuid = (v) => /^[0-9a-f-]{36}$/i.test(String(v || ''))
 
-/** Company name and what it sells, from the Brand Brain. */
+/**
+ * Company name and what it sells, from the Brand Brain, and the company's own
+ * email domains (every connected mailbox's), which are never "the sender's
+ * website".
+ */
 export async function loadBrand(db, workspaceId) {
-  const [[ws], [profile]] = await Promise.all([
+  const [[ws], [profile], mailboxes] = await Promise.all([
     db(`workspaces?id=eq.${workspaceId}&select=name,agent_monthly_cap_usd`).then((r) => r || []),
     db(`brand_profile?workspace_id=eq.${workspaceId}&select=product_index`).then((r) => r || []),
+    db(`lead_mailboxes?workspace_id=eq.${workspaceId}&select=email,label`).then((r) => r || []).catch(() => []),
   ])
+  const domainOf = (e) => String(e || '').toLowerCase().split('@')[1] || ''
   return {
     companyName: ws?.name || 'the company',
     offering: profile?.product_index || '',
     cap: ws?.agent_monthly_cap_usd ?? null,
+    ownDomains: [...new Set(mailboxes.flatMap((m) => [domainOf(m.email), domainOf(m.label)]).filter(Boolean))],
   }
 }
 
@@ -51,11 +60,17 @@ const receivedIso = (s) => {
 }
 
 /**
- * Ask the model about one enquiry. Records the call in agent_usage (so the
- * company's monthly cap counts it) whether it worked or not.
+ * Ask the model about one enquiry, with what the sender's website says when
+ * there is one to check. Records the call in agent_usage (so the company's
+ * monthly cap counts it) whether it worked or not. Returns { verdict, site }
+ * or { error }.
  */
 export async function askModel(deps, { workspaceId, env, brand, surface = 'lead_qualifier' }) {
-  const body = openRouterRequest(env, brand)
+  const domain = websiteDomain(env, { ownDomains: brand?.ownDomains || [] })
+  let site = null
+  if (domain && deps.website) site = await deps.website(domain).catch(() => null)
+  if (domain && !site) site = { domain, ok: false }
+  const body = openRouterRequest(env, brand, { site })
   const res = await deps.model(body, workspaceId)
   const usage = res.usage || {}
   const cost = Number(usage.cost) || 0
@@ -67,8 +82,8 @@ export async function askModel(deps, { workspaceId, env, brand, surface = 'lead_
       cost_usd: cost, error: res.error ? String(res.error).slice(0, 300) : '',
     },
   }).catch(() => {})
-  if (res.error) return { error: String(res.error).slice(0, 300), cost, model: body.model }
-  return { verdict: parseVerdict(res.text), cost, model: body.model }
+  if (res.error) return { error: String(res.error).slice(0, 300), cost, model: body.model, site }
+  return { verdict: parseVerdict(res.text), cost, model: body.model, site }
 }
 
 /**
@@ -137,7 +152,7 @@ async function qualifyRows(deps, { workspaceId, batch, now, started }) {
       workspace_id: workspaceId, source: 'website_form', source_ref: env.sourceRef,
       received_at: receivedIso(env.receivedAt), name: env.name, company: env.company, email: env.email,
       phone: env.phone, subject: env.subject, message: env.message, language: env.language,
-      updated_at: now.toISOString(),
+      folder: 'website', email_kind: emailKind(env.email), updated_at: now.toISOString(),
     }
 
     const dup = findDuplicate(env, known.filter((k) => k.sourceRef !== env.sourceRef), { days: DUPLICATE_DAYS })
@@ -168,8 +183,8 @@ async function qualifyRows(deps, { workspaceId, batch, now, started }) {
     }
     const v = out.verdict
     const saved = await upsertLead(deps.db, {
-      ...base, verdict: v.verdict, category: v.category, confidence: v.confidence, reason: v.reason,
-      summary: v.summary, details: v.details, ask_next: v.ask_next, model: out.model, cost_usd: out.cost, error: '',
+      ...base, ...verdictColumns(v, { site: out.site, folder: 'website', email: env.email }),
+      model: out.model, cost_usd: out.cost, error: '',
     })
     // Later rows in this same batch can be duplicates of this one.
     known.push({ id: saved?.id, sourceRef: env.sourceRef, email: env.email, phone: env.phone, message: env.message, receivedAt: base.received_at })
@@ -202,7 +217,7 @@ export async function tryIt(deps, { workspaceId, input = {} }) {
   if (!capDecision({ cap: brand.cap, spent, estimate: 0.001 }).allowed) return { status: 402, error: 'This month\'s AI budget is used up.' }
   const out = await askModel(deps, { workspaceId, env, brand, surface: 'lead_qualifier_test' })
   if (out.error) return { status: 502, error: `The model did not answer: ${out.error}` }
-  return { status: 200, verdict: out.verdict, cost: out.cost, model: out.model }
+  return { status: 200, verdict: out.verdict, website: out.site, cost: out.cost, model: out.model }
 }
 
 export { QUALIFIER_MODEL }
