@@ -1,32 +1,29 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Navigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../../store/auth'
 import { PageHeader, Button, Spinner, Skeleton, Input, Textarea, Toggle } from '../../components/ui/index'
 import { Notice, Stat, SubTabs } from '../email/parts'
-import { fetchLeadsPage, fetchMonthLeads, leadsApi, downloadEmailFile } from '../../lib/leads/client'
+import { fetchMonthLeads, leadsApi } from '../../lib/leads/client'
+import { VerdictTag, CriteriaChips } from './parts'
+import LeadsBoard from './Board'
 import { RULE_LABELS } from '../../lib/leads/qualify'
 import {
-  VERDICT_LABEL, VERDICT_TONE, SOURCE_LABEL, effectiveVerdict, monthStats, sheetHealth, modelName,
-  PAGE_SIZE, pageLabel, pageCount,
-  criteriaLabels,
+  monthStats, sheetHealth, modelName, money,
 } from '../../lib/leads/view'
 
-// ─── Lead Agent ────────────────────────────────────────────────────────────
-// Admin only (the owner's decision, 2026-10-06). The agent reads every
-// enquiry, from the website Sheet now and the info@ mailbox next, and says
-// whether it is a real buyer. This page is where you see what it decided,
-// correct it, try it on any text, and switch it on or off.
+// ─── Leads ─────────────────────────────────────────────────────────────────
+// Admin only for now (the owner's decision, 2026-10-06; who else gets in is
+// part of separating sales from marketing). Two views: Leads, the clean list
+// the sales team asked for (Board.jsx, 2026-10-11), and Agent settings, where
+// the agent is switched on or off, tried on any text, and its key and
+// mailboxes are managed. leads.araklighting.com opens straight onto it.
 //
 // How it is wired (the Sheet's script, the keys) is in docs/LEADS-SETUP.md,
 // not on this page: the page says what is wrong, not how to fix it.
 
-const TABS = [
-  { key: 'all', label: 'All' },
-  { key: 'qualified', label: 'Qualified' },
-  { key: 'needs_review', label: 'Needs review' },
-  { key: 'unqualified', label: 'Unqualified' },
-  { key: 'duplicate', label: 'Duplicates' },
-  { key: 'pending', label: 'Not checked' },
+const VIEWS = [
+  { key: 'leads', label: 'Leads' },
+  { key: 'settings', label: 'Agent settings' },
 ]
 
 // What went wrong with "Connect a mailbox", in the words a person needs.
@@ -43,44 +40,27 @@ const MS_ERRORS = {
   consent_denied: 'The other organisation\'s admin did not approve the app.',
 }
 
-const money = (n) => `$${(Number(n) || 0).toFixed(n && n < 0.1 ? 4 : 2)}`
 
-function VerdictTag({ verdict, corrected = false }) {
-  return (
-    <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-[0.08em] leading-[1.4] whitespace-nowrap ${VERDICT_TONE[verdict] || VERDICT_TONE.pending}`}>
-      {VERDICT_LABEL[verdict] || verdict}
-      {corrected && <span className="font-semibold normal-case tracking-normal opacity-70">· corrected</span>}
-    </span>
-  )
-}
 
-function when(iso) {
-  if (!iso) return '—'
-  const d = new Date(iso)
-  return d.toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Riyadh' })
-}
 
 export default function LeadAgent() {
   const { isAccessAdmin, activeWorkspaceId } = useAuth()
-  // This month's leads, for the counts; the list below reads its own page.
+  // This month's leads, for the counts on Agent settings.
   const [monthLeads, setMonthLeads] = useState([])
   const [status, setStatus] = useState(null)
   const [loadedFor, setLoadedFor] = useState(null)
   const [error, setError] = useState('')
   const [refreshing, setRefreshing] = useState(false)
-  const [tab, setTab] = useState('all')
-  const [page, setPage] = useState(0)
-  // The page on screen, and which workspace|tab|page it is for. A newer
-  // request wins over a slower older one.
-  const [list, setList] = useState({ key: null, rows: [], total: 0, error: '' })
-  const listWanted = useRef('')
-  const listTop = useRef(null)
-  const [open, setOpen] = useState(null)
+  // Bumped by Refresh so the list reloads too.
+  const [refreshKey, setRefreshKey] = useState(0)
   // Back from Microsoft's sign-in (Connect a mailbox): ?ms=connected or ?ms_error=…
-  const [params] = useSearchParams()
+  const [params, setParams] = useSearchParams()
   const msBack = params.get('ms') === 'connected' ? { ok: true, mailbox: params.get('mailbox') || 'The mailbox' }
     : params.get('ms') === 'approved' ? { ok: true, approved: true }
     : params.get('ms_error') ? { ok: false, code: params.get('ms_error') } : null
+  // Leads is the page; the agent's own settings are one tab away (?view=settings).
+  // Coming back from a mailbox sign-in lands on settings, where it happened.
+  const view = params.get('view') === 'settings' || msBack ? 'settings' : 'leads'
   // "Now" for the month and the Sheet's last call, taken when data loads
   // rather than during render.
   const [now, setNow] = useState(() => new Date())
@@ -103,30 +83,10 @@ export default function LeadAgent() {
     }
   }, [activeWorkspaceId])
 
-  const listKey = `${activeWorkspaceId}|${tab}|${page}`
-  const loadList = useCallback(async () => {
-    if (!activeWorkspaceId) return
-    const key = `${activeWorkspaceId}|${tab}|${page}`
-    listWanted.current = key
-    try {
-      const r = await fetchLeadsPage(activeWorkspaceId, { tab, page })
-      if (listWanted.current !== key) return
-      // Past the end (leads moved tab since): go to the last page instead.
-      if (!r.rows.length && r.total && page > 0) return setPage(pageCount(r.total) - 1)
-      setList({ key, ...r, error: '' })
-    } catch (err) {
-      if (listWanted.current === key) setList({ key, rows: [], total: 0, error: err.message || String(err) })
-    }
-  }, [activeWorkspaceId, tab, page])
-
   useEffect(() => { if (isAccessAdmin) queueMicrotask(reload) }, [reload, isAccessAdmin])
-  useEffect(() => { if (isAccessAdmin) queueMicrotask(loadList) }, [loadList, isAccessAdmin])
 
   const loading = loadedFor !== activeWorkspaceId
-  const listLoading = list.key !== listKey
   const stats = useMemo(() => monthStats(monthLeads, now), [monthLeads, now])
-  const shown = list.rows
-  const pages = pageCount(list.total)
 
   if (!isAccessAdmin) return <Navigate to="/" replace />
 
@@ -139,245 +99,96 @@ export default function LeadAgent() {
     setStatus((s) => ({ ...s, settings: r.settings }))
   }
 
+  /** A person's verdict. Returns the updated lead for the list to show. */
   async function review(lead, verdict) {
     const r = await leadsApi('review', activeWorkspaceId, { lead_id: lead.id, verdict })
-    if (r.error) return setError(r.error)
-    // It stays on this page, tagged as corrected, until the next load moves it.
-    const patch = (ls) => ls.map((l) => (l.id === lead.id ? { ...l, ...r.lead } : l))
-    setList((s) => ({ ...s, rows: patch(s.rows) }))
-    setMonthLeads(patch)
+    if (r.error) { setError(r.error); return null }
+    setMonthLeads((ls) => ls.map((l) => (l.id === lead.id ? { ...l, ...r.lead } : l)))
+    return r.lead
   }
 
   function refresh() {
     reload()
-    loadList()
+    setRefreshKey((k) => k + 1)
   }
 
-  function chooseTab(t) {
-    setTab(t)
-    setPage(0)
-    setOpen(null)
-  }
-
-  function goTo(p) {
-    setPage(p)
-    setOpen(null)
-    // Back to the top of the list, not the bottom of a long page.
-    const top = listTop.current?.getBoundingClientRect().top
-    if (top != null && top < 0) listTop.current.scrollIntoView({ block: 'start' })
+  function chooseView(v) {
+    setParams(v === 'settings' ? { view: 'settings' } : {}, { replace: true })
   }
 
   return (
     <div className="max-w-7xl space-y-4">
-      <PageHeader title="Lead Agent" subtitle="Reads every enquiry and says whether it is a real buyer, so salespeople only open the ones worth their time. Admin only.">
+      <PageHeader title="Leads" subtitle="Every enquiry from the website and the info@ mailboxes, sorted by the agent. Open a row to read the email and why.">
         <Button variant="secondary" size="sm" onClick={refresh} disabled={refreshing || !activeWorkspaceId}>
           {refreshing ? <Spinner size="sm" /> : null}
           Refresh
         </Button>
       </PageHeader>
 
+      <SubTabs items={VIEWS} value={view} onChange={chooseView} />
+
       {msBack?.ok && msBack.approved && <Notice tone="sage" title="The other organisation approved the app">Its mailboxes can now be connected with "Connect a mailbox from another Microsoft 365".</Notice>}
       {msBack?.ok && !msBack.approved && <Notice tone="sage" title={`${msBack.mailbox} is connected`}>The agent reads its new mail every 5 minutes, read only, from 1 October, and imports July to September in the background.</Notice>}
       {msBack && !msBack.ok && <Notice tone="red" title="The mailbox was not connected">{MS_ERRORS[msBack.code] || 'Microsoft did not finish the sign-in. Try again.'}</Notice>}
       {error && <Notice tone="red" title="Something went wrong">{error}</Notice>}
-      {status?.error && <Notice tone="red" title="Could not load the agent's settings">{status.error}</Notice>}
 
-      {/* ── Is it running ── */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-px bg-border border border-border">
-        <div className="bg-white px-4 py-3">
-          <p className="text-[10px] font-semibold text-text-tertiary uppercase tracking-wide">Agent</p>
-          {loading ? <Skeleton className="h-6 w-24 mt-1" /> : (
-            <div className="mt-1.5"><Toggle checked={Boolean(settings?.enabled)} onChange={setEnabled} label={settings?.enabled ? 'On' : 'Off'} /></div>
-          )}
-          <p className="text-[10px] text-text-tertiary mt-1">Off: new enquiries wait unread until it is on again.</p>
-        </div>
-        <div className="bg-white px-4 py-3">
-          <p className="text-[10px] font-semibold text-text-tertiary uppercase tracking-wide">Model</p>
-          {loading ? <Skeleton className="h-6 w-24 mt-1" /> : <p className="text-sm font-bold text-text mt-1">{modelName(status?.model)}</p>}
-          <p className="text-[10px] text-text-tertiary mt-1">Through OpenRouter. Names, emails and phone numbers are hidden from it.</p>
-        </div>
-        <div className="bg-white px-4 py-3">
-          <p className="text-[10px] font-semibold text-text-tertiary uppercase tracking-wide">OpenRouter key</p>
-          {loading ? <Skeleton className="h-6 w-24 mt-1" /> : status?.key?.valid
-            ? <p className="text-sm font-bold text-sage-700 mt-1">Working{status.key.limitRemaining != null ? ` · ${money(status.key.limitRemaining)} left` : ''}</p>
-            : <p className="text-sm font-bold text-red-600 mt-1">{status?.key?.saved ? 'Saved key is not accepted' : 'No key saved'}</p>}
-          <p className="text-[10px] text-text-tertiary mt-1">{status?.key?.fromDeployment ? 'Using the deployment\'s key.' : 'Replace it under Connection, on the right.'}</p>
-        </div>
-        <div className="bg-white px-4 py-3">
-          <p className="text-[10px] font-semibold text-text-tertiary uppercase tracking-wide">Website Sheet</p>
-          {loading ? <Skeleton className="h-6 w-24 mt-1" /> : (
-            <p className={`text-sm font-bold mt-1 ${sheet.state === 'ok' ? 'text-sage-700' : sheet.state === 'stale' ? 'text-amber-800' : 'text-text-secondary'}`}>{sheet.label}</p>
-          )}
-          <p className="text-[10px] text-text-tertiary mt-1">{sheet.state === 'stale' ? 'The Sheet checks every 5 minutes; it has stopped calling in.' : 'The Sheet sends new enquiries every 5 minutes.'}</p>
-        </div>
-      </div>
-
-      {/* ── This month ── */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-px bg-border border border-border">
-        <Stat label="Qualified" value={stats.qualified} hint="Real buyers this month" tone="text-sage-700" loading={loading} />
-        <Stat label="Needs review" value={stats.needs_review} hint="A person should look" tone="text-amber-800" loading={loading} />
-        <Stat label="Unqualified" value={stats.unqualified} hint="Pitches, jobs, spam" loading={loading} />
-        <Stat label="Duplicates" value={stats.duplicate} hint="Same sender sent it again" loading={loading} />
-        <Stat label="AI spend" value={money(stats.spend)} hint={stats.reviewed ? `${stats.reviewed} checked by a person, ${stats.corrected} corrected` : 'This month, on these enquiries'} loading={loading} />
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
-        {/* ── The leads ── */}
-        <div ref={listTop} className="lg:col-span-2 bg-white border border-border min-w-0 scroll-mt-4">
-          <div className="px-4 pt-3"><SubTabs items={TABS} value={tab} onChange={chooseTab} /></div>
-          {listLoading ? (
-            <div className="p-4 space-y-3">{[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-12 w-full" />)}</div>
-          ) : list.error ? (
-            <p className="px-4 py-10 text-sm text-red-600 text-center">Could not load the enquiries: {list.error}</p>
-          ) : !shown.length ? (
-            <p className="px-4 py-10 text-sm text-text-tertiary text-center">
-              {tab === 'all' ? 'No enquiries yet. They appear here once the website Sheet sends them.' : 'No enquiries in this tab.'}
-            </p>
-          ) : (
-            <>
-            <ul className="divide-y divide-border">
-              {shown.map((l) => {
-                const v = effectiveVerdict(l)
-                const isOpen = open === l.id
-                return (
-                  <li key={l.id}>
-                    <button type="button" onClick={() => setOpen(isOpen ? null : l.id)}
-                      className="w-full text-left px-4 py-3 hover:bg-surface-subtle transition-colors flex items-start gap-3">
-                      <div className="w-24 flex-shrink-0">
-                        <p className="text-[11px] text-text-secondary tabular-nums">{when(l.received_at || l.created_at)}</p>
-                        <p className="text-[10px] text-text-tertiary mt-0.5 truncate" title={l.mailbox || ''}>{SOURCE_LABEL[l.source] || l.source}{l.mailbox ? ` · ${l.mailbox.split('@')[0]}@` : ''}</p>
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <p className="text-sm font-semibold text-text truncate">{l.company || l.name || l.email || 'Unknown sender'}</p>
-                        <p className="text-xs text-text-secondary mt-0.5 line-clamp-2" dir="auto">{l.summary || l.message}</p>
-                        <CriteriaChips lead={l} />
-                        {l.reason && <p className="text-[11px] text-text-tertiary mt-1 line-clamp-1">{l.reason}</p>}
-                        {!l.verdict && l.error && <p className="text-[11px] text-red-600 mt-1 line-clamp-1">{l.error}</p>}
-                      </div>
-                      <div className="flex-shrink-0"><VerdictTag verdict={v} corrected={Boolean(l.human_verdict && l.human_verdict !== l.verdict)} /></div>
-                    </button>
-                    {isOpen && <LeadDetail lead={l} onReview={review} workspaceId={activeWorkspaceId} />}
-                  </li>
-                )
-              })}
-            </ul>
-            <Pager page={page} pages={pages} label={pageLabel(page, PAGE_SIZE, list.total)} onGo={goTo} />
-            </>
-          )}
+      {view === 'leads' ? (
+        <LeadsBoard workspaceId={activeWorkspaceId} onReview={review} refreshKey={refreshKey} />
+      ) : (
+        <>
+          {status?.error && <Notice tone="red" title="Could not load the agent's settings">{status.error}</Notice>}
+        {/* ── Is it running ── */}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-px bg-border border border-border">
+          <div className="bg-white px-4 py-3">
+            <p className="text-[10px] font-semibold text-text-tertiary uppercase tracking-wide">Agent</p>
+            {loading ? <Skeleton className="h-6 w-24 mt-1" /> : (
+              <div className="mt-1.5"><Toggle checked={Boolean(settings?.enabled)} onChange={setEnabled} label={settings?.enabled ? 'On' : 'Off'} /></div>
+            )}
+            <p className="text-[10px] text-text-tertiary mt-1">Off: new enquiries wait unread until it is on again.</p>
+          </div>
+          <div className="bg-white px-4 py-3">
+            <p className="text-[10px] font-semibold text-text-tertiary uppercase tracking-wide">Model</p>
+            {loading ? <Skeleton className="h-6 w-24 mt-1" /> : <p className="text-sm font-bold text-text mt-1">{modelName(status?.model)}</p>}
+            <p className="text-[10px] text-text-tertiary mt-1">Through OpenRouter. Names, emails and phone numbers are hidden from it.</p>
+          </div>
+          <div className="bg-white px-4 py-3">
+            <p className="text-[10px] font-semibold text-text-tertiary uppercase tracking-wide">OpenRouter key</p>
+            {loading ? <Skeleton className="h-6 w-24 mt-1" /> : status?.key?.valid
+              ? <p className="text-sm font-bold text-sage-700 mt-1">Working{status.key.limitRemaining != null ? ` · ${money(status.key.limitRemaining)} left` : ''}</p>
+              : <p className="text-sm font-bold text-red-600 mt-1">{status?.key?.saved ? 'Saved key is not accepted' : 'No key saved'}</p>}
+            <p className="text-[10px] text-text-tertiary mt-1">{status?.key?.fromDeployment ? 'Using the deployment\'s key.' : 'Replace it under Connection, on the right.'}</p>
+          </div>
+          <div className="bg-white px-4 py-3">
+            <p className="text-[10px] font-semibold text-text-tertiary uppercase tracking-wide">Website Sheet</p>
+            {loading ? <Skeleton className="h-6 w-24 mt-1" /> : (
+              <p className={`text-sm font-bold mt-1 ${sheet.state === 'ok' ? 'text-sage-700' : sheet.state === 'stale' ? 'text-amber-800' : 'text-text-secondary'}`}>{sheet.label}</p>
+            )}
+            <p className="text-[10px] text-text-tertiary mt-1">{sheet.state === 'stale' ? 'The Sheet checks every 5 minutes; it has stopped calling in.' : 'The Sheet sends new enquiries every 5 minutes.'}</p>
+          </div>
         </div>
 
-        <div className="space-y-4 min-w-0">
-          <TryIt workspaceId={activeWorkspaceId} />
-          <Connection workspaceId={activeWorkspaceId} status={status} loading={loading} onChange={setStatus} onError={setError} onReload={reload} now={now} />
+        {/* ── This month ── */}
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-px bg-border border border-border">
+          <Stat label="Qualified" value={stats.qualified} hint="Real buyers this month" tone="text-sage-700" loading={loading} />
+          <Stat label="Needs review" value={stats.needs_review} hint="A person should look" tone="text-amber-800" loading={loading} />
+          <Stat label="Unqualified" value={stats.unqualified} hint="Pitches, jobs, spam" loading={loading} />
+          <Stat label="Duplicates" value={stats.duplicate} hint="Same sender sent it again" loading={loading} />
+          <Stat label="AI spend" value={money(stats.spend)} hint={stats.reviewed ? `${stats.reviewed} checked by a person, ${stats.corrected} corrected` : 'This month, on these enquiries'} loading={loading} />
         </div>
-      </div>
-    </div>
-  )
-}
 
-function Pager({ page, pages, label, onGo }) {
-  return (
-    <div className="flex items-center justify-between gap-2 px-4 py-2.5 border-t border-border">
-      <p className="text-[11px] text-text-tertiary tabular-nums">{label}</p>
-      {pages > 1 && (
-        <div className="flex items-center gap-1.5">
-          <Button size="xs" variant="ghost" onClick={() => onGo(0)} disabled={page === 0}>First</Button>
-          <Button size="xs" variant="secondary" onClick={() => onGo(page - 1)} disabled={page === 0}>Previous</Button>
-          <span className="text-[11px] text-text-secondary tabular-nums px-1">Page {page + 1} of {pages}</span>
-          <Button size="xs" variant="secondary" onClick={() => onGo(page + 1)} disabled={page >= pages - 1}>Next</Button>
-          <Button size="xs" variant="ghost" onClick={() => onGo(pages - 1)} disabled={page >= pages - 1}>Last</Button>
-        </div>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
+            <TryIt workspaceId={activeWorkspaceId} />
+            <Connection workspaceId={activeWorkspaceId} status={status} loading={loading} onChange={setStatus} onError={setError} onReload={reload} now={now} />
+          </div>
+        </>
       )}
     </div>
   )
 }
 
-function LeadDetail({ lead, onReview, workspaceId }) {
-  const [fileState, setFileState] = useState({ busy: false, error: '' })
-  async function openInApp() {
-    setFileState({ busy: true, error: '' })
-    const r = await downloadEmailFile(workspaceId, lead)
-    setFileState({ busy: false, error: r.error || '' })
-  }
-  const d = lead.details || {}
-  const facts = [['Products', d.products], ['Brands', d.brands], ['Quantity', d.quantity], ['Location', d.location], ['Stage', d.stage], ['Urgency', d.urgency]].filter(([, v]) => v)
-  const asks = Array.isArray(lead.ask_next) ? lead.ask_next : []
-  return (
-    <div className="px-4 pb-4 pl-[7.75rem] space-y-3 text-xs">
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-text-secondary">
-        <p><span className="text-text-tertiary">Name </span>{lead.name || '—'}</p>
-        <p className="truncate"><span className="text-text-tertiary">Email </span>{lead.email || '—'}</p>
-        <p><span className="text-text-tertiary">Phone </span>{lead.phone || '—'}</p>
-      </div>
-      {lead.subject && <p className="text-text-tertiary">{lead.subject}</p>}
-      <p className="whitespace-pre-wrap text-text leading-relaxed border-l-2 border-border pl-3" dir="auto">{lead.message}</p>
-      <Evidence lead={lead} />
-      {facts.length > 0 && (
-        <div className="flex flex-wrap gap-x-4 gap-y-1">
-          {facts.map(([k, v]) => <p key={k}><span className="text-text-tertiary">{k} </span><span className="text-text">{v}</span></p>)}
-        </div>
-      )}
-      {asks.length > 0 && (
-        <div>
-          <p className="eyebrow mb-1">Ask on the first call</p>
-          <ul className="list-disc pl-4 space-y-0.5 text-text">{asks.map((a) => <li key={a}>{a}</li>)}</ul>
-        </div>
-      )}
-      {lead.verdict && lead.verdict !== 'duplicate' && (
-        <div className="flex flex-wrap items-center gap-2 pt-1">
-          <span className="text-text-tertiary">Is the agent right?</span>
-          <Button size="xs" variant={lead.human_verdict === lead.verdict ? 'primary' : 'secondary'} onClick={() => onReview(lead, lead.verdict)}>Yes</Button>
-          {['qualified', 'needs_review', 'unqualified'].filter((v) => v !== lead.verdict).map((v) => (
-            <Button key={v} size="xs" variant={lead.human_verdict === v ? 'primary' : 'secondary'} onClick={() => onReview(lead, v)}>
-              No, {VERDICT_LABEL[v].toLowerCase()}
-            </Button>
-          ))}
-          {lead.human_verdict && <Button size="xs" variant="ghost" onClick={() => onReview(lead, null)}>Clear</Button>}
-        </div>
-      )}
-      <div className="flex flex-wrap items-center gap-3">
-        {lead.source === 'email' && (
-          <Button size="xs" variant="secondary" onClick={openInApp} disabled={fileState.busy}
-            title="Downloads the original email with its attachments; open it to see it in the Outlook app">
-            {fileState.busy ? <Spinner size="sm" /> : null}Open in Outlook app
-          </Button>
-        )}
-        {lead.link && <a href={lead.link} target="_blank" rel="noreferrer" className="text-[11px] font-semibold text-amber-800 hover:underline">Open in Outlook on the web</a>}
-        {fileState.error && <p className="text-[11px] text-red-600">{fileState.error}</p>}
-        <p className="text-[10px] text-text-tertiary">{lead.mailbox ? `${lead.mailbox} · ` : ''}{lead.model ? `${modelName(lead.model)} · ${money(lead.cost_usd)}` : ''}{lead.confidence ? ` · ${lead.confidence} confidence` : ''}</p>
-      </div>
-    </div>
-  )
-}
 
-/** The sales team's criteria as small chips. Junk and Philips only are red: someone must look. */
-const CHIP_TONE = { Junk: 'bg-red-50 text-red-600', 'Philips only': 'bg-red-50 text-red-600', Trader: 'bg-amber-100 text-amber-800', 'Not verified': 'bg-amber-100 text-amber-800' }
-function CriteriaChips({ lead }) {
-  const labels = criteriaLabels(lead)
-  if (!labels.length) return null
-  return (
-    <div className="flex flex-wrap gap-1 mt-1">
-      {labels.map((t) => (
-        <span key={t} className={`text-[10px] px-1.5 py-0.5 ${CHIP_TONE[t] || 'bg-stone-100 text-stone-600'}`}>{t}</span>
-      ))}
-    </div>
-  )
-}
 
-/** Why the agent read the sender, the source and the phase the way it did. */
-function Evidence({ lead }) {
-  const rows = [
-    ['Sender', lead.sender_evidence],
-    ['Source', [lead.source_evidence, lead.website ? `website checked: ${lead.website}` : ''].filter(Boolean).join(' · ')],
-    ['Phase', lead.project_evidence],
-  ].filter(([, v]) => v)
-  if (!rows.length) return null
-  return (
-    <div className="space-y-0.5">
-      {rows.map(([k, v]) => <p key={k}><span className="text-text-tertiary">{k} </span><span className="text-text" dir="auto">{v}</span></p>)}
-    </div>
-  )
-}
+
 
 function TryIt({ workspaceId }) {
   const [subject, setSubject] = useState('')
