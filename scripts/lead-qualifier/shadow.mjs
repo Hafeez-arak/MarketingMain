@@ -9,6 +9,7 @@
 //   node --env-file=.env scripts/lead-qualifier/shadow.mjs                 (all leads)
 //   ... --limit 20                                                         (a sample first)
 //   ... --resume                                                           (skip leads already in the output)
+//   ... --ids <file>                                                       (only the lead ids in a JSON array file)
 //
 // Output (never in git, this repo is public):
 //   LEAD_PRIVATE_DIR (default ~/Desktop/Arak neww/lead-qualifier-private)/shadow-<date>.json
@@ -45,7 +46,8 @@ for (let from = 0; ; from += 500) {
 }
 const done = resume && fs.existsSync(out) ? JSON.parse(fs.readFileSync(out, 'utf8')) : []
 const seen = new Set(done.map((r) => r.id))
-const todo = leads.filter((l) => !seen.has(l.id)).slice(0, limit)
+const only = arg('ids') ? new Set(JSON.parse(fs.readFileSync(arg('ids'), 'utf8'))) : null
+const todo = leads.filter((l) => !seen.has(l.id) && (!only || only.has(l.id))).slice(0, limit)
 console.log(`${leads.length} leads; ${todo.length} to read; writing ${out}`)
 
 const results = [...done]

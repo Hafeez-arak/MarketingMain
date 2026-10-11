@@ -274,8 +274,8 @@ Rules:
 - A company inviting us to register as their supplier, or to quote on their RFQs or tenders, is a buyer.
 - Students, researchers and journalists asking questions for their own study or article are not customers: use not_an_enquiry.
 - Requests for maintenance, repair, programming, technical support, a site visit or a maintenance contract (AMC) for a lighting, lighting-control, KNX or smart system are buyers (project_enquiry), even if someone else installed it. Use existing_customer_support only when they say we supplied or installed it and report a fault, warranty claim or complaint.
-- If what they want is clearly outside what we sell (for example IT or network equipment, HVAC sensors, furniture, vehicles, stationery), use unclear and start the reason with "Outside what we sell:".
-- If you cannot tell whether they want to buy from us or sell to us (an empty message, or only a vague subject line), use unclear.
+- If a BUYER asks us for something clearly outside what we sell (for example IT or network equipment, HVAC sensors, furniture, vehicles, stationery), use unclear and start the reason with "Outside what we sell:". A company promoting ITS OWN products or services, in any field, is vendor_pitch, never unclear.
+- An empty or unreadable message whose subject offers shipping, freight, DDP, logistics, sourcing or other services is vendor_pitch. If you still cannot tell whether they want to buy from us or sell to us (an empty message with a vague or no subject), use unclear.
 - A vague request to meet about an unnamed "client project", with no product or scope, especially from an odd or mismatched domain, is usually a scam: use spam, or unclear with low confidence.
 - Use low confidence when the enquiry could reasonably be read two ways.
 - Personal details were replaced with [NAME], [EMAIL@domain], [PHONE], [LINK:domain]. The domains are real: use them.
@@ -312,7 +312,7 @@ request_type:
 - inquiry: they ask about us or for paperwork: supplier or vendor registration, prequalification, a catalogue or company profile, a general question.
 - none: not a request from a buyer (pitches, jobs, spam, notifications).
 
-philips: how the brand Philips (Signify) is named in what they want.
+philips: how the brand Philips (Signify) is named in what they want. Philips product lines count as Philips even without the word: Ledinaire, GreenPerform, CoreLine, Maxos, TrueLine, StyliD, ClearWay, MASTER, CorePro, Interact, Dynalite, Color Kinetics.
 - none: Philips is not named.
 - only: every item they want is Philips, or they want a Philips distributor or genuine Philips only.
 - mixed: Philips items together with items of other brands or with no brand.
