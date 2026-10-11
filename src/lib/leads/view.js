@@ -128,3 +128,60 @@ export function criteriaLabels(lead = {}) {
   if (lead.email_kind === 'free') out.push('Free email')
   return out
 }
+
+// ─── The leads list's filters (the sales view, 2026-10-11) ─────────────────
+
+/** What the "Show" filter offers. "Leads" = qualified + needs review: what sales works on. */
+export const SHOW_OPTIONS = [
+  { key: 'leads', label: 'Leads to work on' },
+  { key: 'qualified', label: 'Qualified' },
+  { key: 'needs_review', label: 'Needs review' },
+  { key: 'unqualified', label: 'Unqualified' },
+  { key: 'duplicate', label: 'Duplicates' },
+  { key: 'pending', label: 'Not checked yet' },
+  { key: 'all', label: 'Everything' },
+]
+
+export const EMPTY_FILTERS = { show: 'leads', sender: '', project: '', request: '', folder: '', emailKind: '', search: '' }
+
+/**
+ * The filters as PostgREST conditions: `or` groups (each its own `or=`
+ * parameter, so they AND together) and plain `eq` pairs. Pure, so the list's
+ * rules are tested without Supabase. A person's verdict wins over the agent's.
+ */
+export function leadFilters(f = EMPTY_FILTERS) {
+  const ors = []
+  const eqs = []
+  if (f.show === 'leads') {
+    ors.push('human_verdict.in.(qualified,needs_review),and(human_verdict.is.null,verdict.in.(qualified,needs_review))')
+  } else if (f.show && f.show !== 'all') {
+    ors.push(verdictFilter(f.show))
+  }
+  if (f.sender) eqs.push(['sender_type', f.sender])
+  // "Not stated" is the empty phase: sales fills it in after the call.
+  if (f.project) eqs.push(['project_type', f.project === 'none' ? '' : f.project])
+  if (f.request) eqs.push(['request_type', f.request])
+  if (f.folder) eqs.push(['folder', f.folder])
+  if (f.emailKind) eqs.push(['email_kind', f.emailKind])
+  // PostgREST's or-syntax uses , ( ) and quotes: keep them out of the words.
+  const words = String(f.search || '').replace(/[,()"'*\\%]/g, ' ').replace(/\s+/g, ' ').trim()
+  if (words) {
+    const like = `*${words}*`
+    ors.push(['company', 'name', 'email', 'subject', 'summary', 'message'].map((c) => `${c}.ilike.${like}`).join(','))
+  }
+  return { ors, eqs }
+}
+
+/** How many filters besides "Show" are set, for the "Clear filters" button. */
+export const activeFilterCount = (f = EMPTY_FILTERS) =>
+  ['sender', 'project', 'request', 'folder', 'emailKind', 'search'].filter((k) => String(f[k] || '').trim()).length
+
+/** "$0.0098" for small amounts, "$9.60" otherwise. */
+export const money = (n) => `$${(Number(n) || 0).toFixed(n && n < 0.1 ? 4 : 2)}`
+
+/** "6 Oct, 13:00" in Riyadh time. */
+export function when(iso) {
+  if (!iso) return '—'
+  const d = new Date(iso)
+  return d.toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Riyadh' })
+}

@@ -29,13 +29,22 @@ for (let i = 1; i <= 60; i++) {
 // first, the offset/limit page, and the exact count in Content-Range.
 function restLeads(url) {
   const p = new URL(url, window.location.origin).searchParams
-  const or = p.get('or') || ''
   const eff = (l) => l.human_verdict || l.verdict || 'pending'
   let rows = leads
-  const tab = or.match(/^\(human_verdict\.eq\.(\w+),/)?.[1] || (or.includes('verdict.is.null') ? 'pending' : null)
-  if (tab) rows = rows.filter((l) => eff(l) === tab)
-  const since = or.match(/received_at\.gte\.([^,)]+)/)?.[1]
-  if (since) rows = rows.filter((l) => l.received_at >= since || l.created_at >= since)
+  // Each or= group narrows the list (PostgREST ANDs them), like the real thing.
+  for (const or of p.getAll('or')) {
+    if (or.includes('human_verdict.in.(qualified,needs_review)')) { rows = rows.filter((l) => ['qualified', 'needs_review'].includes(eff(l))); continue }
+    const words = or.match(/company\.ilike\.\*([^*]*)\*/)?.[1]
+    if (words) { const w = words.toLowerCase(); rows = rows.filter((l) => [l.company, l.name, l.email, l.subject, l.summary, l.message].some((v) => String(v || '').toLowerCase().includes(w))); continue }
+    const tab = or.match(/^\(human_verdict\.eq\.(\w+),/)?.[1] || (or.includes('verdict.is.null') ? 'pending' : null)
+    if (tab) rows = rows.filter((l) => eff(l) === tab)
+    const since = or.match(/received_at\.gte\.([^,)]+)/)?.[1]
+    if (since) rows = rows.filter((l) => l.received_at >= since || l.created_at >= since)
+  }
+  for (const col of ['sender_type', 'project_type', 'request_type', 'folder', 'email_kind']) {
+    const v = p.get(col)
+    if (v != null) rows = rows.filter((l) => (l[col] || '') === v.replace(/^eq\./, ''))
+  }
   rows = [...rows].sort((a, b) => (b.received_at || '').localeCompare(a.received_at || '') || b.id.localeCompare(a.id))
   const offset = Number(p.get('offset') || 0)
   const limit = p.has('limit') ? Number(p.get('limit')) : rows.length

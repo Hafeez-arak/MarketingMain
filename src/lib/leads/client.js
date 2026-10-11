@@ -1,5 +1,5 @@
 import { supabase } from '../supabaseClient'
-import { PAGE_SIZE, pageRange, verdictFilter } from './view'
+import { PAGE_SIZE, pageRange, verdictFilter, leadFilters } from './view'
 
 // ─── Lead Agent: the browser's data layer ──────────────────────────────────
 // Reads go straight to Supabase with the admin's own session (RLS lets only
@@ -11,16 +11,17 @@ import { PAGE_SIZE, pageRange, verdictFilter } from './view'
 const LEAD_COLUMNS = 'id,source,received_at,name,company,email,phone,subject,message,language,verdict,category,confidence,reason,summary,details,ask_next,duplicate_of,model,cost_usd,error,human_verdict,reviewed_at,created_at,mailbox,link,sender_type,sender_evidence,source_check,source_evidence,project_type,project_evidence,request_type,philips,rule,website,folder,email_kind,criteria_version'
 
 /**
- * One page of the list, filtered by tab in the database, with the tab's
- * total. Ties on received_at are broken by id so no lead appears on two
- * pages or on none.
+ * One page of the list, filtered in the database (see leadFilters), with the
+ * filtered total. `tab` is the older verdict-only filter. Ties on
+ * received_at are broken by id so no lead appears on two pages or on none.
  */
-export async function fetchLeadsPage(ws, { tab = 'all', page = 0, pageSize = PAGE_SIZE } = {}) {
+export async function fetchLeadsPage(ws, { tab = null, filters = null, page = 0, pageSize = PAGE_SIZE } = {}) {
   const { from, to } = pageRange(page, pageSize)
   let q = supabase.from('leads').select(LEAD_COLUMNS, { count: 'exact' })
     .eq('workspace_id', ws)
-  const filter = verdictFilter(tab)
-  if (filter) q = q.or(filter)
+  const { ors, eqs } = filters ? leadFilters(filters) : { ors: [verdictFilter(tab || 'all')].filter(Boolean), eqs: [] }
+  for (const o of ors) q = q.or(o)
+  for (const [col, val] of eqs) q = q.eq(col, val)
   const { data, error, count } = await q
     .order('received_at', { ascending: false, nullsFirst: false })
     .order('id', { ascending: false })

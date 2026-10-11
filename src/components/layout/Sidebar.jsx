@@ -13,7 +13,7 @@ const nav = [
   // emails and phone numbers. `adminOnly` items and sections are dropped for
   // everyone else at render.
   { section: 'Sales', adminOnly: true, items: [
-    { to: '/leads', label: 'Lead Agent', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"/></svg> },
+    { to: '/leads', label: 'Leads', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"/></svg> },
     { to: '/targets', label: 'Targets', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/></svg> },
   ]},
   { section: 'Brand', items: [

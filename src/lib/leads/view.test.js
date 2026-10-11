@@ -70,3 +70,26 @@ describe('criteriaLabels', () => {
     expect(criteriaLabels({ sender_type: 'contractor' })).toEqual([])
   })
 })
+
+describe('leadFilters', () => {
+  it('"Leads" means qualified or needs review, a person\'s verdict first', async () => {
+    const { leadFilters, EMPTY_FILTERS } = await import('./view.js')
+    expect(leadFilters(EMPTY_FILTERS)).toEqual({
+      ors: ['human_verdict.in.(qualified,needs_review),and(human_verdict.is.null,verdict.in.(qualified,needs_review))'],
+      eqs: [],
+    })
+    expect(leadFilters({ ...EMPTY_FILTERS, show: 'all' }).ors).toEqual([])
+    expect(leadFilters({ ...EMPTY_FILTERS, show: 'unqualified' }).ors[0]).toContain('verdict.eq.unqualified')
+  })
+  it('turns each criteria filter into an exact match; "not stated" is the empty phase', async () => {
+    const { leadFilters, EMPTY_FILTERS } = await import('./view.js')
+    const f = leadFilters({ ...EMPTY_FILTERS, sender: 'trader', project: 'none', request: 'requirement', folder: 'junk', emailKind: 'free' })
+    expect(f.eqs).toEqual([['sender_type', 'trader'], ['project_type', ''], ['request_type', 'requirement'], ['folder', 'junk'], ['email_kind', 'free']])
+  })
+  it('searches the words across company, sender, subject and message, with PostgREST syntax stripped', async () => {
+    const { leadFilters, EMPTY_FILTERS, activeFilterCount } = await import('./view.js')
+    const f = leadFilters({ ...EMPTY_FILTERS, search: ' Nour, (contracting) ' })
+    expect(f.ors[1]).toBe('company.ilike.*Nour contracting*,name.ilike.*Nour contracting*,email.ilike.*Nour contracting*,subject.ilike.*Nour contracting*,summary.ilike.*Nour contracting*,message.ilike.*Nour contracting*')
+    expect(activeFilterCount({ ...EMPTY_FILTERS, search: 'x', folder: 'junk' })).toBe(2)
+  })
+})
