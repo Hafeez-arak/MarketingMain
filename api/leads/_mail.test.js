@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { skipReason, stripQuoted, requestKey, messageToEnvelope, checkMailbox, checkMail, finishConnect, tenantOf, NEW_LEADS_FROM, isWarmupEmail, emailFile } from './_mail.js'
+import { skipReason, stripQuoted, requestKey, messageToEnvelope, checkMailbox, checkMail, finishConnect, tenantOf, NEW_LEADS_FROM, isWarmupEmail, emailFile, leadPhones } from './_mail.js'
 import { intakeWebsite } from './_intake.js'
 
 // Made-up mail only: this repo is public.
@@ -364,5 +364,36 @@ describe('emailFile', () => {
     expect(await emailFile(fake({ found: false }).deps, { workspaceId: WS, leadId: 'lead-1' })).toMatchObject({ status: 404 })
     expect(await emailFile(fake().deps, { workspaceId: WS, leadId: 'lead-2' })).toMatchObject({ status: 404 })
     expect(await emailFile(fake({ size: 5_000_000 }).deps, { workspaceId: WS, leadId: 'lead-1' })).toMatchObject({ status: 413 })
+  })
+})
+
+describe('leadPhones', () => {
+  const deps = (calls, reply = '{"phones":["+966 55 111 2222"]}') => ({
+    db: async () => [],
+    model: async (body) => { calls.push(['model', body.messages[0].content.length]); return { text: reply, usage: { cost: 0.0002 } } },
+    fetch: async (url) => {
+      calls.push(['graph', String(url).split('?')[0].split('/').slice(-2).join('/')])
+      if (String(url).includes('/attachments?')) return new Response(JSON.stringify({ value: [
+        { id: 'a1', contentType: 'image/png', size: 20_000, isInline: true },
+        { id: 'a2', contentType: 'image/png', size: 300, isInline: true }, // a spacer
+        { id: 'a3', contentType: 'application/pdf', size: 90_000, isInline: false }, // the BOQ
+      ] }), { status: 200 })
+      return new Response(JSON.stringify({ contentBytes: 'iVBOR' }), { status: 200 })
+    },
+  })
+  it('a number in the text is enough: no picture is read', async () => {
+    const calls = []
+    expect(await leadPhones(deps(calls), { token: 't', msg: { id: 'm1' }, text: 'Regards\nMob: 0553251417', verdict: 'qualified', workspaceId: WS })).toEqual(['0553251417'])
+    expect(calls).toEqual([])
+  })
+  it('no number in the text: the signature picture is read, only the small images', async () => {
+    const calls = []
+    expect(await leadPhones(deps(calls), { token: 't', msg: { id: 'm1' }, text: 'Regards, Omar', verdict: 'needs_review', workspaceId: WS })).toEqual(['+966 55 111 2222'])
+    expect(calls).toEqual([['graph', 'm1/attachments'], ['graph', 'attachments/a1'], ['model', 2]])
+  })
+  it('never spends on mail that is not a lead', async () => {
+    const calls = []
+    expect(await leadPhones(deps(calls), { token: 't', msg: { id: 'm1' }, text: 'Buy our SEO', verdict: 'unqualified', workspaceId: WS })).toEqual([])
+    expect(calls).toEqual([])
   })
 })

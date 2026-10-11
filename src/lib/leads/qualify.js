@@ -151,6 +151,39 @@ export function maskText(text, { name = '' } = {}) {
   return out
 }
 
+const PHONE_RE = /(?<![\p{L}\d/.-])\+?\(?\d[\d\s().-]{5,}\d(?![\p{L}\d])/gu
+const PHONE_WORD = /(tel|phone|mob|mobile|cell|fax|whatsapp|call|contact|direct|office|t\s*[:.]|m\s*[:.]|p\s*[:.]|هاتف|جوال|تلفون|موبايل|واتس|ج\s*[:.]|ت\s*[:.])[^\n\d]{0,12}$/iu
+const toAsciiDigits = (t) => String(t || '').replace(/[٠-٩]/g, (d) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d))).replace(/[۰-۹]/g, (d) => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(d)))
+
+/**
+ * The phone numbers someone wrote in their message, usually the signature,
+ * in the order they appear, at most five. A number counts when it looks
+ * dialable (starts with +, 00, 0 or a Gulf country code) or a word like
+ * "Tel", "Mob" or "جوال" sits just before it, so RFQ and PO numbers are left
+ * alone. The same number written twice is listed once (matched on its last
+ * nine digits). Read in code from the original text: phones never go to a model.
+ */
+export function extractPhones(text) {
+  const t = toAsciiDigits(text)
+  const out = []
+  const seen = new Set()
+  for (const m of t.matchAll(PHONE_RE)) {
+    const raw = m[0].trim()
+    if (/^\d{4}[-/.]\d{1,2}[-/.]\d{1,2}$/.test(raw)) continue
+    const digits = raw.replace(/\D/g, '')
+    if (digits.length < 8 || digits.length > 15) continue
+    const before = t.slice(Math.max(0, m.index - 30), m.index)
+    const dialable = /^(\+|00|0|966|971|973|974|965|968)/.test(raw.replace(/^\(/, ''))
+    if (!dialable && !PHONE_WORD.test(before)) continue
+    const key = digits.slice(-9)
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(raw.replace(/\s+/g, ' '))
+    if (out.length === 5) break
+  }
+  return out
+}
+
 /**
  * What the model is allowed to see. Name, email address and phone are never
  * sent; the company name and the email's DOMAIN are, because "besix.com" and
@@ -272,7 +305,8 @@ Rules:
 - Short is not junk. "Outdoor lighting" or "need price" from anyone is product_enquiry.
 - Free email (Gmail, Hotmail) is not junk. Many real buyers use it.
 - A company introducing itself and then ASKING US for prices or products is a buyer. A company introducing itself and OFFERING its products, workers or services is a pitch.
-- A company inviting us to register as their supplier, or to quote on their RFQs or tenders, is a buyer.
+- A company inviting us to register as their supplier, or to quote on their RFQs or tenders, is a buyer, but only when it writes from its own domain or names a real project or product.
+- A generic invitation to "register as a vendor, supplier or strategic partner" or to "request the vendor questionnaire / EOI form", sent to "Dear Sir/Madam", naming no project and no product, from an address that is not the named company's own domain (a bulk-mail or CRM service, a free email, an unrelated domain), is a known scam: use spam.
 - Students, researchers and journalists asking questions for their own study or article are not customers: use not_an_enquiry.
 - Requests for maintenance, repair, programming, technical support, a site visit or a maintenance contract (AMC) for a lighting, lighting-control, KNX or smart system are buyers (project_enquiry), even if someone else installed it. Use existing_customer_support only when they say we supplied or installed it and report a fault, warranty claim or complaint.
 - If a BUYER asks us for something clearly outside what we sell (for example IT or network equipment, HVAC sensors, furniture, vehicles, stationery), use unclear and start the reason with "Outside what we sell:". A company promoting ITS OWN products or services, in any field, is vendor_pitch, never unclear.
@@ -297,7 +331,7 @@ sender_confidence: high, medium or low, for sender_type alone.
 sender_evidence: the words from the signature or website that show it ("Procurement Engineer, BESIX Saudi"; "website: general contractor for hotels"), or "".
 
 source_check: is this a real, identifiable business or person we can call back?
-- verified: the signature names a company together with a role, an address, a company phone or a company website; or the website checked below shows a real company that matches the sender; or (website forms) a company name together with a company email domain whose website matches.
+- verified: the signature names a company together with a role, an address, a company phone or a company website; or the website checked below shows a real company that matches the sender; or (website forms) a company name together with a company email domain whose website matches. The email domain must fit the company named: a large or well-known company (an oil company, a bank, a ministry, a giga-project) writing from a domain that is not its own, such as a bulk-mail or CRM service (salesforce, sfcustomeremail, sendgrid, mailchimp, hubspot), a free email or an unrelated domain, is not_verified however good the signature looks. Small companies writing from a free email can still be verified by their signature.
 - not_verified: no signature, only a name, a free email with no company details, or the website could not be opened and nothing else shows who they are. Never guess: when in doubt, not_verified.
 source_evidence: what you relied on, in a few words.
 
@@ -564,4 +598,55 @@ export function sheetColumns(v, duplicateOf = null) {
   if (duplicateOf) return ['duplicate', `Same sender and message as the enquiry of ${duplicateOf.receivedAt}.`]
   const label = { qualified: 'qualified', unqualified: 'unqualified', needs_review: 'needs review' }[v.verdict]
   return [label, `${v.category.replace(/_/g, ' ')}: ${v.rule ? fullReason(v) : v.reason}`]
+}
+
+// ─── Phone numbers in a signature picture ──────────────────────────────────
+// Many signatures are a picture (a business-card image), so the number is
+// not in the text. When a lead has no number in its text, its small images
+// are read by the same model (the sales team's request, 2026-10-11). Only
+// the images go, never the email text; the provider still may not keep them.
+
+export const PHONES_SCHEMA = {
+  name: 'signature_phones',
+  strict: true,
+  schema: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['phones'],
+    properties: { phones: { type: 'array', items: { type: 'string' } } },
+  },
+}
+
+/** The OpenRouter body that asks for the phone numbers written in up to three images. */
+export function phonesFromImagesRequest(images, { model = QUALIFIER_MODEL } = {}) {
+  return {
+    model,
+    messages: [{
+      role: 'user',
+      content: [
+        { type: 'text', text: 'These images come from the signature of a business email. List every telephone, mobile, WhatsApp or fax number written in them, exactly as written. Ignore anything that is not a phone number. If there is none, return an empty list. Answer with JSON only.' },
+        ...images.slice(0, 3).map((im) => ({ type: 'image_url', image_url: { url: `data:${im.contentType};base64,${im.base64}` } })),
+      ],
+    }],
+    max_tokens: 1500,
+    response_format: { type: 'json_schema', json_schema: PHONES_SCHEMA },
+    reasoning: { effort: 'low', exclude: true },
+    provider: { data_collection: 'deny', require_parameters: true },
+    usage: { include: true },
+  }
+}
+
+/** The model's list → clean numbers, through the same check as the text (so a stray date never becomes a phone). */
+export function parsePhones(text) {
+  let list
+  try {
+    const raw = String(text ?? '').trim().replace(/^```(?:json)?\s*|\s*```$/g, '')
+    list = JSON.parse(raw.slice(raw.indexOf('{'), raw.lastIndexOf('}') + 1)).phones || []
+  } catch { return [] }
+  return extractPhones(list.filter((p) => typeof p === 'string').map((p) => `Tel: ${p}`).join('\n'))
+}
+
+/** Every number for a lead, the form's own first, each once. */
+export function mergePhones(...lists) {
+  return extractPhones(lists.flat().filter(Boolean).map((p) => `Tel: ${p}`).join('\n'))
 }

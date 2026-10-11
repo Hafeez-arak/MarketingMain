@@ -1,7 +1,7 @@
 import { READ_SCOPES, refreshTokens, exchangeCode, whoAmI, packTokens, unpackTokens, classifyGraphError, tenantOf } from '../email/_graph.js'
-import { toEnvelope, findDuplicate, verdictColumns, emailKind } from '../../src/lib/leads/qualify.js'
+import { toEnvelope, findDuplicate, verdictColumns, emailKind, extractPhones, mergePhones } from '../../src/lib/leads/qualify.js'
 import { capDecision } from '../../src/lib/agent/budget.js'
-import { askModel, loadBrand, monthSpent, upsertLead } from './_intake.js'
+import { askModel, askPhonesInImages, loadBrand, monthSpent, upsertLead } from './_intake.js'
 
 // ─── The lead agent reads mailboxes ────────────────────────────────────────
 // info@arak-sa.com and info@clb-sa.com (the owner's decisions, 2026-10-06/07),
@@ -244,6 +244,48 @@ export async function folderNames(deps, token) {
 /** Where a message sits, by its parentFolderId: a named folder, "other", or '' when Graph did not say. */
 export const folderOf = (msg, names = {}) => (msg?.parentFolderId ? names[msg.parentFolderId] || 'other' : '')
 
+// A signature picture is small: bigger images are photos or drawings, tiny
+// ones are spacers and icons.
+const MIN_IMAGE = 1_500
+const MAX_IMAGE = 400_000
+
+/**
+ * The small images of one email (where a signature picture lives), at most
+ * three, as { contentType, base64 }. Read only; [] when there are none or
+ * Microsoft will not say. Inline images do not set hasAttachments, so the
+ * attachments are always asked for.
+ */
+export async function signatureImages(deps, token, messageId) {
+  try {
+    const q = new URLSearchParams({ $select: 'id,name,contentType,size,isInline' })
+    const r = await deps.fetch(`${GRAPH}/me/messages/${encodeURIComponent(messageId)}/attachments?${q}`, { headers: { Authorization: `Bearer ${token}` } })
+    if (!r.ok) return []
+    const list = ((await r.json())?.value || [])
+      .filter((a) => /^image\/(png|jpe?g|gif|webp)$/i.test(a.contentType || '') && a.size >= MIN_IMAGE && a.size <= MAX_IMAGE)
+      // Inline images first: that is where a signature sits.
+      .sort((a, b) => Number(b.isInline) - Number(a.isInline))
+      .slice(0, 3)
+    const out = []
+    for (const a of list) {
+      const one = await deps.fetch(`${GRAPH}/me/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(a.id)}`, { headers: { Authorization: `Bearer ${token}` } })
+      const j = one.ok ? await one.json() : null
+      if (j?.contentBytes) out.push({ contentType: a.contentType.toLowerCase().replace('jpg', 'jpeg'), base64: j.contentBytes })
+    }
+    return out
+  } catch { return [] }
+}
+
+/**
+ * Every number a lead gave: written in the email, or, for a lead with none
+ * in its text, read from its signature picture.
+ */
+export async function leadPhones(deps, { token, msg, text, verdict, workspaceId }) {
+  const written = extractPhones(text)
+  if (written.length || !['qualified', 'needs_review'].includes(verdict) || !msg?.id) return written
+  const images = await signatureImages(deps, token, msg.id)
+  return mergePhones(await askPhonesInImages(deps, { workspaceId, images }))
+}
+
 const quoteIn = (values) => values.map((v) => `"${String(v).replace(/"/g, '\\"')}"`).join(',')
 
 async function setMailbox(deps, mb, patch) {
@@ -350,9 +392,10 @@ async function readPage(deps, ctx, { mb, token, from, until, budget, folders }) 
       counts.failed++; settledAll = false; break
     }
     const v = p.out.verdict
+    const phones = await leadPhones(deps, { token, msg: m, text: p.env.message, verdict: v.verdict, workspaceId: mb.workspace_id })
     await upsertLead(deps.db, {
       ...base(), ...verdictColumns(v, { site: p.out.site, folder: folderOf(m, folders), email: p.env.email }),
-      model: p.out.model, cost_usd: p.out.cost, error: '',
+      phones, model: p.out.model, cost_usd: p.out.cost, error: '',
     })
     counts[v.verdict]++
     to = m.receivedDateTime

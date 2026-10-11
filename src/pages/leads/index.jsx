@@ -133,7 +133,7 @@ export default function LeadAgent() {
       {error && <Notice tone="red" title="Something went wrong">{error}</Notice>}
 
       {view === 'leads' ? (
-        <LeadsBoard workspaceId={activeWorkspaceId} onReview={review} refreshKey={refreshKey} />
+        <LeadsBoard workspaceId={activeWorkspaceId} onReview={review} refreshKey={refreshKey} mailboxes={status?.mailboxes || []} />
       ) : (
         <>
           {status?.error && <Notice tone="red" title="Could not load the agent's settings">{status.error}</Notice>}

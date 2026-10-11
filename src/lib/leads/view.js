@@ -142,7 +142,7 @@ export const SHOW_OPTIONS = [
   { key: 'all', label: 'Everything' },
 ]
 
-export const EMPTY_FILTERS = { show: 'leads', sender: '', project: '', request: '', folder: '', emailKind: '', search: '' }
+export const EMPTY_FILTERS = { show: 'leads', channel: '', sender: '', project: '', request: '', folder: '', emailKind: '', search: '' }
 
 /**
  * The filters as PostgREST conditions: `or` groups (each its own `or=`
@@ -157,6 +157,9 @@ export function leadFilters(f = EMPTY_FILTERS) {
   } else if (f.show && f.show !== 'all') {
     ors.push(verdictFilter(f.show))
   }
+  // Where it came in: the website form, or one connected mailbox (by the label it is stored under).
+  if (f.channel === 'website') eqs.push(['source', 'website_form'])
+  else if (f.channel) eqs.push(['mailbox', f.channel])
   if (f.sender) eqs.push(['sender_type', f.sender])
   // "Not stated" is the empty phase: sales fills it in after the call.
   if (f.project) eqs.push(['project_type', f.project === 'none' ? '' : f.project])
@@ -174,7 +177,7 @@ export function leadFilters(f = EMPTY_FILTERS) {
 
 /** How many filters besides "Show" are set, for the "Clear filters" button. */
 export const activeFilterCount = (f = EMPTY_FILTERS) =>
-  ['sender', 'project', 'request', 'folder', 'emailKind', 'search'].filter((k) => String(f[k] || '').trim()).length
+  ['channel', 'sender', 'project', 'request', 'folder', 'emailKind', 'search'].filter((k) => String(f[k] || '').trim()).length
 
 /** "$0.0098" for small amounts, "$9.60" otherwise. */
 export const money = (n) => `$${(Number(n) || 0).toFixed(n && n < 0.1 ? 4 : 2)}`
@@ -185,3 +188,20 @@ export function when(iso) {
   const d = new Date(iso)
   return d.toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Riyadh' })
 }
+
+/** "Arak" from info@arak-sa.com, "CLB" from info@clb-sa.com: the company a mailbox belongs to. */
+export function brandOf(address = '') {
+  const word = String(address).toLowerCase().split('@')[1]?.split(/[-.]/)[0] || ''
+  if (!word) return ''
+  return word.length <= 3 ? word.toUpperCase() : word[0].toUpperCase() + word.slice(1)
+}
+
+/** Where a lead came in, the way the team says it: "Arak website", "Arak email", "CLB email". */
+export function channelLabel(lead = {}, { websiteBrand = 'Arak' } = {}) {
+  if (lead.source === 'website_form') return `${websiteBrand} website`
+  const brand = brandOf(lead.mailbox)
+  return brand ? `${brand} email` : 'Email'
+}
+
+/** Every number a lead gave, the stored list first, else the form's own field. */
+export const phonesOf = (lead = {}) => (Array.isArray(lead.phones) && lead.phones.length ? lead.phones : [lead.phone].filter(Boolean))

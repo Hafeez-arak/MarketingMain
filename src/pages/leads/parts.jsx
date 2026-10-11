@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Button, Spinner } from '../../components/ui/index'
 import { downloadEmailFile } from '../../lib/leads/client'
-import { VERDICT_LABEL, VERDICT_TONE, criteriaLabels, modelName, money } from '../../lib/leads/view'
+import { VERDICT_LABEL, VERDICT_TONE, criteriaLabels, modelName, money, phonesOf, channelLabel, FOLDER_LABEL } from '../../lib/leads/view'
 
 // ─── Pieces shared by the leads list and the agent settings ────────────────
 
@@ -60,8 +60,13 @@ export function LeadDetail({ lead, onReview, workspaceId, wide = false }) {
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-text-secondary">
         <p><span className="text-text-tertiary">Name </span>{lead.name || '—'}</p>
         <p className="truncate"><span className="text-text-tertiary">Email </span>{lead.email || '—'}</p>
-        <p><span className="text-text-tertiary">Phone </span>{lead.phone || '—'}</p>
+        <p><span className="text-text-tertiary">{phonesOf(lead).length > 1 ? 'Phones ' : 'Phone '}</span>
+          {phonesOf(lead).length
+            ? phonesOf(lead).map((p, i) => <span key={p} className="tabular-nums" dir="ltr">{i ? ', ' : ''}<a href={`tel:${p.replace(/[^\d+]/g, '')}`} className="hover:underline">{p}</a></span>)
+            : '—'}
+        </p>
       </div>
+      <p className="text-text-tertiary">Came in: <span className="text-text-secondary">{channelLabel(lead)}{lead.mailbox ? ` (${lead.mailbox})` : ''}{lead.folder && lead.source === 'email' ? `, ${FOLDER_LABEL[lead.folder] || lead.folder} folder` : ''}</span></p>
       {lead.subject && <p className="text-text-tertiary">{lead.subject}</p>}
       <p className="whitespace-pre-wrap text-text leading-relaxed border-l-2 border-border pl-3" dir="auto">{lead.message}</p>
       <Evidence lead={lead} />
