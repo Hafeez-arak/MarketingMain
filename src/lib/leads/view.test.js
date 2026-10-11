@@ -59,3 +59,14 @@ describe('paging', () => {
     expect(pageCount(0, 25)).toBe(1)
   })
 })
+
+describe('criteriaLabels', () => {
+  it('names what is known, in a fixed order, and nothing for leads read before the criteria', async () => {
+    const { criteriaLabels } = await import('./view.js')
+    expect(criteriaLabels({ criteria_version: 2, sender_type: 'contractor', source_check: 'verified', project_type: 'tender', request_type: 'requirement', philips: 'or_equivalent', folder: 'junk', email_kind: 'free' }))
+      .toEqual(['Contractor', 'Verified', 'Tender', 'Requirement', 'Philips or equivalent', 'Junk', 'Free email'])
+    expect(criteriaLabels({ criteria_version: 2, sender_type: 'trader', source_check: 'not_verified', project_type: '', philips: 'none', folder: 'inbox', email_kind: 'company' }))
+      .toEqual(['Trader', 'Not verified'])
+    expect(criteriaLabels({ sender_type: 'contractor' })).toEqual([])
+  })
+})

@@ -8,7 +8,7 @@ import { PAGE_SIZE, pageRange, verdictFilter } from './view'
 // Every query carries its own workspace_id filter: RLS is membership, not
 // isolation.
 
-const LEAD_COLUMNS = 'id,source,received_at,name,company,email,phone,subject,message,language,verdict,category,confidence,reason,summary,details,ask_next,duplicate_of,model,cost_usd,error,human_verdict,reviewed_at,created_at,mailbox,link'
+const LEAD_COLUMNS = 'id,source,received_at,name,company,email,phone,subject,message,language,verdict,category,confidence,reason,summary,details,ask_next,duplicate_of,model,cost_usd,error,human_verdict,reviewed_at,created_at,mailbox,link,sender_type,sender_evidence,source_check,source_evidence,project_type,project_evidence,request_type,philips,rule,website,folder,email_kind,criteria_version'
 
 /**
  * One page of the list, filtered by tab in the database, with the tab's

@@ -131,7 +131,8 @@ function world({ messages = [], graphStatus = 200, tokenExpired = true, leads = 
     }
     if (u.endsWith('/me?$select=displayName,mail,userPrincipalName')) return new Response(JSON.stringify({ displayName: 'Info', mail: 'A.Box@Example-Co.sa' }), { status: 200 })
     if (u.endsWith('/me?$select=proxyAddresses')) return new Response(JSON.stringify({ proxyAddresses: proxy }), { status: 200 })
-    if (u.includes('/me/mailFolders/inbox?$select=id')) return new Response(JSON.stringify({ id: 'inbox' }), { status: 200 })
+    const folder = u.match(/\/me\/mailFolders\/(\w+)\?\$select=id$/)?.[1]
+    if (folder) return new Response(JSON.stringify({ id: `${folder}-id` }), { status: 200 })
     throw new Error(`fake fetch: ${u}`)
   }
   const replies = []
@@ -143,7 +144,7 @@ function world({ messages = [], graphStatus = 200, tokenExpired = true, leads = 
       state.modelCalls++; state.inFlight++; state.maxInFlight = Math.max(state.maxInFlight, state.inFlight)
       await new Promise((r) => setTimeout(r, 2))
       state.inFlight--
-      return replies.shift() || { text: JSON.stringify({ category: 'quotation_request', confidence: 'high', reason: 'Asks for a quote.', summary: 's', details: {}, ask_next: [] }), usage: { prompt_tokens: 800, completion_tokens: 120, cost: 0.00015 } }
+      return replies.shift() || { text: JSON.stringify({ category: 'quotation_request', confidence: 'high', reason: 'Asks for a quote.', summary: 's', details: {}, ask_next: [], source_check: 'verified', sender_type: 'contractor', sender_confidence: 'high' }), usage: { prompt_tokens: 800, completion_tokens: 120, cost: 0.00015 } }
     },
   }
   return { state, deps, replies }
@@ -165,8 +166,20 @@ describe('checkMailbox: new mail', () => {
     expect(w.state.leads).toHaveLength(1)
     expect(w.state.leads[0]).toMatchObject({ source: 'email', mailbox: 'info@example-co.sa', link: 'https://outlook.office.com/m1', conversation_id: 'conv-1', verdict: 'qualified' })
     expect(w.state.mailboxes[0]).toMatchObject({ read_from: '2026-10-06T04:00:00Z', status: 'active', last_error: '' })
-    expect(w.state.graphCalls[0].url).toContain('/me/messages?')
-    expect(w.state.graphCalls[0].headers.Prefer).toBe('outlook.body-content-type="text"')
+    const list = w.state.graphCalls.find((c) => c.url.includes('/me/messages?'))
+    expect(list.headers.Prefer).toBe('outlook.body-content-type="text"')
+    expect(new URL(list.url).searchParams.get('$select')).toContain('parentFolderId')
+  })
+
+  it('says which folder each email sat in, so a real enquiry in Junk stands out', async () => {
+    const w = world({ messages: [
+      msg(1, { parentFolderId: 'junkemail-id' }),
+      msg(2, { parentFolderId: 'inbox-id' }),
+      msg(3, { parentFolderId: 'some-user-folder' }),
+    ] })
+    await run(w)
+    expect(w.state.leads.map((l) => l.folder)).toEqual(['junk', 'inbox', 'other'])
+    expect(w.state.leads[0]).toMatchObject({ email_kind: 'company', criteria_version: 2, sender_type: 'contractor', source_check: 'verified' })
   })
 
   it('a reminder for the same referenced RFQ is not a new lead, even in a new conversation', async () => {

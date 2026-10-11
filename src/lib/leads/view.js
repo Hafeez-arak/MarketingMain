@@ -99,3 +99,32 @@ export function pageLabel(page, size, total) {
 }
 
 export const pageCount = (total, size = PAGE_SIZE) => Math.max(1, Math.ceil((Number(total) || 0) / size))
+
+// ─── The sales team's criteria, in their words (2026-10-11) ────────────────
+
+export const SENDER_LABEL = {
+  contractor: 'Contractor', developer_owner: 'Developer / owner', consultant: 'Consultant', end_client: 'End client',
+  facility_company: 'Facility company', trader: 'Trader', individual: 'Individual', unknown: 'Sender unclear',
+}
+export const PROJECT_LABEL = { jih: 'JIH', tender: 'Tender', maintenance: 'Maintenance' }
+export const REQUEST_LABEL = { requirement: 'Requirement', inquiry: 'Inquiry' }
+export const FOLDER_LABEL = { inbox: 'Inbox', junk: 'Junk', deleted: 'Deleted items', archive: 'Archive', other: 'Other folder', website: 'Website form' }
+export const PHILIPS_LABEL = { only: 'Philips only', mixed: 'Philips + others', or_equivalent: 'Philips or equivalent' }
+
+/**
+ * The criteria a lead was read against, as short labels in a fixed order:
+ * who, verified, phase, what, Philips, folder, email kind. Only what is known;
+ * a lead read before the criteria (version 1) gives none.
+ */
+export function criteriaLabels(lead = {}) {
+  if ((lead.criteria_version || 1) < 2) return []
+  const out = []
+  if (lead.sender_type) out.push(SENDER_LABEL[lead.sender_type] || lead.sender_type)
+  if (lead.source_check) out.push(lead.source_check === 'verified' ? 'Verified' : 'Not verified')
+  if (lead.project_type) out.push(PROJECT_LABEL[lead.project_type] || lead.project_type)
+  if (lead.request_type) out.push(REQUEST_LABEL[lead.request_type] || lead.request_type)
+  if (PHILIPS_LABEL[lead.philips]) out.push(PHILIPS_LABEL[lead.philips])
+  if (lead.folder && lead.folder !== 'inbox') out.push(FOLDER_LABEL[lead.folder] || lead.folder)
+  if (lead.email_kind === 'free') out.push('Free email')
+  return out
+}
