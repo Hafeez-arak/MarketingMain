@@ -57,3 +57,32 @@ export async function leadsApi(action, workspaceId, payload = {}) {
     return { error: `Could not reach the server: ${err.message}` }
   }
 }
+
+/**
+ * Download a lead's original email (.eml, attachments included). Opened, it
+ * lands in the computer's mail app: Outlook when Outlook is the default.
+ * Returns { ok } or { error }.
+ */
+export async function downloadEmailFile(workspaceId, lead) {
+  try {
+    const res = await fetch('/api/leads/email_file', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ workspace_id: workspaceId, lead_id: lead.id }),
+    })
+    if (!res.ok || /json/.test(res.headers.get('content-type') || '')) {
+      const data = await res.json().catch(() => null)
+      return { error: data?.error || `The email could not be fetched (${res.status}).` }
+    }
+    const blob = await res.blob()
+    const name = decodeURIComponent((res.headers.get('content-disposition') || '').match(/filename\*=UTF-8''([^;]+)/)?.[1] || 'email.eml')
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url; a.download = name
+    document.body.appendChild(a); a.click(); a.remove()
+    setTimeout(() => URL.revokeObjectURL(url), 10_000)
+    return { ok: true }
+  } catch (err) {
+    return { error: `Could not reach the server: ${err.message}` }
+  }
+}

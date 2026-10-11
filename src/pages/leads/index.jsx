@@ -3,7 +3,7 @@ import { Navigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../../store/auth'
 import { PageHeader, Button, Spinner, Skeleton, Input, Textarea, Toggle } from '../../components/ui/index'
 import { Notice, Stat, SubTabs } from '../email/parts'
-import { fetchLeadsPage, fetchMonthLeads, leadsApi } from '../../lib/leads/client'
+import { fetchLeadsPage, fetchMonthLeads, leadsApi, downloadEmailFile } from '../../lib/leads/client'
 import { RULE_LABELS } from '../../lib/leads/qualify'
 import {
   VERDICT_LABEL, VERDICT_TONE, SOURCE_LABEL, effectiveVerdict, monthStats, sheetHealth, modelName,
@@ -256,7 +256,7 @@ export default function LeadAgent() {
                       </div>
                       <div className="flex-shrink-0"><VerdictTag verdict={v} corrected={Boolean(l.human_verdict && l.human_verdict !== l.verdict)} /></div>
                     </button>
-                    {isOpen && <LeadDetail lead={l} onReview={review} />}
+                    {isOpen && <LeadDetail lead={l} onReview={review} workspaceId={activeWorkspaceId} />}
                   </li>
                 )
               })}
@@ -292,7 +292,13 @@ function Pager({ page, pages, label, onGo }) {
   )
 }
 
-function LeadDetail({ lead, onReview }) {
+function LeadDetail({ lead, onReview, workspaceId }) {
+  const [fileState, setFileState] = useState({ busy: false, error: '' })
+  async function openInApp() {
+    setFileState({ busy: true, error: '' })
+    const r = await downloadEmailFile(workspaceId, lead)
+    setFileState({ busy: false, error: r.error || '' })
+  }
   const d = lead.details || {}
   const facts = [['Products', d.products], ['Brands', d.brands], ['Quantity', d.quantity], ['Location', d.location], ['Stage', d.stage], ['Urgency', d.urgency]].filter(([, v]) => v)
   const asks = Array.isArray(lead.ask_next) ? lead.ask_next : []
@@ -330,22 +336,29 @@ function LeadDetail({ lead, onReview }) {
         </div>
       )}
       <div className="flex flex-wrap items-center gap-3">
-        {lead.link && <a href={lead.link} target="_blank" rel="noreferrer" className="text-[11px] font-semibold text-amber-800 hover:underline">Open in Outlook</a>}
+        {lead.source === 'email' && (
+          <Button size="xs" variant="secondary" onClick={openInApp} disabled={fileState.busy}
+            title="Downloads the original email with its attachments; open it to see it in the Outlook app">
+            {fileState.busy ? <Spinner size="sm" /> : null}Open in Outlook app
+          </Button>
+        )}
+        {lead.link && <a href={lead.link} target="_blank" rel="noreferrer" className="text-[11px] font-semibold text-amber-800 hover:underline">Open in Outlook on the web</a>}
+        {fileState.error && <p className="text-[11px] text-red-600">{fileState.error}</p>}
         <p className="text-[10px] text-text-tertiary">{lead.mailbox ? `${lead.mailbox} · ` : ''}{lead.model ? `${modelName(lead.model)} · ${money(lead.cost_usd)}` : ''}{lead.confidence ? ` · ${lead.confidence} confidence` : ''}</p>
       </div>
     </div>
   )
 }
 
-/** The sales team's criteria as small chips; Junk and Trader stand out. */
+/** The sales team's criteria as small chips. Junk and Philips only are red: someone must look. */
+const CHIP_TONE = { Junk: 'bg-red-50 text-red-600', 'Philips only': 'bg-red-50 text-red-600', Trader: 'bg-amber-100 text-amber-800', 'Not verified': 'bg-amber-100 text-amber-800' }
 function CriteriaChips({ lead }) {
   const labels = criteriaLabels(lead)
   if (!labels.length) return null
-  const loud = new Set(['Junk', 'Trader', 'Philips only', 'Not verified'])
   return (
     <div className="flex flex-wrap gap-1 mt-1">
       {labels.map((t) => (
-        <span key={t} className={`text-[10px] px-1.5 py-0.5 ${loud.has(t) ? 'bg-amber-100 text-amber-800' : 'bg-stone-100 text-stone-600'}`}>{t}</span>
+        <span key={t} className={`text-[10px] px-1.5 py-0.5 ${CHIP_TONE[t] || 'bg-stone-100 text-stone-600'}`}>{t}</span>
       ))}
     </div>
   )

@@ -503,3 +503,34 @@ export async function finishConnect(deps, { claims, code, redirectUri }) {
   })
   return { ok: true, email: label }
 }
+
+/** Vercel answers at most 4.5 MB; leave room for headers. */
+export const MAX_EMAIL_FILE = 4_300_000
+
+/**
+ * The original email of a lead, exactly as it arrived (MIME, attachments
+ * included), so a salesperson opens it in the Outlook app with the BOQ
+ * attached. Read only: the token is Mail.Read and nothing in the mailbox
+ * changes. Found by its Message-ID in the mailbox that read it.
+ * Returns { bytes, filename } or { error, status }.
+ */
+export async function emailFile(deps, { workspaceId, leadId }) {
+  const [lead] = await deps.db(`leads?id=eq.${leadId}&workspace_id=eq.${workspaceId}&source=eq.email&select=id,mailbox,source_ref,subject,received_at`) || []
+  if (!lead) return { status: 404, error: 'That email is not a lead of this company.' }
+  const mailboxes = await deps.db(`lead_mailboxes?workspace_id=eq.${workspaceId}&select=*`) || []
+  const mb = mailboxes.find((m) => lower(m.label) === lower(lead.mailbox) || lower(m.email) === lower(lead.mailbox))
+  if (!mb) return { status: 404, error: `The mailbox ${lead.mailbox || ''} is no longer connected.` }
+  const tok = await accessToken(deps, mb)
+  if (tok.error) return { status: 502, error: tok.error.reason || tok.error.message }
+  const auth = { Authorization: `Bearer ${tok.token}` }
+  const q = new URLSearchParams({ $filter: `internetMessageId eq '${String(lead.source_ref).replace(/'/g, "''")}'`, $select: 'id' })
+  const found = await deps.fetch(`${GRAPH}/me/messages?${q}`, { headers: auth })
+  const msg = found.ok ? (await found.json())?.value?.[0] : null
+  if (!msg?.id) return { status: 404, error: 'The email is no longer in the mailbox (it may have been deleted).' }
+  const raw = await deps.fetch(`${GRAPH}/me/messages/${encodeURIComponent(msg.id)}/$value`, { headers: auth })
+  if (!raw.ok) return { status: 502, error: `Microsoft answered ${raw.status} for the email file.` }
+  const bytes = Buffer.from(await raw.arrayBuffer())
+  if (bytes.length > MAX_EMAIL_FILE) return { status: 413, error: 'This email is too large to download here (big attachments). Open it in Outlook on the web.' }
+  const name = (String(lead.subject || 'email').replace(/[\\/:*?"<>|\r\n]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80) || 'email')
+  return { bytes, filename: `${name}.eml` }
+}

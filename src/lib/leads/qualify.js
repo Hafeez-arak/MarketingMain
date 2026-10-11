@@ -13,9 +13,10 @@
 // The sales team's criteria (2026-10-11) sit on top, also in code: the model
 // only READS who is writing, whether the source checks out, the project's
 // phase, what they want and how Philips is named; deriveVerdict() turns that
-// into qualified / unqualified / needs review. A trader from the market and a
-// Philips-only request are not leads; a source nobody can verify goes to a
-// person, never out.
+// into qualified / unqualified / needs review. A Philips-only request is not a
+// lead; a source nobody can verify goes to a person, never out. A trader is a
+// lead, labelled as one (the owner, 2026-10-11, after the shadow run showed
+// what rejecting them cost).
 //
 // Pure: no network, no clock unless passed in. Tested in qualify.test.js.
 
@@ -43,7 +44,7 @@ const PITCHES = new Set(['vendor_pitch', 'marketing_pitch', 'partnership_offer']
 
 const CONFIDENCE = ['high', 'medium', 'low']
 
-/** Who is writing (the sales team's list, 2026-10-11). A trader is not a lead. */
+/** Who is writing (the sales team's list, 2026-10-11). A label only: every type can be a lead. */
 export const SENDER_TYPES = ['contractor', 'developer_owner', 'consultant', 'end_client', 'facility_company', 'trader', 'individual', 'unknown']
 
 /** The project's phase, only when the email says it; otherwise sales fills it in after the call. */
@@ -439,16 +440,16 @@ export function openRouterRequest(env, brand = {}, { model = QUALIFIER_MODEL, si
  * the page can show "Rejected: trader from the market" above the model's own
  * reason. Only a would-be lead is touched: a pitch stays a pitch.
  *   1. every item Philips, or a Philips distributor wanted → unqualified
- *   2. a trader from the market → unqualified (needs review when the model is unsure who they are)
- *   3. nobody can verify the source → needs review, never unqualified
- *   4. the model is unsure about the category → needs review
+ *   2. nobody can verify the source → needs review, never unqualified
+ *   3. the model is unsure about the category → needs review
+ * A trader from the market was rule 2 for a day; the owner kept them in
+ * (2026-10-11): sender_type says "trader" and sales decides.
  */
 export function deriveVerdict(r) {
   let verdict = CATEGORIES[r.category]
   let rule = ''
   if (verdict === 'qualified') {
     if (r.philips === 'only') { verdict = 'unqualified'; rule = 'philips_only' }
-    else if (r.senderType === 'trader') { verdict = r.senderConfidence === 'low' ? 'needs_review' : 'unqualified'; rule = 'trader' }
     else if (r.sourceCheck !== 'verified') { verdict = 'needs_review'; rule = 'unverified' }
     else if (r.confidence === 'low') { verdict = 'needs_review'; rule = 'unsure' }
   } else if (verdict === 'unqualified' && r.confidence === 'low' && !PITCHES.has(r.category)) {
@@ -464,7 +465,6 @@ export function deriveVerdict(r) {
 /** What a rule means, in the words the sales team used. */
 export const RULE_LABELS = {
   philips_only: 'Rejected: asks only for Philips',
-  trader: 'Trader from the market',
   unverified: 'Source not verified',
   unsure: 'Not sure',
 }

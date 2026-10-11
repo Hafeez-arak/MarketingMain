@@ -180,9 +180,8 @@ describe('the sales team\'s criteria (2026-10-11)', () => {
     expect(parseVerdict(reply({ philips: 'mixed' })).verdict).toBe('qualified')
     expect(parseVerdict(reply({ philips: 'or_equivalent' })).verdict).toBe('qualified')
   })
-  it('a trader from the market is not a lead, unless the model is unsure who they are', () => {
-    expect(parseVerdict(reply({ sender_type: 'trader' }))).toMatchObject({ verdict: 'unqualified', rule: 'trader' })
-    expect(parseVerdict(reply({ sender_type: 'trader', sender_confidence: 'low' }))).toMatchObject({ verdict: 'needs_review', rule: 'trader' })
+  it('a trader from the market is a lead, labelled as one (the owner, 2026-10-11)', () => {
+    expect(parseVerdict(reply({ sender_type: 'trader' }))).toMatchObject({ verdict: 'qualified', rule: '', senderType: 'trader' })
   })
   it('a source nobody can verify goes to a person, never out', () => {
     expect(parseVerdict(reply({ source_check: 'not_verified' }))).toMatchObject({ verdict: 'needs_review', rule: 'unverified' })

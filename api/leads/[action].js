@@ -3,7 +3,7 @@ import { db, isConfigured } from '../agent/_supabase.js'
 import { sealSecret } from '../email/_secrets.js'
 import { signState, authorizeUrl, READ_SCOPES } from '../email/_graph.js'
 import { intakeWebsite, tryIt, QUALIFIER_MODEL } from './_intake.js'
-import { checkMail } from './_mail.js'
+import { checkMail, emailFile } from './_mail.js'
 import { exportLeads, applySheetDecisions } from './_export.js'
 import { leadDeps, openRouterKey, hasDeploymentKey, describeKey, sendAlert } from './_deps.js'
 import { previewLenses } from '../agent/_investigate.js'
@@ -126,6 +126,22 @@ const fail = (status, error) => ({ __fail: true, status, error })
 // ─── Admin actions ─────────────────────────────────────────────────────────
 
 const actions = {
+  /**
+   * The lead's original email as an .eml file, to open in the Outlook app
+   * with its attachments. Written straight to the response (not JSON).
+   */
+  async email_file({ workspaceId, body }) {
+    if (!isUuid(body.lead_id)) return fail(400, 'Which lead?')
+    const out = await emailFile(leadDeps(), { workspaceId, leadId: body.lead_id })
+    if (out.error) return fail(out.status, out.error)
+    const res = this.res
+    res.setHeader('Content-Type', 'message/rfc822')
+    res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(out.filename)}`)
+    res.setHeader('Cache-Control', 'no-store')
+    res.status(200).send(out.bytes)
+    return { __sent: true }
+  },
+
   /** Everything the Lead Agent page shows that RLS cannot: keys, model, mailboxes. */
   async status({ workspaceId }) {
     const settings = await settingsFor(workspaceId)
@@ -355,6 +371,7 @@ export default async function handler(req, res) {
   try {
     const out = await actions[action].call({ req, res }, { workspaceId, body, user })
     if (out && out.__fail) return res.status(out.status).json({ ok: false, error: out.error })
+    if (out && out.__sent) return undefined
     return res.status(200).json({ ok: true, ...out })
   } catch (err) {
     return res.status(500).json({ ok: false, error: String(err.message || err).slice(0, 300) })

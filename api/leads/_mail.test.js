@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { skipReason, stripQuoted, requestKey, messageToEnvelope, checkMailbox, checkMail, finishConnect, tenantOf, NEW_LEADS_FROM, isWarmupEmail } from './_mail.js'
+import { skipReason, stripQuoted, requestKey, messageToEnvelope, checkMailbox, checkMail, finishConnect, tenantOf, NEW_LEADS_FROM, isWarmupEmail, emailFile } from './_mail.js'
 import { intakeWebsite } from './_intake.js'
 
 // Made-up mail only: this repo is public.
@@ -325,5 +325,44 @@ describe('the Sheet call is the mailboxes\' heartbeat', () => {
       { key: '11111111-2222-3333-4444-555555555555', rows: [] })
     expect(calls[0].workspaceId).toBe(WS)
     expect(out.mail.mailboxes[0].counts.qualified).toBe(1)
+  })
+})
+
+describe('emailFile', () => {
+  const lead = { id: 'lead-1', mailbox: 'info@example-co.sa', source_ref: "<rfq-o'brien@client.example>", subject: 'RFQ: Hotel / lobby lights', received_at: '2026-10-06T08:00:00Z' }
+  function fake({ found = true, size = 10 } = {}) {
+    const calls = []
+    const deps = {
+      now: () => NOW, ms: { clientId: 'c', tenant: 't', secret: 's', configured: true },
+      open: () => JSON.stringify({ rt: 'r', at: 'live', exp: NOW.getTime() + 3_600_000 }), seal: (x) => x,
+      db: async (path) => {
+        if (path.startsWith('leads?id=eq.lead-1')) return [lead]
+        if (path.startsWith('leads?')) return []
+        if (path.startsWith('lead_mailboxes?')) return [MB]
+        if (path.startsWith('lead_mailbox_secrets?')) return [{ secret: 'x' }]
+        throw new Error(path)
+      },
+      fetch: async (url, init) => {
+        calls.push({ url: String(url), auth: init?.headers?.Authorization })
+        if (String(url).includes('/me/messages?')) return new Response(JSON.stringify({ value: found ? [{ id: 'AAMk/1' }] : [] }), { status: 200 })
+        if (String(url).endsWith('/$value')) return new Response('x'.repeat(size), { status: 200 })
+        throw new Error(String(url))
+      },
+    }
+    return { deps, calls }
+  }
+  it('finds the email by its Message-ID in the mailbox that read it and returns the original file', async () => {
+    const { deps, calls } = fake()
+    const out = await emailFile(deps, { workspaceId: WS, leadId: 'lead-1' })
+    expect(out.filename).toBe('RFQ Hotel lobby lights.eml')
+    expect(out.bytes.length).toBe(10)
+    expect(new URL(calls[0].url).searchParams.get('$filter')).toBe("internetMessageId eq '<rfq-o''brien@client.example>'")
+    expect(calls[1].url).toContain('/me/messages/AAMk%2F1/$value')
+    expect(calls.every((c) => c.auth === 'Bearer live')).toBe(true)
+  })
+  it('says so plainly when the email is gone, another company\'s, or too large', async () => {
+    expect(await emailFile(fake({ found: false }).deps, { workspaceId: WS, leadId: 'lead-1' })).toMatchObject({ status: 404 })
+    expect(await emailFile(fake().deps, { workspaceId: WS, leadId: 'lead-2' })).toMatchObject({ status: 404 })
+    expect(await emailFile(fake({ size: 5_000_000 }).deps, { workspaceId: WS, leadId: 'lead-1' })).toMatchObject({ status: 413 })
   })
 })
