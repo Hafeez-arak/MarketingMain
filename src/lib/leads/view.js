@@ -112,6 +112,17 @@ export const FOLDER_LABEL = { inbox: 'Inbox', junk: 'Junk', deleted: 'Deleted it
 export const PHILIPS_LABEL = { only: 'Philips only', mixed: 'Philips + others', or_equivalent: 'Philips or equivalent' }
 
 /**
+ * The project phase that counts: the team's choice when they set one
+ * (2026-10-12), else the agent's reading. '' is not stated.
+ * project_final is the database's own copy of this rule.
+ */
+export function projectOf(lead = {}) {
+  if (lead.project_final != null) return lead.project_final
+  if (lead.human_project_type) return lead.human_project_type === 'none' ? '' : lead.human_project_type
+  return lead.project_type || ''
+}
+
+/**
  * The criteria a lead was read against, as short labels in a fixed order:
  * who, verified, phase, what, Philips, folder, email kind. Only what is known;
  * a lead read before the criteria (version 1) gives none.
@@ -121,7 +132,7 @@ export function criteriaLabels(lead = {}) {
   const out = []
   if (lead.sender_type) out.push(SENDER_LABEL[lead.sender_type] || lead.sender_type)
   if (lead.source_check) out.push(lead.source_check === 'verified' ? 'Verified' : 'Not verified')
-  if (lead.project_type) out.push(PROJECT_LABEL[lead.project_type] || lead.project_type)
+  if (projectOf(lead)) out.push(PROJECT_LABEL[projectOf(lead)] || projectOf(lead))
   if (lead.request_type) out.push(REQUEST_LABEL[lead.request_type] || lead.request_type)
   if (PHILIPS_LABEL[lead.philips]) out.push(PHILIPS_LABEL[lead.philips])
   if (lead.folder && lead.folder !== 'inbox') out.push(FOLDER_LABEL[lead.folder] || lead.folder)
@@ -168,8 +179,9 @@ export function leadFilters(f = EMPTY_FILTERS) {
   if (f.channel === 'website') eqs.push(['source', 'website_form'])
   else if (f.channel) eqs.push(['mailbox', f.channel])
   if (f.sender) eqs.push(['sender_type', f.sender])
-  // "Not stated" is the empty phase: sales fills it in after the call.
-  if (f.project) eqs.push(['project_type', f.project === 'none' ? '' : f.project])
+  // "Not stated" is the empty phase: sales fills it in after the call. The
+  // team's choice counts (project_final).
+  if (f.project) eqs.push(['project_final', f.project === 'none' ? '' : f.project])
   if (f.request) eqs.push(['request_type', f.request])
   if (f.folder) eqs.push(['folder', f.folder])
   if (f.emailKind) eqs.push(['email_kind', f.emailKind])

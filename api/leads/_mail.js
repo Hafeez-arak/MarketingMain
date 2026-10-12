@@ -1,6 +1,7 @@
 import { READ_SCOPES, refreshTokens, exchangeCode, whoAmI, packTokens, unpackTokens, classifyGraphError, tenantOf } from '../email/_graph.js'
 import { toEnvelope, findDuplicate, verdictColumns, emailKind, extractPhones, mergePhones } from '../../src/lib/leads/qualify.js'
 import { capDecision } from '../../src/lib/agent/budget.js'
+import { outlookLink } from '../../src/lib/leads/view.js'
 import { askModel, askPhonesInImages, loadBrand, monthSpent, upsertLead } from './_intake.js'
 
 // ─── The lead agent reads mailboxes ────────────────────────────────────────
@@ -557,8 +558,14 @@ export const MAX_EMAIL_FILE = 4_300_000
  * changes. Found by its Message-ID in the mailbox that read it.
  * Returns { bytes, filename } or { error, status }.
  */
-export async function emailFile(deps, { workspaceId, leadId }) {
-  const [lead] = await deps.db(`leads?id=eq.${leadId}&workspace_id=eq.${workspaceId}&source=eq.email&select=id,mailbox,source_ref,subject,received_at`) || []
+/**
+ * The lead's email as it is in its mailbox NOW, found by its Message-ID
+ * (internetMessageId never changes; Exchange's own item id does, whenever
+ * the email moves folder, out of Junk say). Read only, Mail.Read.
+ * Returns { lead, mailboxes, msg, auth } or { status, error }.
+ */
+async function findMessage(deps, { workspaceId, leadId, select }) {
+  const [lead] = await deps.db(`leads?id=eq.${leadId}&workspace_id=eq.${workspaceId}&source=eq.email&select=id,mailbox,source_ref,subject,received_at,link`) || []
   if (!lead) return { status: 404, error: 'That email is not a lead of this company.' }
   const mailboxes = await deps.db(`lead_mailboxes?workspace_id=eq.${workspaceId}&select=*`) || []
   const mb = mailboxes.find((m) => lower(m.label) === lower(lead.mailbox) || lower(m.email) === lower(lead.mailbox))
@@ -566,10 +573,36 @@ export async function emailFile(deps, { workspaceId, leadId }) {
   const tok = await accessToken(deps, mb)
   if (tok.error) return { status: 502, error: tok.error.reason || tok.error.message }
   const auth = { Authorization: `Bearer ${tok.token}` }
-  const q = new URLSearchParams({ $filter: `internetMessageId eq '${String(lead.source_ref).replace(/'/g, "''")}'`, $select: 'id' })
+  const q = new URLSearchParams({ $filter: `internetMessageId eq '${String(lead.source_ref).replace(/'/g, "''")}'`, $select: select })
   const found = await deps.fetch(`${GRAPH}/me/messages?${q}`, { headers: auth })
   const msg = found.ok ? (await found.json())?.value?.[0] : null
-  if (!msg?.id) return { status: 404, error: 'The email is no longer in the mailbox (it may have been deleted).' }
+  if (!msg?.id) return { status: 404, error: `This email is no longer in ${lead.mailbox || 'the mailbox'}: it was deleted there.` }
+  return { lead, mailboxes, msg, auth }
+}
+
+/**
+ * "Open in Outlook", worked out at the click (2026-10-12): the stored link
+ * named no mailbox and an item id that dies when the email moves, so it
+ * often opened "This message might have been moved or deleted". This finds
+ * the email where it is now and names its mailbox. The fresh link is stored
+ * back (updated_at moves, so the workbook gets it too).
+ * Returns { url } or { status, error }.
+ */
+export async function currentOutlookLink(deps, { workspaceId, leadId }) {
+  const f = await findMessage(deps, { workspaceId, leadId, select: 'id,webLink' })
+  if (f.error) return f
+  const url = outlookLink({ link: f.msg.webLink, mailbox: f.lead.mailbox }, f.mailboxes)
+  if (!url) return { status: 502, error: 'Microsoft did not give a link for this email.' }
+  if (f.msg.webLink && f.msg.webLink !== f.lead.link) {
+    await deps.db(`leads?id=eq.${f.lead.id}`, { method: 'PATCH', prefer: 'return=minimal', body: { link: f.msg.webLink, updated_at: deps.now().toISOString() } })
+  }
+  return { url }
+}
+
+export async function emailFile(deps, { workspaceId, leadId }) {
+  const f = await findMessage(deps, { workspaceId, leadId, select: 'id' })
+  if (f.error) return f
+  const { lead, msg, auth } = f
   const raw = await deps.fetch(`${GRAPH}/me/messages/${encodeURIComponent(msg.id)}/$value`, { headers: auth })
   if (!raw.ok) return { status: 502, error: `Microsoft answered ${raw.status} for the email file.` }
   const bytes = Buffer.from(await raw.arrayBuffer())

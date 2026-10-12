@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { effectiveVerdict, monthStats, sheetHealth, modelName, verdictFilter, pageRange, pageLabel, pageCount, leadFilters, EMPTY_FILTERS, outlookLink } from './view.js'
+import { effectiveVerdict, monthStats, sheetHealth, modelName, verdictFilter, pageRange, pageLabel, pageCount, leadFilters, EMPTY_FILTERS, outlookLink, projectOf } from './view.js'
 
 const now = new Date('2026-10-20T10:00:00Z')
 const lead = (o) => ({ received_at: '2026-10-05T10:00:00Z', created_at: '2026-10-06T10:00:00Z', cost_usd: 0.0002, ...o })
@@ -84,7 +84,7 @@ describe('leadFilters', () => {
   it('turns each criteria filter into an exact match; "not stated" is the empty phase', async () => {
     const { leadFilters, EMPTY_FILTERS } = await import('./view.js')
     const f = leadFilters({ ...EMPTY_FILTERS, sender: 'trader', project: 'none', request: 'requirement', folder: 'junk', emailKind: 'free' })
-    expect(f.eqs).toEqual([['sender_type', 'trader'], ['project_type', ''], ['request_type', 'requirement'], ['folder', 'junk'], ['email_kind', 'free']])
+    expect(f.eqs).toEqual([['sender_type', 'trader'], ['project_final', ''], ['request_type', 'requirement'], ['folder', 'junk'], ['email_kind', 'free']])
   })
   it('searches the words across company, sender, subject and message, with PostgREST syntax stripped', async () => {
     const { leadFilters, EMPTY_FILTERS, activeFilterCount } = await import('./view.js')
@@ -134,5 +134,15 @@ describe('the review and CRM filters', () => {
   it('Corrected by a person and Approved / in CRM', () => {
     expect(leadFilters({ ...EMPTY_FILTERS, show: 'corrected' })).toEqual({ ors: [], eqs: [['corrected', true]] })
     expect(leadFilters({ ...EMPTY_FILTERS, show: 'approved' })).toEqual({ ors: ['approved_at.not.is.null'], eqs: [] })
+  })
+})
+
+describe('the project phase', () => {
+  it('the team\'s choice wins, \'none\' means not stated, otherwise the agent\'s', () => {
+    expect(projectOf({ project_type: 'tender' })).toBe('tender')
+    expect(projectOf({ project_type: '', human_project_type: 'jih' })).toBe('jih')
+    expect(projectOf({ project_type: 'tender', human_project_type: 'none' })).toBe('')
+    expect(projectOf({ project_type: 'tender', human_project_type: 'maintenance', project_final: 'maintenance' })).toBe('maintenance')
+    expect(projectOf({})).toBe('')
   })
 })

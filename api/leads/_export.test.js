@@ -88,6 +88,13 @@ describe('toRow', () => {
     // Read before the criteria existed: nothing is claimed.
     expect(toRow({ source: 'email', sender_type: 'contractor', project_type: 'jih', verdict: 'qualified' })).toMatchObject({ who: '', project: '' })
   })
+  it('the team\'s phase goes to the workbook and overrides a cell there; the link names the mailbox', () => {
+    const mailboxes = [{ email: 'a.rak@example.sa', label: 'info@example.sa' }]
+    const r = toRow({ source: 'email', mailbox: 'info@example.sa', criteria_version: 2, project_type: '', human_project_type: 'jih', project_final: 'jih', verdict: 'qualified', link: 'https://outlook.office365.com/owa/?ItemID=AAMk1&exvsurl=1&viewmodel=ReadMessageItem' }, { mailboxes })
+    expect(r).toMatchObject({ project: 'JIH', projectByPerson: true, link: 'https://outlook.office.com/mail/a.rak%40example.sa/deeplink?ItemID=AAMk1&exvsurl=1' })
+    expect(toRow({ criteria_version: 2, project_type: 'tender', verdict: 'qualified' })).toMatchObject({ project: 'Tender', projectByPerson: false })
+    expect(toRow({ criteria_version: 2, project_type: 'tender', human_project_type: 'none', project_final: '', verdict: 'qualified' })).toMatchObject({ project: '', projectByPerson: true })
+  })
   it('the Sheet shows qualified and doubtful leads, nothing else', () => {
     expect(toRow({ verdict: 'needs_review' })).toMatchObject({ verdict: 'Needs review', show: true, qualified: true })
     expect(toRow({ verdict: 'qualified', human_verdict: 'needs_review' })).toMatchObject({ show: true })

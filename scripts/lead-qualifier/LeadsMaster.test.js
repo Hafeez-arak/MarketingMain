@@ -135,6 +135,15 @@ describe('the refresh', () => {
     expect(at(tab, 'Project')).toBe('JIH')
   })
 
+  it('a phase the team set on the leads page wins over the cell', () => {
+    const tab = oldTab()
+    const gs = load([tab])
+    gs.setupTab_('New leads')
+    tab.rows[1][tab.rows[0].indexOf('Project')] = 'Tender'
+    gs.apply_([lead({ project: 'JIH', projectByPerson: true })])
+    expect(at(tab, 'Project')).toBe('JIH')
+  })
+
   it('a new lead the email says nothing about arrives with Project empty, for the team', () => {
     const tab = oldTab()
     const gs = load([tab])

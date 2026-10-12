@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { Button } from '../../components/ui/index'
+import { Button, Spinner } from '../../components/ui/index'
+import { leadsApi } from '../../lib/leads/client'
 import { VERDICT_LABEL, VERDICT_TONE, CRM_LABEL, criteriaLabels, modelName, money, phonesOf, channelLabel, outlookLink, when, FOLDER_LABEL } from '../../lib/leads/view'
 
 // ─── Pieces shared by the leads list and the agent settings ────────────────
@@ -100,7 +101,45 @@ function Review({ lead, onReview }) {
  * the .eml download it replaced was clumsy. The link names the mailbox
  * (outlookLink), so it opens for anyone with access to that mailbox.
  */
-export function LeadDetail({ lead, onReview, mailboxes = [], wide = false }) {
+/**
+ * "Open in Outlook": the link is worked out at the click, by the server,
+ * from where the email is NOW (outlook_link). The stored one dies when the
+ * email moves folder, which opened "This message might have been moved or
+ * deleted". The tab is opened first, inside the click, or the browser
+ * blocks it as a pop-up; it is then sent to the link, or closed with the
+ * reason shown here.
+ */
+function OpenInOutlook({ lead, workspaceId, fallback }) {
+  const [state, setState] = useState({ busy: false, error: '' })
+  async function open() {
+    const tab = window.open('', '_blank')
+    setState({ busy: true, error: '' })
+    const r = await leadsApi('outlook_link', workspaceId, { lead_id: lead.id })
+    if (r.url) {
+      if (tab) { tab.opener = null; tab.location.href = r.url } else window.location.href = r.url
+      return setState({ busy: false, error: '' })
+    }
+    tab?.close()
+    setState({ busy: false, error: r.error || 'Could not open the email.' })
+  }
+  return (
+    <>
+      <Button size="xs" variant="secondary" onClick={open} disabled={state.busy}
+        title="Opens the email in Outlook on the web, in the mailbox it arrived in. Needs access to that mailbox.">
+        {state.busy ? <Spinner size="sm" /> : null}Open in Outlook
+        <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3h7v7M10 14L21 3M21 14v7H3V3h7"/></svg>
+      </Button>
+      {state.error && (
+        <span className="text-[11px] text-red-600">
+          {state.error}
+          {fallback && !/deleted/.test(state.error) && <> <a href={fallback} target="_blank" rel="noreferrer" className="underline">Try the saved link</a></>}
+        </span>
+      )}
+    </>
+  )
+}
+
+export function LeadDetail({ lead, onReview, workspaceId, mailboxes = [], wide = false }) {
   const href = outlookLink(lead, mailboxes)
   const d = lead.details || {}
   const facts = [['Products', d.products], ['Brands', d.brands], ['Quantity', d.quantity], ['Location', d.location], ['Stage', d.stage], ['Urgency', d.urgency]].filter(([, v]) => v)
@@ -140,14 +179,7 @@ export function LeadDetail({ lead, onReview, mailboxes = [], wide = false }) {
         </p>
       )}
       <div className="flex flex-wrap items-center gap-3">
-        {href && (
-          <a href={href} target="_blank" rel="noreferrer"
-            title="Opens the email in Outlook on the web, in the mailbox it arrived in. Needs access to that mailbox."
-            className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] tracking-wide font-semibold border bg-white text-text border-border hover:border-stone-400 hover:bg-surface-subtle transition-colors">
-            Open in Outlook
-            <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3h7v7M10 14L21 3M21 14v7H3V3h7"/></svg>
-          </a>
-        )}
+        {lead.source === 'email' && <OpenInOutlook lead={lead} workspaceId={workspaceId} fallback={href} />}
         <p className="text-[10px] text-text-tertiary">{lead.mailbox ? `${lead.mailbox} · ` : ''}{lead.model ? `${modelName(lead.model)} · ${money(lead.cost_usd)}` : ''}{lead.confidence ? ` · ${lead.confidence} confidence` : ''}</p>
       </div>
     </div>

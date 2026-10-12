@@ -3,7 +3,7 @@ import { Button, Skeleton, Input, Select, Spinner } from '../../components/ui/in
 import { fetchLeadsPage, leadsApi } from '../../lib/leads/client'
 import {
   SHOW_OPTIONS, EMPTY_FILTERS, activeFilterCount, effectiveVerdict, PAGE_SIZE, pageLabel, pageCount, when,
-  SENDER_LABEL, PROJECT_LABEL, REQUEST_LABEL, FOLDER_LABEL, PHILIPS_LABEL, CRM_LABEL, channelLabel, brandOf, phonesOf,
+  SENDER_LABEL, PROJECT_LABEL, REQUEST_LABEL, FOLDER_LABEL, PHILIPS_LABEL, CRM_LABEL, channelLabel, brandOf, phonesOf, projectOf,
 } from '../../lib/leads/view'
 import { VerdictTag, LeadDetail } from './parts'
 
@@ -66,7 +66,34 @@ function CrmCell({ lead, canApprove, onAsk }) {
   return dash
 }
 
-function Row({ lead, open, onToggle, onReview, mailboxes, canApprove, onAsk }) {
+/**
+ * The project phase, set by anyone on the team (2026-10-12): stated in the
+ * email or not, they pick it after the call. Picking what the agent read
+ * goes back to following the agent.
+ */
+function ProjectPicker({ lead, onSet }) {
+  const [busy, setBusy] = useState(false)
+  const value = projectOf(lead) || 'none'
+  async function change(e) {
+    const choice = e.target.value
+    const agent = lead.project_type || 'none'
+    setBusy(true)
+    await onSet(lead, choice === agent ? null : choice)
+    setBusy(false)
+  }
+  return (
+    <span onClick={stop} className="block -ml-1">
+      <select aria-label="Project phase" value={value} disabled={busy} onChange={change}
+        className={`max-w-full text-xs bg-transparent border border-transparent hover:border-border focus:border-border focus:outline-none px-1 py-0.5 cursor-pointer disabled:opacity-50 ${value !== 'none' ? 'font-semibold text-text' : 'text-text-tertiary'}`}>
+        <option value="none">Not stated</option>
+        {Object.entries(PROJECT_LABEL).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+      </select>
+      {lead.human_project_type && <span className="block px-1 text-[10px] text-text-tertiary">set by team</span>}
+    </span>
+  )
+}
+
+function Row({ lead, open, onToggle, onReview, onSetProject, workspaceId, mailboxes, canApprove, onAsk }) {
   const v = effectiveVerdict(lead)
   const v2 = (lead.criteria_version || 1) >= 2
   const junk = lead.folder === 'junk'
@@ -102,7 +129,7 @@ function Row({ lead, open, onToggle, onReview, mailboxes, canApprove, onAsk }) {
           <span className="text-xs text-text">{REQUEST_LABEL[lead.request_type] || dash}</span>
         </Cell>
         <Cell label="Project">
-          <span className={`text-xs ${lead.project_type ? 'text-text font-semibold' : 'text-text-tertiary'}`}>{PROJECT_LABEL[lead.project_type] || (v2 ? 'Not stated' : '—')}</span>
+          <ProjectPicker lead={lead} onSet={onSetProject} />
         </Cell>
         <Cell label="Source">
           {v2 && lead.source_check
@@ -118,7 +145,7 @@ function Row({ lead, open, onToggle, onReview, mailboxes, canApprove, onAsk }) {
       </div>
       {open && (
         <div className="border-t border-border bg-white">
-          <LeadDetail lead={lead} onReview={onReview} mailboxes={mailboxes} wide />
+          <LeadDetail lead={lead} onReview={onReview} workspaceId={workspaceId} mailboxes={mailboxes} wide />
         </div>
       )}
     </li>
@@ -212,6 +239,17 @@ export default function LeadsBoard({ workspaceId, onReview, refreshKey = 0, mail
     return updated // the detail opens its "why?" box only once the No is saved
   }
 
+  // An action on a row that failed (the list itself stays as it is).
+  const [actionError, setActionError] = useState('')
+
+  // The team's project phase: saved at once, the row shows it.
+  async function setProject(lead, project) {
+    const r = await leadsApi('set_project', workspaceId, { lead_id: lead.id, project })
+    if (r.error) return setActionError(r.error)
+    setActionError('')
+    replaceRow(lead.id, r.lead)
+  }
+
   // Approve → confirm → Odoo. The row shows the outcome; Odoo's refusal, if
   // any, stays on the row (Retry) rather than in the dialog.
   const [asking, setAsking] = useState(null)
@@ -274,6 +312,7 @@ export default function LeadsBoard({ workspaceId, onReview, refreshKey = 0, mail
           <Input id="leads-search" label="Search" placeholder="Company, subject, words…" value={searchText} onChange={(e) => setSearchText(e.target.value)} />
         </div>
       </div>
+      {actionError && <p className="px-4 py-2 text-xs text-red-600 border-b border-border">{actionError}</p>}
       <div className="px-4 py-2 flex items-center justify-between gap-3 border-b border-border">
         <p className="text-[11px] text-text-secondary tabular-nums">
           {loading ? 'Loading…' : `${list.total} ${list.total === 1 ? 'lead' : 'leads'}`}
@@ -297,7 +336,7 @@ export default function LeadsBoard({ workspaceId, onReview, refreshKey = 0, mail
         <ul className="divide-y divide-border">
           {list.rows.map((l) => (
             <Row key={l.id} lead={l} open={open === l.id} onToggle={() => setOpen(open === l.id ? null : l.id)} onReview={review}
-              mailboxes={mailboxes} canApprove={canApprove} onAsk={(lead) => { setApproving({ busy: false, error: '' }); setAsking(lead) }} />
+              onSetProject={setProject} workspaceId={workspaceId} mailboxes={mailboxes} canApprove={canApprove} onAsk={(lead) => { setApproving({ busy: false, error: '' }); setAsking(lead) }} />
           ))}
         </ul>
       )}

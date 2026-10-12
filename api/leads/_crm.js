@@ -10,7 +10,7 @@
 
 import {
   SENDER_LABEL, PROJECT_LABEL, REQUEST_LABEL, FOLDER_LABEL, PHILIPS_LABEL,
-  channelLabel, phonesOf, effectiveVerdict,
+  channelLabel, phonesOf, effectiveVerdict, projectOf,
 } from '../../src/lib/leads/view.js'
 import { riyadhTime } from './_export.js'
 import { normalizeUrl, defaultDb, testConnection, createLead } from './_odoo.js'
@@ -41,7 +41,7 @@ export function odooLeadValues(lead, { approvedBy = '' } = {}) {
     v2 ? para('Who', SENDER_LABEL[lead.sender_type] || lead.sender_type) : '',
     v2 && lead.source_check ? para('Source', lead.source_check === 'verified' ? 'Verified' : 'Not verified') : '',
     v2 ? para('Request', REQUEST_LABEL[lead.request_type] || lead.request_type) : '',
-    v2 ? para('Project', PROJECT_LABEL[lead.project_type] || lead.project_type) : '',
+    v2 || lead.human_project_type ? para('Project', PROJECT_LABEL[projectOf(lead)] || projectOf(lead)) : '',
     para('Philips', PHILIPS_LABEL[lead.philips]),
     para('Email', lead.email_kind === 'free' ? 'Free email (Gmail, Outlook…)' : lead.email_kind === 'company' ? 'Company domain' : ''),
     phones.length > 1 ? para('All numbers', phones.join(', ')) : '',
@@ -51,7 +51,7 @@ export function odooLeadValues(lead, { approvedBy = '' } = {}) {
     para('Approved by', approvedBy),
     `<p>Lead Agent ref: ${esc(lead.id)}</p>`,
   ].filter(Boolean).join('')
-  const tags = ['Lead Agent', channelLabel(lead), v2 ? PROJECT_LABEL[lead.project_type] : ''].filter(Boolean)
+  const tags = ['Lead Agent', channelLabel(lead), PROJECT_LABEL[projectOf(lead)]].filter(Boolean)
   return {
     name: (who && !what.includes(who) ? `${what} (${who})` : what).slice(0, 200),
     contact_name: lead.name || '',
@@ -131,7 +131,7 @@ export async function disconnectCrm(deps, workspaceId) {
 
 // ─── Approving and sending ─────────────────────────────────────────────────
 
-const LEAD_SELECT = 'id,source,received_at,created_at,name,company,email,phone,phones,subject,message,summary,ask_next,verdict,human_verdict,mailbox,folder,sender_type,source_check,project_type,request_type,philips,email_kind,criteria_version,approved_at,approved_by,crm_status,crm_id,crm_url,crm_error,crm_sent_at,updated_at'
+const LEAD_SELECT = 'id,source,received_at,created_at,name,company,email,phone,phones,subject,message,summary,ask_next,verdict,human_verdict,mailbox,folder,sender_type,source_check,project_type,request_type,philips,email_kind,criteria_version,human_project_type,project_final,approved_at,approved_by,crm_status,crm_id,crm_url,crm_error,crm_sent_at,updated_at'
 
 /** Claim a lead for sending: only one request can, and only from these states. */
 function claimable(now) {

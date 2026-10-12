@@ -163,7 +163,8 @@ Link · **Status · Assigned to · Notes** · Lead ID (hidden).
 The script never writes Status, Assigned to or Notes, and writes **Project**
 (JIH / Tender / Maintenance) only while the cell is empty: when the email
 does not say, the agent leaves it blank, the team picks it from the dropdown
-after the call, and theirs stands. Came in is "Arak website", "Arak email"
+after the call, and theirs stands. A phase the team set on the leads page
+wins over the cell, since the page is where the team keeps it. Came in is "Arak website", "Arak email"
 or "CLB email"; Folder is where the email sat (Junk in red: a real lead
 sometimes lands there). Email type is company domain or free email (Gmail,
 Outlook…). Phone is every number they gave, one per line. Type is the
@@ -255,13 +256,23 @@ They cannot create a company either. In `/api/leads`, a seat opens `review`,
 (`can_approve_leads`) whether they are a sales admin.
 
 **Open in Outlook** opens the email in Outlook on the web, in the mailbox it
-arrived in (a.rak@arak-sa.com for info@arak-sa.com, info@clb-sa.com). It
-opens only for someone Microsoft 365 lets into that mailbox: a sales person
+arrived in (a.rak@arak-sa.com for info@arak-sa.com, info@clb-sa.com). The
+link is worked out at the click, from where the email is now: Exchange
+changes an email's id when it moves folder (out of Junk, say), and a link
+saved earlier then opens "This message might have been moved or deleted". If
+the email was deleted from the mailbox, the page says so instead. It opens
+only for someone Microsoft 365 lets into that mailbox: a sales person
 needs **Full Access** to it, given once by a Microsoft 365 admin (Exchange
 admin center → Recipients → the mailbox → Delegation → Read and manage). The
 CLB mailbox is a different Microsoft 365, so only a CLB account with access
 opens those. No Outlook app can open one message from a link, so there is no
 app button.
+
+**Project (JIH / Tender / Maintenance)** is a dropdown on every row: anyone
+on the team sets it after the call, whether the email stated one or not.
+Their choice wins on the page, in its filter, in the workbook (even over a
+phase already in the cell) and in Odoo; "set by team" marks it. Picking what
+the agent read goes back to following the agent.
 
 **"Is the agent right?"** A No asks for an optional reason. Corrections
 change what the page and the workbook show; the agent itself does not learn
