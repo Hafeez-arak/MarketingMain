@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { AuthContext } from './auth'
 import { supabase } from '../lib/supabaseClient'
-import { fetchMyAccess } from '../lib/access'
+import { fetchMyAccess, fetchMySalesCompanies } from '../lib/access'
 import { pickActiveWorkspace, rememberWorkspace, rememberedWorkspace } from '../lib/activeWorkspace'
 
 // ─── Auth + workspace context ──────────────────────────────────────────────
@@ -40,12 +40,23 @@ export function AuthProvider({ children }) {
         .eq('user_id', userId),
       fetchMyAccess(userId),
     ])
-    setAccess(myAccess)
-    setLoadingWorkspaces(false)
-    if (error) { setAuthError(error.message); return }
-    const ws = (data || [])
-      .filter(row => row.workspaces)
-      .map(row => ({ ...row.workspaces, role: row.role }))
+    // A sales person holds no memberships (that is what keeps the marketing
+    // app shut to them); their companies are seats, read separately.
+    let ws
+    if (myAccess?.role === 'sales' && myAccess?.status === 'approved') {
+      const { companies, error: salesError } = await fetchMySalesCompanies()
+      setAccess(myAccess)
+      setLoadingWorkspaces(false)
+      if (salesError) { setAuthError(salesError); return }
+      ws = companies.map(c => ({ ...c, role: 'sales' }))
+    } else {
+      setAccess(myAccess)
+      setLoadingWorkspaces(false)
+      if (error) { setAuthError(error.message); return }
+      ws = (data || [])
+        .filter(row => row.workspaces)
+        .map(row => ({ ...row.workspaces, role: row.role }))
+    }
     setWorkspaces(ws)
     // The company open before a refresh, if this person still holds it —
     // otherwise the first one. See lib/activeWorkspace.js.
@@ -126,6 +137,9 @@ export function AuthProvider({ children }) {
     accessStatus: access?.status || (session ? 'pending' : null),
     isApproved: access?.status === 'approved',
     isAccessAdmin: access?.role === 'admin' && access?.status === 'approved',
+    // Leads only: the app renders SalesApp for them instead of the marketing
+    // shell. The database is what actually keeps them out of everything else.
+    isSales: access?.role === 'sales' && access?.status === 'approved',
     workspaces,
     activeWorkspace,
     activeWorkspaceId,

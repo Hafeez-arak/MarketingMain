@@ -21,6 +21,8 @@ export const USERS = {
   lina:  { user_id: 'u-lina',  email: 'lina@example.com',   full_name: 'Lina Saleh', role: 'member', status: 'pending' },
   // Approved a moment ago, nothing ticked yet: the "no companies" screen.
   noor:  { user_id: 'u-noor',  email: 'noor@example.com',   full_name: 'Noor Hassan', role: 'member', status: 'approved' },
+  // The sales team: Leads only, by seat (20261013_sales_seats).
+  faisal: { user_id: 'u-faisal', email: 'faisal@example.com', full_name: 'Faisal Nasser', role: 'sales', status: 'approved' },
 }
 export const ME = USERS[AS] || USERS.admin
 
@@ -35,7 +37,11 @@ const db = {
     ['ws-arak', 'u-admin'], ['ws-aqeeq', 'u-admin'], ['ws-ghusn', 'u-admin'],
     ['ws-aqeeq', 'u-sara'], ['ws-aqeeq', 'u-omar'], ['ws-ghusn', 'u-omar'],
   ].map(([workspace_id, user_id]) => ({ workspace_id, user_id, role: 'owner' })),
-  invites: [{ email: 'waiting@example.com', invited_at: '2026-09-30T09:00:00Z', workspace_ids: ['ws-ghusn'] }],
+  seats: [{ workspace_id: 'ws-arak', user_id: 'u-faisal' }],
+  invites: [
+    { email: 'waiting@example.com', invited_at: '2026-09-30T09:00:00Z', workspace_ids: ['ws-ghusn'], role: 'member' },
+    { email: 'sales.new@example.com', invited_at: '2026-10-11T09:00:00Z', workspace_ids: ['ws-arak'], role: 'sales' },
+  ],
 }
 window.__accessDb = db
 window.__accessCalls = []
@@ -48,6 +54,21 @@ export function myWorkspaces() {
 }
 
 const isAdmin = () => ME.role === 'admin' && ME.status === 'approved'
+const roleOf = uid => db.access.find(a => a.user_id === uid)?.role
+// Companies go to the table that matches the role (place_user_companies).
+const place = (uid, ids, replace) => {
+  const sales = roleOf(uid) === 'sales'
+  if (sales) db.members = db.members.filter(m => m.user_id !== uid)
+  else db.seats = db.seats.filter(m => m.user_id !== uid)
+  if (replace) {
+    if (sales) db.seats = db.seats.filter(m => m.user_id !== uid)
+    else db.members = db.members.filter(m => m.user_id !== uid)
+  }
+  for (const id of ids) {
+    if (sales) { if (!db.seats.some(m => m.workspace_id === id && m.user_id === uid)) db.seats.push({ workspace_id: id, user_id: uid }) }
+    else join(id, uid)
+  }
+}
 const join = (workspace_id, user_id) => {
   if (!db.members.some(m => m.workspace_id === workspace_id && m.user_id === user_id)) {
     db.members.push({ workspace_id, user_id, role: 'owner' })
@@ -79,20 +100,22 @@ const RPC = {
     const row = db.access.find(a => a.user_id === target_user)
     if (row) row.status = 'revoked'
     db.members = db.members.filter(m => m.user_id !== target_user)
+    db.seats = db.seats.filter(m => m.user_id !== target_user)
     return { status: 204, body: null }
   },
-  invite_access({ target_email, ws_ids }) {
+  invite_access({ target_email, ws_ids, as_role = 'member' }) {
     const email = String(target_email || '').trim().toLowerCase()
     const wanted = (ws_ids || []).filter(id => db.workspaces.some(w => w.id === id))
     const row = db.access.find(a => a.email === email)
     if (!row) {
       db.invites = db.invites.filter(i => i.email !== email)
-      db.invites.unshift({ email, invited_at: new Date().toISOString(), workspace_ids: wanted })
+      db.invites.unshift({ email, invited_at: new Date().toISOString(), workspace_ids: wanted, role: as_role })
       return { status: 200, body: 'invited' }
     }
     if (row.status === 'approved') return { status: 200, body: 'already' }
     row.status = 'approved'
-    wanted.forEach(id => join(id, row.user_id))
+    if (row.role !== 'admin') row.role = as_role
+    place(row.user_id, wanted, false)
     return { status: 200, body: 'approved' }
   },
   cancel_invite({ target_email }) {
@@ -101,8 +124,16 @@ const RPC = {
   },
   set_user_workspaces({ target_user, ws_ids }) {
     if (!isAdmin()) return fail('Only the access admin can assign companies')
-    db.members = db.members.filter(m => m.user_id !== target_user)
-    ;(ws_ids || []).forEach(id => join(id, target_user))
+    place(target_user, ws_ids || [], true)
+    return { status: 204, body: null }
+  },
+  set_user_role({ target_user, new_role }) {
+    if (!isAdmin()) return fail('Only the access admin can change roles')
+    const row = db.access.find(a => a.user_id === target_user)
+    if (row?.role === 'admin') return fail('The access admin\'s role does not change')
+    const held = [...db.members, ...db.seats].filter(m => m.user_id === target_user).map(m => m.workspace_id)
+    row.role = new_role
+    place(target_user, held, true)
     return { status: 204, body: null }
   },
 }
@@ -112,6 +143,7 @@ const TABLES = {
   access_invites: () => db.invites,
   workspaces: () => [...db.workspaces].sort((a, b) => a.name.localeCompare(b.name)),
   workspace_members: () => db.members,
+  sales_seats: () => db.seats,
 }
 
 function respond(status, body) {

@@ -17,8 +17,19 @@
  * buttons, alternating rows of equal height, newest first, "Open email"
  * links, and a coloured Status dropdown for the team.
  *
- * The script writes Received .. Link. It NEVER writes Status, Assigned to or
- * Notes: those are the team's. Rows are found by the hidden Lead ID column,
+ * The sales team's criteria have a column each, as on the leads page
+ * (2026-10-11): Came in, Folder (Junk in red), Email type, Who, Verified,
+ * Request, Project and Philips, every one with a filter button. Project
+ * (JIH / Tender / Maintenance) is left empty when the email does not say:
+ * the team fills it in after the call, and the script never overwrites it.
+ *
+ * Upgrading from an older version: paste this over it and run
+ * installLeadsMaster once. The new columns are slotted in beside their
+ * neighbours and filled for every row; nothing the team wrote moves or is
+ * lost.
+ *
+ * The script writes the agent's columns. It NEVER writes Status, Assigned to
+ * or Notes: those are the team's. Rows are found by the hidden Lead ID column,
  * so sorting, filtering and moving rows is fine. One-way: what you type here
  * does not go back. Tabs from an older version ("All enquiries",
  * "Qualified") are left alone; delete them when you no longer need them.
@@ -32,7 +43,11 @@ var NEW_TAB = 'New leads';
 var HISTORY_TAB = 'Jul–Sep 2026';
 // The agent's "period" for each lead -> its tab.
 var TAB_FOR = { 'new': NEW_TAB, 'history': HISTORY_TAB };
-var HEADERS = ['Received', 'Source', 'Name', 'Company', 'Email', 'Phone', 'Brief', 'AI verdict', 'Decision', 'Type', 'AI reason', 'Link', 'Status', 'Assigned to', 'Notes', 'Lead ID'];
+// A new tab gets these, in this order. An older tab keeps its own order and
+// gets each missing one right after the column before it here.
+var HEADERS = ['Received', 'Came in', 'Folder', 'Name', 'Company', 'Email', 'Email type', 'Phone',
+  'Who', 'Verified', 'Request', 'Project', 'Philips', 'Brief', 'AI verdict', 'Decision', 'Type', 'AI reason', 'Link',
+  'Status', 'Assigned to', 'Notes', 'Lead ID'];
 // The team's say on a lead (the owner's decision, 2026-10-07). Picking
 // Unqualified removes the row; Qualified keeps it and turns it green. Sent to
 // the lead agent as a person's correction; never written by this script.
@@ -42,15 +57,25 @@ var DECISIONS_URL = LEADS_URL.replace(/\/export$/, '/sheet_decisions');
 // The team's columns: never written, and a row with anything in them is never removed.
 var TEAM = ['Status', 'Assigned to', 'Notes'];
 // Header -> field in the lead agent's answer. Only these are ever written.
+// Source is an older tab's column (Came in and Folder replace it); it is kept
+// up to date while it is there. Type is the agent's category now that the
+// criteria have their own columns.
 var FIELD = {
-  'Received': 'received', 'Source': 'source', 'Name': 'name', 'Company': 'company', 'Email': 'email', 'Phone': 'phone',
-  'Brief': 'brief', 'AI verdict': 'verdict', 'Type': 'type', 'AI reason': 'reason', 'Link': 'link', 'Lead ID': 'id',
+  'Received': 'received', 'Came in': 'cameIn', 'Folder': 'folder', 'Source': 'source', 'Name': 'name', 'Company': 'company',
+  'Email': 'email', 'Email type': 'emailType', 'Phone': 'phone', 'Who': 'who', 'Verified': 'verified', 'Request': 'request',
+  'Project': 'project', 'Philips': 'philips', 'Brief': 'brief', 'AI verdict': 'verdict', 'Type': 'category',
+  'AI reason': 'reason', 'Link': 'link', 'Lead ID': 'id',
 };
+// Filled by the agent only while empty: once the team writes JIH / Tender /
+// Maintenance after the call, theirs stands.
+var PROJECT = 'Project';
+var PROJECT_CHOICES = ['JIH', 'Tender', 'Maintenance'];
 
 // ── Look ───────────────────────────────────────────────────────────────────
 var WIDTHS = {
-  'Received': 130, 'Source': 190, 'Name': 150, 'Company': 170, 'Email': 210, 'Phone': 130, 'Brief': 400,
-  'AI verdict': 100, 'Type': 150, 'AI reason': 300, 'Link': 95, 'Status': 130, 'Assigned to': 130, 'Notes': 240,
+  'Received': 130, 'Came in': 110, 'Folder': 90, 'Source': 190, 'Name': 150, 'Company': 170, 'Email': 210,
+  'Email type': 120, 'Phone': 140, 'Who': 130, 'Verified': 100, 'Request': 100, 'Project': 110, 'Philips': 140,
+  'Brief': 400, 'AI verdict': 100, 'Type': 150, 'AI reason': 300, 'Link': 95, 'Status': 130, 'Assigned to': 130, 'Notes': 240,
 };
 var ROW_HEIGHT = 63; // about three lines of text; click a cell to read all of it
 var HEADER_BG = '#1f2a37';
@@ -136,17 +161,18 @@ function setupTab_(name) {
     sheet.getRange(1, 1, 1, HEADERS.length).setValues([HEADERS]);
     return sheet;
   }
-  // An existing tab keeps its own column order. Decision goes right after AI
-  // verdict, where the team looks; anything else missing goes at the end.
-  var verdictAt = headers.indexOf('AI verdict');
-  if (headers.indexOf(DECISION) === -1 && verdictAt !== -1) {
-    sheet.insertColumnAfter(verdictAt + 1);
-    sheet.getRange(1, verdictAt + 2).setValue(DECISION);
-    headers.splice(verdictAt + 1, 0, DECISION);
-  }
-  var last = sheet.getLastColumn();
-  HEADERS.forEach(function (h) {
-    if (headers.indexOf(h) === -1) { last += 1; sheet.getRange(1, last).setValue(h); }
+  // An existing tab keeps its own column order. A missing column goes right
+  // after the nearest one before it in HEADERS (Decision after AI verdict,
+  // the criteria after Phone…), so it lands where the team looks rather than
+  // after Notes. Columns are found by header, so nothing else notices.
+  HEADERS.forEach(function (h, i) {
+    if (headers.indexOf(h) !== -1) return;
+    var at = -1;
+    for (var j = i - 1; j >= 0 && at === -1; j--) at = headers.indexOf(HEADERS[j]);
+    if (at === -1) at = headers.length - 1;
+    sheet.insertColumnAfter(at + 1);
+    sheet.getRange(1, at + 2).setValue(h);
+    headers.splice(at + 1, 0, h);
   });
   return sheet;
 }
@@ -191,6 +217,27 @@ function formatTab_(sheet) {
     rules.push(SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo('Unqualified')
       .setBackground('#eeeeee').setFontColor('#5f6368').setRanges([decision]).build());
   }
+
+  // Project: JIH / Tender / Maintenance, for the team to pick after the call
+  // when the email did not say. Anything else typed is allowed.
+  if (col[PROJECT]) {
+    var project = sheet.getRange(2, col[PROJECT], rows - 1, 1);
+    project.setDataValidation(SpreadsheetApp.newDataValidation()
+      .requireValueInList(PROJECT_CHOICES, true).setAllowInvalid(true).build());
+    rules.push(SpreadsheetApp.newConditionalFormatRule().whenCellNotEmpty()
+      .setBold(true).setRanges([project]).build());
+  }
+
+  // The criteria the team filters on, coloured as on the leads page.
+  [['Folder', 'Junk', '#fce8e6', '#c5221f'], ['Who', 'Trader', '#fef7e0', '#7a4f01'],
+    ['Verified', 'Verified', null, '#0d652d'], ['Verified', 'Not verified', null, '#8a5300'],
+    ['Email type', 'Free email', null, '#5f6368']].forEach(function (c) {
+    if (!col[c[0]]) return;
+    var rule = SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo(c[1]).setFontColor(c[3])
+      .setRanges([sheet.getRange(2, col[c[0]], rows - 1, 1)]);
+    if (c[2]) rule.setBackground(c[2]).setBold(true);
+    rules.push(rule.build());
+  });
 
   // Status: a dropdown, coloured by value (first, so it shows on any row).
   if (col['Status']) {
@@ -362,9 +409,11 @@ function apply_(leads) {
         // it was not a person who took it out (a person's Unqualified always
         // removes it).
         if (!inSheet_(lead) && (lead.byPerson || !teamTouched_(data, col, row))) { remove.push(row); return; }
-        // Known: refresh only the agent's cells.
+        // Known: refresh only the agent's cells. Project only while empty.
         Object.keys(FIELD).forEach(function (h) {
-          if (col[h] && h !== 'Lead ID') sheet.getRange(row, col[h]).setValue(cell_(h, lead[FIELD[h]]));
+          if (!col[h] || h === 'Lead ID') return;
+          if (h === PROJECT && String((data[row - 2] || [])[col[h] - 1] || '').trim()) return;
+          sheet.getRange(row, col[h]).setValue(cell_(h, lead[FIELD[h]]));
         });
         changed = true;
         return;

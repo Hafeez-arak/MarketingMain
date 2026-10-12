@@ -26,6 +26,7 @@ import { ResearchReport }          from './pages/insights/ResearchReport'
 import { BusinessView }            from './pages/insights/BusinessView'
 import AgentPage                  from './pages/agent/index'
 import LeadAgent                  from './pages/leads/index'
+import SalesApp                   from './pages/leads/SalesApp'
 import Targets                    from './pages/sales/Targets'
 import AgentBrief                 from './pages/admin/AgentBrief'
 import { MediaLibrary }            from './pages/media/index'
@@ -86,8 +87,23 @@ function NotFound() {
 // it as one element (rather than gating each <Route> individually) means
 // adding a new page later never risks forgetting the auth check.
 function ProtectedApp() {
-  const { activeWorkspaceId } = useAuth()
+  const { activeWorkspaceId, isSales } = useAuth()
   const { pathname } = useLocation()
+  // The sales team: Leads and nothing else, whatever address they open. The
+  // marketing shell (and its webhook loader, assistant and publish watch)
+  // never mounts for them. See pages/leads/SalesApp.jsx.
+  if (isSales) {
+    return (
+      <RequireAuth>
+        <ErrorBoundary key={pathname}>
+          <Routes>
+            <Route path="/leads" element={<SalesApp key={activeWorkspaceId || 'none'} />} />
+            <Route path="*"      element={<Navigate to="/leads" replace />} />
+          </Routes>
+        </ErrorBoundary>
+      </RequireAuth>
+    )
+  }
   return (
     <RequireAuth>
       {/* Key the whole data subtree on the active company: switching companies

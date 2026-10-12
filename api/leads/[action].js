@@ -27,6 +27,9 @@ import { previewLenses } from '../agent/_investigate.js'
 //                       Signed in, a member of that workspace (asked with the
 //                       caller's own token, so RLS answers) and the access
 //                       admin. Only then does the service key touch anything.
+//   a sales person      the same, but with a sales seat in that company
+//                       instead of membership, and only review and
+//                       email_file (SALES_ACTIONS).
 //
 // Microsoft's sign-in comes back to /api/email/ms-callback (the address
 // registered in Entra), which hands a lead-agent sign-in to _mail.js.
@@ -89,6 +92,23 @@ async function isAdmin(token) {
       method: 'POST',
       headers: { apikey: ANON_KEY || SERVICE_KEY, Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
       body: '{}',
+    })
+    return r.ok && (await r.json()) === true
+  } catch { return false }
+}
+
+// A sales person (20261013_sales_seats) is not a member of the company at
+// all: their seat is asked for separately, again with their own token. A
+// seat opens these actions and nothing else.
+const SALES_ACTIONS = new Set(['review', 'email_file'])
+
+async function isSalesMember(workspaceId, token) {
+  if (!isUuid(workspaceId)) return false
+  try {
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/rpc/is_sales_member`, {
+      method: 'POST',
+      headers: { apikey: ANON_KEY || SERVICE_KEY, Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ws_id: workspaceId }),
     })
     return r.ok && (await r.json()) === true
   } catch { return false }
@@ -365,8 +385,12 @@ export default async function handler(req, res) {
   const user = await authenticate(token)
   if (!user) return res.status(401).json({ ok: false, error: 'Sign in to do this. If you are signed in, reload the page.' })
   const [member, admin] = await Promise.all([isMember(workspaceId, token), isAdmin(token)])
-  if (!member) return res.status(403).json({ ok: false, error: 'You do not have access to that workspace.' })
-  if (!admin) return res.status(403).json({ ok: false, error: 'The lead agent is for the admin only.' })
+  if (!member || !admin) {
+    // Not the admin in this company: a sales seat may still correct a
+    // verdict or fetch an email, and do nothing else.
+    const sales = SALES_ACTIONS.has(action) && await isSalesMember(workspaceId, token)
+    if (!sales) return res.status(403).json({ ok: false, error: member ? 'The lead agent is for the admin only.' : 'You do not have access to that workspace.' })
+  }
 
   try {
     const out = await actions[action].call({ req, res }, { workspaceId, body, user })
