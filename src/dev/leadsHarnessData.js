@@ -3,13 +3,15 @@
 // page loads. Made-up enquiries only (this repo is public). ?mode=hang keeps
 // every request pending (the loading state); ?mode=fail rejects them.
 
+import { buildLeadCard, normaliseLeadCard, afterCallFields } from '../lib/sales/leadCard'
+
 export const WS = '00000000-0000-0000-0000-0000000000dd'
 const mode = new URLSearchParams(window.location.search).get('mode') || ''
 const iso = (d, h) => `2026-10-0${d}T${String(h).padStart(2, '0')}:00:00Z`
 
 const leads = [
   { id: 'e1', source: 'email', mailbox: 'info@example-co.sa', link: 'https://outlook.office.com/mail/', received_at: iso(6, 10), created_at: iso(6, 10), name: 'Khalid', company: '', email: 'khalid@example-dev.sa', phone: '', subject: 'Facade lighting for a tower', message: 'Dear ARAK, we are developing a 20-floor tower in Jeddah and need facade lighting design and supply. Can we meet next week?', language: 'en', verdict: 'qualified', category: 'project_enquiry', confidence: 'high', reason: 'A developer with a tower project asking for facade lighting design and supply.', summary: 'Facade lighting design and supply, 20-floor tower, Jeddah', details: { products: 'Facade lighting', location: 'Jeddah', stage: 'Development' }, ask_next: ['Project timeline?', 'Who is the consultant?', 'Budget range?'], model: 'openai/gpt-6-luna', cost_usd: 0.00018, error: '', human_verdict: null, criteria_version: 2, sender_type: 'trader', sender_evidence: 'Signature: Purchasing, Example Dev Trading Est.', source_check: 'verified', source_evidence: 'signature and website match', project_type: 'tender', project_evidence: 'we are bidding for the main contract', request_type: 'requirement', philips: 'or_equivalent', website: 'example-dev.sa', folder: 'junk', email_kind: 'company', phones: ['+966 12 600 0000', '055 000 1111'] },
-  { id: 'l1', source: 'website_form', received_at: iso(6, 8), created_at: iso(6, 8), name: 'Omar Haddad', company: 'Nour Contracting', email: 'omar@nourcontracting.sa', phone: '+966 50 111 2233', subject: 'Commercial / office', message: 'We need a quotation for 40 recessed downlights, 4000K, for an office fit-out in Riyadh. Delivery in 3 weeks.', language: 'en', verdict: 'qualified', category: 'quotation_request', confidence: 'high', reason: 'Asks for a quote on 40 downlights for an office in Riyadh.', summary: 'Quote for 40 recessed downlights, 4000K, office fit-out, Riyadh', details: { products: 'Recessed downlights 4000K', quantity: '40', location: 'Riyadh', urgency: '3 weeks' }, ask_next: ['Beam angle and dimming?', 'Is there a lighting layout?', 'Who approves the order?'], model: 'openai/gpt-6-luna', cost_usd: 0.00016, error: '', human_verdict: null, criteria_version: 2, sender_type: 'contractor', sender_evidence: 'Nour Contracting, office fit-out', source_check: 'verified', source_evidence: 'company name + company email domain', project_type: 'jih', project_evidence: 'Delivery in 3 weeks', request_type: 'requirement', philips: 'none', folder: 'website', email_kind: 'company' },
+  { id: 'l1', source: 'website_form', received_at: iso(6, 8), created_at: iso(6, 8), name: 'Omar Haddad', company: 'Nour Contracting', email: 'omar@nourcontracting.sa', phone: '+966 50 111 2233', subject: 'Commercial / office', message: 'We need a quotation for 40 recessed downlights, 4000K, for an office fit-out in Riyadh. Delivery in 3 weeks.', language: 'en', verdict: 'qualified', category: 'quotation_request', confidence: 'high', reason: 'Asks for a quote on 40 downlights for an office in Riyadh.', summary: 'Quote for 40 recessed downlights, 4000K, office fit-out, Riyadh', details: { products: 'Recessed downlights 4000K', quantity: '40', location: 'Riyadh', urgency: '3 weeks' }, ask_next: ['Beam angle and dimming?', 'Is there a lighting layout?', 'Who approves the order?'], model: 'openai/gpt-6-luna', cost_usd: 0.00016, error: '', human_verdict: null, criteria_version: 2, sender_type: 'contractor', sender_evidence: 'Nour Contracting, office fit-out', source_check: 'verified', source_evidence: 'company name + company email domain', project_type: 'jih', project_evidence: 'Delivery in 3 weeks', request_type: 'requirement', philips: 'none', folder: 'website', email_kind: 'company', approved_at: iso(6, 12), crm_status: 'queued' },
   { id: 'l2', source: 'website_form', received_at: iso(5, 14), created_at: iso(5, 14), name: 'Ayşe K.', company: 'Bosphorus Chandeliers', email: 'sales@example-chandeliers.com', phone: '', subject: 'Hotel / hospitality', message: 'We are an Istanbul chandelier manufacturer and would love to share our portfolio for your upcoming hotel projects.', language: 'en', verdict: 'unqualified', category: 'vendor_pitch', confidence: 'high', reason: 'A manufacturer offering its own products to us.', summary: 'Chandelier maker pitching its portfolio', details: {}, ask_next: [], model: 'openai/gpt-6-luna', cost_usd: 0.00015, error: '', human_verdict: 'unqualified' },
   { id: 'l3', source: 'website_form', received_at: iso(5, 9), created_at: iso(5, 9), name: 'فهد', company: '', email: 'fahad@example.com', phone: '0550000000', subject: 'خارجي / واجهات', message: 'انارات خارجيه', language: 'ar', verdict: 'qualified', category: 'product_enquiry', confidence: 'medium', reason: 'Asks for outdoor lighting; very little detail.', summary: 'Outdoor lighting, no details yet', details: { products: 'Outdoor lighting' }, ask_next: ['Which building or site?', 'How many fittings?'], model: 'openai/gpt-6-luna', cost_usd: 0.00014, error: '', human_verdict: null },
   { id: 'l4', source: 'website_form', received_at: iso(5, 9), created_at: iso(5, 9), name: 'فهد', company: '', email: 'fahad@example.com', phone: '0550000000', subject: 'خارجي / واجهات', message: 'انارات خارجيه', language: 'ar', verdict: 'duplicate', category: '', confidence: '', reason: 'Same sender and message as the enquiry of 2026-10-05 06:00 UTC.', summary: '', details: {}, ask_next: [], model: '', cost_usd: 0, error: '', human_verdict: null },
@@ -65,6 +67,15 @@ const status = {
 const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
 const original = window.fetch.bind(window)
 
+const cards = {}
+const CARD_CONTEXT = {
+  suppliers: ['C°LB', 'Reggiani', 'Zennio'],
+  accounts: [{ name: 'Nour Contracting Co', orders: 4, value_sar: 610000, last_order: '2026-05-01', status: 'new' }],
+  earlier: [{ received_at: '2026-09-14T09:00:00Z' }],
+  companyFacts: 'Registered vendor / prequalified with (example): Example Giga City',
+  playbook: null,
+}
+
 window.fetch = async (input, init = {}) => {
   const url = typeof input === 'string' ? input : input.url
   if (url.includes('/src/') || url.includes('/node_modules/') || url.includes('/@')) return original(input, init)
@@ -108,6 +119,26 @@ window.fetch = async (input, init = {}) => {
     Object.assign(l, { approved_at: new Date().toISOString(), crm_status: 'queued', human_verdict: l.verdict === 'qualified' ? l.human_verdict : 'qualified' })
     status.crm.queued++
     return json({ ok: true, lead: l, crm: 'queued' })
+  }
+  // Battle cards: built by the real builder from made-up records.
+  if (url.includes('/api/leads/card_save')) {
+    const body = JSON.parse(init.body || '{}')
+    const row = cards[body.lead_id]
+    if (!row) return json({ ok: false, error: 'This lead has no battle card yet. Open it first.' }, 404)
+    const after = afterCallFields(body)
+    if (after.error) return json({ ok: false, error: after.error }, 400)
+    Object.assign(row, { card: normaliseLeadCard(body.card), ...after.values, updated_at: new Date().toISOString() })
+    return json({ ok: true, card: row })
+  }
+  if (url.includes('/api/leads/card')) {
+    const { lead_id } = JSON.parse(init.body || '{}')
+    const l = leads.find((x) => x.id === lead_id)
+    if (!l?.approved_at) return json({ ok: false, error: 'The battle card opens once the lead is approved.' }, 409)
+    if (!cards[lead_id]) {
+      const now = new Date().toISOString()
+      cards[lead_id] = { lead_id, card: buildLeadCard(l, CARD_CONTEXT), decision: '', quote_due: null, target_price: '', decides: '', built_at: now, updated_at: now }
+    }
+    return json({ ok: true, card: cards[lead_id] })
   }
   if (url.includes('/api/leads/try')) {
     return json({ ok: true, model: 'openai/gpt-6-luna', cost: 0.00015, verdict: { verdict: 'unqualified', category: 'job_or_recruitment', confidence: 'high', reason: 'A job application with a CV.', summary: 'Electrical engineer looking for a job', details: {}, ask_next: [] } })
