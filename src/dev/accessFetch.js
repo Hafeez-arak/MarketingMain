@@ -23,6 +23,8 @@ export const USERS = {
   noor:  { user_id: 'u-noor',  email: 'noor@example.com',   full_name: 'Noor Hassan', role: 'member', status: 'approved' },
   // The sales team: Leads only, by seat (20261013_sales_seats).
   faisal: { user_id: 'u-faisal', email: 'faisal@example.com', full_name: 'Faisal Nasser', role: 'sales', status: 'approved' },
+  // A sales admin: sales, plus Approve into the CRM (leads_approver).
+  layla: { user_id: 'u-layla', email: 'layla@example.com', full_name: 'Layla Odeh', role: 'sales', leads_approver: true, status: 'approved' },
 }
 export const ME = USERS[AS] || USERS.admin
 
@@ -37,7 +39,7 @@ const db = {
     ['ws-arak', 'u-admin'], ['ws-aqeeq', 'u-admin'], ['ws-ghusn', 'u-admin'],
     ['ws-aqeeq', 'u-sara'], ['ws-aqeeq', 'u-omar'], ['ws-ghusn', 'u-omar'],
   ].map(([workspace_id, user_id]) => ({ workspace_id, user_id, role: 'owner' })),
-  seats: [{ workspace_id: 'ws-arak', user_id: 'u-faisal' }],
+  seats: [{ workspace_id: 'ws-arak', user_id: 'u-faisal' }, { workspace_id: 'ws-arak', user_id: 'u-layla' }],
   invites: [
     { email: 'waiting@example.com', invited_at: '2026-09-30T09:00:00Z', workspace_ids: ['ws-ghusn'], role: 'member' },
     { email: 'sales.new@example.com', invited_at: '2026-10-11T09:00:00Z', workspace_ids: ['ws-arak'], role: 'sales' },
@@ -114,7 +116,7 @@ const RPC = {
     }
     if (row.status === 'approved') return { status: 200, body: 'already' }
     row.status = 'approved'
-    if (row.role !== 'admin') row.role = as_role
+    if (row.role !== 'admin') { row.role = as_role === 'sales_admin' ? 'sales' : as_role; row.leads_approver = as_role === 'sales_admin' }
     place(row.user_id, wanted, false)
     return { status: 200, body: 'approved' }
   },
@@ -132,7 +134,8 @@ const RPC = {
     const row = db.access.find(a => a.user_id === target_user)
     if (row?.role === 'admin') return fail('The access admin\'s role does not change')
     const held = [...db.members, ...db.seats].filter(m => m.user_id === target_user).map(m => m.workspace_id)
-    row.role = new_role
+    row.role = new_role === 'sales_admin' ? 'sales' : new_role
+    row.leads_approver = new_role === 'sales_admin'
     place(target_user, held, true)
     return { status: 204, body: null }
   },

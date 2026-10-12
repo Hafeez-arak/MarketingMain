@@ -5,6 +5,7 @@ import { signState, authorizeUrl, READ_SCOPES } from '../email/_graph.js'
 import { intakeWebsite, tryIt, QUALIFIER_MODEL } from './_intake.js'
 import { checkMail, emailFile } from './_mail.js'
 import { exportLeads, applySheetDecisions } from './_export.js'
+import { approveLead, crmStatus, saveCrm, sendWaiting, disconnectCrm } from './_crm.js'
 import { leadDeps, openRouterKey, hasDeploymentKey, describeKey, sendAlert } from './_deps.js'
 import { previewLenses } from '../agent/_investigate.js'
 
@@ -28,8 +29,9 @@ import { previewLenses } from '../agent/_investigate.js'
 //                       caller's own token, so RLS answers) and the access
 //                       admin. Only then does the service key touch anything.
 //   a sales person      the same, but with a sales seat in that company
-//                       instead of membership, and only review and
-//                       email_file (SALES_ACTIONS).
+//                       instead of membership, and only review, email_file
+//                       and approve (SALES_ACTIONS); approve also asks the
+//                       database whether they are a sales admin.
 //
 // Microsoft's sign-in comes back to /api/email/ms-callback (the address
 // registered in Entra), which hands a lead-agent sign-in to _mail.js.
@@ -100,12 +102,27 @@ async function isAdmin(token) {
 // A sales person (20261013_sales_seats) is not a member of the company at
 // all: their seat is asked for separately, again with their own token. A
 // seat opens these actions and nothing else.
-const SALES_ACTIONS = new Set(['review', 'email_file'])
+const SALES_ACTIONS = new Set(['review', 'email_file', 'approve'])
 
 async function isSalesMember(workspaceId, token) {
   if (!isUuid(workspaceId)) return false
   try {
     const r = await fetch(`${SUPABASE_URL}/rest/v1/rpc/is_sales_member`, {
+      method: 'POST',
+      headers: { apikey: ANON_KEY || SERVICE_KEY, Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ws_id: workspaceId }),
+    })
+    return r.ok && (await r.json()) === true
+  } catch { return false }
+}
+
+/**
+ * May this caller approve leads into the CRM here? The access admin, or a
+ * sales admin with a seat in this company. Asked with the caller's token.
+ */
+async function canApprove(workspaceId, token) {
+  try {
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/rpc/can_approve_leads`, {
       method: 'POST',
       headers: { apikey: ANON_KEY || SERVICE_KEY, Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ ws_id: workspaceId }),
@@ -179,6 +196,7 @@ const actions = {
       // this once to allow the app there. It comes back to the Lead Agent page.
       consentUrl: ms.configured ? consentUrl(ms, baseUrlOf(this.req)) : '',
       mailboxes,
+      crm: await crmStatus(leadDeps(), workspaceId),
       key: { saved: Boolean(secret), savedAt: secret?.updated_at || null, fromDeployment: !secret && hasDeploymentKey, ...(key ? await describeKey(key) : { valid: false }) },
     }
   },
@@ -265,13 +283,50 @@ const actions = {
     if (!isUuid(body.lead_id)) return fail(400, 'lead_id is required.')
     const verdict = body.verdict === null ? null : String(body.verdict || '')
     if (verdict !== null && !['qualified', 'unqualified', 'needs_review'].includes(verdict)) return fail(400, 'Unknown verdict.')
+    // Why the agent was wrong, in a person's words (optional): the weekly
+    // review turns these into rules. Cleared with the verdict.
+    const reason = verdict ? String(body.reason || '').trim().slice(0, 500) : ''
     const [row] = await db(`leads?id=eq.${body.lead_id}&workspace_id=eq.${workspaceId}`, {
       method: 'PATCH', prefer: 'return=representation',
       // updated_at moves too, so the master Sheet picks the correction up.
-      body: { human_verdict: verdict, reviewed_by: verdict ? user.id : null, reviewed_at: verdict ? new Date().toISOString() : null, updated_at: new Date().toISOString() },
+      body: { human_verdict: verdict, human_reason: reason, reviewed_by: verdict ? user.id : null, reviewed_at: verdict ? new Date().toISOString() : null, updated_at: new Date().toISOString() },
     }) || []
     if (!row) return fail(404, 'That lead is not in this company.')
     return { lead: row }
+  },
+
+  /**
+   * Approve a lead into the CRM (Odoo): the access admin or a sales admin,
+   * after confirming on the page. Sent now when Odoo is connected, otherwise
+   * kept waiting until it is. See _crm.js.
+   */
+  async approve({ workspaceId, body, user, token }) {
+    if (!(await canApprove(workspaceId, token))) return fail(403, 'Only a sales admin can approve leads into the CRM.')
+    const out = await approveLead(leadDeps(), { workspaceId, leadId: body.lead_id, user })
+    if (out.error) return fail(out.status, out.error)
+    return { lead: out.lead, crm: out.crm }
+  },
+
+  /** Save the Odoo connection and test it (read only); a working one sends the waiting leads. */
+  async crm_save({ workspaceId, body }) {
+    const deps = leadDeps()
+    const out = await saveCrm(deps, workspaceId, body)
+    if (out.error) return fail(out.status, out.error)
+    const sent = out.crm.connected && (out.crm.queued || out.crm.failed) ? await sendWaiting(deps, workspaceId) : null
+    return { crm: sent ? await crmStatus(deps, workspaceId) : out.crm, test: out.test, sent }
+  },
+
+  /** Send the approved leads still waiting (or failed before). */
+  async crm_send({ workspaceId }) {
+    const deps = leadDeps()
+    const out = await sendWaiting(deps, workspaceId)
+    if (out.error) return fail(409, out.error)
+    return { sent: out, crm: await crmStatus(deps, workspaceId) }
+  },
+
+  /** Forget the Odoo connection. Leads already sent keep their Odoo links. */
+  async crm_disconnect({ workspaceId }) {
+    return { crm: await disconnectCrm(leadDeps(), workspaceId) }
   },
 
   /**
@@ -393,7 +448,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    const out = await actions[action].call({ req, res }, { workspaceId, body, user })
+    const out = await actions[action].call({ req, res }, { workspaceId, body, user, token })
     if (out && out.__fail) return res.status(out.status).json({ ok: false, error: out.error })
     if (out && out.__sent) return undefined
     return res.status(200).json({ ok: true, ...out })

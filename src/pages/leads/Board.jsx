@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Button, Skeleton, Input, Select } from '../../components/ui/index'
-import { fetchLeadsPage } from '../../lib/leads/client'
+import { Button, Skeleton, Input, Select, Spinner } from '../../components/ui/index'
+import { fetchLeadsPage, leadsApi } from '../../lib/leads/client'
 import {
   SHOW_OPTIONS, EMPTY_FILTERS, activeFilterCount, effectiveVerdict, PAGE_SIZE, pageLabel, pageCount, when,
-  SENDER_LABEL, PROJECT_LABEL, REQUEST_LABEL, FOLDER_LABEL, PHILIPS_LABEL, channelLabel, brandOf, phonesOf,
+  SENDER_LABEL, PROJECT_LABEL, REQUEST_LABEL, FOLDER_LABEL, PHILIPS_LABEL, CRM_LABEL, channelLabel, brandOf, phonesOf,
 } from '../../lib/leads/view'
 import { VerdictTag, LeadDetail } from './parts'
 
@@ -14,6 +14,10 @@ import { VerdictTag, LeadDetail } from './parts'
 // everything else (the email as it arrived, why the agent decided, Outlook)
 // one click away in the opened row. Filtered and paged in the database, so
 // every lead is reachable however many there are.
+//
+// The CRM column (2026-10-12): a sales admin (or the access admin) approves
+// a lead into Odoo from here, after a confirmation that shows what will be
+// sent. Everyone else sees where each lead stands.
 
 const SENDER_OPTIONS = Object.entries(SENDER_LABEL)
 const PROJECT_OPTIONS = [...Object.entries(PROJECT_LABEL), ['none', 'Not stated']]
@@ -21,7 +25,7 @@ const REQUEST_OPTIONS = Object.entries(REQUEST_LABEL)
 const FOLDER_OPTIONS = Object.entries(FOLDER_LABEL)
 
 // Column widths, shared by the header and every row so they line up.
-const GRID = 'md:grid md:grid-cols-[6.5rem_minmax(0,1.6fr)_minmax(0,2.2fr)_7rem_6.5rem_6rem_5.5rem_6.5rem] md:gap-3 md:items-start'
+const GRID = 'md:grid md:grid-cols-[6.5rem_minmax(0,1.6fr)_minmax(0,2.2fr)_7rem_6.5rem_6rem_5.5rem_6.5rem_7rem] md:gap-3 md:items-start'
 
 function Cell({ label, children, className = '' }) {
   // On a phone each value carries its own label; on a desktop the header does.
@@ -35,14 +39,44 @@ function Cell({ label, children, className = '' }) {
 
 const dash = <span className="text-text-tertiary">—</span>
 
-function Row({ lead, open, onToggle, onReview }) {
+// Clicks inside the CRM cell act on the CRM, not on opening the row.
+const stop = (e) => e.stopPropagation()
+
+/** Where the lead stands with Odoo, and the Approve button for those who may. */
+function CrmCell({ lead, canApprove, onAsk }) {
+  const st = lead.crm_status
+  if (st === 'sent') {
+    return lead.crm_url
+      ? <a href={lead.crm_url} target="_blank" rel="noreferrer" onClick={stop} className="text-xs font-semibold text-sage-700 hover:underline">In Odoo ↗</a>
+      : <span className="text-xs font-semibold text-sage-700">{CRM_LABEL.sent}</span>
+  }
+  if (st === 'queued') return <span className="text-[11px] font-semibold text-amber-800 leading-tight block">{CRM_LABEL.queued}</span>
+  if (st === 'sending') return <span className="text-[11px] text-text-secondary">{CRM_LABEL.sending}</span>
+  if (st === 'failed') {
+    return (
+      <span className="block" title={lead.crm_error || ''}>
+        <span className="text-[11px] font-semibold text-red-600 block">{CRM_LABEL.failed}</span>
+        {canApprove && <Button size="xs" variant="secondary" className="mt-1" onClick={(e) => { stop(e); onAsk(lead) }}>Retry</Button>}
+      </span>
+    )
+  }
+  if (canApprove && lead.verdict !== 'duplicate') {
+    return <Button size="xs" variant="primary" onClick={(e) => { stop(e); onAsk(lead) }}>Approve</Button>
+  }
+  return dash
+}
+
+function Row({ lead, open, onToggle, onReview, mailboxes, canApprove, onAsk }) {
   const v = effectiveVerdict(lead)
   const v2 = (lead.criteria_version || 1) >= 2
   const junk = lead.folder === 'junk'
   return (
     <li className={open ? 'bg-surface-subtle' : ''}>
-      <button type="button" onClick={onToggle} aria-expanded={open}
-        className={`w-full text-left px-4 py-3 hover:bg-surface-subtle transition-colors grid grid-cols-2 gap-x-3 gap-y-1.5 ${GRID}`}>
+      {/* A div, not a button: the row holds the Approve button, and a button
+          cannot hold another. Keyboard: Enter or Space opens it. */}
+      <div role="button" tabIndex={0} onClick={onToggle} aria-expanded={open}
+        onKeyDown={(e) => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); onToggle() } }}
+        className={`w-full text-left px-4 py-3 hover:bg-surface-subtle transition-colors cursor-pointer grid grid-cols-2 gap-x-3 gap-y-1.5 focus:outline-none focus-visible:ring-1 focus-visible:ring-amber-400 ${GRID}`}>
         <Cell label="Received" className="col-span-2 md:col-span-1">
           <span className="text-[11px] text-text-secondary tabular-nums">{when(lead.received_at || lead.created_at)}</span>
           <span className="block text-[10px] mt-0.5 text-text-secondary font-semibold">{channelLabel(lead)}</span>
@@ -78,17 +112,64 @@ function Row({ lead, open, onToggle, onReview }) {
         <Cell label="Verdict" className="md:text-right">
           <VerdictTag verdict={v} corrected={Boolean(lead.human_verdict && lead.human_verdict !== lead.verdict)} />
         </Cell>
-      </button>
+        <Cell label="CRM" className="md:text-right">
+          <CrmCell lead={lead} canApprove={canApprove} onAsk={onAsk} />
+        </Cell>
+      </div>
       {open && (
         <div className="border-t border-border bg-white">
-          <LeadDetail lead={lead} onReview={onReview} wide />
+          <LeadDetail lead={lead} onReview={onReview} mailboxes={mailboxes} wide />
         </div>
       )}
     </li>
   )
 }
 
-export default function LeadsBoard({ workspaceId, onReview, refreshKey = 0, mailboxes = [] }) {
+/**
+ * "Send this lead to Odoo?": exactly what will be sent, and what happens if
+ * Odoo is not connected yet. Nothing is sent until the button is pressed.
+ */
+function ApproveDialog({ lead, busy, error, onCancel, onConfirm }) {
+  const phones = phonesOf(lead)
+  const rows = [
+    ['Company', lead.company], ['Contact', lead.name], ['Email', lead.email], ['Phone', phones.join(', ')],
+    ['Wants', lead.summary || lead.subject], ['Who', SENDER_LABEL[lead.sender_type]], ['Project', PROJECT_LABEL[lead.project_type]],
+    ['Came in', channelLabel(lead)],
+  ].filter(([, v]) => v)
+  const notQualified = effectiveVerdict(lead) !== 'qualified'
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(28,35,33,0.45)' }} onClick={busy ? undefined : onCancel}>
+      <div role="dialog" aria-modal="true" aria-labelledby="approve-title" onClick={stop}
+        className="bg-white shadow-dropdown w-full max-w-md border border-border animate-fade-scale p-6 space-y-4">
+        <h3 id="approve-title" className="font-semibold text-text text-sm">
+          {lead.crm_status === 'failed' ? 'Try sending this lead to Odoo again?' : 'Approve this lead and send it to Odoo?'}
+        </h3>
+        <dl className="grid grid-cols-[5.5rem_1fr] gap-x-3 gap-y-1.5 text-xs">
+          {rows.map(([k, v]) => (
+            <div key={k} className="contents">
+              <dt className="text-text-tertiary">{k}</dt>
+              <dd className="text-text min-w-0 break-words" dir="auto">{v}</dd>
+            </div>
+          ))}
+        </dl>
+        <p className="text-xs text-text-secondary leading-relaxed">
+          It becomes a lead in Odoo CRM with the email, the criteria and the agent's questions, and can't be sent twice.
+          {notQualified ? ' Approving also marks it qualified.' : ''}
+          {' '}If Odoo isn't connected yet, it is marked approved and sent as soon as it is.
+        </p>
+        {error && <p className="text-xs text-red-600">{error}</p>}
+        <div className="flex gap-3 pt-1">
+          <Button variant="secondary" className="flex-1 justify-center" disabled={busy} onClick={onCancel}>Cancel</Button>
+          <Button className="flex-1 justify-center" disabled={busy} onClick={onConfirm}>
+            {busy ? <Spinner size="sm" /> : null}{busy ? 'Sending…' : 'Approve and send'}
+          </Button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+export default function LeadsBoard({ workspaceId, onReview, refreshKey = 0, mailboxes = [], canApprove = false }) {
   const [filters, setFilters] = useState(EMPTY_FILTERS)
   // The search box waits for a pause in typing before it asks the database.
   const [searchText, setSearchText] = useState('')
@@ -122,10 +203,26 @@ export default function LeadsBoard({ workspaceId, onReview, refreshKey = 0, mail
 
   useEffect(() => { queueMicrotask(load) }, [load])
 
+  const replaceRow = (id, updated) => setList((s) => ({ ...s, rows: s.rows.map((l) => (l.id === id ? { ...l, ...updated } : l)) }))
+
   // A correction changes the row in place; it leaves the list on the next load.
-  async function review(lead, verdict) {
-    const updated = await onReview(lead, verdict)
-    if (updated) setList((s) => ({ ...s, rows: s.rows.map((l) => (l.id === lead.id ? { ...l, ...updated } : l)) }))
+  async function review(lead, verdict, reason) {
+    const updated = await onReview(lead, verdict, reason)
+    if (updated) replaceRow(lead.id, updated)
+    return updated // the detail opens its "why?" box only once the No is saved
+  }
+
+  // Approve → confirm → Odoo. The row shows the outcome; Odoo's refusal, if
+  // any, stays on the row (Retry) rather than in the dialog.
+  const [asking, setAsking] = useState(null)
+  const [approving, setApproving] = useState({ busy: false, error: '' })
+  async function approve() {
+    setApproving({ busy: true, error: '' })
+    const r = await leadsApi('approve', workspaceId, { lead_id: asking.id })
+    if (r.error) return setApproving({ busy: false, error: r.error })
+    replaceRow(asking.id, r.lead)
+    setApproving({ busy: false, error: '' })
+    setAsking(null)
   }
 
   const set = (k) => (e) => { setFilters((f) => ({ ...f, [k]: e.target.value })); setPage(0); setOpen(null) }
@@ -187,7 +284,7 @@ export default function LeadsBoard({ workspaceId, onReview, refreshKey = 0, mail
 
       {/* ── Header (desktop) ── */}
       <div className={`hidden ${GRID} px-4 py-2 border-b border-border text-[10px] font-semibold text-text-tertiary uppercase tracking-wide`}>
-        <span>Received</span><span>From</span><span>Wants</span><span>Who</span><span>Request</span><span>Project</span><span>Source</span><span className="text-right">Verdict</span>
+        <span>Received</span><span>From</span><span>Wants</span><span>Who</span><span>Request</span><span>Project</span><span>Source</span><span className="text-right">Verdict</span><span className="text-right">CRM</span>
       </div>
 
       {loading ? (
@@ -199,7 +296,8 @@ export default function LeadsBoard({ workspaceId, onReview, refreshKey = 0, mail
       ) : (
         <ul className="divide-y divide-border">
           {list.rows.map((l) => (
-            <Row key={l.id} lead={l} open={open === l.id} onToggle={() => setOpen(open === l.id ? null : l.id)} onReview={review} />
+            <Row key={l.id} lead={l} open={open === l.id} onToggle={() => setOpen(open === l.id ? null : l.id)} onReview={review}
+              mailboxes={mailboxes} canApprove={canApprove} onAsk={(lead) => { setApproving({ busy: false, error: '' }); setAsking(lead) }} />
           ))}
         </ul>
       )}
@@ -216,6 +314,7 @@ export default function LeadsBoard({ workspaceId, onReview, refreshKey = 0, mail
           </div>
         )}
       </div>
+      {asking && <ApproveDialog lead={asking} busy={approving.busy} error={approving.error} onCancel={() => setAsking(null)} onConfirm={approve} />}
     </div>
   )
 }

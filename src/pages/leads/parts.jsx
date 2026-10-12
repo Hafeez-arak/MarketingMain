@@ -1,5 +1,6 @@
+import { useState } from 'react'
 import { Button } from '../../components/ui/index'
-import { VERDICT_LABEL, VERDICT_TONE, criteriaLabels, modelName, money, phonesOf, channelLabel, FOLDER_LABEL } from '../../lib/leads/view'
+import { VERDICT_LABEL, VERDICT_TONE, CRM_LABEL, criteriaLabels, modelName, money, phonesOf, channelLabel, outlookLink, when, FOLDER_LABEL } from '../../lib/leads/view'
 
 // ─── Pieces shared by the leads list and the agent settings ────────────────
 
@@ -43,13 +44,64 @@ function Evidence({ lead }) {
 }
 
 /**
+ * "Is the agent right?", and after a No an optional line on why: the weekly
+ * review turns those into rules (the owner's decision, 2026-10-12). The No
+ * is saved at once; the reason is saved with it when given.
+ */
+function Review({ lead, onReview }) {
+  const [why, setWhy] = useState(null) // { verdict, text } while the box is open
+  async function no(v) {
+    const updated = await onReview(lead, v)
+    if (updated) setWhy({ verdict: v, text: '' })
+  }
+  async function saveWhy(e) {
+    e.preventDefault()
+    if (why.text.trim()) await onReview(lead, why.verdict, why.text.trim())
+    setWhy(null)
+  }
+  return (
+    <div className="space-y-2 pt-1">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-text-tertiary">Is the agent right?</span>
+        <Button size="xs" variant={lead.human_verdict === lead.verdict ? 'primary' : 'secondary'} onClick={() => { setWhy(null); onReview(lead, lead.verdict) }}>Yes</Button>
+        {['qualified', 'needs_review', 'unqualified'].filter((v) => v !== lead.verdict).map((v) => (
+          <Button key={v} size="xs" variant={lead.human_verdict === v ? 'primary' : 'secondary'} onClick={() => no(v)}>
+            No, {VERDICT_LABEL[v].toLowerCase()}
+          </Button>
+        ))}
+        {lead.human_verdict && <Button size="xs" variant="ghost" onClick={() => { setWhy(null); onReview(lead, null) }}>Clear</Button>}
+      </div>
+      {why && (
+        <form onSubmit={saveWhy} className="flex flex-wrap items-center gap-2">
+          <input
+            autoFocus
+            value={why.text}
+            onChange={(e) => setWhy({ ...why, text: e.target.value })}
+            maxLength={500}
+            placeholder="Why? (optional) e.g. a trader asking for a price list"
+            aria-label="Why the agent was wrong (optional)"
+            className="flex-1 min-w-[14rem] border border-border bg-white text-text text-xs px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-amber-400"
+          />
+          <Button size="xs" type="submit" disabled={!why.text.trim()}>Save</Button>
+          <Button size="xs" variant="ghost" onClick={() => setWhy(null)}>Skip</Button>
+        </form>
+      )}
+      {!why && lead.human_reason && lead.human_verdict && lead.human_verdict !== lead.verdict && (
+        <p className="text-text-tertiary">Why it was corrected: <span className="text-text" dir="auto">{lead.human_reason}</span></p>
+      )}
+    </div>
+  )
+}
+
+/**
  * An opened lead: the email as it arrived, why the agent decided, what to
  * ask, and the way into Outlook. Outlook on the web only (the owner's
  * decision, 2026-10-12): no Outlook app opens one message from a link, and
- * the .eml download it replaced was clumsy. The server's email_file action
- * is kept for when it comes back.
+ * the .eml download it replaced was clumsy. The link names the mailbox
+ * (outlookLink), so it opens for anyone with access to that mailbox.
  */
-export function LeadDetail({ lead, onReview, wide = false }) {
+export function LeadDetail({ lead, onReview, mailboxes = [], wide = false }) {
+  const href = outlookLink(lead, mailboxes)
   const d = lead.details || {}
   const facts = [['Products', d.products], ['Brands', d.brands], ['Quantity', d.quantity], ['Location', d.location], ['Stage', d.stage], ['Urgency', d.urgency]].filter(([, v]) => v)
   const asks = Array.isArray(lead.ask_next) ? lead.ask_next : []
@@ -79,22 +131,18 @@ export function LeadDetail({ lead, onReview, wide = false }) {
           <ul className="list-disc pl-4 space-y-0.5 text-text">{asks.map((a) => <li key={a}>{a}</li>)}</ul>
         </div>
       )}
-      {lead.verdict && lead.verdict !== 'duplicate' && (
-        <div className="flex flex-wrap items-center gap-2 pt-1">
-          <span className="text-text-tertiary">Is the agent right?</span>
-          <Button size="xs" variant={lead.human_verdict === lead.verdict ? 'primary' : 'secondary'} onClick={() => onReview(lead, lead.verdict)}>Yes</Button>
-          {['qualified', 'needs_review', 'unqualified'].filter((v) => v !== lead.verdict).map((v) => (
-            <Button key={v} size="xs" variant={lead.human_verdict === v ? 'primary' : 'secondary'} onClick={() => onReview(lead, v)}>
-              No, {VERDICT_LABEL[v].toLowerCase()}
-            </Button>
-          ))}
-          {lead.human_verdict && <Button size="xs" variant="ghost" onClick={() => onReview(lead, null)}>Clear</Button>}
-        </div>
+      {lead.verdict && lead.verdict !== 'duplicate' && <Review lead={lead} onReview={onReview} />}
+      {lead.crm_status && (
+        <p className="text-text-tertiary">
+          CRM: <span className={lead.crm_status === 'failed' ? 'text-red-600 font-semibold' : 'text-text-secondary'}>{CRM_LABEL[lead.crm_status]}</span>
+          {lead.approved_at ? <span> · approved {when(lead.approved_at)}</span> : null}
+          {lead.crm_status === 'failed' && lead.crm_error ? <span className="block text-red-600">Odoo said: {lead.crm_error}</span> : null}
+        </p>
       )}
       <div className="flex flex-wrap items-center gap-3">
-        {lead.link && (
-          <a href={lead.link} target="_blank" rel="noreferrer"
-            title="Opens the email in Outlook on the web, in the mailbox it arrived in"
+        {href && (
+          <a href={href} target="_blank" rel="noreferrer"
+            title="Opens the email in Outlook on the web, in the mailbox it arrived in. Needs access to that mailbox."
             className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] tracking-wide font-semibold border bg-white text-text border-border hover:border-stone-400 hover:bg-surface-subtle transition-colors">
             Open in Outlook
             <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3h7v7M10 14L21 3M21 14v7H3V3h7"/></svg>

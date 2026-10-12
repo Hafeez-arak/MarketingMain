@@ -140,6 +140,9 @@ export function AuthProvider({ children }) {
     // Leads only: the app renders SalesApp for them instead of the marketing
     // shell. The database is what actually keeps them out of everything else.
     isSales: access?.role === 'sales' && access?.status === 'approved',
+    // Approve into the CRM: the access admin, or a sales admin. The server
+    // asks the database again (can_approve_leads) before sending anything.
+    canApproveLeads: access?.status === 'approved' && (access?.role === 'admin' || (access?.role === 'sales' && Boolean(access?.leads_approver))),
     workspaces,
     activeWorkspace,
     activeWorkspaceId,

@@ -19,6 +19,7 @@ function fakeFetch(url, init = {}) {
   if (u.includes('/auth/v1/user')) return json({ id: 'user-1' })
   if (u.includes('/rpc/is_access_admin')) return json(who.admin)
   if (u.includes('/rpc/is_sales_member')) return json(who.sales)
+  if (u.includes('/rpc/can_approve_leads')) return json(Boolean(who.approver))
   if (u.includes('/rest/v1/workspaces?id=eq.')) return json(who.member ? [{ id: WS }] : [])
   if (u.includes('/rest/v1/leads?id=eq.') && method === 'PATCH') {
     const body = JSON.parse(init.body)
@@ -69,6 +70,30 @@ describe('a sales seat', () => {
     expect(writes()).toEqual([])
     // Not even asked: a seat is only looked up for the actions it could open.
     expect(calls.some((c) => c.includes('is_sales_member'))).toBe(false)
+  })
+})
+
+describe('approving into the CRM', () => {
+  it('a sales seat that is not a sales admin is refused, and nothing is written', async () => {
+    who = { member: false, admin: false, sales: true, approver: false }
+    const res = await call(handler, 'approve', { lead_id: LEAD })
+    expect(res.statusCode).toBe(403)
+    expect(res.body.error).toMatch(/sales admin/)
+    expect(writes()).toEqual([])
+  })
+
+  it('a sales admin gets through to the lead (here: not found in this fake)', async () => {
+    who = { member: false, admin: false, sales: true, approver: true }
+    const res = await call(handler, 'approve', { lead_id: LEAD })
+    expect(res.statusCode).toBe(404)
+  })
+
+  it('the Odoo settings are the admin\'s alone, even for a sales admin', async () => {
+    who = { member: false, admin: false, sales: true, approver: true }
+    for (const action of ['crm_save', 'crm_send', 'crm_disconnect']) {
+      expect((await call(handler, action, {})).statusCode).toBe(403)
+    }
+    expect(writes()).toEqual([])
   })
 })
 

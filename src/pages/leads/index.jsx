@@ -6,6 +6,7 @@ import { Notice, Stat, SubTabs } from '../email/parts'
 import { fetchMonthLeads, leadsApi } from '../../lib/leads/client'
 import { VerdictTag, CriteriaChips } from './parts'
 import LeadsBoard from './Board'
+import CrmCard from './CrmCard'
 import { RULE_LABELS } from '../../lib/leads/qualify'
 import {
   monthStats, sheetHealth, modelName, money,
@@ -100,8 +101,8 @@ export default function LeadAgent() {
   }
 
   /** A person's verdict. Returns the updated lead for the list to show. */
-  async function review(lead, verdict) {
-    const r = await leadsApi('review', activeWorkspaceId, { lead_id: lead.id, verdict })
+  async function review(lead, verdict, reason) {
+    const r = await leadsApi('review', activeWorkspaceId, { lead_id: lead.id, verdict, reason })
     if (r.error) { setError(r.error); return null }
     setMonthLeads((ls) => ls.map((l) => (l.id === lead.id ? { ...l, ...r.lead } : l)))
     return r.lead
@@ -133,7 +134,7 @@ export default function LeadAgent() {
       {error && <Notice tone="red" title="Something went wrong">{error}</Notice>}
 
       {view === 'leads' ? (
-        <LeadsBoard workspaceId={activeWorkspaceId} onReview={review} refreshKey={refreshKey} mailboxes={status?.mailboxes || []} />
+        <LeadsBoard workspaceId={activeWorkspaceId} onReview={review} refreshKey={refreshKey} mailboxes={status?.mailboxes || []} canApprove />
       ) : (
         <>
           {status?.error && <Notice tone="red" title="Could not load the agent's settings">{status.error}</Notice>}
@@ -177,7 +178,11 @@ export default function LeadAgent() {
         </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
-            <TryIt workspaceId={activeWorkspaceId} />
+            <div className="space-y-4 min-w-0">
+              <TryIt workspaceId={activeWorkspaceId} />
+              <CrmCard workspaceId={activeWorkspaceId} crm={status?.crm} loading={loading}
+                onChange={(crm) => setStatus((st) => ({ ...st, crm }))} onError={setError} />
+            </div>
             <Connection workspaceId={activeWorkspaceId} status={status} loading={loading} onChange={setStatus} onError={setError} onReload={reload} now={now} />
           </div>
         </>

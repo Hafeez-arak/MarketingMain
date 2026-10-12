@@ -27,23 +27,29 @@ import {
 // app, or the sales team's Leads page and nothing else. A sales person holds
 // no company membership at all (20261013_sales_seats), so the marketing
 // app's data stays shut to them in the database, not just on screen.
+// A sales admin (2026-10-12) is a sales person who may also approve leads
+// into the CRM: stored as role 'sales' with leads_approver on.
 const ROLE_CHOICES = [
   { key: 'member', label: 'Marketing app', hint: 'Everything inside the companies they get.' },
-  { key: 'sales', label: 'Leads only', hint: 'The sales team: the leads list, nothing else.' },
+  { key: 'sales', label: 'Sales', hint: 'The leads list only: read, call, correct.' },
+  { key: 'sales_admin', label: 'Sales admin', hint: 'Sales, plus Approve: sends a lead to Odoo.' },
 ]
 
+/** member | sales | sales_admin, from a user_access row or an invite. */
+const accessOf = (row) => (row.role === 'sales' ? (row.leads_approver ? 'sales_admin' : 'sales') : row.role)
+
 function RoleTag({ role }) {
-  if (role !== 'sales') return null
+  if (role !== 'sales' && role !== 'sales_admin') return null
   return (
     <span className="text-[10px] font-semibold uppercase tracking-wide px-2 py-1 border bg-amber-50 text-amber-800 border-amber-200 whitespace-nowrap">
-      Leads only
+      {role === 'sales_admin' ? 'Sales admin' : 'Sales · leads only'}
     </span>
   )
 }
 
 function RoleChoice({ value, onChange, disabled = false }) {
   return (
-    <div className="grid grid-cols-2 gap-2">
+    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
       {ROLE_CHOICES.map(c => (
         <label key={c.key}
           className={`border px-3 py-2 cursor-pointer transition-colors ${value === c.key ? 'border-amber-400 bg-amber-50/60' : 'border-border bg-white hover:bg-surface-subtle'}`}>
@@ -172,9 +178,9 @@ function PersonRow({
             Admin
           </span>
         )}
-        {!(row.status === 'approved' && !isAdmin && onSetRole) && <RoleTag role={row.role} />}
+        {!(row.status === 'approved' && !isAdmin && onSetRole) && <RoleTag role={accessOf(row)} />}
         {row.status === 'approved' && !isAdmin && onSetRole && (
-          <select aria-label="Access" value={row.role === 'sales' ? 'sales' : 'member'} disabled={busy}
+          <select aria-label="Access" value={accessOf(row)} disabled={busy}
             onChange={e => onSetRole(row, e.target.value)}
             className="text-[11px] font-semibold text-text bg-white border border-border px-1.5 py-1 focus:outline-none focus:ring-1 focus:ring-amber-400">
             {ROLE_CHOICES.map(c => <option key={c.key} value={c.key}>{c.label}</option>)}
@@ -277,7 +283,7 @@ export function Access() {
     const { outcome, error: err } = await inviteAccess(email, ids, newRole)
     if (err) { setError(err); setAdding(false); return }
     const names = companies.filter(c => ids.includes(c.id)).map(c => c.name).join(', ')
-    const what = newRole === 'sales' ? ' (Leads only)' : ''
+    const what = { sales: ' (sales, leads only)', sales_admin: ' (sales admin)' }[newRole] || ''
     // Say which of the three things happened. "Done" would leave the admin
     // unsure whether that person can log in right now or still has to sign up.
     setNotice({
@@ -341,13 +347,15 @@ export function Access() {
   }
 
   async function handleSetRole(row, role) {
-    if (role === row.role) return
+    if (role === accessOf(row)) return
     setBusyId(row.user_id); setError(''); setNotice('')
     const e = await setUserRole(row.user_id, role)
     if (e) setError(e)
-    else setNotice(role === 'sales'
-      ? `${row.full_name || row.email} now sees Leads only, for the same companies. They see the change the next time they open the app.`
-      : `${row.full_name || row.email} now has the marketing app, for the same companies. They see the change the next time they open the app.`)
+    else setNotice(`${row.full_name || row.email} ${{
+      sales: 'now sees the leads only, for the same companies',
+      sales_admin: 'is now a sales admin: the leads, plus Approve into Odoo, for the same companies',
+      member: 'now has the marketing app, for the same companies',
+    }[role]}. They see the change the next time they open the app.`)
     await load()
     setBusyId(null)
   }
@@ -442,7 +450,7 @@ export function Access() {
           {!loading && companies.length > 0 && (
             <div>
               <p className="text-xs text-text-tertiary mb-1.5">
-                Companies they should see{newRole === 'sales' ? ' the leads of' : ''}. Leave all unticked to decide later.
+                Companies they should see{newRole !== 'member' ? ' the leads of' : ''}. Leave all unticked to decide later.
               </p>
               <CompanyChecklist
                 companies={companies}
@@ -530,7 +538,7 @@ export function Access() {
         <div className="px-5 py-4 border-b border-border">
           <h3 className="font-semibold text-text text-sm">People with access</h3>
           <p className="text-xs text-text-tertiary mt-0.5">
-            Marketing app: everything inside the companies they hold. Leads only: the sales team's leads list for those companies, nothing else. Use Companies to change who gets what.
+            Marketing app: everything inside the companies they hold. Sales: the leads list for those companies, nothing else. Sales admin: the same, plus Approve into Odoo. Use Companies to change who gets what.
           </p>
         </div>
         {loading ? (

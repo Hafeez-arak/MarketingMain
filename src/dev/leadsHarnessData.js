@@ -58,6 +58,7 @@ const status = {
   settings: { workspace_id: WS, enabled: true, intake_key: '1cfe0000-aaaa-bbbb-cccc-ddddeeeeffff', last_intake_at: new Date(Date.now() - 3 * 60_000).toISOString() },
   key: { saved: true, valid: true, limitRemaining: 9.6, fromDeployment: false },
   microsoft: true,
+  crm: { connected: false, url: '', db: '', login: '', hasKey: false, version: '', lastCheckedAt: null, lastError: '', queued: 0, failed: 0 },
   mailboxes: [{ id: 'mb1', email: 'info@example-co.sa', status: 'active', last_checked_at: new Date(Date.now() - 2 * 60_000).toISOString(), last_error: '', last_counts: { seen: 9, skipped: 7, qualified: 1, unqualified: 1 } }],
 }
 
@@ -79,10 +80,19 @@ window.fetch = async (input, init = {}) => {
     return json({ ok: true, settings: status.settings })
   }
   if (url.includes('/api/leads/review')) {
-    const { lead_id, verdict } = JSON.parse(init.body || '{}')
+    const { lead_id, verdict, reason } = JSON.parse(init.body || '{}')
     const l = leads.find((x) => x.id === lead_id)
     l.human_verdict = verdict
+    l.human_reason = verdict ? String(reason || '') : ''
     return json({ ok: true, lead: l })
+  }
+  if (url.includes('/api/leads/approve')) {
+    // Odoo not connected in the harness: an approval waits as queued.
+    const { lead_id } = JSON.parse(init.body || '{}')
+    const l = leads.find((x) => x.id === lead_id)
+    Object.assign(l, { approved_at: new Date().toISOString(), crm_status: 'queued', human_verdict: l.verdict === 'qualified' ? l.human_verdict : 'qualified' })
+    status.crm.queued++
+    return json({ ok: true, lead: l, crm: 'queued' })
   }
   if (url.includes('/api/leads/try')) {
     return json({ ok: true, model: 'openai/gpt-6-luna', cost: 0.00015, verdict: { verdict: 'unqualified', category: 'job_or_recruitment', confidence: 'high', reason: 'A job application with a CV.', summary: 'Electrical engineer looking for a job', details: {}, ask_next: [] } })

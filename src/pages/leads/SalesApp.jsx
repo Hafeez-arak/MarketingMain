@@ -33,7 +33,7 @@ function CompanyPicker({ workspaces, activeWorkspaceId, onChange }) {
 }
 
 export default function SalesApp() {
-  const { user, workspaces, activeWorkspaceId, switchWorkspace, signOut } = useAuth()
+  const { user, workspaces, activeWorkspaceId, switchWorkspace, signOut, canApproveLeads } = useAuth()
   const [monthLeads, setMonthLeads] = useState([])
   const [mailboxes, setMailboxes] = useState([])
   const [loadedFor, setLoadedFor] = useState(null)
@@ -73,8 +73,8 @@ export default function SalesApp() {
   const stats = useMemo(() => monthStats(monthLeads, now), [monthLeads, now])
   const month = now.toLocaleString('en-GB', { month: 'long' })
 
-  async function review(lead, verdict) {
-    const r = await leadsApi('review', activeWorkspaceId, { lead_id: lead.id, verdict })
+  async function review(lead, verdict, reason) {
+    const r = await leadsApi('review', activeWorkspaceId, { lead_id: lead.id, verdict, reason })
     if (r.error) { setError(r.error); return null }
     setMonthLeads((ls) => ls.map((l) => (l.id === lead.id ? { ...l, ...r.lead } : l)))
     return r.lead
@@ -131,7 +131,7 @@ export default function SalesApp() {
           <Stat label="Everything" value={stats.total} loading={loading} hint={`All enquiries in ${month}`} />
         </div>
 
-        <LeadsBoard workspaceId={activeWorkspaceId} onReview={review} refreshKey={refreshKey} mailboxes={mailboxes} />
+        <LeadsBoard workspaceId={activeWorkspaceId} onReview={review} refreshKey={refreshKey} mailboxes={mailboxes} canApprove={canApproveLeads} />
       </main>
     </div>
   )
