@@ -13,7 +13,7 @@
 // script pasted before the columns existed shows in its Type column.
 
 import {
-  criteriaLabels, channelLabel, phonesOf,
+  criteriaLabels, channelLabel, phonesOf, projectOf, outlookLink,
   SENDER_LABEL, PROJECT_LABEL, REQUEST_LABEL, FOLDER_LABEL, PHILIPS_LABEL,
 } from '../../src/lib/leads/view.js'
 
@@ -52,7 +52,7 @@ export function riyadhTime(iso) {
 }
 
 /** One lead → the master Sheet's row. The verdict is a person's correction when there is one. */
-export function toRow(lead) {
+export function toRow(lead, { mailboxes = [] } = {}) {
   const verdict = lead.human_verdict || lead.verdict || ''
   // Brief: everything they wrote. An email's subject is part of what it says;
   // a website enquiry's "subject" is the project type it ticked.
@@ -87,7 +87,10 @@ export function toRow(lead) {
     qualified: verdict === 'qualified' || verdict === 'needs_review',
     type: lead.verdict === 'duplicate' ? 'duplicate' : [String(lead.category || '').replace(/_/g, ' '), ...criteriaLabels(lead)].filter(Boolean).join(' · '),
     reason: lead.reason || '',
-    link: lead.link || '',
+    // Named mailbox, so it opens for anyone with access to it (outlookLink).
+    // The id inside can still go stale if the email moves before the app
+    // refreshes it; the leads page always works it out at the click.
+    link: outlookLink(lead, mailboxes),
     // One column each, for the workbook's filters.
     cameIn: channelLabel(lead),
     folder: email && lead.folder ? FOLDER_LABEL[lead.folder] || lead.folder : '',
@@ -97,7 +100,11 @@ export function toRow(lead) {
     request: v2 && lead.request_type ? REQUEST_LABEL[lead.request_type] || lead.request_type : '',
     // Empty when the email does not say: the team fills it in after the call
     // (the sales manager's rule), and the workbook never overwrites theirs.
-    project: v2 && lead.project_type ? PROJECT_LABEL[lead.project_type] || lead.project_type : '',
+    // The team's phase when they set one; else the agent's (v2 leads only).
+    project: lead.human_project_type || v2 ? PROJECT_LABEL[projectOf(lead)] || projectOf(lead) : '',
+    // Set by a person on the leads page: the workbook writes it even over a
+    // cell that already holds a phase.
+    projectByPerson: Boolean(lead.human_project_type),
     philips: PHILIPS_LABEL[lead.philips] || '',
     category: lead.verdict === 'duplicate' ? 'duplicate' : String(lead.category || '').replace(/_/g, ' '),
   }
@@ -121,14 +128,16 @@ export async function exportLeads(deps, { key, cursor = '' }) {
   const after = ts && !Number.isNaN(Date.parse(ts))
     ? `&or=(updated_at.gt.${encodeURIComponent(ts)},and(updated_at.eq.${encodeURIComponent(ts)},id.gt.${isUuid(id) ? id : '00000000-0000-0000-0000-000000000000'}))`
     : ''
-  const rows = await deps.db(`leads?workspace_id=eq.${ws}${after}&select=id,source,received_at,created_at,updated_at,name,company,email,phone,subject,message,verdict,human_verdict,category,reason,link,mailbox,error,sender_type,source_check,project_type,request_type,philips,folder,email_kind,criteria_version,phones&order=updated_at.asc,id.asc&limit=${EXPORT_PAGE}`) || []
+  const rows = await deps.db(`leads?workspace_id=eq.${ws}${after}&select=id,source,received_at,created_at,updated_at,name,company,email,phone,subject,message,verdict,human_verdict,category,reason,link,mailbox,error,sender_type,source_check,project_type,request_type,philips,folder,email_kind,criteria_version,phones,human_project_type,project_final&order=updated_at.asc,id.asc&limit=${EXPORT_PAGE}`) || []
+  // The mailboxes' real addresses, for links that open in the right mailbox.
+  const mailboxes = rows.some((l) => l.link) ? await deps.db(`lead_mailboxes?workspace_id=eq.${ws}&select=email,label`) || [] : []
   const last = rows[rows.length - 1]
   // The workbook's timer is the other watchman: it checks on the website
   // Sheet (and everything else) at most every 10 minutes. See _health.js.
   if (deps.health) await deps.health({ workspaceId: ws }).catch(() => {})
   return {
     status: 200,
-    leads: rows.map(toRow),
+    leads: rows.map((l) => toRow(l, { mailboxes })),
     next: last ? `${last.updated_at}|${last.id}` : cursor,
     more: rows.length === EXPORT_PAGE,
   }

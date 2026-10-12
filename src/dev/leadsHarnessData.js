@@ -86,6 +86,21 @@ window.fetch = async (input, init = {}) => {
     l.human_reason = verdict ? String(reason || '') : ''
     return json({ ok: true, lead: l })
   }
+  if (url.includes('/api/leads/outlook_link')) {
+    // e1 is still in its mailbox; any other email lead was deleted there.
+    const { lead_id } = JSON.parse(init.body || '{}')
+    window.__lastOutlookAsk = lead_id
+    return lead_id === 'e1'
+      ? json({ ok: true, url: 'https://outlook.office.com/mail/info%40example-co.sa/deeplink?ItemID=AAMkHarness&exvsurl=1' })
+      : json({ ok: false, error: 'This email is no longer in info@example-co.sa: it was deleted there.' }, 404)
+  }
+  if (url.includes('/api/leads/set_project')) {
+    const { lead_id, project } = JSON.parse(init.body || '{}')
+    const l = leads.find((x) => x.id === lead_id)
+    l.human_project_type = project
+    l.project_final = project === null ? (l.project_type || '') : project === 'none' ? '' : project
+    return json({ ok: true, lead: l })
+  }
   if (url.includes('/api/leads/approve')) {
     // Odoo not connected in the harness: an approval waits as queued.
     const { lead_id } = JSON.parse(init.body || '{}')

@@ -21,7 +21,8 @@
  * (2026-10-11): Came in, Folder (Junk in red), Email type, Who, Verified,
  * Request, Project and Philips, every one with a filter button. Project
  * (JIH / Tender / Maintenance) is left empty when the email does not say:
- * the team fills it in after the call, and the script never overwrites it.
+ * the team fills it in after the call, and the script never overwrites it,
+ * except with a phase the team set on the leads page, which wins.
  *
  * Upgrading from an older version: paste this over it and run
  * installLeadsMaster once. The new columns are slotted in beside their
@@ -409,10 +410,11 @@ function apply_(leads) {
         // it was not a person who took it out (a person's Unqualified always
         // removes it).
         if (!inSheet_(lead) && (lead.byPerson || !teamTouched_(data, col, row))) { remove.push(row); return; }
-        // Known: refresh only the agent's cells. Project only while empty.
+        // Known: refresh only the agent's cells. Project only while empty,
+        // unless the team set it on the leads page (projectByPerson): that wins.
         Object.keys(FIELD).forEach(function (h) {
           if (!col[h] || h === 'Lead ID') return;
-          if (h === PROJECT && String((data[row - 2] || [])[col[h] - 1] || '').trim()) return;
+          if (h === PROJECT && !lead.projectByPerson && String((data[row - 2] || [])[col[h] - 1] || '').trim()) return;
           sheet.getRange(row, col[h]).setValue(cell_(h, lead[FIELD[h]]));
         });
         changed = true;

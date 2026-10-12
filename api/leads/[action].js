@@ -3,7 +3,7 @@ import { db, isConfigured } from '../agent/_supabase.js'
 import { sealSecret } from '../email/_secrets.js'
 import { signState, authorizeUrl, READ_SCOPES } from '../email/_graph.js'
 import { intakeWebsite, tryIt, QUALIFIER_MODEL } from './_intake.js'
-import { checkMail, emailFile } from './_mail.js'
+import { checkMail, emailFile, currentOutlookLink } from './_mail.js'
 import { exportLeads, applySheetDecisions } from './_export.js'
 import { approveLead, crmStatus, saveCrm, sendWaiting, disconnectCrm } from './_crm.js'
 import { leadDeps, openRouterKey, hasDeploymentKey, describeKey, sendAlert } from './_deps.js'
@@ -29,9 +29,10 @@ import { previewLenses } from '../agent/_investigate.js'
 //                       caller's own token, so RLS answers) and the access
 //                       admin. Only then does the service key touch anything.
 //   a sales person      the same, but with a sales seat in that company
-//                       instead of membership, and only review, email_file
-//                       and approve (SALES_ACTIONS); approve also asks the
-//                       database whether they are a sales admin.
+//                       instead of membership, and only review, email_file,
+//                       approve, outlook_link and set_project
+//                       (SALES_ACTIONS); approve also asks the database
+//                       whether they are a sales admin.
 //
 // Microsoft's sign-in comes back to /api/email/ms-callback (the address
 // registered in Entra), which hands a lead-agent sign-in to _mail.js.
@@ -102,7 +103,7 @@ async function isAdmin(token) {
 // A sales person (20261013_sales_seats) is not a member of the company at
 // all: their seat is asked for separately, again with their own token. A
 // seat opens these actions and nothing else.
-const SALES_ACTIONS = new Set(['review', 'email_file', 'approve'])
+const SALES_ACTIONS = new Set(['review', 'email_file', 'approve', 'outlook_link', 'set_project'])
 
 async function isSalesMember(workspaceId, token) {
   if (!isUuid(workspaceId)) return false
@@ -177,6 +178,37 @@ const actions = {
     res.setHeader('Cache-Control', 'no-store')
     res.status(200).send(out.bytes)
     return { __sent: true }
+  },
+
+  /**
+   * "Open in Outlook": the email's link as it is now, in its own mailbox.
+   * Worked out at the click, because Exchange changes an email's id when it
+   * moves folder, and a stored link then opens "moved or deleted".
+   */
+  async outlook_link({ workspaceId, body }) {
+    if (!isUuid(body.lead_id)) return fail(400, 'Which lead?')
+    const out = await currentOutlookLink(leadDeps(), { workspaceId, leadId: body.lead_id })
+    if (out.error) return fail(out.status, out.error)
+    return { url: out.url }
+  },
+
+  /**
+   * The team's project phase (2026-10-12): JIH / Tender / Maintenance, or
+   * 'none' (no phase), or null to follow the agent again. Anyone on the leads
+   * team may set it, stated in the email or not; it wins everywhere
+   * (project_final), and updated_at moves so the workbook takes it.
+   */
+  async set_project({ workspaceId, body, user }) {
+    if (!isUuid(body.lead_id)) return fail(400, 'Which lead?')
+    const project = body.project === null || body.project === '' ? null : String(body.project)
+    if (project !== null && !['jih', 'tender', 'maintenance', 'none'].includes(project)) return fail(400, 'Unknown project phase.')
+    const now = new Date().toISOString()
+    const [row] = await db(`leads?id=eq.${body.lead_id}&workspace_id=eq.${workspaceId}`, {
+      method: 'PATCH', prefer: 'return=representation',
+      body: { human_project_type: project, project_set_by: project ? user.id : null, project_set_at: project ? now : null, updated_at: now },
+    }) || []
+    if (!row) return fail(404, 'That lead is not in this company.')
+    return { lead: row }
   },
 
   /** Everything the Lead Agent page shows that RLS cannot: keys, model, mailboxes. */
