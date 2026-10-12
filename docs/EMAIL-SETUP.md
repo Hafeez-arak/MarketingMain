@@ -420,8 +420,12 @@ The contact form on arak-sa.com (repo `055-Junaid/arak-lighting-website`) posts
 every enquiry to its Sheet, and, when the marketing box is ticked, also to
 `POST https://marketing-main-ten.vercel.app/api/email/website-signup` with the
 workspace's `email_settings.website_signup_key`. The contact lands in the
-marketing lane, opted in, in the group **Website enquiries**. Anyone who is
-unsubscribed, bounced or marked us as spam is left as they are.
+marketing lane, opted in. Anyone who is unsubscribed, bounced or marked us as
+spam is left as they are.
+
+The tick alone puts nobody in a group, because vendors tick it too. Which
+group they join is decided by the lead agent's verdict (section 20). The old
+group **Website enquiries** was removed on 2026-10-12.
 
 - Arak's key is set (2026-09-29). Read it with
   `select website_signup_key from email_settings where workspace_id = '00000000-0000-0000-0000-000000000001'`.
@@ -501,3 +505,50 @@ read-only approval for info@clb-sa.com.
 
 The sending run re-checks every domain every 12 hours and stops a mailbox the
 moment its SPF, DKIM or MX goes missing.
+
+## 20. Everyone who contacted us → "Previously contacted …" groups (2026-10-12)
+
+Anyone who asked us for a quote, a product or a project joins a **marketing**
+group by themselves, and campaigns can be sent to that group:
+
+| Source | Group |
+|---|---|
+| info@arak-sa.com + the website form | Previously contacted Arak |
+| info@clb-sa.com | Previously contacted CLB |
+
+- **Who joins:** leads whose verdict is qualified or needs review (the team's
+  verdict wins over the agent's). A duplicate follows the lead it repeats.
+  Job seekers, vendors, agencies and spam never join.
+- **The team overrules:** set a lead to Unqualified and the person leaves the
+  group, unless another of their enquiries still counts. The contact itself
+  is kept.
+- **Website form:** since 2026-10-02 18:47 UTC the form has a marketing box.
+  A website enquiry from after that time joins only if the box was ticked.
+  Older ones count like an email.
+- **Never:** unsubscribed, bounced or spam-reporting contacts are left as
+  they are. Our own domains are skipped. A cold prospect who writes in
+  moves to marketing and their queued outreach is cancelled.
+- New contacts have source **Contacted us**, consent **business contact**,
+  and a note such as "Contacted us 2026-08-02 at info@arak-sa.com".
+
+It is a database trigger on `leads`
+(`supabase/migrations/20261016_previously_contacted_groups.sql`), so every
+way a verdict changes keeps the groups right. Which group each source feeds
+is data:
+
+```sql
+-- a mailbox the lead agent reads ('' = feeds no group)
+update lead_mailboxes set contact_group = 'Previously contacted Arak' where label = 'info@arak-sa.com';
+-- the website form, and when its marketing box went live
+update lead_agent_settings set website_contact_group = 'Previously contacted Arak',
+  website_consent_since = '2026-10-02T18:47:00Z' where workspace_id = '<ws>';
+-- after changing either: sort everyone again
+select sync_lead_contacts_all('<ws>');
+```
+
+Rename a group in the app only together with its `contact_group` value. If
+you don't, the next enquiry creates a new group with the old name.
+
+CLB's history was extended to 12 May 2026 (5 months), so May–June CLB
+enquiries also appear on the Leads page.
+

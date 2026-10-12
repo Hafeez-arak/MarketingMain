@@ -697,6 +697,8 @@ describe('G. controls, links and the rest', () => {
     expect(await contactOf('new@visitor.sa')).toMatchObject({ audience: 'marketing', consent: 'opted_in', source: 'website' })
     await post({ email: 'faisal@abha.sa', name: 'Faisal' })
     expect(await contactOf('faisal@abha.sa')).toMatchObject({ audience: 'marketing', consent: 'opted_in' })
+    // The tick alone joins no group: that is the lead agent's verdict (20261016).
+    expect(await app.q("select g.name from email_group_members m join email_groups g on g.id = m.group_id join email_contacts c on c.id = m.contact_id where c.email in ('new@visitor.sa', 'faisal@abha.sa') and g.audience = 'marketing'")).toEqual([])
     // Anna said stop in E2: a ticked box on the website does not undo that.
     expect((await post({ email: 'anna@fitout.sa' })).body).toEqual({ ok: true, added: false })
     expect((await contactOf('anna@fitout.sa')).status).toBe('unsubscribed')

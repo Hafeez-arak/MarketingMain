@@ -38,7 +38,7 @@ export const STATUSES = {
 
 export const SOURCES = {
   manual: 'Added by hand', import: 'CSV import', website: 'Website', event: 'Event',
-  research: 'Research agent', reply: 'Replied to outreach', other: 'Other',
+  research: 'Research agent', reply: 'Replied to outreach', enquiry: 'Contacted us', other: 'Other',
 }
 
 export const LANGUAGES = { en: 'English', ar: 'Arabic' }
@@ -51,9 +51,6 @@ export const SUBSCRIBERS_GROUP = 'Newsletter subscribers'
 // anything but "stop" (api/email/_cold.js, readReplies). Made on the first one.
 export const REPLIES_GROUP = 'Replied to outreach'
 
-// The marketing group someone joins by sending an enquiry from the website
-// with the marketing box ticked (api/email/_engine.js, websiteSignup).
-export const WEBSITE_GROUP = 'Website enquiries'
 
 /** Lower-cased, trimmed, with a mailto: or angle brackets stripped. */
 export function normalizeEmail(raw) {
