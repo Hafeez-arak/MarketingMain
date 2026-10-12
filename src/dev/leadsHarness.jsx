@@ -9,15 +9,16 @@ import '../index.css'
 // ─── Dev-only Lead Agent harness ───────────────────────────────────────────
 // The real Lead Agent page without signing in: a fake admin session and
 // canned answers (leadsHarnessData.js). Served at /dev-leads.html
-// (?mode=hang | ?mode=fail for the loading and error states; ?as=sales for
-// what the sales team sees). Vite only builds index.html, so this never
+// (?mode=hang | ?mode=fail for the loading and error states; ?as=sales or
+// ?as=sales_admin for what the sales team sees). Vite only builds index.html, so this never
 // reaches production.
 
-const asSales = new URLSearchParams(window.location.search).get('as') === 'sales'
+const as = new URLSearchParams(window.location.search).get('as') || 'admin'
+const asSales = as === 'sales' || as === 'sales_admin'
 
 const session = { user: { id: 'u1', email: asSales ? 'sales@example.com' : 'admin@example.com' }, access_token: 'dev' }
 const auth = {
-  session, user: session.user, accessToken: 'dev', loading: false, isApproved: true, isAccessAdmin: !asSales, isSales: asSales,
+  session, user: session.user, accessToken: 'dev', loading: false, isApproved: true, isAccessAdmin: !asSales, isSales: asSales, canApproveLeads: !asSales || as === 'sales_admin',
   workspaces: [{ id: WS, name: 'Harness Co', role: 'owner' }, ...(asSales ? [{ id: 'other', name: 'Other Co', role: 'sales' }] : [])],
   activeWorkspace: { id: WS, name: 'Harness Co' }, activeWorkspaceId: WS,
   switchWorkspace: () => {}, refreshWorkspaces: () => {}, signOut: () => {},

@@ -231,23 +231,73 @@ that mailbox's Sent Items. **Send test alert** on the page proves the path;
 
 A sales person signs in to the same address (or leads.arak-sa.com) and sees
 the leads list and nothing else: no sidebar, no marketing app, no agent
-settings. They can filter, open a lead, read the email, call the numbers,
-open it in Outlook, and correct the agent's verdict.
+settings. Two kinds (2026-10-12):
 
-1. **Team & Access** → Add someone → their email → **Leads only** → tick the
-   company (Arak) → Add.
+- **Sales**: filter, open a lead, read the email, call the numbers, open it
+  in Outlook, and correct the agent's verdict.
+- **Sales admin**: the same, plus **Approve**, which sends a lead to Odoo
+  (section 7). The access admin can always approve.
+
+1. **Team & Access** → Add someone → their email → **Sales** or **Sales
+   admin** → tick the company (Arak) → Add.
 2. Tell them to create an account at the app's address with that email. They
    are in as soon as they do; nothing is emailed.
 
-Someone already in can be switched on their row (Marketing app / Leads
-only); their companies come with them. Remove works the same as for anyone.
+Someone already in is switched on their row (Marketing app / Sales / Sales
+admin); their companies come with them. Remove works the same as for anyone.
 
 This is enforced in the database, not just hidden on screen
 (`20261013_sales_seats.sql`): a sales person is not a member of any company.
 Their companies are "sales seats", which only the leads and mailbox-list
 policies read, so every marketing table and server function refuses them.
-They cannot create a company either. In `/api/leads`, a seat opens `review`
-and `email_file` and nothing else.
+They cannot create a company either. In `/api/leads`, a seat opens `review`,
+`email_file` and `approve`, and `approve` also asks the database
+(`can_approve_leads`) whether they are a sales admin.
+
+**Open in Outlook** opens the email in Outlook on the web, in the mailbox it
+arrived in (a.rak@arak-sa.com for info@arak-sa.com, info@clb-sa.com). It
+opens only for someone Microsoft 365 lets into that mailbox: a sales person
+needs **Full Access** to it, given once by a Microsoft 365 admin (Exchange
+admin center → Recipients → the mailbox → Delegation → Read and manage). The
+CLB mailbox is a different Microsoft 365, so only a CLB account with access
+opens those. No Outlook app can open one message from a link, so there is no
+app button.
+
+**"Is the agent right?"** A No asks for an optional reason. Corrections
+change what the page and the workbook show; the agent itself does not learn
+from them on its own. **Show → Corrected by a person** lists them with their
+reasons for the weekly review, where each becomes a rule fix and a test case.
+
+## 7. Approve into Odoo
+
+**Approve** (sales admins and the access admin) asks for confirmation,
+showing exactly what will be sent, then creates a lead in Odoo CRM: the
+title, contact, company, email and first number as fields; the criteria,
+every number, the message, the agent's questions and who approved it in the
+description; tags "Lead Agent", where it came in (e.g. "Arak website") and
+JIH / Tender / Maintenance. The row then says **In Odoo ↗** (a link). A lead
+is never sent twice. **Show → Approved / in CRM** lists them.
+
+Until Odoo is connected, an approved lead says **Approved · waiting for
+Odoo**; connecting sends every waiting one. If Odoo refuses one, the row says
+so with Odoo's reason and a **Retry**.
+
+To connect (Leads → **Agent settings** → **CRM (Odoo)** → Connect Odoo):
+
+1. In Odoo, ideally as its own user (e.g. "Lead Agent", with the CRM user
+   right) so its leads show who made them: avatar → **Preferences** →
+   **Account Security** → **New API Key**. Copy it.
+2. Odoo address `https://arak-co.odoo.com` (the database fills itself in on
+   Odoo Online), the user's login email, and the key → **Save and test**.
+
+The test only reads: it signs in, checks the user may create CRM leads, and
+counts them. **On Odoo Online the API is officially the Custom plan's**: if
+the plan is Standard, Odoo refuses and the card shows its words. Changing the
+plan is a cost decision. The key is stored sealed and never shown again.
+
+How it talks to Odoo: JSON-RPC (`api/leads/_odoo.js`), because 18.0 has no
+JSON-2 API. Odoo removes JSON-RPC in Online 21.1; that file is the only one
+to change then.
 
 ## Changing or stopping it
 

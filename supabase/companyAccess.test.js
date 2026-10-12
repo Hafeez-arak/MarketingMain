@@ -291,11 +291,12 @@ describe('sales seats after 20261013_sales_seats', () => {
     await pg.exec(`
       alter table public.workspaces add column if not exists slug text;
       alter table public.workspaces add column if not exists created_at timestamptz not null default now();
-      create table public.leads (id uuid primary key default gen_random_uuid(), workspace_id uuid not null);
+      create table public.leads (id uuid primary key default gen_random_uuid(), workspace_id uuid not null, verdict text, human_verdict text);
       create table public.lead_mailboxes (id uuid primary key default gen_random_uuid(), workspace_id uuid not null);
     `)
     await pg.exec(migration('20261013_sales_role'))
     await pg.exec(migration('20261013_sales_seats'))
+    await pg.exec(migration('20261014_lead_approval'))
     await h.as(ADMIN)
     arak = await h.create('Arak')
     ghusn = await h.create('Ghusn')
@@ -369,6 +370,40 @@ describe('sales seats after 20261013_sales_seats', () => {
     expect(await seatsOf(FAISAL)).toEqual([])
     await h.as(FAISAL)
     expect(await one(`select public.is_sales_member($1)`, [arak])).toBe(false)
+  })
+
+  it('only a sales admin (and the access admin) may approve leads, and only in their own companies', async () => {
+    const LAYLA = '00000000-0000-0000-0000-0000000000c2'
+    await pg.query(`select public.invite_access('faisal@example.com', $1::uuid[], 'sales')`, [[arak]])
+    await pg.query(`select public.invite_access('layla@example.com', $1::uuid[], 'sales_admin')`, [[arak]])
+    await h.signUp(FAISAL, 'faisal@example.com')
+    await h.signUp(LAYLA, 'layla@example.com')
+    expect(await roleOf(LAYLA)).toBe('sales')
+    expect(await seatsOf(LAYLA)).toEqual(['Arak'])
+    await h.as(LAYLA)
+    expect(await one(`select public.can_approve_leads($1)`, [arak])).toBe(true)
+    expect(await one(`select public.can_approve_leads($1)`, [ghusn])).toBe(false)
+    expect(await one(`select public.has_app_access()`)).toBe(false)
+    await h.as(FAISAL)
+    expect(await one(`select public.can_approve_leads($1)`, [arak])).toBe(false)
+    await h.as(ADMIN)
+    expect(await one(`select public.can_approve_leads($1)`, [arak])).toBe(true)
+  })
+
+  it('switching to and from sales admin moves the approve right and keeps the seats', async () => {
+    await pg.query(`select public.invite_access('faisal@example.com', $1::uuid[], 'sales')`, [[arak]])
+    await h.signUp(FAISAL, 'faisal@example.com')
+    await h.as(ADMIN)
+    await pg.query(`select public.set_user_role($1, 'sales_admin')`, [FAISAL])
+    expect(await roleOf(FAISAL)).toBe('sales')
+    expect(await seatsOf(FAISAL)).toEqual(['Arak'])
+    await h.as(FAISAL)
+    expect(await one(`select public.can_approve_leads($1)`, [arak])).toBe(true)
+    await h.as(ADMIN)
+    await pg.query(`select public.set_user_role($1, 'member')`, [FAISAL])
+    expect(await h.companiesOf(FAISAL)).toEqual(['Arak'])
+    await h.as(FAISAL)
+    expect(await one(`select public.can_approve_leads($1)`, [arak])).toBe(false)
   })
 
   it('a member is added exactly as before', async () => {

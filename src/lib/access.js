@@ -19,7 +19,7 @@ export async function fetchMyAccess(userId) {
   if (!userId) return { access: null, error: null }
   const { data, error } = await supabase
     .from('user_access')
-    .select('user_id, email, full_name, status, role, requested_at')
+    .select('user_id, email, full_name, status, role, leads_approver, requested_at')
     .eq('user_id', userId)
     .maybeSingle()
   if (error) return { access: null, error: error.message }
@@ -32,7 +32,7 @@ export async function fetchMyAccess(userId) {
 export async function fetchAllAccess() {
   const { data, error } = await supabase
     .from('user_access')
-    .select('user_id, email, full_name, status, role, requested_at, decided_at')
+    .select('user_id, email, full_name, status, role, leads_approver, requested_at, decided_at')
     .order('requested_at', { ascending: false })
   if (error) return { rows: [], error: error.message }
   return { rows: data || [], error: null }
@@ -174,8 +174,9 @@ export async function fetchMySalesCompanies() {
   return { companies: data || [], error: null }
 }
 
-// Move someone between the marketing app ('member') and Leads only
-// ('sales'). Their companies come with them.
+// Move someone between the marketing app ('member'), Leads only ('sales')
+// and Leads only with Approve into the CRM ('sales_admin'). Their companies
+// come with them.
 export async function setUserRole(userId, role) {
   const { error } = await supabase.rpc('set_user_role', { target_user: userId, new_role: role })
   return error ? error.message : null

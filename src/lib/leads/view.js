@@ -139,6 +139,8 @@ export const SHOW_OPTIONS = [
   { key: 'unqualified', label: 'Unqualified' },
   { key: 'duplicate', label: 'Duplicates' },
   { key: 'pending', label: 'Not checked yet' },
+  { key: 'corrected', label: 'Corrected by a person' },
+  { key: 'approved', label: 'Approved / in CRM' },
   { key: 'all', label: 'Everything' },
 ]
 
@@ -154,6 +156,11 @@ export function leadFilters(f = EMPTY_FILTERS) {
   const eqs = []
   if (f.show === 'leads') {
     ors.push('human_verdict.in.(qualified,needs_review),and(human_verdict.is.null,verdict.in.(qualified,needs_review))')
+  } else if (f.show === 'corrected') {
+    // The weekly review: where a person said the agent was wrong.
+    eqs.push(['corrected', true])
+  } else if (f.show === 'approved') {
+    ors.push('approved_at.not.is.null')
   } else if (f.show && f.show !== 'all') {
     ors.push(verdictFilter(f.show))
   }
@@ -205,3 +212,33 @@ export function channelLabel(lead = {}, { websiteBrand = 'Arak' } = {}) {
 
 /** Every number a lead gave, the stored list first, else the form's own field. */
 export const phonesOf = (lead = {}) => (Array.isArray(lead.phones) && lead.phones.length ? lead.phones : [lead.phone].filter(Boolean))
+
+// ─── Outlook and the CRM ───────────────────────────────────────────────────
+
+/**
+ * The email in Outlook on the web, in the mailbox it arrived in. Graph's
+ * own webLink (outlook.office365.com/owa/?ItemID=…) opens only inside the
+ * signed-in person's OWN mailbox, so it fails for anyone but the mailbox
+ * itself. Naming the mailbox (/mail/<address>/deeplink) opens it for anyone
+ * Microsoft 365 lets into that mailbox (Full Access). The address is the
+ * mailbox's real one: info@arak-sa.com is an alias of a.rak@arak-sa.com.
+ */
+export function outlookLink(lead = {}, mailboxes = []) {
+  const link = String(lead.link || '')
+  if (!link) return ''
+  let itemId
+  try { itemId = new URL(link).searchParams.get('ItemID') || '' } catch { return link }
+  const want = String(lead.mailbox || '').toLowerCase()
+  const mb = mailboxes.find((m) => [m.label, m.email].some((a) => String(a || '').toLowerCase() === want))
+  const address = mb?.email || ''
+  if (!itemId || !address) return link
+  return `https://outlook.office.com/mail/${encodeURIComponent(address)}/deeplink?ItemID=${encodeURIComponent(itemId)}&exvsurl=1`
+}
+
+/** A lead's trip to the CRM, as the list says it. */
+export const CRM_LABEL = {
+  queued: 'Approved · waiting for Odoo',
+  sending: 'Sending to Odoo…',
+  sent: 'In Odoo',
+  failed: 'Odoo refused it',
+}

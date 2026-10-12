@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { effectiveVerdict, monthStats, sheetHealth, modelName, verdictFilter, pageRange, pageLabel, pageCount } from './view.js'
+import { effectiveVerdict, monthStats, sheetHealth, modelName, verdictFilter, pageRange, pageLabel, pageCount, leadFilters, EMPTY_FILTERS, outlookLink } from './view.js'
 
 const now = new Date('2026-10-20T10:00:00Z')
 const lead = (o) => ({ received_at: '2026-10-05T10:00:00Z', created_at: '2026-10-06T10:00:00Z', cost_usd: 0.0002, ...o })
@@ -112,5 +112,27 @@ describe('where a lead came in', () => {
     expect(phonesOf({ phones: ['055 1', '011 2'], phone: 'x' })).toEqual(['055 1', '011 2'])
     expect(phonesOf({ phones: [], phone: '0550000000' })).toEqual(['0550000000'])
     expect(phonesOf({})).toEqual([])
+  })
+})
+
+describe('the Outlook link', () => {
+  const mailboxes = [{ email: 'a.rak@example.sa', label: 'info@example.sa' }, { email: 'info@other.sa', label: 'info@other.sa' }]
+  const owa = 'https://outlook.office365.com/owa/?ItemID=AAMkAG%2Fx%2By%3D&exvsurl=1&viewmodel=ReadMessageItem'
+  it('opens in the mailbox it arrived in, by the mailbox\'s real address, not its alias', () => {
+    expect(outlookLink({ link: owa, mailbox: 'info@example.sa' }, mailboxes))
+      .toBe('https://outlook.office.com/mail/a.rak%40example.sa/deeplink?ItemID=AAMkAG%2Fx%2By%3D&exvsurl=1')
+    expect(outlookLink({ link: owa, mailbox: 'INFO@other.sa' }, mailboxes))
+      .toBe('https://outlook.office.com/mail/info%40other.sa/deeplink?ItemID=AAMkAG%2Fx%2By%3D&exvsurl=1')
+  })
+  it('falls back to the stored link when the mailbox is unknown, and gives nothing without one', () => {
+    expect(outlookLink({ link: owa, mailbox: 'gone@example.sa' }, mailboxes)).toBe(owa)
+    expect(outlookLink({ link: '', mailbox: 'info@example.sa' }, mailboxes)).toBe('')
+  })
+})
+
+describe('the review and CRM filters', () => {
+  it('Corrected by a person and Approved / in CRM', () => {
+    expect(leadFilters({ ...EMPTY_FILTERS, show: 'corrected' })).toEqual({ ors: [], eqs: [['corrected', true]] })
+    expect(leadFilters({ ...EMPTY_FILTERS, show: 'approved' })).toEqual({ ors: ['approved_at.not.is.null'], eqs: [] })
   })
 })
