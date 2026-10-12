@@ -1,6 +1,4 @@
-import { useState } from 'react'
-import { Button, Spinner } from '../../components/ui/index'
-import { downloadEmailFile } from '../../lib/leads/client'
+import { Button } from '../../components/ui/index'
 import { VERDICT_LABEL, VERDICT_TONE, criteriaLabels, modelName, money, phonesOf, channelLabel, FOLDER_LABEL } from '../../lib/leads/view'
 
 // ─── Pieces shared by the leads list and the agent settings ────────────────
@@ -44,14 +42,14 @@ function Evidence({ lead }) {
   )
 }
 
-/** An opened lead: the email as it arrived, why the agent decided, what to ask, and the way into Outlook. */
-export function LeadDetail({ lead, onReview, workspaceId, wide = false }) {
-  const [fileState, setFileState] = useState({ busy: false, error: '' })
-  async function openInApp() {
-    setFileState({ busy: true, error: '' })
-    const r = await downloadEmailFile(workspaceId, lead)
-    setFileState({ busy: false, error: r.error || '' })
-  }
+/**
+ * An opened lead: the email as it arrived, why the agent decided, what to
+ * ask, and the way into Outlook. Outlook on the web only (the owner's
+ * decision, 2026-10-12): no Outlook app opens one message from a link, and
+ * the .eml download it replaced was clumsy. The server's email_file action
+ * is kept for when it comes back.
+ */
+export function LeadDetail({ lead, onReview, wide = false }) {
   const d = lead.details || {}
   const facts = [['Products', d.products], ['Brands', d.brands], ['Quantity', d.quantity], ['Location', d.location], ['Stage', d.stage], ['Urgency', d.urgency]].filter(([, v]) => v)
   const asks = Array.isArray(lead.ask_next) ? lead.ask_next : []
@@ -94,14 +92,14 @@ export function LeadDetail({ lead, onReview, workspaceId, wide = false }) {
         </div>
       )}
       <div className="flex flex-wrap items-center gap-3">
-        {lead.source === 'email' && (
-          <Button size="xs" variant="secondary" onClick={openInApp} disabled={fileState.busy}
-            title="Downloads the original email with its attachments; open it to see it in the Outlook app">
-            {fileState.busy ? <Spinner size="sm" /> : null}Open in Outlook app
-          </Button>
+        {lead.link && (
+          <a href={lead.link} target="_blank" rel="noreferrer"
+            title="Opens the email in Outlook on the web, in the mailbox it arrived in"
+            className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] tracking-wide font-semibold border bg-white text-text border-border hover:border-stone-400 hover:bg-surface-subtle transition-colors">
+            Open in Outlook
+            <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3h7v7M10 14L21 3M21 14v7H3V3h7"/></svg>
+          </a>
         )}
-        {lead.link && <a href={lead.link} target="_blank" rel="noreferrer" className="text-[11px] font-semibold text-amber-800 hover:underline">Open in Outlook on the web</a>}
-        {fileState.error && <p className="text-[11px] text-red-600">{fileState.error}</p>}
         <p className="text-[10px] text-text-tertiary">{lead.mailbox ? `${lead.mailbox} · ` : ''}{lead.model ? `${modelName(lead.model)} · ${money(lead.cost_usd)}` : ''}{lead.confidence ? ` · ${lead.confidence} confidence` : ''}</p>
       </div>
     </div>
