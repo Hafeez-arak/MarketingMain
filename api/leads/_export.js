@@ -6,12 +6,16 @@
 // One-way: nothing the team types in the Sheet comes back (the owner's
 // decision, 2026-10-07).
 //
-// The sales team's criteria (2026-10-11) ride in the existing Type column
-// ("quotation request · Contractor · Verified · Tender · Junk"), so pasted
-// workbook scripts show them without a re-paste; the leads page replaces the
-// workbook later.
+// The sales team's criteria (2026-10-11) have a column each, labelled the way
+// the leads page labels them: Came in, Folder, Email type, Who, Verified,
+// Request, Project, Philips. They also still ride in `type` ("quotation
+// request · Contractor · Verified · Tender · Junk"), which is what a workbook
+// script pasted before the columns existed shows in its Type column.
 
-import { criteriaLabels } from '../../src/lib/leads/view.js'
+import {
+  criteriaLabels, channelLabel, phonesOf,
+  SENDER_LABEL, PROJECT_LABEL, REQUEST_LABEL, FOLDER_LABEL, PHILIPS_LABEL,
+} from '../../src/lib/leads/view.js'
 
 /** Rows per answer; the script asks again until it has everything. */
 export const EXPORT_PAGE = 200
@@ -55,6 +59,10 @@ export function toRow(lead) {
   const brief = lead.source === 'email'
     ? [lead.subject, lead.message].filter(Boolean).join('\n\n')
     : [lead.subject ? `Project type: ${lead.subject}` : '', lead.message].filter(Boolean).join('\n\n')
+  // Read against the criteria at all? An older lead (version 1) has none, and
+  // its blanks mean "not asked", not "no".
+  const v2 = (lead.criteria_version || 1) >= 2
+  const email = lead.source === 'email'
   return {
     id: lead.id,
     period: periodOf(lead.received_at || lead.created_at),
@@ -63,7 +71,8 @@ export function toRow(lead) {
     name: lead.name || '',
     company: lead.company || '',
     email: lead.email || '',
-    phone: lead.phone || '',
+    // Every number they gave, one per line (signature, text or picture).
+    phone: phonesOf(lead).join('\n'),
     brief: brief.slice(0, 45_000), // a Sheets cell holds 50,000 characters
     verdict: verdict ? VERDICT[verdict] || verdict : (lead.error ? 'Not checked yet' : ''),
     // In the Sheet: qualified leads AND the doubtful ones ("Needs review"), so
@@ -79,6 +88,18 @@ export function toRow(lead) {
     type: lead.verdict === 'duplicate' ? 'duplicate' : [String(lead.category || '').replace(/_/g, ' '), ...criteriaLabels(lead)].filter(Boolean).join(' · '),
     reason: lead.reason || '',
     link: lead.link || '',
+    // One column each, for the workbook's filters.
+    cameIn: channelLabel(lead),
+    folder: email && lead.folder ? FOLDER_LABEL[lead.folder] || lead.folder : '',
+    emailType: lead.email_kind === 'free' ? 'Free email' : lead.email_kind === 'company' ? 'Company domain' : '',
+    who: v2 && lead.sender_type ? SENDER_LABEL[lead.sender_type] || lead.sender_type : '',
+    verified: v2 && lead.source_check ? (lead.source_check === 'verified' ? 'Verified' : 'Not verified') : '',
+    request: v2 && lead.request_type ? REQUEST_LABEL[lead.request_type] || lead.request_type : '',
+    // Empty when the email does not say: the team fills it in after the call
+    // (the sales manager's rule), and the workbook never overwrites theirs.
+    project: v2 && lead.project_type ? PROJECT_LABEL[lead.project_type] || lead.project_type : '',
+    philips: PHILIPS_LABEL[lead.philips] || '',
+    category: lead.verdict === 'duplicate' ? 'duplicate' : String(lead.category || '').replace(/_/g, ' '),
   }
 }
 
@@ -100,7 +121,7 @@ export async function exportLeads(deps, { key, cursor = '' }) {
   const after = ts && !Number.isNaN(Date.parse(ts))
     ? `&or=(updated_at.gt.${encodeURIComponent(ts)},and(updated_at.eq.${encodeURIComponent(ts)},id.gt.${isUuid(id) ? id : '00000000-0000-0000-0000-000000000000'}))`
     : ''
-  const rows = await deps.db(`leads?workspace_id=eq.${ws}${after}&select=id,source,received_at,created_at,updated_at,name,company,email,phone,subject,message,verdict,human_verdict,category,reason,link,mailbox,error,sender_type,source_check,project_type,request_type,philips,folder,email_kind,criteria_version&order=updated_at.asc,id.asc&limit=${EXPORT_PAGE}`) || []
+  const rows = await deps.db(`leads?workspace_id=eq.${ws}${after}&select=id,source,received_at,created_at,updated_at,name,company,email,phone,subject,message,verdict,human_verdict,category,reason,link,mailbox,error,sender_type,source_check,project_type,request_type,philips,folder,email_kind,criteria_version,phones&order=updated_at.asc,id.asc&limit=${EXPORT_PAGE}`) || []
   const last = rows[rows.length - 1]
   // The workbook's timer is the other watchman: it checks on the website
   // Sheet (and everything else) at most every 10 minutes. See _health.js.

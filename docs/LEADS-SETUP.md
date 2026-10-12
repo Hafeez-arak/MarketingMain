@@ -3,8 +3,9 @@
 The lead agent reads every enquiry and decides whether it is a real buyer
 (qualified), not one (unqualified: vendor pitches, jobs, marketing, spam), or
 one a person should look at (needs review). Resends from the same sender are
-marked duplicate without asking the model. Admin only: **Lead Agent** in the
-sidebar.
+marked duplicate without asking the model. The admin has **Leads** in the
+sidebar (the list and the agent's settings); the sales team signs in to the
+list alone (section 6).
 
 ## Where it lives and why it is always on
 
@@ -153,14 +154,22 @@ Notes; a person's Unqualified always removes it.
 Tabs from the first version ("All enquiries", "Qualified") are left alone;
 delete them once the new tabs are filled.
 
-Columns on both tabs: Received · Source · Name · Company · Email · Phone ·
-Brief · AI verdict · Type · AI reason · Link · **Status · Assigned to ·
-Notes** · Lead ID (hidden).
+Columns on both tabs, the sales team's criteria with one column each
+(2026-10-11), labelled as on the leads page: Received · Came in · Folder ·
+Name · Company · Email · Email type · Phone · Who · Verified · Request ·
+**Project** · Philips · Brief · AI verdict · **Decision** · Type · AI reason ·
+Link · **Status · Assigned to · Notes** · Lead ID (hidden).
 
-The script writes Received to Link. It never writes Status, Assigned to or
-Notes. Brief is everything they wrote (an email's subject and body; a website
-enquiry's project type and brief). Source says where it came from, such as
-"Website" or "Email (info@arak-sa.com)". AI verdict shows a correction made
+The script never writes Status, Assigned to or Notes, and writes **Project**
+(JIH / Tender / Maintenance) only while the cell is empty: when the email
+does not say, the agent leaves it blank, the team picks it from the dropdown
+after the call, and theirs stands. Came in is "Arak website", "Arak email"
+or "CLB email"; Folder is where the email sat (Junk in red: a real lead
+sometimes lands there). Email type is company domain or free email (Gmail,
+Outlook…). Phone is every number they gave, one per line. Type is the
+agent's category. Brief is everything they wrote (an email's subject and
+body; a website enquiry's project type and brief). A workbook from before
+these columns has an old Source column; it is kept up to date. AI verdict shows a correction made
 on the Lead Agent page, if there is one. One-way: what the team types in the
 workbook does not go back.
 
@@ -174,6 +183,12 @@ workbook does not go back.
 
 Done when both tabs appear and fill with every lead so far, and the Lead
 Agent page says "Leads workbook: checked … ago".
+
+**Upgrading a workbook from an older version** (to get the criteria
+columns): steps 2 to 4 again, pasting over the old script. The new columns
+are slotted in beside their neighbours (Came in and Folder after Received,
+Email type after Email, Who to Philips after Phone), every row is filled in,
+and nothing the team wrote moves or is lost.
 
 - The script lays the tabs out itself: a dark frozen header with filter
   buttons, alternating rows of equal height (about three lines; click a cell
@@ -211,6 +226,28 @@ The email is sent through a connected Microsoft 365 outreach mailbox (the
 alert address's own if connected, else the first), via Graph; it shows in
 that mailbox's Sent Items. **Send test alert** on the page proves the path;
 **Check now** runs the check on the spot.
+
+## 6. The sales team: Leads only
+
+A sales person signs in to the same address (or leads.arak-sa.com) and sees
+the leads list and nothing else: no sidebar, no marketing app, no agent
+settings. They can filter, open a lead, read the email, call the numbers,
+open it in Outlook, and correct the agent's verdict.
+
+1. **Team & Access** → Add someone → their email → **Leads only** → tick the
+   company (Arak) → Add.
+2. Tell them to create an account at the app's address with that email. They
+   are in as soon as they do; nothing is emailed.
+
+Someone already in can be switched on their row (Marketing app / Leads
+only); their companies come with them. Remove works the same as for anyone.
+
+This is enforced in the database, not just hidden on screen
+(`20261013_sales_seats.sql`): a sales person is not a member of any company.
+Their companies are "sales seats", which only the leads and mailbox-list
+policies read, so every marketing table and server function refuses them.
+They cannot create a company either. In `/api/leads`, a seat opens `review`
+and `email_file` and nothing else.
 
 ## Changing or stopping it
 

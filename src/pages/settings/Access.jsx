@@ -4,7 +4,7 @@ import { Card, Button, PageHeader } from '../../components/ui/index'
 import {
   fetchAllAccess, approveAccess, revokeAccess,
   fetchInvites, inviteAccess, cancelInvite,
-  fetchAllCompanies, fetchCompanyAssignments, setUserCompanies,
+  fetchAllCompanies, fetchCompanyAssignments, setUserCompanies, setUserRole,
 } from '../../lib/access'
 
 // ─── Team & Access ─────────────────────────────────────────────────────────
@@ -22,6 +22,42 @@ import {
 // opens on their row straight away so the two decisions still take one visit.
 // Adding by email carries its own tick-list for the same reason — an invited
 // person has no row to tick until they sign up.
+
+// Two kinds of access below the admin (20261013_sales_role): the marketing
+// app, or the sales team's Leads page and nothing else. A sales person holds
+// no company membership at all (20261013_sales_seats), so the marketing
+// app's data stays shut to them in the database, not just on screen.
+const ROLE_CHOICES = [
+  { key: 'member', label: 'Marketing app', hint: 'Everything inside the companies they get.' },
+  { key: 'sales', label: 'Leads only', hint: 'The sales team: the leads list, nothing else.' },
+]
+
+function RoleTag({ role }) {
+  if (role !== 'sales') return null
+  return (
+    <span className="text-[10px] font-semibold uppercase tracking-wide px-2 py-1 border bg-amber-50 text-amber-800 border-amber-200 whitespace-nowrap">
+      Leads only
+    </span>
+  )
+}
+
+function RoleChoice({ value, onChange, disabled = false }) {
+  return (
+    <div className="grid grid-cols-2 gap-2">
+      {ROLE_CHOICES.map(c => (
+        <label key={c.key}
+          className={`border px-3 py-2 cursor-pointer transition-colors ${value === c.key ? 'border-amber-400 bg-amber-50/60' : 'border-border bg-white hover:bg-surface-subtle'}`}>
+          <span className="flex items-center gap-2 text-sm font-medium text-text">
+            <input type="radio" name="access-role" value={c.key} checked={value === c.key} disabled={disabled}
+              onChange={() => onChange(c.key)} className="accent-amber-500" />
+            {c.label}
+          </span>
+          <span className="block text-[11px] text-text-tertiary mt-0.5 pl-5">{c.hint}</span>
+        </label>
+      ))}
+    </div>
+  )
+}
 
 function StatusTag({ status }) {
   const style = {
@@ -101,7 +137,7 @@ function CompanyPicker({ companies, assigned, saving, onCancel, onSave }) {
 }
 
 function PersonRow({
-  row, busy, onApprove, onRevoke, isSelf,
+  row, busy, onApprove, onRevoke, isSelf, onSetRole,
   companies = [], assigned = null, expanded = false, onToggleCompanies, onSaveCompanies,
 }) {
   const isAdmin = row.role === 'admin'
@@ -135,6 +171,14 @@ function PersonRow({
           <span className="text-[10px] font-semibold uppercase tracking-wide px-2 py-1 border bg-stone-800 text-white border-stone-800">
             Admin
           </span>
+        )}
+        {!(row.status === 'approved' && !isAdmin && onSetRole) && <RoleTag role={row.role} />}
+        {row.status === 'approved' && !isAdmin && onSetRole && (
+          <select aria-label="Access" value={row.role === 'sales' ? 'sales' : 'member'} disabled={busy}
+            onChange={e => onSetRole(row, e.target.value)}
+            className="text-[11px] font-semibold text-text bg-white border border-border px-1.5 py-1 focus:outline-none focus:ring-1 focus:ring-amber-400">
+            {ROLE_CHOICES.map(c => <option key={c.key} value={c.key}>{c.label}</option>)}
+          </select>
         )}
         <StatusTag status={row.status} />
         <div className="flex items-center gap-1.5 flex-shrink-0 justify-end">
@@ -180,6 +224,7 @@ export function Access() {
   const [confirm, setConfirm] = useState(null)  // person pending a remove/deny confirmation
   const [newEmail, setNewEmail] = useState('')
   const [newCompanies, setNewCompanies] = useState(() => new Set()) // ticked on the add form
+  const [newRole, setNewRole] = useState('member')                     // chosen on the add form
   const [adding, setAdding]     = useState(false)
   const [companies, setCompanies]     = useState([])   // every company that exists
   const [assignments, setAssignments] = useState({})   // user_id → [workspace_id]
@@ -229,22 +274,24 @@ export function Access() {
     if (!email) return
     setAdding(true); setError(''); setNotice('')
     const ids = [...newCompanies]
-    const { outcome, error: err } = await inviteAccess(email, ids)
+    const { outcome, error: err } = await inviteAccess(email, ids, newRole)
     if (err) { setError(err); setAdding(false); return }
     const names = companies.filter(c => ids.includes(c.id)).map(c => c.name).join(', ')
+    const what = newRole === 'sales' ? ' (Leads only)' : ''
     // Say which of the three things happened. "Done" would leave the admin
     // unsure whether that person can log in right now or still has to sign up.
     setNotice({
       approved: names
-        ? `${email} is in, with ${names}.`
-        : `${email} can sign in, but has no companies yet. Use Companies on their row to give them one.`,
+        ? `${email} is in${what}, with ${names}.`
+        : `${email} can sign in${what}, but has no companies yet. Use Companies on their row to give them one.`,
       invited: names
-        ? `${email} is cleared and will get ${names} when they sign up. Tell them to create an account.`
-        : `${email} is cleared, with no companies yet. Tell them to create an account, then use Companies on their row.`,
-      already:  `${email} already has access. Use Companies on their row to change what they see.`,
+        ? `${email} is cleared${what} and will get ${names} when they sign up. Tell them to create an account.`
+        : `${email} is cleared${what}, with no companies yet. Tell them to create an account, then use Companies on their row.`,
+      already:  `${email} already has access. Use their row to change what they see.`,
     }[outcome] || 'Done.')
     setNewEmail('')
     setNewCompanies(new Set())
+    setNewRole('member')
     await load()
     await refreshWorkspaces()
     setAdding(false)
@@ -290,6 +337,18 @@ export function Access() {
     // Assigning to yourself changes your own switcher; cheap enough to resync
     // either way rather than guess which case this was.
     await refreshWorkspaces()
+    setBusyId(null)
+  }
+
+  async function handleSetRole(row, role) {
+    if (role === row.role) return
+    setBusyId(row.user_id); setError(''); setNotice('')
+    const e = await setUserRole(row.user_id, role)
+    if (e) setError(e)
+    else setNotice(role === 'sales'
+      ? `${row.full_name || row.email} now sees Leads only, for the same companies. They see the change the next time they open the app.`
+      : `${row.full_name || row.email} now has the marketing app, for the same companies. They see the change the next time they open the app.`)
+    await load()
     setBusyId(null)
   }
 
@@ -376,10 +435,14 @@ export function Access() {
               {adding ? 'Adding…' : 'Add'}
             </Button>
           </div>
+          <div>
+            <p className="text-xs text-text-tertiary mb-1.5">What they get</p>
+            <RoleChoice value={newRole} onChange={setNewRole} disabled={adding} />
+          </div>
           {!loading && companies.length > 0 && (
             <div>
               <p className="text-xs text-text-tertiary mb-1.5">
-                Companies they should see. Leave all unticked to decide later.
+                Companies they should see{newRole === 'sales' ? ' the leads of' : ''}. Leave all unticked to decide later.
               </p>
               <CompanyChecklist
                 companies={companies}
@@ -415,6 +478,7 @@ export function Access() {
                       || 'No companies yet'}
                   </p>
                 </div>
+                <RoleTag role={inv.role} />
                 <span className="text-[10px] font-semibold uppercase tracking-wide px-2 py-1 border bg-sky-50 text-sky-700 border-sky-200">
                   Invited
                 </span>
@@ -466,7 +530,7 @@ export function Access() {
         <div className="px-5 py-4 border-b border-border">
           <h3 className="font-semibold text-text text-sm">People with access</h3>
           <p className="text-xs text-text-tertiary mt-0.5">
-            Everyone below can do everything inside the companies they hold. Use Companies to change who gets what.
+            Marketing app: everything inside the companies they hold. Leads only: the sales team's leads list for those companies, nothing else. Use Companies to change who gets what.
           </p>
         </div>
         {loading ? (
@@ -483,6 +547,7 @@ export function Access() {
                 expanded={openCompanies === row.user_id}
                 onToggleCompanies={p => setOpenCompanies(openCompanies === p.user_id ? null : p.user_id)}
                 onSaveCompanies={handleSaveCompanies}
+                onSetRole={handleSetRole}
                 onApprove={handleApprove} onRevoke={p => setConfirm({ ...p, action: 'remove' })} />
             ))}
           </ul>

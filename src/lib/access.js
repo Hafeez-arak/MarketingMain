@@ -69,7 +69,7 @@ export async function revokeAccess(userId) {
 export async function fetchInvites() {
   const { data, error } = await supabase
     .from('access_invites')
-    .select('email, invited_at, workspace_ids')
+    .select('email, invited_at, workspace_ids, role')
     .order('invited_at', { ascending: false })
   if (error) return { invites: [], error: error.message }
   return { invites: data || [], error: null }
@@ -84,10 +84,12 @@ export async function fetchInvites() {
 // workspaceIds are the companies ticked on the form. They are applied now for
 // 'approved', kept on the invite for 'invited', and ignored for 'already' —
 // someone who is in has their companies edited on their own row.
-export async function inviteAccess(email, workspaceIds = []) {
+// role is 'member' (the marketing app) or 'sales' (Leads only).
+export async function inviteAccess(email, workspaceIds = [], role = 'member') {
   const { data, error } = await supabase.rpc('invite_access', {
     target_email: email,
     ws_ids: workspaceIds,
+    as_role: role,
   })
   if (error) return { outcome: null, error: error.message }
   return { outcome: data, error: null }
@@ -120,13 +122,18 @@ export async function fetchAllCompanies() {
 // The whole roster in one query, shaped for the UI: { [user_id]: [ws_id, …] }.
 // One round trip for everyone rather than one per person — the list is a few
 // dozen rows at most and the page renders a checkbox grid per row.
+//
+// A sales person's companies are seats, not memberships (20261013_sales_seats),
+// so both tables are read; a person only ever has rows in one of them.
 export async function fetchCompanyAssignments() {
-  const { data, error } = await supabase
-    .from('workspace_members')
-    .select('user_id, workspace_id')
+  const [members, seats] = await Promise.all([
+    supabase.from('workspace_members').select('user_id, workspace_id'),
+    supabase.from('sales_seats').select('user_id, workspace_id'),
+  ])
+  const error = members.error || seats.error
   if (error) return { assignments: {}, error: error.message }
   const assignments = {}
-  for (const row of data || []) {
+  for (const row of [...(members.data || []), ...(seats.data || [])]) {
     ;(assignments[row.user_id] ||= []).push(row.workspace_id)
   }
   return { assignments, error: null }
@@ -154,4 +161,22 @@ export async function createCompany(name, memberIds = []) {
   })
   if (error) return { id: null, error: error.message }
   return { id: data, error: null }
+}
+
+// ─── Sales: Leads and nothing else ─────────────────────────────────────────
+// A sales person holds no company membership at all, so every marketing
+// table and function refuses them without knowing they exist. Their
+// companies are seats, read through this function (a workspaces policy would
+// have made them look like members to every server function).
+export async function fetchMySalesCompanies() {
+  const { data, error } = await supabase.rpc('my_sales_companies')
+  if (error) return { companies: [], error: error.message }
+  return { companies: data || [], error: null }
+}
+
+// Move someone between the marketing app ('member') and Leads only
+// ('sales'). Their companies come with them.
+export async function setUserRole(userId, role) {
+  const { error } = await supabase.rpc('set_user_role', { target_user: userId, new_role: role })
+  return error ? error.message : null
 }

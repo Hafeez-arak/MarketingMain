@@ -68,6 +68,26 @@ describe('toRow', () => {
     expect(toRow({ verdict: 'duplicate' }).type).toBe('duplicate')
     expect(toRow({ verdict: null, error: 'Provider overloaded' }).verdict).toBe('Not checked yet')
   })
+  it('the sales team\'s criteria, one column each, labelled as on the leads page', () => {
+    const r = toRow({
+      source: 'email', mailbox: 'info@clb-sa.com', folder: 'junk', email_kind: 'company', criteria_version: 2,
+      sender_type: 'contractor', source_check: 'verified', request_type: 'requirement', project_type: 'tender',
+      philips: 'or_equivalent', category: 'project_enquiry', phones: ['+966 55 123 4567', '+966 11 222 3333'], phone: '+966 55 123 4567', verdict: 'qualified',
+    })
+    expect(r).toMatchObject({
+      cameIn: 'CLB email', folder: 'Junk', emailType: 'Company domain', who: 'Contractor', verified: 'Verified',
+      request: 'Requirement', project: 'Tender', philips: 'Philips or equivalent', category: 'project enquiry',
+      phone: '+966 55 123 4567\n+966 11 222 3333',
+    })
+    // The pasted-before-the-columns script still gets them all in Type.
+    expect(r.type).toBe('project enquiry · Contractor · Verified · Tender · Requirement · Philips or equivalent · Junk')
+  })
+  it('leaves Project empty when the email does not say, for the team to fill in; a website lead has no folder', () => {
+    const r = toRow({ source: 'website_form', folder: 'website', email_kind: 'free', criteria_version: 2, sender_type: 'trader', source_check: 'unverified', verdict: 'needs_review' })
+    expect(r).toMatchObject({ cameIn: 'Arak website', folder: '', emailType: 'Free email', who: 'Trader', verified: 'Not verified', project: '', request: '' })
+    // Read before the criteria existed: nothing is claimed.
+    expect(toRow({ source: 'email', sender_type: 'contractor', project_type: 'jih', verdict: 'qualified' })).toMatchObject({ who: '', project: '' })
+  })
   it('the Sheet shows qualified and doubtful leads, nothing else', () => {
     expect(toRow({ verdict: 'needs_review' })).toMatchObject({ verdict: 'Needs review', show: true, qualified: true })
     expect(toRow({ verdict: 'qualified', human_verdict: 'needs_review' })).toMatchObject({ show: true })

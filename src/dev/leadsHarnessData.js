@@ -70,6 +70,8 @@ window.fetch = async (input, init = {}) => {
   if (mode === 'hang') return new Promise(() => {})
   if (mode === 'fail') return Promise.reject(new TypeError('Failed to fetch'))
   if (url.includes('/rest/v1/leads')) return restLeads(url)
+  // What a sales seat reads for the "Came in" filter (SalesApp).
+  if (url.includes('/rest/v1/lead_mailboxes')) return json(status.mailboxes.map(({ id, email }) => ({ id, email, label: '' })))
   if (url.includes('/api/leads/status')) return json(status)
   if (url.includes('/api/leads/set_enabled')) {
     const { enabled } = JSON.parse(init.body || '{}')

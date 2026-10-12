@@ -264,3 +264,120 @@ describe('company access after 20261004_companies_by_assignment', () => {
     expect(await h.companiesOf(stranger)).toEqual([])
   })
 })
+
+// ─── The sales team: Leads only (20261013_sales_role + _sales_seats) ──────
+// A sales person must hold no workspace_members row, ever: membership is the
+// permission for every marketing table and function, and nine tables join it
+// directly. Their companies are sales_seats, which only the leads policies
+// read. Every path that hands out companies is checked here.
+describe('sales seats after 20261013_sales_seats', () => {
+  const FAISAL = '00000000-0000-0000-0000-0000000000c1'
+  let pg, h, arak, ghusn
+
+  const seatsOf = async userId => {
+    const { rows } = await pg.query(
+      `select w.name from public.sales_seats s join public.workspaces w on w.id = s.workspace_id
+        where s.user_id = $1 order by w.name`, [userId])
+    return rows.map(r => r.name)
+  }
+  const roleOf = async userId => (await pg.query(`select role from public.user_access where user_id = $1`, [userId])).rows[0]?.role
+  const one = async (sql, args = []) => Object.values((await pg.query(sql, args)).rows[0])[0]
+
+  beforeEach(async () => {
+    pg = await freshDatabase()
+    h = helpers(pg)
+    await pg.exec(migration(CHANGE))
+    // What the sales migrations lean on beyond the access ones.
+    await pg.exec(`
+      alter table public.workspaces add column if not exists slug text;
+      alter table public.workspaces add column if not exists created_at timestamptz not null default now();
+      create table public.leads (id uuid primary key default gen_random_uuid(), workspace_id uuid not null);
+      create table public.lead_mailboxes (id uuid primary key default gen_random_uuid(), workspace_id uuid not null);
+    `)
+    await pg.exec(migration('20261013_sales_role'))
+    await pg.exec(migration('20261013_sales_seats'))
+    await h.as(ADMIN)
+    arak = await h.create('Arak')
+    ghusn = await h.create('Ghusn')
+  })
+
+  it('an invited sales address signs up into seats, not memberships', async () => {
+    expect(await one(`select public.invite_access('faisal@example.com', $1::uuid[], 'sales')`, [[arak]])).toBe('invited')
+    await h.signUp(FAISAL, 'Faisal@Example.com')
+    expect(await h.status(FAISAL)).toBe('approved')
+    expect(await roleOf(FAISAL)).toBe('sales')
+    expect(await seatsOf(FAISAL)).toEqual(['Arak'])
+    expect(await h.companiesOf(FAISAL)).toEqual([])
+  })
+
+  it('a waiting person added as sales gets seats straight away', async () => {
+    await h.signUp(FAISAL, 'faisal@example.com')
+    await h.as(ADMIN)
+    expect(await one(`select public.invite_access('faisal@example.com', $1::uuid[], 'sales')`, [[arak, ghusn]])).toBe('approved')
+    expect(await seatsOf(FAISAL)).toEqual(['Arak', 'Ghusn'])
+    expect(await h.companiesOf(FAISAL)).toEqual([])
+  })
+
+  it('the company picker writes seats for a sales person', async () => {
+    await pg.query(`select public.invite_access('faisal@example.com', $1::uuid[], 'sales')`, [[arak]])
+    await h.signUp(FAISAL, 'faisal@example.com')
+    await h.as(ADMIN)
+    await pg.query(`select public.set_user_workspaces($1, $2::uuid[])`, [FAISAL, [ghusn]])
+    expect(await seatsOf(FAISAL)).toEqual(['Ghusn'])
+    expect(await h.companiesOf(FAISAL)).toEqual([])
+  })
+
+  it('switching role carries the companies across, both ways', async () => {
+    await h.signUp(SARA, 'sara@example.com')
+    await h.as(ADMIN)
+    await pg.query(`select public.approve_access($1)`, [SARA])
+    await pg.query(`select public.set_user_workspaces($1, $2::uuid[])`, [SARA, [arak, ghusn]])
+    await pg.query(`select public.set_user_role($1, 'sales')`, [SARA])
+    expect(await seatsOf(SARA)).toEqual(['Arak', 'Ghusn'])
+    expect(await h.companiesOf(SARA)).toEqual([])
+    await pg.query(`select public.set_user_role($1, 'member')`, [SARA])
+    expect(await h.companiesOf(SARA)).toEqual(['Arak', 'Ghusn'])
+    expect(await seatsOf(SARA)).toEqual([])
+  })
+
+  it('never changes the admin\'s role, and only the admin changes anyone\'s', async () => {
+    await expect(pg.query(`select public.set_user_role($1, 'sales')`, [ADMIN])).rejects.toThrow(/does not change/)
+    await h.signUp(SARA, 'sara@example.com')
+    await h.as(ADMIN)
+    await pg.query(`select public.approve_access($1)`, [SARA])
+    await h.as(SARA)
+    await expect(pg.query(`select public.set_user_role($1, 'sales')`, [SARA])).rejects.toThrow(/Only the access admin/)
+  })
+
+  it('as the sales person: a seat, not a member, and no way to make a company', async () => {
+    await pg.query(`select public.invite_access('faisal@example.com', $1::uuid[], 'sales')`, [[arak]])
+    await h.signUp(FAISAL, 'faisal@example.com')
+    await h.as(FAISAL)
+    expect(await one(`select public.is_sales_member($1)`, [arak])).toBe(true)
+    expect(await one(`select public.is_sales_member($1)`, [ghusn])).toBe(false)
+    expect(await one(`select public.is_workspace_member($1)`, [arak])).toBe(false)
+    expect(await one(`select public.has_app_access()`)).toBe(false)
+    expect((await pg.query(`select name from public.my_sales_companies()`)).rows.map(r => r.name)).toEqual(['Arak'])
+    await expect(h.create('Mine')).rejects.toThrow(/not been approved/)
+  })
+
+  it('remove takes the seats too', async () => {
+    await pg.query(`select public.invite_access('faisal@example.com', $1::uuid[], 'sales')`, [[arak]])
+    await h.signUp(FAISAL, 'faisal@example.com')
+    await h.as(ADMIN)
+    await pg.query(`select public.revoke_access($1)`, [FAISAL])
+    expect(await seatsOf(FAISAL)).toEqual([])
+    await h.as(FAISAL)
+    expect(await one(`select public.is_sales_member($1)`, [arak])).toBe(false)
+  })
+
+  it('a member is added exactly as before', async () => {
+    expect(await one(`select public.invite_access('sara@example.com', $1::uuid[])`, [[arak]])).toBe('invited')
+    await h.signUp(SARA, 'sara@example.com')
+    expect(await roleOf(SARA)).toBe('member')
+    expect(await h.companiesOf(SARA)).toEqual(['Arak'])
+    expect(await seatsOf(SARA)).toEqual([])
+    await h.as(SARA)
+    expect(await one(`select public.has_app_access()`)).toBe(true)
+  })
+})
