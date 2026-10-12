@@ -6,6 +6,7 @@ import {
   SENDER_LABEL, PROJECT_LABEL, REQUEST_LABEL, FOLDER_LABEL, PHILIPS_LABEL, CRM_LABEL, channelLabel, brandOf, phonesOf, projectOf,
 } from '../../lib/leads/view'
 import { VerdictTag, LeadDetail } from './parts'
+import BattleCard from './BattleCard'
 
 // ─── The leads list ────────────────────────────────────────────────────────
 // What the sales team asked for (2026-10-11): one clean row per lead with
@@ -18,6 +19,9 @@ import { VerdictTag, LeadDetail } from './parts'
 // The CRM column (2026-10-12): a sales admin (or the access admin) approves
 // a lead into Odoo from here, after a confirmation that shows what will be
 // sent. Everyone else sees where each lead stands.
+//
+// An approved lead opens on its battle card (BattleCard.jsx, 2026-10-12),
+// with the email one tab away.
 
 const SENDER_OPTIONS = Object.entries(SENDER_LABEL)
 const PROJECT_OPTIONS = [...Object.entries(PROJECT_LABEL), ['none', 'Not stated']]
@@ -97,6 +101,7 @@ function Row({ lead, open, onToggle, onReview, onSetProject, workspaceId, mailbo
   const v = effectiveVerdict(lead)
   const v2 = (lead.criteria_version || 1) >= 2
   const junk = lead.folder === 'junk'
+  const [tab, setTab] = useState('card')
   return (
     <li className={open ? 'bg-surface-subtle' : ''}>
       {/* A div, not a button: the row holds the Approve button, and a button
@@ -145,7 +150,23 @@ function Row({ lead, open, onToggle, onReview, onSetProject, workspaceId, mailbo
       </div>
       {open && (
         <div className="border-t border-border bg-white">
-          <LeadDetail lead={lead} onReview={onReview} workspaceId={workspaceId} mailboxes={mailboxes} wide />
+          {lead.approved_at ? (
+            <>
+              <div role="tablist" aria-label="Lead" className="flex gap-1 px-4 pt-3 md:pl-[8.25rem]">
+                {[['card', 'Battle card'], ['email', 'Email and evidence']].map(([k, label]) => (
+                  <button key={k} type="button" role="tab" aria-selected={tab === k} onClick={() => setTab(k)}
+                    className={`text-xs px-2.5 py-1 border-b-2 focus:outline-none focus-visible:ring-1 focus-visible:ring-amber-400 ${tab === k ? 'border-amber-500 text-text font-semibold' : 'border-transparent text-text-secondary hover:text-text'}`}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+              {tab === 'card'
+                ? <BattleCard lead={lead} workspaceId={workspaceId} />
+                : <LeadDetail lead={lead} onReview={onReview} workspaceId={workspaceId} mailboxes={mailboxes} wide />}
+            </>
+          ) : (
+            <LeadDetail lead={lead} onReview={onReview} workspaceId={workspaceId} mailboxes={mailboxes} wide />
+          )}
         </div>
       )}
     </li>
@@ -180,7 +201,7 @@ function ApproveDialog({ lead, busy, error, onCancel, onConfirm }) {
           ))}
         </dl>
         <p className="text-xs text-text-secondary leading-relaxed">
-          It becomes a lead in Odoo CRM with the email, the criteria and the agent's questions, and can't be sent twice.
+          It gets its battle card here, and becomes a lead in Odoo CRM with the email, the criteria and the agent's questions. It can't be sent twice.
           {notQualified ? ' Approving also marks it qualified.' : ''}
           {' '}If Odoo isn't connected yet, it is marked approved and sent as soon as it is.
         </p>

@@ -73,6 +73,24 @@ describe('a sales seat', () => {
   })
 })
 
+describe('battle cards', () => {
+  it('a sales seat may open and save a card (here: no such lead or card in this fake)', async () => {
+    who = { member: false, admin: false, sales: true }
+    expect((await call(handler, 'card', { lead_id: LEAD })).statusCode).toBe(404)
+    expect((await call(handler, 'card_save', { lead_id: LEAD, decision: 'park' })).statusCode).toBe(404)
+    expect(writes()).toEqual([])
+  })
+
+  it('a stranger and a marketing member without a seat are refused', async () => {
+    for (const w of [{ member: false, admin: false, sales: false }, { member: true, admin: false, sales: false }]) {
+      who = w
+      expect((await call(handler, 'card', { lead_id: LEAD })).statusCode).toBe(403)
+      expect((await call(handler, 'card_save', { lead_id: LEAD })).statusCode).toBe(403)
+    }
+    expect(writes()).toEqual([])
+  })
+})
+
 describe('approving into the CRM', () => {
   it('a sales seat that is not a sales admin is refused, and nothing is written', async () => {
     who = { member: false, admin: false, sales: true, approver: false }

@@ -6,6 +6,7 @@ import { intakeWebsite, tryIt, QUALIFIER_MODEL } from './_intake.js'
 import { checkMail, emailFile, currentOutlookLink } from './_mail.js'
 import { exportLeads, applySheetDecisions } from './_export.js'
 import { approveLead, crmStatus, saveCrm, sendWaiting, disconnectCrm } from './_crm.js'
+import { openCard, saveCard } from './_card.js'
 import { leadDeps, openRouterKey, hasDeploymentKey, describeKey, sendAlert } from './_deps.js'
 import { previewLenses } from '../agent/_investigate.js'
 
@@ -30,8 +31,8 @@ import { previewLenses } from '../agent/_investigate.js'
 //                       admin. Only then does the service key touch anything.
 //   a sales person      the same, but with a sales seat in that company
 //                       instead of membership, and only review, email_file,
-//                       approve, outlook_link and set_project
-//                       (SALES_ACTIONS); approve also asks the database
+//                       approve, outlook_link, set_project and the battle
+//                       card (SALES_ACTIONS); approve also asks the database
 //                       whether they are a sales admin.
 //
 // Microsoft's sign-in comes back to /api/email/ms-callback (the address
@@ -103,7 +104,7 @@ async function isAdmin(token) {
 // A sales person (20261013_sales_seats) is not a member of the company at
 // all: their seat is asked for separately, again with their own token. A
 // seat opens these actions and nothing else.
-const SALES_ACTIONS = new Set(['review', 'email_file', 'approve', 'outlook_link', 'set_project'])
+const SALES_ACTIONS = new Set(['review', 'email_file', 'approve', 'outlook_link', 'set_project', 'card', 'card_save'])
 
 async function isSalesMember(workspaceId, token) {
   if (!isUuid(workspaceId)) return false
@@ -334,9 +335,27 @@ const actions = {
    */
   async approve({ workspaceId, body, user, token }) {
     if (!(await canApprove(workspaceId, token))) return fail(403, 'Only a sales admin can approve leads into the CRM.')
-    const out = await approveLead(leadDeps(), { workspaceId, leadId: body.lead_id, user })
+    const deps = leadDeps()
+    const out = await approveLead(deps, { workspaceId, leadId: body.lead_id, user })
     if (out.error) return fail(out.status, out.error)
+    // Every approved lead gets its battle card. Built now so it is waiting;
+    // if this fails, opening the card builds it.
+    await openCard(deps, { workspaceId, leadId: body.lead_id }).catch(() => null)
     return { lead: out.lead, crm: out.crm }
+  },
+
+  /** An approved lead's battle card, built the first time it is opened. */
+  async card({ workspaceId, body }) {
+    const out = await openCard(leadDeps(), { workspaceId, leadId: body.lead_id })
+    if (out.error) return fail(out.status, out.error)
+    return { card: out.card }
+  },
+
+  /** The team's edits to a card, and the four things recorded after the call. */
+  async card_save({ workspaceId, body, user }) {
+    const out = await saveCard(leadDeps(), { workspaceId, leadId: body.lead_id, user, body })
+    if (out.error) return fail(out.status, out.error)
+    return { card: out.card }
   },
 
   /** Save the Odoo connection and test it (read only); a working one sends the waiting leads. */
