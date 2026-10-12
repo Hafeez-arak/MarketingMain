@@ -7,7 +7,7 @@
 // lte gt gte in is not.is not.in ilike, or=(…), select with one embedded
 // !inner table, order, limit, offset; GET, HEAD (count=exact), POST (with
 // on_conflict and ignore/merge-duplicates), PATCH, DELETE; return=minimal
-// and return=representation.
+// and return=representation; POST rpc/<function> with named arguments.
 //
 // Three things it copies from the real one on purpose, because they are
 // where bugs hide:
@@ -184,11 +184,26 @@ function pgError(err) {
   return httpError(status, err.message, err.code)
 }
 
+/** POST rpc/<fn>: the function called with the body's keys as named arguments. */
+async function rpc(pg, fn, body = {}) {
+  if (!IDENT.test(fn)) return { status: 404, body: { message: 'no function' } }
+  try {
+    const args = Object.entries(body || {}).map(([k, v]) => `${ident(k)} => ${lit(v)}`).join(', ')
+    const r = await pg.query(`select to_json(public.${ident(fn)}(${args}))::text as j`)
+    return { status: 200, body: JSON.parse(r.rows[0].j) }
+  } catch (err) {
+    const e = err.status ? err : pgError(err)
+    return { status: e.status, body: { message: e.message, code: e.code } }
+  }
+}
+
 /**
  * Answer one PostgREST request.
  * @returns {Promise<{ status: number, body?: any, headers?: object }>}
  */
 export async function postgrest(pg, { method, table, search, body, prefer = '', user = null }) {
+  const fn = /^rpc\/(.+)$/.exec(table)?.[1]
+  if (fn && method === 'POST') return rpc(pg, fn, body)
   if (!IDENT.test(table)) return { status: 404, body: { message: 'no table' } }
   const q = parseQuery(search || '')
   const T = `public.${ident(table)} t`

@@ -1,5 +1,5 @@
 import crypto from 'node:crypto'
-import { pickRecipients, blockReason, SUBSCRIBERS_GROUP, WEBSITE_GROUP, normalizeEmail, isValidEmail } from '../../src/lib/email/contacts.js'
+import { pickRecipients, blockReason, SUBSCRIBERS_GROUP, normalizeEmail, isValidEmail } from '../../src/lib/email/contacts.js'
 import { renderEmail, marketingProblems } from '../../src/lib/email/render.js'
 import { renderDesign, designChecks, hasDesign } from '../../src/lib/email/design.js'
 import { dailyCap } from '../../src/lib/email/warmup.js'
@@ -489,8 +489,9 @@ export async function subscribe({ db }, token, now = new Date()) {
 /**
  * Move a prospect out of outreach and into the marketing lane: audience
  * marketing (plus `patch`), queued outreach cancelled, out of every cold
- * group, into the marketing group `group` (made if missing). Used by the
- * sign-up button and by a reply that is not a "stop".
+ * group, into the marketing group `group` (made if missing; none when not
+ * given). Used by the sign-up button, by a reply that is not a "stop", and
+ * by a ticked box on the website form.
  * @param {object} contact  { id, workspace_id }
  */
 export async function moveToMarketing({ db }, contact, { patch = {}, group, groupDescription = '', reason, now = new Date() }) {
@@ -510,6 +511,7 @@ export async function moveToMarketing({ db }, contact, { patch = {}, group, grou
       method: 'DELETE', prefer: 'return=minimal',
     })
   }
+  if (!group) return
   // Names are unique per workspace ignoring case (email_groups_ws_name_idx).
   let list = groups.find(g => g.audience === 'marketing' && String(g.name).toLowerCase() === group.toLowerCase())
   if (!list) {
@@ -536,14 +538,18 @@ export async function moveToMarketing({ db }, contact, { patch = {}, group, grou
 // The contact form on arak-sa.com posts here as well as to its enquiries
 // Sheet. The form carries a small "i" that opens a box, ticked by default,
 // agreeing to marketing email; only an enquiry sent with it ticked arrives
-// with consent: true, and only those are added.
+// with consent: true, and only those are recorded.
 //
-//   new address         a marketing contact: opted in, source 'website',
-//                       in the group WEBSITE_GROUP
+//   new address         a marketing contact: opted in, source 'website'
 //   a cold prospect     moves to marketing the same way; outreach stops
-//   a marketing contact joins the group, consent raised to opted in
+//   a marketing contact consent raised to opted in
 //   unsubscribed, bounced or marked spam: left exactly as it is. A ticked
 //                       box on an enquiry never overrides someone's "stop".
+//
+// The tick alone puts nobody in a group: a vendor ticks it too. The group
+// ("Previously contacted Arak") is the lead agent's, by its verdict
+// (supabase/migrations/20261016_previously_contacted_groups.sql). The tick
+// is what lets a website enquiry count there, so it asks for that sum again.
 //
 // The key is not a secret (it is in the website's page); it only says which
 // workspace the website belongs to, and can be changed to cut a site off.
@@ -565,7 +571,7 @@ export async function websiteSignup({ db }, { key, input = {}, now = new Date() 
   const note = clip(`Website enquiry ${nowIso.slice(0, 10)}${input.projectType ? `: ${clip(input.projectType, 80)}` : ''}`, 300)
 
   const find = async () => (await db(`email_contacts?workspace_id=eq.${ws}&email=eq.${encodeURIComponent(email)}&select=id,workspace_id,audience,status,consent,notes`) || [])[0]
-  const group = { group: WEBSITE_GROUP, groupDescription: 'Sent an enquiry from the website and agreed to marketing email.', reason: 'Enquired on the website', now }
+  const regroup = () => db('rpc/sync_lead_contact', { method: 'POST', prefer: 'return=minimal', body: { p_workspace: ws, p_email: email } })
 
   let contact = await find()
   if (!contact) {
@@ -579,7 +585,7 @@ export async function websiteSignup({ db }, { key, input = {}, now = new Date() 
       }],
     }) || []
     if (created) {
-      await moveToMarketing({ db }, created, group)
+      await regroup()
       return { ok: true, added: true, created: true }
     }
     // The same address arrived twice at once: the other insert won.
@@ -589,8 +595,9 @@ export async function websiteSignup({ db }, { key, input = {}, now = new Date() 
   if (contact.status !== 'active') return { ok: true, added: false, reason: contact.status }
 
   await moveToMarketing({ db }, contact, {
-    ...group,
+    reason: 'Enquired on the website', now,
     patch: { consent: 'opted_in', notes: [contact.notes, note].filter(Boolean).join('\n').slice(0, 2000) },
   })
+  await regroup()
   return { ok: true, added: true, created: false, moved: contact.audience === 'cold' }
 }

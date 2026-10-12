@@ -22,6 +22,12 @@ export const EMAIL_MIGRATIONS = [
   '20261003_website_signup_key',
   '20261009_outreach_warmup_safety',
   '20261011_outreach_variation',
+  // The lead tables, for the trigger that puts enquirers into marketing
+  // groups and the rpc websiteSignup calls (20261016).
+  '20261006_lead_agent',
+  '20261007_lead_mailboxes',
+  '20261008_lead_history',
+  '20261016_previously_contacted_groups',
 ]
 
 const PRELUDE = `
@@ -38,6 +44,7 @@ do $$ begin
 
 create table public.workspaces (id uuid primary key, name text not null default '');
 create table public.workspace_members (workspace_id uuid references public.workspaces(id), user_id uuid, role text default 'member');
+create or replace function public.is_access_admin() returns boolean language sql stable as $$ select true $$;
 create or replace function public.is_workspace_member(ws_id uuid) returns boolean language sql stable as $$
   select exists (select 1 from public.workspace_members m where m.workspace_id = ws_id and m.user_id = auth.uid())
 $$;
