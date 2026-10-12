@@ -97,11 +97,32 @@ function ProjectPicker({ lead, onSet }) {
   )
 }
 
+/**
+ * The Battle card tab of a lead not yet approved: the card is made when it
+ * is (the owner's rule, 2026-10-12), so say so, and offer Approve to those
+ * who may.
+ */
+function CardWaiting({ lead, canApprove, onAsk }) {
+  return (
+    <div className="px-4 pb-5 pt-3 md:pl-[8.25rem] text-xs space-y-2">
+      <p className="text-text">This lead gets its battle card when it is approved.</p>
+      <p className="text-text-secondary leading-relaxed max-w-[60ch]">
+        Approving says the lead is real. The card is then built from the email and our records, and the team works from it until the deal moves to the CRM.
+      </p>
+      {canApprove
+        ? <Button size="xs" onClick={() => onAsk(lead)}>Approve and make the card</Button>
+        : <p className="text-text-tertiary">A sales admin approves leads.</p>}
+    </div>
+  )
+}
+
 function Row({ lead, open, onToggle, onReview, onSetProject, workspaceId, mailboxes, canApprove, onAsk }) {
   const v = effectiveVerdict(lead)
   const v2 = (lead.criteria_version || 1) >= 2
   const junk = lead.folder === 'junk'
-  const [tab, setTab] = useState('card')
+  // An approved lead opens on its card; any other on its email.
+  const [tab, setTab] = useState(lead.approved_at ? 'card' : 'email')
+  const hasTabs = lead.verdict !== 'duplicate'
   return (
     <li className={open ? 'bg-surface-subtle' : ''}>
       {/* A div, not a button: the row holds the Approve button, and a button
@@ -150,7 +171,7 @@ function Row({ lead, open, onToggle, onReview, onSetProject, workspaceId, mailbo
       </div>
       {open && (
         <div className="border-t border-border bg-white">
-          {lead.approved_at ? (
+          {hasTabs ? (
             <>
               <div role="tablist" aria-label="Lead" className="flex gap-1 px-4 pt-3 md:pl-[8.25rem]">
                 {[['card', 'Battle card'], ['email', 'Email and evidence']].map(([k, label]) => (
@@ -161,7 +182,7 @@ function Row({ lead, open, onToggle, onReview, onSetProject, workspaceId, mailbo
                 ))}
               </div>
               {tab === 'card'
-                ? <BattleCard lead={lead} workspaceId={workspaceId} />
+                ? (lead.approved_at ? <BattleCard lead={lead} workspaceId={workspaceId} /> : <CardWaiting lead={lead} canApprove={canApprove} onAsk={onAsk} />)
                 : <LeadDetail lead={lead} onReview={onReview} workspaceId={workspaceId} mailboxes={mailboxes} wide />}
             </>
           ) : (
