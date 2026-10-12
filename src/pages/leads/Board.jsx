@@ -35,7 +35,7 @@ function Cell({ label, children, className = '' }) {
 
 const dash = <span className="text-text-tertiary">—</span>
 
-function Row({ lead, open, onToggle, onReview, workspaceId }) {
+function Row({ lead, open, onToggle, onReview }) {
   const v = effectiveVerdict(lead)
   const v2 = (lead.criteria_version || 1) >= 2
   const junk = lead.folder === 'junk'
@@ -81,7 +81,7 @@ function Row({ lead, open, onToggle, onReview, workspaceId }) {
       </button>
       {open && (
         <div className="border-t border-border bg-white">
-          <LeadDetail lead={lead} onReview={onReview} workspaceId={workspaceId} wide />
+          <LeadDetail lead={lead} onReview={onReview} wide />
         </div>
       )}
     </li>
@@ -199,7 +199,7 @@ export default function LeadsBoard({ workspaceId, onReview, refreshKey = 0, mail
       ) : (
         <ul className="divide-y divide-border">
           {list.rows.map((l) => (
-            <Row key={l.id} lead={l} open={open === l.id} onToggle={() => setOpen(open === l.id ? null : l.id)} onReview={review} workspaceId={workspaceId} />
+            <Row key={l.id} lead={l} open={open === l.id} onToggle={() => setOpen(open === l.id ? null : l.id)} onReview={review} />
           ))}
         </ul>
       )}
