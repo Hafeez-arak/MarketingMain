@@ -27,7 +27,7 @@
 // The first is the whole point. A summary that lists nine true facts and no
 // instruction is a report, and reports get skimmed.
 
-import { partitionByClock, setupGaps, deadlineLabel } from './researchBrief'
+import { partitionByClock, setupGaps, deadlineLabel, ownAccountConnected } from './researchBrief'
 import { num } from './agent/num'
 
 /** A run older than this is no longer describing the present. */
@@ -131,7 +131,10 @@ export function summarise({
   memory = [],
   performance = null,
   decisions = null,
-  hasOwnAccount = false,
+  // Read off the run when not given. It used to default to false, and no
+  // caller passed it, so "No comparable account of ours is connected" showed
+  // on every run, including the ones that measured @araklighting.
+  hasOwnAccount = null,
   weakSample = 5,
   now = new Date(),
 } = {}) {
@@ -139,7 +142,7 @@ export function summarise({
   const proposed = memory.filter(m => m.status === 'proposed')
   const report = run?.report || {}
   const { act, standing } = partitionByClock(report.findings || [], now)
-  const gaps = run ? setupGaps(report, { hasOwnAccount }) : []
+  const gaps = run ? setupGaps(report, { hasOwnAccount: hasOwnAccount ?? ownAccountConnected(report) }) : []
 
   // `postsWithMetrics` is what summarisePerformance actually calls it.
   const postsMeasured = num(performance?.postsWithMetrics) ?? 0

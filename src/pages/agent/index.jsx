@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import { useAuth } from '../../store/auth'
-import { Card, PageHeader, SectionHead, Button, Spinner, Empty, Skeleton } from '../../components/ui/index'
+import { Card, PageHeader, SectionHead, Button, Spinner, Empty, Skeleton, ConfirmDialog } from '../../components/ui/index'
 import { useAgentChat } from '../../lib/useAgentChat'
 import { describePage, suggestionsFor } from '../../lib/pageContext'
 import { startResearchRun, fetchRuns, fetchLensResults } from '../../lib/agentRun'
@@ -99,6 +99,7 @@ export default function AgentPage() {
     return () => clearInterval(t)
   }, [watching])
 
+  const [confirmRun, setConfirmRun] = useState(false)
   const runResearch = useCallback(async () => {
     if (running) return
     setRunning(true)
@@ -137,10 +138,18 @@ export default function AgentPage() {
         subtitle={`Ask about ${activeWorkspace?.name || 'this brand'} — its posts, its numbers, its market.`}
       >
         {turns.length ? <Button variant="ghost" onClick={reset}>New conversation</Button> : null}
-        <Button variant="secondary" onClick={runResearch} disabled={running}>
+        {/* Asked first, as on the Research page: a run spends money and takes minutes. */}
+        <Button variant="secondary" onClick={() => setConfirmRun(true)} disabled={running}>
           {running ? 'Measuring…' : 'Run research'}
         </Button>
       </PageHeader>
+
+      <ConfirmDialog
+        open={confirmRun} onClose={() => setConfirmRun(false)}
+        title="Run research now?"
+        message="This searches the web on every research topic, takes about 5–10 minutes and is paid from the monthly agent budget."
+        onConfirm={runResearch}
+      />
 
       {/* Above the weekly research, deliberately: while a run is going this is
           the only thing on the page that is changing, and afterwards it is the

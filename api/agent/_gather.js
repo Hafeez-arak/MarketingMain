@@ -307,7 +307,7 @@ export async function gather(workspaceId, runId, period) {
   // something it never saw.
   const prior = await db(
     `competitor_snapshots?workspace_id=eq.${workspaceId}&run_id=neq.${runId}` +
-    `&data_source=eq.instagram&select=competitor_name,captured_at,followers,posts_per_week,` +
+    `&data_source=eq.instagram&select=competitor_name,ig_handle,captured_at,followers,posts_per_week,` +
     `engagement_per_1k,format_mix&order=captured_at.desc&limit=500`,
   )
 

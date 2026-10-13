@@ -181,14 +181,13 @@ describe('ownChannels', () => {
     { platform: 'tiktok', username: 'arak_tt', is_active: true, followers_count: 800 },
   ]
 
-  it('reports every live platform, including the ones with no account', () => {
-    // A dark channel is a marketing fact. Omitting LinkedIn here would make
-    // "we never post there" look identical to "LinkedIn went fine".
+  it('reports only the platforms we have an account on', () => {
+    // 2026-10-13: a platform with no account is not our channel. Listing it
+    // every week ("No TikTok account is connected") read as a standing to-do.
+    // A connected platform with nothing posted is still listed, as silent.
     const out = ownChannels({ accounts, posts: [], analytics: [], period: PERIOD, prior: PRIOR })
-    expect(out.platforms.map(p => p.platform)).toEqual(['instagram', 'tiktok', 'linkedin'])
-    const li = out.platforms.find(p => p.platform === 'linkedin')
-    expect(li.state).toBe('not_connected')
-    expect(li.note).toContain('LinkedIn')
+    expect(out.platforms.map(p => p.platform)).toEqual(['instagram', 'tiktok'])
+    expect(out.platforms.every(p => p.state === 'silent')).toBe(true)
   })
 
   it('does not include a beta platform nobody can publish to', () => {
@@ -264,7 +263,7 @@ describe('ownChannels', () => {
       accounts: [{ platform: 'tiktok', username: 'old', is_active: false }],
       period: PERIOD,
     })
-    expect(out.platforms.find(p => p.platform === 'tiktok').connected).toBe(false)
+    expect(out.platforms.find(p => p.platform === 'tiktok')).toBeUndefined()
     expect(out.connected_count).toBe(0)
   })
 
@@ -290,7 +289,7 @@ describe('ownChannels', () => {
   it('survives being called with nothing', () => {
     // Stage 0 must never take a run down; an empty workspace is the common case.
     expect(() => ownChannels()).not.toThrow()
-    expect(ownChannels().platforms).toHaveLength(3)
+    expect(ownChannels().platforms).toEqual([])
   })
 })
 
@@ -426,9 +425,7 @@ describe('ownChannels with posts made directly on LinkedIn', () => {
 
   it('does not count posts from a platform with no connected account', () => {
     const out = ownChannels({ accounts: [], period: PERIOD, external: [direct('a', '2026-09-08T10:00:00Z', 20)] })
-    const li = out.platforms.find(p => p.platform === 'linkedin')
-    expect(li.state).toBe('not_connected')
-    expect(li.posts).toBe(0)
+    expect(out.platforms.find(p => p.platform === 'linkedin')).toBeUndefined()
   })
 
   it('adds up app posts and directly-made posts together', () => {

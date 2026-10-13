@@ -98,7 +98,7 @@ export const SECTIONS = [
   { key: 'competitors', label: 'Competitor moves', teams: ['marketing', 'sales', 'technical'] },
   { key: 'social', label: 'Social activity', teams: ['marketing'] },
   { key: 'events', label: 'Events', teams: ['marketing', 'sales'] },
-  { key: 'search', label: 'Search demand', teams: ['marketing', 'sales'] },
+  { key: 'search', label: 'Website', teams: ['marketing', 'sales'] },
   { key: 'market', label: 'Market & technical', teams: ['marketing', 'technical'] },
   // The world industry is read by the technical team and by marketing for
   // what to say; sales works this market, not Shenzhen's.
@@ -831,6 +831,29 @@ export function marketingRecommendations(report) {
  * know that something was FIXED — only a person knows that — so it says
  * "not repeated this run" rather than "resolved", which is the honest claim.
  */
+// ── A run's own faults are not open market questions ──
+// `unanswered` carries both: "is the 1 July requirement real?" and "your
+// credit balance is too low". Only the first is something a person can go
+// and answer. The second kind is said once, at the top of the report, for the
+// run it happened in (runFaults), and never carried forward as an open item.
+const FAULT = new RegExp([
+  'credit balance', 'fault in the run', 'lens failed and was not answered',
+  'investigation did not complete', 'time budget', 'did not finish', 'not enough time',
+  'could not start', 'was not started', 'returned \\d{3}', 'invalid_request_error',
+  'dropped for repeating',
+].join('|'), 'i')
+// A label that leaked in as a note ("sc-domain:arak-sa.com, 2026-09-13 to
+// 2026-10-10."), from reports before 2026-10-13.
+const LABEL = /^sc-domain:|^https?:\/\/\S+, \d{4}-\d{2}-\d{2} to /i
+
+export const isRunFault = text => FAULT.test(flat(text))
+const isLabel = text => LABEL.test(flat(text))
+
+/** This run's own problems, shortest first, for one line above the report. */
+export function runFaults(report = {}) {
+  return (report?.unanswered || []).map(flat).filter(t => t && isRunFault(t))
+}
+
 export function openItems({ runs = [], limit = 10, lookback = 6 } = {}) {
   const complete = (runs || [])
     .filter(r => r?.report && (r.report.unanswered || []).length)
@@ -844,7 +867,7 @@ export function openItems({ runs = [], limit = 10, lookback = 6 } = {}) {
     const date = String(run.started_at || '').slice(0, 10)
     for (const raw of run.report.unanswered || []) {
       const text = flat(raw)
-      if (!text) continue
+      if (!text || isRunFault(text) || isLabel(text)) continue
       // Similarity, not equality: the same blocker is written a little
       // differently every week, and two lines that are 80% the same sentence
       // are one open item rather than two.

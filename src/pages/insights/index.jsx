@@ -2,14 +2,14 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
 import { useApp } from '../../store/app'
 import { useAuth } from '../../store/auth'
-import { Card, PageHeader, Button, Empty, Skeleton } from '../../components/ui/index'
+import { Card, PageHeader, Button, Empty, Skeleton, ConfirmDialog } from '../../components/ui/index'
 import { fetchBrandMemory, updateBrandMemory, deleteBrandMemory } from '../../lib/brandContext'
 import { runHealth, scheduleNeverRan } from '../../lib/agent/runHealth'
 import {
   fetchIdeaEvents, fetchIdeasForInsights, fetchPerformance, requestInsightsReview,
   summariseDecisions, summarisePerformance,
 } from '../../lib/insights'
-import { startResearchRun, fetchRuns, fetchLensResults } from '../../lib/agentRun'
+import { startResearchRun, fetchRuns, fetchLensResults, fetchAgentSpend } from '../../lib/agentRun'
 import { isLive } from '../../lib/agent/progress'
 import { summarise, learningLine, ageLabel } from '../../lib/learnedSummary'
 import { ResearchTab } from './ResearchTab'
@@ -138,6 +138,24 @@ export function Insights() {
     [runs, memory, performance, decisions, now],
   )
 
+  // ── Asked first ──
+  // A run spends real money and takes minutes, and the button sits beside two
+  // that only open pages. One click should not be enough to start it.
+  const [confirmRun, setConfirmRun] = useState(false)
+  const [spend, setSpend] = useState(null)
+  const askRun = useCallback(() => {
+    if (running) return
+    setSpend(null)
+    setConfirmRun(true)
+    fetchAgentSpend(activeWorkspaceId, accessToken).then(setSpend)
+  }, [running, activeWorkspaceId, accessToken])
+  const lastCost = Number(runs.find(r => r.status === 'complete' && Number(r.cost_estimate) > 0)?.cost_estimate) || null
+  const runMessage = [
+    'This searches the web on every research topic and takes about 5–10 minutes.',
+    lastCost ? `The last full run cost $${lastCost.toFixed(2)}.` : '',
+    spend ? `This month so far: $${spend.spent.toFixed(2)}${spend.cap != null ? ` of the $${spend.cap.toFixed(0)} monthly limit` : ''}.` : '',
+  ].filter(Boolean).join(' ')
+
   const runResearch = useCallback(async () => {
     if (running) return
     setRunning(true); setRunNote('')
@@ -238,10 +256,17 @@ export function Insights() {
         <Button variant="secondary" size="sm" onClick={() => navigate('/insights/business')}>
           Business view
         </Button>
-        <Button variant="secondary" size="sm" onClick={runResearch} disabled={running || watching}>
+        <Button variant="secondary" size="sm" onClick={askRun} disabled={running || watching}>
           {running ? 'Starting…' : watching ? 'Running…' : 'Run research'}
         </Button>
       </PageHeader>
+
+      <ConfirmDialog
+        open={confirmRun} onClose={() => setConfirmRun(false)}
+        title="Run research now?"
+        message={runMessage}
+        onConfirm={runResearch}
+      />
 
       {runNote && <Card className="p-3"><p className="text-sm text-text-secondary">{runNote}</p></Card>}
 
@@ -362,7 +387,7 @@ export function Insights() {
         <ResearchTab
           run={selected} runs={runs} lensRows={lensRows}
           selectedId={selected?.id} onSelectRun={setSelectedId}
-          onRun={runResearch} running={running} now={now}
+          onRun={askRun} running={running} now={now}
         />
       ) : (
         <LearnedTab

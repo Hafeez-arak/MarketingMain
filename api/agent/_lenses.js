@@ -9,7 +9,9 @@ import { searchConfig, searchFindings, lineOf } from '../../src/lib/agent/search
 import { fetchSearchData } from './_searchConsole.js'
 import { searchWeb, readPage, webConfigured } from './_web.js'
 import { msLeft } from '../../src/lib/agent/phases.js'
-import { BACKUP_TOOLS, BACKUP_NAMES, BACKUP_PROMPT, backupGate } from '../../src/lib/agent/backupSearch.js'
+import {
+  BACKUP_TOOLS, BACKUP_NAMES, PROVIDERS_OUT, backupGate, backupPrompt, claudeSearchesFor,
+} from '../../src/lib/agent/backupSearch.js'
 
 // ─── Running a lens ────────────────────────────────────────────────────────
 // Each lens is one bounded model call with web search, asked one question and
@@ -398,7 +400,13 @@ function backupWeb(budget = {}, deadline = null) {
     if (name === 'read_page') stats.reads += 1
     else stats.searches += 1
     stats.notes.push(...(out.notes || []))
-    if (!out.ok) { stats.failed += 1; return { ok: false, error: out.error } }
+    if (!out.ok) {
+      stats.failed += 1
+      // Every provider failed on quota or the network, not on this page:
+      // the lens goes back to web_search, which keeps a reserve for this.
+      if (!out.contentError && (out.available || []).length) return { ok: false, error: PROVIDERS_OUT }
+      return { ok: false, error: out.error }
+    }
     stats.servedBy.add(out.used)
     if (name === 'read_page') {
       if (out.page?.url) found.add(out.page.url)
@@ -438,8 +446,13 @@ export async function runLens({
       stage: lensKey,
       identity,
       brand,
-      tools: [...webTools(lens.budget), ...(backup?.tools || [])],
-      messages: [{ role: 'user', content: backup ? prompt + BACKUP_PROMPT : prompt }],
+      // With Firecrawl/Tavily on, web_search also carries the reserve it
+      // falls back to when both are out (backupSearch.js).
+      tools: [
+        ...webTools(backup ? { ...lens.budget, searches: claudeSearchesFor(lens) } : lens.budget),
+        ...(backup?.tools || []),
+      ],
+      messages: [{ role: 'user', content: backup ? prompt + backupPrompt(lens) : prompt }],
       runTool: backup?.runTool || null,
       maxTokens: lens.budget.maxTokens || 8_000,
       effort: lens.budget.effort || 'medium',
@@ -674,10 +687,10 @@ export async function runSearchLens({ profile, ctx, now = new Date() }) {
       // brand's vocabulary. An unclassified finding carries ''.
     }).map(raw => makeFinding('search', { ...raw, line: lineOf(raw.evidence || {}, lines) }))
 
-    return {
-      lens: 'search', ok: true, findings, sources: [], cost: 0, error: '',
-      note: `${data.site}, ${data.windows.current.start} to ${data.windows.current.end}.`,
-    }
+    // No `note`: a lens note is filed under the run's unanswered questions,
+    // and "sc-domain:arak-sa.com, 2026-09-13 to 2026-10-10." is a label, not
+    // a question (it sat in Open items for two runs).
+    return { lens: 'search', ok: true, findings, sources: [], cost: 0, error: '' }
   } catch (err) {
     return { lens: 'search', ok: false, findings: [], sources: [], cost: 0, error: String(err?.message || err).slice(0, 300) }
   }
