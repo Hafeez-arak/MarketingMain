@@ -10,7 +10,7 @@ import {
 import {
   TEAMS, sectionVisible, forTeam, topThree, salesRows, competitorMoves, movesByLine,
   globalView, lineView, socialActivity, eventsView,
-  marketNotes, marketingRecommendations, newCompetitors, sourceList, domainOf, teamsOf,
+  marketNotes, asNote, marketingRecommendations, newCompetitors, sourceList, domainOf, teamsOf,
   openItems, freshnessLabel, searchDemand, linesIn, forLine, linesOfRefs, matchesLine,
 } from '../../lib/marketReport'
 import { fetchIntel, updateOpportunity, updateEventDecision } from '../../lib/marketIntel'
@@ -1105,7 +1105,7 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
         <Section id="global" n={num('global')} title="Global industry"
           note="The world upstream of our market — what the international manufacturers are doing, where component prices and standards are heading, and what reaches us later. Deliberately not searched in Saudi Arabia.">
           {world.items.length ? (
-            <div className="space-y-2.5">{world.items.map((f, i) => <Note key={i} n={f} now={now} />)}</div>
+            <div className="space-y-2.5">{world.items.map((f, i) => <Note key={i} n={asNote(f, now)} now={now} />)}</div>
           ) : (
             <Quiet>
               Nothing from the world industry this week. This lens is new — a report from before it
@@ -1120,7 +1120,7 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
         <Section id="poles" n={num('poles')} title="Smart poles"
           note="The municipal line, on its own. Its buyer is a city rather than an architect or a consultant, so it is kept out of the two specification businesses.">
           {poles.items.length ? (
-            <div className="space-y-2.5">{poles.items.map((f, i) => <Note key={i} n={f} now={now} />)}</div>
+            <div className="space-y-2.5">{poles.items.map((f, i) => <Note key={i} n={asNote(f, now)} now={now} />)}</div>
           ) : (
             <Quiet>
               Nothing on smart poles this week.{poles.rivals === 0 && ' No company on the watchlist sells' +
