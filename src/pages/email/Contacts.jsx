@@ -6,8 +6,9 @@ import {
 } from '../../lib/email/contacts'
 import { parseCsv, rowsToContacts, contactsToCsv } from '../../lib/email/csv'
 import {
-  saveContact, deleteContacts, updateContacts, importContacts, addToGroup, removeFromGroup, setContactGroups, saveGroup,
+  saveContact, deleteContacts, updateContacts, importContacts, addToGroup, setContactGroups, saveGroup, applyGroupPlan,
 } from '../../lib/email/client'
+import { planGroupAction, doneText, isAutomatic } from '../../lib/email/groupActions'
 import { AudienceTag, ContactStatus, GroupChip, Notice, EIcon } from './parts'
 import { download, shortDate } from './format'
 import { ResearchLeads } from './ResearchLeads'
@@ -37,6 +38,8 @@ export function Contacts({ workspaceId, data, loading, reload, params, setTab })
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
+  const [done, setDone] = useState('')            // what the last group action did
+  const [pending, setPending] = useState(null)    // { plan, title } waiting for Confirm
 
   const groupsById = useMemo(() => new Map(data.groups.map(g => [g.id, g])), [data.groups])
   const groupsOf = useMemo(() => {
@@ -85,6 +88,24 @@ export function Contacts({ workspaceId, data, loading, reload, params, setTab })
   const selectedContacts = data.contacts.filter(c => selected.has(c.id))
   const mixedLanes = new Set(selectedContacts.map(c => c.audience)).size > 1
 
+  // A group action is planned first (src/lib/email/groupActions.js): nothing
+  // to change is said, not run; a plain add runs at once; a move, a removal
+  // or a lane switch shows what it will do and waits for Confirm.
+  const applyPlan = plan => run('group', async () => { await applyGroupPlan(workspaceId, plan); setDone(doneText(plan.summary)) })
+  function groupAction(action) {
+    setError(''); setDone('')
+    let plan
+    try { plan = planGroupAction(action, { contacts: selectedContacts, groups: data.groups, members: data.members }) }
+    catch (err) { setError(err.message); return }
+    if (plan.empty) { setDone(plan.summary); return }
+    if (action.kind === 'add') { applyPlan(plan); return }
+    const g = groupsById.get(action.groupId)
+    const title = action.kind === 'lane' ? `Move to ${AUDIENCES[action.lane].label}?`
+      : action.kind === 'move' ? `Move to “${g.name}”?`
+        : `Remove from “${g.name}”?`
+    setPending({ plan, title })
+  }
+
   return (
     <div className="space-y-3">
       <Card className="p-3">
@@ -126,15 +147,17 @@ export function Contacts({ workspaceId, data, loading, reload, params, setTab })
       </Card>
 
       {error && <Notice tone="red" title="That did not work">{error}</Notice>}
+      {done && !error && (
+        <Notice tone="sage" action={<Button size="xs" variant="ghost" onClick={() => setDone('')}>OK</Button>}>{done}</Notice>
+      )}
 
       {!loading && <ResearchLeads workspaceId={workspaceId} contacts={data.contacts} onAdd={values => { setPrefill(values); setEditing('new') }} />}
 
       {selected.size > 0 && (
         <BulkBar
-          count={selected.size} groups={data.groups} busy={busy} mixedLanes={mixedLanes}
+          selectedContacts={selectedContacts} groups={data.groups} groupsOf={groupsOf} busy={busy} mixedLanes={mixedLanes}
           onClear={() => setSelected(new Set())}
-          onAddGroup={g => run('group', () => addToGroup(workspaceId, g, ids))}
-          onRemoveGroup={g => run('group', () => removeFromGroup(workspaceId, g, ids))}
+          onGroupAction={groupAction}
           onSet={patch => run('update', () => updateContacts(workspaceId, ids, patch))}
           onDelete={() => setConfirmDelete(true)}
         />
@@ -238,19 +261,36 @@ export function Contacts({ workspaceId, data, loading, reload, params, setTab })
         message="They are removed from every group and every queued email. Their sending history is kept in campaign numbers. This cannot be undone. To stop emailing someone but keep the record, set them to Unsubscribed instead."
         onConfirm={() => run('delete', async () => { await deleteContacts(workspaceId, ids); setSelected(new Set()) })}
       />
+
+      <ConfirmDialog
+        open={!!pending} onClose={() => setPending(null)}
+        title={pending?.title}
+        message={pending?.plan.summary}
+        onConfirm={() => applyPlan(pending.plan)}
+      />
     </div>
   )
 }
 
-function BulkBar({ count, groups, busy, mixedLanes, onClear, onAddGroup, onRemoveGroup, onSet, onDelete }) {
+function BulkBar({ selectedContacts, groups, groupsOf, busy, mixedLanes, onClear, onGroupAction, onSet, onDelete }) {
   const [action, setAction] = useState('')
+  const count = selectedContacts.length
+  // Add/Move offer only groups of the selection's lane(s); Remove offers only
+  // groups someone selected is actually in, with how many of them are.
+  const lanes = new Set(selectedContacts.map(c => c.audience))
+  const fitting = groups.filter(g => lanes.has(g.audience))
+  const inCount = new Map()
+  for (const c of selectedContacts) for (const gid of groupsOf.get(c.id) || []) inCount.set(gid, (inCount.get(gid) || 0) + 1)
+  const holding = groups.filter(g => inCount.has(g.id))
+  const label = g => `${g.name}${isAutomatic(g) ? ' (automatic)' : ''}${mixedLanes ? ` · ${AUDIENCES[g.audience].label}` : ''}`
+  const none = <option disabled>No {[...lanes].map(l => AUDIENCES[l].label).join(' or ')} groups yet</option>
+
   function apply(value) {
     if (!value) return
     const [kind, arg] = value.split(':')
     setAction('')
-    if (kind === 'add') onAddGroup(arg)
-    else if (kind === 'remove') onRemoveGroup(arg)
-    else if (kind === 'audience') onSet(arg === 'cold' ? { audience: 'cold', consent: 'none' } : { audience: 'marketing', consent: 'business_contact' })
+    if (kind === 'add' || kind === 'move' || kind === 'remove') onGroupAction({ kind, groupId: arg })
+    else if (kind === 'audience') onGroupAction({ kind: 'lane', lane: arg })
     else if (kind === 'lang') onSet({ language: arg })
     else if (kind === 'status') onSet(arg === 'unsubscribed' ? { status: 'unsubscribed', unsubscribed_at: new Date().toISOString() } : { status: arg })
     else if (kind === 'type') onSet({ contact_type: arg })
@@ -261,8 +301,17 @@ function BulkBar({ count, groups, busy, mixedLanes, onClear, onAddGroup, onRemov
       <select value={action} onChange={e => apply(e.target.value)} disabled={!!busy}
         className="bg-white text-text text-xs px-2 py-1.5 border border-white min-w-[200px]">
         <option value="">Choose an action…</option>
-        <optgroup label="Add to group">{groups.map(g => <option key={g.id} value={`add:${g.id}`}>{g.name} ({g.audience})</option>)}</optgroup>
-        <optgroup label="Remove from group">{groups.map(g => <option key={g.id} value={`remove:${g.id}`}>{g.name}</option>)}</optgroup>
+        <optgroup label="Add to group (keeps their other groups)">
+          {fitting.length ? fitting.map(g => <option key={g.id} value={`add:${g.id}`}>{label(g)}</option>) : none}
+        </optgroup>
+        <optgroup label="Move to group (leaves their other groups)">
+          {fitting.length ? fitting.map(g => <option key={g.id} value={`move:${g.id}`}>{label(g)}</option>) : none}
+        </optgroup>
+        {holding.length > 0 && (
+          <optgroup label="Remove from group">
+            {holding.map(g => <option key={g.id} value={`remove:${g.id}`}>{label(g)}: {inCount.get(g.id)} of {count}</option>)}
+          </optgroup>
+        )}
         <optgroup label="Lane">
           <option value="audience:marketing">Move to Newsletter (they know us)</option>
           <option value="audience:cold">Move to Outreach (prospects)</option>
@@ -303,6 +352,7 @@ function ContactModal({ workspaceId, contact, prefill = null, groups, currentGro
   const emailTaken = !contact && existingEmails.some(c => c.email === String(form.email).trim().toLowerCase())
   const laneGroups = groups.filter(g => g.audience === form.audience)
   const otherLaneGroups = groups.filter(g => g.audience !== form.audience && groupIds.includes(g.id))
+  const leftAutomatic = groups.filter(g => isAutomatic(g) && currentGroups.includes(g.id) && !groupIds.includes(g.id))
 
   async function save() {
     setError('')
@@ -397,10 +447,15 @@ function ContactModal({ workspaceId, contact, prefill = null, groups, currentGro
                 <label key={g.id} className={`flex items-center gap-1.5 text-xs border px-2 py-1 cursor-pointer ${groupIds.includes(g.id) ? 'border-amber-700 bg-amber-50 text-text' : 'border-border text-text-secondary'}`}>
                   <input type="checkbox" checked={groupIds.includes(g.id)}
                     onChange={() => setGroupIds(ids => ids.includes(g.id) ? ids.filter(x => x !== g.id) : [...ids, g.id])} />
-                  {g.name}
+                  {g.name}{isAutomatic(g) && <span className="text-text-tertiary">(automatic)</span>}
                 </label>
               ))}
             </div>
+          )}
+          {leftAutomatic.length > 0 && (
+            <p className="text-[11px] text-text-tertiary mt-1.5">
+              {leftAutomatic.map(g => `“${g.name}”`).join(', ')} {leftAutomatic.length === 1 ? 'is' : 'are'} filled by the lead agent. Taken out by hand, they stay out: the agent will not add them back.
+            </p>
           )}
           {otherLaneGroups.length > 0 && (
             <p className="text-[11px] text-amber-800 mt-1.5">

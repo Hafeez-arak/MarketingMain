@@ -156,3 +156,84 @@ describe('previously contacted groups', () => {
     expect(await groupsOf('gone@co.sa')).toEqual([])
   })
 })
+
+// ─── A person's hand edit wins (20261017) ──────────────────────────────────
+describe('hand edits to an automatic group', () => {
+  const membership = async email => (await q(`
+    select g.name, g.managed_by, m.added_by from email_group_members m join email_groups g on g.id = m.group_id
+    join email_contacts c on c.id = m.contact_id where c.email = $1 order by 1`, [email]))
+  const ids = async email => {
+    const [r] = await q('select c.id cid, g.id gid from email_contacts c, email_groups g where c.email = $1 and g.name = $2', [email, ARAK])
+    return r
+  }
+
+  it('the agent marks the group automatic and the membership as its own', async () => {
+    await lead({ email: 'buyer@co.sa' })
+    expect(await membership('buyer@co.sa')).toEqual([{ name: ARAK, managed_by: 'lead_agent', added_by: 'lead_agent' }])
+    expect(await q('select * from email_group_exclusions')).toEqual([])
+  })
+
+  it('removed by hand: remembered, and a later enquiry does not put them back', async () => {
+    const id = await lead({ email: 'buyer@co.sa' })
+    const { cid, gid } = await ids('buyer@co.sa')
+    await q('delete from email_group_members where group_id = $1 and contact_id = $2', [gid, cid])
+    expect(await q('select contact_id from email_group_exclusions')).toEqual([{ contact_id: cid }])
+
+    await lead({ email: 'buyer@co.sa' })
+    await q(`update leads set human_verdict = 'qualified' where id = $1`, [id])
+    await q('select sync_lead_contacts_all($1)', [WS])
+    expect(await groupsOf('buyer@co.sa')).toEqual([])
+  })
+
+  it('added back by hand: the exclusion goes and the membership is the person\'s', async () => {
+    await lead({ email: 'buyer@co.sa' })
+    const { cid, gid } = await ids('buyer@co.sa')
+    await q('delete from email_group_members where group_id = $1 and contact_id = $2', [gid, cid])
+    await q('insert into email_group_members (group_id, contact_id, workspace_id) values ($1, $2, $3)', [gid, cid, WS])
+    expect(await q('select * from email_group_exclusions')).toEqual([])
+    expect(await membership('buyer@co.sa')).toEqual([{ name: ARAK, managed_by: 'lead_agent', added_by: 'person' }])
+  })
+
+  it('added by hand: stays even when the agent later says unqualified', async () => {
+    await lead({ email: 'other@co.sa' })
+    const [{ gid }] = await q('select id gid from email_groups where name = $1', [ARAK])
+    const [{ id: cid }] = await q(`insert into email_contacts (workspace_id, email) values ($1, 'phoned@co.sa') returning id`, [WS])
+    await q('insert into email_group_members (group_id, contact_id, workspace_id) values ($1, $2, $3)', [gid, cid, WS])
+    await lead({ email: 'phoned@co.sa', verdict: 'unqualified' })
+    expect(await groupsOf('phoned@co.sa')).toEqual([ARAK])
+  })
+
+  it('the agent still takes out its own additions when the verdict changes', async () => {
+    const id = await lead({ email: 'vendor@co.sa' })
+    await q(`update leads set human_verdict = 'unqualified' where id = $1`, [id])
+    expect(await groupsOf('vendor@co.sa')).toEqual([])
+    expect(await q('select * from email_group_exclusions')).toEqual([])
+  })
+
+  it('removed by hand from an ordinary group: nothing to remember', async () => {
+    const [{ id: gid }] = await q(`insert into email_groups (workspace_id, name) values ($1, 'Customers') returning id`, [WS])
+    const [{ id: cid }] = await q(`insert into email_contacts (workspace_id, email) values ($1, 'x@co.sa') returning id`, [WS])
+    await q('insert into email_group_members (group_id, contact_id, workspace_id) values ($1, $2, $3)', [gid, cid, WS])
+    await q('delete from email_group_members where group_id = $1', [gid])
+    expect(await q('select * from email_group_exclusions')).toEqual([])
+  })
+
+  it('deleting a contact or the group itself is not a hand removal, and does not fail', async () => {
+    await lead({ email: 'a@co.sa' })
+    await lead({ email: 'b@co.sa' })
+    await q(`delete from email_contacts where email = 'a@co.sa'`)
+    expect(await q('select * from email_group_exclusions')).toEqual([])
+    await q('delete from email_groups where name = $1', [ARAK])
+    expect(await q('select * from email_group_exclusions')).toEqual([])
+  })
+
+  it('moved to Outreach by hand: the agent does not pull them back', async () => {
+    await lead({ email: 'buyer@co.sa' })
+    const { cid, gid } = await ids('buyer@co.sa')
+    await q(`update email_contacts set audience = 'cold', consent = 'none' where id = $1`, [cid])
+    await q('delete from email_group_members where group_id = $1 and contact_id = $2', [gid, cid])
+    await lead({ email: 'buyer@co.sa' })
+    expect((await contact('buyer@co.sa')).audience).toBe('cold')
+    expect(await groupsOf('buyer@co.sa')).toEqual([])
+  })
+})

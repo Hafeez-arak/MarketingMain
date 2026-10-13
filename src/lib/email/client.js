@@ -141,6 +141,17 @@ export async function removeFromGroup(ws, groupId, contactIds) {
   }
 }
 
+/**
+ * Run a plan from planGroupAction (src/lib/email/groupActions.js): the lane
+ * first, then the joins, then the leaves, so a failure half-way never leaves
+ * someone in no group they were meant to be moved into.
+ */
+export async function applyGroupPlan(ws, plan) {
+  if (plan.patchIds.length) await updateContacts(ws, plan.patchIds, plan.patch)
+  if (plan.add.length) await addToGroup(ws, plan.groupId, plan.add)
+  for (const r of plan.remove) await removeFromGroup(ws, r.groupId, r.contactIds)
+}
+
 /** Make a contact's groups exactly `groupIds`. */
 export async function setContactGroups(ws, contactId, groupIds, currentIds) {
   const want = new Set(groupIds)

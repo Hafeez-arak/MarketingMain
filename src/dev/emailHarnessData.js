@@ -61,7 +61,9 @@ function seed() {
   const g1 = { id: uid(), workspace_id: WS, name: 'Customers', description: 'Bought from us in the last 3 years', audience: 'marketing', color: 'steel', created_at: now() }
   const g2 = { id: uid(), workspace_id: WS, name: 'Consultants', description: '', audience: 'marketing', color: 'sage', created_at: now() }
   const g3 = { id: uid(), workspace_id: WS, name: 'Riyadh hotel projects', description: 'From the research agent', audience: 'cold', color: 'sky', created_at: now() }
-  db.email_groups.push(g1, g2, g3)
+  // Filled by the lead agent (supabase/migrations/20261016 + 20261017).
+  const g4 = { id: uid(), workspace_id: WS, name: 'Previously contacted Arak', description: 'Asked us for a quote, a product or a project. The lead agent adds and removes people by its verdict.', audience: 'marketing', color: 'steel', managed_by: 'lead_agent', created_at: now() }
+  db.email_groups.push(g1, g2, g3, g4)
   const people = [
     ['sara@almabani.example', 'Sara', 'Al Qahtani', 'Al Mabani', 'Procurement Manager', 'Customer', 'marketing', 'ar'],
     ['omar@nesma.example', 'Omar', 'Haddad', 'Nesma & Partners', 'MEP Engineer', 'Contractor', 'marketing', 'en'],
@@ -87,6 +89,9 @@ function seed() {
     db.email_contacts.push(c)
     const g = audience === 'cold' ? g3 : (contact_type === 'Consultant' ? g2 : g1)
     db.email_group_members.push({ group_id: g.id, contact_id: c.id, workspace_id: WS, added_at: now() })
+    if (email.startsWith('sara@') || email.startsWith('omar@')) {
+      db.email_group_members.push({ group_id: g4.id, contact_id: c.id, workspace_id: WS, added_by: 'lead_agent', added_at: now() })
+    }
   })
   const camp = {
     id: uid(), workspace_id: WS, audience: 'marketing', name: 'September update', subject: 'Three new projects lit by Arak',
