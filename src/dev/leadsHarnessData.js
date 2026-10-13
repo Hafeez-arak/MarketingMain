@@ -74,7 +74,21 @@ const CARD_CONTEXT = {
   earlier: [{ received_at: '2026-09-14T09:00:00Z' }],
   companyFacts: 'Registered vendor / prequalified with (example): Example Giga City',
   playbook: null,
+  keyProjects: 'Palm Grand Hotel, Riyadh — hotel; light fittings\nTower One, Riyadh — corporate headquarters office; KNX lighting control',
+  icp: {
+    segments: [
+      { key: 'office', label: 'Offices, headquarters and corporate fit-outs', track: 'core', weight: 2, match: ['office', 'headquarters'] },
+      { key: 'hospitality', label: 'Hotels and resorts', track: 'core', weight: 3, match: ['hotel'] },
+    ],
+    buyers: [{ key: 'contractor_awarded', weight: 3, note: 'Holds the job' }, { key: 'contractor_bidding', weight: -2, note: 'Still bidding: quote light' }],
+    regions: ['riyadh'],
+    size: { sweet_max: 500000, ok_max: 2000000, currency: 'SAR' },
+  },
 }
+const WATCHLIST = [
+  { name: 'Example Rival Lighting', note: 'Made-up rival: strong in office fit-outs, works through design partners.', domain: 'example-rival.sa', lines: ['lighting'], city: 'Riyadh', brands: [{ brand: 'Acme Lights', relationship: 'exclusive' }] },
+  { name: 'Example Controls Co', note: 'Made-up rival: KNX integrator.', domain: '', lines: ['controls'], city: 'Jeddah', brands: [] },
+]
 
 window.fetch = async (input, init = {}) => {
   const url = typeof input === 'string' ? input : input.url
@@ -138,7 +152,7 @@ window.fetch = async (input, init = {}) => {
       const now = new Date().toISOString()
       cards[lead_id] = { lead_id, card: buildLeadCard(l, CARD_CONTEXT), decision: '', quote_due: null, target_price: '', decides: '', built_at: now, updated_at: now }
     }
-    return json({ ok: true, card: cards[lead_id] })
+    return json({ ok: true, card: cards[lead_id], watchlist: WATCHLIST })
   }
   if (url.includes('/api/leads/try')) {
     return json({ ok: true, model: 'openai/gpt-6-luna', cost: 0.00015, verdict: { verdict: 'unqualified', category: 'job_or_recruitment', confidence: 'high', reason: 'A job application with a CV.', summary: 'Electrical engineer looking for a job', details: {}, ask_next: [] } })

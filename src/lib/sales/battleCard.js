@@ -62,6 +62,9 @@ export function normaliseCard(raw = {}) {
         proof: str(o?.proof),
         walk_away: str(o?.walk_away),
         example: str(o?.example),
+        // Which leads' battle cards show it (src/lib/sales/leadCard.js
+        // SIGNAL_LABEL); none means the Agent Brief only.
+        when: str(o?.when),
       }))
       .filter(o => o.objection && o.answer),
   }

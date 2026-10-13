@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Button, Input, Select, Skeleton, Spinner, Textarea } from '../../components/ui/index'
 import { leadsApi } from '../../lib/leads/client'
 import { when } from '../../lib/leads/view'
-import { FACTS, DECISIONS, CARD_KINDS, cardChips, normaliseLeadCard } from '../../lib/sales/leadCard'
+import { FACTS, DECISIONS, CARD_KINDS, cardChips, normaliseLeadCard, matchCompetitors } from '../../lib/sales/leadCard'
 
 // ─── An approved lead's battle card ────────────────────────────────────────
 // The owner's design (2026-10-12): one screen the salesperson works from
@@ -18,10 +18,12 @@ const CHIP_TONE = {
   '': 'bg-stone-100 text-stone-700',
 }
 
-const EMPTY_AFTER = { decision: '', quote_due: '', target_price: '', decides: '' }
+const EMPTY_AFTER = { decision: '', quote_due: '', target_price: '', decides: '', competitors: '' }
 const afterOf = (row) => ({
-  decision: row?.decision || '', quote_due: row?.quote_due || '', target_price: row?.target_price || '', decides: row?.decides || '',
+  decision: row?.decision || '', quote_due: row?.quote_due || '', target_price: row?.target_price || '', decides: row?.decides || '', competitors: row?.competitors || '',
 })
+
+const FIT_BANDS = { strong: 'Strong fit', possible: 'Possible fit', weak: 'Weak fit', '': 'No fit shown' }
 
 function Block({ title, who, children }) {
   return (
@@ -45,6 +47,7 @@ export default function BattleCard({ lead, workspaceId }) {
   const [editing, setEditing] = useState(false)
   const [saving, setSaving] = useState(false)
   const [note, setNote] = useState('')
+  const [rivals, setRivals] = useState([]) // the competitor watchlist, for who else is quoting
 
   useEffect(() => {
     // One card per opened row: the row's lead never changes under it.
@@ -55,6 +58,7 @@ export default function BattleCard({ lead, workspaceId }) {
       setRow(r.card)
       setCard(normaliseLeadCard(r.card.card))
       setAfter(afterOf(r.card))
+      setRivals(Array.isArray(r.watchlist) ? r.watchlist : [])
     })
     return () => { live = false }
   }, [lead.id, workspaceId])
@@ -103,6 +107,16 @@ export default function BattleCard({ lead, workspaceId }) {
       {editing
         ? <Textarea className="mt-2" rows={2} value={card.headline} onChange={(e) => setCard({ ...card, headline: e.target.value })} aria-label="The deal in one line" />
         : <p className="mt-2 text-sm font-semibold text-text leading-snug" dir="auto">{card.headline || missing}</p>}
+      {editing ? (
+        <div className="mt-2 grid grid-cols-1 sm:grid-cols-[9rem_1fr] gap-2">
+          <select aria-label="ICP fit" value={card.fit.band} onChange={(e) => setCard({ ...card, fit: { ...card.fit, band: e.target.value } })} className={field}>
+            {Object.entries(FIT_BANDS).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+          </select>
+          <textarea rows={2} value={card.fit.text} onChange={(e) => setCard({ ...card, fit: { ...card.fit, text: e.target.value } })} aria-label="Why it fits" className={`${field} resize-y`} />
+        </div>
+      ) : card.fit.text ? (
+        <p className="mt-1 text-text-secondary leading-relaxed">{card.fit.text}</p>
+      ) : null}
 
       <div className="mt-2">
         {/* ── What we know ── */}
@@ -119,6 +133,18 @@ export default function BattleCard({ lead, workspaceId }) {
               </div>
             ))}
           </dl>
+        </Block>
+
+        {/* ── Proof ── */}
+        <Block title="Proof to name" who="our projects">
+          {editing ? (
+            <Textarea rows={2} value={card.references.join('\n')} hint="One project per line."
+              onChange={(e) => setCard({ ...card, references: e.target.value.split('\n') })} aria-label="Proof to name" />
+          ) : card.references.length ? (
+            <ul className="space-y-0.5">{card.references.map((r, i) => <li key={i} className="text-text">{r}</li>)}</ul>
+          ) : (
+            <p className="text-text-tertiary italic">No project of ours in this segment yet.</p>
+          )}
         </Block>
 
         {/* ── History ── */}
@@ -174,6 +200,16 @@ export default function BattleCard({ lead, workspaceId }) {
             <Input label="Target price" placeholder='SAR, or "not shared"' value={after.target_price} onChange={setAfterField('target_price')} maxLength={200} />
             <Input label="Who decides" placeholder="Name and role" value={after.decides} onChange={setAfterField('decides')} maxLength={300} />
           </div>
+          <Input className="mt-3" label="Who else is quoting" placeholder="Competitors on this deal, e.g. Nouran, Armada" list={`rivals-${lead.id}`}
+            value={after.competitors} onChange={setAfterField('competitors')} maxLength={300} />
+          <datalist id={`rivals-${lead.id}`}>{rivals.map((c) => <option key={c.name} value={c.name} />)}</datalist>
+          {matchCompetitors(after.competitors, rivals).map((c) => (
+            <div key={c.name} className="mt-2 border border-border px-3 py-2 space-y-0.5">
+              <p className="font-semibold text-text">{c.name}{c.city ? <span className="font-normal text-text-tertiary"> · {c.city}</span> : null}{c.lines?.length ? <span className="font-normal text-text-tertiary"> · {c.lines.join(', ')}</span> : null}</p>
+              {c.note && <p className="text-text-secondary">{c.note}</p>}
+              {c.brands?.length > 0 && <p className="text-text-secondary">Holds: {c.brands.map((b) => `${b.brand}${b.relationship === 'exclusive' ? ' (exclusive)' : ''}`).join(', ')}</p>}
+            </div>
+          ))}
         </Block>
       </div>
 

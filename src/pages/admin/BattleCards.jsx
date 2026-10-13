@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Button, Skeleton } from '../../components/ui/index'
 import { fetchBattleCards } from '../../lib/sales/client'
 import { normaliseCard, hasCard, byPhase, cardCounts, cardAsText } from '../../lib/sales/battleCard'
+import { SIGNAL_LABEL } from '../../lib/sales/leadCard'
 
 // ─── Admin → Agent Brief → Battle cards ────────────────────────────────────
 // The two cards as a salesperson would hold them: empty, to fill in on a
@@ -200,6 +201,9 @@ function Objection({ n, o, filled }) {
           {o.walk_away && o.walk_away !== '—' && <Line label="Walk away if" text={o.walk_away} tone="text-red-700" />}
         </div>
         {o.why && <Line label="Why it happens" text={o.why} muted />}
+        {o.when && SIGNAL_LABEL[o.when] && (
+          <p className="text-[11px] text-text-tertiary">Shown on a lead's battle card when {SIGNAL_LABEL[o.when]}.</p>
+        )}
       </div>
       {filled && o.example && (
         <div className="px-4 py-2.5 border-t border-sky-100 bg-sky-50 text-xs text-sky-900">

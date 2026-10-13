@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { openCard, saveCard } from './_card.js'
+import { openCard, saveCard, watchlist } from './_card.js'
 
 // Battle cards against an in-memory database that understands the handful
 // of PostgREST calls _card.js makes. Made-up leads only (this repo is public).
@@ -36,7 +36,9 @@ function fakeDb({ leads = [LEAD], earlier = [] } = {}) {
     if (path.startsWith('brand_directory_rows')) return [{ data: { name: 'Zennio' } }]
     if (path.startsWith('sales_accounts')) return [{ name: 'Example Dev Contracting', orders: 3, value_sar: 450000, last_order: '2026-02-01', status: 'new' }]
     if (path.startsWith('sales_icp')) return [{ battle_cards: { lead: { lessons: [{ when: 'existing_customer', text: 'Call them today.' }] } } }]
-    if (path.startsWith('brand_profile')) return [{ company_facts: '' }]
+    if (path.startsWith('brand_profile')) return [{ company_facts: '', key_projects: 'Tower One, Jeddah — office; KNX lighting control' }]
+    if (path.startsWith('research_agenda')) return [{ subject: 'Rival Co', why: 'Strong in towers.', domain: 'rival.sa', lines: ['lighting'], city: 'Jeddah' }]
+    if (path.startsWith('competitor_brands')) return [{ competitor: 'Rival Co', brand: 'Acme Lights', relationship: 'exclusive' }, { competitor: 'Rival Co', brand: 'Gone', relationship: 'ended' }]
     return []
   }
   return state
@@ -97,5 +99,24 @@ describe('saveCard', () => {
     const s = fakeDb()
     expect(await saveCard(deps(s), { workspaceId: WS, leadId: L1, user: USER, body: { decision: 'maybe' } })).toMatchObject({ status: 400 })
     expect(await saveCard(deps(s), { workspaceId: WS, leadId: L1, user: USER, body: {} })).toMatchObject({ status: 404 })
+  })
+})
+
+describe('watchlist', () => {
+  it('lists the active rivals with the brands they still hold', async () => {
+    const s = fakeDb()
+    expect(await watchlist(deps(s), WS)).toEqual([
+      { name: 'Rival Co', note: 'Strong in towers.', domain: 'rival.sa', lines: ['lighting'], city: 'Jeddah', brands: [{ brand: 'Acme Lights', relationship: 'exclusive' }] },
+    ])
+    const q = s.paths.find((p) => p.includes('research_agenda'))
+    expect(q).toContain(`workspace_id=eq.${WS}`)
+    expect(q).toContain('kind=eq.competitor&status=eq.active')
+  })
+
+  it('a built card carries the proof from our projects', async () => {
+    const s = fakeDb()
+    const { card } = await openCard(deps(s), { workspaceId: WS, leadId: L1 })
+    expect(card.card.references).toEqual([])  // no ICP in this fake, so no segments to match
+    expect(card.card.fit).toEqual({ band: '', text: '' })
   })
 })

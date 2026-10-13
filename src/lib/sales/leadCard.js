@@ -15,9 +15,16 @@
 // matched to the lead by the signals below. Without them a generic set is
 // used. No client name or deal figure sits in this public repository.
 //
+// Since 2026-10-12 the card also says how well the lead fits the company's
+// ICP (the same scoring as Sales → Targets), names our own projects in the
+// same segment as proof, says which competitor holds a brand they named, and
+// takes its objection answers from the Agent Brief's battle cards, so an
+// answer is written in one place.
+//
 // Pure. No network.
 
 import { projectOf, SENDER_LABEL } from '../leads/view.js'
+import { scoreTarget } from './icp.js'
 
 const str = (v) => String(v ?? '').trim()
 const list = (v) => (Array.isArray(v) ? v : [])
@@ -136,7 +143,7 @@ export function brandRule(lead = {}, suppliers = []) {
     brand_not_ours: theirs.length > 0 && !ours.length,
     brand_equivalent: equivalents || philips === 'or_equivalent',
   }
-  return { text: lines.join(' ') || '', signals, known: Boolean(lines.length) }
+  return { text: lines.join(' ') || '', signals, known: Boolean(lines.length), ours, theirs }
 }
 
 // ─── Our history with the sender ───────────────────────────────────────────
@@ -229,6 +236,131 @@ export function normalisePlaybook(raw) {
   return { lessons: pick(lessons, 'lessons'), questions: pick(questions, 'questions'), objections: pick(objections, 'objections') }
 }
 
+// ─── Fit, proof and competition ───────────────────────────────────────────
+
+/** The ICP's buyer type for a lead, from who wrote and the phase. */
+export function buyerOf(lead = {}) {
+  const phase = projectOf(lead)
+  const words = [lead.subject, lead.summary, lead.details?.products].map(str).join(' ')
+  switch (lead.sender_type) {
+    case 'contractor':
+      if (/fit-?\s?out|interiors?/i.test(words)) return 'fitout'
+      return phase === 'jih' ? 'contractor_awarded' : phase === 'tender' ? 'contractor_bidding' : ''
+    case 'developer_owner': return 'owner_developer'
+    case 'end_client': case 'facility_company': return 'operator'
+    case 'consultant': return 'consultant'
+    case 'trader': return 'other'
+    default: return ''
+  }
+}
+
+// What the lead is about, without the signature (whose "Head office,
+// Riyadh" would otherwise read as an office job in our region).
+const aboutText = (lead = {}) => [lead.subject, lead.summary, lead.details?.products, lead.details?.location, lead.details?.stage].map(str).join(' ')
+
+const BAND_LABEL = { strong: 'Strong fit', possible: 'Possible fit', weak: 'Weak fit' }
+
+/**
+ * How well the lead fits the company's ICP, scored the way Sales → Targets
+ * scores a target. { band, text }, or an empty band when there is no ICP.
+ */
+export function icpFit(lead = {}, icp = null, { existing = false } = {}) {
+  if (!icp || !list(icp.segments).length) return { band: '', text: '' }
+  const r = scoreTarget({
+    name: lead.company, headline: lead.summary, detail: aboutText(lead), scope: lead.details?.products,
+    location: lead.details?.location, stage: lead.details?.stage, buyer: buyerOf(lead),
+  }, icp)
+  // The ICP's own finding: existing customers win about three times as
+  // often. Targets scores companies we may never have sold to, so it does
+  // not know this; a lead from one of our accounts does.
+  if (existing) {
+    r.score = Math.min(100, r.score + 20)
+    r.band = r.score >= 60 ? 'strong' : r.score >= 35 ? 'possible' : 'weak'
+    r.reasons.unshift('Existing customer')
+  }
+  const flags = [...r.flags]
+  if (lead.sender_type === 'trader') flags.unshift('A trader: a stock deal, not a project')
+  const track = r.track === 'core' ? ' (core)' : r.track === 'broader' ? ' (growth)' : ''
+  const why = r.reasons.length ? r.reasons.join(', ') : 'no segment, buyer or region we recognise'
+  return { band: r.band, text: `${BAND_LABEL[r.band]}${track}: ${why}.${flags.length ? ` Watch: ${flags.join('; ')}.` : ''}` }
+}
+
+/**
+ * Our own projects to name on the call: those in the lead's ICP segments
+ * (the segment's words found in both), two at most. key_projects is the
+ * Brand Brain's list, one project per line.
+ */
+export function pickReferences(lead = {}, keyProjects = '', icp = null) {
+  const projects = str(keyProjects).split('\n').map(str).filter(Boolean)
+  if (!projects.length) return []
+  const about = aboutText(lead).toLowerCase()
+  const segments = list(icp?.segments).filter((sg) => list(sg.match).some((w) => about.includes(str(w).toLowerCase())))
+  const out = []
+  for (const sg of segments) {
+    for (const p of projects) {
+      if (out.length < 2 && !out.includes(p) && list(sg.match).some((w) => p.toLowerCase().includes(str(w).toLowerCase()))) out.push(p)
+    }
+  }
+  return out
+}
+
+/** Which competitor holds a brand they named that we do not carry. */
+export function heldBy(theirs = [], competitorBrands = []) {
+  const out = []
+  for (const b of theirs) {
+    const re = brandPattern(b)
+    const holders = competitorBrands.filter((cb) => re?.test(str(cb.brand)) && cb.relationship !== 'ended')
+    if (holders.length) out.push(`${b}: ${holders.map((h) => `${h.competitor}${h.relationship === 'exclusive' ? ' (exclusive)' : ''}`).join(', ')}.`)
+  }
+  return out
+}
+
+/**
+ * The Agent Brief's objections (inbound first, then outbound) that carry a
+ * `when`: the one place their answers are written. The walk-away goes with
+ * the answer.
+ */
+export function objectionsFromCards(battleCards = {}) {
+  const seen = new Set()
+  const out = []
+  for (const kind of ['inbound', 'outbound']) {
+    for (const o of list(battleCards?.[kind]?.objections)) {
+      const key = str(o?.objection).toLowerCase()
+      if (!str(o?.when) || !key || seen.has(key)) continue
+      seen.add(key)
+      const walk = str(o?.walk_away)
+      out.push({ when: str(o.when), objection: str(o.objection), answer: `${str(o.answer)}${walk && walk !== '—' ? ` Walk away if: ${walk.replace(/\.$/, '')}.` : ''}` })
+    }
+  }
+  return out
+}
+
+/** The signals an objection can be shown on, in words, for the Agent Brief. */
+export const SIGNAL_LABEL = {
+  always: 'every lead', existing_customer: 'an existing customer', repeat_sender: 'a repeat sender', quick: 'a quick quote',
+  project: 'a project quote', tender: 'a tender', bidding: 'a contractor still bidding', trader: 'a trader',
+  submittals: 'they ask for documents', controls: 'lighting control is in scope', price_pressure: 'they push on price',
+  urgent: 'it is urgent', brand_not_ours: 'a brand we do not carry', brand_ours: 'a brand we carry',
+  brand_equivalent: 'equivalents are allowed', maintenance: 'maintenance',
+}
+
+const plainName = (s) => compact(str(s).replace(/\([^)]*\)/g, ' '))
+
+/**
+ * The watchlist competitors named in a piece of text (the salesperson's
+ * "who else is quoting"), by name, domain or a brand they hold.
+ */
+export function matchCompetitors(text = '', watchlist = []) {
+  const hay = compact(text)
+  if (hay.length < 3) return []
+  return list(watchlist).filter((c) => {
+    const name = plainName(c.name)
+    const root = str(c.domain).toLowerCase().split('.')[0].replace(/[^a-z0-9]/g, '')
+    return (name.length >= 4 && hay.includes(name)) || (root.length >= 4 && hay.includes(root))
+      || list(c.brands).some((b) => compact(b.brand).length >= 4 && hay.includes(compact(b.brand)))
+  })
+}
+
 // ─── Building the card ─────────────────────────────────────────────────────
 
 const HAS_DATE = /\b\d{1,2}(st|nd|rd|th)?[\s/.-]+(\d{1,2}|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)|\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{1,2}\b|\btoday\b|\btomorrow\b/i
@@ -281,7 +413,11 @@ export function leadSignals(lead = {}, { account = null, earlier = [], brand = n
  *   context.earlier    earlier enquiries from the same domain ({ received_at, subject })
  *   context.suppliers  the brands we carry (names)
  *   context.companyFacts  the Brand Brain's company facts (registered vendors)
- *   context.playbook   sales_icp.battle_cards.lead
+ *   context.playbook   sales_icp.battle_cards.lead (lessons, questions)
+ *   context.objections the Agent Brief's objections (objectionsFromCards)
+ *   context.icp        sales_icp.config, for the fit line and the segments
+ *   context.keyProjects   the Brand Brain's key projects, one per line
+ *   context.competitorBrands   competitor_brands ({ competitor, brand, relationship })
  */
 export function buildLeadCard(lead = {}, context = {}) {
   const suppliers = list(context.suppliers).map(str).filter(Boolean)
@@ -290,7 +426,8 @@ export function buildLeadCard(lead = {}, context = {}) {
   const brand = brandRule(lead, suppliers)
   const vendors = vendorBodies(context.companyFacts)
   const signals = leadSignals(lead, { account, earlier, brand, vendors })
-  const playbook = normalisePlaybook(context.playbook)
+  const fromCards = list(context.objections)
+  const playbook = normalisePlaybook(fromCards.length ? { ...(context.playbook || {}), objections: fromCards } : context.playbook)
   const d = lead.details || {}
 
   const history = []
@@ -329,11 +466,13 @@ export function buildLeadCard(lead = {}, context = {}) {
     facts: {
       project: [d.location, d.stage].map(str).filter(Boolean).join(' · '),
       scope: [d.products, d.quantity].map(str).filter(Boolean).join(' · '),
-      brand: brand.text,
+      brand: [brand.text, ...heldBy(brand.theirs, list(context.competitorBrands))].filter(Boolean).join(' '),
       documents: documentsIn(lead),
       also_want: wantsIn(lead),
       due: str(d.urgency),
     },
+    fit: icpFit(lead, context.icp, { existing: signals.existing_customer }),
+    references: pickReferences(lead, context.keyProjects, context.icp),
     history,
     ask: asks.map((q) => ({ q, a: '' })),
     pushback,
@@ -349,6 +488,8 @@ export function normaliseLeadCard(raw = {}) {
     customer: CUSTOMER_LABEL[c.customer] ? c.customer : 'new',
     headline: clip(c.headline, 500),
     facts: Object.fromEntries(FACTS.map(([k]) => [k, clip(facts[k], 1000)])),
+    fit: { band: BAND_LABEL[c.fit?.band] ? c.fit.band : '', text: clip(c.fit?.text, 600) },
+    references: list(c.references).map((r) => clip(r, 300)).filter(Boolean).slice(0, 4),
     history: list(c.history).map((h) => clip(h, 500)).filter(Boolean).slice(0, 8),
     ask: list(c.ask).map((a) => ({ q: clip(a?.q, 300), a: clip(a?.a, 1000) })).filter((a) => a.q).slice(0, 6),
     pushback: list(c.pushback).map((p) => ({ objection: clip(p?.objection, 300), answer: clip(p?.answer, 1000) })).filter((p) => p.objection).slice(0, 4),
@@ -361,7 +502,7 @@ export function afterCallFields(body = {}) {
   if (decision && !DECISIONS[decision]) return { error: 'Unknown decision.' }
   const due = str(body.quote_due)
   if (due && (!/^\d{4}-\d{2}-\d{2}$/.test(due) || Number.isNaN(new Date(`${due}T00:00:00Z`).getTime()))) return { error: 'The quote date is not a date.' }
-  return { values: { decision, quote_due: due || null, target_price: clip(body.target_price, 200), decides: clip(body.decides, 300) } }
+  return { values: { decision, quote_due: due || null, target_price: clip(body.target_price, 200), decides: clip(body.decides, 300), competitors: clip(body.competitors, 300) } }
 }
 
 /** Header chips for a lead and its card, in display order. */
@@ -373,5 +514,6 @@ export function cardChips(lead = {}, card = {}) {
   const phase = projectOf(lead)
   out.push({ tone: '', text: phase ? ({ jih: 'JIH', tender: 'Tender', maintenance: 'Maintenance' }[phase] || phase) : 'Phase not set' })
   out.push({ tone: c.customer === 'existing' ? 'good' : c.customer === 'parked' ? 'warn' : '', text: CUSTOMER_LABEL[c.customer] })
+  if (c.fit.band) out.push({ tone: c.fit.band === 'strong' ? 'good' : c.fit.band === 'weak' ? 'warn' : '', text: BAND_LABEL[c.fit.band] })
   return out
 }
