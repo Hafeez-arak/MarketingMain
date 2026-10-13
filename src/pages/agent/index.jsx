@@ -11,6 +11,8 @@ import { AgentSteering } from '../../components/AgentSteering'
 import PastConversations from '../../components/PastConversations'
 import { AgentMarkdown } from '../../components/AgentMarkdown'
 import AskInput from '../../components/AskInput'
+import { JumpToLatest } from '../../components/AssistantDrawer'
+import { useFollowBottom } from '../../lib/useFollowBottom'
 
 // ─── /agent — the assistant, full page ─────────────────────────────────────
 // The same agent, the same tools and the SAME conversation as the drawer —
@@ -51,12 +53,12 @@ export default function AgentPage() {
   const [lensRows, setLensRows] = useState([])
   const [running, setRunning] = useState(false)
   const [runNote, setRunNote] = useState('')
-  const bottom = useRef(null)
 
   const context = useMemo(() => describePage(location), [location])
   const suggestions = useMemo(() => suggestionsFor(context), [context])
 
-  useEffect(() => { bottom.current?.scrollIntoView({ behavior: 'smooth' }) }, [turns, busy])
+  const boxRef = useRef(null)
+  const { onScroll, following, jumpToLatest } = useFollowBottom(boxRef, turns, turns.length)
 
   // `reload` is a counter rather than a callback dependency so that starting a
   // run can ask for a refresh without the effect re-subscribing on every
@@ -217,7 +219,8 @@ export default function AgentPage() {
             </div>
           </div>
         ) : (
-          <div className="space-y-4 max-h-[55vh] overflow-y-auto pr-1">
+          <div className="relative">
+          <div ref={boxRef} onScroll={onScroll} className="space-y-4 max-h-[55vh] overflow-y-auto pr-1">
             {turns.map((t, i) => (
               <div key={i} className={t.role === 'user' ? 'text-right' : ''}>
                 {t.role === 'user' ? (
@@ -240,7 +243,8 @@ export default function AgentPage() {
                 ) : null}
               </div>
             ))}
-            <div ref={bottom} />
+          </div>
+          {!following ? <JumpToLatest onClick={jumpToLatest} /> : null}
           </div>
         )}
 
