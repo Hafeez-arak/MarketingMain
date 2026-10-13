@@ -71,7 +71,9 @@ export async function callModel({
   // Our own tools, run here between legs. Absent (the default), a turn that
   // stops on `tool_use` ends as before. The research lenses pass it for the
   // Firecrawl/Tavily search that takes over when web_search hits max_uses.
-  //   runTool(name, input) → { ok, result } | { ok: false, error }
+  //   runTool(name, input, { serverSearches }) → { ok, result } | { ok: false, error }
+  // `serverSearches` is how many web_search calls the turn has made so far,
+  // so a caller can insist on Claude's search before its own.
   runTool = null,
   // Ceiling on tool rounds. The caller paces itself (see backupWeb in
   // _lenses.js); this only stops a loop that has stopped listening.
@@ -235,7 +237,8 @@ export async function callModel({
       const calls = (response.content || []).filter(b => b?.type === 'tool_use')
       const results = await Promise.all(calls.map(async c => {
         let outcome
-        try { outcome = await runTool(c.name, c.input || {}) } catch (err) {
+        const serverSearches = allContent.filter(b => b?.type === 'server_tool_use' && b?.name === 'web_search').length
+        try { outcome = await runTool(c.name, c.input || {}, { serverSearches }) } catch (err) {
           outcome = { ok: false, error: err?.message || String(err) }
         }
         return toolResultBlock(c.id, outcome)

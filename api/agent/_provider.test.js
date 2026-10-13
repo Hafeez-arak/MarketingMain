@@ -63,6 +63,17 @@ describe('callModel with our own tools', () => {
     expect(out.response.content).toContainEqual(searched)
   })
 
+  it('tells the tool how many Claude searches the turn has made so far', async () => {
+    const searched = { type: 'server_tool_use', id: 's1', name: 'web_search', input: { query: 'q' } }
+    script.push(
+      msg([searched, searched, { type: 'tool_use', id: 't1', name: 'search_web', input: { query: 'q' } }], 'tool_use'),
+      msg([{ type: 'text', text: '{}' }], 'end_turn'),
+    )
+    let seen = null
+    await callModel(args({ runTool: async (name, input, ctx) => { seen = ctx; return { ok: true, result: {} } } }))
+    expect(seen).toEqual({ serverSearches: 2 })
+  })
+
   it('passes a tool failure back to the model as an error rather than ending the turn', async () => {
     script.push(
       msg([{ type: 'tool_use', id: 't1', name: 'read_page', input: { url: 'https://x' } }], 'tool_use'),

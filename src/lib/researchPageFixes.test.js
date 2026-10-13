@@ -93,3 +93,14 @@ describe('our own Instagram account', () => {
     expect(gaps.map(g => g.key)).not.toContain('own_account')
   })
 })
+
+describe('last week\'s faults are not handed to the next brief', () => {
+  it('keeps only the questions a person could answer', async () => {
+    const { realQuestions } = await import('./agent/runFaults.js')
+    expect(realQuestions([
+      "Last week's run fault is closed. The 2026-10-13 run returned an empty brief.",
+      'The Search Console window note for sc-domain:arak-sa.com, 2026-09-13 to 2026-10-10, is closed.',
+      'Which SASO standard numbers actually apply to our imported fixtures is not confirmed.',
+    ])).toEqual(['Which SASO standard numbers actually apply to our imported fixtures is not confirmed.'])
+  })
+})

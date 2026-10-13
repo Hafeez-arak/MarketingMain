@@ -34,6 +34,7 @@ import {
   sameName, nameKey, daysTo, cleanDate, isOpenOpportunity, CLOSED_STATUSES, SOCIAL_CHANNELS,
 } from './agent/intel'
 import { ownChannelRows, actionPlan, pct } from './researchBrief'
+import { isRunFault, isLabel } from './agent/runFaults.js'
 
 /**
  * The second axis: which side of the business a reader is in.
@@ -831,23 +832,8 @@ export function marketingRecommendations(report) {
  * know that something was FIXED — only a person knows that — so it says
  * "not repeated this run" rather than "resolved", which is the honest claim.
  */
-// ── A run's own faults are not open market questions ──
-// `unanswered` carries both: "is the 1 July requirement real?" and "your
-// credit balance is too low". Only the first is something a person can go
-// and answer. The second kind is said once, at the top of the report, for the
-// run it happened in (runFaults), and never carried forward as an open item.
-const FAULT = new RegExp([
-  'credit balance', 'fault in the run', 'lens failed and was not answered',
-  'investigation did not complete', 'time budget', 'did not finish', 'not enough time',
-  'could not start', 'was not started', 'returned \\d{3}', 'invalid_request_error',
-  'dropped for repeating',
-].join('|'), 'i')
-// A label that leaked in as a note ("sc-domain:arak-sa.com, 2026-09-13 to
-// 2026-10-10."), from reports before 2026-10-13.
-const LABEL = /^sc-domain:|^https?:\/\/\S+, \d{4}-\d{2}-\d{2} to /i
-
-export const isRunFault = text => FAULT.test(flat(text))
-const isLabel = text => LABEL.test(flat(text))
+// Run faults and leaked labels: see agent/runFaults.js.
+export { isRunFault }
 
 /** This run's own problems, shortest first, for one line above the report. */
 export function runFaults(report = {}) {

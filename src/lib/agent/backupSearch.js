@@ -107,6 +107,24 @@ export function backupPrompt(lens) {
 }
 
 /**
+ * On a Claude-first lens, search_web waits until web_search has been tried
+ * its own allowance. The prompt alone did not hold: on the 2026-10-13 rerun
+ * events, category and global made 0 Claude searches between them and went
+ * straight to the tool described as having "no fixed limit". read_page is
+ * never held back; reading a page found either way is always useful.
+ * Null when the call may go ahead; otherwise what the model is told.
+ */
+export function claudeFirstGate(lens, name, serverSearches = 0) {
+  if (prefersFirecrawl(lens) || name !== 'search_web') return null
+  const own = Number(lens?.budget?.searches) || 0
+  const left = own - (Number(serverSearches) || 0)
+  if (left <= 0) return null
+  return `Not yet: for this question use web_search first (it is better for dated news and company facts). ` +
+    `${left} web_search ${left === 1 ? 'search is' : 'searches are'} left before search_web opens up. ` +
+    'read_page works now for any URL you have found.'
+}
+
+/**
  * May the lens make another backup call? Null when yes; otherwise the message
  * the model gets back instead of a result, which tells it to answer.
  *

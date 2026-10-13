@@ -11,6 +11,7 @@ import { LENS_PROMPTS } from '../../src/lib/agent/lensPrompts.js'
 import { runLens, runOurselvesLens, runCalendarLens, runSearchLens, markStage } from './_lenses.js'
 import { gatherCalendar } from './_calendar.js'
 import { readWebsite } from './_websiteRead.js'
+import { realQuestions } from '../../src/lib/agent/runFaults.js'
 import { marketOf } from '../../src/lib/agent/calendar.js'
 import { priorIdeas } from './_memory.js'
 import { silentLensNote } from '../../src/lib/agent/runHealth.js'
@@ -78,7 +79,8 @@ function lastWeek(priorRuns = []) {
   if (!report) return ''
   const date = String(priorRuns[0].started_at || '').slice(0, 10)
   const top = (report.top_three || []).filter(t => t?.finding).slice(0, 3)
-  const open = (report.unanswered || []).slice(0, 6)
+  // Faults and labels are the run's, not the market's (runFaults.js).
+  const open = realQuestions(report.unanswered).slice(0, 6)
   if (!top.length && !open.length) return ''
   return [
     `WHAT THE RUN OF ${date || 'LAST WEEK'} ASKED THIS TEAM TO DO:`,
