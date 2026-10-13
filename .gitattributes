@@ -1,0 +1,16 @@
+# LF everywhere, whatever the machine's git says. The production box checks
+# out on Windows and runs everything in WSL and Docker; with Windows'
+# core.autocrlf=true every file came out CRLF, WSL git saw 257 files as
+# modified, and `git pull` there refused to run (2026-10-13).
+* text=auto eol=lf
+
+# Never touched, whatever git guesses.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.woff binary
+*.woff2 binary
