@@ -1,4 +1,4 @@
-import { buildLeadCard, normaliseLeadCard, afterCallFields, senderDomain } from '../../src/lib/sales/leadCard.js'
+import { buildLeadCard, normaliseLeadCard, afterCallFields, senderDomain, objectionsFromCards } from '../../src/lib/sales/leadCard.js'
 
 // ─── Battle cards for approved leads ───────────────────────────────────────
 // A lead gets its card when it is approved (the owner, 2026-10-12: approving
@@ -12,7 +12,7 @@ import { buildLeadCard, normaliseLeadCard, afterCallFields, senderDomain } from 
 
 const isUuid = (v) => /^[0-9a-f-]{36}$/i.test(String(v || ''))
 
-const CARD_COLUMNS = 'lead_id,card,decision,quote_due,target_price,decides,built_at,updated_at,updated_by'
+const CARD_COLUMNS = 'lead_id,card,decision,quote_due,target_price,decides,competitors,built_at,updated_at,updated_by'
 const LEAD_COLUMNS = 'id,received_at,created_at,company,name,email,subject,message,summary,details,ask_next,category,verdict,human_verdict,sender_type,source_check,project_type,human_project_type,project_final,philips,approved_at'
 
 const effective = (l) => l.human_verdict || l.verdict
@@ -21,23 +21,44 @@ const effective = (l) => l.human_verdict || l.verdict
 async function context(deps, workspaceId, lead) {
   const domain = senderDomain(lead)
   const before = lead.received_at || lead.created_at
-  const [icp, accounts, suppliers, profile, earlier] = await Promise.all([
-    deps.db(`sales_icp?workspace_id=eq.${workspaceId}&select=battle_cards`).then((r) => r || []).catch(() => []),
+  const [icp, accounts, suppliers, profile, earlier, competitorBrands] = await Promise.all([
+    deps.db(`sales_icp?workspace_id=eq.${workspaceId}&select=battle_cards,config`).then((r) => r || []).catch(() => []),
     deps.db(`sales_accounts?workspace_id=eq.${workspaceId}&select=name,orders,value_sar,last_order,status`).then((r) => r || []).catch(() => []),
     deps.db(`brand_directory_rows?workspace_id=eq.${workspaceId}&section_key=eq.suppliers&select=data`).then((r) => r || []).catch(() => []),
-    deps.db(`brand_profile?workspace_id=eq.${workspaceId}&select=company_facts`).then((r) => r || []).catch(() => []),
+    deps.db(`brand_profile?workspace_id=eq.${workspaceId}&select=company_facts,key_projects`).then((r) => r || []).catch(() => []),
     domain && before
       ? deps.db(`leads?workspace_id=eq.${workspaceId}&email=ilike.*@${domain}&received_at=lt.${encodeURIComponent(before)}&id=neq.${lead.id}&select=received_at,subject,verdict,human_verdict&order=received_at.desc&limit=20`).then((r) => r || []).catch(() => [])
       : [],
+    deps.db(`competitor_brands?workspace_id=eq.${workspaceId}&select=competitor,brand,relationship`).then((r) => r || []).catch(() => []),
   ])
   return {
     playbook: icp[0]?.battle_cards?.lead || null,
+    objections: objectionsFromCards(icp[0]?.battle_cards || {}),
+    icp: icp[0]?.config || null,
+    keyProjects: profile[0]?.key_projects || '',
+    competitorBrands,
     accounts,
     suppliers: suppliers.map((r) => r?.data?.name).filter(Boolean),
     companyFacts: profile[0]?.company_facts || '',
     // Earlier real enquiries only: a pitch or a resend from the same domain is not one.
     earlier: earlier.filter((e) => ['qualified', 'needs_review'].includes(effective(e))),
   }
+}
+
+/**
+ * The competitor watchlist, for "who else is quoting": each active rival
+ * with the note Research keeps on it and the brands it holds. Sent with the
+ * card, never stored in it, so it is always the current list.
+ */
+export async function watchlist(deps, workspaceId) {
+  const [rivals, brands] = await Promise.all([
+    deps.db(`research_agenda?workspace_id=eq.${workspaceId}&kind=eq.competitor&status=eq.active&select=subject,why,domain,lines,city&order=subject`).then((r) => r || []).catch(() => []),
+    deps.db(`competitor_brands?workspace_id=eq.${workspaceId}&select=competitor,brand,relationship`).then((r) => r || []).catch(() => []),
+  ])
+  return rivals.map((c) => ({
+    name: c.subject, note: c.why || '', domain: c.domain || '', lines: c.lines || [], city: c.city || '',
+    brands: brands.filter((b) => b.competitor === c.subject && b.relationship !== 'ended').map((b) => ({ brand: b.brand, relationship: b.relationship })),
+  }))
 }
 
 async function readCard(deps, workspaceId, leadId) {

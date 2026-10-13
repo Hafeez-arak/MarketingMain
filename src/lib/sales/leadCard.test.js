@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   buildLeadCard, brandRule, matchAccount, documentsIn, wantsIn, cardKind, vendorBodies,
   normaliseLeadCard, afterCallFields, cardChips, senderDomain, DEFAULT_PLAYBOOK,
+  buyerOf, icpFit, pickReferences, heldBy, objectionsFromCards, matchCompetitors,
 } from './leadCard'
 
 // Made-up leads, companies and accounts. The real ones live in the database.
@@ -126,12 +127,92 @@ describe('saving', () => {
     expect(c.pushback).toEqual([])
   })
   it('checks the after-call fields', () => {
-    expect(afterCallFields({ decision: 'park', quote_due: '2026-10-20', target_price: ' 1.2M ', decides: 'PM' })).toEqual({ values: { decision: 'park', quote_due: '2026-10-20', target_price: '1.2M', decides: 'PM' } })
+    expect(afterCallFields({ decision: 'park', quote_due: '2026-10-20', target_price: ' 1.2M ', decides: 'PM', competitors: ' Rival Co ' })).toEqual({ values: { decision: 'park', quote_due: '2026-10-20', target_price: '1.2M', decides: 'PM', competitors: 'Rival Co' } })
     expect(afterCallFields({ decision: 'maybe' }).error).toBe('Unknown decision.')
     expect(afterCallFields({ quote_due: 'next week' }).error).toBe('The quote date is not a date.')
     expect(afterCallFields({}).values.quote_due).toBeNull()
   })
   it('shows the header chips in order', () => {
     expect(cardChips(tender, { kind: 'project', customer: 'existing' }).map((c) => c.text)).toEqual(['Project quote', 'Contractor · verified', 'Tender', 'Existing customer'])
+  })
+})
+
+// ─── Fit, proof and competition (2026-10-12) ───────────────────────────────
+
+const ICP = {
+  segments: [
+    { key: 'hospitality', label: 'Hotels', track: 'core', weight: 3, match: ['hotel', 'resort'] },
+    { key: 'controls', label: 'Lighting control', track: 'core', weight: 3, match: ['knx', 'lighting control'] },
+    { key: 'large_dev', label: 'Giga projects', track: 'broader', weight: 2, match: ['giga city'] },
+  ],
+  buyers: [
+    { key: 'contractor_awarded', weight: 3, note: 'Holds the job' },
+    { key: 'operator', weight: 1, note: 'End user' },
+    { key: 'contractor_bidding', weight: -2, note: 'Still bidding: quote light' },
+  ],
+  regions: ['riyadh'],
+  size: { sweet_max: 500000, ok_max: 2000000, currency: 'SAR' },
+}
+const PROJECTS = 'Palm Grand Hotel, Riyadh — hotel; light fittings\nTower One, Riyadh — office; KNX lighting control\nCity Mall — retail mall'
+
+describe('the ICP fit', () => {
+  it('maps who wrote and the phase to the ICP buyer', () => {
+    expect(buyerOf({ sender_type: 'contractor', project_final: 'jih' })).toBe('contractor_awarded')
+    expect(buyerOf({ sender_type: 'contractor', project_final: 'tender' })).toBe('contractor_bidding')
+    expect(buyerOf({ sender_type: 'contractor', project_final: '', subject: 'Office fit-out' })).toBe('fitout')
+    expect(buyerOf({ sender_type: 'end_client' })).toBe('operator')
+  })
+  it('scores like Targets, with the reasons and what to watch', () => {
+    const hotel = { sender_type: 'contractor', project_final: 'jih', summary: 'Hotel lobby lighting', details: { location: 'Riyadh' } }
+    expect(icpFit(hotel, ICP)).toEqual({ band: 'strong', text: 'Strong fit (core): Hotels, Contractor already holding the job, In our region.' })
+    expect(icpFit(tender, ICP).text).toBe('Weak fit (growth): Giga projects (growth segment). Watch: Still bidding: quote light.')
+    expect(icpFit(trader, ICP).text).toMatch(/^Weak fit: no segment.*Watch: A trader: a stock deal, not a project\.$/)
+    expect(icpFit(hotel, null)).toEqual({ band: '', text: '' })
+  })
+  it('counts an existing customer, as the ICP says to', () => {
+    const r = icpFit({ sender_type: 'end_client', summary: 'Spare parts', details: { location: 'Riyadh' } }, ICP, { existing: true })
+    expect(r.band).toBe('possible')
+    expect(r.text).toMatch(/^Possible fit: Existing customer, /)
+  })
+})
+
+describe('proof and competition', () => {
+  it('names our projects in the lead\'s segment, two at most', () => {
+    expect(pickReferences({ summary: 'KNX for a hotel' }, PROJECTS, ICP)).toEqual(['Palm Grand Hotel, Riyadh — hotel; light fittings', 'Tower One, Riyadh — office; KNX lighting control'])
+    expect(pickReferences({ summary: 'Street poles' }, PROJECTS, ICP)).toEqual([])
+    expect(pickReferences({ summary: 'Hotel' }, '', ICP)).toEqual([])
+  })
+  it('says which competitor holds a brand we do not carry', () => {
+    const cb = [{ competitor: 'Rival Co', brand: 'Acme Lights', relationship: 'exclusive' }, { competitor: 'Old Co', brand: 'Acme Lights', relationship: 'ended' }]
+    expect(heldBy(['Acme Lights', 'Other'], cb)).toEqual(['Acme Lights: Rival Co (exclusive).'])
+    const card = buildLeadCard({ ...tender, details: { ...tender.details, brands: 'Acme Lights' } }, { suppliers: SUPPLIERS, competitorBrands: cb })
+    expect(card.facts.brand).toBe('Not ours: Acme Lights. Offer our own or an approved equal, or say early that we can\'t. Acme Lights: Rival Co (exclusive).')
+  })
+  it('takes objection answers from the Agent Brief cards, once each, with the walk-away', () => {
+    const cards = {
+      inbound: { objections: [{ objection: 'Too dear.', answer: 'Ask their target.', walk_away: 'Gap above 20%.', when: 'price_pressure' }, { objection: 'No tag.', answer: 'x' }] },
+      outbound: { objections: [{ objection: 'Too dear.', answer: 'Other answer.', when: 'price_pressure' }, { objection: 'Not awarded.', answer: 'Budget price.', walk_away: '—', when: 'bidding' }] },
+    }
+    const objections = objectionsFromCards(cards)
+    expect(objections).toEqual([
+      { when: 'price_pressure', objection: 'Too dear.', answer: 'Ask their target. Walk away if: Gap above 20%.' },
+      { when: 'bidding', objection: 'Not awarded.', answer: 'Budget price.' },
+    ])
+    expect(buildLeadCard(tender, { objections }).pushback).toEqual([{ objection: 'Not awarded.', answer: 'Budget price.' }])
+  })
+  it('finds watchlist competitors by name, domain or a brand they hold', () => {
+    const rivals = [
+      { name: 'Nouran Lighting', domain: 'nouran.net', brands: [] },
+      { name: 'Lumiere (which one? ask sales)', domain: '', brands: [] },
+      { name: 'Rival Co', domain: '', brands: [{ brand: 'Acme Lights' }] },
+    ]
+    expect(matchCompetitors('nouran, LUMIERE and someone with acme lights', rivals).map((c) => c.name)).toEqual(['Nouran Lighting', 'Lumiere (which one? ask sales)', 'Rival Co'])
+    expect(matchCompetitors('', rivals)).toEqual([])
+  })
+  it('keeps the fit and references through a save, and drops a bad band', () => {
+    const c = normaliseLeadCard({ fit: { band: 'great', text: 'Fits' }, references: ['A', '', 'B'] })
+    expect(c.fit).toEqual({ band: '', text: 'Fits' })
+    expect(c.references).toEqual(['A', 'B'])
+    expect(cardChips({}, { fit: { band: 'strong' } }).map((x) => x.text)).toContain('Strong fit')
   })
 })

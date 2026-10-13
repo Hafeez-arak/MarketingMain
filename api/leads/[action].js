@@ -6,7 +6,7 @@ import { intakeWebsite, tryIt, QUALIFIER_MODEL } from './_intake.js'
 import { checkMail, emailFile, currentOutlookLink } from './_mail.js'
 import { exportLeads, applySheetDecisions } from './_export.js'
 import { approveLead, crmStatus, saveCrm, sendWaiting, disconnectCrm } from './_crm.js'
-import { openCard, saveCard } from './_card.js'
+import { openCard, saveCard, watchlist } from './_card.js'
 import { leadDeps, openRouterKey, hasDeploymentKey, describeKey, sendAlert } from './_deps.js'
 import { previewLenses } from '../agent/_investigate.js'
 
@@ -346,9 +346,10 @@ const actions = {
 
   /** An approved lead's battle card, built the first time it is opened. */
   async card({ workspaceId, body }) {
-    const out = await openCard(leadDeps(), { workspaceId, leadId: body.lead_id })
+    const deps = leadDeps()
+    const out = await openCard(deps, { workspaceId, leadId: body.lead_id })
     if (out.error) return fail(out.status, out.error)
-    return { card: out.card }
+    return { card: out.card, watchlist: await watchlist(deps, workspaceId) }
   },
 
   /** The team's edits to a card, and the four things recorded after the call. */
