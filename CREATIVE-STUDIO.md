@@ -117,7 +117,7 @@ On the n8n box, after `git pull`:
 ```bash
 ./n8n/redeploy.sh "Arak Lighting – Creative Generate" "Arak Lighting – Creative Edit" \
   "Arak Lighting – Creative Video" "Arak Lighting – Creative Video Edit" \
-  "Arak Lighting – Creative Video Reconcile" "Arak Lighting – Creative Layerize" \\
+  "Arak Lighting – Creative Video Reconcile" "Arak Lighting – Creative Layerize" \
   "Arak Lighting – Creative Upscale"
 ```
 
