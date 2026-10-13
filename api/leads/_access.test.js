@@ -8,7 +8,7 @@ import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from 'vites
 const WS = '11111111-1111-4111-8111-111111111111'
 const LEAD = '22222222-2222-4222-8222-222222222222'
 
-let who // { member, admin, sales }
+let who // { member, admin, sales, approver, hidden }
 let calls
 
 function fakeFetch(url, init = {}) {
@@ -21,6 +21,11 @@ function fakeFetch(url, init = {}) {
   if (u.includes('/rpc/is_sales_member')) return json(who.sales)
   if (u.includes('/rpc/can_approve_leads')) return json(Boolean(who.approver))
   if (u.includes('/rest/v1/workspaces?id=eq.')) return json(who.member ? [{ id: WS }] : [])
+  // A sales person asking for the lead with their own token: the leads
+  // policy (can_see_lead) answers. `hidden` = it is someone else's.
+  if (u.includes('/rest/v1/leads?id=eq.') && method === 'GET' && init.headers?.Authorization === 'Bearer tok') {
+    return json(who.hidden ? [] : [{ id: LEAD }])
+  }
   if (u.includes('/rest/v1/leads?id=eq.') && method === 'PATCH') {
     const body = JSON.parse(init.body)
     return json([{ id: LEAD, human_verdict: body.human_verdict }])
@@ -70,6 +75,48 @@ describe('a sales seat', () => {
     expect(writes()).toEqual([])
     // Not even asked: a seat is only looked up for the actions it could open.
     expect(calls.some((c) => c.includes('is_sales_member'))).toBe(false)
+  })
+})
+
+describe('a salesperson sees only their own leads (2026-10-13)', () => {
+  it.each(['review', 'email_file', 'outlook_link', 'set_project', 'card', 'card_save', 'approve', 'assign', 'forward'])('%s on someone else\'s lead is refused, and nothing is written', async (action) => {
+    who = { member: false, admin: false, sales: true, approver: true, hidden: true }
+    const res = await call(handler, action, { lead_id: LEAD, verdict: 'qualified', project: 'jih' })
+    expect(res.statusCode).toBe(404)
+    expect(res.body.error).toMatch(/not one of yours/)
+    expect(writes()).toEqual([])
+  })
+
+  it('the admin is not asked: the admin sees every lead', async () => {
+    who = { member: true, admin: true, sales: false, hidden: true }
+    const res = await call(handler, 'review', { lead_id: LEAD, verdict: 'qualified' })
+    expect(res.statusCode).toBe(200)
+  })
+})
+
+describe('assigning', () => {
+  it('a salesperson who is not a sales admin may not assign or forward', async () => {
+    who = { member: false, admin: false, sales: true, approver: false }
+    for (const action of ['assign', 'forward']) {
+      const res = await call(handler, action, { lead_id: LEAD, user_id: LEAD })
+      expect(res.statusCode).toBe(403)
+      expect(res.body.error).toMatch(/sales admin/)
+    }
+    expect(writes()).toEqual([])
+  })
+
+  it('a sales admin gets through to the lead (here: not found in this fake)', async () => {
+    who = { member: false, admin: false, sales: true, approver: true }
+    expect((await call(handler, 'assign', { lead_id: LEAD, user_id: LEAD })).statusCode).toBe(404)
+    expect(writes()).toEqual([])
+  })
+
+  it('the sales team settings are the admin\'s alone, even for a sales admin', async () => {
+    who = { member: false, admin: false, sales: true, approver: true }
+    for (const action of ['team', 'team_save', 'team_odoo']) {
+      expect((await call(handler, action, { user_id: LEAD, all_website_leads: true })).statusCode).toBe(403)
+    }
+    expect(writes()).toEqual([])
   })
 })
 

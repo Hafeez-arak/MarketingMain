@@ -103,3 +103,25 @@ export async function createLead(fetchFn, cfg, values, ref) {
   const id = await call(fetchFn, cfg, uid, 'crm.lead', 'create', [vals])
   return { id, url: leadUrl(cfg.url, id), existed: false }
 }
+
+/**
+ * The Odoo user a salesperson is, by their login (an email here), or null.
+ * The email field is asked too, for a user whose login is a username.
+ */
+export async function findUserId(fetchFn, cfg, loginOrEmail) {
+  const who = String(loginOrEmail || '').trim()
+  if (!who) return null
+  const uid = await login(fetchFn, cfg)
+  const [id] = await call(fetchFn, cfg, uid, 'res.users', 'search', [['|', ['login', '=ilike', who], ['email', '=ilike', who]]], { limit: 1 })
+  return id || null
+}
+
+/**
+ * Make this Odoo user the lead's salesperson. Odoo emails them "You have
+ * been assigned", and under "Own Documents Only" the lead is theirs alone.
+ */
+export async function setLeadOwner(fetchFn, cfg, leadId, userId) {
+  const uid = await login(fetchFn, cfg)
+  await call(fetchFn, cfg, uid, 'crm.lead', 'write', [[Number(leadId)], { user_id: userId }])
+  return true
+}

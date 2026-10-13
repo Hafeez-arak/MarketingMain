@@ -4,6 +4,7 @@ import { fetchLeadsPage, leadsApi } from '../../lib/leads/client'
 import {
   SHOW_OPTIONS, EMPTY_FILTERS, activeFilterCount, effectiveVerdict, PAGE_SIZE, pageLabel, pageCount, when,
   SENDER_LABEL, PROJECT_LABEL, REQUEST_LABEL, FOLDER_LABEL, PHILIPS_LABEL, CRM_LABEL, channelLabel, brandOf, phonesOf, projectOf,
+  ownerLabel, shortName, FORWARD_LABEL,
 } from '../../lib/leads/view'
 import { VerdictTag, LeadDetail } from './parts'
 import BattleCard from './BattleCard'
@@ -22,6 +23,11 @@ import BattleCard from './BattleCard'
 //
 // An approved lead opens on its battle card (BattleCard.jsx, 2026-10-12),
 // with the email one tab away.
+//
+// The Owner column (2026-10-13): a sales admin assigns a lead to one person
+// on the sales team at any time, which forwards the customer's email to them
+// at once; Approve asks for someone when no one has it yet. A salesperson
+// sees only their own leads (the database decides, can_see_lead).
 
 const SENDER_OPTIONS = Object.entries(SENDER_LABEL)
 const PROJECT_OPTIONS = [...Object.entries(PROJECT_LABEL), ['none', 'Not stated']]
@@ -29,7 +35,7 @@ const REQUEST_OPTIONS = Object.entries(REQUEST_LABEL)
 const FOLDER_OPTIONS = Object.entries(FOLDER_LABEL)
 
 // Column widths, shared by the header and every row so they line up.
-const GRID = 'md:grid md:grid-cols-[6.5rem_minmax(0,1.6fr)_minmax(0,2.2fr)_7rem_6.5rem_6rem_5.5rem_6.5rem_7rem] md:gap-3 md:items-start'
+const GRID = 'md:grid md:grid-cols-[6.5rem_minmax(0,1.6fr)_minmax(0,2fr)_6.5rem_6rem_6rem_5.5rem_6.5rem_6.5rem_7rem] md:gap-3 md:items-start'
 
 function Cell({ label, children, className = '' }) {
   // On a phone each value carries its own label; on a desktop the header does.
@@ -68,6 +74,57 @@ function CrmCell({ lead, canApprove, onAsk }) {
     return <Button size="xs" variant="primary" onClick={(e) => { stop(e); onAsk(lead) }}>Approve</Button>
   }
   return dash
+}
+
+/**
+ * Who has the lead. A sales admin clicks it to assign or reassign; a forward
+ * that failed shows here in red, since the person has not got the email.
+ */
+function OwnerCell({ lead, team, me, canApprove, onAssign }) {
+  const label = ownerLabel(lead, team, me)
+  const failed = lead.forward_status === 'failed'
+  const tone = !lead.assigned_to ? 'text-text-tertiary' : label === 'You' ? 'text-text font-semibold' : 'text-text'
+  if (!canApprove) {
+    return <span className={`text-xs ${tone}`}>{label}</span>
+  }
+  return (
+    <span onClick={stop} className="block">
+      {lead.assigned_to
+        ? <button type="button" onClick={() => onAssign(lead)} title="Assign to someone else"
+            className={`text-xs hover:underline focus:outline-none focus-visible:ring-1 focus-visible:ring-amber-400 ${tone}`}>{label}</button>
+        : <Button size="xs" variant="secondary" onClick={() => onAssign(lead)}>Assign</Button>}
+      {failed && <span className="block text-[10px] font-semibold text-red-600">{FORWARD_LABEL.failed}</span>}
+    </span>
+  )
+}
+
+/**
+ * Under an opened row: who has it, since when, and whether the customer's
+ * email reached them. A failed forward says why and offers to try again.
+ */
+function OwnerLine({ lead, team, me, canApprove, onForward }) {
+  const [busy, setBusy] = useState(false)
+  if (!lead.assigned_to) return null
+  const person = team.find((m) => m.user_id === lead.assigned_to)
+  const who = lead.assigned_to === me ? 'you' : person ? (person.full_name || person.email) : 'someone who has left the team'
+  async function again() {
+    setBusy(true)
+    await onForward(lead)
+    setBusy(false)
+  }
+  return (
+    <div className="px-4 pt-3 md:pl-[8.25rem] text-[11px] text-text-secondary flex flex-wrap items-center gap-x-2 gap-y-1">
+      <span>Assigned to <span className="font-semibold text-text">{who}</span>{lead.assigned_at ? ` · ${when(lead.assigned_at)}` : ''}</span>
+      {lead.forward_status === 'sent' && <span className="text-sage-700">· {FORWARD_LABEL.sent}{lead.forwarded_at ? ` ${when(lead.forwarded_at)}` : ''}</span>}
+      {lead.forward_status === 'sending' && <span>· {FORWARD_LABEL.sending}</span>}
+      {lead.forward_status === 'failed' && (
+        <>
+          <span className="text-red-600 font-semibold">· {FORWARD_LABEL.failed}: {lead.forward_error}</span>
+          {canApprove && <Button size="xs" variant="secondary" onClick={again} disabled={busy}>{busy ? <Spinner size="sm" /> : null}Try again</Button>}
+        </>
+      )}
+    </div>
+  )
 }
 
 /**
@@ -116,7 +173,7 @@ function CardWaiting({ lead, canApprove, onAsk }) {
   )
 }
 
-function Row({ lead, open, onToggle, onReview, onSetProject, workspaceId, mailboxes, canApprove, onAsk }) {
+function Row({ lead, open, onToggle, onReview, onSetProject, workspaceId, mailboxes, canApprove, onAsk, team, me, onAssign, onForward }) {
   const v = effectiveVerdict(lead)
   const v2 = (lead.criteria_version || 1) >= 2
   const junk = lead.folder === 'junk'
@@ -165,12 +222,16 @@ function Row({ lead, open, onToggle, onReview, onSetProject, workspaceId, mailbo
         <Cell label="Verdict" className="md:text-right">
           <VerdictTag verdict={v} corrected={Boolean(lead.human_verdict && lead.human_verdict !== lead.verdict)} />
         </Cell>
+        <Cell label="Owner">
+          <OwnerCell lead={lead} team={team} me={me} canApprove={canApprove} onAssign={onAssign} />
+        </Cell>
         <Cell label="CRM" className="md:text-right">
           <CrmCell lead={lead} canApprove={canApprove} onAsk={onAsk} />
         </Cell>
       </div>
       {open && (
         <div className="border-t border-border bg-white">
+          <OwnerLine lead={lead} team={team} me={me} canApprove={canApprove} onForward={onForward} />
           {hasTabs ? (
             <>
               <div role="tablist" aria-label="Lead" className="flex gap-1 px-4 pt-3 md:pl-[8.25rem]">
@@ -194,11 +255,74 @@ function Row({ lead, open, onToggle, onReview, onSetProject, workspaceId, mailbo
   )
 }
 
+/** The team as choices, the sales admins marked. */
+function PersonOptions({ team }) {
+  return team.map((m) => (
+    <option key={m.user_id} value={m.user_id}>{m.full_name || m.email}{m.approver ? ' (sales admin)' : ''}</option>
+  ))
+}
+
+/** What the person gets when a lead is assigned: the email forwarded, from where. */
+function forwardWords(lead, person) {
+  const name = person ? shortName(person) : 'They'
+  return lead.source === 'email'
+    ? `${name} gets the customer's email forwarded from ${lead.mailbox || 'the mailbox it came to'} now, attachments and all, and replies from there.`
+    : `${name} gets this website enquiry by email now, with the customer as the reply address.`
+}
+
+/**
+ * "Assign to whom?": one person on the team. Assigning forwards the email
+ * at once, so the dialog says so before anything is sent.
+ */
+function AssignDialog({ lead, team, busy, error, onCancel, onConfirm }) {
+  const [to, setTo] = useState(lead.assigned_to || '')
+  const person = team.find((m) => m.user_id === to)
+  const same = to && to === lead.assigned_to
+  const canClear = lead.assigned_to && !lead.approved_at && !lead.crm_status
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(28,35,33,0.45)' }} onClick={busy ? undefined : onCancel}>
+      <div role="dialog" aria-modal="true" aria-labelledby="assign-title" onClick={stop}
+        className="bg-white shadow-dropdown w-full max-w-md border border-border animate-fade-scale p-6 space-y-4">
+        <h3 id="assign-title" className="font-semibold text-text text-sm">{lead.assigned_to ? 'Assign this lead to someone else?' : 'Who works this lead?'}</h3>
+        <p className="text-xs text-text" dir="auto">{lead.company || lead.name || lead.email}: {lead.summary || lead.subject}</p>
+        <Select label="Assign to" value={to} onChange={(e) => setTo(e.target.value)}>
+          <option value="">Choose a person…</option>
+          <PersonOptions team={team} />
+        </Select>
+        {!team.length && <p className="text-xs text-red-600">No one is on this company's sales team yet.</p>}
+        {to && (
+          <p className="text-xs text-text-secondary leading-relaxed">
+            {same ? `${shortName(person)} has it already: this sends the email to them again.` : forwardWords(lead, person)}
+            {lead.crm_status === 'sent' && !same ? ' They become its salesperson in Odoo too.' : ''}
+          </p>
+        )}
+        {error && <p className="text-xs text-red-600">{error}</p>}
+        <div className="flex gap-3 pt-1">
+          <Button variant="secondary" className="flex-1 justify-center" disabled={busy} onClick={onCancel}>Cancel</Button>
+          <Button className="flex-1 justify-center" disabled={busy || !to} onClick={() => onConfirm(to)}>
+            {busy ? <Spinner size="sm" /> : null}{busy ? 'Sending…' : same ? 'Send again' : 'Assign and forward'}
+          </Button>
+        </div>
+        {canClear && (
+          <button type="button" disabled={busy} onClick={() => onConfirm(null)} className="text-[11px] text-text-tertiary hover:text-text underline">
+            Take it off {shortName(team.find((m) => m.user_id === lead.assigned_to)) || 'them'} (no one has it)
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
+
 /**
  * "Send this lead to Odoo?": exactly what will be sent, and what happens if
  * Odoo is not connected yet. Nothing is sent until the button is pressed.
+ * It goes with a salesperson: the one it is assigned to, or one chosen here
+ * (which forwards them the email, as Assign does).
  */
-function ApproveDialog({ lead, busy, error, onCancel, onConfirm }) {
+function ApproveDialog({ lead, team, busy, error, onCancel, onConfirm }) {
+  const [to, setTo] = useState(lead.assigned_to || '')
+  const person = team.find((m) => m.user_id === to)
+  const changing = to && to !== lead.assigned_to
   const phones = phonesOf(lead)
   const rows = [
     ['Company', lead.company], ['Contact', lead.name], ['Email', lead.email], ['Phone', phones.join(', ')],
@@ -221,15 +345,20 @@ function ApproveDialog({ lead, busy, error, onCancel, onConfirm }) {
             </div>
           ))}
         </dl>
+        <Select label="Assigned to" value={to} onChange={(e) => setTo(e.target.value)} disabled={lead.crm_status === 'failed' && Boolean(lead.assigned_to)}>
+          <option value="">Choose who works it…</option>
+          <PersonOptions team={team} />
+        </Select>
+        {changing && <p className="text-xs text-text-secondary leading-relaxed">{forwardWords(lead, person)}</p>}
         <p className="text-xs text-text-secondary leading-relaxed">
-          It gets its battle card here, and becomes a lead in Odoo CRM with the email, the criteria and the agent's questions. It can't be sent twice.
+          It gets its battle card here, and becomes a lead in Odoo CRM with {person ? shortName(person) : 'them'} as its salesperson, the email, the criteria and the agent's questions. It can't be sent twice.
           {notQualified ? ' Approving also marks it qualified.' : ''}
           {' '}If Odoo isn't connected yet, it is marked approved and sent as soon as it is.
         </p>
         {error && <p className="text-xs text-red-600">{error}</p>}
         <div className="flex gap-3 pt-1">
           <Button variant="secondary" className="flex-1 justify-center" disabled={busy} onClick={onCancel}>Cancel</Button>
-          <Button className="flex-1 justify-center" disabled={busy} onClick={onConfirm}>
+          <Button className="flex-1 justify-center" disabled={busy || !to} onClick={() => onConfirm(to)}>
             {busy ? <Spinner size="sm" /> : null}{busy ? 'Sending…' : 'Approve and send'}
           </Button>
         </div>
@@ -238,7 +367,7 @@ function ApproveDialog({ lead, busy, error, onCancel, onConfirm }) {
   )
 }
 
-export default function LeadsBoard({ workspaceId, onReview, refreshKey = 0, mailboxes = [], canApprove = false }) {
+export default function LeadsBoard({ workspaceId, onReview, refreshKey = 0, mailboxes = [], canApprove = false, team = [], me = '' }) {
   const [filters, setFilters] = useState(EMPTY_FILTERS)
   // The search box waits for a pause in typing before it asks the database.
   const [searchText, setSearchText] = useState('')
@@ -261,14 +390,14 @@ export default function LeadsBoard({ workspaceId, onReview, refreshKey = 0, mail
     if (!workspaceId) return
     wanted.current = key
     try {
-      const r = await fetchLeadsPage(workspaceId, { filters, page })
+      const r = await fetchLeadsPage(workspaceId, { filters, page, me })
       if (wanted.current !== key) return
       if (!r.rows.length && r.total && page > 0) return setPage(pageCount(r.total) - 1)
       setList({ key, ...r, error: '' })
     } catch (err) {
       if (wanted.current === key) setList({ key, rows: [], total: 0, error: err.message || String(err) })
     }
-  }, [workspaceId, filters, page, key])
+  }, [workspaceId, filters, page, key, me])
 
   useEffect(() => { queueMicrotask(load) }, [load])
 
@@ -296,13 +425,33 @@ export default function LeadsBoard({ workspaceId, onReview, refreshKey = 0, mail
   // any, stays on the row (Retry) rather than in the dialog.
   const [asking, setAsking] = useState(null)
   const [approving, setApproving] = useState({ busy: false, error: '' })
-  async function approve() {
+  async function approve(assignTo) {
     setApproving({ busy: true, error: '' })
-    const r = await leadsApi('approve', workspaceId, { lead_id: asking.id })
+    const r = await leadsApi('approve', workspaceId, { lead_id: asking.id, assign_to: assignTo })
     if (r.error) return setApproving({ busy: false, error: r.error })
     replaceRow(asking.id, r.lead)
     setApproving({ busy: false, error: '' })
     setAsking(null)
+  }
+
+  // Assign → confirm → the email is forwarded. A failed forward stays on the
+  // row (with Try again), as an Odoo refusal does.
+  const [assigning, setAssigning] = useState(null)
+  const [assignState, setAssignState] = useState({ busy: false, error: '' })
+  async function assign(userId) {
+    setAssignState({ busy: true, error: '' })
+    const r = await leadsApi('assign', workspaceId, { lead_id: assigning.id, user_id: userId })
+    if (r.error) return setAssignState({ busy: false, error: r.error })
+    replaceRow(assigning.id, r.lead)
+    setActionError(r.odooError ? `Assigned here, but the salesperson in Odoo was not changed: ${r.odooError}` : '')
+    setAssignState({ busy: false, error: '' })
+    setAssigning(null)
+  }
+  async function forwardAgain(lead) {
+    const r = await leadsApi('forward', workspaceId, { lead_id: lead.id })
+    if (r.error) return setActionError(r.error)
+    setActionError('')
+    replaceRow(lead.id, r.lead)
   }
 
   const set = (k) => (e) => { setFilters((f) => ({ ...f, [k]: e.target.value })); setPage(0); setOpen(null) }
@@ -320,9 +469,15 @@ export default function LeadsBoard({ workspaceId, onReview, refreshKey = 0, mail
   return (
     <div ref={top} className="bg-white border border-border min-w-0 scroll-mt-4">
       {/* ── Filters ── */}
-      <div className="p-4 border-b border-border grid grid-cols-2 md:grid-cols-4 xl:grid-cols-[1.3fr_1.1fr_1fr_1fr_1fr_1fr_1fr_1.5fr] gap-3 items-end">
+      <div className="p-4 border-b border-border grid grid-cols-2 md:grid-cols-4 xl:grid-cols-[1.3fr_1fr_1.1fr_1fr_1fr_1fr_1fr_1fr_1.5fr] gap-3 items-end">
         <Select label="Show" value={filters.show} onChange={set('show')} className="col-span-2 md:col-span-1">
           {SHOW_OPTIONS.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
+        </Select>
+        <Select label="Owner" value={filters.owner} onChange={set('owner')}>
+          <option value="">Anyone</option>
+          {me && <option value="me">Mine</option>}
+          {canApprove && <option value="none">Unassigned</option>}
+          {canApprove && team.filter((m) => m.user_id !== me).map((m) => <option key={m.user_id} value={m.user_id}>{m.full_name || m.email}</option>)}
         </Select>
         <Select label="Came in" value={filters.channel} onChange={set('channel')}>
           <option value="">Anywhere</option>
@@ -365,7 +520,7 @@ export default function LeadsBoard({ workspaceId, onReview, refreshKey = 0, mail
 
       {/* ── Header (desktop) ── */}
       <div className={`hidden ${GRID} px-4 py-2 border-b border-border text-[10px] font-semibold text-text-tertiary uppercase tracking-wide`}>
-        <span>Received</span><span>From</span><span>Wants</span><span>Who</span><span>Request</span><span>Project</span><span>Source</span><span className="text-right">Verdict</span><span className="text-right">CRM</span>
+        <span>Received</span><span>From</span><span>Wants</span><span>Who</span><span>Request</span><span>Project</span><span>Source</span><span className="text-right">Verdict</span><span>Owner</span><span className="text-right">CRM</span>
       </div>
 
       {loading ? (
@@ -378,7 +533,8 @@ export default function LeadsBoard({ workspaceId, onReview, refreshKey = 0, mail
         <ul className="divide-y divide-border">
           {list.rows.map((l) => (
             <Row key={l.id} lead={l} open={open === l.id} onToggle={() => setOpen(open === l.id ? null : l.id)} onReview={review}
-              onSetProject={setProject} workspaceId={workspaceId} mailboxes={mailboxes} canApprove={canApprove} onAsk={(lead) => { setApproving({ busy: false, error: '' }); setAsking(lead) }} />
+              onSetProject={setProject} workspaceId={workspaceId} mailboxes={mailboxes} canApprove={canApprove} onAsk={(lead) => { setApproving({ busy: false, error: '' }); setAsking(lead) }}
+              team={team} me={me} onAssign={(lead) => { setAssignState({ busy: false, error: '' }); setAssigning(lead) }} onForward={forwardAgain} />
           ))}
         </ul>
       )}
@@ -395,7 +551,8 @@ export default function LeadsBoard({ workspaceId, onReview, refreshKey = 0, mail
           </div>
         )}
       </div>
-      {asking && <ApproveDialog lead={asking} busy={approving.busy} error={approving.error} onCancel={() => setAsking(null)} onConfirm={approve} />}
+      {asking && <ApproveDialog lead={asking} team={team} busy={approving.busy} error={approving.error} onCancel={() => setAsking(null)} onConfirm={approve} />}
+      {assigning && <AssignDialog lead={assigning} team={team} busy={assignState.busy} error={assignState.error} onCancel={() => setAssigning(null)} onConfirm={assign} />}
     </div>
   )
 }

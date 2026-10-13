@@ -19,8 +19,11 @@ import { askModel, askPhonesInImages, loadBrand, monthSpent, upsertLead } from '
 //   history    1 July → 1 October 2026, once, for the "Jul–Sep 2026" tab;
 //              it walks history_cursor forward and stops when done
 //
-// Nothing is sent, moved, tagged or deleted: the token is Mail.Read only, at
-// sign-in and at every renewal (READ_SCOPES). Attachments are never fetched.
+// Nothing is moved, tagged or deleted: the token is Mail.Read only, at
+// sign-in and at every renewal (READ_SCOPES). The one exception, since
+// 2026-10-13: a mailbox the admin signed in to again with "Allow forwarding"
+// (can_send, Mail.Send) forwards a lead's email to the salesperson it is
+// assigned to, and nothing else. Attachments are never fetched.
 // Skipped mail is not stored at all.
 //
 //   deps.db / deps.model / deps.now   as in _intake.js
@@ -168,10 +171,25 @@ export function messageToEnvelope(msg) {
 
 const authError = (reason) => Object.assign(new Error(reason), { kind: 'auth', reason })
 
+/**
+ * Reading, plus forwarding a lead's email to the salesperson it is assigned
+ * to (2026-10-13). Asked for only when the admin chooses "Allow forwarding"
+ * and signs in as the mailbox again. Mail.Send forwards and sends; it still
+ * cannot move, change or delete anything.
+ */
+export const SEND_SCOPES = `${READ_SCOPES} Mail.Send`
+
+/**
+ * What a mailbox's token is renewed with: exactly what it was granted. A
+ * renewal asking for more than the mailbox gave is refused, and the reading
+ * would stop with it.
+ */
+export const scopesFor = (mb) => (mb?.can_send ? SEND_SCOPES : READ_SCOPES)
+
 /** The sign-in settings for this mailbox: another organisation's renews against its own tenant. */
 const configFor = (deps, mb) => (mb?.tenant ? { ...deps.ms, tenant: mb.tenant } : deps.ms)
 
-/** A usable read-only access token for the mailbox, renewed (with READ_SCOPES) when near expiry. */
+/** A usable access token for the mailbox, renewed (with what it was granted, scopesFor) when near expiry. */
 export async function accessToken(deps, mb) {
   const [row] = await deps.db(`lead_mailbox_secrets?mailbox_id=eq.${mb.id}&select=secret`) || []
   if (!row) return { error: authError('No stored sign-in for this mailbox. Connect it again.') }
@@ -181,7 +199,7 @@ export async function accessToken(deps, mb) {
   const now = deps.now().getTime()
   if (t.at && t.exp > now + 5 * 60_000) return { token: t.at }
   try {
-    const got = await refreshTokens({ config: configFor(deps, mb), refreshToken: t.rt, fetch: deps.fetch, scopes: READ_SCOPES })
+    const got = await refreshTokens({ config: configFor(deps, mb), refreshToken: t.rt, fetch: deps.fetch, scopes: scopesFor(mb) })
     const packed = packTokens({ ...got, refresh_token: got.refresh_token || t.rt }, now)
     await deps.db('lead_mailbox_secrets?on_conflict=mailbox_id', {
       method: 'POST', prefer: 'resolution=merge-duplicates,return=minimal',
@@ -504,9 +522,12 @@ export async function finishConnect(deps, { claims, code, redirectUri }) {
   const config = claims.o ? { ...deps.ms, tenant: 'organizations' } : deps.ms
   let tokens
   try {
-    tokens = await exchangeCode({ config, code, redirectUri, fetch: deps.fetch, scopes: READ_SCOPES })
+    tokens = await exchangeCode({ config, code, redirectUri, fetch: deps.fetch, scopes: claims.s ? SEND_SCOPES : READ_SCOPES })
   } catch { return { error: 'token' } }
   if (!tokens.refresh_token) return { error: 'token' }
+  // What Microsoft actually granted, not what was asked: an admin may have
+  // allowed reading only. A sign-in without forwarding takes it away again.
+  const canSend = Boolean(claims.s) && /(^|[\s/])Mail\.Send(\s|$)/i.test(String(tokens.scope || ''))
   const me = await whoAmI({ accessToken: tokens.access_token, fetch: deps.fetch })
   if (!me.ok) return { error: /licence|mailbox/i.test(me.error?.reason || '') ? 'no_mailbox' : 'graph' }
   const email = lower(me.email)
@@ -529,13 +550,13 @@ export async function finishConnect(deps, { claims, code, redirectUri }) {
   if (mb) {
     ;[mb] = await deps.db(`lead_mailboxes?id=eq.${mb.id}`, {
       method: 'PATCH', prefer: 'return=representation',
-      body: { status: 'active', last_error: '', display_name: me.displayName || mb.display_name, label: mb.label || label, tenant: tenant || mb.tenant || '', updated_at: now.toISOString() },
+      body: { status: 'active', last_error: '', display_name: me.displayName || mb.display_name, label: mb.label || label, tenant: tenant || mb.tenant || '', can_send: canSend, updated_at: now.toISOString() },
     }) || []
   } else {
     ;[mb] = await deps.db('lead_mailboxes', {
       method: 'POST', prefer: 'return=representation',
       body: {
-        workspace_id: claims.ws, email, label, tenant, display_name: me.displayName || '', status: 'active',
+        workspace_id: claims.ws, email, label, tenant, display_name: me.displayName || '', status: 'active', can_send: canSend,
         read_from: NEW_LEADS_FROM, created_by: claims.uid || null,
       },
     }) || []
@@ -545,7 +566,7 @@ export async function finishConnect(deps, { claims, code, redirectUri }) {
     method: 'POST', prefer: 'resolution=merge-duplicates,return=minimal',
     body: { mailbox_id: mb.id, workspace_id: claims.ws, secret: deps.seal(packTokens(tokens, now.getTime())), updated_at: now.toISOString() },
   })
-  return { ok: true, email: label }
+  return { ok: true, email: label, canSend }
 }
 
 /** Vercel answers at most 4.5 MB; leave room for headers. */
@@ -577,7 +598,7 @@ async function findMessage(deps, { workspaceId, leadId, select }) {
   const found = await deps.fetch(`${GRAPH}/me/messages?${q}`, { headers: auth })
   const msg = found.ok ? (await found.json())?.value?.[0] : null
   if (!msg?.id) return { status: 404, error: `This email is no longer in ${lead.mailbox || 'the mailbox'}: it was deleted there.` }
-  return { lead, mailboxes, msg, auth }
+  return { lead, mailboxes, mb, msg, auth }
 }
 
 /**
@@ -609,4 +630,83 @@ export async function emailFile(deps, { workspaceId, leadId }) {
   if (bytes.length > MAX_EMAIL_FILE) return { status: 413, error: 'This email is too large to download here (big attachments). Open it in Outlook on the web.' }
   const name = (String(lead.subject || 'email').replace(/[\\/:*?"<>|\r\n]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80) || 'email')
   return { bytes, filename: `${name}.eml` }
+}
+
+// ─── Forwarding a lead to its salesperson (2026-10-13) ─────────────────────
+
+const escHtml = (v) => String(v ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
+const mailboxName = (mb) => mb?.label || mb?.email || 'the mailbox'
+const cannotSend = (mb) => `${mailboxName(mb)} can only read. On Agent settings, choose "Allow forwarding" on it and sign in as it again.`
+
+/** Graph's answer to a send, as { ok } or { ok:false, error }. 202 is success. */
+async function graphSend(deps, auth, path, body) {
+  const r = await deps.fetch(`${GRAPH}${path}`, {
+    method: 'POST', headers: { ...auth, 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  })
+  if (r.ok) return { ok: true }
+  let j = {}
+  try { j = await r.json() } catch { /* not JSON */ }
+  const code = j?.error?.code || ''
+  if (r.status === 403 || /AccessDenied/i.test(code)) return { ok: false, denied: true, error: `Microsoft refused to send (${code || r.status}).` }
+  return { ok: false, error: `Microsoft answered ${r.status}${code ? ` (${code})` : ''}: ${String(j?.error?.message || '').slice(0, 200)}` }
+}
+
+/** The note on top of the forward: who assigned it and where it lives. */
+export function forwardNote({ toName = '', byName = '', appUrl = '' } = {}) {
+  const hi = toName ? `${toName.split(' ')[0]}, this` : 'This'
+  return [
+    `${hi} enquiry is assigned to you${byName ? ` by ${byName}` : ''}.`,
+    appUrl ? `It is on your Leads page: ${appUrl}/leads` : '',
+    'Reply to the customer from this email, so the conversation stays with you.',
+  ].filter(Boolean).join('\n')
+}
+
+/** A website enquiry as an email body: what they wrote and how to reach them. */
+export function websiteLeadHtml(lead, note) {
+  const rows = [['Name', lead.name], ['Company', lead.company], ['Email', lead.email], ['Phone', (lead.phones || []).join(', ') || lead.phone], ['Summary', lead.summary]]
+    .filter(([, v]) => v)
+    .map(([k, v]) => `<tr><td style="padding:2px 12px 2px 0;color:#666">${escHtml(k)}</td><td>${escHtml(v)}</td></tr>`).join('')
+  return `<p>${escHtml(note).replace(/\n/g, '<br>')}</p><table>${rows}</table>`
+    + `<p><b>Their message:</b></p><blockquote>${escHtml(lead.message || '').replace(/\n/g, '<br>')}</blockquote>`
+}
+
+/**
+ * Send a lead to the salesperson it is assigned to. An email lead is
+ * FORWARDED from the mailbox it arrived in (attachments and all; it sits in
+ * that mailbox's Sent Items). A website enquiry has no email, so it is
+ * written out and sent from the first mailbox allowed to send, with the
+ * customer as Reply-To.
+ *   to: { email, name }   by: the assigner's name   appUrl: for the note
+ * Returns { ok, from } or { ok:false, error }.
+ */
+export async function forwardLead(deps, { workspaceId, leadId, to, by = '', appUrl = '' }) {
+  if (!to?.email) return { ok: false, error: 'No one to forward it to.' }
+  const recipients = [{ emailAddress: { address: to.email, name: to.name || '' } }]
+  const note = forwardNote({ toName: to.name, byName: by, appUrl })
+  const [lead] = await deps.db(`leads?id=eq.${leadId}&workspace_id=eq.${workspaceId}&select=id,source,mailbox,name,company,email,phone,phones,subject,summary,message`) || []
+  if (!lead) return { ok: false, error: 'That lead is not in this company.' }
+
+  if (lead.source === 'email') {
+    const f = await findMessage(deps, { workspaceId, leadId, select: 'id' })
+    if (f.error) return { ok: false, error: f.error }
+    if (!f.mb.can_send) return { ok: false, error: cannotSend(f.mb) }
+    const out = await graphSend(deps, f.auth, `/me/messages/${encodeURIComponent(f.msg.id)}/forward`, { comment: note, toRecipients: recipients })
+    if (!out.ok) return { ok: false, error: out.denied ? cannotSend(f.mb) : out.error }
+    return { ok: true, from: mailboxName(f.mb) }
+  }
+
+  const mailboxes = await deps.db(`lead_mailboxes?workspace_id=eq.${workspaceId}&can_send=eq.true&status=eq.active&select=*&order=created_at`) || []
+  const mb = mailboxes[0]
+  if (!mb) return { ok: false, error: 'No connected mailbox may send yet. On Agent settings, choose "Allow forwarding" on info@ and sign in as it again.' }
+  const tok = await accessToken(deps, mb)
+  if (tok.error) return { ok: false, error: tok.error.reason || tok.error.message }
+  const message = {
+    subject: `Website enquiry: ${lead.summary || lead.subject || lead.company || lead.name || 'new lead'}`.slice(0, 200),
+    body: { contentType: 'HTML', content: websiteLeadHtml(lead, note) },
+    toRecipients: recipients,
+    ...(lead.email ? { replyTo: [{ emailAddress: { address: lead.email, name: lead.name || '' } }] } : {}),
+  }
+  const out = await graphSend(deps, { Authorization: `Bearer ${tok.token}` }, '/me/sendMail', { message, saveToSentItems: true })
+  if (!out.ok) return { ok: false, error: out.denied ? cannotSend(mb) : out.error }
+  return { ok: true, from: mailboxName(mb) }
 }

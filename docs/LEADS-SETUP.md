@@ -234,10 +234,11 @@ A sales person signs in to the same address (or leads.arak-sa.com) and sees
 the leads list and nothing else: no sidebar, no marketing app, no agent
 settings. Two kinds (2026-10-12):
 
-- **Sales**: filter, open a lead, read the email, call the numbers, open it
-  in Outlook, and correct the agent's verdict.
-- **Sales admin**: the same, plus **Approve**, which sends a lead to Odoo
-  (section 7). The access admin can always approve.
+- **Sales**: sees **only the leads assigned to them** (section 8), plus every
+  website enquiry if their seat has that switch on. Filter, open a lead, read
+  the email, call the numbers, open it in Outlook, correct the agent's verdict.
+- **Sales admin**: sees every lead, **assigns** them (section 8) and
+  **Approves** them into Odoo (section 7). The access admin can always do both.
 
 1. **Team & Access** → Add someone → their email → **Sales** or **Sales
    admin** → tick the company (Arak) → Add.
@@ -252,8 +253,10 @@ This is enforced in the database, not just hidden on screen
 Their companies are "sales seats", which only the leads and mailbox-list
 policies read, so every marketing table and server function refuses them.
 They cannot create a company either. In `/api/leads`, a seat opens `review`,
-`email_file` and `approve`, and `approve` also asks the database
-(`can_approve_leads`) whether they are a sales admin.
+`email_file`, `approve`, `assign`, `forward` and the battle card, only on a
+lead the database lets them read (`can_see_lead`, `20261018_lead_assignment`);
+`approve`, `assign` and `forward` also ask `can_approve_leads` whether they are
+a sales admin.
 
 **Open in Outlook** opens the email in Outlook on the web, in the mailbox it
 arrived in (a.rak@arak-sa.com for info@arak-sa.com, info@clb-sa.com). The
@@ -282,7 +285,9 @@ reasons for the weekly review, where each becomes a rule fix and a test case.
 ## 7. Approve into Odoo
 
 **Approve** (sales admins and the access admin) asks for confirmation,
-showing exactly what will be sent, then creates a lead in Odoo CRM: the
+showing exactly what will be sent and **who it is assigned to** (chosen there
+if no one has it yet: a lead is never approved without someone), then creates
+a lead in Odoo CRM with that person as its **Salesperson**: the
 title, contact, company, email and first number as fields; the criteria,
 every number, the message, the agent's questions and who approved it in the
 description; tags "Lead Agent", where it came in (e.g. "Arak website") and
@@ -293,13 +298,29 @@ Until Odoo is connected, an approved lead says **Approved · waiting for
 Odoo**; connecting sends every waiting one. If Odoo refuses one, the row says
 so with Odoo's reason and a **Retry**.
 
-To connect (Leads → **Agent settings** → **CRM (Odoo)** → Connect Odoo):
+To connect, in this order:
 
-1. In Odoo, ideally as its own user (e.g. "Lead Agent", with the CRM user
-   right) so its leads show who made them: avatar → **Preferences** →
-   **Account Security** → **New API Key**. Copy it.
-2. Odoo address `https://arak-co.odoo.com` (the database fills itself in on
-   Odoo Online), the user's login email, and the key → **Save and test**.
+1. **Check the plan.** Odoo Online's external API is the **Custom** plan's
+   (odoo.com → My account → My subscriptions shows it). On Standard, step 5
+   fails with Odoo's own refusal. Changing plan is a cost decision.
+2. **A user for the agent** (Settings → Users → New): name "Lead Agent", its
+   own email as login, **Sales: Administrator** or **User: All Documents**.
+   It must be able to see every lead and give them to other people; an "Own
+   Documents" user cannot. This is a paid seat. Do not use a person's own
+   login: every lead would say that person made it.
+3. **Each salesperson** (Ammar, Haitham…) has an Odoo user whose login is the
+   same email they use here, with **Sales: User: Own Documents Only**. That
+   setting is what keeps Ammar's leads out of Haitham's sight in Odoo. If a
+   login differs, type it in **Sales team → Odoo login**.
+4. **The key:** sign in to Odoo as Lead Agent → avatar → **My Preferences**
+   (or Preferences) → **Account Security** → **New API Key** → name it "Lead
+   Agent" → choose the longest duration offered (persistent if it is there) →
+   copy it. It is shown once.
+5. Leads → **Agent settings** → **CRM (Odoo)** → **Connect Odoo**: address
+   `https://arak-co.odoo.com` (the database fills itself in), Lead Agent's
+   login email, the key → **Save and test**.
+6. **Sales team → Find them in Odoo**: says who Odoo could not find, before
+   any lead is approved.
 
 The test only reads: it signs in, checks the user may create CRM leads, and
 counts them. **On Odoo Online the API is officially the Custom plan's**: if
@@ -309,6 +330,41 @@ plan is a cost decision. The key is stored sealed and never shown again.
 How it talks to Odoo: JSON-RPC (`api/leads/_odoo.js`), because 18.0 has no
 JSON-2 API. Odoo removes JSON-RPC in Online 21.1; that file is the only one
 to change then.
+
+## 8. Assigning a lead, and forwarding its email
+
+A sales admin (or the access admin) gives each lead to one person, at any
+time: **Owner** column → **Assign** (or click the name to reassign) → choose →
+**Assign and forward**. That one action:
+
+- records the owner here: the lead now shows on that person's list, and on
+  no other salesperson's (sales admins see all);
+- **forwards the customer's original email** to them, from the info@ mailbox
+  it arrived in, attachments and all. They reply to the customer from that
+  forward, from their own mailbox. A website enquiry has no email, so it is
+  written out and sent from info@arak-sa.com with the customer as Reply-To;
+- if the lead is already in Odoo, makes them its Salesperson there too (Odoo
+  then emails them "You have been assigned").
+
+An opened row says who has it, since when, and whether the email reached
+them. A forward that failed says why and has **Try again**. Before approval a
+lead can be taken off everyone; an approved lead can only change hands,
+because in Odoo an unassigned lead is visible to every salesperson.
+
+**Forwarding needs the mailbox's permission once.** The mailboxes were
+connected read only. On **Agent settings → Connection**, each mailbox says
+"Read only" or "Forwards leads"; **Allow forwarding** signs in as that
+mailbox again asking for Mail.Send as well (send only: still nothing can be
+moved or deleted). For **info@clb-sa.com** (another Microsoft 365), CLB's
+admin first opens the approval link on that page again, because the app now
+asks for Mail.Send there too; then **Allow forwarding**. Until then, assigning
+works but the forward says "can only read".
+
+**Who sees what** (`can_see_lead` in `20261018_lead_assignment.sql`): a
+salesperson reads leads assigned to them; a sales admin all of the company's;
+a seat with **Also sees every website enquiry** (Agent settings → Sales team)
+also every website-form lead. Battle cards follow their lead. This is the
+database's rule, so the server and every list obey it.
 
 ## Changing or stopping it
 

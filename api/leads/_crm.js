@@ -7,13 +7,17 @@
 // A lead goes to Odoo once. Two guards: the database claim below (only one
 // request can move a lead to 'sending'), and createLead looking for our
 // reference in Odoo first, for a push that died after Odoo had saved it.
+//
+// Since 2026-10-13 every lead goes in with its salesperson (user_id): under
+// Odoo's "Own Documents Only" an unassigned lead is visible to every
+// salesperson, so a lead with no one assigned is not sent at all.
 
 import {
   SENDER_LABEL, PROJECT_LABEL, REQUEST_LABEL, FOLDER_LABEL, PHILIPS_LABEL,
   channelLabel, phonesOf, effectiveVerdict, projectOf,
 } from '../../src/lib/leads/view.js'
 import { riyadhTime } from './_export.js'
-import { normalizeUrl, defaultDb, testConnection, createLead } from './_odoo.js'
+import { normalizeUrl, defaultDb, testConnection, createLead, findUserId } from './_odoo.js'
 
 const isUuid = (v) => /^[0-9a-f-]{36}$/i.test(String(v || ''))
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
@@ -129,9 +133,37 @@ export async function disconnectCrm(deps, workspaceId) {
   return crmStatus(deps, workspaceId)
 }
 
+// ─── The salesperson in Odoo ───────────────────────────────────────────────
+
+export const odooCfg = (conn) => ({ url: conn.url, db: conn.db, login: conn.login, apiKey: conn.apiKey })
+
+/** "Ammar Ahmed (ammar@…)" or the email, for messages. */
+const nameOf = (u) => (u?.full_name ? `${u.full_name} (${u.email})` : u?.email || 'That person')
+
+/**
+ * The Odoo user id of the salesperson a lead is assigned to. Found in Odoo
+ * by their login (their email here, or the Odoo login set on their seat) and
+ * kept on the seat, so Odoo is asked once per person. Throws, in words the
+ * admin can act on, when there is no one or Odoo has no such user.
+ */
+export async function odooOwner(deps, conn, workspaceId, userId) {
+  if (!isUuid(userId)) throw new Error('No one is assigned to this lead. Assign it to a salesperson first.')
+  const [[seat], [person]] = await Promise.all([
+    deps.db(`sales_seats?user_id=eq.${userId}&workspace_id=eq.${workspaceId}&select=odoo_login,odoo_user_id`).then((r) => r || []),
+    deps.db(`user_access?user_id=eq.${userId}&select=email,full_name`).then((r) => r || []),
+  ])
+  if (!seat) throw new Error(`${nameOf(person)} is no longer on this company's sales team. Assign the lead to someone else.`)
+  if (seat.odoo_user_id) return seat.odoo_user_id
+  const login = seat.odoo_login || person?.email || ''
+  const id = await findUserId(deps.fetch, odooCfg(conn), login)
+  if (!id) throw new Error(`${nameOf(person)} has no user in Odoo with the login ${login}. Add them in Odoo, or set their Odoo login under Sales team.`)
+  await deps.db(`sales_seats?user_id=eq.${userId}&workspace_id=eq.${workspaceId}`, { method: 'PATCH', prefer: 'return=minimal', body: { odoo_user_id: id } })
+  return id
+}
+
 // ─── Approving and sending ─────────────────────────────────────────────────
 
-const LEAD_SELECT = 'id,source,received_at,created_at,name,company,email,phone,phones,subject,message,summary,ask_next,verdict,human_verdict,mailbox,folder,sender_type,source_check,project_type,request_type,philips,email_kind,criteria_version,human_project_type,project_final,approved_at,approved_by,crm_status,crm_id,crm_url,crm_error,crm_sent_at,updated_at'
+const LEAD_SELECT = 'id,source,received_at,created_at,name,company,email,phone,phones,subject,message,summary,ask_next,verdict,human_verdict,mailbox,folder,sender_type,source_check,project_type,request_type,philips,email_kind,criteria_version,human_project_type,project_final,approved_at,approved_by,assigned_to,crm_status,crm_id,crm_url,crm_error,crm_sent_at,updated_at'
 
 /** Claim a lead for sending: only one request can, and only from these states. */
 function claimable(now) {
@@ -160,7 +192,9 @@ async function pushOne(deps, conn, lead, marks = {}) {
   if (!claimed) return null // someone else is sending it, or it is already in Odoo
   try {
     const by = await approverName(deps, claimed.approved_by)
-    const out = await createLead(deps.fetch, { url: conn.url, db: conn.db, login: conn.login, apiKey: conn.apiKey }, odooLeadValues({ ...lead, ...claimed }, { approvedBy: by }), lead.id)
+    const owner = await odooOwner(deps, conn, claimed.workspace_id || lead.workspace_id || conn.workspace_id, claimed.assigned_to)
+    const values = { ...odooLeadValues({ ...lead, ...claimed }, { approvedBy: by }), user_id: owner }
+    const out = await createLead(deps.fetch, odooCfg(conn), values, lead.id)
     const [row] = await deps.db(`leads?id=eq.${lead.id}`, {
       method: 'PATCH', prefer: 'return=representation',
       body: { crm_status: 'sent', crm_id: String(out.id), crm_url: out.url, crm_error: '', crm_sent_at: deps.now().toISOString(), updated_at: deps.now().toISOString() },
@@ -186,6 +220,7 @@ export async function approveLead(deps, { workspaceId, leadId, user }) {
   const [lead] = await deps.db(`leads?id=eq.${leadId}&workspace_id=eq.${workspaceId}&select=${LEAD_SELECT}`) || []
   if (!lead) return { status: 404, error: 'That lead is not in this company.' }
   if (lead.crm_status === 'sent') return { lead, crm: 'already' }
+  if (!lead.assigned_to) return { status: 400, error: 'Assign this lead to a salesperson before approving it.' }
 
   const now = deps.now().toISOString()
   const marks = { updated_at: now }

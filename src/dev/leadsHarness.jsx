@@ -16,7 +16,7 @@ import '../index.css'
 const as = new URLSearchParams(window.location.search).get('as') || 'admin'
 const asSales = as === 'sales' || as === 'sales_admin'
 
-const session = { user: { id: 'u1', email: asSales ? 'sales@example.com' : 'admin@example.com' }, access_token: 'dev' }
+const session = { user: { id: asSales ? 'u1' : 'admin', email: asSales ? 'sales@example.com' : 'admin@example.com' }, access_token: 'dev' }
 const auth = {
   session, user: session.user, accessToken: 'dev', loading: false, isApproved: true, isAccessAdmin: !asSales, isSales: asSales, canApproveLeads: !asSales || as === 'sales_admin',
   workspaces: [{ id: WS, name: 'Harness Co', role: 'owner' }, ...(asSales ? [{ id: 'other', name: 'Other Co', role: 'sales' }] : [])],
