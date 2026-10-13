@@ -11,7 +11,10 @@
 // $30–80, and costs a third prompt style plus a quality cliff wherever the
 // split is drawn slightly wrong.
 
-// Prices in USD per 1,000,000 tokens, as published 2026-09-09.
+// Prices in USD per 1,000,000 tokens. The 5.5 models as published on
+// platform.claude.com/docs/en/about-claude/pricing (read 2026-10-13); cache
+// reads there are 5% of input, not 10%. The older entries stay so rows the
+// ledger already holds still read back against a known model.
 //
 // Cache reads and writes are listed explicitly rather than computed from a
 // multiplier. The multipliers (~0.1× read, ~1.25× write) are documented
@@ -20,6 +23,20 @@
 // supabase/migrations/20260827_agent_spine.sql, which stores the computed cost
 // rather than deriving it on read for the same reason.
 export const MODELS = {
+  'claude-opus-5-5': {
+    label: 'Opus 5.5',
+    input:      4.00,
+    cacheRead:  0.20,
+    cacheWrite: 5.00,
+    output:    20.00,
+  },
+  'claude-sonnet-5-5': {
+    label: 'Sonnet 5.5',
+    input:      2.00,
+    cacheRead:  0.10,
+    cacheWrite: 2.50,
+    output:    10.00,
+  },
   'claude-opus-5': {
     label: 'Opus 5',
     input:      5.00,
@@ -36,12 +53,12 @@ export const MODELS = {
   },
 }
 
-export const DEFAULT_MODEL = 'claude-sonnet-5'
+export const DEFAULT_MODEL = 'claude-sonnet-5-5'
 
 // ─── Jobs → models ─────────────────────────────────────────────────────────
 // Named by what the call is FOR, never by which model it wants. A caller that
 // says `modelFor('synthesise')` keeps working when the mapping changes; one
-// that hardcodes 'claude-opus-5' does not, and there is no way to find every
+// that hardcodes 'claude-opus-5-5' does not, and there is no way to find every
 // such caller later except by grepping and hoping.
 //
 // Opus where a person acts on the output and a wrong answer costs real work.
@@ -49,10 +66,10 @@ export const DEFAULT_MODEL = 'claude-sonnet-5'
 // and shaping rather than judging.
 export const JOBS = {
   // ── Opus: the output someone acts on ──
-  plan:        'claude-opus-5',   // decides what the whole run chases
-  synthesise:  'claude-opus-5',   // writes the brief people read
-  chat:        'claude-opus-5',   // the assistant answering a real question
-  review:      'claude-opus-5',   // critiquing a draft before it goes out
+  plan:        'claude-opus-5-5',   // decides what the whole run chases
+  synthesise:  'claude-opus-5-5',   // writes the brief people read
+  chat:        'claude-opus-5-5',   // the assistant answering a real question
+  review:      'claude-opus-5-5',   // critiquing a draft before it goes out
   // Explaining a screen of numbers in three sentences. Small in tokens and
   // large in consequence: it is the first thing read on the page, it sits
   // directly above the figures it describes, and it is read by someone who
@@ -60,29 +77,29 @@ export const JOBS = {
   // job, so it goes where judgement goes. Measured at $0.023 a press against
   // the real payload on 2026-09-20 — Sonnet would save a cent and buy a
   // worse first paragraph.
-  explain:     'claude-opus-5',
+  explain:     'claude-opus-5-5',
   // Drafting an email that goes to customers or prospects under the company's
   // name. A person edits it, but the draft sets the tone they start from, and
   // three options a person would not send cost more in rewriting than the
   // model saves. A few calls a week.
-  email:       'claude-opus-5',
+  email:       'claude-opus-5-5',
 
   // ── Sonnet: the long middle ──
-  search:      'claude-sonnet-5', // the bounded read-and-gather loop
-  reflect:     'claude-sonnet-5', // what is still unanswered
-  extract:     'claude-sonnet-5', // pulling shaped data out of fetched pages
-  title:       'claude-sonnet-5', // naming a chat thread
-  revise:      'claude-sonnet-5', // rewording one post idea on a person's instruction
+  search:      'claude-sonnet-5-5', // the bounded read-and-gather loop
+  reflect:     'claude-sonnet-5-5', // what is still unanswered
+  extract:     'claude-sonnet-5-5', // pulling shaped data out of fetched pages
+  title:       'claude-sonnet-5-5', // naming a chat thread
+  revise:      'claude-sonnet-5-5', // rewording one post idea on a person's instruction
   // The Monday email drafts (server/agentHandlers/emailWeekly.js). Sonnet by
   // choice: three options a person picks from and edits, once a week, from a
   // context that is already curated down to what matters. The on-demand
   // "Write with AI" in the composer stays on Opus (`email`).
-  email_weekly: 'claude-sonnet-5',
+  email_weekly: 'claude-sonnet-5-5',
   // Compacting the agent's memory. Sonnet rather than a third, cheaper tier:
   // this runs roughly ten times a month, so the saving would be pennies, and
   // the job is genuinely lossy — deciding what the agent never sees again is
   // not where to buy a quality cliff. See the Haiku note at the top.
-  remember:    'claude-sonnet-5',
+  remember:    'claude-sonnet-5-5',
 }
 
 /**

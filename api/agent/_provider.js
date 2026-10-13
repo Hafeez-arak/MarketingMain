@@ -1,5 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk'
-import { modelFor } from '../../src/lib/agent/models.js'
+import { modelFor, MODELS } from '../../src/lib/agent/models.js'
 import { usageRow, normaliseUsage } from '../../src/lib/agent/cost.js'
 import { buildRequest } from '../../src/lib/agent/prompt.js'
 import { spentInMonth, capDecision, monthKey } from '../../src/lib/agent/budget.js'
@@ -20,6 +20,15 @@ import { db } from './_supabase.js'
 // a single caller.
 
 const KEY = process.env.ANTHROPIC_API_KEY || ''
+
+// ── A safety decline is retried, not reported as a failed lens ──
+// Opus 5.5 and Sonnet 5.5 run safety classifiers that can decline a request
+// (HTTP 200, stop_reason "refusal"); benign work can trip them. With
+// `fallbacks: "default"` the API re-runs a declined request on the model
+// Anthropic recommends for that category, inside the same call. Recommended
+// for every caller of these models (2026-10-13). The answering model is
+// `response.model`, which is what the ledger prices.
+const FALLBACK = { betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' }
 const client = KEY ? new Anthropic({ apiKey: KEY }) : null
 
 /**
@@ -140,7 +149,7 @@ export async function callModel({
       // Streamed even when the caller does not consume events: a long tool-loop
       // turn with a large max_tokens can otherwise exceed the SDK's HTTP timeout,
       // and a timeout here bills for the generation and returns nothing.
-      const stream = client.messages.stream(turnParams, { signal: abort.signal })
+      const stream = client.beta.messages.stream({ ...turnParams, ...FALLBACK }, { signal: abort.signal })
 
       // The chat surface passes onText so the browser can type the answer out as
       // it arrives. Everything else ignores it and waits for the final message —
@@ -179,9 +188,13 @@ export async function callModel({
   // week something is going wrong — and a resumed turn is a second billable
   // request, so it gets its own row rather than being folded into the first.
   const bill = async legResponse => {
+    // Priced as the model that answered: after a fallback that is not the
+    // one asked for. An answering model with no price card keeps the asked
+    // one's, rather than recording a zero.
+    const served = MODELS[legResponse?.model] ? legResponse.model : model
     const row = usageRow({
       workspaceId, surface, stage, runId, chatId,
-      model, usage: legResponse?.usage || {}, error,
+      model: served, usage: legResponse?.usage || {}, error,
     })
     totalCost += row.cost_usd || 0
     try {
