@@ -25,6 +25,103 @@ together (using a studio asset as a planned post's media) is a later step.
 
 ---
 
+## Model refresh + two new tools — built 2026-10-13
+
+A market check of every endpoint fal added after the 2026-09-15 review. The
+marketing team chose what to take; everything was checked against fal's live
+schemas and prices on 2026-10-13. **Not yet tried with a real paid call.**
+
+**Swapped models.** Each is a drop-in replacement, and old IDs still work:
+
+| Was | Now | Why |
+|---|---|---|
+| Nano Banana 2 | **Nano Banana 2.1** (`google/nano-banana-2.1`) | Better quality, text and consistency; ~$0.059 vs $0.12 per 2K image |
+| GPT Image 2 | **GPT Image 2.5 Flare** (`openai/gpt-image-2.5/flare/*`) | OpenAI's newer everyday tier, same token rates |
+| Kling 2.5 Turbo Pro | **Kling 3 Pro** (`fal-ai/kling-video/v3/pro/*`) | 3–15s, end frame, $0.112/s ($0.168 with sound) |
+| Kling O1 Edit | **Kling O3 Pro Edit** | Same $0.168/s; edits clips up to 15s (was 10s) |
+| Veo 3.1 Fast | **Veo 3.1 Lite** (`fal-ai/veo3.1/lite`) | About half the price: $0.03–0.08/s |
+
+Saved rows and storyboards keep the model ID they were made with, and the
+workflow falls back to Seedance 2.0 for an ID it doesn't know. So the retired
+IDs are **aliases** in both `videoModels.js` (`MODEL_ALIASES`) and the Creative
+Video workflow. Without them, re-rendering an old Kling take would have
+silently switched to Seedance 2.0.
+
+Two traps in Kling 3, both handled and tested: the start frame is
+`start_image_url` (sent as `image_url` it is ignored), and `generate_audio`
+**defaults to on and is billed**, so it is always sent.
+
+**⚠ Veo:** Google retires the Veo 3.1 *preview* models on 2026-10-22. It is
+unclear whether fal's Lite endpoint is built on one of them. If it is, Veo
+renders will start failing with an error from fal (loudly, not silently).
+Gemini Omni Flash 1.1, already in the picker, is Google's named replacement.
+
+### Finish in 1080p (Seedance 2.5 drafts)
+
+Every Seedance 2.5 render at **Draft (480p)** is now sent to fal as a *draft*.
+It costs the same and looks the same, but fal returns a `draft_id` (stored at
+`overlay_state.draft`, valid 7 days). A **✦ Finish in 1080p** button then
+appears:
+- on the clip in its lane, before Re-render;
+- on each clip card in a multi-clip storyboard.
+
+Finishing re-renders **the same take** at 1080p through
+`bytedance/seedance-2.5/draft/complete` ($1.164/s). Re-render or Sharp would
+roll new footage that moves differently. So the cheap loop is now: check the
+movement at Draft, then pay for 1080p only on the take you approved.
+
+- The finish is a new row whose `overlay_state.finishOf.draftId` names the
+  draft. n8n carries that through its own `overlay_state` writes, so **Retry
+  finishes the draft again**. Without it, the generic retry branch would have
+  fired a fresh 1080p text-to-video at the same price.
+- On a storyboard the finish becomes the clip's next attempt, so the reel picks
+  it up. The seam check treats it as the same take, so the next chained clip is
+  not flagged as broken.
+- Not offered on a composite (text already stamped on), since the finished
+  clip would come back without the text. Finish first, then add text.
+
+### Split into layers (Layerize)
+
+In the photo editor's **Add** panel: **Split into layers · $0.03**. It sends
+the picture to `bytedance/seedream/v5/flash/layerize` (n8n workflow
+`Arak Lighting – Creative Layerize`, webhook `arak-creative-layerize`,
+synchronous like Enhance) and gets back a clean background plus up to 16 named
+cut-outs, each with a position.
+
+- The browser copies every layer into the `creative-studio` bucket before using
+  it (`requestLayerize`), because fal's URLs don't last and layers are saved by
+  URL.
+- The background goes in as a **locked** full-photo layer at the bottom. The
+  elements go above it and are selected, and the Position panel opens on the
+  layer list with the model's names ("Pendant lamp"). Everything lands *under*
+  text and logos already placed. One Undo removes the whole split.
+- Painted-in text becomes a movable, deletable layer, but **not retypeable**.
+  To change the words, delete that layer and add real text, which also gives
+  exact Arabic.
+- Photo editor only. In the clip editor the picture is a still standing in for
+  footage, and a split could never reach the video.
+
+Verified in `dev-editor.html` with a fake split (no spend). It places
+correctly, names the layers, locks the background and undoes in one step. The
+clip-side Finish button sits behind sign-in and was not clicked in a browser;
+it is covered by unit tests and a clean build.
+
+### To go live (after merge)
+
+On the n8n box, after `git pull`:
+
+```bash
+./n8n/redeploy.sh "Arak Lighting – Creative Generate" "Arak Lighting – Creative Edit" \
+  "Arak Lighting – Creative Video" "Arak Lighting – Creative Video Edit" \
+  "Arak Lighting – Creative Video Reconcile" "Arak Lighting – Creative Layerize"
+```
+
+Layerize is a **new** workflow, so check that it is published/active after the
+import. Vercel deploys the app on merge, and the new webhook slot resolves
+automatically from the n8n base URL, so nothing needs pasting into Settings.
+
+---
+
 ## 🔴 Blocker — fal.ai balance is empty
 
 Every fal endpoint returns `403 User is locked. Reason: Exhausted balance.`

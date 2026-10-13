@@ -36,7 +36,7 @@ import { captureFirstFrame, parentStillOf } from '../../components/studio/videoF
 import {
   buildBranches, createSession, deleteSession, deleteVersion, downloadVersion, fetchFalBalance, fetchSessions,
   fetchVersions, finalizeVersion, insertPendingVersions, renameSession, requestCompose, requestEdit,
-  requestEnhance, requestGenerate, requestVideo, requestStitch, requestVideoEdit, selectVersion,
+  requestEnhance, requestGenerate, requestLayerize, requestVideo, requestStitch, requestVideoEdit, selectVersion,
   touchSession, updateVersion, uploadToStudio,
 } from '../../lib/creativeStudio'
 import { fetchIdeaForStudio, fetchPlanForIdea } from '../../lib/studioBridge'
@@ -2336,6 +2336,10 @@ export function CreativeStudio() {
               saving={savingOverlay}
               onSave={handleOverlaySave}
               onCancel={() => setEditingOverlay(null)}
+              // "Split into layers" in the Add panel. Photo editor only: the
+              // clip editor below is a frame standing in for footage, and a
+              // split of it could never reach the video.
+              onLayerize={url => requestLayerize(webhooks.creativeLayerize, activeWorkspaceId, accessToken, url)}
               // Image layers need somewhere permanent to live: an object URL
               // would die with the tab and a data URL would bloat the JSONB
               // overlay_state row, so an added image is uploaded to the

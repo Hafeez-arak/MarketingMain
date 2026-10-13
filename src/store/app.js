@@ -45,6 +45,7 @@ export const WEBHOOK_SLOTS = [
   'publishPost', 'zernioSync', 'zernioDashboard',
   'creativeGenerate', 'creativeEdit', 'creativeVideo', 'creativeCompose',
   'creativeEnhance', 'creativeVideoEdit', 'creativeStitch', 'creativeCancel',
+  'creativeLayerize',
   'falBalance',
   'insightsReview',
 ]

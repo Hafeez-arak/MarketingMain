@@ -7028,6 +7028,104 @@ def build_creative_enhance() -> dict:
 
 
 
+
+# ─── Creative Layerize (added 2026-10-13) ───────────────────────────────────
+CREATIVE_LAYERIZE_STICKY = """## Creative Studio — Layerize
+
+POST `arak-creative-layerize`
+```
+{ image_url }
+```
+
+**Synchronous**, like Enhance: the answer goes straight back into the open
+photo editor, so there is no version row and nothing to poll.
+
+Splits a flat image into a clean background plus up to 16 separate,
+transparent elements (a product, a person, a sign, a block of baked-in text),
+each with a name and a position, using fal's
+`bytedance/seedream/v5/flash/layerize` — **$0.027 per image**, however many
+layers come back.
+
+Returns fal's own file URLs. The BROWSER copies each one into the
+creative-studio bucket (uploadToStudio) before the editor uses it, because
+fal's URLs are not guaranteed to last and the layers are saved by URL in
+overlay_state. Uploading from here would mean binary through a Code node,
+which corrupts the file — see Creative Generate's sticky.
+
+Positions come back as `box: [left, top, right, bottom]` in 0–1 fractions of
+the image that was sent, which is the same unit every editor layer uses.
+
+Needs env: FAL_KEY."""
+
+CREATIVE_LAYERIZE_JS = _CREATIVE_REQ_JS + r"""
+const MODEL = 'bytedance/seedream/v5/flash/layerize';
+const body = ($input.first().json.body) || {};
+const imageUrl = String(body.image_url || '').trim();
+
+try {
+  if (!/^https?:\/\//i.test(imageUrl)) throw new Error('No image to split.');
+
+  // fal.run rather than the queue: a layerize call returns in well under a
+  // minute, and this answer is awaited by an open editor rather than written
+  // to a row a poller would pick up.
+  const r = await req({ method: 'POST', url: 'https://fal.run/' + MODEL,
+    headers: { Authorization: 'Key ' + FAL, 'Content-Type': 'application/json' },
+    body: { image_url: imageUrl, image_size: 'auto' }, json: true });
+
+  const raw = Array.isArray(r && r.layers) ? r.layers : [];
+  if (!raw.length) throw new Error('The model returned no layers.');
+
+  // fal states the bounds two ways; the 0–1000 normalized form is the one
+  // that needs no knowledge of the output's pixel size. z_index 0 is always
+  // the base, and the only layer without a box.
+  const out = raw
+    .filter(l => l && l.image && l.image.url)
+    .map(l => {
+      const n = l.bounding_box && Array.isArray(l.bounding_box.normalized) ? l.bounding_box.normalized : null;
+      return {
+        url: l.image.url,
+        width: Number(l.image.width) || 0,
+        height: Number(l.image.height) || 0,
+        z: Number(l.z_index) || 0,
+        name: String(l.name || '').slice(0, 60),
+        box: n && n.length === 4 ? n.map(v => Math.max(0, Math.min(1, Number(v) / 1000))) : null,
+      };
+    })
+    .sort((a, b) => a.z - b.z);
+
+  const base = out.find(l => l.z === 0 && !l.box) || null;
+  const layers = out.filter(l => l !== base && l.box);
+  if (!base) throw new Error('The model returned no background layer.');
+
+  return [{ json: { ok: true, base, layers } }];
+} catch (err) {
+  return [{ json: { ok: false, error: errText(err) } }];
+}
+"""
+
+
+def build_creative_layerize() -> dict:
+    """
+    Webhook (responseMode=lastNode) -> Split Into Layers (single Code node).
+
+    Same graph as Creative Enhance and for the same reason: one paid call
+    whose answer goes straight back to the screen that asked for it.
+    """
+    nodes = [
+        _sticky(CREATIVE_LAYERIZE_STICKY, height=460, width=460, x=0, y=-240),
+        _webhook("arak-creative-layerize", "lastNode", x=0, y=200),
+        _code("Split Into Layers", CREATIVE_LAYERIZE_JS, x=240, y=200),
+    ]
+    connections = {"Webhook": {"main": [[{"node": "Split Into Layers", "type": "main", "index": 0}]]}}
+    return {
+        "name": "Arak Lighting – Creative Layerize",
+        "nodes": nodes,
+        "connections": connections,
+        "active": False,
+        "settings": {"executionOrder": "v1"},
+        "tags": [],
+    }
+
 RESEARCH_RESOLVE_STICKY = """## Research: Resolve Handles
 
 **Zero secrets in this file.** Needs `META_IG_TOKEN`, `META_IG_USER_ID`, `TAVILY_API_KEY`, `SUPABASE_URL`, `SUPABASE_KEY`.
@@ -8563,6 +8661,7 @@ if __name__ == "__main__":
         build_creative_cancel(),
         build_fal_balance(),
         build_creative_enhance(),
+        build_creative_layerize(),
         build_insights_review(),
         build_brand_research(),
         build_research_resolve(),

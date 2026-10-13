@@ -247,6 +247,19 @@ const WORKFLOW_CONFIGS = [
     ),
   },
   {
+    platform: 'creativeLayerize',
+    label: 'Creative Studio — Split Into Layers',
+    placeholder: 'https://your-instance.app.n8n.cloud/webhook/arak-creative-layerize',
+    description: 'The photo editor\'s "Split into layers" — separates a flat picture into a clean background plus each object or block of text as its own movable layer. Real spend (fal.ai), about $0.03 an image. Answers straight back into the open editor.',
+    icon: (
+      <div className="w-8 h-8 flex items-center justify-center flex-shrink-0" style={{ background: '#8b5cf6' }}>
+        <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24">
+          <path d="M12 3l9 5-9 5-9-5 9-5z" strokeLinejoin="round"/><path d="M3 13l9 5 9-5" strokeLinecap="round" strokeLinejoin="round"/>
+        </svg>
+      </div>
+    ),
+  },
+  {
     platform: 'publishPost',
     label: 'Publish Post (Zernio)',
     placeholder: 'https://your-instance.app.n8n.cloud/webhook/arak-publish-post',

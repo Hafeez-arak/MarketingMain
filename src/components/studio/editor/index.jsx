@@ -3,7 +3,7 @@ import { Button, Spinner } from '../../ui/index'
 import { ensureFontsLoaded, weightsFor } from '../fonts'
 
 import {
-  migrateDocument, newTextLayer, newShapeLayer, newImageLayer, cornerBox,
+  migrateDocument, newTextLayer, newShapeLayer, newImageLayer, cornerBox, splitLayersOnPhoto, placeInCrop,
   patchLayers, removeLayers, reorderLayers, sendToExtreme, duplicateLayer,
   pickStyle, styleFor, cropPx, docSize, normalizeCrop, isFullFrame, FULL_CROP, DOC_VERSION,
 } from './model/document'
@@ -141,6 +141,11 @@ export function PhotoEditor({
   // whole reason this is a mode and not a second editor.
   mode = 'photo',
   duration = 5,
+  // "Split into layers" (photo mode only): (imageUrl) => Promise<{ base,
+  // layers } | { error }>, the layers already copied into our own storage.
+  // Absent, the button is not shown — which is what video mode gets, since
+  // the picture there is a stand-in for footage the editor cannot alter.
+  onLayerize,
   // The clip itself, in video mode. `imageUrl` is still frame one and is still
   // what the document's geometry, palette and export are built against — this
   // is only what plays underneath. Absent, the editor behaves exactly as it
@@ -163,6 +168,7 @@ export function PhotoEditor({
   const [fontsReady, setFontsReady] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [splitting, setSplitting] = useState(false)
 
   // Height reserved for the contextual toolbar (see the band in the markup).
   // Latched to the tallest the toolbar has needed at this width rather than
@@ -357,6 +363,28 @@ export function PhotoEditor({
     const ratio = img.naturalWidth / img.naturalHeight
     addLayer(newImageLayer(url, { naturalRatio: ratio, canvasRatio }))
   }, [addLayer, canvasRatio])
+
+  // One paid call, one undo step. The new layers go UNDER whatever is already
+  // on the page (see layersFromSplit), and are fetched before they are added
+  // so the canvas doesn't flash a set of empty boxes. Split against the
+  // photo the editor opened on — the clean plate, so text already placed here
+  // as real layers is not split into pixels a second time.
+  const splitIntoLayers = useCallback(async () => {
+    if (!onLayerize || splitting) return
+    setSplitting(true); setError('')
+    const res = await onLayerize(imageUrl)
+    if (res?.error) { setSplitting(false); setError(res.error); return }
+    // Built here, once — the reducer only places them for the crop it sees,
+    // which may have changed during the wait.
+    const added = splitLayersOnPhoto(res)
+    await ensureLayerImages(added)
+    commitDoc(d => ({ ...d, layers: [...placeInCrop(added, d.crop), ...d.layers] }))
+    setSplitting(false)
+    // The elements, not the locked background: they are what you split it to move.
+    setSelectedIds(added.filter(l => !l.locked).map(l => l.id))
+    setTool('select')
+    setPanel('position')
+  }, [onLayerize, splitting, imageUrl, commitDoc])
 
   // The logo, placed for you: a fixed size and a safe margin from the chosen
   // corner. The exact file from Brand Brain, not an AI redraw — a model asked
@@ -846,7 +874,10 @@ export function PhotoEditor({
         {/* ── Left rail + panel ── */}
         <SidePanel panel={panel} hide={isVideo ? ['adjust'] : []}
           onOpenPanel={p => { if (p !== 'crop' && tool === 'crop') cancelCrop(); setPanel(p) }}>
-          {panel === 'insert' && <InsertPanel onAddText={addText} onAddShape={addShape} />}
+          {panel === 'insert' && (
+            <InsertPanel onAddText={addText} onAddShape={addShape}
+              onSplit={onLayerize && !isVideo ? splitIntoLayers : null} splitting={splitting} />
+          )}
           {panel === 'uploads' && (
             <UploadsPanel onUploadImage={onUploadImage} onAddImage={addImage} onAddLogo={addLogo} library={imageLibrary} workspaceId={workspaceId} accessToken={accessToken} />
           )}

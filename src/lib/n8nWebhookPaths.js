@@ -30,6 +30,9 @@ export const WEBHOOK_PATHS = {
   creativeVideoEdit:'arak-creative-video-edit',
   creativeCompose:  'arak-creative-compose',
   creativeEnhance:  'arak-creative-enhance',
+  // Splits a flat image into editable layers for the photo editor. Like
+  // Enhance, it answers in-band rather than writing a row.
+  creativeLayerize: 'arak-creative-layerize',
   creativeStitch:   'arak-creative-stitch',
   creativeCancel:   'arak-creative-cancel',
   falBalance:       'arak-fal-balance',

@@ -445,6 +445,55 @@ export async function requestEnhance(webhookUrl, payload) {
   } catch (err) { return { error: err.message } }
 }
 
+// ── Layerize ───────────────────────────────────────────────────────────────
+
+// The photo editor's "Split into layers". Waits for its answer like Enhance —
+// the result goes straight onto the open canvas, so there is no row to poll —
+// but unlike Enhance it spends money (~$0.03 an image, fal).
+//
+// fal answers with its own file URLs, which are not guaranteed to last, and
+// editor layers are saved BY URL in overlay_state. So every layer is copied
+// into the studio bucket here before the editor ever sees it; a layer that
+// can't be copied fails the whole split rather than leaving a canvas that
+// looks fine today and has holes in it next week.
+//
+// Returns { ok, base: {url, width, height}, layers: [{url, name, box, width,
+// height}] } with `box` as [left, top, right, bottom] fractions of the image
+// that was sent, bottom layer first.
+export async function requestLayerize(webhookUrl, workspaceId, accessToken, imageUrl) {
+  if (!webhookUrl) return { error: 'Split-into-layers webhook not configured. Go to Settings → Integrations.' }
+  if (!imageUrl) return { error: 'There is no picture to split.' }
+  let data
+  try {
+    const res = await fetch(webhookUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image_url: imageUrl }),
+    })
+    if (!res.ok) return { error: `Webhook returned ${res.status}` }
+    const raw = await res.json()
+    data = Array.isArray(raw) ? raw[0] : raw
+  } catch (err) { return { error: err.message } }
+  if (!data || data.ok !== true || !data.base?.url) {
+    return { error: (data && data.error) || 'The split came back empty.' }
+  }
+
+  const keep = async (layer, name) => {
+    const res = await fetch(layer.url)
+    if (!res.ok) throw new Error(`Couldn't fetch a layer (${res.status}).`)
+    const up = await uploadToStudio(workspaceId, accessToken, await res.blob(), name)
+    if (up.error) throw new Error(up.error)
+    return { ...layer, url: up.url }
+  }
+  try {
+    const [base, ...layers] = await Promise.all([
+      keep(data.base, 'layer-background.png'),
+      ...(data.layers || []).map((l, i) => keep(l, `layer-${i + 1}.png`)),
+    ])
+    return { ok: true, base, layers }
+  } catch (err) { return { error: err.message } }
+}
+
 // ── Download ───────────────────────────────────────────────────────────────
 
 // The old "⬇ Download" was a plain <a target="_blank"> with no `download`
