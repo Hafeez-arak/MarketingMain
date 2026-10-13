@@ -428,7 +428,7 @@ ${schema}`;
 try {
   const resp = await req({ method:'POST', url:'https://api.anthropic.com/v1/messages',
     headers:{ 'x-api-key':ANTHROPIC, 'anthropic-version':'2023-06-01', 'content-type':'application/json' },
-    body:{ model:'claude-sonnet-5', max_tokens:2500, messages:[{ role:'user', content:[
+    body:{ model:'claude-sonnet-5-5', max_tokens:2500, messages:[{ role:'user', content:[
       { type:'text', text: cachedPrefix, cache_control:{ type:'ephemeral' } },
       { type:'text', text: variableSuffix },
     ] }] },
@@ -547,7 +547,7 @@ Turn this into a proper post brief. Return ONLY valid JSON, no markdown fences:
 try {
   const resp = await req({ method:'POST', url:'https://api.anthropic.com/v1/messages',
     headers:{ 'x-api-key':ANTHROPIC, 'anthropic-version':'2023-06-01', 'content-type':'application/json' },
-    body:{ model:'claude-sonnet-5', max_tokens:1200, messages:[{ role:'user', content:[
+    body:{ model:'claude-sonnet-5-5', max_tokens:1200, messages:[{ role:'user', content:[
       { type:'text', text: cachedPrefix, cache_control:{ type:'ephemeral' } },
       { type:'text', text: variableSuffix },
     ] }] },
@@ -798,7 +798,7 @@ try {
     headers:{ 'x-api-key':ANTHROPIC, 'anthropic-version':'2023-06-01', 'content-type':'application/json' },
     // Three bilingual LinkedIn posts of up to ~1,300 characters each do not
     // fit in 3000 tokens with room to spare; a cut-off reply is a failed draft.
-    body:{ model:'claude-sonnet-5', max_tokens: platform === 'linkedin' ? 8000 : 3000, messages:[{ role:'user', content:[
+    body:{ model:'claude-sonnet-5-5', max_tokens: platform === 'linkedin' ? 8000 : 3000, messages:[{ role:'user', content:[
       { type:'text', text: cachedPrefix, cache_control:{ type:'ephemeral' } },
       // Images sit AFTER the cached block, so the brand prefix stays
       // byte-identical across a plan's posts and keeps its cache hit.
@@ -3282,7 +3282,7 @@ def build_campaign_planner() -> dict:
                 # — which fails as a JSON parse error downstream, not as an
                 # obviously-truncated plan. Check stop_reason is not
                 # "max_tokens" if plans ever come back unparseable.
-                "jsonBody": "={{ JSON.stringify({ model: \"claude-opus-5\", max_tokens: 32000, thinking: { type: \"adaptive\" }, messages: [{ role: \"user\", content: [ { type: \"text\", text: $json.prompt_cached, cache_control: { type: \"ephemeral\" } }, { type: \"text\", text: $json.prompt_variable } ] }] }) }}",
+                "jsonBody": "={{ JSON.stringify({ model: \"claude-opus-5-5\", max_tokens: 32000, thinking: { type: \"adaptive\" }, output_config: { effort: \"high\" }, messages: [{ role: \"user\", content: [ { type: \"text\", text: $json.prompt_cached, cache_control: { type: \"ephemeral\" } }, { type: \"text\", text: $json.prompt_variable } ] }] }) }}",
                 # ── The timeout is the whole ballgame here ────────────────
                 # This is a NON-STREAMING call, so no response headers arrive
                 # until the entire generation has finished — and n8n's timeout
@@ -5337,8 +5337,9 @@ Turns a rough brief into a written prompt. Two modes:
 - `motion` — camera movement and motion only, max 40 words. The still already
   exists; restating the scene fights the source frame.
 
-Model is `claude-sonnet-5` with thinking **explicitly disabled** and low effort.
-Both matter: Sonnet 5 runs adaptive thinking when `thinking` is omitted, which
+Model is `claude-sonnet-5-5` with thinking **off** (`between_tools`; Sonnet 5.5
+rejects `disabled`) and low effort.
+Both matter: Sonnet runs adaptive thinking when `thinking` is omitted, which
 triples the latency of a button the user is waiting on and shares `max_tokens`
 with the answer. Low effort also keeps it filling gaps instead of embellishing
 past the brief — the failure mode that makes a prompt enhancer useless.
@@ -5442,12 +5443,13 @@ try {
   const resp = await req({ method:'POST', url:'https://api.anthropic.com/v1/messages',
     headers:{ 'x-api-key':ANTHROPIC, 'anthropic-version':'2023-06-01', 'content-type':'application/json' },
     body:{
-      model:'claude-sonnet-5',
+      model:'claude-sonnet-5-5',
       max_tokens: 800,
-      // Explicit, not omitted. Sonnet 5 runs adaptive thinking by default,
+      // Explicit, not omitted. Sonnet runs adaptive thinking by default,
       // which is 3-4x the latency for a bounded rewrite and shares max_tokens
-      // with the answer itself.
-      thinking: { type: 'disabled' },
+      // with the answer itself. Sonnet 5.5 rejects { type: 'disabled' } with a
+      // 400; `between_tools` is its thinking-off, valid at effort high or below.
+      thinking: { type: 'between_tools' },
       output_config: { effort: mode === 'motion' ? 'medium' : 'low' },
       messages:[{ role:'user', content:[
         { type:'text', text: cachedPrefix, cache_control:{ type:'ephemeral' } },
@@ -6502,7 +6504,7 @@ def build_insights_review() -> dict:
                 "specifyBody": "json",
                 # Sonnet, not Opus: this is summarising a page of numbers into
                 # four sentences, not planning a month of content.
-                "jsonBody": "={{ JSON.stringify({ model: \"claude-sonnet-5\", max_tokens: 2000, messages: [{ role: \"user\", content: $json.prompt }] }) }}",
+                "jsonBody": "={{ JSON.stringify({ model: \"claude-sonnet-5-5\", max_tokens: 2000, messages: [{ role: \"user\", content: $json.prompt }] }) }}",
                 "options": {},
             },
             "id": nid(),
@@ -6854,7 +6856,7 @@ def build_brand_research() -> dict:
                 },
                 "sendBody": True,
                 "specifyBody": "json",
-                "jsonBody": "={{ JSON.stringify({ model: \"claude-sonnet-5\", max_tokens: 2000, messages: [{ role: \"user\", content: $json.prompt }] }) }}",
+                "jsonBody": "={{ JSON.stringify({ model: \"claude-sonnet-5-5\", max_tokens: 2000, messages: [{ role: \"user\", content: $json.prompt }] }) }}",
                 "options": {},
             },
             "id": nid(),
@@ -8009,7 +8011,7 @@ const SUPA_KEY = $env.SUPABASE_KEY;
 const sHeaders = { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}`, 'Content-Type': 'application/json' };
 const TAVILY   = $env.TAVILY_API_KEY;
 const ANTHROPIC = $env.ANTHROPIC_API_KEY;
-const MODEL = 'claude-sonnet-5';
+const MODEL = 'claude-sonnet-5-5';
 
 // Bounds, not suggestions. A weekly cron pointed at an unbounded tool loop is
 // how a $0.30 job quietly becomes a $40 one, and nobody notices until the

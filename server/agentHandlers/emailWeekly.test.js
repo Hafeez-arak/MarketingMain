@@ -73,7 +73,7 @@ describe('POST /api/agent/emailWeekly', () => {
     expect(call.messages[0].content).toContain('Founding Day')
     const ready = state.calls.find(c => c.method === 'PATCH' && c.body?.status === 'ready')
     expect(ready.body.options).toHaveLength(3)
-    expect(ready.body.model).toBe('claude-sonnet-5')
+    expect(ready.body.model).toBe('claude-sonnet-5-5')
     expect(ready.body.note).toBe('Research is 11 days old.')
   })
 

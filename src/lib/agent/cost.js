@@ -117,7 +117,7 @@ export function cacheHitRate(usage) {
  * keep it (20260913_agent_usage_searches.sql). Rows written before that
  * migration carry 0, which is honest for them — nobody was counting.
  */
-export function runTotals(rows = [], { rank = ['claude-opus-5', 'claude-sonnet-5', 'claude-haiku-4-5-20251001'] } = {}) {
+export function runTotals(rows = [], { rank = ['claude-opus-5-5', 'claude-opus-5', 'claude-sonnet-5-5', 'claude-sonnet-5', 'claude-haiku-4-5-20251001'] } = {}) {
   const list = (rows || []).filter(Boolean)
   const num = v => (Number.isFinite(Number(v)) ? Number(v) : 0)
 

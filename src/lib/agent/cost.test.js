@@ -20,20 +20,27 @@ describe('the model registry is the only place a model is named', () => {
     }
   })
 
-  it('uses two models and no more — Haiku was ruled out deliberately', () => {
-    expect(Object.keys(MODELS).sort()).toEqual(['claude-opus-5', 'claude-sonnet-5'])
-    expect(new Set(Object.values(JOBS)).size).toBe(2)
+  it('runs on two models and no more — Haiku was ruled out deliberately', () => {
+    // The 5.0 price cards stay so older ledger rows still read back; only the
+    // 5.5 models are routed to.
+    expect(new Set(Object.values(JOBS))).toEqual(new Set(['claude-opus-5-5', 'claude-sonnet-5-5']))
+    expect(Object.keys(MODELS)).toEqual(expect.arrayContaining(['claude-opus-5', 'claude-sonnet-5']))
   })
 
   it('puts the calls a person acts on through Opus', () => {
-    expect(modelFor('synthesise')).toBe('claude-opus-5')
-    expect(modelFor('chat')).toBe('claude-opus-5')
-    expect(modelFor('review')).toBe('claude-opus-5')
+    expect(modelFor('synthesise')).toBe('claude-opus-5-5')
+    expect(modelFor('chat')).toBe('claude-opus-5-5')
+    expect(modelFor('review')).toBe('claude-opus-5-5')
   })
 
   it('puts the long middle of a run through Sonnet', () => {
-    expect(modelFor('search')).toBe('claude-sonnet-5')
-    expect(modelFor('reflect')).toBe('claude-sonnet-5')
+    expect(modelFor('search')).toBe('claude-sonnet-5-5')
+    expect(modelFor('reflect')).toBe('claude-sonnet-5-5')
+  })
+
+  it('prices the 5.5 models as published, cache reads at 5% of input', () => {
+    expect(MODELS['claude-opus-5-5']).toMatchObject({ input: 4, cacheRead: 0.2, cacheWrite: 5, output: 20 })
+    expect(MODELS['claude-sonnet-5-5']).toMatchObject({ input: 2, cacheRead: 0.1, cacheWrite: 2.5, output: 10 })
   })
 
   it('falls back rather than throwing on an unregistered job', () => {

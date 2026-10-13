@@ -115,7 +115,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ model: \"claude-sonnet-5\", max_tokens: 2000, messages: [{ role: \"user\", content: $json.prompt }] }) }}",
+        "jsonBody": "={{ JSON.stringify({ model: \"claude-sonnet-5-5\", max_tokens: 2000, messages: [{ role: \"user\", content: $json.prompt }] }) }}",
         "options": {}
       },
       "id": "44b904aa-360d-5008-99f9-827d9d87c598",
