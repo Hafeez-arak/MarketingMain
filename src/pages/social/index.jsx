@@ -4,7 +4,7 @@ import { useApp, actions } from '../../store/app'
 import { useAuth } from '../../store/auth'
 import { fetchPostCounts } from '../../lib/scheduledPosts'
 import { Card, Button, Badge, Empty, PostImage, Skeleton } from '../../components/ui/index'
-import { PLATFORM_META, formatDateTime, isLivePlatform } from '../../lib/utils'
+import { PLATFORM_META, LIVE_PLATFORMS, formatDateTime } from '../../lib/utils'
 import { useConnectedAccounts } from '../../lib/useConnectedAccounts'
 import { ConnectAccounts } from '../../components/social/ConnectAccounts'
 
@@ -14,14 +14,15 @@ import { ConnectAccounts } from '../../components/social/ConnectAccounts'
 // localStorage that the Connect button set to true without connecting
 // anything — so every card claimed success, and the first publish attempt was
 // where the truth arrived.
+//
+// Beta platforms (Snapchat) get no card. It used to sit here as a greyed-out
+// "Coming soon" card, which the team read as clutter rather than news.
 
-function PlatformCard({ platformKey, meta, postCount, accounts, loading, onOpen }) {
-  const live      = isLivePlatform(platformKey)
+function PlatformCard({ meta, postCount, accounts, loading, onOpen }) {
   const connected = accounts.some(a => a.is_active !== false)
 
   return (
-    <Card className={`overflow-hidden transition-all ${live ? 'cursor-pointer hover:border-stone-400' : ''}`}
-      onClick={live ? onOpen : undefined}>
+    <Card className="overflow-hidden transition-all cursor-pointer hover:border-stone-400" onClick={onOpen}>
       <div className="h-1" style={{ background: meta.color }} />
       <div className="p-5">
         <div className="flex items-center justify-between mb-3">
@@ -29,11 +30,7 @@ function PlatformCard({ platformKey, meta, postCount, accounts, loading, onOpen 
             <span className={`w-8 h-8 flex items-center justify-center text-xs font-bold ${meta.bg} ${meta.text}`}>{meta.abbr}</span>
             <span className="font-semibold text-text">{meta.label}</span>
           </div>
-          {!live ? (
-            <span className="text-[10px] font-bold uppercase tracking-[0.08em] px-1.5 py-0.5 leading-[1.4] bg-amber-50 text-amber-700">
-              Coming soon
-            </span>
-          ) : loading ? (
+          {loading ? (
             <Skeleton className="h-[18px] w-20" />
           ) : (
             <span className={`text-[10px] font-bold uppercase tracking-[0.08em] px-1.5 py-0.5 leading-[1.4] ${connected ? 'bg-sage-50 text-sage-700' : 'bg-surface-subtle text-text-tertiary'}`}>
@@ -43,14 +40,12 @@ function PlatformCard({ platformKey, meta, postCount, accounts, loading, onOpen 
         </div>
 
         <p className="text-sm text-text-secondary mb-1">
-          {!live
-            ? 'Publishing to Snapchat is not available yet.'
-            : postCount === null ? '' : postCount === 0 ? 'No posts created yet.' : `${postCount} post${postCount === 1 ? '' : 's'} created`}
+          {postCount === null ? '' : postCount === 0 ? 'No posts created yet.' : `${postCount} post${postCount === 1 ? '' : 's'} created`}
         </p>
         <p className="text-xs text-text-tertiary mb-4 truncate min-h-[1rem]">
-          {live && loading
+          {loading
             ? <Skeleton className="h-3 w-28" />
-            : live && connected
+            : connected
             ? accounts.map(a => a.username ? `@${a.username}` : a.display_name).filter(Boolean).join(', ')
             : ''}
         </p>
@@ -61,11 +56,10 @@ function PlatformCard({ platformKey, meta, postCount, accounts, loading, onOpen 
             the flow needs a page to come back to, and one implementation of
             it is enough. */}
         <div className="flex gap-2" onClick={e => e.stopPropagation()}>
-          <Button variant="secondary" size="sm" className="flex-1 justify-center"
-            disabled={!live} onClick={onOpen}>
-            {live ? 'Open' : 'Coming soon'}
+          <Button variant="secondary" size="sm" className="flex-1 justify-center" onClick={onOpen}>
+            Open
           </Button>
-          {live && !loading && !connected && (
+          {!loading && !connected && (
             <Button variant="primary" size="sm" className="flex-1 justify-center"
               onClick={onOpen}>
               Connect
@@ -94,7 +88,7 @@ export function SocialOverview() {
     return () => { live = false }
   }, [activeWorkspaceId, accessToken])
 
-  const platforms = Object.entries(PLATFORM_META)
+  const platforms = LIVE_PLATFORMS.map(key => [key, PLATFORM_META[key]])
 
   return (
     <div className="max-w-7xl space-y-5">
@@ -109,7 +103,6 @@ export function SocialOverview() {
         {platforms.map(([key, meta]) => (
           <PlatformCard
             key={key}
-            platformKey={key}
             meta={meta}
             postCount={counts === null || counts.failed ? null : (counts[key] || 0)}
             accounts={allAccounts.filter(a => a.platform === key)}
