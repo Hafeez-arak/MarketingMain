@@ -56,15 +56,16 @@ as $$
 $$;
 grant execute on function public.can_see_lead(uuid, uuid, text) to authenticated;
 
-drop policy if exists leads_sales_read on public.leads;
-create policy leads_sales_read on public.leads
-  for select to authenticated using (public.can_see_lead(workspace_id, assigned_to, source));
+-- ALTER, not drop + create: the policies exist (20261013_sales_seats,
+-- 20261016_lead_cards), and Supabase's SQL tool refuses a DROP unless a
+-- person confirms it at the moment it runs.
+alter policy leads_sales_read on public.leads
+  using (public.can_see_lead(workspace_id, assigned_to, source));
 
 -- A battle card goes with its lead: readable when the lead is (the leads
 -- policy answers inside the sub-select).
-drop policy if exists lead_cards_sales_read on public.lead_cards;
-create policy lead_cards_sales_read on public.lead_cards
-  for select to authenticated using (
+alter policy lead_cards_sales_read on public.lead_cards
+  using (
     public.is_sales_member(workspace_id)
     and exists (select 1 from public.leads l where l.id = lead_cards.lead_id)
   );

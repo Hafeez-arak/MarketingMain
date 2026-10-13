@@ -301,6 +301,8 @@ describe('sales seats after 20261013_sales_seats', () => {
     await pg.exec(migration('20261013_sales_role'))
     await pg.exec(migration('20261013_sales_seats'))
     await pg.exec(migration('20261014_lead_approval'))
+    // As 20261016_lead_cards leaves it; 20261018 narrows it.
+    await pg.exec(`create policy lead_cards_sales_read on public.lead_cards for select to authenticated using (public.is_sales_member(workspace_id))`)
     await pg.exec(migration('20261018_lead_assignment'))
     await h.as(ADMIN)
     arak = await h.create('Arak')
