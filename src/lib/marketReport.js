@@ -705,6 +705,18 @@ export const upcomingEvents = args => eventsView(args).soon
 // ─── Market & technical notes ──────────────────────────────────────────────
 
 /**
+ * A finding in the shape the page's note card draws. globalView and lineView
+ * return raw findings (the printable report reads those fields directly), so
+ * the page runs their items through this too.
+ */
+export const asNote = (f, now = new Date()) => ({
+  headline: f.headline, detail: f.detail || '', action: f.suggested_action || '',
+  technicalNote: f.technical_note || '', teams: teamsOf(f), sources: f.sources || [],
+  days: daysLeft(f, now), confidence: f.confidence, relevance: f.relevance || 'medium',
+  category: f.category || '', store: f.store || null, ref: f.ref,
+})
+
+/**
  * Regulation, technology and giga-project change — for marketing and the
  * technical team. Leads, events and competitor findings have their own
  * sections and are not repeated here.
@@ -714,12 +726,7 @@ export function marketNotes(report = {}, now = new Date()) {
     isReportable(f) && !f.lead && !f.event && !str(f.competitor) &&
     (f.lens === 'category' || ['regulation', 'tech', 'gigaproject', 'product'].includes(f.category) ||
       f.for_whom === 'technical' || f.for_whom === 'both')), now)
-    .map(f => ({
-      headline: f.headline, detail: f.detail || '', action: f.suggested_action || '',
-      technicalNote: f.technical_note || '', teams: teamsOf(f), sources: f.sources || [],
-      days: daysLeft(f, now), confidence: f.confidence, relevance: f.relevance || 'medium',
-      category: f.category || '', store: f.store || null, ref: f.ref,
-    }))
+    .map(f => asNote(f, now))
   // The synthesis restates lens findings in its own words, so a rewording of
   // one already listed is dropped — and so is one that restates a lead, which
   // belongs to sales. 0.2 is measured on the 14 Sep brief: each of its seven

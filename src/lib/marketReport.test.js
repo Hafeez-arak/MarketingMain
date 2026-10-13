@@ -6,7 +6,7 @@ import {
   newCompetitors, sourceList, sectionVisible, dayLabel, resolveRefs,
   searchDemand,
   linesIn, forLine, linesOfRefs, matchesLine,
-  movesByLine, globalView, lineView,
+  movesByLine, globalView, lineView, asNote,
 } from './marketReport'
 
 // The real 14 Sep 2026 Arak brief — written before any of the three-reader
@@ -497,6 +497,15 @@ describe('the world industry is its own section', () => {
   it('takes the global lens and leaves the local market lens alone', () => {
     const items = globalView(report).items
     expect(items.map(f => f.headline)).toEqual(['A European efficiency rule lands in 2027.'])
+  })
+
+  // 2026-10-13: the first run with global findings crashed the Research page,
+  // which drew these raw findings with the note card and read `teams` off them.
+  it('turns into a note card with its teams, the same as a market note', () => {
+    const note = asNote(globalView(report).items[0])
+    expect(note.headline).toBe('A European efficiency rule lands in 2027.')
+    expect(Array.isArray(note.teams)).toBe(true)
+    expect(note.sources).toEqual([])
   })
 
   it('is empty rather than throwing on a report from before the lens existed', () => {
