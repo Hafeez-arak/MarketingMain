@@ -1,10 +1,19 @@
-// ─── The search a lens keeps going with once web_search is spent ───────────
+// ─── Two searches, each where it is better, and neither runs dry ──────────
 // Each lens gets a few of Claude's own web searches (budget.searches in
 // lenses.js). On 2026-10-13 every searching lens used all six and stopped, and
 // the brief said so: "Armada, Spectra Electricals and Lumiere were not
 // re-checked." The owner's call: when those run out, carry on through
 // Firecrawl (Tavily behind it, api/agent/_web.js) rather than stop. Those
 // searches draw on free tiers, not the Anthropic bill.
+//
+// 2026-10-13, second decision: use each for what it is good at. The 09-15
+// bake-off (14 Arak questions): Claude won dated news and company facts,
+// Firecrawl won tender portals, listings, PDFs and company sites. So a lens
+// marked `web: 'firecrawl'` in lenses.js (openings, demand, rivals) searches
+// Firecrawl first and keeps Claude's search for news; every other lens is the
+// other way round. And a run never stops on credits: when Firecrawl and Tavily
+// are both out, the lens is told so and carries on with web_search, which has
+// RESERVE_SEARCHES extra on top of its own allowance for exactly that.
 //
 // No search budget here, on purpose. What stays is a guard against a loop
 // that has stopped listening, and the lens's own clock: a lens stopped
@@ -27,11 +36,10 @@ export const BACKUP_TOOLS = [
   {
     name: 'search_web',
     description:
-      'Backup web search (Firecrawl, Tavily behind it). Use it once web_search reports that its ' +
-      'limit is reached (max_uses_exceeded), and for anything web_search could not find: tender ' +
-      'portals, PDFs, competitor websites. It has no fixed limit this pass. Returns titles, URLs ' +
-      'and snippets; read_page the ones that matter. A specific query (a company name plus what ' +
-      'you want to know) beats a general one.',
+      'Web search through Firecrawl (Tavily behind it). Best for tender portals, listings, PDFs ' +
+      'and company websites; no fixed limit this pass. Returns titles, URLs and snippets; ' +
+      'read_page the ones that matter. A specific query (a company name plus what you want to ' +
+      'know) beats a general one.',
     input_schema: {
       type: 'object',
       additionalProperties: false,
@@ -45,8 +53,8 @@ export const BACKUP_TOOLS = [
   {
     name: 'read_page',
     description:
-      'Read one web page as markdown (Firecrawl, Tavily behind it). Use it for a URL from ' +
-      'search_web, or when web_fetch has reached its limit. Long pages are truncated. A failure ' +
+      'Read one web page as markdown (Firecrawl, Tavily behind it). Use it for a URL from any ' +
+      'search, including when web_fetch has reached its limit. Long pages are truncated. A failure ' +
       'comes back as an error, which means the page could not be read, not that it is empty.',
     input_schema: {
       type: 'object',
@@ -61,15 +69,60 @@ export const BACKUP_TOOLS = [
 
 export const BACKUP_NAMES = new Set(BACKUP_TOOLS.map(t => t.name))
 
+/** Claude searches held back for when Firecrawl and Tavily are both out. */
+export const RESERVE_SEARCHES = 6
+
+/** Which search a lens reaches for first. */
+export const prefersFirecrawl = lens => lens?.web === 'firecrawl'
+
+/** web_search's max_uses for a lens: its own allowance plus the reserve. */
+export const claudeSearchesFor = lens => {
+  const own = Number(lens?.budget?.searches) || 0
+  return own > 0 ? own + RESERVE_SEARCHES : 0
+}
+
+/** What a lens is told when every backup provider failed on quota. */
+export const PROVIDERS_OUT =
+  'Firecrawl and Tavily are both out of credit or rate limited right now. Carry on with web_search ' +
+  'and web_fetch for the rest of this question; there are reserve searches for exactly this.'
+
+const COVER =
+  'Cover everything this question asks for (every name on a list, every source it names) rather ' +
+  'than reporting what was left unchecked. If a search tool tells you to stop, write your answer ' +
+  'with what you have.'
+
 /**
- * Appended to a lens prompt when the backup is on. Without it a lens told
- * "you have 6 searches" plans to six and reports the rest as not checked.
+ * Appended to a lens prompt when Firecrawl/Tavily are on. Without it a lens
+ * told "you have 6 searches" plans to six and reports the rest as unchecked.
  */
-export const BACKUP_PROMPT =
-  '\n\nSEARCH BACKUP: when web_search or web_fetch says its limit is reached, carry on with ' +
-  'search_web and read_page. Cover everything this question asks for (every name on a list, ' +
-  'every source it names) rather than reporting what was left unchecked. If a backup tool ' +
-  'tells you to stop, write your answer with what you have.'
+export function backupPrompt(lens) {
+  const own = Number(lens?.budget?.searches) || 0
+  return prefersFirecrawl(lens)
+    ? '\n\nHOW TO SEARCH: start with search_web and read_page (Firecrawl). They are best for tender ' +
+      'portals, listings, PDFs and company websites, and have no fixed limit. Use web_search for ' +
+      `recent news and dated announcements, about ${own} times. ` + COVER
+    : `\n\nHOW TO SEARCH: start with web_search and web_fetch, about ${own} searches. They are best ` +
+      'for dated news and company facts. Then carry on with search_web and read_page (Firecrawl), ' +
+      'which have no fixed limit and are best for portals, PDFs and company websites. ' + COVER
+}
+
+/**
+ * On a Claude-first lens, search_web waits until web_search has been tried
+ * its own allowance. The prompt alone did not hold: on the 2026-10-13 rerun
+ * events, category and global made 0 Claude searches between them and went
+ * straight to the tool described as having "no fixed limit". read_page is
+ * never held back; reading a page found either way is always useful.
+ * Null when the call may go ahead; otherwise what the model is told.
+ */
+export function claudeFirstGate(lens, name, serverSearches = 0) {
+  if (prefersFirecrawl(lens) || name !== 'search_web') return null
+  const own = Number(lens?.budget?.searches) || 0
+  const left = own - (Number(serverSearches) || 0)
+  if (left <= 0) return null
+  return `Not yet: for this question use web_search first (it is better for dated news and company facts). ` +
+    `${left} web_search ${left === 1 ? 'search is' : 'searches are'} left before search_web opens up. ` +
+    'read_page works now for any URL you have found.'
+}
 
 /**
  * May the lens make another backup call? Null when yes; otherwise the message

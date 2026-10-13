@@ -10,6 +10,8 @@ import {
 import { LENS_PROMPTS } from '../../src/lib/agent/lensPrompts.js'
 import { runLens, runOurselvesLens, runCalendarLens, runSearchLens, markStage } from './_lenses.js'
 import { gatherCalendar } from './_calendar.js'
+import { readWebsite } from './_websiteRead.js'
+import { realQuestions } from '../../src/lib/agent/runFaults.js'
 import { marketOf } from '../../src/lib/agent/calendar.js'
 import { priorIdeas } from './_memory.js'
 import { silentLensNote } from '../../src/lib/agent/runHealth.js'
@@ -18,7 +20,7 @@ import { freshQuestions, dedupeQuestions } from '../../src/lib/agent/agendaDedup
 import { parseLines, stampLines } from '../../src/lib/agent/lines.js'
 import { applyNovelty, priorFindingsFrom, repetitionNote } from '../../src/lib/agent/novelty.js'
 import {
-  deadlineFor, resultsFromRows, timingNote, pendingLenses, timedOutResult,
+  deadlineFor, worthStarting, resultsFromRows, timingNote, pendingLenses, timedOutResult,
 } from '../../src/lib/agent/phases.js'
 import { LIVE_PLATFORMS } from '../../src/lib/utils.js'
 import { ownPostingFacts } from '../../src/lib/agent/ownChannels.js'
@@ -77,7 +79,8 @@ function lastWeek(priorRuns = []) {
   if (!report) return ''
   const date = String(priorRuns[0].started_at || '').slice(0, 10)
   const top = (report.top_three || []).filter(t => t?.finding).slice(0, 3)
-  const open = (report.unanswered || []).slice(0, 6)
+  // Faults and labels are the run's, not the market's (runFaults.js).
+  const open = realQuestions(report.unanswered).slice(0, 6)
   if (!top.length && !open.length) return ''
   return [
     `WHAT THE RUN OF ${date || 'LAST WEEK'} ASKED THIS TEAM TO DO:`,
@@ -621,7 +624,7 @@ export async function synthesiseRun({ workspaceId, runId, cadence = 'weekly', de
     const summary = lensSummary(results)
 
     await markStage(workspaceId, runId, 'synthesise')
-    const synth = await callModel({
+    const synthArgs = {
       workspaceId, surface: 'run', runId, job: 'synthesise', stage: 'synthesise',
       identity: IDENTITY, brand,
       messages: [
@@ -698,26 +701,43 @@ export async function synthesiseRun({ workspaceId, runId, cadence = 'weekly', de
       maxTokens: 16_000, effort: 'high',
       outputFormat: BRIEF_SCHEMA,
       deadline: limit,
-    })
-    cost += synth.cost || 0
-
-    if (!synth.ok) return bail(gathered, synth.error, cost, summary)
-    if (refusalOf(synth.response)) return bail(gathered, refusalOf(synth.response), cost, summary)
-
-    let brief = null
-    try {
-      brief = JSON.parse(textIn(synth.response))
-    } catch (err) {
-      return bail(gathered, `The brief did not parse: ${err.message}`, cost, summary)
     }
 
-    // ── A BRIEF THAT CAME BACK BLANK MUST SAY SO ──
-    //
-    // Recorded on every run, not only failing ones, so the numbers can be
-    // compared week to week. See briefEmptiness for the run this comes from:
-    // a successful, billed call that returned a real headline over six empty
-    // sections, and stored a report indistinguishable from a quiet week.
-    const wrote = briefEmptiness(brief)
+    // ── A BLANK BRIEF GETS ONE MORE TRY ──
+    // 2026-10-13: 51 findings in, 4,742 output tokens billed, and 181
+    // characters of JSON with every section empty. Nothing in the request
+    // explained it, and the text itself was not kept. Now it is kept, and the
+    // call is made once more while there is time, since a second identical
+    // request is about $0.40 against a run that already spent $3 gathering.
+    let synth = null
+    let brief = null
+    let wrote = null
+    let blankText = ''
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      synth = await callModel(synthArgs)
+      cost += synth.cost || 0
+
+      if (!synth.ok) return bail(gathered, synth.error, cost, summary)
+      if (refusalOf(synth.response)) return bail(gathered, refusalOf(synth.response), cost, summary)
+
+      try {
+        brief = JSON.parse(textIn(synth.response))
+      } catch (err) {
+        return bail(gathered, `The brief did not parse: ${err.message}`, cost, summary)
+      }
+
+      // ── A BRIEF THAT CAME BACK BLANK MUST SAY SO ──
+      //
+      // Recorded on every run, not only failing ones, so the numbers can be
+      // compared week to week. See briefEmptiness for the run this comes from:
+      // a successful, billed call that returned a real headline over six empty
+      // sections, and stored a report indistinguishable from a quiet week.
+      wrote = briefEmptiness(brief)
+      if (!wrote.empty) break
+      blankText = textIn(synth.response).slice(0, 1_000)
+      console.error(`[agent] synthesise: blank brief on attempt ${attempt}: ${blankText}`)
+      if (!worthStarting(limit, 120_000)) break
+    }
 
     const report = mergeBrief(gathered, brief, allowedUrls, findings)
     report.lenses = summary
@@ -728,6 +748,8 @@ export async function synthesiseRun({ workspaceId, runId, cadence = 'weekly', de
       // nothing" from "the model wrote plenty and we dropped it".
       text_chars: textIn(synth.response).length,
       findings_in: findings.length,
+      // What a blank attempt actually said, so the next one can be explained.
+      ...(blankText ? { blank_text: blankText } : {}),
     }
     if (wrote.empty) {
       report.unanswered = [
@@ -790,6 +812,18 @@ export async function synthesiseRun({ workspaceId, runId, cadence = 'weekly', de
     // one line, because neither is visible in the findings themselves.
     const notes = [...results.map(r => r.note).filter(Boolean), timingNote(results)].filter(Boolean)
     if (notes.length) report.unanswered = [...(report.unanswered || []), ...notes]
+
+    // ── The website, read once the brief is written ──
+    // After, not before: the brief is the part someone acts on, and a slow
+    // Google API must never cost it its time. Skipped, and said, when there
+    // is not enough left.
+    if (worthStarting(limit, 30_000)) {
+      const site = await readWebsite({ workspaceId, runId, identity: IDENTITY, brand, deadline: limit })
+      cost += site.cost || 0
+      report.website = site.ok ? site.read : { error: site.error }
+    } else {
+      report.website = { error: 'Not enough time was left after the brief to read the website.' }
+    }
 
     return { ok: true, report, cost, sources: [...allowedUrls], lenses: summary }
   } catch (err) {

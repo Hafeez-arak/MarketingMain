@@ -58,6 +58,11 @@ describe('when the watchlist is longer than the budget', () => {
 })
 
 describe('competitorLine', () => {
+  it('researches a domain someone supplied, even under an old "unresolvable" label', () => {
+    expect(competitorLine({ domain: 'al-dhow.com', resolution: 'unresolvable' })).toMatch(/RESEARCH THIS DOMAIN: al-dhow.com/)
+    expect(competitorLine({ domain: '', resolution: 'unresolvable' })).toMatch(/CANNOT BE RESEARCHED/)
+  })
+
   it('leads with the domain, because that is the identity', () => {
     expect(competitorLine({ domain: 'selapass.com', lines: ['controls'] }))
       .toContain('RESEARCH THIS DOMAIN: selapass.com')

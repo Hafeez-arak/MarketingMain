@@ -44,7 +44,7 @@ export async function startResearchRun({ workspaceId, accessToken, periodDays = 
 export async function fetchRuns(workspaceId, accessToken, limit = 5, { throwOnError = false } = {}) {
   const url = `${SUPABASE_URL}/rest/v1/research_runs?workspace_id=eq.${workspaceId}` +
     `&order=started_at.desc&limit=${limit}` +
-    `&select=id,status,stage,started_at,finished_at,report,error`
+    `&select=id,status,stage,started_at,finished_at,report,error,cost_estimate`
   let failure
   try {
     const res = await fetch(url, {
@@ -81,5 +81,31 @@ export async function fetchLensResults(workspaceId, runId, accessToken) {
     return await res.json()
   } catch {
     return []
+  }
+}
+
+/**
+ * This month's agent spend and the workspace's cap, for the Run research
+ * confirmation. Null when either cannot be read: the dialog then says less
+ * rather than showing a zero it does not know.
+ */
+export async function fetchAgentSpend(workspaceId, accessToken, now = new Date()) {
+  if (!workspaceId || !accessToken) return null
+  const since = `${now.toISOString().slice(0, 7)}-01T00:00:00Z`
+  const headers = { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${accessToken}` }
+  try {
+    const [usage, ws] = await Promise.all([
+      fetch(`${SUPABASE_URL}/rest/v1/agent_usage?workspace_id=eq.${workspaceId}&created_at=gte.${since}&select=cost_usd&limit=10000`, { headers }),
+      fetch(`${SUPABASE_URL}/rest/v1/workspaces?id=eq.${workspaceId}&select=agent_monthly_cap_usd`, { headers }),
+    ])
+    if (!usage.ok || !ws.ok) return null
+    const rows = await usage.json()
+    const cap = (await ws.json())?.[0]?.agent_monthly_cap_usd
+    return {
+      spent: rows.reduce((t, r) => t + (Number(r.cost_usd) || 0), 0),
+      cap: cap === null || cap === undefined ? null : Number(cap),
+    }
+  } catch {
+    return null
   }
 }

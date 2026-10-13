@@ -6,13 +6,15 @@ const requests = []
 vi.mock('@anthropic-ai/sdk', () => ({
   default: class {
     constructor() {
-      this.messages = {
+      const messages = {
         stream: params => {
           requests.push(structuredClone(params))
           const next = script.shift()
           return { on() {}, finalMessage: async () => next }
         },
       }
+      this.messages = messages
+      this.beta = { messages }
     }
   },
 }))
@@ -63,6 +65,17 @@ describe('callModel with our own tools', () => {
     expect(out.response.content).toContainEqual(searched)
   })
 
+  it('tells the tool how many Claude searches the turn has made so far', async () => {
+    const searched = { type: 'server_tool_use', id: 's1', name: 'web_search', input: { query: 'q' } }
+    script.push(
+      msg([searched, searched, { type: 'tool_use', id: 't1', name: 'search_web', input: { query: 'q' } }], 'tool_use'),
+      msg([{ type: 'text', text: '{}' }], 'end_turn'),
+    )
+    let seen = null
+    await callModel(args({ runTool: async (name, input, ctx) => { seen = ctx; return { ok: true, result: {} } } }))
+    expect(seen).toEqual({ serverSearches: 2 })
+  })
+
   it('passes a tool failure back to the model as an error rather than ending the turn', async () => {
     script.push(
       msg([{ type: 'tool_use', id: 't1', name: 'read_page', input: { url: 'https://x' } }], 'tool_use'),
@@ -79,6 +92,12 @@ describe('callModel with our own tools', () => {
     expect(out.ok).toBe(false)
     expect(out.error).toMatch(/still searching after 2 tool rounds/)
     expect(requests).toHaveLength(3)
+  })
+
+  it('asks for the server-side fallback on every call', async () => {
+    script.push(msg([{ type: 'text', text: '{}' }], 'end_turn'))
+    await callModel(args({}))
+    expect(requests[0]).toMatchObject({ fallbacks: 'default', betas: ['server-side-fallback-2026-07-01'] })
   })
 
   it('leaves a tool_use turn alone when the caller runs its own tools (chat)', async () => {

@@ -405,7 +405,10 @@ export function ownChannels({ accounts = [], posts = [], analytics = [], period,
   const measured = platforms.filter(p => p.state === 'measured')
 
   return {
-    platforms,
+    // Only channels we have. A platform with no account is not a channel of
+    // ours, and listing it every week ("No TikTok account is connected")
+    // reads as a to-do the owner has already decided against (2026-10-13).
+    platforms: connected,
     connected_count: connected.length,
     measured_count: measured.length,
     // The one sentence a reader needs before any number below it means
@@ -534,24 +537,6 @@ export function ownChannelFindings(own) {
           followers_gained_organic: page.followers_gained_organic, page_views: page.page_views,
         },
       })
-    }
-
-    if (p.state === 'not_connected') {
-      // Only worth raising once there is something to compare it against —
-      // otherwise a brand that has deliberately never used LinkedIn gets the
-      // same nag every week forever.
-      if ((own?.measured_count || 0) > 0) {
-        findings.push({
-          headline: `We have no ${p.label} presence at all.`,
-          detail: `${p.label} is a platform this product can publish to, and no account is connected. ` +
-            'That is a choice worth making deliberately rather than by default.',
-          confidence: 1,
-          novelty: 'continuing',
-          suggested_action: `Decide whether ${p.label} is a channel for this brand. If it is, connect the account; if it is not, retire the question.`,
-          evidence: { platform: p.platform, state: p.state },
-        })
-      }
-      continue
     }
 
     if (p.state === 'silent') {

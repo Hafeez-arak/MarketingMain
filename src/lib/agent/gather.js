@@ -188,6 +188,20 @@ export function priorByName(rows) {
   return map
 }
 
+/**
+ * The earlier snapshot to compare with, only if it is the SAME account.
+ * "Us" moved from the 2-follower test account to @araklighting on
+ * 2026-10-12, and the next run reported followers 2 → 851, +42,450%. A
+ * different handle under the same name starts a new series.
+ */
+export function priorFor(prev, s) {
+  const p = prev.get(String(s?.competitor_name || '').toLowerCase())
+  if (!p) return null
+  const a = String(p.ig_handle || '').toLowerCase()
+  const b = String(s.ig_handle || '').toLowerCase()
+  return a && b && a !== b ? null : p
+}
+
 /** Every movement across every measured rival, biggest first. */
 export function computeMovements(snapshots, prior) {
   const prev = prior instanceof Map ? prior : priorByName(prior)
@@ -196,7 +210,7 @@ export function computeMovements(snapshots, prior) {
 
   for (const s of snapshots || []) {
     if (s?.data_source !== 'instagram') continue
-    const p = prev.get(String(s.competitor_name || '').toLowerCase())
+    const p = priorFor(prev, s)
     if (!p) continue
     comparable += 1
     const add = m => { if (m) movements.push(m) }
@@ -238,7 +252,7 @@ export function buildBoard(snapshots, prior) {
   const comparable = selfIsComparable(self)
 
   return (snapshots || []).filter(s => !s?.is_self).map(s => {
-    const p = prev.get(String(s.competitor_name || '').toLowerCase())
+    const p = priorFor(prev, s)
     return {
       name: s.competitor_name,
       handle: s.ig_handle,

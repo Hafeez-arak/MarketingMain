@@ -34,6 +34,7 @@ import {
   sameName, nameKey, daysTo, cleanDate, isOpenOpportunity, CLOSED_STATUSES, SOCIAL_CHANNELS,
 } from './agent/intel'
 import { ownChannelRows, actionPlan, pct } from './researchBrief'
+import { isRunFault, isLabel } from './agent/runFaults.js'
 
 /**
  * The second axis: which side of the business a reader is in.
@@ -98,7 +99,7 @@ export const SECTIONS = [
   { key: 'competitors', label: 'Competitor moves', teams: ['marketing', 'sales', 'technical'] },
   { key: 'social', label: 'Social activity', teams: ['marketing'] },
   { key: 'events', label: 'Events', teams: ['marketing', 'sales'] },
-  { key: 'search', label: 'Search demand', teams: ['marketing', 'sales'] },
+  { key: 'search', label: 'Website', teams: ['marketing', 'sales'] },
   { key: 'market', label: 'Market & technical', teams: ['marketing', 'technical'] },
   // The world industry is read by the technical team and by marketing for
   // what to say; sales works this market, not Shenzhen's.
@@ -831,6 +832,14 @@ export function marketingRecommendations(report) {
  * know that something was FIXED — only a person knows that — so it says
  * "not repeated this run" rather than "resolved", which is the honest claim.
  */
+// Run faults and leaked labels: see agent/runFaults.js.
+export { isRunFault }
+
+/** This run's own problems, shortest first, for one line above the report. */
+export function runFaults(report = {}) {
+  return (report?.unanswered || []).map(flat).filter(t => t && isRunFault(t))
+}
+
 export function openItems({ runs = [], limit = 10, lookback = 6 } = {}) {
   const complete = (runs || [])
     .filter(r => r?.report && (r.report.unanswered || []).length)
@@ -844,7 +853,7 @@ export function openItems({ runs = [], limit = 10, lookback = 6 } = {}) {
     const date = String(run.started_at || '').slice(0, 10)
     for (const raw of run.report.unanswered || []) {
       const text = flat(raw)
-      if (!text) continue
+      if (!text || isRunFault(text) || isLabel(text)) continue
       // Similarity, not equality: the same blocker is written a little
       // differently every week, and two lines that are 80% the same sentence
       // are one open item rather than two.
