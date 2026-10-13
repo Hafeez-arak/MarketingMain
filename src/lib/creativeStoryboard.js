@@ -1,5 +1,7 @@
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './supabaseClient'
-import { getVideoModel, estimateVideoCost, modelImageRole, resolveVideoModelId } from '../components/studio/videoModels'
+import {
+  getVideoModel, estimateVideoCost, modelImageRole, resolveVideoModelId, finishDraftIdOf,
+} from '../components/studio/videoModels'
 import { buildVideoPrompt } from '../components/studio/motionPresets'
 
 // ─── Multi-clip storyboard ─────────────────────────────────────────────────
@@ -235,9 +237,14 @@ export function clipState(row) {
 // clip 2 mints a fresh overlay row that becomes clip 2's current take, and
 // comparing that row's timestamp would report clip 3's seam as broken when the
 // footage beneath the lettering never changed.
+//
+// A Seedance 2.5 draft finished at 1080p is the same take for the same reason:
+// fal completes the draft rather than rolling new footage, so the clip after
+// it still continues from the frame it was chained to.
 function takeTimeOf(row, byId) {
   let cur = row
-  for (let hops = 0; cur && cur.kind === 'overlay' && cur.parent_version_id && hops < 8; hops += 1) {
+  const sameTake = r => r.kind === 'overlay' || !!finishDraftIdOf(r)
+  for (let hops = 0; cur && sameTake(cur) && cur.parent_version_id && hops < 8; hops += 1) {
     const parent = byId.get(cur.parent_version_id)
     if (!parent) break
     cur = parent

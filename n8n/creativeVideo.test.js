@@ -275,6 +275,17 @@ describe('Creative Video — Seedance 2.5 drafts', () => {
     expect(input).toEqual({ draft_id: 'draft_abc', resolution: '1080p' })
   })
 
+  it("keeps a finish row's draft id through n8n's own overlay_state write", async () => {
+    // Retry reads overlay_state.finishOf to finish the draft again. The submit
+    // write replaces overlay_state wholesale, so dropping it there would turn
+    // a retried finish into a from-scratch 1080p render at the same price.
+    const postgrest = db()
+    await render({ model: 'seedance-2.5', draft_id: 'draft_abc', resolution: '1080p' }, { postgrest })
+    const row = postgrest.tables.creative_versions.find(r => r.id === VERSION)
+    expect(row.overlay_state.finishOf).toEqual({ draftId: 'draft_abc' })
+    expect(row.overlay_state.pendingRequest.model).toBe('bytedance/seedance-2.5/draft/complete')
+  })
+
   it('ignores a draft id sent with any other model', async () => {
     const { endpoint } = await render({ model: 'seedance-2', draft_id: 'draft_abc' })
     expect(endpoint).toBe('bytedance/seedance-2.0/text-to-video')

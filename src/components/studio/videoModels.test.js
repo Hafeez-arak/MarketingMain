@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   VIDEO_MODELS, getVideoModel, estimateVideoCost, modelImageRole, modelImageMax,
   MODEL_ALIASES, resolveVideoModelId, isVideoEditModel, VIDEO_EDIT_MODEL_ID,
-  canEditVideoDuration,
+  canEditVideoDuration, draftOf, finishDraftIdOf, estimateFinishCost,
 } from './videoModels'
 
 // ─── The picker's catalog ──────────────────────────────────────────────────
@@ -118,5 +118,35 @@ describe('video model catalog', () => {
         expect(max, m.id).toBe(1)
       }
     }
+  })
+})
+
+// ─── When "Finish in 1080p" is offered ─────────────────────────────────────
+// draftOf is the one gate for both the button and the handler. Offering it on
+// the wrong row is a paid call that fal will refuse, or worse, accept.
+describe('draftOf', () => {
+  const now = Date.parse('2026-10-13T12:00:00Z')
+  const row = (over = {}) => ({
+    status: 'ready', kind: 'video', model: 'seedance-2.5',
+    overlay_state: { draft: { id: 'draft_abc', expiresAt: '2026-10-20T12:00:00Z' } },
+    ...over,
+  })
+
+  it('offers a ready Seedance 2.5 draft inside its seven days', () => {
+    expect(draftOf(row(), now)).toEqual({ id: 'draft_abc', expiresAt: '2026-10-20T12:00:00Z' })
+  })
+
+  it('refuses an expired, unfinished, composited or non-Seedance-2.5 row', () => {
+    expect(draftOf(row({ overlay_state: { draft: { id: 'x', expiresAt: '2026-10-13T11:59:00Z' } } }), now)).toBeNull()
+    expect(draftOf(row({ status: 'pending' }), now)).toBeNull()
+    expect(draftOf(row({ kind: 'overlay' }), now)).toBeNull()
+    expect(draftOf(row({ model: 'seedance-2' }), now)).toBeNull()
+    expect(draftOf(row({ overlay_state: { pendingRequest: {} } }), now)).toBeNull()
+  })
+
+  it('prices a finish at the 1080p completion rate', () => {
+    expect(estimateFinishCost('20')).toBeCloseTo(23.28, 2)
+    expect(finishDraftIdOf({ overlay_state: { finishOf: { draftId: 'd' } } })).toBe('d')
+    expect(finishDraftIdOf({})).toBe('')
   })
 })

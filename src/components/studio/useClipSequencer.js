@@ -7,6 +7,7 @@ import {
   setRunStatus,
 } from '../../lib/creativeStoryboard'
 import { captureLastFrameBlob } from './videoFrame'
+import { DRAFT_MODEL_ID, draftOf, finishDraftIdOf } from './videoModels'
 
 // ─── The multi-clip render run ─────────────────────────────────────────────
 // Renders a storyboard one clip at a time, from the browser, because that is
@@ -254,6 +255,62 @@ export function useClipSequencer({
     void fireClip(index, runId.current)
   }, [fireClip])
 
+  // ── Finishing one clip's draft at 1080p ──
+  // The same take, sharper: fal completes the Seedance 2.5 draft rather than
+  // rendering anew, so nothing chained after this clip goes out of step (see
+  // takeTimeOf in creativeStoryboard.js). It becomes the clip's next attempt,
+  // which is what makes the reel pick it up — clipRowsByIndex reads the latest
+  // attempt — and it carries the draft id so Retry finishes it again rather
+  // than re-rolling. One clip only, never the board: like renderOne, nobody
+  // who asked to sharpen one shot has agreed to pay for the rest.
+  const finishOne = useCallback(async index => {
+    const {
+      session: s, workspaceId: ws, accessToken: tok, webhooks: hooks,
+      versions: vs, clipRows: rows,
+    } = ctx.current
+    const row = rows?.[index]
+    // A live draft, or a finish that failed — retrying one finishes the same
+    // draft again rather than falling back to a fresh 480p take.
+    const draftId = draftOf(row)?.id || (row?.status === 'failed' ? finishDraftIdOf(row) : '')
+    if (!s || !draftId) return
+    runId.current += 1
+    lock.current = { sessionId: s.id, clipIndex: index }
+    setArmedFor(null)
+    setRunStatus(tok, s.id, '')
+
+    const ins = await insertPendingVersions(ws, tok, s.id, [{
+      round: 0, kind: 'video', provider: 'seedance', mediaType: 'video',
+      clipIndex: index, clipAttempt: nextClipAttempt(vs, index),
+      parentVersionId: row.id,
+      imageUrl: row.image_url || '',
+      userPrompt: row.user_prompt || '',
+      model: DRAFT_MODEL_ID,
+      duration: row.duration || '',
+      resolution: '1080p',
+      generateAudio: !!row.generate_audio,
+      aspectRatio: s.aspect_ratio || '',
+      overlayState: { finishOf: { draftId } },
+    }])
+    if (ins.error) {
+      if (String(ins.error).includes(UNIQUE_VIOLATION)) { ctx.current.refresh(s.id); return }
+      ctx.current.onError(ins.error)
+      return
+    }
+    ctx.current.onVersions(ins.rows)
+
+    const fired = await requestVideo(hooks.creativeVideo, {
+      session_id: s.id, version_id: ins.rows[0].id,
+      prompt: row.user_prompt || '', model: DRAFT_MODEL_ID, draft_id: draftId,
+      duration: row.duration || '5', aspect_ratio: s.aspect_ratio || '',
+      resolution: '1080p', generate_audio: !!row.generate_audio,
+    })
+    if (fired.error) {
+      ctx.current.onError(fired.error)
+      await updateVersion(tok, ins.rows[0].id, { status: 'failed', error: fired.error })
+      ctx.current.refresh(s.id)
+    }
+  }, [])
+
   // ── Cancelling a clip fal is already working on ──
   // Two separate things, and only one of them is guaranteed. Marking the row
   // failed locally is what frees the board. Asking fal to drop the job is what
@@ -306,6 +363,7 @@ export function useClipSequencer({
     start,
     stop,
     renderOne,
+    finishOne,
     cancelClip,
     clipRows,
     states,

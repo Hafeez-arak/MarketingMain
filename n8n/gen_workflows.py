@@ -4109,6 +4109,11 @@ async function run(){
 
   const pendingRequest = { requestId, model, cancelUrl: submit.cancel_url || '',
                            submittedAt: new Date().toISOString() };
+  // A finish row says which draft it completes. The browser writes this at
+  // insert, and both writes below replace overlay_state wholesale, so it is
+  // carried through them — Retry reads it to finish the draft again rather
+  // than starting a new 1080p render from nothing at the same price.
+  const keep = draftId ? { finishOf: { draftId } } : {};
   // Saved BEFORE polling starts, not after — the request_id only ever lived
   // in this function's local variables until now, and this function can be
   // killed mid-poll by n8n's own task-runner timeout (found 2026-08-11: a
@@ -4128,7 +4133,7 @@ async function run(){
       // rather than the full model path, and a URL derived from the wrong one
       // 405s. Creative Cancel prefers this and only derives a fallback if fal
       // ever stops returning it.
-      body: { overlay_state: { pendingRequest } },
+      body: { overlay_state: Object.assign({ pendingRequest }, keep) },
       json: true });
   } catch (e) { /* recoverable by Reconcile only if this succeeded; never worth failing the render over */ }
 
@@ -4181,9 +4186,9 @@ async function run(){
         url: String($env.SUPABASE_URL).replace(/\/+$/, '') + '/rest/v1/creative_versions?id=eq.' + versionId,
         headers: { Authorization: 'Bearer ' + $env.SUPABASE_KEY, apikey: $env.SUPABASE_KEY,
                    'Content-Type': 'application/json', Prefer: 'return=minimal' },
-        body: { overlay_state: { pendingRequest, draft: {
+        body: { overlay_state: Object.assign({ pendingRequest, draft: {
           id: String(result.draft_id),
-          expiresAt: new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString() } } },
+          expiresAt: new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString() } }, keep) },
         json: true });
     } catch (e) { /* the clip matters more than the button */ }
   }

@@ -96,6 +96,8 @@ export function BranchChat({
   onReRender,              // optional: re-run a past render against the current base
   onEditClip,              // text/logos onto a finished clip. Free — ffmpeg, no model.
   reRenderCost,            // (version) => dollars, shown on the button BEFORE the click
+  onFinishDraft,           // finish a Seedance 2.5 draft at 1080p — the same take, sharper
+  finishDraftCost,         // (version) => dollars, or null when the clip isn't a live draft
   editVideoCost,           // (version) => dollars — what Send costs on a video stage
   editVideoAllowed,        // (version) => bool — fal's 3–15s limit on the source clip
   preparingClip = '',      // version id whose first frame is being read
@@ -560,6 +562,14 @@ export function BranchChat({
               onClick={() => onDownload(stage)}
               title={stage.is_final ? 'Download (already in the Media Library)' : 'Download — also files it in the Media Library'}>
               {pendingKey === `download:${stage.id}` ? <Spinner size="sm" /> : stageIsVideo ? '⬇ Clip' : '⬇ Download'}
+            </Button>
+          )}
+          {/* Before Re-render on purpose: on a draft it is the better click —
+              the same take at 1080p, where Re-render rolls new footage. */}
+          {stageIsVideo && onFinishDraft && finishDraftCost?.(stage) != null && (
+            <Button size="sm" disabled={!!busy} onClick={() => onFinishDraft(stage)}
+              title="Renders THIS take again at 1080p — the same movement you approved, just sharp. Available for 7 days after the draft.">
+              ✦ Finish in 1080p · −${finishDraftCost(stage).toFixed(2)}
             </Button>
           )}
           {stageIsVideo && onReRender && (

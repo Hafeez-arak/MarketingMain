@@ -295,3 +295,37 @@ export function canEditVideoDuration(duration) {
   const d = Number(duration)
   return d >= VIDEO_EDIT_DURATION_RANGE[0] && d <= VIDEO_EDIT_DURATION_RANGE[1]
 }
+
+// ─── Finishing a Seedance 2.5 draft at 1080p ───────────────────────────────
+// Added 2026-10-13. Every Seedance 2.5 render at Draft (480p) goes to fal as a
+// DRAFT — same 480p, same $0.2205/s — and fal hands back a draft id, which the
+// Creative Video workflow stores at overlay_state.draft with its expiry. For
+// seven days that take can be finished at 1080p as THE SAME TAKE, where Sharp
+// or a re-render would roll new footage that moves differently. That is the
+// whole value: check the movement cheaply, then pay for 1080p only on the one
+// you approved.
+//
+// The finished clip is a new row whose overlay_state.finishOf.draftId names
+// the draft it completes. n8n carries that through its own overlay_state
+// writes, which is what lets Retry finish the draft again instead of firing a
+// from-scratch 1080p render at the same price.
+export const DRAFT_MODEL_ID = 'seedance-2.5'
+export const FINISH_DRAFT_RATE = 1.164 // $/s at 1080p, fal's completion price
+
+export function draftOf(version, now = Date.now()) {
+  if (!version || version.status !== 'ready' || version.kind !== 'video') return null
+  if (resolveVideoModelId(version.model) !== DRAFT_MODEL_ID) return null
+  const d = version.overlay_state?.draft
+  if (!d?.id) return null
+  const exp = Date.parse(d.expiresAt)
+  if (Number.isFinite(exp) && exp <= now) return null
+  return { id: String(d.id), expiresAt: d.expiresAt || '' }
+}
+
+export function finishDraftIdOf(version) {
+  return version?.overlay_state?.finishOf?.draftId || ''
+}
+
+export function estimateFinishCost(duration) {
+  return FINISH_DRAFT_RATE * (Number(duration) || 5)
+}
