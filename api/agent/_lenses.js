@@ -7,6 +7,9 @@ import { ownChannelFindings } from '../../src/lib/agent/ownChannels.js'
 import { CHANNELS, SIGNAL_CATEGORIES } from '../../src/lib/agent/intel.js'
 import { searchConfig, searchFindings, lineOf } from '../../src/lib/agent/searchConsole.js'
 import { fetchSearchData } from './_searchConsole.js'
+import { searchWeb, readPage, webConfigured } from './_web.js'
+import { msLeft } from '../../src/lib/agent/phases.js'
+import { BACKUP_TOOLS, BACKUP_NAMES, BACKUP_PROMPT, backupGate } from '../../src/lib/agent/backupSearch.js'
 
 // ─── Running a lens ────────────────────────────────────────────────────────
 // Each lens is one bounded model call with web search, asked one question and
@@ -372,6 +375,43 @@ const webTools = ({ searches = 0, fetches = null } = {}) => (searches > 0
   : [])
 
 /**
+ * Firecrawl/Tavily for a lens whose web_search runs out (backupSearch.js).
+ * Null when the lens does not search or no provider key is set.
+ *
+ * `found` joins the citation allow-list: a URL these tools returned was really
+ * returned, exactly like a web_search result.
+ */
+function backupWeb(budget = {}, deadline = null) {
+  if (!(budget.searches > 0) || !webConfigured()) return null
+  const found = new Set()
+  const stats = { searches: 0, reads: 0, failed: 0, servedBy: new Set(), notes: [] }
+  let used = 0
+
+  async function runTool(name, input = {}) {
+    if (!BACKUP_NAMES.has(name)) return { ok: false, error: `There is no tool called "${name}".` }
+    const stop = backupGate({ used, msLeft: deadline ? msLeft(deadline) : null })
+    if (stop) return { ok: false, error: stop }
+    used += 1
+    const out = name === 'read_page'
+      ? await readPage(input.url)
+      : await searchWeb(input.query, { limit: Math.min(Number(input.limit) || 5, 10) })
+    if (name === 'read_page') stats.reads += 1
+    else stats.searches += 1
+    stats.notes.push(...(out.notes || []))
+    if (!out.ok) { stats.failed += 1; return { ok: false, error: out.error } }
+    stats.servedBy.add(out.used)
+    if (name === 'read_page') {
+      if (out.page?.url) found.add(out.page.url)
+      return { ok: true, result: out.page }
+    }
+    for (const r of out.results || []) if (r.url) found.add(r.url)
+    return { ok: true, result: { results: out.results || [] } }
+  }
+
+  return { tools: BACKUP_TOOLS, runTool, found, stats }
+}
+
+/**
  * Run one lens.
  *
  * @param {object} args
@@ -388,6 +428,7 @@ export async function runLens({
   if (!lens) return { lens: lensKey, ok: false, findings: [], sources: [], cost: 0, error: 'Unknown lens.' }
 
   const allowed = new Set()
+  const backup = backupWeb(lens.budget, deadline)
   try {
     const out = await callModel({
       workspaceId, surface: 'run', runId,
@@ -397,8 +438,9 @@ export async function runLens({
       stage: lensKey,
       identity,
       brand,
-      tools: webTools(lens.budget),
-      messages: [{ role: 'user', content: prompt }],
+      tools: [...webTools(lens.budget), ...(backup?.tools || [])],
+      messages: [{ role: 'user', content: backup ? prompt + BACKUP_PROMPT : prompt }],
+      runTool: backup?.runTool || null,
       maxTokens: lens.budget.maxTokens || 8_000,
       effort: lens.budget.effort || 'medium',
       outputFormat: SCHEMAS[lens.schema] || FINDINGS_SCHEMA,
@@ -407,6 +449,13 @@ export async function runLens({
       // happened; being stopped by the platform writes nothing at all.
       deadline,
     })
+
+    for (const u of backup?.found || []) allowed.add(u)
+    if (backup && (backup.stats.searches || backup.stats.reads)) {
+      const s = backup.stats
+      console.log(`[agent] ${lensKey}: backup web ${s.searches} search(es), ${s.reads} read(s), ${s.failed} failed` +
+        ` via ${[...s.servedBy].join('+') || 'none'}${s.notes.length ? ` (${[...new Set(s.notes)].join(' ')})` : ''}`)
+    }
 
     if (out.refused) return { lens: lensKey, ok: false, findings: [], sources: [], cost: out.cost || 0, error: out.error }
     if (!out.ok) {
