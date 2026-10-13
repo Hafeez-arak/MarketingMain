@@ -1,7 +1,7 @@
 import {
   createZernio, normalizeAccount, ownedByProfile, profileIdOf,
   CONNECT_SPECS, CONNECTABLE, explainZernioError, ZernioError, qs, analyticsPlan, followerPlan, retryRateLimited,
-  syncAccountPosts,
+  syncAccountPosts, feedPlan, mergeFeedPages, FEED_MAX_PAGES,
 } from './_zernio.js'
 import { mayDisconnect, protectionReason } from '../../src/lib/platformSafety.js'
 
@@ -458,6 +458,33 @@ const handlers = {
       insightsFrom: plan.insightsFrom,
       metricsSupported: plan.metricsSupported,
       ...Object.fromEntries(plan.requests.map((r, i) => [r.key, results[i]])),
+    }
+  },
+
+  // The Instagram page's "All posts" tab: every post live on one account
+  // since it was connected, ours and ones made on the platform directly.
+  // See feedPlan / feedPost in _zernio.js.
+  async feed(z, { ws, profileId, body }) {
+    const accountId = String(body.account_id || '').trim()
+    if (!accountId) return fail('account_id is required.', 400)
+
+    const account = await requireOwnedAccount(z, { workspaceId: ws.id, profileId, accountId })
+    const plan = feedPlan({ accountId, connectedAt: account.connected_at })
+
+    const pages = []
+    for (let page = 1; page <= FEED_MAX_PAGES; page++) {
+      const out = await retryRateLimited(() => z.request('analytics', { query: plan.query(page) }))
+      pages.push(out)
+      const total = Number(out?.pagination?.pages) || 1
+      if (!(out?.posts || []).length || page >= total) break
+    }
+
+    return {
+      account,
+      from_date: plan.fromDate,
+      to_date: plan.toDate,
+      last_sync: pages[0]?.overview?.lastSync || null,
+      posts: mergeFeedPages(pages),
     }
   },
 

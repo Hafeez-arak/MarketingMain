@@ -742,3 +742,80 @@ export function explainZernioError(err) {
   }
   return (err && err.message) || 'That did not work.'
 }
+
+// ─── The "All posts" feed ──────────────────────────────────────────────────
+//
+// Everything live on one account since it was connected, whether it went out
+// through this app or was posted on the platform directly.
+//
+// Zernio's /analytics list is the source because it is the only one that
+// carries both kinds: it imports the platform's own posts (its external store
+// keeps about the last 12 months) alongside the ones we published through it.
+// History before the connection is deliberately left out — the tab tracks
+// from the day the account was connected, not the account's whole past.
+//
+// Zernio caps one query at 366 days, so a start older than that is clamped
+// rather than sent and refused.
+export const FEED_MAX_DAYS = 365
+export const FEED_PAGE_SIZE = 100
+export const FEED_MAX_PAGES = 5
+
+export function feedPlan({ accountId, connectedAt, now = Date.now() }) {
+  const toDate = isoDay(now)
+  const earliest = isoDay(now - FEED_MAX_DAYS * DAY_MS)
+  const connected = Date.parse(connectedAt || '')
+  const since = Number.isFinite(connected) ? isoDay(connected) : earliest
+  const fromDate = since > earliest ? since : earliest
+  return {
+    fromDate,
+    toDate,
+    query: page => ({
+      accountId, source: 'all', fromDate, toDate,
+      limit: FEED_PAGE_SIZE, page, sortBy: 'date', order: 'desc',
+    }),
+  }
+}
+
+// ── Which posts are ours ──
+//
+// `latePostId` is set only on posts published through Zernio, and nothing but
+// this app publishes through our Zernio team, so it is the "From platform"
+// mark. NOT `isExternal`: the list sets that to true on EVERY row, app posts
+// included — the same trap api/agent/_zernioLive.js documents.
+const metric = v => (v == null || v === '' || !Number.isFinite(Number(v)) ? null : Number(v))
+
+export function feedPost(raw) {
+  const p = raw || {}
+  const a = p.analytics || {}
+  const media = Array.isArray(p.mediaItems) ? p.mediaItems : []
+  return {
+    id: String(p._id || p.postId || ''),
+    zernio_post_id: p.latePostId ? String(p.latePostId) : null,
+    origin: p.latePostId ? 'platform' : 'direct',
+    published_at: p.publishedAt || p.scheduledFor || null,
+    caption: String(p.content || ''),
+    url: String(p.platformPostUrl || ''),
+    media_type: String(p.mediaType || media[0]?.type || ''),
+    thumbnail: String(p.thumbnailUrl || media[0]?.thumbnail || media[0]?.url || ''),
+    likes: metric(a.likes),
+    comments: metric(a.comments),
+    reach: metric(a.reach),
+    views: metric(a.views),
+    saves: metric(a.saves),
+    shares: metric(a.shares),
+    updated_at: a.lastUpdated || null,
+  }
+}
+
+// Newest first, one row per post. Paging can repeat a row when a new post
+// lands between two page reads, so the list is de-duplicated by id.
+export function mergeFeedPages(pages) {
+  const seen = new Map()
+  for (const page of pages) {
+    for (const raw of (page?.posts || [])) {
+      const post = feedPost(raw)
+      if (post.id && !seen.has(post.id)) seen.set(post.id, post)
+    }
+  }
+  return [...seen.values()].sort((x, y) => String(y.published_at || '').localeCompare(String(x.published_at || '')))
+}
