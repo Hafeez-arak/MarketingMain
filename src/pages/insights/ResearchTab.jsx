@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Card, Button, Empty, Badge, PillSelect, Skeleton } from '../../components/ui/index'
 import { AgentSteering } from '../../components/AgentSteering'
@@ -11,7 +12,7 @@ import {
   TEAMS, sectionVisible, forTeam, topThree, salesRows, competitorMoves, movesByLine,
   globalView, lineView, socialActivity, eventsView,
   marketNotes, asNote, marketingRecommendations, newCompetitors, sourceList, domainOf, teamsOf,
-  openItems, freshnessLabel, searchDemand, linesIn, forLine, linesOfRefs, matchesLine,
+  openItems, runFaults, freshnessLabel, searchDemand, linesIn, forLine, linesOfRefs, matchesLine,
 } from '../../lib/marketReport'
 import { fetchIntel, updateOpportunity, updateEventDecision } from '../../lib/marketIntel'
 import { fetchAgenda, setAgendaStatus } from '../../lib/agentAgenda'
@@ -398,7 +399,7 @@ function OurChannel({ p }) {
       </div>
       {p.state === 'measured' && (
         <div className="text-right shrink-0 tabular-nums">
-          <p className="text-xs font-semibold text-text">{p.posts} posts · {p.avg_engagement ?? '—'}/post</p>
+          <p className="text-xs font-semibold text-text">{p.posts} post{p.posts === 1 ? '' : 's'} · {p.avg_engagement ?? '—'} interactions/post</p>
           <p className={`text-[10px] ${p.change ? (p.change.direction === 'up' ? 'text-sage-600' : 'text-red-600') : 'text-text-tertiary'}`}>
             {p.change ? `${p.change.direction === 'up' ? '+' : '−'}${p.change.change_pct}% vs prior` : p.weak ? 'thin sample' : 'no comparison yet'}
           </p>
@@ -492,6 +493,38 @@ function SearchRow({ r, lineLabel }) {
       </div>
       {r.detail && <p className="text-[11px] text-text-secondary mt-1.5 leading-relaxed">{r.detail}</p>}
       {r.action && <p className="text-xs text-text-secondary mt-2 leading-relaxed"><span className="font-semibold">Do: </span>{r.action}</p>}
+    </div>
+  )
+}
+
+function WebsiteRead({ read }) {
+  return (
+    <div className="mb-4 space-y-3">
+      <p className="text-sm text-text leading-relaxed" dir="auto">{read.summary}</p>
+      {read.numbers.length > 0 && (
+        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+          {read.numbers.map((x, i) => (
+            <div key={i} className="border border-border bg-white p-3">
+              <p className="text-[10px] font-semibold text-text-tertiary uppercase tracking-wide">{x.label}</p>
+              <p className="text-lg font-semibold text-text tabular-nums mt-0.5">{x.value}</p>
+              {x.meaning && <p className="text-[11px] text-text-secondary leading-snug mt-1">{x.meaning}</p>}
+            </div>
+          ))}
+        </div>
+      )}
+      {read.suggestions.length > 0 && (
+        <div>
+          <p className="text-[10px] font-semibold text-text-tertiary uppercase tracking-wide">What to do</p>
+          <ul className="mt-1.5 space-y-1">
+            {read.suggestions.map((t, i) => (
+              <li key={i} className="text-xs text-text leading-relaxed before:content-['▸_'] before:text-amber-700" dir="auto">{t}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+      <Link to="/analytics?channel=website" className="inline-block text-[11px] text-text-secondary hover:text-text underline">
+        Every number is on the Website tab →
+      </Link>
     </div>
   )
 }
@@ -671,6 +704,10 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
   // never closed is exactly what a per-run caveats list cannot show.
   const open = useMemo(() => openItems({ runs }), [runs])
   const empty = useMemo(() => emptiness(report), [report])
+  const faults = useMemo(() => runFaults(report), [report])
+  // The agent's read of the website (api/agent/_websiteRead.js), from runs
+  // after 2026-10-13. Older runs show the Explain button instead.
+  const site = report.website || null
 
   // Stamped with the run it describes and checked on render, so switching to
   // another week's report cannot leave last week's sentences sitting above it.
@@ -746,7 +783,7 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
     { key: 'competitors', label: 'Competitor moves', count: visibleMoves.length },
     { key: 'social', label: 'Social activity', count: social.theirs.length + social.ours.length },
     { key: 'events', label: 'Events', count: events.count + events.dates.length },
-    { key: 'search', label: 'Search demand', count: search.opportunities.length + search.movers.length },
+    { key: 'search', label: 'Website', count: search.opportunities.length + search.movers.length },
     { key: 'market', label: 'Market & technical', count: visibleNotes.length },
     { key: 'global', label: 'Global industry', count: world.items.length },
     { key: 'poles', label: 'Smart poles', count: poles.items.length },
@@ -857,6 +894,14 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
               Weekly market report · {fmtDate(report.period?.start)} – {fmtDate(report.period?.end)}
             </p>
             <p className="text-base font-semibold text-text mt-1.5 leading-snug">{run.error || report.headline || 'No headline.'}</p>
+            {/* The run's own faults, once, here. They used to sit in "Could
+                not answer" and "Open items" beside real market questions. */}
+            {faults.length > 0 && (
+              <p className="text-xs text-amber-800 mt-2 leading-relaxed">
+                This run had a problem: {faults[0]}
+                {faults.length > 1 && <span className="text-text-tertiary"> (+{faults.length - 1} more)</span>}
+              </p>
+            )}
           </div>
           <Badge status={run.status === 'complete' ? 'completed' : run.status === 'failed' ? 'failed' : 'pending'} />
         </div>
@@ -1027,8 +1072,12 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
 
       {/* 6 ── Search demand */}
       {sectionVisible('search', team) && (
-        <Section id="search" n={num('search')} title="Search demand"
-          note="What people typed on the way to our own site, measured by Google. Impressions and position, not clicks — at this volume a click count is too thin to read as movement.">
+        <Section id="search" n={num('search')} title="Website"
+          note="How our site did over the last 28 days, read by the agent from Google Search and Google Analytics: what matters, and what to do about it.">
+          {site?.summary && <WebsiteRead read={site} />}
+          {site?.error && !site?.summary && (
+            <p className="text-[11px] text-text-tertiary mb-3">The agent could not read the website this run: {site.error}</p>
+          )}
           {!search.present ? (
             <Quiet>
               This run had no search data. Either no Search Console property is configured for this brand, or the
@@ -1039,7 +1088,7 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
               {/* What it adds up to, above the items it is about. Idle until
                   asked: the weekly run already paid for the findings below,
                   and nobody should be charged again just for opening the tab. */}
-              <div className="border border-border bg-surface-subtle">
+              {!site?.summary && <div className="border border-border bg-surface-subtle">
                 <div className="px-3 py-2 flex items-center justify-between gap-3">
                   <p className="text-[11px] text-text-tertiary">
                     {explainFor.state === 'done' && explainFor.points.length
@@ -1059,7 +1108,8 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
                     {explainFor.capped ? 'This workspace has reached its monthly agent budget. ' : ''}{explainFor.error}
                   </p>
                 )}
-              </div>
+              </div>}
+              {site?.summary && <p className="text-[10px] font-semibold text-text-tertiary uppercase tracking-wide pt-1">From Google Search</p>}
               {search.note && <p className="text-sm text-text leading-snug" dir="auto">{search.note}</p>}
               {search.byLine.length > 0 && (
                 <div className="flex flex-wrap gap-1.5">
@@ -1241,11 +1291,6 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
                 </li>
               ))}
             </ul>
-          </Fold>
-        )}
-        {(report.unanswered || []).length > 0 && (
-          <Fold title="Could not answer" subtitle="A research agent that never admits a miss is one you cannot calibrate." count={report.unanswered.length}>
-            <ul className="mt-3 space-y-2">{report.unanswered.map((u, i) => <li key={i} className="text-xs text-text-tertiary leading-relaxed">{u}</li>)}</ul>
           </Fold>
         )}
         {passed.length > 0 && (

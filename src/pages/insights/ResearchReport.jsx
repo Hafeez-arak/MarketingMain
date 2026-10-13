@@ -13,7 +13,7 @@ import {
   TEAMS, sectionVisible, forTeam, topThree, salesRows, competitorMoves, movesByLine,
   globalView, lineView, linesIn, socialActivity, eventsView,
   marketNotes, marketingRecommendations, newCompetitors, sourceList, openItems, freshnessLabel,
-  searchDemand,
+  searchDemand, isRunFault,
 } from '../../lib/marketReport'
 import { fetchIntel } from '../../lib/marketIntel'
 import { fetchAgenda } from '../../lib/agentAgenda'
@@ -404,9 +404,22 @@ export function ResearchReport() {
                 an absent section reads as "we did not look", and the whole
                 point of this one is to say what people are searching for AND
                 to be honest when the answer is "almost nothing". */}
-            {show('search') && search.present && (
-              <ReportSection title="Search demand"
-                note="What people typed on the way to our own site, measured by Google Search Console. Impressions and position rather than clicks — at this volume a click count is too thin to read as movement.">
+            {show('search') && (search.present || report.website?.summary) && (
+              <ReportSection title="Website"
+                note="How our site did over the last 28 days, read by the agent from Google Search and Google Analytics.">
+                {report.website?.summary && (
+                  <div className="mb-3" data-print-keep>
+                    <p className="text-[12px] text-text leading-snug" dir="auto">{report.website.summary}</p>
+                    {(report.website.numbers || []).length > 0 && (
+                      <p className="text-[11px] text-text-secondary mt-1.5">
+                        {report.website.numbers.map(x => `${x.label}: ${x.value}`).join(' · ')}
+                      </p>
+                    )}
+                    {(report.website.suggestions || []).map((t, i) => (
+                      <p key={i} className="text-[11px] text-text-secondary mt-1"><span className="font-semibold">Do: </span>{t}</p>
+                    ))}
+                  </div>
+                )}
                 {search.note && <p className="text-[12px] text-text leading-snug mb-2" dir="auto">{search.note}</p>}
                 {search.byLine.length > 0 && (
                   <p className="text-[10px] text-text-tertiary mb-2">
@@ -573,7 +586,8 @@ export function ResearchReport() {
               )}
             </ReportSection>
 
-            <Caveats items={report.unanswered || []} />
+            {/* The run's own faults are not caveats about the market. */}
+            <Caveats items={(report.unanswered || []).filter(u => !isRunFault(u))} />
 
             <ReportFooter>
               {brand} · weekly market report from the run of {runDate}. Every finding cites the source it was read from; own-channel

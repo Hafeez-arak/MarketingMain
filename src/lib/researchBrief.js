@@ -231,6 +231,16 @@ export function emptiness(report = {}) {
  * Every entry names what to do and where, because "set your geography" without
  * a destination is a complaint rather than an instruction.
  */
+/**
+ * Is an Instagram account of ours connected, as far as this run could tell?
+ * Either our own channels list it, or the board measured us as "Us".
+ */
+export function ownAccountConnected(report = {}) {
+  return (report?.own_performance?.platforms || []).some(p => p.platform === 'instagram' && p.connected)
+    || (report?.movements || []).some(m => m.competitor === 'Us')
+    || (report?.competitor_board || []).some(b => b.is_self || b.name === 'Us')
+}
+
 export function setupGaps(report = {}, { hasOwnAccount = true } = {}) {
   const gaps = []
   const unanswered = (report.unanswered || []).join(' ')
@@ -292,8 +302,10 @@ export function setupGaps(report = {}, { hasOwnAccount = true } = {}) {
  * top of a page whose job is to report the week that happened.
  */
 export function ownChannelRows(report = {}) {
-  const rank = { measured: 0, unmeasured: 1, silent: 2, not_connected: 3 }
+  const rank = { measured: 0, unmeasured: 1, silent: 2 }
+  // Reports before 2026-10-13 also listed platforms with no account at all.
   return [...(report?.own_performance?.platforms || [])]
+    .filter(p => p.connected !== false && p.state !== 'not_connected')
     .sort((a, b) => (rank[a.state] ?? 9) - (rank[b.state] ?? 9)
       || (b.avg_engagement ?? -1) - (a.avg_engagement ?? -1))
 }

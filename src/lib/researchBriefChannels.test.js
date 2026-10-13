@@ -17,9 +17,10 @@ describe('ownChannelRows', () => {
     },
   }
 
-  it('reads measured first, then what is actionable, then the dark channels', () => {
+  it('reads measured first, then what is actionable, and leaves out a platform with no account', () => {
+    // A report from before 2026-10-13 still lists platforms nobody connected.
     expect(ownChannelRows(report).map(p => p.platform))
-      .toEqual(['instagram', 'tiktok', 'linkedin'])
+      .toEqual(['instagram', 'tiktok'])
   })
 
   it('puts the stronger channel first when two are measured', () => {

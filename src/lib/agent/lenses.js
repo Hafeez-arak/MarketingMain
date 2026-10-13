@@ -143,6 +143,9 @@ export const LENSES = [
     //
     // Six searches, down from eight on 2026-09-15: its events job moved to the
     // events lens, so every search it has now goes to projects.
+    // Firecrawl first (backupSearch.js): portals, tender listings, PDFs and
+    // company sites are where it beat Claude's search on 2026-09-15.
+    web: 'firecrawl',
     budget: { searches: 6, maxTokens: 10_000, effort: 'medium' },
     universal: true,
   },
@@ -230,6 +233,9 @@ export const LENSES = [
     //
     // Fetches are named explicitly rather than left to the default: since #71
     // this lens reads DOCUMENTS, and a document must be fetched to be cited.
+    // Firecrawl first (backupSearch.js): portals, tender listings, PDFs and
+    // company sites are where it beat Claude's search on 2026-09-15.
+    web: 'firecrawl',
     budget: { searches: 6, fetches: 10, maxTokens: 8_000, effort: 'medium' },
     universal: true,
   },
@@ -331,6 +337,9 @@ export const LENSES = [
     // against today's eight, and the second pass is the one that was returning
     // nothing at all.
     perLine: true,
+    // Firecrawl first (backupSearch.js): portals, tender listings, PDFs and
+    // company sites are where it beat Claude's search on 2026-09-15.
+    web: 'firecrawl',
     budget: { searches: 6, maxTokens: 10_000, effort: 'medium' },
     universal: true,
   },
