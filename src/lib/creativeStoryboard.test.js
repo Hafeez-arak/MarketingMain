@@ -3,10 +3,10 @@ import { normalizeStoryboard, staleSeams } from './creativeStoryboard'
 
 // ─── Seams after a draft is finished ───────────────────────────────────────
 // A chained clip is "stale" when the clip before it was re-rendered after it
-// was made — its first frame no longer matches anything. Finishing a Seedance
-// 2.5 draft at 1080p mints a NEWER row for the previous clip, but it is the
-// same take (fal completes the draft rather than rolling new footage), so the
-// seam still joins. Reading it as broken would push the team to re-render a
+// was made — its first frame no longer matches anything. Making the previous
+// clip 1080p mints a NEWER row for it, but it is the same take (the upscaler
+// enlarges the footage rather than rolling new footage), so the seam still
+// joins. Reading it as broken would push the team to re-render a
 // clip that was fine, at full price.
 
 const board = {
@@ -21,11 +21,10 @@ const draft = { id: 'd1', kind: 'video', clip_index: 0, created_at: '2026-10-13T
 const clip2 = { id: 'c2', kind: 'video', clip_index: 1, created_at: '2026-10-13T10:05:00Z' }
 
 describe('staleSeams', () => {
-  it('keeps a seam joined when the clip before it was only finished at 1080p', () => {
+  it('keeps a seam joined when the clip before it was only made 1080p', () => {
     const finished = {
       id: 'f1', kind: 'video', clip_index: 0, parent_version_id: 'd1',
-      created_at: '2026-10-13T10:10:00Z',
-      overlay_state: { finishOf: { draftId: 'draft_abc' } },
+      created_at: '2026-10-13T10:10:00Z', model: 'topaz-upscale',
     }
     const seams = staleSeams(board, [finished, clip2], [draft, clip2, finished])
     expect(seams.size).toBe(0)

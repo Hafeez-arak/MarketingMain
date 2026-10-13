@@ -102,9 +102,9 @@ const MODEL_CAVEATS = {
   // The old "no aspect control on text-to-video" half of this note is gone:
   // 2.5's enum was 'auto' only when it was written and now takes real ratios.
   //
-  // Draft takes can be finished at 1080p later (the "Finish in 1080p" button
-  // on the clip) — so checking the movement at Draft costs nothing extra.
-  'seedance-2.5': 'Sharp costs about 5× Draft here — check the movement at Draft, then finish the take you like in 1080p without re-rolling it. Past 15s, scene changes (lighting, objects, what happens) need a full re-render; text, fonts and colours stay free and instant at any length.',
+  // "Make 1080p" on a finished clip enlarges that exact take for cents, so
+  // Draft is enough for nearly everything.
+  'seedance-2.5': 'Sharp costs about 5× Draft here — render at Draft, then use Make 1080p on the take you like (about $0.20 per 10s, same take). Past 15s, scene changes (lighting, objects, what happens) need a full re-render; text, fonts and colours stay free and instant at any length.',
   'kling-3-pro': 'No style references, one quality tier. Without a starting image it renders 16:9, 9:16 or 1:1 — other shapes are trimmed to fit when text is added.',
   'hailuo-2.3': 'No style references, no end frame, one quality tier.',
   'h3-max': 'No sound at all. Sharp is a 768p original enlarged to 1080p, not a native 1080p render.',

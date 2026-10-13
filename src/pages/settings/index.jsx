@@ -247,6 +247,19 @@ const WORKFLOW_CONFIGS = [
     ),
   },
   {
+    platform: 'creativeUpscale',
+    label: 'Creative Studio — Make 1080p',
+    placeholder: 'https://your-instance.app.n8n.cloud/webhook/arak-creative-upscale',
+    description: 'The "Make 1080p" button under a finished clip — enlarges that exact clip to 1080p (same take, same movement) with the Topaz upscaler. Real spend (fal.ai), about $0.20 per 10 seconds of video.',
+    icon: (
+      <div className="w-8 h-8 flex items-center justify-center flex-shrink-0" style={{ background: '#8b5cf6' }}>
+        <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24">
+          <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" strokeLinecap="round" strokeLinejoin="round"/>
+        </svg>
+      </div>
+    ),
+  },
+  {
     platform: 'creativeLayerize',
     label: 'Creative Studio — Split Into Layers',
     placeholder: 'https://your-instance.app.n8n.cloud/webhook/arak-creative-layerize',

@@ -387,6 +387,9 @@ export const requestCompose  = (url, payload) => fire(url, payload, 'Creative Co
 // requestCompose above, but a change to the footage itself rather than a
 // from-scratch take. What a video lane's chat box fires on Send.
 export const requestVideoEdit = (url, payload) => fire(url, payload, 'Creative Video Edit')
+// "Make 1080p": Topaz enlarges an existing clip — the same take, sharper, for
+// cents (~$0.20 per 10s). Fire-and-poll like its siblings.
+export const requestUpscale  = (url, payload) => fire(url, payload, 'Creative Upscale')
 // Joins a multi-clip storyboard's finished clips into one reel. Free, like
 // requestCompose and for the same reason — local ffmpeg, no model call — but
 // slower, since it re-encodes every clip to a common shape first.

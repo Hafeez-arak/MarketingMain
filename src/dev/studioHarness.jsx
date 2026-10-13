@@ -2,15 +2,15 @@ import { useEffect, useState } from 'react'
 import ReactDOM from 'react-dom/client'
 import { BranchChat } from '../components/studio/BranchChat'
 import { ClipBoard } from '../components/studio/ClipBoard'
-import { draftOf, estimateFinishCost } from '../components/studio/videoModels'
+import { canUpscale, estimateUpscaleCost, upscaleSourceTier, UPSCALE_MODEL_ID } from '../components/studio/videoModels'
 import '../index.css'
 
 // ─── Dev-only studio harness ───────────────────────────────────────────────
-// Shows the "✦ Finish in 1080p" button without signing in and without a paid
-// render. Every row here is fake: a lane holding a still and a Seedance 2.5
-// draft, and a two-clip storyboard whose first clip is a draft. Clicking
-// Finish adds a pending row and "finishes" it after a few seconds; nothing
-// leaves the browser. Served by Vite at /dev-studio.html, never built.
+// Shows the "Make 1080p" button without signing in and without a paid call.
+// Every row here is fake: a lane holding a still and a 480p clip, and a
+// two-clip storyboard whose first clip is 480p and second already 1080p.
+// Clicking Make 1080p adds a pending row and "finishes" it after a few
+// seconds; nothing leaves the browser. Served by Vite at /dev-studio.html, never built.
 
 function still(label) {
   const c = document.createElement('canvas')
@@ -24,7 +24,7 @@ function still(label) {
 }
 
 // A two-second clip recorded from a canvas, so the lane has a real video to
-// show. Stands in for a 480p Seedance draft.
+// show. Stands in for a 480p Seedance render.
 function recordClip(label) {
   return new Promise(resolve => {
     const c = document.createElement('canvas')
@@ -49,18 +49,17 @@ function recordClip(label) {
 
 const now = Date.now()
 const iso = ms => new Date(ms).toISOString()
-const DRAFT_STATE = { draft: { id: 'fake-draft', expiresAt: iso(now + 6 * 86400000) } }
 
 function videoRow(id, url, over = {}) {
   return {
     id, status: 'ready', kind: 'video', media_type: 'video', provider: 'seedance',
     model: 'seedance-2.5', resolution: '480p', duration: '20', video_url: url,
     user_prompt: 'Slow push in on the pendant, light breathing', created_at: iso(now - 60000),
-    overlay_state: DRAFT_STATE, ...over,
+    ...over,
   }
 }
 
-function Harness() {
+export function StudioHarness() {
   const [clips, setClips] = useState(null)
   const [laneRows, setLaneRows] = useState([])
   const [boardRows, setBoardRows] = useState([])
@@ -68,7 +67,7 @@ function Harness() {
   const say = m => setLog(l => [`${new Date().toLocaleTimeString()} · ${m}`, ...l])
 
   useEffect(() => {
-    Promise.all([recordClip('Draft · 480p'), recordClip('Clip 2 · 720p'), recordClip('Finished · 1080p')])
+    Promise.all([recordClip('Draft · 480p'), recordClip('Clip 2 · 1080p'), recordClip('Made 1080p')])
       .then(([draft, other, finished]) => {
         setClips({ draft, other, finished })
         const img = still('Gemini still')
@@ -79,22 +78,21 @@ function Harness() {
         ])
         setBoardRows([
           videoRow('c1', draft, { clip_index: 0, clip_attempt: 0 }),
-          videoRow('c2', other, { clip_index: 1, clip_attempt: 0, resolution: '720p', overlay_state: null, duration: '10' }),
+          videoRow('c2', other, { clip_index: 1, clip_attempt: 0, resolution: '1080p', duration: '10' }),
         ])
       })
   }, [])
 
-  // What the real handlers do, minus the money: a pending finish row, then
-  // ready at 1080p. The finished row carries finishOf and no draft, so the
-  // button correctly disappears from it.
-  function finish(rows, setRows, base, extra) {
-    const id = `fin-${Date.now()}`
-    say(`Finish in 1080p clicked — would send draft_id "${draftOf(base).id}" to fal ($${estimateFinishCost(base.duration).toFixed(2)})`)
-    setRows(r => [...r, { ...base, ...extra, id, status: 'pending', resolution: '1080p', parent_version_id: base.id,
-      overlay_state: { finishOf: { draftId: draftOf(base).id } }, created_at: iso(Date.now()) }])
+  // What the real handlers do, minus the money: a pending upscale row, then
+  // ready at 1080p. The new row is 1080p, so the button disappears from it.
+  function upscale(setRows, base, extra) {
+    const id = `up-${Date.now()}`
+    say(`Make 1080p clicked — would send this ${upscaleSourceTier(base)} clip to Topaz ($${estimateUpscaleCost(base.duration).toFixed(2)})`)
+    setRows(r => [...r, { ...base, ...extra, id, status: 'pending', model: UPSCALE_MODEL_ID, resolution: '1080p',
+      parent_version_id: base.id, created_at: iso(Date.now()) }])
     setTimeout(() => {
       setRows(r => r.map(v => (v.id === id ? { ...v, status: 'ready', video_url: clips.finished } : v)))
-      say('Finished (simulated) — same take, now 1080p')
+      say('Done (simulated) — the same clip, now 1080p')
     }, 3000)
   }
 
@@ -120,14 +118,14 @@ function Harness() {
   return (
     <div className="mx-auto max-w-5xl space-y-6 p-6">
       <div className="border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">
-        <b>Preview only — fake data, nothing is charged.</b> Look for <b>✦ Finish in 1080p</b> under the lane's
-        draft video, and on clip 1 of the storyboard (clip 2 is not a draft, so it has no button).
-        Click it to see what happens; the finished take arrives after ~3 seconds.
+        <b>Preview only — fake data, nothing is charged.</b> Look for the Make 1080p button under the
+        480p video, and on clip 1 of the storyboard (clip 2 is already 1080p, so it has none).
+        Click it to see what happens; the 1080p version arrives after ~3 seconds.
       </div>
 
       <section>
         <h2 className="mb-2 text-sm font-semibold">1 · A lane (single video)</h2>
-        <div className="h-[640px]">
+        <div>
           <BranchChat
             branch={branch} composer={{ baseId: laneStage.id }} split={false} focused busy=""
             onChange={noop} onSend={noop} onActivate={noop} onAnimate={noop}
@@ -135,8 +133,8 @@ function Harness() {
             onEditClip={noop}
             reRenderCost={() => 4.41}
             editVideoCost={() => 3.36} editVideoAllowed={() => false}
-            onFinishDraft={v => finish(laneRows, setLaneRows, v, {})}
-            finishDraftCost={v => (draftOf(v) ? estimateFinishCost(v.duration) : null)}
+            onUpscale={v => upscale(setLaneRows, v, {})}
+            upscaleCost={v => (canUpscale(v) ? estimateUpscaleCost(v.duration) : null)}
             onOpenEditor={noop} onFinalize={noop} onUseThis={noop} onDownload={noop}
             onRetry={noop} onDelete={noop} onAttach={noop} onZoom={noop}
           />
@@ -152,7 +150,7 @@ function Harness() {
           preparingClipId="" runStatus=""
           onPatchClip={noop} onPatchBoard={noop} onAddClip={noop} onRemoveClip={noop} onMoveClip={noop}
           onStart={noop} onStop={noop} onRenderClip={i => say(`Render clip ${i + 1}`)}
-          onFinishClip={i => finish(boardRows, setBoardRows, clipRows[i],
+          onUpscaleClip={i => upscale(setBoardRows, clipRows[i],
             { clip_index: i, clip_attempt: (clipRows[i].clip_attempt || 0) + 1 })}
           onCancelClip={noop} onStitch={noop}
           onAddRef={noop} onRemoveRef={noop} onAddClipRef={noop} onRemoveClipRef={noop}
@@ -168,4 +166,4 @@ function Harness() {
   )
 }
 
-ReactDOM.createRoot(document.getElementById('root')).render(<Harness />)
+ReactDOM.createRoot(document.getElementById('root')).render(<StudioHarness />)

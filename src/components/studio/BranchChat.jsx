@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Button, Spinner } from '../ui/index'
 import { PROVIDER_LABEL, labelFor } from './labels'
 import { MultiRefRow } from './MediaPicker'
-import { VIDEO_EDIT_DURATION_RANGE, VIDEO_EDIT_MAX_REFERENCES } from './videoModels'
+import { VIDEO_EDIT_DURATION_RANGE, VIDEO_EDIT_MAX_REFERENCES, upscaleSourceTier } from './videoModels'
 
 // ─── One candidate's own workspace ─────────────────────────────────────────
 // The ChatGPT image and the Gemini image are not two options to choose
@@ -96,8 +96,8 @@ export function BranchChat({
   onReRender,              // optional: re-run a past render against the current base
   onEditClip,              // text/logos onto a finished clip. Free — ffmpeg, no model.
   reRenderCost,            // (version) => dollars, shown on the button BEFORE the click
-  onFinishDraft,           // finish a Seedance 2.5 draft at 1080p — the same take, sharper
-  finishDraftCost,         // (version) => dollars, or null when the clip isn't a live draft
+  onUpscale,               // "Make 1080p": enlarge THIS clip — same take, sharper, cents
+  upscaleCost,             // (version) => dollars, or null when the clip can't or needn't go
   editVideoCost,           // (version) => dollars — what Send costs on a video stage
   editVideoAllowed,        // (version) => bool — fal's 3–15s limit on the source clip
   preparingClip = '',      // version id whose first frame is being read
@@ -526,6 +526,16 @@ export function BranchChat({
             all day; anything that calls a model wears the amber accent and its
             price. The interface teaches which clicks spend money, so nobody has
             to police it in a meeting. */}
+        {/* The two ways to spend on a finished clip look alike as buttons and
+            do opposite things, so a low-resolution clip says which is which
+            in words before either is pressed. */}
+        {stageIsVideo && onUpscale && upscaleCost?.(stage) != null && (
+          <p className="mb-1.5 text-[11px] leading-snug text-text-secondary">
+            This clip is <b>{upscaleSourceTier(stage)}</b> — fine for checking the movement.{' '}
+            <b>Make 1080p</b> sharpens this exact clip.{' '}
+            <b>Re-render</b> makes a new, different take.
+          </p>
+        )}
         <div className="flex flex-wrap items-center gap-1.5">
           {!stageIsVideo && (
             <Button size="sm" variant="outline" disabled={!canAct} onClick={() => onOpenEditor(base)}>Editor</Button>
@@ -564,12 +574,10 @@ export function BranchChat({
               {pendingKey === `download:${stage.id}` ? <Spinner size="sm" /> : stageIsVideo ? '⬇ Clip' : '⬇ Download'}
             </Button>
           )}
-          {/* Before Re-render on purpose: on a draft it is the better click —
-              the same take at 1080p, where Re-render rolls new footage. */}
-          {stageIsVideo && onFinishDraft && finishDraftCost?.(stage) != null && (
-            <Button size="sm" disabled={!!busy} onClick={() => onFinishDraft(stage)}
-              title="Renders THIS take again at 1080p — the same movement you approved, just sharp. Available for 7 days after the draft.">
-              ✦ Finish in 1080p · −${finishDraftCost(stage).toFixed(2)}
+          {stageIsVideo && onUpscale && upscaleCost?.(stage) != null && (
+            <Button size="sm" disabled={!!busy} onClick={() => onUpscale(stage)}
+              title="Sharpens this exact clip to 1080p — same movement, nothing re-generated">
+              Make 1080p · ${upscaleCost(stage).toFixed(2)}
             </Button>
           )}
           {stageIsVideo && onReRender && (

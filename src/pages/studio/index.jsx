@@ -22,7 +22,7 @@ import {
 import {
   canEditVideoDuration, estimateVideoCost, estimateVideoEditCost, getVideoModel, modelImageMax,
   VIDEO_EDIT_DURATION_RANGE, VIDEO_EDIT_MODEL_ID, isVideoEditModel, resolveVideoModelId,
-  DRAFT_MODEL_ID, draftOf, estimateFinishCost, finishDraftIdOf,
+  UPSCALE_MODEL_ID, canUpscale, estimateUpscaleCost, isUpscaleModel, upscaleSourceTier,
   modelImageRole, VIDEO_EDIT_MAX_REFERENCES,
 } from '../../components/studio/videoModels'
 import { aspectLabel } from '../../lib/postFormats'
@@ -36,7 +36,7 @@ import { captureFirstFrame, parentStillOf } from '../../components/studio/videoF
 import {
   buildBranches, createSession, deleteSession, deleteVersion, downloadVersion, fetchFalBalance, fetchSessions,
   fetchVersions, finalizeVersion, insertPendingVersions, renameSession, requestCompose, requestEdit,
-  requestEnhance, requestGenerate, requestLayerize, requestVideo, requestStitch, requestVideoEdit, selectVersion,
+  requestEnhance, requestGenerate, requestLayerize, requestUpscale, requestVideo, requestStitch, requestVideoEdit, selectVersion,
   touchSession, updateVersion, uploadToStudio,
 } from '../../lib/creativeStudio'
 import { fetchIdeaForStudio, fetchPlanForIdea } from '../../lib/studioBridge'
@@ -1040,7 +1040,7 @@ export function CreativeStudio() {
   const startRun = useCallback(() => { markRun('running'); sequencer.start() }, [markRun, sequencer])
   const stopRun = useCallback(() => { markRun('paused'); sequencer.stop('paused') }, [markRun, sequencer])
   const renderClip = useCallback(index => { markRun(''); sequencer.renderOne(index) }, [markRun, sequencer])
-  const finishClip = useCallback(index => { markRun(''); sequencer.finishOne(index) }, [markRun, sequencer])
+  const upscaleClip = useCallback(index => { markRun(''); sequencer.upscaleOne(index) }, [markRun, sequencer])
   const cancelClip = useCallback(index => { markRun('paused'); sequencer.cancelClip(index) }, [markRun, sequencer])
 
   function addStoryboardRef() { setPickerSlot({ id: 'storyboardRef', label: 'Image for every new shot', kind: 'all' }) }
@@ -1221,30 +1221,24 @@ export function CreativeStudio() {
     })
   }
 
-  // "Finish in 1080p" on a Seedance 2.5 draft. Not a re-render: fal completes
-  // the draft it already made, so the take that was approved at 480p is the
-  // one that comes back sharp. The new row is a child of the draft in the same
-  // lane, and carries the draft id (overlay_state.finishOf) so a failed finish
-  // retries as a finish — see handleRetry.
-  async function handleFinishDraft(branch, video) {
-    const draft = draftOf(video)
-    if (!draft) return
+  // "Make 1080p": Topaz enlarges THIS clip — same take, same movement — for
+  // cents, where Re-render buys new footage. The result is a child of the
+  // clip in the same lane, marked by its model so Retry upscales again and
+  // Re-render reaches back to the clip it came from.
+  async function handleUpscale(branch, video) {
+    const tier = upscaleSourceTier(video)
+    if (!tier) return
     setFocusedBranch(branch.rootId)
     await runStep(branch, {
       label: 'video',
       row: {
         round: nextRound, kind: 'video', provider: 'seedance', mediaType: 'video',
         parentVersionId: video.id, userPrompt: video.user_prompt || '', aspectRatio: session.aspect_ratio,
-        model: DRAFT_MODEL_ID, duration: video.duration || '', resolution: '1080p',
+        model: UPSCALE_MODEL_ID, duration: video.duration || '', resolution: '1080p',
         generateAudio: !!video.generate_audio,
-        overlayState: { finishOf: { draftId: draft.id } },
       },
-      payload: {
-        prompt: video.user_prompt || '', model: DRAFT_MODEL_ID, draft_id: draft.id,
-        duration: video.duration || '5', aspect_ratio: session.aspect_ratio,
-        resolution: '1080p', generate_audio: !!video.generate_audio,
-      },
-      send: p => requestVideo(webhooks.creativeVideo, p),
+      payload: { video_url: video.video_url, resolution: tier },
+      send: p => requestUpscale(webhooks.creativeUpscale, p),
     })
   }
 
@@ -1257,6 +1251,9 @@ export function CreativeStudio() {
   function handleReRender(branch, video) {
     const still = branch.latest
     if (!still || still.media_type === 'video') return
+    // An upscaled clip carries the upscaler as its model and 1080p as its
+    // tier; a re-render means another take like the clip it was made from.
+    if (isUpscaleModel(video.model)) video = versions.find(v => v.id === video.parent_version_id) || video
     setVideoTarget(still)
     setVideoPrefill({
       prompt: video.user_prompt || '',
@@ -1550,12 +1547,8 @@ export function CreativeStudio() {
       generateAudio: !!version.generate_audio, model: version.model || '',
       // Only an overlay row has this, and it's what lets the retry below
       // rebuild the compose payload without re-uploading anything — the
-      // layers were already uploaded to storage when Save first ran. A draft
-      // finish keeps only the draft it completes: copying the old attempt's
-      // pendingRequest would point Reconcile at a request this row never made.
-      overlayState: finishDraftIdOf(version)
-        ? { finishOf: { draftId: finishDraftIdOf(version) } }
-        : (version.overlay_state || null),
+      // layers were already uploaded to storage when Save first ran.
+      overlayState: version.overlay_state || null,
       clipRole: version.clip_role || null,
       ...clipCols,
     }
@@ -1580,16 +1573,14 @@ export function CreativeStudio() {
         prompt: version.user_prompt,
         reference_image_urls: version.reference_url ? [version.reference_url] : [],
       })
-    } else if (version.kind === 'video' && finishDraftIdOf(version)) {
-      // A failed "Finish in 1080p". Has to come before the generic branch
-      // below, which would read image_url off the parent — a draft is a VIDEO
-      // row with none — and fire a from-scratch 1080p text-to-video at the
-      // same $1.164/s, ignoring the take the person actually approved.
-      fired = await requestVideo(webhooks.creativeVideo, {
-        session_id: session.id, version_id: fresh.id, prompt: version.user_prompt || '',
-        model: DRAFT_MODEL_ID, draft_id: finishDraftIdOf(version),
-        duration: version.duration || '5', aspect_ratio: version.aspect_ratio,
-        resolution: '1080p', generate_audio: !!version.generate_audio,
+    } else if (version.kind === 'video' && isUpscaleModel(version.model)) {
+      // A failed Make 1080p. Before the generic branch below, which would read
+      // image_url off the parent — a VIDEO row with none — and fire a fresh
+      // text-to-video render at the upscaler's model id.
+      const parent = versions.find(v => v.id === version.parent_version_id)
+      fired = await requestUpscale(webhooks.creativeUpscale, {
+        session_id: session.id, version_id: fresh.id,
+        video_url: parent?.video_url || '', resolution: upscaleSourceTier(parent),
       })
     } else if (version.kind === 'video') {
       fired = await requestVideo(webhooks.creativeVideo, {
@@ -1741,18 +1732,20 @@ export function CreativeStudio() {
     onEditClip: openClipEditor,
     // What a re-render would cost, shown before the click. The free actions
     // carry no badge at all, which is the whole distinction.
-    reRenderCost: v => estimateVideoCost(v.model || 'seedance-2', {
-      resolution: v.resolution || '720p', duration: v.duration || '5', audio: !!v.generate_audio,
-    }),
+    reRenderCost: v => {
+      const src = isUpscaleModel(v.model) ? (versions.find(x => x.id === v.parent_version_id) || v) : v
+      return estimateVideoCost(src.model || 'seedance-2', {
+        resolution: src.resolution || '720p', duration: src.duration || '5', audio: !!src.generate_audio,
+      })
+    },
     // What asking for a change in the chat box would cost — Kling O3 Edit
     // bills by the SOURCE clip's own duration, not a model/resolution pair,
     // so this is a plain per-second rate rather than reRenderCost's lookup.
     editVideoCost: v => estimateVideoEditCost(v.duration || '5'),
-    // Offered only on a ready Seedance 2.5 draft whose seven days haven't run
-    // out — draftOf() is the one place that decides, so the button and the
-    // handler can't disagree.
-    onFinishDraft: v => handleFinishDraft(branch, v),
-    finishDraftCost: v => (draftOf(v) ? estimateFinishCost(v.duration || '5') : null),
+    // Offered only on a ready clip below 1080p — upscaleSourceTier() is the
+    // one place that decides, so the button and the handler can't disagree.
+    onUpscale: v => handleUpscale(branch, v),
+    upscaleCost: v => (canUpscale(v) ? estimateUpscaleCost(v.duration || '5') : null),
     // Whether that action is even offered — fal's own 3–15s limit on the
     // source clip, checked here so the button can explain itself instead of
     // firing and failing.
@@ -2130,7 +2123,7 @@ export function CreativeStudio() {
               onStart={startRun}
               onStop={stopRun}
               onRenderClip={renderClip}
-              onFinishClip={finishClip}
+              onUpscaleClip={upscaleClip}
               onCancelClip={cancelClip}
               onStitch={handleStitch}
               onAddRef={addStoryboardRef}

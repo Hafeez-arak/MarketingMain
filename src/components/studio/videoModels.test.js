@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   VIDEO_MODELS, getVideoModel, estimateVideoCost, modelImageRole, modelImageMax,
   MODEL_ALIASES, resolveVideoModelId, isVideoEditModel, VIDEO_EDIT_MODEL_ID,
-  canEditVideoDuration, draftOf, finishDraftIdOf, estimateFinishCost,
+  canEditVideoDuration, canUpscale, upscaleSourceTier, estimateUpscaleCost, UPSCALE_MODEL_ID,
 } from './videoModels'
 
 // ─── The picker's catalog ──────────────────────────────────────────────────
@@ -121,32 +121,35 @@ describe('video model catalog', () => {
   })
 })
 
-// ─── When "Finish in 1080p" is offered ─────────────────────────────────────
-// draftOf is the one gate for both the button and the handler. Offering it on
-// the wrong row is a paid call that fal will refuse, or worse, accept.
-describe('draftOf', () => {
-  const now = Date.parse('2026-10-13T12:00:00Z')
-  const row = (over = {}) => ({
-    status: 'ready', kind: 'video', model: 'seedance-2.5',
-    overlay_state: { draft: { id: 'draft_abc', expiresAt: '2026-10-20T12:00:00Z' } },
-    ...over,
+// ─── When "Make 1080p" is offered ──────────────────────────────────────────
+// upscaleSourceTier is the one gate for the button, the handler and Retry.
+// Offering it on a clip that is already 1080p is paying to get the same
+// clip back; offering it on a composite enlarges the text as pixels.
+describe('Make 1080p', () => {
+  const clip = (over = {}) => ({
+    status: 'ready', kind: 'video', model: 'seedance-2.5', resolution: '480p',
+    video_url: 'https://cdn.test/clip.mp4', duration: '20', ...over,
   })
 
-  it('offers a ready Seedance 2.5 draft inside its seven days', () => {
-    expect(draftOf(row(), now)).toEqual({ id: 'draft_abc', expiresAt: '2026-10-20T12:00:00Z' })
+  it('offers a ready clip below 1080p, and says which tier it is', () => {
+    expect(upscaleSourceTier(clip())).toBe('480p')
+    expect(upscaleSourceTier(clip({ resolution: '720p' }))).toBe('720p')
+    // Hailuo stores no resolution but is 768p by definition.
+    expect(upscaleSourceTier(clip({ model: 'hailuo-2.3', resolution: '' }))).toBe('768p')
   })
 
-  it('refuses an expired, unfinished, composited or non-Seedance-2.5 row', () => {
-    expect(draftOf(row({ overlay_state: { draft: { id: 'x', expiresAt: '2026-10-13T11:59:00Z' } } }), now)).toBeNull()
-    expect(draftOf(row({ status: 'pending' }), now)).toBeNull()
-    expect(draftOf(row({ kind: 'overlay' }), now)).toBeNull()
-    expect(draftOf(row({ model: 'seedance-2' }), now)).toBeNull()
-    expect(draftOf(row({ overlay_state: { pendingRequest: {} } }), now)).toBeNull()
+  it('refuses 1080p and up, unknown sizes, composites, pending rows and its own output', () => {
+    expect(canUpscale(clip({ resolution: '1080p' }))).toBe(false)
+    expect(canUpscale(clip({ resolution: '4k' }))).toBe(false)
+    expect(canUpscale(clip({ model: 'kling-3-pro', resolution: '' }))).toBe(false)
+    expect(canUpscale(clip({ kind: 'overlay' }))).toBe(false)
+    expect(canUpscale(clip({ status: 'pending' }))).toBe(false)
+    expect(canUpscale(clip({ model: UPSCALE_MODEL_ID, resolution: '480p' }))).toBe(false)
   })
 
-  it('prices a finish at the 1080p completion rate', () => {
-    expect(estimateFinishCost('20')).toBeCloseTo(23.28, 2)
-    expect(finishDraftIdOf({ overlay_state: { finishOf: { draftId: 'd' } } })).toBe('d')
-    expect(finishDraftIdOf({})).toBe('')
+  it('prices per started 10 seconds, as fal bills it', () => {
+    expect(estimateUpscaleCost('20')).toBeCloseTo(0.40, 2)
+    expect(estimateUpscaleCost('5')).toBeCloseTo(0.20, 2)
+    expect(estimateUpscaleCost('12')).toBeCloseTo(0.40, 2)
   })
 })

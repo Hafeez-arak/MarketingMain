@@ -296,36 +296,46 @@ export function canEditVideoDuration(duration) {
   return d >= VIDEO_EDIT_DURATION_RANGE[0] && d <= VIDEO_EDIT_DURATION_RANGE[1]
 }
 
-// ─── Finishing a Seedance 2.5 draft at 1080p ───────────────────────────────
-// Added 2026-10-13. Every Seedance 2.5 render at Draft (480p) goes to fal as a
-// DRAFT — same 480p, same $0.2205/s — and fal hands back a draft id, which the
-// Creative Video workflow stores at overlay_state.draft with its expiry. For
-// seven days that take can be finished at 1080p as THE SAME TAKE, where Sharp
-// or a re-render would roll new footage that moves differently. That is the
-// whole value: check the movement cheaply, then pay for 1080p only on the one
-// you approved.
+// ─── Make 1080p (upscale) ──────────────────────────────────────────────────
+// Added 2026-10-13. The studio's cheap way to a sharp clip: Topaz on fal
+// enlarges the clip that already exists, so the take — its movement, timing,
+// everything — is exactly the one that was approved, just at 1080p. That is
+// the point of the button and why it is not a re-render: Draft stays the
+// cheap way to check the movement, and 1080p costs cents rather than a second
+// render. (A native 1080p render of the same take, Seedance 2.5's draft
+// completion at $1.164/s, was built first and dropped on the owner's call —
+// $23 for a 20s clip against ~$0.40 here.)
 //
-// The finished clip is a new row whose overlay_state.finishOf.draftId names
-// the draft it completes. n8n carries that through its own overlay_state
-// writes, which is what lets Retry finish the draft again instead of firing a
-// from-scratch 1080p render at the same price.
-export const DRAFT_MODEL_ID = 'seedance-2.5'
-export const FINISH_DRAFT_RATE = 1.164 // $/s at 1080p, fal's completion price
+// An upscaled clip is a new row whose model is UPSCALE_MODEL_ID — the same
+// way an edit is marked — and whose parent is the clip it enlarged. Retry,
+// Re-render and the storyboard's seam check all read that marker.
+export const UPSCALE_MODEL_ID = 'topaz-upscale'
+// fal: $0.20 per started 10 seconds of 1080p output (precision models).
+export const UPSCALE_PER_10S = 0.20
 
-export function draftOf(version, now = Date.now()) {
-  if (!version || version.status !== 'ready' || version.kind !== 'video') return null
-  if (resolveVideoModelId(version.model) !== DRAFT_MODEL_ID) return null
-  const d = version.overlay_state?.draft
-  if (!d?.id) return null
-  const exp = Date.parse(d.expiresAt)
-  if (Number.isFinite(exp) && exp <= now) return null
-  return { id: String(d.id), expiresAt: d.expiresAt || '' }
+// The short side of each tier below 1080p that a clip here can come back at.
+// Kling and Hailuo store no resolution: Hailuo is 768p by definition, Kling 3
+// is not offered (its single tier is not stated, and paying to enlarge a clip
+// that may already be 1080p is the one mistake this must not make).
+const BELOW_1080 = { '360p': 1, '480p': 1, '720p': 1, '768p': 1 }
+
+export function isUpscaleModel(id) {
+  return id === UPSCALE_MODEL_ID
 }
 
-export function finishDraftIdOf(version) {
-  return version?.overlay_state?.finishOf?.draftId || ''
+// The tier to send the upscaler, or '' when the clip can't or needn't go.
+export function upscaleSourceTier(version) {
+  if (!version || version.status !== 'ready' || version.kind !== 'video' || !version.video_url) return ''
+  if (isUpscaleModel(version.model)) return ''
+  const tier = String(version.resolution || '').toLowerCase()
+    || (resolveVideoModelId(version.model) === 'hailuo-2.3' ? '768p' : '')
+  return BELOW_1080[tier] ? tier : ''
 }
 
-export function estimateFinishCost(duration) {
-  return FINISH_DRAFT_RATE * (Number(duration) || 5)
+export function canUpscale(version) {
+  return !!upscaleSourceTier(version)
+}
+
+export function estimateUpscaleCost(duration) {
+  return UPSCALE_PER_10S * Math.max(1, Math.ceil((Number(duration) || 5) / 10))
 }

@@ -1,6 +1,6 @@
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './supabaseClient'
 import {
-  getVideoModel, estimateVideoCost, modelImageRole, resolveVideoModelId, finishDraftIdOf,
+  getVideoModel, estimateVideoCost, modelImageRole, resolveVideoModelId, isUpscaleModel,
 } from '../components/studio/videoModels'
 import { buildVideoPrompt } from '../components/studio/motionPresets'
 
@@ -238,12 +238,12 @@ export function clipState(row) {
 // comparing that row's timestamp would report clip 3's seam as broken when the
 // footage beneath the lettering never changed.
 //
-// A Seedance 2.5 draft finished at 1080p is the same take for the same reason:
-// fal completes the draft rather than rolling new footage, so the clip after
-// it still continues from the frame it was chained to.
+// A clip made 1080p is the same take for the same reason: the upscaler
+// enlarges the footage rather than rolling new footage, so the clip after it
+// still continues from the frame it was chained to.
 function takeTimeOf(row, byId) {
   let cur = row
-  const sameTake = r => r.kind === 'overlay' || !!finishDraftIdOf(r)
+  const sameTake = r => r.kind === 'overlay' || isUpscaleModel(r.model)
   for (let hops = 0; cur && sameTake(cur) && cur.parent_version_id && hops < 8; hops += 1) {
     const parent = byId.get(cur.parent_version_id)
     if (!parent) break

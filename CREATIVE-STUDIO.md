@@ -56,29 +56,33 @@ unclear whether fal's Lite endpoint is built on one of them. If it is, Veo
 renders will start failing with an error from fal (loudly, not silently).
 Gemini Omni Flash 1.1, already in the picker, is Google's named replacement.
 
-### Finish in 1080p (Seedance 2.5 drafts)
+### Make 1080p (upscale)
 
-Every Seedance 2.5 render at **Draft (480p)** is now sent to fal as a *draft*.
-It costs the same and looks the same, but fal returns a `draft_id` (stored at
-`overlay_state.draft`, valid 7 days). A **✦ Finish in 1080p** button then
-appears:
-- on the clip in its lane, before Re-render;
-- on each clip card in a multi-clip storyboard.
+On any finished clip below 1080p (480p, 720p, 768p) there is now a **Make
+1080p** button. It appears next to Re-render in the lane and on each
+storyboard clip card. A line above the buttons says what each one does:
 
-Finishing re-renders **the same take** at 1080p through
-`bytedance/seedance-2.5/draft/complete` ($1.164/s). Re-render or Sharp would
-roll new footage that moves differently. So the cheap loop is now: check the
-movement at Draft, then pay for 1080p only on the take you approved.
+> This clip is **480p** — fine for checking the movement. **Make 1080p**
+> sharpens this exact clip. **Re-render** makes a new, different take.
 
-- The finish is a new row whose `overlay_state.finishOf.draftId` names the
-  draft. n8n carries that through its own `overlay_state` writes, so **Retry
-  finishes the draft again**. Without it, the generic retry branch would have
-  fired a fresh 1080p text-to-video at the same price.
-- On a storyboard the finish becomes the clip's next attempt, so the reel picks
-  it up. The seam check treats it as the same take, so the next chained clip is
-  not flagged as broken.
-- Not offered on a composite (text already stamped on), since the finished
-  clip would come back without the text. Finish first, then add text.
+It sends the clip to `topaz/upscale/video/precision` (Proteus) through the n8n
+workflow `Arak Lighting – Creative Upscale` (webhook `arak-creative-upscale`).
+The price is **$0.20 per started 10 seconds** (a 20s clip is $0.40). It is the
+same take, enlarged, not re-generated.
+
+- The scale factor comes from the clip's tier (480p → 2.25×), because fal
+  takes a factor rather than a target size. Output is forced to H.264, since
+  Topaz's default H.265 doesn't play in every browser.
+- The new row's model is `topaz-upscale` and its parent is the source clip.
+  Retry upscales again, Re-render reaches back to the source clip's settings,
+  and the storyboard's seam check treats it as the same take.
+- Not offered on a clip that already has text on it, because the text would be
+  enlarged as pixels. Make it 1080p first, then add text. Kling 3 is not
+  offered either: its output tier isn't stated, and it may already be 1080p.
+
+**Dropped on 2026-10-13:** a first version re-rendered the same take natively
+through Seedance 2.5's draft completion at $1.164/s ($23.28 for 20s). The
+owner chose the cheap upscale only.
 
 ### Split into layers (Layerize)
 
@@ -101,10 +105,10 @@ cut-outs, each with a position.
 - Photo editor only. In the clip editor the picture is a still standing in for
   footage, and a split could never reach the video.
 
-Verified in `dev-editor.html` with a fake split (no spend). It places
-correctly, names the layers, locks the background and undoes in one step. The
-clip-side Finish button sits behind sign-in and was not clicked in a browser;
-it is covered by unit tests and a clean build.
+Both features have free preview pages with fake data: `dev-editor.html`
+(Split into layers) and `dev-studio.html` (Make 1080p in a lane and on a
+storyboard). Both were clicked through. Neither has been tried with a real
+paid call.
 
 ### To go live (after merge)
 
@@ -113,11 +117,12 @@ On the n8n box, after `git pull`:
 ```bash
 ./n8n/redeploy.sh "Arak Lighting – Creative Generate" "Arak Lighting – Creative Edit" \
   "Arak Lighting – Creative Video" "Arak Lighting – Creative Video Edit" \
-  "Arak Lighting – Creative Video Reconcile" "Arak Lighting – Creative Layerize"
+  "Arak Lighting – Creative Video Reconcile" "Arak Lighting – Creative Layerize" \\
+  "Arak Lighting – Creative Upscale"
 ```
 
-Layerize is a **new** workflow, so check that it is published/active after the
-import. Vercel deploys the app on merge, and the new webhook slot resolves
+Layerize and Upscale are **new** workflows, so check that both are
+published/active after the import. Vercel deploys the app on merge, and the new webhook slot resolves
 automatically from the n8n base URL, so nothing needs pasting into Settings.
 
 ---

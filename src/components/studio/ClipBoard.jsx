@@ -5,7 +5,7 @@ import { LookPicker, ModelPicker } from './VideoSettings'
 import { STYLE_BIBLE_PLACEHOLDER } from './motionPresets'
 import {
   getVideoModel, estimateVideoCost, modelImageMax, modelImageRole,
-  draftOf, estimateFinishCost, finishDraftIdOf,
+  canUpscale, estimateUpscaleCost, isUpscaleModel, upscaleSourceTier,
 } from './videoModels'
 import {
   MULTI_CLIP_MAX, canMoveClip, chainedAfter, clipImagePlan, clipPromptFor, staleSeams,
@@ -173,7 +173,7 @@ function ImageNote({ plan, model, index }) {
 function ClipCard({
   clip, index, row, state, model, audio, active, promptText, preparing, plan,
   canRender, renderBlockedWhy, busy,
-  onPatch, onRemove, onRender, onFinish, onCancel, onAddText, onPreview, onMove, onAddRef, onRemoveRef,
+  onPatch, onRemove, onRender, onUpscale, onCancel, onAddText, onPreview, onMove, onAddRef, onRemoveRef,
   canRemove, canUp, canDown, disabled,
 }) {
   const cost = estimateVideoCost(model.id, { resolution: clip.resolution, duration: clip.duration, audio })
@@ -182,12 +182,12 @@ function ClipCard({
   // A composite has been through the text editor; the take you'd re-render is
   // still the clip underneath it.
   const composited = row?.kind === 'overlay'
-  // A Seedance 2.5 draft can be finished at 1080p as the same take; a finish
-  // that failed retries as a finish. Neither is offered on a composite — the
-  // finished clip would come back without the text stamped on this one.
-  const finishable = ready && !!onFinish && !!draftOf(row)
-  const refinish = state === 'failed' && !!onFinish && !!finishDraftIdOf(row)
-  const finishCost = estimateFinishCost(row?.duration || clip.duration)
+  // Make 1080p enlarges this clip's own take; a failed one retries as an
+  // upscale. Not offered on a composite: the text stamped on it would be
+  // enlarged as pixels — make it 1080p first, then add the text.
+  const upscalable = ready && !!onUpscale && canUpscale(row)
+  const reupscale = state === 'failed' && !!onUpscale && isUpscaleModel(row?.model)
+  const upscaleCost = estimateUpscaleCost(row?.duration || clip.duration)
 
   return (
     <div className={`border p-3 space-y-2 transition-colors ${
@@ -224,10 +224,10 @@ function ClipCard({
             <Button size="xs" variant="secondary" onClick={() => onAddText(row)} disabled={disabled || !!preparing}>
               {preparing ? <><Spinner size="sm" /> Opening…</> : 'Editor'}
             </Button>
-            {finishable && (
-              <Button size="xs" onClick={() => onFinish(index)} disabled={busy}
-                title="Renders THIS take again at 1080p — the same movement, just sharp, so later clips still join up. Available for 7 days after the draft.">
-                ✦ Finish in 1080p · {money(finishCost)}
+            {upscalable && (
+              <Button size="xs" onClick={() => onUpscale(index)} disabled={busy}
+                title={`This clip is ${upscaleSourceTier(row)}. Sharpens this exact clip to 1080p — same movement, so later clips still join up. Re-render makes a new, different take.`}>
+                Make 1080p · {money(upscaleCost)}
               </Button>
             )}
             <Button size="xs" variant="secondary" onClick={() => onRender(index)} disabled={busy}>
@@ -235,13 +235,11 @@ function ClipCard({
             </Button>
           </>
         )}
-        {refinish && (
-          <Button size="xs" onClick={() => onFinish(index)} disabled={busy}>
-            ↻ Try finishing again · {money(finishCost)}
+        {reupscale && (
+          <Button size="xs" onClick={() => onUpscale(index)} disabled={busy}>
+            ↻ Try 1080p again · {money(upscaleCost)}
           </Button>
         )}
-        {/* Both stay on a failed finish: if the draft's seven days ran out,
-            finishing again can only fail again, and a fresh take is the way on. */}
         {!ready && !pending && (
           // One shot at a time, without committing to the whole board. The
           // price is on the button for the same reason it is on Render all.
@@ -349,7 +347,7 @@ export function ClipBoard({
   storyboard, clipRows, versions, states, activeIndex, running, allReady, busy,
   stitchRow, stitching, preparingClipId, runStatus,
   onPatchClip, onPatchBoard, onAddClip, onRemoveClip, onMoveClip,
-  onStart, onStop, onRenderClip, onFinishClip, onCancelClip, onStitch,
+  onStart, onStop, onRenderClip, onUpscaleClip, onCancelClip, onStitch,
   onAddRef, onRemoveRef, onAddClipRef, onRemoveClipRef,
   onOpenClip, onDownloadStitch, onUseThis,
 }) {
@@ -489,7 +487,7 @@ export function ClipBoard({
                 plan={plan} canRender={!why} renderBlockedWhy={why} busy={busy}
                 onPatch={onPatchClip} onRemove={onRemoveClip}
                 onRender={idx => (clipRows[idx] ? setRerendering(idx) : onRenderClip(idx))}
-                onFinish={onFinishClip}
+                onUpscale={onUpscaleClip}
                 onCancel={setCancelling}
                 onAddText={onOpenClip}
                 onPreview={row => setPreview({ url: row.video_url, kind: 'video', index: i })}

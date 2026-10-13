@@ -3845,13 +3845,6 @@ const MODEL_CONFIGS = {
       // enum — it follows the source frame, which is the right answer there,
       // so the mapped ratio is simply not sent on that path.
       const input = { prompt, duration, resolution, generate_audio: generateAudio };
-      // Draft mode (2026-10-13). A 480p take is sent as a fal DRAFT: same
-      // 480p, same $0.2205/s, but fal hands back a draft_id that can later be
-      // completed at 1080p as the SAME take (see DRAFT_COMPLETE below), rather
-      // than a re-roll that comes back moving differently. `draft` overrides
-      // resolution on fal's side, which is why it is only ever set at 480p —
-      // a Final or Sharp click must still get the tier it asked for.
-      if (resolution === '480p') input.draft = true;
       if (refs && refs.length) {
         if (aspect) input.aspect_ratio = aspect;
         input.image_urls = refs;
@@ -4058,11 +4051,6 @@ const duration  = String(body.duration || '5');
 const MODEL_ALIASES = { 'kling-2.5-turbo-pro': 'kling-3-pro', 'veo-3.1-fast': 'veo-3.1-lite' };
 const requestedModel = MODEL_ALIASES[body.model] || body.model;
 const modelId   = MODEL_CONFIGS[requestedModel] ? requestedModel : 'seedance-2';
-// Finishing a Seedance 2.5 draft at 1080p. Not a new take: fal re-renders the
-// draft it already made, so what was approved at 480p is what comes back.
-// Only the original caller can complete a draft, within seven days.
-const DRAFT_COMPLETE = 'bytedance/seedance-2.5/draft/complete';
-const draftId = modelId === 'seedance-2.5' ? String(body.draft_id || '').trim() : '';
 const aspect    = mapAspect(modelId, body.aspect_ratio);
 const resolution = body.resolution || '720p';
 // Off unless asked: a model inventing ambient sound under a brand asset is a
@@ -4073,13 +4061,13 @@ const generateAudio = body.generate_audio === true;
 const cfg = MODEL_CONFIGS[modelId];
 
 async function run(){
-  if (!prompt && !draftId) throw new Error('No direction given for the video.');
+  if (!prompt) throw new Error('No direction given for the video.');
 
   // Three modes, one workflow, because a session may be image-then-video,
   // video-only, or built from references — the team works all three ways and an
   // image is an optional starting point, not a prerequisite.
-  const useRefs = !draftId && referenceUrls.length > 0 && !!cfg.r2v;
-  const model = draftId ? DRAFT_COMPLETE : (useRefs ? cfg.r2v : (imageUrl ? cfg.i2v : cfg.t2v));
+  const useRefs = referenceUrls.length > 0 && !!cfg.r2v;
+  const model = useRefs ? cfg.r2v : (imageUrl ? cfg.i2v : cfg.t2v);
 
   // The references are only useful if the prompt says what to do with each one.
   // Seedance addresses them positionally as @Image1/@Image2 and, without a
@@ -4092,15 +4080,8 @@ async function run(){
       + 'Do not copy them shot for shot.\n\n' + prompt
     : prompt;
 
-  // Completion takes only the draft id: the prompt, frame and references
-  // were all fixed when the draft was made.
-  let input;
-  if (draftId) {
-    input = { draft_id: draftId, resolution: '1080p' };
-  } else {
-    input = cfg.build(imageUrl, endImageUrl, useRefs ? referenceUrls : null);
-    input.prompt = refPrompt;
-  }
+  const input = cfg.build(imageUrl, endImageUrl, useRefs ? referenceUrls : null);
+  input.prompt = refPrompt;
 
   const submit = await req({ method:'POST', url:'https://queue.fal.run/' + model,
     headers:{ Authorization:'Key ' + FAL, 'Content-Type':'application/json' }, body: input, json:true });
@@ -4109,11 +4090,6 @@ async function run(){
 
   const pendingRequest = { requestId, model, cancelUrl: submit.cancel_url || '',
                            submittedAt: new Date().toISOString() };
-  // A finish row says which draft it completes. The browser writes this at
-  // insert, and both writes below replace overlay_state wholesale, so it is
-  // carried through them — Retry reads it to finish the draft again rather
-  // than starting a new 1080p render from nothing at the same price.
-  const keep = draftId ? { finishOf: { draftId } } : {};
   // Saved BEFORE polling starts, not after — the request_id only ever lived
   // in this function's local variables until now, and this function can be
   // killed mid-poll by n8n's own task-runner timeout (found 2026-08-11: a
@@ -4133,7 +4109,7 @@ async function run(){
       // rather than the full model path, and a URL derived from the wrong one
       // 405s. Creative Cancel prefers this and only derives a fallback if fal
       // ever stops returning it.
-      body: { overlay_state: Object.assign({ pendingRequest }, keep) },
+      body: { overlay_state: { pendingRequest } },
       json: true });
   } catch (e) { /* recoverable by Reconcile only if this succeeded; never worth failing the render over */ }
 
@@ -4174,24 +4150,6 @@ async function run(){
 
   const result = await req({ method:'GET', url: resultUrl, headers:{ Authorization:'Key ' + FAL }, json:true });
   const videoUrl = result.video && result.video.url;
-  // A draft take: keep fal's draft_id on the row so the studio can offer
-  // "Finish in 1080p". Lives in overlay_state beside pendingRequest because a
-  // generated video row's overlay_state is written by n8n alone — text added
-  // on top becomes a separate 'overlay' row, never a write to this one.
-  // Best effort, like the save above: without it the button simply does not
-  // appear, and the draft itself is still a perfectly good 480p clip.
-  if (result.draft_id) {
-    try {
-      await req({ method: 'PATCH',
-        url: String($env.SUPABASE_URL).replace(/\/+$/, '') + '/rest/v1/creative_versions?id=eq.' + versionId,
-        headers: { Authorization: 'Bearer ' + $env.SUPABASE_KEY, apikey: $env.SUPABASE_KEY,
-                   'Content-Type': 'application/json', Prefer: 'return=minimal' },
-        body: { overlay_state: Object.assign({ pendingRequest, draft: {
-          id: String(result.draft_id),
-          expiresAt: new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString() } }, keep) },
-        json: true });
-    } catch (e) { /* the clip matters more than the button */ }
-  }
   // The request id goes in EVERY failure past this point. A render that fails
   // after submitting has already been paid for, and without the id there is no
   // way to fetch the clip fal did produce — which is how one paid Kling render
@@ -4323,6 +4281,118 @@ catch (err) {
 }
 """
 
+
+
+# ─── Creative Upscale (added 2026-10-13) ────────────────────────────────────
+CREATIVE_UPSCALE_STICKY = """## Creative Studio — Upscale (Make 1080p)
+
+POST `arak-creative-upscale`
+```
+{ session_id, version_id, video_url, resolution }
+```
+
+The studio's **Make 1080p** button. Enlarges an EXISTING clip to 1080p with
+fal's `topaz/upscale/video/precision` (Proteus). Not a new render: the take,
+its movement and its timing are exactly the clip that went in, just sharper.
+
+`resolution` is the source clip's own tier ('480p', '720p', '768p', '360p'),
+and sets the factor that lands the short side on 1080 (480p → 2.25×). fal
+needs a factor, not a target size.
+
+`H264_output: true` always — Topaz defaults to H.265, which several browsers
+will not play and which Creative Compose would then have to re-encode.
+
+Costs $0.20 per started 10 seconds of 1080p output (a 20s clip is $0.40).
+
+Same queue mechanics as Creative Video: the request id is saved to
+`overlay_state.pendingRequest` before polling, so Creative Video Reconcile can
+still recover the clip if this execution dies.
+
+Needs env: FAL_KEY, SUPABASE_URL, SUPABASE_KEY."""
+
+CREATIVE_UPSCALE_JS = _CREATIVE_REQ_JS + r"""
+const BUCKET = 'creative-studio';
+const MODEL = 'topaz/upscale/video/precision';
+// Short side in pixels for each tier the studio stores. The factor is what
+// brings that to 1080; anything already at 1080 or above is refused rather
+// than paid for to come back the same size.
+const SHORT_SIDE = { '360p': 360, '480p': 480, '720p': 720, '768p': 768 };
+
+function looksLikeVideo(buf){
+  if (!buf || buf.length < 12) return false;
+  return buf.toString('ascii', 4, 8) === 'ftyp';
+}
+
+const body = ($input.first().json.body) || {};
+const sessionId = body.session_id || '';
+const versionId = body.version_id || '';
+const videoUrl  = String(body.video_url || '').trim();
+const short     = SHORT_SIDE[String(body.resolution || '').toLowerCase()] || 0;
+
+async function run(){
+  if (!videoUrl) throw new Error('No clip to make 1080p.');
+  if (!short) throw new Error('This clip is already 1080p or its size is unknown, so there is nothing to upscale.');
+
+  const input = {
+    video_url: videoUrl,
+    model: 'Proteus',
+    upscale_factor: Math.round((1080 / short) * 1000) / 1000,
+    H264_output: true,
+  };
+
+  const submit = await req({ method:'POST', url:'https://queue.fal.run/' + MODEL,
+    headers:{ Authorization:'Key ' + FAL, 'Content-Type':'application/json' }, body: input, json:true });
+  const requestId = submit.request_id;
+  if (!requestId) throw new Error('fal did not return a request_id: ' + JSON.stringify(submit).slice(0, 250));
+
+  // See CREATIVE_VIDEO_JS for why this is saved before polling starts.
+  try {
+    await req({ method: 'PATCH',
+      url: String($env.SUPABASE_URL).replace(/\/+$/, '') + '/rest/v1/creative_versions?id=eq.' + versionId,
+      headers: { Authorization: 'Bearer ' + $env.SUPABASE_KEY, apikey: $env.SUPABASE_KEY,
+                 'Content-Type': 'application/json', Prefer: 'return=minimal' },
+      body: { overlay_state: { pendingRequest: { requestId, model: MODEL, cancelUrl: submit.cancel_url || '',
+                                                 submittedAt: new Date().toISOString() } } },
+      json: true });
+  } catch (e) { /* recoverable by Reconcile only if this succeeded */ }
+
+  const appId = MODEL.split('/').slice(0, 2).join('/');
+  const statusUrl = submit.status_url || ('https://queue.fal.run/' + appId + '/requests/' + requestId + '/status');
+  const resultUrl = submit.response_url || ('https://queue.fal.run/' + appId + '/requests/' + requestId);
+
+  let status = submit.status || 'IN_QUEUE';
+  let tries = 0;
+  while ((status === 'IN_QUEUE' || status === 'IN_PROGRESS') && tries < 150) {
+    await new Promise(r => setTimeout(r, 3000));
+    const st = await req({ method:'GET', url: statusUrl, headers:{ Authorization:'Key ' + FAL }, json:true });
+    status = st.status; tries++;
+  }
+  if (status !== 'COMPLETED') {
+    throw new Error(status === 'IN_QUEUE' || status === 'IN_PROGRESS'
+      ? 'Upscale timed out after ~' + (tries * 3) + 's (request ' + requestId + ')'
+      : 'Upscale ' + status + ' (request ' + requestId + ')');
+  }
+
+  const result = await req({ method:'GET', url: resultUrl, headers:{ Authorization:'Key ' + FAL }, json:true });
+  const outUrl = result.video && result.video.url;
+  if (!outUrl) throw new Error('fal returned no video URL (request ' + requestId + '): ' + JSON.stringify(result).slice(0, 250));
+
+  const buf = await req({ method:'GET', url: outUrl, encoding:'arraybuffer' });
+  if (!looksLikeVideo(buf)) throw new Error('Downloaded file is not a real video (' + buf.length + ' bytes)');
+  const base = versionId + '-' + Date.now() + '.mp4';
+  const filename = (sessionId ? sessionId + '/' : '') + base;
+  return {
+    json: { _ok: true, version_id: versionId, bucket: BUCKET, filename },
+    binary: { data: await prepareBinaryData(buf, base, 'video/mp4') },
+  };
+}
+
+try { return await run(); }
+catch (err) {
+  return { json: { _ok: false, version_id: versionId,
+                   error: (err && err.message) ? err.message : String(err) } };
+}
+"""
 
 # ─── Creative Video Reconcile ───────────────────────────────────────────────
 # The permanent fix for "the video actually finished in fal, but the app never
@@ -4503,16 +4573,7 @@ async function run() {
         const filename = (row.session_id ? row.session_id + '/' : '') + row.id + '-' + Date.now() + '.mp4';
         await req({ method: 'POST', url: SUP + '/storage/v1/object/' + BUCKET + '/' + filename,
           headers: { apikey: KEY, Authorization: 'Bearer ' + KEY, 'Content-Type': 'video/mp4', 'x-upsert': 'true' }, body: buf });
-        const done = { status: 'ready', error: '', video_url: SUP + '/storage/v1/object/public/' + BUCKET + '/' + filename };
-        // A recovered Seedance 2.5 draft keeps its "Finish in 1080p" option,
-        // exactly as it would have if the render workflow had lived to write
-        // it. Seven days from submission, which is fal's own window.
-        if (result.draft_id) {
-          const from = Date.parse(pr.submittedAt || row.created_at) || Date.now();
-          done.overlay_state = { pendingRequest: pr, draft: { id: String(result.draft_id),
-            expiresAt: new Date(from + 7 * 24 * 3600 * 1000).toISOString() } };
-        }
-        await patchRow(row.id, done);
+        await patchRow(row.id, { status: 'ready', error: '', video_url: SUP + '/storage/v1/object/public/' + BUCKET + '/' + filename });
         results.push({ id: row.id, outcome: 'recovered' });
       } else if (s.status === 'IN_QUEUE' || s.status === 'IN_PROGRESS') {
         if (age > GIVEUP_MS) {
@@ -5827,14 +5888,8 @@ POST `arak-creative-video`
 ```
 { session_id, version_id, prompt, model?, image_url?, end_image_url?,
   reference_image_urls?: string[], duration?, aspect_ratio?, resolution?,
-  generate_audio?, draft_id? }
+  generate_audio? }
 ```
-
-**Seedance 2.5 drafts (2026-10-13).** A Seedance 2.5 render at 480p is sent
-with `draft: true` (same price), and the `draft_id` fal returns is written to
-`overlay_state.draft` with its seven-day expiry. Sending `draft_id` back with
-`model: 'seedance-2.5'` completes that take at 1080p through
-`bytedance/seedance-2.5/draft/complete` ($1.164/s) instead of re-rolling it.
 
 Three modes, picked from what's in the payload:
 - `reference_image_urls` → **reference-to-video**, a separate endpoint taking
@@ -6245,6 +6300,19 @@ def build_creative_video() -> dict:
         sticky=CREATIVE_VIDEO_STICKY,
         js=CREATIVE_VIDEO_JS,
         code_node_name="Render Video",
+        mime="video/mp4",
+        media_field="video_url",
+        accepted_expr="={{ JSON.stringify({ status: 'accepted', version_id: $json.body.version_id }) }}",
+    )
+
+
+def build_creative_upscale() -> dict:
+    return _build_creative_workflow(
+        name="Arak Lighting – Creative Upscale",
+        webhook_path="arak-creative-upscale",
+        sticky=CREATIVE_UPSCALE_STICKY,
+        js=CREATIVE_UPSCALE_JS,
+        code_node_name="Upscale Video",
         mime="video/mp4",
         media_field="video_url",
         accepted_expr="={{ JSON.stringify({ status: 'accepted', version_id: $json.body.version_id }) }}",
@@ -8657,6 +8725,7 @@ if __name__ == "__main__":
         build_creative_edit(),
         build_creative_video(),
         build_creative_video_edit(),
+        build_creative_upscale(),
         build_creative_video_reconcile(),
         build_creative_compose(),
         build_creative_stitch(),

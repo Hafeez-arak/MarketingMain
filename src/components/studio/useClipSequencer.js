@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  insertPendingVersions, requestCancel, requestVideo, updateVersion, uploadToStudio,
+  insertPendingVersions, requestCancel, requestUpscale, requestVideo, updateVersion, uploadToStudio,
 } from '../../lib/creativeStudio'
 import {
   chainsFrom, clipImagePlan, clipPromptFor, clipRowsByIndex, clipState, nextClipAttempt,
   setRunStatus,
 } from '../../lib/creativeStoryboard'
 import { captureLastFrameBlob } from './videoFrame'
-import { DRAFT_MODEL_ID, draftOf, finishDraftIdOf } from './videoModels'
+import { UPSCALE_MODEL_ID, isUpscaleModel, upscaleSourceTier } from './videoModels'
 
 // ─── The multi-clip render run ─────────────────────────────────────────────
 // Renders a storyboard one clip at a time, from the browser, because that is
@@ -255,24 +255,24 @@ export function useClipSequencer({
     void fireClip(index, runId.current)
   }, [fireClip])
 
-  // ── Finishing one clip's draft at 1080p ──
-  // The same take, sharper: fal completes the Seedance 2.5 draft rather than
-  // rendering anew, so nothing chained after this clip goes out of step (see
-  // takeTimeOf in creativeStoryboard.js). It becomes the clip's next attempt,
-  // which is what makes the reel pick it up — clipRowsByIndex reads the latest
-  // attempt — and it carries the draft id so Retry finishes it again rather
-  // than re-rolling. One clip only, never the board: like renderOne, nobody
-  // who asked to sharpen one shot has agreed to pay for the rest.
-  const finishOne = useCallback(async index => {
+  // ── Make 1080p on one clip ──
+  // Topaz enlarges the clip's current take — the same footage, sharper — so
+  // nothing chained after it goes out of step (see takeTimeOf in
+  // creativeStoryboard.js). It becomes the clip's next attempt, which is what
+  // makes the reel pick it up: clipRowsByIndex reads the latest attempt. A
+  // failed upscale retries as an upscale of the take underneath it, never as a
+  // fresh render. One clip only, never the board — like renderOne.
+  const upscaleOne = useCallback(async index => {
     const {
       session: s, workspaceId: ws, accessToken: tok, webhooks: hooks,
       versions: vs, clipRows: rows,
     } = ctx.current
     const row = rows?.[index]
-    // A live draft, or a finish that failed — retrying one finishes the same
-    // draft again rather than falling back to a fresh 480p take.
-    const draftId = draftOf(row)?.id || (row?.status === 'failed' ? finishDraftIdOf(row) : '')
-    if (!s || !draftId) return
+    const source = row?.status === 'failed' && isUpscaleModel(row.model)
+      ? (vs || []).find(v => v.id === row.parent_version_id)
+      : row
+    const tier = upscaleSourceTier(source)
+    if (!s || !tier) return
     runId.current += 1
     lock.current = { sessionId: s.id, clipIndex: index }
     setArmedFor(null)
@@ -281,15 +281,14 @@ export function useClipSequencer({
     const ins = await insertPendingVersions(ws, tok, s.id, [{
       round: 0, kind: 'video', provider: 'seedance', mediaType: 'video',
       clipIndex: index, clipAttempt: nextClipAttempt(vs, index),
-      parentVersionId: row.id,
-      imageUrl: row.image_url || '',
-      userPrompt: row.user_prompt || '',
-      model: DRAFT_MODEL_ID,
-      duration: row.duration || '',
+      parentVersionId: source.id,
+      imageUrl: source.image_url || '',
+      userPrompt: source.user_prompt || '',
+      model: UPSCALE_MODEL_ID,
+      duration: source.duration || '',
       resolution: '1080p',
-      generateAudio: !!row.generate_audio,
+      generateAudio: !!source.generate_audio,
       aspectRatio: s.aspect_ratio || '',
-      overlayState: { finishOf: { draftId } },
     }])
     if (ins.error) {
       if (String(ins.error).includes(UNIQUE_VIOLATION)) { ctx.current.refresh(s.id); return }
@@ -298,11 +297,9 @@ export function useClipSequencer({
     }
     ctx.current.onVersions(ins.rows)
 
-    const fired = await requestVideo(hooks.creativeVideo, {
+    const fired = await requestUpscale(hooks.creativeUpscale, {
       session_id: s.id, version_id: ins.rows[0].id,
-      prompt: row.user_prompt || '', model: DRAFT_MODEL_ID, draft_id: draftId,
-      duration: row.duration || '5', aspect_ratio: s.aspect_ratio || '',
-      resolution: '1080p', generate_audio: !!row.generate_audio,
+      video_url: source.video_url, resolution: tier,
     })
     if (fired.error) {
       ctx.current.onError(fired.error)
@@ -363,7 +360,7 @@ export function useClipSequencer({
     start,
     stop,
     renderOne,
-    finishOne,
+    upscaleOne,
     cancelClip,
     clipRows,
     states,
