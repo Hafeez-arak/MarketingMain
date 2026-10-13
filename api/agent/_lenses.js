@@ -10,7 +10,7 @@ import { fetchSearchData } from './_searchConsole.js'
 import { searchWeb, readPage, webConfigured } from './_web.js'
 import { msLeft } from '../../src/lib/agent/phases.js'
 import {
-  BACKUP_TOOLS, BACKUP_NAMES, PROVIDERS_OUT, backupGate, backupPrompt, claudeSearchesFor,
+  BACKUP_TOOLS, BACKUP_NAMES, PROVIDERS_OUT, backupGate, backupPrompt, claudeSearchesFor, claudeFirstGate,
 } from '../../src/lib/agent/backupSearch.js'
 
 // ─── Running a lens ────────────────────────────────────────────────────────
@@ -383,14 +383,16 @@ const webTools = ({ searches = 0, fetches = null } = {}) => (searches > 0
  * `found` joins the citation allow-list: a URL these tools returned was really
  * returned, exactly like a web_search result.
  */
-function backupWeb(budget = {}, deadline = null) {
-  if (!(budget.searches > 0) || !webConfigured()) return null
+function backupWeb(lens, deadline = null) {
+  if (!(lens?.budget?.searches > 0) || !webConfigured()) return null
   const found = new Set()
   const stats = { searches: 0, reads: 0, failed: 0, servedBy: new Set(), notes: [] }
   let used = 0
 
-  async function runTool(name, input = {}) {
+  async function runTool(name, input = {}, { serverSearches = 0 } = {}) {
     if (!BACKUP_NAMES.has(name)) return { ok: false, error: `There is no tool called "${name}".` }
+    const wait = claudeFirstGate(lens, name, serverSearches)
+    if (wait) return { ok: false, error: wait }
     const stop = backupGate({ used, msLeft: deadline ? msLeft(deadline) : null })
     if (stop) return { ok: false, error: stop }
     used += 1
@@ -436,7 +438,7 @@ export async function runLens({
   if (!lens) return { lens: lensKey, ok: false, findings: [], sources: [], cost: 0, error: 'Unknown lens.' }
 
   const allowed = new Set()
-  const backup = backupWeb(lens.budget, deadline)
+  const backup = backupWeb(lens, deadline)
   try {
     const out = await callModel({
       workspaceId, surface: 'run', runId,
