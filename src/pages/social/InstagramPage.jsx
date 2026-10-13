@@ -1024,6 +1024,7 @@ function PostsList({ posts, loading = false, dispatch, state, updatePostStatus, 
   const [filter,       setFilter]       = useState('all')
   const [selectedPost, setSelectedPost] = useState(null)
   const [composerPost, setComposerPost] = useState(null)
+  const [deleteError,  setDeleteError]  = useState('')
 
   const { activeWorkspaceId, accessToken } = useAuth()
   const supabaseUrl = SUPABASE_URL
@@ -1087,13 +1088,31 @@ function PostsList({ posts, loading = false, dispatch, state, updatePostStatus, 
   }
 
   async function handleDelete(post) {
+    setDeleteError('')
     if (post._fromSupabase) {
       if (supabaseUrl && anonKey) {
         const table = post._table || 'instagram_generated_posts'
-        await fetch(`${supabaseUrl}/rest/v1/${table}?id=eq.${post.id}`, {
+        // The answer is read, not assumed. The database refuses to delete a
+        // post that has gone out (generated_posts_lock_sent), and this used to
+        // drop the row from the screen regardless, so it came straight back on
+        // the next load and the button looked broken.
+        const res = await fetch(`${supabaseUrl}/rest/v1/${table}?id=eq.${post.id}`, {
           method: 'DELETE',
-          headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${anonKey}` },
-        })
+          headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${anonKey}`, 'Prefer': 'return=representation' },
+        }).catch(err => ({ ok: false, json: async () => ({ message: String(err?.message || err) }) }))
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}))
+          setDeleteError(body?.message || 'The post could not be deleted.')
+          return
+        }
+        const gone = await res.json().catch(() => null)
+        // An empty answer means nothing matched — RLS hid it, or it was
+        // already gone. Either way the screen must not claim a delete.
+        if (Array.isArray(gone) && gone.length === 0) {
+          setDeleteError('The post could not be deleted.')
+          onRefresh?.()
+          return
+        }
       }
     }
     dispatch(actions.deletePost(post.id))
@@ -1131,6 +1150,13 @@ function PostsList({ posts, loading = false, dispatch, state, updatePostStatus, 
         </div>
         {!loading && <span className="text-[11px] text-text-tertiary">{filtered.length} post{filtered.length !== 1 ? 's' : ''}</span>}
       </div>
+
+      {deleteError && (
+        <Card className="p-3 flex items-center gap-3 border-red-200 bg-red-50">
+          <p className="text-xs flex-1 text-red-600">{deleteError}</p>
+          <Button size="sm" variant="secondary" onClick={() => setDeleteError('')}>Dismiss</Button>
+        </Card>
+      )}
 
       {/* Empty state */}
       {loading ? (
@@ -1181,10 +1207,15 @@ function PostsList({ posts, loading = false, dispatch, state, updatePostStatus, 
                         {!customMeta && styleMeta && <span className="tag-base bg-surface-subtle text-text-secondary">{styleMeta.label}</span>}
                         {campaign && <span className="tag-clay">{campaign.name}</span>}
                       </div>
-                      <button onClick={e => { e.stopPropagation(); handleDelete(p) }}
-                        className="text-text-tertiary hover:text-red-500 transition-colors flex-shrink-0 p-1 -m-1">
-                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/></svg>
-                      </button>
+                      {/* Same rule as the full view's Delete: a post that has
+                          gone out is history, and the database won't drop it. */}
+                      {!postLock(p._raw || p).locked && (
+                        <button onClick={e => { e.stopPropagation(); handleDelete(p) }}
+                          aria-label="Delete post"
+                          className="text-text-tertiary hover:text-red-500 transition-colors flex-shrink-0 p-1 -m-1">
+                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/></svg>
+                        </button>
+                      )}
                     </div>
                     <p className="text-sm text-text line-clamp-2 leading-relaxed mb-1.5">{p.copy || 'No caption'}</p>
                     {p.hashtags && <p className="text-xs text-amber-700 line-clamp-1 mb-1.5">{p.hashtags}</p>}
