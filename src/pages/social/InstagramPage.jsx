@@ -5,6 +5,7 @@ import { useAuth } from '../../store/auth'
 import { ComposerHost } from '../../components/composer/ComposerHost'
 import { ConnectAccounts } from '../../components/social/ConnectAccounts'
 import { AccountAnalytics } from '../../components/social/AccountAnalytics'
+import { AccountFeed } from '../../components/social/AccountFeed'
 import { useConnectedAccounts } from '../../lib/useConnectedAccounts'
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from '../../lib/supabaseClient'
 import FitImage, { IgPicture } from '../../components/FitImage'
@@ -1125,6 +1126,9 @@ function PostsList({ posts, loading = false, dispatch, state, updatePostStatus, 
     { key: 'pending_publish', label: 'Pending',   count: posts.filter(p => p.status === 'pending_publish').length },
     { key: 'scheduled',       label: 'Scheduled', count: posts.filter(p => p.status === 'scheduled').length },
     { key: 'published',       label: 'Published', count: posts.filter(p => p.status === 'published').length },
+    // Not a status of OUR rows: what is live on the account, including posts
+    // made in the Instagram app. Its own list, from Zernio — see AccountFeed.
+    { key: 'feed',            label: 'All posts' },
   ]
 
   return (
@@ -1148,7 +1152,7 @@ function PostsList({ posts, loading = false, dispatch, state, updatePostStatus, 
             </button>
           ))}
         </div>
-        {!loading && <span className="text-[11px] text-text-tertiary">{filtered.length} post{filtered.length !== 1 ? 's' : ''}</span>}
+        {!loading && filter !== 'feed' && <span className="text-[11px] text-text-tertiary">{filtered.length} post{filtered.length !== 1 ? 's' : ''}</span>}
       </div>
 
       {deleteError && (
@@ -1159,7 +1163,9 @@ function PostsList({ posts, loading = false, dispatch, state, updatePostStatus, 
       )}
 
       {/* Empty state */}
-      {loading ? (
+      {filter === 'feed' ? (
+        <AccountFeed accounts={accounts} />
+      ) : loading ? (
         <PostListSkeleton />
       ) : filtered.length === 0 ? (
         <Card className="p-12 text-center">

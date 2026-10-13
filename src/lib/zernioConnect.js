@@ -364,6 +364,18 @@ export async function fetchFollowerHistory(workspaceId, accountId, range = 30) {
   return call('followers', { workspace_id: workspaceId, account_id: accountId, ...window })
 }
 
+// Every post live on one account since it was connected — through this app
+// or on the platform directly — for the Instagram page's "All posts" tab.
+export async function fetchAccountFeed(workspaceId, accountId) {
+  const res = await call('feed', { workspace_id: workspaceId, account_id: accountId })
+  if (res.error) return { error: res.error }
+  return {
+    posts: res.posts || [],
+    fromDate: res.from_date || '',
+    lastSync: res.last_sync || null,
+  }
+}
+
 // Refresh: Zernio re-reads the account (or every account, without an id) from
 // the platform now, instead of on its ~90-minute cycle, and returns the fresh
 // account list. See syncAccountPosts in api/zernio/_zernio.js.
