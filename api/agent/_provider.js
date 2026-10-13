@@ -7,6 +7,7 @@ import { msLeft, worthStarting } from '../../src/lib/agent/phases.js'
 import {
   turnOutcome, exhaustedMessage, refusalMessage, MAX_CONTINUATIONS,
 } from '../../src/lib/agent/turnOutcome.js'
+import { toolResultBlock } from '../../src/lib/agent/loop.js'
 import { db } from './_supabase.js'
 
 // ─── The one place a model is actually called ──────────────────────────────
@@ -67,6 +68,14 @@ export async function callModel({
   // that never closes. Stopping ourselves is strictly better than being
   // stopped, because we can still report what happened.
   deadline = null,
+  // Our own tools, run here between legs. Absent (the default), a turn that
+  // stops on `tool_use` ends as before. The research lenses pass it for the
+  // Firecrawl/Tavily search that takes over when web_search hits max_uses.
+  //   runTool(name, input) → { ok, result } | { ok: false, error }
+  runTool = null,
+  // Ceiling on tool rounds. The caller paces itself (see backupWeb in
+  // _lenses.js); this only stops a loop that has stopped listening.
+  maxToolRounds = 40,
 }) {
   if (!client) {
     // Named, not swallowed. A missing key here previously looked exactly like
@@ -202,19 +211,50 @@ export async function callModel({
   await bill(leg.response)
   response = leg.response
 
-  while (!error && turnOutcome(response?.stop_reason, { continuations }).resume) {
-    continuations += 1
-    leg = await oneTurn(buildRequest({
-      model, identity, brand, tools, maxTokens, effort, outputFormat,
-      messages: [...messages, { role: 'assistant', content: response.content }],
-    }))
+  // ── Our own tools ──
+  // The conversation grows by one assistant turn and one tool_result turn per
+  // round. `turn` is the assistant turn in progress, which can span pauses.
+  // Text from a FINISHED turn ("let me search…") is dropped from what the
+  // caller sees: a structured-output caller parses every text block as one
+  // JSON document. The search result blocks are kept, because they are where
+  // the caller's sources come from.
+  const convo = [...messages]
+  let turn = [...(leg.response?.content || [])]
+  const earlier = []
+  let rounds = 0
+
+  while (!error && response) {
+    if (turnOutcome(response.stop_reason, { continuations }).resume) {
+      continuations += 1
+      leg = await oneTurn(buildRequest({
+        model, identity, brand, tools, maxTokens, effort, outputFormat,
+        messages: [...convo, { role: 'assistant', content: response.content }],
+      }))
+    } else if (response.stop_reason === 'tool_use' && runTool && rounds < maxToolRounds) {
+      rounds += 1
+      const calls = (response.content || []).filter(b => b?.type === 'tool_use')
+      const results = await Promise.all(calls.map(async c => {
+        let outcome
+        try { outcome = await runTool(c.name, c.input || {}) } catch (err) {
+          outcome = { ok: false, error: err?.message || String(err) }
+        }
+        return toolResultBlock(c.id, outcome)
+      }))
+      convo.push({ role: 'assistant', content: turn }, { role: 'user', content: results })
+      earlier.push(...turn.filter(b => b?.type !== 'text'))
+      turn = []
+      leg = await oneTurn(buildRequest({ model, identity, brand, tools, maxTokens, effort, outputFormat, messages: convo }))
+    } else {
+      break
+    }
     if (leg.error) {
       // Out of time or a broken leg. What earlier legs established still
       // stands — report it rather than throwing the whole turn away.
-      console.error(`[agent] ${stage || surface}: resume ${continuations} failed: ${leg.error}`)
+      console.error(`[agent] ${stage || surface}: leg after ${continuations} resume(s), ${rounds} tool round(s) failed: ${leg.error}`)
       break
     }
     allContent.push(...(leg.response.content || []))
+    turn.push(...(leg.response.content || []))
     await bill(leg.response)
     response = leg.response
   }
@@ -222,8 +262,16 @@ export async function callModel({
   // The turn the caller sees carries EVERY leg's content — sources found
   // before a pause are part of the answer — with the last leg's stop_reason,
   // which is the one that says how the whole turn actually ended.
-  if (response && continuations > 0) {
+  if (response && rounds > 0) {
+    response = { ...response, content: [...earlier, ...turn] }
+  } else if (response && continuations > 0) {
     response = { ...response, content: allContent }
+  }
+  // Still asking for a tool after the ceiling: unfinished, and must not be
+  // parsed as an answer.
+  if (!error && response?.stop_reason === 'tool_use' && runTool) {
+    error = `The model was still searching after ${rounds} tool rounds and was stopped. ` +
+            'It did not finish, which is not the same as finding nothing.'
   }
 
   const usage = normaliseUsage(response?.usage)
