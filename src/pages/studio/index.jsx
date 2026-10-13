@@ -21,6 +21,7 @@ import {
 } from '../../lib/creativeStoryboard'
 import {
   canEditVideoDuration, estimateVideoCost, estimateVideoEditCost, getVideoModel, modelImageMax,
+  VIDEO_EDIT_DURATION_RANGE, VIDEO_EDIT_MODEL_ID, isVideoEditModel, resolveVideoModelId,
   modelImageRole, VIDEO_EDIT_MAX_REFERENCES,
 } from '../../components/studio/videoModels'
 import { aspectLabel } from '../../lib/postFormats'
@@ -1093,13 +1094,13 @@ export function CreativeStudio() {
   // Send under a finished VIDEO edits the footage itself — a genuinely
   // different action from Send under a still, which is why this is its own
   // function rather than a branch bolted onto handleSend's image logic below.
-  // No model touches a photo the way Kling O1 Edit touches a clip: the source
+  // No model touches a photo the way Kling O3 Edit touches a clip: the source
   // video goes back in whole, so there's no "editing dropped image instead"
   // concept here — there is nothing else in the request to edit.
   async function handleVideoEdit(branch, instruction, base, refs) {
     if (!canEditVideoDuration(base.duration)) {
       setError(
-        `Kling O1 Edit only accepts 3–10s clips — this one is ${base.duration || '?'}s. `
+        `Kling O3 Edit only accepts ${VIDEO_EDIT_DURATION_RANGE[0]}–${VIDEO_EDIT_DURATION_RANGE[1]}s clips — this one is ${base.duration || '?'}s. `
         + 'Use Re-render for a fresh take instead.',
       )
       return
@@ -1110,7 +1111,7 @@ export function CreativeStudio() {
       row: {
         round: nextRound, kind: 'video', provider: 'seedance', mediaType: 'video',
         parentVersionId: base.id, userPrompt: instruction, aspectRatio: session.aspect_ratio,
-        model: 'kling-o1-edit', duration: base.duration || '', resolution: base.resolution || '',
+        model: VIDEO_EDIT_MODEL_ID, duration: base.duration || '', resolution: base.resolution || '',
         generateAudio: !!base.generate_audio,
       },
       payload: {
@@ -1230,7 +1231,10 @@ export function CreativeStudio() {
     setVideoTarget(still)
     setVideoPrefill({
       prompt: video.user_prompt || '',
-      model: video.model || 'seedance-2',
+      // Resolved, because the id saved on an old row may be one that has since
+      // been replaced (Kling 2.5 Turbo, Veo 3.1 Fast) and the picker has no
+      // option by that name to show as selected.
+      model: resolveVideoModelId(video.model || 'seedance-2'),
       duration: video.duration || '5',
       resolution: video.resolution || '720p',
       generateAudio: !!video.generate_audio,
@@ -1527,8 +1531,8 @@ export function CreativeStudio() {
     const fresh = ins.rows[0]
 
     let fired
-    if (version.kind === 'video' && version.model === 'kling-o1-edit') {
-      // Editing a video (Kling O1 Edit, see handleVideoEdit above) sends the
+    if (version.kind === 'video' && isVideoEditModel(version.model)) {
+      // Editing a video (Kling O3 Edit, see handleVideoEdit above) sends the
       // clip itself back in — its parent row IS a video, not a still to
       // animate. The generic 'video' branch below reads `image_url` off that
       // parent, which a video row doesn't have, and fires it at the ANIMATE
@@ -1696,11 +1700,11 @@ export function CreativeStudio() {
     reRenderCost: v => estimateVideoCost(v.model || 'seedance-2', {
       resolution: v.resolution || '720p', duration: v.duration || '5', audio: !!v.generate_audio,
     }),
-    // What asking for a change in the chat box would cost — Kling O1 Edit
+    // What asking for a change in the chat box would cost — Kling O3 Edit
     // bills by the SOURCE clip's own duration, not a model/resolution pair,
     // so this is a plain per-second rate rather than reRenderCost's lookup.
     editVideoCost: v => estimateVideoEditCost(v.duration || '5'),
-    // Whether that action is even offered — fal's own 3–10s limit on the
+    // Whether that action is even offered — fal's own 3–15s limit on the
     // source clip, checked here so the button can explain itself instead of
     // firing and failing.
     editVideoAllowed: v => canEditVideoDuration(v.duration),

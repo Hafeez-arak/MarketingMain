@@ -1,5 +1,5 @@
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './supabaseClient'
-import { getVideoModel, estimateVideoCost, modelImageRole } from '../components/studio/videoModels'
+import { getVideoModel, estimateVideoCost, modelImageRole, resolveVideoModelId } from '../components/studio/videoModels'
 import { buildVideoPrompt } from '../components/studio/motionPresets'
 
 // ─── Multi-clip storyboard ─────────────────────────────────────────────────
@@ -113,11 +113,16 @@ export function normalizeStoryboard(raw, fallback = {}) {
   const base = emptyStoryboard(fallback)
   if (!raw || typeof raw !== 'object') return base
   const clips = Array.isArray(raw.clips) && raw.clips.length ? raw.clips : base.clips
+  // A board saved with a model that has since been replaced (Kling 2.5 Turbo,
+  // Veo 3.1 Fast) opens on its successor, so the picker shows a real option
+  // and the next render goes where the workflow will actually send it.
+  const model = resolveVideoModelId(raw.model || base.model)
   return {
     ...base,
     ...raw,
+    model,
     clips: clips.slice(0, MULTI_CLIP_MAX).map((c, i) => ({
-      ...newClip(raw.model || base.model),
+      ...newClip(model),
       ...c,
       key: c.key || clipKey(),
       continueFromPrevious: i === 0 ? false : !!c.continueFromPrevious,

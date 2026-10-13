@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import {
   VIDEO_MODELS, getVideoModel, estimateVideoCost, modelImageRole, modelImageMax,
+  MODEL_ALIASES, resolveVideoModelId, isVideoEditModel, VIDEO_EDIT_MODEL_ID,
+  canEditVideoDuration,
 } from './videoModels'
 
 // ─── The picker's catalog ──────────────────────────────────────────────────
@@ -81,6 +83,28 @@ describe('video model catalog', () => {
     // must land on something real rather than crashing the history strip.
     expect(getVideoModel('a-model-that-never-existed').id).toBe(VIDEO_MODELS[0].id)
     expect(getVideoModel(undefined).id).toBe(VIDEO_MODELS[0].id)
+  })
+
+  it('opens a retired model id on the model that replaced it', () => {
+    // Saved rows and storyboards keep the id they were made with. Without the
+    // alias, getVideoModel fell back to VIDEO_MODELS[0] — a re-render that
+    // silently changed model and price.
+    expect(getVideoModel('kling-2.5-turbo-pro').id).toBe('kling-3-pro')
+    expect(getVideoModel('veo-3.1-fast').id).toBe('veo-3.1-lite')
+    expect(resolveVideoModelId('seedance-2.5')).toBe('seedance-2.5')
+    for (const [from, to] of Object.entries(MODEL_ALIASES)) {
+      expect(VIDEO_MODELS.some(m => m.id === from), `${from} is retired`).toBe(false)
+      expect(VIDEO_MODELS.some(m => m.id === to), `${to} is offered`).toBe(true)
+    }
+  })
+
+  it('reads edit rows made before and after the move to O3 as edits', () => {
+    expect(isVideoEditModel(VIDEO_EDIT_MODEL_ID)).toBe(true)
+    expect(isVideoEditModel('kling-o1-edit')).toBe(true)
+    expect(isVideoEditModel('seedance-2.5')).toBe(false)
+    // O3 takes 3–15s sources, where O1 stopped at 10.
+    expect(canEditVideoDuration('15')).toBe(true)
+    expect(canEditVideoDuration('20')).toBe(false)
   })
 
   it('caps references at a count every reference endpoint accepts', () => {

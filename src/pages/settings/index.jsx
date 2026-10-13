@@ -130,7 +130,7 @@ const WORKFLOW_CONFIGS = [
     platform: 'creativeGenerate',
     label: 'Creative Studio — Generate',
     placeholder: 'https://your-instance.app.n8n.cloud/webhook/arak-creative-generate',
-    description: 'The Creative Studio\'s two-option generator: one candidate from ChatGPT (gpt-image-2) and one from Gemini (nano-banana-2) for every prompt, so you compare and pick. Real spend (fal.ai) — fires when you hit Generate.',
+    description: 'The Creative Studio\'s two-option generator: one candidate from ChatGPT (GPT Image 2.5) and one from Gemini (Nano Banana 2.1) for every prompt, so you compare and pick. Real spend (fal.ai) — fires when you hit Generate.',
     icon: (
       <div className="w-8 h-8 flex items-center justify-center flex-shrink-0" style={{ background: '#8b5cf6' }}>
         <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24">
@@ -169,7 +169,7 @@ const WORKFLOW_CONFIGS = [
     platform: 'creativeVideoEdit',
     label: 'Creative Studio — Video Edit',
     placeholder: 'https://your-instance.app.n8n.cloud/webhook/arak-creative-video-edit',
-    description: 'What the chat box\'s Send does under a finished clip — edits the FOOTAGE itself ("change the background to marble") via Kling O1 Edit, keeping the source\'s own camera movement. Real spend (fal.ai), ~$0.17/second of the clip. Only works on clips 3–10s long; longer ones only offer Re-render.',
+    description: 'What the chat box\'s Send does under a finished clip — edits the FOOTAGE itself ("change the background to marble") via Kling O3 Edit, keeping the source\'s own camera movement. Real spend (fal.ai), ~$0.17/second of the clip. Only works on clips 3–15s long; longer ones only offer Re-render.',
     icon: (
       <div className="w-8 h-8 flex items-center justify-center flex-shrink-0" style={{ background: '#8b5cf6' }}>
         <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24">

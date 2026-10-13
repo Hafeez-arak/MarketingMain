@@ -93,16 +93,19 @@ export function LookPicker({ lookId, onPick }) {
 //  · Only Seedance has a reference-to-video endpoint; on the others a style
 //    reference has nowhere to go.
 const MODEL_CAVEATS = {
-  'veo-3.1-fast': 'Renders 16:9 or 9:16 only — other shapes are trimmed to fit when text is added.',
-  // Said here rather than only when a marketer tries it: past 10s the clip is
-  // over Kling O1 Edit's input limit, so "change the lighting" becomes a fresh
+  'veo-3.1-lite': 'Renders 16:9 or 9:16 only — other shapes are trimmed to fit when text is added.',
+  // Said here rather than only when a marketer tries it: past 15s the clip is
+  // over Kling O3 Edit's input limit, so "change the lighting" becomes a fresh
   // take instead of an edit of this one. Text/fonts/colours are unaffected at
   // any length — those are composited by us, never regenerated.
   //
   // The old "no aspect control on text-to-video" half of this note is gone:
   // 2.5's enum was 'auto' only when it was written and now takes real ratios.
-  'seedance-2.5': 'Sharp costs about 5× Draft here — check the movement cheaply first. Past 10s, scene changes (lighting, objects, what happens) need a full re-render; text, fonts and colours stay free and instant at any length.',
-  'kling-2.5-turbo-pro': 'No style references, no end frame, one quality tier.',
+  //
+  // Draft takes can be finished at 1080p later (the "Finish in 1080p" button
+  // on the clip) — so checking the movement at Draft costs nothing extra.
+  'seedance-2.5': 'Sharp costs about 5× Draft here — check the movement at Draft, then finish the take you like in 1080p without re-rolling it. Past 15s, scene changes (lighting, objects, what happens) need a full re-render; text, fonts and colours stay free and instant at any length.',
+  'kling-3-pro': 'No style references, one quality tier. Without a starting image it renders 16:9, 9:16 or 1:1 — other shapes are trimmed to fit when text is added.',
   'hailuo-2.3': 'No style references, no end frame, one quality tier.',
   'h3-max': 'No sound at all. Sharp is a 768p original enlarged to 1080p, not a native 1080p render.',
   'gemini-omni-flash-1.1': 'Renders 16:9 or 9:16 only — other shapes are trimmed to fit when text is added. Always generates sound; there is no way to turn it off.',
