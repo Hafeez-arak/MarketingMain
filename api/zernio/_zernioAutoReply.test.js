@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import fs from 'node:fs'
 import {
   automationFields, cleanList, normalizeAutomation, postChoices, hasMorePages, AUTO_REPLY_PLATFORMS, isAction,
+  requireOwnedAutomation,
 } from './[action].js'
 
 // ─── Keyword auto-replies ──────────────────────────────────────────────────
@@ -250,5 +251,43 @@ describe('hasMorePages — when the picker asks for another page', () => {
     expect(hasMorePages({ posts: new Array(24) }, 1, 24)).toBe(true)
     expect(hasMorePages({ posts: new Array(5) }, 1, 24)).toBe(false)
     expect(hasMorePages(null, 1, 24)).toBe(false)
+  })
+})
+
+describe('requireOwnedAutomation — who may touch an automation', () => {
+  // A fake Zernio: the profile's accounts, the profile's automation list, and
+  // one automation fetched by id. Only `mine` belongs to this profile.
+  const fake = ({ accounts, listed, automation }) => ({
+    request: async (path, opts = {}) => {
+      if (path === 'accounts') return { accounts }
+      if (path === 'comment-automations') {
+        return { automations: opts.query?.profileId === 'mine' ? listed : [] }
+      }
+      return { automation }
+    },
+  })
+  const args = { workspaceId: 'ws', profileId: 'mine', automationId: 'auto1' }
+
+  it('allows one whose account is connected to this profile', async () => {
+    const z = fake({ accounts: [{ _id: 'acc', profileId: 'mine' }], listed: [], automation: { id: 'auto1', accountId: 'acc' } })
+    await expect(requireOwnedAutomation(z, args)).resolves.toMatchObject({ id: 'auto1' })
+  })
+
+  // The old test Instagram account was disconnected with two automations on
+  // it. They kept showing on the page and Delete answered "That account does
+  // not belong to this workspace." for ever.
+  it('allows one whose account was disconnected, if it is still in this profile\'s list', async () => {
+    const z = fake({ accounts: [], listed: [{ id: 'auto1', accountId: 'gone' }], automation: { id: 'auto1', accountId: 'gone' } })
+    await expect(requireOwnedAutomation(z, args)).resolves.toMatchObject({ id: 'auto1' })
+  })
+
+  it('refuses another profile\'s automation, guessed by id', async () => {
+    const z = fake({ accounts: [{ _id: 'acc', profileId: 'mine' }], listed: [{ id: 'other' }], automation: { id: 'auto1', accountId: 'theirs' } })
+    await expect(requireOwnedAutomation(z, args)).rejects.toMatchObject({ httpStatus: 403 })
+  })
+
+  it('says not found when Zernio has no such automation', async () => {
+    const z = fake({ accounts: [], listed: [], automation: {} })
+    await expect(requireOwnedAutomation(z, args)).rejects.toMatchObject({ httpStatus: 404 })
   })
 })
