@@ -742,7 +742,10 @@ export function axesFor(lines = []) {
 
 export function competitorLine(n = {}) {
   const bits = []
-  if (n.resolution === 'unresolvable') {
+  // A domain someone has since supplied wins over an old "unresolvable":
+  // Al Dhow kept the label after al-dhow.com was set, and the 2026-10-13
+  // run skipped it with its site and Instagram both on file.
+  if (n.resolution === 'unresolvable' && !n.domain) {
     return 'CANNOT BE RESEARCHED — no domain and no resolvable identity. Do not spend a search on this name. ' +
       'Report it as unresearchable so a person can supply one.'
   }
