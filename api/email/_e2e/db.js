@@ -28,6 +28,7 @@ export const EMAIL_MIGRATIONS = [
   '20261007_lead_mailboxes',
   '20261008_lead_history',
   '20261016_previously_contacted_groups',
+  '20261017_group_hand_edits',
 ]
 
 const PRELUDE = `

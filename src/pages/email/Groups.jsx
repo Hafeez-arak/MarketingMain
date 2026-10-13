@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { Card, Button, Input, Textarea, Modal, ConfirmDialog, Empty, Skeleton } from '../../components/ui/index'
 import { AUDIENCES, blockReason } from '../../lib/email/contacts'
+import { isAutomatic } from '../../lib/email/groupActions'
 import { saveGroup, deleteGroup } from '../../lib/email/client'
 import { AudienceTag, Notice, EIcon } from './parts'
 import { GROUP_COLORS } from './format'
@@ -66,7 +67,10 @@ export function Groups({ workspaceId, data, loading, reload, setTab }) {
                     <li key={g.id} className="px-5 py-3 flex items-center gap-4">
                       <span className={`w-2 h-8 flex-shrink-0 ${GROUP_COLORS[g.color] || GROUP_COLORS.steel}`} />
                       <div className="min-w-0 flex-1">
-                        <p className="font-medium text-text text-sm truncate">{g.name}</p>
+                        <p className="font-medium text-text text-sm truncate flex items-center gap-2">
+                          {g.name}
+                          {isAutomatic(g) && <span className="text-[10px] font-semibold uppercase tracking-wide text-sky-700 bg-sky-50 border border-sky-200 px-1.5 py-0.5">Automatic</span>}
+                        </p>
                         {g.description && <p className="text-xs text-text-tertiary truncate">{g.description}</p>}
                       </div>
                       <div className="text-right flex-shrink-0">
@@ -76,7 +80,11 @@ export function Groups({ workspaceId, data, loading, reload, setTab }) {
                       <div className="flex items-center gap-1 flex-shrink-0">
                         <Button size="xs" variant="ghost" onClick={() => setTab('contacts', { group: g.id })}>View</Button>
                         <Button size="xs" variant="ghost" onClick={() => setEditing(g)}>Edit</Button>
-                        <Button size="xs" variant="ghost" onClick={() => setDeleting(g)} aria-label={`Delete ${g.name}`}><EIcon name="trash" /></Button>
+                        {/* The lead agent would make it again with the next enquiry; the
+                            hidden twin keeps View and Edit in line with the other rows. */}
+                        {isAutomatic(g)
+                          ? <span aria-hidden="true" className="invisible"><Button size="xs" variant="ghost" tabIndex={-1}><EIcon name="trash" /></Button></span>
+                          : <Button size="xs" variant="ghost" onClick={() => setDeleting(g)} aria-label={`Delete ${g.name}`}><EIcon name="trash" /></Button>}
                       </div>
                     </li>
                   )
@@ -88,7 +96,8 @@ export function Groups({ workspaceId, data, loading, reload, setTab }) {
       })}
 
       <p className="text-[11px] text-text-tertiary">
-        To add people to a group: tick them in Contacts and choose “Add to group”, or pick a group when importing a CSV.
+        To put people in a group: tick them in Contacts and choose “Add to group” (they keep their other groups) or “Move to group” (they leave their other groups in that lane), or pick a group when importing a CSV.
+        Automatic groups are filled by the lead agent from enquiries. You can still add or remove people by hand; someone you take out stays out.
       </p>
 
       {editing && (
@@ -128,7 +137,9 @@ function GroupModal({ workspaceId, group, audience, memberCount, onClose, onSave
   return (
     <Modal open onClose={onClose} title={group ? 'Edit group' : `New ${AUDIENCES[audience].label.toLowerCase()} group`}>
       <div className="p-5 space-y-4">
-        <Input label="Name" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} autoFocus />
+        {/* The lead agent finds its group by name, so a rename would split it in two. */}
+        <Input label="Name" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} autoFocus={!isAutomatic(group)}
+          disabled={isAutomatic(group)} hint={isAutomatic(group) ? 'Filled by the lead agent, which finds it by this name, so it cannot be renamed.' : ''} />
         <Textarea label="Description" rows={2} value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
           hint="Who is in it and why. Shown when choosing groups for a campaign." />
         <div>

@@ -546,8 +546,27 @@ update lead_agent_settings set website_contact_group = 'Previously contacted Ara
 select sync_lead_contacts_all('<ws>');
 ```
 
-Rename a group in the app only together with its `contact_group` value. If
-you don't, the next enquiry creates a new group with the old name.
+The app marks these groups **Automatic** (`email_groups.managed_by`). They
+can't be renamed or deleted there, because the agent finds its group by name
+and would recreate a deleted one.
+
+**Hand edits win** (`20261017_group_hand_edits.sql`, the owner's rule of
+2026-10-12):
+- Someone you take out by hand stays out. The removal is recorded in
+  `email_group_exclusions` and the agent never adds them back.
+- Someone you add by hand stays in, even with no enquiry. The agent only
+  ever removes memberships it made (`email_group_members.added_by`).
+- Adding someone back by hand clears their exclusion.
+
+**Contacts → selection actions:**
+- **Add to group**: they keep their other groups.
+- **Move to group**: they leave their other groups in that lane.
+- **Remove from group**: only lists groups a selected contact is in.
+- **Move to Newsletter / Outreach**: they also leave the old lane's groups.
+
+Contacts of the other lane are skipped and the page says so. A move, a
+removal or a lane switch shows what it will do and waits for Confirm, and
+"Nothing to change" runs nothing.
 
 CLB's history was extended to 12 May 2026 (5 months), so May–June CLB
 enquiries also appear on the Leads page.
