@@ -879,6 +879,14 @@ function cleanList(raw) {
  * deployment's, not the workspace's, so without this a workspace could read
  * another's logs (which contain commenter names and message text) by guessing
  * an id. The read is one extra round trip and is not optional.
+ *
+ * An automation outlives its account. Disconnect an Instagram account and its
+ * automations stay in this profile's list, still switched on, but the account
+ * is gone from the profile — so the account check alone refused to touch them
+ * and they could never be deleted (the old test account's two did exactly
+ * this). When the account check fails we fall back to the profile's own
+ * automation list: Zernio filters it by profileId, so an id that appears there
+ * is ours whether or not its account still is.
  */
 async function requireOwnedAutomation(z, { workspaceId, profileId, automationId }) {
   const out = await z.request(`comment-automations/${encodeURIComponent(automationId)}`)
@@ -889,7 +897,14 @@ async function requireOwnedAutomation(z, { workspaceId, profileId, automationId 
     err.httpStatus = 404
     throw err
   }
-  await requireOwnedAccount(z, { workspaceId, profileId, accountId })
+  try {
+    await requireOwnedAccount(z, { workspaceId, profileId, accountId })
+  } catch (err) {
+    if (err.httpStatus !== 403) throw err
+    const listed = await z.request('comment-automations', { query: { profileId } })
+    const ours = (listed?.automations || []).some(a => String(a.id || a._id || '') === automationId)
+    if (!ours) throw err
+  }
   return automation
 }
 
@@ -1017,4 +1032,4 @@ export default async function handler(req, res) {
 }
 
 export { qs, profileIdOf, CONNECTABLE }
-export { automationFields, cleanList, normalizeAutomation, postChoices, hasMorePages, AUTO_REPLY_PLATFORMS }
+export { automationFields, cleanList, normalizeAutomation, postChoices, hasMorePages, AUTO_REPLY_PLATFORMS, requireOwnedAutomation }
