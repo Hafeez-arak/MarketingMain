@@ -2,11 +2,13 @@ import crypto from 'node:crypto'
 import { db, isConfigured } from '../agent/_supabase.js'
 import { sealSecret } from '../email/_secrets.js'
 import { signState, authorizeUrl, READ_SCOPES } from '../email/_graph.js'
+import { SEND_SCOPES } from './_mail.js'
 import { intakeWebsite, tryIt, QUALIFIER_MODEL } from './_intake.js'
 import { checkMail, emailFile, currentOutlookLink } from './_mail.js'
 import { exportLeads, applySheetDecisions } from './_export.js'
 import { approveLead, crmStatus, saveCrm, sendWaiting, disconnectCrm } from './_crm.js'
 import { openCard, saveCard, watchlist } from './_card.js'
+import { assignLead, teamList, teamSave, teamCheckOdoo } from './_assign.js'
 import { leadDeps, openRouterKey, hasDeploymentKey, describeKey, sendAlert } from './_deps.js'
 import { previewLenses } from '../agent/_investigate.js'
 
@@ -31,9 +33,11 @@ import { previewLenses } from '../agent/_investigate.js'
 //                       admin. Only then does the service key touch anything.
 //   a sales person      the same, but with a sales seat in that company
 //                       instead of membership, and only review, email_file,
-//                       approve, outlook_link, set_project and the battle
-//                       card (SALES_ACTIONS); approve also asks the database
-//                       whether they are a sales admin.
+//                       approve, assign, forward, outlook_link, set_project
+//                       and the battle card (SALES_ACTIONS), and only on a
+//                       lead they can see (their own, since 2026-10-13: the
+//                       database's can_see_lead answers). approve, assign and
+//                       forward also ask whether they are a sales admin.
 //
 // Microsoft's sign-in comes back to /api/email/ms-callback (the address
 // registered in Entra), which hands a lead-agent sign-in to _mail.js.
@@ -104,7 +108,23 @@ async function isAdmin(token) {
 // A sales person (20261013_sales_seats) is not a member of the company at
 // all: their seat is asked for separately, again with their own token. A
 // seat opens these actions and nothing else.
-const SALES_ACTIONS = new Set(['review', 'email_file', 'approve', 'outlook_link', 'set_project', 'card', 'card_save'])
+const SALES_ACTIONS = new Set(['review', 'email_file', 'approve', 'assign', 'forward', 'outlook_link', 'set_project', 'card', 'card_save'])
+
+/**
+ * May this sales person open this lead? Asked with their own token, so the
+ * leads policy (can_see_lead: their own leads, all for a sales admin, the
+ * website's too for a seat that has them) answers.
+ */
+async function canSeeLead(workspaceId, leadId, token) {
+  if (!isUuid(workspaceId) || !isUuid(leadId)) return false
+  try {
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/leads?id=eq.${leadId}&workspace_id=eq.${workspaceId}&select=id`, {
+      headers: { apikey: ANON_KEY || SERVICE_KEY, Authorization: `Bearer ${token}` },
+    })
+    const rows = r.ok ? await r.json() : []
+    return Array.isArray(rows) && rows.length === 1
+  } catch { return false }
+}
 
 async function isSalesMember(workspaceId, token) {
   if (!isUuid(workspaceId)) return false
@@ -152,14 +172,16 @@ async function settingsFor(workspaceId) {
 function consentUrl(ms, base) {
   const q = new URLSearchParams({
     client_id: ms.clientId,
-    scope: 'https://graph.microsoft.com/Mail.Read https://graph.microsoft.com/User.Read openid profile email offline_access',
+    // Mail.Send since 2026-10-13: a mailbox there may be allowed to forward
+    // leads to the salesperson they are assigned to.
+    scope: 'https://graph.microsoft.com/Mail.Read https://graph.microsoft.com/Mail.Send https://graph.microsoft.com/User.Read openid profile email offline_access',
     redirect_uri: `${base}/api/email/ms-callback`,
     state: 'leads-consent',
   })
   return `https://login.microsoftonline.com/organizations/v2.0/adminconsent?${q}`
 }
 
-const MAILBOX_COLUMNS = 'id,email,label,tenant,warmup_tag,display_name,status,read_from,last_checked_at,last_error,last_counts,history_from,history_until,history_cursor,history_done,created_at'
+const MAILBOX_COLUMNS = 'id,email,label,tenant,can_send,warmup_tag,display_name,status,read_from,last_checked_at,last_error,last_counts,history_from,history_until,history_cursor,history_done,created_at'
 const fail = (status, error) => ({ __fail: true, status, error })
 
 // ─── Admin actions ─────────────────────────────────────────────────────────
@@ -336,12 +358,65 @@ const actions = {
   async approve({ workspaceId, body, user, token }) {
     if (!(await canApprove(workspaceId, token))) return fail(403, 'Only a sales admin can approve leads into the CRM.')
     const deps = leadDeps()
+    // Chosen in the confirmation when no one had it yet (or someone else):
+    // assigned first, which forwards the email, then approved.
+    let forward = null
+    if (isUuid(body.assign_to)) {
+      const [cur] = await db(`leads?id=eq.${body.lead_id}&workspace_id=eq.${workspaceId}&select=assigned_to`) || []
+      if (cur && cur.assigned_to !== body.assign_to) {
+        const a = await assignLead(deps, { workspaceId, leadId: body.lead_id, to: body.assign_to, user, appUrl: baseUrlOf(this.req) })
+        if (a.error) return fail(a.status, a.error)
+        forward = a.forward
+      }
+    }
     const out = await approveLead(deps, { workspaceId, leadId: body.lead_id, user })
     if (out.error) return fail(out.status, out.error)
     // Every approved lead gets its battle card. Built now so it is waiting;
     // if this fails, opening the card builds it.
     await openCard(deps, { workspaceId, leadId: body.lead_id }).catch(() => null)
-    return { lead: out.lead, crm: out.crm }
+    return { lead: out.lead, crm: out.crm, forward }
+  },
+
+  /**
+   * Give a lead to a salesperson (or, before approval, to no one: user_id
+   * null). Their email gets the customer's email at once. A sales admin or
+   * the access admin only. See _assign.js.
+   */
+  async assign({ workspaceId, body, user, token }) {
+    if (!(await canApprove(workspaceId, token))) return fail(403, 'Only a sales admin can assign leads.')
+    const out = await assignLead(leadDeps(), { workspaceId, leadId: body.lead_id, to: body.user_id || null, user, appUrl: baseUrlOf(this.req) })
+    if (out.error) return fail(out.status, out.error)
+    return { lead: out.lead, forward: out.forward, odooError: out.odooError }
+  },
+
+  /** Send the email to the person it is assigned to again (after a failed forward). */
+  async forward({ workspaceId, body, user, token }) {
+    if (!(await canApprove(workspaceId, token))) return fail(403, 'Only a sales admin can forward leads.')
+    if (!isUuid(body.lead_id)) return fail(400, 'Which lead?')
+    const [cur] = await db(`leads?id=eq.${body.lead_id}&workspace_id=eq.${workspaceId}&select=assigned_to`) || []
+    if (!cur) return fail(404, 'That lead is not in this company.')
+    if (!cur.assigned_to) return fail(400, 'Assign it to someone first.')
+    const out = await assignLead(leadDeps(), { workspaceId, leadId: body.lead_id, to: cur.assigned_to, user, appUrl: baseUrlOf(this.req) })
+    if (out.error) return fail(out.status, out.error)
+    return { lead: out.lead, forward: out.forward }
+  },
+
+  /** The sales team on Agent settings: who sees the website's leads, who they are in Odoo. */
+  async team({ workspaceId }) {
+    return { team: await teamList(leadDeps(), workspaceId) }
+  },
+
+  async team_save({ workspaceId, body }) {
+    const out = await teamSave(leadDeps(), workspaceId, body)
+    if (out.error) return fail(out.status, out.error)
+    return out
+  },
+
+  /** Look every salesperson up in Odoo now. */
+  async team_odoo({ workspaceId }) {
+    const out = await teamCheckOdoo(leadDeps(), workspaceId)
+    if (out.error) return fail(out.status, out.error)
+    return out
   },
 
   /** An approved lead's battle card, built the first time it is opened. */
@@ -382,7 +457,8 @@ const actions = {
   },
 
   /**
-   * Start "Connect a mailbox": a Microsoft sign-in asking for READ ONLY.
+   * Start "Connect a mailbox": a Microsoft sign-in asking for READ ONLY, or
+   * (body.send, "Allow forwarding") read plus Mail.Send, to forward leads.
    * The answer comes back to /api/email/ms-callback (the registered address),
    * which sees `p: 'leads'` in the signed state and hands it to _mail.js.
    */
@@ -393,12 +469,14 @@ const actions = {
     // other_org: a mailbox on another Microsoft 365 (clb-sa.com). It signs in
     // at the shared "organizations" endpoint instead of our own tenant's.
     const otherOrg = Boolean(body.other_org)
-    const state = signState({ ws: workspaceId, uid: user.id, p: 'leads', o: otherOrg ? 1 : 0, n: nonce }, SERVICE_KEY)
+    const send = Boolean(body.send)
+    const state = signState({ ws: workspaceId, uid: user.id, p: 'leads', o: otherOrg ? 1 : 0, s: send ? 1 : 0, n: nonce }, SERVICE_KEY)
     const secure = /^https:/.test(baseUrlOf(this.req)) ? '; Secure' : ''
     // Path /api/email: that is where the callback reads it.
     this.res.setHeader('Set-Cookie', `ms_oauth=${nonce}; Path=/api/email; HttpOnly; SameSite=Lax; Max-Age=900${secure}`)
     const config = otherOrg ? { ...ms, tenant: 'organizations' } : ms
-    return { url: authorizeUrl({ config, redirectUri: `${baseUrlOf(this.req)}/api/email/ms-callback`, state, scopes: READ_SCOPES }) }
+    const loginHint = String(body.login_hint || '').trim().slice(0, 200)
+    return { url: authorizeUrl({ config, redirectUri: `${baseUrlOf(this.req)}/api/email/ms-callback`, state, loginHint, scopes: send ? SEND_SCOPES : READ_SCOPES }) }
   },
 
   /** Read the connected mailboxes now, instead of waiting for the next round. */
@@ -497,6 +575,10 @@ export default async function handler(req, res) {
     // verdict or fetch an email, and do nothing else.
     const sales = SALES_ACTIONS.has(action) && await isSalesMember(workspaceId, token)
     if (!sales) return res.status(403).json({ ok: false, error: member ? 'The lead agent is for the admin only.' : 'You do not have access to that workspace.' })
+    // And only on a lead they can see: their own, unless they see them all.
+    if (body.lead_id !== undefined && !(await canSeeLead(workspaceId, body.lead_id, token))) {
+      return res.status(404).json({ ok: false, error: 'That lead is not one of yours.' })
+    }
   }
 
   try {

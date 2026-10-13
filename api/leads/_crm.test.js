@@ -10,6 +10,9 @@ const WS = '11111111-1111-4111-8111-111111111111'
 const L1 = '22222222-2222-4222-8222-222222222222'
 const L2 = '33333333-3333-4333-8333-333333333333'
 const LAYLA = { id: '44444444-4444-4444-8444-444444444444', email: 'layla@example.com' }
+// The salesperson the leads are assigned to, and who they are in Odoo.
+const OMAR = { id: '55555555-5555-4555-8555-555555555555', email: 'omar@example.com' }
+const ODOO_USERS = { 'omar@example.com': 21, 'omar.k': 22 }
 
 function fakeOdoo({ plan = 'custom', canCreate = true, failCreate = false } = {}) {
   const odoo = { leads: [], tags: [], calls: [] }
@@ -33,6 +36,14 @@ function fakeOdoo({ plan = 'custom', canCreate = true, failCreate = false } = {}
       odoo.leads.push({ id: 100 + odoo.leads.length, ...a[0] })
       return ok(100 + odoo.leads.length - 1)
     }
+    if (model === 'res.users' && m === 'search') {
+      const who = String(a[0][1][2]).toLowerCase()
+      return ok(ODOO_USERS[who] ? [ODOO_USERS[who]] : [])
+    }
+    if (model === 'crm.lead' && m === 'write') {
+      for (const id of a[0]) Object.assign(odoo.leads.find((l) => l.id === id) || {}, a[1])
+      return ok(true)
+    }
     if (model === 'crm.tag' && m === 'search') return ok(odoo.tags.filter((t) => t.name === a[0][0][2]).map((t) => t.id))
     if (model === 'crm.tag' && m === 'create') { odoo.tags.push({ id: odoo.tags.length + 1, ...a[0] }); return ok(odoo.tags.length) }
     return err(`fake odoo: ${model}.${m}`)
@@ -47,13 +58,13 @@ function lead(over = {}) {
     subject: 'Tower facade', message: 'We need facade lighting <b>now</b>.', summary: 'Facade lighting, 20-floor tower, Jeddah',
     ask_next: ['Timeline?'], verdict: 'needs_review', human_verdict: null, criteria_version: 2, sender_type: 'contractor',
     source_check: 'verified', project_type: 'tender', request_type: 'requirement', philips: 'or_equivalent', email_kind: 'company',
-    approved_at: null, approved_by: null, crm_status: null, crm_id: '', crm_url: '', crm_error: '', updated_at: '2026-10-12T08:00:00Z',
+    approved_at: null, approved_by: null, assigned_to: OMAR.id, crm_status: null, crm_id: '', crm_url: '', crm_error: '', updated_at: '2026-10-12T08:00:00Z',
     ...over,
   }
 }
 
 function fakeDb(rows, crmRow = null) {
-  const state = { leads: rows.map((r) => ({ ...r })), crm: crmRow, writes: [] }
+  const state = { leads: rows.map((r) => ({ ...r })), crm: crmRow, writes: [], seats: { [OMAR.id]: { odoo_login: '', odoo_user_id: null } } }
   const byId = (path) => state.leads.find((l) => path.includes(`id=eq.${l.id}`))
   state.db = async (path, { method = 'GET', body } = {}) => {
     if (method !== 'GET') state.writes.push(`${method} ${path.split('?')[0]}`)
@@ -62,7 +73,14 @@ function fakeDb(rows, crmRow = null) {
       if (method === 'POST') { state.crm = { ...state.crm, ...body }; return [] }
       if (method === 'DELETE') { state.crm = null; return [] }
     }
-    if (path.startsWith('user_access')) return [{ email: LAYLA.email, full_name: 'Layla' }]
+    if (path.startsWith('user_access')) {
+      return path.includes(OMAR.id) ? [{ email: OMAR.email, full_name: 'Omar' }] : [{ email: LAYLA.email, full_name: 'Layla' }]
+    }
+    if (path.startsWith('sales_seats')) {
+      const id = Object.keys(state.seats).find((k) => path.includes(`user_id=eq.${k}`))
+      if (method === 'GET') return id ? [state.seats[id]] : []
+      if (method === 'PATCH') { Object.assign(state.seats[id], body); return [] }
+    }
     if (path.startsWith('leads?workspace_id') && path.includes('crm_status=in.(queued,failed)')) {
       return state.leads.filter((l) => ['queued', 'failed'].includes(l.crm_status))
     }
@@ -180,6 +198,44 @@ describe('approving', () => {
     const r = await approveLead(depsOf(state, odoo), { workspaceId: WS, leadId: L1, user: LAYLA })
     expect(r.lead).toMatchObject({ crm_status: 'sent', crm_id: '55' })
     expect(odoo.leads).toHaveLength(1)
+  })
+
+  it('goes into Odoo with its salesperson, found once by their email and kept on their seat', async () => {
+    state.crm = { ...connected }
+    const odoo = fakeOdoo()
+    await approveLead(depsOf(state, odoo), { workspaceId: WS, leadId: L1, user: LAYLA })
+    expect(odoo.leads[0].user_id).toBe(21)
+    expect(state.seats[OMAR.id].odoo_user_id).toBe(21)
+    await approveLead(depsOf(state, odoo), { workspaceId: WS, leadId: L2, user: LAYLA })
+    expect(odoo.leads[1].user_id).toBe(21)
+    expect(odoo.calls.filter((c) => c.includes('res.users.search'))).toHaveLength(1)
+  })
+
+  it('an Odoo login set on the seat wins over their email', async () => {
+    state.crm = { ...connected }
+    state.seats[OMAR.id].odoo_login = 'omar.k'
+    const odoo = fakeOdoo()
+    await approveLead(depsOf(state, odoo), { workspaceId: WS, leadId: L1, user: LAYLA })
+    expect(odoo.leads[0].user_id).toBe(22)
+  })
+
+  it('is not approved with no one assigned', async () => {
+    state.leads[0].assigned_to = null
+    const odoo = fakeOdoo()
+    const r = await approveLead(depsOf(state, odoo), { workspaceId: WS, leadId: L1, user: LAYLA })
+    expect(r).toMatchObject({ status: 400, error: expect.stringMatching(/Assign this lead/) })
+    expect(state.leads[0].approved_at).toBeNull()
+    expect(odoo.calls).toEqual([])
+  })
+
+  it('a salesperson Odoo does not know: refused on the lead, in words the admin can act on, and nothing created', async () => {
+    state.crm = { ...connected }
+    state.seats[OMAR.id].odoo_login = 'nobody@example.com'
+    const odoo = fakeOdoo()
+    const r = await approveLead(depsOf(state, odoo), { workspaceId: WS, leadId: L1, user: LAYLA })
+    expect(r.lead.crm_status).toBe('failed')
+    expect(r.lead.crm_error).toMatch(/Omar \(omar@example\.com\) has no user in Odoo with the login nobody@example\.com/)
+    expect(odoo.leads).toHaveLength(0)
   })
 
   it('refuses a lead of another company', async () => {

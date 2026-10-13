@@ -155,16 +155,21 @@ export const SHOW_OPTIONS = [
   { key: 'all', label: 'Everything' },
 ]
 
-export const EMPTY_FILTERS = { show: 'leads', channel: '', sender: '', project: '', request: '', folder: '', emailKind: '', search: '' }
+export const EMPTY_FILTERS = { show: 'leads', owner: '', channel: '', sender: '', project: '', request: '', folder: '', emailKind: '', search: '' }
 
 /**
  * The filters as PostgREST conditions: `or` groups (each its own `or=`
  * parameter, so they AND together) and plain `eq` pairs. Pure, so the list's
  * rules are tested without Supabase. A person's verdict wins over the agent's.
+ * `me` is the signed-in user's id, for the Owner filter's "Mine".
  */
-export function leadFilters(f = EMPTY_FILTERS) {
+export function leadFilters(f = EMPTY_FILTERS, { me = '' } = {}) {
   const ors = []
   const eqs = []
+  // Whose it is (2026-10-13): mine, no one's yet, or one person's.
+  if (f.owner === 'none') ors.push('assigned_to.is.null')
+  else if (f.owner === 'me' && me) eqs.push(['assigned_to', me])
+  else if (f.owner && f.owner !== 'me') eqs.push(['assigned_to', f.owner])
   if (f.show === 'leads') {
     ors.push('human_verdict.in.(qualified,needs_review),and(human_verdict.is.null,verdict.in.(qualified,needs_review))')
   } else if (f.show === 'corrected') {
@@ -196,7 +201,7 @@ export function leadFilters(f = EMPTY_FILTERS) {
 
 /** How many filters besides "Show" are set, for the "Clear filters" button. */
 export const activeFilterCount = (f = EMPTY_FILTERS) =>
-  ['channel', 'sender', 'project', 'request', 'folder', 'emailKind', 'search'].filter((k) => String(f[k] || '').trim()).length
+  ['owner', 'channel', 'sender', 'project', 'request', 'folder', 'emailKind', 'search'].filter((k) => String(f[k] || '').trim()).length
 
 /** "$0.0098" for small amounts, "$9.60" otherwise. */
 export const money = (n) => `$${(Number(n) || 0).toFixed(n && n < 0.1 ? 4 : 2)}`
@@ -254,3 +259,25 @@ export const CRM_LABEL = {
   sent: 'In Odoo',
   failed: 'Odoo refused it',
 }
+
+// ─── Who works a lead (2026-10-13) ─────────────────────────────────────────
+
+/** A team member's short name: their first name, or the part of the address before @. */
+export function shortName(member) {
+  if (!member) return ''
+  const full = String(member.full_name || '').trim()
+  return full ? full.split(/\s+/)[0] : String(member.email || '').split('@')[0]
+}
+
+/**
+ * The Owner column's words for a lead: "You", a first name, "Unassigned",
+ * or "Someone else" when the person has left the team.
+ */
+export function ownerLabel(lead, team = [], me = '') {
+  if (!lead?.assigned_to) return 'Unassigned'
+  if (me && lead.assigned_to === me) return 'You'
+  return shortName(team.find((m) => m.user_id === lead.assigned_to)) || 'Someone else'
+}
+
+/** Where the forward of the customer's email to the owner stands. */
+export const FORWARD_LABEL = { sending: 'Forwarding…', sent: 'Email forwarded', failed: 'Email not forwarded' }

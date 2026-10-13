@@ -8,18 +8,18 @@ import { PAGE_SIZE, pageRange, verdictFilter, leadFilters } from './view'
 // Every query carries its own workspace_id filter: RLS is membership, not
 // isolation.
 
-const LEAD_COLUMNS = 'id,source,received_at,name,company,email,phone,subject,message,language,verdict,category,confidence,reason,summary,details,ask_next,duplicate_of,model,cost_usd,error,human_verdict,reviewed_at,created_at,mailbox,link,sender_type,sender_evidence,source_check,source_evidence,project_type,project_evidence,request_type,philips,rule,website,folder,email_kind,criteria_version,phones,human_reason,approved_at,crm_status,crm_url,crm_error,human_project_type,project_final'
+const LEAD_COLUMNS = 'id,source,received_at,name,company,email,phone,subject,message,language,verdict,category,confidence,reason,summary,details,ask_next,duplicate_of,model,cost_usd,error,human_verdict,reviewed_at,created_at,mailbox,link,sender_type,sender_evidence,source_check,source_evidence,project_type,project_evidence,request_type,philips,rule,website,folder,email_kind,criteria_version,phones,human_reason,approved_at,crm_status,crm_url,crm_error,human_project_type,project_final,assigned_to,assigned_at,forward_status,forward_to,forward_error,forwarded_at'
 
 /**
  * One page of the list, filtered in the database (see leadFilters), with the
  * filtered total. `tab` is the older verdict-only filter. Ties on
  * received_at are broken by id so no lead appears on two pages or on none.
  */
-export async function fetchLeadsPage(ws, { tab = null, filters = null, page = 0, pageSize = PAGE_SIZE } = {}) {
+export async function fetchLeadsPage(ws, { tab = null, filters = null, page = 0, pageSize = PAGE_SIZE, me = '' } = {}) {
   const { from, to } = pageRange(page, pageSize)
   let q = supabase.from('leads').select(LEAD_COLUMNS, { count: 'exact' })
     .eq('workspace_id', ws)
-  const { ors, eqs } = filters ? leadFilters(filters) : { ors: [verdictFilter(tab || 'all')].filter(Boolean), eqs: [] }
+  const { ors, eqs } = filters ? leadFilters(filters, { me }) : { ors: [verdictFilter(tab || 'all')].filter(Boolean), eqs: [] }
   for (const o of ors) q = q.or(o)
   for (const [col, val] of eqs) q = q.eq(col, val)
   const { data, error, count } = await q
@@ -57,4 +57,14 @@ export async function leadsApi(action, workspaceId, payload = {}) {
   } catch (err) {
     return { error: `Could not reach the server: ${err.message}` }
   }
+}
+
+/**
+ * The company's sales team by name (sales_team, 20261018): for the Owner
+ * column and the Assign choice. Readable by the team and the admin.
+ */
+export async function fetchSalesTeam(ws) {
+  const { data, error } = await supabase.rpc('sales_team', { ws_id: ws })
+  if (error) throw new Error(error.message)
+  return data || []
 }

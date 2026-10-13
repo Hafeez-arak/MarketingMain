@@ -7,6 +7,7 @@ import { fetchMonthLeads, leadsApi } from '../../lib/leads/client'
 import { VerdictTag, CriteriaChips } from './parts'
 import LeadsBoard from './Board'
 import CrmCard from './CrmCard'
+import TeamCard from './TeamCard'
 import { RULE_LABELS } from '../../lib/leads/qualify'
 import {
   monthStats, sheetHealth, modelName, money,
@@ -45,10 +46,12 @@ const MS_ERRORS = {
 
 
 export default function LeadAgent() {
-  const { isAccessAdmin, activeWorkspaceId } = useAuth()
+  const { isAccessAdmin, activeWorkspaceId, user } = useAuth()
   // This month's leads, for the counts on Agent settings.
   const [monthLeads, setMonthLeads] = useState([])
   const [status, setStatus] = useState(null)
+  // The sales team: the Owner column, the Assign choice, and its own card.
+  const [team, setTeam] = useState([])
   const [loadedFor, setLoadedFor] = useState(null)
   const [error, setError] = useState('')
   const [refreshing, setRefreshing] = useState(false)
@@ -56,7 +59,7 @@ export default function LeadAgent() {
   const [refreshKey, setRefreshKey] = useState(0)
   // Back from Microsoft's sign-in (Connect a mailbox): ?ms=connected or ?ms_error=…
   const [params, setParams] = useSearchParams()
-  const msBack = params.get('ms') === 'connected' ? { ok: true, mailbox: params.get('mailbox') || 'The mailbox' }
+  const msBack = params.get('ms') === 'connected' ? { ok: true, mailbox: params.get('mailbox') || 'The mailbox', forwarding: params.get('forwarding') || '' }
     : params.get('ms') === 'approved' ? { ok: true, approved: true }
     : params.get('ms_error') ? { ok: false, code: params.get('ms_error') } : null
   // Leads is the page; the agent's own settings are one tab away (?view=settings).
@@ -71,8 +74,9 @@ export default function LeadAgent() {
     const ws = activeWorkspaceId
     setRefreshing(true)
     try {
-      const [rows, s] = await Promise.all([fetchMonthLeads(ws), leadsApi('status', ws)])
+      const [rows, s, t] = await Promise.all([fetchMonthLeads(ws), leadsApi('status', ws), leadsApi('team', ws)])
       setMonthLeads(rows)
+      if (!t.error) setTeam(t.team || [])
       setNow(new Date())
       setStatus(s.error ? { error: s.error } : s)
       setError('')
@@ -129,12 +133,14 @@ export default function LeadAgent() {
       <SubTabs items={VIEWS} value={view} onChange={chooseView} />
 
       {msBack?.ok && msBack.approved && <Notice tone="sage" title="The other organisation approved the app">Its mailboxes can now be connected with "Connect a mailbox from another Microsoft 365".</Notice>}
-      {msBack?.ok && !msBack.approved && <Notice tone="sage" title={`${msBack.mailbox} is connected`}>The agent reads its new mail every 5 minutes, read only, from 1 October, and imports July to September in the background.</Notice>}
+      {msBack?.ok && !msBack.approved && msBack.forwarding === 'on' && <Notice tone="sage" title={`${msBack.mailbox} may forward now`}>Assigning a lead that came to it forwards the customer's email to the salesperson.</Notice>}
+      {msBack?.ok && !msBack.approved && msBack.forwarding === 'refused' && <Notice tone="red" title={`${msBack.mailbox} is still read only`}>Microsoft did not grant sending. On another Microsoft 365, its admin approves the app again (the approval link below) before signing in with "Allow forwarding".</Notice>}
+      {msBack?.ok && !msBack.approved && !msBack.forwarding && <Notice tone="sage" title={`${msBack.mailbox} is connected`}>The agent reads its new mail every 5 minutes, read only, from 1 October, and imports July to September in the background.</Notice>}
       {msBack && !msBack.ok && <Notice tone="red" title="The mailbox was not connected">{MS_ERRORS[msBack.code] || 'Microsoft did not finish the sign-in. Try again.'}</Notice>}
       {error && <Notice tone="red" title="Something went wrong">{error}</Notice>}
 
       {view === 'leads' ? (
-        <LeadsBoard workspaceId={activeWorkspaceId} onReview={review} refreshKey={refreshKey} mailboxes={status?.mailboxes || []} canApprove />
+        <LeadsBoard workspaceId={activeWorkspaceId} onReview={review} refreshKey={refreshKey} mailboxes={status?.mailboxes || []} canApprove team={team} me={user?.id || ''} />
       ) : (
         <>
           {status?.error && <Notice tone="red" title="Could not load the agent's settings">{status.error}</Notice>}
@@ -182,6 +188,8 @@ export default function LeadAgent() {
               <TryIt workspaceId={activeWorkspaceId} />
               <CrmCard workspaceId={activeWorkspaceId} crm={status?.crm} loading={loading}
                 onChange={(crm) => setStatus((st) => ({ ...st, crm }))} onError={setError} />
+              <TeamCard workspaceId={activeWorkspaceId} team={team} loading={loading} odooConnected={Boolean(status?.crm?.connected)}
+                onChange={setTeam} onError={setError} />
             </div>
             <Connection workspaceId={activeWorkspaceId} status={status} loading={loading} onChange={setStatus} onError={setError} onReload={reload} now={now} />
           </div>
@@ -304,9 +312,10 @@ function Connection({ workspaceId, status, loading, onChange, onError, onReload,
     onReload()
   }
 
-  async function connectMailbox(otherOrg = false) {
-    setBusy(otherOrg ? 'connect-other' : 'connect')
-    const r = await leadsApi('mail_connect_start', workspaceId, { other_org: otherOrg })
+  // send: "Allow forwarding", the same sign-in asking to send too (Mail.Send).
+  async function connectMailbox(otherOrg = false, { send = false, mailbox = null } = {}) {
+    setBusy(send ? `send:${mailbox?.id}` : otherOrg ? 'connect-other' : 'connect')
+    const r = await leadsApi('mail_connect_start', workspaceId, { other_org: otherOrg, send, login_hint: mailbox?.email || '' })
     if (r.error) { setBusy(''); return onError(r.error) }
     window.location.assign(r.url)
   }
@@ -374,6 +383,17 @@ function Connection({ workspaceId, status, loading, onChange, onError, onReload,
                   <p className="text-[11px] text-text-tertiary">
                     Jul–Sep history: {mb.history_done ? 'imported' : mb.history_cursor ? `importing, up to ${String(mb.history_cursor).slice(0, 10)}` : 'starts with the next round'}
                   </p>
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-[11px] text-text-tertiary">
+                      {mb.can_send ? 'Forwards leads to the person they are assigned to.' : 'Read only: cannot forward leads to salespeople yet.'}
+                    </p>
+                    {!mb.can_send && (
+                      <Button size="xs" variant="secondary" onClick={() => connectMailbox(Boolean(mb.tenant), { send: true, mailbox: mb })} disabled={busy === `send:${mb.id}` || status?.microsoft === false}
+                        title={`Sign in as ${mb.email} again, allowing it to send`}>
+                        {busy === `send:${mb.id}` ? <Spinner size="sm" /> : null}Allow forwarding
+                      </Button>
+                    )}
+                  </div>
                   <WarmupTag workspaceId={workspaceId} mailbox={mb} onError={onError} onReload={onReload} />
                 </div>
               )
@@ -397,7 +417,7 @@ function Connection({ workspaceId, status, loading, onChange, onError, onReload,
                 <Button size="xs" variant="secondary" onClick={() => copy('consent', status.consentUrl)}>{copied === 'consent' ? 'Copied' : 'Copy'}</Button>
               </div>
             )}
-            <p className="text-[10px] text-text-tertiary">Approval link for another organisation's Microsoft 365 admin (once, before its mailboxes connect). Sign in as the mailbox. The agent can only read it: it cannot send, move or delete anything.</p>
+            <p className="text-[10px] text-text-tertiary">Approval link for another organisation's Microsoft 365 admin (once, before its mailboxes connect, and again for forwarding). Sign in as the mailbox. The agent reads it, and with forwarding allowed sends a lead's email to its salesperson; it never moves or deletes anything.</p>
           </>
         )}
       </div>

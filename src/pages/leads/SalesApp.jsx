@@ -3,7 +3,7 @@ import { useAuth } from '../../store/auth'
 import { supabase } from '../../lib/supabaseClient'
 import { Button, Spinner } from '../../components/ui/index'
 import { Notice, Stat } from '../email/parts'
-import { fetchMonthLeads, leadsApi } from '../../lib/leads/client'
+import { fetchMonthLeads, fetchSalesTeam, leadsApi } from '../../lib/leads/client'
 import { monthStats } from '../../lib/leads/view'
 import LeadsBoard from './Board'
 
@@ -36,6 +36,8 @@ export default function SalesApp() {
   const { user, workspaces, activeWorkspaceId, switchWorkspace, signOut, canApproveLeads } = useAuth()
   const [monthLeads, setMonthLeads] = useState([])
   const [mailboxes, setMailboxes] = useState([])
+  // The company's sales team by name: the Owner column and the Assign choice.
+  const [team, setTeam] = useState([])
   const [loadedFor, setLoadedFor] = useState(null)
   const [error, setError] = useState('')
   const [refreshing, setRefreshing] = useState(false)
@@ -50,13 +52,15 @@ export default function SalesApp() {
       // The mailboxes only name the "Came in" filter's choices; RLS lets a
       // sales seat read them, and nothing about them but these three columns
       // is asked for.
-      const [rows, mb] = await Promise.all([
+      const [rows, mb, people] = await Promise.all([
         fetchMonthLeads(ws),
         supabase.from('lead_mailboxes').select('id,email,label').eq('workspace_id', ws).order('created_at'),
+        fetchSalesTeam(ws),
       ])
       if (mb.error) throw new Error(mb.error.message)
       setMonthLeads(rows)
       setMailboxes(mb.data || [])
+      setTeam(people)
       setNow(new Date())
       setError('')
     } catch (err) {
@@ -113,7 +117,9 @@ export default function SalesApp() {
           <div className="min-w-0">
             <h1 className="text-lg font-semibold text-text tracking-tight">Leads</h1>
             <p className="text-xs text-text-secondary mt-0.5">
-              Every enquiry from the website and the info@ mailboxes, sorted by the agent. Open a row to read the email, call the number, or open it in Outlook.
+              {canApproveLeads
+                ? 'Every enquiry from the website and the info@ mailboxes, sorted by the agent. Assign each lead to the person who works it: they get the email at once.'
+                : 'The leads assigned to you. Open a row to read the email, call the number, or open it in Outlook; the email itself is in your inbox too.'}
             </p>
           </div>
           <Button variant="secondary" size="sm" onClick={refresh} disabled={refreshing || !activeWorkspaceId}>
@@ -131,7 +137,7 @@ export default function SalesApp() {
           <Stat label="Everything" value={stats.total} loading={loading} hint={`All enquiries in ${month}`} />
         </div>
 
-        <LeadsBoard workspaceId={activeWorkspaceId} onReview={review} refreshKey={refreshKey} mailboxes={mailboxes} canApprove={canApproveLeads} />
+        <LeadsBoard workspaceId={activeWorkspaceId} onReview={review} refreshKey={refreshKey} mailboxes={mailboxes} canApprove={canApproveLeads} team={team} me={user?.id || ''} />
       </main>
     </div>
   )
