@@ -15,7 +15,7 @@
 // Nothing here imports React, a store, or the network. brandContext.js
 // re-exports all of it, so no existing call site changes.
 
-import { buildInstructionsString, buildSectionBlocks } from './brandBrainCore.js'
+import { buildInstructionsString, buildSectionBlocks, DRAWING_TASKS, scopeProfileForDrawing } from './brandBrainCore.js'
 
 // The kinds of generation a field can be scoped to. A field or section with
 // an empty `tasks` array belongs to all of them, which is why adding this
@@ -266,15 +266,24 @@ export function buildContext(profile, schema, directory, memory, options = {}) {
   //    what keeps brand_name/brand_descriptor from being printed twice.
   const fieldTaskById = new Map((schema?.fields || []).map(f => [f.key, f.tasks]))
   const sectionTasksByKey = new Map((schema?.sections || []).map(s => [s.key, s.tasks]))
-  const scopedProfile = {
+  const fieldTags = f => f.tasks ?? fieldTaskById.get(f.key)
+  let scopedProfile = {
     ...profile,
     fieldDefs: (profile?.fieldDefs || []).filter(f => {
-      const fieldTags = f.tasks ?? fieldTaskById.get(f.key)
-      if (!matchesTask(fieldTags, task)) return false
+      if (!matchesTask(fieldTags(f), task)) return false
       // A field inherits its section's scope: tagging the section is the
       // cheap way to scope a whole group without touching every field.
       return matchesTask(sectionTasksByKey.get(f.section_key), task)
     }),
+  }
+  // A task that draws gets only what describes how the brand looks — see
+  // scopeProfileForDrawing. "Tagged on purpose" means the field or its
+  // section names a task; an empty tag list is the "every task" default,
+  // which is exactly how the guardrails and the client list got here.
+  const draws = DRAWING_TASKS.has(task)
+  if (draws) {
+    scopedProfile = scopeProfileForDrawing(scopedProfile,
+      f => !!(fieldTags(f)?.length || sectionTasksByKey.get(f.section_key)?.length))
   }
   // `task` is passed even though the filtering above already applied it: that
   // filter works on `fieldDefs`, and a workspace with none of them (Arak, on
@@ -287,9 +296,13 @@ export function buildContext(profile, schema, directory, memory, options = {}) {
   //    schema exactly as a directory does, and skipping that check here was
   //    the one way a section could still be sent to a task it was tagged out
   //    of.
+  //
+  //    Never for a task that draws: the summary names photo files ("exact
+  //    photo files are picked separately") that no image or video call ever
+  //    attaches, so the model was told about pictures it would never see.
   const legacyBlocks = buildSectionBlocks(profile, { schema, rowsBySection: directory?.rowsBySection, assets: directory?.assets })
   const assetSection = (schema?.sections || []).find(s => s.kind === 'assets')
-  if (legacyBlocks.assets && matchesTask(assetSection?.tasks, task)) {
+  if (!draws && legacyBlocks.assets && matchesTask(assetSection?.tasks, task)) {
     blocks.push({ key: 'assets', label: assetSection?.title || 'Asset Library', text: legacyBlocks.assets })
   }
 
@@ -306,7 +319,13 @@ export function buildContext(profile, schema, directory, memory, options = {}) {
     const text = indexed
       ? buildDirectoryIndex(section, columns, rows)
       : legacyBlocks[section.key]
-    if (text) blocks.push({ key: section.key, label: section.title, text })
+    // A drawing task reads a whole directory only when the section was tagged
+    // for it on purpose. Untagged, it gets at most the detail of the rows the
+    // brief names (below, for a directory large enough to be indexed) — the
+    // product actually in the picture — and not a catalogue of everything
+    // else the brand sells.
+    const wholeDirectory = !draws || !!section.tasks?.length
+    if (text && wholeDirectory) blocks.push({ key: section.key, label: section.title, text })
 
     // Only meaningful on top of an index. An un-indexed section already
     // carries every column of every row, so a "selected" block there would

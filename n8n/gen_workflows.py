@@ -144,6 +144,24 @@ NO_INVENTED_FACTS = (
 # One string, since almost every prompt wants both.
 PROMPT_RULES = PRECEDENCE_RULES + "\n\n" + NO_INVENTED_FACTS
 
+# The same rules for a prompt that DRAWS (Creative Enhance, image mode). Two
+# parts of PROMPT_RULES are caption mechanics that mean nothing to a picture:
+# the "say so in post_strategy" clause (Enhance has no such field; its
+# conflicts list is where an overridden default is reported) and the "end
+# with a soft call to action" fallback, which in an image prompt reads as an
+# instruction to letter a CTA into the scene. And the logo rule: a model told
+# about a wordmark paints its own version of it — gpt-image-2 invented an
+# "ARAK LIGHTING" wall sign on 2026-08-09 — while the real logo goes on
+# afterwards as a layer in the editor, exactly like text.
+DRAWING_PROMPT_RULES = (
+    PRECEDENCE_RULES.split("\nWhen you override")[0]
+    + "\n\n"
+    "NEVER put a phone number, booking link, website, address, account handle, price, "
+    "discount or promotional offer into the picture.\n\n"
+    "Do not put the brand name, wordmark or logo into the picture — logos are added "
+    "afterwards in the editor."
+)
+
 # Captions go out under the brand's name, and the thing that gives away a
 # machine wrote them is always the same short list of habits, the em dash
 # above all. This is deliberately a separate block from PROMPT_RULES: it
@@ -215,12 +233,15 @@ def _with_brand(js: str) -> str:
     the surrounding `${ }` is already there. Emitting it as a JSON literal
     rather than raw text means the rules cannot terminate the template or be
     re-parsed as JS, whatever punctuation they contain.
+    `${__DRAWING_RULES__}` is the image-prompt variant (Creative Enhance).
     `${__CAPTION_VOICE__}` works the same way, but only the two prompts that
     write published captions use it. `__DE_DASH_JS__` is the exception: it is
     a function definition, so it is spliced in as raw JS, not as a string.
     """
     return (
         BRAND_PERSONA_JS + "\n" + js
+    ).replace(
+        '__DRAWING_RULES__', js_str(DRAWING_PROMPT_RULES)
     ).replace(
         '__PROMPT_RULES__', js_str(PROMPT_RULES)
     ).replace(
@@ -5551,7 +5572,7 @@ Rules, in priority order:
 5. 60–120 words. Do not pad to reach a length; a brief that needed little may come back short.
 6. Write flowing descriptive prose, not a keyword list.
 
-${__PROMPT_RULES__}`;
+${__DRAWING_RULES__}`;
 
 const MOTION_RULES = `You rewrite rough animation notes into motion prompts for an AI image-to-video model (Seedance, 2–12 second clips), for ${brandOnly(body)}.
 

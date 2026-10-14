@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest'
-import { buildBranches } from './creativeStudio.js'
+import { describe, it, expect, vi, afterEach } from 'vitest'
+import { buildBranches, requestEnhance, defaultModelFor, IMAGE_MODEL_BY_PROVIDER } from './creativeStudio.js'
 
 // ─── buildBranches ─────────────────────────────────────────────────────────
 //
@@ -121,5 +121,42 @@ describe('buildBranches', () => {
     ])
     expect(branches).toHaveLength(1)
     expect(branches[0].versions.map(x => x.id)).toEqual(['orphan'])
+  })
+})
+
+// ─── requestEnhance ────────────────────────────────────────────────────────
+//
+// The enhancer reports brand-vs-brief conflicts alongside the rewritten
+// prompt, and the composer shows them before the paid round. requestEnhance
+// used to return only { ok, prompt }, so the warning could never appear.
+describe('requestEnhance', () => {
+  const answer = body => vi.fn(async () => ({ ok: true, json: async () => body }))
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('passes the conflicts through with the prompt', async () => {
+    const conflicts = [{ field: 'Brand colours', brandRule: 'warm bronze', promptAsks: 'cool blue' }]
+    vi.stubGlobal('fetch', answer([{ ok: true, prompt: 'A cool blue lobby', conflicts }]))
+    const res = await requestEnhance('https://hook', { prompt: 'blue lobby' })
+    expect(res).toEqual({ ok: true, prompt: 'A cool blue lobby', conflicts })
+  })
+
+  it('gives an empty list when the workflow sent none', async () => {
+    vi.stubGlobal('fetch', answer({ ok: true, prompt: 'A lobby' }))
+    const res = await requestEnhance('https://hook', { prompt: 'lobby' })
+    expect(res.conflicts).toEqual([])
+  })
+})
+
+// ─── The model recorded on a row ───────────────────────────────────────────
+describe('defaultModelFor', () => {
+  it('names the lane’s image model on a still, not Seedance', () => {
+    expect(defaultModelFor({ mediaType: 'image', provider: 'openai' })).toBe(IMAGE_MODEL_BY_PROVIDER.openai)
+    expect(defaultModelFor({ mediaType: 'image', provider: 'gemini' })).toBe(IMAGE_MODEL_BY_PROVIDER.gemini)
+    expect(defaultModelFor({ provider: 'gemini' })).toBe(IMAGE_MODEL_BY_PROVIDER.gemini)
+    expect(defaultModelFor({ mediaType: 'image', provider: 'manual' })).toBe('')
+  })
+
+  it('keeps the Seedance default for video', () => {
+    expect(defaultModelFor({ mediaType: 'video', provider: 'seedance' })).toBe('seedance-2')
   })
 })

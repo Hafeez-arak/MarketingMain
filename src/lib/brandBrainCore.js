@@ -11,7 +11,7 @@
 //
 // brandBrain.js re-exports all of this, so no existing call site changes.
 
-import { getFieldValue, buildDirectoryBlock } from './brandSchemaCore.js'
+import { getFieldValue, setFieldValue, buildDirectoryBlock } from './brandSchemaCore.js'
 
 export const DEFAULT_BRAND_PROFILE = {
   // Identity & voice
@@ -89,41 +89,113 @@ export function rowToProfile(row, fieldDefs) {
     updatedAt:        row.updated_at          || null,
   }
 }
+// ── What a drawing model is allowed to read ────────────────────────────────
+//
+// An image or video model reads the brand block as part of the picture's
+// description, so anything in it that is not about how the brand LOOKS is at
+// best noise and at worst a refusal. Measured: nano-banana-2 rejected a
+// request outright (fal 422, "the input cannot be processed as the requested
+// output type") on a brief gpt-image-2 rendered without complaint, because the
+// block it was handed read as a copywriting job — "Speak as 'we'", "Never do:
+// excessive exclamation marks", a list of landmark client names.
+//
+// PR #77 scoped only the legacy path below, on the grounds that Arak had zero
+// brand_fields and so never reached the schema path. By 2026-10-14 Arak had 24
+// of them, the schema path was the one running, and the untagged fields — the
+// guardrails, the key-projects list, compliance — went to every task again:
+// 2,548 characters into each picture prompt, about 15% of it visual.
+//
+// So the rule now lives in code, for both paths, rather than in how carefully
+// someone tagged the Brand Brain:
+//   · a field explicitly tagged for image/video is sent (someone decided);
+//   · an untagged field whose name says it is visual is sent;
+//   · an untagged guardrail is sent as ITS VISUAL LINES ONLY — "Generic
+//     stock-photo lighting clichés" is a rule about pictures, "Speak as 'we'"
+//     is not, and a never-do list is one rule per line;
+//   · every other untagged field is dropped.
+// Whatever is sent loses its staff-facing notes ("confirm with the client",
+// "flagging rather than guessing") and any sentence about the logo — logos
+// are placed afterwards as a real layer in the editor, exactly like text, and
+// a described logo is an invitation to paint a wrong one.
+//
+// Every task that writes is untouched and still receives the whole blob.
+export const DRAWING_TASKS = new Set(['image', 'video'])
+
+const VISUAL_NAME = /visual|colou?r|palette|imagery|photograph|typograph|\bimage|\blook\b/i
+const GUARDRAIL_COLUMNS = new Set(['tone_dos', 'tone_donts'])
+const GUARDRAIL_NAME = /^(always|never)\b|\bdon'?ts?\b|\bavoid\b|guardrail/i
+// A line of a free-text rule list that talks about what a picture shows.
+const VISUAL_LINE = /photo|image|imagery|picture|visual|colou?r|palette|\bshots?\b|camera|\blens|render|stock|illustrat|graphic|cartoon|clip ?art|filter|saturat|contrast|composition|aesthetic|\blook/i
+// Notes written for the people maintaining the Brand Brain, not for a model.
+const STAFF_NOTE = /\bconfirm|\bflag(ging|ged)?\b|not found|\bTBC\b|to be confirmed|check with|ask the client|on the (live|current) site|\bplaceholder|\bTODO\b/i
+const LOGO_TALK = /\blogo|\bwordmark|\blockup/i
+
+// Only the lines of a rule list that are about the picture.
+export function visualLines(text) {
+  return String(text || '').split('\n')
+    .map(l => l.trim())
+    .filter(l => l && VISUAL_LINE.test(l))
+    .join('\n')
+}
+
+// A visual field with the staff notes and the logo talk taken out. Notes
+// trail the fact they qualify ("…dark backgrounds — a variant was not found;
+// confirm with the client"), so a sentence keeps the clauses BEFORE its first
+// note, and a sentence that opens with one is dropped whole.
+export function cleanVisualText(text) {
+  return String(text || '').split('\n').map(line => line
+    .split(/(?<=[.!?])\s+/)
+    .map(sentence => {
+      if (LOGO_TALK.test(sentence)) return ''
+      const clauses = sentence.split(/\s+[—–]\s+|;\s+/)
+      const firstNote = clauses.findIndex(c => STAFF_NOTE.test(c))
+      if (firstNote === -1) return sentence.trim()
+      const kept = clauses.slice(0, firstNote).join(' — ').trim().replace(/[,;:—–\s]+$/, '')
+      return kept ? (/[.!?]$/.test(kept) ? kept : `${kept}.`) : ''
+    })
+    .filter(Boolean)
+    .join(' '))
+    .filter(l => l.trim())
+    .join('\n')
+}
+
+function isGuardrailField(f) {
+  return f.section_key === 'guardrails' || GUARDRAIL_COLUMNS.has(f.storage_column) ||
+    GUARDRAIL_NAME.test(f.label || '') || GUARDRAIL_NAME.test(f.prompt_label || '')
+}
+function isVisualField(f) {
+  return /visual/i.test(f.section_key || '') ||
+    [f.key, f.label, f.prompt_label].some(n => VISUAL_NAME.test(n || ''))
+}
+
+// The schema path's half. `explicit(f)` says whether this field (or its
+// section) was tagged for the task on purpose — buildContext knows the
+// section tags, this module does not. Values are rewritten in place through
+// setFieldValue so the one flattener below still does all the formatting.
+export function scopeProfileForDrawing(profile, explicit = () => false) {
+  if (!profile?.fieldDefs?.length) return profile
+  let out = profile
+  const kept = []
+  for (const f of profile.fieldDefs) {
+    const value = getFieldValue(profile, f)
+    let next
+    if (explicit(f) || isVisualField(f)) next = cleanVisualText(value)
+    else if (isGuardrailField(f)) next = visualLines(value)
+    else continue
+    if (!String(next).trim()) continue
+    out = setFieldValue(out, f, next)
+    kept.push(f)
+  }
+  return { ...out, fieldDefs: kept }
+}
+
+// The fixed columns a drawing task may read on the legacy path.
+const LEGACY_VISUAL_KEYS = ['toneDos', 'toneDonts', 'visualIdentity', 'brandColors', 'visualStyleNotes']
+
 // Flatten the structured profile + optional platform-specific notes into the
 // single "instructions" string the existing n8n webhooks already expect.
 // Keeps the webhook contract unchanged — workflows don't need to be rebuilt,
 // they just receive a richer instructions block.
-// ── The legacy blob's task scoping ─────────────────────────────────────────
-//
-// A workspace with structured Brand Brain fields gets its scoping from
-// SCOPE_TASKS and each field's own `tasks` tag. A workspace that never defined
-// any — which on 2026-09-19 is Arak, with zero brand_fields and zero
-// brand_sections — falls down the legacy path below, where there is nothing to
-// hang a tag on, so EVERY column went to every task.
-//
-// What that looked like in practice: the picture models were handed "Speak as
-// 'we' — ARAK is an established institution", "Never do: excessive exclamation
-// marks" and a list of landmark client names, none of which describe an image.
-// nano-banana-2 rejected the request outright (fal 422, "the input cannot be
-// processed as the requested output type") while gpt-image-2 rendered it, which
-// is how a Gemini lane came to fail four times on a brief ChatGPT completed.
-//
-// So the legacy path gets the scoping too: for a task that DRAWS, only the
-// columns that describe how the brand looks. Every other task is untouched and
-// still receives the whole blob — this list is an exclusion for image/video,
-// not a new contract for captions and plans.
-//
-// toneDos/toneDonts stay in deliberately. They are the brand's guardrails, the
-// one part the prompt builders mark absolute, and Arak's own never-do list is
-// half visual ("Generic stock-photo lighting clichés"). A free-text column
-// written by a person cannot be split by key, so the choice is to send it or
-// drop a real visual rule; sending it is the smaller error.
-const DRAWING_TASKS = new Set(['image', 'video'])
-const VISUAL_KEYS = [
-  'voiceDescriptors', 'toneDos', 'toneDonts',
-  'visualIdentity', 'brandColors', 'visualStyleNotes', 'languages',
-]
-
 export function buildInstructionsString(profile, platformNotes, task = null) {
   if (!profile) profile = DEFAULT_BRAND_PROFILE
 
@@ -149,8 +221,19 @@ export function buildInstructionsString(profile, platformNotes, task = null) {
   // Legacy path — used only when a workspace has no field definitions yet
   // (a brand new workspace, or a failed schema fetch). Keeps generation
   // working rather than sending an empty instructions block.
+  // Same rule as scopeProfileForDrawing, applied to the fixed columns.
   const draws = DRAWING_TASKS.has(task)
-  const only = key => (draws && !VISUAL_KEYS.includes(key) ? '' : profile[key])
+  if (draws) {
+    profile = {
+      ...profile,
+      toneDos:          visualLines(profile.toneDos),
+      toneDonts:        visualLines(profile.toneDonts),
+      visualIdentity:   cleanVisualText(profile.visualIdentity),
+      brandColors:      cleanVisualText(profile.brandColors),
+      visualStyleNotes: cleanVisualText(profile.visualStyleNotes),
+    }
+  }
+  const only = key => (draws && !LEGACY_VISUAL_KEYS.includes(key) ? '' : profile[key])
   const sections = [
     // Identity first — this is the company persona the AI writes *as*.
     only('mission')          && `Mission: ${profile.mission}`,
