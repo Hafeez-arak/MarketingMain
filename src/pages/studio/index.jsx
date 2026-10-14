@@ -21,6 +21,8 @@ import {
 } from '../../lib/creativeStoryboard'
 import {
   canEditVideoDuration, estimateVideoCost, estimateVideoEditCost, getVideoModel, modelImageMax,
+  VIDEO_EDIT_DURATION_RANGE, VIDEO_EDIT_MODEL_ID, isVideoEditModel, resolveVideoModelId,
+  UPSCALE_MODEL_ID, canUpscale, estimateUpscaleCost, isUpscaleModel, upscaleSourceTier,
   modelImageRole, VIDEO_EDIT_MAX_REFERENCES,
 } from '../../components/studio/videoModels'
 import { aspectLabel } from '../../lib/postFormats'
@@ -34,7 +36,7 @@ import { captureFirstFrame, parentStillOf } from '../../components/studio/videoF
 import {
   buildBranches, createSession, deleteSession, deleteVersion, downloadVersion, fetchFalBalance, fetchSessions,
   fetchVersions, finalizeVersion, insertPendingVersions, renameSession, requestCompose, requestEdit,
-  requestEnhance, requestGenerate, requestVideo, requestStitch, requestVideoEdit, selectVersion,
+  requestEnhance, requestGenerate, requestLayerize, requestUpscale, requestVideo, requestStitch, requestVideoEdit, selectVersion,
   touchSession, updateVersion, uploadToStudio,
 } from '../../lib/creativeStudio'
 import { fetchIdeaForStudio, fetchPlanForIdea } from '../../lib/studioBridge'
@@ -1038,6 +1040,7 @@ export function CreativeStudio() {
   const startRun = useCallback(() => { markRun('running'); sequencer.start() }, [markRun, sequencer])
   const stopRun = useCallback(() => { markRun('paused'); sequencer.stop('paused') }, [markRun, sequencer])
   const renderClip = useCallback(index => { markRun(''); sequencer.renderOne(index) }, [markRun, sequencer])
+  const upscaleClip = useCallback(index => { markRun(''); sequencer.upscaleOne(index) }, [markRun, sequencer])
   const cancelClip = useCallback(index => { markRun('paused'); sequencer.cancelClip(index) }, [markRun, sequencer])
 
   function addStoryboardRef() { setPickerSlot({ id: 'storyboardRef', label: 'Image for every new shot', kind: 'all' }) }
@@ -1093,13 +1096,13 @@ export function CreativeStudio() {
   // Send under a finished VIDEO edits the footage itself — a genuinely
   // different action from Send under a still, which is why this is its own
   // function rather than a branch bolted onto handleSend's image logic below.
-  // No model touches a photo the way Kling O1 Edit touches a clip: the source
+  // No model touches a photo the way Kling O3 Edit touches a clip: the source
   // video goes back in whole, so there's no "editing dropped image instead"
   // concept here — there is nothing else in the request to edit.
   async function handleVideoEdit(branch, instruction, base, refs) {
     if (!canEditVideoDuration(base.duration)) {
       setError(
-        `Kling O1 Edit only accepts 3–10s clips — this one is ${base.duration || '?'}s. `
+        `Kling O3 Edit only accepts ${VIDEO_EDIT_DURATION_RANGE[0]}–${VIDEO_EDIT_DURATION_RANGE[1]}s clips — this one is ${base.duration || '?'}s. `
         + 'Use Re-render for a fresh take instead.',
       )
       return
@@ -1110,7 +1113,7 @@ export function CreativeStudio() {
       row: {
         round: nextRound, kind: 'video', provider: 'seedance', mediaType: 'video',
         parentVersionId: base.id, userPrompt: instruction, aspectRatio: session.aspect_ratio,
-        model: 'kling-o1-edit', duration: base.duration || '', resolution: base.resolution || '',
+        model: VIDEO_EDIT_MODEL_ID, duration: base.duration || '', resolution: base.resolution || '',
         generateAudio: !!base.generate_audio,
       },
       payload: {
@@ -1218,6 +1221,27 @@ export function CreativeStudio() {
     })
   }
 
+  // "Make 1080p": Topaz enlarges THIS clip — same take, same movement — for
+  // cents, where Re-render buys new footage. The result is a child of the
+  // clip in the same lane, marked by its model so Retry upscales again and
+  // Re-render reaches back to the clip it came from.
+  async function handleUpscale(branch, video) {
+    const tier = upscaleSourceTier(video)
+    if (!tier) return
+    setFocusedBranch(branch.rootId)
+    await runStep(branch, {
+      label: 'video',
+      row: {
+        round: nextRound, kind: 'video', provider: 'seedance', mediaType: 'video',
+        parentVersionId: video.id, userPrompt: video.user_prompt || '', aspectRatio: session.aspect_ratio,
+        model: UPSCALE_MODEL_ID, duration: video.duration || '', resolution: '1080p',
+        generateAudio: !!video.generate_audio,
+      },
+      payload: { video_url: video.video_url, resolution: tier },
+      send: p => requestUpscale(webhooks.creativeUpscale, p),
+    })
+  }
+
   // The 🔄 action on a past render: same words and settings, but against the
   // lane's CURRENT still — the whole point of never baking text into video
   // (CREATIVE-STUDIO.md) is that "fix the image, re-animate" stays a loop
@@ -1227,10 +1251,16 @@ export function CreativeStudio() {
   function handleReRender(branch, video) {
     const still = branch.latest
     if (!still || still.media_type === 'video') return
+    // An upscaled clip carries the upscaler as its model and 1080p as its
+    // tier; a re-render means another take like the clip it was made from.
+    if (isUpscaleModel(video.model)) video = versions.find(v => v.id === video.parent_version_id) || video
     setVideoTarget(still)
     setVideoPrefill({
       prompt: video.user_prompt || '',
-      model: video.model || 'seedance-2',
+      // Resolved, because the id saved on an old row may be one that has since
+      // been replaced (Kling 2.5 Turbo, Veo 3.1 Fast) and the picker has no
+      // option by that name to show as selected.
+      model: resolveVideoModelId(video.model || 'seedance-2'),
       duration: video.duration || '5',
       resolution: video.resolution || '720p',
       generateAudio: !!video.generate_audio,
@@ -1527,8 +1557,8 @@ export function CreativeStudio() {
     const fresh = ins.rows[0]
 
     let fired
-    if (version.kind === 'video' && version.model === 'kling-o1-edit') {
-      // Editing a video (Kling O1 Edit, see handleVideoEdit above) sends the
+    if (version.kind === 'video' && isVideoEditModel(version.model)) {
+      // Editing a video (Kling O3 Edit, see handleVideoEdit above) sends the
       // clip itself back in — its parent row IS a video, not a still to
       // animate. The generic 'video' branch below reads `image_url` off that
       // parent, which a video row doesn't have, and fires it at the ANIMATE
@@ -1542,6 +1572,15 @@ export function CreativeStudio() {
         video_url: parent?.video_url || '',
         prompt: version.user_prompt,
         reference_image_urls: version.reference_url ? [version.reference_url] : [],
+      })
+    } else if (version.kind === 'video' && isUpscaleModel(version.model)) {
+      // A failed Make 1080p. Before the generic branch below, which would read
+      // image_url off the parent — a VIDEO row with none — and fire a fresh
+      // text-to-video render at the upscaler's model id.
+      const parent = versions.find(v => v.id === version.parent_version_id)
+      fired = await requestUpscale(webhooks.creativeUpscale, {
+        session_id: session.id, version_id: fresh.id,
+        video_url: parent?.video_url || '', resolution: upscaleSourceTier(parent),
       })
     } else if (version.kind === 'video') {
       fired = await requestVideo(webhooks.creativeVideo, {
@@ -1693,14 +1732,21 @@ export function CreativeStudio() {
     onEditClip: openClipEditor,
     // What a re-render would cost, shown before the click. The free actions
     // carry no badge at all, which is the whole distinction.
-    reRenderCost: v => estimateVideoCost(v.model || 'seedance-2', {
-      resolution: v.resolution || '720p', duration: v.duration || '5', audio: !!v.generate_audio,
-    }),
-    // What asking for a change in the chat box would cost — Kling O1 Edit
+    reRenderCost: v => {
+      const src = isUpscaleModel(v.model) ? (versions.find(x => x.id === v.parent_version_id) || v) : v
+      return estimateVideoCost(src.model || 'seedance-2', {
+        resolution: src.resolution || '720p', duration: src.duration || '5', audio: !!src.generate_audio,
+      })
+    },
+    // What asking for a change in the chat box would cost — Kling O3 Edit
     // bills by the SOURCE clip's own duration, not a model/resolution pair,
     // so this is a plain per-second rate rather than reRenderCost's lookup.
     editVideoCost: v => estimateVideoEditCost(v.duration || '5'),
-    // Whether that action is even offered — fal's own 3–10s limit on the
+    // Offered only on a ready clip below 1080p — upscaleSourceTier() is the
+    // one place that decides, so the button and the handler can't disagree.
+    onUpscale: v => handleUpscale(branch, v),
+    upscaleCost: v => (canUpscale(v) ? estimateUpscaleCost(v.duration || '5') : null),
+    // Whether that action is even offered — fal's own 3–15s limit on the
     // source clip, checked here so the button can explain itself instead of
     // firing and failing.
     editVideoAllowed: v => canEditVideoDuration(v.duration),
@@ -2077,6 +2123,7 @@ export function CreativeStudio() {
               onStart={startRun}
               onStop={stopRun}
               onRenderClip={renderClip}
+              onUpscaleClip={upscaleClip}
               onCancelClip={cancelClip}
               onStitch={handleStitch}
               onAddRef={addStoryboardRef}
@@ -2282,6 +2329,10 @@ export function CreativeStudio() {
               saving={savingOverlay}
               onSave={handleOverlaySave}
               onCancel={() => setEditingOverlay(null)}
+              // "Split into layers" in the Add panel. Photo editor only: the
+              // clip editor below is a frame standing in for footage, and a
+              // split of it could never reach the video.
+              onLayerize={url => requestLayerize(webhooks.creativeLayerize, activeWorkspaceId, accessToken, url)}
               // Image layers need somewhere permanent to live: an object URL
               // would die with the tab and a data URL would bloat the JSONB
               // overlay_state row, so an added image is uploaded to the

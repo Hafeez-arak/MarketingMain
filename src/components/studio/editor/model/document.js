@@ -177,6 +177,60 @@ export function newImageLayer(url, { naturalRatio = 1, canvasRatio = 1, ...overr
   }
 }
 
+// ── Split into layers ──────────────────────────────────────────────────────
+// Turns a Layerize result into image layers. The split was made from the WHOLE
+// base photo, so its boxes are fractions of that photo, while every layer here
+// is a fraction of the document — the photo seen through its crop. Converting
+// is the one step that matters: skip it and every element lands offset by the
+// crop, by exactly the amount nobody would think to check.
+//
+// The clean background becomes a full-photo layer at the bottom, LOCKED, so a
+// click on the canvas lands on the elements above it rather than dragging the
+// whole picture. It covers the original photo, which stays underneath as it
+// always was — hide or delete the split layers and the original is back.
+// Everything returned goes BELOW the document's existing layers: text and
+// logos the marketer already placed must stay on top of the photo they were
+// placed on.
+export function layersFromSplit({ base, layers = [] }, crop) {
+  return placeInCrop(splitLayersOnPhoto({ base, layers }), crop)
+}
+
+// The same layers in WHOLE-PHOTO fractions, ids already assigned. Split out so
+// the editor can build them once, outside its history reducer — React may run
+// a reducer twice, and two runs of newImageLayer would mint two sets of ids.
+export function splitLayersOnPhoto({ base, layers = [] }) {
+  const toDoc = ([l, t, r, b]) => ({
+    x: l, y: t, w: Math.max(0.001, r - l), h: Math.max(0.001, b - t),
+  })
+  const ratioOf = (layer, box) => (layer.width && layer.height
+    ? layer.width / layer.height
+    : ((box[2] - box[0]) || 1) / ((box[3] - box[1]) || 1))
+  const out = []
+  if (base?.url) {
+    out.push(newImageLayer(base.url, {
+      ...toDoc([0, 0, 1, 1]), naturalRatio: ratioOf(base, [0, 0, 1, 1]),
+      locked: true, name: 'Background (split)',
+    }))
+  }
+  for (const layer of layers) {
+    if (!layer?.url || !Array.isArray(layer.box) || layer.box.length !== 4) continue
+    out.push(newImageLayer(layer.url, {
+      ...toDoc(layer.box), naturalRatio: ratioOf(layer, layer.box),
+      name: layer.name || 'Element',
+    }))
+  }
+  return out
+}
+
+// Whole-photo fractions → document fractions, for the document's crop. Pure,
+// so it is safe inside a reducer.
+export function placeInCrop(layers, crop) {
+  const c = normalizeCrop(crop)
+  return layers.map(l => ({
+    ...l, x: (l.x - c.x) / c.w, y: (l.y - c.y) / c.h, w: l.w / c.w, h: l.h / c.h,
+  }))
+}
+
 export const CORNERS = ['top-left', 'top-right', 'bottom-left', 'bottom-right']
 
 // Where a logo goes when dropped into a corner: the box {x, y, w, h} in the
@@ -227,7 +281,7 @@ export function isBoxed(layer) {
 
 export function layerLabel(l) {
   if (l.type === 'text') return l.text?.trim().slice(0, 28) || 'Text'
-  if (l.type === 'image') return 'Image'
+  if (l.type === 'image') return l.name || 'Image'
   if (l.type === 'polygon') return l.sides === 3 ? 'Triangle' : `${l.sides}-sided shape`
   return l.type.charAt(0).toUpperCase() + l.type.slice(1)
 }

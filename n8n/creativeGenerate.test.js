@@ -52,9 +52,12 @@ const db = () => new StubPostgrest({
 const okImage = url => async () => ({ statusCode: 200, body: { images: [{ url }] } })
 const download = async () => ({ statusCode: 200, body: PNG })
 
+// Matched on the full endpoint path, not the family name: 'nano-banana-2'
+// is also a substring of 'nano-banana-2.1', so a looser key would keep
+// passing against the retired model these replaced (2026-10-13).
 const routes = () => [
-  ['nano-banana-2', okImage('https://cdn.fal.test/gemini.png')],
-  ['gpt-image-2', okImage('https://cdn.fal.test/openai.png')],
+  ['fal.run/google/nano-banana-2.1', okImage('https://cdn.fal.test/gemini.png')],
+  ['fal.run/openai/gpt-image-2.5/flare/text-to-image', okImage('https://cdn.fal.test/openai.png')],
   ['cdn.fal.test', download],
 ]
 
@@ -107,7 +110,7 @@ describe('Creative Generate', () => {
       env: ENV,
       postgrest: db(),
       routes: [
-        ['nano-banana-2', async () => ({ statusCode: 403, body: { detail: 'User is locked. Reason: Exhausted balance.' } })],
+        ['fal.run/google/nano-banana-2.1', async () => ({ statusCode: 403, body: { detail: 'User is locked. Reason: Exhausted balance.' } })],
         ['cdn.fal.test', download],
       ],
       input: { body: { session_id: SESSION, prompt: 'x', targets: [{ version_id: GEM, provider: 'gemini' }] } },

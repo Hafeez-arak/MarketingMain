@@ -130,7 +130,7 @@ const WORKFLOW_CONFIGS = [
     platform: 'creativeGenerate',
     label: 'Creative Studio — Generate',
     placeholder: 'https://your-instance.app.n8n.cloud/webhook/arak-creative-generate',
-    description: 'The Creative Studio\'s two-option generator: one candidate from ChatGPT (gpt-image-2) and one from Gemini (nano-banana-2) for every prompt, so you compare and pick. Real spend (fal.ai) — fires when you hit Generate.',
+    description: 'The Creative Studio\'s two-option generator: one candidate from ChatGPT (GPT Image 2.5) and one from Gemini (Nano Banana 2.1) for every prompt, so you compare and pick. Real spend (fal.ai) — fires when you hit Generate.',
     icon: (
       <div className="w-8 h-8 flex items-center justify-center flex-shrink-0" style={{ background: '#8b5cf6' }}>
         <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24">
@@ -169,7 +169,7 @@ const WORKFLOW_CONFIGS = [
     platform: 'creativeVideoEdit',
     label: 'Creative Studio — Video Edit',
     placeholder: 'https://your-instance.app.n8n.cloud/webhook/arak-creative-video-edit',
-    description: 'What the chat box\'s Send does under a finished clip — edits the FOOTAGE itself ("change the background to marble") via Kling O1 Edit, keeping the source\'s own camera movement. Real spend (fal.ai), ~$0.17/second of the clip. Only works on clips 3–10s long; longer ones only offer Re-render.',
+    description: 'What the chat box\'s Send does under a finished clip — edits the FOOTAGE itself ("change the background to marble") via Kling O3 Edit, keeping the source\'s own camera movement. Real spend (fal.ai), ~$0.17/second of the clip. Only works on clips 3–15s long; longer ones only offer Re-render.',
     icon: (
       <div className="w-8 h-8 flex items-center justify-center flex-shrink-0" style={{ background: '#8b5cf6' }}>
         <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24">
@@ -242,6 +242,32 @@ const WORKFLOW_CONFIGS = [
         <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24">
           <path d="M12 3v3M12 18v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M3 12h3M18 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1" strokeLinecap="round"/>
           <circle cx="12" cy="12" r="2.5"/>
+        </svg>
+      </div>
+    ),
+  },
+  {
+    platform: 'creativeUpscale',
+    label: 'Creative Studio — Make 1080p',
+    placeholder: 'https://your-instance.app.n8n.cloud/webhook/arak-creative-upscale',
+    description: 'The "Make 1080p" button under a finished clip — enlarges that exact clip to 1080p (same take, same movement) with the Topaz upscaler. Real spend (fal.ai), about $0.20 per 10 seconds of video.',
+    icon: (
+      <div className="w-8 h-8 flex items-center justify-center flex-shrink-0" style={{ background: '#8b5cf6' }}>
+        <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24">
+          <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" strokeLinecap="round" strokeLinejoin="round"/>
+        </svg>
+      </div>
+    ),
+  },
+  {
+    platform: 'creativeLayerize',
+    label: 'Creative Studio — Split Into Layers',
+    placeholder: 'https://your-instance.app.n8n.cloud/webhook/arak-creative-layerize',
+    description: 'The photo editor\'s "Split into layers" — separates a flat picture into a clean background plus each object or block of text as its own movable layer. Real spend (fal.ai), about $0.03 an image. Answers straight back into the open editor.',
+    icon: (
+      <div className="w-8 h-8 flex items-center justify-center flex-shrink-0" style={{ background: '#8b5cf6' }}>
+        <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24">
+          <path d="M12 3l9 5-9 5-9-5 9-5z" strokeLinejoin="round"/><path d="M3 13l9 5 9-5" strokeLinecap="round" strokeLinejoin="round"/>
         </svg>
       </div>
     ),

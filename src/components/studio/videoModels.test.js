@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import {
   VIDEO_MODELS, getVideoModel, estimateVideoCost, modelImageRole, modelImageMax,
+  MODEL_ALIASES, resolveVideoModelId, isVideoEditModel, VIDEO_EDIT_MODEL_ID,
+  canEditVideoDuration, canUpscale, upscaleSourceTier, estimateUpscaleCost, UPSCALE_MODEL_ID,
 } from './videoModels'
 
 // ─── The picker's catalog ──────────────────────────────────────────────────
@@ -83,6 +85,28 @@ describe('video model catalog', () => {
     expect(getVideoModel(undefined).id).toBe(VIDEO_MODELS[0].id)
   })
 
+  it('opens a retired model id on the model that replaced it', () => {
+    // Saved rows and storyboards keep the id they were made with. Without the
+    // alias, getVideoModel fell back to VIDEO_MODELS[0] — a re-render that
+    // silently changed model and price.
+    expect(getVideoModel('kling-2.5-turbo-pro').id).toBe('kling-3-pro')
+    expect(getVideoModel('veo-3.1-fast').id).toBe('veo-3.1-lite')
+    expect(resolveVideoModelId('seedance-2.5')).toBe('seedance-2.5')
+    for (const [from, to] of Object.entries(MODEL_ALIASES)) {
+      expect(VIDEO_MODELS.some(m => m.id === from), `${from} is retired`).toBe(false)
+      expect(VIDEO_MODELS.some(m => m.id === to), `${to} is offered`).toBe(true)
+    }
+  })
+
+  it('reads edit rows made before and after the move to O3 as edits', () => {
+    expect(isVideoEditModel(VIDEO_EDIT_MODEL_ID)).toBe(true)
+    expect(isVideoEditModel('kling-o1-edit')).toBe(true)
+    expect(isVideoEditModel('seedance-2.5')).toBe(false)
+    // O3 takes 3–15s sources, where O1 stopped at 10.
+    expect(canEditVideoDuration('15')).toBe(true)
+    expect(canEditVideoDuration('20')).toBe(false)
+  })
+
   it('caps references at a count every reference endpoint accepts', () => {
     for (const m of VIDEO_MODELS) {
       const max = modelImageMax(m.id)
@@ -94,5 +118,38 @@ describe('video model catalog', () => {
         expect(max, m.id).toBe(1)
       }
     }
+  })
+})
+
+// ─── When "Make 1080p" is offered ──────────────────────────────────────────
+// upscaleSourceTier is the one gate for the button, the handler and Retry.
+// Offering it on a clip that is already 1080p is paying to get the same
+// clip back; offering it on a composite enlarges the text as pixels.
+describe('Make 1080p', () => {
+  const clip = (over = {}) => ({
+    status: 'ready', kind: 'video', model: 'seedance-2.5', resolution: '480p',
+    video_url: 'https://cdn.test/clip.mp4', duration: '20', ...over,
+  })
+
+  it('offers a ready clip below 1080p, and says which tier it is', () => {
+    expect(upscaleSourceTier(clip())).toBe('480p')
+    expect(upscaleSourceTier(clip({ resolution: '720p' }))).toBe('720p')
+    // Hailuo stores no resolution but is 768p by definition.
+    expect(upscaleSourceTier(clip({ model: 'hailuo-2.3', resolution: '' }))).toBe('768p')
+  })
+
+  it('refuses 1080p and up, unknown sizes, composites, pending rows and its own output', () => {
+    expect(canUpscale(clip({ resolution: '1080p' }))).toBe(false)
+    expect(canUpscale(clip({ resolution: '4k' }))).toBe(false)
+    expect(canUpscale(clip({ model: 'kling-3-pro', resolution: '' }))).toBe(false)
+    expect(canUpscale(clip({ kind: 'overlay' }))).toBe(false)
+    expect(canUpscale(clip({ status: 'pending' }))).toBe(false)
+    expect(canUpscale(clip({ model: UPSCALE_MODEL_ID, resolution: '480p' }))).toBe(false)
+  })
+
+  it('prices per started 10 seconds, as fal bills it', () => {
+    expect(estimateUpscaleCost('20')).toBeCloseTo(0.40, 2)
+    expect(estimateUpscaleCost('5')).toBeCloseTo(0.20, 2)
+    expect(estimateUpscaleCost('12')).toBeCloseTo(0.40, 2)
   })
 })

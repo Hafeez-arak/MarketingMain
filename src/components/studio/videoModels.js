@@ -31,8 +31,10 @@
 // Cost verified against fal.ai's published rates, 2026-09-15:
 //  · Seedance 2.0: $0.3034/s @720p, $0.682/s @1080p
 //  · Seedance 2.5: $0.2205/s @480p, $0.4730/s @720p, $1.164/s @1080p
-//  · Kling 2.5 Turbo Pro: $0.35 flat for 5s, +$0.07/s beyond (linear, $0.07/s)
-//  · Veo 3.1 Fast: $0.10/s without audio, $0.15/s with — same rate @720p/1080p
+//  · Kling 3 Pro: $0.112/s without audio, $0.168/s with (replaced Kling 2.5
+//    Turbo Pro, $0.35 flat for 5s + $0.07/s, on 2026-10-13)
+//  · Veo 3.1 Lite: $0.03/s @720p / $0.05/s @1080p without audio, $0.05/s /
+//    $0.08/s with (replaced Veo 3.1 Fast, $0.10/$0.15 a second, 2026-10-13)
 //  · MiniMax Hailuo 2.3: $0.28 flat for 6s, $0.56 flat for 10s — NOT linear
 //    per second, hence a duration lookup instead of a rate
 //  · Wan 3.0 Prime: $0.068/s @480p, $0.14/s @720p, $0.28/s @1080p
@@ -84,21 +86,30 @@ export const VIDEO_MODELS = [
       resolution === '1080p' ? 1.164 : resolution === '720p' ? 0.4730 : 0.2205
     ) * (Number(duration) || 5),
   },
+  // ── Moved up 2026-10-13 ──────────────────────────────────────────────────
+  // Kling 2.5 Turbo Pro → Kling 3 Pro, and Veo 3.1 Fast → Veo 3.1 Lite. Both
+  // old ids are still accepted (see MODEL_ALIASES below), because every row
+  // and storyboard ever saved stores the id it was rendered with.
   {
-    id: 'kling-2.5-turbo-pro',
-    label: 'Kling 2.5 Turbo Pro',
-    hint: 'Strongest camera control and physics — 5 or 10s, one quality tier',
-    durations: ['5', '10'],
+    id: 'kling-3-pro',
+    label: 'Kling 3 Pro',
+    // fal's v3 endpoint takes every whole second from 3 to 15. Not all
+    // thirteen are listed: the picker is a dropdown, and these cover every
+    // length the team actually asks for.
+    hint: 'Strongest camera control and physics — up to 15s, start and end frame',
+    durations: ['3', '5', '6', '8', '10', '12', '15'],
     defaultDuration: '5',
     resolutions: null,
     defaultResolution: '',
-    audio: 'unsupported',
-    cost: ({ duration }) => 0.35 + Math.max(0, (Number(duration) || 5) - 5) * 0.07,
+    // Billed: sound moves the rate from $0.112 to $0.168 a second. The
+    // endpoint DEFAULTS IT ON, which is why the workflow always sends it.
+    audio: 'paid',
+    cost: ({ duration, audio }) => (audio ? 0.168 : 0.112) * (Number(duration) || 5),
   },
   {
-    id: 'veo-3.1-fast',
-    label: 'Veo 3.1 (Google)',
-    hint: 'Best dialogue and native audio — 4, 6 or 8s',
+    id: 'veo-3.1-lite',
+    label: 'Veo 3.1 Lite (Google)',
+    hint: 'Cheapest 1080p with real sound — 4, 6 or 8s',
     durations: ['4', '6', '8'],
     defaultDuration: '8',
     resolutions: [
@@ -107,7 +118,9 @@ export const VIDEO_MODELS = [
     ],
     defaultResolution: '720p',
     audio: 'paid',
-    cost: ({ duration, audio }) => (audio ? 0.15 : 0.10) * (Number(duration) || 8),
+    cost: ({ resolution, duration, audio }) => (
+      resolution === '1080p' ? (audio ? 0.08 : 0.05) : (audio ? 0.05 : 0.03)
+    ) * (Number(duration) || 8),
   },
   {
     id: 'hailuo-2.3',
@@ -188,8 +201,24 @@ export const VIDEO_MODELS = [
   },
 ]
 
+// Ids that were retired in favour of a newer model. The id a clip was made
+// with is saved on its row (creative_versions.model) and in every storyboard,
+// and both are read back by Re-render and by the cost on its button. Without
+// this, an old Kling row fell through to VIDEO_MODELS[0] here and to Seedance
+// 2.0 in the workflow — a re-render that silently changed model, with no
+// error. Kept in step with MODEL_ALIASES in the Creative Video workflow.
+export const MODEL_ALIASES = {
+  'kling-2.5-turbo-pro': 'kling-3-pro',
+  'veo-3.1-fast': 'veo-3.1-lite',
+}
+
+export function resolveVideoModelId(id) {
+  return MODEL_ALIASES[id] || id
+}
+
 export function getVideoModel(id) {
-  return VIDEO_MODELS.find(m => m.id === id) || VIDEO_MODELS[0]
+  const want = resolveVideoModelId(id)
+  return VIDEO_MODELS.find(m => m.id === want) || VIDEO_MODELS[0]
 }
 
 // ─── What a model does with extra images ───────────────────────────────────
@@ -219,7 +248,7 @@ const MODELS_WITH_REFERENCES = new Set([
 ])
 
 export function modelImageRole(modelId) {
-  return MODELS_WITH_REFERENCES.has(modelId) ? 'references' : 'start'
+  return MODELS_WITH_REFERENCES.has(resolveVideoModelId(modelId)) ? 'references' : 'start'
 }
 
 export function modelImageMax(modelId) {
@@ -231,18 +260,31 @@ export function estimateVideoCost(modelId, { resolution, duration, audio } = {})
 }
 
 // ─── In-context video editing ──────────────────────────────────────────────
-// Kling O1 Edit (fal-ai/kling-video/o1/video-to-video/edit) — the model behind
+// Kling O3 Pro Edit (fal-ai/kling-video/o3/pro/video-to-video/edit) — the
+// model behind
 // "ask for a change" in a video lane's chat box. Distinct from every model
 // above: those generate a NEW clip from a prompt (and optionally a still);
 // this one takes an EXISTING clip and applies a natural-language change to it
 // while preserving the source's own camera movement and motion, which is what
 // makes "change the background to marble" a genuine edit rather than a
 // from-scratch re-roll. Verified against fal's schema, 2026-08-11.
+//
+// Moved from Kling O1 Edit to O3 Pro Edit on 2026-10-13: the same $0.168 a
+// second, but the source clip may now run to 15s rather than 10s, which is
+// what brings Seedance 2.5's 12s and 15s takes into reach of an edit.
 export const VIDEO_EDIT_RATE = 0.168 // $/second of the SOURCE clip's duration
 // fal's own hard limit on the input video — not a choice made here. Outside
 // this range the endpoint rejects the request outright, so the UI checks
 // before offering the action rather than letting the click fail.
-export const VIDEO_EDIT_DURATION_RANGE = [3, 10]
+export const VIDEO_EDIT_DURATION_RANGE = [3, 15]
+// What an edit row stores in creative_versions.model. Rows made before the
+// move say 'kling-o1-edit', and both have to read as "an edit of a clip"
+// rather than as a model the picker could re-render with.
+export const VIDEO_EDIT_MODEL_ID = 'kling-o3-edit'
+const VIDEO_EDIT_MODEL_IDS = new Set([VIDEO_EDIT_MODEL_ID, 'kling-o1-edit'])
+export function isVideoEditModel(id) {
+  return VIDEO_EDIT_MODEL_IDS.has(id)
+}
 export const VIDEO_EDIT_MAX_REFERENCES = 4 // fal's cap: elements + reference images combined
 
 export function estimateVideoEditCost(duration) {
@@ -252,4 +294,48 @@ export function estimateVideoEditCost(duration) {
 export function canEditVideoDuration(duration) {
   const d = Number(duration)
   return d >= VIDEO_EDIT_DURATION_RANGE[0] && d <= VIDEO_EDIT_DURATION_RANGE[1]
+}
+
+// ─── Make 1080p (upscale) ──────────────────────────────────────────────────
+// Added 2026-10-13. The studio's cheap way to a sharp clip: Topaz on fal
+// enlarges the clip that already exists, so the take — its movement, timing,
+// everything — is exactly the one that was approved, just at 1080p. That is
+// the point of the button and why it is not a re-render: Draft stays the
+// cheap way to check the movement, and 1080p costs cents rather than a second
+// render. (A native 1080p render of the same take, Seedance 2.5's draft
+// completion at $1.164/s, was built first and dropped on the owner's call —
+// $23 for a 20s clip against ~$0.40 here.)
+//
+// An upscaled clip is a new row whose model is UPSCALE_MODEL_ID — the same
+// way an edit is marked — and whose parent is the clip it enlarged. Retry,
+// Re-render and the storyboard's seam check all read that marker.
+export const UPSCALE_MODEL_ID = 'topaz-upscale'
+// fal: $0.20 per started 10 seconds of 1080p output (precision models).
+export const UPSCALE_PER_10S = 0.20
+
+// The short side of each tier below 1080p that a clip here can come back at.
+// Kling and Hailuo store no resolution: Hailuo is 768p by definition, Kling 3
+// is not offered (its single tier is not stated, and paying to enlarge a clip
+// that may already be 1080p is the one mistake this must not make).
+const BELOW_1080 = { '360p': 1, '480p': 1, '720p': 1, '768p': 1 }
+
+export function isUpscaleModel(id) {
+  return id === UPSCALE_MODEL_ID
+}
+
+// The tier to send the upscaler, or '' when the clip can't or needn't go.
+export function upscaleSourceTier(version) {
+  if (!version || version.status !== 'ready' || version.kind !== 'video' || !version.video_url) return ''
+  if (isUpscaleModel(version.model)) return ''
+  const tier = String(version.resolution || '').toLowerCase()
+    || (resolveVideoModelId(version.model) === 'hailuo-2.3' ? '768p' : '')
+  return BELOW_1080[tier] ? tier : ''
+}
+
+export function canUpscale(version) {
+  return !!upscaleSourceTier(version)
+}
+
+export function estimateUpscaleCost(duration) {
+  return UPSCALE_PER_10S * Math.max(1, Math.ceil((Number(duration) || 5) / 10))
 }

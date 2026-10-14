@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Button, Spinner } from '../ui/index'
 import { PROVIDER_LABEL, labelFor } from './labels'
 import { MultiRefRow } from './MediaPicker'
-import { VIDEO_EDIT_MAX_REFERENCES } from './videoModels'
+import { VIDEO_EDIT_DURATION_RANGE, VIDEO_EDIT_MAX_REFERENCES, upscaleSourceTier } from './videoModels'
 
 // ─── One candidate's own workspace ─────────────────────────────────────────
 // The ChatGPT image and the Gemini image are not two options to choose
@@ -96,8 +96,10 @@ export function BranchChat({
   onReRender,              // optional: re-run a past render against the current base
   onEditClip,              // text/logos onto a finished clip. Free — ffmpeg, no model.
   reRenderCost,            // (version) => dollars, shown on the button BEFORE the click
+  onUpscale,               // "Make 1080p": enlarge THIS clip — same take, sharper, cents
+  upscaleCost,             // (version) => dollars, or null when the clip can't or needn't go
   editVideoCost,           // (version) => dollars — what Send costs on a video stage
-  editVideoAllowed,        // (version) => bool — fal's 3–10s limit on the source clip
+  editVideoAllowed,        // (version) => bool — fal's 3–15s limit on the source clip
   preparingClip = '',      // version id whose first frame is being read
   onOpenEditor,
   onFinalize,
@@ -132,7 +134,7 @@ export function BranchChat({
   // "this is taking too long" escape hatch need a stage to render against.
   const stage = picked || newest
   // What an instruction acts on, with no explicit pick: the newest thing IF
-  // it's ready — a just-finished video included, now that Kling O1 Edit can
+  // it's ready — a just-finished video included, now that Kling O3 Edit can
   // act on one — otherwise branch.latest's still-preferring fallback, so the
   // composer stays usable while a new render is pending or just failed rather
   // than going dead. Deliberately NOT branch.latest outright any more: that
@@ -142,7 +144,7 @@ export function BranchChat({
   // the OLD image-edit path instead of the new video one.
   const defaultBase = (newest && newest.status === 'ready') ? newest : branch.latest
   // What an instruction acts on: whatever is picked, as long as it's actually
-  // ready — a picked video included, since Kling O1 Edit can act on one, the
+  // ready — a picked video included, since Kling O3 Edit can act on one, the
   // same as it's always worked for a picked still — else the default above.
   const base = picked && picked.status === 'ready' ? picked : defaultBase
 
@@ -483,7 +485,7 @@ export function BranchChat({
 
         {baseIsVideo && !editAllowed && (
           <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 px-2 py-1">
-            This clip is {base.duration || '?'}s — edits only work on 3–10s clips. Use Re-render below for a fresh take instead.
+            This clip is {base.duration || '?'}s — edits only work on {VIDEO_EDIT_DURATION_RANGE[0]}–{VIDEO_EDIT_DURATION_RANGE[1]}s clips. Use Re-render below for a fresh take instead.
           </p>
         )}
 
@@ -524,6 +526,16 @@ export function BranchChat({
             all day; anything that calls a model wears the amber accent and its
             price. The interface teaches which clicks spend money, so nobody has
             to police it in a meeting. */}
+        {/* The two ways to spend on a finished clip look alike as buttons and
+            do opposite things, so a low-resolution clip says which is which
+            in words before either is pressed. */}
+        {stageIsVideo && onUpscale && upscaleCost?.(stage) != null && (
+          <p className="mb-1.5 text-[11px] leading-snug text-text-secondary">
+            This clip is <b>{upscaleSourceTier(stage)}</b> — fine for checking the movement.{' '}
+            <b>Make 1080p</b> sharpens this exact clip.{' '}
+            <b>Re-render</b> makes a new, different take.
+          </p>
+        )}
         <div className="flex flex-wrap items-center gap-1.5">
           {!stageIsVideo && (
             <Button size="sm" variant="outline" disabled={!canAct} onClick={() => onOpenEditor(base)}>Editor</Button>
@@ -560,6 +572,12 @@ export function BranchChat({
               onClick={() => onDownload(stage)}
               title={stage.is_final ? 'Download (already in the Media Library)' : 'Download — also files it in the Media Library'}>
               {pendingKey === `download:${stage.id}` ? <Spinner size="sm" /> : stageIsVideo ? '⬇ Clip' : '⬇ Download'}
+            </Button>
+          )}
+          {stageIsVideo && onUpscale && upscaleCost?.(stage) != null && (
+            <Button size="sm" disabled={!!busy} onClick={() => onUpscale(stage)}
+              title="Sharpens this exact clip to 1080p — same movement, nothing re-generated">
+              Make 1080p · ${upscaleCost(stage).toFixed(2)}
             </Button>
           )}
           {stageIsVideo && onReRender && (

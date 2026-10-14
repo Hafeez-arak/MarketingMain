@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  insertPendingVersions, requestCancel, requestVideo, updateVersion, uploadToStudio,
+  insertPendingVersions, requestCancel, requestUpscale, requestVideo, updateVersion, uploadToStudio,
 } from '../../lib/creativeStudio'
 import {
   chainsFrom, clipImagePlan, clipPromptFor, clipRowsByIndex, clipState, nextClipAttempt,
   setRunStatus,
 } from '../../lib/creativeStoryboard'
 import { captureLastFrameBlob } from './videoFrame'
+import { UPSCALE_MODEL_ID, isUpscaleModel, upscaleSourceTier } from './videoModels'
 
 // ─── The multi-clip render run ─────────────────────────────────────────────
 // Renders a storyboard one clip at a time, from the browser, because that is
@@ -254,6 +255,59 @@ export function useClipSequencer({
     void fireClip(index, runId.current)
   }, [fireClip])
 
+  // ── Make 1080p on one clip ──
+  // Topaz enlarges the clip's current take — the same footage, sharper — so
+  // nothing chained after it goes out of step (see takeTimeOf in
+  // creativeStoryboard.js). It becomes the clip's next attempt, which is what
+  // makes the reel pick it up: clipRowsByIndex reads the latest attempt. A
+  // failed upscale retries as an upscale of the take underneath it, never as a
+  // fresh render. One clip only, never the board — like renderOne.
+  const upscaleOne = useCallback(async index => {
+    const {
+      session: s, workspaceId: ws, accessToken: tok, webhooks: hooks,
+      versions: vs, clipRows: rows,
+    } = ctx.current
+    const row = rows?.[index]
+    const source = row?.status === 'failed' && isUpscaleModel(row.model)
+      ? (vs || []).find(v => v.id === row.parent_version_id)
+      : row
+    const tier = upscaleSourceTier(source)
+    if (!s || !tier) return
+    runId.current += 1
+    lock.current = { sessionId: s.id, clipIndex: index }
+    setArmedFor(null)
+    setRunStatus(tok, s.id, '')
+
+    const ins = await insertPendingVersions(ws, tok, s.id, [{
+      round: 0, kind: 'video', provider: 'seedance', mediaType: 'video',
+      clipIndex: index, clipAttempt: nextClipAttempt(vs, index),
+      parentVersionId: source.id,
+      imageUrl: source.image_url || '',
+      userPrompt: source.user_prompt || '',
+      model: UPSCALE_MODEL_ID,
+      duration: source.duration || '',
+      resolution: '1080p',
+      generateAudio: !!source.generate_audio,
+      aspectRatio: s.aspect_ratio || '',
+    }])
+    if (ins.error) {
+      if (String(ins.error).includes(UNIQUE_VIOLATION)) { ctx.current.refresh(s.id); return }
+      ctx.current.onError(ins.error)
+      return
+    }
+    ctx.current.onVersions(ins.rows)
+
+    const fired = await requestUpscale(hooks.creativeUpscale, {
+      session_id: s.id, version_id: ins.rows[0].id,
+      video_url: source.video_url, resolution: tier,
+    })
+    if (fired.error) {
+      ctx.current.onError(fired.error)
+      await updateVersion(tok, ins.rows[0].id, { status: 'failed', error: fired.error })
+      ctx.current.refresh(s.id)
+    }
+  }, [])
+
   // ── Cancelling a clip fal is already working on ──
   // Two separate things, and only one of them is guaranteed. Marking the row
   // failed locally is what frees the board. Asking fal to drop the job is what
@@ -306,6 +360,7 @@ export function useClipSequencer({
     start,
     stop,
     renderOne,
+    upscaleOne,
     cancelClip,
     clipRows,
     states,

@@ -70,9 +70,33 @@ const SHAPES = [
   { id: 'arrow', Icon: IconArrow, label: 'Arrow' },
 ]
 
-export function InsertPanel({ onAddText, onAddShape }) {
+// Layerize's flat price per image, whatever number of layers comes back
+// (bytedance/seedream/v5/flash/layerize on fal, checked 2026-10-13).
+const SPLIT_COST = 0.027
+
+export function InsertPanel({ onAddText, onAddShape, onSplit, splitting = false }) {
   return (
     <div className="space-y-4">
+      {onSplit && (
+        <PanelSection title="Picture">
+          <button type="button" onClick={onSplit} disabled={splitting}
+            className="w-full rounded-lg border border-amber-300 bg-amber-50 px-3 py-2.5 text-left hover:border-amber-500 disabled:opacity-60">
+            <span className="flex items-center justify-between gap-2 text-sm font-semibold text-amber-900">
+              <span className="flex items-center gap-1.5">
+                {splitting ? <Spinner size="sm" /> : <IconLayers className="h-4 w-4" />}
+                {splitting ? 'Splitting…' : 'Split into layers'}
+              </span>
+              <span className="text-[11px] font-medium">${SPLIT_COST.toFixed(2)}</span>
+            </span>
+            <span className="mt-0.5 block text-[10px] leading-snug text-amber-800/80">
+              Each object and any painted-in text becomes its own layer you can move, resize or delete, over a clean background.
+            </span>
+          </button>
+          {splitting && (
+            <p className="text-[10px] text-text-tertiary">Usually 20–40 seconds. Keep the editor open.</p>
+          )}
+        </PanelSection>
+      )}
       <PanelSection title="Text">
         <div className="space-y-1.5">
           {TEXT_PRESETS.map(p => (

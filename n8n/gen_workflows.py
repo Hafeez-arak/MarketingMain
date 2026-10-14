@@ -3378,6 +3378,8 @@ def build_campaign_planner() -> dict:
 # Latest model generation, confirmed available on our FAL_KEY:
 #   gpt-image-2 / gpt-image-2/edit   ("ChatGPT" to the marketing team)          — 2026-08-09
 #   nano-banana-2 / nano-banana-2/edit     ("Gemini")                          — 2026-08-09
+#   → openai/gpt-image-2.5/flare/{text-to-image,edit}                          — 2026-10-13
+#   → google/nano-banana-2.1{,/edit}                                          — 2026-10-13
 #   bytedance/seedance-2.0/{image,text}-to-video                              — 2026-08-10
 # ============================================================
 
@@ -3596,15 +3598,32 @@ function buildPrompt(provider){
   return p;
 }
 
+// ─── Image models, moved up 2026-10-13 ─────────────────────────────────────
+// Both candidates moved to the next release of the same family. Each is a
+// drop-in: the input schemas were diffed field by field against the models
+// they replace and only differ where noted.
+//  · Nano Banana 2.1 (Google, 2026-10-06). Better prompt adherence, text and
+//    consistency, and about half the price at 2K ($0.059 vs $0.12 an image).
+//    It drops the 0.5K tier, which nothing here used, and reasons at 'medium'
+//    by default where 2 reasoned not at all — the $0.059 already includes it.
+//  · GPT Image 2.5 Flare (OpenAI, 2026-09-08). OpenAI's everyday tier; the
+//    same token rates as gpt-image-2, the same image_size presets and the same
+//    explicit-dimension rules, so GPT_EXACT's 4:5 still holds. (Sunburst is
+//    the slower, more detailed tier and was deliberately not chosen.)
+const GEMINI_T2I  = 'google/nano-banana-2.1';
+const GEMINI_EDIT = 'google/nano-banana-2.1/edit';
+const OPENAI_T2I  = 'openai/gpt-image-2.5/flare/text-to-image';
+const OPENAI_EDIT = 'openai/gpt-image-2.5/flare/edit';
+
 async function genGemini(){
   const useEdit = !!referenceUrl;
-  const endpoint = useEdit ? 'fal-ai/nano-banana-2/edit' : 'fal-ai/nano-banana-2';
+  const endpoint = useEdit ? GEMINI_EDIT : GEMINI_T2I;
   const b = { prompt: buildPrompt('gemini'), aspect_ratio: aspect, resolution: '2K', output_format: 'png', num_images: 1 };
   if (useEdit) b.image_urls = [referenceUrl];
   const r = await req({ method:'POST', url:'https://fal.run/' + endpoint,
     headers:{ Authorization:'Key ' + FAL, 'Content-Type':'application/json' }, body: b, json:true });
   const url = (r.images && r.images[0] && r.images[0].url) || (r.image && r.image.url);
-  if (!url) throw new Error('nano-banana-2 returned no image');
+  if (!url) throw new Error('Nano Banana 2.1 returned no image');
   return url;
 }
 
@@ -3615,7 +3634,7 @@ async function genOpenAI(){
   // 'prompt'/'image_urls' vs a routing 404), after /edit-image silently 404'd
   // on every call that reached it (this path only fires when a reference image
   // is attached at generate time).
-  const endpoint = useEdit ? 'fal-ai/gpt-image-2/edit' : 'fal-ai/gpt-image-2';
+  const endpoint = useEdit ? OPENAI_EDIT : OPENAI_T2I;
   // Exact dimensions where a bucket would distort the shape (4:5), the named
   // bucket everywhere else — the buckets are exact for those ratios and let
   // the model pick its own best resolution.
@@ -3626,7 +3645,7 @@ async function genOpenAI(){
   const r = await req({ method:'POST', url:'https://fal.run/' + endpoint,
     headers:{ Authorization:'Key ' + FAL, 'Content-Type':'application/json' }, body: b, json:true });
   const url = (r.images && r.images[0] && r.images[0].url) || (r.image && r.image.url);
-  if (!url) throw new Error('gpt-image-2 returned no image');
+  if (!url) throw new Error('GPT Image 2.5 returned no image');
   return url;
 }
 
@@ -3751,7 +3770,7 @@ async function run(){
   const images = [sourceUrl].concat(refUrls);
   let tempUrl;
   if (provider === 'openai') {
-    const r = await req({ method:'POST', url:'https://fal.run/fal-ai/gpt-image-2/edit',
+    const r = await req({ method:'POST', url:'https://fal.run/openai/gpt-image-2.5/flare/edit',
       headers:{ Authorization:'Key ' + FAL, 'Content-Type':'application/json' },
       body:{ prompt: editPrompt(), image_urls: images, quality:'high', output_format:'png', num_images:1 }, json:true });
     tempUrl = (r.images && r.images[0] && r.images[0].url) || (r.image && r.image.url);
@@ -3760,7 +3779,7 @@ async function run(){
     // 'auto' keeps the source's own shape, which is what an edit should do
     // unless the caller deliberately asks for a different frame.
     if (aspect && aspect !== 'auto') b.aspect_ratio = aspect;
-    const r = await req({ method:'POST', url:'https://fal.run/fal-ai/nano-banana-2/edit',
+    const r = await req({ method:'POST', url:'https://fal.run/google/nano-banana-2.1/edit',
       headers:{ Authorization:'Key ' + FAL, 'Content-Type':'application/json' }, body: b, json:true });
     tempUrl = (r.images && r.images[0] && r.images[0].url) || (r.image && r.image.url);
   }
@@ -3840,19 +3859,36 @@ const MODEL_CONFIGS = {
       return input;
     },
   },
-  'kling-2.5-turbo-pro': {
-    i2v: 'fal-ai/kling-video/v2.5-turbo/pro/image-to-video',
-    t2v: 'fal-ai/kling-video/v2.5-turbo/pro/text-to-video',
-    // No resolution/aspect_ratio input on this endpoint; duration is "5" or "10" only.
-    build(imageUrl) {
-      const input = { prompt, duration: duration === '10' ? '10' : '5' };
-      if (imageUrl) input.image_url = imageUrl;
+  // Replaced Kling 2.5 Turbo Pro on 2026-10-13 (see MODEL_ALIASES). Two
+  // silent traps, both verified against fal's schema:
+  //  · the start frame is `start_image_url`, not `image_url` — sent under the
+  //    old name it is ignored and the clip renders from the prompt alone;
+  //  · generate_audio DEFAULTS TO TRUE and is billed ($0.168/s against
+  //    $0.112/s), so it is always sent, never left to the default.
+  // Durations are any whole second 3–15, as a string. Text-to-video takes
+  // 16:9/9:16/1:1; image-to-video takes no ratio and follows the frame.
+  'kling-3-pro': {
+    i2v: 'fal-ai/kling-video/v3/pro/image-to-video',
+    t2v: 'fal-ai/kling-video/v3/pro/text-to-video',
+    build(imageUrl, endImageUrl) {
+      const d = Math.min(15, Math.max(3, Math.round(Number(duration) || 5)));
+      const input = { prompt, duration: String(d), generate_audio: generateAudio };
+      if (imageUrl) {
+        input.start_image_url = imageUrl;
+        if (endImageUrl) input.end_image_url = endImageUrl;
+        return input;
+      }
+      if (aspect) input.aspect_ratio = aspect;
       return input;
     },
   },
-  'veo-3.1-fast': {
-    i2v: 'fal-ai/veo3.1/fast/image-to-video',
-    t2v: 'fal-ai/veo3.1/fast',
+  // Replaced Veo 3.1 Fast on 2026-10-13: the same inputs at roughly half the
+  // price. Google retires the Veo 3.1 *preview* models on 2026-10-22; if
+  // fal's Lite endpoint turns out to sit on one of those, renders here start
+  // failing loudly (fal returns an error), not silently.
+  'veo-3.1-lite': {
+    i2v: 'fal-ai/veo3.1/lite/image-to-video',
+    t2v: 'fal-ai/veo3.1/lite',
     // Duration takes an 's' suffix ("8s") here, not a bare number.
     build(imageUrl) {
       const d = /s$/.test(duration) ? duration : duration + 's';
@@ -3973,7 +4009,8 @@ function looksLikeVideo(buf){
 //    text-to-video enum has no such value at all. So an unrecognised ratio has
 //    to land on a REAL one for H3 Max rather than on a keyword it would
 //    reject, which is what the RATIOS check below is for.
-//  · Kling and Hailuo take no aspect_ratio at all.
+//  · Kling 3 Pro takes 16:9/9:16/1:1 on text-to-video (and nothing at all on
+//    image-to-video, where the frame decides). Hailuo takes no aspect_ratio.
 //
 // An approximate ratio is acceptable now in a way it wasn't before, because
 // Creative Compose centre-crops the finished clip to the overlay's own shape.
@@ -3982,10 +4019,11 @@ const PORTRAIT = { '4:5': 1, '9:16': 1, '3:4': 1, '2:3': 1 };
 const RATIOS = { '21:9': 1, '16:9': 1, '4:3': 1, '1:1': 1, '3:4': 1, '9:16': 1 };
 function mapAspect(model, a) {
   const want = a || '';
-  if (model === 'veo-3.1-fast' || model === 'gemini-omni-flash-1.1') {
+  if (model === 'veo-3.1-lite' || model === 'gemini-omni-flash-1.1') {
     return PORTRAIT[want] ? '9:16' : '16:9';
   }
-  if (model === 'kling-2.5-turbo-pro' || model === 'hailuo-2.3') return '';
+  if (model === 'kling-3-pro') return PORTRAIT[want] ? '9:16' : (want === '1:1' ? '1:1' : '16:9');
+  if (model === 'hailuo-2.3') return '';
   const mapped = SEEDANCE_MAP[want] || want;
   if (model === 'wan-3.0-prime') return RATIOS[mapped] ? mapped : 'adaptive';
   if (model === 'h3-max') return RATIOS[mapped] ? mapped : '16:9';
@@ -3996,7 +4034,7 @@ const body = ($input.first().json.body) || {};
 const sessionId = body.session_id || '';
 const versionId = body.version_id || '';
 const imageUrl  = body.image_url || '';       // absent => text-to-video
-const endImageUrl = body.end_image_url || ''; // optional last frame (Seedance only)
+const endImageUrl = body.end_image_url || ''; // optional last frame (models whose build() reads it)
 // Style references. Seedance's reference-to-video takes these as a whole
 // separate endpoint; every other model here has nowhere to put them, so the
 // picker says so rather than accepting them and quietly ignoring them.
@@ -4005,7 +4043,14 @@ const referenceUrls = Array.isArray(body.reference_image_urls)
   : [];
 const prompt    = String(body.prompt || '').trim();
 const duration  = String(body.duration || '5');
-const modelId   = MODEL_CONFIGS[body.model] ? body.model : 'seedance-2';
+// Ids retired in favour of a newer model, kept in step with MODEL_ALIASES in
+// src/components/studio/videoModels.js. Every saved row and storyboard keeps
+// the id it was made with, and an id missing from MODEL_CONFIGS falls back to
+// Seedance 2.0 below — so without this, re-rendering an old Kling take would
+// silently have become a Seedance one.
+const MODEL_ALIASES = { 'kling-2.5-turbo-pro': 'kling-3-pro', 'veo-3.1-fast': 'veo-3.1-lite' };
+const requestedModel = MODEL_ALIASES[body.model] || body.model;
+const modelId   = MODEL_CONFIGS[requestedModel] ? requestedModel : 'seedance-2';
 const aspect    = mapAspect(modelId, body.aspect_ratio);
 const resolution = body.resolution || '720p';
 // Off unless asked: a model inventing ambient sound under a brand asset is a
@@ -4043,6 +4088,8 @@ async function run(){
   const requestId = submit.request_id;
   if (!requestId) throw new Error('fal did not return a request_id: ' + JSON.stringify(submit).slice(0, 250));
 
+  const pendingRequest = { requestId, model, cancelUrl: submit.cancel_url || '',
+                           submittedAt: new Date().toISOString() };
   // Saved BEFORE polling starts, not after — the request_id only ever lived
   // in this function's local variables until now, and this function can be
   // killed mid-poll by n8n's own task-runner timeout (found 2026-08-11: a
@@ -4062,9 +4109,7 @@ async function run(){
       // rather than the full model path, and a URL derived from the wrong one
       // 405s. Creative Cancel prefers this and only derives a fallback if fal
       // ever stops returning it.
-      body: { overlay_state: { pendingRequest: {
-        requestId, model, cancelUrl: submit.cancel_url || '',
-        submittedAt: new Date().toISOString() } } },
+      body: { overlay_state: { pendingRequest } },
       json: true });
   } catch (e) { /* recoverable by Reconcile only if this succeeded; never worth failing the render over */ }
 
@@ -4134,7 +4179,7 @@ catch (err) {
 # ─── Creative Video Edit ────────────────────────────────────────────────────
 # Every other video workflow GENERATES — a prompt (and maybe a still) becomes
 # a brand new take. This one EDITS: an existing clip goes back in, along with
-# a plain-English instruction, and fal-ai/kling-video/o1/video-to-video/edit
+# a plain-English instruction, and fal-ai/kling-video/o3/pro/video-to-video/edit
 # changes what the instruction names while preserving the source's own camera
 # movement and motion structure. Added 2026-08-11 once it turned out this
 # model exists — the original plan treated "edit the footage in place" as
@@ -4145,7 +4190,9 @@ catch (err) {
 # behind the exact same queue.fal.run mechanics, so the same bug would apply.
 CREATIVE_VIDEO_EDIT_JS = _CREATIVE_REQ_JS + r"""
 const BUCKET = 'creative-studio';
-const MODEL = 'fal-ai/kling-video/o1/video-to-video/edit';
+// Kling O3 Pro Edit since 2026-10-13 (was O1 Edit): the same $0.168/s and
+// the same inputs, but source clips may now run 3–15s instead of 3–10s.
+const MODEL = 'fal-ai/kling-video/o3/pro/video-to-video/edit';
 
 function looksLikeVideo(buf){
   if (!buf || buf.length < 12) return false;
@@ -4234,6 +4281,118 @@ catch (err) {
 }
 """
 
+
+
+# ─── Creative Upscale (added 2026-10-13) ────────────────────────────────────
+CREATIVE_UPSCALE_STICKY = """## Creative Studio — Upscale (Make 1080p)
+
+POST `arak-creative-upscale`
+```
+{ session_id, version_id, video_url, resolution }
+```
+
+The studio's **Make 1080p** button. Enlarges an EXISTING clip to 1080p with
+fal's `topaz/upscale/video/precision` (Proteus). Not a new render: the take,
+its movement and its timing are exactly the clip that went in, just sharper.
+
+`resolution` is the source clip's own tier ('480p', '720p', '768p', '360p'),
+and sets the factor that lands the short side on 1080 (480p → 2.25×). fal
+needs a factor, not a target size.
+
+`H264_output: true` always — Topaz defaults to H.265, which several browsers
+will not play and which Creative Compose would then have to re-encode.
+
+Costs $0.20 per started 10 seconds of 1080p output (a 20s clip is $0.40).
+
+Same queue mechanics as Creative Video: the request id is saved to
+`overlay_state.pendingRequest` before polling, so Creative Video Reconcile can
+still recover the clip if this execution dies.
+
+Needs env: FAL_KEY, SUPABASE_URL, SUPABASE_KEY."""
+
+CREATIVE_UPSCALE_JS = _CREATIVE_REQ_JS + r"""
+const BUCKET = 'creative-studio';
+const MODEL = 'topaz/upscale/video/precision';
+// Short side in pixels for each tier the studio stores. The factor is what
+// brings that to 1080; anything already at 1080 or above is refused rather
+// than paid for to come back the same size.
+const SHORT_SIDE = { '360p': 360, '480p': 480, '720p': 720, '768p': 768 };
+
+function looksLikeVideo(buf){
+  if (!buf || buf.length < 12) return false;
+  return buf.toString('ascii', 4, 8) === 'ftyp';
+}
+
+const body = ($input.first().json.body) || {};
+const sessionId = body.session_id || '';
+const versionId = body.version_id || '';
+const videoUrl  = String(body.video_url || '').trim();
+const short     = SHORT_SIDE[String(body.resolution || '').toLowerCase()] || 0;
+
+async function run(){
+  if (!videoUrl) throw new Error('No clip to make 1080p.');
+  if (!short) throw new Error('This clip is already 1080p or its size is unknown, so there is nothing to upscale.');
+
+  const input = {
+    video_url: videoUrl,
+    model: 'Proteus',
+    upscale_factor: Math.round((1080 / short) * 1000) / 1000,
+    H264_output: true,
+  };
+
+  const submit = await req({ method:'POST', url:'https://queue.fal.run/' + MODEL,
+    headers:{ Authorization:'Key ' + FAL, 'Content-Type':'application/json' }, body: input, json:true });
+  const requestId = submit.request_id;
+  if (!requestId) throw new Error('fal did not return a request_id: ' + JSON.stringify(submit).slice(0, 250));
+
+  // See CREATIVE_VIDEO_JS for why this is saved before polling starts.
+  try {
+    await req({ method: 'PATCH',
+      url: String($env.SUPABASE_URL).replace(/\/+$/, '') + '/rest/v1/creative_versions?id=eq.' + versionId,
+      headers: { Authorization: 'Bearer ' + $env.SUPABASE_KEY, apikey: $env.SUPABASE_KEY,
+                 'Content-Type': 'application/json', Prefer: 'return=minimal' },
+      body: { overlay_state: { pendingRequest: { requestId, model: MODEL, cancelUrl: submit.cancel_url || '',
+                                                 submittedAt: new Date().toISOString() } } },
+      json: true });
+  } catch (e) { /* recoverable by Reconcile only if this succeeded */ }
+
+  const appId = MODEL.split('/').slice(0, 2).join('/');
+  const statusUrl = submit.status_url || ('https://queue.fal.run/' + appId + '/requests/' + requestId + '/status');
+  const resultUrl = submit.response_url || ('https://queue.fal.run/' + appId + '/requests/' + requestId);
+
+  let status = submit.status || 'IN_QUEUE';
+  let tries = 0;
+  while ((status === 'IN_QUEUE' || status === 'IN_PROGRESS') && tries < 150) {
+    await new Promise(r => setTimeout(r, 3000));
+    const st = await req({ method:'GET', url: statusUrl, headers:{ Authorization:'Key ' + FAL }, json:true });
+    status = st.status; tries++;
+  }
+  if (status !== 'COMPLETED') {
+    throw new Error(status === 'IN_QUEUE' || status === 'IN_PROGRESS'
+      ? 'Upscale timed out after ~' + (tries * 3) + 's (request ' + requestId + ')'
+      : 'Upscale ' + status + ' (request ' + requestId + ')');
+  }
+
+  const result = await req({ method:'GET', url: resultUrl, headers:{ Authorization:'Key ' + FAL }, json:true });
+  const outUrl = result.video && result.video.url;
+  if (!outUrl) throw new Error('fal returned no video URL (request ' + requestId + '): ' + JSON.stringify(result).slice(0, 250));
+
+  const buf = await req({ method:'GET', url: outUrl, encoding:'arraybuffer' });
+  if (!looksLikeVideo(buf)) throw new Error('Downloaded file is not a real video (' + buf.length + ' bytes)');
+  const base = versionId + '-' + Date.now() + '.mp4';
+  const filename = (sessionId ? sessionId + '/' : '') + base;
+  return {
+    json: { _ok: true, version_id: versionId, bucket: BUCKET, filename },
+    binary: { data: await prepareBinaryData(buf, base, 'video/mp4') },
+  };
+}
+
+try { return await run(); }
+catch (err) {
+  return { json: { _ok: false, version_id: versionId,
+                   error: (err && err.message) ? err.message : String(err) } };
+}
+"""
 
 # ─── Creative Video Reconcile ───────────────────────────────────────────────
 # The permanent fix for "the video actually finished in fal, but the app never
@@ -5691,8 +5850,10 @@ Do NOT "fix" that by uploading from inside the Code node. It corrupts every
 image: a Buffer nested in httpRequest's options does not survive the task
 runner's RPC boundary and is stored as the text `{"type":"Buffer",...}`.
 
-Models: `gpt-image-2` + `nano-banana-2` (their `/edit` variants when a
-reference image is supplied — reference = inspiration, never a copy).
+Models: `openai/gpt-image-2.5/flare` + `google/nano-banana-2.1` (their
+`/edit` variants when a reference image is supplied — reference =
+inspiration, never a copy). Moved up from gpt-image-2 / nano-banana-2 on
+2026-10-13.
 
 Needs env: FAL_KEY, SUPABASE_URL, SUPABASE_KEY."""
 
@@ -5744,11 +5905,14 @@ Three modes, picked from what's in the payload:
   image-then-video.
 
 `model` selects the fal endpoint via MODEL_CONFIGS at the top of the Code
-node — unrecognised or missing values fall back to 'seedance-2'. Each model's
+node — unrecognised or missing values fall back to 'seedance-2', after
+MODEL_ALIASES maps a retired id (kling-2.5-turbo-pro, veo-3.1-fast) to the
+model that replaced it. Each model's
 `build()` there knows its own accepted inputs, and those differ in ways that
 fail SILENTLY rather than loudly, because fal ignores an unknown key instead of
 rejecting it:
-- Kling and Hailuo take neither `resolution` nor `aspect_ratio`
+- Kling 3 Pro and Hailuo take no `resolution`; Kling 3's start frame is
+  `start_image_url` and its `generate_audio` DEFAULTS TO TRUE (billed)
 - Veo's `duration` needs an 's' suffix ("8s"); Wan, H3 Max and Gemini Omni
   need a real integer, not the numeric string Seedance takes
 - Wan's start frame is `start_image_url`, not `image_url`, and its audio flag
@@ -5757,7 +5921,7 @@ rejecting it:
 - Gemini Omni's references go in `image_urls`, not `reference_image_urls`
 
 `generate_audio` defaults false — free on Seedance and Wan, billed separately
-on Veo, absent on Kling/Hailuo/H3 Max, and unavoidable on Gemini Omni, which
+on Veo and Kling 3, absent on Hailuo/H3 Max, and unavoidable on Gemini Omni, which
 has no audio parameter at all and always generates sound.
 
 **Aspect ratio is per model** (fixed 2026-08-11 — it was one global map, and
@@ -5765,7 +5929,7 @@ rewriting 4:5 to 3:4 for everyone meant every 4:5 and 1:1 Veo render failed,
 since Veo rejects 3:4). Seedance has no 4:5 bucket so it gets 3:4; Veo and
 Gemini Omni get an orientation (9:16 or 16:9); Wan falls back to `adaptive` and
 H3 Max to a real ratio, since H3 Max's text-to-video enum has no "decide for
-me" value; Kling and Hailuo take none. An approximate shape is fine now because
+me" value; Kling 3 gets 16:9/9:16/1:1 on text-to-video only; Hailuo takes none. An approximate shape is fine now because
 Creative Compose centre-crops the finished clip back to the overlay's own
 aspect. (Seedance 2.5 was `auto`-only until 2026-09-15 and is no longer a
 special case.)
@@ -5784,8 +5948,9 @@ POST `arak-creative-video-edit`
 { session_id, version_id, video_url, prompt, reference_image_urls?: string[] }
 ```
 
-Edits an EXISTING clip via fal's Kling O1 Edit
-(`fal-ai/kling-video/o1/video-to-video/edit`) — a natural-language instruction
+Edits an EXISTING clip via fal's Kling O3 Pro Edit
+(`fal-ai/kling-video/o3/pro/video-to-video/edit`, O1 Edit until 2026-10-13) —
+a natural-language instruction
 ("change the background to marble", "make the light pulse slower") applied
 while the model preserves the source's own camera movement and motion
 structure. This is what the chat box's Send does on a finished video, distinct
@@ -5793,7 +5958,7 @@ from Re-render (same prompt, a brand-new take) and Add text (free, ffmpeg only,
 never touches the footage).
 
 Real constraint from fal's own schema, not a choice made here: the source
-clip must be 3–10.05 seconds. The frontend checks the row's stored `duration`
+clip must be 3–15 seconds (it was 3–10.05 on O1). The frontend checks the row's stored `duration`
 before offering this action at all — outside that range, only Re-render shows.
 
 `reference_image_urls` are optional style/appearance references, addressed in
@@ -5801,10 +5966,11 @@ the prompt as @Image1, @Image2 — capped at 4 (fal's own limit, shared with any
 character "elements", which this app never sends).
 
 `keep_audio: true` always — an edit that changes the picture must not also
-silently drop audio the source render had; fal defaults this to false.
+silently drop audio the source render had. (O1 defaulted it to false; O3
+defaults it to true, and it is still sent explicitly.)
 
 Costs $0.168/second of the SOURCE clip's duration, not the edit's own compute
-time — a 5s edit is ~$0.84, a 10s edit ~$1.68.
+time — a 5s edit is ~$0.84, a 15s edit ~$2.52.
 
 Needs env: FAL_KEY, SUPABASE_URL, SUPABASE_KEY."""
 
@@ -6134,6 +6300,19 @@ def build_creative_video() -> dict:
         sticky=CREATIVE_VIDEO_STICKY,
         js=CREATIVE_VIDEO_JS,
         code_node_name="Render Video",
+        mime="video/mp4",
+        media_field="video_url",
+        accepted_expr="={{ JSON.stringify({ status: 'accepted', version_id: $json.body.version_id }) }}",
+    )
+
+
+def build_creative_upscale() -> dict:
+    return _build_creative_workflow(
+        name="Arak Lighting – Creative Upscale",
+        webhook_path="arak-creative-upscale",
+        sticky=CREATIVE_UPSCALE_STICKY,
+        js=CREATIVE_UPSCALE_JS,
+        code_node_name="Upscale Video",
         mime="video/mp4",
         media_field="video_url",
         accepted_expr="={{ JSON.stringify({ status: 'accepted', version_id: $json.body.version_id }) }}",
@@ -6918,6 +7097,104 @@ def build_creative_enhance() -> dict:
     }
 
 
+
+
+# ─── Creative Layerize (added 2026-10-13) ───────────────────────────────────
+CREATIVE_LAYERIZE_STICKY = """## Creative Studio — Layerize
+
+POST `arak-creative-layerize`
+```
+{ image_url }
+```
+
+**Synchronous**, like Enhance: the answer goes straight back into the open
+photo editor, so there is no version row and nothing to poll.
+
+Splits a flat image into a clean background plus up to 16 separate,
+transparent elements (a product, a person, a sign, a block of baked-in text),
+each with a name and a position, using fal's
+`bytedance/seedream/v5/flash/layerize` — **$0.027 per image**, however many
+layers come back.
+
+Returns fal's own file URLs. The BROWSER copies each one into the
+creative-studio bucket (uploadToStudio) before the editor uses it, because
+fal's URLs are not guaranteed to last and the layers are saved by URL in
+overlay_state. Uploading from here would mean binary through a Code node,
+which corrupts the file — see Creative Generate's sticky.
+
+Positions come back as `box: [left, top, right, bottom]` in 0–1 fractions of
+the image that was sent, which is the same unit every editor layer uses.
+
+Needs env: FAL_KEY."""
+
+CREATIVE_LAYERIZE_JS = _CREATIVE_REQ_JS + r"""
+const MODEL = 'bytedance/seedream/v5/flash/layerize';
+const body = ($input.first().json.body) || {};
+const imageUrl = String(body.image_url || '').trim();
+
+try {
+  if (!/^https?:\/\//i.test(imageUrl)) throw new Error('No image to split.');
+
+  // fal.run rather than the queue: a layerize call returns in well under a
+  // minute, and this answer is awaited by an open editor rather than written
+  // to a row a poller would pick up.
+  const r = await req({ method: 'POST', url: 'https://fal.run/' + MODEL,
+    headers: { Authorization: 'Key ' + FAL, 'Content-Type': 'application/json' },
+    body: { image_url: imageUrl, image_size: 'auto' }, json: true });
+
+  const raw = Array.isArray(r && r.layers) ? r.layers : [];
+  if (!raw.length) throw new Error('The model returned no layers.');
+
+  // fal states the bounds two ways; the 0–1000 normalized form is the one
+  // that needs no knowledge of the output's pixel size. z_index 0 is always
+  // the base, and the only layer without a box.
+  const out = raw
+    .filter(l => l && l.image && l.image.url)
+    .map(l => {
+      const n = l.bounding_box && Array.isArray(l.bounding_box.normalized) ? l.bounding_box.normalized : null;
+      return {
+        url: l.image.url,
+        width: Number(l.image.width) || 0,
+        height: Number(l.image.height) || 0,
+        z: Number(l.z_index) || 0,
+        name: String(l.name || '').slice(0, 60),
+        box: n && n.length === 4 ? n.map(v => Math.max(0, Math.min(1, Number(v) / 1000))) : null,
+      };
+    })
+    .sort((a, b) => a.z - b.z);
+
+  const base = out.find(l => l.z === 0 && !l.box) || null;
+  const layers = out.filter(l => l !== base && l.box);
+  if (!base) throw new Error('The model returned no background layer.');
+
+  return [{ json: { ok: true, base, layers } }];
+} catch (err) {
+  return [{ json: { ok: false, error: errText(err) } }];
+}
+"""
+
+
+def build_creative_layerize() -> dict:
+    """
+    Webhook (responseMode=lastNode) -> Split Into Layers (single Code node).
+
+    Same graph as Creative Enhance and for the same reason: one paid call
+    whose answer goes straight back to the screen that asked for it.
+    """
+    nodes = [
+        _sticky(CREATIVE_LAYERIZE_STICKY, height=460, width=460, x=0, y=-240),
+        _webhook("arak-creative-layerize", "lastNode", x=0, y=200),
+        _code("Split Into Layers", CREATIVE_LAYERIZE_JS, x=240, y=200),
+    ]
+    connections = {"Webhook": {"main": [[{"node": "Split Into Layers", "type": "main", "index": 0}]]}}
+    return {
+        "name": "Arak Lighting – Creative Layerize",
+        "nodes": nodes,
+        "connections": connections,
+        "active": False,
+        "settings": {"executionOrder": "v1"},
+        "tags": [],
+    }
 
 RESEARCH_RESOLVE_STICKY = """## Research: Resolve Handles
 
@@ -8448,12 +8725,14 @@ if __name__ == "__main__":
         build_creative_edit(),
         build_creative_video(),
         build_creative_video_edit(),
+        build_creative_upscale(),
         build_creative_video_reconcile(),
         build_creative_compose(),
         build_creative_stitch(),
         build_creative_cancel(),
         build_fal_balance(),
         build_creative_enhance(),
+        build_creative_layerize(),
         build_insights_review(),
         build_brand_research(),
         build_research_resolve(),

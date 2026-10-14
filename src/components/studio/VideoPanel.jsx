@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Button, Spinner, Textarea } from '../ui/index'
 import { applyStrength, paceForDuration } from './motionPresets'
 import { AudioToggle, CostLine, ModelPicker, MotionPicker, QualityRow } from './VideoSettings'
-import { getVideoModel } from './videoModels'
+import { getVideoModel, resolveVideoModelId } from './videoModels'
 
 // ─── Animate (image → video) ───────────────────────────────────────────────
 // The controls themselves live in VideoSettings.jsx, shared with the "A video"
@@ -22,7 +22,7 @@ export function VideoPanel({
   const [prompt, setPrompt] = useState(initialPrompt)
   const [presetId, setPresetId] = useState('')
   const [strength, setStrength] = useState('medium')
-  const [modelId, setModelId] = useState(initialModel)
+  const [modelId, setModelId] = useState(() => resolveVideoModelId(initialModel))
   const [duration, setDuration] = useState(initialDuration)
   const [resolution, setResolution] = useState(initialResolution)
   const [audio, setAudio] = useState(initialAudio)

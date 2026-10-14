@@ -1,5 +1,7 @@
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './supabaseClient'
-import { getVideoModel, estimateVideoCost, modelImageRole } from '../components/studio/videoModels'
+import {
+  getVideoModel, estimateVideoCost, modelImageRole, resolveVideoModelId, isUpscaleModel,
+} from '../components/studio/videoModels'
 import { buildVideoPrompt } from '../components/studio/motionPresets'
 
 // ─── Multi-clip storyboard ─────────────────────────────────────────────────
@@ -113,11 +115,16 @@ export function normalizeStoryboard(raw, fallback = {}) {
   const base = emptyStoryboard(fallback)
   if (!raw || typeof raw !== 'object') return base
   const clips = Array.isArray(raw.clips) && raw.clips.length ? raw.clips : base.clips
+  // A board saved with a model that has since been replaced (Kling 2.5 Turbo,
+  // Veo 3.1 Fast) opens on its successor, so the picker shows a real option
+  // and the next render goes where the workflow will actually send it.
+  const model = resolveVideoModelId(raw.model || base.model)
   return {
     ...base,
     ...raw,
+    model,
     clips: clips.slice(0, MULTI_CLIP_MAX).map((c, i) => ({
-      ...newClip(raw.model || base.model),
+      ...newClip(model),
       ...c,
       key: c.key || clipKey(),
       continueFromPrevious: i === 0 ? false : !!c.continueFromPrevious,
@@ -230,9 +237,14 @@ export function clipState(row) {
 // clip 2 mints a fresh overlay row that becomes clip 2's current take, and
 // comparing that row's timestamp would report clip 3's seam as broken when the
 // footage beneath the lettering never changed.
+//
+// A clip made 1080p is the same take for the same reason: the upscaler
+// enlarges the footage rather than rolling new footage, so the clip after it
+// still continues from the frame it was chained to.
 function takeTimeOf(row, byId) {
   let cur = row
-  for (let hops = 0; cur && cur.kind === 'overlay' && cur.parent_version_id && hops < 8; hops += 1) {
+  const sameTake = r => r.kind === 'overlay' || isUpscaleModel(r.model)
+  for (let hops = 0; cur && sameTake(cur) && cur.parent_version_id && hops < 8; hops += 1) {
     const parent = byId.get(cur.parent_version_id)
     if (!parent) break
     cur = parent

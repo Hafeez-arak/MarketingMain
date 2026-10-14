@@ -3,7 +3,10 @@ import { Button, ConfirmDialog, Modal, Spinner, Textarea, Toggle } from '../ui/i
 import { MultiRefRow } from './MediaPicker'
 import { LookPicker, ModelPicker } from './VideoSettings'
 import { STYLE_BIBLE_PLACEHOLDER } from './motionPresets'
-import { getVideoModel, estimateVideoCost, modelImageMax, modelImageRole } from './videoModels'
+import {
+  getVideoModel, estimateVideoCost, modelImageMax, modelImageRole,
+  canUpscale, estimateUpscaleCost, isUpscaleModel, upscaleSourceTier,
+} from './videoModels'
 import {
   MULTI_CLIP_MAX, canMoveClip, chainedAfter, clipImagePlan, clipPromptFor, staleSeams,
   storyboardTotals,
@@ -170,7 +173,7 @@ function ImageNote({ plan, model, index }) {
 function ClipCard({
   clip, index, row, state, model, audio, active, promptText, preparing, plan,
   canRender, renderBlockedWhy, busy,
-  onPatch, onRemove, onRender, onCancel, onAddText, onPreview, onMove, onAddRef, onRemoveRef,
+  onPatch, onRemove, onRender, onUpscale, onCancel, onAddText, onPreview, onMove, onAddRef, onRemoveRef,
   canRemove, canUp, canDown, disabled,
 }) {
   const cost = estimateVideoCost(model.id, { resolution: clip.resolution, duration: clip.duration, audio })
@@ -179,6 +182,12 @@ function ClipCard({
   // A composite has been through the text editor; the take you'd re-render is
   // still the clip underneath it.
   const composited = row?.kind === 'overlay'
+  // Make 1080p enlarges this clip's own take; a failed one retries as an
+  // upscale. Not offered on a composite: the text stamped on it would be
+  // enlarged as pixels — make it 1080p first, then add the text.
+  const upscalable = ready && !!onUpscale && canUpscale(row)
+  const reupscale = state === 'failed' && !!onUpscale && isUpscaleModel(row?.model)
+  const upscaleCost = estimateUpscaleCost(row?.duration || clip.duration)
 
   return (
     <div className={`border p-3 space-y-2 transition-colors ${
@@ -215,10 +224,21 @@ function ClipCard({
             <Button size="xs" variant="secondary" onClick={() => onAddText(row)} disabled={disabled || !!preparing}>
               {preparing ? <><Spinner size="sm" /> Opening…</> : 'Editor'}
             </Button>
+            {upscalable && (
+              <Button size="xs" onClick={() => onUpscale(index)} disabled={busy}
+                title={`This clip is ${upscaleSourceTier(row)}. Sharpens this exact clip to 1080p — same movement, so later clips still join up. Re-render makes a new, different take.`}>
+                Make 1080p · {money(upscaleCost)}
+              </Button>
+            )}
             <Button size="xs" variant="secondary" onClick={() => onRender(index)} disabled={busy}>
               ↻ Re-render · {money(cost)}
             </Button>
           </>
+        )}
+        {reupscale && (
+          <Button size="xs" onClick={() => onUpscale(index)} disabled={busy}>
+            ↻ Try 1080p again · {money(upscaleCost)}
+          </Button>
         )}
         {!ready && !pending && (
           // One shot at a time, without committing to the whole board. The
@@ -327,7 +347,7 @@ export function ClipBoard({
   storyboard, clipRows, versions, states, activeIndex, running, allReady, busy,
   stitchRow, stitching, preparingClipId, runStatus,
   onPatchClip, onPatchBoard, onAddClip, onRemoveClip, onMoveClip,
-  onStart, onStop, onRenderClip, onCancelClip, onStitch,
+  onStart, onStop, onRenderClip, onUpscaleClip, onCancelClip, onStitch,
   onAddRef, onRemoveRef, onAddClipRef, onRemoveClipRef,
   onOpenClip, onDownloadStitch, onUseThis,
 }) {
@@ -467,6 +487,7 @@ export function ClipBoard({
                 plan={plan} canRender={!why} renderBlockedWhy={why} busy={busy}
                 onPatch={onPatchClip} onRemove={onRemoveClip}
                 onRender={idx => (clipRows[idx] ? setRerendering(idx) : onRenderClip(idx))}
+                onUpscale={onUpscaleClip}
                 onCancel={setCancelling}
                 onAddText={onOpenClip}
                 onPreview={row => setPreview({ url: row.video_url, kind: 'video', index: i })}

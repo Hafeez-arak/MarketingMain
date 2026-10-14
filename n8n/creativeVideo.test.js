@@ -19,6 +19,10 @@ import { VIDEO_MODELS, modelImageRole } from '../src/components/studio/videoMode
 //   · Veo's duration needs an 's' suffix.
 //   · Seedance 2.5 takes real aspect ratios again (it was 'auto'-only, so the
 //     workflow used to send none at all).
+//   · Kling 3's start frame is start_image_url, and its generate_audio
+//     defaults to TRUE — and is billed.
+//   · A retired model id (Kling 2.5 Turbo, Veo 3.1 Fast) must reach its
+//     successor, not fall back to Seedance 2.0.
 
 const ENV = {
   FAL_KEY: 'stub-fal-key',
@@ -38,7 +42,7 @@ const MP4 = Buffer.concat([
 ])
 
 // Captures the submit call, which is the whole point of this file.
-function fal() {
+function fal({ result = { video: { url: 'https://cdn.fal.test/clip.mp4' } } } = {}) {
   const submits = []
   const routes = [
     ['queue.fal.run', async ({ url, body, method }) => {
@@ -54,7 +58,7 @@ function fal() {
           },
         }
       }
-      return { statusCode: 200, body: { video: { url: 'https://cdn.fal.test/clip.mp4' } } }
+      return { statusCode: 200, body: result }
     }],
     ['cdn.fal.test', async () => ({ statusCode: 200, body: MP4 })],
   ]
@@ -65,8 +69,8 @@ const db = () => new StubPostgrest({
   creative_versions: [{ id: VERSION, session_id: SESSION, status: 'pending' }],
 })
 
-async function render(over = {}) {
-  const { routes, submits } = fal()
+async function render(over = {}, { result, postgrest = db() } = {}) {
+  const { routes, submits } = fal({ result })
   // `items` rather than `out`: this node returns ONE item object rather than an
   // array of them, so the harness's out?.[0] convenience is null here.
   const { items } = await runCodeNode(RENDER, {
@@ -79,7 +83,7 @@ async function render(over = {}) {
         ...over,
       },
     },
-    postgrest: db(),
+    postgrest,
     routes,
   })
   // A throw inside the node is reported as _ok:false rather than raised, so an
@@ -147,18 +151,52 @@ describe('Creative Video — per-model request bodies', () => {
   })
 
   it('leaves the models that take no aspect ratio alone', async () => {
-    for (const model of ['kling-2.5-turbo-pro', 'hailuo-2.3']) {
-      const { input } = await render({ model })
-      expect(input.aspect_ratio, model).toBeUndefined()
-      expect(input.resolution, model).toBeUndefined()
-    }
+    const { input } = await render({ model: 'hailuo-2.3' })
+    expect(input.aspect_ratio).toBeUndefined()
+    expect(input.resolution).toBeUndefined()
+  })
+
+  it("sends Kling 3 its own start-frame field and turns its billed default-on audio off", async () => {
+    const { endpoint, input } = await render({
+      model: 'kling-3-pro', image_url: 'https://cdn.test/start.png',
+      end_image_url: 'https://cdn.test/end.png', duration: '12',
+    })
+    expect(endpoint).toBe('fal-ai/kling-video/v3/pro/image-to-video')
+    // The trap: image_url is silently ignored by this endpoint.
+    expect(input.start_image_url).toBe('https://cdn.test/start.png')
+    expect(input.image_url).toBeUndefined()
+    expect(input.end_image_url).toBe('https://cdn.test/end.png')
+    // generate_audio defaults to true at fal, and sound is billed here.
+    expect(input.generate_audio).toBe(false)
+    expect(input.duration).toBe('12')
+    // Image-to-video follows the frame and has no ratio field at all.
+    expect(input.aspect_ratio).toBeUndefined()
+    expect(input.resolution).toBeUndefined()
+  })
+
+  it('gives Kling 3 text-to-video one of the three shapes it accepts', async () => {
+    const portrait = await render({ model: 'kling-3-pro' })
+    expect(portrait.endpoint).toBe('fal-ai/kling-video/v3/pro/text-to-video')
+    expect(portrait.input.aspect_ratio).toBe('9:16')   // 4:5 is portrait
+    expect((await render({ model: 'kling-3-pro', aspect_ratio: '1:1' })).input.aspect_ratio).toBe('1:1')
+    expect((await render({ model: 'kling-3-pro', aspect_ratio: '16:9' })).input.aspect_ratio).toBe('16:9')
   })
 
   it("keeps Veo's 's' suffix on duration", async () => {
-    const { endpoint, input } = await render({ model: 'veo-3.1-fast', duration: '8' })
-    expect(endpoint).toBe('fal-ai/veo3.1/fast')
+    const { endpoint, input } = await render({ model: 'veo-3.1-lite', duration: '8' })
+    expect(endpoint).toBe('fal-ai/veo3.1/lite')
     expect(input.duration).toBe('8s')
     expect(input.aspect_ratio).toBe('9:16')
+  })
+
+  // Every saved row and storyboard keeps the id it was rendered with, and an
+  // id the workflow doesn't know falls back to Seedance 2.0 — so re-rendering
+  // an old take would quietly have switched model.
+  it('sends a retired model id to the model that replaced it', async () => {
+    const kling = await render({ model: 'kling-2.5-turbo-pro', image_url: 'https://cdn.test/start.png' })
+    expect(kling.endpoint).toBe('fal-ai/kling-video/v3/pro/image-to-video')
+    const veo = await render({ model: 'veo-3.1-fast', image_url: 'https://cdn.test/start.png' })
+    expect(veo.endpoint).toBe('fal-ai/veo3.1/lite/image-to-video')
   })
 
   // ── The two halves have to agree ─────────────────────────────────────────
@@ -188,10 +226,10 @@ describe('Creative Video — per-model request bodies', () => {
     // otherwise the request falls through to text-to-video and the pictures
     // are discarded at full price.
     const { endpoint, input } = await render({
-      model: 'kling-2.5-turbo-pro',
+      model: 'kling-3-pro',
       reference_image_urls: ['https://cdn.test/a.png'],
     })
-    expect(endpoint).toBe('fal-ai/kling-video/v2.5-turbo/pro/text-to-video')
+    expect(endpoint).toBe('fal-ai/kling-video/v3/pro/text-to-video')
     expect(input.reference_image_urls).toBeUndefined()
     expect(input.image_urls).toBeUndefined()
   })

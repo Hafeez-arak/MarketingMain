@@ -8,8 +8,8 @@
 // being compared, and has to be updated whenever genGemini/genOpenAI in the
 // Creative Generate workflow point somewhere new.
 export const PROVIDER_LABEL = {
-  openai: 'ChatGPT (GPT Image 2)',
-  gemini: 'Gemini (Nano Banana 2)',
+  openai: 'ChatGPT (GPT Image 2.5)',
+  gemini: 'Gemini (Nano Banana 2.1)',
   seedance: 'Video',
   manual: 'Your edit',
 }

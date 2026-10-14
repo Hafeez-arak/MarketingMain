@@ -1,0 +1,93 @@
+{
+  "name": "Arak Lighting – Creative Layerize",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Creative Studio — Layerize\n\nPOST `arak-creative-layerize`\n```\n{ image_url }\n```\n\n**Synchronous**, like Enhance: the answer goes straight back into the open\nphoto editor, so there is no version row and nothing to poll.\n\nSplits a flat image into a clean background plus up to 16 separate,\ntransparent elements (a product, a person, a sign, a block of baked-in text),\neach with a name and a position, using fal's\n`bytedance/seedream/v5/flash/layerize` — **$0.027 per image**, however many\nlayers come back.\n\nReturns fal's own file URLs. The BROWSER copies each one into the\ncreative-studio bucket (uploadToStudio) before the editor uses it, because\nfal's URLs are not guaranteed to last and the layers are saved by URL in\noverlay_state. Uploading from here would mean binary through a Code node,\nwhich corrupts the file — see Creative Generate's sticky.\n\nPositions come back as `box: [left, top, right, bottom]` in 0–1 fractions of\nthe image that was sent, which is the same unit every editor layer uses.\n\nNeeds env: FAL_KEY.",
+        "height": 460,
+        "width": 460
+      },
+      "id": "d5233eb5-ef88-5399-b9d0-1ba92cfe4ace",
+      "name": "Note: Overview",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        -240
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "arak-creative-layerize",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "b17762e9-d219-5b27-a9e5-dd35b1b8e88a",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        200
+      ],
+      "webhookId": "arak-creative-layerize"
+    },
+    {
+      "parameters": {
+        "jsCode": "const expected = String($env.N8N_WEBHOOK_SECRET || '').trim();\nif (expected) {\n  const headers = ($input.first().json || {}).headers || {};\n  const got = String(headers['x-webhook-secret'] || headers['X-Webhook-Secret'] || '').trim();\n  if (got !== expected) {\n    throw new Error('Unauthorized: missing or invalid webhook secret');\n  }\n}\nreturn $input.all();"
+      },
+      "id": "96120c9c-c59d-5085-a592-675d40a28095",
+      "name": "Webhook Secret Guard",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        130,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst rawHttp = this.helpers.httpRequest;\n\n// Retry a lookup that never left the machine.\n//\n// Observed 2026-08-17: one candidate in a two-candidate generate round died\n// with \"getaddrinfo ENOTFOUND fal.run\" while the OTHER candidate — same node,\n// same host, same second — reached fal and returned an image, and the balance\n// call to the same domain succeeded either side of it. Docker's embedded\n// resolver (127.0.0.11) drops a lookup occasionally; nothing was wrong with\n// fal, the key, or the prompt. The visible cost was half a paid round lost to\n// a blip the user then has to notice and re-run by hand.\n//\n// ONLY name resolution is retried, deliberately. A DNS failure proves the\n// request never reached the provider, so re-sending it cannot start a second\n// paid job. A connection reset or a timeout carries no such proof — the model\n// may already be rendering — so those still fail once, loudly, exactly as\n// before.\nconst http = async (opts) => {\n  for (let attempt = 0; ; attempt++) {\n    try {\n      return await rawHttp(opts);\n    } catch (e) {\n      const code = (e && (e.code || (e.cause && e.cause.code))) || '';\n      const msg  = String((e && e.message) || '');\n      const isDns = code === 'ENOTFOUND' || code === 'EAI_AGAIN'\n        || /getaddrinfo\\s+(ENOTFOUND|EAI_AGAIN)/.test(msg);\n      if (!isDns || attempt >= 2) throw e;\n      await new Promise(r => setTimeout(r, 400 * (attempt + 1)));\n    }\n  }\n};\nconst prepareBinaryData = this.helpers.prepareBinaryData;\nconst FAL = $env.FAL_KEY;\n\n// Pull the provider's ACTUAL message out of whatever shape n8n wrapped it in.\n// Verified necessary 2026-08-09: an exhausted fal balance reached the card as\n// the useless \"Request failed with status code 403\", when fal had actually\n// replied {\"detail\":\"User is locked. Reason: Exhausted balance.\"}. Those two\n// strings lead to completely different actions, so this walks every container\n// the body might hide in — including `response.body` and `cause`, which the\n// older unwrapper (still used by the other workflows) misses — and only falls\n// back to n8n's generic text when nothing real is found.\nfunction errText(e){\n  const candidates = [\n    e && e.response && e.response.data,\n    e && e.response && e.response.body,\n    e && e.error,\n    e && e.cause && e.cause.response && e.cause.response.data,\n    e && e.cause && e.cause.error,\n    e && e.cause,\n    e && e.description,\n  ];\n  for (const c of candidates) {\n    if (!c) continue;\n    if (typeof c === 'string' && c.trim()) return c.slice(0, 400);\n    if (Buffer.isBuffer(c)) return c.toString('utf8', 0, 300);\n    if (typeof c === 'object') {\n      if (c.detail) return (typeof c.detail === 'string' ? c.detail : JSON.stringify(c.detail)).slice(0, 400);\n      if (c.error && c.error.message) return String(c.error.message).slice(0, 400);\n      if (c.message && c.message !== (e && e.message)) return String(c.message).slice(0, 400);\n      const s = JSON.stringify(c);\n      if (s && s !== '{}' && s !== 'null') return s.slice(0, 400);\n    }\n  }\n  return (e && e.message) || String(e);\n}\n\nfunction bodyText(body, status){\n  if (body == null) return 'HTTP ' + status;\n  if (Buffer.isBuffer(body)) return 'HTTP ' + status + ': ' + body.toString('utf8', 0, 300);\n  if (typeof body === 'string') return 'HTTP ' + status + ': ' + body.slice(0, 400);\n  if (typeof body === 'object') {\n    if (body.detail) return (typeof body.detail === 'string' ? body.detail : JSON.stringify(body.detail)).slice(0, 400);\n    if (body.error && body.error.message) return String(body.error.message).slice(0, 400);\n    if (body.message) return String(body.message).slice(0, 400);\n    return 'HTTP ' + status + ': ' + JSON.stringify(body).slice(0, 400);\n  }\n  return 'HTTP ' + status;\n}\n\n// Don't let n8n throw on a non-2xx at all — ask for the full response and\n// judge the status here. Measured 2026-08-09: when n8n raises the error\n// itself, the provider's body is NOT reachable from the thrown object by any\n// path (errText below was tried and still yielded \"Request failed with status\n// code 403\"), so an exhausted balance and a rejected prompt were\n// indistinguishable on the card. Reading the body directly is the only way to\n// get the real reason out. errText stays as the fallback for older n8n builds\n// that ignore ignoreHttpStatusErrors and throw regardless.\n// returnFullResponse changes how a BINARY body comes back. Measured against\n// this n8n build, 2026-08-10, fetching the same JPEG both ways:\n//   encoding:'arraybuffer'                       -> real Buffer (isBuffer true)\n//   encoding:'arraybuffer' + returnFullResponse  -> {type:'Buffer', data:[...]}\n// i.e. the JSON-serialised form, whose .length is undefined. Since req() sets\n// returnFullResponse on every call to read error bodies, every image and video\n// download in these workflows was silently getting that object instead of\n// bytes — \"Downloaded file is not a real image (undefined bytes)\". It went\n// unnoticed because fal's balance was empty the whole time this code existed,\n// so the download line had never once been reached with a real response.\nfunction reviveBinary(b){\n  if (!b || typeof b !== 'object') return b;\n  if (typeof Buffer !== 'undefined' && Buffer.isBuffer(b)) return b;\n  if (b.type === 'Buffer' && Array.isArray(b.data)) return Buffer.from(b.data);\n  if (b instanceof ArrayBuffer) return Buffer.from(new Uint8Array(b));\n  if (ArrayBuffer.isView(b)) return Buffer.from(b.buffer, b.byteOffset, b.byteLength);\n  return b;\n}\n\nasync function req(opts){\n  let full;\n  try {\n    full = await http(Object.assign({}, opts, { returnFullResponse: true, ignoreHttpStatusErrors: true }));\n  } catch (e) {\n    throw new Error(errText(e));\n  }\n  const status = (full && (full.statusCode || full.status)) || 200;\n  const body = (full && full.body !== undefined) ? full.body : full;\n  if (status >= 400) throw new Error(bodyText(body, status));\n  return reviveBinary(body);\n}\n\n// A byte-count threshold is not enough — a corrupted buffer can be LARGER\n// than the real file (a JSON-stringified Buffer is ~7x bigger), which is how\n// a broken image once saved silently with no error anywhere. Check the actual\n// file signature instead.\nfunction looksLikeImage(buf){\n  if (!buf || buf.length < 12) return false;\n  // Same fix as the other looksLikeImage in this file: PNG's 0x89 lead byte\n  // cannot survive an 'ascii' string compare (Node masks the high bit off\n  // every byte for that encoding), so this always failed a genuine PNG.\n  const head = buf.toString('ascii', 0, 12);\n  return (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4E && buf[3] === 0x47)\n      || (buf[0] === 0xFF && buf[1] === 0xD8)\n      || (head.startsWith('RIFF') && head.indexOf('WEBP') !== -1);\n}\n\n// gpt-image-2's named buckets have no 4:5, which used to mean the GPT\n// candidate came back 3:4 while the Gemini one came back a true 4:5 — two\n// different shapes in a side-by-side that exists to compare models, and the\n// GPT one not post-ready. The prompt even claimed it would be \"cropped to\n// 4:5\" and no crop was ever performed anywhere in the pipeline.\n//\n// The endpoint also accepts explicit dimensions, which removes the problem at\n// the source rather than trimming after the fact: 1024x1280 is exactly 4:5,\n// both edges multiples of 16, and 1.31MP sits inside the documented\n// 655,360–8,294,400 pixel range. Every other ratio has an exact bucket\n// already, so only 4:5 needs this.\nconst GPT_SIZE = {\n  '1:1': 'square_hd', '3:4': 'portrait_4_3',\n  '9:16': 'portrait_16_9', '16:9': 'landscape_16_9',\n  '1.91:1': 'landscape_16_9', '4:3': 'landscape_4_3', '3:2': 'landscape_4_3',\n};\nconst GPT_EXACT = {\n  '4:5': { width: 1024, height: 1280 },\n};\n\nconst MODEL = 'bytedance/seedream/v5/flash/layerize';\nconst body = ($input.first().json.body) || {};\nconst imageUrl = String(body.image_url || '').trim();\n\ntry {\n  if (!/^https?:\\/\\//i.test(imageUrl)) throw new Error('No image to split.');\n\n  // fal.run rather than the queue: a layerize call returns in well under a\n  // minute, and this answer is awaited by an open editor rather than written\n  // to a row a poller would pick up.\n  const r = await req({ method: 'POST', url: 'https://fal.run/' + MODEL,\n    headers: { Authorization: 'Key ' + FAL, 'Content-Type': 'application/json' },\n    body: { image_url: imageUrl, image_size: 'auto' }, json: true });\n\n  const raw = Array.isArray(r && r.layers) ? r.layers : [];\n  if (!raw.length) throw new Error('The model returned no layers.');\n\n  // fal states the bounds two ways; the 0–1000 normalized form is the one\n  // that needs no knowledge of the output's pixel size. z_index 0 is always\n  // the base, and the only layer without a box.\n  const out = raw\n    .filter(l => l && l.image && l.image.url)\n    .map(l => {\n      const n = l.bounding_box && Array.isArray(l.bounding_box.normalized) ? l.bounding_box.normalized : null;\n      return {\n        url: l.image.url,\n        width: Number(l.image.width) || 0,\n        height: Number(l.image.height) || 0,\n        z: Number(l.z_index) || 0,\n        name: String(l.name || '').slice(0, 60),\n        box: n && n.length === 4 ? n.map(v => Math.max(0, Math.min(1, Number(v) / 1000))) : null,\n      };\n    })\n    .sort((a, b) => a.z - b.z);\n\n  const base = out.find(l => l.z === 0 && !l.box) || null;\n  const layers = out.filter(l => l !== base && l.box);\n  if (!base) throw new Error('The model returned no background layer.');\n\n  return [{ json: { ok: true, base, layers } }];\n} catch (err) {\n  return [{ json: { ok: false, error: errText(err) } }];\n}\n"
+      },
+      "id": "a7de6573-d619-5bb6-aa89-c6094d902ed3",
+      "name": "Split Into Layers",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        200
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Webhook Secret Guard",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook Secret Guard": {
+      "main": [
+        [
+          {
+            "node": "Split Into Layers",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [],
+  "id": "23QUPTzOn18ERzbc"
+}

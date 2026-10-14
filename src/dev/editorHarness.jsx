@@ -125,6 +125,41 @@ function ReelHarness() {
   )
 }
 
+// A stand-in for the paid Layerize call: a plain background with the banding
+// "removed", plus two transparent cut-outs at known spots, so the placement
+// maths can be eyeballed against the photo they came from. Resolves after a
+// beat, like the real one, so the button's working state is visible.
+function fakeCutout(w, h, draw) {
+  const c = document.createElement('canvas')
+  c.width = w; c.height = h
+  draw(c.getContext('2d'), w, h)
+  return c.toDataURL('image/png')
+}
+async function fakeLayerize() {
+  await new Promise(r => setTimeout(r, 900))
+  const plain = fakeCutout(1600, 2000, (ctx, w, h) => {
+    const g = ctx.createLinearGradient(0, 0, w, h)
+    g.addColorStop(0, '#3b2f1d'); g.addColorStop(0.5, '#c8a24a'); g.addColorStop(1, '#1a1410')
+    ctx.fillStyle = g; ctx.fillRect(0, 0, w, h)
+  })
+  const lamp = fakeCutout(320, 480, (ctx, w, h) => {
+    ctx.fillStyle = '#f5e6b8'; ctx.beginPath(); ctx.ellipse(w / 2, h * 0.7, w * 0.45, h * 0.28, 0, 0, Math.PI * 2); ctx.fill()
+    ctx.fillStyle = '#222'; ctx.fillRect(w / 2 - 4, 0, 8, h * 0.45)
+  })
+  const sign = fakeCutout(800, 160, (ctx, w, h) => {
+    ctx.fillStyle = '#1a1410'; ctx.fillRect(0, 0, w, h)
+    ctx.fillStyle = '#d4af37'; ctx.font = 'bold 90px sans-serif'; ctx.fillText('GRAND OPENING', 20, 115)
+  })
+  return {
+    ok: true,
+    base: { url: plain, width: 1600, height: 2000 },
+    layers: [
+      { url: lamp, name: 'Pendant lamp', width: 320, height: 480, box: [0.4, 0.3, 0.6, 0.54] },
+      { url: sign, name: 'Painted headline', width: 800, height: 160, box: [0.25, 0.75, 0.75, 0.8] },
+    ],
+  }
+}
+
 export function EditorHarness() {
   if (REEL) return <ReelHarness />
   return (
@@ -155,6 +190,7 @@ export function EditorHarness() {
         onCancel={() => {}}
         onUploadImage={async () => ({ error: 'Uploading is not wired up in the harness.' })}
         imageLibrary={[]}
+        onLayerize={MODE === 'photo' ? fakeLayerize : undefined}
         brandColorsText="Arak gold #d4af37, deep charcoal #1A1410, warm sand #C8A24A and an off-white"
       />
     </div>
