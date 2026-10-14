@@ -43,6 +43,7 @@ import { fetchIdeaForStudio, fetchPlanForIdea } from '../../lib/studioBridge'
 import { fetchPlanWithIdeas } from '../../lib/contentPlans'
 import { planDraftFromPlan } from '../../lib/campaignPlan'
 import { UseThisSheet } from '../../components/studio/UseThisSheet'
+import { composerWarnings } from '../../components/studio/composerWarnings'
 
 // ─── Creative Studio ───────────────────────────────────────────────────────
 // Prompt → two candidates → keep talking to whichever one you like → animate.
@@ -684,6 +685,9 @@ export function CreativeStudio() {
     [state.brandProfile, brandSchema, brandDirectory, brandMemory, brandTask, mutedBlocks, prompt, refNotes],
   )
   const brandInstructions = brandCtx.instructions
+
+  // Plain-word notes under the prompt box — see composerWarnings.js.
+  const promptWarnings = useMemo(() => composerWarnings(prompt, { intent }), [prompt, intent])
 
   // Rewrites the box in place and stops. It deliberately does NOT generate:
   // the whole point is that the prompt is read and editable before it costs a
@@ -1526,7 +1530,11 @@ export function CreativeStudio() {
   // like it had spawned a whole new column. See buildBranches for the other
   // half: a parentless retry now rejoins its provider's lane instead of
   // starting one.
-  async function handleRetry(version) {
+  // `withoutBrand` is the failed card's "Try again without brand context":
+  // the same brief with the brand block left out, for the case where the
+  // block itself is what the model choked on. Only a round-0 generate sends
+  // that block at all, so it changes nothing on any other kind of retry.
+  async function handleRetry(version, { withoutBrand = false } = {}) {
     if (!version || !session) return
     setBusy(`retry:${version.id}`); setError('')
 
@@ -1617,7 +1625,7 @@ export function CreativeStudio() {
     } else if (isRound0) {
       fired = await requestGenerate(webhooks.creativeGenerate, {
         session_id: session.id, prompt: version.user_prompt, aspect_ratio: version.aspect_ratio,
-        instructions: brandInstructions,
+        instructions: withoutBrand ? '' : brandInstructions,
         reference_url: version.reference_url || '', reference_notes: version.reference_notes || '',
         targets: [{ version_id: fresh.id, provider: version.provider }],
       })
@@ -1757,7 +1765,8 @@ export function CreativeStudio() {
     onFinalize: v => handleFinalize(branch, v),
     onUseThis: v => setUseThisFor(v),
     onDownload: handleDownload,
-    onRetry: handleRetry,
+    onRetry: v => handleRetry(v),
+    onRetryWithoutBrand: brandInstructions ? v => handleRetry(v, { withoutBrand: true }) : undefined,
     // Only offered once there's more than one candidate in the strip, so this
     // can never empty a lane out from under itself — the strip itself is
     // already hidden below that threshold (see BranchChat's History section).
@@ -1793,8 +1802,8 @@ export function CreativeStudio() {
       {missingWebhook && (
         <div className="mb-4 border border-amber-300 bg-amber-50 px-4 py-3">
           <p className="text-xs text-amber-900">
-            The Studio's workflows aren't connected yet — add the Creative Studio webhook
-            URLs in <span className="font-semibold">Settings → Integrations</span> before generating.
+            The studio isn't switched on for this company yet, so nothing can be generated.
+            Tell your admin.
           </p>
         </div>
       )}
@@ -1802,8 +1811,8 @@ export function CreativeStudio() {
       {missingCompose && (
         <div className="mb-4 border border-amber-300 bg-amber-50 px-4 py-3">
           <p className="text-xs text-amber-900">
-            Adding text to a clip needs the <span className="font-semibold">Creative Studio — Compose</span> webhook,
-            which isn't set. Video will still generate; you just won't be able to put words on it yet.
+            Putting words on a clip isn't switched on yet. Videos still generate; you just
+            can't add text to them for now.
           </p>
         </div>
       )}
@@ -1811,8 +1820,8 @@ export function CreativeStudio() {
       {missingStitch && (
         <div className="mb-4 border border-amber-300 bg-amber-50 px-4 py-3">
           <p className="text-xs text-amber-900">
-            Joining the clips into one video needs the <span className="font-semibold">Creative Studio — Stitch</span> webhook,
-            which isn't set. The clips will still render; you'd just have to assemble them yourself.
+            Joining clips into one video isn't switched on yet. The clips still render; you'd
+            just have to put them together yourself.
           </p>
         </div>
       )}
@@ -1908,6 +1917,16 @@ export function CreativeStudio() {
                     else if (promptSource === 'raw' && v !== promptRaw) setPromptEnhanced('')
                   }}
                   placeholder="e.g. A dusk shot of a modern Riyadh villa facade with warm linear lighting, for an Instagram post announcing our new residential range" />
+
+                {/* Notes, not gates: each is a brief that reads fine and comes
+                    back wrong in a predictable way. Generate stays live. */}
+                {promptWarnings.length > 0 && (
+                  <ul className="space-y-0.5">
+                    {promptWarnings.map(w => (
+                      <li key={w.id} className="text-[11px] text-amber-800 leading-snug">{w.text}</li>
+                    ))}
+                  </ul>
+                )}
 
                 <div className="flex items-center justify-between gap-2 flex-wrap">
                   <div className="flex items-center gap-2">
