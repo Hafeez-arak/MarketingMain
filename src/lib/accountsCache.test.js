@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
-  createAccountsStore, readCache, writeCache, accountsFromMirror, CACHE_PREFIX, FRESH_MS,
+  createAccountsStore, readCache, writeCache, accountsFromMirror, platformStatus, CACHE_PREFIX, FRESH_MS,
 } from './accountsCache'
 
 // ─── Which early answer is allowed on screen ───────────────────────────────
@@ -178,5 +178,47 @@ describe('createAccountsStore', () => {
     const before = seen.ws
     store.replace(WS, [insta])
     expect(seen.ws).toBe(before)
+  })
+})
+
+// The flash the owner saw: a list remembered before Instagram was connected
+// holds only LinkedIn, and the Instagram card read that as "Not connected".
+describe('platformStatus', () => {
+  it('reads a platform missing from an early answer as unknown, not "not connected"', async () => {
+    const storage = memoryStorage()
+    writeCache(storage, WS, [page])
+    const live = deferred()
+    const store = createAccountsStore({ fetchLive: () => live.promise, storage })
+
+    expect(platformStatus(store.getSnapshot(WS), 'linkedin')).toBe('connected')
+    expect(platformStatus(store.getSnapshot(WS), 'instagram')).toBe('loading')
+
+    const run = store.refresh(WS)
+    live.resolve({ accounts: [page, insta] })
+    await run
+    expect(platformStatus(store.getSnapshot(WS), 'instagram')).toBe('connected')
+    expect(platformStatus(store.getSnapshot(WS), 'tiktok')).toBe('not_connected')
+  })
+
+  it('is loading before any answer, and failed — never "not connected" — when Zernio cannot be asked', async () => {
+    const store = createAccountsStore({ fetchLive: async () => ({ error: 'Zernio is down.' }) })
+    expect(platformStatus(store.getSnapshot(WS), 'instagram')).toBe('loading')
+    await store.refresh(WS)
+    expect(platformStatus(store.getSnapshot(WS), 'instagram')).toBe('failed')
+  })
+
+  it('keeps the live answer when a later refresh fails', async () => {
+    let fail = false
+    const store = createAccountsStore({ fetchLive: async () => (fail ? { error: 'x' } : { accounts: [insta] }) })
+    await store.refresh(WS)
+    fail = true
+    await store.refresh(WS, { force: true })
+    expect(platformStatus(store.getSnapshot(WS), 'instagram')).toBe('connected')
+    expect(platformStatus(store.getSnapshot(WS), 'tiktok')).toBe('not_connected')
+  })
+
+  it('does not count a deactivated account as connected', () => {
+    const snap = { accounts: [{ ...insta, is_active: false }], source: 'live', error: '' }
+    expect(platformStatus(snap, 'instagram')).toBe('not_connected')
   })
 })

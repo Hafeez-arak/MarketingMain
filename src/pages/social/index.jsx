@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom'
 import { useApp, actions } from '../../store/app'
 import { useAuth } from '../../store/auth'
 import { fetchPostCounts } from '../../lib/scheduledPosts'
-import { Card, Button, Badge, Empty, PostImage, Skeleton } from '../../components/ui/index'
+import { Card, Button, Badge, Empty, PostImage, Skeleton, Avatar } from '../../components/ui/index'
 import { PLATFORM_META, LIVE_PLATFORMS, formatDateTime } from '../../lib/utils'
 import { useConnectedAccounts } from '../../lib/useConnectedAccounts'
 import { ConnectAccounts } from '../../components/social/ConnectAccounts'
@@ -17,38 +17,126 @@ import { ConnectAccounts } from '../../components/social/ConnectAccounts'
 //
 // Beta platforms (Snapchat) get no card. It used to sit here as a greyed-out
 // "Coming soon" card, which the team read as clutter rather than news.
+//
+// Each card has four states, from statusOf() in useConnectedAccounts: loading
+// draws a skeleton of the card, failed says so, and only Zernio's own answer
+// may say "Not connected". A connected card carries the green ring and the
+// account itself; a not-connected one is drawn quieter, so the eye lands on
+// what is live.
 
-function PlatformCard({ meta, postCount, accounts, loading, onOpen }) {
-  const connected = accounts.some(a => a.is_active !== false)
+function AccountAvatar({ account }) {
+  const name = account.username || account.display_name || '?'
+  return account.profile_picture
+    ? <img src={account.profile_picture} alt="" className="w-8 h-8 rounded-full object-cover border border-border flex-shrink-0" />
+    : <Avatar name={name} size="md" />
+}
+
+function StatusPill({ status }) {
+  if (status === 'connected') {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.08em] px-2 py-0.5 leading-[1.4] bg-sage-100 text-sage-800 border border-sage-200 flex-shrink-0">
+        <span className="w-1.5 h-1.5 rounded-full bg-sage-600" />
+        Connected
+      </span>
+    )
+  }
+  if (status === 'failed') {
+    return (
+      <span className="text-[10px] font-bold uppercase tracking-[0.08em] px-1.5 py-0.5 leading-[1.4] bg-red-50 text-red-600 flex-shrink-0">
+        Not checked
+      </span>
+    )
+  }
+  return (
+    <span className="text-[10px] font-bold uppercase tracking-[0.08em] px-1.5 py-0.5 leading-[1.4] bg-surface-muted text-text-tertiary flex-shrink-0">
+      Not connected
+    </span>
+  )
+}
+
+function PlatformHeading({ meta, muted = false }) {
+  return (
+    <div className="flex items-center gap-2 min-w-0">
+      <span className={`w-8 h-8 flex items-center justify-center text-xs font-bold flex-shrink-0 ${meta.bg} ${meta.text} ${muted ? 'opacity-60' : ''}`}>{meta.abbr}</span>
+      <span className={`font-semibold truncate ${muted ? 'text-text-secondary' : 'text-text'}`}>{meta.label}</span>
+    </div>
+  )
+}
+
+// The card's own shape with nothing claimed in it. The platform's name and
+// mark say nothing about the account, so they show; the rest waits.
+function PlatformCardSkeleton({ meta }) {
+  return (
+    <div className="bg-white border border-border overflow-hidden" aria-busy="true" aria-label={`Checking ${meta.label}`}>
+      <Skeleton className="h-1 w-full" />
+      <div className="p-5">
+        <div className="flex items-center justify-between gap-2 mb-4">
+          <PlatformHeading meta={meta} />
+          <Skeleton className="h-[18px] w-20" />
+        </div>
+        <div className="flex items-center gap-2.5 mb-3 px-3 py-2 border border-border-light">
+          <Skeleton className="w-8 h-8 rounded-full flex-shrink-0" />
+          <div className="flex-1 space-y-1.5">
+            <Skeleton className="h-3.5 w-28" />
+            <Skeleton className="h-3 w-20" />
+          </div>
+        </div>
+        <Skeleton className="h-3 w-24 mb-4" />
+        <Skeleton className="h-8 w-full" />
+      </div>
+    </div>
+  )
+}
+
+function PlatformCard({ meta, status, postCount, accounts, onOpen, onRetry }) {
+  if (status === 'loading') return <PlatformCardSkeleton meta={meta} />
+
+  const connected = status === 'connected'
+  const live = accounts.filter(a => a.is_active !== false)
+  const postLine = postCount === null ? '' : postCount === 0 ? 'No posts created yet.' : `${postCount} post${postCount === 1 ? '' : 's'} created`
 
   return (
-    <Card className="overflow-hidden transition-all cursor-pointer hover:border-stone-400" onClick={onOpen}>
-      <div className="h-1" style={{ background: meta.color }} />
+    <div onClick={onOpen}
+      className={`overflow-hidden cursor-pointer transition-colors duration-150 ${connected
+        ? 'bg-white border border-sage-300 ring-1 ring-sage-300 hover:border-sage-500 hover:ring-sage-500'
+        : 'bg-surface-subtle border border-border hover:border-stone-400'}`}>
+      <div className="h-1" style={connected ? { background: meta.color } : undefined} />
       <div className="p-5">
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center gap-2">
-            <span className={`w-8 h-8 flex items-center justify-center text-xs font-bold ${meta.bg} ${meta.text}`}>{meta.abbr}</span>
-            <span className="font-semibold text-text">{meta.label}</span>
-          </div>
-          {loading ? (
-            <Skeleton className="h-[18px] w-20" />
-          ) : (
-            <span className={`text-[10px] font-bold uppercase tracking-[0.08em] px-1.5 py-0.5 leading-[1.4] ${connected ? 'bg-sage-50 text-sage-700' : 'bg-surface-subtle text-text-tertiary'}`}>
-              {connected ? 'Connected' : 'Not connected'}
-            </span>
-          )}
+        <div className="flex items-center justify-between gap-2 mb-4">
+          <PlatformHeading meta={meta} muted={!connected} />
+          <StatusPill status={status} />
         </div>
 
-        <p className="text-sm text-text-secondary mb-1">
-          {postCount === null ? '' : postCount === 0 ? 'No posts created yet.' : `${postCount} post${postCount === 1 ? '' : 's'} created`}
-        </p>
-        <p className="text-xs text-text-tertiary mb-4 truncate min-h-[1rem]">
-          {loading
-            ? <Skeleton className="h-3 w-28" />
-            : connected
-            ? accounts.map(a => a.username ? `@${a.username}` : a.display_name).filter(Boolean).join(', ')
-            : ''}
-        </p>
+        {connected ? (
+          <div className="space-y-1.5 mb-3">
+            {live.map(a => (
+              <div key={a.zernio_account_id || a.id || a.username}
+                className="flex items-center gap-2.5 px-3 py-2 bg-sage-50 border border-sage-200">
+                <AccountAvatar account={a} />
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold text-text truncate">
+                    {a.username ? `@${a.username}` : (a.display_name || 'Connected account')}
+                  </p>
+                  <p className={`text-xs truncate ${a.needs_reconnection ? 'text-red-600' : 'text-text-secondary'}`}>
+                    {a.needs_reconnection
+                      ? 'Needs reconnecting'
+                      : a.followers_count != null
+                      ? `${Number(a.followers_count).toLocaleString('en-US')} followers`
+                      : 'Ready to publish'}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-sm text-text-secondary mb-3 min-h-[3.25rem]">
+            {status === 'failed'
+              ? "Couldn't load connected accounts, so this one wasn't checked."
+              : `Connect a ${meta.label} account to publish and see analytics here.`}
+          </p>
+        )}
+
+        <p className="text-xs text-text-tertiary mb-4 min-h-[1rem]">{postLine}</p>
 
         {/* Two actions, because a card that only says "Open" gives someone
             with nothing connected no idea what to do next. The Connect button
@@ -59,43 +147,58 @@ function PlatformCard({ meta, postCount, accounts, loading, onOpen }) {
           <Button variant="secondary" size="sm" className="flex-1 justify-center" onClick={onOpen}>
             Open
           </Button>
-          {!loading && !connected && (
-            <Button variant="primary" size="sm" className="flex-1 justify-center"
-              onClick={onOpen}>
+          {status === 'not_connected' && (
+            <Button variant="primary" size="sm" className="flex-1 justify-center" onClick={onOpen}>
               Connect
+            </Button>
+          )}
+          {status === 'failed' && (
+            <Button variant="outline" size="sm" className="flex-1 justify-center" onClick={onRetry}>
+              Try again
             </Button>
           )}
         </div>
       </div>
-    </Card>
+    </div>
   )
 }
 
 export function SocialOverview() {
   const navigate = useNavigate()
-  const { allAccounts, loading, error, refresh } = useConnectedAccounts()
+  const { allAccounts, statusOf, error, refresh } = useConnectedAccounts()
   const { activeWorkspaceId, accessToken } = useAuth()
   // Posts live in Supabase, not in state.posts — that store only holds what
   // this browser session created, so counting it said "No posts created yet"
   // for every post made before the page loaded. null = not answered yet.
-  const [counts, setCounts] = useState(null)
+  // Kept with the workspace it answers for, so a switch reads as "not
+  // answered yet" without a reset inside the effect.
+  const [answered, setAnswered] = useState({ ws: null, counts: null })
+  const counts = answered.ws === activeWorkspaceId ? answered.counts : null
   useEffect(() => {
     let live = true
-    setCounts(null)
     // null back means the count failed: kept as `failed`, so each card says
     // nothing about its posts rather than "No posts created yet".
-    fetchPostCounts(activeWorkspaceId, accessToken).then(c => { if (live) setCounts(c ?? { failed: true }) })
+    fetchPostCounts(activeWorkspaceId, accessToken).then(c => {
+      if (live) setAnswered({ ws: activeWorkspaceId, counts: c ?? { failed: true } })
+    })
     return () => { live = false }
   }, [activeWorkspaceId, accessToken])
 
   const platforms = LIVE_PLATFORMS.map(key => [key, PLATFORM_META[key]])
+  // Said once, above the cards, and only while some card has no answer. A
+  // refresh that fails over an answer already on screen keeps that answer,
+  // and the cards are still right.
+  const failed = platforms.some(([key]) => statusOf(key) === 'failed')
 
   return (
     <div className="max-w-7xl space-y-5">
-      {error && (
-        <Card className="p-4">
-          <p className="text-sm text-red-600">{error}</p>
-          <Button variant="outline" size="sm" className="mt-2" onClick={refresh}>Try again</Button>
+      {failed && (
+        <Card className="p-4 flex items-start justify-between gap-3 flex-wrap">
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-red-600">Couldn't load connected accounts</p>
+            {error && <p className="text-xs text-text-secondary mt-0.5">{error}</p>}
+          </div>
+          <Button variant="outline" size="sm" onClick={refresh}>Try again</Button>
         </Card>
       )}
 
@@ -104,10 +207,11 @@ export function SocialOverview() {
           <PlatformCard
             key={key}
             meta={meta}
+            status={statusOf(key)}
             postCount={counts === null || counts.failed ? null : (counts[key] || 0)}
             accounts={allAccounts.filter(a => a.platform === key)}
-            loading={loading}
             onOpen={() => navigate(`/social/${key}`)}
+            onRetry={refresh}
           />
         ))}
       </div>
@@ -127,7 +231,7 @@ export function SocialPlatform() {
   const meta = PLATFORM_META[platform]
   const posts = state.posts.filter(p => p.platform === platform)
   const [filter, setFilter] = useState('all')
-  const { accounts, loading, error, refresh } = useConnectedAccounts(platform)
+  const { accounts, loading, status, error, refresh } = useConnectedAccounts(platform)
 
   if (!meta) return <p className="text-text-secondary">Platform not found.</p>
 
@@ -144,7 +248,7 @@ export function SocialPlatform() {
             <div>
               <h2 className="font-semibold text-text">{meta.label}</h2>
               <p className="text-xs text-text-secondary">
-                {posts.length} post{posts.length === 1 ? '' : 's'} · {loading ? 'Checking connection…' : connected ? 'Connected' : 'Not connected'}
+                {posts.length} post{posts.length === 1 ? '' : 's'} · {loading ? 'Checking connection…' : connected ? 'Connected' : status === 'failed' ? 'Connection not checked' : 'Not connected'}
               </p>
             </div>
           </div>

@@ -208,6 +208,8 @@ export function ConnectAccounts({ platform, accounts, loading, error, refresh, c
   }
 
   const problem = error || flow.error || disconnectError
+  // The account list itself could not be loaded, and nothing is on screen.
+  const listFailed = !loading && !!error && accounts.length === 0
 
   // Zernio replaces rather than adds for Instagram: one Instagram account per
   // profile, and picking a different identity purges the previous account's
@@ -219,7 +221,9 @@ export function ConnectAccounts({ platform, accounts, loading, error, refresh, c
   return (
     <>
       {problem && (
-        <p className="text-sm text-red-600 mb-3">{problem}</p>
+        <p className="text-sm text-red-600 mb-3">
+          {listFailed && problem === error ? `Couldn't load connected accounts. ${error}` : problem}
+        </p>
       )}
 
       {/* The other half of the round trip. Success used to be silent: the URL
@@ -245,17 +249,26 @@ export function ConnectAccounts({ platform, accounts, loading, error, refresh, c
         </div>
       )}
 
-      {!loading && accounts.length === 0 && !compact && (
+      {/* A list that failed to load is not an empty list. Saying "No account
+          connected" under the error, with a Connect button, told someone with
+          a connected account to connect it again. */}
+      {!loading && accounts.length === 0 && !listFailed && !compact && (
         <p className="text-sm text-text-secondary mb-3">
           No {meta.label} account connected to this workspace yet.
         </p>
+      )}
+
+      {listFailed && (
+        <div className="mt-1">
+          <Button variant="outline" size="sm" onClick={refresh}>Try again</Button>
+        </div>
       )}
 
       {/* Held back until the list is in. Before, it rendered as "Connect
           Instagram" and then changed its mind to "Replace the connected
           account" once the accounts arrived — a primary button inviting you to
           connect something that was already connected. */}
-      {!(loading && accounts.length === 0) && (
+      {!(loading && accounts.length === 0) && !listFailed && (
         <div className="mt-3">
           <Button variant={accounts.length ? 'outline' : 'primary'} size="sm"
             disabled={flow.phase === 'starting'}

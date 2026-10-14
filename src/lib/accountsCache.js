@@ -87,6 +87,23 @@ export function accountsFromMirror(rows) {
     }))
 }
 
+// What a screen may say about ONE platform, from one snapshot:
+//   'connected'     — any answer lists an active account for it
+//   'not_connected' — Zernio itself answered, and listed none
+//   'failed'        — Zernio could not be asked, and nothing earlier lists it
+//   'loading'       — none of the above yet
+// An early answer (memory or mirror) proves a platform IS connected, never
+// that it is not. The list remembered before Instagram was connected holds
+// only LinkedIn; reading that as "Instagram: Not connected" painted the wrong
+// answer on every Instagram card until Zernio replied a second or two later.
+export function platformStatus(snapshot, platform) {
+  const accounts = snapshot?.accounts || []
+  if (accounts.some(a => a.platform === platform && a.is_active !== false)) return 'connected'
+  if (snapshot?.source === 'live') return 'not_connected'
+  if (snapshot?.error) return 'failed'
+  return 'loading'
+}
+
 export function createAccountsStore({ fetchLive, fetchMirror = null, storage = null, now = () => Date.now() }) {
   const entries = new Map()
   const listeners = new Map()
