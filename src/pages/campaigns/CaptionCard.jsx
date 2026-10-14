@@ -39,7 +39,7 @@ function AutoTextarea({ value, minRows = 3, className = box, ...props }) {
 export function CaptionCard({
   idea, thumbUrl, mediaUrls = [], language = 'both', dateMin, dateMax, todayKey = '', redrafting = false,
   lock = null, onOpenMedia,
-  onPick, onEdit, onSaveField, onClearChoice, onRedraft, onDate, onTime, onPollEdit, onPollSave,
+  onPick, onEdit, onSaveField, onClearChoice, onRedraft, onWriteOwn, onDate, onTime, onPollEdit, onPollSave,
 }) {
   const own = idea.copyMode === 'own'
   const wantsCaption = idea.wantsCaption !== false
@@ -177,6 +177,13 @@ export function CaptionCard({
             <button onClick={onRedraft} disabled={redrafting} className="font-semibold text-amber-700 hover:text-amber-800 disabled:opacity-50">
               {redrafting ? <Spinner size="sm" /> : '↻ Retry'}
             </button>
+            {/* The way out when the writer keeps failing: without it a failed
+                caption had only Retry, and the plan could not be scheduled. */}
+            {onWriteOwn && (
+              <button onClick={onWriteOwn} disabled={redrafting} className="font-semibold text-text-secondary hover:text-text disabled:opacity-50">
+                ✎ Write my own
+              </button>
+            )}
           </div>
         ) : options.length > 0 ? (
           <div>

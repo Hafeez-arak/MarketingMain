@@ -12,7 +12,7 @@
 // owns the idea, the modal is how it gets edited.
 
 import { useState } from 'react'
-import { Button, Input, Textarea, Spinner, Modal } from '../../components/ui/index'
+import { Button, Input, Textarea, Spinner, Modal, ConfirmDialog } from '../../components/ui/index'
 import { formatDate } from '../../lib/utils'
 import { formatsFor, aspectLabel } from '../../lib/postFormats'
 import { logIdeaEvent, ideaSnapshot } from '../../lib/brandContext'
@@ -43,6 +43,7 @@ export function IdeaCard({ idea, index, accessToken, workspaceId, onChange, onRe
   const [saving,  setSaving]  = useState(false)
   const [saveError, setSaveError] = useState('')
   const [showRejectReasons, setShowRejectReasons] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
   const targets = idea.platforms?.length ? idea.platforms : [idea.platform]
   const own = isOwnPost(idea)
   const formatLabel = formatsFor(idea.platform).find(f => f.id === idea.postFormat)?.label || 'Feed image'
@@ -196,12 +197,19 @@ export function IdeaCard({ idea, index, accessToken, workspaceId, onChange, onRe
             ✕ Reject
           </button>
           {!idea.isNew && <button onClick={() => setEditing(true)} className="text-[11px] font-medium px-2.5 py-1 rounded-lg text-text-tertiary hover:text-text hover:bg-surface-subtle transition-colors">Edit</button>}
-          <button onClick={() => onRemove(idea)} className="text-[11px] font-medium px-2.5 py-1 rounded-lg text-text-tertiary hover:text-red-500 transition-colors ml-auto">
+          {/* A saved idea is asked about first: Delete sits next to Reject
+              and removed the idea for good on one click. An unsaved one has
+              nothing to lose. */}
+          <button onClick={() => (idea.isNew ? onRemove(idea) : setConfirmDelete(true))} className="text-[11px] font-medium px-2.5 py-1 rounded-lg text-text-tertiary hover:text-red-500 transition-colors ml-auto">
             {idea.isNew ? 'Discard' : 'Delete'}
           </button>
         </div>
         )}
       </div>
+
+      <ConfirmDialog open={confirmDelete} onClose={() => setConfirmDelete(false)} onConfirm={() => onRemove(idea)}
+        title="Delete this idea?" danger
+        message={`“${idea.title || idea.topic || 'Untitled idea'}” is removed from the plan for good. To keep it out of the plan but on record, Reject it instead.`} />
 
       {editing && (
         <IdeaEditModal idea={idea} saving={saving} saveError={saveError} workspaceId={workspaceId} accessToken={accessToken}

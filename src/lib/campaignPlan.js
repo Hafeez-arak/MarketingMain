@@ -50,7 +50,23 @@ export function planDraftFromPlan(plan, ideas, { step = 'review' } = {}) {
     // send you to the plan list instead of a blank setup form that has
     // nothing to do with how this plan actually came to be.
     openedFromPlanList: true,
+    // A plan n8n is still writing (or has written and nobody has picked up)
+    // re-enters the planner's wait loop. Without this, opening such a plan
+    // from the list showed its old ideas and the AI result was never read:
+    // the loop only runs while the draft carries generatingPlanId.
+    ...(planAwaitsGeneration(plan)
+      ? { generatingPlanId: plan.id, generatingMode: plan.generation_mode || 'new' }
+      : { generatingPlanId: null }),
   }
+}
+
+// Still generating, or finished with a result nobody has consumed yet —
+// readPlanGeneration checks the result before the status for the same reason.
+export function planAwaitsGeneration(plan) {
+  if (!plan) return false
+  if (plan.status === 'generating') return true
+  const result = plan.generation_result
+  return !!(result && Array.isArray(result.posts) && result.posts.length)
 }
 
 // Map a persisted plan_ideas row into the shape the UI/draft uses.

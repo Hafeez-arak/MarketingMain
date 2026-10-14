@@ -817,9 +817,11 @@ Return ONLY valid JSON — no markdown fences, no comments, nothing before or af
 try {
   const resp = await req({ method:'POST', url:'https://api.anthropic.com/v1/messages',
     headers:{ 'x-api-key':ANTHROPIC, 'anthropic-version':'2023-06-01', 'content-type':'application/json' },
-    // Three bilingual LinkedIn posts of up to ~1,300 characters each do not
-    // fit in 3000 tokens with room to spare; a cut-off reply is a failed draft.
-    body:{ model:'claude-sonnet-5-5', max_tokens: platform === 'linkedin' ? 8000 : 3000, messages:[{ role:'user', content:[
+    // Three captions in BOTH languages (plus three media prompts) did not fit
+    // in 3000 tokens: Arabic costs several tokens a word, and a reply cut off
+    // mid-JSON is a failed draft. LinkedIn's longer posts need the room too.
+    // max_tokens is a ceiling, not a spend: a short reply costs what it costs.
+    body:{ model:'claude-sonnet-5-5', max_tokens: (platform === 'linkedin' || lang === 'both') ? 8000 : 3000, messages:[{ role:'user', content:[
       { type:'text', text: cachedPrefix, cache_control:{ type:'ephemeral' } },
       // Images sit AFTER the cached block, so the brand prefix stays
       // byte-identical across a plan's posts and keeps its cache hit.

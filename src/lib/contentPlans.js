@@ -17,7 +17,11 @@ export async function fetchPlans(workspaceId, accessToken, { throwOnError = fals
   let failure
   try {
     const res = await fetch(
-      `${SUPABASE_URL}/rest/v1/content_plans?workspace_id=eq.${workspaceId}&select=*&order=created_at.desc`,
+      // Each plan carries its ideas' platforms and status, so a card can show
+      // where the plan really goes and how many ideas it has — the plan's own
+      // `platforms` is only what was ticked on setup.
+      `${SUPABASE_URL}/rest/v1/content_plans?workspace_id=eq.${workspaceId}` +
+      `&select=*,plan_ideas(platform,platforms,status)&order=created_at.desc`,
       { headers: authHeaders(accessToken) }
     )
     if (res.ok) return await res.json()
@@ -339,12 +343,39 @@ export async function updatePlan(accessToken, planId, patch) {
   } catch (err) { return { error: err.message } }
 }
 
-export async function deletePlan(accessToken, planId) {
+// plan_ideas cascade-delete via FK. Post rows do NOT: generated_posts.plan_id
+// has no foreign key, so a booked post outlives its plan and still goes out.
+// Cancel those first (cancelPlanBookings in ContentPlans) — this only removes
+// the plan. It used to ignore the response, so a refused delete looked done.
+export async function deletePlan(accessToken, planId, workspaceId) {
   try {
-    // plan_ideas cascade-delete via FK
-    await fetch(`${SUPABASE_URL}/rest/v1/content_plans?id=eq.${planId}`, { method: 'DELETE', headers: authHeaders(accessToken) })
+    const res = await fetch(
+      `${SUPABASE_URL}/rest/v1/content_plans?id=eq.${planId}${workspaceId ? `&workspace_id=eq.${workspaceId}` : ''}`,
+      { method: 'DELETE', headers: { ...authHeaders(accessToken), Prefer: 'return=representation' } },
+    )
+    if (!res.ok) return { error: `The plan could not be deleted (${res.status}).` }
+    const rows = await res.json().catch(() => [])
+    if (!rows.length) return { error: 'The plan could not be deleted — it may already be gone, or you may not have access.' }
     return { ok: true }
   } catch (err) { return { error: err.message } }
+}
+
+// Per plan: how many post rows it produced, and which of them are booked and
+// not yet out. One read for every plan on the page. `null` on a failed read,
+// so the page can say "couldn't count" rather than print 0.
+export async function fetchPlanPosts(workspaceId, accessToken, planIds) {
+  if (!workspaceId || !planIds?.length) return {}
+  try {
+    const res = await fetch(
+      `${SUPABASE_URL}/rest/v1/generated_posts?workspace_id=eq.${workspaceId}` +
+      `&plan_id=in.(${planIds.join(',')})&select=*&limit=2000`,
+      { headers: authHeaders(accessToken) },
+    )
+    if (!res.ok) return null
+    const byPlan = {}
+    for (const row of await res.json()) (byPlan[row.plan_id] ||= []).push({ ...row, post_table: 'generated_posts' })
+    return byPlan
+  } catch { return null }
 }
 
 // ── Ideas ──

@@ -19,7 +19,7 @@ import { WEEKDAYS, DEFAULT_DRAFT, isUntouchedSelection, targetLabel } from './pl
 import { IdeaCard } from './IdeaCard'
 import { CaptionCard } from './CaptionCard'
 import { GenerateMoreModal, CalendarView, FocusCategoryPicker } from './plannerParts'
-import { momentsInRange, dbIdeaToDraft } from '../../lib/campaignPlan'
+import { momentsInRange, dbIdeaToDraft, planAwaitsGeneration } from '../../lib/campaignPlan'
 import { PostComposer } from '../../components/composer/PostComposer'
 import { composerFromIdea, slidesFromComposerMedia, flatOptionsFromComposer } from '../../lib/composerState'
 import {
@@ -282,7 +282,11 @@ export function CampaignPlanner() {
       if (!dbIdeas) return
       const dbDraftIdeas = dbIdeas.map(dbIdeaToDraft)
       const localOnly = (draft.ideas || []).filter(i => typeof i.id === 'string' && i.id.startsWith('new_'))
-      update({ ideas: [...dbDraftIdeas, ...localOnly] })
+      // A plan still being written picks its wait back up, however the
+      // draft got here; see planAwaitsGeneration.
+      const resume = planAwaitsGeneration(plan) && !draftRef.current?.generatingPlanId
+        ? { generatingPlanId: plan.id, generatingMode: plan.generation_mode || 'new' } : {}
+      update({ ideas: [...dbDraftIdeas, ...localOnly], ...resume })
     })
   }, [planId, accessToken, activeWorkspaceId])
 
@@ -410,29 +414,33 @@ export function CampaignPlanner() {
       const rows = await fetchIdeaDrafts(accessToken, draftingIds)
       if (!rows.length) return
       const now = Date.now()
-      update({
-        ideas: ideas.map(i => {
-          if (i.draftStatus !== 'drafting') return i
-          const row = rows.find(r => r.id === i.id)
-          if (!row) return i
-          // No drafted_at means the age is unknowable — time it out too rather
-          // than wait forever on a card that can never satisfy the check.
-          const staleMs = i.draftedAt ? now - new Date(i.draftedAt).getTime() : Infinity
-          if (row.draft_status === 'drafting' && staleMs > 5 * 60 * 1000) {
-            // Written down, not just patched locally — a local-only verdict
-            // died with the tab and the next load resumed the same spinner.
-            markIdeaDraftFailed(accessToken, i.id, 'Drafting timed out — no result came back from the workflow.')
-            return { ...i, draftStatus: 'failed', draftError: 'Drafting timed out — try again.' }
-          }
-          if (row.draft_status === 'ready' || row.draft_status === 'failed') {
-            return {
-              ...i, draftStatus: row.draft_status, draftError: row.draft_error || '',
-              captionOptions: row.caption_options || [],
-            }
-          }
-          return i
-        }),
-      })
+      // Decide per card from the board as it is NOW, not the `ideas` this
+      // interval captured: a caption picked while the read was in flight used
+      // to be overwritten by the stale array and snap back.
+      const patches = {}
+      for (const i of draftRef.current?.ideas || []) {
+        if (i.draftStatus !== 'drafting') continue
+        const row = rows.find(r => r.id === i.id)
+        if (!row) continue
+        // No drafted_at means the age is unknowable — time it out too rather
+        // than wait forever on a card that can never satisfy the check.
+        const staleMs = i.draftedAt ? now - new Date(i.draftedAt).getTime() : Infinity
+        if (row.draft_status === 'drafting' && staleMs > 5 * 60 * 1000) {
+          // Written down, not just patched locally — a local-only verdict
+          // died with the tab and the next load resumed the same spinner.
+          markIdeaDraftFailed(accessToken, i.id, 'Drafting timed out — no result came back from the workflow.')
+          patches[i.id] = { draftStatus: 'failed', draftError: 'Drafting timed out — try again.' }
+        } else if (row.draft_status === 'ready' || row.draft_status === 'failed') {
+          patches[i.id] = { draftStatus: row.draft_status, draftError: row.draft_error || '', captionOptions: row.caption_options || [] }
+        }
+      }
+      if (!Object.keys(patches).length) return
+      // Applied functionally, and only to a card still 'drafting' when it
+      // lands, so a late result never clobbers a choice.
+      update(prev => ({
+        ideas: (prev?.ideas || []).map(i =>
+          patches[i.id] && i.draftStatus === 'drafting' ? { ...i, ...patches[i.id] } : i),
+      }))
     }, 4000)
     return () => clearInterval(timer)
   }, [ideas, accessToken])
@@ -874,6 +882,14 @@ export function CampaignPlanner() {
   // What saving the plan will write: approved posts that haven't gone out.
   const toSchedule = approvedIdeas.filter(i => !isLocked(i))
   const captionsDrafting = approvedIdeas.some(i => i.draftStatus === 'drafting')
+  // Instagram cannot post without a picture or video. Owner decision
+  // (2026-10-14): saving is BLOCKED while any such post has none, and the
+  // posts are named — it used to save them and leave each one to fail later.
+  // A video post counts once it has its cover; the clip renders after saving.
+  const goesToInstagram = i => (i.platforms?.length ? i.platforms : [i.platform]).includes('instagram')
+  const hasVisual = i => mediaUrlsFor(i).length > 0 || !!thumbFor(i) || !!i.previewVideoUrl
+  const picturesMissing = toSchedule.filter(i => goesToInstagram(i) && !hasVisual(i))
+  const ideaName = i => i.title || i.topic || 'Untitled post'
 
   // Arriving on the captions step writes the options for every post that still
   // needs them — once per idea per visit, never for your own words, and never
@@ -1208,64 +1224,74 @@ export function CampaignPlanner() {
     const approved = ideas.filter(i => i.status === 'approved' && !isLocked(i))
     if (approved.length === 0) { setError(approvedIdeas.length ? 'Every approved post has already gone out.' : 'Approve at least one idea first.'); return }
     if (approved.some(i => !captionReady(i))) { setError('Pick a caption for every post, and finish every poll, first.'); return }
-    setError(''); setBusy(true)
-
-    await markIdeasProcessing(accessToken, planId, { copyMode: 'ai' })
-
-    // Any post still without a date or time gets one now, the same way setup
-    // places them, so nothing is left unscheduled by accident.
-    // Never onto a day already gone; a date already set is left for the
-    // queue to flag rather than moved behind anyone's back.
-    const readyIdeas = distributeDates(approved, placement)
-      .map(i => ({ ...i, time: i.time || DEFAULT_POST_TIME }))
-
-    const res = await publishIdeasAsPosts(activeWorkspaceId, accessToken, planId, readyIdeas)
-    if (res.error) {
-      await markIdeasGenerated(accessToken, readyIdeas.map(i => i.id), { status: 'failed', error: res.error })
-      setBusy(false); setError(`The posts couldn't be saved: ${res.error}`); return
+    if (picturesMissing.length) {
+      setError(`Instagram needs a picture for: ${picturesMissing.map(ideaName).join(', ')}. Add one on the pictures step, or take Instagram off that post.`)
+      return
     }
-    const posts = res.posts || []
-    const skipped = res.skipped || []
+    setError(''); setBusy(true)
+    // try/finally: any throw on the way (a dropped request, a bad row) used to
+    // leave the button on "Scheduling…" until the page was reloaded.
+    try {
+      await markIdeasProcessing(accessToken, planId, { copyMode: 'ai' })
 
-    // An idea whose post went out between loading and saving was marked
-    // processing above like the rest; it is finished, not failed.
-    const wroteRow = new Set([...posts.map(p => p.ideaId), ...skipped.map(p => p.ideaId)])
-    await markIdeasGenerated(accessToken, [...wroteRow])
-    const noRow = readyIdeas.filter(i => !wroteRow.has(i.id)).map(i => i.id)
-    if (noRow.length) await markIdeasGenerated(accessToken, noRow, { status: 'failed', error: 'No post row was written for this idea.' })
+      // Any post still without a date or time gets one now, the same way setup
+      // places them, so nothing is left unscheduled by accident.
+      // Never onto a day already gone; a date already set is left for the
+      // queue to flag rather than moved behind anyone's back.
+      const readyIdeas = distributeDates(approved, placement)
+        .map(i => ({ ...i, time: i.time || DEFAULT_POST_TIME }))
 
-    await updatePlan(accessToken, planId, { status: 'active' })
+      const res = await publishIdeasAsPosts(activeWorkspaceId, accessToken, planId, readyIdeas)
+      if (res.error) {
+        await markIdeasGenerated(accessToken, readyIdeas.map(i => i.id), { status: 'failed', error: res.error })
+        setError(`The posts couldn't be saved: ${res.error}`); return
+      }
+      const posts = res.posts || []
+      const skipped = res.skipped || []
 
-    // Book them. Read back fresh rather than trusted from the write, because
-    // booking decides from publish state the write never touched.
-    const rows = await fetchScheduledPosts(activeWorkspaceId, accessToken, { ids: posts.map(p => p.id).filter(Boolean) })
-    const booking = await schedulePlanPosts({
-      rows, accounts: connectedAccounts, workspaceId: activeWorkspaceId,
-      changedIds: new Set(posts.filter(p => !p.wasScheduled || p.changed).map(p => p.id)),
-    })
+      // An idea whose post went out between loading and saving was marked
+      // processing above like the rest; it is finished, not failed.
+      const wroteRow = new Set([...posts.map(p => p.ideaId), ...skipped.map(p => p.ideaId)])
+      await markIdeasGenerated(accessToken, [...wroteRow])
+      const noRow = readyIdeas.filter(i => !wroteRow.has(i.id)).map(i => i.id)
+      if (noRow.length) await markIdeasGenerated(accessToken, noRow, { status: 'failed', error: 'No post row was written for this idea.' })
 
-    // Video renders still run in the background, each polling for its own
-    // cover image before firing — only for ideas whose video does not already
-    // exist.
-    triggerVideoRenders({
-      webhooks: state.webhooks,
-      videoIdeas: readyIdeas.filter(i => i.mediaType === 'video' && i.copyMode !== 'own' && !i.previewVideoUrl),
-      accessToken,
-    })
+      await updatePlan(accessToken, planId, { status: 'active' })
 
-    setBusy(false)
-    setPostsTick(t => t + 1)
-    const ideaTitle = row => (ideas.find(i => i.id === row.plan_idea_id)?.title) || row.topic || 'Untitled post'
-    update({
-      step: 'done',
-      manualResult: {
-        count: posts.length,
-        warnings: [...(res.errors || [])],
-        booked: booking.booked.length + booking.kept.length,
-        attention: booking.attention.map(a => ({ title: ideaTitle(a.row), platform: a.row.platform, reason: a.reason })),
-        wentOut: skipped.length + booking.skipped.length,
-      },
-    })
+      // Book them. Read back fresh rather than trusted from the write, because
+      // booking decides from publish state the write never touched.
+      const rows = await fetchScheduledPosts(activeWorkspaceId, accessToken, { ids: posts.map(p => p.id).filter(Boolean) })
+      const booking = await schedulePlanPosts({
+        rows, accounts: connectedAccounts, workspaceId: activeWorkspaceId,
+        changedIds: new Set(posts.filter(p => !p.wasScheduled || p.changed).map(p => p.id)),
+      })
+
+      // Video renders still run in the background, each polling for its own
+      // cover image before firing — only for ideas whose video does not already
+      // exist.
+      triggerVideoRenders({
+        webhooks: state.webhooks,
+        videoIdeas: readyIdeas.filter(i => i.mediaType === 'video' && i.copyMode !== 'own' && !i.previewVideoUrl),
+        accessToken,
+      })
+
+      setPostsTick(t => t + 1)
+      const ideaTitle = row => (ideas.find(i => i.id === row.plan_idea_id)?.title) || row.topic || 'Untitled post'
+      update({
+        step: 'done',
+        manualResult: {
+          count: posts.length,
+          warnings: [...(res.errors || [])],
+          booked: booking.booked.length + booking.kept.length,
+          attention: booking.attention.map(a => ({ title: ideaTitle(a.row), platform: a.row.platform, reason: a.reason })),
+          wentOut: skipped.length + booking.skipped.length,
+        },
+      })
+    } catch (err) {
+      setError(`Saving stopped part-way: ${err?.message || err}. Check the Post Queue, then try again.`)
+    } finally {
+      setBusy(false)
+    }
   }
 
   const brandReady = state.brandProfile && !isBrandProfileEmpty(state.brandProfile)
@@ -1893,6 +1919,7 @@ export function CampaignPlanner() {
                 onSaveField={(field, value) => saveIdeaFields(idea, { [field]: value })}
                 onClearChoice={() => clearCaptionChoice(idea)}
                 onRedraft={() => redraftCaptions(idea)}
+                onWriteOwn={() => { patchLocal(idea, { copyMode: 'own' }); saveIdeaFields(idea, { copy_mode: 'own' }) }}
                 onDate={date => { patchLocal(idea, { date }); saveIdeaFields(idea, { scheduled_date: date || null }) }}
                 onTime={time => { patchLocal(idea, { time }); saveIdeaFields(idea, { publish_time: time || '' }) }}
                 onPollEdit={poll => patchLocal(idea, { platformOptions: { ...(idea.platformOptions || {}), poll } })}
@@ -1908,13 +1935,15 @@ export function CampaignPlanner() {
               <Button variant="secondary" onClick={() => update({ step: afterReview === 'media' ? 'media' : 'review' })}>
                 {afterReview === 'media' ? 'Back to pictures' : 'Back to ideas'}
               </Button>
-              <Button onClick={finalizePlan} disabled={busy || accountsLoading || toSchedule.length === 0 || captionsMissing.length > 0}>
+              <Button onClick={finalizePlan} disabled={busy || accountsLoading || toSchedule.length === 0 || captionsMissing.length > 0 || picturesMissing.length > 0}>
                 {busy ? <><Spinner size="sm" /> Scheduling your posts…</>
                   : toSchedule.length === 0 ? 'Everything has gone out'
                   : `Schedule ${toSchedule.length} post${toSchedule.length === 1 ? '' : 's'}`}
               </Button>
               <p className="text-xs text-text-tertiary flex-1">
-                {captionsMissing.length > 0
+                {picturesMissing.length > 0
+                  ? `Instagram needs a picture for ${picturesMissing.length === 1 ? '' : `${picturesMissing.length} posts: `}${picturesMissing.map(ideaName).join(', ')}. Add one on the pictures step first.`
+                  : captionsMissing.length > 0
                   ? captionsDrafting
                     ? 'Writing captions…'
                     : captionsMissing.some(i => hasCaption(i) || i.wantsCaption === false)

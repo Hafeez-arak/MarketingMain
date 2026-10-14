@@ -170,3 +170,24 @@ describe('publishIdeasAsPosts — existing rows', () => {
     expect(res.posts[0]).toMatchObject({ wasScheduled: true, changed: true })
   })
 })
+
+// ─── The published caption carries both languages ─────────────────────────
+// It was `captionEn || captionAr`, so a bilingual plan published English only.
+describe('publishIdeasAsPosts — bilingual caption', () => {
+  it('publishes Arabic, a blank line, then English, and keeps each half in its own column', async () => {
+    await publishIdeasAsPosts('ws-1', 'tok', 'plan-1', [idea({
+      platform: 'instagram', postFormat: 'post', mediaType: 'image', previewImageUrl: 'https://x/p.jpg',
+      captionAr: ' إضاءة معمارية لكل مشروع ', captionEn: 'Architectural lighting for every project.',
+    })])
+    expect(writes[0].body).toMatchObject({
+      caption: 'إضاءة معمارية لكل مشروع\n\nArchitectural lighting for every project.',
+      caption_ar: ' إضاءة معمارية لكل مشروع ',
+      caption_en: 'Architectural lighting for every project.',
+    })
+  })
+
+  it('publishes a single language as it is', async () => {
+    await publishIdeasAsPosts('ws-1', 'tok', 'plan-1', [idea({ captionEn: '', captionAr: 'نص عربي فقط' })])
+    expect(writes[0].body.caption).toBe('نص عربي فقط')
+  })
+})
