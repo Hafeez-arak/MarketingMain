@@ -408,6 +408,14 @@ function mediaFieldsFor(version) {
 }
 
 // Per-table copy fields.
+// One published caption from the two language boxes: the Arabic block, a
+// blank line, then the English block (owner decision 2026-10-14). Either half
+// alone is published as it is. A blank line is enough for direction: each
+// paragraph takes its own direction from its first letter.
+export function joinCaption(captionAr, captionEn) {
+  return [captionAr, captionEn].map(s => String(s || '').trim()).filter(Boolean).join('\n\n')
+}
+
 function copyFieldsFor(platform, { caption, captionAr, captionEn, hashtags }) {
   const common = {
     caption_ar: captionAr || '', caption_en: captionEn || '',
@@ -710,9 +718,10 @@ export async function publishIdeasAsPosts(workspaceId, accessToken, planId, idea
     if (!targets.length) { errors.push(`${label}: no platform to post to.`); continue }
 
     const media = manualMediaFor(idea)
-    // The operator's own words. caption_en is where the manual editor writes;
-    // caption_ar carries the Arabic when the brand posts bilingually.
-    const caption = idea.captionEn || idea.captionAr || ''
+    // What goes out: both languages when there are both. This used to be
+    // `captionEn || captionAr`, so a bilingual plan published its English half
+    // only and the Arabic was silently dropped.
+    const caption = joinCaption(idea.captionAr, idea.captionEn)
 
     // Media is spread unconditionally on the INSERT path below so a new row
     // always carries every media column explicitly, empty or not. An UPDATE is

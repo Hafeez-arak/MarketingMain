@@ -2,10 +2,12 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useApp, actions } from '../../store/app'
 import { useAuth } from '../../store/auth'
-import { Card, Button, Empty, Spinner, ConfirmDialog, IconBadge, PageHeader, Skeleton } from '../../components/ui/index'
+import { Card, Button, Empty, Spinner, Modal, IconBadge, PageHeader, Skeleton } from '../../components/ui/index'
 import { Icon } from '../../components/ui/icons'
 import { formatDate, PLATFORM_META } from '../../lib/utils'
-import { fetchPlans, fetchPlanWithIdeas, deletePlan } from '../../lib/contentPlans'
+import { fetchPlans, fetchPlanWithIdeas, deletePlan, fetchPlanPosts } from '../../lib/contentPlans'
+import { unschedulePost } from '../../lib/scheduledPosts'
+import { postLock } from '../../lib/postLock'
 import { momentsInRange, planDraftFromPlan } from '../../lib/campaignPlan'
 
 const STATUS_STYLE = {
@@ -13,10 +15,24 @@ const STATUS_STYLE = {
   approved: 'bg-sage-100 text-sage-700',
   active:   'bg-sky-50 text-sky-600',
   archived: 'bg-stone-100 text-text-tertiary',
+  generating: 'bg-amber-100 text-amber-800 animate-pulse',
+}
+const STATUS_LABEL = { generating: 'Generating…' }
+
+// Where the plan's ideas actually go — the plan's own `platforms` is only
+// what was ticked on setup, and ideas are moved between platforms after.
+function planPlatforms(plan) {
+  const live = (plan.plan_ideas || []).filter(i => i.status !== 'rejected')
+  const set = new Set(live.flatMap(i => (i.platforms?.length ? i.platforms : [i.platform]).filter(Boolean)))
+  return set.size ? [...set] : (plan.platforms || [])
 }
 
+// Booked at the platform and not out yet: what deleting the plan must cancel,
+// or it would still publish with no plan behind it.
+const isBookedUnsent = post => post.publish_status === 'scheduled' && !postLock(post).locked
+
 export function ContentPlans() {
-  const { dispatch } = useApp()
+  const { state, dispatch } = useApp()
   const navigate = useNavigate()
   const { activeWorkspaceId, accessToken } = useAuth()
 
@@ -27,6 +43,10 @@ export function ContentPlans() {
   const [loadedFor, setLoadedFor] = useState(null)
   const [opening, setOpening] = useState(null)
   const [deleteTarget, setDeleteTarget] = useState(null)
+  const [deleting, setDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState('')
+  // planId → its post rows. undefined while reading, null if the read failed.
+  const [planPosts, setPlanPosts] = useState(undefined)
   const [loadError, setLoadError] = useState('')
   const [reloadKey, setReloadKey] = useState(0)
 
@@ -38,6 +58,8 @@ export function ContentPlans() {
     fetchPlans(activeWorkspaceId, accessToken, { throwOnError: true }).then(p => {
       if (!alive) return
       setPlans(p); setLoadError(''); setLoadedFor(activeWorkspaceId)
+      setPlanPosts(undefined)
+      fetchPlanPosts(activeWorkspaceId, accessToken, p.map(x => x.id)).then(byPlan => { if (alive) setPlanPosts(byPlan) })
     }).catch(err => {
       if (!alive) return
       setLoadError(String(err?.message || err)); setLoadedFor(activeWorkspaceId)
@@ -53,11 +75,35 @@ export function ContentPlans() {
     navigate('/campaigns/plan')
   }
 
+  // Owner decision (2026-10-14): deleting a plan cancels its booked, unsent
+  // posts, through the same cancel the Post Queue uses. Cancelled posts stay
+  // in the queue under Needs attention. If any cancel fails the plan is NOT
+  // deleted, so the delete can simply be tried again.
   async function handleDelete(plan) {
-    await deletePlan(accessToken, plan.id)
-    setPlans(prev => prev.filter(p => p.id !== plan.id))
-    setDeleteTarget(null)
+    setDeleting(true); setDeleteError('')
+    try {
+      const fresh = await fetchPlanPosts(activeWorkspaceId, accessToken, [plan.id])
+      if (fresh === null) { setDeleteError('Couldn’t check this plan’s booked posts, so nothing was deleted. Try again.'); return }
+      const booked = (fresh[plan.id] || []).filter(isBookedUnsent)
+      const failed = []
+      for (const post of booked) {
+        const res = await unschedulePost({ accessToken, post, webhooks: state.webhooks, workspaceId: activeWorkspaceId })
+        if (res.error) failed.push(`${post.topic || 'A post'}: ${res.error}`)
+      }
+      if (failed.length) {
+        setDeleteError(`${failed.length} booked post${failed.length === 1 ? '' : 's'} couldn’t be cancelled, so the plan was kept. ${failed.join(' · ')}`)
+        return
+      }
+      const res = await deletePlan(accessToken, plan.id, activeWorkspaceId)
+      if (res.error) { setDeleteError(res.error); return }
+      setPlans(prev => prev.filter(p => p.id !== plan.id))
+      setDeleteTarget(null)
+    } finally {
+      setDeleting(false)
+    }
   }
+
+  const bookedFor = plan => (planPosts?.[plan.id] || []).filter(isBookedUnsent).length
 
   return (
     <div className="max-w-5xl space-y-5">
@@ -115,7 +161,7 @@ export function ContentPlans() {
                 <div className="flex-1 min-w-0">
                   <div className="flex items-start justify-between gap-2">
                     <h3 className="font-semibold text-text text-sm leading-snug">{plan.name || 'Untitled plan'}</h3>
-                    <span className={`text-[10px] font-bold uppercase tracking-[0.08em] px-1.5 py-0.5 leading-[1.4] flex-shrink-0 ${STATUS_STYLE[plan.status] || STATUS_STYLE.draft}`}>{plan.status}</span>
+                    <span className={`text-[10px] font-bold uppercase tracking-[0.08em] px-1.5 py-0.5 leading-[1.4] flex-shrink-0 ${STATUS_STYLE[plan.status] || STATUS_STYLE.draft}`}>{STATUS_LABEL[plan.status] || plan.status}</span>
                   </div>
                   {plan.start_date && <p className="text-[11px] text-text-tertiary mt-0.5">{formatDate(plan.start_date)} – {formatDate(plan.end_date)}</p>}
                 </div>
@@ -134,7 +180,7 @@ export function ContentPlans() {
                     A stored platform we no longer recognise still shows, under
                     its own key. The row is history — a plan really did ask for
                     it — and hiding it would quietly rewrite what was asked. */}
-                {(plan.platforms || []).map(p => (
+                {planPlatforms(plan).map(p => (
                   <span key={p} className="text-[10px] font-bold uppercase tracking-[0.08em] px-1.5 py-0.5 leading-[1.4] bg-surface-subtle border border-border text-text-secondary">
                     {PLATFORM_META[p]?.label || p}
                   </span>
@@ -144,11 +190,13 @@ export function ContentPlans() {
                 ))}
               </div>
 
+              <PlanCounts plan={plan} posts={planPosts === undefined ? undefined : planPosts === null ? null : (planPosts[plan.id] || [])} />
+
               <div className="flex items-center gap-2 pt-3 border-t border-border mt-auto">
                 <Button size="xs" onClick={() => openPlan(plan)} disabled={opening === plan.id}>
                   {opening === plan.id ? <><Spinner size="sm" /> Opening…</> : 'Open'}
                 </Button>
-                <button onClick={() => setDeleteTarget(plan)} className="ml-auto text-text-tertiary hover:text-red-500 transition-colors">
+                <button onClick={() => { setDeleteError(''); setDeleteTarget(plan) }} aria-label="Delete plan" className="ml-auto text-text-tertiary hover:text-red-500 transition-colors">
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/></svg>
                 </button>
               </div>
@@ -157,9 +205,45 @@ export function ContentPlans() {
         </div>
       )}
 
-      <ConfirmDialog open={!!deleteTarget} onClose={() => setDeleteTarget(null)}
-        onConfirm={() => handleDelete(deleteTarget)} title="Delete plan"
-        message="This permanently deletes the plan and all its ideas. This cannot be undone." danger />
+      <Modal open={!!deleteTarget} onClose={() => !deleting && setDeleteTarget(null)} title="Delete plan" width="max-w-sm">
+        <div className="p-5 space-y-4">
+          <p className="text-sm text-text-secondary leading-relaxed">
+            This permanently deletes <span className="font-semibold text-text">{deleteTarget?.name || 'this plan'}</span> and all its ideas.
+            {' '}{deleteTarget && (planPosts === undefined
+              ? 'Checking for booked posts…'
+              : planPosts === null
+                ? 'Any posts it has booked will be cancelled first.'
+                : bookedFor(deleteTarget) > 0
+                  ? `Its ${bookedFor(deleteTarget)} booked post${bookedFor(deleteTarget) === 1 ? '' : 's'} will be cancelled first and kept in the Post Queue.`
+                  : 'It has no booked posts.')}
+            {' '}This cannot be undone.
+          </p>
+          {deleteError && <p className="text-xs text-red-600 leading-snug">{deleteError}</p>}
+          <div className="flex gap-2 justify-end">
+            <Button variant="secondary" onClick={() => setDeleteTarget(null)} disabled={deleting}>Cancel</Button>
+            <Button variant="danger" onClick={() => handleDelete(deleteTarget)} disabled={deleting}>
+              {deleting ? <><Spinner size="sm" /> Deleting…</> : 'Delete'}
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </div>
+  )
+}
+
+// "6 ideas · 4 posts · 2 booked". Ideas come with the plan; posts are a second
+// read, so they show a placeholder until it lands and say so if it failed —
+// never a 0 that isn't known.
+function PlanCounts({ plan, posts }) {
+  const ideas = (plan.plan_ideas || []).filter(i => i.status !== 'rejected').length
+  const n = (k, word) => `${k} ${word}${k === 1 ? '' : 's'}`
+  return (
+    <p className="text-[11px] text-text-tertiary mb-3 flex items-center gap-1.5">
+      <span>{n(ideas, 'idea')}</span>
+      <span aria-hidden>·</span>
+      {posts === undefined ? <Skeleton className="h-3 w-14 inline-block" />
+        : posts === null ? <span>posts couldn’t be counted</span>
+        : <span>{n(posts.length, 'post')}{posts.some(isBookedUnsent) ? ` · ${posts.filter(isBookedUnsent).length} booked` : ''}</span>}
+    </p>
   )
 }
