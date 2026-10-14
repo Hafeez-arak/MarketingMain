@@ -1,7 +1,7 @@
 import {
   createZernio, normalizeAccount, ownedByProfile, profileIdOf,
   CONNECT_SPECS, CONNECTABLE, explainZernioError, ZernioError, qs, analyticsPlan, followerPlan, retryRateLimited,
-  syncAccountPosts,
+  syncAccountPosts, feedPlan, mergeFeedPages, FEED_MAX_PAGES,
 } from './_zernio.js'
 import { mayDisconnect, protectionReason } from '../../src/lib/platformSafety.js'
 
@@ -461,6 +461,33 @@ const handlers = {
     }
   },
 
+  // The Instagram page's "All posts" tab: every post live on one account
+  // since it was connected, ours and ones made on the platform directly.
+  // See feedPlan / feedPost in _zernio.js.
+  async feed(z, { ws, profileId, body }) {
+    const accountId = String(body.account_id || '').trim()
+    if (!accountId) return fail('account_id is required.', 400)
+
+    const account = await requireOwnedAccount(z, { workspaceId: ws.id, profileId, accountId })
+    const plan = feedPlan({ accountId, connectedAt: account.connected_at })
+
+    const pages = []
+    for (let page = 1; page <= FEED_MAX_PAGES; page++) {
+      const out = await retryRateLimited(() => z.request('analytics', { query: plan.query(page) }))
+      pages.push(out)
+      const total = Number(out?.pagination?.pages) || 1
+      if (!(out?.posts || []).length || page >= total) break
+    }
+
+    return {
+      account,
+      from_date: plan.fromDate,
+      to_date: plan.toDate,
+      last_sync: pages[0]?.overview?.lastSync || null,
+      posts: mergeFeedPages(pages),
+    }
+  },
+
   // Just the follower series, for the Follower history card's own range
   // picker. Same ownership proof as `analytics`, two Zernio reads instead of
   // nine — see followerPlan for why it is not that route with a different
@@ -852,6 +879,14 @@ function cleanList(raw) {
  * deployment's, not the workspace's, so without this a workspace could read
  * another's logs (which contain commenter names and message text) by guessing
  * an id. The read is one extra round trip and is not optional.
+ *
+ * An automation outlives its account. Disconnect an Instagram account and its
+ * automations stay in this profile's list, still switched on, but the account
+ * is gone from the profile — so the account check alone refused to touch them
+ * and they could never be deleted (the old test account's two did exactly
+ * this). When the account check fails we fall back to the profile's own
+ * automation list: Zernio filters it by profileId, so an id that appears there
+ * is ours whether or not its account still is.
  */
 async function requireOwnedAutomation(z, { workspaceId, profileId, automationId }) {
   const out = await z.request(`comment-automations/${encodeURIComponent(automationId)}`)
@@ -862,7 +897,14 @@ async function requireOwnedAutomation(z, { workspaceId, profileId, automationId 
     err.httpStatus = 404
     throw err
   }
-  await requireOwnedAccount(z, { workspaceId, profileId, accountId })
+  try {
+    await requireOwnedAccount(z, { workspaceId, profileId, accountId })
+  } catch (err) {
+    if (err.httpStatus !== 403) throw err
+    const listed = await z.request('comment-automations', { query: { profileId } })
+    const ours = (listed?.automations || []).some(a => String(a.id || a._id || '') === automationId)
+    if (!ours) throw err
+  }
   return automation
 }
 
@@ -990,4 +1032,4 @@ export default async function handler(req, res) {
 }
 
 export { qs, profileIdOf, CONNECTABLE }
-export { automationFields, cleanList, normalizeAutomation, postChoices, hasMorePages, AUTO_REPLY_PLATFORMS }
+export { automationFields, cleanList, normalizeAutomation, postChoices, hasMorePages, AUTO_REPLY_PLATFORMS, requireOwnedAutomation }

@@ -84,7 +84,7 @@ describe('messageToEnvelope', () => {
 })
 
 /** Fake Microsoft (sign-in + Graph, honouring the date filter) and a fake PostgREST. */
-function world({ messages = [], graphStatus = 200, tokenExpired = true, leads = [], mailboxes = [{ ...MB }], proxy = [] } = {}) {
+function world({ messages = [], graphStatus = 200, tokenExpired = true, leads = [], mailboxes = [{ ...MB }], proxy = [], grantSend = true } = {}) {
   const state = { leads: [...leads], usage: [], mailboxes, secrets: [{ mailbox_id: MB.id, secret: 'sealed' }], tokenCalls: [], graphCalls: [], modelCalls: 0, inFlight: 0, maxInFlight: 0 }
   const tokens = { rt: 'refresh-1', at: 'old', exp: tokenExpired ? 0 : NOW.getTime() + 3_600_000 }
   const db = async (path, init = {}) => {
@@ -118,7 +118,10 @@ function world({ messages = [], graphStatus = 200, tokenExpired = true, leads = 
     if (u.includes('/oauth2/v2.0/token')) {
       state.tokenCalls.push({ url: u, ...Object.fromEntries(new URLSearchParams(init.body)) })
       const idToken = `x.${Buffer.from(JSON.stringify({ tid: 'tenant-of-other-org' })).toString('base64url')}.y`
-      return new Response(JSON.stringify({ access_token: 'fresh', refresh_token: 'refresh-2', expires_in: 3600, id_token: idToken }), { status: 200 })
+      // Microsoft names what it granted; an admin may have allowed less than was asked.
+      const asked = new URLSearchParams(init.body).get('scope') || ''
+      const scope = asked.split(' ').filter((x) => grantSend || x !== 'Mail.Send').map((x) => (x.startsWith('Mail.') || x === 'User.Read' ? `https://graph.microsoft.com/${x}` : x)).join(' ')
+      return new Response(JSON.stringify({ access_token: 'fresh', refresh_token: 'refresh-2', expires_in: 3600, id_token: idToken, scope }), { status: 200 })
     }
     state.graphCalls.push({ url: u, headers: init.headers })
     if (u.includes('/me/messages?')) {
@@ -292,7 +295,7 @@ describe('finishConnect', () => {
   it('our own mailbox: read-only token, labelled by its info@ alias, reading new mail from 1 October', async () => {
     const w = world({ mailboxes: [], proxy: ['SMTP:a.box@example-co.sa', 'smtp:info@example-co.sa'] })
     const out = await finishConnect(w.deps, { claims: { ws: WS, uid: 'u1' }, code: 'abc', redirectUri: 'https://app/api/email/ms-callback' })
-    expect(out).toEqual({ ok: true, email: 'info@example-co.sa' })
+    expect(out).toEqual({ ok: true, email: 'info@example-co.sa', canSend: false })
     expect(w.state.tokenCalls[0].scope).not.toMatch(/Mail\.Send|Mail\.ReadWrite/)
     expect(w.state.tokenCalls[0].url).toContain('/our-tenant/')
     expect(w.state.mailboxes[0]).toMatchObject({ email: 'a.box@example-co.sa', label: 'info@example-co.sa', tenant: '', read_from: NEW_LEADS_FROM })
@@ -303,6 +306,33 @@ describe('finishConnect', () => {
     await finishConnect(w.deps, { claims: { ws: WS, uid: 'u1', o: 1 }, code: 'abc', redirectUri: 'https://app/api/email/ms-callback' })
     expect(w.state.tokenCalls[0].url).toContain('/organizations/')
     expect(w.state.mailboxes[0].tenant).toBe('tenant-of-other-org')
+  })
+})
+
+describe('"Allow forwarding" (2026-10-13)', () => {
+  it('signs in asking for Mail.Send too, and records that it was granted', async () => {
+    const w = world({ mailboxes: [{ ...MB }] })
+    const out = await finishConnect(w.deps, { claims: { ws: WS, uid: 'u1', s: 1 }, code: 'abc', redirectUri: 'https://app/api/email/ms-callback' })
+    expect(out.canSend).toBe(true)
+    expect(w.state.tokenCalls[0].scope).toMatch(/Mail\.Read .*Mail\.Send/)
+    expect(w.state.tokenCalls[0].scope).not.toMatch(/ReadWrite/)
+    expect(w.state.mailboxes[0].can_send).toBe(true)
+  })
+  it('asked but not granted (an admin allowed reading only): it stays read only', async () => {
+    const w = world({ mailboxes: [{ ...MB }], grantSend: false })
+    const out = await finishConnect(w.deps, { claims: { ws: WS, uid: 'u1', s: 1 }, code: 'abc', redirectUri: 'https://app/api/email/ms-callback' })
+    expect(out.canSend).toBe(false)
+    expect(w.state.mailboxes[0].can_send).toBe(false)
+  })
+  it('signing in again without it takes forwarding away, so renewals never ask for more than the token holds', async () => {
+    const w = world({ mailboxes: [{ ...MB, can_send: true }] })
+    await finishConnect(w.deps, { claims: { ws: WS, uid: 'u1' }, code: 'abc', redirectUri: 'https://app/api/email/ms-callback' })
+    expect(w.state.mailboxes[0].can_send).toBe(false)
+  })
+  it('a mailbox allowed to forward renews with Mail.Send; the others never do', async () => {
+    const w = world({ messages: [], mailboxes: [{ ...MB, can_send: true }] })
+    await run(w)
+    expect(w.state.tokenCalls[0].scope).toMatch(/Mail\.Send/)
   })
 })
 

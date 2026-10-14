@@ -773,7 +773,9 @@ async function handleMsCallback(req, res) {
   // tables, never an outreach sender. See api/leads/_mail.js.
   if (toLeads) {
     const out = await finishLeadMailConnect(leadDeps(), { claims, code: q('code'), redirectUri: `${base}/api/email/ms-callback` })
-    return back(out.ok ? { ms: 'connected', mailbox: out.email } : { ms_error: out.error })
+    // "Allow forwarding": say whether Microsoft granted it, not just that it signed in.
+    const forwarding = claims.s ? { forwarding: out.canSend ? 'on' : 'refused' } : {}
+    return back(out.ok ? { ms: 'connected', mailbox: out.email, ...forwarding } : { ms_error: out.error })
   }
 
   // Another organisation's mailbox: redeemed where it signed in, and its own

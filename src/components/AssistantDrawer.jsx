@@ -7,6 +7,7 @@ import { Button, Spinner } from './ui/index'
 import PastConversations from './PastConversations'
 import { AgentMarkdown } from './AgentMarkdown'
 import AskInput from './AskInput'
+import { useFollowBottom } from '../lib/useFollowBottom'
 
 // ─── The assistant, on every page ──────────────────────────────────────────
 // AGENT.md §5a. A drawer that opens anywhere and knows what you are looking
@@ -37,6 +38,23 @@ function ToolTrace({ steps, busy }) {
   )
 }
 
+// Shown once the reader has scrolled up, so getting back to a still-arriving
+// answer is one click rather than a long drag.
+export function JumpToLatest({ onClick }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="absolute bottom-3 left-1/2 -translate-x-1/2 z-10 flex items-center gap-1.5 px-3 py-1.5
+                 text-xs font-semibold bg-white text-text border border-border shadow-dropdown
+                 hover:border-stone-400 transition-colors"
+    >
+      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M12 5v14M19 12l-7 7-7-7"/></svg>
+      Latest
+    </button>
+  )
+}
+
 export function AssistantDrawer() {
   const location = useLocation()
   const { activeWorkspaceId, activeWorkspace } = useAuth()
@@ -46,8 +64,11 @@ export function AssistantDrawer() {
   const [historyOpen, setHistoryOpen] = useState(false)
   const [question, setQuestion] = useState('')
   const { turns, busy, ask, reset, stop, ready, threadId, openThread } = useAgentChat()
-  const bottom = useRef(null)
   const input = useRef(null)
+  // Re-attaches on open as well as on a new question: the panel is rebuilt
+  // each time it opens, and should open on the latest message.
+  const boxRef = useRef(null)
+  const { onScroll, following, jumpToLatest } = useFollowBottom(boxRef, turns, `${open}:${turns.length}`)
 
   // Recomputed per render from the router, so the descriptor is always for the
   // page actually on screen rather than the one the drawer opened on.
@@ -55,7 +76,6 @@ export function AssistantDrawer() {
   const contextLabel = describeContextLabel(context)
   const suggestions = useMemo(() => suggestionsFor(context), [context])
 
-  useEffect(() => { bottom.current?.scrollIntoView({ behavior: 'smooth' }) }, [turns, busy])
   useEffect(() => { if (open) input.current?.focus() }, [open])
 
   // Cmd/Ctrl-K opens it from anywhere, Escape closes. The whole point is
@@ -130,7 +150,8 @@ export function AssistantDrawer() {
               </button>
             </header>
 
-            <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
+            <div className="relative flex-1 min-h-0 flex flex-col">
+            <div ref={boxRef} onScroll={onScroll} className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
               {turns.length === 0 ? (
                 <div className="pt-2">
                   <p className="text-xs text-text-secondary mb-2.5">
@@ -179,7 +200,8 @@ export function AssistantDrawer() {
                   </div>
                 ))
               )}
-              <div ref={bottom} />
+            </div>
+            {!following && turns.length ? <JumpToLatest onClick={jumpToLatest} /> : null}
             </div>
 
             {/* items-end keeps the history and Ask buttons pinned to the bottom

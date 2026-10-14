@@ -92,6 +92,29 @@ describe('leadFilters', () => {
     expect(f.ors[1]).toBe('company.ilike.*Nour contracting*,name.ilike.*Nour contracting*,email.ilike.*Nour contracting*,subject.ilike.*Nour contracting*,summary.ilike.*Nour contracting*,message.ilike.*Nour contracting*')
     expect(activeFilterCount({ ...EMPTY_FILTERS, search: 'x', folder: 'junk' })).toBe(2)
   })
+  it('Owner: mine, no one\'s yet, or one person\'s', async () => {
+    const { leadFilters, EMPTY_FILTERS, activeFilterCount } = await import('./view.js')
+    const ME = '44444444-4444-4444-8444-444444444444'
+    const OMAR = '55555555-5555-4555-8555-555555555555'
+    expect(leadFilters({ ...EMPTY_FILTERS, owner: 'me' }, { me: ME }).eqs).toEqual([['assigned_to', ME]])
+    expect(leadFilters({ ...EMPTY_FILTERS, owner: 'me' }).eqs).toEqual([])
+    expect(leadFilters({ ...EMPTY_FILTERS, owner: 'none' }).ors).toContain('assigned_to.is.null')
+    expect(leadFilters({ ...EMPTY_FILTERS, owner: OMAR }).eqs).toEqual([['assigned_to', OMAR]])
+    expect(activeFilterCount({ ...EMPTY_FILTERS, owner: 'none' })).toBe(1)
+  })
+})
+
+describe('who works a lead', () => {
+  it('says You, a first name, Unassigned, or Someone else', async () => {
+    const { ownerLabel, shortName } = await import('./view.js')
+    const team = [{ user_id: 'a', full_name: 'Omar Saleh', email: 'omar@example.com' }, { user_id: 'b', full_name: '', email: 'huda.k@example.com' }]
+    expect(ownerLabel({ assigned_to: null }, team, 'a')).toBe('Unassigned')
+    expect(ownerLabel({ assigned_to: 'a' }, team, 'a')).toBe('You')
+    expect(ownerLabel({ assigned_to: 'a' }, team, 'z')).toBe('Omar')
+    expect(ownerLabel({ assigned_to: 'b' }, team)).toBe('huda.k')
+    expect(ownerLabel({ assigned_to: 'gone' }, team)).toBe('Someone else')
+    expect(shortName(null)).toBe('')
+  })
 })
 
 describe('where a lead came in', () => {

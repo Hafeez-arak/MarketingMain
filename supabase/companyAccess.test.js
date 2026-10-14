@@ -291,12 +291,19 @@ describe('sales seats after 20261013_sales_seats', () => {
     await pg.exec(`
       alter table public.workspaces add column if not exists slug text;
       alter table public.workspaces add column if not exists created_at timestamptz not null default now();
-      create table public.leads (id uuid primary key default gen_random_uuid(), workspace_id uuid not null, verdict text, human_verdict text);
+      create table public.leads (id uuid primary key default gen_random_uuid(), workspace_id uuid not null, verdict text, human_verdict text, source text not null default 'email', subject text);
       create table public.lead_mailboxes (id uuid primary key default gen_random_uuid(), workspace_id uuid not null);
+      create table public.lead_cards (lead_id uuid primary key references public.leads(id) on delete cascade, workspace_id uuid not null);
+      alter table public.leads enable row level security;
+      alter table public.lead_cards enable row level security;
+      grant select on public.leads, public.lead_cards to authenticated;
     `)
     await pg.exec(migration('20261013_sales_role'))
     await pg.exec(migration('20261013_sales_seats'))
     await pg.exec(migration('20261014_lead_approval'))
+    // As 20261016_lead_cards leaves it; 20261018 narrows it.
+    await pg.exec(`create policy lead_cards_sales_read on public.lead_cards for select to authenticated using (public.is_sales_member(workspace_id))`)
+    await pg.exec(migration('20261018_lead_assignment'))
     await h.as(ADMIN)
     arak = await h.create('Arak')
     ghusn = await h.create('Ghusn')
@@ -404,6 +411,49 @@ describe('sales seats after 20261013_sales_seats', () => {
     expect(await h.companiesOf(FAISAL)).toEqual(['Arak'])
     await h.as(FAISAL)
     expect(await one(`select public.can_approve_leads($1)`, [arak])).toBe(false)
+  })
+
+  // 20261018_lead_assignment: a salesperson reads only their own leads, as
+  // in Odoo. Read through the real policy: RLS on, as the authenticated role.
+  it('a salesperson sees their own leads; a sales admin all; a website seat the website\'s too; a card goes with its lead', async () => {
+    const LAYLA = '00000000-0000-0000-0000-0000000000c2'
+    const HUDA = '00000000-0000-0000-0000-0000000000c3'
+    await pg.query(`select public.invite_access('faisal@example.com', $1::uuid[], 'sales')`, [[arak]])
+    await pg.query(`select public.invite_access('huda@example.com', $1::uuid[], 'sales')`, [[arak]])
+    await pg.query(`select public.invite_access('layla@example.com', $1::uuid[], 'sales_admin')`, [[arak]])
+    await h.signUp(FAISAL, 'faisal@example.com')
+    await h.signUp(HUDA, 'huda@example.com')
+    await h.signUp(LAYLA, 'layla@example.com')
+    await pg.query(`update public.sales_seats set all_website_leads = true where user_id = $1`, [HUDA])
+    const lead = async (subject, source, owner, ws = arak) =>
+      one(`insert into public.leads (workspace_id, subject, source, assigned_to) values ($1, $2, $3, $4) returning id`, [ws, subject, source, owner])
+    const faisalsEmail = await lead('faisal email', 'email', FAISAL)
+    await lead('huda email', 'email', HUDA)
+    await lead('unassigned email', 'email', null)
+    await lead('website for faisal', 'website_form', FAISAL)
+    await lead('website unassigned', 'website_form', null)
+    await lead('ghusn website', 'website_form', null, ghusn)
+    await pg.query(`insert into public.lead_cards (lead_id, workspace_id) values ($1, $2)`, [faisalsEmail, arak])
+
+    const sees = async uid => {
+      await h.as(uid)
+      await pg.exec('set role authenticated')
+      try {
+        const { rows } = await pg.query(`select subject from public.leads order by subject`)
+        const cards = (await pg.query(`select count(*)::int as n from public.lead_cards`)).rows[0].n
+        return { leads: rows.map(r => r.subject), cards }
+      } finally { await pg.exec('reset role') }
+    }
+    expect(await sees(FAISAL)).toEqual({ leads: ['faisal email', 'website for faisal'], cards: 1 })
+    expect(await sees(HUDA)).toEqual({ leads: ['huda email', 'website for faisal', 'website unassigned'], cards: 0 })
+    expect(await sees(LAYLA)).toEqual({ leads: ['faisal email', 'huda email', 'unassigned email', 'website for faisal', 'website unassigned'], cards: 1 })
+
+    // The team by name, for the Owner column: the team and the admin, no one else.
+    await h.as(FAISAL)
+    expect((await pg.query(`select email, approver from public.sales_team($1)`, [arak])).rows.map(r => r.email)).toEqual(['faisal@example.com', 'huda@example.com', 'layla@example.com'])
+    expect((await pg.query(`select * from public.sales_team($1)`, [ghusn])).rows).toEqual([])
+    await h.as(SARA)
+    expect((await pg.query(`select * from public.sales_team($1)`, [arak])).rows).toEqual([])
   })
 
   it('a member is added exactly as before', async () => {
