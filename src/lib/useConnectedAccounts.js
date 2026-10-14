@@ -6,7 +6,7 @@ import {
   readConnectCallback, fetchSelectionOptions, completeSelection,
   explainOAuthError,
 } from './zernioConnect'
-import { createAccountsStore, browserStorage, MIRROR_SELECT } from './accountsCache'
+import { createAccountsStore, browserStorage, platformStatus, MIRROR_SELECT } from './accountsCache'
 
 // ─── The one place a screen asks "what is actually connected?" ─────────────
 // Replaces `state.connectedAccounts[platform]`, a boolean in localStorage that
@@ -73,7 +73,14 @@ export function useConnectedAccounts(platform = '') {
   // "Not answered yet", not "a request is running". A remembered list counts,
   // so a reload paints the accounts at once; an empty memory does not, so no
   // screen says "Not connected" before Zernio has.
-  const loading = !!workspaceId && !snapshot.source
+  //
+  // For one platform it is narrower: a remembered list that lacks this
+  // platform has not answered for it. See platformStatus in ./accountsCache.js.
+  const statusOf = useCallback(
+    p => (workspaceId ? platformStatus(snapshot, p) : 'not_connected'),
+    [workspaceId, snapshot],
+  )
+  const loading = !!workspaceId && (platform ? statusOf(platform) === 'loading' : !snapshot.source)
 
   const forPlatform = platform
     ? snapshot.accounts.filter(a => a.platform === platform)
@@ -88,6 +95,14 @@ export function useConnectedAccounts(platform = '') {
     refreshing: snapshot.refreshing,
     // Zernio itself has answered in this session — not memory, not the mirror.
     verified: snapshot.source === 'live',
+    // Zernio has answered, or could not be asked. Until then, a platform with
+    // nothing listed is unknown rather than "not connected".
+    settled: !workspaceId || snapshot.source === 'live' || !!snapshot.error,
+    // 'connected' | 'not_connected' | 'failed' | 'loading' for one platform —
+    // for a screen holding every platform's accounts that draws one per row.
+    statusOf,
+    // The same, for the platform this hook was asked about ('' when none).
+    status: platform ? statusOf(platform) : '',
     error: snapshot.error,
     refresh,
     workspaceId,

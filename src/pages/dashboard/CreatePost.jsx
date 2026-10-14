@@ -19,7 +19,7 @@ import { useConnectedAccounts } from '../../lib/useConnectedAccounts'
 
 export function CreatePostDialog({ open, onClose }) {
   const navigate = useNavigate()
-  const { allAccounts, loading } = useConnectedAccounts()
+  const { allAccounts, statusOf } = useConnectedAccounts()
 
   return (
     <Modal open={open} onClose={onClose} title="Create a post" width="max-w-md">
@@ -27,7 +27,8 @@ export function CreatePostDialog({ open, onClose }) {
         {LIVE_PLATFORMS.map(key => {
           const meta = PLATFORM_META[key]
           const accounts = allAccounts.filter(a => a.platform === key && a.is_active !== false)
-          const connected = accounts.length > 0
+          const status = statusOf(key)
+          const connected = status === 'connected'
           return (
             <button key={key}
               onClick={() => { onClose?.(); navigate(`/social/${key}`) }}
@@ -38,7 +39,8 @@ export function CreatePostDialog({ open, onClose }) {
               <span className="min-w-0 flex-1">
                 <span className="block text-sm font-semibold text-text">{meta.label}</span>
                 <span className="block text-xs text-text-tertiary truncate">
-                  {loading ? 'Checking…'
+                  {status === 'loading' ? 'Checking…'
+                    : status === 'failed' ? "Couldn't check the connection"
                     : connected
                       ? accounts.map(a => (a.username ? `@${a.username}` : a.display_name)).filter(Boolean).join(', ')
                       : 'Not connected — connect on the next screen'}

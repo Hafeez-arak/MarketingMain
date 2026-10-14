@@ -20,7 +20,7 @@ const META = PLATFORM_META.tiktok
 export function TikTokPage() {
   const { state, dispatch } = useApp()
   const [filter, setFilter] = useState('all')
-  const { accounts, loading, error, refresh } = useConnectedAccounts('tiktok')
+  const { accounts, loading, status, error, refresh } = useConnectedAccounts('tiktok')
 
   // The database's posts (plans, the composer) plus any older browser-only
   // ones, by id. Counted only once the database has answered.
@@ -45,7 +45,7 @@ export function TikTokPage() {
                 ? <Skeleton className="h-3 w-32 mt-1" />
                 : (
                   <p className="text-xs text-text-secondary">
-                    {remote.error ? 'Posts not loaded' : `${posts.length} post${posts.length === 1 ? '' : 's'}`} · {connected ? 'Connected' : 'Not connected'}
+                    {remote.error ? 'Posts not loaded' : `${posts.length} post${posts.length === 1 ? '' : 's'}`} · {connected ? 'Connected' : status === 'failed' ? 'Connection not checked' : 'Not connected'}
                   </p>
                 )}
             </div>

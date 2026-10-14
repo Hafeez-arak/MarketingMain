@@ -21,7 +21,7 @@ const TABS = [{ key: 'posts', label: 'Posts' }, { key: 'analytics', label: 'Anal
 export function LinkedInPage() {
   const { state, dispatch } = useApp()
   const [filter, setFilter] = useState('all')
-  const { accounts, loading, error, refresh } = useConnectedAccounts('linkedin')
+  const { accounts, loading, status, error, refresh } = useConnectedAccounts('linkedin')
 
   // Opened straight on Analytics with ?tab=analytics. Read once rather than
   // through the router: this URL also carries Zernio's OAuth callback params,
@@ -52,7 +52,7 @@ export function LinkedInPage() {
                 ? <Skeleton className="h-3 w-32 mt-1" />
                 : (
                   <p className="text-xs text-text-secondary">
-                    {remote.error ? 'Posts not loaded' : `${posts.length} post${posts.length === 1 ? '' : 's'}`} · {connected ? 'Connected' : 'Not connected'}
+                    {remote.error ? 'Posts not loaded' : `${posts.length} post${posts.length === 1 ? '' : 's'}`} · {connected ? 'Connected' : status === 'failed' ? 'Connection not checked' : 'Not connected'}
                   </p>
                 )}
             </div>

@@ -102,7 +102,13 @@ export function ComposerHost({
   // PostComposer filters this list itself (`platformAccounts`). Fetching just
   // the opening platform's accounts left every other tab looking
   // disconnected the moment someone clicked it, even when it was.
-  const { allAccounts: accounts, loading: accountsLoading } = useConnectedAccounts()
+  //
+  // `settled`, not `loading`: a remembered list can hold LinkedIn but not an
+  // Instagram account connected since, and the picker would say "No Instagram
+  // account connected" until Zernio answered. The picker shows a skeleton only
+  // while a platform has no accounts, so this costs the others nothing.
+  const { allAccounts: accounts, settled: accountsSettled } = useConnectedAccounts()
+  const accountsLoading = !accountsSettled
   const [open, setOpen]       = useState(false)
   const [busy, setBusy]       = useState(false)
   const [note, setNote]       = useState('')
