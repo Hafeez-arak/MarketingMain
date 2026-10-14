@@ -14,9 +14,11 @@ import { ensureCaptions } from '../../lib/campaignPlanner'
 import { publishIdeasAsPosts } from '../../lib/studioBridge'
 import { syncZernio } from '../../lib/zernio'
 import { defaultWebhookUrl } from '../../lib/n8nWebhooks'
-import { fetchScheduledPosts, movePost, unschedulePost } from '../../lib/scheduledPosts'
+import { fetchScheduledPosts, unschedulePost } from '../../lib/scheduledPosts'
 import { postLock, queueBucket } from '../../lib/postLock'
-import { accountFor, bookPost } from '../../lib/planScheduling'
+import { accountFor, bookPost, bookPostAt, schedulePlanPosts } from '../../lib/planScheduling'
+import { scheduleStage } from '../../lib/postStage'
+import { groupByDay } from './queueOrder'
 import { isProtectedPlatform } from '../../lib/platformSafety'
 import { useConnectedAccounts } from '../../lib/useConnectedAccounts'
 import { MediaViewer } from '../../components/PostMediaViewer'
@@ -40,10 +42,6 @@ import { ComposerHost } from '../../components/composer/ComposerHost'
 // whole background batch in n8n writing captions and images; now finalize
 // writes the post row itself, and the flag only spans the caption draft.
 
-const TABLES = {
-  instagram: 'instagram_generated_posts',
-}
-
 // A "processing" idea can still get stranded: finalize marks it before
 // drafting, and a tab closed mid-draft (or a Draft Copy webhook that never
 // answers) leaves generation_status at 'processing' with no error and no
@@ -59,7 +57,7 @@ const mediaOf = r => (Array.isArray(r.image_urls) && r.image_urls.length ? r.ima
 // alternative routes belonged to a platform that no longer exists here.
 function normalizePost(row, platform) {
   const base = {
-    id: row.id, platform, _table: row.post_table || TABLES[platform],
+    id: row.id, platform, _table: row.post_table || 'generated_posts',
     captionAr: row.caption_ar || '', captionEn: row.caption_en || '',
     postKind: row.post_kind || 'caption_image',
     hashtags: row.hashtags, imageUrl: row.image_url, imagePrompt: row.image_prompt,
@@ -145,20 +143,7 @@ function useApprovalPosts(accessToken, workspaceId) {
     }
   }, [accessToken, workspaceId])
 
-  async function updateStatus(post, status) {
-    if (!accessToken) return
-    await fetch(`${SUPABASE_URL}/rest/v1/${post._table}?id=eq.${post.id}`, {
-      method: 'PATCH',
-      headers: {
-        apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${accessToken}`,
-        'Content-Type': 'application/json', Prefer: 'return=minimal',
-      },
-      body: JSON.stringify({ status, updated_at: new Date().toISOString() }),
-    })
-    setPosts(prev => prev.map(p => p.id === post.id && p.platform === post.platform ? { ...p, status } : p))
-  }
-
-  return { posts, ideas, plans, loading, loaded, loadError, fetchAll, updateStatus, setIdeas }
+  return { posts, ideas, plans, loading, loaded, loadError, fetchAll, setIdeas }
 }
 
 // Shaped like a plan group with its first cards open, so the page keeps its
@@ -285,17 +270,23 @@ function PlatformChip({ platform }) {
 
 
 // One post, whatever bucket it is in. The actions are the bucket's:
-//   upcoming   edit (re-books at Zernio), reschedule, cancel the booking
+//   upcoming   edit (re-books it), reschedule, cancel the booking
 //   attention  edit, schedule, post now — or the one place that can fix it
 //   published  nothing but a link: it has gone out
-function QueueCard({ post, bucket, accounts, now, busy, onOpen, onOpenMedia, onEdit, onBook, onReschedule, onCancel, onDelete }) {
+function QueueCard({ post, bucket, planName, accounts, now, busy, onOpen, onOpenMedia, onEdit, onBook, onReschedule, onCancel, onDelete }) {
   const [expanded, setExpanded] = useState(false)
   const [picking, setPicking] = useState(false)
   const [when, setWhen] = useState('')
   const media = post.mediaUrls || []
   const thumb = post.imageUrl || media[0] || post.coverImageUrl || ''
-  const text = [post.captionAr, post.captionEn].filter(Boolean)
-  const caption = text.length ? text : [post.copy || '']
+  // What actually goes out is the `caption` column — the two language boxes
+  // are the planner's working copy, and an edit made here or in the composer
+  // changes `caption` only. Split on blank lines so each language block takes
+  // its own direction.
+  const sent = String(post.copy || '').trim()
+  const caption = sent
+    ? sent.split(/\n\s*\n/).filter(Boolean)
+    : [post.captionAr, post.captionEn].filter(Boolean).length ? [post.captionAr, post.captionEn].filter(Boolean) : ['']
   const long = caption.join('\n').length > 220 || caption.join('\n').split('\n').length > 4
   const protectedPost = isProtectedPlatform(post.platform)
   const needsComposer = post.platform === 'tiktok' && !post.platformOptions?.tiktok?.privacy_level
@@ -327,10 +318,20 @@ function QueueCard({ post, bucket, accounts, now, busy, onOpen, onOpenMedia, onE
           <div className="flex items-center gap-1.5 flex-wrap">
             <PlatformChip platform={post.platform} />
             {bucket === 'upcoming' && <span className="text-[10px] font-bold uppercase tracking-[0.08em] px-1.5 py-0.5 leading-[1.4] bg-clay-50 text-clay-700">{formatBrandDateTime(post.scheduledPublishAt)}</span>}
-            {bucket === 'published' && <span className="text-[10px] font-bold uppercase tracking-[0.08em] px-1.5 py-0.5 leading-[1.4] bg-sage-50 text-sage-700">{lock.state === 'publishing' ? '↗ Publishing…' : '✓ Published'}</span>}
+            {/* "Published" only once something confirmed it. A booked post
+                whose time has passed has almost certainly gone, but the sync
+                that confirms it runs hourly, and it may yet come back failed. */}
+            {bucket === 'published' && (
+              lock.state === 'publishing'
+                ? <span className="text-[10px] font-bold uppercase tracking-[0.08em] px-1.5 py-0.5 leading-[1.4] bg-sage-50 text-sage-700">↗ Publishing…</span>
+                : scheduleStage(post._raw, now) === 'published'
+                  ? <span className="text-[10px] font-bold uppercase tracking-[0.08em] px-1.5 py-0.5 leading-[1.4] bg-sage-50 text-sage-700">✓ Published</span>
+                  : <span className="text-[10px] font-bold uppercase tracking-[0.08em] px-1.5 py-0.5 leading-[1.4] bg-stone-100 text-stone-600">Sent · awaiting confirmation</span>
+            )}
             {bucket === 'attention' && post.publishStatus === 'failed' && <span className="text-[10px] font-bold uppercase tracking-[0.08em] px-1.5 py-0.5 leading-[1.4] bg-red-50 text-red-600">✕ Failed</span>}
             {protectedPost && <span className="text-[10px] font-bold uppercase tracking-[0.08em] px-1.5 py-0.5 leading-[1.4] bg-sky-50 text-sky-800">Draft only</span>}
             {media.length > 1 && <span className="text-[10px] text-text-tertiary">Carousel · {media.length} slides</span>}
+            {planName && <span className="text-[11px] font-medium text-text-secondary truncate">{planName}</span>}
             {post.topic && <span className="text-[11px] text-text-tertiary truncate">· {post.topic}</span>}
           </div>
 
@@ -350,7 +351,7 @@ function QueueCard({ post, bucket, accounts, now, busy, onOpen, onOpenMedia, onE
 
           {bucket === 'published' && (
             <p className="text-[11px] text-text-tertiary flex items-center gap-2 flex-wrap">
-              {post.publishedAt ? `Went out ${formatBrandDateTime(post.publishedAt)}` : post.scheduledPublishAt ? `Went out ${formatBrandDateTime(post.scheduledPublishAt)}` : 'Gone out'}
+              {post.publishedAt ? `Went out ${formatBrandDateTime(post.publishedAt)}` : post.scheduledPublishAt ? `Due ${formatBrandDateTime(post.scheduledPublishAt)}` : 'Gone out'}
               {post.platformPostUrl && <a href={post.platformPostUrl} target="_blank" rel="noreferrer" className="font-semibold text-amber-700 hover:underline">View on {PLATFORM_META[post.platform]?.label || post.platform} ↗</a>}
               <span>· can’t be edited</span>
             </p>
@@ -380,7 +381,7 @@ function QueueCard({ post, bucket, accounts, now, busy, onOpen, onOpenMedia, onE
                   <Button size="xs" variant="secondary" onClick={() => onBook(post, '')} disabled={busy}>↗ Post now</Button>
                 </>
               )}
-              {/* Never booked at Zernio here — nothing to unschedule, so a
+              {/* Never booked here — nothing to unschedule, so a
                   straight delete is safe. A booked post has to go through
                   "Cancel schedule" first, which drops it back to attention. */}
               {bucket === 'attention' && !picking && (
@@ -405,13 +406,6 @@ function QueueCard({ post, bucket, accounts, now, busy, onOpen, onOpenMedia, onE
       </div>
     </Card>
   )
-}
-
-// The order within a group: what goes out next first; what went out most
-// recently first; what needs a person by the date it was meant for.
-function sortItems(items, tab) {
-  const at = x => x.post ? Date.parse(x.post.scheduledPublishAt || x.post.publishedAt || '') || x.post.plannedAt || 0 : 0
-  return [...items].sort((a, b) => tab === 'published' ? at(b) - at(a) : at(a) - at(b))
 }
 
 export function Approvals() {
@@ -465,7 +459,7 @@ export function Approvals() {
         let idea = i
         if (kind === 'processing' && i.generation_started_at && now - new Date(i.generation_started_at).getTime() > STALE_PROCESSING_MS) {
           kind = 'failed'
-          idea = { ...i, generation_error: 'Taking longer than expected — the request may never have finished. Retry, or check the n8n workflow.' }
+          idea = { ...i, generation_error: 'Taking longer than expected — the request may never have finished. Wait a minute, then retry.' }
         }
         return { key: `idea_${i.id}`, type: kind, idea, bucket: 'attention', planId: i.plan_id }
       })
@@ -481,23 +475,12 @@ export function Approvals() {
   const currentTab = tab || (counts.attention ? 'attention' : counts.upcoming ? 'upcoming' : 'all')
   const filtered = currentTab === 'all' ? items : items.filter(x => x.bucket === currentTab)
 
-  // Group by plan (newest plan first, as fetched); posts from no plan last.
-  const grouped = useMemo(() => {
-    const byKey = new Map()
-    for (const item of filtered) {
-      const key = item.planId || 'manual'
-      if (!byKey.has(key)) byKey.set(key, [])
-      byKey.get(key).push(item)
-    }
-    const planGroups = plans
-      .filter(p => byKey.has(p.id))
-      .map(p => ({ key: p.id, title: p.name || `${p.month || ''} Content Plan`, items: sortItems(byKey.get(p.id), currentTab) }))
-    // A plan id this workspace has no plan row for (deleted plan) still shows.
-    const orphan = [...byKey.keys()].filter(k => k !== 'manual' && !plans.some(p => p.id === k))
-      .map(k => ({ key: k, title: 'Deleted plan', items: sortItems(byKey.get(k), currentTab) }))
-    const manualGroup = byKey.has('manual') ? [{ key: 'manual', title: 'Posts not from a plan', items: sortItems(byKey.get('manual'), currentTab) }] : []
-    return [...planGroups, ...orphan, ...manualGroup]
-  }, [filtered, plans, currentTab])
+  // By day, soonest first; sent posts after (see queueOrder.js). Each card
+  // names its plan instead of the plan being the group.
+  const grouped = useMemo(() => groupByDay(filtered), [filtered])
+  const planNameOf = planId => !planId ? '' : (plans.find(p => p.id === planId)?.name || 'Deleted plan')
+  const dayTitle = g => !g.dayKey ? (g.sent ? 'Sent, no date' : 'No date yet')
+    : `${g.sent ? 'Sent · ' : ''}${new Date(`${g.dayKey}T12:00:00Z`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })}`
 
   // Every group opens expanded. Only the first used to, so a second month's
   // posts looked missing until someone thought to click its header.
@@ -531,14 +514,17 @@ export function Approvals() {
 
   async function handleReschedule(post, when) {
     setBusyId(post.id); setNotice(null)
-    const res = await movePost({
-      accessToken, post: post._raw, dateKey: when.slice(0, 10), time: when.slice(11, 16),
-      webhooks: state.webhooks, workspaceId: activeWorkspaceId,
+    // bookPostAt, like the Schedule page: it re-books through the composer
+    // path, which carries first comment, alt text, Reel/Story type and
+    // collaborators. movePost re-sent only the slot and dropped all of those.
+    const res = await bookPostAt({
+      post: post._raw, dateKey: when.slice(0, 10), time: when.slice(11, 16),
+      accounts, workspaceId: activeWorkspaceId,
     })
     setBusyId(null)
     setNotice(res.error
       ? { tone: 'error', text: res.unscheduled ? `The old slot was cancelled but the new one could not be booked, so this post is not scheduled anywhere: ${res.error}` : res.error }
-      : { tone: 'ok', text: `Moved to ${res.label || formatBrandDateTime(res.scheduledPublishAt)}.` })
+      : { tone: 'ok', text: `Moved to ${formatBrandDateTime(res.scheduledPublishAt)}.` })
     fetchAll()
     return !res.error
   }
@@ -618,12 +604,20 @@ export function Approvals() {
       setIdeas(prev => prev.map(i => i.id === idea.id ? { ...i, generation_status: 'failed', generation_error: failure } : i))
     } else {
       setIdeas(prev => prev.map(i => i.id === idea.id ? { ...i, generation_status: 'completed', generation_error: '' } : i))
+      // Book it, as saving the plan does. Retry used to stop at writing the
+      // row, so a retried post sat unbooked under Needs attention.
+      const ids = (result.posts || []).map(x => x.id).filter(Boolean)
+      if (ids.length) {
+        const rows = await fetchScheduledPosts(activeWorkspaceId, accessToken, { ids })
+        const booking = await schedulePlanPosts({ rows, accounts, workspaceId: activeWorkspaceId })
+        if (booking.attention.length) setNotice({ tone: 'error', text: `Written, but not scheduled: ${booking.attention[0].reason}` })
+      }
       fetchAll()
     }
   }
 
-  // Pull fresh accounts and metrics from Zernio on demand — the same workflow
-  // the daily schedule runs, so there's one sync path, not two.
+  // Pull fresh accounts, metrics and publish results on demand — the same
+  // workflow the hourly schedule runs, so there's one sync path, not two.
   async function handleSync() {
     setSyncing(true); setSyncNote('')
     const result = await syncZernio(state.webhooks?.zernioSync || defaultWebhookUrl('zernioSync'), activeWorkspaceId)
@@ -632,7 +626,7 @@ export function Approvals() {
       ? result.error
       : result.analytics_skipped
         ? result.analytics_skipped
-        : `Synced ${result.accounts_synced ?? 0} account(s), ${result.rows_written ?? 0} metric row(s).`)
+        : `Synced ${result.accounts_synced ?? 0} account(s), ${result.rows_written ?? 0} metric row(s)${result.failed_marked ? `, ${result.failed_marked} newly failed post(s)` : ''}.`)
     fetchAll()
   }
 
@@ -641,13 +635,8 @@ export function Approvals() {
   // and expects the caller to write it. Must replicate that PATCH here or
   // caption edits silently vanish on close, exactly like the ReferencePicker
   // bug fixed earlier.
-  // PostDetail hands back only the id, so the target table has to be resolved
-  // from the post it was opened on — `handleDelete` below already does exactly
-  // that via post._table. Writing to a hardcoded TABLES.instagram instead is
-  // harmless only while Instagram is the sole platform; the moment a TikTok or
-  // Snapchat post is editable it PATCHes a row id in the wrong table, which
-  // either 404s silently or, worse, hits an unrelated row that happens to
-  // share the id. Resolve, and refuse to guess if the ids don't line up.
+  // PostDetail hands back only the id, so the target table is resolved from
+  // the post it was opened on, and nothing is written if the ids don't match.
   async function handleCaptionUpdated(postId, newCopy, originalCopy) {
     const target = (selectedPost && selectedPost.id === postId) ? selectedPost : null
     setSelectedPost(prev => (prev && prev.id === postId) ? { ...prev, copy: newCopy } : prev)
@@ -656,23 +645,51 @@ export function Approvals() {
     if (postLock(target._raw).locked) { setNotice({ tone: 'error', text: 'This post has already gone out, so its caption can’t be edited.' }); return }
     logEditFeedback(activeWorkspaceId, accessToken, { platform: target.platform, postId, field: 'caption', original: originalCopy, edited: newCopy })
     if (!accessToken) return
-    await fetch(`${SUPABASE_URL}/rest/v1/${target._table}?id=eq.${postId}`, {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/${target._table}?id=eq.${postId}`, {
       method: 'PATCH',
       headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json', Prefer: 'return=minimal' },
       body: JSON.stringify({ caption: newCopy, updated_at: new Date().toISOString() }),
     })
+    if (!res.ok) { setNotice({ tone: 'error', text: await refusalText(res, 'The caption couldn’t be saved.') }); fetchAll(); return }
+    // A booked post goes out with the text it was BOOKED with — saving the
+    // row alone changed nothing on the platform. Re-book it at its own slot.
+    if (target._raw?.publish_status === 'scheduled' && target.scheduledPublishAt) {
+      const slot = utcToBrandInputs(target.scheduledPublishAt)
+      const booked = await bookPostAt({
+        post: { ...target._raw, caption: newCopy }, dateKey: slot.date, time: slot.time,
+        accounts, workspaceId: activeWorkspaceId,
+      })
+      setNotice(booked.error
+        ? { tone: 'error', text: `The caption is saved here, but the scheduled post still has the old text: ${booked.error}` }
+        : { tone: 'ok', text: 'Caption saved and the scheduled post updated.' })
+    }
+    fetchAll()
   }
 
   async function handleDelete(post) {
     if (postLock(post._raw).locked) { setNotice({ tone: 'error', text: 'This post has already gone out, so its record can’t be deleted.' }); return }
     if (accessToken) {
-      await fetch(`${SUPABASE_URL}/rest/v1/${post._table}?id=eq.${post.id}`, {
+      // The database refuses a delete it considers sent (generated_posts_lock_sent);
+      // that refusal used to be ignored and the card just came back.
+      const res = await fetch(`${SUPABASE_URL}/rest/v1/${post._table}?id=eq.${post.id}`, {
         method: 'DELETE',
-        headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${accessToken}` },
+        headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${accessToken}`, Prefer: 'return=representation' },
       })
+      const gone = res.ok ? await res.json().catch(() => []) : []
+      if (!res.ok || !gone.length) {
+        setNotice({ tone: 'error', text: res.ok ? 'The post couldn’t be deleted — it may already be gone.' : await refusalText(res, 'The post couldn’t be deleted.') })
+        fetchAll()
+        return
+      }
     }
     setSelectedPost(null)
     fetchAll()
+  }
+
+  // Instagram has its own detail view; every other platform opens the composer.
+  function openPost(post) {
+    if (post.platform === 'instagram') setSelectedPost(post)
+    else openComposer(post)
   }
 
   const selectedLocked = selectedPost ? postLock(selectedPost._raw, now).locked : false
@@ -684,7 +701,7 @@ export function Approvals() {
         subtitle="Every post from your plans and the composer — what goes out next, what went out, and what needs you. Saved plans are scheduled automatically; reschedule, edit or cancel them here.">
         <div className="text-right">
           <Button size="sm" variant="secondary" onClick={handleSync} disabled={syncing}>
-            {syncing ? <><Spinner size="sm" /> Syncing…</> : 'Sync from Zernio'}
+            {syncing ? <><Spinner size="sm" /> Syncing…</> : 'Sync'}
           </Button>
           {syncNote && <p className="text-[10px] text-text-tertiary mt-1.5 max-w-[240px]">{syncNote}</p>}
         </div>
@@ -740,7 +757,7 @@ export function Approvals() {
                 <button onClick={() => toggleExpanded(group.key)} aria-expanded={expanded}
                   className="w-full flex items-center gap-2.5 px-4 py-3 hover:bg-surface-subtle transition-colors">
                   <svg className={`w-3.5 h-3.5 text-text-tertiary transition-transform flex-shrink-0 ${expanded ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg>
-                  <span className="font-semibold text-text text-sm text-left">{group.title}</span>
+                  <span className={`font-semibold text-sm text-left ${group.sent ? 'text-text-secondary' : 'text-text'}`}>{dayTitle(group)}</span>
                   <span className="text-[11px] text-text-tertiary">{group.items.length} post{group.items.length !== 1 ? 's' : ''}</span>
                 </button>
                 {expanded && (
@@ -748,9 +765,9 @@ export function Approvals() {
                     {group.items.map(item => {
                       if (item.type === 'processing') return <ProcessingCard key={item.key} idea={item.idea} />
                       if (item.type === 'failed') return <FailedCard key={item.key} idea={item.idea} post={null} onRetry={handleRetry} retrying={retryingId === item.idea.id} />
-                      return <QueueCard key={item.key} post={item.post} bucket={item.bucket} accounts={accounts} now={now}
+                      return <QueueCard key={item.key} post={item.post} bucket={item.bucket} planName={planNameOf(item.post.planId)} accounts={accounts} now={now}
                         busy={busyId === item.post.id}
-                        onOpen={setSelectedPost} onOpenMedia={openMedia} onEdit={openComposer}
+                        onOpen={openPost} onOpenMedia={openMedia} onEdit={openComposer}
                         onBook={handleBook} onReschedule={handleReschedule} onCancel={setCancelTarget} onDelete={setDeleteTarget} />
                     })}
                   </div>
@@ -763,7 +780,7 @@ export function Approvals() {
 
       <ConfirmDialog open={!!cancelTarget} onClose={() => setCancelTarget(null)}
         onConfirm={() => handleCancel(cancelTarget)} title="Cancel this schedule?"
-        message="The post is taken off the schedule at Zernio and will not go out. It stays here under Needs attention, so you can schedule it again." danger />
+        message="The post is taken off the schedule and will not go out. It stays here under Needs attention, so you can schedule it again." danger />
 
       <ConfirmDialog open={!!deleteTarget} onClose={() => setDeleteTarget(null)}
         onConfirm={() => { const target = deleteTarget; setDeleteTarget(null); handleDelete(target) }} title="Delete this post?"
@@ -782,6 +799,7 @@ export function Approvals() {
           supabaseUrl={SUPABASE_URL}
           anonKey={accessToken || ''}
           locked={selectedLocked}
+          accounts={accounts}
           onClose={() => setSelectedPost(null)}
           onStatusChange={() => {}}
           onPublish={post => { setSelectedPost(null); openComposer(post) }}
@@ -807,4 +825,13 @@ export function Approvals() {
       />
     </div>
   )
+}
+
+// The database's own words when it refuses a write (the lock trigger raises a
+// plain sentence), or a fallback.
+async function refusalText(res, fallback) {
+  try {
+    const body = await res.json()
+    return body?.message || fallback
+  } catch { return fallback }
 }

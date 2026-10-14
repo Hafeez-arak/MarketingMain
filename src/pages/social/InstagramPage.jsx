@@ -15,7 +15,8 @@ const IG_META = PLATFORM_META.instagram
 import { useBrandProfileSync, logEditFeedback } from '../../lib/brandBrain'
 import { useBrandContext } from '../../lib/brandContext'
 import { CaptionStudio } from '../../components/CaptionStudio'
-import { fetchScheduledPosts, movePost, unschedulePost } from '../../lib/scheduledPosts'
+import { fetchScheduledPosts, unschedulePost } from '../../lib/scheduledPosts'
+import { bookPostAt } from '../../lib/planScheduling'
 import { publishComposed } from '../../lib/publishPost'
 import { composerFromPost } from '../../lib/composerState'
 import { postLock } from '../../lib/postLock'
@@ -487,9 +488,11 @@ function PostDetail({ post, state, webhookUrl, regenWebhookUrl, supabaseUrl, ano
     const target = brandWallToUtc(reschedWhen.slice(0, 10), reschedWhen.slice(11, 16))
     if (!target || target.getTime() <= Date.now() + 60 * 1000) { setReschedError('Pick a time in the future.'); return }
     setReschedBusy(true); setReschedError('')
-    const res = await movePost({
-      accessToken, post: post._raw, dateKey: reschedWhen.slice(0, 10), time: reschedWhen.slice(11, 16),
-      webhooks: state.webhooks, workspaceId: activeWorkspaceId,
+    // bookPostAt, not movePost: it re-books through the composer path, so the
+    // first comment, alt text, Reel/Story type and collaborators survive.
+    const res = await bookPostAt({
+      post: post._raw, dateKey: reschedWhen.slice(0, 10), time: reschedWhen.slice(11, 16),
+      accounts, workspaceId: activeWorkspaceId,
     })
     setReschedBusy(false)
     if (res.error) { setReschedError(res.error); return }

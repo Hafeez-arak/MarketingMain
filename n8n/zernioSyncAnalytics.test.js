@@ -68,7 +68,7 @@ const db = ({ posts = [], accounts = [] } = {}) => new StubPostgrest({
 
 // Route order matters: needles are substrings, and the timeline URL must be
 // claimed before the single-post one.
-function zernio({ accounts = [], timeline = {}, single = {} } = {}) {
+function zernio({ accounts = [], timeline = {}, single = {}, posts = {} } = {}) {
   const asked = []
   const idOf = url => new URL(url).searchParams.get('postId')
   const routes = [
@@ -81,6 +81,13 @@ function zernio({ accounts = [], timeline = {}, single = {} } = {}) {
       const s = single[idOf(url)]
       if (!s) return { statusCode: 404, body: { error: 'Post not found' } }
       return { statusCode: s.syncStatus === 'pending' ? 202 : 200, body: s }
+    }],
+    ['/api/v1/posts/', async ({ url }) => {
+      const id = decodeURIComponent(new URL(url).pathname.split('/').pop())
+      asked.push(['post', id])
+      const p = posts[id]
+      if (!p) return { statusCode: 404, body: { error: 'Post not found' } }
+      return { statusCode: 200, body: { post: p } }
     }],
     ['/api/v1/accounts', async () => ({ statusCode: 200, body: { accounts, hasAnalyticsAccess: true } })],
   ]
@@ -113,6 +120,48 @@ describe('publish status', () => {
   it('leaves a post alone while Zernio still has it scheduled', async () => {
     const pg = db({ posts: [post({ publish_status: 'scheduled' })] })
     const { routes } = zernio({ single: { [LIVE_POST]: { ...LIVE_SINGLE, status: 'scheduled', platformAnalytics: [], analytics: {} } } })
+    await run(pg, routes)
+    expect(pg.tables.generated_posts[0].publish_status).toBe('scheduled')
+  })
+})
+
+// A post the platform refused stayed 'scheduled' forever, then read as "gone
+// out" once its time passed — so nobody saw it had failed. Shapes from the
+// Zernio OpenAPI Post / PlatformTarget schemas.
+describe('a post the platform refused', () => {
+  const scheduledSingle = { ...LIVE_SINGLE, status: 'scheduled', platformAnalytics: [], analytics: {} }
+
+  it('is marked failed with the platform’s reason', async () => {
+    const pg = db({ posts: [post({ publish_status: 'scheduled' })] })
+    const { routes } = zernio({
+      single: { [LIVE_POST]: scheduledSingle },
+      posts: { [LIVE_POST]: { _id: LIVE_POST, status: 'failed', platforms: [
+        { platform: 'instagram', status: 'failed', errorMessage: 'The aspect ratio is not supported.' },
+      ] } },
+    })
+    const out = await run(pg, routes)
+    expect(pg.tables.generated_posts[0]).toMatchObject({
+      publish_status: 'failed', publish_error: 'The aspect ratio is not supported.',
+    })
+    expect(out.out.failed_marked).toBe(1)
+  })
+
+  it('says so even when the platform gave no reason', async () => {
+    const pg = db({ posts: [post({ publish_status: 'publishing' })] })
+    const { routes } = zernio({
+      single: { [LIVE_POST]: scheduledSingle },
+      posts: { [LIVE_POST]: { _id: LIVE_POST, status: 'failed', platforms: [{ platform: 'instagram', status: 'failed' }] } },
+    })
+    await run(pg, routes)
+    expect(pg.tables.generated_posts[0]).toMatchObject({ publish_status: 'failed', publish_error: 'The platform refused this post.' })
+  })
+
+  it('leaves a post Zernio still has scheduled alone', async () => {
+    const pg = db({ posts: [post({ publish_status: 'scheduled' })] })
+    const { routes } = zernio({
+      single: { [LIVE_POST]: scheduledSingle },
+      posts: { [LIVE_POST]: { _id: LIVE_POST, status: 'scheduled', platforms: [{ platform: 'instagram', status: 'pending' }] } },
+    })
     await run(pg, routes)
     expect(pg.tables.generated_posts[0].publish_status).toBe('scheduled')
   })

@@ -1805,7 +1805,7 @@ ZERNIO_SYNC_STICKY = r"""## Arak – Zernio Sync (accounts + analytics)
 
 Pulls state back FROM Zernio: refreshes `social_accounts` (what's connected, follower counts, dead tokens) and fills `post_analytics` with per-day metrics for every post we published through Zernio.
 
-Runs on a daily schedule AND on an on-demand webhook (`arak-zernio-sync`) so a "Refresh" button in the UI hits the same path — one workflow, not two that drift.
+Runs every hour AND on an on-demand webhook (`arak-zernio-sync`) so a "Refresh" button in the UI hits the same path — one workflow, not two that drift.
 
 **Why it queries per-post instead of the bulk list:** `GET /v1/analytics` (list mode) returns EXTERNAL post ids, not the Zernio ids we stored at publish time — the docs are explicit about this and suggest correlating on `platformPostUrl`, which is fragile (URLs get rewritten, and it breaks entirely for posts with no public URL yet). Single-post mode (`?postId=`) is documented to accept Zernio post ids directly, so this iterates our own published rows and asks about each one by id. N calls instead of 1, but correct correlation instead of clever correlation — and at this scale N is dozens per month.
 
@@ -1978,6 +1978,7 @@ try {
   }
 
   let rowsWritten = 0;
+  let failedMarked = 0;
   const errors = [];
 
   for (const t of targets){
@@ -2073,6 +2074,33 @@ try {
               body:{ publish_status:'published',
                      published_at: single.publishedAt || new Date().toISOString(),
                      platform_post_url: single.platformPostUrl || '' }, json:true });
+          } else {
+            // Not live by the analytics read — ask the post itself. A post the
+            // platform refused used to stay 'scheduled' here forever, then read
+            // as "gone out" once its time passed (postLock), so nobody ever saw
+            // it had failed. GET /v1/posts/{id} carries status 'failed' and
+            // the platform's reason on each target's errorMessage.
+            const got = await req({ method:'GET',
+              url:`${ZBASE}/posts/${encodeURIComponent(t.zernio_post_id)}`,
+              headers:zHeaders, json:true });
+            const post = (got && got.post) || got || {};
+            const pStatus = String(post.status || '').toLowerCase();
+            const targetsZ = Array.isArray(post.platforms) ? post.platforms : [];
+            if (pStatus === 'failed'){
+              const reason = targetsZ.map(x => x && (x.errorMessage || (x.platformError && x.platformError.message)))
+                .filter(Boolean)[0] || 'The platform refused this post.';
+              await req({ method:'PATCH', url:`${SUPA_URL}/rest/v1/${t.post_table}?id=eq.${t.id}`,
+                headers:{ ...sHeaders, Prefer:'return=minimal' },
+                body:{ publish_status:'failed', publish_error: String(reason).slice(0, 500) }, json:true });
+              failedMarked++;
+            } else if (pStatus === 'published'){
+              const live = targetsZ.find(x => x && x.status === 'published') || {};
+              await req({ method:'PATCH', url:`${SUPA_URL}/rest/v1/${t.post_table}?id=eq.${t.id}`,
+                headers:{ ...sHeaders, Prefer:'return=minimal' },
+                body:{ publish_status:'published',
+                       published_at: live.publishedAt || new Date().toISOString(),
+                       platform_post_url: live.platformPostUrl || '' }, json:true });
+            }
           }
         } catch (e) { /* non-fatal */ }
       }
@@ -2082,7 +2110,7 @@ try {
   }
 
   return [{ json: { ok: true, accounts: accounts.length, accounts_synced: accountsSynced,
-                    posts_checked: targets.length, rows_written: rowsWritten,
+                    posts_checked: targets.length, rows_written: rowsWritten, failed_marked: failedMarked,
                     errors: errors.slice(0, 10) } }];
 } catch (err) {
   return [{ json: { ok: false, error: (err && err.message) ? err.message : String(err) } }];
@@ -3181,7 +3209,7 @@ def build_zernio_publish() -> dict:
 def build_zernio_sync() -> dict:
     """
     TWO entry points into ONE Code node:
-      Schedule Trigger (daily 06:00) ─┐
+      Schedule Trigger (hourly) ──────┐
       Webhook (arak-zernio-sync) ─────┴─> Zernio: Sync -> Respond
 
     Deliberately one workflow rather than a scheduled copy and a manual
@@ -3195,9 +3223,11 @@ def build_zernio_sync() -> dict:
     nodes = [
         _sticky(ZERNIO_SYNC_STICKY, height=440, width=500, x=0, y=-260),
         {
-            "parameters": {"rule": {"interval": [{"triggerAtHour": 6}]}},
+            # Hourly (owner decision 2026-10-14): a refused post must show as
+            # failed within the hour, not the next morning.
+            "parameters": {"rule": {"interval": [{"field": "hours", "hoursInterval": 1}]}},
             "id": nid(),
-            "name": "Daily 06:00",
+            "name": "Hourly",
             "type": "n8n-nodes-base.scheduleTrigger",
             "typeVersion": 1.2,
             "position": [0, 140],
@@ -3206,7 +3236,7 @@ def build_zernio_sync() -> dict:
         _code("Zernio: Sync", ZERNIO_SYNC_JS, x=260, y=230),
     ]
     connections = {
-        "Daily 06:00": {"main": [[{"node": "Zernio: Sync", "type": "main", "index": 0}]]},
+        "Hourly": {"main": [[{"node": "Zernio: Sync", "type": "main", "index": 0}]]},
         "Webhook": {"main": [[{"node": "Zernio: Sync", "type": "main", "index": 0}]]},
     }
     return {
