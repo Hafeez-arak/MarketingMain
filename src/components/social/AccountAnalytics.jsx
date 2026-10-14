@@ -187,7 +187,9 @@ export function AccountAnalytics({ platform, accounts = [], loadingAccounts = fa
                     <MetricLabel metric={m.info} label={m.label} icon={m.icon} className="mb-1.5" />
                     {current
                       ? <p className="text-2xl font-bold text-text">
-                          {insights ? fmt(insights.metrics?.[m.key]?.total || 0) : '—'}
+                          {/* "—" when the platform sent no total for this metric —
+                              `|| 0` printed a confident 0 for a number nobody read. */}
+                          {typeof insights?.metrics?.[m.key]?.total === 'number' ? fmt(insights.metrics[m.key].total) : '—'}
                         </p>
                       : <Skeleton className="h-8 w-16" />}
                   </div>

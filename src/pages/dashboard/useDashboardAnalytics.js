@@ -96,7 +96,11 @@ export function useDashboardAnalytics({ accounts = [], range = { days: 30 }, rel
   // inferred, and so a preset resolved on the server's clock stays honest.
   const measured = useMemo(() => {
     const first = Object.values(responses).find(r => r?.fromDate)
-    return { fromDate: first?.fromDate || '', toDate: first?.toDate || '' }
+    // Account-wide insights (reach, profile views) are capped shorter than
+    // the post window — 29 days on Instagram — so they carry their own start:
+    // the latest one any account reported, i.e. the narrowest window.
+    const insightsFrom = Object.values(responses).map(r => r?.insightsFrom).filter(Boolean).sort().pop() || ''
+    return { fromDate: first?.fromDate || '', toDate: first?.toDate || '', insightsFrom }
   }, [responses])
 
   return {

@@ -240,7 +240,7 @@ export function Analytics() {
                 const url = profileUrlOf(a)
                 return (
                   <div key={a.zernio_account_id}
-                    onClick={choosable ? () => setPlatform(a.platform) : undefined}
+                    onClick={choosable ? () => chooseChannel(a.platform) : undefined}
                     className={`flex items-center gap-4 px-5 py-3 transition-colors ${choosable ? 'cursor-pointer' : ''} ${active ? 'bg-amber-50/60' : 'hover:bg-surface-subtle'}`}>
                     <PlatformPill platform={a.platform} />
                     <div className="flex-1 min-w-0">

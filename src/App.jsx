@@ -34,7 +34,6 @@ import { SocialOverview, SocialPlatform } from './pages/social/index'
 import { InstagramPage } from './pages/social/InstagramPage'
 import { TikTokPage } from './pages/social/TikTokPage'
 import { LinkedInPage } from './pages/social/LinkedInPage'
-import { SnapchatPage } from './pages/social/SnapchatPage'
 import { Approvals as PostApprovals } from './pages/social/Approvals'
 import AutoReplies from './pages/social/AutoReplies'
 import { Settings } from './pages/settings/index'
@@ -166,7 +165,6 @@ function ProtectedApp() {
             <Route path="/social/instagram"      element={<InstagramPage />} />
             <Route path="/social/tiktok"         element={<TikTokPage />} />
             <Route path="/social/linkedin"       element={<LinkedInPage />} />
-            <Route path="/social/snapchat"       element={<SnapchatPage />} />
             {/* Fallback for any platform in PLATFORM_META without its own page
                 yet. React Router ranks static segments above dynamic ones, so
                 the platform routes above still win regardless of order. */}
@@ -175,6 +173,7 @@ function ProtectedApp() {
             {/* The Integrations page was removed; old links land on the
                 dashboard instead of the not-found page. */}
             <Route path="/integrations"          element={<Navigate to="/" replace />} />
+            <Route path="/social/snapchat"       element={<Navigate to="/social" replace />} />
             <Route path="/team"                  element={<Access />} />
             <Route path="*"                      element={<NotFound />} />
           </Routes>

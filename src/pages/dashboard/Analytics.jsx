@@ -380,6 +380,12 @@ export function AnalyticsOverview({ summaries, overview, measured, range, onRang
   const single = facets.length === 1
   // The window these numbers actually cover — see the Posts published tile.
   const measuredLabel = windowLabel(measured.fromDate, measured.toDate, resolveRange(range).days)
+  // Reach and profile views come from account insights, which cover a shorter
+  // window than the posts (Instagram allows 29 days). Each tile says its own
+  // window, so a 29-day figure never sits under a "Last 90 days" label.
+  const insightsLabel = measured.insightsFrom
+    ? windowLabel(measured.insightsFrom, measured.toDate, Math.min(resolveRange(range).days, 29))
+    : measuredLabel
   const heading = single ? `${facets[0].label} over time`
     : facets.length <= 3 ? `${facets.map(f => f.label).join(', ')} over time`
       : `${facets.length} metrics over time`
@@ -408,7 +414,7 @@ export function AnalyticsOverview({ summaries, overview, measured, range, onRang
             hint={followers ? undefined : 'Counted daily'}
             delta={followers ? <Delta value={followers.delta} /> : null} />
           <Tile label="Accounts reached" value={stat(overview.reach)} metric="home.reach"
-            hint="People, not impressions" />
+            hint={`People, not impressions · ${insightsLabel.toLowerCase()}`} />
           {/* Named by whose number it is when it is not everybody's. LinkedIn
               takes no view count on an ordinary post, so a mixed selection's
               "post views" is the Instagram and TikTok half — saying so is the
@@ -416,18 +422,18 @@ export function AnalyticsOverview({ summaries, overview, measured, range, onRang
           <Tile label="Post views" value={stat(overview.postViews)} metric="home.post_views"
             hint={overview.postViews === null
               ? 'Not reported by these platforms'
-              : overview.postViewPlatforms.length < overview.byPlatform.length
+              : `${overview.postViewPlatforms.length < overview.byPlatform.length
                 ? `${overview.postViewPlatforms.map(label).join(' and ')} only`
-                : 'Videos and images'} />
+                : 'Videos and images'} · ${measuredLabel.toLowerCase()}`} />
           {/* The distinction the user asked for in as many words. Instagram
               counts these across every surface — feed, stories, explore and
               the profile itself — so they are NOT the post views above and
               must never be added to them. */}
           <Tile label="Profile views" value={stat(overview.accountViews)} metric="home.account_views"
-            hint="Profile and page, all surfaces" />
+            hint={`Profile and page · ${insightsLabel.toLowerCase()}`} />
           <Tile label="Engagement" value={pct(overview.engagementRate)}
             metric="home.engagement_rate"
-            hint={`${fmt(overview.interactions)} interactions`} />
+            hint={`${fmt(overview.interactions)} interactions · ${measuredLabel.toLowerCase()}`} />
           {/* The window these numbers ACTUALLY cover, not the one in the
               picker. Meta refuses more than 30 days between `since` and
               `until` on account insights, so asking for 90 gets you 29 — and

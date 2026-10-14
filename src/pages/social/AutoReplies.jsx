@@ -216,7 +216,7 @@ export default function AutoReplies() {
       {blocked.length > 0 && (
         <Card className="p-3 bg-surface-muted border-dashed">
           <p className="text-xs text-text-secondary">
-            Auto-replies work on Instagram and Facebook only — that is Zernio's limit, not a setting.{' '}
+            Auto-replies work on Instagram only — it is the platform’s limit, not a setting.{' '}
             {blocked.map(a => PLATFORM_META[a.platform]?.label || a.platform).filter((v, i, s) => s.indexOf(v) === i).join(' and ')}
             {blocked.length === 1 ? ' cannot' : ' cannot'} run one.
           </p>
@@ -232,10 +232,17 @@ export default function AutoReplies() {
           title="No account that can do this yet"
           description={
             allAccounts.length === 0
-              ? 'Connect an Instagram or Facebook account and you can set up keyword replies here.'
-              : 'Auto-replies need an Instagram or Facebook account. Connect one to get started.'
+              ? 'Connect an Instagram account and you can set up keyword replies here.'
+              : 'Auto-replies need an Instagram account. Connect one to get started.'
           }
           action={<Button onClick={() => navigate('/social')}>Connect an account</Button>} /></Card>
+      ) : error && automations.length === 0 ? (
+        // The red card above says what failed. "No auto-replies yet" under it
+        // would claim there are none, which nobody has checked.
+        <Card className="p-4 flex items-center gap-3">
+          <p className="text-sm text-text-secondary flex-1">The auto-replies couldn’t be loaded, so this list may not be empty.</p>
+          <Button size="sm" variant="secondary" onClick={load}>Try again</Button>
+        </Card>
       ) : automations.length === 0 ? (
         <Card><Empty
           title="No auto-replies yet"
@@ -299,7 +306,9 @@ function AutomationCard({ automation: a, account, busy, onEdit, onToggle, onLogs
             )}
           </div>
           <p className="text-[11px] text-text-tertiary mt-0.5">
-            {account ? (account.username ? `@${account.username}` : account.display_name) : a.account_id}
+            {/* Never the raw id: an account that has since been disconnected
+                is named as such rather than as a string of hex. */}
+            {account ? (account.username ? `@${account.username}` : account.display_name || 'Connected account') : 'A disconnected account'}
             {' · '}
             {/* Absent platformPostId means every post, which is the common
                 case and reads as a blank if it is not named. */}
@@ -717,7 +726,7 @@ function LogsModal({ automation, workspaceId, onClose }) {
   return (
     <Modal open onClose={onClose} title={`History — ${automation.name}`} width="max-w-2xl">
       <div className="p-6 space-y-3 max-h-[70vh] overflow-y-auto">
-        {error && <p className="text-sm text-red-600">{error}</p>}
+        {error && <p className="text-sm text-red-600">The history couldn’t be loaded, so this may not be everything. Close and reopen to try again.</p>}
 
         {/* Shown ABOVE the log, and shown even when the log is empty — this is
             the only thing that distinguishes "nobody commented" from "the
@@ -742,7 +751,7 @@ function LogsModal({ automation, workspaceId, onClose }) {
 
         {loading ? (
           <div className="space-y-2">{[0, 1, 2].map(i => <Skeleton key={i} className="h-12 w-full" />)}</div>
-        ) : logs.length === 0 ? (
+        ) : error && logs.length === 0 ? null : logs.length === 0 ? (
           <p className="text-sm text-text-secondary">
             Nothing has triggered this yet.
             {misses && misses.total > 0 && ' Comments are arriving — the words above may need changing.'}

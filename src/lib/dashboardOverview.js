@@ -266,7 +266,9 @@ export function combineOverview(summaries = []) {
     postViews: metricAcross(ok, 'views').value,
     postViewPlatforms: metricAcross(ok, 'views').platforms,
     accountViews: sumCounted(ok.map(s => s.accountViews)),
-    reach: sumCounted(ok.map(s => s.accountReach)) ?? (metrics.reach || null),
+    // Account reach only. Falling back to post reach added up counted a person
+    // once per post they saw, and printed that as "accounts reached".
+    reach: sumCounted(ok.map(s => s.accountReach)),
     postReach: metrics.reach,
     byPlatform: byPlatform.sort((a, b) => b.interactions - a.interactions || a.platform.localeCompare(b.platform)),
     mostActive,

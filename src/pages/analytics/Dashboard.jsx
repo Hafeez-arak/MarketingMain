@@ -51,11 +51,23 @@ const metricIcon = key => ({
 }[key] || Icon.activity)
 
 // Monday-start week bucket key (YYYY-MM-DD of that week's Monday).
+// null for a row with no usable date — new Date('T00:00:00Z') is Invalid
+// Date, and its toISOString() threw and took the whole page down.
 function weekOf(dateStr) {
   const d = new Date(`${dateStr}T00:00:00Z`)
+  if (!dateStr || Number.isNaN(d.getTime())) return null
   const dow = (d.getUTCDay() + 6) % 7 // 0=Mon .. 6=Sun
   d.setUTCDate(d.getUTCDate() - dow)
   return d.toISOString().slice(0, 10)
+}
+// A widget whose read failed. Distinct from "not enough history", which is a
+// true statement about a quiet account.
+function LoadFailed({ height }) {
+  return (
+    <div className="flex items-center justify-center text-center px-6 py-8" style={height ? { height } : undefined}>
+      <p className="text-sm text-text-tertiary">This couldn’t be loaded. Refresh the page to try again.</p>
+    </div>
+  )
 }
 const shortDate = iso => new Date(`${iso}T00:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })
 
@@ -233,6 +245,10 @@ export function AnalyticsDashboard({ dash, days, range = { days: 30 }, accountId
   const bestTimeSlots = dash?.bestTime?.slots || EMPTY
   const frequencyRows = dash?.frequency?.frequency || EMPTY
   const decayBuckets = [...(dash?.decay?.buckets || EMPTY)].sort((a, b) => a.bucket_order - b.bucket_order)
+  // Each widget's source can fail on its own ({_error} on that key). A failed
+  // read used to fall through to "Not enough history yet" — or a flat line of
+  // zeros — which says the account is quiet when nothing was read at all.
+  const readFailed = key => Boolean(dash?.[key]?._error)
 
   // Follower history, from whichever source has points. follower-stats is
   // cross-platform; Instagram's own follower-history is the per-account
@@ -244,7 +260,8 @@ export function AnalyticsDashboard({ dash, days, range = { days: 30 }, accountId
     return acc
   }, [posts])
 
-  const overallEngagementRate = useMemo(() => engagementRate(totals) ?? 0, [totals])
+  // null, not 0, when there is nothing to divide: pct() prints "—" for it.
+  const overallEngagementRate = useMemo(() => engagementRate(totals), [totals])
 
   // Whether THIS strip draws the engagement rate, or leaves it to the
   // platform's own strip above. LinkedIn publishes a rate and Instagram does
@@ -310,6 +327,7 @@ export function AnalyticsDashboard({ dash, days, range = { days: 30 }, accountId
     const m = new Map(rangeWeeks.map(wk => [wk, { week: wk, ...ZERO_METRICS }]))
     for (const r of dailyRows) {
       const wk = weekOf(r.date)
+      if (!wk) continue
       if (!m.has(wk)) m.set(wk, { week: wk, ...ZERO_METRICS })
       const e = m.get(wk)
       for (const k of Object.keys(ZERO_METRICS)) e[k] += (r.metrics && r.metrics[k]) || 0
@@ -513,6 +531,7 @@ export function AnalyticsDashboard({ dash, days, range = { days: 30 }, accountId
             </div>
             <div className="flex flex-col lg:flex-row gap-6">
               <div className="flex-1 min-w-0">
+                {readFailed('daily') ? <LoadFailed height={280} /> : (
                 <ResponsiveContainer width="100%" height={280}>
                   <LineChart data={weeklyBuckets} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#eef1ef" vertical={false} />
@@ -525,6 +544,7 @@ export function AnalyticsDashboard({ dash, days, range = { days: 30 }, accountId
                     ))}
                   </LineChart>
                 </ResponsiveContainer>
+                )}
               </div>
               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-2 gap-x-6 gap-y-5 lg:w-56 lg:flex-shrink-0 lg:border-l lg:border-border lg:pl-6">
                 {metricOptions.map(m => (
@@ -546,7 +566,7 @@ export function AnalyticsDashboard({ dash, days, range = { days: 30 }, accountId
           {/* Best time to post / Follower history */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <ChartCard title="Best time to post" icon={Icon.clock} metric="calc.best_time">
-              <BestTimeHeatmap slots={bestTimeSlots} />
+              {readFailed('bestTime') ? <LoadFailed /> : <BestTimeHeatmap slots={bestTimeSlots} />}
             </ChartCard>
             <ChartCard title="Follower history" icon={Icon.users} tone="sage" metric="calc.follower_history">
               {/* Its own range picker: audience growth is a longer question
@@ -672,7 +692,7 @@ export function AnalyticsDashboard({ dash, days, range = { days: 30 }, accountId
           {/* Posting frequency vs engagement / Engagement accumulation */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <ChartCard title="Posting frequency vs engagement" subtitle="Optimal cadence per platform" icon={Icon.activity} tone="sage" metric="calc.frequency">
-              {frequencyRows.length === 0 ? (
+              {readFailed('frequency') ? <LoadFailed /> : frequencyRows.length === 0 ? (
                 <p className="text-sm text-text-tertiary py-8 text-center">Not enough history yet.</p>
               ) : (
                 <>
@@ -696,7 +716,7 @@ export function AnalyticsDashboard({ dash, days, range = { days: 30 }, accountId
               )}
             </ChartCard>
             <ChartCard title="Engagement accumulation" subtitle="How engagement builds up after publishing" icon={Icon.trending} metric="calc.decay">
-              {decayBuckets.length === 0 ? (
+              {readFailed('decay') ? <LoadFailed /> : decayBuckets.length === 0 ? (
                 <p className="text-sm text-text-tertiary py-8 text-center">Not enough history yet.</p>
               ) : (
                 <>

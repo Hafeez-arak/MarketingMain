@@ -49,7 +49,6 @@ export const WEBHOOK_PATHS = {
   // closes that without needing access to the n8n box.
   publishPost:      'arak-publish-post',
   zernioSync:       'arak-zernio-sync',
-  zernioDashboard:  'arak-zernio-dashboard',
   insightsReview:   'arak-insights-review',
   // No brandResearch slot. `arak-brand-research` wrote `proposed` rows into
   // brand_memory from a second code path; the research agent's run does the

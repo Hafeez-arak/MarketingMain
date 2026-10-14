@@ -109,9 +109,11 @@ export function FollowerHistoryCard({ pageRange, accountId, initial = null, chil
         )}
       </div>
 
-      {error ? (
+      {error || (!override && initial?.followers?._error) ? (
+        // The page's own follower read can fail too; it used to read as
+        // "Nothing recorded in this window".
         <div className="h-[220px] flex items-center justify-center text-center px-6">
-          <p className="text-xs text-text-tertiary">Followers did not load: {error}</p>
+          <p className="text-xs text-text-tertiary">Followers couldn’t be loaded. Refresh the page to try again.</p>
         </div>
       ) : rows.length === 0 ? (
         <div className="h-[220px] flex flex-col items-center justify-center text-center gap-2 px-6">

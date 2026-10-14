@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useApp, actions } from '../../store/app'
+import { useApp } from '../../store/app'
 import { Card, Button, Badge, Empty, PostImage, Skeleton } from '../../components/ui/index'
 import { PLATFORM_META, formatDateTime } from '../../lib/utils'
 import { useConnectedAccounts } from '../../lib/useConnectedAccounts'
@@ -18,15 +18,14 @@ import { ComposerHost } from '../../components/composer/ComposerHost'
 const META = PLATFORM_META.tiktok
 
 export function TikTokPage() {
-  const { state, dispatch } = useApp()
+  const { state } = useApp()
   const [filter, setFilter] = useState('all')
   const { accounts, loading, status, error, refresh } = useConnectedAccounts('tiktok')
 
-  // The database's posts (plans, the composer) plus any older browser-only
-  // ones, by id. Counted only once the database has answered.
+  // The database's posts (plans, the composer). Counted only once the
+  // database has answered.
   const remote = usePlatformPosts('tiktok')
-  const remoteIds = new Set(remote.posts.map(p => p.id))
-  const posts = [...remote.posts, ...state.posts.filter(p => p.platform === 'tiktok' && !remoteIds.has(p.id))]
+  const posts = [...remote.posts]
     .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))
   const counting = !remote.loaded
   const connected = accounts.some(a => a.is_active !== false)
@@ -113,11 +112,6 @@ export function TikTokPage() {
                         {p.mediaUrls.map((url, i) => <PostImage key={i} src={url} alt="" className="w-16 h-16 rounded-xl object-cover border border-border" />)}
                       </div>
                     )}
-                  </div>
-                  <div className="flex gap-1 flex-shrink-0">
-                    {!p._fromSupabase && <Button variant="ghost" size="xs" onClick={() => dispatch(actions.deletePost(p.id))}>
-                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14H6L5 6" /></svg>
-                    </Button>}
                   </div>
                 </div>
               </Card>
