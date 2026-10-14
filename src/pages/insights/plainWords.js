@@ -1,4 +1,4 @@
-import { explainRunError } from '../../lib/agent/runHealth'
+import { explainRunError, isPartialRun } from '../../lib/agent/runHealth'
 
 // ─── The Research page, in words a marketer reads ──────────────────────────
 // The selectors in lib/ speak the agent's language — lenses, allowances, raw
@@ -17,9 +17,8 @@ export function plainRunProblem(error, fallback = 'Something went wrong part-way
   }[key] || fallback
 }
 
-/** True when a run finished its measuring step but never did the research itself. */
-export const partRun = run =>
-  run?.status === 'complete' && run?.stage !== 'synthesise' && Boolean(String(run?.error || '').trim())
+/** True when a run finished but never really did the research — see isPartialRun. */
+export const partRun = isPartialRun
 
 /** How a run ended, as a short status for a badge. */
 export function runStatus(run) {

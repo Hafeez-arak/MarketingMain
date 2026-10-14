@@ -3,7 +3,7 @@ import { callModel } from './_provider.js'
 import { textIn } from '../../src/lib/agent/loop.js'
 import {
   makeNote, notesFromRun, renderDigest, freshTail, digestIsStale,
-  approxTokens, DIGEST_TOKEN_BUDGET,
+  approxTokens, DIGEST_TOKEN_BUDGET, isExpired, datedMerge,
 } from '../../src/lib/agent/memory.js'
 
 // ─── Reading and writing the agent's memory ────────────────────────────────
@@ -165,9 +165,14 @@ const COMPACT_PROMPT = [
   '- Drop anything that is trivially re-readable from the database, anything',
   '  purely conversational, and anything that has stopped mattering.',
   '- Keep each statement to one line. No preamble, no commentary.',
+  '- If two notes contradict each other, keep the one with the LATER date',
+  '  and drop the other.',
   '',
-  'Return JSON: {"notes":[{"kind":"...","body":"..."}]} using ONLY the kinds',
-  'that appear in the input.',
+  'Each input note starts with its number. For every note you return, list in',
+  '"from" the numbers of the input notes it was made from.',
+  '',
+  'Return JSON: {"notes":[{"kind":"...","body":"...","from":[0,3]}]} using ONLY',
+  'the kinds that appear in the input.',
 ].join('\n')
 
 const COMPACT_SCHEMA = {
@@ -182,10 +187,11 @@ const COMPACT_SCHEMA = {
         items: {
           type: 'object',
           additionalProperties: false,
-          required: ['kind', 'body'],
+          required: ['kind', 'body', 'from'],
           properties: {
             kind: { type: 'string' },
             body: { type: 'string' },
+            from: { type: 'array', items: { type: 'integer' } },
           },
         },
       },
@@ -216,7 +222,10 @@ export async function rebuildDigest(workspaceId, { force = false } = {}) {
       db(`agent_digest?workspace_id=eq.${workspaceId}&select=built_through&limit=1`),
     ])
 
-    const all = notes || []
+    // Expired notes never go back into the prompt, or to the compactor —
+    // which used to be handed them and give them a fresh life.
+    const now = new Date()
+    const all = (notes || []).filter(n => !isExpired(n, now))
     if (!all.length) return { ...nil, ok: true }
 
     const unfolded = all.filter(n => n.status === 'new')
@@ -249,7 +258,7 @@ export async function rebuildDigest(workspaceId, { force = false } = {}) {
         messages: [{
           role: 'user',
           content: `${COMPACT_PROMPT}\n\nNotes:\n${
-            all.map(n => `[${n.kind}] ${n.body}`).join('\n')
+            all.map((n, i) => `${i}. [${n.kind}] (${String(n.created_at || '').slice(0, 10)}) ${n.body}`).join('\n')
           }`,
         }],
         maxTokens: 4_000,
@@ -260,13 +269,9 @@ export async function rebuildDigest(workspaceId, { force = false } = {}) {
 
       if (out.ok) {
         try {
-          const merged = (JSON.parse(textIn(out.response))?.notes || [])
-            .filter(n => String(n?.body || '').trim())
-            .map(n => ({
-              ...makeNote({ kind: n.kind, body: n.body }),
-              created_at: new Date().toISOString(),
-              seen_count: 1,
-            }))
+          // Each merged note keeps the age and expiry of what it came from;
+          // see datedMerge.
+          const merged = datedMerge(JSON.parse(textIn(out.response))?.notes || [], all)
           if (merged.length) {
             const viaModel = renderDigest(merged)
             // Only accept the compaction if it actually helped. A summariser

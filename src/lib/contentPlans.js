@@ -1,5 +1,6 @@
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './supabaseClient'
 import { promotable, promotionNote, ideasFromReport, RESEARCH_SOURCE } from './researchIdeas'
+import { isPartialRun } from './agent/runHealth'
 
 // ─── Content Plans ──────────────────────────────────────────────────────────
 // The monthly planning layer. A plan is created up front, its ideas are
@@ -222,11 +223,11 @@ export async function fetchResearchIdeas(workspaceId, accessToken) {
     // and perfectly good. One bad run should not erase the feature.
     const res = await fetch(
       `${SUPABASE_URL}/rest/v1/research_runs?workspace_id=eq.${workspaceId}&status=eq.complete` +
-      `&started_at=gte.${since}&select=id,started_at,report&order=started_at.desc&limit=6`,
+      `&started_at=gte.${since}&select=id,status,stage,error,started_at,report&order=started_at.desc&limit=6`,
       { headers: authHeaders(accessToken) },
     )
     if (!res.ok) return empty
-    const runs = (await res.json()).filter(r => r?.report)
+    const runs = (await res.json()).filter(r => r?.report && !isPartialRun(r))
     if (!runs.length) return empty
 
     const latestRunDate = String(runs[0].started_at || '').slice(0, 10)
@@ -281,17 +282,20 @@ export async function fetchPlannerMemory(workspaceId, accessToken) {
   }
   const since = new Date(Date.now() - RESEARCH_MAX_AGE_DAYS * 86400000).toISOString()
   const [runs, digests, posts] = await Promise.all([
+    // Six, not one: the newest run may be one that died on credit or came
+    // back empty (isPartialRun), and the planner was fed it as "research".
     getJson(`${SUPABASE_URL}/rest/v1/research_runs?workspace_id=eq.${workspaceId}&status=eq.complete` +
-      `&started_at=gte.${since}&select=started_at,report&order=started_at.desc&limit=1`),
+      `&started_at=gte.${since}&select=status,stage,error,started_at,report&order=started_at.desc&limit=6`),
     getJson(`${SUPABASE_URL}/rest/v1/agent_digest?workspace_id=eq.${workspaceId}&select=digest&limit=1`),
     getJson(`${SUPABASE_URL}/rest/v1/scheduled_posts?workspace_id=eq.${workspaceId}` +
       `&select=platform,topic,caption,caption_en,scheduled_date,status&order=created_at.desc&limit=40`),
   ])
 
-  const report = runs?.[0]?.report || null
+  const good = (runs || []).find(r => r?.report && !isPartialRun(r)) || null
+  const report = good?.report || null
   const clip = (v, n) => String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, n)
   const research = report ? {
-    date: String(runs[0].started_at || '').slice(0, 10),
+    date: String(good.started_at || '').slice(0, 10),
     headline: clip(report.headline, 400),
     // Findings are long-form and cite sources; the planner needs the claim,
     // not the essay, so each is clipped to a sentence or two.

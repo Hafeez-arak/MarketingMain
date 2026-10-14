@@ -162,7 +162,9 @@ export default async function handler(req, res) {
 
   try {
     const [{ brand }, measured] = await Promise.all([
-      loadBrandContext(workspaceId, 'review'),
+      // 'chat', a real task: 'review' is not in TASKS, so every field tagged
+      // for a task matched nothing and silently dropped out.
+      loadBrandContext(workspaceId, 'chat'),
       readMeasuredPosts(workspaceId),
     ])
     const evidence = evidenceFor(measured, String(draft.platform || ''))

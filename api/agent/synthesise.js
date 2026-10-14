@@ -150,7 +150,11 @@ export default async function handler(req, res) {
       status: 'complete',
       stage: deep.ok ? 'synthesise' : 'gather',
       report: deep.report,
-      error: deep.ok ? '' : String(deep.error || '').slice(0, 500),
+      // An empty brief is a fault, not a quiet week, and it has to say so on
+      // the row: it used to be stored with no error, as a clean run.
+      error: deep.ok
+        ? (deep.report?.synthesis?.empty ? 'The brief came back empty — nothing to act on was written.' : '')
+        : String(deep.error || '').slice(0, 500),
       // The ledger wins when it is readable. `deep.cost` only counts what THIS
       // invocation spent, and the lenses ran in five earlier invocations.
       cost_estimate: totals ? totals.cost_usd : Number((deep.cost || 0).toFixed(4)),
