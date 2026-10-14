@@ -42,7 +42,7 @@ export const WEBHOOK_SLOTS = [
   'campaignPlanner',
   'elongateIdea', 'captionStudio', 'draftCopy', 'mediaOptions',
   'videoRender',
-  'publishPost', 'zernioSync', 'zernioDashboard',
+  'publishPost', 'zernioSync',
   'creativeGenerate', 'creativeEdit', 'creativeVideo', 'creativeCompose',
   'creativeEnhance', 'creativeVideoEdit', 'creativeStitch', 'creativeCancel',
   'creativeLayerize', 'creativeUpscale',

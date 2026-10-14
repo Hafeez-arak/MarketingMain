@@ -10,7 +10,6 @@ const titles = {
   '/analytics': 'Analytics', '/agent': 'Assistant', '/insights': 'Research', '/media': 'Media Library', '/social': 'Social Media',
   '/social/instagram': 'Instagram',
   '/social/tiktok': 'TikTok',
-  '/social/snapchat': 'Snapchat',
   '/social/linkedin': 'LinkedIn',
   '/social/approvals': 'Post Queue',
   '/analytics/report': 'Performance Report', '/insights/report': 'Research Brief', '/insights/business': 'Business View',
