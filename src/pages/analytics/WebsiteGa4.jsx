@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
 import {
   ResponsiveContainer, ComposedChart, Area, Line, XAxis, YAxis, CartesianGrid, Tooltip,
 } from 'recharts'
@@ -145,7 +144,6 @@ const shareOf = (rows, key) => {
 }
 
 export function Ga4Panels({ ga4, summary, days, custom = false }) {
-  const navigate = useNavigate()
   if (!ga4) return null
 
   // ── Not set up: the normal state until a tag exists ──
@@ -159,24 +157,8 @@ export function Ga4Panels({ ga4, summary, days, custom = false }) {
             Search Console above ends at the click. Everything after it — how many people arrived, where they came
             from, which pages they read and whether they got in touch — only exists if a GA4 tag is on the site.
           </p>
-          {(ga4.configError || ga4.error) && (
-            <p className="text-xs text-red-600 mt-2">{ga4.configError || ga4.error}</p>
-          )}
-          <p className="eyebrow mt-4 mb-2">To turn this on</p>
-          <ol className="space-y-1.5 mb-4">
-            {(ga4.setup || []).map((step, i) => (
-              <li key={step} className="text-xs text-text-secondary flex gap-2.5">
-                <span className="w-4 h-4 border border-border bg-surface-subtle flex items-center justify-center
-                  text-[10px] font-bold text-text-tertiary flex-shrink-0 tabular-nums">{i + 1}</span>
-                <span>{step}</span>
-              </li>
-            ))}
-          </ol>
-          <p className="text-[11px] text-text-tertiary mb-4 leading-relaxed">
-            GA4 only reports from the day the tag goes live — it cannot backfill. Installing it today means this
-            panel has a week of data next week, and a year of it next year.
-          </p>
-          <Button size="sm" variant="secondary" onClick={() => navigate('/brand-brain')}>Open Brand Brain</Button>
+          {/* How to connect it lives in docs/GA4-SETUP.md, not on screen. */}
+          <p className="text-sm text-text-secondary mt-3">Not connected yet. Contact your admin to connect it.</p>
         </div>
       </Card>
     )

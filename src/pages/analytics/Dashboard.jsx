@@ -353,14 +353,14 @@ export function AnalyticsDashboard({ dash, days, range = { days: 30 }, accountId
   if (dash?.error) {
     return (
       <Card className="p-6 border-dashed bg-surface-muted">
-        <Empty icon={alertIcon} title="Couldn't reach Zernio" description={dash.error} />
+        <Empty icon={alertIcon} title="Analytics couldn’t be loaded" description={dash.error} />
       </Card>
     )
   }
   if (!hasAnalyticsAccess) {
     return (
       <Card className="p-6 border-dashed bg-surface-muted">
-        <Empty title="Analytics add-on not enabled" description="This Zernio plan doesn't include the analytics add-on yet." />
+        <Empty title="Analytics isn’t switched on" description="Post analytics aren’t included in the current plan yet. Contact your admin." />
       </Card>
     )
   }
@@ -414,7 +414,7 @@ export function AnalyticsDashboard({ dash, days, range = { days: 30 }, accountId
                   first snapshot lands; the tile must not contradict it with a
                   number nobody measured. */}
               {totalFollowers === null
-                ? <span className="text-text-tertiary" title="Zernio records followers once a day. A newly connected account has no count until its first snapshot.">—</span>
+                ? <span className="text-text-tertiary" title="Followers are counted once a day. A newly connected account has no count until the first one.">—</span>
                 : fmt(totalFollowers)}
             </p>
           </div>

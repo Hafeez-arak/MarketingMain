@@ -156,7 +156,7 @@ export default function LeadAgent() {
           <div className="bg-white px-4 py-3">
             <p className="text-[10px] font-semibold text-text-tertiary uppercase tracking-wide">Model</p>
             {loading ? <Skeleton className="h-6 w-24 mt-1" /> : <p className="text-sm font-bold text-text mt-1">{modelName(status?.model)}</p>}
-            <p className="text-[10px] text-text-tertiary mt-1">Through OpenRouter. Names, emails and phone numbers are hidden from it.</p>
+            <p className="text-[10px] text-text-tertiary mt-1">Names, emails and phone numbers are hidden from the AI.</p>
           </div>
           <div className="bg-white px-4 py-3">
             <p className="text-[10px] font-semibold text-text-tertiary uppercase tracking-wide">OpenRouter key</p>

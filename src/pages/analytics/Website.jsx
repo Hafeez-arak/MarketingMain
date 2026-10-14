@@ -1,5 +1,4 @@
 import { useId, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
 import {
   ResponsiveContainer, ComposedChart, Area, Line, LineChart, BarChart, Bar,
   XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine, Cell,
@@ -164,26 +163,6 @@ function PanelHead({ title, subtitle, metric, icon = Icon.activity, tone = 'stee
 /** The steps, not a shrug. Every credential on this page is one somebody has
  *  to create by hand once, and "not connected" with nothing to do about it is
  *  the least useful thing a panel can say. */
-export function SetupSteps({ title, description, steps = [], error, action }) {
-  return (
-    <div className="p-5">
-      <p className="text-sm text-text-secondary mb-1">{description}</p>
-      {error && <p className="text-xs text-red-600 mb-3">{error}</p>}
-      {title && <p className="eyebrow mt-4 mb-2">{title}</p>}
-      <ol className="space-y-1.5 mb-4">
-        {steps.map((step, i) => (
-          <li key={step} className="text-xs text-text-secondary flex gap-2.5">
-            <span className="w-4 h-4 border border-border bg-surface-subtle flex items-center justify-center
-              text-[10px] font-bold text-text-tertiary flex-shrink-0 tabular-nums">{i + 1}</span>
-            <span>{step}</span>
-          </li>
-        ))}
-      </ol>
-      {action}
-    </div>
-  )
-}
-
 const PRIORITY = {
   high: { label: 'Now', classes: 'bg-red-50 text-red-600 border-red-200' },
   medium: { label: 'Soon', classes: 'bg-amber-50 text-amber-700 border-amber-200' },
@@ -244,7 +223,6 @@ export function WebsiteTab() {
 const PREVIEW_ROWS = 3
 
 export function WebsiteAnalytics(w) {
-  const navigate = useNavigate()
   // Declared before every early return below — a hook behind a condition is a
   // hook that changes order between renders.
   const [allQueries, setAllQueries] = useState(false)
@@ -307,9 +285,8 @@ export function WebsiteAnalytics(w) {
         <Card className="overflow-hidden">
           <PanelHead title="Search Console is not connected" icon={Icon.trending} tone="sage"
             subtitle="Nothing to read until a property is set up" />
-          <SetupSteps description="Google Search Console is where the search half of this page comes from."
-            error={search.error} steps={search.setup || []}
-            action={<Button size="sm" variant="secondary" onClick={() => navigate('/brand-brain')}>Open Brand Brain</Button>} />
+          {/* How to connect it lives in docs/WEBSITE-SETUP.md, not on screen. */}
+          <p className="p-5 text-sm text-text-secondary">Not connected yet. Contact your admin to connect it.</p>
         </Card>
         <Ga4Panels ga4={ga4} summary={ga4Summary} days={days} custom={isCustom(range)} />
       <BioLinkPanel ga4={ga4} bio={bio} arrivals={arrivals} summary={arrivalsSummary} days={days}

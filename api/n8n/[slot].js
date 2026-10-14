@@ -106,10 +106,8 @@ export default async function handler(req, res) {
 
   const base = await readBaseUrl()
   if (!base) {
-    return res.status(503).json({
-      error: 'n8n is not reachable: no base URL is configured. Start the tunnel ' +
-             '(n8n/docker/start-tunnel.sh) or set app_config.n8n_base_url.',
-    })
+    console.error('[config] n8n base URL is not set: start the tunnel (n8n/docker/start-tunnel.sh) or set app_config.n8n_base_url')
+    return res.status(503).json({ error: 'The automation service isn’t running right now. Contact your admin.' })
   }
 
   // Every workflow now runs a Webhook Secret Guard first, so forwarding an
@@ -176,8 +174,9 @@ export default async function handler(req, res) {
   } catch (err) {
     // A dead tunnel looks like a fetch failure here. Say so in the terms the
     // person reading it can act on, rather than leaking the hostname.
+    console.error(`[n8n] could not reach the instance (tunnel down?): ${err.message}`)
     return res.status(502).json({
-      error: `Could not reach n8n. The tunnel may have restarted or stopped. (${err.message})`,
+      error: 'The automation service couldn’t be reached. Try again in a minute; if it keeps happening, contact your admin.',
     })
   }
 }

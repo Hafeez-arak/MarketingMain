@@ -116,20 +116,8 @@ export function WebsiteCard({ data, loading, summary, recommendations, pages }) 
       <Card className="overflow-hidden">
         <Header site={data.site} />
         <div className="p-5">
-          <p className="text-sm text-text-secondary mb-3">
-            Search Console is not connected yet, so there is nothing to read.
-            {data.error ? <span className="text-text-tertiary"> ({data.error})</span> : null}
-          </p>
-          <ol className="space-y-1.5 mb-4">
-            {(data.setup || []).map((step, i) => (
-              <li key={step} className="text-xs text-text-secondary flex gap-2.5">
-                <span className="w-4 h-4 border border-border bg-surface-subtle flex items-center justify-center
-                  text-[10px] font-bold text-text-tertiary flex-shrink-0 tabular-nums">{i + 1}</span>
-                <span>{step}</span>
-              </li>
-            ))}
-          </ol>
-          <Button size="sm" variant="secondary" onClick={() => navigate('/brand-brain')}>Open Brand Brain</Button>
+          {/* How to connect it lives in docs/WEBSITE-SETUP.md, not on screen. */}
+          <p className="text-sm text-text-secondary">Search Console isn’t connected yet. Contact your admin to connect it.</p>
         </div>
       </Card>
     )

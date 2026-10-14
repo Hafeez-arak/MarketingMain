@@ -113,7 +113,10 @@ export async function fetchGa4Data({
   const sa = serviceAccount(env)
   const resolved = propertyFor(property, env)
 
-  if (!sa) return { ok: false, configured: false, error: 'GOOGLE_SA_KEY is not set.', property: '' }
+  if (!sa) {
+    console.error('[config] GOOGLE_SA_KEY is not set on this deployment')
+    return { ok: false, configured: false, error: 'Google is not connected yet.', property: '' }
+  }
   if (resolved.error) return { ok: false, configured: false, error: resolved.error, property: '' }
   if (!resolved.path) {
     return { ok: false, configured: false, error: 'No GA4 property is configured for this brand.', property: '' }

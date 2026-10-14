@@ -2,6 +2,7 @@ import { SUPABASE_URL, SUPABASE_ANON_KEY } from './supabaseClient'
 import { describeWebhookFailure } from './n8nWebhooks'
 import { tableForPlatform } from './studioBridge'
 import { markIdeasDrafting, fetchIdeaDrafts, updateIdea } from './contentPlans'
+import { notSetUp } from './notSetUp'
 
 // ─── Campaign Planner ───────────────────────────────────────────────────────
 // Turns a single stated goal into a set of dated, platform-specific post
@@ -44,7 +45,7 @@ export const PLANNABLE_PLATFORMS = ['instagram', 'tiktok', 'linkedin']
 // the posts are NOT in this response and never will be. The caller polls
 // content_plans.generation_result (see awaitPlanGeneration) instead.
 export async function startCampaignPlan(webhookUrl, payload) {
-  if (!webhookUrl) return { error: 'No Campaign Planner webhook configured. Go to Settings → Integrations → Workflow Webhooks.' }
+  if (!webhookUrl) return { error: notSetUp('Campaign Planner') }
   if (!payload?.plan_id) return { error: 'Internal: the plan row has to exist before generation can start.' }
   try {
     const res = await fetch(webhookUrl, {
@@ -60,9 +61,8 @@ export async function startCampaignPlan(webhookUrl, payload) {
     const raw = Array.isArray(data) ? data[0] : data
     if (raw && Array.isArray(raw.posts)) {
       return {
-        error: 'The Campaign Planner workflow on n8n is the old synchronous version. ' +
-               'Redeploy it from n8n/workflows (n8n/redeploy.sh) so it saves the plan ' +
-               'itself instead of answering with it.',
+        // The workflow on the box predates async plans: redeploy it (n8n/redeploy.sh).
+        error: 'Plan writing needs an update before it can be used. Contact your admin.',
       }
     }
     return { ok: true }
@@ -78,7 +78,7 @@ export async function startCampaignPlan(webhookUrl, payload) {
 // See the accompanying n8n spec doc for the full contract.
 export function normalizePlanPosts(raw, payload) {
   const posts = Array.isArray(raw?.posts) ? raw.posts : []
-  if (posts.length === 0) return { error: 'The workflow returned no posts. Check the n8n response shape against the spec.' }
+  if (posts.length === 0) return { error: 'No posts came back. Try again.' }
   {
     // Only a platform this plan asked for. The workflow already refuses
     // anything else; checked again because a post landing on a platform
@@ -139,7 +139,7 @@ export function normalizePlanPosts(raw, payload) {
 // Synchronous (one Sonnet call, no image generation) — the caller can just
 // await it inline instead of polling like the generation webhooks.
 export async function elongateIdea(webhookUrl, payload) {
-  if (!webhookUrl) return { error: 'No Idea Elongation webhook configured. Go to Settings → Integrations → Workflow Webhooks.' }
+  if (!webhookUrl) return { error: notSetUp('Idea Elongation') }
   try {
     const res = await fetch(webhookUrl, {
       method: 'POST',
@@ -162,7 +162,7 @@ export async function elongateIdea(webhookUrl, payload) {
 // call), so the caller awaits it inline. Only fires when the reviewer asks,
 // so it never adds cost to normal generation.
 export async function requestCaptionStudio(webhookUrl, payload) {
-  if (!webhookUrl) return { error: 'Caption Studio webhook not configured. Go to Settings → Integrations → Workflow Webhooks.' }
+  if (!webhookUrl) return { error: notSetUp('Caption Studio') }
   try {
     const res = await fetch(webhookUrl, {
       method: 'POST',
@@ -188,7 +188,7 @@ export async function requestCaptionStudio(webhookUrl, payload) {
 // just means that one card's draft_status never leaves 'drafting' until a
 // retry, it never blocks the rest of the board.
 export async function requestDraftCopy(webhookUrl, payload) {
-  if (!webhookUrl) return { error: 'Draft Copy webhook not configured. Go to Settings → Integrations → Workflow Webhooks.' }
+  if (!webhookUrl) return { error: notSetUp('Draft Copy') }
   try {
     const res = await fetch(webhookUrl, {
       method: 'POST',
@@ -205,7 +205,7 @@ export async function requestDraftCopy(webhookUrl, payload) {
 // image options" and is watching a loading state, so this awaits the real
 // 2-3 candidate image URLs (fal.ai) rather than firing and polling.
 export async function requestMediaOptions(webhookUrl, payload) {
-  if (!webhookUrl) return { error: 'Media Options webhook not configured. Go to Settings → Integrations → Workflow Webhooks.' }
+  if (!webhookUrl) return { error: notSetUp('Media Options') }
   try {
     const res = await fetch(webhookUrl, {
       method: 'POST',
@@ -225,7 +225,7 @@ export async function requestMediaOptions(webhookUrl, payload) {
 // Video Render — fire-and-forget, one call per video idea (batched by the
 // caller firing several at once, not by one call carrying an array).
 export async function requestVideoRender(webhookUrl, payload) {
-  if (!webhookUrl) return { error: 'Video Render webhook not configured. Go to Settings → Integrations → Workflow Webhooks.' }
+  if (!webhookUrl) return { error: notSetUp('Video Render') }
   try {
     const res = await fetch(webhookUrl, {
       method: 'POST',
@@ -335,7 +335,7 @@ export async function ensureCaptions({ draftCopyUrl, ideas, accessToken, buildPa
     if (!draftCopyUrl) {
       // Named individually rather than as a count — "3 ideas have no caption"
       // sends someone hunting through a month of cards to find which three.
-      for (const i of stillMissing) errors.push(`${i.title || i.topic || 'Untitled idea'}: no caption, and the Draft Copy webhook isn't configured (Settings → Integrations).`)
+      for (const i of stillMissing) errors.push(`${i.title || i.topic || 'Untitled idea'}: no caption, and captions can't be written right now — contact your admin.`)
       return { ideas: applyCaptions(list, resolved), errors }
     }
 

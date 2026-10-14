@@ -25,6 +25,7 @@ import { syncZernio } from '../../lib/zernio'
 import { fetchAccountFeed } from '../../lib/zernioConnect'
 import { ORIGIN, POST_FILTERS, matchesFilter, countPosts, buildAllPosts, feedStats } from '../../lib/instagramAllPosts'
 import { defaultWebhookUrl } from '../../lib/n8nWebhooks'
+import { notSetUp } from '../../lib/notSetUp'
 
 // ─── Constants ─────────────────────────────────────────────────────────────
 const LIGHTING_STYLES = [
@@ -594,7 +595,7 @@ function PostDetail({ post, state, webhookUrl, regenWebhookUrl, supabaseUrl, ano
 
   async function handleRegenImage() {
     if (!activeRegenUrl) {
-      setRegenError('Configure the Instagram webhook in Settings → Integrations.')
+      setRegenError(notSetUp('Instagram image'))
       return
     }
     setRegenLoading(true); setRegenError(''); setStagedImage(null)

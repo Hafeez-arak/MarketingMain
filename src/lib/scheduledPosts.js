@@ -4,6 +4,7 @@ import { publishPost } from './zernio'
 import { defaultWebhookUrl } from './n8nWebhooks'
 import { postLock } from './postLock'
 import { mediaOfPost } from './mediaOrder'
+import { notSetUp } from './notSetUp'
 
 // ─── Posts, across all three tables ────────────────────────────────────────
 // Reads go through the scheduled_posts view (20260813_scheduled_posts_view.sql);
@@ -257,7 +258,7 @@ export async function unschedulePost({ accessToken, post, webhooks, workspaceId 
 
 async function cancelScheduled({ webhooks, post, workspaceId }) {
   const url = (webhooks?.publishPost || defaultWebhookUrl('publishPost'))
-  if (!url) return { error: 'Publish webhook not configured — set it in Settings → Integrations.' }
+  if (!url) return { error: notSetUp('Publish') }
   try {
     const res = await fetch(url, {
       method: 'POST',

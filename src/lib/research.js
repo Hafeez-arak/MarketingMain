@@ -1,4 +1,5 @@
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './supabaseClient'
+import { notSetUp } from './notSetUp'
 
 // ─── Research agent — the agenda ───────────────────────────────────────────
 // The standing memory the weekly run works from: the questions this brand
@@ -153,7 +154,7 @@ export function competitorRowsFrom(schema, directory) {
 // matching a rival to an account is arithmetic over a domain, a name and a
 // bio, and it has to answer the same way twice.
 export async function requestHandleResolve(webhookUrl, payload) {
-  if (!webhookUrl) return { error: 'Research resolve webhook not configured. Go to Settings → Integrations.' }
+  if (!webhookUrl) return { error: notSetUp('Research resolve') }
   if (!payload?.workspace_id) return { error: 'No active workspace.' }
   try {
     const res = await fetch(webhookUrl, {
@@ -250,7 +251,7 @@ export function runStatusLabel(run) {
 }
 
 export async function requestResearchRun(webhookUrl, payload) {
-  if (!webhookUrl) return { error: 'Research run webhook not configured. Go to Settings → Integrations.' }
+  if (!webhookUrl) return { error: notSetUp('Research run') }
   if (!payload?.workspace_id) return { error: 'No active workspace.' }
   try {
     const res = await fetch(webhookUrl, {

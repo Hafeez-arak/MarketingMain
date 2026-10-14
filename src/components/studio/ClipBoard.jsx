@@ -631,8 +631,8 @@ export function ClipBoard({
         onConfirm={() => { const i = cancelling; setCancelling(null); onCancelClip(i) }}
         title={`Cancel clip ${(cancelling ?? 0) + 1}?`}
         message={
-          'This asks fal to drop the render and frees the board straight away. It only avoids the ' +
-          'charge if the job is still queued — once fal has started generating, that take is paid for ' +
+          'This asks the video service to drop the render and frees the board straight away. It only avoids the ' +
+          'charge if the job is still queued — once generating has started, that take is paid for ' +
           'either way. The run stops here rather than moving on to the next shot.'
         }
       />

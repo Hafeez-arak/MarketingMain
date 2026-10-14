@@ -179,7 +179,7 @@ export function Analytics() {
               Website tab. That tab has its own Refresh, which re-reads Google. */}
           {!onWebsite && (loading || allAccounts.length > 0) && (
             <Button size="sm" variant="secondary" onClick={handleSync} disabled={syncing || loading}>
-              {syncing ? <><Spinner size="sm" /> Refreshing…</> : 'Refresh from Zernio'}
+              {syncing ? <><Spinner size="sm" /> Refreshing…</> : 'Refresh'}
             </Button>
           )}
         </div>
@@ -262,7 +262,7 @@ export function Analytics() {
                         page invented. */}
                     <div className="text-sm text-text-secondary">
                       {a.followers_count === null || a.followers_count === undefined
-                        ? <span title="Zernio has not recorded a follower snapshot for this account yet.">— followers</span>
+                        ? <span title="Followers haven’t been counted for this account yet.">— followers</span>
                         : `${fmt(a.followers_count)} followers`}
                     </div>
                     {a.needs_reconnection

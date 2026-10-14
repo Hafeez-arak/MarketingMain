@@ -39,6 +39,7 @@ import { useConnectedAccounts } from '../../lib/useConnectedAccounts'
 import { MediaViewer, SlideStrip } from '../../components/PostMediaViewer'
 import { ImageFitter } from '../../components/media/ImageFitter'
 import { refitSlides } from '../../lib/refitSlides'
+import { notSetUp } from '../../lib/notSetUp'
 
 // The five stages, in order. `media` is the pictures step and `captions` the
 // words written against them — captions come after the picture on purpose, so
@@ -344,7 +345,7 @@ export function CampaignPlanner() {
   async function draftCaptions(allIdeas, ids) {
     const draftCopyUrl = state.webhooks?.draftCopy
     if (!ids.length) return
-    if (!draftCopyUrl) { setError('Draft Copy webhook not configured (Settings → Integrations).'); return }
+    if (!draftCopyUrl) { setError(notSetUp('Draft Copy')); return }
     const nowIso = new Date().toISOString()
     update({ ideas: allIdeas.map(i => ids.includes(i.id) ? { ...i, draftStatus: 'drafting', draftedAt: nowIso, draftError: '', captionOptions: [] } : i) })
     await markIdeasDrafting(accessToken, ids)
@@ -428,7 +429,7 @@ export function CampaignPlanner() {
         if (row.draft_status === 'drafting' && staleMs > 5 * 60 * 1000) {
           // Written down, not just patched locally — a local-only verdict
           // died with the tab and the next load resumed the same spinner.
-          markIdeaDraftFailed(accessToken, i.id, 'Drafting timed out — no result came back from the workflow.')
+          markIdeaDraftFailed(accessToken, i.id, 'Drafting timed out — no captions came back. Try again.')
           patches[i.id] = { draftStatus: 'failed', draftError: 'Drafting timed out — try again.' }
         } else if (row.draft_status === 'ready' || row.draft_status === 'failed') {
           patches[i.id] = { draftStatus: row.draft_status, draftError: row.draft_error || '', captionOptions: row.caption_options || [] }
@@ -540,7 +541,7 @@ export function CampaignPlanner() {
     if (v) { setError(v); return }
     // The AI planner webhook is only needed when AI-assist is actually on —
     // a plan of only your own posts never calls it.
-    if (aiAssist && !webhookUrl) { setError('Campaign Planner webhook not configured (Settings → Integrations).'); return }
+    if (aiAssist && !webhookUrl) { setError(notSetUp('Campaign Planner')); return }
     setError(''); setLoading(true)
 
     const { cleanSeeds, seedIdeas } = buildSeeds()
@@ -663,7 +664,7 @@ export function CampaignPlanner() {
   // Top up the existing plan with more AI ideas — same webhook, with the
   // plan's current ideas sent so the workflow steers away from repeating them.
   async function handleGenerateMore({ count, focus }) {
-    if (!webhookUrl) { setMoreError('Campaign Planner webhook not configured (Settings → Integrations).'); return }
+    if (!webhookUrl) { setMoreError(notSetUp('Campaign Planner')); return }
     setMoreError(''); setMoreLoading(true)
 
     const brandCtx = contextFor('plan')
@@ -1476,7 +1477,7 @@ export function CampaignPlanner() {
                 : 'Leave off for a plan that is exactly the posts you added.'}
             </p>
             {aiAssist && !webhookUrl && (
-              <p className="text-[11px] text-amber-700">The Campaign Planner webhook isn't configured — add it in Settings → Integrations.</p>
+              <p className="text-[11px] text-amber-700">Writing a plan with AI isn’t available right now — contact your admin.</p>
             )}
 
             {aiAssist && (

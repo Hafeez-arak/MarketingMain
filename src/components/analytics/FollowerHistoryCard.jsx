@@ -119,7 +119,7 @@ export function FollowerHistoryCard({ pageRange, accountId, initial = null, chil
         <div className="h-[220px] flex flex-col items-center justify-center text-center gap-2 px-6">
           <p className="text-sm font-medium text-text">Nothing recorded in this window</p>
           <p className="text-xs text-text-tertiary">
-            Zernio counts followers once a day and keeps no history from before an account was
+            Followers are counted once a day, with no history from before an account was
             connected, so {rangeLabel(range).toLowerCase()} can be emptier than the window suggests.
             Reconnecting an account starts the series again.
           </p>

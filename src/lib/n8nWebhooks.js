@@ -84,11 +84,10 @@ export async function describeWebhookFailure(res) {
            'generate (and bill) twice.'
   }
   if (res.status === 503) {
-    return fromProxy || 'n8n is not reachable: no instance is configured right now. ' +
-           'Whoever runs the tunnel needs to start it.'
+    return fromProxy || 'The automation service isn’t running right now. Contact your admin.'
   }
   if (res.status === 502) {
-    return fromProxy || 'Could not reach n8n — the tunnel may have restarted or stopped.'
+    return fromProxy || 'The automation service couldn’t be reached. Try again in a minute; if it keeps happening, contact your admin.'
   }
   return fromProxy || text || `The workflow returned ${res.status}.`
 }

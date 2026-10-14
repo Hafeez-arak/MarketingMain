@@ -56,7 +56,10 @@ export function profileIdOf(value) {
 // instagram_audio_requires_facebook_login mean "this will never work as
 // asked" rather than "try again".
 export function createZernio({ apiKey, fetchImpl = fetch, base = ZERNIO_BASE }) {
-  if (!apiKey) throw new Error('ZERNIO_API_KEY is not set on this deployment.')
+  if (!apiKey) {
+    console.error('[config] ZERNIO_API_KEY is not set on this deployment')
+    throw new Error('Social accounts aren’t available right now. Contact your admin.')
+  }
 
   async function request(path, { method = 'GET', query, body, connectToken } = {}) {
     const url = `${base}/${path.replace(/^\/+/, '')}${query ? `?${qs(query)}` : ''}`

@@ -1,5 +1,6 @@
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './supabaseClient'
 import { POST_TABLES } from './scheduledPosts'
+import { notSetUp } from './notSetUp'
 
 // ─── Insights ──────────────────────────────────────────────────────────────
 // Reads the two logs the rest of the loop writes — idea_events (what people
@@ -121,7 +122,7 @@ export async function fetchPerformance(workspaceId, accessToken) {
 // rows as `proposed` — never `active` — so nothing it infers reaches a prompt
 // before a human has agreed to it on this page.
 export async function requestInsightsReview(webhookUrl, workspaceId) {
-  if (!webhookUrl) return { error: 'Insights review webhook not configured. Go to Settings → Integrations.' }
+  if (!webhookUrl) return { error: notSetUp('Insights review') }
   if (!workspaceId) return { error: 'No active workspace.' }
   try {
     const res = await fetch(webhookUrl, {

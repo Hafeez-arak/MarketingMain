@@ -3,6 +3,13 @@ import {
   SC_SCOPE, SC_TOKEN_URL, SC_API, propertyId, queryBody, normalizeRows, searchWindows,
 } from '../../src/lib/agent/searchConsole.js'
 
+// The credential's name stays in the server log; the page only learns that
+// Google is not connected (see docs/WEBSITE-SETUP.md).
+function notConnected(extra) {
+  console.error('[config] GOOGLE_SA_KEY is not set on this deployment')
+  return { ok: false, configured: false, error: 'Google is not connected yet.', ...extra }
+}
+
 // ─── Talking to Search Console ─────────────────────────────────────────────
 //
 // The half that needs a key and a network. Everything that decides what any of
@@ -153,7 +160,7 @@ export async function fetchSearchData({ site, now = new Date(), rowLimit = 500, 
   const sa = serviceAccount(env)
   const property = siteFor(site, env)
 
-  if (!sa) return { ok: false, configured: false, error: 'GOOGLE_SA_KEY is not set.', site: property }
+  if (!sa) return notConnected({ site: property })
   if (!property) return { ok: false, configured: false, error: 'No Search Console property is configured for this brand.', site: property }
 
   const windows = searchWindows(now)
@@ -251,7 +258,7 @@ export async function fetchWebsiteData({
   const sa = serviceAccount(env)
   const property = siteFor(site, env)
 
-  if (!sa) return { ok: false, configured: false, error: 'GOOGLE_SA_KEY is not set.', site: property }
+  if (!sa) return notConnected({ site: property })
   if (!property) return { ok: false, configured: false, error: 'No Search Console property is configured for this brand.', site: property }
 
   const windows = searchWindows(now, { days, from, to })

@@ -7,6 +7,7 @@
 // mount anything, so it depends on nothing but React. Before it existed the
 // symptom was a blank white page whose only clue was a console error.
 export function ConfigError({ message }) {
+  if (message) console.error(`[config] ${message}`)
   return (
     <div style={{
       minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -20,30 +21,16 @@ export function ConfigError({ message }) {
           margin: 0, fontSize: 12, fontWeight: 600, letterSpacing: '0.14em',
           textTransform: 'uppercase', color: '#7D98A1',
         }}>
-          Configuration
+          Setup
         </p>
         <h1 style={{ margin: '10px 0 14px', fontSize: 20, fontWeight: 700, color: '#1C2321' }}>
-          This deployment isn’t configured yet.
+          This app isn’t set up yet.
         </h1>
-        <p style={{ margin: '0 0 18px', fontSize: 14, lineHeight: 1.6, color: '#5E6572' }}>
-          {message}
+        {/* What to set, and where, is in docs/DEPLOY-SETUP.md; `message` names
+            what is missing, for whoever reads the console. */}
+        <p style={{ margin: 0, fontSize: 14, lineHeight: 1.6, color: '#5E6572' }}>
+          Contact your admin.
         </p>
-        <p style={{ margin: '0 0 10px', fontSize: 14, lineHeight: 1.6, color: '#5E6572' }}>
-          Add these to the hosting provider’s environment variables, then
-          <strong> redeploy</strong> — they are inlined when the app is built, so an
-          existing deployment will not pick them up on its own.
-        </p>
-        <pre style={{
-          margin: 0, padding: '12px 14px', borderRadius: 10, background: '#EEF1EF',
-          fontSize: 12.5, lineHeight: 1.7, color: '#1C2321', overflowX: 'auto',
-        }}>
-{`VITE_SUPABASE_URL=https://<project>.supabase.co
-VITE_SUPABASE_ANON_KEY=<anon key>
-
-# Server-side only (no VITE_ prefix — these must never
-# reach the browser). Used by the /api/n8n proxy.
-SUPABASE_SERVICE_ROLE_KEY=<service role key>`}
-        </pre>
       </div>
     </div>
   )

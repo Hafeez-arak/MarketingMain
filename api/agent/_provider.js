@@ -92,7 +92,8 @@ export async function callModel({
     // Named, not swallowed. A missing key here previously looked exactly like
     // "the feature silently does nothing", which cost this project a day once
     // already with the n8n webhook secret.
-    return { ok: false, refused: true, error: 'ANTHROPIC_API_KEY is not set on this deployment, so the agent cannot run.' }
+    console.error('[config] ANTHROPIC_API_KEY is not set on this deployment')
+    return { ok: false, refused: true, error: 'The assistant is not available right now. Contact your admin.' }
   }
 
   const model = modelFor(job)
@@ -108,7 +109,7 @@ export async function callModel({
 
   const params = buildRequest({ model, identity, brand, tools, messages, maxTokens, effort, outputFormat })
 
-  let response = null
+  let response
   let error = ''
   let timedOut = false
   // Every turn this call made, so a resumed generation reports all of its
