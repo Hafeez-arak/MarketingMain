@@ -60,20 +60,6 @@ export const MIN_WINDOW_DAYS = 7
 
 // Said here rather than in the component, so the browser bundle does not carry
 // setup instructions for credentials it never handles.
-const SEARCH_SETUP = [
-  'Create a Google Cloud service account and download its JSON key.',
-  "In Search Console, add that service account's client_email as a Full user on the property.",
-  'Put the JSON in GOOGLE_SA_KEY on this deployment (raw or base64).',
-  'Set customFields.website on the Brand Brain to the verified property, e.g. sc-domain:example.com.',
-]
-
-const GA4_SETUP = [
-  'Install a GA4 tag on the website — without it the property collects nothing, whatever is configured here.',
-  'In GA4, open Admin → Property access management and add the same service account client_email as a Viewer.',
-  'Copy the numeric property id from Admin → Property settings (digits only, not the G- measurement id).',
-  'Set customFields.ga4_property_id on the Brand Brain to that number.',
-]
-
 // ─── The bio link ──────────────────────────────────────────────────────────
 //
 // The one question this tab could not answer: is anybody actually clicking the
@@ -106,7 +92,10 @@ async function fetchBioTaps(workspaceId, days) {
     }
   }
   const key = process.env.ZERNIO_API_KEY || ''
-  if (!key) return { ok: false, error: 'ZERNIO_API_KEY is not set on this deployment.' }
+  if (!key) {
+    console.error('[config] ZERNIO_API_KEY is not set on this deployment')
+    return { ok: false, error: 'This isn’t available right now. Contact your admin.' }
+  }
   try {
     const profile = await zernioProfileFor(workspaceId)
     const instagram = (profile?.accounts || []).find(a => String(a.platform).toLowerCase() === 'instagram')
@@ -207,7 +196,6 @@ export default async function handler(req, res) {
         lines,
         sitemaps: sitemaps.sitemaps || [],
         sitemapError: sitemaps.error || '',
-        setup: search.configured ? undefined : SEARCH_SETUP,
       },
       // ── The bio link, as a third thing ──
       // Not folded into `ga4` even though the arrivals come from there,
@@ -231,7 +219,6 @@ export default async function handler(req, res) {
         // mistake, not a missing configuration, and it gets the message that
         // says which number to look for rather than the four generic steps.
         configError: ga4.error || '',
-        setup: analytics.configured ? undefined : GA4_SETUP,
       },
     })
   } catch (err) {

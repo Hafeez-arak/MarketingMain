@@ -7,14 +7,15 @@ import { previewFit } from '../lib/imageFit'
 // pads such a picture (lib/imageFit), so a preview that filled a fixed frame
 // showed people a cut-off logo for a post that went out whole.
 function useShape(src) {
-  const [shape, setShape] = useState(null)
+  // Keyed by the picture it was measured from, so a new `src` reads as "not
+  // known yet" without resetting state synchronously inside the effect.
+  const [measured, setMeasured] = useState({ src: null, shape: null })
   useEffect(() => {
     let live = true
-    setShape(null)
-    if (src) previewFit(src).then(f => { if (live) setShape(f) })
+    if (src) previewFit(src).then(f => { if (live) setMeasured({ src, shape: f }) })
     return () => { live = false }
   }, [src])
-  return shape
+  return measured.src === src ? measured.shape : null
 }
 
 // Fills its parent's frame; used for thumbnails whose frame is fixed.

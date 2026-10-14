@@ -1,4 +1,5 @@
 import { BRAND_TIMEZONE } from './brandTime'
+import { notSetUp } from './notSetUp'
 
 // ─── Zernio (publishing + analytics) — the primary path ──────────────────
 // The only publishing provider, for every platform. The Meta Graph API path
@@ -40,7 +41,7 @@ export async function publishPost(webhookUrl, {
   platformSpecificData, tiktokSettings,
   scheduledFor, timezone, force = false, reschedule = false,
 }) {
-  if (!webhookUrl) return { error: 'Publish webhook not configured — set it in Settings → Integrations.' }
+  if (!webhookUrl) return { error: notSetUp('Publish') }
   if (!POST_TABLES.includes(postTable)) return { error: `Unknown post table: ${postTable}` }
   try {
     const res = await fetch(webhookUrl, {
@@ -92,7 +93,7 @@ export async function publishPost(webhookUrl, {
 // On-demand refresh — hits the same workflow the daily schedule trigger
 // runs, just synchronously so a "Refresh" button gets a real result.
 export async function syncZernio(webhookUrl, workspaceId) {
-  if (!webhookUrl) return { error: 'Zernio Sync webhook not configured — set it in Settings → Integrations.' }
+  if (!webhookUrl) return { error: notSetUp('Sync') }
   try {
     const res = await fetch(webhookUrl, {
       method: 'POST',

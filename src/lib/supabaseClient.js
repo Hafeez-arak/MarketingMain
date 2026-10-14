@@ -2,7 +2,7 @@ import { createClient } from '@supabase/supabase-js'
 
 // ─── Supabase client ────────────────────────────────────────────────────────
 // Phase 0 replaces the old pattern (each workspace manually pasting a
-// Supabase URL + anon key into Settings → Integrations) with a single,
+// Supabase URL + anon key into a settings page) with a single,
 // fixed client baked from env vars. There is only ever one Supabase project
 // behind this app now — tenant isolation happens via RLS + auth, not via
 // "which credentials did this browser tab happen to have typed in."

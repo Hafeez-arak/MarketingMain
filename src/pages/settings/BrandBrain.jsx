@@ -1703,7 +1703,7 @@ export function BrandBrain() {
                     <svg className="w-3.5 h-3.5 text-stone-600" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
                   </div>
                   <div>
-                    <p className="text-sm font-medium text-text">Preview what gets sent to n8n</p>
+                    <p className="text-sm font-medium text-text">Preview the brand instructions</p>
                     <p className="text-xs text-text-secondary">
                       {isBrandProfileEmpty(profile) ? 'Nothing yet — fill in at least one field above' : 'See the flattened instructions block'}
                     </p>

@@ -101,14 +101,7 @@ export default async function handler(req, res) {
         configured: false,
         site: data.site || '',
         error: data.error || '',
-        // Said here rather than in the component, so the browser bundle does
-        // not carry setup instructions for a credential it never handles.
-        setup: [
-          'Create a Google Cloud service account and download its JSON key.',
-          'In Search Console, add that service account\'s client_email as a Full user on the property.',
-          'Put the JSON in GOOGLE_SA_KEY on this deployment (raw or base64).',
-          'Set customFields.website on the Brand Brain to the verified property, e.g. sc-domain:example.com.',
-        ],
+        // How to connect it is in docs/WEBSITE-SETUP.md, not on screen.
       })
     }
     if (!data.ok) {

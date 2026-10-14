@@ -125,7 +125,7 @@ export function CaptionStudio({ open, onClose, webhookUrl, platform, language = 
       <div className="p-6 space-y-5">
         {!webhookUrl && (
           <div className="rounded-xl bg-amber-50 border border-amber-100 px-4 py-3 text-xs text-amber-700">
-            Caption Studio webhook isn't configured yet — add it in Settings → Integrations → Workflow Webhooks.
+            Writing captions isn’t available right now — contact your admin.
           </div>
         )}
 

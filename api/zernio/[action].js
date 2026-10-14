@@ -975,11 +975,8 @@ export default async function handler(req, res) {
     })
   }
   if (!ZERNIO_KEY) {
-    return res.status(503).json({
-      ok: false,
-      error: 'ZERNIO_API_KEY is not set on this deployment, so no account can be connected. ' +
-             'Add it to the Vercel project environment and redeploy.',
-    })
+    console.error('[config] ZERNIO_API_KEY is not set on this deployment')
+    return res.status(503).json({ ok: false, error: 'Accounts can’t be connected right now. Contact your admin.' })
   }
 
   const body = req.body && typeof req.body === 'object' ? req.body : {}

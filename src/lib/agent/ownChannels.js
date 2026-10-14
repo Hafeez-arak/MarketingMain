@@ -392,8 +392,8 @@ export function ownChannels({ accounts = [], posts = [], analytics = [], period,
       // in-flight post makes the stock silent note a confident falsehood, so
       // it is replaced rather than appended to.
       note: state === 'silent' && undated > 0
-        ? `${undated} ${label} post${undated === 1 ? ' is' : 's are'} mid-publish — accepted by ` +
-          'Zernio but not yet stamped with a publish time, so nothing can be placed in this ' +
+        ? `${undated} ${label} post${undated === 1 ? ' is' : 's are'} mid-publish — accepted ` +
+          'for publishing but not yet stamped with a publish time, so nothing can be placed in this ' +
           'period or measured yet. This is publishing in progress, not a quiet week.'
         : state === 'silent' && last
           ? `${NOTES.silent(label)} The last post went out on ${last.slice(0, 10)}.`
@@ -547,7 +547,7 @@ export function ownChannelFindings(own) {
           headline: p.undated === 1
             ? `A ${p.label} post is mid-publish and has no timestamp yet.`
             : `${p.undated} ${p.label} posts are mid-publish and have no timestamps yet.`,
-          detail: 'Accepted by Zernio but not yet stamped with a publish time, so they fall in no ' +
+          detail: 'Accepted for publishing but not yet stamped with a publish time, so they fall in no ' +
             'reporting period and have no analytics. Nothing is wrong unless this persists — ' +
             'the timestamp lands when the publish settles and the daily sync runs.',
           confidence: 1,

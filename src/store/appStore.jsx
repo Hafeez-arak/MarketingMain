@@ -160,9 +160,8 @@ function reducer(state, action) {
     case 'ADD_TEAM_MEMBER':    return { ...state, team: [...state.team, action.payload] }
     case 'REMOVE_TEAM_MEMBER': return { ...state, team: state.team.filter(m => m.id !== action.payload) }
     case 'SET_INSTAGRAM_SCHEDULE':     return { ...state, instagramSchedule: action.payload }
-    case 'SET_WEBHOOK': return { ...state, webhooks: { ...state.webhooks, [action.payload.platform]: action.payload.url } }
     // Applying a blob fetched from workspace_webhooks. Deliberately NOT a
-    // loop of SET_WEBHOOK over its entries, which is what the two loaders
+    // loop of per-slot writes over its entries, which is what the two loaders
     // used to do: that path writes every stored key verbatim, so the ''s
     // and stale hosts in an old row land in the store unfiltered and
     // clobber the build's defaults. Routing it through webhooksFrom applies

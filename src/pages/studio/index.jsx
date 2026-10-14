@@ -1792,8 +1792,8 @@ export function CreativeStudio() {
           // a labelled readout, and the label/value split lets the number carry
           // the size instead of the whole string being uniformly small.
           <div className="inline-flex items-center gap-2.5 border border-border bg-surface-card px-3 py-1.5 whitespace-nowrap"
-            title="Credit left on the fal.ai account, refreshed when this page loads">
-            <span className="text-[10px] font-bold uppercase tracking-[0.08em] text-text-secondary">fal credit</span>
+            title="Credit left for making pictures and videos, refreshed when this page loads">
+            <span className="text-[10px] font-bold uppercase tracking-[0.08em] text-text-secondary">Studio credit</span>
             <span className="text-sm font-semibold text-text tabular-nums">${falBalance.toFixed(2)}</span>
           </div>
         )}

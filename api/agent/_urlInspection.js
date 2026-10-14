@@ -102,7 +102,10 @@ export async function fetchInspections({ site, urls = [], env = process.env } = 
   const sa = serviceAccount(env)
   const property = siteFor(site, env)
 
-  if (!sa) return { ok: false, configured: false, error: 'GOOGLE_SA_KEY is not set.', rows: [] }
+  if (!sa) {
+    console.error('[config] GOOGLE_SA_KEY is not set on this deployment')
+    return { ok: false, configured: false, error: 'Google is not connected yet.', rows: [] }
+  }
   if (!property) return { ok: false, configured: false, error: 'No Search Console property is configured for this brand.', rows: [] }
   if (!urls.length) return { ok: true, configured: true, site: property, rows: [] }
 

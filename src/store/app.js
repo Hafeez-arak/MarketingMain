@@ -79,7 +79,6 @@ export const actions = {
   updateWorkspace:    p  => ({ type: 'UPDATE_WORKSPACE',     payload: p }),
   addTeamMember:      p  => ({ type: 'ADD_TEAM_MEMBER',      payload: p }),
   removeTeamMember:   id => ({ type: 'REMOVE_TEAM_MEMBER',   payload: id }),
-  setWebhook:         (platform, url) => ({ type: 'SET_WEBHOOK', payload: { platform, url } }),
   hydrateWebhooks:    saved => ({ type: 'HYDRATE_WEBHOOKS', payload: saved }),
   setBrandProfile:    p  => ({ type: 'SET_BRAND_PROFILE',     payload: p }),
   setCampaignPlanDraft: p => ({ type: 'SET_CAMPAIGN_PLAN_DRAFT', payload: p }),

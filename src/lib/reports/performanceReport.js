@@ -244,7 +244,7 @@ export function caveats(payload, { limit = 6 } = {}) {
   if (unmeasured.length) {
     out.push(
       `${unmeasured.map(p => p.label).join(', ')}: posts went out but no analytics have synced. ` +
-      'Zernio refreshes at most every 90 minutes and platform reach can lag by up to 48 hours.',
+      'Numbers refresh at most every 90 minutes and platform reach can lag by up to 48 hours.',
     )
   }
 
@@ -260,7 +260,7 @@ export function caveats(payload, { limit = 6 } = {}) {
   if (undated.length) {
     const n = undated.reduce((sum, p) => sum + p.undated, 0)
     out.push(
-      `${n} post${n === 1 ? ' is' : 's are'} mid-publish — accepted by Zernio but not yet stamped ` +
+      `${n} post${n === 1 ? ' is' : 's are'} mid-publish — accepted for publishing but not yet stamped ` +
       'with a publish time, so they sit in no period and are counted nowhere above.',
     )
   }

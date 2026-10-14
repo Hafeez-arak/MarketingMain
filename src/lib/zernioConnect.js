@@ -194,15 +194,15 @@ const OAUTH_ERRORS = {
   connection_failed: 'The platform refused the connection. Start again.',
   reconnect_account_mismatch:
     'That is a different account from the one being reconnected. Sign in as the same account, or disconnect the old one first.',
-  account_limit_exceeded: 'The Zernio plan has no room for another connected account.',
-  profile_limit_exceeded: 'The Zernio plan has no room for another workspace profile.',
-  payment_required: 'Zernio refused this because the plan does not cover it — check billing at zernio.com.',
-  access_denied: 'This Zernio API key has no access to that profile.',
+  account_limit_exceeded: 'The plan has no room for another connected account. Contact your admin.',
+  profile_limit_exceeded: 'The plan has no room for another company. Contact your admin.',
+  payment_required: 'The current plan doesn’t cover this. Contact your admin.',
+  access_denied: 'This company’s connection settings don’t allow that. Contact your admin.',
   platform_requires_destination:
     'That platform needs a page or profile chosen after login, and this app has no screen for it yet.',
   connection_cancelled: 'The window was closed before the connection finished. Start again.',
-  unsupported_platform: 'Zernio does not support connecting that platform this way.',
-  internal_error: 'Zernio hit an internal error. Try again in a moment.',
+  unsupported_platform: 'That platform can’t be connected this way.',
+  internal_error: 'The connection service hit an error. Try again in a moment.',
 }
 
 export function explainOAuthError(cb) {

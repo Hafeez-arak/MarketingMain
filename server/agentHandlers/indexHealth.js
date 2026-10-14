@@ -41,12 +41,6 @@ async function readBody(req) {
   return raw ? JSON.parse(raw) : {}
 }
 
-const SETUP = [
-  'Create a Google Cloud service account and download its JSON key.',
-  "In Search Console, add that service account's client_email as a Full user on the property.",
-  'Put the JSON in GOOGLE_SA_KEY on this deployment (raw or base64).',
-  'Set customFields.website on the Brand Brain to the verified property, e.g. sc-domain:example.com.',
-]
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -102,7 +96,6 @@ export default async function handler(req, res) {
         ok: inspected.configured,
         configured: inspected.configured,
         site: inspected.site || site,
-        setup: inspected.configured ? undefined : SETUP,
         error: inspected.configured
           ? 'No URLs to check: no sitemap is submitted for this property, and no page took an impression in the window.'
           : inspected.error,
@@ -118,7 +111,6 @@ export default async function handler(req, res) {
         ok: false,
         configured: inspected.configured,
         site: inspected.site || site,
-        setup: inspected.configured ? undefined : SETUP,
         error: inspected.error,
         sitemap: { sources: sitemap.sources, found: sitemap.urls.length, error: sitemap.error },
         health: null,

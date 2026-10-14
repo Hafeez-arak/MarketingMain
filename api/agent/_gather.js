@@ -108,7 +108,10 @@ async function connectedAccounts(workspaceId) {
  */
 export async function gatherZernioOwn(accounts, period, { apiKey = process.env.ZERNIO_API_KEY || '' } = {}) {
   const none = note => ({ external: [], pageInsights: {}, note })
-  if (!apiKey) return none('ZERNIO_API_KEY is not set, so posts made directly on a platform and LinkedIn page totals were not read.')
+  if (!apiKey) {
+    console.error('[config] ZERNIO_API_KEY is not set on this deployment')
+    return none('Posts made directly on a platform and LinkedIn page totals could not be read this time.')
+  }
   const live = (accounts || []).filter(a => a?.zernio_profile_id)
   if (!live.length) return none('')
   try {

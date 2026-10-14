@@ -315,9 +315,10 @@ export async function postAnalytics(z, profileId, { limit = POST_LIMIT } = {}) {
 export async function liveZernioAnalytics(workspaceId, { days = MAX_INSIGHT_DAYS, apiKey } = {}) {
   const key = apiKey || process.env.ZERNIO_API_KEY || ''
   if (!key) {
+    console.error('[config] ZERNIO_API_KEY is not set on this deployment')
     return {
       available: false,
-      error: 'ZERNIO_API_KEY is not set on this deployment, so Zernio cannot be asked directly. ' +
+      error: 'Live platform numbers are not available right now. ' +
         'Stored analytics are still available through get_channel_analytics.',
     }
   }

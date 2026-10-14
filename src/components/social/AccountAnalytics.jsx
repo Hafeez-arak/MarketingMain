@@ -135,7 +135,7 @@ export function AccountAnalytics({ platform, accounts = [], loadingAccounts = fa
         <RangePicker value={range} onChange={setRange} />
         {(loading || syncing) && <Spinner size="sm" />}
         <div className="ml-auto flex items-center gap-3">
-          {lastSync && <span className="text-[11px] text-text-tertiary">Zernio synced {timeAgo(lastSync)}</span>}
+          {lastSync && <span className="text-[11px] text-text-tertiary">Synced {timeAgo(lastSync)}</span>}
           {refreshable && (
             <Button size="sm" variant="secondary" onClick={handleRefresh} disabled={loading || syncing}>
               {syncing ? 'Refreshing…' : 'Refresh'}

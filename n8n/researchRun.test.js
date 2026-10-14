@@ -433,7 +433,7 @@ function anthropic(script) {
   }]
 }
 const say = obj => ({ stop_reason: 'end_turn', content: [{ type: 'text', text: JSON.stringify(obj) }] })
-const useTool = (name, input, id = 't1') => ({ stop_reason: 'tool_use', content: [{ type: 'tool_use', id, name, input }] })
+const toolTurn = (name, input, id = 't1') => ({ stop_reason: 'tool_use', content: [{ type: 'tool_use', id, name, input }] })
 
 function tavily(results) {
   return ['api.tavily.com', async () => ({ statusCode: 200, body: { answer: 'stub', results } })]
@@ -491,7 +491,7 @@ describe('Run: Investigate — citations are checked, not trusted', () => {
     const { out } = await runCodeNode(INVESTIGATE, {
       env: INV_ENV, input: invInput(), postgrest: pg,
       routes: [
-        anthropic([useTool('web_search', { query: 'lighting trends' }), say(reportObj)]),
+        anthropic([toolTurn('web_search', { query: 'lighting trends' }), say(reportObj)]),
         tavily([{ title: 'Real', url: REAL, content: 'something true' }]),
       ],
     })
@@ -541,7 +541,7 @@ describe('Run: Investigate — bounds and boundaries', () => {
     // A model that would loop forever if nothing stopped it.
     const { out } = await runCodeNode(INVESTIGATE, {
       env: INV_ENV, input: invInput(), postgrest: pg,
-      routes: [anthropic([useTool('web_search', { query: 'again' })]), tavily([])],
+      routes: [anthropic([toolTurn('web_search', { query: 'again' })]), tavily([])],
     })
     expect(out.ok).toBe(true)
     expect(out.investigated === true || out.investigated === false).toBe(true)
