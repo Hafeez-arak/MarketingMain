@@ -126,7 +126,7 @@ function Moved({ block }) {
       </ul>
       {block.more > 0 && (
         <p className="text-[10px] text-text-tertiary mt-2">
-          {block.more} more not shown. This block deliberately shows only the three that matter most.
+          {block.more} more not shown — only the three that matter most are listed here.
         </p>
       )}
     </>
@@ -173,6 +173,9 @@ export function BusinessView() {
         watchlist: comp.watchlist, brands: comp.brands, deals: comp.deals,
         signals: intel.signals || [],
       })
+    }).catch(() => {
+      // A failed load says it failed — never a blank page or an empty market.
+      if (alive) setState(s => ({ ...s, loading: false, available: false }))
     })
     return () => { alive = false }
   }, [activeWorkspaceId, accessToken, reload])
@@ -197,8 +200,9 @@ export function BusinessView() {
       <ReportDoc>
         <ReportToolbar backTo="/insights" backLabel="Back to research" />
         <Empty
-          title="The competitor tables cannot be read"
-          description="Either the database change has not been applied yet, or the request failed. We show nothing rather than an empty market, because that would be a claim built on a missing table."
+          title="The competitor information could not be loaded"
+          description="This is a connection problem, not missing information — nothing has been lost. Please try again in a moment."
+          action={<Button onClick={() => { setState(s => ({ ...s, loading: true })); setReload(n => n + 1) }}>Try again</Button>}
         />
       </ReportDoc>
     )
@@ -236,7 +240,7 @@ export function BusinessView() {
             <Losing block={p.losing} />
           </ReportSection>
 
-          <ReportSection title="The board"
+          <ReportSection title="Who we compete with"
             note={p.line === 'controls'
               ? 'Controls work is chosen by MEP and ELV consultants, then bought through the main contractor. So what counts is which protocols a rival supports, what they are certified for, and who they commission for.'
               : 'Lighting is chosen by architects and lighting designers. So what counts is which brands a rival can supply, and what they have already lit.'}>
@@ -248,7 +252,7 @@ export function BusinessView() {
           </ReportSection>
 
           <ReportSection title="What we still cannot answer"
-            note="Listed here rather than left out. A missing section looks like nothing is wrong.">
+            note="The gaps in what we know about this business, and how each one could be filled.">
             <Unknown items={p.unknown} />
           </ReportSection>
         </div>

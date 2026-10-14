@@ -93,8 +93,8 @@ function HandleRow({ row, accessToken, onChanged }) {
               is the kind of wrong that does not look wrong. */}
           {weak ? (
             <div className="mt-1 text-[11px] text-amber-700">
-              Not measured until someone confirms it — the pipeline only trusts a verified
-              or hand-set handle.
+              Not measured until someone confirms it — only a verified or hand-set handle
+              is counted.
             </div>
           ) : null}
         </div>
@@ -301,7 +301,7 @@ export function AgentSteering() {
           {/* Deliberately allowed to differ from the Brand Brain's competitor
               directory. That difference is information, not a sync bug. */}
           <p className="mt-2 text-[11px] text-text-tertiary">
-            This list is the agent's own and may differ from the Brand Brain directory.
+            This list belongs to the research and may differ from the competitors listed in Brand Brain.
           </p>
         </div>
       </Card>

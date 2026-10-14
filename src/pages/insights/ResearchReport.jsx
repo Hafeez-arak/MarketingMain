@@ -8,7 +8,7 @@ import {
   ReportTable, ReportRow, Cell, Caveats, ReportFooter,
 } from '../../components/report/ReportShell'
 import { useReportFilename } from '../../lib/reports/print'
-import { lensStates, lensHeadline, runEffort, pct } from '../../lib/researchBrief'
+import { lensStates, pct } from '../../lib/researchBrief'
 import {
   TEAMS, sectionVisible, forTeam, topThree, salesRows, competitorMoves, movesByLine,
   globalView, lineView, linesIn, socialActivity, eventsView,
@@ -17,6 +17,7 @@ import {
 } from '../../lib/marketReport'
 import { fetchIntel } from '../../lib/marketIntel'
 import { fetchAgenda } from '../../lib/agentAgenda'
+import { plainRunProblem, partRun, readingLine } from './plainWords'
 
 // ─── /insights/report — the research brief, as a document ──────────────────
 // The Research tab is built for reading on a screen: a sticky rail, four
@@ -160,7 +161,7 @@ export function ResearchReport() {
   )
 
   if (!activeWorkspaceId) {
-    return <Empty title="No workspace selected" description="Pick a workspace to read its research." />
+    return <Empty title="No brand selected" description="Pick a brand to read its research." />
   }
 
   const setParam = (key, value) => setParams(prev => {
@@ -189,7 +190,7 @@ export function ResearchReport() {
               <option key={r.id} value={r.id}>
                 {new Date(r.started_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
                 {' — '}
-                {(r.error ? 'failed' : r.report?.headline || r.status).slice(0, 44)}
+                {r.status === 'failed' ? 'did not finish' : partRun(r) ? 'partly finished' : (r.report?.headline || 'complete').slice(0, 44)}
               </option>
             ))}
           </PillSelect>
@@ -200,13 +201,13 @@ export function ResearchReport() {
         <Card className="p-6"><ReportSkeleton /></Card>
       ) : error ? (
         <Card className="p-6">
-          <Empty title="Could not load the research" description={`${error}. This is a connection problem rather than missing data — nothing has been lost.`} />
+          <Empty title="The research could not be loaded" description="This is a connection problem, not missing research — nothing has been lost. Please try again." />
         </Card>
       ) : !run ? (
         <Card className="p-6">
           <Empty
-            title="No research has been run for this brand yet"
-            description="Start a run from the Research page and this report will have something to print."
+            title="No research yet"
+            description="Run research from the Research page and this report will have something to print."
             action={<Button onClick={() => { window.location.href = '/insights' }}>Go to Research</Button>}
           />
         </Card>
@@ -216,13 +217,12 @@ export function ResearchReport() {
             <ReportMasthead
               kind={`Weekly market report${team !== 'all' ? ` · for ${teamLabel}` : ''}`}
               brand={brand}
-              line={run.error ? `This run did not finish: ${run.error}` : report.headline || 'This run produced no headline.'}
+              line={run.status === 'failed' ? `This research did not finish. ${plainRunProblem(run.error)}` : report.headline || 'This research has no summary.'}
               meta={[runDate, report.period?.days ? `${report.period.days}-day window` : '']}
             />
 
             {/* ── Top 3 ── */}
-            <ReportSection title="Top 3 this week" keep
-              note={top.derived ? 'Chosen in code from this run\'s findings; this report predates the agent writing its own.' : ''}>
+            <ReportSection title="Top priorities this week" keep>
               {topItems.length ? (
                 <ol className="space-y-2">
                   {topItems.map((t, i) => (
@@ -231,7 +231,7 @@ export function ResearchReport() {
                       <div>
                         <p className="text-[13px] font-semibold text-text leading-snug">{t.finding}
                           <span className="ml-1.5 text-[10px] font-normal uppercase tracking-wide text-text-tertiary">{t.team}</span></p>
-                        {t.action && <p className="text-[11px] text-text-secondary mt-0.5 leading-relaxed"><span className="font-semibold">Action: </span>{t.action}</p>}
+                        {t.action && <p className="text-[11px] text-text-secondary mt-0.5 leading-relaxed"><span className="font-semibold">What to do: </span>{t.action}</p>}
                         {sourceLine(t.pieces.map(p => p.url).filter(Boolean)) && (
                           <p className="text-[10px] text-text-tertiary mt-0.5">{sourceLine(t.pieces.map(p => p.url).filter(Boolean))}</p>
                         )}
@@ -244,10 +244,10 @@ export function ResearchReport() {
 
             {/* ── Sales ── */}
             {show('sales') && (
-              <ReportSection title="Sales: act now"
-                note={sales.trackerAvailable ? 'Every open lead in the tracker, across all runs, with its current status.' : 'Leads from this report.'}>
+              <ReportSection title="Leads, tenders and projects"
+                note={sales.trackerAvailable ? 'Every open opening we are tracking, with its current status.' : 'Openings found in this research.'}>
                 {sales.open.length ? (
-                  <ReportTable head={[{ label: 'Lead / tender / project' }, { label: 'Details' }, { label: 'Window closes' }, { label: 'Suggested action' }]}>
+                  <ReportTable head={[{ label: 'Opening' }, { label: 'Details' }, { label: 'Deadline' }, { label: 'What to do' }]}>
                     {sales.open.map((r, i) => (
                       <ReportRow key={r.id || i}>
                         <Cell first className="w-[30%]">
@@ -281,7 +281,7 @@ export function ResearchReport() {
 
             {/* ── Competitor moves ── */}
             <ReportSection title="Competitor moves"
-              note={moves.derived ? 'Assembled from this report\'s competitor readings.' : 'Combined from small signals across websites, LinkedIn, job ads, social posts and the press, this week and earlier.'}>
+              note="Pieced together from competitors' websites, LinkedIn, job ads, social posts and the press.">
               {moveItems.length ? (
                 <div className="space-y-3">
                   {moveGroups.map(g => (
@@ -295,15 +295,15 @@ export function ResearchReport() {
                     <div key={i} data-print-keep className="border-l-2 border-text pl-3">
                       <p className="text-[13px] font-semibold text-text">{m.competitor}
                         <span className="ml-1.5 text-[10px] font-normal uppercase tracking-wide text-text-tertiary">
-                          {[m.relevance && `relevance ${m.relevance}`, freshnessLabel(m.freshness), ...m.channels]
+                          {[m.relevance && `${m.relevance} priority`, freshnessLabel(m.freshness), ...m.channels]
                             .filter(Boolean).join(' · ')}
                         </span>
                       </p>
                       {m.whatChanged && <p className="text-[12px] text-text mt-0.5 leading-snug">{m.whatChanged}</p>}
-                      {m.picture && <p className="text-[11px] text-text-secondary mt-0.5 leading-relaxed"><span className="font-semibold">The picture: </span>{m.picture}</p>}
-                      {m.effect && <p className="text-[11px] text-text-secondary mt-0.5 leading-relaxed"><span className="font-semibold">For us: </span>{m.effect}</p>}
+                      {m.picture && <p className="text-[11px] text-text-secondary mt-0.5 leading-relaxed"><span className="font-semibold">Why we think so: </span>{m.picture}</p>}
+                      {m.effect && <p className="text-[11px] text-text-secondary mt-0.5 leading-relaxed"><span className="font-semibold">What it means for us: </span>{m.effect}</p>}
                       {sourceLine(m.pieces.map(p => p.url).filter(Boolean)) && (
-                        <p className="text-[10px] text-text-tertiary mt-0.5">{m.pieces.length} piece{m.pieces.length === 1 ? '' : 's'} · {sourceLine(m.pieces.map(p => p.url).filter(Boolean))}</p>
+                        <p className="text-[10px] text-text-tertiary mt-0.5">{sourceLine(m.pieces.map(p => p.url).filter(Boolean))}</p>
                       )}
                     </div>
                       ))}
@@ -384,7 +384,7 @@ export function ResearchReport() {
                 {events.dates.length > 0 && (
                   <div className="mt-3">
                     <p className="text-[10px] font-semibold uppercase tracking-wide text-text-tertiary mb-1">
-                      Dates in the calendar — not events to attend
+                      Dates to plan content around
                     </p>
                     <ul className="space-y-1">
                       {events.dates.map((d, i) => (
@@ -406,7 +406,7 @@ export function ResearchReport() {
                 to be honest when the answer is "almost nothing". */}
             {show('search') && (search.present || report.website?.summary) && (
               <ReportSection title="Website"
-                note="How our site did over the last 28 days, read by the agent from Google Search and Google Analytics.">
+                note="How our website did over the last 28 days on Google.">
                 {report.website?.summary && (
                   <div className="mb-3" data-print-keep>
                     <p className="text-[12px] text-text leading-snug" dir="auto">{report.website.summary}</p>
@@ -428,7 +428,7 @@ export function ResearchReport() {
                 )}
                 {search.opportunities.length + search.movers.length === 0 ? (
                   <p className="text-[11px] text-text-secondary leading-relaxed">
-                    Nothing crossed the reporting floor this period. That is a result, not a gap.
+                    Nothing in the search numbers changed enough to report this time.
                   </p>
                 ) : (
                   <ul className="space-y-2">
@@ -445,7 +445,7 @@ export function ResearchReport() {
 
             {/* ── Market & technical ── */}
             {show('market') && noteItems.length > 0 && (
-              <ReportSection title="Market and technical notes">
+              <ReportSection title="Market and technical news">
                 <ul className="space-y-2">
                   {noteItems.slice(0, 10).map((x, i) => (
                     <li key={i} data-print-keep className="text-[11px] text-text-secondary leading-relaxed">
@@ -499,9 +499,8 @@ export function ResearchReport() {
 
             {/* ── Marketing recommendations ── */}
             {show('recs') && (plan.blocks.length > 0 || plan.loose.length > 0) && (
-              <ReportSection title="Marketing recommendations"
-                note={`Each is a gap between the market and our position, with the content proposed to close it. Proposals only — nothing here has been scheduled or published.${
-                  plan.overCap ? ` This run proposed ${plan.total}; the brief asks for two to four.` : ''}`}>
+              <ReportSection title="Content ideas"
+                note="Where what the market wants and what we say do not line up, with content to close the gap. Suggestions only — nothing here has been scheduled or published.">
                 <div className="space-y-3">
                   {plan.blocks.map((block, i) => (
                     <div key={block.gap.id || i} data-print-keep>
@@ -532,7 +531,7 @@ export function ResearchReport() {
 
             {/* ── New competitors ── */}
             {show('newcomp') && candidates.length > 0 && (
-              <ReportSection title="New competitors to review" note="Found by the agent; not on the watchlist until a person accepts them.">
+              <ReportSection title="New competitors to review" note="Found by the research; not watched until someone accepts them.">
                 <ul className="space-y-1">
                   {candidates.map(c => (
                     <li key={c.name} className="text-[11px] text-text-secondary leading-relaxed">
@@ -545,7 +544,7 @@ export function ResearchReport() {
 
             {/* ── Sources ── */}
             {sources.length > 0 && (
-              <ReportSection title="Sources" note={`Checked during the run of ${runDate}.`}>
+              <ReportSection title="Sources" note={`Checked during the research of ${runDate}.`}>
                 <ol className="space-y-0.5 list-decimal ml-4">
                   {sources.map(s => (
                     <li key={s.url} className="text-[10px] text-text-secondary leading-relaxed break-all">
@@ -557,8 +556,8 @@ export function ResearchReport() {
             )}
 
             {/* ── Open items ── */}
-            <ReportSection title="Open items" keep
-              note="Raised by an earlier run and not closed. Nothing here is marked resolved automatically — only a person can say that.">
+            <ReportSection title="Still unanswered" keep
+              note="Raised by earlier research and not yet resolved.">
               {open.length ? (
                 <ul className="space-y-1.5">
                   {open.map((item, i) => (
@@ -567,31 +566,30 @@ export function ResearchReport() {
                       <span>
                         {item.text}
                         <span className="text-text-tertiary">
-                          {' '}· raised in {item.runs} run{item.runs === 1 ? '' : 's'}
-                          {item.thisRun ? '' : ' · not repeated this run'}
+                          {item.runs > 1 ? ` · raised ${item.runs} times` : ''}
                         </span>
                       </span>
                     </li>
                   ))}
                 </ul>
-              ) : <p className="text-[11px] text-text-tertiary">Nothing is carried over from earlier runs.</p>}
+              ) : <p className="text-[11px] text-text-tertiary">Nothing is left open from earlier research.</p>}
             </ReportSection>
 
-            <ReportSection title="How this run went" keep>
+            <ReportSection title="How this research went" keep>
               <p className="text-[11px] text-text-secondary leading-relaxed">
-                {states.length ? `${states.length} question${states.length === 1 ? '' : 's'} checked · ${lensHeadline(states)}.` : 'This run recorded no per-question results.'}
+                {states.length
+                  ? `${states.length} topic${states.length === 1 ? '' : 's'} checked: ${states.filter(s => s.state === 'found').length} found something` +
+                    `${states.some(s => s.state === 'failed') ? `, ${states.filter(s => s.state === 'failed').length} could not be checked` : ''}. ${readingLine(states)}`
+                  : 'This research did not record which topics it checked.'}
               </p>
-              {runEffort(states) && (
-                <p className="text-[11px] text-text-tertiary leading-relaxed mt-1">{runEffort(states)}.</p>
-              )}
             </ReportSection>
 
             {/* The run's own faults are not caveats about the market. */}
             <Caveats items={(report.unanswered || []).filter(u => !isRunFault(u))} />
 
             <ReportFooter>
-              {brand} · weekly market report from the run of {runDate}. Every finding cites the source it was read from; own-channel
-              numbers are computed in code from our analytics. The lead tracker and events reflect the store when this was printed.
+              {brand} · weekly market report from the research of {runDate}. Every finding names the source it came from; our own
+              channel numbers come from our analytics. Leads and events show their status at the time of printing.
               Nothing in this report has been published or scheduled.
             </ReportFooter>
           </ReportDoc>

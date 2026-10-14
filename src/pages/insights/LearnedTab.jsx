@@ -20,6 +20,10 @@ import { useState } from 'react'
 // book stays readable in one place — it just links here to act on them.
 
 const pct = n => `${Math.round(n * 100)}%`
+// Where a rule came from, in words: a rule from research was argued from
+// sources, one from analytics from our own numbers.
+const SOURCE_LABEL = { research: 'from research', analytics: 'from our own numbers', human: 'written by hand', review: 'from a review' }
+const ruleMeta = r => [SCOPE_LABELS[r.scope] || r.scope, SOURCE_LABEL[r.source] || (r.source ? `from ${r.source}` : '')].filter(Boolean).join(' · ')
 const round1 = n => (Math.round(n * 10) / 10).toFixed(1)
 
 // A bar whose width is relative to the best row in its own table. Absolute
@@ -58,7 +62,7 @@ function BreakdownTable({ title, rows, empty }) {
                 {round1(r.avgEngagement)} avg
                 <span className={r.weak ? 'text-amber-600' : ''}>
                   {' · '}{r.sampleSize} post{r.sampleSize === 1 ? '' : 's'}
-                  {r.weak ? ' — too few to trust' : ''}
+                  {r.weak ? ' — too few to rely on' : ''}
                 </span>
               </span>
             </div>
@@ -99,9 +103,9 @@ function ProposedRule({ rule, onActivate, onDismiss, busy }) {
     <div className="rounded-xl border border-border bg-white p-3">
       <Input value={text} onChange={e => setText(e.target.value)} className="text-xs" />
       <p className="text-[10px] text-text-tertiary mt-1.5">
-        {rule.scope} · from {rule.source}
-        {sample ? ` · ${sample} post${sample === 1 ? '' : 's'}` : ''}
-        {sample && sample < WEAK_SAMPLE ? ' — thin evidence' : ''}
+        {ruleMeta(rule)}
+        {sample ? ` · based on ${sample} post${sample === 1 ? '' : 's'}` : ''}
+        {sample && sample < WEAK_SAMPLE ? ' — not much to go on' : ''}
         {rule.confidence != null ? ` · confidence ${pct(Number(rule.confidence))}` : ''}
       </p>
       {rule.detail && (
@@ -109,9 +113,9 @@ function ProposedRule({ rule, onActivate, onDismiss, busy }) {
       )}
       {dated && (
         <p className="text-[11px] text-amber-700 mt-2 leading-relaxed">
-          This names a date, and a rule has no expiry — approved, it keeps steering every
-          generation long after the moment passes. If it is a one-off, send it to a content
-          plan as an idea instead, or edit the date out to make it a standing rule.
+          This mentions a date, but a rule never expires — once approved it keeps shaping
+          content long after that date passes. If it is a one-off, add it to a content plan
+          as an idea instead, or edit the date out to make it a lasting rule.
         </p>
       )}
       <div className="flex items-center gap-2 mt-3">
@@ -128,7 +132,7 @@ function ProposedRule({ rule, onActivate, onDismiss, busy }) {
 
 export function LearnedTab({
   events, decisions, performance, proposed, active, noHistory,
-  busy, reviewing, reviewNote, onRunReview, onShowResearch, onActivate, onRetire, onRemove,
+  busy, reviewing, reviewNote, onRunReview, onActivate, onRetire, onRemove,
 }) {
   const [scopeFilter, setScopeFilter] = useState('all')
   const shown = active.filter(r => scopeFilter === 'all' || r.scope === scopeFilter)
@@ -137,9 +141,9 @@ export function LearnedTab({
     return (
       <Card className="p-6">
         <p className="text-sm text-text-secondary leading-relaxed">
-          Nothing recorded yet. This half fills from two places: decisions you make on a plan's
-          ideas, and analytics from posts that have gone out. Approve or reject some ideas in
-          the planner and they will start showing up here.
+          Nothing learned yet. This fills up from two places: the ideas you approve or reject in a
+          content plan, and the numbers from posts that have gone out. Approve or reject a few
+          ideas in the planner and they will start showing up here.
         </p>
         <div className="mt-3">
           <Link to="/campaigns"><Button size="sm">Go to content plans</Button></Link>
@@ -155,7 +159,7 @@ export function LearnedTab({
         <Card>
           <SectionHead
             title="What happened"
-            subtitle={`${events.length} decision${events.length === 1 ? '' : 's'} recorded on this brand's ideas.`}
+            subtitle={`${events.length} decision${events.length === 1 ? '' : 's'} made on this brand's content ideas.`}
           />
           <div className="grid grid-cols-2 md:grid-cols-4 divide-x divide-border border-b border-border">
             <Stat
@@ -168,7 +172,7 @@ export function LearnedTab({
             <Stat
               label="Re-drafted"
               value={decisions.totals.redrafted || 0}
-              hint="copy asked for another take"
+              hint="asked for another version"
             />
           </div>
 
@@ -188,8 +192,8 @@ export function LearnedTab({
             </div>
 
             <div className="px-5 py-4">
-              <p className="text-[11px] font-semibold text-text-tertiary uppercase tracking-wide">Most-edited fields</p>
-              <p className="text-[10px] text-text-tertiary mt-1">Where generation needed a human hand.</p>
+              <p className="text-[11px] font-semibold text-text-tertiary uppercase tracking-wide">What people edit most</p>
+              <p className="text-[10px] text-text-tertiary mt-1">Where the first draft most often needed a person to fix it.</p>
               {decisions.editedFields.length ? (
                 <div className="mt-3 space-y-2">
                   {decisions.editedFields.map(([field, count]) => (
@@ -231,13 +235,13 @@ export function LearnedTab({
             title="What performed"
             subtitle={
               `${performance.postsWithMetrics} post${performance.postsWithMetrics === 1 ? '' : 's'} with analytics` +
-              `, ${performance.postsTracedToIdeas} traced back to a planned idea.`
+              `, ${performance.postsTracedToIdeas} of them from a planned idea.`
             }
           />
           {performance.postsWithMetrics < WEAK_SAMPLE && (
             <p className="mx-5 mt-4 text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 leading-relaxed">
-              There is not enough posting history here to draw conclusions yet. These numbers are
-              shown so the plumbing is visible, not because they mean anything at this size.
+              There are not enough posts yet to draw conclusions. The numbers below are early
+              and will become meaningful as more posts go out.
             </p>
           )}
           <div className="grid md:grid-cols-2 divide-y md:divide-y-0 md:divide-x divide-border">
@@ -258,23 +262,10 @@ export function LearnedTab({
       {/* ── 3. Proposed rules ── */}
       <Card>
         <SectionHead
-          title="Proposed rules"
-          subtitle="Suggestions waiting on you. Approving one adds a rule on TOP of the Brand Brain — it never edits what you wrote about the company."
+          title="Suggested rules"
+          subtitle="Suggestions waiting for you. Approving one adds a rule alongside the Brand Brain — it never changes what you wrote about the company."
           action={
             <div className="flex items-center gap-2">
-              {/* "Run research" stopped being a button here. The one-shot
-                  brand-research workflow it fired wrote `proposed` rows into
-                  this same table from a second code path — three paths writing
-                  one table is exactly the drift buildContext exists to prevent,
-                  and the agent's run supersedes it with evidence attached. It
-                  switches tabs rather than navigating: /insights/research is a
-                  redirect back to this same page, so routing through it meant
-                  a round trip to land on the half that was one click away.
-                  "Run review" stays for now: its replacement is the agent's
-                  `ourselves` lens, which cannot say anything until a real
-                  Instagram account is connected. Removing a working button in
-                  favour of one that returns nothing would be tidy and wrong. */}
-              <Button size="sm" variant="secondary" onClick={onShowResearch}>Research</Button>
               <Button size="sm" variant="secondary" disabled={reviewing || busy} onClick={onRunReview}>
                 {reviewing ? 'Reviewing…' : 'Run review'}
               </Button>
@@ -294,13 +285,11 @@ export function LearnedTab({
               ))}
             </div>
           ) : (
-            <p className="text-xs text-text-tertiary leading-relaxed">
-              Nothing proposed. <strong className="font-semibold text-text-secondary">Run review</strong> reads
-              the two sections above and suggests rules from them — it declines to run until there is
-              enough history to say anything honest. <strong className="font-semibold text-text-secondary">Research</strong> opens
-              the other half, where a run searches this brand's market and competitors instead — so it has
-              something to say before there is any history at all. You can also write rules by hand under
-              Learned Guidance in <Link to="/brand-brain" className="underline">Brand Brain</Link>.
+            <p className="text-xs text-text-tertiary leading-relaxed max-w-3xl">
+              Nothing waiting. <strong className="font-semibold text-text-secondary">Run review</strong> looks
+              at the decisions and numbers above and suggests rules — it only does so once there is enough
+              history to go on. You can also write rules yourself under Learned Guidance
+              in <Link to="/brand-brain" className="underline">Brand Brain</Link>.
             </p>
           )}
         </div>
@@ -309,11 +298,11 @@ export function LearnedTab({
       {/* ── 4. Active memory ── */}
       <Card>
         <SectionHead
-          title="Steering generation now"
-          subtitle={`${active.length} active rule${active.length === 1 ? '' : 's'} added to every matching prompt.`}
+          title="Rules in use"
+          subtitle={`${active.length} rule${active.length === 1 ? '' : 's'} applied whenever matching content is written.`}
           action={
             <Select value={scopeFilter} onChange={e => setScopeFilter(e.target.value)}>
-              <option value="all">All scopes</option>
+              <option value="all">All kinds</option>
               {MEMORY_SCOPES.map(s => (
                 <option key={s} value={s}>{SCOPE_LABELS[s] || s}</option>
               ))}
@@ -328,8 +317,8 @@ export function LearnedTab({
                   <span className="flex-1 min-w-0">
                     <span className="block text-xs text-text leading-relaxed">{r.rule}</span>
                     <span className="block text-[10px] text-text-tertiary mt-0.5">
-                      {r.scope} · from {r.source}
-                      {r.evidence?.sample_size ? ` · ${r.evidence.sample_size} posts` : ''}
+                      {ruleMeta(r)}
+                      {r.evidence?.sample_size ? ` · based on ${r.evidence.sample_size} posts` : ''}
                     </span>
                   </span>
                   <span className="flex items-center gap-1 shrink-0">
@@ -341,7 +330,7 @@ export function LearnedTab({
             </div>
           ) : (
             <p className="text-xs text-text-tertiary leading-relaxed">
-              No active rules. Generation is running on the Brand Brain fields alone.
+              No rules in use. New content is written from the Brand Brain alone.
             </p>
           )}
         </div>

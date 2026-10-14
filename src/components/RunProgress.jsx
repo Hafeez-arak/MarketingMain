@@ -27,7 +27,10 @@ const STATE = {
   skipped: { dot: 'bg-stone-200',  text: 'text-text-tertiary',  label: () => 'not reached' },
 }
 
-export function RunProgress({ run, lensRows, now = new Date() }) {
+// `plain` is the Research page's reading of the same strip: no cost, no
+// "computed" tag, no raw errors — a marketer reads it, not whoever runs the
+// agent. Off by default, so the agent page keeps its operator's view.
+export function RunProgress({ run, lensRows, now = new Date(), plain = false }) {
   if (!run) return null
   const p = runProgress(run, lensRows)
   const stuck = looksStuck(run, now)
@@ -35,10 +38,10 @@ export function RunProgress({ run, lensRows, now = new Date() }) {
   return (
     <Card>
       <SectionHead
-        title={p.live ? 'Running now' : 'How the last run went'}
+        title={p.live ? (plain ? 'Research in progress' : 'Running now') : (plain ? 'Step by step' : 'How the last run went')}
         subtitle={progressLine(p)}
         action={
-          p.cost > 0
+          p.cost > 0 && !plain
             ? <span className="text-[11px] text-text-tertiary tabular-nums">${p.cost.toFixed(2)}</span>
             : null
         }
@@ -76,8 +79,9 @@ export function RunProgress({ run, lensRows, now = new Date() }) {
 
         {stuck && (
           <p className="mt-3 text-xs text-amber-700 leading-relaxed">
-            This run has been going for over 20 minutes. It is probably dead — the next run
-            you start will sweep it and report it as timed out.
+            {plain
+              ? 'This run has been going for over 20 minutes and has probably stopped. You can start a new one.'
+              : 'This run has been going for over 20 minutes. It is probably dead — the next run you start will sweep it and report it as timed out.'}
           </p>
         )}
 
@@ -91,13 +95,13 @@ export function RunProgress({ run, lensRows, now = new Date() }) {
                 }`} />
                 <span className={`w-[130px] shrink-0 font-medium ${s.text}`}>{l.label}</span>
                 <span className="text-text-tertiary truncate flex-1" title={l.question}>
-                  {l.error || l.question}
+                  {plain ? l.question : (l.error || l.question)}
                 </span>
                 <span className="text-[10px] text-text-tertiary shrink-0 tabular-nums">
                   {s.label(l.findings)}
                   {l.durationMs != null && ` · ${secs(l.durationMs)}`}
                   {/* Named so "free" does not read as "broken". */}
-                  {l.computed && ' · computed'}
+                  {l.computed && !plain && ' · computed'}
                 </span>
               </div>
             )
