@@ -37,18 +37,19 @@ import { LinkedInPage } from './pages/social/LinkedInPage'
 import { SnapchatPage } from './pages/social/SnapchatPage'
 import { Approvals as PostApprovals } from './pages/social/Approvals'
 import AutoReplies from './pages/social/AutoReplies'
-import { Settings, Integrations } from './pages/settings/index'
+import { Settings } from './pages/settings/index'
 import { Access } from './pages/settings/Access'
 import { BrandBrain } from './pages/settings/BrandBrain'
 import { CreativeStudio } from './pages/studio/index'
 
 // Loads the account's saved webhook URLs into state.webhooks on startup, so
 // they're there regardless of which page loads first. This used to happen
-// only inside the Settings → Integrations component's own effect — meaning
-// any page that fires a webhook (Studio, Instagram, etc.) BEFORE Settings
-// was ever visited in that browser session saw every webhook as "not
-// configured", even though the account's copy in workspace_webhooks was
-// correct all along. Hooks-only; renders nothing.
+// only inside the old Integrations page's own effect — meaning any page that
+// fires a webhook (Studio, Instagram, etc.) BEFORE that page was ever visited
+// in that browser session saw every webhook as "not configured", even though
+// the account's copy in workspace_webhooks was correct all along. That page
+// is gone; this is now the only place the saved copy is loaded. Hooks-only;
+// renders nothing.
 function WebhooksLoader() {
   const { dispatch } = useApp()
   const { activeWorkspaceId, accessToken } = useAuth()
@@ -171,7 +172,9 @@ function ProtectedApp() {
                 the platform routes above still win regardless of order. */}
             <Route path="/social/:platform"      element={<SocialPlatform />} />
             <Route path="/settings"             element={<Settings />} />
-            <Route path="/integrations"          element={<Integrations />} />
+            {/* The Integrations page was removed; old links land on the
+                dashboard instead of the not-found page. */}
+            <Route path="/integrations"          element={<Navigate to="/" replace />} />
             <Route path="/team"                  element={<Access />} />
             <Route path="*"                      element={<NotFound />} />
           </Routes>

@@ -14,7 +14,7 @@ const titles = {
   '/social/linkedin': 'LinkedIn',
   '/social/approvals': 'Post Queue',
   '/analytics/report': 'Performance Report', '/insights/report': 'Research Brief', '/insights/business': 'Business View',
-  '/settings': 'Settings', '/integrations': 'Integrations', '/team': 'Team & Access',
+  '/settings': 'Settings', '/team': 'Team & Access',
 }
 
 // Sub-pages reached via a flow (not a direct sidebar link) get a back button

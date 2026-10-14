@@ -1,9 +1,11 @@
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './supabaseClient'
 
 // ─── Workspace webhooks ─────────────────────────────────────────────────────
-// The n8n webhook URLs (Settings → Workflow Webhooks) stored per workspace in
-// Supabase — table: workspace_webhooks, one row per workspace, the whole map
-// as jsonb — instead of only in this browser's localStorage. Same auth model
+// Per-workspace n8n webhook overrides stored in Supabase — table:
+// workspace_webhooks, one row per workspace, the whole map as jsonb. Read-only
+// from the app since the Integrations page (which edited them) was removed:
+// every slot defaults to /api/n8n/<slot>, and an override can still be set
+// in the table directly for testing against another n8n. Same auth model
 // as brandBrain.js: `apikey` is the fixed anon key, `Authorization` carries
 // the signed-in user's session token so RLS scopes the row to workspaces
 // they're actually a member of.
@@ -23,29 +25,5 @@ export async function fetchWorkspaceWebhooks(workspaceId, accessToken) {
     return rows?.[0]?.webhooks || null
   } catch {
     return null
-  }
-}
-
-export async function saveWorkspaceWebhooks(workspaceId, accessToken, webhooks) {
-  if (!workspaceId) return { error: 'No active workspace. Try signing out and back in.' }
-  try {
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/workspace_webhooks?on_conflict=workspace_id`, {
-      method: 'POST',
-      headers: {
-        ...authHeaders(accessToken),
-        'Content-Type': 'application/json',
-        Prefer: 'resolution=merge-duplicates,return=representation',
-      },
-      body: JSON.stringify({ workspace_id: workspaceId, webhooks, updated_at: new Date().toISOString() }),
-    })
-    if (!res.ok) { const err = await res.text(); return { error: err } }
-    // Same fallback as saveBrandProfile: a successful write with no
-    // representation (missing SELECT policy, proxy stripping Prefer)
-    // shouldn't report back an empty map and blank the form.
-    let row = null
-    try { const rows = await res.json(); row = Array.isArray(rows) ? rows[0] : rows } catch { /* empty body */ }
-    return { ok: true, webhooks: row?.webhooks || webhooks }
-  } catch (e) {
-    return { error: String(e) }
   }
 }
