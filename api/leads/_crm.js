@@ -17,7 +17,7 @@ import {
   channelLabel, phonesOf, effectiveVerdict, projectOf,
 } from '../../src/lib/leads/view.js'
 import { riyadhTime } from './_export.js'
-import { normalizeUrl, defaultDb, testConnection, createLead, findUserId } from './_odoo.js'
+import { normalizeUrl, defaultDb, discoverDb, testConnection, createLead, findUserId } from './_odoo.js'
 
 const isUuid = (v) => /^[0-9a-f-]{36}$/i.test(String(v || ''))
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
@@ -104,7 +104,8 @@ export async function crmStatus(deps, workspaceId) {
 export async function saveCrm(deps, workspaceId, body = {}) {
   const url = normalizeUrl(body.url)
   if (!url) return { status: 400, error: 'That is not an Odoo address. It looks like https://your-company.odoo.com.' }
-  const dbName = String(body.db || '').trim() || defaultDb(url)
+  // Asked of Odoo itself: on Odoo Online the name is not the subdomain.
+  const dbName = String(body.db || '').trim() || await discoverDb(deps.fetch, url) || defaultDb(url)
   if (!dbName) return { status: 400, error: 'Which database? On Odoo Online it is the first part of the address.' }
   const login = String(body.login || '').trim()
   if (!login) return { status: 400, error: 'The Odoo login (the user\'s email) is required.' }
