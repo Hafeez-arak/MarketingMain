@@ -2,7 +2,8 @@ import { useMemo, useState } from 'react'
 import { Card, Button, Input, Textarea, Modal, ConfirmDialog, Empty, Skeleton } from '../../components/ui/index'
 import { AUDIENCES, blockReason } from '../../lib/email/contacts'
 import { isAutomatic } from '../../lib/email/groupActions'
-import { saveGroup, deleteGroup } from '../../lib/email/client'
+import { saveGroup, deleteGroup, fetchAudience } from '../../lib/email/client'
+import { useCached } from './data'
 import { AudienceTag, Notice, EIcon } from './parts'
 import { GROUP_COLORS } from './format'
 
@@ -10,17 +11,27 @@ import { GROUP_COLORS } from './format'
 // A group is a named list inside one lane. Marketing campaigns may only pick
 // marketing groups and cold campaigns only cold groups; the server re-checks
 // both the group's lane and each contact's.
+//
+// The list of groups paints from the section's shared tables; each group's
+// two numbers (members, and how many of them can be emailed) need every
+// contact and membership, read once for the session and shared with the
+// campaign editor. A group's members are seen on Contacts (View), a page at
+// a time.
 
 export function Groups({ workspaceId, data, loading, reload, setTab }) {
   const [editing, setEditing] = useState(null)     // group | 'new-marketing' | 'new-cold'
   const [deleting, setDeleting] = useState(null)
   const [error, setError] = useState('')
 
+  const audienceRead = useCached(workspaceId ? `audience:${workspaceId}` : null, () => fetchAudience(workspaceId))
+  const counting = loading || audienceRead.loading
+  const countFailed = Boolean(audienceRead.error) && !audienceRead.data
   const stats = useMemo(() => {
-    const byId = new Map(data.contacts.map(c => [c.id, c]))
+    const { contacts = [], members = [] } = audienceRead.data || {}
+    const byId = new Map(contacts.map(c => [c.id, c]))
     const out = new Map()
     for (const g of data.groups) out.set(g.id, { total: 0, reachable: 0 })
-    for (const m of data.members) {
+    for (const m of members) {
       const s = out.get(m.group_id)
       if (!s) continue
       s.total++
@@ -28,7 +39,7 @@ export function Groups({ workspaceId, data, loading, reload, setTab }) {
       if (!blockReason(byId.get(m.contact_id), g.audience)) s.reachable++
     }
     return out
-  }, [data.contacts, data.groups, data.members])
+  }, [audienceRead.data, data.groups])
 
   async function remove(g) {
     setError('')
@@ -40,6 +51,12 @@ export function Groups({ workspaceId, data, loading, reload, setTab }) {
   return (
     <div className="space-y-4">
       {error && <Notice tone="red">{error}</Notice>}
+      {countFailed && (
+        <Notice tone="red" title="Could not count the people in each group"
+          action={<Button size="sm" variant="secondary" onClick={audienceRead.refetch}>Try again</Button>}>
+          {audienceRead.error}
+        </Notice>
+      )}
       {lanes.map(lane => {
         const groups = data.groups.filter(g => g.audience === lane)
         return (
@@ -73,9 +90,17 @@ export function Groups({ workspaceId, data, loading, reload, setTab }) {
                         </p>
                         {g.description && <p className="text-xs text-text-tertiary truncate">{g.description}</p>}
                       </div>
-                      <div className="text-right flex-shrink-0">
-                        <p className="text-sm font-semibold text-text tabular-nums">{s.total.toLocaleString()}</p>
-                        <p className="text-[10px] text-text-tertiary">{s.reachable.toLocaleString()} can be emailed</p>
+                      <div className="text-right flex-shrink-0 min-w-[84px]">
+                        {counting ? (
+                          <><Skeleton className="h-4 w-10 ml-auto" /><Skeleton className="h-2.5 w-20 ml-auto mt-1" /></>
+                        ) : countFailed ? (
+                          <p className="text-sm font-semibold text-text-tertiary">—</p>
+                        ) : (
+                          <>
+                            <p className="text-sm font-semibold text-text tabular-nums">{s.total.toLocaleString()}</p>
+                            <p className="text-[10px] text-text-tertiary">{s.reachable.toLocaleString()} can be emailed</p>
+                          </>
+                        )}
                       </div>
                       <div className="flex items-center gap-1 flex-shrink-0">
                         <Button size="xs" variant="ghost" onClick={() => setTab('contacts', { group: g.id })}>View</Button>

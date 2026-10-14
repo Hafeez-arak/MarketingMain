@@ -1,7 +1,9 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Card, Button } from '../../components/ui/index'
+import { Pagination } from '../../components/ui/Pagination'
 import { leadsForOutreach, searchLinks, contactFromLead } from '../../lib/email/leads'
-import { fetchResearchLeads, dismissLeadForOutreach } from '../../lib/email/client'
+import { fetchResearchLeads, fetchLeadContacts, dismissLeadForOutreach, PAGE_SIZE } from '../../lib/email/client'
+import { useCached } from './data'
 import { shortDate } from './format'
 
 // ─── From research: leads waiting for people ───────────────────────────────
@@ -11,32 +13,37 @@ import { shortDate } from './format'
 // lighting or procurement, and "Add contact", which opens the contact form
 // already filled in as a cold prospect tied to the lead. "Not for outreach"
 // takes the lead off this list; it stays a lead in Insights.
+//
+// It reads the open leads (the newest 100) and only the contacts tied to a
+// lead, never the whole contact list. Leads waiting for people come first,
+// an order only this page knows, so "Show all" pages through them here.
 
 const SHOWN = 4
 
-export function ResearchLeads({ workspaceId, contacts, onAdd }) {
-  const [opps, setOpps] = useState(null)
+export function ResearchLeads({ workspaceId, onAdd }) {
+  const oppsRead = useCached(workspaceId ? `research-leads:${workspaceId}` : null, () => fetchResearchLeads(workspaceId))
+  const tiedRead = useCached(workspaceId ? `lead-contacts:${workspaceId}` : null, () => fetchLeadContacts(workspaceId))
+  const [dismissed, setDismissed] = useState(() => new Set())
   const [open, setOpen] = useState(false)
   const [all, setAll] = useState(false)
+  const [page, setPage] = useState(0)
   const [error, setError] = useState('')
 
-  useEffect(() => {
-    let live = true
-    fetchResearchLeads(workspaceId).then(r => { if (live) setOpps(r) })
-    return () => { live = false }
-  }, [workspaceId])
-
-  const leads = useMemo(() => leadsForOutreach(opps || [], contacts), [opps, contacts])
+  const opps = useMemo(() => (oppsRead.data && tiedRead.data ? oppsRead.data.filter(o => !dismissed.has(o.id)) : null),
+    [oppsRead.data, tiedRead.data, dismissed])
+  const leads = useMemo(() => leadsForOutreach(opps || [], tiedRead.data || []), [opps, tiedRead.data])
   const waiting = leads.filter(l => !l.contacts.length).length
   if (!opps || !leads.length) return null
 
   async function dismiss(id) {
     setError('')
-    try { await dismissLeadForOutreach(workspaceId, id); setOpps(o => o.filter(x => x.id !== id)) }
+    try { await dismissLeadForOutreach(workspaceId, id); setDismissed(d => new Set(d).add(id)) }
     catch (err) { setError(err.message) }
   }
 
-  const visible = all ? leads : leads.slice(0, SHOWN)
+  const lastPage = Math.max(0, Math.ceil(leads.length / PAGE_SIZE) - 1)
+  const shownPage = Math.min(page, lastPage)
+  const visible = all ? leads.slice(shownPage * PAGE_SIZE, (shownPage + 1) * PAGE_SIZE) : leads.slice(0, SHOWN)
   return (
     <Card>
       <button type="button" onClick={() => setOpen(o => !o)} className="w-full px-4 py-2.5 flex items-center justify-between gap-3 text-left hover:bg-surface-subtle">
@@ -86,9 +93,10 @@ export function ResearchLeads({ workspaceId, contacts, onAdd }) {
               )}
             </div>
           ))}
+          {all && <Pagination page={shownPage} pageSize={PAGE_SIZE} count={leads.length} onPage={setPage} noun="leads" />}
           {leads.length > SHOWN && (
             <div className="px-4 py-2 text-center">
-              <button type="button" onClick={() => setAll(a => !a)} className="text-[11px] text-text-secondary underline">{all ? 'Show fewer' : `Show all ${leads.length}`}</button>
+              <button type="button" onClick={() => { setAll(a => !a); setPage(0) }} className="text-[11px] text-text-secondary underline">{all ? 'Show fewer' : `Show all ${leads.length}`}</button>
             </div>
           )}
         </div>

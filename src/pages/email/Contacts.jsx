@@ -1,37 +1,65 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Card, Button, Input, Select, Textarea, Modal, ConfirmDialog, Empty, Skeleton, Toggle } from '../../components/ui/index'
+import { Pagination } from '../../components/ui/Pagination'
 import {
   AUDIENCES, CONTACT_TYPES, CONSENT, STATUSES, SOURCES, LANGUAGES,
-  cleanContact, displayName, isValidEmail,
+  cleanContact, displayName, isValidEmail, normalizeEmail,
 } from '../../lib/email/contacts'
 import { parseCsv, rowsToContacts, contactsToCsv } from '../../lib/email/csv'
 import {
   saveContact, deleteContacts, updateContacts, importContacts, addToGroup, setContactGroups, saveGroup, applyGroupPlan,
+  fetchContactsPage, fetchContactsMatching, fetchContactsByIds, existingEmails, PAGE_SIZE,
 } from '../../lib/email/client'
+import { useCached, useDebounced, usePage, pageBeyond } from './data'
 import { planGroupAction, doneText, isAutomatic } from '../../lib/email/groupActions'
 import { AudienceTag, ContactStatus, GroupChip, Notice, EIcon } from './parts'
 import { download, shortDate } from './format'
 import { ResearchLeads } from './ResearchLeads'
 
-const PAGE = 100
+// ─── Contacts → People ─────────────────────────────────────────────────────
+// Read a page at a time (50, newest first) with the total, and filtered by
+// the database, so a search or a filter covers every contact, not the page
+// on screen. The search waits for typing to pause; any filter change goes
+// back to page 1 and clears the selection.
+//
+// Selection: ticks stay while paging. The header box ticks this page; once
+// it is ticked, "Select all N that match" ticks every contact the filters
+// match, on every page. The bar says how many are selected and how many of
+// them are on other pages. A bulk action re-reads the selected contacts
+// first, so it plans from their groups as they are now.
+
+const EMPTY_SELECTION = new Map()
 
 export function Contacts({ workspaceId, data, loading, reload, params, setTab }) {
-  const [q, setQRaw] = useState('')
-  const [audience, setAudienceRaw] = useState('')
-  const [status, setStatusRaw] = useState('')
-  const [type, setTypeRaw] = useState('')
-  const [shown, setShown] = useState(PAGE)
-  const [picked, setSelected] = useState(new Set())
+  const [q, setQ] = useState('')
+  const [audience, setAudience] = useState('')
+  const [status, setStatus] = useState('')
+  const [type, setType] = useState('')
   // The group filter lives in the URL, so "View" on a group and the import's
   // "View the group" land here already filtered, and Back undoes it.
   const group = params.get('group') || ''
-  // Any filter change starts the list from the top again.
-  const filterSetter = set => v => { set(v); setShown(PAGE) }
-  const setQ = filterSetter(setQRaw)
-  const setAudience = filterSetter(setAudienceRaw)
-  const setStatus = filterSetter(setStatusRaw)
-  const setType = filterSetter(setTypeRaw)
-  const setGroup = v => { setTab('contacts', { group: v }); setShown(PAGE) }
+  const setGroup = v => setTab('contacts', { group: v })
+  const needle = useDebounced(q.trim(), 300)
+  const filters = useMemo(() => ({ q: needle, audience, status, type, group }), [needle, audience, status, type, group])
+  const filtered = Boolean(needle || audience || status || type || group)
+  const family = `contacts:${workspaceId}:${JSON.stringify(filters)}`
+  const [page, setPage] = usePage(family)
+  const read = useCached(workspaceId ? `${family}:${page}` : null,
+    () => fetchContactsPage(workspaceId, filters, page, PAGE_SIZE), { keep: `contacts:${workspaceId}` })
+  const back = pageBeyond(read, page, PAGE_SIZE)
+  if (back != null) setPage(back)
+  const rows = useMemo(() => read.data?.rows || [], [read.data])
+  const count = read.data?.count ?? null
+  const listLoading = loading || read.loading
+  const listFailed = Boolean(read.error) && !read.data
+
+  // The selection: id → contact (with its group ids). Cleared when the
+  // filters change, so a bulk action never reaches someone the filters left out.
+  const [sel, setSel] = useState({ on: family, rows: EMPTY_SELECTION })
+  if (sel.on !== family) setSel({ on: family, rows: EMPTY_SELECTION })
+  const selected = sel.on === family ? sel.rows : EMPTY_SELECTION
+  const setSelected = rowsMap => setSel({ on: family, rows: rowsMap })
+
   const [editing, setEditing] = useState(null)      // contact | 'new' | null
   const [prefill, setPrefill] = useState(null)      // a new contact's starting values, from a research lead
   const [importing, setImporting] = useState(false)
@@ -42,61 +70,77 @@ export function Contacts({ workspaceId, data, loading, reload, params, setTab })
   const [pending, setPending] = useState(null)    // { plan, title } waiting for Confirm
 
   const groupsById = useMemo(() => new Map(data.groups.map(g => [g.id, g])), [data.groups])
-  const groupsOf = useMemo(() => {
-    const m = new Map()
-    for (const x of data.members) {
-      if (!m.has(x.contact_id)) m.set(x.contact_id, [])
-      m.get(x.contact_id).push(x.group_id)
-    }
-    return m
-  }, [data.members])
-  const existingEmails = useMemo(() => new Set(data.contacts.map(c => c.email)), [data.contacts])
-  const types = useMemo(() => [...new Set([...CONTACT_TYPES, ...data.contacts.map(c => c.contact_type).filter(Boolean)])], [data.contacts])
+  // The types offered: the usual ones, plus any other on this page or chosen.
+  const types = useMemo(() => [...new Set([...CONTACT_TYPES, ...rows.map(c => c.contact_type), type].filter(Boolean))], [rows, type])
 
-  const filtered = useMemo(() => {
-    const needle = q.trim().toLowerCase()
-    return data.contacts.filter(c => {
-      if (audience && c.audience !== audience) return false
-      if (status && c.status !== status) return false
-      if (type && c.contact_type !== type) return false
-      if (group === '__none' && (groupsOf.get(c.id) || []).length) return false
-      if (group && group !== '__none' && !(groupsOf.get(c.id) || []).includes(group)) return false
-      if (!needle) return true
-      return [c.email, c.first_name, c.last_name, c.company, c.job_title, c.city, c.notes]
-        .some(v => String(v || '').toLowerCase().includes(needle))
-    })
-  }, [data.contacts, q, audience, status, type, group, groupsOf])
+  const selectedContacts = [...selected.values()]
+  const ids = [...selected.keys()]
+  const groupsOf = new Map(selectedContacts.map(c => [c.id, c.group_ids || []]))
+  const mixedLanes = new Set(selectedContacts.map(c => c.audience)).size > 1
+  const onPage = new Set(rows.map(c => c.id))
+  const elsewhere = ids.filter(id => !onPage.has(id)).length
+  const pageAllSelected = rows.length > 0 && rows.every(c => selected.has(c.id))
+  const allMatchingSelected = count != null && selected.size >= count && count > 0
 
-  // The selection that counts is only the ticked rows that are still visible,
-  // so a bulk delete never reaches a contact the person cannot see (filtered
-  // out, or deleted in another tab).
-  const selected = useMemo(() => {
-    const visibleIds = new Set(filtered.map(c => c.id))
-    return new Set([...picked].filter(id => visibleIds.has(id)))
-  }, [picked, filtered])
-
-  const visible = filtered.slice(0, shown)
-  const allSelected = filtered.length > 0 && filtered.every(c => selected.has(c.id))
-  const toggle = id => setSelected(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
+  function toggle(c) {
+    const n = new Map(selected)
+    if (n.has(c.id)) n.delete(c.id); else n.set(c.id, c)
+    setSelected(n)
+  }
+  function togglePage() {
+    const n = new Map(selected)
+    if (pageAllSelected) for (const c of rows) n.delete(c.id)
+    else for (const c of rows) n.set(c.id, c)
+    setSelected(n)
+  }
+  async function selectAllMatching() {
+    setBusy('select'); setError('')
+    try {
+      const all = await fetchContactsMatching(workspaceId, filters, 'id,email,first_name,last_name,audience,status')
+      setSelected(new Map(all.map(c => [c.id, c])))
+    } catch (err) { setError(`Could not select them all: ${err.message}`) } finally { setBusy('') }
+  }
+  // The selected contacts as they are now (before an action, and after one),
+  // less any the filters no longer match: a lane move under "Outreach"
+  // leaves the selection with the people moved out of sight.
+  async function freshSelection() {
+    const fresh = await fetchContactsByIds(workspaceId, ids, 'id,email,first_name,last_name,audience,status', filters)
+    const n = new Map(fresh.map(c => [c.id, c]))
+    setSelected(n)
+    return [...n.values()]
+  }
 
   async function run(label, fn) {
     setBusy(label); setError('')
-    try { await fn(); await reload() } catch (err) { setError(err.message || String(err)) } finally { setBusy('') }
+    try {
+      await fn()
+      await reload()
+      if (selected.size && label !== 'delete') await freshSelection()
+    } catch (err) { setError(err.message || String(err)) } finally { setBusy('') }
   }
 
-  const ids = [...selected]
-  const selectedContacts = data.contacts.filter(c => selected.has(c.id))
-  const mixedLanes = new Set(selectedContacts.map(c => c.audience)).size > 1
+  async function exportCsv() {
+    setBusy('export'); setError('')
+    try {
+      const all = await fetchContactsMatching(workspaceId, filters)
+      download(`contacts-${new Date().toISOString().slice(0, 10)}.csv`,
+        contactsToCsv(all, c => (c.group_ids || []).map(id => groupsById.get(id)?.name).filter(Boolean)))
+    } catch (err) { setError(`Could not export: ${err.message}`) } finally { setBusy('') }
+  }
 
   // A group action is planned first (src/lib/email/groupActions.js): nothing
   // to change is said, not run; a plain add runs at once; a move, a removal
   // or a lane switch shows what it will do and waits for Confirm.
   const applyPlan = plan => run('group', async () => { await applyGroupPlan(workspaceId, plan); setDone(doneText(plan.summary)) })
-  function groupAction(action) {
+  async function groupAction(action) {
     setError(''); setDone('')
     let plan
-    try { plan = planGroupAction(action, { contacts: selectedContacts, groups: data.groups, members: data.members }) }
-    catch (err) { setError(err.message); return }
+    try {
+      setBusy('plan')
+      const contacts = await freshSelection()
+      const members = contacts.flatMap(c => (c.group_ids || []).map(group_id => ({ group_id, contact_id: c.id })))
+      plan = planGroupAction(action, { contacts, groups: data.groups, members })
+    } catch (err) { setError(err.message); return } finally { setBusy('') }
     if (plan.empty) { setDone(plan.summary); return }
     if (action.kind === 'add') { applyPlan(plan); return }
     const g = groupsById.get(action.groupId)
@@ -131,14 +175,17 @@ export function Contacts({ workspaceId, data, loading, reload, params, setTab })
           </Select>
         </div>
         <div className="flex flex-wrap items-center justify-between gap-2 mt-3">
-          <p className="text-xs text-text-tertiary">
-            {loading ? 'Loading…' : `${filtered.length.toLocaleString()} of ${data.contacts.length.toLocaleString()} contacts`}
-          </p>
+          {listLoading ? <Skeleton className="h-4 w-32" /> : (
+            <p className="text-xs text-text-tertiary">
+              {listFailed ? 'Contacts could not be loaded'
+                : `${(count || 0).toLocaleString()} ${filtered ? `contact${count === 1 ? '' : 's'} match these filters` : `contact${count === 1 ? '' : 's'}`}`}
+              {read.refreshing && read.data ? ' · updating…' : ''}
+            </p>
+          )}
           <div className="flex flex-wrap gap-2">
-            <Button size="sm" variant="secondary" disabled={!filtered.length}
-              onClick={() => download(`contacts-${new Date().toISOString().slice(0, 10)}.csv`,
-                contactsToCsv(filtered, c => (groupsOf.get(c.id) || []).map(id => groupsById.get(id)?.name).filter(Boolean)))}>
-              Export CSV
+            <Button size="sm" variant="secondary" disabled={!count || !!busy} onClick={exportCsv}
+              title={count > PAGE_SIZE ? `Every contact that matches, not only this page (${count.toLocaleString()})` : undefined}>
+              {busy === 'export' ? 'Exporting…' : 'Export CSV'}
             </Button>
             <Button size="sm" variant="secondary" onClick={() => setImporting(true)} disabled={loading}>Import CSV</Button>
             <Button size="sm" onClick={() => setEditing('new')} disabled={loading}><EIcon name="plus" /> Add contact</Button>
@@ -151,12 +198,12 @@ export function Contacts({ workspaceId, data, loading, reload, params, setTab })
         <Notice tone="sage" action={<Button size="xs" variant="ghost" onClick={() => setDone('')}>OK</Button>}>{done}</Notice>
       )}
 
-      {!loading && <ResearchLeads workspaceId={workspaceId} contacts={data.contacts} onAdd={values => { setPrefill(values); setEditing('new') }} />}
+      <ResearchLeads workspaceId={workspaceId} onAdd={values => { setPrefill(values); setEditing('new') }} />
 
       {selected.size > 0 && (
         <BulkBar
-          selectedContacts={selectedContacts} groups={data.groups} groupsOf={groupsOf} busy={busy} mixedLanes={mixedLanes}
-          onClear={() => setSelected(new Set())}
+          selectedContacts={selectedContacts} elsewhere={elsewhere} groups={data.groups} groupsOf={groupsOf} busy={busy} mixedLanes={mixedLanes}
+          onClear={() => setSelected(EMPTY_SELECTION)}
           onGroupAction={groupAction}
           onSet={patch => run('update', () => updateContacts(workspaceId, ids, patch))}
           onDelete={() => setConfirmDelete(true)}
@@ -164,22 +211,42 @@ export function Contacts({ workspaceId, data, loading, reload, params, setTab })
       )}
 
       <Card>
-        {loading ? (
-          <div className="p-4 space-y-2">{[0, 1, 2, 3, 4].map(i => <Skeleton key={i} className="h-9 w-full" />)}</div>
-        ) : data.contacts.length === 0 ? (
+        {listLoading ? (
+          <ContactRowsSkeleton />
+        ) : listFailed ? (
+          <div className="p-4">
+            <Notice tone="red" title="Could not load contacts" action={<Button size="sm" variant="secondary" onClick={read.refetch}>Try again</Button>}>
+              {read.error}
+            </Notice>
+          </div>
+        ) : count === 0 && !filtered ? (
           <Empty icon={<EIcon name="users" />} title="No contacts yet"
             description="Start with the people who already know you: export your customers and business contacts from Outlook or your accounting system, and import the CSV."
             action={<div className="flex gap-2"><Button size="sm" variant="secondary" onClick={() => setEditing('new')}>Add one</Button><Button size="sm" onClick={() => setImporting(true)}>Import CSV</Button></div>} />
-        ) : filtered.length === 0 ? (
+        ) : count === 0 ? (
           <p className="px-5 py-8 text-sm text-text-tertiary text-center">No contacts match these filters.</p>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            {read.error && <p className="px-4 py-2 text-[11px] text-red-600 border-b border-border">Could not refresh the list: {read.error}</p>}
+            {pageAllSelected && count > rows.length && (
+              <div className="px-4 py-2 text-xs bg-amber-50 border-b border-amber-200 text-text-secondary flex flex-wrap items-center gap-x-2">
+                {allMatchingSelected ? (
+                  <>All {count.toLocaleString()} contacts that match are selected.
+                    <button className="underline font-semibold text-amber-800" onClick={() => setSelected(EMPTY_SELECTION)}>Clear the selection</button></>
+                ) : (
+                  <>All {rows.length} on this page are selected.
+                    <button className="underline font-semibold text-amber-800 disabled:opacity-50" disabled={!!busy} onClick={selectAllMatching}>
+                      {busy === 'select' ? 'Selecting…' : `Select all ${count.toLocaleString()} that match`}
+                    </button></>
+                )}
+              </div>
+            )}
+            <table className={`w-full text-sm transition-opacity ${read.stale ? 'opacity-60' : ''}`} aria-busy={read.stale}>
               <thead>
                 <tr className="text-[10px] uppercase tracking-wide text-text-tertiary border-b border-border">
                   <th className="w-10 px-3 py-2">
-                    <input type="checkbox" aria-label="Select all" checked={allSelected}
-                      onChange={() => setSelected(allSelected ? new Set() : new Set(filtered.map(c => c.id)))} />
+                    <input type="checkbox" aria-label="Select everyone on this page" title="Select everyone on this page" checked={pageAllSelected}
+                      onChange={togglePage} />
                   </th>
                   <th className="text-left font-semibold px-2 py-2">Contact</th>
                   <th className="text-left font-semibold px-2 py-2">Company</th>
@@ -191,9 +258,9 @@ export function Contacts({ workspaceId, data, loading, reload, params, setTab })
                 </tr>
               </thead>
               <tbody>
-                {visible.map(c => (
+                {rows.map(c => (
                   <tr key={c.id} className={`border-b border-border last:border-0 hover:bg-surface-subtle ${selected.has(c.id) ? 'bg-amber-50' : ''}`}>
-                    <td className="px-3 py-2 align-top"><input type="checkbox" aria-label={`Select ${c.email}`} checked={selected.has(c.id)} onChange={() => toggle(c.id)} /></td>
+                    <td className="px-3 py-2 align-top"><input type="checkbox" aria-label={`Select ${c.email}`} checked={selected.has(c.id)} onChange={() => toggle(c)} /></td>
                     <td className="px-2 py-2 align-top cursor-pointer" onClick={() => setEditing(c)}>
                       <p className="font-medium text-text truncate max-w-[240px]">{displayName(c)}</p>
                       <p className="text-[11px] text-text-tertiary truncate max-w-[240px]">
@@ -208,7 +275,7 @@ export function Contacts({ workspaceId, data, loading, reload, params, setTab })
                     <td className="px-2 py-2 align-top"><AudienceTag audience={c.audience} /></td>
                     <td className="px-2 py-2 align-top">
                       <div className="flex flex-wrap gap-1 max-w-[220px]">
-                        {(groupsOf.get(c.id) || []).map(id => <GroupChip key={id} group={groupsById.get(id)} />)}
+                        {(c.group_ids || []).map(id => <GroupChip key={id} group={groupsById.get(id)} />)}
                       </div>
                     </td>
                     <td className="px-2 py-2 align-top">
@@ -220,13 +287,7 @@ export function Contacts({ workspaceId, data, loading, reload, params, setTab })
                 ))}
               </tbody>
             </table>
-            {filtered.length > shown && (
-              <div className="px-5 py-3 border-t border-border text-center">
-                <Button size="sm" variant="secondary" onClick={() => setShown(s => s + PAGE * 5)}>
-                  Show more ({(filtered.length - shown).toLocaleString()} left)
-                </Button>
-              </div>
-            )}
+            <Pagination page={page} pageSize={PAGE_SIZE} count={count} onPage={setPage} busy={read.stale} noun="contacts" />
           </div>
         )}
       </Card>
@@ -237,9 +298,8 @@ export function Contacts({ workspaceId, data, loading, reload, params, setTab })
           contact={editing === 'new' ? null : editing}
           prefill={editing === 'new' ? prefill : null}
           groups={data.groups}
-          currentGroups={editing === 'new' ? [] : (groupsOf.get(editing.id) || [])}
+          currentGroups={editing === 'new' ? [] : (editing.group_ids || [])}
           types={types}
-          existingEmails={data.contacts}
           onClose={() => { setEditing(null); setPrefill(null) }}
           onSaved={async () => { setEditing(null); setPrefill(null); await reload() }}
         />
@@ -248,7 +308,6 @@ export function Contacts({ workspaceId, data, loading, reload, params, setTab })
       {importing && (
         <ImportModal
           workspaceId={workspaceId} groups={data.groups} types={types}
-          existing={existingEmails}
           onClose={() => setImporting(false)}
           onDone={async () => { await reload() }}
           onViewGroup={id => { setImporting(false); setTab('contacts', { group: id }) }}
@@ -257,9 +316,9 @@ export function Contacts({ workspaceId, data, loading, reload, params, setTab })
 
       <ConfirmDialog
         open={confirmDelete} onClose={() => setConfirmDelete(false)} danger
-        title={`Delete ${selected.size} contact${selected.size === 1 ? '' : 's'}?`}
-        message="They are removed from every group and every queued email. Their sending history is kept in campaign numbers. This cannot be undone. To stop emailing someone but keep the record, set them to Unsubscribed instead."
-        onConfirm={() => run('delete', async () => { await deleteContacts(workspaceId, ids); setSelected(new Set()) })}
+        title={`Delete ${selected.size.toLocaleString()} contact${selected.size === 1 ? '' : 's'}?`}
+        message={`${elsewhere ? `${elsewhere.toLocaleString()} of them ${elsewhere === 1 ? 'is' : 'are'} on other pages. ` : ''}They are removed from every group and every queued email. Their sending history is kept in campaign numbers. This cannot be undone. To stop emailing someone but keep the record, set them to Unsubscribed instead.`}
+        onConfirm={() => run('delete', async () => { await deleteContacts(workspaceId, ids); setSelected(EMPTY_SELECTION) })}
       />
 
       <ConfirmDialog
@@ -272,7 +331,26 @@ export function Contacts({ workspaceId, data, loading, reload, params, setTab })
   )
 }
 
-function BulkBar({ selectedContacts, groups, groupsOf, busy, mixedLanes, onClear, onGroupAction, onSet, onDelete }) {
+/** The list's shape while its first page loads. */
+function ContactRowsSkeleton() {
+  return (
+    <div className="divide-y divide-border" aria-busy="true">
+      {[0, 1, 2, 3, 4, 5].map(i => (
+        <div key={i} className="flex items-center gap-4 px-3 py-2.5">
+          <Skeleton className="h-3.5 w-3.5" />
+          <div className="flex-1 min-w-0 space-y-1.5"><Skeleton className="h-3.5 w-40" /><Skeleton className="h-2.5 w-56" /></div>
+          <Skeleton className="h-3.5 w-28 hidden sm:block" />
+          <Skeleton className="h-3.5 w-20 hidden md:block" />
+          <Skeleton className="h-4 w-16" />
+          <Skeleton className="h-4 w-24 hidden md:block" />
+          <Skeleton className="h-4 w-14" />
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function BulkBar({ selectedContacts, elsewhere = 0, groups, groupsOf, busy, mixedLanes, onClear, onGroupAction, onSet, onDelete }) {
   const [action, setAction] = useState('')
   const count = selectedContacts.length
   // Add/Move offer only groups of the selection's lane(s); Remove offers only
@@ -297,7 +375,10 @@ function BulkBar({ selectedContacts, groups, groupsOf, busy, mixedLanes, onClear
   }
   return (
     <div className="sticky top-0 z-20 bg-amber-700 text-white px-4 py-2 flex flex-wrap items-center gap-3">
-      <span className="text-sm font-semibold">{count} selected</span>
+      <span className="text-sm font-semibold">
+        {count.toLocaleString()} selected
+        {elsewhere > 0 && <span className="font-normal text-white/80"> · {elsewhere.toLocaleString()} on other pages</span>}
+      </span>
       <select value={action} onChange={e => apply(e.target.value)} disabled={!!busy}
         className="bg-white text-text text-xs px-2 py-1.5 border border-white min-w-[200px]">
         <option value="">Choose an action…</option>
@@ -335,7 +416,7 @@ function BulkBar({ selectedContacts, groups, groupsOf, busy, mixedLanes, onClear
   )
 }
 
-function ContactModal({ workspaceId, contact, prefill = null, groups, currentGroups, types, existingEmails, onClose, onSaved }) {
+function ContactModal({ workspaceId, contact, prefill = null, groups, currentGroups, types, onClose, onSaved }) {
   const [form, setForm] = useState(() => ({
     email: '', first_name: '', last_name: '', company: '', job_title: '', phone: '', city: '', country: 'Saudi Arabia',
     contact_type: '', audience: 'marketing', language: 'en', consent: 'business_contact', notes: '', source: 'manual',
@@ -349,7 +430,7 @@ function ContactModal({ workspaceId, contact, prefill = null, groups, currentGro
   const [error, setError] = useState('')
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
 
-  const emailTaken = !contact && existingEmails.some(c => c.email === String(form.email).trim().toLowerCase())
+  const [emailTaken, setEmailTaken] = useState(false)
   const laneGroups = groups.filter(g => g.audience === form.audience)
   const otherLaneGroups = groups.filter(g => g.audience !== form.audience && groupIds.includes(g.id))
   const leftAutomatic = groups.filter(g => isAutomatic(g) && currentGroups.includes(g.id) && !groupIds.includes(g.id))
@@ -357,9 +438,15 @@ function ContactModal({ workspaceId, contact, prefill = null, groups, currentGro
   async function save() {
     setError('')
     if (!isValidEmail(form.email)) { setError('Enter a valid email address.'); return }
-    if (emailTaken) { setError('That address is already in your contacts.'); return }
     setSaving(true)
     try {
+      // Asked of the database, not of a list in the browser: the list on
+      // screen is one page. The unique index would refuse it anyway.
+      if (!contact && (await existingEmails(workspaceId, [normalizeEmail(form.email)])).size) {
+        setEmailTaken(true)
+        setError('That address is already in your contacts.')
+        return
+      }
       const row = cleanContact(form, { source: contact?.source || 'manual' })
       if (contact) {
         const statusPatch = form.status !== contact.status
@@ -387,7 +474,7 @@ function ContactModal({ workspaceId, contact, prefill = null, groups, currentGro
     <Modal open onClose={onClose} title={contact ? `Edit ${displayName(contact)}` : 'Add contact'} width="max-w-2xl">
       <div className="p-5 space-y-4">
         <div className="grid sm:grid-cols-2 gap-3">
-          <Input label="Email" value={form.email} onChange={e => set('email', e.target.value)} placeholder="name@company.com"
+          <Input label="Email" value={form.email} onChange={e => { set('email', e.target.value); setEmailTaken(false) }} placeholder="name@company.com"
             error={emailTaken ? 'Already in your contacts' : ''} autoFocus={!contact} />
           <Select label="Type" value={form.contact_type} onChange={e => set('contact_type', e.target.value)}>
             <option value="">—</option>
@@ -490,7 +577,7 @@ function ContactModal({ workspaceId, contact, prefill = null, groups, currentGro
   )
 }
 
-function ImportModal({ workspaceId, groups, types, existing, onClose, onDone, onViewGroup }) {
+function ImportModal({ workspaceId, groups, types, onClose, onDone, onViewGroup }) {
   const [text, setText] = useState('')
   const [fileName, setFileName] = useState('')
   const [defaults, setDefaults] = useState({ audience: 'marketing', language: 'en', consent: 'business_contact', contact_type: '' })
@@ -500,7 +587,22 @@ function ImportModal({ workspaceId, groups, types, existing, onClose, onDone, on
   const [result, setResult] = useState(null)
   const [error, setError] = useState('')
 
-  const parsed = useMemo(() => text.trim() ? rowsToContacts(parseCsv(text), defaults, existing) : null, [text, defaults, existing])
+  // Which addresses in the file are already contacts is asked of the
+  // database (for those addresses only), not of a list held in the browser.
+  const rows = useMemo(() => text.trim() ? parseCsv(text) : null, [text])
+  const candidates = useMemo(() => rows ? rowsToContacts(rows, defaults).contacts.map(c => c.email).join('\n') : '', [rows, defaults])
+  const [known, setKnown] = useState({ for: '', emails: null, error: '' })
+  useEffect(() => {
+    if (!candidates) return undefined
+    let live = true
+    existingEmails(workspaceId, candidates.split('\n')).then(
+      emails => { if (live) setKnown({ for: candidates, emails, error: '' }) },
+      err => { if (live) setKnown({ for: candidates, emails: new Set(), error: err.message || String(err) }) })
+    return () => { live = false }
+  }, [workspaceId, candidates])
+  const checking = Boolean(candidates) && known.for !== candidates
+  const existing = known.for === candidates ? known.emails : null
+  const parsed = useMemo(() => rows ? rowsToContacts(rows, defaults, existing || new Set()) : null, [rows, defaults, existing])
   const laneGroups = groups.filter(g => g.audience === defaults.audience)
   const setD = (k, v) => setDefaults(d => ({ ...d, [k]: v }))
 
@@ -602,7 +704,9 @@ function ImportModal({ workspaceId, groups, types, existing, onClose, onDone, on
             {parsed && (
               <div className="border border-border">
                 <div className="px-4 py-2 bg-surface-subtle flex flex-wrap gap-x-6 gap-y-1 text-xs">
-                  <span><strong className="text-text">{parsed.contacts.length.toLocaleString()}</strong> ready to import</span>
+                  {checking
+                    ? <span className="text-text-tertiary">Checking which are already in your contacts…</span>
+                    : <span><strong className="text-text">{parsed.contacts.length.toLocaleString()}</strong> ready to import</span>}
                   <span><strong className="text-text">{parsed.rejected.length.toLocaleString()}</strong> left out</span>
                   <span className="text-text-tertiary">Columns found: {parsed.columns.filter(Boolean).join(', ') || 'none'}</span>
                 </div>
@@ -654,10 +758,13 @@ function ImportModal({ workspaceId, groups, types, existing, onClose, onDone, on
               </div>
             )}
 
+            {known.error && !checking && (
+              <p className="text-[11px] text-amber-800">Could not check which addresses are already in your contacts ({known.error}). Importing is still safe: an address already there is skipped, never overwritten.</p>
+            )}
             {error && <p className="text-xs text-red-600">{error}</p>}
             <div className="flex justify-end gap-2">
               <Button variant="secondary" onClick={onClose}>Cancel</Button>
-              <Button onClick={run} disabled={!parsed?.contacts.length || !!progress}>
+              <Button onClick={run} disabled={!parsed?.contacts.length || !!progress || checking}>
                 {progress ? `Importing ${progress.done}/${progress.total}…` : `Import ${parsed?.contacts.length ? parsed.contacts.length.toLocaleString() : ''} contacts`}
               </Button>
             </div>

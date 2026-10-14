@@ -130,13 +130,56 @@ function seed() {
 }
 seed()
 
-// ── A PostgREST stand-in: enough of eq / in / gte / order / on_conflict ──
+// ── A PostgREST stand-in: enough of eq / in / gte / or / ilike / order /
+// range and count / on_conflict, and the contact list's group embeds ──
+
+// "a.ilike.\"*x, y*\",b.not.is.null" → ['a.ilike."*x, y*"', 'b.not.is.null']
+function splitOr(list) {
+  const out = []
+  let cur = ''
+  let quoted = false
+  for (let i = 0; i < list.length; i++) {
+    const ch = list[i]
+    if (ch === '\\' && quoted) { cur += list[++i]; continue }
+    if (ch === '"') { quoted = !quoted; continue }
+    if (ch === ',' && !quoted) { out.push(cur); cur = ''; continue }
+    cur += ch
+  }
+  return [...out, cur]
+}
+
+function test(cell, raw) {
+  const [first, ...rest] = raw.split('.')
+  const negate = first === 'not'
+  const op = negate ? rest.shift() : first
+  const val = rest.join('.')
+  let ok = true
+  if (op === 'eq') ok = String(cell ?? '') === val
+  else if (op === 'neq') ok = String(cell ?? '') !== val
+  else if (op === 'in') ok = val.replace(/^\(|\)$/g, '').split(',').map(s => s.replace(/^"|"$/g, '')).includes(String(cell))
+  else if (op === 'gte') ok = Boolean(cell && cell >= val)
+  else if (op === 'lt') ok = Boolean(cell && cell < val)
+  else if (op === 'is' && val === 'null') ok = cell == null
+  else if (op === 'ilike') {
+    const needle = val.replace(/^\*|\*$/g, '').toLowerCase()
+    ok = String(cell ?? '').toLowerCase().includes(needle)
+  }
+  return negate ? !ok : ok
+}
+
 function matches(row, params) {
   for (const [key, raw] of params) {
     if (['select', 'order', 'limit', 'offset', 'on_conflict', 'columns'].includes(key)) continue
+    if (key === 'or') {
+      const parts = splitOr(raw.replace(/^\(|\)$/g, ''))
+      if (!parts.some(p => { const [col, ...r] = p.split('.'); return test(row[col], r.join('.')) })) return false
+      continue
+    }
+    if (key.includes('.') || key === 'groups' || key === 'in_group') continue   // embeds: see embedContacts
     const [op, ...rest] = raw.split('.')
     const val = rest.join('.')
     const cell = row[key]
+    if (op === 'not' || op === 'neq' || op === 'ilike') { if (!test(cell, raw)) return false; continue }
     if (op === 'eq' && String(cell ?? '') !== val) return false
     if (op === 'in') {
       const list = val.replace(/^\(|\)$/g, '').split(',').map(s => s.replace(/^"|"$/g, ''))
@@ -167,6 +210,19 @@ function stats() {
   return [...by.values()]
 }
 
+// The contact list asks for each contact's groups (groups:email_group_members…)
+// and, filtered by one group, an inner join on it (in_group:…!inner).
+function embedContacts(rows, u) {
+  const select = u.searchParams.get('select') || ''
+  if (!select.includes('groups:')) return rows
+  const ids = c => db.email_group_members.filter(m => m.contact_id === c.id).map(m => ({ group_id: m.group_id }))
+  let out = rows.map(c => ({ ...c, groups: ids(c) }))
+  if (u.searchParams.get('groups') === 'is.null') out = out.filter(c => !c.groups.length)
+  const inGroup = u.searchParams.get('in_group.group_id')
+  if (inGroup) out = out.filter(c => c.groups.some(g => g.group_id === inGroup.replace(/^eq\./, ''))).map(c => ({ ...c, in_group: [{ group_id: inGroup.replace(/^eq\./, '') }] }))
+  return out
+}
+
 const DEFAULTS = {
   email_contacts: () => ({ id: uid(), first_name: '', last_name: '', company: '', job_title: '', phone: '', city: '', country: '', contact_type: '', audience: 'marketing', language: 'en', consent: 'business_contact', status: 'active', source: 'manual', notes: '', replied_at: null, unsubscribe_token: uid(), last_sent_at: null, created_at: now(), updated_at: now() }),
   email_groups: () => ({ id: uid(), description: '', audience: 'marketing', color: 'steel', created_at: now(), updated_at: now() }),
@@ -186,13 +242,23 @@ function rest(url, init) {
   let rows
 
   if (table === 'email_campaign_stats') rows = stats().filter(r => matches(r, params))
-  else if (method === 'GET') {
+  else if (method === 'GET' || method === 'HEAD') {
     rows = (db[table] || []).filter(r => matches(r, params))
+    if (table === 'email_contacts') rows = embedContacts(rows, u)
     const order = u.searchParams.get('order')
     if (order) {
-      const [col, dir] = order.split('.')
+      const [col, dir] = order.split(',')[0].split('.')
       rows = [...rows].sort((a, b) => (a[col] > b[col] ? 1 : -1) * (dir === 'desc' ? -1 : 1))
     }
+    // range() and { count: 'exact' }, as PostgREST answers them.
+    const total = rows.length
+    const offset = Number(u.searchParams.get('offset') || 0)
+    const limit = u.searchParams.get('limit')
+    if (limit != null) rows = rows.slice(offset, offset + Number(limit))
+    const counted = (headers.get('Prefer') || '').includes('count=exact')
+    const range = `${rows.length ? `${offset}-${offset + rows.length - 1}` : '*'}/${counted ? total : '*'}`
+    if (method === 'HEAD') return Promise.resolve(new Response(null, { status: 200, headers: { 'Content-Range': range } }))
+    return json(wantsObject ? (rows[0] ?? null) : rows, 200, range)
   } else if (method === 'POST') {
     const list = Array.isArray(body) ? body : [body]
     const conflict = u.searchParams.get('on_conflict')
@@ -223,8 +289,8 @@ function rest(url, init) {
   return json(wantsObject ? (rows?.[0] ?? null) : rows)
 }
 
-function json(payload, status = 200) {
-  return Promise.resolve(new Response(JSON.stringify(payload), { status, headers: { 'Content-Type': 'application/json', 'Content-Range': '0-0/*' } }))
+function json(payload, status = 200, range = '0-0/*') {
+  return Promise.resolve(new Response(JSON.stringify(payload), { status, headers: { 'Content-Type': 'application/json', 'Content-Range': range } }))
 }
 
 function api(action, body) {
