@@ -41,7 +41,6 @@ describe('buildInstructionsString, scoped by task', () => {
       const text = buildInstructionsString(legacy, '', task)
       expect(text).toContain('stylised "A"')
       expect(text).toContain('Dusk exteriors')
-      expect(text).toContain('Arabic and English')
       // The half that made an image model read the request as a writing job.
       expect(text).not.toContain('Founded 1976')
       expect(text).not.toContain('Call 800-000-0000')
@@ -51,13 +50,13 @@ describe('buildInstructionsString, scoped by task', () => {
     }
   })
 
-  // A person's free-text never-do list is half visual, and code cannot split a
-  // paragraph by key. Dropping it would lose a real rule about how the brand's
-  // pictures may look, so it is sent.
-  it('keeps the guardrails', () => {
+  // A person's free-text never-do list is half visual. It is one rule per
+  // line, so the visual lines are sent and the copywriting ones are not.
+  it('keeps only the visual lines of the guardrails', () => {
     const text = buildInstructionsString(legacy, '', 'image')
     expect(text).toContain('stock-photo lighting clichés')
-    expect(text).toContain('Speak as "we"')
+    expect(text).not.toContain('Speak as "we"')
+    expect(text).not.toContain('Arabic and English')
   })
 
   it('is unchanged when no task is given, so every existing caller behaves the same', () => {

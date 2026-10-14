@@ -1544,7 +1544,10 @@ export function CreativeStudio() {
       promptSource: version.prompt_source || 'raw', aspectRatio: version.aspect_ratio,
       referenceUrl: version.reference_url || '', referenceNotes: version.reference_notes || '',
       duration: version.duration || '', resolution: version.resolution || '',
-      generateAudio: !!version.generate_audio, model: version.model || '',
+      generateAudio: !!version.generate_audio,
+      // A still's own `model` may be the old 'seedance-2' mislabel; leaving
+      // it blank lets insertPendingVersions record the lane's real model.
+      model: version.media_type === 'video' ? (version.model || '') : '',
       // Only an overlay row has this, and it's what lets the retry below
       // rebuild the compose payload without re-uploading anything — the
       // layers were already uploaded to storage when Save first ran.

@@ -116,6 +116,22 @@ export async function fetchVersions(accessToken, sessionId) {
   } catch { return [] }
 }
 
+// The image models behind the two lanes, as the Creative Generate and Edit
+// workflows name them (gen_workflows.py, GEMINI_T2I / OPENAI_T2I). Only for
+// the record on the row — the workflow picks the endpoint from `provider`.
+export const IMAGE_MODEL_BY_PROVIDER = {
+  openai: 'gpt-image-2.5-flare',
+  gemini: 'nano-banana-2.1',
+}
+
+// What `model` says when the caller didn't name one. Video keeps the old
+// Seedance default the re-render path relies on; a still names the model of
+// its lane, and anything else (a hand-made overlay) names none.
+export function defaultModelFor(row) {
+  if ((row.mediaType || 'image') === 'video') return 'seedance-2'
+  return IMAGE_MODEL_BY_PROVIDER[row.provider] || ''
+}
+
 // Insert the row(s) a generating step will fill in. Done BEFORE the webhook
 // fires so there is always somewhere for the result to land and something for
 // the UI to show as pending — n8n is handed the ids rather than creating rows
@@ -148,7 +164,9 @@ export async function insertPendingVersions(workspaceId, accessToken, sessionId,
         // Recorded so a video render can be replayed verbatim later — the
         // 🔄 re-render action needs the exact settings that made it, not just
         // the prompt, and nothing else on this row captured them before.
-        model: r.model || 'seedance-2',
+        // A still used to fall through to 'seedance-2' (the column's DB
+        // default), so every image row claimed a video model made it.
+        model: r.model || defaultModelFor(r),
         duration: r.duration || '',
         resolution: r.resolution || '',
         generate_audio: !!r.generateAudio,
@@ -444,7 +462,10 @@ export async function requestEnhance(webhookUrl, payload) {
     if (!row || row.ok !== true || !row.prompt) {
       return { error: (row && row.error) || 'The enhancer returned nothing usable.' }
     }
-    return { ok: true, prompt: row.prompt }
+    // `conflicts` rides along: the brand-vs-brief clash the enhancer found,
+    // shown above the composer BEFORE the paid round. Dropping it here is
+    // why that warning never appeared.
+    return { ok: true, prompt: row.prompt, conflicts: Array.isArray(row.conflicts) ? row.conflicts : [] }
   } catch (err) { return { error: err.message } }
 }
 
