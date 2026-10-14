@@ -266,7 +266,7 @@ export function setupGaps(report = {}, { hasOwnAccount = true } = {}) {
       key: 'own_account',
       what: 'No comparable account of ours is connected, so every competitor number is uncontextualised.',
       fix: 'Connect the real Instagram account.',
-      to: '/integrations',
+      to: '/social',
     })
   }
 
@@ -279,14 +279,14 @@ export function setupGaps(report = {}, { hasOwnAccount = true } = {}) {
         key: `analytics_${p.platform}`,
         what: `${p.posts} post${p.posts === 1 ? '' : 's'} went out on ${p.label} with no analytics synced, so that channel cannot be judged.`,
         fix: `Check the analytics sync for ${p.label}.`,
-        to: '/integrations',
+        to: '/social',
       })
     } else if (p.connected && p.needs_reconnection) {
       gaps.push({
         key: `reconnect_${p.platform}`,
         what: `The ${p.label} account is flagged as needing reconnection — publishing and measurement may both be failing.`,
         fix: `Reconnect ${p.label}.`,
-        to: '/integrations',
+        to: '/social',
       })
     }
   }

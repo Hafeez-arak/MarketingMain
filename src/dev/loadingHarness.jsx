@@ -24,7 +24,7 @@ import { LinkedInPage } from '../pages/social/LinkedInPage'
 import { SnapchatPage } from '../pages/social/SnapchatPage'
 import { Approvals } from '../pages/social/Approvals'
 import AutoReplies from '../pages/social/AutoReplies'
-import { Settings, Integrations } from '../pages/settings/index'
+import { Settings } from '../pages/settings/index'
 import { Access } from '../pages/settings/Access'
 import { BrandBrain } from '../pages/settings/BrandBrain'
 import { CreativeStudio } from '../pages/studio/index'
@@ -48,7 +48,7 @@ export const ROUTES = {
   '/agent': <AgentPage />, '/media': <MediaLibrary />, '/social': <SocialOverview />,
   '/social/approvals': <Approvals />, '/social/auto-replies': <AutoReplies />,
   '/social/instagram': <InstagramPage />, '/social/tiktok': <TikTokPage />, '/social/linkedin': <LinkedInPage />,
-  '/social/snapchat': <SnapchatPage />, '/settings': <Settings />, '/integrations': <Integrations />, '/team': <Access />,
+  '/social/snapchat': <SnapchatPage />, '/settings': <Settings />, '/team': <Access />,
 }
 window.__loadingRoutes = Object.keys(ROUTES)
 
