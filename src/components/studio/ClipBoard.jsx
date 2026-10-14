@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Button, ConfirmDialog, Modal, Spinner, Textarea, Toggle } from '../ui/index'
+import FailureNote from './FailureNote'
 import { MultiRefRow } from './MediaPicker'
 import { LookPicker, ModelPicker } from './VideoSettings'
 import { STYLE_BIBLE_PLACEHOLDER } from './motionPresets'
@@ -333,9 +334,7 @@ function ClipCard({
             </details>
           )}
 
-          {row?.status === 'failed' && row.error && (
-            <p className="text-[10px] text-red-600 leading-snug">{row.error}</p>
-          )}
+          {row?.status === 'failed' && row.error && <FailureNote error={row.error} media="video" />}
         </div>
       </div>
     </div>
@@ -677,7 +676,7 @@ export function ClipBoard({
             </div>
           )}
           {stitchRow.status === 'failed' && (
-            <p className="text-[11px] text-red-600 leading-snug">{stitchRow.error || 'The stitch failed.'}</p>
+            <FailureNote error={stitchRow.error || 'The stitch failed.'} media="video" size="sm" />
           )}
         </div>
       )}

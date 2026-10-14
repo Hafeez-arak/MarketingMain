@@ -383,7 +383,12 @@ export async function uploadToStudio(workspaceId, accessToken, blob, name) {
 // ── Webhook calls (all fire-and-forget; the caller polls the rows) ─────────
 
 async function fire(webhookUrl, payload, label) {
-  if (!webhookUrl) return { error: `${label} webhook not configured. Go to Settings → Integrations.` }
+  // The person on the page needs to know only that it isn't on yet and who
+  // can switch it on; `label` names the workflow for the console.
+  if (!webhookUrl) {
+    console.warn(`${label} webhook is not set for this workspace`)
+    return { error: 'This part of the studio isn\'t set up yet. Tell your admin.' }
+  }
   try {
     const res = await fetch(webhookUrl, {
       method: 'POST',
@@ -447,7 +452,7 @@ export async function fetchFalBalance(webhookUrl) {
 // It never triggers a generation. The enhanced text lands in the composer and
 // the human decides what to do with it.
 export async function requestEnhance(webhookUrl, payload) {
-  if (!webhookUrl) return { error: 'Enhance webhook not configured. Go to Settings → Integrations.' }
+  if (!webhookUrl) return { error: 'Enhance isn\'t set up yet. Tell your admin.' }
   try {
     const res = await fetch(webhookUrl, {
       method: 'POST',
@@ -485,7 +490,7 @@ export async function requestEnhance(webhookUrl, payload) {
 // height}] } with `box` as [left, top, right, bottom] fractions of the image
 // that was sent, bottom layer first.
 export async function requestLayerize(webhookUrl, workspaceId, accessToken, imageUrl) {
-  if (!webhookUrl) return { error: 'Split-into-layers webhook not configured. Go to Settings → Integrations.' }
+  if (!webhookUrl) return { error: 'Split into layers isn\'t set up yet. Tell your admin.' }
   if (!imageUrl) return { error: 'There is no picture to split.' }
   let data
   try {

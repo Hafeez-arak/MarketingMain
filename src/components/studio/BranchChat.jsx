@@ -3,6 +3,8 @@ import { Button, Spinner } from '../ui/index'
 import { PROVIDER_LABEL, labelFor } from './labels'
 import { MultiRefRow } from './MediaPicker'
 import { VIDEO_EDIT_DURATION_RANGE, VIDEO_EDIT_MAX_REFERENCES, upscaleSourceTier } from './videoModels'
+import FailureNote from './FailureNote'
+import { canRetryWithoutBrand, explainFailure } from './failureText'
 
 // ─── One candidate's own workspace ─────────────────────────────────────────
 // The ChatGPT image and the Gemini image are not two options to choose
@@ -106,6 +108,7 @@ export function BranchChat({
   onUseThis,               // opens the sheet that turns this version into real posts
   onDownload,              // downloads the file AND files it in the library if it isn't already
   onRetry,                 // re-run a failed version against the same prompt
+  onRetryWithoutBrand,     // optional: the same, with the brand block left out (only passed when there is one)
   onDelete,                // remove one candidate from the history strip
   onAttach,                // opens a picker (upload / Media Library) for this lane's composer
   onZoom,                  // opens the full-screen viewer at this version
@@ -314,14 +317,24 @@ export function BranchChat({
         ) : stage.status === 'failed' ? (
           <div className="flex flex-col items-center gap-1.5 px-6 text-center">
             <p className="text-[11px] font-semibold text-red-700">{labelFor(stage) || 'That step'} failed</p>
-            {/* The real provider message, not a generic apology — an exhausted
-                balance and a rejected prompt need very different responses. */}
-            <p className="text-[10px] text-red-600 leading-snug line-clamp-3 max-w-xs">{stage.error || 'No reason given.'}</p>
-            <div className="flex items-center gap-1.5 mt-1">
+            {/* What it means first; the provider's own message behind
+                Details — an exhausted balance and a rejected prompt need very
+                different responses, and whoever fixes it needs the exact words. */}
+            <FailureNote error={stage.error} media={stage.media_type} className="max-w-xs" />
+            <div className="flex flex-wrap items-center justify-center gap-1.5 mt-1">
               {onRetry && (
                 <button type="button" onClick={() => onRetry(stage)} disabled={pendingKey === `retry:${stage.id}`}
                   className="inline-flex items-center gap-1.5 border border-red-300 bg-white px-2.5 py-1 text-[10px] font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50">
                   {pendingKey === `retry:${stage.id}` ? <><Spinner size="sm" /> Retrying…</> : '↻ Try again'}
+                </button>
+              )}
+              {/* Nano Banana making nothing from a brief is, measured, most
+                  often the brand block reading as a writing job — so the one
+                  retry that can change the outcome is offered beside the plain one. */}
+              {onRetryWithoutBrand && canRetryWithoutBrand(stage, explainFailure(stage.error), true) && (
+                <button type="button" onClick={() => onRetryWithoutBrand(stage)} disabled={pendingKey === `retry:${stage.id}`}
+                  className="border border-border bg-white px-2.5 py-1 text-[10px] font-semibold text-text hover:border-amber-400 hover:bg-amber-50 disabled:opacity-50">
+                  Try again without brand context
                 </button>
               )}
               {onDelete && (
