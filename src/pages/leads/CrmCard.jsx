@@ -94,7 +94,7 @@ export default function CrmCard({ workspaceId, crm, loading, onChange, onError }
       {form ? (
         <form onSubmit={save} className="space-y-2.5 border-t border-border pt-3">
           <Input id="crm-url" label="Odoo address" value={form.url} onChange={set('url')} placeholder={ODOO_DEFAULT} />
-          <Input id="crm-db" label="Database" value={form.db} onChange={set('db')} placeholder="On Odoo Online, filled in from the address" />
+          <Input id="crm-db" label="Database" value={form.db} onChange={set('db')} placeholder="Leave empty: asked of Odoo itself" />
           <Input id="crm-login" label="Odoo user (email)" value={form.login} onChange={set('login')} placeholder="The user the agent writes as" />
           <Input id="crm-key" label="API key" type="password" autoComplete="off" value={form.api_key} onChange={set('api_key')}
             placeholder={crm?.hasKey ? 'Saved: leave empty to keep it' : 'Paste the key from Odoo'} />

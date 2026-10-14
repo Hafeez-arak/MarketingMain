@@ -14,9 +14,16 @@ const LAYLA = { id: '44444444-4444-4444-8444-444444444444', email: 'layla@exampl
 const OMAR = { id: '55555555-5555-4555-8555-555555555555', email: 'omar@example.com' }
 const ODOO_USERS = { 'omar@example.com': 21, 'omar.k': 22 }
 
-function fakeOdoo({ plan = 'custom', canCreate = true, failCreate = false } = {}) {
+// Odoo Online names its database after the account, not the subdomain
+// (arak-co.odoo.com runs "profaccountant-arak-co-main-…"), and lists it.
+const REAL_DB = 'example-arak-co-main-123'
+
+function fakeOdoo({ plan = 'custom', canCreate = true, failCreate = false, listsDb = true } = {}) {
   const odoo = { leads: [], tags: [], calls: [] }
   odoo.fetch = async (url, init) => {
+    if (String(url).endsWith('/web/database/list')) {
+      return new Response(JSON.stringify(listsDb ? { jsonrpc: '2.0', id: 1, result: [REAL_DB] } : { jsonrpc: '2.0', id: 1, error: { message: 'Access Denied' } }))
+    }
     const { params } = JSON.parse(init.body)
     const { service, method, args } = params
     odoo.calls.push(`${service}.${method}${service === 'object' ? ` ${args[3]}.${args[4]}` : ''}`)
@@ -25,6 +32,7 @@ function fakeOdoo({ plan = 'custom', canCreate = true, failCreate = false } = {}
     if (service === 'common' && method === 'version') return ok({ server_version: '18.0+e' })
     if (service === 'common' && method === 'authenticate') {
       if (plan !== 'custom') return err('API access requires the Custom plan.')
+      if (![REAL_DB, 'arak-co', 'erp'].includes(args[0])) return err(`connection to server failed: database "${args[0]}" does not exist`)
       return ok(args[2] === 'good-key' ? 7 : false)
     }
     const [, , , model, m, a, kw] = args
@@ -251,13 +259,23 @@ describe('when the API key arrives', () => {
     const deps = depsOf(state, odoo)
     expect((await crmStatus(deps, WS))).toMatchObject({ connected: false, queued: 2 })
     const saved = await saveCrm(deps, WS, { url: 'arak-co.odoo.com', login: 'lead.agent@example.com', api_key: 'good-key' })
-    expect(saved.crm).toMatchObject({ connected: true, url: 'https://arak-co.odoo.com', db: 'arak-co', version: '18.0+e', hasKey: true })
+    expect(saved.crm).toMatchObject({ connected: true, url: 'https://arak-co.odoo.com', db: REAL_DB, version: '18.0+e', hasKey: true })
     expect(state.crm.api_key).toBe('sealed:good-key')
     expect(saved.crm).not.toHaveProperty('apiKey')
     const out = await sendWaiting(deps, WS)
     expect(out).toEqual({ sent: 2, failed: 0, left: 0 })
     expect(odoo.leads).toHaveLength(2)
     expect(odoo.leads[0].description).toContain('Layla (layla@example.com)')
+  })
+
+  it('the database is asked of Odoo, typed by the admin when given, and guessed from the address only as a last resort', async () => {
+    const state = fakeDb([])
+    await saveCrm(depsOf(state, fakeOdoo()), WS, { url: 'arak-co.odoo.com', login: 'x', api_key: 'good-key' })
+    expect(state.crm.db).toBe(REAL_DB)
+    await saveCrm(depsOf(state, fakeOdoo()), WS, { url: 'arak-co.odoo.com', db: 'erp', login: 'x', api_key: 'good-key' })
+    expect(state.crm.db).toBe('erp')
+    await saveCrm(depsOf(state, fakeOdoo({ listsDb: false })), WS, { url: 'arak-co.odoo.com', login: 'x', api_key: 'good-key' })
+    expect(state.crm.db).toBe('arak-co')
   })
 
   it('a wrong key is saved for fixing but not connected, with Odoo\'s reason', async () => {

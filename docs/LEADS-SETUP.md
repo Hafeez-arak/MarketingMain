@@ -315,9 +315,16 @@ To connect, in this order:
 4. **The key:** sign in to Odoo as Lead Agent → avatar → **My Preferences**
    (or Preferences) → **Account Security** → **New API Key** → name it "Lead
    Agent" → choose the longest duration offered (persistent if it is there) →
-   copy it. It is shown once.
+   copy it. It is shown once. **A user who is not an Odoo Settings admin is
+   capped (1 day on Arak's Odoo, seen 2026-10-14).** The admin raises the cap
+   first (Settings → Technical → System Parameters, `base.api_key_duration`,
+   in days) or makes the key a Settings admin may make. When a key expires,
+   approvals fail with Odoo's refusal and wait with Retry until a new key is
+   saved.
 5. Leads → **Agent settings** → **CRM (Odoo)** → **Connect Odoo**: address
-   `https://arak-co.odoo.com` (the database fills itself in), Lead Agent's
+   `https://arak-co.odoo.com`, Database left empty (asked of Odoo itself: on
+   Odoo Online it is not the subdomain, Arak's is
+   `profaccountant-arak-co-main-17902620`), Lead Agent's
    login email, the key → **Save and test**.
 6. **Sales team → Find them in Odoo**: says who Odoo could not find, before
    any lead is approved.

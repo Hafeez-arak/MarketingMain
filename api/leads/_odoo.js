@@ -27,6 +27,25 @@ export function defaultDb(url) {
   return /\.odoo\.com$/i.test(host) ? host.split('.')[0] : ''
 }
 
+/**
+ * The database's real name, as the server itself lists it. Odoo Online's
+ * is not the subdomain: arak-co.odoo.com runs "profaccountant-arak-co-main-
+ * 17902620" (found 2026-10-14), so the guess above fails to sign in. Online
+ * answers this one public call with its single database; '' when it won't.
+ */
+export async function discoverDb(fetchFn, url) {
+  try {
+    const res = await fetchFn(`${url}/web/database/list`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', method: 'call', params: {}, id: Date.now() }),
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    })
+    const list = (await res.json().catch(() => null))?.result
+    return Array.isArray(list) && list.length === 1 ? String(list[0]) : ''
+  } catch { return '' }
+}
+
 class OdooError extends Error {}
 
 async function rpc(fetchFn, url, service, method, args) {
