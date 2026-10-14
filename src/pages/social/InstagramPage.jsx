@@ -5,11 +5,10 @@ import { useAuth } from '../../store/auth'
 import { ComposerHost } from '../../components/composer/ComposerHost'
 import { ConnectAccounts } from '../../components/social/ConnectAccounts'
 import { AccountAnalytics } from '../../components/social/AccountAnalytics'
-import { AccountFeed } from '../../components/social/AccountFeed'
 import { useConnectedAccounts } from '../../lib/useConnectedAccounts'
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from '../../lib/supabaseClient'
 import FitImage, { IgPicture } from '../../components/FitImage'
-import { Card, Badge, Button, Spinner, Skeleton } from '../../components/ui/index'
+import { Card, Badge, Button, Spinner, Skeleton, PostImage } from '../../components/ui/index'
 import { formatDateTime, PLATFORM_META } from '../../lib/utils'
 
 const IG_META = PLATFORM_META.instagram
@@ -22,6 +21,8 @@ import { composerFromPost } from '../../lib/composerState'
 import { postLock } from '../../lib/postLock'
 import { formatBrandDateTime, utcToBrandInputs, brandWallToUtc, BRAND_TIMEZONE_LABEL } from '../../lib/brandTime'
 import { syncZernio } from '../../lib/zernio'
+import { fetchAccountFeed } from '../../lib/zernioConnect'
+import { ORIGIN, POST_FILTERS, matchesFilter, countPosts, buildAllPosts, feedStats } from '../../lib/instagramAllPosts'
 import { defaultWebhookUrl } from '../../lib/n8nWebhooks'
 
 // ─── Constants ─────────────────────────────────────────────────────────────
@@ -165,6 +166,65 @@ function useSupabasePosts(supabaseUrl, anonKey, workspaceId) {
   return { remotePosts, loadingPosts, firstLoad, loadError, lastFetchedAt, fetchRemotePosts, updatePostStatus }
 }
 
+// ─── What is live on the connected accounts ───────────────────────────────
+// Zernio's feed for each connected Instagram account, from the day it was
+// connected: posts sent from here AND posts made in the Instagram app. Merged
+// with our own rows by buildAllPosts (lib/instagramAllPosts.js). Read on load
+// and on Sync only — not on the 30s poll, since each read goes to Zernio.
+function useInstagramFeed(workspaceId, igAccounts) {
+  const live = igAccounts.accounts.filter(a => a.is_active !== false && a.zernio_account_id)
+  const key = `${workspaceId || ''}:${live.map(a => a.zernio_account_id).sort().join(',')}`
+  const [state, setState] = useState({ key: '', posts: [], fromDate: '', error: '', loading: false })
+
+  // State is only written once the answer is back (or, on a refetch, to mark
+  // it running), so the effect below never sets state synchronously. A list
+  // for another set of accounts is hidden by `key` rather than cleared.
+  async function fetchInto(isCurrent = () => true) {
+    if (!workspaceId || !live.length) return
+    const results = await Promise.all(live.map(a =>
+      fetchAccountFeed(workspaceId, a.zernio_account_id).then(r => ({ ...r, username: a.username }))))
+    if (!isCurrent()) return
+    const failed = results.find(r => r.error)
+    const posts = results.flatMap(r => (r.posts || []).map(p => ({ ...p, username: r.username })))
+    const fromDate = results.map(r => r.fromDate).filter(Boolean).sort()[0] || ''
+    setState(s => ({
+      key, loading: false, error: failed ? failed.error : '',
+      // A failed refresh keeps what was already on screen.
+      posts: failed && !posts.length && s.key === key ? s.posts : posts,
+      fromDate: fromDate || (s.key === key ? s.fromDate : ''),
+    }))
+  }
+
+  function reload() {
+    if (!live.length) { igAccounts.refresh?.(); return }
+    if (!workspaceId) return
+    setState(s => ({ ...s, loading: true }))
+    fetchInto()
+  }
+
+  useEffect(() => {
+    let current = true
+    queueMicrotask(() => fetchInto(() => current))
+    return () => { current = false }
+  }, [key]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const fresh = state.key === key
+  // Nothing connected is an answer (no feed to read), but only once the
+  // account list itself has answered.
+  const none = !igAccounts.loading && !live.length
+  return {
+    posts:     fresh ? state.posts : [],
+    fromDate:  fresh ? state.fromDate : '',
+    usernames: live.map(a => a.username).filter(Boolean),
+    firstLoad: !none && (igAccounts.loading || !fresh),
+    loading:   state.loading,
+    // No account list at all means no feed could be asked for — said, not
+    // shown as "nothing posted".
+    error:     none ? (igAccounts.error ? 'the connected account could not be read' : '') : (fresh ? state.error : ''),
+    reload,
+  }
+}
+
 export function InstagramPage() {
   const { state, dispatch } = useApp()
   const { activeWorkspaceId, accessToken } = useAuth()
@@ -183,6 +243,15 @@ export function InstagramPage() {
     ...remotePosts.filter(p => !localIds.has(p.id)),
     ...localPosts,
   ].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+
+  // What is live on the account, and the one list both make. Every number on
+  // this page — header, tiles, chips — counts these rows, so none of them can
+  // read 0 above a post the list is showing.
+  const feed      = useInstagramFeed(activeWorkspaceId, igAccounts)
+  const rows      = buildAllPosts(mergedPosts, feed.posts)
+  const counts    = countPosts(rows)
+  const appFailed  = !!loadError && !remotePosts.length
+  const feedFailed = !!feed.error && !feed.posts.length
 
   // Auto-fetch on mount + re-fetch every 30s to pick up n8n-generated posts
   // A ref rather than state: "have I done the first fetch" is bookkeeping the
@@ -233,6 +302,12 @@ export function InstagramPage() {
   function handlePosted() {
     zernioSync.current = { at: 0, runs: 0 }
     fetchRemotePosts()
+    feed.reload()
+  }
+
+  function syncAll() {
+    fetchRemotePosts()
+    feed.reload()
   }
 
   return (
@@ -246,15 +321,15 @@ export function InstagramPage() {
             <span className={`w-10 h-10 flex items-center justify-center text-sm font-bold ${IG_META.bg} ${IG_META.text}`}>{IG_META.abbr}</span>
             <div>
               <h2 className="font-semibold text-text">Instagram</h2>
-              {firstLoad
+              {firstLoad || feed.firstLoad
                 ? <Skeleton className="h-3 w-14 mt-1" />
-                : <p className="text-xs text-text-secondary">{loadError && !remotePosts.length ? 'Posts not loaded' : `${mergedPosts.length} post${mergedPosts.length !== 1 ? 's' : ''}`}</p>}
+                : <p className="text-xs text-text-secondary">{appFailed && feedFailed ? 'Posts not loaded' : appFailed || feedFailed ? 'Some posts not loaded' : `${rows.length} post${rows.length !== 1 ? 's' : ''}`}</p>}
             </div>
           </div>
           <div className="flex items-center gap-2">
             {supabaseUrl && anonKey && (
-              <Button variant="secondary" onClick={fetchRemotePosts} disabled={loadingPosts}>
-                {loadingPosts
+              <Button variant="secondary" onClick={syncAll} disabled={loadingPosts || feed.loading}>
+                {loadingPosts || feed.loading
                   ? <Spinner size="sm" />
                   : <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-.27-4.93"/></svg>}
                 {lastFetchedAt ? `Synced ${lastFetchedAt.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}` : 'Sync'}
@@ -302,18 +377,21 @@ export function InstagramPage() {
           refresh={igAccounts.refresh} />
       </Card>
 
-      {/* Stats */}
+      {/* Stats — the same counts as the chips below. Total and Published
+          include posts made in the Instagram app; Pending and Scheduled are
+          stages only a post made here can be in. Each tile waits for the
+          sources it counts, and a source that failed shows a dash, not 0. */}
       <div className="grid grid-cols-4 gap-3">
         {[
-          { label: 'Total',     value: mergedPosts.length },
-          { label: 'Pending',   value: mergedPosts.filter(p => p.status === 'pending_publish').length },
-          { label: 'Scheduled', value: mergedPosts.filter(p => p.status === 'scheduled').length },
-          { label: 'Published', value: mergedPosts.filter(p => p.status === 'published').length },
+          { label: 'Total',     value: counts.all,             feed: true },
+          { label: 'Pending',   value: counts.pending_publish, feed: false },
+          { label: 'Scheduled', value: counts.scheduled,       feed: false },
+          { label: 'Published', value: counts.published,       feed: true },
         ].map(s => (
           <Card key={s.label} className="p-4 text-center">
-            {firstLoad
+            {firstLoad || (s.feed && feed.firstLoad)
               ? <Skeleton className="h-8 w-10 mx-auto" />
-              : <p className="text-2xl font-bold text-text">{loadError && !remotePosts.length ? '—' : s.value}</p>}
+              : <p className="text-2xl font-bold text-text">{appFailed || (s.feed && feedFailed) ? '—' : s.value}</p>}
             <p className="text-xs text-text-secondary mt-0.5">{s.label}</p>
           </Card>
         ))}
@@ -321,11 +399,20 @@ export function InstagramPage() {
 
       {loadError && (
         <Card className="p-3 flex items-center gap-3 border-red-200 bg-red-50">
-          <p className="text-xs flex-1 text-red-600">The posts could not be loaded ({loadError}). Nothing has been lost.</p>
+          <p className="text-xs flex-1 text-red-600">The posts made in this app could not be loaded ({loadError}). Nothing has been lost.</p>
           <Button size="sm" variant="secondary" onClick={fetchRemotePosts} disabled={loadingPosts}>Try again</Button>
         </Card>
       )}
-      {loadError && !mergedPosts.length ? null : <PostsList posts={mergedPosts} loading={firstLoad} dispatch={dispatch} state={state} updatePostStatus={updatePostStatus} onRefresh={fetchRemotePosts}
+      {feed.error && (
+        <Card className="p-3 flex items-center gap-3 border-red-200 bg-red-50">
+          <p className="text-xs flex-1 text-red-600">The posts on Instagram could not be loaded ({feed.error}).</p>
+          <Button size="sm" variant="secondary" onClick={feed.reload} disabled={feed.loading}>Try again</Button>
+        </Card>
+      )}
+      {appFailed && feedFailed ? null : <PostsList rows={rows} counts={counts}
+        loadingApp={firstLoad} loadingFeed={feed.firstLoad} appFailed={appFailed} feedFailed={feedFailed}
+        usernames={feed.usernames} feedFrom={feed.fromDate}
+        dispatch={dispatch} state={state} updatePostStatus={updatePostStatus} onRefresh={syncAll}
         accounts={igAccounts.accounts} onPosted={handlePosted} webhookUrl="" regenWebhookUrl="" />}
       </>)}
     </div>
@@ -1021,7 +1108,73 @@ function PostListSkeleton() {
   )
 }
 
-function PostsList({ posts, loading = false, dispatch, state, updatePostStatus, onRefresh, onPosted, accounts, webhookUrl, regenWebhookUrl }) {
+// "Made in app" vs "Posted on Instagram". Deliberately unlike each other and
+// unlike the status badge beside them: steel for ours, Instagram pink for the
+// account's own.
+const ORIGIN_CLASS = {
+  app:       'bg-amber-50 text-amber-800 border border-amber-200',
+  instagram: 'bg-pink-50 text-pink-700 border border-pink-200',
+}
+
+function OriginTag({ origin }) {
+  const meta = ORIGIN[origin] || ORIGIN.instagram
+  return (
+    <span title={meta.title}
+      className={`inline-flex items-center px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-[0.08em] leading-[1.4] whitespace-nowrap ${ORIGIN_CLASS[origin] || ORIGIN_CLASS.instagram}`}>
+      {meta.label}
+    </span>
+  )
+}
+
+// A post we have no row for: made in the Instagram app, or sent from here and
+// since removed from our list. It lives on Instagram, so that is where it opens.
+function FeedPostCard({ row, showAccount }) {
+  const f = row.feed
+  const numbers = feedStats(f)
+  const Wrapper = f.url ? 'a' : 'div'
+  return (
+    <Wrapper {...(f.url ? { href: f.url, target: '_blank', rel: 'noreferrer' } : {})} className="block">
+      <Card className="overflow-hidden hover:border-stone-400 transition-colors duration-150">
+        <div className="flex">
+          <PostImage src={f.thumbnail} alt="" className="w-28 h-28 object-cover flex-shrink-0" />
+          <div className="flex-1 p-4 min-w-0">
+            <div className="flex items-center gap-1.5 flex-wrap mb-2">
+              <OriginTag origin={row.origin} />
+              <Badge status="published" />
+              <span className="tag-base bg-surface-subtle text-text-secondary">{row.type}</span>
+            </div>
+            <p className="text-sm text-text line-clamp-2 leading-relaxed mb-1.5">{f.caption || 'No caption'}</p>
+            <p className="text-[11px] text-text-tertiary">
+              {f.published_at ? <>Posted {formatBrandDateTime(f.published_at)}</> : 'Date unknown'}
+              {showAccount && f.username && <span className="ml-1.5">· @{f.username}</span>}
+              {numbers.length > 0 && <span className="ml-1.5">· {numbers.join(' · ')}</span>}
+            </p>
+            {f.url && <p className="text-[10px] text-text-tertiary mt-1 opacity-60">Click to open on Instagram</p>}
+          </div>
+        </div>
+      </Card>
+    </Wrapper>
+  )
+}
+
+// The line under the chips: what the current chip lists, in a sentence.
+function filterHelp(filter, usernames, since) {
+  const handle = usernames.length === 1 ? `@${usernames[0]}` : usernames.length ? 'the connected accounts' : ''
+  const sinceText = since ? ` since it was connected (${since})` : ' since it was connected'
+  switch (filter) {
+    case 'draft':           return 'Drafts made in this app.'
+    case 'pending_publish': return 'Made in this app and waiting to be published.'
+    case 'scheduled':       return 'Made in this app and booked to go out, soonest first.'
+    case 'published':       return handle
+      ? `Live on ${handle}${sinceText}, whether made in this app or posted on Instagram.`
+      : 'Posts made in this app that have gone out.'
+    default:                return handle
+      ? `Everything made in this app, plus everything posted on ${handle}${sinceText}. Upcoming posts first, then newest.`
+      : 'Everything made in this app. Upcoming posts first, then newest.'
+  }
+}
+
+function PostsList({ rows, counts, loadingApp = false, loadingFeed = false, appFailed = false, feedFailed = false, usernames = [], feedFrom = '', dispatch, state, updatePostStatus, onRefresh, onPosted, accounts, webhookUrl, regenWebhookUrl }) {
   const [filter,       setFilter]       = useState('all')
   const [selectedPost, setSelectedPost] = useState(null)
   const [composerPost, setComposerPost] = useState(null)
@@ -1031,11 +1184,13 @@ function PostsList({ posts, loading = false, dispatch, state, updatePostStatus, 
   const supabaseUrl = SUPABASE_URL
   const anonKey     = accessToken || ''
 
-  const filtered = filter === 'all' ? posts : posts.filter(p =>
-    filter === 'pending_publish' ? p.status === 'pending_publish' :
-    filter === 'published'       ? p.status === 'published' :
-    p.status === filter
-  )
+  const filtered = rows.filter(r => matchesFilter(r, filter))
+  // All posts and Published include the account's own posts, so they wait for
+  // (and can be let down by) that read too; the other chips are ours alone.
+  const usesFeed = filter === 'all' || filter === 'published'
+  const loading  = loadingApp || (usesFeed && loadingFeed)
+  const failed   = appFailed || (usesFeed && feedFailed)
+  const since    = feedFrom ? formatBrandDateTime(`${feedFrom}T00:00:00Z`).split(',')[0] : ''
 
   async function handleStatusChange(post, newStatus) {
     if (post._fromSupabase && updatePostStatus) {
@@ -1120,16 +1275,8 @@ function PostsList({ posts, loading = false, dispatch, state, updatePostStatus, 
     if (selectedPost?.id === post.id) setSelectedPost(null)
   }
 
-  const FILTERS = [
-    { key: 'all',             label: 'All',       count: posts.length },
-    { key: 'draft',           label: 'Drafts',    count: posts.filter(p => p.status === 'draft').length },
-    { key: 'pending_publish', label: 'Pending',   count: posts.filter(p => p.status === 'pending_publish').length },
-    { key: 'scheduled',       label: 'Scheduled', count: posts.filter(p => p.status === 'scheduled').length },
-    { key: 'published',       label: 'Published', count: posts.filter(p => p.status === 'published').length },
-    // Not a status of OUR rows: what is live on the account, including posts
-    // made in the Instagram app. Its own list, from Zernio — see AccountFeed.
-    { key: 'feed',            label: 'All posts' },
-  ]
+  const FILTERS = POST_FILTERS.map(f => ({ ...f, count: counts[f.key] }))
+  const countsReady = !loadingApp && !loadingFeed
 
   return (
     <div className="space-y-4">
@@ -1144,7 +1291,7 @@ function PostsList({ posts, loading = false, dispatch, state, updatePostStatus, 
                   : 'text-text-secondary bg-white border-border hover:border-stone-400 hover:text-text'
               }`}>
               {f.label}
-              {!loading && f.count > 0 && (
+              {countsReady && f.count > 0 && (
                 <span className={`ml-1.5 text-[10px] px-1.5 py-0.5 leading-[1.4] font-bold ${
                   filter === f.key ? 'bg-white/25 text-white' : 'bg-surface-subtle text-text-tertiary'
                 }`}>{f.count}</span>
@@ -1152,8 +1299,9 @@ function PostsList({ posts, loading = false, dispatch, state, updatePostStatus, 
             </button>
           ))}
         </div>
-        {!loading && filter !== 'feed' && <span className="text-[11px] text-text-tertiary">{filtered.length} post{filtered.length !== 1 ? 's' : ''}</span>}
+        {!loading && !(failed && !filtered.length) && <span className="text-[11px] text-text-tertiary">{filtered.length} post{filtered.length !== 1 ? 's' : ''}</span>}
       </div>
+      <p className="text-xs text-text-secondary -mt-1">{filterHelp(filter, usernames, since)}</p>
 
       {deleteError && (
         <Card className="p-3 flex items-center gap-3 border-red-200 bg-red-50">
@@ -1163,11 +1311,9 @@ function PostsList({ posts, loading = false, dispatch, state, updatePostStatus, 
       )}
 
       {/* Empty state */}
-      {filter === 'feed' ? (
-        <AccountFeed accounts={accounts} />
-      ) : loading ? (
+      {loading ? (
         <PostListSkeleton />
-      ) : filtered.length === 0 ? (
+      ) : filtered.length === 0 ? (failed ? null :
         <Card className="p-12 text-center">
           <div className="w-11 h-11 border border-border bg-surface-subtle mx-auto mb-4 flex items-center justify-center text-text-tertiary">
             <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
@@ -1179,13 +1325,16 @@ function PostsList({ posts, loading = false, dispatch, state, updatePostStatus, 
         </Card>
       ) : (
         <div className="grid grid-cols-1 gap-3">
-          {filtered.map(p => {
+          {filtered.map(row => {
+            if (!row.post) return <FeedPostCard key={row.key} row={row} showAccount={usernames.length > 1} />
+            const p          = row.post
+            const numbers    = feedStats(row.feed)
             const campaign   = (state.campaigns || []).find(c => c.id === p.campaignId)
             const styleMeta  = IMAGE_STYLES.find(s => s.value === p.style)
             const imgSrc     = p.imageUrl || p.mediaUrls?.[0]
             const customMeta = CUSTOM_POST_TYPES.find(t => t.value === p.customType)
             return (
-              <Card key={p.id}
+              <Card key={row.key}
                 className="overflow-hidden cursor-pointer hover:border-stone-400 transition-colors duration-150"
                 onClick={() => setSelectedPost(p)}>
                 <div className="flex">
@@ -1206,7 +1355,9 @@ function PostsList({ posts, loading = false, dispatch, state, updatePostStatus, 
                   <div className="flex-1 p-4 min-w-0">
                     <div className="flex items-start justify-between gap-2 mb-2">
                       <div className="flex items-center gap-1.5 flex-wrap">
-                        <Badge status={p.status === 'pending_publish' ? 'pending' : p.status} />
+                        <OriginTag origin="app" />
+                        <Badge status={row.status === 'pending_publish' ? 'pending' : row.status} />
+                        <span className="tag-base bg-surface-subtle text-text-secondary">{row.type}</span>
                         {p.generatedByWorkflow && <span className="tag-base bg-surface-subtle text-text-secondary">AI</span>}
                         {p.source === 'plan' && <span className="tag-base bg-surface-subtle text-text-secondary">Monthly plan</span>}
                         {customMeta && <span className="tag-base bg-surface-subtle text-text-secondary">{customMeta.label}</span>}
@@ -1230,8 +1381,11 @@ function PostsList({ posts, loading = false, dispatch, state, updatePostStatus, 
                           the full view shows — not when it was drafted. */}
                       {p._raw?.scheduled_publish_at && (p.status === 'scheduled' || p.status === 'publishing')
                         ? <><span className="font-semibold text-sky-700">Goes out {formatBrandDateTime(p._raw.scheduled_publish_at)}</span></>
-                        : <>Created {formatDateTime(p.createdAt)}</>}
-                      {p.topic && <span className="ml-1.5 opacity-70">· {p.topic}</span>}</p>
+                        : row.status === 'published' && row.when
+                          ? <>Posted {formatBrandDateTime(row.when)}</>
+                          : <>Created {formatDateTime(p.createdAt)}</>}
+                      {p.topic && <span className="ml-1.5 opacity-70">· {p.topic}</span>}
+                      {numbers.length > 0 && <span className="ml-1.5">· {numbers.join(' · ')}</span>}</p>
                     <p className="text-[10px] text-text-tertiary mt-1 opacity-60">Click to open full view</p>
                   </div>
                 </div>
