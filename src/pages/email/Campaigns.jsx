@@ -1,13 +1,18 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
 import { Card, Button, Input, Select, Textarea, Modal, ConfirmDialog, Empty, Skeleton, SectionHead } from '../../components/ui/index'
+import { Pagination } from '../../components/ui/Pagination'
 import { pickRecipients, displayName } from '../../lib/email/contacts'
 import { renderEmail, marketingProblems, MERGE_TAGS, applyMergeTags, toPlainText, subscribeButton, customKeysOf } from '../../lib/email/render'
 import { spin, spinSeed, wordingCount, versionsOf, versionLetter, versionResults, pickVersion, MAX_VERSIONS } from '../../lib/email/variation'
 import { brandTodayKey } from '../../lib/brandTime'
 import { mailboxReadiness, mailboxCap, coldProblems } from '../../lib/email/cold'
-import { saveCampaign, deleteCampaign, fetchCampaignSends, emailApi, fetchBrandKit, duplicateCampaign } from '../../lib/email/client'
+import {
+  saveCampaign, deleteCampaign, fetchCampaignSends, emailApi, fetchBrandKit, duplicateCampaign,
+  fetchAudience, fetchAiDrafts, fetchCampaign, fetchCampaignsPage, fetchCampaignSendsPage, PAGE_SIZE,
+} from '../../lib/email/client'
+import { prime } from '../../lib/email/cache'
 import { renderDesign, designChecks, designFromText, hasDesign, templates } from '../../lib/email/design'
-import { DesignEditor } from './DesignEditor'
+import { useCached, usePage, pageBeyond } from './data'
 import { WeeklyDrafts, WeeklyDraftsSkeleton } from './WeeklyDrafts'
 import { AudienceTag, CampaignStatus, Notice, Stat, EIcon } from './parts'
 import { pct, shortDate, dateTime, download } from './format'
@@ -36,16 +41,37 @@ const EMPTY = {
 
 const SAMPLE_CONTACT = { first_name: 'Sara', company: 'Example Co', email: 'sara@example.com' }
 
+// The drag-and-drop editor is the heaviest screen in the section and only a
+// designed newsletter uses it: its code downloads when one is opened.
+const DesignEditor = lazy(() => import('./DesignEditor').then(m => ({ default: m.DesignEditor })))
+
+// What loads where: the list reads its lane's campaigns a page at a time;
+// opening one reads it in full (wording, design, versions). The editor also
+// reads every contact and membership, on purpose: who it goes to is worked
+// out over all of them (pickRecipients). A sent campaign's recipients are
+// read a page at a time, and in full only when it has A/B/C versions to
+// compare.
+
 // In previews the sign-up button opens the test page, never a real sign-up.
 const TEST_SUBSCRIBE_URL = typeof window === 'undefined' ? '' : `${window.location.origin}/api/email/subscribe?t=test`
 
 export function Campaigns(props) {
-  const { params, setTab, audience, data, loading } = props
+  const { params, setTab, audience, workspaceId } = props
   const open = params.get('campaign')
+  const one = open && open !== 'new'
+  const read = useCached(one && workspaceId ? `campaign:${workspaceId}:${open}` : null, () => fetchCampaign(workspaceId, open))
   if (open) {
-    const campaign = open === 'new' ? null : data.campaigns.find(c => c.id === open)
-    if (open !== 'new' && !campaign) {
-      if (loading) return <Card className="p-5"><Skeleton className="h-40 w-full" /></Card>
+    const campaign = one ? read.data : null
+    if (one && read.loading) return <Card className="p-5"><Skeleton className="h-40 w-full" /></Card>
+    if (one && read.error && read.data === undefined) {
+      return (
+        <Notice tone="red" title="Could not open this campaign"
+          action={<div className="flex gap-2"><Button size="sm" variant="secondary" onClick={read.refetch}>Try again</Button><Button size="sm" variant="ghost" onClick={() => setTab(audience)}>Back</Button></div>}>
+          {read.error}
+        </Notice>
+      )
+    }
+    if (one && !campaign) {
       return <Notice tone="amber" title="Campaign not found" action={<Button size="sm" variant="secondary" onClick={() => setTab(audience)}>Back</Button>}>It may have been deleted.</Notice>
     }
     if (!campaign || (['draft', 'paused'].includes(campaign.status) && !params.get('view'))) {
@@ -63,23 +89,48 @@ export function Campaigns(props) {
 
 function CampaignList({ audience, data, loading, setTab, workspaceId, reload }) {
   const [deleting, setDeleting] = useState(null)
-  const campaigns = data.campaigns.filter(c => c.audience === audience)
-  const statsById = new Map(data.stats.map(s => [s.campaign_id, s]))
   const cold = audience === 'cold'
+  const family = `campaigns:${workspaceId}:${audience}`
+  const [page, setPage] = usePage(family)
+  const read = useCached(workspaceId ? `${family}:${page}` : null, () => fetchCampaignsPage(workspaceId, audience, page, PAGE_SIZE), { keep: family })
+  const back = pageBeyond(read, page, PAGE_SIZE)
+  if (back != null) setPage(back)
+  const drafts = useCached(!cold && workspaceId ? `ai-drafts:${workspaceId}` : null, () => fetchAiDrafts(workspaceId))
+  const campaigns = read.data?.rows || []
+  const count = read.data?.count ?? null
+  const listLoading = loading || read.loading
+  const listFailed = Boolean(read.error) && !read.data
+  const statsById = new Map(data.stats.map(s => [s.campaign_id, s]))
 
   return (
     <div className="space-y-3">
       {cold && !loading && <ColdLaneNotice data={data} setTab={setTab} />}
-      {!cold && (loading ? <WeeklyDraftsSkeleton /> : <WeeklyDrafts workspaceId={workspaceId} data={data} reload={reload} setTab={setTab} />)}
+      {!cold && (loading || drafts.loading ? <WeeklyDraftsSkeleton /> : <WeeklyDrafts workspaceId={workspaceId} data={{ ...data, aiDrafts: drafts.data || null }} reload={reload} setTab={setTab} />)}
       <Card>
         <SectionHead
           title={cold ? 'Outreach campaigns' : 'Newsletters'}
           subtitle={cold ? 'A first email and follow-ups, personal and plain, to a group of prospects.' : 'One email to one or more newsletter groups.'}
           action={<Button size="sm" onClick={() => setTab(audience, { campaign: 'new' })} disabled={loading}><EIcon name="plus" /> New campaign</Button>}
         />
-        {loading ? (
-          <div className="p-5 space-y-2"><Skeleton className="h-12 w-full" /><Skeleton className="h-12 w-full" /></div>
-        ) : campaigns.length === 0 ? (
+        {listLoading ? (
+          <div className="divide-y divide-border" aria-busy="true">
+            {[0, 1, 2].map(i => (
+              <div key={i} className="flex items-center gap-4 px-5 py-3">
+                <div className="flex-1 min-w-0 space-y-1.5"><Skeleton className="h-3.5 w-48" /><Skeleton className="h-2.5 w-64" /></div>
+                <Skeleton className="h-3.5 w-24 hidden md:block" />
+                <Skeleton className="h-4 w-16" />
+                <Skeleton className="h-3.5 w-10" />
+                <Skeleton className="h-3.5 w-10" />
+              </div>
+            ))}
+          </div>
+        ) : listFailed ? (
+          <div className="p-4">
+            <Notice tone="red" title="Could not load the campaigns" action={<Button size="sm" variant="secondary" onClick={read.refetch}>Try again</Button>}>
+              {read.error}
+            </Notice>
+          </div>
+        ) : count === 0 ? (
           <Empty icon={<EIcon name="send" />} title="No campaigns yet"
             description={cold
               ? 'Pick a group of prospects, write a short first email (or let the AI write one per prospect from the research), and set up follow-ups.'
@@ -87,7 +138,7 @@ function CampaignList({ audience, data, loading, setTab, workspaceId, reload }) 
             action={<Button size="sm" onClick={() => setTab(audience, { campaign: 'new' })}>Write the first one</Button>} />
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className={`w-full text-sm transition-opacity ${read.stale ? 'opacity-60' : ''}`} aria-busy={read.stale}>
               <thead>
                 <tr className="text-[10px] uppercase tracking-wide text-text-tertiary border-b border-border">
                   <th className="text-left font-semibold px-5 py-2">Campaign</th>
@@ -147,6 +198,7 @@ function CampaignList({ audience, data, loading, setTab, workspaceId, reload }) 
                 })}
               </tbody>
             </table>
+            <Pagination page={page} pageSize={PAGE_SIZE} count={count} onPage={setPage} busy={read.stale} noun="campaigns" />
           </div>
         )}
       </Card>
@@ -229,10 +281,20 @@ function Composer({ audience, campaign, data, workspaceId, reload, setTab, statu
   const chosenIds = form.mailbox_ids || []
   const sendingMailboxes = cold ? (chosenIds.length ? allMailboxes.filter(m => chosenIds.includes(m.id)) : allMailboxes) : []
 
+  // Every contact and membership, on purpose: the recipients are worked out
+  // over all of them, past 1,000 rows (fetchAudience). Shared with Groups.
+  const audienceRead = useCached(workspaceId ? `audience:${workspaceId}` : null, () => fetchAudience(workspaceId))
+  const counting = audienceRead.loading
+  const countFailed = Boolean(audienceRead.error) && !audienceRead.data
   const recipients = useMemo(() => pickRecipients({
-    contacts: data.contacts, memberships: data.members, groupIds: form.group_ids, audience,
+    contacts: audienceRead.data?.contacts || [], memberships: audienceRead.data?.members || [], groupIds: form.group_ids, audience,
     language: form.language_only ? form.language : null,
-  }), [data.contacts, data.members, form.group_ids, audience, form.language_only, form.language])
+  }), [audienceRead.data, form.group_ids, audience, form.language_only, form.language])
+  const memberCount = useMemo(() => {
+    const m = new Map()
+    for (const x of audienceRead.data?.members || []) m.set(x.group_id, (m.get(x.group_id) || 0) + 1)
+    return m
+  }, [audienceRead.data])
 
   const skippedReasons = useMemo(() => {
     const m = new Map()
@@ -296,12 +358,15 @@ function Composer({ audience, campaign, data, workspaceId, reload, setTab, statu
       setDirty(false)
       if (!id) {
         setId(saved.id)
-        // Reload first, then put the id in the URL, so the page never looks
-        // for a campaign it has not loaded yet. The id in the URL is what
+        // The saved row goes into the cache first, then the id into the URL,
+        // so the page never waits on a campaign it has just made (and never
+        // swaps this editor for a skeleton). The id in the URL is what
         // makes a browser refresh reopen this draft rather than a blank one.
-        await reload()
+        prime(`campaign:${workspaceId}:${saved.id}`, saved)
         setTab(audience, { campaign: saved.id })
+        await reload()
       } else {
+        prime(`campaign:${workspaceId}:${saved.id}`, saved)
         reload()
       }
       if (!quiet) setMessage({ tone: 'sage', text: 'Draft saved.' })
@@ -342,18 +407,25 @@ function Composer({ audience, campaign, data, workspaceId, reload, setTab, statu
           <div className="flex flex-wrap gap-2">
             {laneGroups.map(g => {
               const on = form.group_ids.includes(g.id)
-              const n = data.members.filter(m => m.group_id === g.id).length
+              const n = memberCount.get(g.id) || 0
               return (
                 <label key={g.id} className={`flex items-center gap-1.5 text-xs border px-2 py-1 cursor-pointer ${on ? 'border-amber-700 bg-amber-50 text-text' : 'border-border text-text-secondary hover:border-stone-400'}`}>
                   <input type="checkbox" checked={on}
                     onChange={() => set('group_ids', on ? form.group_ids.filter(x => x !== g.id) : [...form.group_ids, g.id])} />
-                  {g.name} <span className="text-text-tertiary">({n})</span>
+                  {g.name} {!counting && !countFailed && <span className="text-text-tertiary">({n})</span>}
                 </label>
               )
             })}
           </div>
         )}
-        {form.group_ids.length > 0 && (
+        {form.group_ids.length > 0 && counting && <Skeleton className="h-4 w-56 mt-2" />}
+        {countFailed && (
+          <p className="text-xs mt-2 text-red-600">
+            Could not load your contacts, so who will receive it cannot be counted yet. {audienceRead.error}
+            <button className="underline ml-1" onClick={audienceRead.refetch}>Try again</button>
+          </p>
+        )}
+        {form.group_ids.length > 0 && !counting && !countFailed && (
           <p className="text-xs mt-2 text-text-secondary">
             <strong className="text-text">{recipients.eligible.length.toLocaleString()}</strong> will receive it
             {recipients.skipped.length > 0 && <> · {recipients.skipped.length} skipped ({skippedReasons.map(([r, n]) => `${n} ${r.toLowerCase()}`).join('; ')})</>}
@@ -483,17 +555,19 @@ function Composer({ audience, campaign, data, workspaceId, reload, setTab, statu
               {sendCard}
             </div>
           </div>
-          <DesignEditor
-            design={form.design}
-            onChange={setDesign}
-            language={form.language}
-            kit={kit}
-            sample={sample}
-            sender={{ from_name: settings.from_name, company_address: settings.company_address }}
-            subject={form.subject}
-            preheader={form.preheader}
-            onReplaceFromTemplate={() => setChoosing(true)}
-          />
+          <Suspense fallback={<Card className="p-5"><div className="grid lg:grid-cols-[220px_minmax(0,1fr)_260px] gap-4"><Skeleton className="h-96 w-full" /><Skeleton className="h-96 w-full" /><Skeleton className="h-96 w-full" /></div></Card>}>
+            <DesignEditor
+              design={form.design}
+              onChange={setDesign}
+              language={form.language}
+              kit={kit}
+              sample={sample}
+              sender={{ from_name: settings.from_name, company_address: settings.company_address }}
+              subject={form.subject}
+              preheader={form.preheader}
+              onReplaceFromTemplate={() => setChoosing(true)}
+            />
+          </Suspense>
         </>
       ) : (
       <div className="grid xl:grid-cols-2 gap-4 items-start">
@@ -980,19 +1054,26 @@ function ColdLaunchModal({ workspaceId, campaignId, recipients, mailboxes, follo
 // ─── Detail (after launch) ─────────────────────────────────────────────────
 
 function CampaignDetail({ audience, campaign, data, workspaceId, reload, setTab }) {
-  const [sends, setSends] = useState(null)
   const [filter, setFilter] = useState('')
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
   const [confirmCancel, setConfirmCancel] = useState(false)
   const st = data.stats.find(s => s.campaign_id === campaign.id) || {}
   const sent = Number(st.sent || 0)
+  const extraVersions = audience === 'cold' ? versionsOf(campaign) : []
 
-  useEffect(() => {
-    let live = true
-    fetchCampaignSends(workspaceId, campaign.id).then(r => { if (live) setSends(r) }).catch(err => { if (live) { setSends([]); setError(err.message) } })
-    return () => { live = false }
-  }, [workspaceId, campaign.id, campaign.status, data.stats])
+  const family = `sends:${workspaceId}:${campaign.id}:${filter}`
+  const [page, setPage] = usePage(family)
+  const sendsRead = useCached(`${family}:${page}`, () => fetchCampaignSendsPage(workspaceId, campaign.id, { status: filter, page, size: PAGE_SIZE }),
+    { keep: `sends:${workspaceId}:${campaign.id}` })
+  const back = pageBeyond(sendsRead, page, PAGE_SIZE)
+  if (back != null) setPage(back)
+  // The A/B/C results count every send, so they are read in full, and only
+  // for a campaign that has versions.
+  const allRead = useCached(extraVersions.length ? `sends-all:${workspaceId}:${campaign.id}` : null, () => fetchCampaignSends(workspaceId, campaign.id))
+  const sends = allRead.data || null
+  const shownSends = sendsRead.data?.rows || []
+  const sendsCount = sendsRead.data?.count ?? null
 
   async function act(action) {
     setBusy(action); setError('')
@@ -1003,9 +1084,7 @@ function CampaignDetail({ audience, campaign, data, workspaceId, reload, setTab 
   }
 
   const groupNames = campaign.group_ids.map(id => data.groups.find(g => g.id === id)?.name).filter(Boolean)
-  const extraVersions = audience === 'cold' ? versionsOf(campaign) : []
   const byVersion = extraVersions.length && sends ? versionResults(sends, 1 + extraVersions.length) : null
-  const shownSends = (sends || []).filter(s => !filter || s.status === filter)
   const shown = {
     subject: campaign.subject, preheader: campaign.preheader, language: campaign.language,
     contact: { first_name: 'Sara', company: 'Example Co' },
@@ -1119,11 +1198,20 @@ function CampaignDetail({ audience, campaign, data, workspaceId, reload, setTab 
                 : ['queued', 'sent', 'delivered', 'opened', 'clicked', 'bounced', 'complained', 'failed', 'skipped', 'cancelled']).map(s => <option key={s} value={s}>{s}</option>)}
             </select>
           </div>
-          {sends === null ? <div className="p-4"><Skeleton className="h-32 w-full" /></div> : (
+          {sendsRead.loading ? (
+            <div className="p-4 space-y-2" aria-busy="true">{[0, 1, 2, 3, 4, 5].map(i => <Skeleton key={i} className="h-5 w-full" />)}</div>
+          ) : sendsRead.error && !sendsRead.data ? (
+            <div className="p-4">
+              <Notice tone="red" title="Could not load the recipients" action={<Button size="sm" variant="secondary" onClick={sendsRead.refetch}>Try again</Button>}>
+                {sendsRead.error}
+              </Notice>
+            </div>
+          ) : (
+            <>
             <div className="max-h-[480px] overflow-y-auto scrollbar-thin">
-              <table className="w-full text-xs">
+              <table className={`w-full text-xs transition-opacity ${sendsRead.stale ? 'opacity-60' : ''}`} aria-busy={sendsRead.stale}>
                 <tbody>
-                  {shownSends.slice(0, 500).map(s => (
+                  {shownSends.map(s => (
                     <tr key={s.id} className="border-b border-border last:border-0">
                       <td className="px-4 py-1.5 text-text truncate max-w-[220px]">{s.email}</td>
                       {audience === 'cold' && <td className="px-2 py-1.5 text-text-tertiary whitespace-nowrap">{s.step ? `Follow-up ${s.step}` : `First${extraVersions.length ? ` · ${versionLetter(s.variant)}` : ''}`}</td>}
@@ -1131,10 +1219,12 @@ function CampaignDetail({ audience, campaign, data, workspaceId, reload, setTab 
                       <td className="px-2 py-1.5 text-text-tertiary">{(audience === 'cold' && s.mailbox_id && s.sent_at ? `${mailboxEmail(data, s.mailbox_id)} · ` : '')}{s.error || (s.clicked_at ? `clicked ${dateTime(s.clicked_at)}` : s.opened_at ? `opened ${dateTime(s.opened_at)}` : s.sent_at ? dateTime(s.sent_at) : s.status === 'queued' ? `due ${dateTime(s.due_at)}` : '')}</td>
                     </tr>
                   ))}
-                  {shownSends.length === 0 && <tr><td className="px-4 py-4 text-text-tertiary">Nobody here.</td></tr>}
+                  {sendsCount === 0 && <tr><td className="px-4 py-4 text-text-tertiary">Nobody here.</td></tr>}
                 </tbody>
               </table>
             </div>
+            <Pagination page={page} pageSize={PAGE_SIZE} count={sendsCount} onPage={setPage} busy={sendsRead.stale} />
+            </>
           )}
         </Card>
         <Card>

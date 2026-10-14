@@ -5,6 +5,8 @@ import { mailboxReadiness, mailboxCap, inSendingWindow, nextWindowStart } from '
 import { Stat, CampaignStatus, AudienceTag, Notice } from './parts'
 import { pct, shortDate } from './format'
 import { StuckSends } from './StuckSends'
+import { fetchRecentSends, fetchContactCounts } from '../../lib/email/client'
+import { useCached } from './data'
 
 // ─── Overview ──────────────────────────────────────────────────────────────
 // The first screen answers three questions, in this order:
@@ -24,12 +26,24 @@ import { StuckSends } from './StuckSends'
 // One-time setup (Resend, DNS, Vercel, Microsoft) is deliberately NOT shown
 // anywhere in the app; it lives in docs/EMAIL-SETUP.md for the person who
 // runs it.
+//
+// What it reads beyond the section's shared tables: the last 30 days of
+// sends (for the rates) and three contact counts, counted by the database
+// rather than by reading every contact.
 
 export function Overview({ data, status, loading, setTab, workspaceId, reload }) {
   // Read once per mount: "today" changing under an open page is not worth a
   // re-render.
   const [now] = useState(() => Date.now())
   const today = brandDateKey(now)
+  const recentRead = useCached(workspaceId ? `recent-sends:${workspaceId}` : null, () => fetchRecentSends(workspaceId))
+  const countsRead = useCached(workspaceId ? `contact-counts:${workspaceId}` : null, () => fetchContactCounts(workspaceId))
+  const recentSends = useMemo(() => recentRead.data || [], [recentRead.data])
+  const sendsLoading = loading || recentRead.loading
+  // A failed read shows a dash and says it failed, never a zero.
+  const sendsFailed = Boolean(recentRead.error) && !recentRead.data
+  const countsFailed = Boolean(countsRead.error) && !countsRead.data
+  const orDash = (failed, value) => (failed ? '—' : value)
 
   const coldIds = useMemo(() => new Set(data.campaigns.filter(c => c.audience === 'cold').map(c => c.id)), [data.campaigns])
 
@@ -44,7 +58,7 @@ export function Overview({ data, status, loading, setTab, workspaceId, reload })
       waiting: 0, running: data.campaigns.filter(c => c.audience === 'cold' && c.status === 'sending').length,
       broken: mailboxes.filter(m => m.status === 'error' || m.status === 'paused'),
     }
-    for (const s of data.recentSends) {
+    for (const s of recentSends) {
       if (!coldIds.has(s.campaign_id) || !s.sent_at) continue
       o.sent++
       if (Date.parse(s.sent_at) >= dayStart) o.sentToday++
@@ -54,7 +68,7 @@ export function Overview({ data, status, loading, setTab, workspaceId, reload })
     }
     for (const st of data.stats) if (coldIds.has(st.campaign_id)) o.waiting += Number(st.queued || 0)
     return o
-  }, [data.mailboxes, data.recentSends, data.stats, data.campaigns, coldIds, today])
+  }, [data.mailboxes, recentSends, data.stats, data.campaigns, coldIds, today])
 
   const coldOn = Boolean(data.settings?.cold_sending_enabled)
   const nextSend = useMemo(() => {
@@ -67,7 +81,7 @@ export function Overview({ data, status, loading, setTab, workspaceId, reload })
   // Newsletter rates, over the same 30 days of sends.
   const rates = useMemo(() => {
     const r = { sent: 0, opened: 0, clicked: 0, bounced: 0, complained: 0 }
-    for (const s of data.recentSends) {
+    for (const s of recentSends) {
       if (coldIds.has(s.campaign_id) || !s.sent_at) continue
       r.sent++
       if (s.opened_at) r.opened++
@@ -76,17 +90,9 @@ export function Overview({ data, status, loading, setTab, workspaceId, reload })
       if (s.complained_at) r.complained++
     }
     return r
-  }, [data.recentSends, coldIds])
+  }, [recentSends, coldIds])
 
-  const counts = useMemo(() => {
-    const c = { marketing: 0, cold: 0, inactive: 0 }
-    for (const x of data.contacts) {
-      if (x.status !== 'active') c.inactive++
-      else if (x.audience === 'cold') c.cold++
-      else c.marketing++
-    }
-    return c
-  }, [data.contacts])
+  const counts = countsRead.data || { marketing: 0, cold: 0, inactive: 0 }
 
   const cap = status?.cap
   const statsById = new Map(data.stats.map(s => [s.campaign_id, s]))
@@ -97,6 +103,11 @@ export function Overview({ data, status, loading, setTab, workspaceId, reload })
     <div className="space-y-4">
       {/* 1 — anything that needs a person */}
       <StuckSends data={data} workspaceId={workspaceId} reload={reload} />
+      {sendsFailed && (
+        <Notice tone="red" title="Could not load the last 30 days of emails">
+          The sent, reply and open numbers below are missing until it loads. {recentRead.error}
+        </Notice>
+      )}
       {!loading && outreach.running > 0 && !coldOn && (
         <Notice tone="amber" title="Outreach is switched off" action={toMailboxes}>
           {outreach.running} outreach campaign{outreach.running === 1 ? ' is' : 's are'} running, but nothing goes to prospects until outreach sending is switched on.
@@ -125,7 +136,7 @@ export function Overview({ data, status, loading, setTab, workspaceId, reload })
           <SectionHead title="Outreach" subtitle="Personal emails to prospects, from your outreach mailboxes"
             action={<Button size="xs" variant="secondary" onClick={() => setTab('cold')}>Open</Button>} />
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-px bg-border border-t border-border">
-            <Stat loading={loading} label="Sent today" value={`${outreach.sentToday} of ${outreach.capToday}`}
+            <Stat loading={sendsLoading} label="Sent today" value={orDash(sendsFailed, `${outreach.sentToday} of ${outreach.capToday}`)}
               hint={outreach.ready ? `From ${outreach.ready} mailbox${outreach.ready === 1 ? '' : 'es'}` : 'No mailbox can send today'}
               info="Each mailbox starts at 5 a day and grows to its own limit. Emails leave one at a time, at uneven times, Sunday–Thursday 9:00–17:00 Riyadh." />
             <Stat loading={loading} label="Waiting to go" value={outreach.waiting.toLocaleString()} hint="First emails and follow-ups queued" />
@@ -134,10 +145,10 @@ export function Overview({ data, status, loading, setTab, workspaceId, reload })
               hint={!coldOn ? 'Outreach sending is switched off'
                 : !nextSend ? (outreach.waiting ? 'No mailbox can send' : 'Nothing is waiting')
                   : nextSend.opening ? `When sending opens, ${formatBrandDateTime(nextSend.when)}` : 'Within sending hours, at an uneven time'} />
-            <Stat loading={loading} label="Replied (30 days)" value={outreach.replied.toLocaleString()} hint={`Of ${outreach.sent.toLocaleString()} sent`}
+            <Stat loading={sendsLoading} label="Replied (30 days)" value={orDash(sendsFailed, outreach.replied.toLocaleString())} hint={sendsFailed ? 'Could not load' : `Of ${outreach.sent.toLocaleString()} sent`}
               info="A reply stops that person's follow-ups and adds them to your newsletter list, unless they asked to stop." />
-            <Stat loading={loading} label="Signed up (30 days)" value={outreach.signed.toLocaleString()} hint="Pressed Sign-up; now on the newsletter list" />
-            <Stat loading={loading} label="Bounced (30 days)" value={pct(outreach.bounced, outreach.sent)} hint="Above 5% a mailbox pauses itself"
+            <Stat loading={sendsLoading} label="Signed up (30 days)" value={orDash(sendsFailed, outreach.signed.toLocaleString())} hint="Pressed Sign-up; now on the newsletter list" />
+            <Stat loading={sendsLoading} label="Bounced (30 days)" value={orDash(sendsFailed, pct(outreach.bounced, outreach.sent))} hint="Above 5% a mailbox pauses itself"
               tone={outreach.sent >= 20 && outreach.bounced / outreach.sent >= 0.05 ? 'text-red-600' : ''} />
           </div>
           <div className="px-5 py-2.5 border-t border-border">
@@ -156,13 +167,13 @@ export function Overview({ data, status, loading, setTab, workspaceId, reload })
               value={cap ? `${cap.remaining} of ${cap.cap}` : '—'}
               hint={cap ? (cap.limitedBy ? `Limited by ${cap.limitedBy}` : 'Newsletters only') : (status?.error || 'Checking…')}
               info="Newsletters only. The lowest of: the warm-up step for this day, the health brake (bounces and spam reports), and the email service's plan. Anything over it goes the next morning." />
-            <Stat loading={loading} label="Sent (30 days)" value={rates.sent.toLocaleString()} hint="Newsletters that left" />
-            <Stat loading={loading} label="Open rate" value={pct(rates.opened, rates.sent)} hint={loading ? 'People who opened' : `${rates.opened} opened`}
+            <Stat loading={sendsLoading} label="Sent (30 days)" value={orDash(sendsFailed, rates.sent.toLocaleString())} hint="Newsletters that left" />
+            <Stat loading={sendsLoading} label="Open rate" value={orDash(sendsFailed, pct(rates.opened, rates.sent))} hint={sendsLoading || sendsFailed ? 'People who opened' : `${rates.opened} opened`}
               info="Apple Mail opens every email automatically to protect privacy, so opens run high and are a rough signal. Clicks are the honest number." />
-            <Stat loading={loading} label="Click rate" value={pct(rates.clicked, rates.sent)} hint={loading ? 'People who clicked' : `${rates.clicked} clicked a link`} />
-            <Stat loading={loading} label="Bounce rate" value={pct(rates.bounced, rates.sent)} hint="Keep under 2%"
+            <Stat loading={sendsLoading} label="Click rate" value={orDash(sendsFailed, pct(rates.clicked, rates.sent))} hint={sendsLoading || sendsFailed ? 'People who clicked' : `${rates.clicked} clicked a link`} />
+            <Stat loading={sendsLoading} label="Bounce rate" value={orDash(sendsFailed, pct(rates.bounced, rates.sent))} hint="Keep under 2%"
               tone={rates.sent >= 20 && rates.bounced / rates.sent >= 0.02 ? 'text-red-600' : ''} />
-            <Stat loading={loading} label="Spam reports" value={pct(rates.complained, rates.sent)} hint="Keep under 0.1%"
+            <Stat loading={sendsLoading} label="Spam reports" value={orDash(sendsFailed, pct(rates.complained, rates.sent))} hint="Keep under 0.1%"
               tone={rates.complained > 0 ? 'text-red-600' : ''}
               info="Gmail starts sending you to spam above 0.3%. One report in a thousand is already worth looking at." />
           </div>
@@ -170,9 +181,9 @@ export function Overview({ data, status, loading, setTab, workspaceId, reload })
       </div>
 
       <div className="grid grid-cols-3 gap-px bg-border border border-border">
-        <Stat loading={loading} label="Newsletter contacts" value={counts.marketing.toLocaleString()} hint="Know us, and can get newsletters" />
-        <Stat loading={loading} label="Outreach prospects" value={counts.cold.toLocaleString()} hint="Not opted in yet: outreach only" />
-        <Stat loading={loading} label="Not emailable" value={counts.inactive.toLocaleString()} hint="Unsubscribed, bounced, or marked us as spam" />
+        <Stat loading={countsRead.loading} label="Newsletter contacts" value={orDash(countsFailed, counts.marketing.toLocaleString())} hint={countsFailed ? 'Could not be counted' : 'Know us, and can get newsletters'} />
+        <Stat loading={countsRead.loading} label="Outreach prospects" value={orDash(countsFailed, counts.cold.toLocaleString())} hint={countsFailed ? 'Could not be counted' : 'Not opted in yet: outreach only'} />
+        <Stat loading={countsRead.loading} label="Not emailable" value={orDash(countsFailed, counts.inactive.toLocaleString())} hint={countsFailed ? 'Could not be counted' : 'Unsubscribed, bounced, or marked us as spam'} />
       </div>
 
       <Card>

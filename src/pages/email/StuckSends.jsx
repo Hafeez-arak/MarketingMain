@@ -1,7 +1,9 @@
 import { useState } from 'react'
 import { Button } from '../../components/ui/index'
+import { Pagination } from '../../components/ui/Pagination'
 import { STUCK_NEEDS_PERSON } from '../../lib/email/cold'
-import { emailApi } from '../../lib/email/client'
+import { emailApi, fetchStuckSends } from '../../lib/email/client'
+import { useCached, usePage, pageBeyond } from './data'
 import { Notice } from './parts'
 import { dateTime } from './format'
 
@@ -11,14 +13,26 @@ import { dateTime } from './format'
 // lost one). The run settles what a Microsoft mailbox can prove from its Sent
 // Items and Drafts; what is left here is a person's call. Three answers:
 // it went out (follow-ups carry on), send it again, or drop it.
+//
+// Read here, 20 at a time with the total, for the whole workspace (the
+// Overview) or one campaign (its page). Silent while it loads and when there
+// are none: it is a warning, not a list.
 
 const WAITING_FOR_RUN = 'Being checked against the mailbox. This settles itself on the next sending run.'
+const SIZE = 20
 
 export function StuckSends({ data, workspaceId, reload, campaignId = null }) {
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
-  const rows = (data.stuckSends || []).filter(r => !campaignId || r.campaign_id === campaignId)
-  if (!rows.length) return null
+  const family = `stuck:${workspaceId}:${campaignId || ''}`
+  const [page, setPage] = usePage(family)
+  const read = useCached(workspaceId ? `${family}:${page}` : null,
+    () => fetchStuckSends(workspaceId, { campaignId, page, size: SIZE }), { keep: family })
+  const back = pageBeyond(read, page, SIZE)
+  if (back != null) setPage(back)
+  const rows = read.data?.rows || []
+  const count = read.data?.count || 0
+  if (!count) return null
 
   const campaignName = id => data.campaigns.find(c => c.id === id)?.name || 'a campaign'
   const mailbox = id => (data.mailboxes || []).find(m => m.id === id)
@@ -35,14 +49,14 @@ export function StuckSends({ data, workspaceId, reload, campaignId = null }) {
   }
 
   return (
-    <Notice tone="amber" title={`${rows.length} email${rows.length === 1 ? '' : 's'} may not have gone out`}>
+    <Notice tone="amber" title={`${count.toLocaleString()} email${count === 1 ? '' : 's'} may not have gone out`}>
       <p>
-        The sending run stopped while handing {rows.length === 1 ? 'this email' : 'these emails'} over, so nobody knows for sure whether {rows.length === 1 ? 'it' : 'they'} left.
+        The sending run stopped while handing {count === 1 ? 'this email' : 'these emails'} over, so nobody knows for sure whether {count === 1 ? 'it' : 'they'} left.
         Nothing is sent again without you, so no prospect gets the same email twice.
       </p>
       {error && <p className="text-red-600 mt-1.5">{error}</p>}
-      <ul className="mt-2 divide-y divide-amber-200 border-t border-amber-200">
-        {rows.slice(0, 20).map(r => (
+      <ul className={`mt-2 divide-y divide-amber-200 border-t border-amber-200 ${read.stale ? 'opacity-60' : ''}`}>
+        {rows.map(r => (
           <li key={r.id} className="py-2 flex flex-wrap items-center justify-between gap-2">
             <div className="min-w-0">
               <p className="text-text font-medium truncate">
@@ -60,7 +74,7 @@ export function StuckSends({ data, workspaceId, reload, campaignId = null }) {
           </li>
         ))}
       </ul>
-      {rows.length > 20 && <p className="text-[11px] text-text-tertiary mt-1">And {rows.length - 20} more, shown once these are answered.</p>}
+      <Pagination page={page} pageSize={SIZE} count={count} onPage={setPage} busy={read.stale} className="!px-0 border-amber-200" />
     </Notice>
   )
 }

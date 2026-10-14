@@ -1,16 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useAuth } from '../../store/auth'
-import { PageHeader, Button, Spinner } from '../../components/ui/index'
-import { fetchEmailData, emailApi } from '../../lib/email/client'
+import { PageHeader, Button, Card, Skeleton, Spinner } from '../../components/ui/index'
+import { fetchEmailCore, emailApi } from '../../lib/email/client'
+import { invalidate } from '../../lib/email/cache'
+import { useCached } from './data'
 import { Overview } from './Overview'
-import { Contacts } from './Contacts'
-import { Groups } from './Groups'
-import { Campaigns } from './Campaigns'
-import { EmailSettings } from './Settings'
-import { Subscribers } from './Subscribers'
 import { Notice, SubTabs } from './parts'
-import { OutreachMailboxes } from './Mailboxes'
 
 // ─── Email ─────────────────────────────────────────────────────────────────
 // One section, five tabs, in the order the work is done. The tab lives in the
@@ -28,10 +24,13 @@ import { OutreachMailboxes } from './Mailboxes'
 // database, the server and the URL keys use them), but a person never sees
 // "cold": outreach is outreach, and marketing email is a newsletter.
 //
-// All data for the section loads once, here, and is handed down. At the
-// sizes this is built for (a few thousand contacts) that is simpler and
-// faster than every tab fetching its own slice, and it means the counts on
-// every tab agree with each other.
+// What loads when: only the small tables every tab needs (groups, the
+// campaign list, their numbers, settings, mailboxes) and the server's status
+// load here. Each tab reads the rest itself when it is opened — a page of
+// contacts, the last 30 days of sends, the people who answered — through a
+// session cache (./data.js), so going back to a tab paints at once. Every
+// tab but the Overview is its own download, fetched when first opened (or
+// hovered).
 
 const TABS = [
   { key: 'overview', label: 'Overview', note: 'What is going out today, what came back, and anything that needs you' },
@@ -53,6 +52,27 @@ const SECTIONS = {
   ],
 }
 
+// The tabs' code, each loaded the first time it is needed.
+const load = {
+  contacts: () => import('./Contacts'),
+  groups: () => import('./Groups'),
+  campaigns: () => import('./Campaigns'),
+  mailboxes: () => import('./Mailboxes'),
+  subscribers: () => import('./Subscribers'),
+  settings: () => import('./Settings'),
+}
+const Contacts = lazy(() => load.contacts().then(m => ({ default: m.Contacts })))
+const Groups = lazy(() => load.groups().then(m => ({ default: m.Groups })))
+const Campaigns = lazy(() => load.campaigns().then(m => ({ default: m.Campaigns })))
+const OutreachMailboxes = lazy(() => load.mailboxes().then(m => ({ default: m.OutreachMailboxes })))
+const Subscribers = lazy(() => load.subscribers().then(m => ({ default: m.Subscribers })))
+const EmailSettings = lazy(() => load.settings().then(m => ({ default: m.EmailSettings })))
+// Pointing at a tab starts its download, so the click usually finds it there.
+const PREFETCH = { contacts: ['contacts', 'groups'], cold: ['campaigns', 'mailboxes', 'subscribers'], marketing: ['campaigns'], settings: ['settings'] }
+const prefetch = key => { for (const k of PREFETCH[key] || []) load[k]().catch(() => {}) }
+
+const EMPTY_CORE = { groups: [], campaigns: [], stats: [], settings: null, mailboxes: [] }
+
 // Old tab names, from bookmarks and links sent before the regroup. The
 // Microsoft sign-in callback also used to come back to ?tab=settings.
 const MOVED = {
@@ -66,6 +86,16 @@ function whereIs(params) {
   const tab = TABS.some(t => t.key === raw) ? raw : 'overview'
   const section = (SECTIONS[tab] || []).some(x => x.key === params.get('section')) ? params.get('section') : ''
   return [tab, section]
+}
+
+/** While a tab's code downloads: the shape of a tab, not a spinner. */
+function TabSkeleton() {
+  return (
+    <div className="space-y-3" aria-busy="true">
+      <Card className="p-3"><Skeleton className="h-9 w-full" /></Card>
+      <Card className="p-4 space-y-2">{[0, 1, 2, 3, 4].map(i => <Skeleton key={i} className="h-9 w-full" />)}</Card>
+    </div>
+  )
 }
 
 export function EmailFlows() {
@@ -95,64 +125,54 @@ export function EmailFlows() {
     }, { replace: true })
   }, [params, tab, section, setParams])
 
-  const [data, setData] = useState(null)
-  const [loadedFor, setLoadedFor] = useState(null)
-  const [error, setError] = useState('')
-  const [status, setStatus] = useState(null)
-  const [refreshing, setRefreshing] = useState(false)
+  const ws = activeWorkspaceId
+  // Keys carry the workspace: switching company shows skeletons (never the
+  // previous company's rows) until this one's answer lands.
+  const core = useCached(ws ? `core:${ws}` : null, () => fetchEmailCore(ws))
+  const statusRead = useCached(ws ? `status:${ws}` : null, async () => {
+    const s = await emailApi('status', ws)
+    return s.error ? { error: s.error } : s
+  })
+  const status = statusRead.data || null
+  // After a change: everything read is stale (what is on screen re-reads
+  // now, the rest when next shown), and the shared tables are awaited, so a
+  // caller that goes on to open what it just made finds it there.
+  const refetchCore = core.refetch
+  const reload = useCallback(async () => { invalidate(); await refetchCore() }, [refetchCore])
   const dispatchedFor = useRef(null)
-
-  const reload = useCallback(async () => {
-    if (!activeWorkspaceId) return
-    const ws = activeWorkspaceId
-    setRefreshing(true)
-    try {
-      const [d, s] = await Promise.all([fetchEmailData(ws), emailApi('status', ws)])
-      setData(d)
-      setStatus(s.error ? { error: s.error } : s)
-      setError('')
-      setLoadedFor(ws)
-    } catch (err) {
-      setError(err.message || String(err))
-      setLoadedFor(ws)
-    } finally {
-      setRefreshing(false)
-    }
-  }, [activeWorkspaceId])
-
-  // Switching workspace needs no reset: `loading` is derived from loadedFor,
-  // so every tab shows skeletons (not the previous company's contacts) until
-  // this workspace's answer lands.
-  useEffect(() => { queueMicrotask(reload) }, [reload])
 
   // Opening the section sends anything that is due — a scheduled campaign
   // whose morning has passed, or the rest of yesterday's warm-up. The daily
   // cron does the same; this is what makes it not depend on the cron alone.
   useEffect(() => {
-    if (!activeWorkspaceId || loadedFor !== activeWorkspaceId || dispatchedFor.current === activeWorkspaceId) return
+    if (!ws || !core.data || dispatchedFor.current === ws) return
     if (!status?.configured?.resend) return
-    const hasWork = (data?.campaigns || []).some(c => c.status === 'sending' || c.status === 'scheduled')
-    dispatchedFor.current = activeWorkspaceId
+    const hasWork = core.data.campaigns.some(c => c.status === 'sending' || c.status === 'scheduled')
+    dispatchedFor.current = ws
     if (!hasWork) return
-    emailApi('dispatch', activeWorkspaceId).then(r => { if (r?.dispatched?.sent) reload() })
-  }, [activeWorkspaceId, loadedFor, status, data, reload])
+    emailApi('dispatch', ws).then(r => { if (r?.dispatched?.sent) reload() })
+  }, [ws, core.data, status, reload])
 
-  const loading = loadedFor !== activeWorkspaceId
+  const loading = !core.data
   const ctx = useMemo(() => ({
-    workspaceId: activeWorkspaceId,
-    data: data || { contacts: [], groups: [], members: [], campaigns: [], stats: [], settings: null, recentSends: [], aiDrafts: null, mailboxes: [] },
+    workspaceId: ws,
+    data: core.data || EMPTY_CORE,
     status,
     loading,
     reload,
     setTab,
     params,
-  }), [activeWorkspaceId, data, status, loading, reload, setTab, params])
+  }), [ws, core.data, status, loading, reload, setTab, params])
+
+  // Nothing could be read: say so, and show no tab (an empty one would claim
+  // there are no contacts or campaigns).
+  const failed = core.error && !core.data
 
   return (
     <div className="max-w-7xl space-y-4">
       <PageHeader title="Email" subtitle="Personal outreach to prospects, and newsletters to people who know us. Kept apart, so a problem with one can never hurt the other.">
-        <Button variant="secondary" size="sm" onClick={reload} disabled={refreshing || !activeWorkspaceId}>
-          {refreshing ? <Spinner size="sm" /> : null}
+        <Button variant="secondary" size="sm" onClick={reload} disabled={core.refreshing || !ws}>
+          {core.refreshing ? <Spinner size="sm" /> : null}
           Refresh
         </Button>
       </PageHeader>
@@ -161,6 +181,7 @@ export function EmailFlows() {
         {TABS.map(t => (
           <button
             key={t.key} onClick={() => setTab(t.key)} title={t.note}
+            onMouseEnter={() => prefetch(t.key)} onFocus={() => prefetch(t.key)}
             className={`flex-1 min-w-[96px] py-2 px-3 border -ml-px first:ml-0 text-xs font-semibold whitespace-nowrap transition-colors ${
               tab === t.key
                 ? 'bg-amber-700 text-white border-amber-700 relative z-10'
@@ -173,9 +194,10 @@ export function EmailFlows() {
       </div>
       <p className="text-[11px] text-text-tertiary -mt-2">{TABS.find(t => t.key === tab)?.note}</p>
 
-      {error && (
-        <Notice tone="red" title="Could not load email data">
-          {error}
+      {core.error && (
+        <Notice tone="red" title={failed ? 'Could not load email data' : 'Could not refresh email data'}
+          action={<Button size="sm" variant="secondary" onClick={reload}>Try again</Button>}>
+          {core.error}{failed ? '' : ' What is shown is from the last time it loaded.'}
         </Notice>
       )}
 
@@ -184,14 +206,18 @@ export function EmailFlows() {
         <SubTabs items={SECTIONS[tab]} value={section} onChange={key => setTab(tab, { section: key })} />
       )}
 
-      {tab === 'overview' && <Overview {...ctx} />}
-      {tab === 'contacts' && section === '' && <Contacts {...ctx} />}
-      {tab === 'contacts' && section === 'groups' && <Groups {...ctx} />}
-      {tab === 'cold' && section === '' && <Campaigns {...ctx} audience="cold" />}
-      {tab === 'cold' && section === 'mailboxes' && <OutreachMailboxes {...ctx} />}
-      {tab === 'cold' && section === 'people' && <Subscribers {...ctx} />}
-      {tab === 'marketing' && <Campaigns {...ctx} audience="marketing" />}
-      {tab === 'settings' && <EmailSettings {...ctx} />}
+      {!failed && (
+        <Suspense fallback={<TabSkeleton />}>
+          {tab === 'overview' && <Overview {...ctx} />}
+          {tab === 'contacts' && section === '' && <Contacts {...ctx} />}
+          {tab === 'contacts' && section === 'groups' && <Groups {...ctx} />}
+          {tab === 'cold' && section === '' && <Campaigns {...ctx} audience="cold" />}
+          {tab === 'cold' && section === 'mailboxes' && <OutreachMailboxes {...ctx} />}
+          {tab === 'cold' && section === 'people' && <Subscribers {...ctx} />}
+          {tab === 'marketing' && <Campaigns {...ctx} audience="marketing" />}
+          {tab === 'settings' && <EmailSettings {...ctx} />}
+        </Suspense>
+      )}
     </div>
   )
 }

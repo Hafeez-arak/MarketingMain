@@ -1,7 +1,9 @@
 import { useMemo, useState } from 'react'
 import { Card, Button, Input, Empty, Skeleton, SectionHead } from '../../components/ui/index'
+import { Pagination } from '../../components/ui/Pagination'
 import { displayName, LANGUAGES } from '../../lib/email/contacts'
-import { saveSettings } from '../../lib/email/client'
+import { saveSettings, fetchAnswered, PAGE_SIZE } from '../../lib/email/client'
+import { useCached, usePage } from './data'
 import { ContactStatus, Notice, Stat, EIcon } from './parts'
 import { pct, shortDate, dateTime, download } from './format'
 
@@ -18,6 +20,11 @@ import { pct, shortDate, dateTime, download } from './format'
 // A reply that said stop is listed too, as "Asked to stop", because a person
 // looking for who answered should see that they did, and that nobody will
 // write to them again. Below the list: what the sign-up page says.
+//
+// Only the people who answered are read (the database filters them out of
+// all contacts), whole: the four numbers count all of them, and the order —
+// newest answer first, across two columns — is one the database cannot
+// sort by. The table shows them 50 at a time; the search covers all of them.
 
 const HOW = {
   signed: { label: 'Signed up', tone: 'bg-sage-100 text-sage-700' },
@@ -27,13 +34,16 @@ const HOW = {
 const howOf = c => (c.subscribed_at ? 'signed' : c.status === 'unsubscribed' ? 'stop' : 'replied')
 const whenOf = c => c.subscribed_at || c.replied_at
 
-export function Subscribers({ workspaceId, data, loading, reload, setTab }) {
+export function Subscribers({ workspaceId, data, loading: coreLoading, reload, setTab }) {
   const [query, setQuery] = useState('')
   const [weekAgo] = useState(() => Date.now() - 7 * 86_400_000)
+  const read = useCached(workspaceId ? `answered:${workspaceId}` : null, () => fetchAnswered(workspaceId))
+  const loading = coreLoading || read.loading
+  const failed = Boolean(read.error) && !read.data
+  const [page, setPage] = usePage(`${workspaceId}:${query}`)
 
-  const people = useMemo(() => data.contacts
-    .filter(c => c.subscribed_at || c.replied_at)
-    .sort((a, b) => String(whenOf(b)).localeCompare(String(whenOf(a)))), [data.contacts])
+  const people = useMemo(() => [...(read.data || [])]
+    .sort((a, b) => String(whenOf(b)).localeCompare(String(whenOf(a)))), [read.data])
   const signed = people.filter(c => howOf(c) === 'signed').length
   const replied = people.filter(c => howOf(c) === 'replied').length
   const interested = signed + replied
@@ -48,6 +58,10 @@ export function Subscribers({ workspaceId, data, loading, reload, setTab }) {
     if (!q) return people
     return people.filter(c => [c.email, c.first_name, c.last_name, c.company].some(v => String(v || '').toLowerCase().includes(q)))
   }, [people, query])
+
+  const lastPage = Math.max(0, Math.ceil(shown.length / PAGE_SIZE) - 1)
+  const shownPage = Math.min(page, lastPage)
+  const pageRows = shown.slice(shownPage * PAGE_SIZE, (shownPage + 1) * PAGE_SIZE)
 
   const thisWeek = people.filter(c => howOf(c) !== 'stop' && Date.parse(whenOf(c)) >= weekAgo).length
   const prospectsWritten = useMemo(() => {
@@ -65,10 +79,10 @@ export function Subscribers({ workspaceId, data, loading, reload, setTab }) {
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 md:grid-cols-4 gap-px bg-border border border-border">
-        <Stat loading={loading} label="Signed up" value={signed.toLocaleString()} hint="Pressed the Sign-up button and confirmed" />
-        <Stat loading={loading} label="Replied" value={replied.toLocaleString()} hint="Wrote back, and did not ask to stop" />
-        <Stat loading={loading} label="This week" value={thisWeek.toLocaleString()} hint="Signed up or replied in the last 7 days" />
-        <Stat loading={loading} label="Response rate" value={pct(interested, prospectsWritten)} hint={`Of ${prospectsWritten.toLocaleString()} outreach emails sent`}
+        <Stat loading={loading} label="Signed up" value={failed ? '—' : signed.toLocaleString()} hint="Pressed the Sign-up button and confirmed" />
+        <Stat loading={loading} label="Replied" value={failed ? '—' : replied.toLocaleString()} hint="Wrote back, and did not ask to stop" />
+        <Stat loading={loading} label="This week" value={failed ? '—' : thisWeek.toLocaleString()} hint="Signed up or replied in the last 7 days" />
+        <Stat loading={loading} label="Response rate" value={failed ? '—' : pct(interested, prospectsWritten)} hint={`Of ${prospectsWritten.toLocaleString()} outreach emails sent`}
           info="People who signed up or replied, divided by every outreach email sent, follow-ups included." />
       </div>
 
@@ -82,12 +96,29 @@ export function Subscribers({ workspaceId, data, loading, reload, setTab }) {
           </div>
           <div className="flex items-center gap-2">
             <Input className="w-52" placeholder="Search name, email, company" value={query} onChange={e => setQuery(e.target.value)} />
-            <Button size="sm" variant="secondary" onClick={exportCsv} disabled={!people.length}>Export CSV</Button>
+            <Button size="sm" variant="secondary" onClick={exportCsv} disabled={!people.length}
+              title={people.length > PAGE_SIZE ? `Everyone who answered (${people.length.toLocaleString()}), not only this page` : undefined}>Export CSV</Button>
             <Button size="sm" onClick={() => setTab('marketing', { campaign: 'new' })} disabled={!interested}>Send them a newsletter</Button>
           </div>
         </div>
         {loading ? (
-          <div className="p-5 space-y-2"><Skeleton className="h-10 w-full" /><Skeleton className="h-10 w-full" /><Skeleton className="h-10 w-full" /></div>
+          <div className="divide-y divide-border" aria-busy="true">
+            {[0, 1, 2, 3].map(i => (
+              <div key={i} className="flex items-center gap-4 px-5 py-2.5">
+                <div className="flex-1 min-w-0 space-y-1.5"><Skeleton className="h-3.5 w-40" /><Skeleton className="h-2.5 w-52" /></div>
+                <Skeleton className="h-3.5 w-28 hidden sm:block" />
+                <Skeleton className="h-4 w-16" />
+                <Skeleton className="h-3.5 w-14" />
+                <Skeleton className="h-3.5 w-24 hidden md:block" />
+              </div>
+            ))}
+          </div>
+        ) : failed ? (
+          <div className="p-4">
+            <Notice tone="red" title="Could not load who answered" action={<Button size="sm" variant="secondary" onClick={read.refetch}>Try again</Button>}>
+              {read.error}
+            </Notice>
+          </div>
         ) : people.length === 0 ? (
           <Empty icon={<EIcon name="users" />} title="Nobody has answered yet"
             description="When a prospect replies to an outreach email, or presses its Sign-up button, they appear here."
@@ -107,7 +138,7 @@ export function Subscribers({ workspaceId, data, loading, reload, setTab }) {
                 </tr>
               </thead>
               <tbody>
-                {shown.map(c => {
+                {pageRows.map(c => {
                   const how = HOW[howOf(c)]
                   return (
                     <tr key={c.id} className="border-b border-border last:border-0">
@@ -131,11 +162,12 @@ export function Subscribers({ workspaceId, data, loading, reload, setTab }) {
                 {shown.length === 0 && <tr><td colSpan={7} className="px-5 py-4 text-text-tertiary">Nobody matches “{query}”.</td></tr>}
               </tbody>
             </table>
+            <Pagination page={shownPage} pageSize={PAGE_SIZE} count={shown.length} onPage={setPage} noun="people" />
           </div>
         )}
       </Card>
 
-      {loading
+      {coreLoading
         ? <Card className="p-5"><Skeleton className="h-32 w-full" /></Card>
         // Mounted once the settings have loaded, so the form starts from them.
         : <SignupPage key={workspaceId} workspaceId={workspaceId} settings={data.settings} reload={reload} />}
