@@ -74,9 +74,14 @@ export function useCalendarPosts({ workspaceId, accessToken, from, to, webhooks,
         // Read once, here, rather than inside wantKey: a clock in the cache
         // key would invalidate it on every render and refetch forever.
         const nowISO = new Date().toISOString()
-        const [booked, unbooked, next] = await Promise.all([
+        const [booked, postedNow, unbooked, next] = await Promise.all([
           fetchScheduledPosts(workspaceId, accessToken, {
             from, to, publishStatus: ON_CALENDAR_STATUSES, throwOnError: true,
+          }),
+          // "Post now" never gets a slot — only published_at — so the range
+          // read above could never find it and it was missing from the month.
+          fetchScheduledPosts(workspaceId, accessToken, {
+            unscheduled: true, publishedSince: from, publishedBefore: to, throwOnError: true,
           }),
           fetchScheduledPosts(workspaceId, accessToken, {
             publishStatus: PENDING_STATUSES, status: APPROVED_STATUSES, limit: 120, throwOnError: true,
@@ -89,7 +94,9 @@ export function useCalendarPosts({ workspaceId, accessToken, from, to, webhooks,
           }),
         ])
         if (cancelled || latest.current !== wantKey) return
-        setPosts(booked)
+        // Placed at the moment it went out. Safe to set on this copy: a post
+        // that has gone out is locked, so nothing books or moves it from here.
+        setPosts([...booked, ...postedNow.map(p => ({ ...p, scheduled_publish_at: p.published_at }))])
         setUpcoming(next)
         // Filtered again here rather than trusting the query alone: `status`
         // is blank on older rows, and needsAttention is the one rule the

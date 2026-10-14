@@ -71,3 +71,7 @@ export function queueBucket(post, now = Date.now()) {
   if (isUpcoming(post, now)) return 'upcoming'
   return 'attention'
 }
+
+// Does this post need a person? The Post Queue's "Needs attention" tab and
+// the sidebar badge both count with this, so the two numbers always agree.
+export const needsQueueAttention = (post, now = Date.now()) => queueBucket(post, now) === 'attention'

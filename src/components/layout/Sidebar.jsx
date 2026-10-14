@@ -3,7 +3,7 @@ import { useAuth } from '../../store/auth'
 import { useState, useEffect } from 'react'
 import { fetchPendingCount } from '../../lib/access'
 import { fetchScheduledPosts } from '../../lib/scheduledPosts'
-import { needsAttention, APPROVED_STATUSES, PENDING_STATUSES } from '../../lib/postStage'
+import { needsQueueAttention } from '../../lib/postLock'
 
 const nav = [
   { section: 'Overview', items: [
@@ -65,9 +65,8 @@ export function Sidebar() {
     return () => { cancelled = true }
   }, [isAccessAdmin])
 
-  // ── Approved posts that nothing will publish ──
-  // The same question the Schedule page's strip asks, on the nav item that
-  // owns them. An approved post whose booking failed is invisible otherwise:
+  // ── Posts that need a person ──
+  // On the nav item that owns them. An approved post whose booking failed is invisible otherwise:
   // it is not on the calendar (nothing is going to send it) and nobody thinks
   // to open the Post Queue to look for a failure they were never told about.
   const [pendingPosts, setPendingPosts] = useState(0)
@@ -78,10 +77,13 @@ export function Sidebar() {
     // hours at a time, and a booking that fails at 3pm should not wait for a
     // reload to show up.
     async function count() {
+      // Counted with the Post Queue's own test (needsQueueAttention), so the
+      // badge and its "Needs attention" tab show the same number. Only
+      // unbooked and failed rows can need a person; booked ones never do.
       const rows = await fetchScheduledPosts(activeWorkspaceId, accessToken, {
-        publishStatus: PENDING_STATUSES, status: APPROVED_STATUSES, limit: 200,
+        publishStatus: ['not_published', 'failed'], limit: 500,
       })
-      if (!cancelled) setPendingPosts(rows.filter(r => needsAttention(r)).length)
+      if (!cancelled) setPendingPosts(rows.filter(r => needsQueueAttention(r)).length)
     }
     queueMicrotask(() => { if (!cancelled) void count() })
     const id = setInterval(() => { void count() }, 120_000)

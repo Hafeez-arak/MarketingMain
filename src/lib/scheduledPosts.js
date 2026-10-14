@@ -36,7 +36,7 @@ export const POST_TABLES = [
 // get the review queue's view of the world (everything, by creation).
 export async function fetchScheduledPosts(workspaceId, accessToken, {
   from, to, platform, publishStatus, status, unscheduled = false, limit = 400,
-  planIdeaIds, ids, publishedSince, order, throwOnError = false,
+  planIdeaIds, ids, publishedSince, publishedBefore, order, throwOnError = false,
 } = {}) {
   if (!workspaceId) return []
   const q = [
@@ -79,6 +79,7 @@ export async function fetchScheduledPosts(workspaceId, accessToken, {
   // Everything that went out since an instant — what the publish watcher asks
   // on each poll, so it reads a handful of rows rather than the whole history.
   if (publishedSince) q.push(`published_at=gte.${publishedSince}`)
+  if (publishedBefore) q.push(`published_at=lte.${publishedBefore}`)
   // Ordered by when it goes out when that is what was asked for, otherwise by
   // when it was made — a review queue and a calendar want different spines.
   q.push(`order=${order || (from || to ? 'scheduled_publish_at.asc' : 'created_at.desc')}`)
