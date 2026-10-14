@@ -346,3 +346,36 @@ describe('the brief is written to be read once', () => {
     expect(text).toContain('KNX')
   })
 })
+
+// ─── Rules cite refs, and refs have to resolve ─────────────────────────────
+// The synthesis is told to cite "F3"/"S2". mergeBrief filtered rule sources as
+// URLs, so every ref-cited rule was dropped and research proposed none.
+describe('mergeBrief — rule sources', () => {
+  const base = { headline: 'x', competitor_board: [], unanswered: [] }
+  const findings = withRefs([
+    { headline: 'Tunnel tenders up', sources: ['https://read.example/a', 'https://unread.example/z'] },
+    { headline: 'Other', sources: ['https://read.example/b'] },
+  ])
+  const signals = [{ ref: 'S1', source_url: 'https://old-run.example/s' }]
+  const allowed = new Set(['https://read.example/a', 'https://read.example/b', 'https://read.example/c'])
+  const rule = (sources, r = 'Lead with energy savings.') => ({ rule: r, detail: '', scope: 'caption', sources, confidence: 0.7 })
+
+  it('keeps a rule that cites a finding, with the URLs that finding read', () => {
+    const merged = mergeBrief(base, { proposed_rules: [rule(['F1'])] }, allowed, findings, signals)
+    expect(merged.proposed_rules).toHaveLength(1)
+    expect(merged.proposed_rules[0].sources).toEqual(['https://read.example/a'])
+    expect(merged.rules_dropped_uncited).toBe(0)
+  })
+
+  it('resolves stored-signal refs and plain read URLs, case-insensitively', () => {
+    const merged = mergeBrief(base, { proposed_rules: [rule(['s1', 'https://read.example/c', 'f2'])] }, allowed, findings, signals)
+    expect(merged.proposed_rules[0].sources).toEqual(['https://old-run.example/s', 'https://read.example/c', 'https://read.example/b'])
+  })
+
+  it('drops a rule whose sources resolve to nothing read, and says so in the report', () => {
+    const merged = mergeBrief(base, { proposed_rules: [rule(['F9', 'https://nobody.example'], 'Invented.')] }, allowed, findings, signals)
+    expect(merged.proposed_rules).toEqual([])
+    expect(merged.rules_dropped_uncited).toBe(1)
+    expect(merged.rules_dropped[0]).toMatchObject({ rule: 'Invented.', cited: ['F9', 'https://nobody.example'] })
+  })
+})

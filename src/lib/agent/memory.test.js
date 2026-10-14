@@ -405,3 +405,52 @@ describe('deciding when to pay for a rebuild', () => {
     expect(digestIsStale()).toBe(false)
   })
 })
+
+// ─── 2026-10-14 handover fixes ─────────────────────────────────────────────
+import { digestForTask, datedMerge } from './memory'
+
+describe('digestForTask', () => {
+  const digest = renderDigest([
+    { kind: 'constraint', body: 'Never name client sites.', created_at: '2026-10-01T00:00:00Z', expires_at: null },
+    { kind: 'fact', body: 'Technolight cut prices 10%.', created_at: '2026-09-01T00:00:00Z', expires_at: null },
+  ], { now: new Date('2026-10-14T00:00:00Z') }).text
+
+  it('keeps the facts for planning and chat', () => {
+    expect(digestForTask(digest, 'plan')).toContain('Technolight cut prices')
+    expect(digestForTask(digest, 'chat')).toContain('Technolight cut prices')
+  })
+
+  it('drops the facts, and only the facts, for captions and email', () => {
+    const out = digestForTask(digest, 'caption')
+    expect(out).not.toContain('Technolight cut prices')
+    expect(out).not.toContain('WHAT YOU HAVE ESTABLISHED')
+    expect(out).toContain('Never name client sites.')
+  })
+
+  it('sends nothing when facts were all there was', () => {
+    const onlyFacts = renderDigest([{ kind: 'fact', body: 'x', created_at: '2026-10-01T00:00:00Z' }]).text
+    expect(digestForTask(onlyFacts, 'email')).toBe('')
+  })
+})
+
+describe('datedMerge', () => {
+  const sources = [
+    { kind: 'fact', body: 'a', created_at: '2026-08-01T00:00:00Z', expires_at: '2026-11-01T00:00:00Z', seen_count: 2 },
+    { kind: 'fact', body: 'b', created_at: '2026-09-01T00:00:00Z', expires_at: '2026-12-01T00:00:00Z' },
+    { kind: 'constraint', body: 'c', created_at: '2026-07-01T00:00:00Z', expires_at: null },
+  ]
+
+  it('keeps the newest source date and the latest expiry instead of "today"', () => {
+    const [m] = datedMerge([{ kind: 'fact', body: 'a and b', from: [0, 1] }], sources)
+    expect(m).toMatchObject({ created_at: '2026-09-01T00:00:00Z', expires_at: '2026-12-01T00:00:00Z', seen_count: 3 })
+  })
+
+  it('stays evergreen when any source was evergreen', () => {
+    const [m] = datedMerge([{ kind: 'constraint', body: 'c+', from: [2, 0] }], sources)
+    expect(m.expires_at).toBeNull()
+  })
+
+  it('drops a note that names no real source', () => {
+    expect(datedMerge([{ kind: 'fact', body: 'invented', from: [9] }, { kind: 'fact', body: 'none' }], sources)).toEqual([])
+  })
+})

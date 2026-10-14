@@ -21,6 +21,20 @@
 //
 // Pure: every time comes in, nothing is read from a clock this file owns.
 
+/**
+ * Finished, but did not really research: every AI call failed (credit ran
+ * out, the cap, the service down) so it stopped after measuring, or the
+ * synthesis came back with every section empty. Both are written `complete`
+ * — the measured numbers are real, and a cap-cut run must stay recoverable —
+ * so this is the one test for "don't treat this run as research". The
+ * Research page labels these "Partly finished"; the planner skips them.
+ */
+export function isPartialRun(run) {
+  if (!run || run.status !== 'complete') return false
+  if (run.stage && run.stage !== 'synthesise' && String(run.error || '').trim()) return true
+  return run.report?.synthesis?.empty === true
+}
+
 /** A run still `running` after this long is not running any more. */
 export const STUCK_MINUTES = 20
 
@@ -89,8 +103,8 @@ export function runHealth(runs = [], now = new Date()) {
   // 2026-10-05 both weekly runs died on "credit balance is too low" — every
   // call refused, $0 spent, nothing found — and the page said nothing for two
   // weeks.
-  if (newest.status === 'complete' && newest.stage !== 'synthesise' && String(newest.error || '').trim()) {
-    const why = explainRunError(newest.error)
+  if (isPartialRun(newest)) {
+    const why = explainRunError(newest.error || 'The brief came back empty.')
     return {
       level: 'failed',
       headline: `The last run did not research anything: ${why.short}.`,

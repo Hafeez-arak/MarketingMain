@@ -695,9 +695,38 @@ export function briefEmptiness(brief = {}) {
   }
 }
 
-export function mergeBrief(gathered, brief, allowedUrls, findings = []) {
+/**
+ * Turn a rule's cited sources into URLs that were actually read.
+ *   'F3'   → the URLs of finding F3 (this run's lenses read them)
+ *   'S2'   → the stored signal's source URL (read by the run that stored it)
+ *   a URL  → kept only if this run read it
+ * Anything else, and any URL nobody read, resolves to nothing.
+ */
+export function ruleSourceResolver(findings = [], signalRefs = [], keep = () => false) {
+  const byRef = new Map((findings || []).filter(f => f?.ref).map(f => [String(f.ref).toUpperCase(), f]))
+  const bySignal = new Map((signalRefs || []).filter(x => x?.ref).map(x => [String(x.ref).toUpperCase(), x]))
+  const urlOf = s => (typeof s === 'string' ? s : s?.url) || ''
+  return (sources = []) => {
+    const out = []
+    for (const raw of sources || []) {
+      const key = String(urlOf(raw)).trim().toUpperCase()
+      if (/^F\d+$/.test(key)) {
+        for (const u of byRef.get(key)?.sources || []) if (keep(u)) out.push(urlOf(u))
+      } else if (/^S\d+$/.test(key)) {
+        const u = bySignal.get(key)?.source_url
+        if (u) out.push(u)
+      } else if (keep(raw)) {
+        out.push(urlOf(raw))
+      }
+    }
+    return [...new Set(out)]
+  }
+}
+
+export function mergeBrief(gathered, brief, allowedUrls, findings = [], signalRefs = []) {
   const allow = allowedUrls instanceof Set ? allowedUrls : new Set(allowedUrls || [])
   const keep = s => allow.has(typeof s === 'string' ? s : s?.url)
+  const resolve = ruleSourceResolver(findings, signalRefs, keep)
 
   // Market trends, assembled from the lens findings rather than written by
   // the model (see the note in BRIEF_SCHEMA). The same citation rule applies:
@@ -708,10 +737,19 @@ export function mergeBrief(gathered, brief, allowedUrls, findings = []) {
     return { ...m, sources, uncited: sources.length === 0 }
   })
 
-  const proposedRules = (brief?.proposed_rules || [])
-    .map(r => ({ ...r, sources: (r.sources || []).filter(keep), dated: datedRule(r.rule) }))
-    // Silently dropped, not flagged. This is the strict side of the asymmetry.
-    .filter(r => r.sources.length > 0)
+  // The synthesis is told to cite by ref ("F3", "S2"), so a rule's sources
+  // are mostly refs, not URLs. They used to be filtered as URLs, which dropped
+  // every one of them: research stopped proposing rules at all. Each ref is
+  // now resolved to the URLs behind it first, then the read-it-or-drop-it rule
+  // applies as before.
+  const resolvedRules = (brief?.proposed_rules || [])
+    .map(r => ({ ...r, cited: r.sources || [], sources: resolve(r.sources), dated: datedRule(r.rule) }))
+  const proposedRules = resolvedRules.filter(r => r.sources.length > 0)
+    .map(r => { const out = { ...r }; delete out.cited; return out })
+  // Still dropped from the review queue, but no longer silently: what was
+  // dropped, and what it cited, stays in the report.
+  const droppedRules = resolvedRules.filter(r => r.sources.length === 0)
+    .map(r => ({ rule: r.rule, scope: r.scope, cited: r.cited, reason: 'none of its sources was read this run' }))
 
   // Stamped before the ideas are bound, because the binding resolves against
   // these ids rather than against whatever the model wrote.
@@ -740,8 +778,8 @@ export function mergeBrief(gathered, brief, allowedUrls, findings = []) {
     proposed_ideas: bindIdeas(brief?.proposed_ideas || [], gaps, findings),
     agenda_changes: brief?.agenda_changes || [],
     unanswered: [...(gathered.unanswered || []), ...(brief?.unanswered || [])],
-    rules_dropped_uncited:
-      (brief?.proposed_rules || []).length - proposedRules.length,
+    rules_dropped_uncited: droppedRules.length,
+    rules_dropped: droppedRules,
     stage_reached: 'synthesise',
   }
 }

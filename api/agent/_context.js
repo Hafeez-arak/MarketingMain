@@ -1,6 +1,7 @@
 import { buildContext } from '../../src/lib/brandContextCore.js'
 import { rowToProfile } from '../../src/lib/brandBrainCore.js'
 import { volatileFragment } from '../../src/lib/agent/prompt.js'
+import { digestForTask } from '../../src/lib/agent/memory.js'
 import { db } from './_supabase.js'
 import { loadMemory } from './_memory.js'
 
@@ -157,7 +158,9 @@ export async function loadBrandContext(workspaceId, task = 'chat') {
     // The prompt's stable second block. buildContext output is a function of
     // rows a human edits, so it is stable between edits — which is exactly the
     // property prompt caching needs.
-    brand: recall.digest ? `${base}\n\n${recall.digest}` : base,
+    // Caption and email tasks get it without the "established" facts — see
+    // digestForTask.
+    brand: digestForTask(recall.digest, task) ? `${base}\n\n${digestForTask(recall.digest, task)}` : base,
     // Volatile. Caller puts this on the user turn, or drops it.
     recallTail: recall.tail,
     recallBuiltAt: recall.builtAt,

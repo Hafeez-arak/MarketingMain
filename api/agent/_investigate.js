@@ -739,7 +739,7 @@ export async function synthesiseRun({ workspaceId, runId, cadence = 'weekly', de
       if (!worthStarting(limit, 120_000)) break
     }
 
-    const report = mergeBrief(gathered, brief, allowedUrls, findings)
+    const report = mergeBrief(gathered, brief, allowedUrls, findings, history.refs)
     report.lenses = summary
     report.synthesis = {
       ...wrote,

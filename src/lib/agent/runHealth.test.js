@@ -178,3 +178,16 @@ describe('silentLensNote', () => {
     expect(silentLensNote(res(0, 0))).toBe('')
   })
 })
+
+import { isPartialRun } from './runHealth'
+describe('isPartialRun', () => {
+  it('flags a run that stopped after measuring with an error, and an empty brief', () => {
+    expect(isPartialRun({ status: 'complete', stage: 'gather', error: 'credit balance is too low' })).toBe(true)
+    expect(isPartialRun({ status: 'complete', stage: 'synthesise', error: '', report: { synthesis: { empty: true } } })).toBe(true)
+  })
+  it('passes a real run, a running one and a failed one', () => {
+    expect(isPartialRun({ status: 'complete', stage: 'synthesise', error: '', report: { synthesis: { empty: false } } })).toBe(false)
+    expect(isPartialRun({ status: 'running', stage: 'gather', error: 'x' })).toBe(false)
+    expect(isPartialRun({ status: 'failed', stage: 'gather', error: 'x' })).toBe(false)
+  })
+})

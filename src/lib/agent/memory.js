@@ -521,3 +521,56 @@ export function digestIsStale({
   void latestNoteAt
   return false
 }
+
+// ─── What each kind of prompt may carry ────────────────────────────────────
+// The "established" facts are the research agent's working conclusions about
+// the market. They expire, they get contradicted, and they are written for
+// planning and research, not for words a customer reads. Email drafts and
+// captions were being handed them as settled truth and repeating stale ones
+// to customers. Those tasks get the digest without that section.
+const NO_FACTS_TASKS = new Set(['caption', 'image', 'video', 'email'])
+const FACTS_TITLE = SECTIONS.find(s => s.kinds.includes('fact')).title
+
+export function digestForTask(digest, task) {
+  const text = String(digest || '')
+  if (!text || !NO_FACTS_TASKS.has(task)) return text
+  const start = text.indexOf(`\n## ${FACTS_TITLE}`)
+  if (start === -1) return text
+  const next = text.indexOf('\n## ', start + 4)
+  const out = text.slice(0, start) + (next === -1 ? '' : text.slice(next))
+  // A digest that was only facts has nothing left worth sending.
+  return /\n## /.test(out) ? out : ''
+}
+
+/**
+ * Merge notes the way compaction does, keeping their real age.
+ *
+ * Compaction used to stamp every merged note "today" with a fresh expiry, so
+ * a months-old, since-contradicted fact read as brand new and lived another
+ * full term. A merged note now keeps the newest created_at of the notes it was
+ * made from (when it was last true) and the latest expiry (evergreen if any
+ * source was evergreen).
+ *
+ * `merged` is the model's output: [{ kind, body, from: [indexes into sources] }].
+ * Notes that name no valid source are dropped — a summariser that invents a
+ * note has nothing to date it by.
+ */
+export function datedMerge(merged = [], sources = []) {
+  const out = []
+  for (const m of merged) {
+    const body = String(m?.body || '').trim()
+    if (!body) continue
+    const from = (Array.isArray(m.from) ? m.from : [])
+      .map(i => sources[Number(i)]).filter(Boolean)
+    if (!from.length) continue
+    const newest = from.map(n => n.created_at).filter(Boolean).sort().pop() || null
+    const expiries = from.map(n => n.expires_at ?? null)
+    const expires = expiries.some(e => e === null) ? null : expiries.sort().pop()
+    out.push({
+      kind: m.kind || from[0].kind, body,
+      created_at: newest, expires_at: expires,
+      seen_count: from.reduce((a, n) => a + (Number(n.seen_count) || 1), 0),
+    })
+  }
+  return out
+}
