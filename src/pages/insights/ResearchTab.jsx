@@ -27,28 +27,25 @@ import {
 } from './plainWords'
 
 // ─── The Research tab — the weekly market report ───────────────────────────
-// Two layers, in the order a marketer asks the questions:
+// One page, read top to bottom, in the order a marketer asks the questions:
 //
-//   1. AT A GLANCE   one card: when, whether the run worked, the headline as a
-//                    short lead, three or four takeaways lifted from the
-//                    report's own top items, and counts that open the detail
-//   2. THE DETAIL    one tab per kind of work — do next, content ideas, leads,
-//                    competitors, market and events, sources and method —
-//                    each with a count. A tab with nothing in it is not shown.
+//   1. AT A GLANCE   one card: when, whether the run worked, the headline,
+//                    the key takeaways and counts that jump to the detail
+//   2. THE DETAIL    every section on the same page — do next, content ideas,
+//                    website, leads, competitors, market and events, sources
+//                    and method — with a contents list down the side that
+//                    shows the counts and jumps to each one.
 //
-// It used to be one long scroll with a sticky jump bar, which covered the
-// headings it jumped to and still left the reader scrolling past empty cards.
-// Tabs keep one kind of work on screen at a time; the open tab is in the URL
-// (?section=, because ?tab= already picks Research vs What We Learned).
+// Rebuilt 2026-10-15 on the owner's brief: keep all the depth, lose the mess.
+// Tabs (#224) hid each kind of work behind a click and "Read more" / "Show
+// more" hid the detail behind another, so reading one finding could take
+// three. Now every finding is shown whole; only its source links fold away,
+// and those print in full regardless. "Why it matters" and "What to do" sit
+// side by side on a wide screen, which is most of what keeps the page short.
 //
-// Every card has the same shape: a title cut to two lines, a one-line
-// summary, "why it matters" and "what to do" as labelled blocks, and the
-// detail and sources behind Show more. Printing renders every tab and every
-// Show more in full — paper has no tabs to click.
-//
-// A team filter and a business filter narrow every tab at once. Every section
-// is built by src/lib/marketReport.js, which the printable brief also uses, so
-// the screen and the PDF never disagree about what the run said.
+// A team filter and a business filter, in one small Filter menu, narrow every
+// section at once. Every section is built by src/lib/marketReport.js, which
+// the printable brief also uses, so the screen and the PDF never disagree.
 //
 // Leads and events read the STORE rather than the brief — a lead found three
 // weeks ago and still open belongs on this week's list — and say so.
@@ -111,36 +108,13 @@ function NewChip({ isNew, changed }) {
   return null
 }
 
-const CLAMP = { 1: 'line-clamp-1', 2: 'line-clamp-2', 3: 'line-clamp-3', 4: 'line-clamp-4' }
-
-// Long text, cut to a few lines with a way to read the rest. On paper it is
-// always whole: a printed "Read more" is a dead end.
-function Clamp({ text, lines = 3, className = '' }) {
-  const [open, setOpen] = useState(false)
-  if (!text) return null
-  const long = String(text).length > lines * 95
-  return (
-    <div className="min-w-0">
-      <p dir="auto" className={`break-words ${!open && long ? `${CLAMP[lines]} print:line-clamp-none` : ''} ${className}`}>{text}</p>
-      {long && (
-        <button data-print-hide onClick={() => setOpen(o => !o)}
-          className="text-xs font-medium text-text-secondary underline underline-offset-2 hover:text-text mt-1">
-          {open ? 'Show less' : 'Read more'}
-        </button>
-      )}
-    </div>
-  )
-}
-
 /** "Why it matters" / "What to do" — a labelled block, so the two never run together. */
-function Block({ label, children, act = false, lines = 3 }) {
+function Block({ label, children, act = false }) {
   if (!children) return null
   return (
     <div className={act ? 'border-l-2 border-amber-600 bg-amber-50/70 px-3 py-2' : 'border-l-2 border-border px-3 py-0.5'}>
       <p className="text-[11px] font-semibold uppercase tracking-wide text-text-secondary">{label}</p>
-      <div className="mt-0.5">
-        <Clamp text={children} lines={lines} className="text-[15px] leading-relaxed text-text" />
-      </div>
+      <p dir="auto" className="mt-0.5 text-sm leading-relaxed text-text break-words">{children}</p>
     </div>
   )
 }
@@ -160,11 +134,19 @@ function Detail({ label, children }) {
 // list of links. An uncited finding says so in the open, because that is a
 // fact about the finding rather than one of its sources.
 function Sources({ sources = [], pieces = [] }) {
+  const [open, setOpen] = useState(false)
   const links = sources.slice(0, 8)
   if (!pieces.length && !links.length) return null
+  const n = pieces.length || links.length
   return (
     <div>
-      <p className="text-[11px] font-semibold uppercase tracking-wide text-text-tertiary mb-1.5">Sources</p>
+      <button data-print-hide type="button" onClick={() => setOpen(o => !o)} aria-expanded={open}
+        className="inline-flex items-center gap-1 text-xs font-semibold text-text-tertiary hover:text-text">
+        {open ? 'Hide sources' : `Sources (${n})`}
+        <svg className={`w-3 h-3 transition-transform ${open ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6" /></svg>
+      </button>
+      <p className="hidden print:block text-[11px] font-semibold uppercase tracking-wide text-text-tertiary mb-1.5">Sources</p>
+      <div className={`${open ? 'mt-1.5' : 'hidden'} print:block`}>
       {pieces.length ? (
         <ul className="space-y-1.5">{pieces.map((p, i) => <Piece key={i} p={p} />)}</ul>
       ) : (
@@ -183,6 +165,7 @@ function Sources({ sources = [], pieces = [] }) {
           })}
         </ul>
       )}
+      </div>
     </div>
   )
 }
@@ -211,59 +194,39 @@ const Uncited = () => (
 const Quiet = ({ children }) => <p className="text-sm text-text-tertiary leading-relaxed max-w-[72ch]">{children}</p>
 
 // ─── The one card shape every item uses ────────────────────────────────────
-// Title cut to two lines, a summary cut to two, the two labelled blocks, and
-// everything else behind Show more — which also lifts the cuts, so the whole
-// title can always be read without leaving the card.
+// Everything is on the card: the whole title, the whole summary, "why it
+// matters" and "what to do" side by side on a wide screen, then any detail.
+// Only source links fold away (see Sources). Nothing is cut short, so no
+// finding takes a click to read.
 
 function ItemCard({ badges, title, titleHref, summary, meta, why, whyLabel = 'Why it matters', todo, todoLabel = 'What to do', aside, more, footer, number, children }) {
-  const [open, setOpen] = useState(false)
-  const cut = open ? '' : 'print:line-clamp-none'
-  const hasMore = !!more || String(title || '').length > 140 || String(summary || '').length > 180
-  const heading = (
-    <h4 dir="auto" className={`text-base font-semibold text-text leading-snug break-words ${open ? '' : `line-clamp-2 ${cut}`}`}>{title}</h4>
-  )
+  const indent = number != null ? 'sm:ml-9' : ''
+  const heading = <h4 dir="auto" className="text-[15px] font-semibold text-text leading-snug break-words">{title}</h4>
   return (
-    <article data-print-keep className="bg-white border border-border p-4 sm:p-5 min-w-0">
+    <article data-print-keep className="bg-white border border-border p-4 min-w-0">
       <div className="flex flex-col sm:flex-row sm:items-start gap-3">
         {number != null && (
-          <span className="shrink-0 w-7 h-7 bg-amber-700 text-white text-sm font-bold flex items-center justify-center tabular-nums">{number}</span>
+          <span className="shrink-0 w-6 h-6 bg-amber-700 text-white text-xs font-bold flex items-center justify-center tabular-nums">{number}</span>
         )}
-        <div className="min-w-0 flex-1 max-w-[72ch]">
-          {badges && <div className="flex items-center gap-1.5 flex-wrap mb-2">{badges}</div>}
+        <div className="min-w-0 flex-1">
+          {badges && <div className="flex items-center gap-1.5 flex-wrap mb-1.5">{badges}</div>}
           {titleHref
             ? <a href={titleHref} target="_blank" rel="noopener noreferrer" className="hover:underline">{heading}</a>
             : heading}
-          {summary && (
-            <p dir="auto" className={`text-sm text-text-secondary mt-1.5 leading-relaxed break-words ${open ? '' : `line-clamp-2 ${cut}`}`}>{summary}</p>
-          )}
-          {meta && <div className="mt-1.5">{meta}</div>}
+          {summary && <p dir="auto" className="text-sm text-text-secondary mt-1 leading-relaxed break-words">{summary}</p>}
+          {meta && <div className="mt-1">{meta}</div>}
         </div>
-        {aside && <div className="shrink-0 sm:max-w-[220px] min-w-0">{aside}</div>}
+        {aside && <div className="shrink-0 sm:max-w-[200px] min-w-0">{aside}</div>}
       </div>
       {(why || todo) && (
-        <div className={`mt-3.5 space-y-2.5 max-w-[72ch] ${number != null ? 'sm:ml-10' : ''}`}>
+        <div className={`mt-3 grid gap-2.5 ${why && todo ? 'lg:grid-cols-2' : ''} ${indent}`}>
           <Block label={whyLabel}>{why}</Block>
           <Block label={todoLabel} act>{todo}</Block>
         </div>
       )}
-      {children && <div className={`mt-3.5 max-w-[72ch] ${number != null ? 'sm:ml-10' : ''}`}>{children}</div>}
-      {more && (
-        <div className={`${open ? '' : 'hidden print:block'} mt-3.5 pt-3 border-t border-border-light max-w-[72ch] space-y-2.5 ${number != null ? 'sm:ml-10' : ''}`}>
-          {more}
-        </div>
-      )}
-      {(footer || hasMore) && (
-        <div className={`mt-3 flex items-center justify-between gap-3 flex-wrap ${number != null ? 'sm:ml-10' : ''}`}>
-          <div className="min-w-0 text-xs text-text-tertiary">{footer}</div>
-          {hasMore && (
-            <button data-print-hide onClick={() => setOpen(o => !o)} aria-expanded={open}
-              className="inline-flex items-center gap-1 text-xs font-semibold text-text-secondary hover:text-text">
-              {open ? 'Show less' : 'Show more'}
-              <svg className={`w-3 h-3 transition-transform ${open ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6" /></svg>
-            </button>
-          )}
-        </div>
-      )}
+      {children && <div className={`mt-3 ${indent}`}>{children}</div>}
+      {more && <div className={`mt-3 space-y-2 ${indent}`}>{more}</div>}
+      {footer && <div className={`mt-2.5 text-xs text-text-tertiary ${indent}`}>{footer}</div>}
     </article>
   )
 }
@@ -450,16 +413,96 @@ function EventCard({ e, canEdit, onDecision, recent = false }) {
   )
 }
 
-// A search row. The business chip shows only when the row matched a business
-// line — an unclassified row shows nothing rather than a made-up "General".
-function SearchRow({ r, lineLabel }) {
+// The search rows, as one list rather than a card each: a query is a line of
+// numbers and a fix, and eleven cards of it was most of the page's length.
+// Nothing is cut — the finding, its detail and what to do are all there. The
+// business chip shows only when the row matched a business line — an
+// unclassified row shows nothing rather than a made-up "General".
+function SearchList({ rows, lineLabel }) {
+  // Rows of the same kind carry the model's explanation word for word ("Google
+  // already treats us as a candidate…"), so it is said once per group, above
+  // the rows it explains, instead of once per row. Order is kept: a group sits
+  // where its first row was.
+  const groups = []
+  for (const r of rows) {
+    const g = r.detail && groups.find(x => x.detail === r.detail)
+    if (g) g.rows.push(r)
+    else groups.push({ detail: r.detail || '', rows: [r] })
+  }
   return (
-    <ItemCard
-      badges={r.line && lineLabel(r.line) ? <Chip>{lineLabel(r.line)}</Chip> : null}
-      title={r.headline}
-      summary={r.detail}
-      todo={r.action}
-    />
+    <ul className="bg-white border border-border divide-y divide-border-light">
+      {groups.map((g, gi) => {
+        const shared = g.rows.length > 1 && g.detail
+        return [
+          shared && (
+            <li key={`g${gi}`} className="px-4 py-2 bg-surface-subtle">
+              <p dir="auto" className="text-[13px] text-text-secondary leading-relaxed">{g.detail}</p>
+            </li>
+          ),
+          ...g.rows.map((r, i) => (
+            <li key={`${gi}-${i}`} data-print-keep className="px-4 py-3 grid gap-x-6 gap-y-2 lg:grid-cols-2 min-w-0">
+              <div className="min-w-0">
+                {r.line && lineLabel(r.line) && <div className="mb-1"><Chip>{lineLabel(r.line)}</Chip></div>}
+                <p dir="auto" className="text-sm font-semibold text-text leading-snug break-words">{r.headline}</p>
+                {r.detail && !shared && <p dir="auto" className="text-[13px] text-text-secondary leading-relaxed mt-0.5 break-words">{r.detail}</p>}
+              </div>
+              {r.action && (
+                <div className="border-l-2 border-amber-600 pl-3 min-w-0">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-text-secondary">What to do</p>
+                  <p dir="auto" className="text-[13px] text-text leading-relaxed mt-0.5 break-words">{r.action}</p>
+                </div>
+              )}
+            </li>
+          )),
+        ]
+      })}
+    </ul>
+  )
+}
+
+// A long list shows its first few items whole, and one button for the rest —
+// one click per list, instead of one per item. Paper always gets the lot.
+function Limited({ items, limit = 5, render, noun = 'items', className = 'space-y-3' }) {
+  const [all, setAll] = useState(false)
+  const extra = items.length - limit
+  return (
+    <div className="space-y-3">
+      <div className={className}>
+        {items.map((it, i) => (
+          <div key={i} className={!all && i >= limit ? 'hidden print:block' : ''}>{render(it, i)}</div>
+        ))}
+      </div>
+      {extra > 0 && (
+        <button data-print-hide type="button" onClick={() => setAll(a => !a)} aria-expanded={all}
+          className="w-full border border-dashed border-border bg-white/60 py-2 text-sm font-semibold text-text-secondary hover:text-text hover:border-border-strong">
+          {all ? 'Show fewer' : `Show all ${items.length} ${noun}`}
+        </button>
+      )}
+    </div>
+  )
+}
+
+// Every quoted page, behind one button: a reference list, not reading.
+function AllSources({ sources }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="space-y-2">
+      <button data-print-hide type="button" onClick={() => setOpen(o => !o)} aria-expanded={open}
+        className="inline-flex items-center gap-1 text-sm font-semibold text-text-secondary hover:text-text">
+        {open ? 'Hide the list' : `Show all ${sources.length} pages`}
+        <svg className={`w-3.5 h-3.5 transition-transform ${open ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6" /></svg>
+      </button>
+      <ul className={`${open ? '' : 'hidden'} print:block bg-white border border-border divide-y divide-border-light`}>
+        {sources.map(s => (
+          <li key={s.url} className="px-4 py-2 text-sm leading-relaxed flex flex-col sm:flex-row sm:gap-3 min-w-0">
+            <span className="text-text-tertiary shrink-0 sm:w-[160px] truncate">{s.domain}</span>
+            <a href={s.url} target="_blank" rel="noopener noreferrer" className="text-text-secondary hover:text-text underline underline-offset-2 min-w-0 truncate">
+              {s.title || s.url}
+            </a>
+          </li>
+        ))}
+      </ul>
+    </div>
   )
 }
 
@@ -529,26 +572,37 @@ function IdeaLine({ idea }) {
     <li className="border-l-2 border-sage-400 pl-3 py-0.5">
       <p className="text-sm font-semibold text-text leading-snug" dir="auto">{idea.title || idea.angle}</p>
       {idea.angle && idea.title && (
-        <div className="mt-0.5"><Clamp text={idea.angle} lines={2} className="text-sm text-text-secondary leading-relaxed" /></div>
+        <p dir="auto" className="mt-0.5 text-sm text-text-secondary leading-relaxed break-words">{idea.angle}</p>
       )}
       {idea.suggested_format && <p className="mt-1"><Chip>{idea.suggested_format}</Chip></p>}
     </li>
   )
 }
 
-function IdeaCard({ idea }) {
-  const ref = idea.answers_ref
-  const more = [
-    ref?.kind === 'finding' && ref.headline ? <Detail key="b" label="Based on">{ref.headline}</Detail> : null,
-    idea.rationale ? <Detail key="r" label="Why">{idea.rationale}</Detail> : null,
-  ].filter(Boolean)
+// The ideas that answer no single gap, as rows of one card: each is a title,
+// an angle and the reason for it — reading, not a stack of boxes.
+function IdeaList({ ideas }) {
   return (
-    <ItemCard
-      badges={idea.suggested_format ? <Chip>{idea.suggested_format}</Chip> : null}
-      title={idea.title || idea.angle}
-      summary={idea.title ? idea.angle : null}
-      more={more.length ? more : null}
-    />
+    <ul className="bg-white border border-border divide-y divide-border-light">
+      {ideas.map((idea, i) => {
+        const ref = idea.answers_ref
+        return (
+          <li key={i} data-print-keep className="px-4 py-3 min-w-0">
+            <div className="flex items-start justify-between gap-3">
+              <p dir="auto" className="text-sm font-semibold text-text leading-snug break-words">{idea.title || idea.angle}</p>
+              {idea.suggested_format && <span className="shrink-0"><Chip>{idea.suggested_format}</Chip></span>}
+            </div>
+            {idea.title && idea.angle && <p dir="auto" className="text-[13px] text-text-secondary leading-relaxed mt-0.5 break-words">{idea.angle}</p>}
+            {(ref?.kind === 'finding' && ref.headline) && (
+              <p dir="auto" className="text-[13px] text-text-secondary leading-relaxed mt-1 break-words"><span className="font-semibold text-text">Based on: </span>{ref.headline}</p>
+            )}
+            {idea.rationale && (
+              <p dir="auto" className="text-[13px] text-text-secondary leading-relaxed mt-1 break-words"><span className="font-semibold text-text">Why: </span>{idea.rationale}</p>
+            )}
+          </li>
+        )
+      })}
+    </ul>
   )
 }
 
@@ -572,75 +626,116 @@ function GapBlock({ block }) {
   )
 }
 
-// ─── The tabs ──────────────────────────────────────────────────────────────
+// ─── Sections and the contents list ────────────────────────────────────────
 
 const TAB_DEFS = [
   { key: 'do', label: 'Do next', chip: n => (n === 1 ? 'thing to do next' : 'things to do next') },
-  { key: 'content', label: 'Content ideas', chip: n => (n === 1 ? 'content idea' : 'content ideas') },
+  { key: 'content', label: 'Content & website', chip: n => (n === 1 ? 'content idea' : 'content ideas') },
   { key: 'leads', label: 'Leads & tenders', chip: n => (n === 1 ? 'open lead or tender' : 'open leads and tenders') },
   { key: 'competitors', label: 'Competitors', chip: n => (n === 1 ? 'competitor move' : 'competitor moves') },
   { key: 'market', label: 'Market & events', chip: n => (n === 1 ? 'market item or event' : 'market items and events') },
   { key: 'method', label: 'Sources & method', chip: null },
 ]
 
-function TabBar({ tabs, active, onPick }) {
-  // On a phone the row scrolls sideways; keep the open tab in view so a
-  // takeaway or chip that switches tabs never lands on a hidden one.
-  const rowRef = useRef(null)
-  useEffect(() => {
-    const row = rowRef.current
-    const el = row?.querySelector('[aria-selected="true"]')
-    if (el && row.scrollWidth > row.clientWidth) {
-      row.scrollTo({ left: Math.max(0, el.offsetLeft - 16), behavior: 'smooth' })
-    }
-  }, [active])
+const sectionId = key => `research-${key}`
+
+function scrollToSection(key) {
+  document.getElementById(sectionId(key))?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+
+// Down the side on a wide screen, so jumping never covers a heading the way
+// the old sticky bar across the top did. The counts are the sections' own.
+function Contents({ tabs, active }) {
   return (
-    <div ref={rowRef} data-print-hide role="tablist" aria-label="Research sections"
-      className="flex overflow-x-auto border-b border-border [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-      {tabs.map(t => (
-        <button key={t.key} role="tab" aria-selected={active === t.key} onClick={() => onPick(t.key)}
-          className={`shrink-0 -mb-px px-2.5 py-2.5 text-sm border-b-2 transition-colors ${
-            active === t.key
-              ? 'border-amber-700 text-text font-semibold'
-              : 'border-transparent text-text-secondary font-medium hover:text-text hover:border-border-strong'}`}>
-          {t.label}
-          {t.count === null
-            ? <span className="ml-1.5 inline-block align-middle w-5 h-3 bg-surface-muted animate-pulse" aria-label="loading" />
-            : t.count != null && (
-              <span className={`ml-1.5 px-1.5 py-px text-xs tabular-nums ${active === t.key ? 'bg-amber-700 text-white' : 'bg-surface-muted text-text-secondary'}`}>{t.count}</span>
-            )}
-        </button>
-      ))}
+    <nav data-print-hide aria-label="Research sections" className="hidden lg:block sticky top-4 self-start">
+      <p className="text-[11px] font-semibold uppercase tracking-wide text-text-tertiary px-2 mb-1.5">On this page</p>
+      <ul className="space-y-0.5">
+        {tabs.map(t => (
+          <li key={t.key}>
+            <button type="button" onClick={() => scrollToSection(t.key)}
+              className={`w-full flex items-center justify-between gap-2 px-2 py-1.5 text-left text-sm border-l-2 transition-colors ${
+                active === t.key
+                  ? 'border-amber-700 text-text font-semibold bg-white'
+                  : 'border-transparent text-text-secondary hover:text-text hover:bg-white'}`}>
+              <span className="truncate">{t.label}</span>
+              {t.count === null
+                ? <span className="w-4 h-3 bg-surface-muted animate-pulse" aria-label="loading" />
+                : t.count != null && t.count > 0 && <span className="text-xs tabular-nums text-text-tertiary">{t.count}</span>}
+            </button>
+          </li>
+        ))}
+      </ul>
+    </nav>
+  )
+}
+
+// Both filters behind one small menu. The button says what is showing, so a
+// narrowed page never passes for the whole report.
+function FilterMenu({ team, onTeam, lines, line, onLine, untagged }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef(null)
+  useEffect(() => {
+    if (!open) return undefined
+    const close = e => { if (!ref.current?.contains(e.target)) setOpen(false) }
+    document.addEventListener('mousedown', close)
+    return () => document.removeEventListener('mousedown', close)
+  }, [open])
+  const teamLabel = TEAMS.find(t => t.key === team)?.label || 'Everyone'
+  const lineName = line === 'all' ? '' : (lines.find(l => l.key === line)?.label || '')
+  const narrowed = team !== 'all' || line !== 'all'
+  return (
+    <div ref={ref} data-print-hide className="relative">
+      <button type="button" onClick={() => setOpen(o => !o)} aria-expanded={open}
+        className={`inline-flex items-center gap-1.5 border px-2.5 py-1.5 text-sm transition-colors ${
+          narrowed ? 'border-amber-600 bg-amber-50 text-text' : 'border-border bg-white text-text-secondary hover:text-text'}`}>
+        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M3 5h18M6 12h12M10 19h4" strokeLinecap="round" /></svg>
+        {narrowed ? [teamLabel, lineName].filter(Boolean).join(' · ') : 'Filter'}
+      </button>
+      {open && (
+        <div className="absolute right-0 z-20 mt-1 w-64 border border-border bg-white p-3 shadow-sm space-y-3">
+          <label className="block">
+            <span className="block text-[11px] font-semibold uppercase tracking-wide text-text-tertiary mb-1">For</span>
+            <PillSelect value={team} onChange={e => onTeam(e.target.value)} className="w-full">
+              {TEAMS.map(t => <option key={t.key} value={t.key}>{t.label}</option>)}
+            </PillSelect>
+          </label>
+          {/* Only when the run found more than one business line. A brand with
+              one undivided business never sees a control that does nothing. */}
+          {lines.length > 1 && (
+            <label className="block">
+              <span className="block text-[11px] font-semibold uppercase tracking-wide text-text-tertiary mb-1">Business</span>
+              <PillSelect value={line} onChange={e => onLine(e.target.value)} className="w-full">
+                <option value="all">All</option>
+                {lines.map(l => <option key={l.key} value={l.key}>{l.label}</option>)}
+              </PillSelect>
+            </label>
+          )}
+          {line !== 'all' && untagged > 0 && (
+            <p className="text-xs text-text-tertiary leading-relaxed">
+              {plural(untagged, 'finding')} could not be tied to one business and only show under All.
+            </p>
+          )}
+          {narrowed && (
+            <button type="button" onClick={() => { onTeam('all'); onLine('all') }}
+              className="text-xs font-semibold text-text-secondary underline underline-offset-2 hover:text-text">Show everything</button>
+          )}
+        </div>
+      )}
     </div>
   )
 }
 
-function Filters({ team, onTeam, lines, line, onLine, untagged }) {
+// One section of the page: a heading with its count, then its parts.
+function Section({ tab, children }) {
+  if (!tab) return null
   return (
-    <div data-print-hide className="flex items-center gap-x-5 gap-y-2 flex-wrap">
-      <label className="flex items-center gap-2 text-sm text-text-secondary">
-        For
-        <PillSelect value={team} onChange={e => onTeam(e.target.value)}>
-          {TEAMS.map(t => <option key={t.key} value={t.key}>{t.label}</option>)}
-        </PillSelect>
-      </label>
-      {/* Only when the run found more than one business line. A brand with
-          one undivided business never sees a control that does nothing. */}
-      {lines.length > 1 && (
-        <label className="flex items-center gap-2 text-sm text-text-secondary">
-          Business
-          <PillSelect value={line} onChange={e => onLine(e.target.value)}>
-            <option value="all">All</option>
-            {lines.map(l => <option key={l.key} value={l.key}>{l.label}</option>)}
-          </PillSelect>
-        </label>
-      )}
-      {line !== 'all' && untagged > 0 && (
-        <p className="text-xs text-text-tertiary">
-          {plural(untagged, 'finding')} could not be tied to one business and only show under All.
-        </p>
-      )}
-    </div>
+    <section id={sectionId(tab.key)} className="scroll-mt-4 space-y-6 pt-6 border-t border-border first:border-t-0 first:pt-0">
+      <h2 className="text-lg font-semibold text-text">
+        {tab.label}
+        {tab.count != null && tab.count > 0 && <span className="ml-2 text-sm font-medium text-text-tertiary tabular-nums">{tab.count}</span>}
+      </h2>
+      {children}
+    </section>
   )
 }
 
@@ -680,8 +775,8 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
   // same route and renderer as the Analytics tab so the two never drift apart.
   const [explain, setExplain] = useState({ state: 'idle', points: [], error: '', cost: 0, capped: false, forRun: null })
   const [saveNote, setSaveNote] = useState('')
-  const [headlineOpen, setHeadlineOpen] = useState(false)
-  const tabsRef = useRef(null)
+  const detailRef = useRef(null)
+  const [active, setActive] = useState(null)
 
   useEffect(() => {
     if (!activeWorkspaceId) return undefined
@@ -838,12 +933,37 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
   }, [team, storeLoaded, visibleTop, visibleSales, sales.closed, visibleMoves, proposedCandidates, candidates, plan,
     showSearch, searchCount, ours, theirs, showDirection, showEvents, events, visibleNotes, world, poles, sources])
 
+  // ?section= still opens the page at a section, so an old link lands where
+  // it pointed. Read once: scrolling afterwards is the reader's business.
   const asked = params.get('section')
-  const activeTab = tabs.some(t => t.key === asked) ? asked : tabs[0]?.key
-  const pickTab = useCallback((key, scroll = false) => {
-    setParams(prev => { const n = new URLSearchParams(prev); n.set('section', key); return n }, { replace: true })
-    if (scroll) tabsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-  }, [setParams])
+  const askedOnce = useRef(false)
+  useEffect(() => {
+    if (askedOnce.current || !asked || !tabs.some(t => t.key === asked)) return
+    askedOnce.current = true
+    requestAnimationFrame(() => document.getElementById(sectionId(asked))?.scrollIntoView({ block: 'start' }))
+    setParams(prev => { const n = new URLSearchParams(prev); n.delete('section'); return n }, { replace: true })
+  }, [asked, tabs, setParams])
+  const pickTab = useCallback(key => scrollToSection(key), [])
+
+  // Which section the reader is in, for the contents list. The page scrolls
+  // inside the app shell, not the window, so this listens on that scroller.
+  useEffect(() => {
+    let el = detailRef.current?.parentElement
+    while (el && !/(auto|scroll)/.test(getComputedStyle(el).overflowY)) el = el.parentElement
+    const scroller = el || window
+    const onScroll = () => {
+      const top = (scroller === window ? 0 : scroller.getBoundingClientRect().top) + 120
+      let current = tabs[0]?.key || null
+      for (const t of tabs) {
+        const node = document.getElementById(sectionId(t.key))
+        if (node && node.getBoundingClientRect().top <= top) current = t.key
+      }
+      setActive(current)
+    }
+    onScroll()
+    scroller.addEventListener('scroll', onScroll, { passive: true })
+    return () => scroller.removeEventListener('scroll', onScroll)
+  }, [tabs])
 
   const onStatus = useCallback(async (row, status) => {
     setBusyId(row.id); setSaveNote('')
@@ -897,7 +1017,6 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
   const nothing = !failedRun && !report.headline && !(report.findings || []).length
   const reading = readingLine(states)
   const headline = failedRun ? 'This research run did not finish.' : report.headline || 'This research has no summary.'
-  const longHeadline = headline.length > 150
 
   // The takeaways are the report's own top items, first sentence only — the
   // glance card never says anything the tabs below do not.
@@ -908,10 +1027,7 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
   ].filter(t => String(t.text || '').trim()).slice(0, 4)
   const chips = tabs.filter(t => t.chip && t.chipCount !== 0)
 
-  const panel = key => `${activeTab === key ? '' : 'hidden print:block'} space-y-8`
-  const printTitle = key => (
-    <h2 className="hidden print:block text-lg font-bold text-text pt-4">{TAB_DEFS.find(t => t.key === key)?.label}</h2>
-  )
+  const tabOf = key => tabs.find(t => t.key === key)
 
   return (
     <div className="space-y-5">
@@ -946,16 +1062,7 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
           )}
         </div>
 
-        <h2 dir="auto" className={`text-lg sm:text-xl font-semibold text-text mt-3 leading-snug max-w-[68ch] ${
-          longHeadline && !headlineOpen ? 'line-clamp-2 print:line-clamp-none' : ''}`}>
-          {headline}
-        </h2>
-        {longHeadline && (
-          <button data-print-hide onClick={() => setHeadlineOpen(o => !o)}
-            className="text-xs font-medium text-text-secondary underline underline-offset-2 hover:text-text mt-1">
-            {headlineOpen ? 'Show less' : 'Read more'}
-          </button>
-        )}
+        <h2 dir="auto" className="text-lg sm:text-xl font-semibold text-text mt-3 leading-snug max-w-[75ch]">{headline}</h2>
 
         {(failedRun || partRun(run)) && (
           <p className="text-sm text-amber-800 bg-amber-50/60 border-l-2 border-amber-600 px-3 py-2 mt-3 leading-relaxed max-w-[72ch]">
@@ -965,7 +1072,7 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
         {!failedRun && !partRun(run) && faults.length > 0 && (
           <p className="text-sm text-amber-800 mt-3 leading-relaxed max-w-[72ch]">
             Part of this research did not complete, so some sections may be thinner than usual.{' '}
-            <button className="underline underline-offset-2" onClick={() => pickTab('method', true)}>What happened</button>
+            <button className="underline underline-offset-2" onClick={() => pickTab('method')}>What happened</button>
           </p>
         )}
         {nothing && !live && <p className="text-[15px] text-text-secondary mt-3 leading-relaxed max-w-[72ch]">{emptyReason(report, states)}</p>}
@@ -977,8 +1084,11 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
               {takeaways.map((t, i) => (
                 <li key={i} className="flex gap-2.5">
                   <span aria-hidden="true" className="shrink-0 mt-[9px] w-1.5 h-1.5 bg-amber-600" />
-                  <button onClick={() => pickTab(t.tab, true)} dir="auto"
-                    className="text-left text-[15px] text-text leading-relaxed line-clamp-2 print:line-clamp-none hover:underline underline-offset-2 decoration-border-strong">
+                  <button onClick={() => pickTab(t.tab)} dir="auto"
+                    className="text-left text-sm text-text leading-relaxed hover:underline underline-offset-2 decoration-border-strong">
+                    {/* The first sentence only: the whole finding is in its
+                        section, one click away, and the summary card stays a
+                        summary. */}
                     {firstSentence(t.text)}
                   </button>
                 </li>
@@ -993,7 +1103,7 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
               t.chipCount === null
                 ? <Skeleton key={t.key} className="h-8 w-40" />
                 : (
-                  <button key={t.key} onClick={() => pickTab(t.key, true)}
+                  <button key={t.key} onClick={() => pickTab(t.key)}
                     className="inline-flex items-baseline gap-1.5 border border-border bg-white px-3 py-1.5 text-sm hover:border-stone-400 hover:bg-surface-subtle transition-colors">
                     <span className="font-bold text-text tabular-nums">{t.chipCount}</span>
                     <span className="text-text-secondary">{t.chip(t.chipCount)}</span>
@@ -1017,26 +1127,23 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
       {saveNote && <Card className="p-3 border-red-200 bg-red-50/50"><p className="text-sm text-red-700">{saveNote}</p></Card>}
 
       {/* ── 2. The detail, one tab at a time ── */}
-      <div ref={tabsRef} className="scroll-mt-4 space-y-5">
-        <TabBar tabs={tabs} active={activeTab} onPick={k => pickTab(k)} />
-        {activeTab !== 'method' && (
-          <Filters team={team} onTeam={chooseTeam} lines={lines} line={line} onLine={chooseLine} untagged={untagged} />
-        )}
+      <div ref={detailRef} className="lg:grid lg:grid-cols-[180px_minmax(0,1fr)] lg:gap-8">
+        <Contents tabs={tabs} active={active} />
+        <div className="min-w-0 space-y-8">
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-sm text-text-secondary">The full report, section by section.</p>
+          <FilterMenu team={team} onTeam={chooseTeam} lines={lines} line={line} onLine={chooseLine} untagged={untagged} />
+        </div>
 
         {/* Do next */}
-        {tabs.some(t => t.key === 'do') && (
-          <div role="tabpanel" className={panel('do')}>
-            {printTitle('do')}
+        <Section tab={tabOf('do')}>
             <Part title="Top priorities" helper="What most needs doing this week, most important first.">
               <Stack>{visibleTop.map((t, i) => <TopItem key={i} t={t} n={i + 1} />)}</Stack>
             </Part>
-          </div>
-        )}
+        </Section>
 
         {/* Content ideas */}
-        {tabs.some(t => t.key === 'content') && (
-          <div role="tabpanel" className={panel('content')}>
-            {printTitle('content')}
+        <Section tab={tabOf('content')}>
             {show('recs') && plan.total > 0 && (
               <Part title="Content ideas" count={plan.total}
                 helper="Where what the market wants and what we say do not line up, with content to close the gap.">
@@ -1044,11 +1151,11 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
                     the one control that starts work should not be the last
                     thing on the page. */}
                 {plan.ideaCount > 0 && <div data-print-hide className="max-w-[72ch] [&>div]:mt-0 [&>div]:border-t-0 [&>div]:pt-0"><SendIdeasToPlan ideas={plan.ordered} /></div>}
-                <Stack>{plan.blocks.map(block => <GapBlock key={block.gap.id} block={block} />)}</Stack>
+                <Limited items={plan.blocks} noun="content ideas" render={block => <GapBlock block={block} />} />
                 {plan.loose.length > 0 && (
                   <div className="space-y-3 pt-2">
                     {plan.blocks.length > 0 && <SubHead>More ideas from this research</SubHead>}
-                    <Stack>{plan.loose.map((idea, i) => <IdeaCard key={i} idea={idea} />)}</Stack>
+                    <IdeaList ideas={plan.loose} />
                   </div>
                 )}
                 {(report.repeated_ideas || []).length > 0 && (
@@ -1108,13 +1215,13 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
                     {search.opportunities.length > 0 && (
                       <div className="space-y-3 pt-1">
                         <SubHead>Searches we show up for but do not win</SubHead>
-                        <Stack>{search.opportunities.map((r, i) => <SearchRow key={i} r={r} lineLabel={lineLabel} />)}</Stack>
+                        <SearchList rows={search.opportunities} lineLabel={lineLabel} />
                       </div>
                     )}
                     {search.movers.length > 0 && (
                       <div className="space-y-3 pt-1">
                         <SubHead>What changed</SubHead>
-                        <Stack>{search.movers.map((r, i) => <SearchRow key={i} r={r} lineLabel={lineLabel} />)}</Stack>
+                        <SearchList rows={search.movers} lineLabel={lineLabel} />
                       </div>
                     )}
                     {!searchCount && <Quiet>Nothing in the search numbers changed enough to report this time.</Quiet>}
@@ -1130,13 +1237,10 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
                 </div>
               </Part>
             )}
-          </div>
-        )}
+        </Section>
 
         {/* Leads & tenders */}
-        {tabs.some(t => t.key === 'leads') && (
-          <div role="tabpanel" className={panel('leads')}>
-            {printTitle('leads')}
+        <Section tab={tabOf('leads')}>
             <Part title="Leads, tenders and projects" count={storeLoaded ? visibleSales.open.length : null}
               helper={sales.trackerAvailable
                 ? 'Every open opening we are tracking, not only this week’s. Set the status as you work each one.'
@@ -1156,13 +1260,10 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
                 </p>
               )}
             </Part>
-          </div>
-        )}
+        </Section>
 
         {/* Competitors */}
-        {tabs.some(t => t.key === 'competitors') && (
-          <div role="tabpanel" className={panel('competitors')}>
-            {printTitle('competitors')}
+        <Section tab={tabOf('competitors')}>
             {show('competitors') && visibleMoves.length > 0 && (
               <Part title="Competitor moves" count={visibleMoves.length}
                 helper="What each competitor is doing, and what it means for us.">
@@ -1206,7 +1307,7 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
                           <p className="text-[15px] font-semibold text-text">
                             {c.name}{c.thisRun && <span className="ml-1.5 align-middle"><Chip tone="bg-sage-50 text-sage-700 border-sage-200">This week</Chip></span>}
                           </p>
-                          {c.why && <div className="mt-0.5"><Clamp text={c.why} lines={2} className="text-sm text-text-secondary leading-relaxed" /></div>}
+                          {c.why && <p dir="auto" className="mt-0.5 text-sm text-text-secondary leading-relaxed break-words">{c.why}</p>}
                           {c.url && <a href={c.url} target="_blank" rel="noopener noreferrer" className="text-xs text-text-tertiary underline underline-offset-2">{domainOf(c.url)}</a>}
                         </div>
                         {c.agendaId && c.status === 'proposed' ? (
@@ -1240,13 +1341,10 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
                 </div>
               </Part>
             )}
-          </div>
-        )}
+        </Section>
 
         {/* Market & events */}
-        {tabs.some(t => t.key === 'market') && (
-          <div role="tabpanel" className={panel('market')}>
-            {printTitle('market')}
+        <Section tab={tabOf('market')}>
             {showEvents && !storeLoaded && (
               <Part title="Events and expos">
                 <div aria-busy="true" className="space-y-3"><Skeleton className="h-24 w-full" /></div>
@@ -1267,7 +1365,7 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
                 )}
                 {events.recent.length > 0 && (
                   <div className="space-y-3 pt-2"><SubHead>Recently — what happened</SubHead>
-                    <Stack>{events.recent.map((e, i) => <EventCard key={e.id || `r${i}`} e={e} recent />)}</Stack>
+                    <Limited items={events.recent} limit={3} noun="past events" render={e => <EventCard e={e} recent />} />
                   </div>
                 )}
               </Part>
@@ -1289,27 +1387,25 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
             {show('market') && visibleNotes.length > 0 && (
               <Part title="Market and technical news" count={visibleNotes.length}
                 helper="Regulations, standards, technology and giga-projects.">
-                <Stack>{visibleNotes.map((note, i) => <Note key={i} n={note} now={now} />)}</Stack>
+                <Limited items={visibleNotes} noun="news items" render={note => <Note n={note} now={now} />} />
               </Part>
             )}
             {show('global') && world.items.length > 0 && (
               <Part title="Global industry" count={world.items.length}
                 helper="What international manufacturers, prices and standards are doing — usually a sign of what reaches us later.">
-                <Stack>{world.items.map((f, i) => <Note key={i} n={asNote(f, now)} now={now} />)}</Stack>
+                <Limited items={world.items} limit={3} noun="global items" render={f => <Note n={asNote(f, now)} now={now} />} />
               </Part>
             )}
             {show('poles') && poles.items.length > 0 && (
               <Part title="Smart poles" count={poles.items.length}
                 helper="Our municipal line, kept on its own because its buyer is a city rather than an architect or consultant.">
-                <Stack>{poles.items.map((f, i) => <Note key={i} n={asNote(f, now)} now={now} />)}</Stack>
+                <Limited items={poles.items} limit={3} noun="smart pole items" render={f => <Note n={asNote(f, now)} now={now} />} />
               </Part>
             )}
-          </div>
-        )}
+        </Section>
 
         {/* Sources & method */}
-        <div role="tabpanel" className={panel('method')}>
-          {printTitle('method')}
+        <Section tab={tabOf('method')}>
           <Part title="How this research went" helper={[status?.label, reading].filter(Boolean).join(' · ')}>
             <div className="bg-white border border-border p-4 sm:p-5 space-y-5">
               {report.repetition && <p className="text-sm text-amber-700 max-w-[72ch]">{report.repetition}</p>}
@@ -1366,16 +1462,7 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
           <Part title="All sources" count={sources.length || null}
             helper={sources.length ? `Every page this research quotes, checked on ${fmtDate(run.started_at)}.` : null}>
             {sources.length ? (
-              <ul className="bg-white border border-border divide-y divide-border-light">
-                {sources.map(s => (
-                  <li key={s.url} className="px-4 py-2 text-sm leading-relaxed flex flex-col sm:flex-row sm:gap-3 min-w-0">
-                    <span className="text-text-tertiary shrink-0 sm:w-[160px] truncate">{s.domain}</span>
-                    <a href={s.url} target="_blank" rel="noopener noreferrer" className="text-text-secondary hover:text-text underline underline-offset-2 min-w-0 truncate">
-                      {s.title || s.url}
-                    </a>
-                  </li>
-                ))}
-              </ul>
+              <AllSources sources={sources} />
             ) : <Quiet>This research does not quote any web pages.</Quiet>}
           </Part>
 
@@ -1396,6 +1483,7 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
               </details>
             </Card>
           </section>
+        </Section>
         </div>
       </div>
     </div>
