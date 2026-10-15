@@ -336,7 +336,7 @@ export function PostComposer({
             <Section>
               <div className="flex items-center justify-between mb-3">
                 <div className="flex gap-1">
-                  {Object.entries(PLATFORM_META).filter(([, m]) => m.status !== 'beta').map(([key, m]) => (
+                  {Object.entries(PLATFORM_META).filter(([, m]) => m.status !== 'beta' && !m.hidden).map(([key, m]) => (
                     <button key={key} type="button"
                       onClick={() => setState(s => setPlatformIn(s, key))}
                       className={`px-3 py-1.5 text-xs font-semibold border transition-colors ${state.platform === key ? 'border-amber-600 bg-amber-50 text-amber-900' : 'border-border text-text-secondary hover:bg-surface-subtle'}`}>

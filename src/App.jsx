@@ -32,7 +32,6 @@ import AgentBrief                 from './pages/admin/AgentBrief'
 import { MediaLibrary }            from './pages/media/index'
 import { SocialOverview, SocialPlatform } from './pages/social/index'
 import { InstagramPage } from './pages/social/InstagramPage'
-import { TikTokPage } from './pages/social/TikTokPage'
 import { LinkedInPage } from './pages/social/LinkedInPage'
 import { Approvals as PostApprovals } from './pages/social/Approvals'
 import AutoReplies from './pages/social/AutoReplies'
@@ -163,7 +162,7 @@ function ProtectedApp() {
             <Route path="/social/approvals"      element={<PostApprovals />} />
             <Route path="/social/auto-replies"   element={<AutoReplies />} />
             <Route path="/social/instagram"      element={<InstagramPage />} />
-            <Route path="/social/tiktok"         element={<TikTokPage />} />
+            <Route path="/social/tiktok"         element={<Navigate to="/social" replace />} />
             <Route path="/social/linkedin"       element={<LinkedInPage />} />
             {/* Fallback for any platform in PLATFORM_META without its own page
                 yet. React Router ranks static segments above dynamic ones, so

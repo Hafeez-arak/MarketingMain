@@ -7,7 +7,7 @@
 // constant shared between two components in one 2,300-line file is invisible;
 // here it is an import.
 
-import { PLATFORM_META } from '../../lib/utils'
+import { PLATFORM_META, isLivePlatform } from '../../lib/utils'
 import { PLANNABLE_PLATFORMS } from '../../lib/campaignPlanner'
 
 // What a month is broadly FOR. Sent to the planner as GOAL CATEGORY, so it
@@ -104,7 +104,8 @@ export function customCategories(value) {
 // 2026-09-15; it is still drafts-only (PROTECTED_PLATFORMS), so a LinkedIn
 // idea ends as a post in Approvals and never reaches the page from here.
 // TikTok joined them next: its ideas are 9:16 videos and photo carousels.
-export const PLATFORMS = PLANNABLE_PLATFORMS
+// A hidden platform (see PLATFORM_META) is left out of the picker.
+export const PLATFORMS = PLANNABLE_PLATFORMS.filter(isLivePlatform)
 
 // Where one idea can be SENT. Distinct from PLATFORMS above, which is where
 // ideas can be GENERATED — the plan-generation workflow only speaks Instagram,
@@ -121,7 +122,7 @@ export const PLATFORMS = PLANNABLE_PLATFORMS
 // connected or published to — so offering it as a target promised a post that
 // would never go anywhere.
 export const TARGET_PLATFORMS = Object.entries(PLATFORM_META)
-  .filter(([, meta]) => meta.status !== 'beta')
+  .filter(([, meta]) => meta.status !== 'beta' && !meta.hidden)
   .map(([id, meta]) => ({
     id,
     label: meta.label,

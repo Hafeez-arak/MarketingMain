@@ -10,6 +10,10 @@ export function timeAgo(iso) {
   const h = Math.floor(m/60)
   if (h<24) return `${h}h ago`; return `${Math.floor(h/24)}d ago`
 }
+// `hidden: true` keeps a platform out of the app entirely — no card, no
+// composer tab, no planner option — while its data and code paths stay put,
+// so turning it back on is deleting the flag. TikTok is hidden until an
+// account is actually connected (2026-10-14).
 // `status: 'beta'` means the platform is shown but cannot be connected or
 // published to. Snapchat is listed rather than omitted because a platform the
 // team is waiting on should be visible and labelled, not a gap everyone has
@@ -17,7 +21,7 @@ export function timeAgo(iso) {
 // honour the flag — see the guards in src/pages/social/.
 export const PLATFORM_META = {
   instagram:{ label:'Instagram', abbr:'IG', color:'#E1306C', bg:'bg-pink-50',  text:'text-pink-600',  border:'border-pink-200',  maxChars:2200 },
-  tiktok:   { label:'TikTok',    abbr:'TT', color:'#010101', bg:'bg-stone-100',text:'text-stone-700', border:'border-stone-300', maxChars:2200 },
+  tiktok:   { label:'TikTok',    abbr:'TT', color:'#010101', bg:'bg-stone-100',text:'text-stone-700', border:'border-stone-300', maxChars:2200, hidden:true },
   // LinkedIn's own limit is 3000 characters for a post body. It was removed
   // from this app entirely on 2026-08-16 (tables dropped, workflows retired)
   // and is back as a real platform rather than an un-hiding — see
@@ -31,10 +35,11 @@ export const PLATFORM_META = {
 // network call, so that adding the next beta platform doesn't quietly wire
 // it up to a publish path that will reject it.
 export const LIVE_PLATFORMS = Object.entries(PLATFORM_META)
-  .filter(([, m]) => m.status !== 'beta')
+  .filter(([, m]) => m.status !== 'beta' && !m.hidden)
   .map(([key]) => key)
 
-export const isLivePlatform = platform => PLATFORM_META[platform]?.status !== 'beta'
+export const isLivePlatform = platform =>
+  PLATFORM_META[platform]?.status !== 'beta' && !PLATFORM_META[platform]?.hidden
 export const STATUS_META = {
   draft:           { label:'Draft',     classes:'bg-stone-100 text-stone-600' },
   scheduled:       { label:'Scheduled', classes:'bg-sky-50 text-sky-700' },

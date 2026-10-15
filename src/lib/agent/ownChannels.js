@@ -25,7 +25,13 @@
 // grade of fact would be the exact failure the whole design is organised
 // against.
 
-import { LIVE_PLATFORMS, PLATFORM_META } from '../utils.js'
+import { PLATFORM_META } from '../utils.js'
+
+// Every platform the app can publish to, including ones hidden from the
+// screens (`hidden` is a display choice). Only platforms with a connected
+// account are reported, so a hidden one with no account never appears — but
+// if it is connected, its numbers are real and must not be dropped.
+const MEASURED_PLATFORMS = Object.keys(PLATFORM_META).filter(k => PLATFORM_META[k].status !== 'beta')
 import { engagementOf, indexAnalytics, analyticsFor } from './aggregate.js'
 
 /** Below this many measured posts, a per-platform average is quoted but flagged. */
@@ -347,7 +353,7 @@ export function ownChannels({ accounts = [], posts = [], analytics = [], period,
   const allPosts = [...(posts || []), ...ext.posts.filter(p => live.has(p.platform))]
   const byPostId = analyticsByPost([...(analytics || []), ...ext.analytics])
 
-  const platforms = LIVE_PLATFORMS.map(platform => {
+  const platforms = MEASURED_PLATFORMS.map(platform => {
     const account = live.get(platform) || null
     const mine = allPosts.filter(p => String(p?.platform || '').toLowerCase() === platform)
     const now = windowStats(postsIn(mine, period), byPostId)
