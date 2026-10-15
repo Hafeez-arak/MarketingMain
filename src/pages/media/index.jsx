@@ -34,6 +34,7 @@ export function MediaLibrary() {
 
   const [assets,      setAssets]      = useState([])
   const [loadedFor,   setLoadedFor]   = useState(null)  // workspace `assets` was fetched for
+  const [failedFor,   setFailedFor]   = useState(null)  // workspace whose first load failed
   const [loading,     setLoading]     = useState(true)
   const [deleteId,    setDeleteId]    = useState(null)
   const [fullscreen,  setFullscreen]  = useState(null)  // { url, name }
@@ -71,15 +72,16 @@ export function MediaLibrary() {
   const fetchAssets = useCallback(async () => {
     setLoading(true)
     const rows = await loadAssets()
-    if (rows) setAssets(rows)
+    if (rows) { setAssets(rows); setLoadedFor(activeWorkspaceId); setFailedFor(null) }
     setLoading(false)
-  }, [loadAssets])
+  }, [loadAssets, activeWorkspaceId])
 
   useEffect(() => {
     let alive = true
     loadAssets().then(rows => {
       if (!alive) return
       if (rows) { setAssets(rows); setLoadedFor(activeWorkspaceId) }
+      else setFailedFor(activeWorkspaceId)
       setLoading(false)
     })
     return () => { alive = false }
@@ -258,7 +260,12 @@ export function MediaLibrary() {
       )}
 
       {/* Files */}
-      {loading || stale ? (
+      {stale && !loading && failedFor === activeWorkspaceId ? (
+        <Card className="px-6 py-8 text-center">
+          <p className="text-sm text-text">The media library couldn’t be loaded.</p>
+          <Button variant="outline" size="sm" className="mt-3" onClick={fetchAssets}>Try again</Button>
+        </Card>
+      ) : loading || stale ? (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3" aria-busy="true" aria-label="Loading media">
           {Array.from({ length: 8 }, (_, i) => <Skeleton key={i} className="aspect-square w-full" />)}
         </div>

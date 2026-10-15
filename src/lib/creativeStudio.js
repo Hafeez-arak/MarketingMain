@@ -25,15 +25,21 @@ function jsonHeaders(accessToken, prefer = 'return=representation') {
 
 // ── Sessions ───────────────────────────────────────────────────────────────
 
-export async function fetchSessions(workspaceId, accessToken, limit = 40) {
+// With throwOnError a failed read throws instead of looking like an empty
+// history, so the sidebar can say it failed rather than "Nothing yet."
+export async function fetchSessions(workspaceId, accessToken, limit = 40, { throwOnError = false } = {}) {
   if (!workspaceId) return []
+  let failure
   try {
     const res = await fetch(
       `${SUPABASE_URL}/rest/v1/creative_sessions?workspace_id=eq.${workspaceId}&select=*&order=updated_at.desc&limit=${limit}`,
       { headers: authHeaders(accessToken) },
     )
-    return res.ok ? await res.json() : []
-  } catch { return [] }
+    if (res.ok) return await res.json()
+    failure = new Error(`HTTP ${res.status}`)
+  } catch (err) { failure = err }
+  if (throwOnError) throw failure
+  return []
 }
 
 export async function createSession(workspaceId, accessToken, { title, intent, aspectRatio, storyboard, planIdeaId, brief }) {

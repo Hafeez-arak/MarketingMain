@@ -243,6 +243,7 @@ export function CreativeStudio() {
   useBrandProfileSync(state, dispatch)
 
   const [sessions, setSessions] = useState([])
+  const [sessionsFailed, setSessionsFailed] = useState(false)
   const [session, setSession] = useState(null)
   const [versions, setVersions] = useState([])
   // Derived, not set in an effect: with no workspace there is nothing to wait
@@ -383,9 +384,12 @@ export function CreativeStudio() {
   useEffect(() => {
     if (!activeWorkspaceId) return
     let cancelled = false
-    fetchSessions(activeWorkspaceId, accessToken).then(rows => {
+    fetchSessions(activeWorkspaceId, accessToken, 40, { throwOnError: true }).then(rows => {
       if (cancelled) return          // workspace switched mid-fetch
-      setSessions(rows); setLoading(false)
+      setSessions(rows); setSessionsFailed(false); setLoading(false)
+    }, () => {
+      if (cancelled) return
+      setSessionsFailed(true); setLoading(false)
     })
     return () => { cancelled = true }
   }, [activeWorkspaceId, accessToken])
@@ -1831,6 +1835,7 @@ export function CreativeStudio() {
           sessions={sessions}
           session={session}
           loading={loading}
+          failed={sessionsFailed}
           onOpen={openSession}
           onNew={newSession}
           onRename={handleRenameSession}
