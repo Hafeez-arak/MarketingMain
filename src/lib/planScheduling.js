@@ -43,7 +43,7 @@ export function bookingFor(row, { accounts = [], changed = true, now = Date.now(
   if (scheduled && !changed) return { action: 'keep', reason: '' }
 
   if (isProtectedPlatform(row.platform)) {
-    return { action: 'attention', reason: 'LinkedIn posts are drafts — nothing here posts to the page.' }
+    return { action: 'attention', reason: 'Posts to this platform are drafts — nothing here publishes them.' }
   }
   if (!row.scheduled_date) return { action: 'attention', reason: 'No date — pick when it goes out.' }
   const at = brandWallToUtc(row.scheduled_date, (row.publish_time || '09:00').slice(0, 5))
@@ -154,7 +154,7 @@ export async function bookPostAt({ post, dateKey, time, accounts = [], workspace
   }
 
   if (isProtectedPlatform(post.platform)) {
-    return { error: 'LinkedIn posts are drafts here — nothing in this app posts to the page.' }
+    return { error: 'Posts to this platform are drafts here — nothing in this app publishes them.' }
   }
 
   const account = accountFor(post, accounts)

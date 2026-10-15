@@ -30,13 +30,13 @@ const idea = over => ({
 })
 
 describe('publishIdeasAsPosts — LinkedIn', () => {
-  it('writes a LinkedIn text post as a draft with its format and no media', async () => {
+  it('writes a LinkedIn text post ready to book, with its format and no media', async () => {
     const res = await publishIdeasAsPosts('ws-1', 'tok', 'plan-1', [idea()])
     expect(res.errors).toEqual([])
     expect(writes).toHaveLength(1)
     expect(writes[0].body).toMatchObject({
       platform: 'linkedin', format: 'text', media_type: 'none', post_kind: 'text_only',
-      status: 'pending_review', caption: 'The standard changes on 1 December.',
+      status: 'pending_publish', caption: 'The standard changes on 1 December.',
     })
   })
 
@@ -94,7 +94,7 @@ describe('publishIdeasAsPosts — LinkedIn', () => {
   })
 })
 
-describe('sendVersionToPosts — LinkedIn is drafts only', () => {
+describe('sendVersionToPosts — LinkedIn', () => {
   const version = { id: 'v1', image_url: 'https://cdn.test/a.png', is_final: true }
 
   it('is offered as a target', () => {
@@ -107,18 +107,16 @@ describe('sendVersionToPosts — LinkedIn is drafts only', () => {
     expect(writes[0].body).toMatchObject({ platform: 'linkedin', status: 'pending_review' })
   })
 
-  it('refuses to publish or schedule to LinkedIn before writing anything', async () => {
-    for (const mode of ['now', 'schedule']) {
-      const res = await sendVersionToPosts('ws-1', 'tok', { version, targets: ['linkedin'], caption: 'x', when: { mode, at: '2026-10-06T19:00' } })
-      expect(res.error).toContain('drafts only')
-    }
-    expect(writes).toHaveLength(0)
+  it('schedules to LinkedIn like any other platform (drafts-only until 2026-10-14)', async () => {
+    const res = await sendVersionToPosts('ws-1', 'tok', { version, targets: ['linkedin'], caption: 'x', when: { mode: 'schedule', at: '2026-10-06T19:00' } })
+    expect(res.error).toBeFalsy()
+    expect(writes.map(w => w.body.platform)).toContain('linkedin')
   })
 
-  it('still publishes to Instagram alongside a refused LinkedIn', async () => {
-    const res = await sendVersionToPosts('ws-1', 'tok', { version, targets: ['instagram', 'linkedin'], caption: 'x', when: { mode: 'now' } })
-    expect(writes.map(w => w.body.platform)).toEqual(['instagram'])
-    expect(res.warning).toContain('linkedin: drafts only')
+  it('sends one post to Instagram and LinkedIn together', async () => {
+    const res = await sendVersionToPosts('ws-1', 'tok', { version, targets: ['instagram', 'linkedin'], caption: 'x', when: { mode: 'schedule', at: '2026-10-06T19:00' } })
+    expect(res.warning || '').not.toContain('drafts only')
+    expect(writes.map(w => w.body.platform)).toEqual(expect.arrayContaining(['instagram', 'linkedin']))
   })
 })
 

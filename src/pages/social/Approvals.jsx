@@ -245,7 +245,7 @@ const TABS = [
 // Why a post that is not booked is not booked, in words that say what to do.
 function attentionReason(post, accounts, now) {
   if (post.publishStatus === 'failed') return post.publishError || 'Publishing failed.'
-  if (isProtectedPlatform(post.platform)) return 'LinkedIn posts are drafts — nothing here posts to the page.'
+  if (isProtectedPlatform(post.platform)) return 'Posts to this platform are drafts — nothing here publishes them.'
   if (post.status === 'rejected') return 'Rejected.'
   if (post.platform === 'tiktok' && !post.platformOptions?.tiktok?.privacy_level) {
     return 'TikTok needs a privacy level and a per-post consent confirmation.'

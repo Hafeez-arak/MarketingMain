@@ -36,12 +36,13 @@
 /**
  * Platforms no account may be published to, whatever the row says.
  *
- * LinkedIn is here because ARAK's is the company's official page and the
- * business has not asked for publishing to it. Removing a platform from this
- * list is a deliberate decision with a real audience on the other side of it,
- * not a cleanup.
+ * Empty since 2026-10-14: LinkedIn was here while ARAK's official page was
+ * connected for reading only, and the owner then decided, for the production
+ * handover, that plans publish to it like Instagram. Adding a platform back is
+ * a deliberate decision with a real audience on the other side of it, not a
+ * cleanup. The per-account `is_protected` flag still applies either way.
  */
-export const PROTECTED_PLATFORMS = ['linkedin']
+export const PROTECTED_PLATFORMS = []
 
 /** Is this platform write-protected for every account, current and future? */
 export function isProtectedPlatform(platform) {
@@ -88,5 +89,5 @@ export function protectionReason(account) {
       'Changing that is a decision for whoever owns the page, not a setting to toggle past.'
   }
   return `${label} is marked protected, so publishing and disconnecting are refused. ` +
-    'Clear is_protected on the account to change that.'
+    'Ask your admin if that should change.'
 }

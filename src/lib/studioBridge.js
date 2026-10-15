@@ -367,9 +367,9 @@ export async function saveIdeaPlatforms(accessToken, ideaId, platforms, primaryP
 //
 // LinkedIn is here so a plan's LinkedIn posts reach Approvals at all — until
 // 2026-09-15 it was missing, and finalising dropped every one of them with
-// "no platform to post to". Being writable is not being publishable: LinkedIn
-// is in PROTECTED_PLATFORMS, and both writers below keep its rows out of
-// pending_publish.
+// "no platform to post to". Until 2026-10-14 LinkedIn was also in
+// PROTECTED_PLATFORMS (drafts only); it now publishes like Instagram, and the
+// protected-platform checks below only matter if a platform is added back.
 const PLATFORM_TABLE = {
   instagram: 'generated_posts',
   tiktok:    'generated_posts',
