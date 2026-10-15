@@ -111,7 +111,7 @@ export function WeeklyDrafts({ workspaceId, data, reload, setTab }) {
           <p className="text-xs text-text-tertiary mt-1">
             {current?.status === 'ready'
               ? `Week of ${shortDate(current.week_of)} · written ${dateTime(current.finished_at)} from your Brand Brain, the latest research, the calendar and past emails.`
-              : 'Every Monday at 10:30 Riyadh time, three options for the week\'s email, from your Brand Brain, the latest research, the calendar and how past emails did.'}
+              : 'Every Monday at 07:30 Riyadh time, three options for the week\'s email, from your Brand Brain, the latest research, the calendar and how past emails did.'}
           </p>
         </div>
         {current?.status === 'ready' ? (
