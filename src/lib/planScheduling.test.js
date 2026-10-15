@@ -36,9 +36,17 @@ describe('bookingFor', () => {
     expect(plan.reason).toMatch(/passed/)
   })
 
-  it('keeps LinkedIn a draft', () => {
+  it('books LinkedIn the same way as Instagram', () => {
+    // Drafts-only until 2026-10-14; the owner then chose to publish to the page.
     const li = { platform: 'linkedin', is_active: true, zernio_account_id: 'acc-li' }
-    expect(bookingFor(row({ platform: 'linkedin' }), { accounts: [li], now: NOW }).action).toBe('attention')
+    const plan = bookingFor(row({ platform: 'linkedin' }), { accounts: [li], now: NOW })
+    expect(plan.action).toBe('book')
+    expect(plan.account).toBe(li)
+  })
+
+  it('still keeps an account flagged protected out of booking', () => {
+    const li = { platform: 'linkedin', is_active: true, zernio_account_id: 'acc-li', is_protected: true }
+    expect(bookingFor(row({ platform: 'linkedin' }), { accounts: [li], now: NOW }).reason).toMatch(/protected/)
   })
 
   it('asks rather than guessing between two accounts', () => {
@@ -87,11 +95,11 @@ describe('bookPostAt', () => {
     expect(res.error).toMatch(/no instagram account is connected/i)
   })
 
-  it('will not book a protected platform', async () => {
-    const li = { platform: 'linkedin', is_active: true, zernio_account_id: 'acc-li' }
+  it('will not book an account flagged protected', async () => {
+    const li = { platform: 'linkedin', is_active: true, zernio_account_id: 'acc-li', is_protected: true }
     const res = await bookPostAt({
       post: row({ platform: 'linkedin' }), ...at, accounts: [li], now: NOW,
     })
-    expect(res.error).toMatch(/drafts/i)
+    expect(res.error).toMatch(/protected/i)
   })
 })

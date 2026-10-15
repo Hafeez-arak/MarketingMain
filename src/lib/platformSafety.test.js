@@ -5,13 +5,13 @@ import {
 
 // ─── The account that cannot be un-posted to ───────────────────────────────
 //
-// ARAK Lighting's LinkedIn is the company's real page. @lightingaaa is a
-// one-follower test account. Every publish path in this app was written for
-// the second kind, and these tests are what keep the first kind out of them.
+// No platform is protected by default since 2026-10-14 — the owner chose to
+// publish to ARAK's LinkedIn page. What remains is the per-account flag:
+// any single account can still be marked protected without a deploy.
 
 const linkedin = {
   platform: 'linkedin', username: 'ARAK Lighting', display_name: 'ARAK Lighting',
-  is_active: true, is_protected: true,
+  is_active: true, is_protected: false,
 }
 const instagram = {
   platform: 'instagram', username: 'lightingaaa', display_name: 'Lighting Arak',
@@ -19,20 +19,11 @@ const instagram = {
 }
 
 describe('isProtectedPlatform', () => {
-  it('protects LinkedIn', () => {
-    expect(isProtectedPlatform('linkedin')).toBe(true)
-  })
-
-  it('does not protect the platforms this product publishes to', () => {
+  it('protects no platform by default, LinkedIn included', () => {
+    expect(isProtectedPlatform('linkedin')).toBe(false)
+    expect(isProtectedPlatform('LinkedIn')).toBe(false)
     expect(isProtectedPlatform('instagram')).toBe(false)
     expect(isProtectedPlatform('tiktok')).toBe(false)
-  })
-
-  it('is not fooled by case or whitespace', () => {
-    // The platform reaches this from a webhook body, a DB column and a React
-    // prop. Exactly one of those is guaranteed to be normalised.
-    expect(isProtectedPlatform('LinkedIn')).toBe(true)
-    expect(isProtectedPlatform('  LINKEDIN  ')).toBe(true)
   })
 
   it('says no to nothing rather than throwing', () => {
@@ -43,20 +34,16 @@ describe('isProtectedPlatform', () => {
 })
 
 describe('mayPublishTo', () => {
-  it('refuses LinkedIn', () => {
-    expect(mayPublishTo(linkedin)).toBe(false)
+  it('allows the LinkedIn page', () => {
+    expect(mayPublishTo(linkedin)).toBe(true)
   })
 
   it('allows Instagram', () => {
     expect(mayPublishTo(instagram)).toBe(true)
   })
 
-  it('refuses LinkedIn even when the stored flag says otherwise', () => {
-    // The reconnection hole: a NEW row defaults is_protected to false, and
-    // this workspace's Instagram already proved that reconnecting is how rows
-    // get replaced. The platform rule is what survives that.
-    expect(mayPublishTo({ ...linkedin, is_protected: false })).toBe(false)
-    expect(mayPublishTo({ platform: 'linkedin' })).toBe(false)
+  it('still refuses a LinkedIn account that is flagged protected', () => {
+    expect(mayPublishTo({ ...linkedin, is_protected: true })).toBe(false)
   })
 
   it('honours the flag on a platform that is not protected by default', () => {
@@ -74,10 +61,10 @@ describe('mayPublishTo', () => {
 })
 
 describe('mayDisconnect', () => {
-  it('refuses to disconnect the protected account', () => {
+  it('refuses to disconnect a protected account', () => {
     // Disconnecting deletes it at Zernio, which is its own harm — the
     // connection to a real company page is not trivially rebuilt.
-    expect(mayDisconnect(linkedin)).toBe(false)
+    expect(mayDisconnect({ ...linkedin, is_protected: true })).toBe(false)
   })
 
   it('allows disconnecting an ordinary account', () => {
@@ -86,18 +73,14 @@ describe('mayDisconnect', () => {
 })
 
 describe('protectionReason', () => {
-  it('names the account and says reporting still works', () => {
-    // The refusal has to distinguish itself from a failure. "Publishing
-    // failed" sends someone to a status page; this should send them to
-    // whoever owns the page.
-    const reason = protectionReason(linkedin)
+  it('names a flagged account in plain words', () => {
+    // The refusal has to distinguish itself from a failure: "publishing
+    // failed" sends someone to a status page, this sends them to whoever
+    // decided.
+    const reason = protectionReason({ ...linkedin, is_protected: true })
     expect(reason).toMatch(/ARAK Lighting/)
-    expect(reason).toMatch(/linkedin/i)
-    expect(reason).toMatch(/Analytics and reporting are unaffected/i)
-  })
-
-  it('explains a flagged account differently from a protected platform', () => {
-    expect(protectionReason({ ...instagram, is_protected: true })).toMatch(/is_protected/)
+    expect(reason).toMatch(/marked protected/)
+    expect(reason).not.toMatch(/is_protected/)
   })
 
   it('says so when there is no account at all', () => {
@@ -106,10 +89,9 @@ describe('protectionReason', () => {
 })
 
 describe('the list itself', () => {
-  it('contains LinkedIn and is not empty', () => {
-    // A guard whose list silently emptied would pass every other test in this
-    // file, because every one of them asks a question about LinkedIn.
-    expect(PROTECTED_PLATFORMS).toContain('linkedin')
-    expect(PROTECTED_PLATFORMS.length).toBeGreaterThan(0)
+  it('no longer contains LinkedIn', () => {
+    // Emptied on purpose (owner decision, 2026-10-14). If a platform is added
+    // back, this test is the reminder that it was a decision, not a cleanup.
+    expect(PROTECTED_PLATFORMS).not.toContain('linkedin')
   })
 })

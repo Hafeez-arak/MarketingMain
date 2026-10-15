@@ -256,43 +256,45 @@ describe('account resolution when the caller names no account', () => {
 // webhook is reachable without one. This is the layer that cannot be routed
 // around, so it is the layer worth testing.
 
-describe('protected accounts', () => {
+describe('LinkedIn publishing', () => {
+  // LinkedIn was a protected platform until 2026-10-14, when the owner chose
+  // to publish plans to ARAK's page. These pin that it now goes through the
+  // same path as Instagram, including a text-only post.
   const linkedinAccounts = [{ _id: 'acc_li', platform: 'linkedin', isActive: true }]
 
-  it('refuses to publish to LinkedIn, and sends Zernio nothing', async () => {
+  it('publishes a LinkedIn post to the LinkedIn account', async () => {
     const { routes, sent } = zernio({ accounts: linkedinAccounts })
     const out = await run({ ...base, account_id: 'acc_li', platform: 'linkedin' },
       { postgrest: db(), routes })
 
-    expect(out.out.ok).toBe(false)
-    expect(out.out.error).toMatch(/protected/i)
-    // The assertion that actually matters: nothing reached the provider.
-    expect(sent).toHaveLength(0)
+    expect(out.out.ok).toBe(true)
+    expect(sent).toHaveLength(1)
+    expect(sent[0].platforms[0]).toMatchObject({ platform: 'linkedin', accountId: 'acc_li' })
   })
 
-  it('refuses a SCHEDULED LinkedIn post too, not just an immediate one', async () => {
+  it('schedules a LinkedIn post at the chosen time', async () => {
     const { routes, sent } = zernio({ accounts: linkedinAccounts })
-    const out = await run({
+    await run({
       ...base, account_id: 'acc_li', platform: 'linkedin',
       scheduled_for: '2026-12-01T09:00:00', timezone: 'Asia/Riyadh',
     }, { postgrest: db(), routes })
 
-    expect(out.out.ok).toBe(false)
-    expect(sent).toHaveLength(0)
+    expect(sent).toHaveLength(1)
+    expect(sent[0].scheduledFor).toBe('2026-12-01T09:00:00')
+    expect(sent[0].timezone).toBe('Asia/Riyadh')
   })
 
-  it('is not fooled by capitalisation from a hand-made request', async () => {
+  it('publishes a text-only LinkedIn post with no media', async () => {
     const { routes, sent } = zernio({ accounts: linkedinAccounts })
-    const out = await run({ ...base, account_id: 'acc_li', platform: 'LinkedIn' },
+    await run({ ...base, account_id: 'acc_li', platform: 'linkedin', image_url: '' },
       { postgrest: db(), routes })
 
-    expect(out.out.ok).toBe(false)
-    expect(sent).toHaveLength(0)
+    expect(sent).toHaveLength(1)
+    expect(sent[0].content).toBe('Warm light')
+    expect(sent[0].mediaItems).toBeUndefined()
   })
 
-  it('still publishes to Instagram — the guard is narrow', async () => {
-    // A safety check that blocked everything would pass every test above and
-    // break the product.
+  it('still publishes to Instagram', async () => {
     const { routes, sent } = zernio()
     await run({ ...base, platform: 'instagram' }, { postgrest: db(), routes })
     expect(sent).toHaveLength(1)

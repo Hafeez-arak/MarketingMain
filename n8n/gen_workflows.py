@@ -1351,8 +1351,9 @@ const platform    = body.platform || 'instagram';
 // the second kind of account, where a mistake is deleted a minute later.
 //
 // Mirrors PROTECTED_PLATFORMS in src/lib/platformSafety.js — the two lists
-// are short and must agree; if one grows, grow the other.
-const PROTECTED_PLATFORMS = ['linkedin'];
+// are short and must agree; if one grows, grow the other. Empty since
+// 2026-10-14, when the owner chose to publish to the LinkedIn page.
+const PROTECTED_PLATFORMS = [];
 const isProtectedPlatform = p => PROTECTED_PLATFORMS.includes(String(p || '').trim().toLowerCase());
 
 // Moving an already-scheduled post to a new time, rather than a first publish.

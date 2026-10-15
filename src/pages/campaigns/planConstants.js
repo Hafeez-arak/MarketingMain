@@ -101,8 +101,7 @@ export function customCategories(value) {
 }
 // Where a plan's ideas can be GENERATED — the platforms the planning and
 // caption workflows know how to write for. LinkedIn joined Instagram on
-// 2026-09-15; it is still drafts-only (PROTECTED_PLATFORMS), so a LinkedIn
-// idea ends as a post in Approvals and never reaches the page from here.
+// 2026-09-15 and publishes to the page like Instagram since 2026-10-14.
 // TikTok joined them next: its ideas are 9:16 videos and photo carousels.
 // A hidden platform (see PLATFORM_META) is left out of the picker.
 export const PLATFORMS = PLANNABLE_PLATFORMS.filter(isLivePlatform)
