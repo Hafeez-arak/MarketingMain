@@ -11,7 +11,7 @@
         -40
       ],
       "parameters": {
-        "content": "## Agent — weekly email drafts\n\nEvery Monday 07:30 UTC (10:30 Riyadh), after the research run at 06:00, the agent container writes three marketing-email options for the week into `email_ai_drafts`. The Marketing tab shows them.\n\nHandler: `server/agentHandlers/emailWeekly.js` (Claude Sonnet, job `email_weekly`). What the model is given, and why: `src/lib/email/weekly.js`.\n\n**Never add retryOnFail to the HTTP node**: it is a paid call, and n8n retries re-send it.\n\nWebhook `/arak-email-weekly`: the app's \"Write this week's drafts\" button, through the signed Vercel proxy. The caller's token is forwarded; the agent checks membership.",
+        "content": "## Agent — weekly email drafts\n\nEvery Monday 07:30 Riyadh time (the box runs on Asia/Riyadh), after the research run at 06:00, the agent container writes three marketing-email options for the week into `email_ai_drafts`. The Marketing tab shows them.\n\nHandler: `server/agentHandlers/emailWeekly.js` (Claude Sonnet, job `email_weekly`). What the model is given, and why: `src/lib/email/weekly.js`.\n\n**Never add retryOnFail to the HTTP node**: it is a paid call, and n8n retries re-send it.\n\nWebhook `/arak-email-weekly`: the app's \"Write this week's drafts\" button, through the signed Vercel proxy. The caller's token is forwarded; the agent checks membership.",
         "height": 300,
         "width": 560
       }

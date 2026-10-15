@@ -156,7 +156,7 @@ shows Gmail's view of the domain's reputation and the spam-report rate.
 ## 11. Weekly AI drafts on the n8n box
 
 The Monday drafts run only on the box: n8n workflow **Agent — weekly email
-drafts** (Monday 07:30 UTC = 10:30 Riyadh, after the 06:00 research run) calls
+drafts** (Monday 07:30 Riyadh — the box runs on Asia/Riyadh — after the 06:00 research run) calls
 the agent container's `/api/agent/emailWeekly`, which uses Claude Sonnet. The
 app's "Write this week's drafts now" button goes through the same workflow.
 

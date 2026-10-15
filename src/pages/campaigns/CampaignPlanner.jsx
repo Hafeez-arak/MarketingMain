@@ -1394,8 +1394,7 @@ export function CampaignPlanner() {
               is never short a platform to plan for, so there is nothing to
               ask here any more. */}
           <p className="text-[11px] text-sky-800 bg-sky-50 border border-sky-100 px-3 py-2 -mt-2">
-            LinkedIn posts are planned, pictured and captioned here like any other, and land in Approvals as drafts.
-            Nothing in this app posts to the LinkedIn page.
+            LinkedIn posts are planned, pictured and captioned here like any other, and publish to the company page at their time once you save.
           </p>
 
           {/* ── Cadence: shared by your posts and AI posts alike ── */}
