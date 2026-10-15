@@ -1,4 +1,4 @@
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Card, Button, Empty, PillSelect, Skeleton } from '../../components/ui/index'
 import { AgentSteering } from '../../components/AgentSteering'
@@ -27,22 +27,28 @@ import {
 } from './plainWords'
 
 // ─── The Research tab — the weekly market report ───────────────────────────
-// Read top to bottom, in the order a marketer asks the questions:
+// Two layers, in the order a marketer asks the questions:
 //
-//   1. WHAT DID IT FIND?      one card: the headline, when, and whether the
-//                             run worked — with counts that jump to the detail
-//   2. WHAT DO I DO WITH IT?  the sections that carry an action: top
-//                             priorities, leads, content ideas (send to a
-//                             plan), competitor moves, events to decide on,
-//                             new competitors to accept or reject
-//   3. THE DETAIL, BY TOPIC   website, social, market news, global industry,
-//                             smart poles, all sources — each folded shut
-//   4. ABOUT THIS RESEARCH    how the run went, open questions, and what the
-//                             research watches — folded, for whoever needs it
+//   1. AT A GLANCE   one card: when, whether the run worked, the headline as a
+//                    short lead, three or four takeaways lifted from the
+//                    report's own top items, and counts that open the detail
+//   2. THE DETAIL    one tab per kind of work — do next, content ideas, leads,
+//                    competitors, market and events, sources and method —
+//                    each with a count. A tab with nothing in it is not shown.
 //
-// A team filter and a business filter narrow every section at once. Every
-// section is built by src/lib/marketReport.js, which the printable brief also
-// uses, so the screen and the PDF never disagree about what the run said.
+// It used to be one long scroll with a sticky jump bar, which covered the
+// headings it jumped to and still left the reader scrolling past empty cards.
+// Tabs keep one kind of work on screen at a time; the open tab is in the URL
+// (?section=, because ?tab= already picks Research vs What We Learned).
+//
+// Every card has the same shape: a title cut to two lines, a one-line
+// summary, "why it matters" and "what to do" as labelled blocks, and the
+// detail and sources behind Show more. Printing renders every tab and every
+// Show more in full — paper has no tabs to click.
+//
+// A team filter and a business filter narrow every tab at once. Every section
+// is built by src/lib/marketReport.js, which the printable brief also uses, so
+// the screen and the PDF never disagree about what the run said.
 //
 // Leads and events read the STORE rather than the brief — a lead found three
 // weeks ago and still open belongs on this week's list — and say so.
@@ -59,6 +65,17 @@ const fmtLongDate = iso => {
   return Number.isFinite(t) ? new Date(t).toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' }) : ''
 }
 const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`
+
+/**
+ * The first sentence of a finding, for the at-a-glance list. Cut from the
+ * report's own words — never rewritten — and only when what is left still
+ * says something (a stub like "Huda." keeps the whole line).
+ */
+function firstSentence(text) {
+  const s = String(text || '').trim()
+  const m = s.match(/^(.{40,}?[.!?])(\s|$)/)
+  return m ? m[1] : s
+}
 
 const TEAM_TONE = {
   marketing: 'bg-sage-50 text-sage-700 border-sage-200',
@@ -79,7 +96,7 @@ const LEAD_TYPE = { lead: 'Lead', tender: 'Tender', project: 'Project' }
 
 function Chip({ children, tone = 'bg-surface-subtle text-text-secondary border-border', title }) {
   return (
-    <span title={title} className={`inline-flex items-center max-w-full truncate px-1.5 py-0.5 border text-[10px] font-semibold whitespace-nowrap ${tone}`}>
+    <span title={title} className={`inline-flex items-center max-w-full truncate px-1.5 py-0.5 border text-[11px] font-semibold whitespace-nowrap ${tone}`}>
       {children}
     </span>
   )
@@ -94,43 +111,69 @@ function NewChip({ isNew, changed }) {
   return null
 }
 
-/** A labelled line inside a card: "What to do: …". */
-function Line({ label, children, strong = false }) {
+const CLAMP = { 1: 'line-clamp-1', 2: 'line-clamp-2', 3: 'line-clamp-3', 4: 'line-clamp-4' }
+
+// Long text, cut to a few lines with a way to read the rest. On paper it is
+// always whole: a printed "Read more" is a dead end.
+function Clamp({ text, lines = 3, className = '' }) {
+  const [open, setOpen] = useState(false)
+  if (!text) return null
+  const long = String(text).length > lines * 95
+  return (
+    <div className="min-w-0">
+      <p dir="auto" className={`break-words ${!open && long ? `${CLAMP[lines]} print:line-clamp-none` : ''} ${className}`}>{text}</p>
+      {long && (
+        <button data-print-hide onClick={() => setOpen(o => !o)}
+          className="text-xs font-medium text-text-secondary underline underline-offset-2 hover:text-text mt-1">
+          {open ? 'Show less' : 'Read more'}
+        </button>
+      )}
+    </div>
+  )
+}
+
+/** "Why it matters" / "What to do" — a labelled block, so the two never run together. */
+function Block({ label, children, act = false, lines = 3 }) {
   if (!children) return null
   return (
-    <p className={`text-xs leading-relaxed mt-2 ${strong ? 'text-text' : 'text-text-secondary'}`}>
-      <span className="font-semibold text-text">{label}: </span>{children}
+    <div className={act ? 'border-l-2 border-amber-600 bg-amber-50/70 px-3 py-2' : 'border-l-2 border-border px-3 py-0.5'}>
+      <p className="text-[11px] font-semibold uppercase tracking-wide text-text-secondary">{label}</p>
+      <div className="mt-0.5">
+        <Clamp text={children} lines={lines} className="text-[15px] leading-relaxed text-text" />
+      </div>
+    </div>
+  )
+}
+
+/** A line of detail behind Show more: "Why we think so: …". */
+function Detail({ label, children }) {
+  if (!children) return null
+  return (
+    <p dir="auto" className="text-sm text-text-secondary leading-relaxed break-words">
+      {label && <span className="font-semibold text-text">{label}: </span>}{children}
     </p>
   )
 }
 
-// ── Sources, one click away ──
-// Behind a toggle so a card reads as a finding and an action, not a list of
-// links. Native <details>: survives re-render, works with find-in-page, and is
-// keyboard accessible. An uncited finding says so in the open, because that is
-// a fact about the finding rather than one of its sources.
-function SourcesToggle({ sources = [], pieces = [], uncited = false }) {
+// ── Sources ──
+// Inside Show more, so a card reads as a finding and an action rather than a
+// list of links. An uncited finding says so in the open, because that is a
+// fact about the finding rather than one of its sources.
+function Sources({ sources = [], pieces = [] }) {
   const links = sources.slice(0, 8)
-  const count = pieces.length || links.length
-  if (uncited) {
-    return <p className="text-[11px] text-amber-700 mt-2">No source could be confirmed for this one — treat it as an observation.</p>
-  }
-  if (!count) return null
+  if (!pieces.length && !links.length) return null
   return (
-    <details className="mt-2.5 group">
-      <summary className="cursor-pointer list-none [&::-webkit-details-marker]:hidden inline-flex items-center gap-1 text-[11px] font-medium text-text-tertiary hover:text-text">
-        <span className="inline-block transition-transform group-open:rotate-90">›</span>
-        Sources ({count})
-      </summary>
+    <div>
+      <p className="text-[11px] font-semibold uppercase tracking-wide text-text-tertiary mb-1.5">Sources</p>
       {pieces.length ? (
-        <ul className="mt-2 space-y-1.5">{pieces.map((p, i) => <Piece key={i} p={p} />)}</ul>
+        <ul className="space-y-1.5">{pieces.map((p, i) => <Piece key={i} p={p} />)}</ul>
       ) : (
-        <ul className="mt-2 space-y-1">
+        <ul className="space-y-1">
           {links.map((s, i) => {
             const url = typeof s === 'string' ? s : s.url
             const title = typeof s === 'string' ? '' : (s.title || '')
             return (
-              <li key={i} className="text-[11px] leading-relaxed min-w-0">
+              <li key={i} className="text-[13px] leading-relaxed min-w-0">
                 <a href={url} target="_blank" rel="noopener noreferrer" className="text-text-secondary underline underline-offset-2 hover:text-text break-words">
                   {title || domainOf(url)}
                 </a>
@@ -140,7 +183,7 @@ function SourcesToggle({ sources = [], pieces = [], uncited = false }) {
           })}
         </ul>
       )}
-    </details>
+    </div>
   )
 }
 
@@ -148,9 +191,9 @@ function SourcesToggle({ sources = [], pieces = [], uncited = false }) {
 // a link to it.
 function Piece({ p }) {
   return (
-    <li className="flex items-start gap-2 text-[11px] leading-relaxed min-w-0">
+    <li className="flex items-start gap-2 text-[13px] leading-relaxed min-w-0">
       <span className="shrink-0 mt-px max-w-[40%]"><Chip>{CHANNEL_LABEL[p.channel] || p.channel || 'Source'}</Chip></span>
-      <span className="text-text-secondary min-w-0">
+      <span className="text-text-secondary min-w-0 break-words" dir="auto">
         {p.summary}
         {p.date && <span className="text-text-tertiary"> · {fmtDate(p.date)}</span>}
         {p.url && (
@@ -161,266 +204,186 @@ function Piece({ p }) {
   )
 }
 
-const Quiet = ({ children }) => <p className="text-xs text-text-tertiary leading-relaxed max-w-3xl">{children}</p>
+const Uncited = () => (
+  <p className="text-[13px] text-amber-700">No source could be confirmed for this one — treat it as an observation.</p>
+)
 
-const CountBadge = ({ n }) => (n != null
-  ? <span className="ml-2 inline-flex items-center justify-center min-w-[20px] px-1.5 py-px bg-surface-muted text-text-secondary text-[10px] font-semibold tabular-nums align-[1px]">{n}</span>
-  : null)
+const Quiet = ({ children }) => <p className="text-sm text-text-tertiary leading-relaxed max-w-[72ch]">{children}</p>
 
-// ── The three layers of the page ──
+// ─── The one card shape every item uses ────────────────────────────────────
+// Title cut to two lines, a summary cut to two, the two labelled blocks, and
+// everything else behind Show more — which also lifts the cuts, so the whole
+// title can always be read without leaving the card.
 
-/** A group heading: "What to do next", "Everything it found, by topic". */
-function Group({ title, helper }) {
-  return (
-    <div className="pt-4">
-      <h2 className="text-[15px] font-bold text-text tracking-tight">{title}</h2>
-      {helper && <p className="text-xs text-text-secondary mt-1 leading-relaxed max-w-3xl">{helper}</p>}
-    </div>
-  )
-}
-
-/** An action section: always open, a heading, a one-line explanation, then the items. */
-function Section({ id, title, helper, count, action, children }) {
-  return (
-    <section id={`brief-${id}`} data-zone={id} className="scroll-mt-32">
-      <Card className="p-0 overflow-hidden">
-        <div className="flex items-start justify-between gap-3 px-4 sm:px-5 py-3.5 border-b border-border">
-          <div className="min-w-0">
-            <h3 className="text-sm font-semibold text-text leading-tight">{title}<CountBadge n={count} /></h3>
-            {helper && <p className="text-[11px] text-text-tertiary mt-1 leading-relaxed max-w-3xl">{helper}</p>}
-          </div>
-          {action}
-        </div>
-        <div className="p-4 sm:p-5">{children}</div>
-      </Card>
-    </section>
-  )
-}
-
-/** A topic of detail: folded shut until someone opens it, or jumps to it. */
-function Fold({ id, title, helper, count, open = false, children }) {
-  return (
-    <section id={`brief-${id}`} data-zone={id} data-fold className="scroll-mt-32">
-      <Card className="p-0 overflow-hidden">
-        <details open={open} className="group">
-          <summary className="cursor-pointer list-none [&::-webkit-details-marker]:hidden px-4 sm:px-5 py-3.5 flex items-start justify-between gap-3 hover:bg-surface-subtle">
-            <div className="min-w-0">
-              <h3 className="text-sm font-semibold text-text leading-tight">{title}<CountBadge n={count} /></h3>
-              {helper && <p className="text-[11px] text-text-tertiary mt-1 leading-relaxed max-w-3xl">{helper}</p>}
-            </div>
-            <span className="shrink-0 text-[11px] font-medium text-text-tertiary mt-0.5">
-              <span className="group-open:hidden">Show</span>
-              <span className="hidden group-open:inline">Hide</span>
-            </span>
-          </summary>
-          <div className="px-4 sm:px-5 pb-5 pt-1 border-t border-border">{children}</div>
-        </details>
-      </Card>
-    </section>
-  )
-}
-
-// Long text, cut to a few lines with a way to read the rest.
-function Clamp({ text, lines = 4 }) {
+function ItemCard({ badges, title, titleHref, summary, meta, why, whyLabel = 'Why it matters', todo, todoLabel = 'What to do', aside, more, footer, number, children }) {
   const [open, setOpen] = useState(false)
-  if (!text) return <span className="text-text-tertiary">—</span>
-  const long = text.length > 220
-  return (
-    <span>
-      <span className={!open && long ? (lines === 3 ? 'line-clamp-3' : 'line-clamp-4') : ''}>{text}</span>
-      {long && (
-        <button onClick={() => setOpen(o => !o)} className="text-[10px] text-text-tertiary underline underline-offset-2 hover:text-text mt-0.5">
-          {open ? 'Show less' : 'Read more'}
-        </button>
-      )}
-    </span>
+  const cut = open ? '' : 'print:line-clamp-none'
+  const hasMore = !!more || String(title || '').length > 140 || String(summary || '').length > 180
+  const heading = (
+    <h4 dir="auto" className={`text-base font-semibold text-text leading-snug break-words ${open ? '' : `line-clamp-2 ${cut}`}`}>{title}</h4>
   )
-}
-
-const Sub = ({ children }) => <p className="text-[10px] font-semibold text-text-tertiary uppercase tracking-wide mb-2">{children}</p>
-
-// ─── Sticky bar: who is reading, and where to jump ─────────────────────────
-
-function Pills({ options, value, onChange }) {
   return (
-    <div className="flex gap-1 flex-wrap">
-      {options.map(o => (
-        <button key={o.key} onClick={() => onChange(o.key)} aria-pressed={value === o.key}
-          className={`px-2.5 py-1 text-xs font-semibold border transition-colors ${
-            value === o.key ? 'bg-amber-700 text-white border-amber-700' : 'bg-white text-text-secondary border-border hover:text-text'}`}>
-          {o.label}
-        </button>
-      ))}
-    </div>
-  )
-}
-
-function ReaderBar({ team, onTeam, lines = [], line = 'all', onLine, untagged = 0, sections, active, onJump }) {
-  const groups = [
-    { key: 'act', label: 'Do next' },
-    { key: 'detail', label: 'Detail' },
-    { key: 'about', label: '' },
-  ]
-  return (
-    <div data-print-hide className="sticky top-0 z-20 -mx-4 sm:-mx-6 px-4 sm:px-6 py-2 bg-surface-muted/95 backdrop-blur border-b border-border space-y-2">
-      <div className="flex items-center gap-x-4 gap-y-2 flex-wrap">
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-[10px] font-semibold text-text-tertiary uppercase tracking-wide">Show items for</span>
-          <Pills options={TEAMS} value={team} onChange={onTeam} />
-        </div>
-        {/* Only when the run found more than one business line. A brand with
-            one undivided business never sees a control that does nothing. */}
-        {lines.length > 1 && (
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-[10px] font-semibold text-text-tertiary uppercase tracking-wide">Business</span>
-            <Pills options={[{ key: 'all', label: 'All' }, ...lines]} value={line} onChange={k => onLine?.(k)} />
-          </div>
+    <article data-print-keep className="bg-white border border-border p-4 sm:p-5 min-w-0">
+      <div className="flex flex-col sm:flex-row sm:items-start gap-3">
+        {number != null && (
+          <span className="shrink-0 w-7 h-7 bg-amber-700 text-white text-sm font-bold flex items-center justify-center tabular-nums">{number}</span>
         )}
+        <div className="min-w-0 flex-1 max-w-[72ch]">
+          {badges && <div className="flex items-center gap-1.5 flex-wrap mb-2">{badges}</div>}
+          {titleHref
+            ? <a href={titleHref} target="_blank" rel="noopener noreferrer" className="hover:underline">{heading}</a>
+            : heading}
+          {summary && (
+            <p dir="auto" className={`text-sm text-text-secondary mt-1.5 leading-relaxed break-words ${open ? '' : `line-clamp-2 ${cut}`}`}>{summary}</p>
+          )}
+          {meta && <div className="mt-1.5">{meta}</div>}
+        </div>
+        {aside && <div className="shrink-0 sm:max-w-[220px] min-w-0">{aside}</div>}
       </div>
-      {line !== 'all' && untagged > 0 && (
-        <p className="text-[10px] text-text-tertiary">
-          {plural(untagged, 'finding')} could not be tied to one business and only show under All.
-        </p>
+      {(why || todo) && (
+        <div className={`mt-3.5 space-y-2.5 max-w-[72ch] ${number != null ? 'sm:ml-10' : ''}`}>
+          <Block label={whyLabel}>{why}</Block>
+          <Block label={todoLabel} act>{todo}</Block>
+        </div>
       )}
-      <nav aria-label="Jump to a section" className="flex items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-        {groups.map(g => {
-          const items = sections.filter(s => s.group === g.key)
-          if (!items.length) return null
-          return (
-            <div key={g.key} className="flex items-center gap-1 shrink-0">
-              {g.key !== 'act' && <span aria-hidden="true" className="w-px h-4 bg-border mx-1" />}
-              {g.label && <span className="text-[10px] font-semibold text-text-tertiary uppercase tracking-wide mr-0.5">{g.label}</span>}
-              {items.map(z => (
-                <button key={z.key} onClick={() => onJump(z.key)}
-                  className={`shrink-0 px-2 py-1 text-[11px] font-medium transition-colors ${
-                    active === z.key ? 'bg-white text-text shadow-sm' : 'text-text-tertiary hover:text-text hover:bg-white/70'}`}>
-                  {z.label}
-                  {z.count != null && <span className="ml-1 tabular-nums text-text-tertiary">{z.count}</span>}
-                </button>
-              ))}
-            </div>
-          )
-        })}
-      </nav>
-    </div>
+      {children && <div className={`mt-3.5 max-w-[72ch] ${number != null ? 'sm:ml-10' : ''}`}>{children}</div>}
+      {more && (
+        <div className={`${open ? '' : 'hidden print:block'} mt-3.5 pt-3 border-t border-border-light max-w-[72ch] space-y-2.5 ${number != null ? 'sm:ml-10' : ''}`}>
+          {more}
+        </div>
+      )}
+      {(footer || hasMore) && (
+        <div className={`mt-3 flex items-center justify-between gap-3 flex-wrap ${number != null ? 'sm:ml-10' : ''}`}>
+          <div className="min-w-0 text-xs text-text-tertiary">{footer}</div>
+          {hasMore && (
+            <button data-print-hide onClick={() => setOpen(o => !o)} aria-expanded={open}
+              className="inline-flex items-center gap-1 text-xs font-semibold text-text-secondary hover:text-text">
+              {open ? 'Show less' : 'Show more'}
+              <svg className={`w-3 h-3 transition-transform ${open ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6" /></svg>
+            </button>
+          )}
+        </div>
+      )}
+    </article>
   )
 }
+
+/** A part of a tab: a heading, one short line, then its items. */
+function Part({ title, helper, count, action, children }) {
+  return (
+    <section className="space-y-3">
+      <div className="flex items-end justify-between gap-3 flex-wrap">
+        <div className="min-w-0">
+          <h3 className="text-base font-semibold text-text">
+            {title}{count != null && <span className="ml-2 text-sm font-medium text-text-tertiary tabular-nums">{count}</span>}
+          </h3>
+          {helper && <p className="text-sm text-text-secondary mt-0.5 leading-relaxed max-w-[72ch]">{helper}</p>}
+        </div>
+        {action}
+      </div>
+      {children}
+    </section>
+  )
+}
+
+const Stack = ({ children }) => <div className="space-y-3">{children}</div>
+const SubHead = ({ children }) => <p className="text-[11px] font-semibold text-text-tertiary uppercase tracking-wide">{children}</p>
 
 // ─── Cards ─────────────────────────────────────────────────────────────────
 
-function TopThree({ items }) {
-  if (!items.length) return <Quiet>Nothing stood out above the rest this week for this team.</Quiet>
+function TopItem({ t, n }) {
+  // A piece that IS the finding would repeat the headline word for word —
+  // only its link is worth keeping then.
+  const pieces = t.pieces.filter(p => p.summary !== t.finding)
+  const links = t.pieces.filter(p => p.summary === t.finding && p.url).map(p => ({ url: p.url }))
+  const hasSources = pieces.length || links.length
   return (
-    <ol className="space-y-4">
-      {items.map((t, i) => {
-        // A piece that IS the finding would repeat the headline word for word —
-        // only its link is worth keeping then.
-        const pieces = t.pieces.filter(p => p.summary !== t.finding)
-        const links = t.pieces.filter(p => p.summary === t.finding && p.url).map(p => ({ url: p.url }))
-        return (
-          <li key={i} className="flex gap-3">
-            <span className="shrink-0 w-6 h-6 bg-amber-700 text-white text-xs font-bold flex items-center justify-center tabular-nums">{i + 1}</span>
-            <div className="min-w-0 flex-1 max-w-3xl">
-              <div className="flex items-center gap-1.5 flex-wrap mb-1"><TeamChip team={t.team} /></div>
-              <p className="text-sm font-semibold text-text leading-snug">{t.finding}</p>
-              <Line label="What to do" strong>{t.action}</Line>
-              <SourcesToggle pieces={pieces} sources={pieces.length ? [] : links} />
-            </div>
-          </li>
-        )
-      })}
-    </ol>
+    <ItemCard
+      number={n}
+      badges={<TeamChip team={t.team} />}
+      title={t.finding}
+      todo={t.action}
+      more={hasSources ? <Sources pieces={pieces} sources={pieces.length ? [] : links} /> : null}
+    />
   )
 }
 
-function SalesTable({ rows, canEdit, onStatus, busyId }) {
+function LeadCard({ r, canEdit, onStatus, busyId }) {
+  const soon = r.days != null && r.days >= 0 && r.days <= 7
+  const gone = r.days != null && r.days < 0
+  const more = [
+    r.headline && r.headline !== r.name ? <Detail key="h">{r.headline}</Detail> : null,
+    r.details.length ? <ul key="d" className="space-y-0.5">{r.details.map((d, j) => <li key={j}><Detail>{d}</Detail></li>)}</ul> : null,
+    r.changed ? <p key="c" className="text-sm text-sky-700">Updated: {r.changed}</p> : null,
+  ].filter(Boolean)
   return (
-    <div className="overflow-x-auto -mx-4 sm:-mx-5">
-      <table className="w-full min-w-[760px] text-left text-xs">
-        <thead>
-          <tr className="text-[10px] uppercase tracking-wide text-text-tertiary border-b border-border">
-            <th className="font-semibold py-2 pl-4 sm:pl-5 pr-3 w-[26%]">Opening</th>
-            <th className="font-semibold py-2 pr-3 w-[24%]">Details</th>
-            <th className="font-semibold py-2 pr-3 w-[13%]">Deadline</th>
-            <th className="font-semibold py-2 pr-3 w-[25%]">What to do</th>
-            <th className="font-semibold py-2 pr-4 sm:pr-5 w-[14%]">Status</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((r, i) => (
-            <tr key={r.id || `f${i}`} className="border-b border-border last:border-0 align-top">
-              <td className="py-3 pl-4 sm:pl-5 pr-3">
-                <div className="flex items-center gap-1.5 flex-wrap mb-1">
-                  <Chip>{LEAD_TYPE[r.type] || r.type}</Chip><RelevanceChip value={r.relevance} /><NewChip isNew={r.isNew} changed={r.changed} />
-                </div>
-                <p className="text-[13px] font-semibold text-text leading-snug">{r.name}</p>
-                {r.headline && r.headline !== r.name && <p className="text-[11px] text-text-tertiary mt-1 leading-relaxed"><Clamp text={r.headline} lines={3} /></p>}
-                {r.changed && <p className="text-[11px] text-sky-700 mt-1">Updated: {r.changed}</p>}
-              </td>
-              <td className="py-3 pr-3 text-text-secondary leading-relaxed">
-                {r.details.length ? r.details.map((d, j) => <div key={j}>{d}</div>) : <span className="text-text-tertiary">—</span>}
-                {r.url && (
-                  <a href={r.url} target="_blank" rel="noopener noreferrer" className="block mt-1 text-[10px] text-text-tertiary underline underline-offset-2 hover:text-text">
-                    Source: {domainOf(r.url)}
-                  </a>
-                )}
-              </td>
-              {/* A published date when one exists, and otherwise the window the
-                  stage implies — labelled as an estimate. */}
-              <td className="py-3 pr-3">
-                <p className={`font-semibold tabular-nums ${r.days != null && r.days >= 0 && r.days <= 7 ? 'text-red-700' : r.days != null && r.days < 0 ? 'text-text-tertiary' : 'text-text'}`}>
-                  {r.deadline ? fmtDate(r.deadline) : ''}
-                </p>
-                <p className="text-[10px] text-text-secondary leading-relaxed">{r.window.label}</p>
-                {r.window.basis === 'stage' && <p className="text-[10px] text-text-tertiary">estimated, not published</p>}
-              </td>
-              <td className="py-3 pr-3 text-text-secondary leading-relaxed"><Clamp text={r.action} /></td>
-              <td className="py-3 pr-4 sm:pr-5">
-                {r.tracked && canEdit ? (
-                  <PillSelect value={r.status} onChange={e => onStatus(r, e.target.value)} className="w-full">
-                    {OPPORTUNITY_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
-                  </PillSelect>
-                ) : (
-                  <span className="text-[10px] text-text-tertiary leading-relaxed block">
-                    {r.tracked ? r.status : 'Tracked from the next research'}
-                  </span>
-                )}
-                {busyId && busyId === r.id && <p className="text-[10px] text-text-tertiary mt-1">Saving…</p>}
-                {r.firstSeen && <p className="text-[10px] text-text-tertiary mt-1">First seen {fmtDate(r.firstSeen)}</p>}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <ItemCard
+      badges={<><Chip>{LEAD_TYPE[r.type] || r.type}</Chip><RelevanceChip value={r.relevance} /><NewChip isNew={r.isNew} changed={r.changed} /></>}
+      title={r.name}
+      meta={(
+        /* A published date when one exists, and otherwise the window the stage
+            implies — labelled as an estimate. */
+        <p className="text-sm leading-relaxed">
+          <span className="font-semibold text-text">Deadline: </span>
+          {r.deadline && (
+            <span className={`font-semibold tabular-nums ${soon ? 'text-red-700' : gone ? 'text-text-tertiary' : 'text-text'}`}>{fmtDate(r.deadline)} · </span>
+          )}
+          <span className="text-text-secondary">{r.window.label}</span>
+          {r.window.basis === 'stage' && <span className="text-text-tertiary"> (estimated, not published)</span>}
+        </p>
+      )}
+      aside={(
+        <div className="sm:text-right sm:w-[180px]">
+          {r.tracked && canEdit ? (
+            <label className="block">
+              <span className="block text-[11px] font-semibold uppercase tracking-wide text-text-tertiary mb-1">Status</span>
+              <PillSelect value={r.status} onChange={e => onStatus(r, e.target.value)} className="w-full">
+                {OPPORTUNITY_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+              </PillSelect>
+            </label>
+          ) : (
+            <span className="text-xs text-text-tertiary leading-relaxed block">
+              {r.tracked ? r.status : 'Tracked from the next research'}
+            </span>
+          )}
+          {busyId && busyId === r.id && <p className="text-xs text-text-tertiary mt-1">Saving…</p>}
+          {r.firstSeen && <p className="text-xs text-text-tertiary mt-1">First seen {fmtDate(r.firstSeen)}</p>}
+        </div>
+      )}
+      todo={r.action}
+      more={more.length ? more : null}
+      footer={r.url && (
+        <a href={r.url} target="_blank" rel="noopener noreferrer" className="underline underline-offset-2 hover:text-text">
+          Source: {domainOf(r.url)}
+        </a>
+      )}
+    />
   )
 }
 
 function CompetitorMove({ m }) {
+  const seen = [
+    m.channels.length ? `Seen on ${m.channels.map(c => CHANNEL_LABEL[c] || c).join(', ')}` : '',
+    m.freshness === 'standing' ? 'nothing new this week' : '',
+  ].filter(Boolean).join(' · ')
+  const more = [
+    m.picture ? <Detail key="p" label="Why we think so">{m.picture}</Detail> : null,
+    m.pieces?.length ? <Sources key="s" pieces={m.pieces} /> : null,
+  ].filter(Boolean)
   return (
-    <div className="border border-border bg-white p-3.5 flex flex-col">
-      <div className="flex items-start justify-between gap-2 flex-wrap">
-        <p className="text-sm font-semibold text-text">{m.competitor}</p>
-        <div className="flex gap-1 flex-wrap">
+    <ItemCard
+      badges={(m.relevance || (m.freshness && m.freshness !== 'standing')) ? (
+        <>
           <RelevanceChip value={m.relevance} />
           {m.freshness && m.freshness !== 'standing' && <Chip tone="bg-sage-50 text-sage-700 border-sage-200">{freshnessLabel(m.freshness)}</Chip>}
-        </div>
-      </div>
-      {m.whatChanged && <p className="text-[13px] text-text mt-1.5 leading-snug">{m.whatChanged}</p>}
-      {m.effect && (
-        <p className="text-xs text-text mt-2.5 leading-relaxed bg-amber-50/60 border-l-2 border-amber-600 px-2.5 py-1.5">
-          <span className="font-semibold">What it means for us: </span>{m.effect}
-        </p>
-      )}
-      {m.picture && <Line label="Why we think so">{m.picture}</Line>}
-      {(m.channels.length > 0 || m.freshness === 'standing') && (
-        <p className="text-[10px] text-text-tertiary mt-2">
-          {[m.channels.length ? `Seen on ${m.channels.map(c => CHANNEL_LABEL[c] || c).join(', ')}` : '',
-            m.freshness === 'standing' ? 'nothing new this week' : ''].filter(Boolean).join(' · ')}
-        </p>
-      )}
-      <SourcesToggle pieces={m.pieces} />
-    </div>
+        </>
+      ) : null}
+      title={m.competitor}
+      summary={m.whatChanged}
+      why={m.effect} whyLabel="What it means for us"
+      more={more.length ? more : null}
+      footer={seen}
+    />
   )
 }
 
@@ -434,19 +397,19 @@ function bestLine(p) {
 
 function OurChannel({ p }) {
   return (
-    <div className="flex items-baseline justify-between gap-3 py-2 border-b border-border last:border-0">
+    <div className="flex flex-col sm:flex-row sm:items-baseline sm:justify-between gap-1 sm:gap-3 py-3 border-b border-border last:border-0">
       <div className="min-w-0">
-        <p className="text-xs font-semibold text-text">
+        <p className="text-sm font-semibold text-text">
           {p.label}{p.username && <span className="font-normal text-text-tertiary"> @{p.username}</span>}
         </p>
-        <p className="text-[11px] text-text-tertiary mt-0.5 truncate">
+        <p className="text-[13px] text-text-secondary mt-0.5 break-words">
           {p.state === 'measured' ? bestLine(p) : p.note}
         </p>
       </div>
       {p.state === 'measured' && (
-        <div className="text-right shrink-0 tabular-nums">
-          <p className="text-xs font-semibold text-text">{plural(p.posts, 'post')} · {p.avg_engagement ?? '—'} interactions each</p>
-          <p className={`text-[10px] ${p.change ? (p.change.direction === 'up' ? 'text-sage-600' : 'text-red-600') : 'text-text-tertiary'}`}>
+        <div className="sm:text-right shrink-0 tabular-nums">
+          <p className="text-sm font-semibold text-text">{plural(p.posts, 'post')} · {p.avg_engagement ?? '—'} interactions each</p>
+          <p className={`text-xs ${p.change ? (p.change.direction === 'up' ? 'text-sage-600' : 'text-red-600') : 'text-text-tertiary'}`}>
             {p.change ? `${p.change.direction === 'up' ? '+' : '−'}${p.change.change_pct}% vs before` : p.weak ? 'too few to compare' : 'no comparison yet'}
           </p>
         </div>
@@ -455,66 +418,35 @@ function OurChannel({ p }) {
   )
 }
 
-// One table for all three bands. A past event swaps the exhibitor-deadline
-// column for what came of it.
-function EventsTable({ rows, canEdit, onDecision, recent = false }) {
+// One card per event. A past event swaps the exhibitor deadline for what
+// came of it.
+function EventCard({ e, canEdit, onDecision, recent = false }) {
+  const when = e.start ? `${fmtDate(e.start)}${e.end && e.end !== e.start ? ` – ${fmtDate(e.end)}` : ''}` : 'Dates to be confirmed'
+  const near = e.deadlineDays != null && e.deadlineDays >= 0 && e.deadlineDays <= 14
   return (
-    <div className="overflow-x-auto -mx-4 sm:-mx-5">
-      <table className="w-full min-w-[760px] text-left text-xs">
-        <thead>
-          <tr className="text-[10px] uppercase tracking-wide text-text-tertiary border-b border-border">
-            <th className="font-semibold py-2 pl-4 sm:pl-5 pr-3 w-[25%]">Event</th>
-            <th className="font-semibold py-2 pr-3 w-[12%]">Dates</th>
-            <th className="font-semibold py-2 pr-3 w-[14%]">Venue</th>
-            {!recent && <th className="font-semibold py-2 pr-3 w-[11%]">Exhibitor deadline</th>}
-            <th className="font-semibold py-2 pr-3 w-[12%]">{recent ? 'Competitors there' : 'Competitors going'}</th>
-            <th className={`font-semibold py-2 pr-4 sm:pr-5 ${recent ? 'w-[37%]' : 'w-[26%]'}`}>{recent ? 'What came of it' : 'Our recommendation'}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((e, i) => (
-            <tr key={e.id || `${e.kind}${i}`} className="border-b border-border last:border-0 align-top">
-              <td className="py-3 pl-4 sm:pl-5 pr-3">
-                <div className="flex items-center gap-1.5 flex-wrap mb-1">
-                  <NewChip isNew={e.isNew} changed={e.changed} />
-                </div>
-                {e.url
-                  ? <a href={e.url} target="_blank" rel="noopener noreferrer" className="text-[13px] font-semibold text-text leading-snug hover:underline">{e.name}</a>
-                  : <p className="text-[13px] font-semibold text-text leading-snug">{e.name}</p>}
-                {e.organizer && <p className="text-[10px] text-text-tertiary mt-0.5">{e.organizer}</p>}
-              </td>
-              <td className="py-3 pr-3 tabular-nums text-text">
-                {e.start ? `${fmtDate(e.start)}${e.end && e.end !== e.start ? ` – ${fmtDate(e.end)}` : ''}` : 'To be confirmed'}
-              </td>
-              <td className="py-3 pr-3 text-text-secondary">{e.venue || '—'}</td>
-              {!recent && <td className="py-3 pr-3">
-                {e.exhibitorDeadline ? (
-                  <>
-                    <p className={`font-semibold tabular-nums ${e.deadlineDays != null && e.deadlineDays >= 0 && e.deadlineDays <= 14 ? 'text-red-700' : 'text-text'}`}>{fmtDate(e.exhibitorDeadline)}</p>
-                    <p className="text-[10px] text-text-tertiary">{e.deadlineStatus}</p>
-                  </>
-                ) : <span className="text-text-tertiary text-[11px]">{e.deadlineStatus || 'not known yet'}</span>}
-              </td>}
-              <td className="py-3 pr-3 text-text-secondary">{e.competitors.length ? e.competitors.join(', ') : '—'}</td>
-              <td className="py-3 pr-4 sm:pr-5 text-text-secondary leading-relaxed">
-                <Clamp text={recent ? e.takeaway || e.recommendation : e.recommendation} />
-                {recent && e.takeaway && e.recommendation && (
-                  <p className="text-[11px] text-text-tertiary mt-1.5"><span className="font-semibold">For us: </span>{e.recommendation}</p>
-                )}
-                {e.id && canEdit && !recent && (
-                  <div className="mt-2 flex items-center gap-2">
-                    <span className="text-[10px] text-text-tertiary">We are</span>
-                    <PillSelect value={e.decision} onChange={ev => onDecision(e, ev.target.value)}>
-                      {EVENT_DECISIONS.map(d => <option key={d} value={d}>{d}</option>)}
-                    </PillSelect>
-                  </div>
-                )}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <ItemCard
+      badges={(e.isNew || e.changed) ? <NewChip isNew={e.isNew} changed={e.changed} /> : null}
+      title={e.name}
+      titleHref={e.url || undefined}
+      summary={[when, e.venue, e.organizer].filter(Boolean).join(' · ')}
+      aside={e.id && canEdit && !recent ? (
+        <label className="block sm:w-[180px]">
+          <span className="block text-[11px] font-semibold uppercase tracking-wide text-text-tertiary mb-1">We are</span>
+          <PillSelect value={e.decision} onChange={ev => onDecision(e, ev.target.value)} className="w-full">
+            {EVENT_DECISIONS.map(d => <option key={d} value={d}>{d}</option>)}
+          </PillSelect>
+        </label>
+      ) : null}
+      todo={recent ? (e.takeaway || e.recommendation) : e.recommendation}
+      todoLabel={recent ? 'What came of it' : 'Our recommendation'}
+      more={recent && e.takeaway && e.recommendation ? <Detail label="For us">{e.recommendation}</Detail> : null}
+      footer={[
+        !recent && (e.exhibitorDeadline
+          ? <span key="d" className={near ? 'text-red-700 font-semibold' : ''}>Exhibitor deadline {fmtDate(e.exhibitorDeadline)}{e.deadlineStatus ? ` · ${e.deadlineStatus}` : ''}</span>
+          : <span key="d">Exhibitor deadline {e.deadlineStatus || 'not known yet'}</span>),
+        e.competitors.length ? <span key="c">{recent ? 'Competitors there' : 'Competitors going'}: {e.competitors.join(', ')}</span> : null,
+      ].filter(Boolean).reduce((acc, x, i) => (i ? [...acc, ' · ', x] : [x]), [])}
+    />
   )
 }
 
@@ -522,43 +454,41 @@ function EventsTable({ rows, canEdit, onDecision, recent = false }) {
 // line — an unclassified row shows nothing rather than a made-up "General".
 function SearchRow({ r, lineLabel }) {
   return (
-    <div className="border border-border bg-white p-3.5 max-w-3xl">
-      <div className="flex items-start justify-between gap-3">
-        <p className="text-sm text-text leading-snug" dir="auto">{r.headline}</p>
-        {r.line && lineLabel(r.line) && <Chip>{lineLabel(r.line)}</Chip>}
-      </div>
-      {r.detail && <p className="text-[11px] text-text-secondary mt-1.5 leading-relaxed">{r.detail}</p>}
-      <Line label="What to do">{r.action}</Line>
-    </div>
+    <ItemCard
+      badges={r.line && lineLabel(r.line) ? <Chip>{lineLabel(r.line)}</Chip> : null}
+      title={r.headline}
+      summary={r.detail}
+      todo={r.action}
+    />
   )
 }
 
 function WebsiteRead({ read }) {
   return (
-    <div className="mb-4 space-y-3">
-      <p className="text-sm text-text leading-relaxed max-w-3xl" dir="auto">{read.summary}</p>
+    <div className="space-y-3">
+      <p className="text-[15px] text-text leading-relaxed max-w-[72ch]" dir="auto">{read.summary}</p>
       {read.numbers.length > 0 && (
         <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
           {read.numbers.map((x, i) => (
             <div key={i} className="border border-border bg-white p-3">
-              <p className="text-[10px] font-semibold text-text-tertiary uppercase tracking-wide">{x.label}</p>
+              <p className="text-[11px] font-semibold text-text-tertiary uppercase tracking-wide">{x.label}</p>
               <p className="text-lg font-semibold text-text tabular-nums mt-0.5">{x.value}</p>
-              {x.meaning && <p className="text-[11px] text-text-secondary leading-snug mt-1">{x.meaning}</p>}
+              {x.meaning && <p className="text-[13px] text-text-secondary leading-snug mt-1">{x.meaning}</p>}
             </div>
           ))}
         </div>
       )}
       {read.suggestions.length > 0 && (
-        <div className="max-w-3xl">
-          <Sub>What to do</Sub>
-          <ul className="space-y-1">
+        <div className="max-w-[72ch] border-l-2 border-amber-600 bg-amber-50/70 px-3 py-2">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-text-secondary">What to do</p>
+          <ul className="mt-1 space-y-1">
             {read.suggestions.map((t, i) => (
-              <li key={i} className="text-xs text-text leading-relaxed before:content-['▸_'] before:text-amber-700" dir="auto">{t}</li>
+              <li key={i} className="text-[15px] text-text leading-relaxed" dir="auto">{t}</li>
             ))}
           </ul>
         </div>
       )}
-      <Link to="/analytics?channel=website" className="inline-block text-[11px] text-text-secondary hover:text-text underline">
+      <Link to="/analytics?channel=website" className="inline-block text-sm text-text-secondary hover:text-text underline underline-offset-2">
         See every website number on the Analytics page →
       </Link>
     </div>
@@ -566,72 +496,151 @@ function WebsiteRead({ read }) {
 }
 
 function Note({ n, now }) {
+  const more = [
+    n.technicalNote ? <Detail key="t" label="For the technical team">{n.technicalNote}</Detail> : null,
+    n.confidence != null ? <p key="c" className="text-xs text-text-tertiary">Confidence {pct(n.confidence)}</p> : null,
+    n.uncited ? <Uncited key="u" /> : (n.sources || []).length ? <Sources key="s" sources={n.sources} /> : null,
+  ].filter(Boolean)
   return (
-    <div className="border border-border bg-white p-3.5 max-w-3xl">
-      <div className="flex items-center gap-1.5 flex-wrap mb-1.5">
-        {n.teams.map(t => <TeamChip key={t} team={t} />)}
-        <RelevanceChip value={n.relevance} />
-        {n.store?.state === 'seen' && <Chip>Already known</Chip>}
-        {n.days != null && n.days >= 0 && (
-          <Chip tone="bg-white text-text border-border">{deadlineLabel({ perishable_until: dateIn(n.days, now) }, now)}</Chip>
-        )}
-      </div>
-      <p className="text-sm text-text leading-snug">{n.headline}</p>
-      {n.detail && <p className="text-[11px] text-text-secondary mt-1.5 leading-relaxed">{n.detail}</p>}
-      <Line label="For marketing">{n.action}</Line>
-      <Line label="For the technical team">{n.technicalNote}</Line>
-      {n.confidence != null && <p className="text-[10px] text-text-tertiary mt-2">Confidence {pct(n.confidence)}</p>}
-      <SourcesToggle sources={n.sources || []} uncited={n.uncited} />
-    </div>
+    <ItemCard
+      badges={(
+        <>
+          {n.teams.map(t => <TeamChip key={t} team={t} />)}
+          <RelevanceChip value={n.relevance} />
+          {n.store?.state === 'seen' && <Chip>Already known</Chip>}
+          {n.days != null && n.days >= 0 && (
+            <Chip tone="bg-white text-text border-border">{deadlineLabel({ perishable_until: dateIn(n.days, now) }, now)}</Chip>
+          )}
+        </>
+      )}
+      title={n.headline}
+      summary={n.detail}
+      todo={n.action}
+      more={more.length ? more : null}
+    />
   )
 }
 
 const dateIn = (days, now) => new Date(now.getTime() + days * 86_400_000).toISOString().slice(0, 10)
 
-function IdeaCard({ idea, under = false }) {
-  const ref = idea.answers_ref
+/** An idea under a gap: compact, because the gap above it carries the why. */
+function IdeaLine({ idea }) {
   return (
-    <div className={`border border-border bg-white p-3 ${under ? 'border-l-2 border-l-sage-400' : ''}`}>
-      <p className="text-xs font-semibold text-text">
-        {!under && idea.n ? <span className="tabular-nums">{idea.n}. </span> : null}{idea.title || idea.angle}
-      </p>
-      {idea.angle && idea.title && <p className="text-[11px] text-text-secondary mt-1.5 leading-relaxed">{idea.angle}</p>}
-      {!under && ref?.kind === 'finding' && ref.headline && (
-        <p className="text-[11px] text-sage-700 mt-2 leading-relaxed"><span className="font-semibold">Based on: </span>{ref.headline}</p>
+    <li className="border-l-2 border-sage-400 pl-3 py-0.5">
+      <p className="text-sm font-semibold text-text leading-snug" dir="auto">{idea.title || idea.angle}</p>
+      {idea.angle && idea.title && (
+        <div className="mt-0.5"><Clamp text={idea.angle} lines={2} className="text-sm text-text-secondary leading-relaxed" /></div>
       )}
-      {idea.rationale && <p className="text-[11px] text-text-tertiary mt-2 leading-relaxed">{idea.rationale}</p>}
-      {idea.suggested_format && <p className="mt-2"><Chip>{idea.suggested_format}</Chip></p>}
-    </div>
+      {idea.suggested_format && <p className="mt-1"><Chip>{idea.suggested_format}</Chip></p>}
+    </li>
+  )
+}
+
+function IdeaCard({ idea }) {
+  const ref = idea.answers_ref
+  const more = [
+    ref?.kind === 'finding' && ref.headline ? <Detail key="b" label="Based on">{ref.headline}</Detail> : null,
+    idea.rationale ? <Detail key="r" label="Why">{idea.rationale}</Detail> : null,
+  ].filter(Boolean)
+  return (
+    <ItemCard
+      badges={idea.suggested_format ? <Chip>{idea.suggested_format}</Chip> : null}
+      title={idea.title || idea.angle}
+      summary={idea.title ? idea.angle : null}
+      more={more.length ? more : null}
+    />
   )
 }
 
 function GapBlock({ block }) {
   const { gap, ideas } = block
   return (
-    <div className="border border-border bg-white p-3.5">
-      <p className="text-sm font-semibold text-text leading-snug">
-        {block.n ? <span className="tabular-nums">{block.n}. </span> : null}{gap.gap}
-      </p>
-      <Line label="Where we stand">{gap.our_position}</Line>
-      <Line label="What to do" strong>{gap.suggested_response}</Line>
-      {BASIS[gap.basis] && <p className="text-[10px] text-text-tertiary mt-2">Based on {BASIS[gap.basis]}</p>}
+    <ItemCard
+      number={block.n || null}
+      title={gap.gap}
+      why={gap.our_position} whyLabel="Where we stand"
+      todo={gap.suggested_response}
+      footer={BASIS[gap.basis] ? `Based on ${BASIS[gap.basis]}` : null}
+    >
       {ideas.length > 0 && (
-        <div className="mt-3 pt-3 border-t border-border space-y-2">
-          <Sub>Content ideas for this</Sub>
-          {ideas.map((idea, i) => <IdeaCard key={i} idea={idea} under />)}
+        <div>
+          <SubHead>Content ideas for this</SubHead>
+          <ul className="mt-2 space-y-2.5">{ideas.map((idea, i) => <IdeaLine key={i} idea={idea} />)}</ul>
         </div>
       )}
+    </ItemCard>
+  )
+}
+
+// ─── The tabs ──────────────────────────────────────────────────────────────
+
+const TAB_DEFS = [
+  { key: 'do', label: 'Do next', chip: n => (n === 1 ? 'thing to do next' : 'things to do next') },
+  { key: 'content', label: 'Content ideas', chip: n => (n === 1 ? 'content idea' : 'content ideas') },
+  { key: 'leads', label: 'Leads & tenders', chip: n => (n === 1 ? 'open lead or tender' : 'open leads and tenders') },
+  { key: 'competitors', label: 'Competitors', chip: n => (n === 1 ? 'competitor move' : 'competitor moves') },
+  { key: 'market', label: 'Market & events', chip: n => (n === 1 ? 'market item or event' : 'market items and events') },
+  { key: 'method', label: 'Sources & method', chip: null },
+]
+
+function TabBar({ tabs, active, onPick }) {
+  // On a phone the row scrolls sideways; keep the open tab in view so a
+  // takeaway or chip that switches tabs never lands on a hidden one.
+  const rowRef = useRef(null)
+  useEffect(() => {
+    const row = rowRef.current
+    const el = row?.querySelector('[aria-selected="true"]')
+    if (el && row.scrollWidth > row.clientWidth) {
+      row.scrollTo({ left: Math.max(0, el.offsetLeft - 16), behavior: 'smooth' })
+    }
+  }, [active])
+  return (
+    <div ref={rowRef} data-print-hide role="tablist" aria-label="Research sections"
+      className="flex overflow-x-auto border-b border-border [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      {tabs.map(t => (
+        <button key={t.key} role="tab" aria-selected={active === t.key} onClick={() => onPick(t.key)}
+          className={`shrink-0 -mb-px px-2.5 py-2.5 text-sm border-b-2 transition-colors ${
+            active === t.key
+              ? 'border-amber-700 text-text font-semibold'
+              : 'border-transparent text-text-secondary font-medium hover:text-text hover:border-border-strong'}`}>
+          {t.label}
+          {t.count === null
+            ? <span className="ml-1.5 inline-block align-middle w-5 h-3 bg-surface-muted animate-pulse" aria-label="loading" />
+            : t.count != null && (
+              <span className={`ml-1.5 px-1.5 py-px text-xs tabular-nums ${active === t.key ? 'bg-amber-700 text-white' : 'bg-surface-muted text-text-secondary'}`}>{t.count}</span>
+            )}
+        </button>
+      ))}
     </div>
   )
 }
 
-function StatButton({ n, label, onClick }) {
+function Filters({ team, onTeam, lines, line, onLine, untagged }) {
   return (
-    <button onClick={onClick}
-      className="text-left border border-border bg-white px-3 py-2 hover:border-stone-400 hover:bg-surface-subtle transition-colors min-w-0">
-      <span className="block text-lg font-bold text-text tabular-nums leading-tight">{n}</span>
-      <span className="block text-[11px] text-text-secondary leading-snug">{label}</span>
-    </button>
+    <div data-print-hide className="flex items-center gap-x-5 gap-y-2 flex-wrap">
+      <label className="flex items-center gap-2 text-sm text-text-secondary">
+        For
+        <PillSelect value={team} onChange={e => onTeam(e.target.value)}>
+          {TEAMS.map(t => <option key={t.key} value={t.key}>{t.label}</option>)}
+        </PillSelect>
+      </label>
+      {/* Only when the run found more than one business line. A brand with
+          one undivided business never sees a control that does nothing. */}
+      {lines.length > 1 && (
+        <label className="flex items-center gap-2 text-sm text-text-secondary">
+          Business
+          <PillSelect value={line} onChange={e => onLine(e.target.value)}>
+            <option value="all">All</option>
+            {lines.map(l => <option key={l.key} value={l.key}>{l.label}</option>)}
+          </PillSelect>
+        </label>
+      )}
+      {line !== 'all' && untagged > 0 && (
+        <p className="text-xs text-text-tertiary">
+          {plural(untagged, 'finding')} could not be tied to one business and only show under All.
+        </p>
+      )}
+    </div>
   )
 }
 
@@ -640,6 +649,7 @@ function StatButton({ n, label, onClick }) {
 export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRun, running, now }) {
   const { activeWorkspaceId, accessToken } = useAuth()
   const report = useMemo(() => run?.report || {}, [run])
+  const [params, setParams] = useSearchParams()
 
   const [team, setTeam] = useState(() => {
     try { return localStorage.getItem('research.team') || 'all' } catch { return 'all' }
@@ -670,6 +680,8 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
   // same route and renderer as the Analytics tab so the two never drift apart.
   const [explain, setExplain] = useState({ state: 'idle', points: [], error: '', cost: 0, capped: false, forRun: null })
   const [saveNote, setSaveNote] = useState('')
+  const [headlineOpen, setHeadlineOpen] = useState(false)
+  const tabsRef = useRef(null)
 
   useEffect(() => {
     if (!activeWorkspaceId) return undefined
@@ -780,55 +792,58 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
     .filter(n => matchesLine(line, linesOfRefs([n.ref].filter(Boolean), report)))
   const proposedCandidates = candidates.filter(c => c.status === 'proposed')
 
-  // `group` places a section on the page: act = what to do next, detail = the
-  // topics, about = how the research was done.
-  const sections = useMemo(() => [
-    { key: 'top', group: 'act', label: 'Top priorities', count: visibleTop.length },
-    { key: 'sales', group: 'act', label: 'Leads', count: storeLoaded ? visibleSales.open.length : null },
-    { key: 'recs', group: 'act', label: 'Content ideas', count: plan.blocks.length + plan.loose.length },
-    { key: 'competitors', group: 'act', label: 'Competitors', count: visibleMoves.length },
-    { key: 'events', group: 'act', label: 'Events', count: storeLoaded ? events.count : null },
-    { key: 'newcomp', group: 'act', label: 'New competitors', count: storeLoaded ? proposedCandidates.length : null },
-    { key: 'search', group: 'detail', label: 'Website', count: search.opportunities.length + search.movers.length },
-    { key: 'social', group: 'detail', label: 'Social', count: social.theirs.length + social.ours.length },
-    { key: 'market', group: 'detail', label: 'Market news', count: visibleNotes.length },
-    { key: 'global', group: 'detail', label: 'Global', count: world.items.length },
-    { key: 'poles', group: 'detail', label: 'Smart poles', count: poles.items.length },
-    { key: 'sources', group: 'detail', label: 'Sources', count: sources.length },
-    { key: 'about', group: 'about', label: 'About this research' },
-  ].filter(s => s.key === 'about' || sectionVisible(s.key, team)),
-  [team, storeLoaded, visibleTop, visibleSales, visibleMoves, social, events, search, visibleNotes, plan, proposedCandidates, sources, world, poles])
+  const show = key => sectionVisible(key, team)
+  const showSearch = show('search') && (search.present || !!site?.summary)
+  const searchCount = search.opportunities.length + search.movers.length
+  const ours = show('social') ? social.ours : []
+  const theirs = show('social') ? social.theirs : []
+  const showDirection = show('competitors') && !direction.derived && direction.items.length > 0
+  const showEvents = show('events')
 
-  const [activeZone, setActiveZone] = useState('top')
-  const rootRef = useRef(null)
-  const active = sections.some(z => z.key === activeZone) ? activeZone : sections[0]?.key
-
-  // A folded topic opens when someone jumps to it — landing on a shut fold
-  // reads as "the link did nothing".
-  const jump = useCallback(key => {
-    const el = document.getElementById(`brief-${key}`)
-    if (el?.dataset.fold !== undefined) {
-      const d = el.querySelector('details')
-      if (d) d.open = true
+  // What each tab holds. `count` is what the badge says (null while the store
+  // is still loading); `has` decides whether the tab is offered at all, so a
+  // tab with nothing in it never takes a place in the row.
+  const tabs = useMemo(() => {
+    const doCount = show('top') ? visibleTop.length : 0
+    // Ideas when there are any; the search rows are counted only when they are
+    // all the tab holds, so the badge and the glance chip say the same number.
+    const ideaCount = show('recs') ? plan.total : 0
+    const contentCount = ideaCount || (showSearch ? searchCount : 0)
+    const leadsCount = show('sales') ? (storeLoaded ? visibleSales.open.length : null) : 0
+    const compCount = (show('competitors') ? visibleMoves.length : 0) + (show('newcomp') && storeLoaded ? proposedCandidates.length : 0)
+    const marketCount = (show('market') ? visibleNotes.length : 0) + (show('global') ? world.items.length : 0) +
+      (show('poles') ? poles.items.length : 0) + (showEvents && storeLoaded ? events.count + events.dates.length : 0)
+    const has = {
+      do: doCount > 0,
+      content: contentCount > 0 || showSearch || ours.length > 0,
+      leads: show('sales') && (!storeLoaded || visibleSales.open.length > 0 || sales.closed.length > 0),
+      competitors: compCount > 0 || showDirection || theirs.length > 0 || (show('newcomp') && (!storeLoaded || candidates.length > 0)),
+      market: marketCount > 0 || (showEvents && !storeLoaded),
+      method: true,
     }
-    el?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-    setActiveZone(key)
-  }, [])
+    // A tab whose total still waits on the store shows a placeholder, not a
+    // number that grows a second later.
+    const pending = !storeLoaded
+    const counts = {
+      do: doCount, content: contentCount, leads: leadsCount,
+      competitors: pending && show('newcomp') ? null : compCount,
+      market: pending && showEvents ? null : marketCount,
+      method: sources.length,
+    }
+    // The glance card's chips name one kind of thing each, so they count only
+    // that kind: "8 content ideas", not ideas and search rows added together.
+    const chipCounts = { ...counts, content: ideaCount, competitors: show('competitors') ? visibleMoves.length : 0 }
+    return TAB_DEFS.filter(t => has[t.key]).map(t => ({ ...t, count: counts[t.key], chipCount: chipCounts[t.key] }))
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [team, storeLoaded, visibleTop, visibleSales, sales.closed, visibleMoves, proposedCandidates, candidates, plan,
+    showSearch, searchCount, ours, theirs, showDirection, showEvents, events, visibleNotes, world, poles, sources])
 
-  // Visibility is accumulated across callbacks — the observer reports only
-  // what CHANGED — and the topmost visible section in document order wins.
-  useEffect(() => {
-    const nodes = [...(rootRef.current?.querySelectorAll('[data-zone]') || [])]
-    if (!nodes.length || typeof IntersectionObserver === 'undefined') return undefined
-    const seen = new Map()
-    const io = new IntersectionObserver(entries => {
-      for (const e of entries) seen.set(e.target, e.isIntersecting)
-      const topNode = nodes.find(n => seen.get(n))
-      if (topNode) setActiveZone(topNode.dataset.zone)
-    }, { rootMargin: '-20% 0px -60% 0px', threshold: 0 })
-    nodes.forEach(n => io.observe(n))
-    return () => io.disconnect()
-  }, [run?.id, sections])
+  const asked = params.get('section')
+  const activeTab = tabs.some(t => t.key === asked) ? asked : tabs[0]?.key
+  const pickTab = useCallback((key, scroll = false) => {
+    setParams(prev => { const n = new URLSearchParams(prev); n.set('section', key); return n }, { replace: true })
+    if (scroll) tabsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }, [setParams])
 
   const onStatus = useCallback(async (row, status) => {
     setBusyId(row.id); setSaveNote('')
@@ -881,27 +896,36 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
   const failedRun = run.status === 'failed'
   const nothing = !failedRun && !report.headline && !(report.findings || []).length
   const reading = readingLine(states)
-  const show = key => sections.some(s => s.key === key)
-  const heroStats = [
-    show('top') && visibleTop.length ? { key: 'top', n: visibleTop.length, label: visibleTop.length === 1 ? 'top priority' : 'top priorities' } : null,
-    show('sales') && storeLoaded && visibleSales.open.length ? { key: 'sales', n: visibleSales.open.length, label: visibleSales.open.length === 1 ? 'open lead or tender' : 'open leads and tenders' } : null,
-    show('recs') && plan.total ? { key: 'recs', n: plan.total, label: plan.total === 1 ? 'content idea' : 'content ideas' } : null,
-    show('competitors') && visibleMoves.length ? { key: 'competitors', n: visibleMoves.length, label: visibleMoves.length === 1 ? 'competitor move' : 'competitor moves' } : null,
-    show('events') && storeLoaded && events.soon.length ? { key: 'events', n: events.soon.length, label: 'events in the next 90 days' } : null,
-  ].filter(Boolean)
+  const headline = failedRun ? 'This research run did not finish.' : report.headline || 'This research has no summary.'
+  const longHeadline = headline.length > 150
+
+  // The takeaways are the report's own top items, first sentence only — the
+  // glance card never says anything the tabs below do not.
+  const takeaways = [
+    ...(show('top') ? visibleTop.map(t => ({ text: t.finding, tab: 'do' })) : []),
+    ...(show('recs') ? plan.blocks.map(b => ({ text: b.gap?.gap, tab: 'content' })) : []),
+    ...(show('competitors') ? visibleMoves.map(m => ({ text: m.whatChanged ? `${m.competitor}: ${m.whatChanged}` : '', tab: 'competitors' })) : []),
+  ].filter(t => String(t.text || '').trim()).slice(0, 4)
+  const chips = tabs.filter(t => t.chip && t.chipCount !== 0)
+
+  const panel = key => `${activeTab === key ? '' : 'hidden print:block'} space-y-8`
+  const printTitle = key => (
+    <h2 className="hidden print:block text-lg font-bold text-text pt-4">{TAB_DEFS.find(t => t.key === key)?.label}</h2>
+  )
 
   return (
-    <div ref={rootRef} className="space-y-4">
+    <div className="space-y-5">
       {live && <RunProgress run={run} lensRows={lensRows} now={now} plain />}
 
-      {/* ── 1. What the research found ── */}
+      {/* ── 1. This week at a glance ── */}
       <Card className="p-5 sm:p-6">
         <div className="flex items-start justify-between gap-3 flex-wrap">
-          <div className="min-w-0">
-            <p className="text-[11px] font-semibold text-text-tertiary uppercase tracking-wide">
-              {isLatest ? 'Latest research' : 'Earlier research'}
+          <div className="min-w-0 flex items-center gap-2 flex-wrap">
+            <p className="text-xs font-semibold text-text-secondary uppercase tracking-wide">
+              {!isLatest ? 'Earlier research' : age != null && age <= 7 ? 'This week at a glance' : 'Latest research at a glance'}
             </p>
-            <p className="text-xs text-text-secondary mt-1">
+            {status && <Chip tone={status.tone}>{status.label}</Chip>}
+            <p className="text-xs text-text-tertiary basis-full sm:basis-auto">
               {[
                 fmtLongDate(run.started_at),
                 age != null ? ageLabel(age) : '',
@@ -909,51 +933,77 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
               ].filter(Boolean).join(' · ')}
             </p>
           </div>
-          <div className="flex items-center gap-2 flex-wrap">
-            {status && <Chip tone={status.tone}>{status.label}</Chip>}
-            {runs.length > 1 && (
-              <PillSelect value={selectedId || runs[0].id} onChange={e => onSelectRun(e.target.value)} className="max-w-[220px]">
-                {runs.map((r, i) => (
-                  <option key={r.id} value={r.id}>
-                    {new Date(r.started_at).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}
-                    {i === 0 ? ' (latest)' : ''}
-                    {r.status === 'failed' ? ' — did not finish' : partRun(r) ? ' — partly finished' : ''}
-                  </option>
-                ))}
-              </PillSelect>
-            )}
-          </div>
+          {runs.length > 1 && (
+            <PillSelect value={selectedId || runs[0].id} onChange={e => onSelectRun(e.target.value)} className="max-w-[220px]">
+              {runs.map((r, i) => (
+                <option key={r.id} value={r.id}>
+                  {new Date(r.started_at).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}
+                  {i === 0 ? ' (latest)' : ''}
+                  {r.status === 'failed' ? ' — did not finish' : partRun(r) ? ' — partly finished' : ''}
+                </option>
+              ))}
+            </PillSelect>
+          )}
         </div>
 
-        <h2 className="text-lg font-semibold text-text mt-3 leading-snug max-w-3xl" dir="auto">
-          {failedRun ? 'This research run did not finish.' : report.headline || 'This research has no summary.'}
+        <h2 dir="auto" className={`text-lg sm:text-xl font-semibold text-text mt-3 leading-snug max-w-[68ch] ${
+          longHeadline && !headlineOpen ? 'line-clamp-2 print:line-clamp-none' : ''}`}>
+          {headline}
         </h2>
+        {longHeadline && (
+          <button data-print-hide onClick={() => setHeadlineOpen(o => !o)}
+            className="text-xs font-medium text-text-secondary underline underline-offset-2 hover:text-text mt-1">
+            {headlineOpen ? 'Show less' : 'Read more'}
+          </button>
+        )}
 
         {(failedRun || partRun(run)) && (
-          <p className="text-xs text-amber-800 bg-amber-50/60 border-l-2 border-amber-600 px-2.5 py-1.5 mt-3 leading-relaxed max-w-3xl">
+          <p className="text-sm text-amber-800 bg-amber-50/60 border-l-2 border-amber-600 px-3 py-2 mt-3 leading-relaxed max-w-[72ch]">
             {plainRunProblem(run.error)} {failedRun ? 'Anything it found before it stopped is below.' : 'Only our own numbers were updated this time.'}
           </p>
         )}
         {!failedRun && !partRun(run) && faults.length > 0 && (
-          <p className="text-xs text-amber-800 mt-3 leading-relaxed max-w-3xl">
+          <p className="text-sm text-amber-800 mt-3 leading-relaxed max-w-[72ch]">
             Part of this research did not complete, so some sections may be thinner than usual.{' '}
-            <button className="underline underline-offset-2" onClick={() => jump('about')}>What happened</button>
+            <button className="underline underline-offset-2" onClick={() => pickTab('method', true)}>What happened</button>
           </p>
         )}
-        {nothing && !live && <p className="text-sm text-text-secondary mt-3 leading-relaxed max-w-3xl">{emptyReason(report, states)}</p>}
+        {nothing && !live && <p className="text-[15px] text-text-secondary mt-3 leading-relaxed max-w-[72ch]">{emptyReason(report, states)}</p>}
 
-        {heroStats.length > 0 && (
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 mt-4">
-            {heroStats.map(s => <StatButton key={s.key} n={s.n} label={s.label} onClick={() => jump(s.key)} />)}
+        {takeaways.length > 0 && (
+          <div className="mt-4 pt-4 border-t border-border-light">
+            <SubHead>Key takeaways</SubHead>
+            <ul className="mt-2 space-y-2 max-w-[72ch]">
+              {takeaways.map((t, i) => (
+                <li key={i} className="flex gap-2.5">
+                  <span aria-hidden="true" className="shrink-0 mt-[9px] w-1.5 h-1.5 bg-amber-600" />
+                  <button onClick={() => pickTab(t.tab, true)} dir="auto"
+                    className="text-left text-[15px] text-text leading-relaxed line-clamp-2 print:line-clamp-none hover:underline underline-offset-2 decoration-border-strong">
+                    {firstSentence(t.text)}
+                  </button>
+                </li>
+              ))}
+            </ul>
           </div>
         )}
-        {!storeLoaded && (show('sales') || show('events')) && (
-          <div className="flex gap-2 mt-2" aria-busy="true" aria-label="Loading leads and events">
-            <Skeleton className="h-12 w-32" /><Skeleton className="h-12 w-32" />
+
+        {chips.length > 0 && (
+          <div data-print-hide className="flex flex-wrap gap-2 mt-4">
+            {chips.map(t => (
+              t.chipCount === null
+                ? <Skeleton key={t.key} className="h-8 w-40" />
+                : (
+                  <button key={t.key} onClick={() => pickTab(t.key, true)}
+                    className="inline-flex items-baseline gap-1.5 border border-border bg-white px-3 py-1.5 text-sm hover:border-stone-400 hover:bg-surface-subtle transition-colors">
+                    <span className="font-bold text-text tabular-nums">{t.chipCount}</span>
+                    <span className="text-text-secondary">{t.chip(t.chipCount)}</span>
+                  </button>
+                )
+            ))}
           </div>
         )}
         {counts && (counts.opportunities_new > 0 || counts.events_new > 0 || counts.opportunities_changed > 0) && (
-          <p className="text-[11px] text-text-tertiary mt-3">
+          <p className="text-xs text-text-tertiary mt-3">
             New since the research before:{' '}
             {[
               counts.opportunities_new ? plural(counts.opportunities_new, 'lead') : '',
@@ -964,395 +1014,390 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
         )}
       </Card>
 
-      {saveNote && <Card className="p-3 border-red-200 bg-red-50/50"><p className="text-xs text-red-700">{saveNote}</p></Card>}
+      {saveNote && <Card className="p-3 border-red-200 bg-red-50/50"><p className="text-sm text-red-700">{saveNote}</p></Card>}
 
-      <ReaderBar team={team} onTeam={chooseTeam} lines={lines} line={line} onLine={chooseLine}
-        untagged={untagged} sections={sections} active={active} onJump={jump} />
+      {/* ── 2. The detail, one tab at a time ── */}
+      <div ref={tabsRef} className="scroll-mt-4 space-y-5">
+        <TabBar tabs={tabs} active={activeTab} onPick={k => pickTab(k)} />
+        {activeTab !== 'method' && (
+          <Filters team={team} onTeam={chooseTeam} lines={lines} line={line} onLine={chooseLine} untagged={untagged} />
+        )}
 
-      {/* ── 2. What to do with it ── */}
-      <Group title="What to do next" helper="The actions this research points to, most important first." />
+        {/* Do next */}
+        {tabs.some(t => t.key === 'do') && (
+          <div role="tabpanel" className={panel('do')}>
+            {printTitle('do')}
+            <Part title="Top priorities" helper="What most needs doing this week, most important first.">
+              <Stack>{visibleTop.map((t, i) => <TopItem key={i} t={t} n={i + 1} />)}</Stack>
+            </Part>
+          </div>
+        )}
 
-      <Section id="top" title="Top priorities" count={visibleTop.length}
-        helper="The things that most need doing this week, with what to do about each.">
-        <TopThree items={visibleTop} />
-      </Section>
+        {/* Content ideas */}
+        {tabs.some(t => t.key === 'content') && (
+          <div role="tabpanel" className={panel('content')}>
+            {printTitle('content')}
+            {show('recs') && plan.total > 0 && (
+              <Part title="Content ideas" count={plan.total}
+                helper="Where what the market wants and what we say do not line up, with content to close the gap.">
+                {/* Above the ideas, not under them: with eight cards below,
+                    the one control that starts work should not be the last
+                    thing on the page. */}
+                {plan.ideaCount > 0 && <div data-print-hide className="max-w-[72ch] [&>div]:mt-0 [&>div]:border-t-0 [&>div]:pt-0"><SendIdeasToPlan ideas={plan.ordered} /></div>}
+                <Stack>{plan.blocks.map(block => <GapBlock key={block.gap.id} block={block} />)}</Stack>
+                {plan.loose.length > 0 && (
+                  <div className="space-y-3 pt-2">
+                    {plan.blocks.length > 0 && <SubHead>More ideas from this research</SubHead>}
+                    <Stack>{plan.loose.map((idea, i) => <IdeaCard key={i} idea={idea} />)}</Stack>
+                  </div>
+                )}
+                {(report.repeated_ideas || []).length > 0 && (
+                  <p className="text-xs text-text-tertiary">
+                    {plural(report.repeated_ideas.length, 'idea')} left out because {report.repeated_ideas.length === 1 ? 'it repeats' : 'they repeat'} an earlier suggestion.
+                  </p>
+                )}
+              </Part>
+            )}
 
-      {show('sales') && (
-        <Section id="sales" title="Leads, tenders and projects" count={storeLoaded ? visibleSales.open.length : null}
-          helper={sales.trackerAvailable
-            ? 'Every open opening we are tracking, not only this week’s. Set the status as you work each one — the research never changes it.'
-            : 'Openings found in this research. From the next research they are tracked week to week with a status you set.'}>
-          {!storeLoaded ? (
-            <div className="space-y-2" aria-busy="true"><Skeleton className="h-10 w-full" /><Skeleton className="h-10 w-full" /></div>
-          ) : visibleSales.open.length ? (
-            <SalesTable rows={visibleSales.open} canEdit={intel.available} onStatus={onStatus} busyId={busyId} />
-          ) : <Quiet>No open leads, tenders or projects right now.</Quiet>}
-          {storeLoaded && sales.closed.length > 0 && (
-            <p className="text-[11px] text-text-tertiary mt-3 max-w-3xl">
-              Closed: {sales.closed.map(c => `${c.name} (${c.status})`).join('; ')}.
-            </p>
-          )}
-        </Section>
-      )}
+            {showSearch && (
+              <Part title="Website and search" count={searchCount || null}
+                helper="How our website did over the last 28 days on Google, and what to do about it.">
+                {site?.summary && <WebsiteRead read={site} />}
+                {site?.error && !site?.summary && (
+                  <p className="text-sm text-text-tertiary">The website numbers could not be read this time.</p>
+                )}
+                {search.present && (
+                  <div className="space-y-3">
+                    {/* A summary on request, never on page view: nobody should
+                        be charged again just for opening the tab. */}
+                    {!site?.summary && (
+                      <div className="border border-border bg-white max-w-[72ch]" data-print-hide={explainFor.state === 'done' ? undefined : ''}>
+                        <div className="px-3 py-2.5 flex items-center justify-between gap-3 flex-wrap">
+                          <p className="text-sm text-text-secondary">
+                            {explainFor.state === 'done' && explainFor.points.length
+                              ? 'What this adds up to'
+                              : 'Want the short version? Get the results below summed up in three sentences.'}
+                          </p>
+                          <Button size="sm" variant="secondary" onClick={runExplain} disabled={explainFor.state === 'loading'}>
+                            {explainFor.state === 'loading' ? 'Summarising…' : (explainFor.state === 'idle' ? 'Summarise' : 'Summarise again')}
+                          </Button>
+                        </div>
+                        {explainFor.state === 'done' && (explainFor.points.length
+                          ? <div className="border-t border-border bg-surface"><ExplainPoints points={explainFor.points} /></div>
+                          : <p className="px-3 pb-2 text-sm text-text-tertiary">Nothing here adds up to more than the items below.</p>
+                        )}
+                        {explainFor.state === 'error' && (
+                          <p className={`px-3 pb-2 text-sm ${explainFor.capped ? 'text-amber-700' : 'text-red-600'}`}>
+                            {explainFor.capped
+                              ? 'This month’s research budget has been used up, so a summary cannot be written right now.'
+                              : 'The summary could not be written. Please try again later.'}
+                          </p>
+                        )}
+                      </div>
+                    )}
+                    {search.note && <p className="text-[15px] text-text leading-relaxed max-w-[72ch]" dir="auto">{search.note}</p>}
+                    {search.byLine.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5">
+                        {search.byLine.map(l => (
+                          <span key={l.key || 'none'} className="text-xs px-2 py-1 bg-white border border-border text-text-secondary">
+                            {l.label}: <span className="tabular-nums font-semibold text-text">{l.impressions}</span> times seen in Google
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    {search.opportunities.length > 0 && (
+                      <div className="space-y-3 pt-1">
+                        <SubHead>Searches we show up for but do not win</SubHead>
+                        <Stack>{search.opportunities.map((r, i) => <SearchRow key={i} r={r} lineLabel={lineLabel} />)}</Stack>
+                      </div>
+                    )}
+                    {search.movers.length > 0 && (
+                      <div className="space-y-3 pt-1">
+                        <SubHead>What changed</SubHead>
+                        <Stack>{search.movers.map((r, i) => <SearchRow key={i} r={r} lineLabel={lineLabel} />)}</Stack>
+                      </div>
+                    )}
+                    {!searchCount && <Quiet>Nothing in the search numbers changed enough to report this time.</Quiet>}
+                  </div>
+                )}
+              </Part>
+            )}
 
-      {show('recs') && (
-        <Section id="recs" title="Content ideas" count={plan.total}
-          helper="Where what the market wants and what we say do not line up, with content to close the gap. Send the ideas to a content plan to start on them.">
-          {plan.blocks.length || plan.loose.length ? (
-            <>
-              <div className="space-y-3 max-w-3xl">{plan.blocks.map(block => <GapBlock key={block.gap.id} block={block} />)}</div>
-              {plan.loose.length > 0 && (
-                <div className="mt-3 space-y-2 max-w-3xl">
-                  {plan.blocks.length > 0 && <div className="pt-3 border-t border-border"><Sub>More ideas from this research</Sub></div>}
-                  {plan.loose.map((idea, i) => <IdeaCard key={i} idea={idea} />)}
+            {ours.length > 0 && (
+              <Part title="How our channels did">
+                <div className="bg-white border border-border px-4 sm:px-5">
+                  {ours.map(p => <OurChannel key={p.platform} p={p} />)}
                 </div>
-              )}
-              {plan.ideaCount > 0 && <SendIdeasToPlan ideas={plan.ordered} />}
-              {(report.repeated_ideas || []).length > 0 && (
-                <p className="text-[11px] text-text-tertiary mt-3">
-                  {plural(report.repeated_ideas.length, 'idea')} left out because {report.repeated_ideas.length === 1 ? 'it repeats' : 'they repeat'} an earlier suggestion.
+              </Part>
+            )}
+          </div>
+        )}
+
+        {/* Leads & tenders */}
+        {tabs.some(t => t.key === 'leads') && (
+          <div role="tabpanel" className={panel('leads')}>
+            {printTitle('leads')}
+            <Part title="Leads, tenders and projects" count={storeLoaded ? visibleSales.open.length : null}
+              helper={sales.trackerAvailable
+                ? 'Every open opening we are tracking, not only this week’s. Set the status as you work each one.'
+                : 'Openings found in this research. From the next research they are tracked week to week.'}>
+              {!storeLoaded ? (
+                <div className="space-y-3" aria-busy="true"><Skeleton className="h-28 w-full" /><Skeleton className="h-28 w-full" /></div>
+              ) : visibleSales.open.length ? (
+                <Stack>
+                  {visibleSales.open.map((r, i) => (
+                    <LeadCard key={r.id || `f${i}`} r={r} canEdit={intel.available} onStatus={onStatus} busyId={busyId} />
+                  ))}
+                </Stack>
+              ) : <Quiet>No open leads, tenders or projects right now.</Quiet>}
+              {storeLoaded && sales.closed.length > 0 && (
+                <p className="text-sm text-text-tertiary max-w-[72ch]">
+                  Closed: {sales.closed.map(c => `${c.name} (${c.status})`).join('; ')}.
                 </p>
               )}
-            </>
-          ) : <Quiet>No content ideas this time.</Quiet>}
-        </Section>
-      )}
+            </Part>
+          </div>
+        )}
 
-      {show('competitors') && (
-        <Section id="competitors" title="Competitor moves" count={visibleMoves.length}
-          helper="What each competitor is doing, pieced together from their website, LinkedIn, job ads, social posts and the press — and what it means for us.">
-          {visibleMoves.length ? (
-            // Grouped by business line: a lighting supplier and a controls
-            // integrator are never in the same room. One group means one
-            // business, and then the heading would be noise.
-            moveGroups.length > 1
-              ? (
-                <div className="space-y-5">
-                  {moveGroups.map(g => (
-                    <div key={g.key || 'unlined'}>
-                      <Sub>{g.label} · {plural(g.items.length, 'competitor')}</Sub>
-                      <div className="grid gap-2.5 md:grid-cols-2">
-                        {g.items.map((m, i) => <CompetitorMove key={i} m={m} />)}
+        {/* Competitors */}
+        {tabs.some(t => t.key === 'competitors') && (
+          <div role="tabpanel" className={panel('competitors')}>
+            {printTitle('competitors')}
+            {show('competitors') && visibleMoves.length > 0 && (
+              <Part title="Competitor moves" count={visibleMoves.length}
+                helper="What each competitor is doing, and what it means for us.">
+                {/* Grouped by business line: a lighting supplier and a controls
+                    integrator are never in the same room. One group means one
+                    business, and then the heading would be noise. */}
+                {moveGroups.length > 1 ? (
+                  <div className="space-y-6">
+                    {moveGroups.map(g => (
+                      <div key={g.key || 'unlined'} className="space-y-3">
+                        <SubHead>{g.label} · {plural(g.items.length, 'competitor')}</SubHead>
+                        <div className="grid gap-3 lg:grid-cols-2">{g.items.map((m, i) => <CompetitorMove key={i} m={m} />)}</div>
                       </div>
-                    </div>
-                  ))}
-                </div>
-              )
-              : <div className="grid gap-2.5 md:grid-cols-2">{visibleMoves.map((m, i) => <CompetitorMove key={i} m={m} />)}</div>
-          ) : <Quiet>No competitor did anything new that we found this week.</Quiet>}
-          {!direction.derived && direction.items.length > 0 && (
-            <div className="mt-5 pt-4 border-t border-border max-w-3xl">
-              <Sub>Where the market is heading</Sub>
-              <ul className="space-y-2">
-                {direction.items.map((d, i) => (
-                  <li key={i} className="text-xs text-text leading-relaxed">
-                    {d.movement}{d.so_what && <span className="text-text-secondary"> <span className="font-semibold">For us:</span> {d.so_what}</span>}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-        </Section>
-      )}
-
-      {show('events') && (
-        <Section id="events" title="Events and expos" count={storeLoaded ? events.count : null}
-          helper="Shows and conferences where our buyers gather. Mark whether we are going so the team knows.">
-          {!storeLoaded ? (
-            <div className="space-y-2" aria-busy="true"><Skeleton className="h-10 w-full" /></div>
-          ) : events.count ? (
-            <div className="space-y-5">
-              <div>
-                <Sub>Next 90 days</Sub>
-                {events.soon.length
-                  ? <EventsTable rows={events.soon} canEdit={intel.available} onDecision={onDecision} />
-                  : <Quiet>Nothing dated in the next 90 days.</Quiet>}
-              </div>
-              {events.later.length > 0 && (
-                <div>
-                  <Sub>Later this year — stands and deadlines to book now</Sub>
-                  <EventsTable rows={events.later} canEdit={intel.available} onDecision={onDecision} />
-                </div>
-              )}
-              {events.recent.length > 0 && (
-                <div>
-                  <Sub>Recently — what happened</Sub>
-                  <EventsTable rows={events.recent} recent />
-                </div>
-              )}
-            </div>
-          ) : <Quiet>No expo, conference or awards are coming up yet.</Quiet>}
-          {/* Holidays and seasonal dates, kept out of the expo tables: nobody
-              exhibits at a public holiday. */}
-          {events.dates.length > 0 && (
-            <div className="mt-5 max-w-3xl">
-              <Sub>Dates to plan content around</Sub>
-              <ul className="space-y-1.5">
-                {events.dates.map((d, i) => (
-                  <li key={i} className="text-xs text-text-secondary leading-relaxed">
-                    <span className="font-semibold text-text tabular-nums">{fmtDate(d.start)}</span> · {d.name}
-                    {d.recommendation && <span className="text-text-tertiary"> — {d.recommendation}</span>}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-        </Section>
-      )}
-
-      {show('newcomp') && (
-        <Section id="newcomp" title="New competitors to review" count={storeLoaded ? proposedCandidates.length : null}
-          helper="Companies acting like competitors that we do not watch yet. Accept to watch them from the next research; reject and they are not suggested again.">
-          {!storeLoaded ? <Skeleton className="h-10 w-full" /> : candidates.length ? (
-            <ul className="divide-y divide-border max-w-3xl">
-              {candidates.map(c => (
-                <li key={c.name} className="py-2.5 flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="text-xs font-semibold text-text">
-                      {c.name}{c.thisRun && <span className="ml-1.5"><Chip tone="bg-sage-50 text-sage-700 border-sage-200">This week</Chip></span>}
-                    </p>
-                    {c.why && <p className="text-[11px] text-text-secondary mt-0.5 leading-relaxed">{c.why}</p>}
-                    {c.url && <a href={c.url} target="_blank" rel="noopener noreferrer" className="text-[10px] text-text-tertiary underline underline-offset-2">{domainOf(c.url)}</a>}
+                    ))}
                   </div>
-                  {c.agendaId && c.status === 'proposed' ? (
-                    <div className="flex gap-1.5 shrink-0">
-                      <Button size="sm" onClick={() => onCandidate(c, 'active')} disabled={busyId === c.agendaId}>Accept</Button>
-                      <Button size="sm" variant="secondary" onClick={() => onCandidate(c, 'retired')} disabled={busyId === c.agendaId}>Reject</Button>
-                    </div>
-                  ) : (
-                    <span className="text-[10px] text-text-tertiary shrink-0">
-                      {!c.agendaId ? 'Not saved yet' : c.status === 'active' ? 'Now watched' : c.status === 'retired' ? 'Rejected' : c.status}
-                    </span>
-                  )}
-                </li>
-              ))}
-            </ul>
-          ) : <Quiet>No new competitors turned up.</Quiet>}
-        </Section>
-      )}
+                ) : <div className="grid gap-3 lg:grid-cols-2">{visibleMoves.map((m, i) => <CompetitorMove key={i} m={m} />)}</div>}
+              </Part>
+            )}
 
-      {/* ── 3. The detail, by topic ── */}
-      <Group title="Everything it found, by topic" helper="Open a topic to read the detail. Each item’s sources are one click away." />
-
-      {show('search') && (
-        <Fold id="search" title="Website and search" count={search.opportunities.length + search.movers.length}
-          helper="How our website did over the last 28 days on Google, and what to do about it.">
-          {site?.summary && <WebsiteRead read={site} />}
-          {site?.error && !site?.summary && (
-            <p className="text-[11px] text-text-tertiary mb-3">The website numbers could not be read this time.</p>
-          )}
-          {!search.present ? (
-            <Quiet>No Google search data came in with this research.</Quiet>
-          ) : (
-            <div className="space-y-3">
-              {/* A summary on request, never on page view: nobody should be
-                  charged again just for opening the tab. */}
-              {!site?.summary && (
-                <div className="border border-border bg-surface-subtle max-w-3xl">
-                  <div className="px-3 py-2 flex items-center justify-between gap-3">
-                    <p className="text-[11px] text-text-secondary">
-                      {explainFor.state === 'done' && explainFor.points.length
-                        ? 'What this adds up to'
-                        : 'Want the short version? Get the results below summed up in three sentences.'}
-                    </p>
-                    <Button size="sm" variant="secondary" onClick={runExplain} disabled={explainFor.state === 'loading'}>
-                      {explainFor.state === 'loading' ? 'Summarising…' : (explainFor.state === 'idle' ? 'Summarise' : 'Summarise again')}
-                    </Button>
-                  </div>
-                  {explainFor.state === 'done' && (explainFor.points.length
-                    ? <div className="border-t border-border bg-surface"><ExplainPoints points={explainFor.points} /></div>
-                    : <p className="px-3 pb-2 text-[11px] text-text-tertiary">Nothing here adds up to more than the items below.</p>
-                  )}
-                  {explainFor.state === 'error' && (
-                    <p className={`px-3 pb-2 text-[11px] ${explainFor.capped ? 'text-amber-700' : 'text-red-600'}`}>
-                      {explainFor.capped
-                        ? 'This month’s research budget has been used up, so a summary cannot be written right now.'
-                        : 'The summary could not be written. Please try again later.'}
-                    </p>
-                  )}
-                </div>
-              )}
-              {site?.summary && <Sub>From Google Search</Sub>}
-              {search.note && <p className="text-sm text-text leading-snug max-w-3xl" dir="auto">{search.note}</p>}
-              {search.byLine.length > 0 && (
-                <div className="flex flex-wrap gap-1.5">
-                  {search.byLine.map(l => (
-                    <span key={l.key || 'none'} className="text-[11px] px-2 py-1 bg-surface-muted text-text-secondary">
-                      {l.label}: <span className="tabular-nums font-semibold">{l.impressions}</span> times seen in Google
-                    </span>
+            {showDirection && (
+              <Part title="Where the market is heading">
+                <ul className="space-y-3 max-w-[72ch]">
+                  {direction.items.map((d, i) => (
+                    <li key={i} className="bg-white border border-border p-4">
+                      <p className="text-[15px] text-text leading-relaxed" dir="auto">{d.movement}</p>
+                      {d.so_what && <p className="text-sm text-text-secondary leading-relaxed mt-1.5"><span className="font-semibold text-text">For us: </span>{d.so_what}</p>}
+                    </li>
                   ))}
-                </div>
-              )}
-              {search.opportunities.length > 0 && (
-                <div className="space-y-2.5">
-                  <Sub>Searches we show up for but do not win</Sub>
-                  {search.opportunities.map((r, i) => <SearchRow key={i} r={r} lineLabel={lineLabel} />)}
-                </div>
-              )}
-              {search.movers.length > 0 && (
-                <div className="space-y-2.5 pt-1">
-                  <Sub>What changed</Sub>
-                  {search.movers.map((r, i) => <SearchRow key={i} r={r} lineLabel={lineLabel} />)}
-                </div>
-              )}
-              {!search.opportunities.length && !search.movers.length && (
-                <Quiet>Nothing in the search numbers changed enough to report this time.</Quiet>
-              )}
-            </div>
-          )}
-        </Fold>
-      )}
+                </ul>
+              </Part>
+            )}
 
-      {show('social') && (
-        <Fold id="social" title="Social media" count={social.theirs.length + social.ours.length}
-          helper="How our own channels did, and what competitors are posting about.">
-          <div className="grid gap-5 md:grid-cols-2">
-            <div>
-              <Sub>Our channels</Sub>
-              {social.ours.length ? social.ours.map(p => <OurChannel key={p.platform} p={p} />) : <Quiet>No numbers for our channels in this research.</Quiet>}
-            </div>
-            <div>
-              <Sub>Competitors</Sub>
-              {social.theirs.length ? (
-                <div className="space-y-3">
-                  {social.theirs.map(g => (
-                    <div key={g.competitor}>
-                      <p className="text-xs font-semibold text-text">{g.competitor}</p>
-                      <ul className="mt-1 space-y-1">
+            {show('newcomp') && (!storeLoaded || candidates.length > 0) && (
+              <Part title="New competitors to review" count={storeLoaded ? proposedCandidates.length : null}
+                helper="Companies acting like competitors that we do not watch yet. Accept to watch them; reject and they are not suggested again.">
+                {!storeLoaded ? <Skeleton className="h-16 w-full" /> : (
+                  <ul className="bg-white border border-border divide-y divide-border max-w-[72ch]">
+                    {candidates.map(c => (
+                      <li key={c.name} className="px-4 py-3 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2 sm:gap-3">
+                        <div className="min-w-0">
+                          <p className="text-[15px] font-semibold text-text">
+                            {c.name}{c.thisRun && <span className="ml-1.5 align-middle"><Chip tone="bg-sage-50 text-sage-700 border-sage-200">This week</Chip></span>}
+                          </p>
+                          {c.why && <div className="mt-0.5"><Clamp text={c.why} lines={2} className="text-sm text-text-secondary leading-relaxed" /></div>}
+                          {c.url && <a href={c.url} target="_blank" rel="noopener noreferrer" className="text-xs text-text-tertiary underline underline-offset-2">{domainOf(c.url)}</a>}
+                        </div>
+                        {c.agendaId && c.status === 'proposed' ? (
+                          <div className="flex gap-1.5 shrink-0" data-print-hide>
+                            <Button size="sm" onClick={() => onCandidate(c, 'active')} disabled={busyId === c.agendaId}>Accept</Button>
+                            <Button size="sm" variant="secondary" onClick={() => onCandidate(c, 'retired')} disabled={busyId === c.agendaId}>Reject</Button>
+                          </div>
+                        ) : (
+                          <span className="text-xs text-text-tertiary shrink-0">
+                            {!c.agendaId ? 'Not saved yet' : c.status === 'active' ? 'Now watched' : c.status === 'retired' ? 'Rejected' : c.status}
+                          </span>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </Part>
+            )}
+
+            {theirs.length > 0 && (
+              <Part title="What competitors are posting">
+                <div className="grid gap-3 lg:grid-cols-2">
+                  {theirs.map(g => (
+                    <div key={g.competitor} className="bg-white border border-border p-4 min-w-0">
+                      <p className="text-[15px] font-semibold text-text">{g.competitor}</p>
+                      <ul className="mt-2 space-y-1.5">
                         {g.items.map((it, i) => <Piece key={i} p={{ channel: it.platform, summary: it.text, url: it.url, date: it.date }} />)}
                       </ul>
                     </div>
                   ))}
                 </div>
-              ) : <Quiet>No competitor posts turned up.</Quiet>}
-            </div>
+              </Part>
+            )}
           </div>
-        </Fold>
-      )}
+        )}
 
-      {show('market') && (
-        <Fold id="market" title="Market and technical news" count={visibleNotes.length}
-          helper="Regulations, standards, technology and giga-projects — with what marketing and the technical team should do.">
-          {visibleNotes.length ? (
-            <div className="space-y-2.5">{visibleNotes.map((note, i) => <Note key={i} n={note} now={now} />)}</div>
-          ) : <Quiet>No regulation, technology or giga-project news this week.</Quiet>}
-        </Fold>
-      )}
-
-      {show('global') && (
-        <Fold id="global" title="Global industry" count={world.items.length}
-          helper="What international manufacturers, prices and standards are doing elsewhere — usually a sign of what reaches us later.">
-          {world.items.length ? (
-            <div className="space-y-2.5">{world.items.map((f, i) => <Note key={i} n={asNote(f, now)} now={now} />)}</div>
-          ) : <Quiet>Nothing from the wider industry this week.</Quiet>}
-        </Fold>
-      )}
-
-      {show('poles') && (
-        <Fold id="poles" title="Smart poles" count={poles.items.length}
-          helper="Our municipal line, kept on its own because its buyer is a city rather than an architect or consultant.">
-          {poles.items.length ? (
-            <div className="space-y-2.5">{poles.items.map((f, i) => <Note key={i} n={asNote(f, now)} now={now} />)}</div>
-          ) : (
-            <Quiet>
-              Nothing on smart poles this week.{poles.rivals === 0 && ' No competitor we watch sells smart poles, so this' +
-              ' topic relies on general market news. Add one under “What the research watches” below to change that.'}
-            </Quiet>
-          )}
-        </Fold>
-      )}
-
-      <Fold id="sources" title="All sources" count={sources.length}
-        helper={`Every page this research quotes, checked on ${fmtDate(run.started_at)}.`}>
-        {sources.length ? (
-          <ul className="space-y-1.5">
-            {sources.map(s => (
-              <li key={s.url} className="text-[11px] leading-relaxed flex gap-2 min-w-0">
-                <span className="text-text-tertiary shrink-0 w-[130px] truncate">{s.domain}</span>
-                <a href={s.url} target="_blank" rel="noopener noreferrer" className="text-text-secondary hover:text-text underline underline-offset-2 min-w-0 truncate">
-                  {s.title || s.url}
-                </a>
-              </li>
-            ))}
-          </ul>
-        ) : <Quiet>This research does not quote any web pages.</Quiet>}
-      </Fold>
-
-      {/* ── 4. About this research ── */}
-      <Group title="About this research" helper="How the research went, what is still unanswered, and what it keeps an eye on." />
-
-      <Fold id="about" title="How this research went"
-        helper={[status?.label, reading].filter(Boolean).join(' · ')}
-        open={states.some(s => s.state === 'failed')}>
-        <div className="space-y-5 pt-2">
-          {report.repetition && <p className="text-xs text-amber-700 max-w-3xl">{report.repetition}</p>}
-          {faults.length > 0 && (
-            <div className="max-w-3xl">
-              <Sub>What did not complete</Sub>
-              <ul className="space-y-1.5">{faults.map((f, i) => <li key={i} className="text-xs text-text-secondary leading-relaxed">{f}</li>)}</ul>
-            </div>
-          )}
-          {states.length > 0 && (
-            <div>
-              <Sub>Topics it checked</Sub>
-              <div className="space-y-1.5">
-                {states.map(s => (
-                  <div key={s.key} className="flex items-baseline gap-3 text-xs min-w-0">
-                    <span className={`px-1.5 py-0.5 border text-[10px] font-semibold shrink-0 w-[150px] text-center ${TOPIC_STATE[s.state]?.tone || ''}`}>{TOPIC_STATE[s.state]?.label || s.state}</span>
-                    <span className="text-text font-medium w-[150px] shrink-0 truncate">{s.label}</span>
-                    <span className="text-text-tertiary truncate hidden sm:block">{s.state === 'failed' ? 'Could not be checked this time.' : s.question}</span>
+        {/* Market & events */}
+        {tabs.some(t => t.key === 'market') && (
+          <div role="tabpanel" className={panel('market')}>
+            {printTitle('market')}
+            {showEvents && !storeLoaded && (
+              <Part title="Events and expos">
+                <div aria-busy="true" className="space-y-3"><Skeleton className="h-24 w-full" /></div>
+              </Part>
+            )}
+            {showEvents && storeLoaded && events.count > 0 && (
+              <Part title="Events and expos" count={events.count}
+                helper="Shows and conferences where our buyers gather. Mark whether we are going so the team knows.">
+                {events.soon.length > 0 && (
+                  <div className="space-y-3"><SubHead>Next 90 days</SubHead>
+                    <Stack>{events.soon.map((e, i) => <EventCard key={e.id || `s${i}`} e={e} canEdit={intel.available} onDecision={onDecision} />)}</Stack>
                   </div>
-                ))}
-              </div>
+                )}
+                {events.later.length > 0 && (
+                  <div className="space-y-3 pt-2"><SubHead>Later this year — stands and deadlines to book now</SubHead>
+                    <Stack>{events.later.map((e, i) => <EventCard key={e.id || `l${i}`} e={e} canEdit={intel.available} onDecision={onDecision} />)}</Stack>
+                  </div>
+                )}
+                {events.recent.length > 0 && (
+                  <div className="space-y-3 pt-2"><SubHead>Recently — what happened</SubHead>
+                    <Stack>{events.recent.map((e, i) => <EventCard key={e.id || `r${i}`} e={e} recent />)}</Stack>
+                  </div>
+                )}
+              </Part>
+            )}
+            {/* Holidays and seasonal dates, kept apart from the expos: nobody
+                exhibits at a public holiday. */}
+            {showEvents && storeLoaded && events.dates.length > 0 && (
+              <Part title="Dates to plan content around" count={events.dates.length}>
+                <ul className="bg-white border border-border divide-y divide-border max-w-[72ch]">
+                  {events.dates.map((d, i) => (
+                    <li key={i} className="px-4 py-2.5 text-[15px] text-text leading-relaxed">
+                      <span className="font-semibold tabular-nums">{fmtDate(d.start)}</span> · {d.name}
+                      {d.recommendation && <span className="block text-sm text-text-secondary">{d.recommendation}</span>}
+                    </li>
+                  ))}
+                </ul>
+              </Part>
+            )}
+            {show('market') && visibleNotes.length > 0 && (
+              <Part title="Market and technical news" count={visibleNotes.length}
+                helper="Regulations, standards, technology and giga-projects.">
+                <Stack>{visibleNotes.map((note, i) => <Note key={i} n={note} now={now} />)}</Stack>
+              </Part>
+            )}
+            {show('global') && world.items.length > 0 && (
+              <Part title="Global industry" count={world.items.length}
+                helper="What international manufacturers, prices and standards are doing — usually a sign of what reaches us later.">
+                <Stack>{world.items.map((f, i) => <Note key={i} n={asNote(f, now)} now={now} />)}</Stack>
+              </Part>
+            )}
+            {show('poles') && poles.items.length > 0 && (
+              <Part title="Smart poles" count={poles.items.length}
+                helper="Our municipal line, kept on its own because its buyer is a city rather than an architect or consultant.">
+                <Stack>{poles.items.map((f, i) => <Note key={i} n={asNote(f, now)} now={now} />)}</Stack>
+              </Part>
+            )}
+          </div>
+        )}
+
+        {/* Sources & method */}
+        <div role="tabpanel" className={panel('method')}>
+          {printTitle('method')}
+          <Part title="How this research went" helper={[status?.label, reading].filter(Boolean).join(' · ')}>
+            <div className="bg-white border border-border p-4 sm:p-5 space-y-5">
+              {report.repetition && <p className="text-sm text-amber-700 max-w-[72ch]">{report.repetition}</p>}
+              {faults.length > 0 && (
+                <div className="max-w-[72ch]">
+                  <SubHead>What did not complete</SubHead>
+                  <ul className="mt-2 space-y-1.5">{faults.map((f, i) => <li key={i} className="text-sm text-text-secondary leading-relaxed">{f}</li>)}</ul>
+                </div>
+              )}
+              {states.length > 0 && (
+                <div>
+                  <SubHead>Topics it checked</SubHead>
+                  <div className="mt-2 space-y-2">
+                    {states.map(s => (
+                      <div key={s.key} className="flex flex-wrap sm:flex-nowrap items-baseline gap-x-3 gap-y-1 text-sm min-w-0">
+                        <span className={`px-1.5 py-0.5 border text-[11px] font-semibold shrink-0 w-[150px] text-center ${TOPIC_STATE[s.state]?.tone || ''}`}>{TOPIC_STATE[s.state]?.label || s.state}</span>
+                        <span className="text-text font-medium sm:w-[160px] shrink-0 truncate">{s.label}</span>
+                        <span className="text-text-secondary truncate hidden md:block">{s.state === 'failed' ? 'Could not be checked this time.' : s.question}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {open.length > 0 && (
+                <div className="max-w-[72ch]">
+                  <SubHead>Still unanswered</SubHead>
+                  <p className="text-xs text-text-tertiary mt-1 mb-2">Raised by earlier research and not yet resolved.</p>
+                  <ul className="space-y-2">
+                    {open.map((item, i) => (
+                      <li key={i} className="text-sm text-text-secondary leading-relaxed">
+                        {item.text}
+                        <span className="text-text-tertiary">
+                          {' '}· first raised {fmtDate(item.firstRaised)}
+                          {item.runs > 1 ? ` · raised ${item.runs} times` : ''}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {passed.length > 0 && (
+                <div className="max-w-[72ch]">
+                  <SubHead>Deadlines that have passed</SubHead>
+                  <div className="mt-2 space-y-1.5">
+                    {passed.map((f, i) => (
+                      <p key={i} className="text-sm text-text-tertiary"><span className="line-through">{f.headline}</span> · {deadlineLabel(f, now)} · {teamsOf(f).map(t => TEAM_LABEL[t] || t).join(', ')}</p>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
-          )}
-          {open.length > 0 && (
-            <div className="max-w-3xl">
-              <Sub>Still unanswered</Sub>
-              <p className="text-[11px] text-text-tertiary mb-2">Raised by earlier research and not yet resolved.</p>
-              <ul className="space-y-2">
-                {open.map((item, i) => (
-                  <li key={i} className="text-xs text-text-secondary leading-relaxed">
-                    {item.text}
-                    <span className="text-text-tertiary">
-                      {' '}· first raised {fmtDate(item.firstRaised)}
-                      {item.runs > 1 ? ` · raised ${item.runs} times` : ''}
-                    </span>
+          </Part>
+
+          <Part title="All sources" count={sources.length || null}
+            helper={sources.length ? `Every page this research quotes, checked on ${fmtDate(run.started_at)}.` : null}>
+            {sources.length ? (
+              <ul className="bg-white border border-border divide-y divide-border-light">
+                {sources.map(s => (
+                  <li key={s.url} className="px-4 py-2 text-sm leading-relaxed flex flex-col sm:flex-row sm:gap-3 min-w-0">
+                    <span className="text-text-tertiary shrink-0 sm:w-[160px] truncate">{s.domain}</span>
+                    <a href={s.url} target="_blank" rel="noopener noreferrer" className="text-text-secondary hover:text-text underline underline-offset-2 min-w-0 truncate">
+                      {s.title || s.url}
+                    </a>
                   </li>
                 ))}
               </ul>
-            </div>
-          )}
-          {passed.length > 0 && (
-            <div className="max-w-3xl">
-              <Sub>Deadlines that have passed</Sub>
-              <div className="space-y-1.5">
-                {passed.map((f, i) => (
-                  <p key={i} className="text-xs text-text-tertiary"><span className="line-through">{f.headline}</span> · {deadlineLabel(f, now)} · {teamsOf(f).map(t => TEAM_LABEL[t] || t).join(', ')}</p>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      </Fold>
+            ) : <Quiet>This research does not quote any web pages.</Quiet>}
+          </Part>
 
-      <section id="brief-watch" className="scroll-mt-32">
-        <Card className="p-0 overflow-hidden">
-          <details className="group">
-            <summary className="cursor-pointer list-none [&::-webkit-details-marker]:hidden px-4 sm:px-5 py-3.5 flex items-start justify-between gap-3 hover:bg-surface-subtle">
-              <div className="min-w-0">
-                <h3 className="text-sm font-semibold text-text leading-tight">What the research watches</h3>
-                <p className="text-[11px] text-text-tertiary mt-1 leading-relaxed">The competitors and standing questions the next research will look at. Add, accept or remove them here.</p>
-              </div>
-              <span className="shrink-0 text-[11px] font-medium text-text-tertiary mt-0.5">
-                <span className="group-open:hidden">Show</span>
-                <span className="hidden group-open:inline">Hide</span>
-              </span>
-            </summary>
-            <div className="p-4 sm:p-5 border-t border-border bg-surface-subtle"><AgentSteering /></div>
-          </details>
-        </Card>
-      </section>
+          <section data-print-hide>
+            <Card className="p-0 overflow-hidden">
+              <details className="group">
+                <summary className="cursor-pointer list-none [&::-webkit-details-marker]:hidden px-4 sm:px-5 py-3.5 flex items-start justify-between gap-3 hover:bg-surface-subtle">
+                  <div className="min-w-0">
+                    <h3 className="text-base font-semibold text-text leading-tight">What the research watches</h3>
+                    <p className="text-sm text-text-secondary mt-1 leading-relaxed">The competitors and standing questions the next research will look at. Add, accept or remove them here.</p>
+                  </div>
+                  <span className="shrink-0 text-xs font-semibold text-text-secondary mt-0.5">
+                    <span className="group-open:hidden">Show</span>
+                    <span className="hidden group-open:inline">Hide</span>
+                  </span>
+                </summary>
+                <div className="p-4 sm:p-5 border-t border-border bg-surface-subtle"><AgentSteering /></div>
+              </details>
+            </Card>
+          </section>
+        </div>
+      </div>
     </div>
   )
 }
