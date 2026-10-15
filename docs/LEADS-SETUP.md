@@ -316,11 +316,15 @@ To connect, in this order:
    (or Preferences) → **Account Security** → **New API Key** → name it "Lead
    Agent" → choose the longest duration offered (persistent if it is there) →
    copy it. It is shown once. **A user who is not an Odoo Settings admin is
-   capped (1 day on Arak's Odoo, seen 2026-10-14).** The admin raises the cap
-   first (Settings → Technical → System Parameters, `base.api_key_duration`,
-   in days) or makes the key a Settings admin may make. When a key expires,
-   approvals fail with Odoo's refusal and wait with Retry until a new key is
-   saved.
+   capped (1 day on Arak's Odoo, seen 2026-10-14);** only a Settings admin
+   gets "Persistent Key". Simplest: the admin gives Lead Agent
+   **Administration: Settings** for a moment, signs in as it, makes a
+   Persistent Key, then sets Administration back to empty. Odoo 18 checks only
+   that the user is active and the key unexpired, so the key keeps working
+   with the user's normal rights. (The cap itself is per group: "API Keys
+   maximum duration days" on a user group, in developer mode. It is not a
+   system parameter.) When a key expires, approvals fail with Odoo's refusal
+   and wait with Retry until a new key is saved.
 5. Leads → **Agent settings** → **CRM (Odoo)** → **Connect Odoo**: address
    `https://arak-co.odoo.com`, Database left empty (asked of Odoo itself: on
    Odoo Online it is not the subdomain, Arak's is
