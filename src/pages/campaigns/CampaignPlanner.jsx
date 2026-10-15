@@ -1366,7 +1366,9 @@ export function CampaignPlanner() {
         })}
       </div>
 
-      {!brandReady && (
+      {/* Only once the profile has loaded: null means not answered (or the
+          read failed), and that is not the same as an empty Brand Brain. */}
+      {state.brandProfile && !brandReady && (
         <div className="rounded-xl bg-amber-50 border border-amber-200 px-4 py-3 text-xs text-amber-700">
           <span className="font-medium">No Brand Brain profile set.</span> The plan works without it but will be generic.
           <button onClick={() => navigate('/brand-brain')} className="underline font-medium hover:text-amber-800 ml-1">Set it up first</button> for on-brand ideas.

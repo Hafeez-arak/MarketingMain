@@ -47,7 +47,7 @@ function groupFor(dateStr) {
 
 const COLLAPSE_KEY = 'studio.sidebarCollapsed'
 
-export function SessionSidebar({ sessions, session, loading, onOpen, onNew, onRename, onDelete, autoOpenId }) {
+export function SessionSidebar({ sessions, session, loading, failed, onOpen, onNew, onRename, onDelete, autoOpenId }) {
   const [collapsed, setCollapsed] = useState(() => {
     try { return localStorage.getItem(COLLAPSE_KEY) === '1' } catch { return false }
   })
@@ -156,6 +156,8 @@ export function SessionSidebar({ sessions, session, loading, onOpen, onNew, onRe
 
       {loading ? (
         <div className="py-6 flex justify-center"><Spinner /></div>
+      ) : failed && sessions.length === 0 ? (
+        <p className="text-[11px] text-red-700 px-1">Your chats couldn’t be loaded.</p>
       ) : sessions.length === 0 ? (
         <p className="text-[11px] text-text-tertiary px-1">Nothing yet.</p>
       ) : (
