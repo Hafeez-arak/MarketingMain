@@ -361,7 +361,7 @@ export function Insights() {
       )}
 
       {/* ── The two halves ── */}
-      <div>
+      <div data-print-hide>
         <div className="flex" role="tablist">
           {TABS.map(t => (
             <button
@@ -376,7 +376,9 @@ export function Insights() {
             </button>
           ))}
         </div>
-        <p className="text-[11px] text-text-tertiary mt-1.5">{TABS.find(t => t.key === tab)?.note}</p>
+        {/* The research half's note would repeat the page subtitle word for
+            word, one line under it. */}
+        {tab === 'learned' && <p className="text-[11px] text-text-tertiary mt-1.5">{TABS.find(t => t.key === tab)?.note}</p>}
       </div>
 
       {tab === 'research' ? (
