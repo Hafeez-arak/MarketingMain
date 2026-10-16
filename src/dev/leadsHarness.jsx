@@ -8,7 +8,7 @@ import '../index.css'
 
 // ─── Dev-only Lead Agent harness ───────────────────────────────────────────
 // The real Lead Agent page without signing in: a fake admin session and
-// canned answers (leadsHarnessData.js). Served at /dev-leads.html
+// canned answers (leadsHarnessData.js). Served at /dev/leads.html
 // (?mode=hang | ?mode=fail for the loading and error states; ?as=sales or
 // ?as=sales_admin for what the sales team sees). Vite only builds index.html, so this never
 // reaches production.

@@ -11,7 +11,7 @@ import '../index.css'
 // answers for /api/email/*, so every tab can be clicked through — add, edit,
 // import, group, compose, send — with nothing leaving the browser.
 //
-// Served at /dev-email.html?tab=contacts. Vite only builds index.html, so this
+// Served at /dev/email.html?tab=contacts. Vite only builds index.html, so this
 // never reaches production.
 
 const session = { user: { id: 'u1', email: 'hafeez@arak-sa.com' }, access_token: 'dev' }

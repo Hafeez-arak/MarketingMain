@@ -22,7 +22,7 @@ import '../index.css'
 // Supabase or Zernio. That is the point — the routing decisions are covered by
 // tests, and this is for looking at layout, drag targets and timezone labels.
 //
-// Served by Vite at /dev-schedule.html. Vite only builds index.html, so this
+// Served by Vite at /dev/schedule.html. Vite only builds index.html, so this
 // never reaches a production bundle.
 
 const today = brandTodayKey()

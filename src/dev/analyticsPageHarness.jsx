@@ -9,7 +9,7 @@ import '../index.css'
 
 // ─── Dev-only harness for the Analytics PAGE, not one of its tabs ──────────
 //
-// The Website tab has its own harness (/dev-website.html) that renders it
+// The Website tab has its own harness (/dev/website.html) that renders it
 // against a recorded payload. This one exists for the ten lines that harness
 // cannot reach: the channel picker.
 //
@@ -28,7 +28,7 @@ import '../index.css'
 //   · the Zernio refresh and the connected-accounts list had to disappear on
 //     the Website tab, because Zernio has never heard of the website.
 //
-// Served by Vite at /dev-analytics-page.html. Vite only builds index.html, so
+// Served by Vite at /dev/analytics-page.html. Vite only builds index.html, so
 // this never reaches a production bundle.
 
 const ACCOUNTS = [

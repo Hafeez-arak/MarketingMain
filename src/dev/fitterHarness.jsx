@@ -18,7 +18,7 @@ import '../index.css'
 // thing and look at what comes out. A fake AuthContext and an intercepted
 // upload are all it needs — nothing here talks to Supabase.
 //
-// Served by Vite at /dev-fitter.html. Vite only builds index.html, so this
+// Served by Vite at /dev/fitter.html. Vite only builds index.html, so this
 // never reaches a production bundle.
 //
 // `?composer=1` mounts the real Create-a-post dialog instead, with the banner

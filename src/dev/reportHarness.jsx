@@ -14,7 +14,7 @@ import runs from './runsFixture.json'
 import '../index.css'
 
 // ─── Dev-only report harness ───────────────────────────────────────────────
-// Served by Vite at /dev-report.html. Vite only builds index.html, so this
+// Served by Vite at /dev/report.html. Vite only builds index.html, so this
 // never reaches a production bundle.
 //
 // ── WHAT THIS EXISTS TO TEST, AND WHY IT NEEDS THE REAL SHELL ──

@@ -39,7 +39,7 @@ import '../index.css'
 // The states switcher covers what a recording cannot: nobody can un-configure
 // a live property to see what the setup steps look like.
 //
-// Served by Vite at /dev-website.html. Vite only builds index.html, so this
+// Served by Vite at /dev/website.html. Vite only builds index.html, so this
 // never reaches a production bundle.
 
 const GA4_LIVE = {

@@ -17,7 +17,7 @@ import '../index.css'
 // shapes the real routes return — see api/zernio/_zernio.js analyticsPlan and
 // api/agent/search.js.
 //
-// Served by Vite at /dev-dashboard.html. Vite only builds index.html, so this
+// Served by Vite at /dev/dashboard.html. Vite only builds index.html, so this
 // never reaches a production bundle.
 
 const FROM = '2026-08-18'

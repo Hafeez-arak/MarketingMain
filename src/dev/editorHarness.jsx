@@ -10,7 +10,7 @@ import '../index.css'
 // auth, and the editor is the one part of it with enough geometry and enough
 // canvas work to be worth exercising directly.
 //
-// Served by Vite at /dev-editor.html. Vite only builds index.html, so this
+// Served by Vite at /dev/editor.html. Vite only builds index.html, so this
 // never reaches a production bundle.
 
 function testPhoto(w = 1600, h = 2000) {
@@ -30,7 +30,7 @@ function testPhoto(w = 1600, h = 2000) {
 // and generating it into state on mount is a cascading render for no reason.
 const TEST_PHOTO = testPhoto()
 
-// `/dev-editor.html?mode=video&duration=8` drives the video variant, where the
+// `/dev/editor.html?mode=video&duration=8` drives the video variant, where the
 // photo stands in for frame one of a clip. Worth having as a switch rather than
 // a second harness: the point of video mode is that it IS the same editor, and
 // flipping between the two in one page is how you notice if that stops being
@@ -90,7 +90,7 @@ const ARABIC_FIXTURE = {
 }
 const INITIAL = params.get('arabic') === '1' ? ARABIC_FIXTURE : null
 
-// `/dev-editor.html?reel=1` mounts the multi-clip reel timeline instead, on two
+// `/dev/editor.html?reel=1` mounts the multi-clip reel timeline instead, on two
 // fixture clips of different lengths. Same reason as the video switch above:
 // the reel surface has real playback logic in it — two elements alternating
 // across a seam, trims that change the cut — and none of it is reachable from
