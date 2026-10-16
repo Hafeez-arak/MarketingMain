@@ -26,7 +26,7 @@ import '../index.css'
 // chosen window. Fixtures that rounded these off into tidy, agreeing numbers
 // would verify a page that never had the problem.
 //
-// Served by Vite at /dev-analytics.html. Vite only builds index.html, so this
+// Served by Vite at /dev/analytics.html. Vite only builds index.html, so this
 // never reaches a production bundle.
 
 const FROM = '2026-08-21'

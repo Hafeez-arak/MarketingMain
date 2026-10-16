@@ -11,7 +11,7 @@ import { STATE_LABELS } from '../../lib/agent/urlInspection'
 // three self-contained readings of data it already has. All three are pure
 // functions of their props, like everything else on the tab: what they need
 // fetching is fetched by useWebsiteAnalytics and handed down, which is what
-// keeps /dev-website.html able to render the whole page with no network.
+// keeps /dev/website.html able to render the whole page with no network.
 //
 // What they have in common is that each one answers a question the numbers
 // cannot. The surfaces panel can say image search earns nothing; only the

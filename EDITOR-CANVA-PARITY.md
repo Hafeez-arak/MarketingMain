@@ -421,7 +421,7 @@ prop, and one arriving through a spread is not guaranteed to be read. Written
 explicitly on all four node types now.
 
 ### Verified in the browser
-Against `dev-editor.html` (a dev-only harness that mounts the editor on a
+Against `dev/editor.html` (a dev-only harness that mounts the editor on a
 generated test photo, since the app is behind a sign-in): the toolbar showing
 all fourteen text controls with none clipped; the colour panel opening
 unclipped with all five groups populated — five distinct golds correctly pulled
@@ -560,7 +560,7 @@ the stroke width, so they scale with the document exactly as the stroke does.
   (-180, 180].
 
 ### Verified in the browser
-Against `dev-editor.html`: a document with all eight layer types; every preset
+Against `dev/editor.html`: a document with all eight layer types; every preset
 landing on its exact values and Auto computing brightness/contrast from the
 real histogram; a 1:1 crop taking 1600×2000 to 1600×1600 with a layer moving
 from y=600 to exactly y=400, then "Reset to the full photo" returning it to

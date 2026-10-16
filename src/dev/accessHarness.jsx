@@ -15,9 +15,9 @@ import '../index.css'
 // The three screens that decide who sees a company, on a small in-memory
 // roster (accessFetch.js), so they can be clicked through without signing in:
 //
-//   /dev-access.html?page=/settings          the create-company form
-//   /dev-access.html?page=/team              Team & Access
-//   /dev-access.html?page=/onboarding&as=noor   approved, no companies yet
+//   /dev/access.html?page=/settings          the create-company form
+//   /dev/access.html?page=/team              Team & Access
+//   /dev/access.html?page=/onboarding&as=noor   approved, no companies yet
 //
 // ?as= picks who is signed in: admin (default), sara (a member), or noor
 // (approved a moment ago, nothing ticked). Vite only builds index.html, so

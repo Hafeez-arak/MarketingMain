@@ -214,7 +214,7 @@ Nothing here spent anything. No fal render was triggered at any point.
 
 **The fixture** is a locally generated 1280×720 / 8s clip with audio (`ffmpeg`
 inside the n8n container — regeneration command in `src/dev/editorHarness.jsx`)
-mounted in `dev-editor.html` under a 1600×2000 document, i.e. **16:9 footage
+mounted in `dev/editor.html` under a 1600×2000 document, i.e. **16:9 footage
 under a 4:5 page**, which is the ordinary production case and the only way to
 exercise the centre-crop.
 
@@ -303,7 +303,7 @@ so a seam no longer tears it down and rebuilds it against a stale element.
 
 ### Verified
 
-`/dev-editor.html?reel=1` mounts it on two fixture clips (8s + 6s). Playback
+`/dev/editor.html?reel=1` mounts it on two fixture clips (8s + 6s). Playback
 crosses the seam onto the second shot cleanly; dragging shot 1's tail in takes
 it to **5.3s of 8.0s** and the reel total from 14.0s to 11.3s, with the trim
 stored as exactly what is sent to the stitcher.

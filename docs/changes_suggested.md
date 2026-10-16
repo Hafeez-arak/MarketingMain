@@ -299,7 +299,7 @@ yet) cannot be produced on demand against the live stack at all.
 npm run dev
 ```
 
-Then open **`/dev-dashboard.html`**. It mounts the real Dashboard, the real
+Then open **`/dev/dashboard.html`**. It mounts the real Dashboard, the real
 aggregation and the real SEO rules against a stubbed `fetch`, with four
 scenarios across the top: everything connected, Search Console not set up,
 Search Console failing, nothing connected. Only the network is fake — the

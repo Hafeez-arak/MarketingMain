@@ -9,7 +9,7 @@ import '../index.css'
 // ─── Dev-only Targets harness ──────────────────────────────────────────────
 // The real Sales → Targets page without signing in: a fake admin session and
 // canned, made-up answers (targetsHarnessData.js). Served at
-// /dev-targets.html (?tab=targets|events|icp, ?mode=hang | ?mode=fail), and
+// /dev/targets.html (?tab=targets|events|icp, ?mode=hang | ?mode=fail), and
 // the Agent Brief page at ?page=brief. Vite
 // only builds index.html, so this never reaches production.
 

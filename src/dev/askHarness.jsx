@@ -14,7 +14,7 @@ import '../index.css'
 // narrowest and the old single-line input failed soonest, and the full-width
 // page. Same component in both, which is the point.
 //
-// Served by Vite at /dev-ask.html. Vite only builds index.html, so this never
+// Served by Vite at /dev/ask.html. Vite only builds index.html, so this never
 // reaches a production bundle.
 
 function Surface({ title, width }) {

@@ -463,7 +463,8 @@ picking the work back up. Read this before touching plan/content generation agai
 - **Image mode, with real count rules.** Every idea has `image_mode`:
   `'generate'` (AI makes it, references just guide it, any count) or
   `'use_reference'` (no AI — the image(s) ARE the post; exactly 1 for a `post`,
-  unlimited for a `carousel`). Enforced in `ReferencePicker.jsx`.
+  unlimited for a `carousel`). Enforced in `ReferencePicker.jsx` (since removed;
+  nothing used it after #107).
   **⚠ NOT YET WIRED on the n8n side** — the Plan Generation workflows still need
   an `image_mode` branch (skip FLUX entirely when `'use_reference'`). This is the
   single biggest gap before content generation is fully correct end-to-end.

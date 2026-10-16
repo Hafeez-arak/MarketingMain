@@ -36,7 +36,7 @@ import '../index.css'
 // it claim something (0, "Not connected", "No posts yet", "null") that is not
 // true yet? See the no-placeholder-flash rule in #44.
 //
-// /dev-loading.html?page=/social/instagram&mode=hang
+// /dev/loading.html?page=/social/instagram&mode=hang
 // Vite only builds index.html, so this never reaches production.
 
 export const ROUTES = {

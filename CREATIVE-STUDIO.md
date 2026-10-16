@@ -105,8 +105,8 @@ cut-outs, each with a position.
 - Photo editor only. In the clip editor the picture is a still standing in for
   footage, and a split could never reach the video.
 
-Both features have free preview pages with fake data: `dev-editor.html`
-(Split into layers) and `dev-studio.html` (Make 1080p in a lane and on a
+Both features have free preview pages with fake data: `dev/editor.html`
+(Split into layers) and `dev/studio.html` (Make 1080p in a lane and on a
 storyboard). Both were clicked through. Neither has been tried with a real
 paid call.
 

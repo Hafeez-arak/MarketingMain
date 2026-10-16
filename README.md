@@ -1,45 +1,30 @@
 # Campai — Marketing Platform
 
-## Setup
+The marketing app for ARAK Lighting and its sister brands: Brand Brain,
+research, content planning, Creative Studio, publishing, analytics, email and
+leads. What each page does is in [docs/team-guide](docs/team-guide/00-start-here.md).
+
+## Run it
 
 ```bash
 npm install
-npm run dev
+npm run dev      # http://localhost:5173
+npm run build
+npm test         # vitest
+npm run lint
 ```
 
-Open **http://localhost:5173**
+The browser needs `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` in `.env`
+(see [docs/DEPLOY-SETUP.md](docs/DEPLOY-SETUP.md)).
 
-## What works
+## Where things live
 
-All state is managed in-memory with React Context + useReducer. Every action persists within the session.
-
-| Route | Feature |
-|-------|---------|
-| `/` | Dashboard — live counts, recent posts, campaign list, quick actions |
-| `/campaigns` | Create, filter, delete campaigns |
-| `/campaigns/new` | Full campaign form — name, goal, platforms, dates, status |
-| `/schedule` | View all posts in a filterable table |
-| `/email` | Email flows with step builder (add/remove email/delay/condition steps) |
-| `/email/new` | Create new email flow with trigger + steps |
-| `/analytics` | Real counts from actual data, platform breakdown, connect prompt |
-| `/media` | Upload real files (drag & drop or browse), grid/list view, delete |
-| `/social` | Overview of all platforms with connect/disconnect toggle |
-| `/social/:platform` | Per-platform post list with stats |
-| `/social/:platform/new` | Full post composer — copy, hashtags, media upload, campaign attach, schedule |
-| `/approvals` | Approve / reject queue — fed by post creation |
-| `/settings` | Workspace name, notifications |
-| `/integrations` | Connect social accounts + third-party API keys |
-| `/team` | Invite members with name, email, role |
-
-## Data flow
-
-1. Create a campaign → visible on Dashboard + Campaigns
-2. Go to Social → connect an account → create a post → it appears in Schedule + Approvals
-3. Approve post in Approvals → notification fires
-4. Upload files in Media → stored in session
-5. All counts on Dashboard update in real time
-
-## Next: connect Supabase
-
-Replace the in-memory store in `src/store/appStore.jsx` with Supabase calls.
-See `src/lib/utils.js` for shared constants and helpers.
+| Path | What it is |
+|------|------------|
+| `src/` | The React app (Vite) |
+| `api/` | Vercel functions: agent, email, leads, Zernio, the n8n proxy |
+| `server/` | The `agent` container that runs research beside n8n |
+| `n8n/` | Workflow generator (`gen_workflows.py`), its tests, and the box's Docker setup |
+| `supabase/migrations/` | Database history — applied by hand, never deleted |
+| `dev/` | Offline preview pages (`/dev/loading.html` etc.) that mount real pages on fake data, no sign-in; `npm run dev` only, never built |
+| `docs/` | Setup guides (`*-SETUP.md`), plans, and the team guide |

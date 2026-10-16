@@ -10,7 +10,7 @@ import '../index.css'
 // Every row here is fake: a lane holding a still and a 480p clip, and a
 // two-clip storyboard whose first clip is 480p and second already 1080p.
 // Clicking Make 1080p adds a pending row and "finishes" it after a few
-// seconds; nothing leaves the browser. Served by Vite at /dev-studio.html, never built.
+// seconds; nothing leaves the browser. Served by Vite at /dev/studio.html, never built.
 
 function still(label) {
   const c = document.createElement('canvas')

@@ -11,7 +11,7 @@ import { WEBHOOK_PATHS } from './src/lib/n8nWebhookPaths.js'
 //
 // This exists so the editor's real output can be inspected and fed to the
 // video compose step without signing in: the studio itself is behind auth, and
-// the dev harness (/dev-editor.html) has no access token, so it cannot upload
+// the dev harness (/dev/editor.html) has no access token, so it cannot upload
 // to Supabase the way the real app does. Writing to a temp dir keeps the
 // service-role key out of the browser entirely, which uploading directly would
 // not.

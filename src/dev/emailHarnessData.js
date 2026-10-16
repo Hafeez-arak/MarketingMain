@@ -325,7 +325,7 @@ function api(action, body) {
     })
   }
   // No Microsoft here: come straight back as if the sign-in failed, to show the message.
-  if (action === 'ms_connect_start') return json({ ok: true, url: '/dev-email.html?tab=cold&section=mailboxes&ms_error=wrong_account' })
+  if (action === 'ms_connect_start') return json({ ok: true, url: '/dev/email.html?tab=cold&section=mailboxes&ms_error=wrong_account' })
   if (action === 'mailbox_check_domain') {
     const mb = db.email_mailboxes.find(m => m.id === body.mailbox_id)
     const check = mb.dns_check?.checked_at ? { ...mb.dns_check, checked_at: now() } : { domain: domainOf(mb.email), blocking: [], warnings: [], checked_at: now() }
