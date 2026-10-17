@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { ChevronRight } from 'lucide-react'
 import { useAuth } from '../store/auth'
 import { Card, SectionHead, Button, Skeleton } from './ui/index'
 import {
@@ -151,6 +152,36 @@ function RowsSkeleton() {
 }
 
 
+
+// ─── Collapsible cards (2026-10-17) ─────────────────────────────────────────
+// The three cards got long — 31 sources alone fill a screen — so each folds to
+// its head. The subtitle stays visible folded, so a closed card still says
+// what it holds. Remembered per person in this browser; storage that throws
+// (private window) just means every card starts closed.
+function useOpen(key) {
+  const storageKey = `agentSteering.open.${key}`
+  const [open, setOpen] = useState(() => {
+    try { return window.localStorage.getItem(storageKey) === '1' } catch { return false }
+  })
+  const toggle = useCallback(() => setOpen(o => {
+    try { window.localStorage.setItem(storageKey, o ? '0' : '1') } catch { /* not remembered, still works */ }
+    return !o
+  }), [storageKey])
+  return [open, toggle]
+}
+
+/** The card title as a button that folds the card. */
+function FoldTitle({ open, onToggle, children, count }) {
+  return (
+    <button type="button" onClick={onToggle} aria-expanded={open}
+            className="flex items-center gap-1.5 text-left hover:text-amber-800">
+      <ChevronRight size={14} className={`flex-shrink-0 transition-transform ${open ? 'rotate-90' : ''}`} aria-hidden="true" />
+      <span>{children}</span>
+      {count != null && !open ? <span className="font-normal text-text-tertiary">({count})</span> : null}
+    </button>
+  )
+}
+
 const INPUT = 'text-xs px-2.5 py-1.5 rounded-lg border border-border focus:outline-none focus:ring-1 focus:ring-amber-700 focus:border-amber-700'
 
 const PLACEHOLDER = {
@@ -241,14 +272,17 @@ function SourcesCard({ sources, loaded, error, accessToken, workspaceId, onChang
       || (a.tier ?? 9) - (b.tier ?? 9) || String(a.subject).localeCompare(String(b.subject)))
   const active = sources.filter(r => r.status === 'active').length
   const types = SOURCE_TYPES.filter(([k]) => sources.some(r => r.source_type === k))
+  const [open, toggle] = useOpen('sources')
   return (
     <Card className="md:col-span-2">
       <SectionHead
-        title="Where to look"
+        bordered={open}
+        title={<FoldTitle open={open} onToggle={toggle} count={loaded ? active : null}>Where to look</FoldTitle>}
         subtitle={!loaded ? 'Loading the sources…'
           : error ? 'The sources could not be loaded. Nothing has been lost.'
             : `${active} source${active === 1 ? '' : 's'} read before the agent searches openly for projects. It also builds its own hashtags and keywords each run.`}
       />
+      {open ? (
       <div className="px-5 py-4 [&>*:first-child]:mt-0">
         {loaded && types.length > 1 ? (
           <div className="mt-1 flex flex-wrap gap-1">
@@ -282,6 +316,7 @@ function SourcesCard({ sources, loaded, error, accessToken, workspaceId, onChang
           <Button size="sm" variant="ghost" onClick={add}>Add</Button>
         </div>
       </div>
+      ) : null}
     </Card>
   )
 }
@@ -298,6 +333,8 @@ export function AgentSteering() {
   const [newCompetitor, setNewCompetitor] = useState('')
   const [finding, setFinding] = useState(false)
   const [findNote, setFindNote] = useState('')
+  const [competitorsOpen, toggleCompetitors] = useOpen('competitors')
+  const [questionsOpen, toggleQuestions] = useOpen('questions')
 
   const refresh = useCallback(() => setReload(n => n + 1), [])
 
@@ -377,10 +414,13 @@ export function AgentSteering() {
   }
 
   return (
-    <div className="grid gap-4 md:grid-cols-2">
+    // items-start: a folded card keeps its own height instead of stretching to
+    // match an open one beside it.
+    <div className="grid gap-4 md:grid-cols-2 items-start">
       <Card>
         <SectionHead
-          title="Competitors it watches"
+          bordered={competitorsOpen}
+          title={<FoldTitle open={competitorsOpen} onToggle={toggleCompetitors} count={loaded ? watched.length : null}>Competitors it watches</FoldTitle>}
           subtitle={!loaded ? 'Loading the watchlist…' : agenda.error ? `The watchlist could not be loaded (${agenda.error}). Nothing has been lost.` : readiness.note}
           action={
             <span className="flex gap-1">
@@ -393,6 +433,7 @@ export function AgentSteering() {
             </span>
           }
         />
+        {competitorsOpen ? (
         <div className="px-5 py-4 [&>*:first-child]:mt-0">
           {findNote ? <p className="mt-1 text-xs text-text-secondary">{findNote}</p> : null}
           {loaded ? (
@@ -441,13 +482,16 @@ export function AgentSteering() {
             This list belongs to the research and may differ from the competitors listed in Brand Brain.
           </p>
         </div>
+        ) : null}
       </Card>
 
       <Card>
         <SectionHead
-          title="Standing questions"
+          bordered={questionsOpen}
+          title={<FoldTitle open={questionsOpen} onToggle={toggleQuestions} count={loaded ? agenda.questions.length : null}>Standing questions</FoldTitle>}
           subtitle="Asked every run, so one week stays comparable to the last."
         />
+        {questionsOpen ? (
         <div className="px-5 py-4 [&>*:first-child]:mt-0">
           {!loaded ? (
             <RowsSkeleton />
@@ -499,6 +543,7 @@ export function AgentSteering() {
             <Button size="sm" variant="ghost" onClick={addQuestion}>Add</Button>
           </div>
         </div>
+        ) : null}
       </Card>
 
       <SourcesCard

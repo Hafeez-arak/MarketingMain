@@ -118,9 +118,11 @@ export function PageHeader({ title, subtitle, children }) {
   )
 }
 
-export function SectionHead({ title, subtitle, action }) {
+export function SectionHead({ title, subtitle, action, bordered = true }) {
   return (
-    <div className="flex items-start justify-between gap-4 px-5 py-4 border-b border-border">
+    // `bordered={false}` for a collapsed card, where the line under the head
+    // would sit on top of the card's own bottom border.
+    <div className={`flex items-start justify-between gap-4 px-5 py-4 ${bordered ? 'border-b border-border' : ''}`}>
       <div className="min-w-0">
         <h3 className="font-semibold text-text text-sm leading-tight">{title}</h3>
         {subtitle && <p className="text-xs text-text-tertiary mt-1">{subtitle}</p>}
