@@ -138,6 +138,108 @@ function standing(agenda = []) {
 }
 
 /**
+ * WHERE TO LOOK — the source list a person keeps on the Research page.
+ *
+ * ── WHY ──
+ *
+ * The 13 Oct 2026 run built its project findings on scribd, an Oracle job
+ * posting and a UK consultancy page. The lens searched well; it just had no
+ * idea which sites carry this market's projects, so it took whatever a search
+ * engine ranked first — and search engines rank giga-project headlines first.
+ *
+ * The list is data (research_agenda rows, kind='source'), never written here:
+ * localLanguage() above explains why this file names no website. Tier 1 is
+ * read every run; the rest as searches allow. Hashtags and keywords on the
+ * list are searched as written; the lens also builds its own (see social()).
+ */
+const SOURCE_LABEL = {
+  website: 'site', news: 'news site', tender_portal: 'tender portal', exchange: 'stock-exchange announcements',
+  government: 'government site', instagram: 'Instagram account', linkedin: 'LinkedIn page', x: 'X account',
+  hashtag: 'hashtag', keyword: 'search phrase',
+}
+export function sourcesBlock(sources = [], { share = 40 } = {}) {
+  const rows = (sources || []).filter(r => r && r.subject)
+  if (!rows.length) return ''
+  const sorted = [...rows].sort((a, b) => (a.tier ?? 9) - (b.tier ?? 9))
+  return [
+    '',
+    'WHERE TO LOOK FIRST — a person on this team chose these sources because they carry the',
+    `projects we want. Spend about ${share}% of your searches here before searching openly:`,
+    '- a site or portal → search it with site:<domain> plus your topic words (in both languages);',
+    '- an Instagram or LinkedIn account → search site:instagram.com/<handle> or',
+    '  site:linkedin.com <name> for its recent posts, and read the posts that name a project;',
+    '- a hashtag or phrase → search it as written, on the open web and on instagram.com / linkedin.com.',
+    'Tier 1 every run; tier 2 and 3 when searches allow. If a source turned up nothing useful,',
+    'say so in one line in the detail of your closest finding — that is how the list gets pruned.',
+    ...sorted.slice(0, 30).map(r =>
+      `- [tier ${r.tier ?? 2}] ${SOURCE_LABEL[r.source_type] || 'source'}: ${r.subject}${r.why ? ` — ${r.why}` : ''}`),
+  ].join('\n')
+}
+
+/**
+ * Find projects where this market announces them, not only in the press.
+ *
+ * Contractors, fit-out companies, developers and project-tracker accounts post
+ * awards, site progress and handovers on Instagram and LinkedIn weeks before —
+ * or instead of — a trade-press article, and the mid-size jobs a specialist
+ * supplier lives on rarely reach the press at all. Nothing here names a
+ * hashtag: the lens builds them from the brand's own segments, region and
+ * language, which is the only way the same line works for every brand.
+ */
+function social(language) {
+  return [
+    '',
+    'SEARCH WHERE PROJECTS ARE ANNOUNCED, NOT ONLY WHERE THEY ARE REPORTED.',
+    'Contractors, fit-out companies, developers and accounts that track local projects post',
+    'awards, site progress and handovers on Instagram and LinkedIn — often before any article.',
+    'Build your own hashtags and keywords from the segments, region and project stages above',
+    `(awarded, fit-out, handover, under construction, opening soon)${language ? `, in ${language} as well as English` : ''},`,
+    'and search them with site:instagram.com and site:linkedin.com/posts queries. When an account',
+    'keeps posting projects that fit us, name it (with its handle or page URL) in the detail of the',
+    'finding it led to, so the team can add it to the source list.',
+  ].join('\n')
+}
+
+/**
+ * Which sources can carry a project finding on their own.
+ *
+ * Every source still counts as evidence; this only stops a project being
+ * reported on the strength of a page that is not about the project.
+ */
+const SOURCE_QUALITY = [
+  '',
+  'SOURCE QUALITY FOR PROJECTS. Prefer the original announcement: the owner\'s or developer\'s',
+  'own page or account, the contractor\'s or fit-out company\'s post, a stock-exchange filing, a',
+  'tender portal listing, or a trade-press article that names the parties. A job posting, a',
+  'document-sharing site (scribd and the like), an encyclopedia, a market-size report or a',
+  'directory listing can add context, but must not be the ONLY source for a project finding —',
+  'if it is all you have, lower the confidence below 0.4 and say what you could not confirm.',
+].join('\n')
+
+/**
+ * Size a project before proposing it: the whole project is rarely the job.
+ *
+ * Added 2026-10-17. The lenses kept proposing Qiddiya stadiums and SAR 2.7bn
+ * hotel programmes as single opportunities to a company whose won deals sit
+ * under a few million. Big projects stay in — they are where the brand earns
+ * its name — but as the PIECE that fits, with the person who holds it.
+ * `fit` is the company's own size/share/region lines, rendered from its ICP.
+ */
+function sizing(fit) {
+  if (!fit) return ''
+  return [
+    '',
+    'SIZE EVERY PROJECT AGAINST WHAT WE ACTUALLY WIN:',
+    fit,
+    'When a project\'s value is far larger than that, do NOT propose the whole project. Name the',
+    'specific piece that fits us — one building, one hotel, the interiors, a fit-out floor, the',
+    'controls package — and who holds it (the contractor, fit-out company or consultant that won',
+    'it). If you cannot find such a piece, still report the project, but say plainly that it is a',
+    'programme to split and lower the relevance to medium.',
+  ].join('\n')
+}
+
+/**
  * What the team already tracks, so a lens reports changes instead of repeats.
  *
  * Built by `knownIntelPrompt` in intel.js from the store. Passed in as text
@@ -233,7 +335,7 @@ const CLOSING = [
  * that is a tender; for a local service it is a new neighbourhood, a rival
  * closing, or an event needing suppliers. Same question, different target.
  */
-export function openingsPrompt(brand, { motion, agenda = [], language = '', intel = '' }) {
+export function openingsPrompt(brand, { motion, agenda = [], language = '', intel = '', sources = [], fit = '' }) {
   // Ranked, not listed. The previous version gave three equal bullets and the
   // model spread its searches evenly across them; design-stage projects are
   // worth more than everything else here combined, because they are the only
@@ -315,6 +417,10 @@ export function openingsPrompt(brand, { motion, agenda = [], language = '', inte
     'Expos, conferences and trade shows are NOT your question — a separate events lens covers',
     'them with its own searches. Spend yours on projects, and on the procurement or budget',
     'cycles that decide when buyers can commit.',
+    sizing(fit),
+    sourcesBlock(sources),
+    social(language),
+    SOURCE_QUALITY,
     known(intel),
     standing(agenda),
     localLanguage(language),
@@ -423,7 +529,7 @@ export function eventsPrompt(brand, { motion, competitors = [], agenda = [], lan
  * packages" would quietly stop looking at anything large, and the company asked
  * for the opposite.
  */
-export function targetsPrompt(brand, { icp = '', mix = { core: 50, broader: 50 }, searches = 8, agenda = [], language = '', intel = '' }) {
+export function targetsPrompt(brand, { icp = '', mix = { core: 50, broader: 50 }, searches = 8, agenda = [], language = '', intel = '', sources = [] }) {
   const coreSearches = Math.max(1, Math.round((searches * (mix.core ?? 50)) / 100))
   const broaderSearches = Math.max(0, searches - coreSearches)
   return [
@@ -436,11 +542,15 @@ export function targetsPrompt(brand, { icp = '', mix = { core: 50, broader: 50 }
     icp || 'No ideal customer profile is written yet. Use who the brand sells to, above.',
     '',
     `SPLIT YOUR ${searches} SEARCHES BETWEEN TWO TRACKS:`,
-    `- CORE (about ${coreSearches} searches): targets that look like what we already win — the core`,
-    '  segments, the good buyers, the package sizes we win most. Set target.track to "core".',
-    `- BROADER (about ${broaderSearches} searches): targets in the broader segments, larger packages,`,
-    '  and kinds of buyer we have not sold to much yet. Being unlike our past wins is the POINT of this',
-    '  track — do not skip a target because it is bigger or newer than what we usually do. Set',
+    `- CORE (about ${coreSearches} searches): projects we can actually do — the core segments, the good`,
+    '  buyers, and projects whose OUR-SHARE value (see OUR SHARE OF A PROJECT above, when given) lands',
+    '  in the package sizes we win most. These are mostly mid-size jobs that never make the big',
+    '  headlines: look for them in stock-exchange contract announcements, tender portals, fit-out and',
+    '  contractor posts, and local project news. Set target.track to "core".',
+    `- BROADER (about ${broaderSearches} searches): bigger projects, broader segments, and kinds of buyer`,
+    '  we have not sold to much yet. Being unlike our past wins is the POINT of this track —',
+    '  do not skip a target because it is bigger or newer than what we usually do. But on a big',
+    '  project the target is still the PIECE that fits us, not the whole programme. Set',
     '  target.track to "broader".',
     '',
     'WHAT COUNTS AS A TARGET:',
@@ -460,7 +570,13 @@ export function targetsPrompt(brand, { icp = '', mix = { core: 50, broader: 50 }
     '  (still bidding the main contract), owner_developer, fitout, operator, consultant, other.',
     '- client, contractor, consultant — names you established; empty string if not.',
     '- location, stage, scope — what the source says.',
-    '- value_sar — the package or project value as written (e.g. "SAR 45 million"), or empty.',
+    '- value_sar — the value as written (e.g. "SAR 45 million"), or empty. Never estimate it.',
+    '- value_kind — "project" when value_sar is the whole project, "package" when it is only the part',
+    '  we would supply; empty when there is no value.',
+    '- package — when the whole project is far bigger than what we win: the specific piece that fits',
+    '  us (one building, one hotel, the interiors, a fit-out floor, the controls package) and who',
+    '  holds it, e.g. "Hotel 3 interiors — fit-out by X". Empty when the whole job already fits.',
+    '- package_value_sar — that piece\'s own value when a source states it; empty otherwise.',
     '- deadline — a real ISO date only; timing — open | closed | unconfirmed.',
     '- why_fit — one sentence: which part of the ICP it matches.',
     '- red_flags — any ICP red flag you saw (e.g. a specified brand, a contractor not yet awarded);',
@@ -480,6 +596,9 @@ export function targetsPrompt(brand, { icp = '', mix = { core: 50, broader: 50 }
     '- Never invent a date, a value or a contact.',
     '- Plan your searches before you spend them and never repeat one. If you run out, report what you',
     '  already confirmed.',
+    sourcesBlock(sources),
+    social(language),
+    SOURCE_QUALITY,
     known(intel),
     standing(agenda),
     localLanguage(language),

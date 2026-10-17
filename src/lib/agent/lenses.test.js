@@ -205,8 +205,14 @@ describe('cadence keeps a monthly question off a weekly bill', () => {
     // run. Eight rather than six because it splits its searches between two
     // tracks, and a track left with three is the starved-lens failure above.
     // It only runs for a company that has written an ICP.
+    //
+    // Raised 50 → 54 on 2026-10-17: openings 6 → 8 and targets 8 → 10. Both
+    // now spend about 40% of their searches on the "Where to look" source list
+    // and the market's own Instagram/LinkedIn posts first; at the old budgets
+    // that left two or three for open searching, the starved-lens failure
+    // above. About +$0.25 a run.
     const weekly = expandPerLine(lensesFor({ cadence: 'weekly' }), ['lighting', 'controls'])
-    expect(searchBudgetFor(weekly)).toBeLessThanOrEqual(50)
+    expect(searchBudgetFor(weekly)).toBeLessThanOrEqual(54)
   })
 })
 

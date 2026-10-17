@@ -220,6 +220,12 @@ export function opportunityFromFinding(f) {
     segment: str(lead.segment),
     buyer: pick(lead.buyer, TARGET_BUYERS, ''),
     value_sar: parseAmount(lead.value_sar),
+    // Whether that value is the whole project or our package, the piece of a
+    // big project that fits us, and that piece's value when a source gave it.
+    // Sales → Targets turns a project value into our share using the ICP.
+    value_kind: pick(lead.value_kind, ['project', 'package'], ''),
+    package: str(lead.package).slice(0, 400),
+    package_value_sar: parseAmount(lead.package_value_sar),
     track: pick(lead.track, ['core', 'broader'], ''),
     why_fit: str(lead.why_fit).slice(0, 600),
     red_flags: str(lead.red_flags).slice(0, 600),
@@ -233,7 +239,7 @@ const TARGET_BUYERS = ['contractor_awarded', 'contractor_bidding', 'owner_develo
 // Filled once and never treated as news: a lead first found by the openings
 // lens and later by the targets lens gains its ICP fields without the report
 // saying the project "changed".
-const OPP_BLANK_FILLS = ['segment', 'buyer', 'value_sar', 'track', 'why_fit', 'red_flags', 'contact']
+const OPP_BLANK_FILLS = ['segment', 'buyer', 'value_sar', 'value_kind', 'package', 'package_value_sar', 'track', 'why_fit', 'red_flags', 'contact']
 
 const isBlank = v => v === null || v === undefined || String(v).trim() === ''
 

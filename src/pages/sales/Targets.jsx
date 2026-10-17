@@ -259,7 +259,12 @@ function TargetRow({ r, onChange }) {
   const [note, setNote] = useState(r.owner_note || '')
   const fit = r.fit || {}
   const facts = [
-    r.segment && fit.segment, r.buyer && buyerLabel(r.buyer), formatAmount(r.value_sar), r.stage, r.location,
+    r.segment && fit.segment, r.buyer && buyerLabel(r.buyer),
+    // The value is labelled for what it is. A bare "2.7B SAR" next to a
+    // package-sized company read as a deal size; the fit line below carries
+    // our estimated share of it.
+    r.value_sar && `${formatAmount(r.value_sar)}${r.value_kind === 'package' ? ' package' : r.value_kind === 'project' ? ' project' : ''}`,
+    r.stage, r.location,
     r.contractor && `contractor ${r.contractor}`, r.consultant && `consultant ${r.consultant}`, r.client && `client ${r.client}`,
   ].filter(Boolean)
   return (
@@ -273,6 +278,12 @@ function TargetRow({ r, onChange }) {
         </div>
         {r.headline && <p className="text-xs text-text-secondary mt-1" dir="auto">{r.headline}</p>}
         {facts.length > 0 && <p className="text-[11px] text-text-tertiary mt-1" dir="auto">{facts.join(' · ')}</p>}
+        {r.package && (
+          <p className="text-xs text-text mt-1.5" dir="auto">
+            <span className="font-semibold">Our piece: </span>{r.package}
+            {r.package_value_sar ? ` (${formatAmount(r.package_value_sar)})` : ''}
+          </p>
+        )}
         {(fit.reasons || []).length > 0 && (
           <p className="text-[11px] text-sage-700 mt-1.5">Fits: {fit.reasons.join(' · ')}</p>
         )}
@@ -363,7 +374,7 @@ function IcpTab({ icp: raw, updatedAt, error, onSave }) {
         <Input label="Share of weekly search on the core track (%)" type="number" min={0} max={100} value={form.core} onChange={set('core')}
           hint="The rest goes to the broader track." />
         <Textarea label="Segments" rows={8} value={form.segments} onChange={set('segments')}
-          hint="One per line: name | core or broader | weight 1–3 | words that identify it, comma separated | note" />
+          hint="One per line: name | core or broader | weight 1–3 | words that identify it, comma separated | note | share % (optional, e.g. 6-8)" />
         <div>
           <p className="text-xs font-semibold text-text mb-1">Buyers</p>
           <p className="text-[11px] text-text-tertiary mb-2">Weight from −3 (a warning) to 3 (the best buyer). 0 means it does not count.</p>
@@ -385,6 +396,14 @@ function IcpTab({ icp: raw, updatedAt, error, onSave }) {
           <Input label="Regions" value={form.regions} onChange={set('regions')} hint="Comma separated words" />
         </div>
         <Input label="Note on size" value={form.size_note} onChange={set('size_note')} />
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <Input label="Our share of a project (%)" value={form.share} onChange={set('share')}
+            hint="e.g. 3-5. A project's value is turned into our package value with this. Empty: values are taken as package sizes." />
+          <div className="md:col-span-2">
+            <Input label="Note on share" value={form.share_note} onChange={set('share_note')}
+              hint="A segment can have its own share: add | 6-8 at the end of its line above." />
+          </div>
+        </div>
         <Textarea label="Red flags" rows={6} value={form.red_flags} onChange={set('red_flags')}
           hint="One per line: flag | what to do | words that reveal it, comma separated" />
         <Textarea label="Ask these first" rows={5} value={form.ask_first} onChange={set('ask_first')} hint="One question per line" />
@@ -435,6 +454,8 @@ function IcpTab({ icp: raw, updatedAt, error, onSave }) {
           icp.size.sweet_max && `Best under ${formatAmount(icp.size.sweet_max)}`,
           icp.size.ok_max && `Fine up to ${formatAmount(icp.size.ok_max)}`,
           icp.size.note,
+          icp.share && `Our share of a project: ${icp.share.min === icp.share.max ? icp.share.min : `${icp.share.min}–${icp.share.max}`}%`,
+          icp.share?.note,
           icp.regions.length && `Region: ${icp.regions.join(', ')}`,
         ].filter(Boolean)} />
         <IcpList title="Ask these first" items={icp.ask_first} ordered />

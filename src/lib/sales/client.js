@@ -14,7 +14,7 @@ import { ACCOUNT_STATUSES } from './icp'
 
 const OPP_COLUMNS = 'id,type,name,headline,client,contractor,consultant,location,scope,stage,deadline,timing,' +
   'relevance,suggested_action,source_url,status,owner_note,first_seen_at,last_seen_at,times_seen,last_change,line,' +
-  'segment,buyer,value_sar,track,why_fit,red_flags,contact'
+  'segment,buyer,value_sar,value_kind,package,package_value_sar,track,why_fit,red_flags,contact'
 
 const EVENT_COLUMNS = 'id,name,start_date,end_date,venue,city,organizer,url,exhibitor_deadline,competitors_exhibiting,' +
   'relevance,recommendation,status,decision,takeaway,last_seen_at'

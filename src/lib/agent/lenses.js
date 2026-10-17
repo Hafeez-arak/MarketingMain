@@ -145,8 +145,12 @@ export const LENSES = [
     // events lens, so every search it has now goes to projects.
     // Firecrawl first (backupSearch.js): portals, tender listings, PDFs and
     // company sites are where it beat Claude's search on 2026-09-15.
+    //
+    // Eight again from 2026-10-17: it now reads the "Where to look" list and
+    // the market's own Instagram/LinkedIn posts before searching openly, and
+    // six left nothing for the open search once the list had its share.
     web: 'firecrawl',
-    budget: { searches: 6, maxTokens: 10_000, effort: 'medium' },
+    budget: { searches: 8, maxTokens: 10_000, effort: 'medium' },
     universal: true,
   },
   {
@@ -168,7 +172,11 @@ export const LENSES = [
     //
     // Eight searches, not six: half go to each track, and a track starved to
     // three is the demand lens's failure again (see its note above).
-    budget: { searches: 8, fetches: 10, maxTokens: 12_000, effort: 'medium' },
+    //
+    // Ten from 2026-10-17, for the same reason as openings: the source list
+    // takes about 40% first, and the core track still needs room for open
+    // searching on the mid-size jobs the list does not reach.
+    budget: { searches: 10, fetches: 12, maxTokens: 12_000, effort: 'medium' },
     // Its own output shape — a target, not a generic finding — so the shared
     // schema every other lens uses is not pushed toward the size the API
     // refuses. A refusal here costs this lens, never the run.

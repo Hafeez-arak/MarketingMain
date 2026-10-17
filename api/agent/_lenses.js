@@ -303,7 +303,8 @@ export const TARGETS_SCHEMA = {
               additionalProperties: false,
               required: [
                 'name', 'kind', 'track', 'segment', 'buyer', 'client', 'contractor', 'consultant',
-                'location', 'stage', 'scope', 'value_sar', 'deadline', 'timing', 'why_fit', 'red_flags', 'contact',
+                'location', 'stage', 'scope', 'value_sar', 'value_kind', 'package', 'package_value_sar',
+                'deadline', 'timing', 'why_fit', 'red_flags', 'contact',
               ],
               properties: {
                 name: { type: 'string', description: 'The project\'s or company\'s OWN name, stable week to week. Never a sentence.' },
@@ -321,6 +322,9 @@ export const TARGETS_SCHEMA = {
                 stage: { type: 'string', description: 'e.g. announced, design, tender, awarded, construction, fit-out.' },
                 scope: { type: 'string' },
                 value_sar: { type: 'string', description: 'The value as written on the source, or empty.' },
+                value_kind: { type: 'string', enum: ['project', 'package', ''], description: 'Is value_sar the whole project, or only the package we would supply?' },
+                package: { type: 'string', description: 'For a project too big for us as a whole: the specific piece that fits us and who holds it. Empty otherwise.' },
+                package_value_sar: { type: 'string', description: 'That piece\'s own value as written on a source, or empty. Never estimate it.' },
                 deadline: { type: 'string', description: 'ISO date, only when established.' },
                 timing: { type: 'string', enum: ['open', 'closed', 'unconfirmed', ''] },
                 why_fit: { type: 'string', description: 'Which part of the ICP it matches, in one sentence.' },
