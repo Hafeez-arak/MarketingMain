@@ -195,6 +195,17 @@ query, and the loop paces itself on that.
 your queue with work; it cannot spend a posting slot. Widening that later is a
 permission change, not a rewrite — which is exactly why it is drawn here.
 
+**Widened 2026-10-17, for admins in the chat only.** The owner asked for the
+assistant to edit anything in the app when an admin asks: Brand Brain fields
+and structure, directory rows, the rule book, the research agenda (questions,
+competitors, sources), the ICP, plan ideas and unscheduled drafts. Admin means
+`user_access.role = 'admin'` (not `workspace_members.role`, which is 'owner'
+for everyone), checked from the token in `api/agent/chat.js`. Every edit writes
+an `agent_edit_log` row with before/after and can be undone; overwrites and
+deletes need the person's yes first. Publishing, sending, members, the cost
+cap and secrets stay out of reach. Everyone else, and the weekly research run,
+keep the propose-only belt above. See `src/lib/agent/adminTools.js`.
+
 ### The write boundary is unchanged and non-negotiable
 
 `RESEARCH-AGENT.md` §5a holds in full: no tool writes to `brand_profile`,

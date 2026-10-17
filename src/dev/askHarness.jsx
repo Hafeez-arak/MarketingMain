@@ -1,6 +1,8 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import ReactDOM from 'react-dom/client'
 import AskInput from '../components/AskInput'
+import { AttachButton, AttachmentTray, TurnAttachments } from '../components/ChatAttachments'
+import { useChatAttachments } from '../lib/useChatAttachments'
 import '../index.css'
 
 // ─── Dev-only composer harness ─────────────────────────────────────────────
@@ -55,6 +57,47 @@ function Surface({ title, width }) {
   )
 }
 
+// The composer with attachments, wired the way AssistantDrawer wires it. The
+// attach button, paste and the tray are real; "sending" only moves the files
+// onto the sent turn so the thumbnails can be seen. window.__attach(files)
+// lets a test add files without a file picker.
+function AttachSurface() {
+  const [question, setQuestion] = useState('')
+  const [sent, setSent] = useState([])
+  const files = useChatAttachments()
+  useEffect(() => { window.__attach = files.add }, [files.add])
+  const send = () => {
+    if (!question.trim() && !files.items.length) return
+    setSent(v => [...v, { text: question, attachments: files.items }])
+    setQuestion('')
+    files.clear()
+  }
+  return (
+    <div className="mb-10">
+      <div className="text-xs font-mono text-slate-400 mb-2">drawer with attachments — 448px</div>
+      <div className="border border-slate-200 rounded-xl bg-white" style={{ width: 448 }}>
+        <div className="p-3 text-xs text-slate-500 border-b border-slate-100 min-h-[80px]">
+          {sent.length === 0 ? 'Attach or paste an image or PDF.' : sent.map((t, i) => (
+            <div key={i} className="mb-2 text-slate-700">
+              <TurnAttachments items={t.attachments} />
+              <div className="whitespace-pre-wrap">↳ {t.text || '(file only)'}</div>
+            </div>
+          ))}
+        </div>
+        <div className="p-3 border-t border-slate-100">
+          <AttachmentTray items={files.items} error={files.error} preparing={files.preparing} onRemove={files.remove} />
+          <form onSubmit={e => { e.preventDefault(); send() }} className="flex gap-2 items-end">
+            <AttachButton onFiles={files.add} />
+            <AskInput value={question} onChange={setQuestion} onSubmit={send} onPaste={files.onPaste}
+                      canSubmitEmpty={files.items.length > 0} placeholder="Ask anything…" />
+            <button type="submit" className="text-sm px-3 py-2 rounded-lg bg-slate-900 text-white">Ask</button>
+          </form>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // Exported, like the other harnesses: Fast Refresh only tracks components in
 // a module that exports them, and a harness you have to hard-reload to see a
 // change in is a harness nobody uses twice.
@@ -65,6 +108,7 @@ export function AskHarness() {
       <p className="text-sm text-slate-500 mb-6">
         Type a long question. The box should wrap and grow to eight lines, then scroll.
       </p>
+      <AttachSurface />
       <Surface title="drawer — 448px" width={448} />
       <Surface title="/agent page — full width" width="100%" />
     </div>

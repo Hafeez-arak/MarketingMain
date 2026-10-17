@@ -80,6 +80,10 @@ export default function AskInput({
   autoFocus = false,
   inputRef,
   className = '',
+  // Attachments (ChatAttachments.jsx): a pasted screenshot becomes a file, and
+  // a message that is only a file may be sent with Enter.
+  onPaste,
+  canSubmitEmpty = false,
 }) {
   const own = useRef(null)
   const ref = inputRef || own
@@ -106,7 +110,7 @@ export default function AskInput({
     // bilingual, so getting it wrong would send half-typed Arabic.
     if (e.nativeEvent?.isComposing || e.keyCode === 229) return
     e.preventDefault()
-    if (!disabled && value.trim()) onSubmit?.()
+    if (!disabled && (value.trim() || canSubmitEmpty)) onSubmit?.()
   }
 
   return (
@@ -116,6 +120,7 @@ export default function AskInput({
       value={value}
       onChange={e => onChange(e.target.value)}
       onKeyDown={handleKeyDown}
+      onPaste={onPaste}
       placeholder={placeholder}
       disabled={disabled}
       autoFocus={autoFocus}

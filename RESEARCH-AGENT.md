@@ -249,6 +249,11 @@ without exception.
 
 ## 5a. The write boundary — the agent never edits the Brand Brain
 
+> **Exception since 2026-10-17:** the in-app chat can edit Brand Brain content
+> directly when an **admin** asks, with every change logged in `agent_edit_log`
+> and undoable (see AGENT.md, "Widened 2026-10-17"). Everything below still
+> holds for the research run and for every non-admin.
+
 **The Brand Brain's *content* is human-authored and the agent cannot touch it.**
 Not "should not", cannot: it has no tool that writes to `brand_profile`,
 `brand_fields`, `brand_sections`, `brand_directory_columns` or

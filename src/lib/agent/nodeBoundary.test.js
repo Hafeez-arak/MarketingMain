@@ -69,6 +69,11 @@ describe('the agent runs in Node, not in a bundle', () => {
     'src/lib/agent/gather.js',
     'src/lib/agent/brief.js',
     'src/lib/agent/writeTools.js',
+    // The admin direct-edit belt and the attachment checks (2026-10-17), and
+    // the ICP normaliser the edit_icp tool validates through.
+    'src/lib/agent/adminTools.js',
+    'src/lib/agent/attachments.js',
+    'src/lib/sales/icp.js',
     'src/lib/agent/resolve.js',
     'src/lib/agent/tokenHealth.js',
     'src/lib/agent/lenses.js',
@@ -85,6 +90,7 @@ describe('the agent runs in Node, not in a bundle', () => {
     'api/agent/_provider.js',
     'api/agent/_tools.js',
     'api/agent/_writeTools.js',
+    'api/agent/_adminEdits.js',
     'api/agent/_loop.js',
     'api/agent/_gather.js',
     'api/agent/_investigate.js',

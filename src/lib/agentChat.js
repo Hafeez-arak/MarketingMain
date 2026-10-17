@@ -15,6 +15,9 @@
  * @param {string} args.question
  * @param {string} [args.threadId]    continue an existing conversation
  * @param {object} [args.context]     the page descriptor — route, entity, id
+ * @param {Array}  [args.attachments] prepared files from chatAttachments.js —
+ *                                    { name, media_type, data, thumb }. Sent on
+ *                                    this request only; see agent/attachments.js.
  * @param {(delta:string)=>void} [args.onText]
  * @param {(step:object)=>void} [args.onStep]
  * @param {AbortSignal} [args.signal]
@@ -22,7 +25,7 @@
  */
 export async function askAgent({
   workspaceId, accessToken, question, threadId = '', context = null,
-  onText, onStep, signal,
+  attachments = [], onText, onStep, signal,
 }) {
   const res = await fetch('/api/agent/chat', {
     method: 'POST',
@@ -35,6 +38,7 @@ export async function askAgent({
       question,
       thread_id: threadId || undefined,
       context: context || undefined,
+      attachments: attachmentPayload(attachments),
     }),
     signal,
   })
@@ -99,5 +103,20 @@ export async function askAgent({
     tools: done?.tools || [],
     cost: done?.cost_usd || 0,
     stoppedBy: done?.stopped_by || '',
+    canEdit: Boolean(done?.can_edit),
   }
+}
+
+/**
+ * The attachments as the endpoint expects them, or undefined for none.
+ *
+ * Only the four fields the server reads. The browser's own `id` and anything
+ * else a caller hung on the object stay behind — every byte here counts
+ * against Vercel's 4.5 MB body cap — and "none" is omitted rather than sent
+ * as [], so a plain question's body is unchanged by this feature.
+ */
+export function attachmentPayload(attachments) {
+  const list = (attachments || []).filter(a => a && a.data)
+  if (!list.length) return undefined
+  return list.map(a => ({ name: a.name, media_type: a.media_type, data: a.data, thumb: a.thumb || '' }))
 }
