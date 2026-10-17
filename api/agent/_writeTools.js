@@ -3,6 +3,7 @@ import {
   OWNERSHIP_CHECKS, WRITE_TARGETS, POST_PLATFORMS,
   AGENT_MEMORY_SOURCE, AGENT_POST_SOURCE, deDash,
 } from '../../src/lib/agent/writeTools.js'
+import { SOURCE_TYPES } from '../../src/lib/agent/adminTools.js'
 
 // ─── Executing a write ─────────────────────────────────────────────────────
 // Every row lands as a proposal. See src/lib/agent/writeTools.js for why the
@@ -37,7 +38,16 @@ async function ownedBy(workspaceId, table, id) {
  * not in this workspace" is recoverable; a thrown exception is not.
  */
 export async function checkOwnership(workspaceId, name, args) {
-  for (const check of OWNERSHIP_CHECKS[name] || []) {
+  return checkIds(workspaceId, OWNERSHIP_CHECKS[name] || [], args)
+}
+
+/**
+ * The same check over any declared list — shared with the admin belt
+ * (ADMIN_OWNERSHIP_CHECKS in src/lib/agent/adminTools.js) so there is one
+ * implementation of "does this id belong here", not two that drift.
+ */
+export async function checkIds(workspaceId, checks, args) {
+  for (const check of checks || []) {
     const value = args?.[check.param]
     if (!value) {
       if (check.required) return `${check.param} is required. Call get_plans to find one.`
@@ -45,7 +55,7 @@ export async function checkOwnership(workspaceId, name, args) {
     }
     if (!(await ownedBy(workspaceId, check.table, value))) {
       return `No ${check.table.replace(/_/g, ' ')} with id ${value} exists in this workspace. ` +
-             `Call get_plans to see what actually exists — do not guess an id.`
+             'Call the matching read tool to see what actually exists — do not guess an id.'
     }
   }
   return ''
@@ -120,35 +130,50 @@ async function proposeIdea(workspaceId, args) {
 
 async function addAgendaItem(workspaceId, args) {
   const subject = clip(args.subject, 300).trim()
-  if (!subject) return { error: 'A question needs text.' }
+  // 'source' since 2026-10-17 (20261020_research_sources.sql): a place the
+  // research reads first. Anything else is a question, as before.
+  const kind = args.kind === 'source' ? 'source' : 'question'
+  if (!subject) return { error: kind === 'source' ? 'A source needs a subject.' : 'A question needs text.' }
 
   // Same anti-nag guard as rules. A standing question re-proposed weekly is
-  // the agenda equivalent of a rejected rule coming back.
+  // the agenda equivalent of a rejected rule coming back — and a source
+  // proposed twice is two rows the lens reads as two votes.
   const existing = await db(
-    `research_agenda?workspace_id=eq.${workspaceId}&kind=eq.question&select=id,subject,status&limit=200`,
+    `research_agenda?workspace_id=eq.${workspaceId}&kind=eq.${kind}&select=id,subject,status&limit=500`,
   )
   const norm = s => String(s || '').toLowerCase().replace(/\s+/g, ' ').trim()
   const clash = (existing || []).find(r => norm(r.subject) === norm(subject))
   if (clash) {
-    return { error: `That question is already on the agenda with status "${clash.status}".` }
+    return { error: `That ${kind} is already on the agenda with status "${clash.status}".` }
+  }
+
+  const body = {
+    workspace_id: workspaceId,
+    kind,
+    subject,
+    why: clip(args.why, 1000),
+    status: 'proposed',
+    cadence: args.cadence === 'monthly' ? 'monthly' : 'weekly',
+    // So a question you proposed is never mistaken for one a person asked
+    // for. The column exists precisely for this.
+    created_by: 'agent',
+  }
+  if (kind === 'source') {
+    const type = String(args.source_type || '').trim()
+    if (type && !SOURCE_TYPES.includes(type)) {
+      return { error: `"${type}" is not a source type. Use one of: ${SOURCE_TYPES.filter(Boolean).join(', ')}.` }
+    }
+    body.source_type = type
+    const tier = Math.round(Number(args.tier))
+    if (tier >= 1 && tier <= 3) body.tier = tier
   }
 
   const [row] = await db('research_agenda', {
     method: 'POST',
     prefer: 'return=representation',
-    body: {
-      workspace_id: workspaceId,
-      kind: 'question',
-      subject,
-      why: clip(args.why, 1000),
-      status: 'proposed',
-      cadence: args.cadence === 'monthly' ? 'monthly' : 'weekly',
-      // So a question you proposed is never mistaken for one a person asked
-      // for. The column exists precisely for this.
-      created_by: 'agent',
-    },
+    body,
   })
-  return { ok: true, id: row?.id, landed: 'The research agenda, as a proposed question.' }
+  return { ok: true, id: row?.id, landed: `The research agenda, as a proposed ${kind}.` }
 }
 
 async function draftPost(workspaceId, args) {

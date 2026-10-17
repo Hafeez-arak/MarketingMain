@@ -238,8 +238,9 @@ export const READ_TOOLS = [
 ]
 
 import { WRITE_TOOLS } from './writeTools.js'
+import { ADMIN_TOOLS } from './adminTools.js'
 
-export { WRITE_TOOLS }
+export { WRITE_TOOLS, ADMIN_TOOLS }
 
 /**
  * Our publishing provider, asked directly. METERED.
@@ -351,7 +352,13 @@ export const WEB_TOOLS = [
 // by accident, but findTool returning null makes the tool uncallable.
 export const ALL_TOOLS = [...READ_TOOLS, ...PROVIDER_TOOLS]
 
-export function toolsFor({ writes = false, web = false } = {}) {
+//
+// `admin` adds the direct-edit belt (adminTools.js). Only the chat endpoint
+// passes it, and only after proving from the session token that the caller is
+// an admin. The research run never does, which is what keeps it read-only
+// while the chat can edit. It implies `writes`: an admin keeps the propose
+// tools too, because "draft me a post" is still a draft.
+export function toolsFor({ writes = false, web = false, admin = false } = {}) {
   return [
     ...READ_TOOLS,
     // Always offered. Asking our own provider how our own account is doing is
@@ -360,7 +367,8 @@ export function toolsFor({ writes = false, web = false } = {}) {
     // would leave the chat surface answering from the thinner source.
     ...PROVIDER_TOOLS,
     ...(web ? WEB_TOOLS : []),
-    ...(writes ? WRITE_TOOLS : []),
+    ...(writes || admin ? WRITE_TOOLS : []),
+    ...(admin ? ADMIN_TOOLS : []),
   ]
 }
 

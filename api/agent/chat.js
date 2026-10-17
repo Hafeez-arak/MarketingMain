@@ -1,14 +1,22 @@
-import { callerId, callerMayUseWorkspace, db, isConfigured } from './_supabase.js'
+import { callerId, callerMayUseWorkspace, callerIsAdmin, db, isConfigured } from './_supabase.js'
 import { loadBrandContext, IDENTITY, prefixRisk } from './_context.js'
 import { runAgent } from './_loop.js'
 import { contextPreamble } from '../../src/lib/agent/prompt.js'
 import { rememberChat } from './_memory.js'
+import { ADMIN_EDITS_PROMPT } from '../../src/lib/agent/adminTools.js'
+import {
+  validateAttachments, userContent, storedAttachments, attachmentNote,
+} from '../../src/lib/agent/attachments.js'
 
 // ─── POST /api/agent/chat ──────────────────────────────────────────────────
 // The assistant answering now. AGENT.md §5a.
 //
 // Body:
-//   { workspace_id, question, thread_id?, context? }
+//   { workspace_id, question, thread_id?, context?, attachments? }
+//
+// `attachments` (2026-10-17) is up to four images or PDFs as base64, already
+// downscaled by the browser. They reach the model on this turn only; see
+// src/lib/agent/attachments.js for why they are not stored or replayed.
 //
 // `context` is the page's typed descriptor — a route, an entity type and an
 // id — never a scrape of the DOM and never the rendered page. The agent
@@ -21,6 +29,48 @@ import { rememberChat } from './_memory.js'
 /** One SSE frame. Named so every write goes through the same shape. */
 function send(res, event, data) {
   res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
+}
+
+/**
+ * The thread's history, as the model will see it.
+ *
+ * A user turn that carried files replays as a note naming them, never the
+ * files. Read with a fallback without `attachments`, because that column
+ * arrives in a hand-applied migration (20261020_agent_admin_edits.sql) and a
+ * select naming a missing column fails the whole request — the chat must not
+ * go down in the window between this deploy and that migration.
+ */
+async function loadHistory(chatId, workspaceId) {
+  const base = `research_messages?chat_id=eq.${encodeURIComponent(chatId)}` +
+    `&workspace_id=eq.${encodeURIComponent(workspaceId)}&order=created_at.asc&limit=40`
+  let rows
+  try {
+    rows = await db(`${base}&select=role,content,attachments`)
+  } catch {
+    rows = await db(`${base}&select=role,content`)
+  }
+  return (rows || []).map(m => {
+    const note = m.role === 'user' ? attachmentNote(m.attachments) : ''
+    return { role: m.role, content: note ? `${note}\n\n${m.content}` : m.content }
+  })
+}
+
+/** Store the user's message; the thumbnails too when there are any and the column exists. */
+async function saveUserMessage(chatId, workspaceId, question, attachments) {
+  const body = { chat_id: chatId, workspace_id: workspaceId, role: 'user', content: question }
+  if (attachments.length) {
+    try {
+      await db('research_messages', {
+        method: 'POST', body: { ...body, attachments: storedAttachments(attachments) }, prefer: 'return=minimal',
+      })
+      return
+    } catch (err) {
+      // Most likely the column is not there yet. The question still has to be
+      // stored or the next turn's history skips it.
+      console.error('[agent/chat] could not store attachments, storing the text only:', err?.message || err)
+    }
+  }
+  await db('research_messages', { method: 'POST', body, prefer: 'return=minimal' })
 }
 
 async function readBody(req) {
@@ -52,9 +102,21 @@ export default async function handler(req, res) {
   }
 
   const workspaceId = String(body.workspace_id || '').trim()
-  const question = String(body.question || '').trim()
   const threadId = String(body.thread_id || '').trim()
   const context = body.context || null
+
+  // Checked again here whatever the browser did: the browser's limits are a
+  // courtesy, this is the boundary.
+  const files = validateAttachments(body.attachments)
+  if (!files.ok) {
+    res.status(400).json({ error: files.error })
+    return
+  }
+  const attachments = files.attachments
+  // A file with no words is a real question ("what is this?"), so it is given
+  // words rather than refused.
+  const question = String(body.question || '').trim() ||
+    (attachments.length ? 'Take a look at what I attached.' : '')
 
   if (!workspaceId || !question) {
     res.status(400).json({ error: 'workspace_id and question are both required.' })
@@ -75,6 +137,12 @@ export default async function handler(req, res) {
     res.status(403).json({ error: 'You do not have access to this workspace.' })
     return
   }
+  // ── May they edit directly? ──
+  // From the verified user id, never from the body. Only asked once
+  // membership is proven, so "admin" always means "admin of a workspace they
+  // are actually in". See callerIsAdmin for why this is not
+  // workspace_members.role.
+  const isAdmin = await callerIsAdmin(userId)
 
   res.writeHead(200, {
     'Content-Type': 'text/event-stream; charset=utf-8',
@@ -115,11 +183,7 @@ export default async function handler(req, res) {
     // that posts its own history is a browser that can post anything into the
     // model's context, and that is a trust boundary which gets harder to close
     // the longer it stands.
-    const history = await db(
-      `research_messages?chat_id=eq.${encodeURIComponent(chatId)}` +
-      `&workspace_id=eq.${encodeURIComponent(workspaceId)}` +
-      `&order=created_at.asc&limit=40&select=role,content`,
-    )
+    const history = await loadHistory(chatId, workspaceId)
 
     // `brand` now carries the agent's memory digest — what it has already
     // proposed, what this team has told it, what it established. It sits in
@@ -132,30 +196,35 @@ export default async function handler(req, res) {
     // The cache guard. Prompt caching fails silently — a prefix that stops
     // being byte-identical still answers correctly, at roughly ten times the
     // price on the prefix, and nothing in the response says so.
-    const risk = prefixRisk({ identity: IDENTITY, brand })
+    // Two variants of the identity block, each stable: an admin's carries the
+    // direct-edit rules. Stable text only — see ADMIN_EDITS_PROMPT.
+    const identity = isAdmin ? `${IDENTITY}\n\n${ADMIN_EDITS_PROMPT}` : IDENTITY
+    const risk = prefixRisk({ identity, brand })
     if (risk) console.error(`[agent] volatile fragment in cached prefix: ${risk}`)
 
     // The page descriptor is the volatile TAIL of the user turn — never the
     // system prompt, which is the whole point of putting it here.
     const preamble = [contextPreamble(context), recallTail].filter(Boolean).join('\n\n')
     const messages = [
-      ...(history || []).map(m => ({ role: m.role, content: m.content })),
-      { role: 'user', content: preamble ? `${preamble}\n\n${question}` : question },
+      ...history,
+      { role: 'user', content: userContent(preamble ? `${preamble}\n\n${question}` : question, attachments) },
     ]
 
-    await db('research_messages', {
-      method: 'POST',
-      body: { chat_id: chatId, workspace_id: workspaceId, role: 'user', content: question },
-      prefer: 'return=minimal',
-    })
+    await saveUserMessage(chatId, workspaceId, question, attachments)
 
     const result = await runAgent({
       workspaceId, job: 'chat', surface: 'chat', chatId,
-      identity: IDENTITY, brand, messages,
+      identity, brand, messages,
+      // Built here from the token, and the only way a tool learns who is
+      // asking. isAdmin decides both which tools are offered and whether
+      // runTool will execute a direct edit.
+      session: { userId, chatId, isAdmin },
       // Writes on, because "draft me a carousel for Thursday" and "add that as
       // a rule" are the natural asks here and an assistant that can only talk
-      // is a search box. Everything still lands as a proposal or a draft, and
-      // the identity prompt tells it to write only when asked — an assistant
+      // is a search box. For a non-admin everything still lands as a proposal
+      // or a draft; an admin's session adds direct edits, each one audited
+      // (see adminTools.js). The identity prompt tells it to write only when
+      // asked — an assistant
       // that files a proposal every time it has an opinion is one whose review
       // queue nobody opens.
       writes: true,
@@ -199,7 +268,7 @@ export default async function handler(req, res) {
       // costs them no waiting, and it can never fail the response — a memory
       // that did not get written is a smaller problem than an answer that did
       // not arrive.
-      const turnCount = ((history || []).filter(m => m.role === 'assistant').length) + 1
+      const turnCount = (history.filter(m => m.role === 'assistant').length) + 1
       await rememberChat(workspaceId, chatId, { turnCount }).catch(() => {})
     }
 
@@ -210,6 +279,9 @@ export default async function handler(req, res) {
       tools: result.toolCalls.map(t => t.name),
       cost_usd: Number(result.cost.toFixed(6)),
       stopped_by: result.stoppedBy,
+      // So the drawer can say "can edit" honestly — read from the same value
+      // that gated the tools, not guessed by the browser.
+      can_edit: isAdmin,
     })
   } catch (err) {
     // The browser opened a spinner and only the server can close it. Every

@@ -2,7 +2,9 @@ import { db } from './_supabase.js'
 import { loadBrandContext } from './_context.js'
 import { findTool, isFree, ALL_TOOLS, WRITE_TOOLS, WEB_TOOLS } from '../../src/lib/agent/tools.js'
 import { searchWeb, readPage } from './_web.js'
-import { WRITE_EXECUTORS, checkOwnership, isWriteTool } from './_writeTools.js'
+import { WRITE_EXECUTORS, checkOwnership, checkIds, isWriteTool } from './_writeTools.js'
+import { ADMIN_EXECUTORS } from './_adminEdits.js'
+import { isAdminTool, ADMIN_OWNERSHIP_CHECKS } from '../../src/lib/agent/adminTools.js'
 import { ourPerformance, competitorBoard, indexAnalytics, analyticsFor } from '../../src/lib/agent/aggregate.js'
 import { ownChannels, priorPeriod } from '../../src/lib/agent/ownChannels.js'
 import {
@@ -402,14 +404,43 @@ const EXECUTORS = {
  * @param {string} workspaceId  from the VERIFIED session. Never from the model.
  * @param {string} name         the tool the model asked for
  * @param {object} args         the model's arguments — filters and limits only
+ * @param {object} [session]    VERIFIED too: { userId, chatId, isAdmin }, built
+ *                              by the endpoint from the token. Absent (the
+ *                              research run, every other caller) means no
+ *                              admin rights, which is the safe default.
  * @returns {Promise<{ok:boolean, result?:object, error?:string, free:boolean}>}
  */
-export async function runTool(workspaceId, name, args = {}) {
+export async function runTool(workspaceId, name, args = {}, session = {}) {
   if (!workspaceId) {
     // Defensive, and it should be unreachable: the endpoint proves membership
     // before constructing a loop. Unreachable checks around tenant isolation
     // are worth their cost.
     return { ok: false, error: 'No workspace in session.', free: true }
+  }
+
+  // ── Direct edits, admins only ──
+  // The role is read from `session`, which the endpoint built from the token —
+  // never from anything in `args`. The belt is not even offered to a
+  // non-admin, but a model can name a tool it was never shown, so the refusal
+  // lives here as well as in the offer.
+  if (isAdminTool(name)) {
+    if (session?.isAdmin !== true) {
+      return {
+        ok: false,
+        free: true,
+        error: 'Direct edits are only available to workspace admins. Use the propose tools ' +
+               '(propose_rule, propose_idea, add_agenda_item, draft_post) so a person can accept it.',
+      }
+    }
+    try {
+      const bad = await checkIds(workspaceId, ADMIN_OWNERSHIP_CHECKS[name] || [], args || {})
+      if (bad) return { ok: false, error: bad, free: true }
+      const result = await ADMIN_EXECUTORS[name](workspaceId, args || {}, session)
+      if (result?.error) return { ok: false, error: result.error, free: true }
+      return { ok: true, result, free: true }
+    } catch (err) {
+      return { ok: false, error: err?.message || String(err), free: true }
+    }
   }
 
   // ── Writes ──

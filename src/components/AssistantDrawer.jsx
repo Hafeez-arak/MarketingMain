@@ -8,6 +8,8 @@ import PastConversations from './PastConversations'
 import { AgentMarkdown } from './AgentMarkdown'
 import AskInput from './AskInput'
 import { useFollowBottom } from '../lib/useFollowBottom'
+import { AttachButton, AttachmentTray, TurnAttachments } from './ChatAttachments'
+import { useChatAttachments } from '../lib/useChatAttachments'
 
 // ─── The assistant, on every page ──────────────────────────────────────────
 // AGENT.md §5a. A drawer that opens anywhere and knows what you are looking
@@ -57,13 +59,14 @@ export function JumpToLatest({ onClick }) {
 
 export function AssistantDrawer() {
   const location = useLocation()
-  const { activeWorkspaceId, activeWorkspace } = useAuth()
+  const { activeWorkspaceId, activeWorkspace, isAccessAdmin } = useAuth()
   const [open, setOpen] = useState(false)
   // Whether the earlier-conversations popup is up. Tracked only so this
   // drawer can stand down from Escape while it is — see below.
   const [historyOpen, setHistoryOpen] = useState(false)
   const [question, setQuestion] = useState('')
   const { turns, busy, ask, reset, stop, ready, threadId, openThread } = useAgentChat()
+  const files = useChatAttachments()
   const input = useRef(null)
   // Re-attaches on open as well as on a new question: the panel is rebuilt
   // each time it opens, and should open on the latest message.
@@ -98,12 +101,17 @@ export function AssistantDrawer() {
     return () => window.removeEventListener('keydown', onKey)
   }, [open, historyOpen])
 
+  // A suggestion chip passes its own text and never carries the pending files:
+  // they belong to what the person was composing, not to a canned question.
   const send = useCallback((text) => {
-    const q = text ?? question
-    if (!q?.trim()) return
-    setQuestion('')
-    ask(q, context)
-  }, [question, ask, context])
+    const chip = typeof text === 'string'
+    const q = chip ? text : question
+    const attached = chip ? [] : files.items
+    if (!q?.trim() && !attached.length) return
+    if (files.preparing) return
+    if (!chip) { setQuestion(''); files.clear() }
+    ask(q, context, attached)
+  }, [question, ask, context, files])
 
   if (!activeWorkspaceId) return null
 
@@ -156,7 +164,9 @@ export function AssistantDrawer() {
                 <div className="pt-2">
                   <p className="text-xs text-text-secondary mb-2.5">
                     Answers come from your own data. It will say when a sample is too small
-                    to mean anything, and it can propose rules and drafts — never publish.
+                    to mean anything, and it can {isAccessAdmin
+                      ? 'change the Brand Brain, rules, research sources and drafts when you ask (every change can be undone)'
+                      : 'propose rules and drafts'} — never publish. You can attach images and PDFs.
                   </p>
                   <div className="space-y-1.5">
                     {suggestions.map(s => (
@@ -176,10 +186,13 @@ export function AssistantDrawer() {
                   <div key={i}>
                     {t.role === 'user' ? (
                       <div className="text-right">
-                        <span className="inline-block bg-surface-muted px-3 py-1.5 text-sm
-                                         text-text max-w-[90%] text-left">
-                          {t.text}
-                        </span>
+                        <TurnAttachments items={t.attachments} />
+                        {t.text ? (
+                          <span className="inline-block bg-surface-muted px-3 py-1.5 text-sm
+                                           text-text max-w-[90%] text-left">
+                            {t.text}
+                          </span>
+                        ) : null}
                       </div>
                     ) : (
                       <div>
@@ -209,8 +222,9 @@ export function AssistantDrawer() {
                 floating up the middle of it. */}
             <form
               onSubmit={e => { e.preventDefault(); send() }}
-              className="p-3 border-t border-border-light flex gap-2 items-end"
+              className="p-3 border-t border-border-light flex flex-wrap gap-2 items-end"
             >
+              <AttachmentTray items={files.items} error={files.error} preparing={files.preparing} onRemove={files.remove} />
               {/* The same way back the /agent page has. The popup portals to
                   the body rather than into this panel, so it is the same size
                   here as it is there — the 448px is no constraint on it. */}
@@ -220,18 +234,21 @@ export function AssistantDrawer() {
                 onDeleteActive={reset}
                 onOpenChange={setHistoryOpen}
               />
+              <AttachButton onFiles={files.add} disabled={!ready || busy} />
               <AskInput
                 inputRef={input}
                 value={question}
                 onChange={setQuestion}
                 onSubmit={send}
+                onPaste={files.onPaste}
+                canSubmitEmpty={files.items.length > 0}
                 placeholder={contextLabel ? `Ask about ${contextLabel}…` : 'Ask anything…'}
                 disabled={!ready}
               />
               {busy ? (
                 <Button variant="secondary" onClick={stop}>Stop</Button>
               ) : (
-                <Button type="submit" disabled={!question.trim() || !ready}>Ask</Button>
+                <Button type="submit" disabled={(!question.trim() && !files.items.length) || files.preparing || !ready}>Ask</Button>
               )}
             </form>
           </aside>

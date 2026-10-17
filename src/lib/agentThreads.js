@@ -43,16 +43,23 @@ export async function fetchThreads(workspaceId, accessToken, limit = 30) {
  */
 export async function fetchThreadTurns(chatId, workspaceId, accessToken) {
   if (!chatId || !workspaceId) return []
-  const url = `${SUPABASE_URL}/rest/v1/research_messages?chat_id=eq.${chatId}` +
-    `&workspace_id=eq.${workspaceId}&order=created_at.asc&limit=40` +
-    `&select=role,content,tool_calls`
+  const base = `${SUPABASE_URL}/rest/v1/research_messages?chat_id=eq.${chatId}` +
+    `&workspace_id=eq.${workspaceId}&order=created_at.asc&limit=40`
   try {
-    const res = await fetch(url, { headers: headers(accessToken) })
+    // `attachments` arrives with a hand-applied migration. Until it does, a
+    // select naming it is a 400 — and a 400 here would make every past
+    // conversation open empty. So: ask for it, and ask again without it.
+    let res = await fetch(`${base}&select=role,content,tool_calls,attachments`, { headers: headers(accessToken) })
+    if (!res.ok) res = await fetch(`${base}&select=role,content,tool_calls`, { headers: headers(accessToken) })
     if (!res.ok) return []
     const rows = await res.json()
     return rows.map(m => ({
       role: m.role,
       text: m.content || '',
+      // Name and thumbnail only — the file itself was never stored.
+      attachments: m.role === 'user' && Array.isArray(m.attachments) && m.attachments.length
+        ? m.attachments.map(a => ({ name: a?.name || '', kind: a?.kind || '', thumb: a?.thumb || '' }))
+        : undefined,
       // Kept so a reopened answer still shows what it was built from. No cost
       // is replayed: this conversation is being read, not paid for again, and
       // a price tag on a turn you did not just buy reads as a fresh charge.

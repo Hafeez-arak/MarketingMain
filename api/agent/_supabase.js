@@ -70,6 +70,42 @@ export async function callerMayUseWorkspace(req, workspaceId) {
   }
 }
 
+/**
+ * Is this caller an admin — allowed to make DIRECT edits from the chat?
+ *
+ * `userId` must come from callerId(req), i.e. from the session token, never
+ * from a request body or a model. Asked with the service key, filtered to that
+ * one verified id, so the answer cannot be steered by anything the caller
+ * sends.
+ *
+ * ── WHY NOT workspace_members.role ──
+ *
+ * The obvious column is a lie here. 20260816_access_control.sql made every
+ * approved person a member of every company with role 'owner' — "there is
+ * deliberately no per-workspace role: nothing reads one" — and every insert
+ * since (invites, assignment, sales seats) still writes 'owner'. Gating on it
+ * would hand direct edits to everyone. The real admin flag is
+ * user_access.role = 'admin' with status 'approved', the same test
+ * is_access_admin() applies in the database and the same one sales_icp's RLS
+ * already uses. Membership of the workspace is checked separately, before
+ * this, by callerMayUseWorkspace.
+ *
+ * Fails closed: an unreachable database, a missing row or any error means
+ * "not an admin", which leaves the person on the propose-only belt.
+ */
+export async function callerIsAdmin(userId) {
+  if (!userId || !SUPABASE_URL || !SERVICE_KEY) return false
+  try {
+    const rows = await db(
+      `user_access?user_id=eq.${encodeURIComponent(userId)}&select=role,status&limit=1`,
+    )
+    const row = Array.isArray(rows) ? rows[0] : null
+    return row?.role === 'admin' && row?.status === 'approved'
+  } catch {
+    return false
+  }
+}
+
 // ─── Retrying, and the one case where retrying is wrong ────────────────────
 // A research run makes dozens of round trips and a single transient blip
 // should not cost the whole thing. Observed live: a read timed out with

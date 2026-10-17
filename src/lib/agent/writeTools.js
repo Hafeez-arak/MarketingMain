@@ -20,6 +20,15 @@
 // So every id a model supplies is re-checked against the session's workspace
 // before it is used. `ownedBy` in api/agent/_writeTools.js is that check, and
 // it is not optional on any path.
+//
+// ── 2026-10-17: ADMINS CAN NOW EDIT DIRECTLY, ELSEWHERE ──
+//
+// The chat gained a second belt for workspace admins — direct edits to the
+// Brand Brain, rule book, agenda, ICP, ideas and drafts — in adminTools.js,
+// executed by api/agent/_adminEdits.js with an audit row per change. It is
+// kept out of THIS file on purpose: everything here is still propose-only, the
+// research run still gets only this belt, and the source check below still
+// holds for every executor in _writeTools.js.
 
 export const WRITE_TOOLS = [
   {
@@ -75,16 +84,27 @@ export const WRITE_TOOLS = [
     name: 'add_agenda_item',
     cost: 'free',
     description:
-      'Propose a standing question for the research agenda — something worth re-asking every ' +
-      'week so answers stay comparable over time. It lands as "proposed" and is marked as ' +
-      'having come from you, so it is never confused with a question a person asked for.',
+      'Propose an item for the research agenda. kind "question" (the default) is a standing ' +
+      'question worth re-asking every week so answers stay comparable over time. kind "source" ' +
+      'is a place the research should read first: subject = the domain, @handle, #hashtag or ' +
+      'search phrase, source_type says which, why = what it carries, tier 1-3 = how often. ' +
+      'It lands as "proposed" and is marked as having come from you, so it is never confused ' +
+      'with one a person asked for.',
     input_schema: {
       type: 'object',
       additionalProperties: false,
       properties: {
-        subject: { type: 'string', description: 'The question itself.' },
+        kind: { type: 'string', enum: ['question', 'source'] },
+        subject: { type: 'string', description: 'The question, or the source itself.' },
         why: { type: 'string', description: 'Why it matters — this steers how an answer is judged.' },
         cadence: { type: 'string', enum: ['weekly', 'monthly'] },
+        source_type: {
+          type: 'string',
+          enum: ['website', 'news', 'tender_portal', 'exchange', 'government',
+                 'instagram', 'linkedin', 'x', 'hashtag', 'keyword'],
+          description: 'Sources only.',
+        },
+        tier: { type: 'integer', description: 'Sources only. 1 = every run, 2 = most runs, 3 = when searches allow.' },
       },
       required: ['subject', 'why'],
     },

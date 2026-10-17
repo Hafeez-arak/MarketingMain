@@ -70,12 +70,22 @@ export function useAgentChat() {
     setBusy(false)
   }, [])
 
-  const ask = useCallback(async (text, context = null) => {
+  // `attachments` are prepared files (see components/ChatAttachments.jsx). The
+  // turn keeps only their names and thumbnails — the full image is sent once
+  // and not held in the transcript, where it would sit in memory for the life
+  // of the tab.
+  const ask = useCallback(async (text, context = null, attachments = []) => {
     const q = String(text || '').trim()
-    if (!q || busy || !activeWorkspaceId || !accessToken) return
+    const files = attachments || []
+    if ((!q && !files.length) || busy || !activeWorkspaceId || !accessToken) return
 
     setBusy(true)
-    setTurns(prev => [...prev, { role: 'user', text: q }, { role: 'assistant', text: '', steps: [] }])
+    const shown = files.map(a => ({ name: a.name, kind: a.kind, thumb: a.thumb || '' }))
+    setTurns(prev => [
+      ...prev,
+      { role: 'user', text: q, attachments: shown.length ? shown : undefined },
+      { role: 'assistant', text: '', steps: [] },
+    ])
 
     const patchLast = patch => setTurns(prev => {
       const next = [...prev]
@@ -100,6 +110,7 @@ export function useAgentChat() {
         question: q,
         threadId: threadFor(activeWorkspaceId),
         context,
+        attachments: files,
         signal: controller.signal,
         onText: appendLast,
         onStep: step => {

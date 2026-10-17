@@ -13,6 +13,8 @@ import { AgentMarkdown } from '../../components/AgentMarkdown'
 import AskInput from '../../components/AskInput'
 import { JumpToLatest } from '../../components/AssistantDrawer'
 import { useFollowBottom } from '../../lib/useFollowBottom'
+import { AttachButton, AttachmentTray, TurnAttachments } from '../../components/ChatAttachments'
+import { useChatAttachments } from '../../lib/useChatAttachments'
 
 // ─── /agent — the assistant, full page ─────────────────────────────────────
 // The same agent, the same tools and the SAME conversation as the drawer —
@@ -42,8 +44,9 @@ function ToolTrace({ steps }) {
 
 export default function AgentPage() {
   const location = useLocation()
-  const { activeWorkspaceId, activeWorkspace, accessToken } = useAuth()
+  const { activeWorkspaceId, activeWorkspace, accessToken, isAccessAdmin } = useAuth()
   const { turns, busy, ask, reset, stop, ready, threadId, openThread } = useAgentChat()
+  const files = useChatAttachments()
   const [question, setQuestion] = useState('')
   const [runs, setRuns] = useState([])
   // Separate from `runs.length`, which is also 0 before the first answer — and
@@ -154,12 +157,16 @@ export default function AgentPage() {
     loadRuns()
   }, [running, activeWorkspaceId, accessToken, loadRuns])
 
+  // Same rule as the drawer: a suggestion chip never carries pending files.
   const send = useCallback((text) => {
-    const q = text ?? question
-    if (!q?.trim()) return
-    setQuestion('')
-    ask(q, context)
-  }, [question, ask, context])
+    const chip = typeof text === 'string'
+    const q = chip ? text : question
+    const attached = chip ? [] : files.items
+    if (!q?.trim() && !attached.length) return
+    if (files.preparing) return
+    if (!chip) { setQuestion(''); files.clear() }
+    ask(q, context, attached)
+  }, [question, ask, context, files])
 
   if (!activeWorkspaceId) {
     return <Empty title="No workspace selected" description="Pick a workspace to talk to its assistant." />
@@ -196,9 +203,14 @@ export default function AgentPage() {
             {turns.map((t, i) => (
               <div key={i} className={t.role === 'user' ? 'text-right' : ''}>
                 {t.role === 'user' ? (
-                  <div className="inline-block bg-surface-muted px-3.5 py-2 text-sm text-text max-w-[85%] text-left whitespace-pre-wrap">
-                    {t.text}
-                  </div>
+                  <>
+                    <TurnAttachments items={t.attachments} />
+                    {t.text ? (
+                      <div className="inline-block bg-surface-muted px-3.5 py-2 text-sm text-text max-w-[85%] text-left whitespace-pre-wrap">
+                        {t.text}
+                      </div>
+                    ) : null}
+                  </>
                 ) : (
                   <>
                     <AgentMarkdown>{t.text}</AgentMarkdown>
@@ -238,23 +250,27 @@ export default function AgentPage() {
           <form
             ref={composerRef}
             onSubmit={e => { e.preventDefault(); send() }}
-            className={`flex gap-2 items-end w-full ${empty ? 'max-w-2xl' : ''}`}
+            className={`flex flex-wrap gap-2 items-end w-full ${empty ? 'max-w-2xl' : ''}`}
           >
+            <AttachmentTray items={files.items} error={files.error} preparing={files.preparing} onRemove={files.remove} />
             {/* Beside the composer rather than up in the page header: this is a
                 thing you reach for while reading a conversation, not a page-level
                 action, and the header already carries the two that are. */}
             <PastConversations activeThreadId={threadId} onOpen={openThread} onDeleteActive={reset} />
+            <AttachButton onFiles={files.add} disabled={!ready || busy} />
             <AskInput
               value={question}
               onChange={setQuestion}
               onSubmit={send}
+              onPaste={files.onPaste}
+              canSubmitEmpty={files.items.length > 0}
               placeholder="Ask anything about this brand…"
               disabled={!ready}
             />
             {busy ? (
               <Button variant="secondary" onClick={stop}>Stop</Button>
             ) : (
-              <Button type="submit" disabled={!question.trim() || !ready}>Ask</Button>
+              <Button type="submit" disabled={(!question.trim() && !files.items.length) || files.preparing || !ready}>Ask</Button>
             )}
           </form>
           {empty && suggestions.length ? (
@@ -274,8 +290,10 @@ export default function AgentPage() {
           {empty ? (
             <p className="mt-6 text-xs text-text-tertiary text-center max-w-xl leading-relaxed">
               It reads this workspace only, answers from tools rather than memory,
-              and will say when a sample is too small to mean anything. It can propose
-              rules, ideas and drafts — it cannot publish or schedule anything.
+              and will say when a sample is too small to mean anything. {isAccessAdmin
+                ? 'For you it can also change the Brand Brain, rules, research sources, the sales profile and drafts when asked, and every change can be undone.'
+                : 'It can propose rules, ideas and drafts.'} It cannot publish or schedule
+              anything. Attach images or PDFs with the clip, or paste a screenshot.
             </p>
           ) : null}
         </div>

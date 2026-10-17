@@ -26,17 +26,23 @@ import {
  * @param {Array}  args.messages      the conversation so far
  * @param {(t:string)=>void} [args.onText]   token deltas, for streaming
  * @param {(e:object)=>void} [args.onEvent]  loop events, for a progress line
+ * @param {object} [args.session]  VERIFIED { userId, chatId, isAdmin } from the
+ *                                 endpoint. Handed to every tool call; only the
+ *                                 chat passes it, so only the chat can edit.
  */
 export async function runAgent({
   workspaceId, job = 'chat', surface = 'chat', stage = '', runId = null, chatId = null,
   identity, brand, messages = [], tools = null, writes = false, web = false,
-  onText = null, onEvent = null,
+  session = {}, onText = null, onEvent = null,
 }) {
   const budget = loopBudget(surface)
   // Writes are opt-in. A tool the model can see is a tool it will eventually
   // reach for, and an assistant that files a proposal every time it has an
   // opinion is one whose review queue nobody opens.
-  const defs = tools || toolDefs(toolsFor({ writes, web }))
+  // `admin` follows the verified session, not a separate flag a caller could
+  // set out of step with it: the belt offered and the gate in runTool read the
+  // same value.
+  const defs = tools || toolDefs(toolsFor({ writes, web, admin: session?.isAdmin === true }))
   const convo = [...messages]
 
   let turns = 0
@@ -117,7 +123,7 @@ export async function runAgent({
       emit({ type: 'tool', name: use.name, input: use.input })
       // workspaceId comes from the closure — the verified session — and the
       // model's input is only ever read for filters. AGENT.md §2.
-      const outcome = await runTool(workspaceId, use.name, use.input)
+      const outcome = await runTool(workspaceId, use.name, use.input, session)
       usedTools.push({ name: use.name, input: use.input, ok: outcome.ok, error: outcome.error || '' })
       if (outcome.ok) urlsFrom(outcome.result, allowedUrls)
       results.push(toolResultBlock(use.id, outcome))
