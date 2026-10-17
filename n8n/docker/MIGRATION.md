@@ -543,6 +543,25 @@ check passes.
 
 ### On the 24/7 box
 
+**This now happens on its own.** `n8n/deploy/auto-deploy.ps1` runs hidden on the
+box from logon (Windows task `ArakMarketingAutoDeploy`). Every minute it fetches
+`origin/main`, fast-forwards the checkout, and runs `n8n/deploy/apply.sh` in WSL
+with the last deployed commit and the new one. That rebuilds the agent when the
+files `server/Dockerfile` copies change, rebuilds both containers when the
+compose file or n8n Dockerfile changes, and passes every added or changed
+workflow JSON to `redeploy.sh`. A workflow deleted from the repo is only logged;
+deactivate it by hand. It leaves the checkout alone when it is off `main` or has
+uncommitted changes. Log: `%LOCALAPPDATA%\ArakMarketing\auto-deploy.log`. A
+failed deploy is not retried every minute; the next push retries the whole range
+(or delete `failed-commit` next to the log). Register the task once with:
+
+```powershell
+$a = New-ScheduledTaskAction -Execute wscript.exe -Argument '"<repo>\n8n\deploy\auto-deploy.vbs"'
+Register-ScheduledTask ArakMarketingAutoDeploy -Action $a -Trigger (New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME)
+```
+
+By hand, the same thing is:
+
 ```bash
 cd /path/to/Marketing
 git pull
