@@ -2,8 +2,9 @@ import { useCallback, useEffect, useState } from 'react'
 import { useAuth } from '../store/auth'
 import { Card, SectionHead, Button, Skeleton } from './ui/index'
 import {
-  fetchAgenda, setHandleByHand, setAgendaStatus, addAgendaRow,
+  fetchAgenda, setHandleByHand, setAgendaStatus, addAgendaRow, updateAgendaRow,
   deleteAgendaRow, watchlistReadiness, resolveHandles, discoverCompetitors,
+  SOURCE_TYPES, sourceTypeLabel,
 } from '../lib/agentAgenda'
 
 // ─── What the agent watches, and what it is told to ask ────────────────────
@@ -149,9 +150,145 @@ function RowsSkeleton() {
   )
 }
 
+
+const INPUT = 'text-xs px-2.5 py-1.5 rounded-lg border border-border focus:outline-none focus:ring-1 focus:ring-amber-700 focus:border-amber-700'
+
+const PLACEHOLDER = {
+  website: 'e.g. saudigulfprojects.com',
+  news: 'e.g. constructionweekonline.com',
+  tender_portal: 'e.g. tenders.etimad.sa',
+  exchange: 'e.g. saudiexchange.sa',
+  government: 'e.g. rcrc.gov.sa',
+  instagram: 'e.g. @addadruh or an instagram.com link',
+  linkedin: 'e.g. linkedin.com/company/…',
+  x: 'e.g. @account',
+  hashtag: 'e.g. #مشاريع_الرياض',
+  keyword: 'e.g. ترسية عقد تشطيب الرياض',
+}
+
+/** One source: what it is, what it carries, how often it is read. */
+function SourceRow({ row, accessToken, onChanged }) {
+  const [editing, setEditing] = useState(false)
+  const [why, setWhy] = useState(row.why || '')
+  const act = async fn => { await fn(); onChanged() }
+  return (
+    <li className="py-2 border-b border-border-light last:border-0 flex items-start gap-2">
+      <span className={`mt-1 text-xs ${row.status === 'active' ? 'text-sage-600' : 'text-text-tertiary'}`}>●</span>
+      <div className="flex-1 min-w-0">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="rounded bg-surface-muted px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-text-secondary">
+            {sourceTypeLabel(row.source_type)}
+          </span>
+          <span className="text-sm text-text break-all" dir="auto">{row.subject}</span>
+        </div>
+        {editing ? (
+          <div className="mt-1 flex gap-2">
+            <input value={why} onChange={e => setWhy(e.target.value)} dir="auto"
+                   onKeyDown={e => e.key === 'Enter' && act(async () => { await updateAgendaRow(accessToken, row.id, { why }); setEditing(false) })}
+                   placeholder="What it carries" className={`flex-1 ${INPUT}`} />
+            <Button size="sm" variant="ghost" onClick={() => act(async () => { await updateAgendaRow(accessToken, row.id, { why }); setEditing(false) })}>Save</Button>
+          </div>
+        ) : row.why ? (
+          <div className="mt-0.5 text-xs text-text-secondary" dir="auto">{row.why}</div>
+        ) : null}
+        <div className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-text-tertiary">
+          <select value={row.tier || 2} aria-label="How often it is read"
+                  onChange={e => act(() => updateAgendaRow(accessToken, row.id, { tier: e.target.value }))}
+                  className="bg-transparent text-xs text-text-tertiary hover:text-text">
+            <option value={1}>every run</option>
+            <option value={2}>most runs</option>
+            <option value={3}>when there is room</option>
+          </select>
+          <span>{row.status === 'retired' ? 'paused' : row.status}</span>
+          {row.created_by === 'agent' ? <span className="text-text-secondary">suggested by the agent</span> : null}
+          {row.status !== 'active' ? (
+            <button onClick={() => act(() => setAgendaStatus(accessToken, row.id, 'active'))}
+                    className="text-sage-600 hover:underline">{row.status === 'proposed' ? 'accept' : 'resume'}</button>
+          ) : (
+            <button onClick={() => act(() => setAgendaStatus(accessToken, row.id, 'retired'))}
+                    className="hover:text-text">pause</button>
+          )}
+          <button onClick={() => setEditing(e => !e)} className="hover:text-text">{editing ? 'cancel' : 'edit note'}</button>
+          <button onClick={() => act(() => deleteAgendaRow(accessToken, row.id))}
+                  className="hover:text-red-600">delete</button>
+        </div>
+      </div>
+    </li>
+  )
+}
+
+/**
+ * "Where to look" — the sites, accounts, hashtags and phrases the project
+ * lenses read before searching openly (2026-10-17). Same table, same RLS and
+ * the same accept/pause/delete as the standing questions beside it; see
+ * sourcesBlock() in src/lib/agent/lensPrompts.js for how a run uses them.
+ */
+function SourcesCard({ sources, loaded, error, accessToken, workspaceId, onChanged }) {
+  const [type, setType] = useState('website')
+  const [subject, setSubject] = useState('')
+  const [why, setWhy] = useState('')
+  const [filter, setFilter] = useState('')
+  const add = async () => {
+    if (!subject.trim()) return
+    await addAgendaRow(workspaceId, accessToken, { kind: 'source', subject, why, source_type: type, tier: 2 })
+    setSubject('')
+    setWhy('')
+    onChanged()
+  }
+  const sorted = [...sources]
+    .filter(r => !filter || r.source_type === filter)
+    .sort((a, b) => (a.status === 'proposed' ? -1 : 0) - (b.status === 'proposed' ? -1 : 0)
+      || (a.tier ?? 9) - (b.tier ?? 9) || String(a.subject).localeCompare(String(b.subject)))
+  const active = sources.filter(r => r.status === 'active').length
+  const types = SOURCE_TYPES.filter(([k]) => sources.some(r => r.source_type === k))
+  return (
+    <Card className="md:col-span-2">
+      <SectionHead
+        title="Where to look"
+        subtitle={!loaded ? 'Loading the sources…'
+          : error ? 'The sources could not be loaded. Nothing has been lost.'
+            : `${active} source${active === 1 ? '' : 's'} read before the agent searches openly for projects. It also builds its own hashtags and keywords each run.`}
+      />
+      <div className="px-5 py-4 [&>*:first-child]:mt-0">
+        {loaded && types.length > 1 ? (
+          <div className="mt-1 flex flex-wrap gap-1">
+            {[['', 'All'], ...types].map(([k, label]) => (
+              <button key={k || 'all'} onClick={() => setFilter(k)}
+                      className={`rounded-full px-2 py-0.5 text-xs ${filter === k ? 'bg-amber-700 text-white' : 'bg-surface-muted text-text-secondary hover:text-text'}`}>
+                {label}
+              </button>
+            ))}
+          </div>
+        ) : null}
+        {!loaded ? <RowsSkeleton /> : sorted.length === 0 ? (
+          <p className="mt-2 text-sm text-text-secondary">
+            None yet. Without these the agent takes whatever a search engine ranks first.
+          </p>
+        ) : (
+          <ul className="mt-2">
+            {sorted.map(r => <SourceRow key={r.id} row={r} accessToken={accessToken} onChanged={onChanged} />)}
+          </ul>
+        )}
+        <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+          <select value={type} onChange={e => setType(e.target.value)} aria-label="Kind of source" className={INPUT}>
+            {SOURCE_TYPES.map(([k, label]) => <option key={k} value={k}>{label}</option>)}
+          </select>
+          <input value={subject} onChange={e => setSubject(e.target.value)} dir="auto"
+                 onKeyDown={e => e.key === 'Enter' && add()}
+                 placeholder={PLACEHOLDER[type]} className={`flex-1 ${INPUT}`} />
+          <input value={why} onChange={e => setWhy(e.target.value)} dir="auto"
+                 onKeyDown={e => e.key === 'Enter' && add()}
+                 placeholder="What it carries (optional)" className={`flex-1 ${INPUT}`} />
+          <Button size="sm" variant="ghost" onClick={add}>Add</Button>
+        </div>
+      </div>
+    </Card>
+  )
+}
+
 export function AgentSteering() {
   const { activeWorkspaceId, accessToken } = useAuth()
-  const [agenda, setAgenda] = useState({ questions: [], competitors: [] })
+  const [agenda, setAgenda] = useState({ questions: [], competitors: [], sources: [] })
   // The empty agenda above is a starting value, not an answer. Until the first
   // fetch lands, both cards used to state "No competitors are being watched
   // yet" and "None yet" about a brand that has both.
@@ -363,6 +500,15 @@ export function AgentSteering() {
           </div>
         </div>
       </Card>
+
+      <SourcesCard
+        sources={agenda.sources || []}
+        loaded={loaded}
+        error={agenda.error}
+        accessToken={accessToken}
+        workspaceId={activeWorkspaceId}
+        onChanged={refresh}
+      />
     </div>
   )
 }

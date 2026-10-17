@@ -25,9 +25,9 @@ const raw = {
 }
 
 describe('the targets lens', () => {
-  it('is registered, searches eight times and only runs with an ICP', () => {
+  it('is registered, searches ten times and only runs with an ICP', () => {
     const lens = lensByKey('targets')
-    expect(lens.budget.searches).toBe(8)
+    expect(lens.budget.searches).toBe(10)
     expect(lens.requires).toBe('icp')
     expect(lens.schema).toBe('targets')
     expect(lensesFor({ cadence: 'weekly' }).map(l => l.key)).toContain('targets')

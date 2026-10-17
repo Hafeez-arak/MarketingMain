@@ -38,6 +38,9 @@ export async function fetchAgenda(workspaceId, accessToken) {
   return {
     questions: rows.filter(r => r.kind === 'question'),
     competitors: rows.filter(r => r.kind === 'competitor'),
+    // The "Where to look" list (2026-10-17): sites, accounts, hashtags and
+    // phrases the project lenses read before searching openly.
+    sources: rows.filter(r => r.kind === 'source'),
     // Set when the read failed, so "nothing is being watched" is only ever
     // said about an agenda that was actually read.
     error: error || '',
@@ -84,8 +87,8 @@ export function setAgendaStatus(accessToken, id, status) {
   )
 }
 
-/** Add a standing question, or a competitor to watch. */
-export function addAgendaRow(workspaceId, accessToken, { kind, subject, why = '' }) {
+/** Add a standing question, a competitor to watch, or a source to read. */
+export function addAgendaRow(workspaceId, accessToken, { kind, subject, why = '', source_type, tier }) {
   return call(
     `${SUPABASE_URL}/rest/v1/research_agenda`,
     accessToken,
@@ -93,8 +96,10 @@ export function addAgendaRow(workspaceId, accessToken, { kind, subject, why = ''
       method: 'POST',
       body: JSON.stringify({
         workspace_id: workspaceId, kind,
-        subject: String(subject || '').trim(),
-        why,
+        subject: kind === 'source' ? cleanSource(subject, source_type) : String(subject || '').trim(),
+        why: String(why || '').trim(),
+        ...(kind === 'source' ? { source_type: SOURCE_TYPES.some(([k]) => k === source_type) ? source_type : 'website' } : {}),
+        ...(tier ? { tier: Math.min(3, Math.max(1, Number(tier) || 2)) } : {}),
         // A person typing it means it is active immediately. Only the agent's
         // suggestions arrive as 'proposed'.
         status: 'active',
@@ -102,6 +107,53 @@ export function addAgendaRow(workspaceId, accessToken, { kind, subject, why = ''
       }),
     },
   )
+}
+
+/** Change what a row says — a source's type, tier or note. */
+export function updateAgendaRow(accessToken, id, patch = {}) {
+  const body = {}
+  if ('why' in patch) body.why = String(patch.why || '').trim()
+  if ('tier' in patch) body.tier = patch.tier ? Math.min(3, Math.max(1, Number(patch.tier) || 2)) : null
+  if ('source_type' in patch && SOURCE_TYPES.some(([k]) => k === patch.source_type)) body.source_type = patch.source_type
+  if ('subject' in patch) body.subject = String(patch.subject || '').trim()
+  return call(`${SUPABASE_URL}/rest/v1/research_agenda?id=eq.${id}`, accessToken, { method: 'PATCH', body: JSON.stringify(body) })
+}
+
+/**
+ * The kinds of source the lenses know how to read, in the order the panel
+ * offers them. Mirrors research_agenda_source_type_check.
+ */
+export const SOURCE_TYPES = [
+  ['website', 'Website'],
+  ['news', 'News site'],
+  ['tender_portal', 'Tender portal'],
+  ['exchange', 'Stock exchange'],
+  ['government', 'Government'],
+  ['instagram', 'Instagram'],
+  ['linkedin', 'LinkedIn'],
+  ['x', 'X'],
+  ['hashtag', 'Hashtag'],
+  ['keyword', 'Search phrase'],
+]
+export const sourceTypeLabel = key => SOURCE_TYPES.find(([k]) => k === key)?.[1] || 'Source'
+
+/**
+ * A source as people paste it, tidied to what the lens searches with.
+ *
+ * "https://www.argaam.com/en/..." → "argaam.com/en/..." for a site, a full
+ * Instagram URL → "@handle", "saudi projects" as a hashtag → "#saudi_projects".
+ * Pure, so the panel and the tests agree on it.
+ */
+export function cleanSource(subject, type) {
+  let v = String(subject || '').trim()
+  if (!v) return ''
+  if (type === 'instagram' || type === 'x') {
+    v = v.replace(/^https?:\/\/(www\.)?(instagram\.com|x\.com|twitter\.com)\//i, '').replace(/[/?#].*$/, '').replace(/^@/, '')
+    return v ? `@${v.toLowerCase()}` : ''
+  }
+  if (type === 'hashtag') return `#${v.replace(/^#+/, '').replace(/\s+/g, '_')}`
+  if (type === 'keyword') return v
+  return v.replace(/^https?:\/\//i, '').replace(/^www\./i, '').replace(/\/$/, '')
 }
 
 export function deleteAgendaRow(accessToken, id) {

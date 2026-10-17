@@ -25,6 +25,7 @@ const icp = {
     { key: 'contractor_bidding', weight: -2, note: 'Their tender loss is our loss' },
   ],
   size: { sweet_max: 500000, ok_max: 2000000, currency: 'SAR', note: 'Large tenders are rarely won.' },
+  share: { min: 3, max: 5, note: 'Rule of thumb; hotels run higher.' },
   regions: ['capital city'],
   red_flags: [{ label: 'Specified brand', advice: 'ask for the vendor list first', match: ['approved vendor', 'specified brand'] }],
   ask_first: ['What is your target price?', 'Is there an approved vendor list?', 'Has the main contractor been awarded?'],
@@ -42,6 +43,8 @@ const opportunities = [
   { id: 'o1', type: 'project', name: 'Cedar Hotel Downtown', headline: 'Main contractor awarded the Cedar Hotel fit-out', client: 'Cedar Hospitality', contractor: 'Stone & Steel Contracting', consultant: 'Arc Design', location: 'Capital city', scope: 'Interior and facade lighting', stage: 'awarded', deadline: null, timing: 'unconfirmed', relevance: 'high', suggested_action: 'Call Stone & Steel procurement; open with a sample board and a lux study.', source_url: 'https://example.com/award', status: 'new', owner_note: '', first_seen_at: '2026-10-05T08:00:00Z', last_seen_at: '2026-10-05T08:00:00Z', times_seen: 1, last_change: '', segment: 'hospitality', buyer: 'contractor_awarded', value_sar: 450000, track: 'core', why_fit: 'Hotel job held by the contractor', red_flags: '', contact: 'stonesteel.example — procurement manager' },
   { id: 'o2', type: 'lead', name: 'Linea Interiors', headline: 'Linea Interiors won three office fit-outs this quarter', client: '', contractor: '', consultant: '', location: 'Capital city', scope: 'Office fit-out', stage: 'fit-out', deadline: null, timing: 'unconfirmed', relevance: 'medium', suggested_action: 'Introduce our range to their design lead.', source_url: 'https://example.com/linea', status: 'new', owner_note: '', first_seen_at: '2026-09-28T08:00:00Z', last_seen_at: '2026-10-05T08:00:00Z', times_seen: 2, last_change: '', segment: 'fitout', buyer: 'fitout', value_sar: null, track: 'broader', why_fit: 'Fit-out company winning office work', red_flags: '', contact: 'linea.example — general enquiries' },
   { id: 'o3', type: 'tender', name: 'North Campus University Library', headline: 'Library package out to tender; approved vendor list issued', client: 'North University', contractor: '', consultant: 'Campus Engineers', location: 'North region', scope: 'Lighting and controls', stage: 'tender', deadline: '2026-11-02', timing: 'open', relevance: 'medium', suggested_action: 'Ask for the vendor list before estimating.', source_url: 'https://example.com/tender', status: 'new', owner_note: '', first_seen_at: '2026-10-05T08:00:00Z', last_seen_at: '2026-10-05T08:00:00Z', times_seen: 1, last_change: '', segment: 'education', buyer: 'contractor_bidding', value_sar: 3500000, track: 'core', why_fit: 'A university', red_flags: 'Approved vendor list issued', contact: '' },
+  { id: 'o5', type: 'project', name: 'Old Town Hotels Programme', headline: 'Six luxury hotels awarded to two contractors', client: 'Old Town Co', contractor: 'Builder JV', consultant: '', location: 'Capital city', scope: 'Fit-out and MEP for six hotels', stage: 'awarded', deadline: null, timing: 'unconfirmed', relevance: 'high', suggested_action: 'Ask Builder JV who holds the guest-room controls on hotel 3.', source_url: 'https://example.com/hotels', status: 'new', owner_note: '', first_seen_at: '2026-10-12T08:00:00Z', last_seen_at: '2026-10-12T08:00:00Z', times_seen: 1, last_change: '', segment: 'hospitality', buyer: 'contractor_awarded', value_sar: 2729000000, value_kind: 'project', package: 'Hotel 3 guest-room controls — held by Builder JV', package_value_sar: null, track: 'broader', why_fit: 'Hotels in our region', red_flags: '', contact: '' },
+  { id: 'o6', type: 'project', name: 'Al Noor Private School', headline: 'Finishing works contract signed for a new private school', client: 'Al Noor Education', contractor: 'Finish Co', consultant: '', location: 'Capital city', scope: 'Construction and finishing', stage: 'awarded', deadline: null, timing: 'unconfirmed', relevance: 'high', suggested_action: 'Call Finish Co procurement.', source_url: 'https://example.com/school', status: 'new', owner_note: '', first_seen_at: '2026-10-12T08:00:00Z', last_seen_at: '2026-10-12T08:00:00Z', times_seen: 1, last_change: '', segment: 'education', buyer: 'contractor_awarded', value_sar: 15000000, value_kind: 'project', package: '', package_value_sar: null, track: 'core', why_fit: 'A school, contractor holds the job', red_flags: '', contact: '' },
   { id: 'o4', type: 'project', name: 'Riverside Tower', headline: 'Mixed-use tower in design', client: 'River Developments', contractor: '', consultant: '', location: '', scope: '', stage: 'design', deadline: null, timing: 'unconfirmed', relevance: 'medium', suggested_action: 'Find the consultant.', source_url: 'https://example.com/tower', status: 'new', owner_note: '', first_seen_at: '2026-09-21T08:00:00Z', last_seen_at: '2026-09-21T08:00:00Z', times_seen: 1, last_change: '', segment: '', buyer: '', value_sar: null, track: '', why_fit: '', red_flags: '', contact: '' },
 ]
 
@@ -103,6 +106,18 @@ const brief = {
 }
 
 const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
+// The Research page's steering panel (?page=steering): one question, one
+// competitor and a "Where to look" list with an agent suggestion.
+const agenda = [
+  { id: 'q1', kind: 'question', subject: 'Which hotel fit-outs are starting in the capital?', status: 'active', created_by: 'human' },
+  { id: 'c1', kind: 'competitor', subject: 'Rival One', status: 'active', ig_handle: 'rivalone', ig_status: 'resolved' },
+  { id: 's1', kind: 'source', source_type: 'exchange', subject: 'exchange.example', why: 'Listed contractors announce contract awards here.', tier: 1, status: 'active', created_by: 'human' },
+  { id: 's2', kind: 'source', source_type: 'instagram', subject: '@projecttracker', why: 'Tracks every project in the capital.', tier: 1, status: 'active', created_by: 'human' },
+  { id: 's3', kind: 'source', source_type: 'hashtag', subject: '#مشاريع_الرياض', why: '', tier: 2, status: 'active', created_by: 'human' },
+  { id: 's4', kind: 'source', source_type: 'linkedin', subject: 'linkedin.com/company/fitout-example', why: 'Found by the research: cited by 1 project finding.', tier: 2, status: 'proposed', created_by: 'agent' },
+  { id: 's5', kind: 'source', source_type: 'news', subject: 'oldnews.example', why: 'Rarely useful.', tier: 3, status: 'retired', created_by: 'human' },
+]
+
 const original = window.fetch.bind(window)
 
 window.fetch = async (input, init = {}) => {
@@ -117,6 +132,7 @@ window.fetch = async (input, init = {}) => {
   if (url.includes('/rest/v1/sales_icp')) return json([{ config: icp, battle_cards: battleCards, updated_at: '2026-10-07T10:00:00Z' }])
   if (url.includes('/rest/v1/sales_accounts')) return json(accounts)
   if (url.includes('/rest/v1/research_opportunities')) return json(opportunities)
+  if (url.includes('/rest/v1/research_agenda')) return json(agenda)
   if (url.includes('/rest/v1/research_events')) return json(events)
   if (url.includes('/rest/v1/research_runs')) return json([{ started_at: '2026-10-05T07:00:00Z', status: 'complete' }])
   return json([])

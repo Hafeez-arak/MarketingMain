@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   normaliseIcp, scoreTarget, parseAmount, formatAmount, icpPromptText, rankTargets, hasIcp, icpToForm, formToIcp,
+  packageEstimate, parseShare,
 } from './icp'
 
 // A made-up ICP. The real one is data in the database, never in this
@@ -83,10 +84,78 @@ describe('how well a target fits', () => {
 
   it('a large package warns on the core track and is a growth target on the broader one', () => {
     const core = scoreTarget({ name: 'Grand Resort', value_sar: 9_000_000 }, ICP)
-    expect(core.flags.join(' ')).toMatch(/qualify hard/)
+    expect(core.flags.join(' ')).toMatch(/too big as one job/)
     const broader = scoreTarget({ name: 'Interiors package', track: 'broader', segment: 'fitout', value_sar: 9_000_000 }, ICP)
-    expect(broader.flags).toEqual([])
     expect(broader.reasons.join(' ')).toMatch(/growth target/)
+    // Still told to find the piece that fits — growth is not a licence to
+    // pitch a whole programme.
+    expect(broader.flags.join(' ')).toMatch(/find the package/)
+  })
+
+  it('a value just over the line is worth a call, not a programme', () => {
+    const fit = scoreTarget({ name: 'Palm Hotel', value_sar: 3_000_000 }, ICP)
+    expect(fit.reasons.join(' ')).toMatch(/worth a call/)
+    expect(fit.flags).toEqual([])
+  })
+
+  describe('share of a project', () => {
+    const WITH_SHARE = { ...ICP, share: { min: 3, max: 5 } }
+
+    it('scores a project on our estimated share, not its headline value', () => {
+      // SAR 15M project → our share 450k–750k: the size we win most.
+      const fit = scoreTarget({ name: 'School block', value_sar: 'SAR 15 million' }, WITH_SHARE)
+      expect(fit.reasons.join(' ')).toMatch(/15M SAR project, our share about 450k–750k SAR — the size we win most/)
+    })
+
+    it('without a share, the same value is a package that is far too big', () => {
+      const fit = scoreTarget({ name: 'School block', value_sar: 'SAR 15 million' }, ICP)
+      expect(fit.flags.join(' ')).toMatch(/too big as one job/)
+    })
+
+    it('a giga-project with a named package is pointed at the package', () => {
+      const fit = scoreTarget({
+        name: 'Diriyah hotels', value_sar: 2_729_000_000, package: 'Hotel 3 guest-room controls — held by UCC Saudi',
+      }, WITH_SHARE)
+      expect(fit.reasons.join(' ')).toMatch(/go for: Hotel 3 guest-room controls/)
+      expect(fit.flags).toEqual([])
+    })
+
+    it('a stated package value beats the estimate, and value_kind=package skips it', () => {
+      const stated = scoreTarget({ name: 'X Hotel', value_sar: 2_000_000_000, package_value_sar: '400k' }, WITH_SHARE)
+      expect(stated.reasons.join(' ')).toMatch(/^.*400k SAR — the size we win most/)
+      const asPackage = scoreTarget({ name: 'X Hotel', value_sar: '450k', value_kind: 'package' }, WITH_SHARE)
+      expect(asPackage.reasons.join(' ')).toMatch(/450k SAR — the size we win most/)
+    })
+
+    it('an old target with no value_kind and a package-sized value is read as a package', () => {
+      const fit = scoreTarget({ name: 'Palm Hotel', value_sar: 450_000 }, WITH_SHARE)
+      expect(fit.reasons.join(' ')).toMatch(/^.*450k SAR — the size we win most/)
+      expect(fit.reasons.join(' ')).not.toMatch(/our share/)
+      // …but one marked as a project is still converted.
+      const project = scoreTarget({ name: 'Palm Hotel', value_sar: 1_500_000, value_kind: 'project' }, WITH_SHARE)
+      expect(project.reasons.join(' ')).toMatch(/our share about 45k–75k SAR/)
+    })
+
+    it('a segment can carry its own share', () => {
+      const icp = {
+        ...WITH_SHARE,
+        segments: WITH_SHARE.segments.map(s => (s.key === 'hotels' ? { ...s, share: { min: 8, max: 10 } } : s)),
+      }
+      const est = packageEstimate({ value_sar: 10_000_000 }, icp, normaliseIcp(icp).segments[0])
+      expect(est).toMatchObject({ min: 800_000, max: 1_000_000, estimated: true })
+    })
+
+    it('tells the lens which project sizes land in our range', () => {
+      expect(icpPromptText(WITH_SHARE)).toMatch(/3–5% of a project's total value.*10M SAR to 66.7M SAR in total/)
+    })
+
+    it('round-trips through the editor', () => {
+      const form = icpToForm({ ...WITH_SHARE, share: { min: 3, max: 5, note: 'hotels run higher' } })
+      expect(form.share).toBe('3-5')
+      expect(formToIcp(form, WITH_SHARE).share).toEqual({ min: 3, max: 5, note: 'hotels run higher' })
+      expect(parseShare('3–5%')).toEqual({ min: 3, max: 5, note: '' })
+      expect(parseShare('nonsense')).toBeNull()
+    })
   })
 
   it('names the red flag and what to ask', () => {

@@ -17,6 +17,7 @@ import { priorIdeas } from './_memory.js'
 import { silentLensNote } from '../../src/lib/agent/runHealth.js'
 import { partitionRepeats } from '../../src/lib/agent/memory.js'
 import { freshQuestions, dedupeQuestions } from '../../src/lib/agent/agendaDedup.js'
+import { suggestSources } from '../../src/lib/agent/sourceSuggest.js'
 import { parseLines, stampLines } from '../../src/lib/agent/lines.js'
 import { applyNovelty, priorFindingsFrom, repetitionNote } from '../../src/lib/agent/novelty.js'
 import {
@@ -25,7 +26,7 @@ import {
 import { LIVE_PLATFORMS } from '../../src/lib/utils.js'
 import { ownPostingFacts } from '../../src/lib/agent/ownChannels.js'
 import { loadIntel } from './_intel.js'
-import { hasIcp, normaliseIcp, icpPromptText } from '../../src/lib/sales/icp.js'
+import { hasIcp, normaliseIcp, icpPromptText, icpFitText } from '../../src/lib/sales/icp.js'
 import {
   knownIntelPrompt, planStoreWrites, annotateFindings, signalHistory, isOpenOpportunity, nameKey,
 } from '../../src/lib/agent/intel.js'
@@ -109,7 +110,7 @@ function lookahead(weeks = 8, now = new Date()) {
  * warm.
  */
 export async function loadRunContext(workspaceId, runId, cadence = 'weekly') {
-  const [{ brand, ctx, profile }, agenda, priorRuns, competitorRows, alreadySaid, runRows, icp] =
+  const [{ brand, ctx, profile }, agenda, priorRuns, competitorRows, alreadySaid, runRows, icp, sources] =
     await Promise.all([
       loadBrandContext(workspaceId, 'research'),
       db(`research_agenda?workspace_id=eq.${workspaceId}&kind=eq.question&status=eq.active` +
@@ -138,6 +139,11 @@ export async function loadRunContext(workspaceId, runId, cadence = 'weekly') {
       priorIdeas(workspaceId),
       db(`research_runs?id=eq.${runId}&workspace_id=eq.${workspaceId}&select=report,stage,status&limit=1`),
       loadIcp(workspaceId),
+      // The "Where to look" list. Active only: a proposed source has not been
+      // accepted by a person, and a retired one was pruned on purpose.
+      db(`research_agenda?workspace_id=eq.${workspaceId}&kind=eq.source&status=eq.active` +
+         `&select=subject,why,source_type,tier&order=tier.asc.nullslast,created_at.asc&limit=60`)
+        .catch(err => { console.error('[agent/run] sources:', err?.message || err); return [] }),
     ])
 
   const gathered = runRows?.[0]?.report || {}
@@ -202,6 +208,7 @@ export async function loadRunContext(workspaceId, runId, cadence = 'weekly') {
       competitorNotes.flatMap(n => n.lines || []),
     ),
     icp,
+    sources: sources || [],
   }
 }
 
@@ -249,7 +256,7 @@ export async function planLenses(workspaceId, runId, cadence = 'weekly') {
  * every lens's — the calendar's dates cost an API round trip, and fetching
  * them to run the demand lens would be waste repeated on every call.
  */
-async function argsForLens(key, { brandFacts, motion, competitors, competitorNotes = [], gathered, profile, ctx, agenda = [], language = '', workspaceId = '', line = '', icp = null }) {
+async function argsForLens(key, { brandFacts, motion, competitors, competitorNotes = [], gathered, profile, ctx, agenda = [], language = '', workspaceId = '', line = '', icp = null, sources = [] }) {
   // What the team already tracks, so the lens reports changes instead of
   // re-announcing last week. Read only for the three lenses that produce
   // leads, events or competitor signals; never fatal — an empty store is a
@@ -270,7 +277,13 @@ async function argsForLens(key, { brandFacts, motion, competitors, competitorNot
   // every lens that searches. It used to reach synthesis only, which reads what
   // the lenses already found and cannot look anything up, so a standing question
   // could change the write-up and never change what was searched for.
-  if (key === 'openings') return { args: [brandFacts, { motion, agenda, language, intel }] }
+  // `sources` — the "Where to look" list — goes to the two lenses that hunt
+  // projects. `fit` is only the size, share and region lines of the ICP, so
+  // openings sizes a project before proposing it (see sizing() in
+  // lensPrompts.js) without turning into a second targets lens.
+  if (key === 'openings') {
+    return { args: [brandFacts, { motion, agenda, language, intel, sources, fit: hasIcp(icp) ? icpFitText(icp) : '' }] }
+  }
   if (key === 'targets') {
     // The ICP is rendered as plain briefing lines, and the split between the
     // two tracks travels as numbers so the prompt can turn it into searches.
@@ -283,6 +296,7 @@ async function argsForLens(key, { brandFacts, motion, competitors, competitorNot
         agenda,
         language,
         intel,
+        sources,
       }],
     }
   }
@@ -943,6 +957,26 @@ export async function persistReport(workspaceId, runId, report) {
       },
       prefer: 'return=minimal',
     }).catch(err => console.error('[agent/synthesise] new competitor:', err.message))
+  }
+
+  // Accounts and sites the project findings rested on, proposed for the
+  // "Where to look" list (see sourceSuggest.js). Every status is checked, so a
+  // source someone rejected is not proposed again.
+  const priorSources = await db(
+    `research_agenda?workspace_id=eq.${workspaceId}&kind=eq.source&select=subject,status&limit=500`,
+  ).catch(() => null)
+  // null means the read failed: proposing blind could re-propose a rejected
+  // source, so nothing is proposed this week rather than something wrong.
+  for (const src of priorSources ? suggestSources(report?.findings || [], priorSources) : []) {
+    await db('research_agenda', {
+      method: 'POST',
+      body: {
+        workspace_id: workspaceId, kind: 'source', source_type: src.source_type,
+        subject: src.subject.slice(0, 300), why: src.why.slice(0, 1000), tier: 2,
+        status: 'proposed', created_by: 'agent', cadence: 'weekly',
+      },
+      prefer: 'return=minimal',
+    }).catch(err => console.error('[agent/synthesise] source:', err.message))
   }
 
   for (const a of freshAgenda) {
