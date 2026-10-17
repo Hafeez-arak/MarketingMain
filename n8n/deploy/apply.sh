@@ -26,16 +26,18 @@ run() { echo "+ $*"; [ -n "$DRY" ] || "$@"; }
 echo "$(grep -c . <<<"$changed") file(s) changed"
 
 # 1. Containers. Rebuilding first, because redeploy.sh imports into the running
-# n8n and a rebuild after it would only restart it again for nothing.
+# n8n and a rebuild after it would only restart it again for nothing. Build and
+# up are separate so the build can be --quiet; `up --build` puts the whole
+# BuildKit progress output into the auto-deploy log.
 if has '^n8n/docker/(docker-compose\.yml|Dockerfile)$'; then
   echo "compose or n8n Dockerfile changed: rebuilding both containers"
-  (cd "$COMPOSE_DIR" && run docker compose up -d --build) || { echo "rebuild FAILED"; exit 2; }
+  (cd "$COMPOSE_DIR" && run docker compose build --quiet && run docker compose up -d) || { echo "rebuild FAILED"; exit 2; }
   rebuilt_agent=1
 elif has '^(server/(Dockerfile|agent\.js|agentHandlers/)|api/agent/|api/zernio/_zernio\.js|src/lib/)'; then
   # The same paths server/Dockerfile COPYs. Anything else in src/ or api/ is
   # Vercel's, not this box's.
   echo "agent code changed: rebuilding the agent"
-  (cd "$COMPOSE_DIR" && run docker compose up -d --build agent) || { echo "agent rebuild FAILED"; exit 2; }
+  (cd "$COMPOSE_DIR" && run docker compose build --quiet agent && run docker compose up -d agent) || { echo "agent rebuild FAILED"; exit 2; }
   rebuilt_agent=1
 fi
 
