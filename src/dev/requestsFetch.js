@@ -36,6 +36,13 @@ const db = {
     { user_id: 'u-hafeez', name: 'hafeez', label: 'Builds the app' },
   ],
 }
+db.cap = 30
+db.usage = [
+  { surface: 'run', cost_usd: 9.15, created_at: ago(24 * 12) },
+  { surface: 'chat', cost_usd: 0.68, created_at: ago(2) },
+  { surface: 'lead_qualifier', cost_usd: 0.37, created_at: ago(30) },
+  { surface: 'run', cost_usd: 8.2, created_at: ago(24 * 30) },
+]
 if (MODE === 'empty') { db.requests = []; db.notifications = []; db.events = [] }
 
 window.__requestCalls = []
@@ -60,6 +67,12 @@ window.fetch = async (input, init = {}) => {
   const rpc = /\/rest\/v1\/rpc\/([a-z_]+)$/.exec(u.pathname)
   if (rpc?.[1] === 'taggable_people') return respond(200, db.taggable)
   if (rpc?.[1] === 'workspace_people') return respond(200, db.people)
+  if (rpc?.[1] === 'set_agent_cap') {
+    const { cap } = JSON.parse(init.body || '{}')
+    if (!(cap >= 1 && cap <= 5000)) return respond(400, { message: 'The monthly limit must be between $1 and $5,000.' })
+    db.cap = cap
+    return respond(200, cap)
+  }
   const table = /\/rest\/v1\/([a-z_]+)$/.exec(u.pathname)?.[1]
   if (MODE === 'fail' && table === 'requests') return respond(500, { message: 'connection reset' })
   if (table === 'requests' && method === 'PATCH') {
@@ -85,5 +98,8 @@ window.fetch = async (input, init = {}) => {
     return respond(204, null)
   }
   if (table === 'notifications') return respond(200, db.notifications)
+  if (table === 'agent_usage') return respond(200, db.usage)
+  if (table === 'workspaces') return respond(200, { agent_monthly_cap_usd: db.cap })
+  if (table === 'agent_cap_log') return respond(200, [])
   return respond(200, [])
 }
