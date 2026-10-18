@@ -170,7 +170,7 @@ export function LeadDetail({ lead, onReview, workspaceId, mailboxes = [], wide =
           <ul className="list-disc pl-4 space-y-0.5 text-text">{asks.map((a) => <li key={a}>{a}</li>)}</ul>
         </div>
       )}
-      {lead.verdict && lead.verdict !== 'duplicate' && <Review lead={lead} onReview={onReview} />}
+      {lead.verdict && lead.verdict !== 'duplicate' && lead.source !== 'manual' && <Review lead={lead} onReview={onReview} />}
       {lead.crm_status && (
         <p className="text-text-tertiary">
           CRM: <span className={lead.crm_status === 'failed' ? 'text-red-600 font-semibold' : 'text-text-secondary'}>{CRM_LABEL[lead.crm_status]}</span>

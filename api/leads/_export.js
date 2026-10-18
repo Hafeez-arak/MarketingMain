@@ -38,7 +38,7 @@ export function periodOf(iso) {
 
 const isUuid = (v) => /^[0-9a-f-]{36}$/i.test(String(v || ''))
 
-const SOURCE = { website_form: 'Website', email: 'Email' }
+const SOURCE = { website_form: 'Website', email: 'Email', manual: 'Added by hand' }
 const VERDICT = { qualified: 'Qualified', unqualified: 'Unqualified', needs_review: 'Needs review', duplicate: 'Duplicate' }
 
 /** "2026-10-06 14:00" in Riyadh time, the way the office reads it. */

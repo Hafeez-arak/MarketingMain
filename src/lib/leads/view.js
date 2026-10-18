@@ -17,7 +17,19 @@ export const VERDICT_TONE = {
   pending: 'bg-red-50 text-red-600',
 }
 
-export const SOURCE_LABEL = { website_form: 'Website', email: 'Email' }
+export const SOURCE_LABEL = { website_form: 'Website', email: 'Email', manual: 'Added by hand' }
+
+/** How a lead added by hand came to us (2026-10-18). */
+export const CHANNEL_LABEL = {
+  phone: 'Phone call',
+  whatsapp: 'WhatsApp',
+  walk_in: 'Walk-in',
+  referral: 'Referral',
+  exhibition: 'Exhibition or event',
+  site_visit: 'Site visit',
+  outbound: 'We contacted them',
+  other: 'Other',
+}
 
 /** What a lead counts as: a person's correction wins over the agent. */
 export function effectiveVerdict(lead) {
@@ -177,11 +189,13 @@ export function leadFilters(f = EMPTY_FILTERS, { me = '' } = {}) {
     eqs.push(['corrected', true])
   } else if (f.show === 'approved') {
     ors.push('approved_at.not.is.null')
+
   } else if (f.show && f.show !== 'all') {
     ors.push(verdictFilter(f.show))
   }
   // Where it came in: the website form, or one connected mailbox (by the label it is stored under).
   if (f.channel === 'website') eqs.push(['source', 'website_form'])
+  else if (f.channel === 'manual') eqs.push(['source', 'manual'])
   else if (f.channel) eqs.push(['mailbox', f.channel])
   if (f.sender) eqs.push(['sender_type', f.sender])
   // "Not stated" is the empty phase: sales fills it in after the call. The
@@ -223,6 +237,7 @@ export function brandOf(address = '') {
 /** Where a lead came in, the way the team says it: "Arak website", "Arak email", "CLB email". */
 export function channelLabel(lead = {}, { websiteBrand = 'Arak' } = {}) {
   if (lead.source === 'website_form') return `${websiteBrand} website`
+  if (lead.source === 'manual') return CHANNEL_LABEL[lead.channel] ? `Added · ${CHANNEL_LABEL[lead.channel]}` : 'Added by hand'
   const brand = brandOf(lead.mailbox)
   return brand ? `${brand} email` : 'Email'
 }

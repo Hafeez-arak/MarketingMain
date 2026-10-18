@@ -9,6 +9,7 @@ import {
 } from '../../lib/leads/view'
 import { VerdictTag, LeadDetail } from './parts'
 import BattleCard from './BattleCard'
+import { StageBar } from './Pipeline'
 
 // ─── The leads list ────────────────────────────────────────────────────────
 // What the sales team asked for (2026-10-11): one clean row per lead with
@@ -29,6 +30,11 @@ import BattleCard from './BattleCard'
 // on the sales team at any time, which forwards the customer's email to them
 // at once; Approve asks for someone when no one has it yet. A salesperson
 // sees only their own leads (the database decides, can_see_lead).
+//
+// The Inbox (2026-10-18): this list is where enquiries are sorted, approved
+// and assigned; the approved ones, and the ones added by hand, are worked in
+// the Pipeline (Pipeline.jsx). An opened lead in the pipeline shows its
+// stage bar here too.
 
 const SENDER_OPTIONS = Object.entries(SENDER_LABEL)
 const PROJECT_OPTIONS = [...Object.entries(PROJECT_LABEL), ['none', 'Not stated']]
@@ -174,12 +180,12 @@ function CardWaiting({ lead, canApprove, onAsk }) {
   )
 }
 
-function Row({ lead, open, onToggle, onReview, onSetProject, workspaceId, mailboxes, canApprove, onAsk, team, me, onAssign, onForward }) {
+function Row({ lead, open, onToggle, onReview, onSetProject, workspaceId, mailboxes, canApprove, onAsk, team, me, onAssign, onForward, onChange }) {
   const v = effectiveVerdict(lead)
   const v2 = (lead.criteria_version || 1) >= 2
   const junk = lead.folder === 'junk'
   // An approved lead opens on its card; any other on its email.
-  const [tab, setTab] = useState(lead.approved_at ? 'card' : 'email')
+  const [tab, setTab] = useState(lead.approved_at || lead.stage ? 'card' : 'email')
   const hasTabs = lead.verdict !== 'duplicate'
   return (
     <li className={open ? 'bg-surface-subtle' : ''}>
@@ -233,10 +239,11 @@ function Row({ lead, open, onToggle, onReview, onSetProject, workspaceId, mailbo
       {open && (
         <div className="border-t border-border bg-white">
           <OwnerLine lead={lead} team={team} me={me} canApprove={canApprove} onForward={onForward} />
+          <StageBar lead={lead} workspaceId={workspaceId} onChange={onChange} />
           {hasTabs ? (
             <>
               <div role="tablist" aria-label="Lead" className="flex gap-1 px-4 pt-3 md:pl-[8.25rem]">
-                {[['card', 'Battle card'], ['email', 'Email and evidence']].map(([k, label]) => (
+                {[['card', 'Battle card'], ['email', lead.source === 'manual' ? 'Details' : 'Email and evidence']].map(([k, label]) => (
                   <button key={k} type="button" role="tab" aria-selected={tab === k} onClick={() => setTab(k)}
                     className={`text-xs px-2.5 py-1 border-b-2 focus:outline-none focus-visible:ring-1 focus-visible:ring-amber-400 ${tab === k ? 'border-amber-500 text-text font-semibold' : 'border-transparent text-text-secondary hover:text-text'}`}>
                     {label}
@@ -245,7 +252,7 @@ function Row({ lead, open, onToggle, onReview, onSetProject, workspaceId, mailbo
                 <AskAboutLead lead={lead} />
               </div>
               {tab === 'card'
-                ? (lead.approved_at ? <BattleCard lead={lead} workspaceId={workspaceId} /> : <CardWaiting lead={lead} canApprove={canApprove} onAsk={onAsk} />)
+                ? (lead.approved_at || lead.stage ? <BattleCard lead={lead} workspaceId={workspaceId} onLeadChange={onChange} /> : <CardWaiting lead={lead} canApprove={canApprove} onAsk={onAsk} />)
                 : <LeadDetail lead={lead} onReview={onReview} workspaceId={workspaceId} mailboxes={mailboxes} wide />}
             </>
           ) : (
@@ -500,6 +507,7 @@ export default function LeadsBoard({ workspaceId, onReview, refreshKey = 0, mail
         <Select label="Came in" value={filters.channel} onChange={set('channel')}>
           <option value="">Anywhere</option>
           <option value="website">{channelLabel({ source: 'website_form' })}</option>
+          <option value="manual">Added by hand</option>
           {mailboxes.map((m) => <option key={m.id} value={m.label || m.email}>{brandOf(m.label || m.email)} email ({m.label || m.email})</option>)}
         </Select>
         <Select label="Who" value={filters.sender} onChange={set('sender')}>
@@ -552,7 +560,8 @@ export default function LeadsBoard({ workspaceId, onReview, refreshKey = 0, mail
           {list.rows.map((l) => (
             <Row key={l.id} lead={l} open={open === l.id} onToggle={() => setOpen(open === l.id ? null : l.id)} onReview={review}
               onSetProject={setProject} workspaceId={workspaceId} mailboxes={mailboxes} canApprove={canApprove} onAsk={(lead) => { setApproving({ busy: false, error: '' }); setAsking(lead) }}
-              team={team} me={me} onAssign={(lead) => { setAssignState({ busy: false, error: '' }); setAssigning(lead) }} onForward={forwardAgain} />
+              team={team} me={me} onAssign={(lead) => { setAssignState({ busy: false, error: '' }); setAssigning(lead) }} onForward={forwardAgain}
+              onChange={(updated) => replaceRow(updated.id, updated)} />
           ))}
         </ul>
       )}

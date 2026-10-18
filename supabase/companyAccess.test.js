@@ -304,6 +304,7 @@ describe('sales seats after 20261013_sales_seats', () => {
     // As 20261016_lead_cards leaves it; 20261018 narrows it.
     await pg.exec(`create policy lead_cards_sales_read on public.lead_cards for select to authenticated using (public.is_sales_member(workspace_id))`)
     await pg.exec(migration('20261018_lead_assignment'))
+    await pg.exec(migration('20261024_lead_pipeline'))
     await h.as(ADMIN)
     arak = await h.create('Arak')
     ghusn = await h.create('Ghusn')
@@ -447,6 +448,12 @@ describe('sales seats after 20261013_sales_seats', () => {
     expect(await sees(FAISAL)).toEqual({ leads: ['faisal email', 'website for faisal'], cards: 1 })
     expect(await sees(HUDA)).toEqual({ leads: ['huda email', 'website for faisal', 'website unassigned'], cards: 0 })
     expect(await sees(LAYLA)).toEqual({ leads: ['faisal email', 'huda email', 'unassigned email', 'website for faisal', 'website unassigned'], cards: 1 })
+
+    // 20261024_lead_pipeline: a lead added by hand is its owner's, like any other.
+    await lead('faisal added', 'manual', FAISAL)
+    expect((await sees(FAISAL)).leads).toContain('faisal added')
+    expect((await sees(HUDA)).leads).not.toContain('faisal added')
+    await expect(lead('bad source', 'fax', FAISAL)).rejects.toThrow(/leads_source_check/)
 
     // The team by name, for the Owner column: the team and the admin, no one else.
     await h.as(FAISAL)

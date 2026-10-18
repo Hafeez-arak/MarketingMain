@@ -1,4 +1,5 @@
 import { buildLeadCard, normaliseLeadCard, afterCallFields, senderDomain, objectionsFromCards } from '../../src/lib/sales/leadCard.js'
+import { trackFields } from '../../src/lib/leads/pipeline.js'
 
 // ─── Battle cards for approved leads ───────────────────────────────────────
 // A lead gets its card when it is approved (the owner, 2026-10-12: approving
@@ -13,7 +14,7 @@ import { buildLeadCard, normaliseLeadCard, afterCallFields, senderDomain, object
 const isUuid = (v) => /^[0-9a-f-]{36}$/i.test(String(v || ''))
 
 const CARD_COLUMNS = 'lead_id,card,decision,quote_due,target_price,decides,competitors,built_at,updated_at,updated_by'
-const LEAD_COLUMNS = 'id,received_at,created_at,company,name,email,subject,message,summary,details,ask_next,category,verdict,human_verdict,sender_type,source_check,project_type,human_project_type,project_final,philips,approved_at'
+const LEAD_COLUMNS = 'id,received_at,created_at,company,name,email,subject,message,summary,details,ask_next,category,verdict,human_verdict,sender_type,source_check,project_type,human_project_type,project_final,philips,approved_at,stage,source,channel'
 
 const effective = (l) => l.human_verdict || l.verdict
 
@@ -76,7 +77,8 @@ export async function openCard(deps, { workspaceId, leadId }) {
   if (existing) return { card: existing }
   const [lead] = await deps.db(`leads?id=eq.${leadId}&workspace_id=eq.${workspaceId}&select=${LEAD_COLUMNS}`) || []
   if (!lead) return { status: 404, error: 'That lead is not in this company.' }
-  if (!lead.approved_at) return { status: 409, error: 'The battle card opens once the lead is approved.' }
+  // In the pipeline: approved, or added by hand (2026-10-18).
+  if (!lead.approved_at && !lead.stage) return { status: 409, error: 'The battle card opens once the lead is approved.' }
   const card = buildLeadCard(lead, await context(deps, workspaceId, lead))
   const now = deps.now().toISOString()
   await deps.db('lead_cards?on_conflict=lead_id', {
@@ -87,13 +89,16 @@ export async function openCard(deps, { workspaceId, leadId }) {
 }
 
 /**
- * Save the team's edits: the whole card and the four after-call fields.
- * Whatever comes in is cut back to the card's shape first.
+ * Save the team's edits: the whole card and the after-call fields. The next
+ * step and the follow-up date belong to the lead (the Pipeline lists them),
+ * so they are saved on it. Whatever comes in is cut back to shape first.
  */
 export async function saveCard(deps, { workspaceId, leadId, user, body = {} }) {
   if (!isUuid(leadId)) return { status: 400, error: 'Which lead?' }
   const after = afterCallFields(body)
   if (after.error) return { status: 400, error: after.error }
+  const track = trackFields({ next_step: body.next_step, follow_up: body.follow_up })
+  if (track.error) return { status: 400, error: track.error }
   const existing = await readCard(deps, workspaceId, leadId)
   if (!existing) return { status: 404, error: 'This lead has no battle card yet. Open it first.' }
   const [row] = await deps.db(`lead_cards?lead_id=eq.${leadId}&workspace_id=eq.${workspaceId}&select=${CARD_COLUMNS}`, {
@@ -101,5 +106,11 @@ export async function saveCard(deps, { workspaceId, leadId, user, body = {} }) {
     body: { card: normaliseLeadCard(body.card ?? existing.card), ...after.values, updated_by: user?.id || null, updated_at: deps.now().toISOString() },
   }) || []
   if (!row) return { status: 404, error: 'This lead has no battle card yet. Open it first.' }
-  return { card: row }
+  let lead = null
+  if (Object.keys(track.values).length) {
+    ;[lead] = await deps.db(`leads?id=eq.${leadId}&workspace_id=eq.${workspaceId}`, {
+      method: 'PATCH', prefer: 'return=representation', body: { ...track.values, updated_at: deps.now().toISOString() },
+    }) || []
+  }
+  return { card: row, lead }
 }

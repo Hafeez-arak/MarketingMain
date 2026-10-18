@@ -47,15 +47,38 @@ export const CUSTOMER_LABEL = {
   new: 'New to us',
 }
 
-// The order the facts appear in, and their labels.
+// "Before the call": the facts the card fills in from the email, in order.
+// Four boxes since 2026-10-18 (the owner: "the data looks too much"): the
+// project, scope, documents and extra asks are one "What they want".
 export const FACTS = [
-  ['project', 'Project'],
-  ['scope', 'Scope'],
+  ['who', 'Who they are'],
+  ['wants', 'What they want'],
   ['brand', 'Brand rule'],
-  ['documents', 'Documents in hand'],
-  ['also_want', 'They also want'],
   ['due', 'Deadline'],
 ]
+
+/** "What they want", from the email: project · scope, then what they sent and what else they ask for. */
+export function wantsLine(lead = {}) {
+  const d = lead.details || {}
+  const head = [d.location, d.stage].map(str).filter(Boolean).join(', ')
+  const scope = [d.products, d.quantity].map(str).filter(Boolean).join(', ') || str(lead.summary)
+  const lines = [[scope, head].filter(Boolean).join(' · ')]
+  const docs = documentsIn(lead)
+  if (docs) lines.push(`Sent: ${docs}`)
+  const more = wantsIn(lead)
+  if (more) lines.push(`Also wants: ${more}`)
+  return lines.filter(Boolean).join('\n')
+}
+
+/** "Who they are": the company, what kind of buyer, verified or not, and the person. */
+export function whoLine(lead = {}) {
+  const company = str(lead.company) || senderDomain(lead)
+  const kind = SENDER_LABEL[lead.sender_type] && lead.sender_type !== 'unknown'
+    ? `${SENDER_LABEL[lead.sender_type]}${lead.source_check === 'verified' ? ' (verified)' : lead.source_check ? ' (not verified)' : ''}`
+    : ''
+  const person = company && str(lead.name) && str(lead.name) !== company ? str(lead.name) : ''
+  return [company || str(lead.name), kind, person].filter(Boolean).join(' · ')
+}
 
 // ─── Reading the email (no model) ──────────────────────────────────────────
 
@@ -464,11 +487,9 @@ export function buildLeadCard(lead = {}, context = {}) {
     customer: signals.parked ? 'parked' : signals.existing_customer ? 'existing' : signals.repeat_sender ? 'repeat' : 'new',
     headline: [who, str(lead.summary) || str(lead.subject)].filter(Boolean).join(': '),
     facts: {
-      project: [d.location, d.stage].map(str).filter(Boolean).join(' · '),
-      scope: [d.products, d.quantity].map(str).filter(Boolean).join(' · '),
+      who: whoLine(lead),
+      wants: wantsLine(lead),
       brand: [brand.text, ...heldBy(brand.theirs, list(context.competitorBrands))].filter(Boolean).join(' '),
-      documents: documentsIn(lead),
-      also_want: wantsIn(lead),
       due: str(d.urgency),
     },
     fit: icpFit(lead, context.icp, { existing: signals.existing_customer }),
@@ -482,7 +503,16 @@ export function buildLeadCard(lead = {}, context = {}) {
 /** A complete card, whatever was stored or sent. Also the save's guard. */
 export function normaliseLeadCard(raw = {}) {
   const c = raw && typeof raw === 'object' ? raw : {}
-  const facts = c.facts && typeof c.facts === 'object' ? c.facts : {}
+  const stored = c.facts && typeof c.facts === 'object' ? c.facts : {}
+  // A card stored before 2026-10-18 had six facts: fold them into four.
+  const facts = stored.wants !== undefined || stored.who !== undefined ? stored : {
+    ...stored,
+    wants: [
+      [stored.scope, stored.project].map(str).filter(Boolean).join(' · '),
+      str(stored.documents) ? `Sent: ${str(stored.documents)}` : '',
+      str(stored.also_want) ? `Also wants: ${str(stored.also_want)}` : '',
+    ].filter(Boolean).join('\n'),
+  }
   return {
     kind: CARD_KINDS[c.kind] ? c.kind : 'project',
     customer: CUSTOMER_LABEL[c.customer] ? c.customer : 'new',

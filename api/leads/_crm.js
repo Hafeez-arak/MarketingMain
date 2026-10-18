@@ -164,7 +164,7 @@ export async function odooOwner(deps, conn, workspaceId, userId) {
 
 // ─── Approving and sending ─────────────────────────────────────────────────
 
-const LEAD_SELECT = 'id,source,received_at,created_at,name,company,email,phone,phones,subject,message,summary,ask_next,verdict,human_verdict,mailbox,folder,sender_type,source_check,project_type,request_type,philips,email_kind,criteria_version,human_project_type,project_final,approved_at,approved_by,assigned_to,crm_status,crm_id,crm_url,crm_error,crm_sent_at,updated_at'
+const LEAD_SELECT = 'id,source,received_at,created_at,name,company,email,phone,phones,subject,message,summary,ask_next,verdict,human_verdict,mailbox,folder,sender_type,source_check,project_type,request_type,philips,email_kind,criteria_version,human_project_type,project_final,approved_at,approved_by,assigned_to,stage,channel,crm_status,crm_id,crm_url,crm_error,crm_sent_at,updated_at'
 
 /** Claim a lead for sending: only one request can, and only from these states. */
 function claimable(now) {
@@ -226,6 +226,8 @@ export async function approveLead(deps, { workspaceId, leadId, user }) {
   const now = deps.now().toISOString()
   const marks = { updated_at: now }
   if (!lead.approved_at) Object.assign(marks, { approved_at: now, approved_by: user.id })
+  // Approved leads gather in the Pipeline (2026-10-18), starting at New.
+  if (!lead.stage) Object.assign(marks, { stage: 'new', stage_at: now, stage_by: user.id })
   if (effectiveVerdict(lead) !== 'qualified') Object.assign(marks, { human_verdict: 'qualified', reviewed_by: user.id, reviewed_at: now })
   const conn = await crmConnection(deps, workspaceId)
   if (!conn?.ready) {

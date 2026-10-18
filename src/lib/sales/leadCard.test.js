@@ -83,6 +83,13 @@ describe('buildLeadCard', () => {
     expect(c.headline).toBe('falconco.com.sa: Offer, prequalification and submittals for landscape lighting at Giga City.')
     expect(c.history[0]).toBe('Existing customer (name match, confirm): Northwind Joint Venture (Alpha – Beta – FALCONCO), 16 orders, SAR 12.3M, last order Jan 2024.')
     expect(c.history).toContain('We are a registered vendor with Giga City.')
+    // Before the call: four boxes, the project, scope, documents and asks in one.
+    expect(c.facts).toEqual({
+      who: 'falconco.com.sa · Contractor (verified)',
+      wants: 'Landscape lighting fixtures · Giga City, RFQ\nSent: BOQ, drawings, specification (attached or linked)\nAlso wants: Material submittal, prequalification, samples or a mock-up',
+      brand: '',
+      due: 'Earliest response',
+    })
     // Not awarded, no brand named: both win-factor questions stay; then the agent's.
     expect(c.ask.map((a) => a.q)).toEqual([DEFAULT_PLAYBOOK.questions[0].text, DEFAULT_PLAYBOOK.questions[1].text, 'What quantities are in the BOQ?'])
     expect(c.pushback.map((p) => p.objection)).toEqual(['We have not won the job yet; just send a price.', 'Send the certificates / you are not prequalified.'])
@@ -121,7 +128,10 @@ describe('saving', () => {
     const c = normaliseLeadCard({ kind: 'nonsense', headline: 'x'.repeat(900), facts: { project: 'P', extra: 'no' }, history: ['a', '', 'b'], ask: [{ q: '' }, { q: 'Q', a: 'A' }], pushback: 'no' })
     expect(c.kind).toBe('project')
     expect(c.headline.length).toBe(500)
-    expect(c.facts).toEqual({ project: 'P', scope: '', brand: '', documents: '', also_want: '', due: '' })
+    // A card stored with the six facts of before 2026-10-18 folds into the four.
+    expect(c.facts).toEqual({ who: '', wants: 'P', brand: '', due: '' })
+    expect(normaliseLeadCard({ facts: { project: 'Riyadh', scope: 'Downlights', documents: 'BOQ', also_want: 'Samples', due: 'Fri' } }).facts)
+      .toEqual({ who: '', wants: 'Downlights · Riyadh\nSent: BOQ\nAlso wants: Samples', brand: '', due: 'Fri' })
     expect(c.history).toEqual(['a', 'b'])
     expect(c.ask).toEqual([{ q: 'Q', a: 'A' }])
     expect(c.pushback).toEqual([])

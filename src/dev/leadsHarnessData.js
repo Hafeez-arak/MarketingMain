@@ -4,6 +4,7 @@
 // every request pending (the loading state); ?mode=fail rejects them.
 
 import { buildLeadCard, normaliseLeadCard, afterCallFields } from '../lib/sales/leadCard'
+import { manualLead, trackFields } from '../lib/leads/pipeline'
 
 export const WS = '00000000-0000-0000-0000-0000000000dd'
 const mode = new URLSearchParams(window.location.search).get('mode') || ''
@@ -20,13 +21,19 @@ const TEAM = [
 
 const leads = [
   { id: 'e1', source: 'email', mailbox: 'info@example-co.sa', link: 'https://outlook.office.com/mail/', received_at: iso(6, 10), created_at: iso(6, 10), name: 'Khalid', company: '', email: 'khalid@example-dev.sa', phone: '', subject: 'Facade lighting for a tower', message: 'Dear ARAK, we are developing a 20-floor tower in Jeddah and need facade lighting design and supply. Can we meet next week?', language: 'en', verdict: 'qualified', category: 'project_enquiry', confidence: 'high', reason: 'A developer with a tower project asking for facade lighting design and supply.', summary: 'Facade lighting design and supply, 20-floor tower, Jeddah', details: { products: 'Facade lighting', location: 'Jeddah', stage: 'Development' }, ask_next: ['Project timeline?', 'Who is the consultant?', 'Budget range?'], model: 'openai/gpt-6-luna', cost_usd: 0.00018, error: '', human_verdict: null, criteria_version: 2, sender_type: 'trader', sender_evidence: 'Signature: Purchasing, Example Dev Trading Est.', source_check: 'verified', source_evidence: 'signature and website match', project_type: 'tender', project_evidence: 'we are bidding for the main contract', request_type: 'requirement', philips: 'or_equivalent', website: 'example-dev.sa', folder: 'junk', email_kind: 'company', phones: ['+966 12 600 0000', '055 000 1111'], assigned_to: 'u1', assigned_at: iso(6, 11), forward_status: 'failed', forward_to: 'sales@example.com', forward_error: 'info@example-clb.sa can only read. On Agent settings, choose "Allow forwarding" on it and sign in as it again.' },
-  { id: 'l1', source: 'website_form', received_at: iso(6, 8), created_at: iso(6, 8), name: 'Omar Haddad', company: 'Nour Contracting', email: 'omar@nourcontracting.sa', phone: '+966 50 111 2233', subject: 'Commercial / office', message: 'We need a quotation for 40 recessed downlights, 4000K, for an office fit-out in Riyadh. Delivery in 3 weeks.', language: 'en', verdict: 'qualified', category: 'quotation_request', confidence: 'high', reason: 'Asks for a quote on 40 downlights for an office in Riyadh.', summary: 'Quote for 40 recessed downlights, 4000K, office fit-out, Riyadh', details: { products: 'Recessed downlights 4000K', quantity: '40', location: 'Riyadh', urgency: '3 weeks' }, ask_next: ['Beam angle and dimming?', 'Is there a lighting layout?', 'Who approves the order?'], model: 'openai/gpt-6-luna', cost_usd: 0.00016, error: '', human_verdict: null, criteria_version: 2, sender_type: 'contractor', sender_evidence: 'Nour Contracting, office fit-out', source_check: 'verified', source_evidence: 'company name + company email domain', project_type: 'jih', project_evidence: 'Delivery in 3 weeks', request_type: 'requirement', philips: 'none', folder: 'website', email_kind: 'company', approved_at: iso(6, 12), crm_status: 'queued', assigned_to: 'u2', assigned_at: iso(6, 11), forward_status: 'sent', forward_to: 'huda@example.com', forwarded_at: iso(6, 11) },
+  { id: 'l1', source: 'website_form', received_at: iso(6, 8), created_at: iso(6, 8), name: 'Omar Haddad', company: 'Nour Contracting', email: 'omar@nourcontracting.sa', phone: '+966 50 111 2233', subject: 'Commercial / office', message: 'We need a quotation for 40 recessed downlights, 4000K, for an office fit-out in Riyadh. Delivery in 3 weeks.', language: 'en', verdict: 'qualified', category: 'quotation_request', confidence: 'high', reason: 'Asks for a quote on 40 downlights for an office in Riyadh.', summary: 'Quote for 40 recessed downlights, 4000K, office fit-out, Riyadh', details: { products: 'Recessed downlights 4000K', quantity: '40', location: 'Riyadh', urgency: '3 weeks' }, ask_next: ['Beam angle and dimming?', 'Is there a lighting layout?', 'Who approves the order?'], model: 'openai/gpt-6-luna', cost_usd: 0.00016, error: '', human_verdict: null, criteria_version: 2, sender_type: 'contractor', sender_evidence: 'Nour Contracting, office fit-out', source_check: 'verified', source_evidence: 'company name + company email domain', project_type: 'jih', project_evidence: 'Delivery in 3 weeks', request_type: 'requirement', philips: 'none', folder: 'website', email_kind: 'company', approved_at: iso(6, 12), crm_status: 'queued', stage: 'rfq', stage_at: iso(6, 13), next_step: 'Send the downlight quote', follow_up: '2026-10-15', assigned_to: 'u2', assigned_at: iso(6, 11), forward_status: 'sent', forward_to: 'huda@example.com', forwarded_at: iso(6, 11) },
   { id: 'l2', source: 'website_form', received_at: iso(5, 14), created_at: iso(5, 14), name: 'Ayşe K.', company: 'Bosphorus Chandeliers', email: 'sales@example-chandeliers.com', phone: '', subject: 'Hotel / hospitality', message: 'We are an Istanbul chandelier manufacturer and would love to share our portfolio for your upcoming hotel projects.', language: 'en', verdict: 'unqualified', category: 'vendor_pitch', confidence: 'high', reason: 'A manufacturer offering its own products to us.', summary: 'Chandelier maker pitching its portfolio', details: {}, ask_next: [], model: 'openai/gpt-6-luna', cost_usd: 0.00015, error: '', human_verdict: 'unqualified' },
   { id: 'l3', source: 'website_form', received_at: iso(5, 9), created_at: iso(5, 9), name: 'فهد', company: '', email: 'fahad@example.com', phone: '0550000000', subject: 'خارجي / واجهات', message: 'انارات خارجيه', language: 'ar', verdict: 'qualified', category: 'product_enquiry', confidence: 'medium', reason: 'Asks for outdoor lighting; very little detail.', summary: 'Outdoor lighting, no details yet', details: { products: 'Outdoor lighting' }, ask_next: ['Which building or site?', 'How many fittings?'], model: 'openai/gpt-6-luna', cost_usd: 0.00014, error: '', human_verdict: null },
   { id: 'l4', source: 'website_form', received_at: iso(5, 9), created_at: iso(5, 9), name: 'فهد', company: '', email: 'fahad@example.com', phone: '0550000000', subject: 'خارجي / واجهات', message: 'انارات خارجيه', language: 'ar', verdict: 'duplicate', category: '', confidence: '', reason: 'Same sender and message as the enquiry of 2026-10-05 06:00 UTC.', summary: '', details: {}, ask_next: [], model: '', cost_usd: 0, error: '', human_verdict: null },
   { id: 'l5', source: 'website_form', received_at: iso(4, 11), created_at: iso(4, 11), name: 'Studio Raml', company: 'Studio Raml Interiors', email: 'hello@example-raml.sa', phone: '', subject: 'Villa / palace', message: 'We propose a referral partnership: we recommend your lighting to our clients for a commission.', language: 'en', verdict: 'needs_review', category: 'partnership_offer', confidence: 'medium', reason: 'A referral partnership offer, not a purchase.', summary: 'Referral partnership proposal', details: {}, ask_next: [], model: 'openai/gpt-6-luna', cost_usd: 0.00017, error: '', human_verdict: null },
   { id: 'l6', source: 'website_form', received_at: iso(6, 9), created_at: iso(6, 9), name: 'Test', company: 'Example Hotels', email: 'buyer@example-hotels.com', phone: '', subject: 'Hotel / hospitality', message: 'KNX lighting control for 120 guest rooms.', language: 'en', verdict: null, category: '', confidence: '', reason: '', summary: '', details: {}, ask_next: [], model: 'openai/gpt-6-luna', cost_usd: 0, error: 'Provider overloaded', human_verdict: null },
 ]
+
+// Made-up leads added by hand (2026-10-18): in the Pipeline from the start.
+leads.push(
+  { id: 'm1', source: 'manual', channel: 'phone', received_at: iso(7, 9), created_at: iso(7, 9), name: 'Sara Example', company: 'Example Fit-Out Co', email: 'sara@example-fitout.sa', phone: '+966 55 123 4567', phones: ['+966 55 123 4567'], subject: '60 linear profiles and DALI dimming for an office floor, Riyadh', summary: '60 linear profiles and DALI dimming for an office floor, Riyadh', message: 'Called the office. They have the layout and want a price this week; consultant is Example Design.', language: 'en', verdict: 'qualified', human_verdict: 'qualified', category: 'project_enquiry', details: { location: 'Riyadh', urgency: 'Price this week', brands: 'Reggiani or equivalent' }, ask_next: [], criteria_version: 2, sender_type: 'contractor', human_project_type: 'jih', project_final: 'jih', request_type: 'requirement', stage: 'quotation', stage_at: iso(7, 15), next_step: 'Call Sara about the quote', follow_up: '2099-01-01', assigned_to: 'u1', assigned_at: iso(7, 9) },
+  { id: 'm2', source: 'manual', channel: 'whatsapp', received_at: iso(3, 9), created_at: iso(3, 9), name: 'Yousef', company: 'Example Villas', email: '', phone: '050 000 2222', phones: ['050 000 2222'], subject: 'Garden lighting for a villa compound', summary: 'Garden lighting for a villa compound', message: '', language: 'en', verdict: 'qualified', human_verdict: 'qualified', category: 'quotation_request', details: {}, ask_next: [], criteria_version: 2, sender_type: 'developer_owner', request_type: 'requirement', stage: 'lost', stage_at: iso(5, 9), lost_reason: 'price', lost_to: 'Example Rival Lighting', next_step: '', follow_up: null, assigned_to: 'u3', assigned_at: iso(3, 9) },
+)
 
 // Enough older made-up pitches to page through (September, so they stay out
 // of this month's counts).
@@ -45,7 +52,12 @@ function restLeads(url) {
   // The leads policy (can_see_lead): a salesperson sees only their own.
   if (as === 'sales') rows = rows.filter((l) => l.assigned_to === 'u1')
   const owner = p.get('assigned_to')
-  if (owner) rows = rows.filter((l) => l.assigned_to === owner.replace(/^eq\./, ''))
+  if (owner === 'is.null') rows = rows.filter((l) => !l.assigned_to)
+  else if (owner) rows = rows.filter((l) => l.assigned_to === owner.replace(/^eq\./, ''))
+  // The Pipeline: every lead with a stage.
+  if (p.get('stage') === 'not.is.null') rows = rows.filter((l) => l.stage)
+  const src = p.get('source')
+  if (src) rows = rows.filter((l) => l.source === src.replace(/^eq\./, ''))
   // Each or= group narrows the list (PostgREST ANDs them), like the real thing.
   for (const or of p.getAll('or')) {
     if (or.includes('assigned_to.is.null')) { rows = rows.filter((l) => !l.assigned_to); continue }
@@ -189,7 +201,7 @@ window.fetch = async (input, init = {}) => {
     const l = leads.find((x) => x.id === lead_id)
     if (assign_to && assign_to !== l.assigned_to) assignTo(l, assign_to)
     if (!l.assigned_to) return json({ ok: false, error: 'Assign this lead to a salesperson before approving it.' }, 400)
-    Object.assign(l, { approved_at: new Date().toISOString(), crm_status: 'queued', human_verdict: l.verdict === 'qualified' ? l.human_verdict : 'qualified' })
+    Object.assign(l, { approved_at: new Date().toISOString(), crm_status: 'queued', stage: l.stage || 'new', stage_at: l.stage_at || new Date().toISOString(), human_verdict: l.verdict === 'qualified' ? l.human_verdict : 'qualified' })
     status.crm.queued++
     return json({ ok: true, lead: l, crm: 'queued' })
   }
@@ -200,13 +212,36 @@ window.fetch = async (input, init = {}) => {
     if (!row) return json({ ok: false, error: 'This lead has no battle card yet. Open it first.' }, 404)
     const after = afterCallFields(body)
     if (after.error) return json({ ok: false, error: after.error }, 400)
+    const track = trackFields({ next_step: body.next_step, follow_up: body.follow_up })
+    if (track.error) return json({ ok: false, error: track.error }, 400)
     Object.assign(row, { card: normaliseLeadCard(body.card), ...after.values, updated_at: new Date().toISOString() })
-    return json({ ok: true, card: row })
+    const l = leads.find((x) => x.id === body.lead_id)
+    Object.assign(l, track.values)
+    return json({ ok: true, card: row, lead: l })
+  }
+  if (url.includes('/api/leads/lead_add')) {
+    const body = JSON.parse(init.body || '{}')
+    const shaped = manualLead(body)
+    if (shaped.error) return json({ ok: false, error: shaped.error }, 400)
+    const now = new Date().toISOString()
+    const owner = body.assign_to !== undefined ? body.assign_to : 'u1'
+    const l = { id: `m${leads.length}`, ...shaped.row, project_final: shaped.row.human_project_type || '', received_at: now, created_at: now, stage_at: now, ask_next: [], assigned_to: owner, assigned_at: owner ? now : null }
+    leads.unshift(l)
+    return json({ ok: true, lead: l })
+  }
+  if (url.includes('/api/leads/stage')) {
+    const body = JSON.parse(init.body || '{}')
+    const t = trackFields(body)
+    if (t.error) return json({ ok: false, error: t.error }, 400)
+    const l = leads.find((x) => x.id === body.lead_id)
+    if (!l?.stage) return json({ ok: false, error: 'This lead joins the pipeline when it is approved.' }, 409)
+    Object.assign(l, t.values, t.values.stage && t.values.stage !== l.stage ? { stage_at: new Date().toISOString() } : {})
+    return json({ ok: true, lead: l })
   }
   if (url.includes('/api/leads/card')) {
     const { lead_id } = JSON.parse(init.body || '{}')
     const l = leads.find((x) => x.id === lead_id)
-    if (!l?.approved_at) return json({ ok: false, error: 'The battle card opens once the lead is approved.' }, 409)
+    if (!l?.approved_at && !l?.stage) return json({ ok: false, error: 'The battle card opens once the lead is approved.' }, 409)
     if (!cards[lead_id]) {
       const now = new Date().toISOString()
       cards[lead_id] = { lead_id, card: buildLeadCard(l, CARD_CONTEXT), decision: '', quote_due: null, target_price: '', decides: '', built_at: now, updated_at: now }

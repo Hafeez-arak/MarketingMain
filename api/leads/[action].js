@@ -9,6 +9,7 @@ import { exportLeads, applySheetDecisions } from './_export.js'
 import { approveLead, crmStatus, saveCrm, sendWaiting, disconnectCrm } from './_crm.js'
 import { openCard, saveCard, watchlist } from './_card.js'
 import { assignLead, teamList, teamSave, teamCheckOdoo } from './_assign.js'
+import { addLead, trackLead } from './_pipeline.js'
 import { leadDeps, openRouterKey, hasDeploymentKey, describeKey, sendAlert } from './_deps.js'
 import { previewLenses } from '../agent/_investigate.js'
 
@@ -34,7 +35,8 @@ import { previewLenses } from '../agent/_investigate.js'
 //   a sales person      the same, but with a sales seat in that company
 //                       instead of membership, and only review, email_file,
 //                       approve, assign, forward, outlook_link, set_project
-//                       and the battle card (SALES_ACTIONS), and only on a
+//                       the battle card, adding a lead by hand and moving
+//                       its stage (SALES_ACTIONS), and only on a
 //                       lead they can see (their own, since 2026-10-13: the
 //                       database's can_see_lead answers). approve, assign and
 //                       forward also ask whether they are a sales admin.
@@ -108,7 +110,7 @@ async function isAdmin(token) {
 // A sales person (20261013_sales_seats) is not a member of the company at
 // all: their seat is asked for separately, again with their own token. A
 // seat opens these actions and nothing else.
-const SALES_ACTIONS = new Set(['review', 'email_file', 'approve', 'assign', 'forward', 'outlook_link', 'set_project', 'card', 'card_save'])
+const SALES_ACTIONS = new Set(['review', 'email_file', 'approve', 'assign', 'forward', 'outlook_link', 'set_project', 'card', 'card_save', 'lead_add', 'stage'])
 
 /**
  * May this sales person open this lead? Asked with their own token, so the
@@ -427,11 +429,30 @@ const actions = {
     return { card: out.card, watchlist: await watchlist(deps, workspaceId) }
   },
 
-  /** The team's edits to a card, and the four things recorded after the call. */
+  /** The team's edits to a card, the things recorded after the call, and the next step. */
   async card_save({ workspaceId, body, user }) {
     const out = await saveCard(leadDeps(), { workspaceId, leadId: body.lead_id, user, body })
     if (out.error) return fail(out.status, out.error)
-    return { card: out.card }
+    return { card: out.card, lead: out.lead }
+  },
+
+  /**
+   * A lead added by hand (2026-10-18): a call, WhatsApp, a walk-in… It joins
+   * the Pipeline with its battle card. A salesperson's is their own; a sales
+   * admin or the access admin may give it to someone (assign_to).
+   */
+  async lead_add({ workspaceId, body, user, token }) {
+    const canAssign = await canApprove(workspaceId, token)
+    const out = await addLead(leadDeps(), { workspaceId, user, body, canAssign })
+    if (out.error) return fail(out.status, out.error)
+    return { lead: out.lead, card: out.card }
+  },
+
+  /** Move a lead along the Pipeline, or set its next step and follow-up date. */
+  async stage({ workspaceId, body, user }) {
+    const out = await trackLead(leadDeps(), { workspaceId, leadId: body.lead_id, user, body })
+    if (out.error) return fail(out.status, out.error)
+    return { lead: out.lead }
   },
 
   /** Save the Odoo connection and test it (read only); a working one sends the waiting leads. */
