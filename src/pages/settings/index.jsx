@@ -1,8 +1,9 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useAuth } from '../../store/auth'
 import { supabase } from '../../lib/supabaseClient'
 import { createCompany, fetchAllAccess } from '../../lib/access'
-import { Card, Button, PageHeader } from '../../components/ui/index'
+import { Card, Button, PageHeader, Skeleton } from '../../components/ui/index'
+import { fetchSpend, setCap, projectedMonth } from '../../lib/aiSpend'
 
 // ─── Settings ──────────────────────────────────────────────────────────────
 // A "company" == a Supabase workspace. This section reads/writes the REAL
@@ -93,6 +94,8 @@ export function Settings() {
       <PageHeader title="Settings" subtitle="Companies, workspace preferences, and account details." />
 
       <AccountCard email={user?.email} />
+
+      {isAccessAdmin && activeId && <SpendCard workspaceId={activeId} key={activeId} />}
 
       <Card className="overflow-hidden">
         <div className="px-5 py-4 border-b border-border flex items-center justify-between gap-4">
@@ -328,6 +331,103 @@ function AccountCard({ email }) {
           </div>
         </div>
       )}
+    </Card>
+  )
+}
+
+// ─── AI spending ───────────────────────────────────────────────────────────
+// 2026-10-18. The monthly AI limit could only be changed in the database.
+// Admins only: set_agent_cap() refuses anyone else and tells the other
+// admins, and a trigger warns every admin at 80% and 100%.
+function SpendCard({ workspaceId }) {
+  const [data, setData] = useState(null)
+  const [editing, setEditing] = useState(false)
+  const [value, setValue] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    let cancelled = false
+    fetchSpend(workspaceId).then(d => { if (!cancelled) setData(d) })
+    return () => { cancelled = true }
+  }, [workspaceId])
+
+  async function save() {
+    setBusy(true); setError('')
+    const out = await setCap(workspaceId, value)
+    setBusy(false)
+    if (out.error) { setError(out.error); return }
+    setData(d => ({ ...d, cap: out.cap }))
+    setEditing(false)
+  }
+
+  const money = n => `$${Number(n || 0).toFixed(2)}`
+  const pct = data && data.cap ? Math.min(100, Math.round((data.total / data.cap) * 100)) : 0
+  const projected = data ? projectedMonth(data.total) : 0
+  const tone = pct >= 100 ? 'bg-red-600' : pct >= 80 ? 'bg-amber-600' : 'bg-amber-700/70'
+
+  return (
+    <Card className="overflow-hidden">
+      <div className="px-5 py-4 flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <h3 className="font-semibold text-text text-sm">AI spending this month</h3>
+          <p className="text-xs text-text-tertiary mt-0.5">
+            The assistant, research runs and the lead agent share one monthly limit. When it is reached they stop until the 1st.
+          </p>
+        </div>
+        {data && !data.error && !editing && (
+          <Button size="sm" variant="secondary" onClick={() => { setValue(String(data.cap ?? '')); setError(''); setEditing(true) }}>
+            Change limit
+          </Button>
+        )}
+      </div>
+
+      <div className="px-5 pb-5 space-y-3">
+        {data === null ? <Skeleton className="h-16" /> : data.error ? (
+          <p className="text-xs text-red-600">Spending could not be loaded: {data.error}</p>
+        ) : (
+          <>
+            <div>
+              <div className="flex items-baseline justify-between text-sm">
+                <span className="font-semibold text-text tabular-nums">{money(data.total)} <span className="font-normal text-text-tertiary">of {data.cap == null ? 'no limit' : money(data.cap)}</span></span>
+                <span className="text-xs text-text-tertiary tabular-nums">At this rate, about {money(projected)} by month end · last month {money(data.lastTotal)}</span>
+              </div>
+              {data.cap != null && (
+                <div className="h-1.5 bg-surface-subtle mt-2 overflow-hidden" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}>
+                  <div className={`h-full ${tone}`} style={{ width: `${pct}%` }} />
+                </div>
+              )}
+            </div>
+
+            {data.bySurface.length > 0 && (
+              <ul className="text-xs divide-y divide-border border-t border-border">
+                {data.bySurface.map(s => (
+                  <li key={s.surface} className="flex justify-between py-1.5">
+                    <span className="text-text-secondary">{s.label}</span>
+                    <span className="tabular-nums text-text">{money(s.cost)}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            {editing && (
+              <div className="border-t border-border pt-3 space-y-2">
+                <label className="block text-xs font-semibold text-text-secondary">Monthly limit in US dollars</label>
+                <div className="flex gap-2">
+                  <input type="number" min="1" max="5000" step="1" autoFocus value={value}
+                    onChange={e => setValue(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') setEditing(false) }}
+                    className="w-32 rounded-xl border border-border bg-white text-text text-sm px-3.5 py-2 focus:outline-none focus:ring-2 focus:ring-amber-400" />
+                  <Button size="sm" onClick={save} disabled={busy || !value}>{busy ? 'Saving…' : 'Save'}</Button>
+                  <Button size="sm" variant="secondary" onClick={() => setEditing(false)}>Cancel</Button>
+                </div>
+                <p className="text-[11px] text-text-tertiary">The other administrators are told when the limit changes.</p>
+                {error && <p className="text-xs text-red-600">{error}</p>}
+              </div>
+            )}
+          </>
+        )}
+      </div>
     </Card>
   )
 }

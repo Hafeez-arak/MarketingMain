@@ -142,7 +142,7 @@ export function healthIssues({ settings = {}, mailboxes = [], failed = [], spent
         key: 'budget_used',
         title: 'This month\'s AI budget is used up',
         detail: `$${spent.toFixed(2)} of $${Number(cap).toFixed(2)}. New enquiries arrive as "Needs review" without an AI verdict until next month.`,
-        fix: 'Raise the company\'s monthly AI limit (agent_monthly_cap_usd).',
+        fix: 'Raise the company\'s monthly AI limit in Settings.',
       })
     } else if (spent >= 0.8 * Number(cap)) {
       issues.push({

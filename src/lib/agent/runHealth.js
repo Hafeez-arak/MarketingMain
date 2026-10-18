@@ -156,7 +156,7 @@ export function explainRunError(error = '') {
       key: 'cap',
       short: 'this month\'s AI spending limit was reached',
       detail: 'The run stopped before researching so it would not go over the company\'s monthly limit.',
-      action: 'Raise the monthly limit (agent_monthly_cap_usd), or wait for next month.',
+      action: 'Raise the monthly AI limit in Settings, or wait for next month.',
     }
   }
   if (/overloaded|rate.?limit|529|timeout|timed out/i.test(raw)) {
