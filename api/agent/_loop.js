@@ -32,7 +32,7 @@ import {
  */
 export async function runAgent({
   workspaceId, job = 'chat', surface = 'chat', stage = '', runId = null, chatId = null,
-  identity, brand, messages = [], tools = null, writes = false, web = false,
+  identity, brand, messages = [], tools = null, writes = false, web = false, company = false,
   session = {}, onText = null, onEvent = null,
 }) {
   const budget = loopBudget(surface)
@@ -42,7 +42,7 @@ export async function runAgent({
   // `admin` follows the verified session, not a separate flag a caller could
   // set out of step with it: the belt offered and the gate in runTool read the
   // same value.
-  const defs = tools || toolDefs(toolsFor({ writes, web, admin: session?.isAdmin === true }))
+  const defs = tools || toolDefs(toolsFor({ writes, web, company, admin: session?.isAdmin === true }))
   const convo = [...messages]
 
   let turns = 0
