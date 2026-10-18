@@ -15,9 +15,11 @@ import { defaultWebhookUrl } from './n8nWebhooks'
 // failure this project has already paid for twice, so the middle state is
 // never folded into the third.
 
-export async function fetchWebsiteSearch(workspaceId, accessToken) {
+/** @param {object} [range] The dashboard's `{ days }` or `{ from, to }`, so the card covers the same period. */
+export async function fetchWebsiteSearch(workspaceId, accessToken, range = { days: 28 }) {
   if (!workspaceId) return { ok: false, configured: false, error: 'No workspace selected.' }
   if (!accessToken) return { ok: false, configured: false, error: 'Sign in to read website analytics.' }
+  const window = range?.from && range?.to ? { from: range.from, to: range.to } : { days: Number(range?.days) || 28 }
   try {
     const res = await fetch('/api/agent/search', {
       method: 'POST',
@@ -25,7 +27,7 @@ export async function fetchWebsiteSearch(workspaceId, accessToken) {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${accessToken}`,
       },
-      body: JSON.stringify({ workspace_id: workspaceId }),
+      body: JSON.stringify({ workspace_id: workspaceId, ...window }),
     })
     const data = await res.json().catch(() => null)
     if (!data) return { ok: false, configured: true, error: `The server returned ${res.status} with nothing in it.` }

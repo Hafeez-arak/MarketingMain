@@ -24,7 +24,7 @@ const BACK_TARGETS = {
   '/campaigns/plan': '/campaigns',
 }
 
-export function Topbar() {
+export function Topbar({ navOpen = false, onMenu }) {
   const location = useLocation()
   const navigate  = useNavigate()
   const { state, dispatch } = useApp()
@@ -54,9 +54,16 @@ export function Topbar() {
   return (
     <header
       data-print-hide
-      className="h-14 bg-white border-b border-border flex items-center pl-5 pr-4 gap-4 flex-shrink-0"
+      className="h-14 bg-white border-b border-border flex items-center pl-3 pr-3 gap-2 md:pl-5 md:pr-4 md:gap-4 flex-shrink-0"
     >
       <div className="flex-1 min-w-0 flex items-center gap-3">
+        {/* The sidebar is a drawer below md; this opens it. */}
+        {onMenu && (
+          <button id="nav-toggle" type="button" onClick={onMenu} aria-label="Menu" aria-controls="app-sidebar" aria-expanded={navOpen}
+            className="md:hidden w-8 h-8 flex items-center justify-center text-text-secondary hover:bg-surface-subtle hover:border-stone-400 border border-border transition-colors flex-shrink-0">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+          </button>
+        )}
         {backTarget && (
           <button onClick={() => navigate(backTarget)}
             className="w-7 h-7 flex items-center justify-center text-text-secondary hover:bg-surface-subtle hover:text-text hover:border-stone-400 border border-border transition-colors flex-shrink-0">
@@ -88,7 +95,7 @@ export function Topbar() {
           </button>
 
           {showNotifs && (
-            <div className="absolute right-0 top-full mt-1 w-80 bg-white border border-border shadow-dropdown z-50 animate-fade-scale">
+            <div className="absolute right-0 top-full mt-1 w-80 max-w-[calc(100vw-1.5rem)] bg-white border border-border shadow-dropdown z-50 animate-fade-scale">
               <div className="flex items-center justify-between px-4 py-2.5 border-b border-border bg-surface-subtle">
                 <p className="eyebrow">Notifications</p>
                 {total > 0 && (
@@ -136,7 +143,7 @@ export function Topbar() {
             <div className="w-6 h-6 bg-amber-700 flex items-center justify-center text-[10px] font-bold text-white flex-shrink-0">
               {(activeWorkspace?.name || '?').slice(0, 1).toUpperCase()}
             </div>
-            <span className="text-xs font-medium text-text max-w-[120px] truncate">{activeWorkspace?.name || 'Workspace'}</span>
+            <span className="hidden sm:inline text-xs font-medium text-text max-w-[120px] truncate">{activeWorkspace?.name || 'Workspace'}</span>
           </button>
           {showAccount && (
             <div className="absolute right-0 top-full mt-1 w-52 bg-white border border-border shadow-dropdown z-50 animate-fade-scale">

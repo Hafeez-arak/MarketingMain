@@ -70,6 +70,16 @@ const FREE_MAIL = new Set([
 const clean = (v) => String(v ?? '').replace(/\r\n?/g, '\n').trim()
 
 /**
+ * A phone as given, or '' when it is not one. The website form's Sheet once
+ * stored "+966 5x" as a formula, so a cell read "#ERROR!"; a value that is a
+ * spreadsheet error or has no digits is never a number to store.
+ */
+export const cleanPhone = (v) => {
+  const s = clean(v)
+  return s.startsWith('#') || !/\d/.test(s) ? '' : s
+}
+
+/**
  * The one shape every source produces. `sourceRef` must be stable for the
  * same message (a Sheet row's received time + email, a mail's message id), so
  * running the qualifier twice never makes two leads.
@@ -83,7 +93,7 @@ export function toEnvelope(source, raw = {}) {
       name: clean(raw.name),
       company: clean(raw.company),
       email: clean(raw.email).toLowerCase(),
-      phone: clean(raw.phone),
+      phone: cleanPhone(raw.phone),
       subject: clean(raw.projectType),
       message: clean(raw.brief),
       language: clean(raw.lang) === 'ar' ? 'ar' : 'en',
@@ -97,7 +107,7 @@ export function toEnvelope(source, raw = {}) {
     name: clean(raw.name),
     company: clean(raw.company),
     email: clean(raw.email).toLowerCase(),
-    phone: clean(raw.phone),
+    phone: cleanPhone(raw.phone),
     subject: clean(raw.subject),
     message: clean(raw.message),
     language: clean(raw.language) === 'ar' ? 'ar' : 'en',

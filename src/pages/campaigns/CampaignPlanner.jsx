@@ -13,7 +13,7 @@ import {
   formatsFor, defaultFormat, defaultAspectRatio, slideRange, aspectLabel,
   derivePostKind,
 } from '../../lib/postFormats'
-import { groupByWeek, monthOptions, normalizeAiIdea, distributeDates, formatTime, DEFAULT_POST_TIME, pollProblems, firstPlaceableDay } from './planModel'
+import { groupByWeek, monthOptions, normalizeAiIdea, distributeDates, formatTime, DEFAULT_POST_TIME, pollProblems, firstPlaceableDay, planNameForMonth } from './planModel'
 import { brandTodayKey } from '../../lib/brandTime'
 import { WEEKDAYS, DEFAULT_DRAFT, isUntouchedSelection, targetLabel } from './planConstants'
 import { IdeaCard } from './IdeaCard'
@@ -464,7 +464,7 @@ export function CampaignPlanner() {
   function pickMonth(ym) {
     const opt = months.find(m => m.value === ym)
     if (!opt) return
-    update({ month: ym, startDate: opt.start, endDate: opt.end, name: name || `${opt.label} Content Plan` })
+    update({ month: ym, startDate: opt.start, endDate: opt.end, name: planNameForMonth(name, opt.label) })
   }
 
   function validateSetup() {

@@ -156,14 +156,18 @@ async function searchAnalytics(token, site, body) {
  * what makes "this query lands on the homepage because no page exists for it"
  * detectable at all.
  */
-export async function fetchSearchData({ site, now = new Date(), rowLimit = 500, env = process.env } = {}) {
+export async function fetchSearchData({
+  site, now = new Date(), days, from = '', to = '', rowLimit = 500, env = process.env,
+} = {}) {
   const sa = serviceAccount(env)
   const property = siteFor(site, env)
 
   if (!sa) return notConnected({ site: property })
   if (!property) return { ok: false, configured: false, error: 'No Search Console property is configured for this brand.', site: property }
 
-  const windows = searchWindows(now)
+  // The dashboard passes its own window so the card says the same period as
+  // the social tiles above it; the weekly lens passes none and keeps 28 days.
+  const windows = searchWindows(now, { ...(days ? { days } : {}), from, to })
   try {
     const token = await accessToken(sa)
     const [current, previous, pages] = await Promise.all([

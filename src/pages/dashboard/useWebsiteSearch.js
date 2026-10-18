@@ -13,8 +13,14 @@ import { searchSummary, seoRecommendations, pagePerformance } from '../../lib/se
 // The derived values live here too, so the card and the list cannot compute
 // "urgent" differently from the same rows.
 
-export function useWebsiteSearch() {
+// It takes the dashboard's window (2026-10-18): the card used to read a fixed
+// 28 days whatever the picker said, so the page showed two periods at once.
+export function useWebsiteSearch(range) {
   const { activeWorkspaceId, accessToken } = useAuth()
+  // The window as primitives, so a new object with the same days is no refetch.
+  const days = range?.days
+  const from = range?.from
+  const to = range?.to
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
 
@@ -26,13 +32,13 @@ export function useWebsiteSearch() {
     queueMicrotask(async () => {
       if (cancelled) return
       setLoading(true)
-      const res = await fetchWebsiteSearch(activeWorkspaceId, accessToken)
+      const res = await fetchWebsiteSearch(activeWorkspaceId, accessToken, from && to ? { from, to } : { days })
       if (cancelled) return
       setData(res)
       setLoading(false)
     })
     return () => { cancelled = true }
-  }, [activeWorkspaceId, accessToken])
+  }, [activeWorkspaceId, accessToken, days, from, to])
 
   const usable = data?.ok && data.configured
 

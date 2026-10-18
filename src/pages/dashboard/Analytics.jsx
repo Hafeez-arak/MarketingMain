@@ -9,10 +9,9 @@ import {
 import { Icon } from '../../components/ui/icons'
 import { PLATFORM_META } from '../../lib/utils'
 import { MetricInfoDot } from '../../components/analytics/MetricLabel'
-import { fmt, pct, windowLabel } from '../analytics/format'
+import { fmt, pct } from '../analytics/format'
 import { RangePicker } from '../../components/analytics/RangePicker'
 import { PostDetail } from '../../components/analytics/PostDetail'
-import { resolveRange } from '../../lib/dateRange'
 import { metricFacets, followerChange } from '../../lib/dashboardOverview'
 
 // ─── The dashboard's analytics overview ────────────────────────────────────
@@ -36,6 +35,12 @@ const PLATFORM_LINE = {
   tiktok: '#325130',
   snapchat: '#c9a35e',
 }
+
+// The dashboard's window choices. Nothing over 29 days: Instagram's account
+// insights (reach, profile views) stop there, and inside the cap every tile,
+// the chart and the website card cover the same period under ONE label. A
+// longer look is /analytics' job, where each strip says its own window.
+const DASHBOARD_RANGE = { presets: [7, 28], minDays: 7, maxDays: 29 }
 
 const SERIES_METRICS = [
   { key: 'views', label: 'Views' },
@@ -311,7 +316,7 @@ export function AnalyticsOverviewSkeleton() {
   )
 }
 
-export function AnalyticsOverview({ summaries, overview, measured, range, onRange, selected, loading, settling }) {
+export function AnalyticsOverview({ summaries, overview, measured, range, onRange, windowText, selected, loading, settling }) {
   const navigate = useNavigate()
   const [metrics, setMetrics] = useState(() => new Set(['views']))
 
@@ -378,14 +383,10 @@ export function AnalyticsOverview({ summaries, overview, measured, range, onRang
   }))
   const hasSeries = facets.some(f => f.total > 0)
   const single = facets.length === 1
-  // The window these numbers actually cover — see the Posts published tile.
-  const measuredLabel = windowLabel(measured.fromDate, measured.toDate, resolveRange(range).days)
-  // Reach and profile views come from account insights, which cover a shorter
-  // window than the posts (Instagram allows 29 days). Each tile says its own
-  // window, so a 29-day figure never sits under a "Last 90 days" label.
-  const insightsLabel = measured.insightsFrom
-    ? windowLabel(measured.insightsFrom, measured.toDate, Math.min(resolveRange(range).days, 29))
-    : measuredLabel
+  // One label for every tile (2026-10-18). The picker cannot go past
+  // Instagram's 29-day insights cap (DASHBOARD_RANGE), so reach and profile
+  // views cover the same days as the posts and need no window of their own.
+  const windowLower = windowText.toLowerCase()
   const heading = single ? `${facets[0].label} over time`
     : facets.length <= 3 ? `${facets.map(f => f.label).join(', ')} over time`
       : `${facets.length} metrics over time`
@@ -414,7 +415,7 @@ export function AnalyticsOverview({ summaries, overview, measured, range, onRang
             hint={followers ? undefined : 'Counted daily'}
             delta={followers ? <Delta value={followers.delta} /> : null} />
           <Tile label="Accounts reached" value={stat(overview.reach)} metric="home.reach"
-            hint={`People, not impressions · ${insightsLabel.toLowerCase()}`} />
+            hint={`People, not impressions · ${windowLower}`} />
           {/* Named by whose number it is when it is not everybody's. LinkedIn
               takes no view count on an ordinary post, so a mixed selection's
               "post views" is the Instagram and TikTok half — saying so is the
@@ -424,25 +425,22 @@ export function AnalyticsOverview({ summaries, overview, measured, range, onRang
               ? 'Not reported by these platforms'
               : `${overview.postViewPlatforms.length < overview.byPlatform.length
                 ? `${overview.postViewPlatforms.map(label).join(' and ')} only`
-                : 'Videos and images'} · ${measuredLabel.toLowerCase()}`} />
+                : 'Videos and images'} · ${windowLower}`} />
           {/* The distinction the user asked for in as many words. Instagram
               counts these across every surface — feed, stories, explore and
               the profile itself — so they are NOT the post views above and
               must never be added to them. */}
           <Tile label="Profile views" value={stat(overview.accountViews)} metric="home.account_views"
-            hint={`Profile and page · ${insightsLabel.toLowerCase()}`} />
+            hint={`Profile and page · ${windowLower}`} />
           <Tile label="Engagement" value={pct(overview.engagementRate)}
             metric="home.engagement_rate"
-            hint={`${fmt(overview.interactions)} interactions · ${measuredLabel.toLowerCase()}`} />
-          {/* The window these numbers ACTUALLY cover, not the one in the
-              picker. Meta refuses more than 30 days between `since` and
-              `until` on account insights, so asking for 90 gets you 29 — and
-              until this read the dates back off the response, the tile printed
-              "Last 90 days" over a figure Zernio measured across a month.
-              `range` is Zernio's own fromDate/toDate, the same pair the chart's
-              x-axis is drawn from, so the tile and the axis cannot disagree. */}
+            hint={`${fmt(overview.interactions)} interactions · ${windowLower}`} />
+          {/* Meta refuses more than 30 days between `since` and `until` on
+              account insights, so asking for 90 got 29 under a "Last 90 days"
+              label. The dashboard's picker now stops at 29 (DASHBOARD_RANGE),
+              so the window asked for is the window measured, for every tile. */}
           <Tile label="Posts published" value={String(overview.posts)} metric="home.posts"
-            hint={measuredLabel} />
+            hint={windowText} />
         </div>
       </Card>
 
@@ -464,7 +462,7 @@ export function AnalyticsOverview({ summaries, overview, measured, range, onRang
                 </p>
               </div>
             </div>
-            <RangePicker value={range} onChange={onRange} />
+            <RangePicker value={range} onChange={onRange} {...DASHBOARD_RANGE} />
           </div>
 
           {/* The metrics on their own row rather than in the header: with five
@@ -578,7 +576,7 @@ export function AnalyticsOverview({ summaries, overview, measured, range, onRang
           )}
         </Card>
 
-        <TopPosts posts={overview.topPosts} windowText={measuredLabel}
+        <TopPosts posts={overview.topPosts} windowText={windowText}
           onDetails={() => navigate('/analytics')} />
         </div>
       </div>

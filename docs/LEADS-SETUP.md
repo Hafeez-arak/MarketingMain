@@ -51,6 +51,13 @@ and fill within a minute, and the Lead Agent page shows "Checked … ago". The
 first run reads the existing rows 20 at a time, so a backlog takes a few
 5-minute rounds.
 
+**Phone shows `#ERROR!` in the Sheet.** `Code.gs` writes "+966 5x …" raw, and
+Sheets reads a leading "+" as a formula. `LeadAgent.gs` recovers the number
+from the formula text, but fix it at the source: in `Code.gs`, where the row
+is written, send the phone as `"'" + phone` instead of `phone` (the apostrophe
+keeps it as text and is not shown). Rows already showing `#ERROR!` keep
+working through the recovery.
+
 ## 3. Connect the mailboxes (about 1 minute each)
 
 The owner's decisions (2026-10-06/07): **info@arak-sa.com** and

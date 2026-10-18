@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import { Sidebar } from './Sidebar'
 import { Topbar } from './Topbar'
@@ -10,6 +11,22 @@ export function AppLayout({ children }) {
   // not on whichever page happens to be open, so the bell has to be watching
   // from wherever you are. See lib/usePublishWatch.js.
   usePublishWatch()
+  // The phone drawer (below md). Kept as the path it was opened on, so any
+  // navigation — a link, the bell, a workspace switch — closes it without an
+  // effect resetting state.
+  const [navOpenAt, setNavOpenAt] = useState(null)
+  const navOpen = navOpenAt === location.pathname
+  const closeNav = () => setNavOpenAt(null)
+  useEffect(() => {
+    if (!navOpen) return
+    const onKey = (e) => {
+      if (e.key !== 'Escape') return
+      setNavOpenAt(null)
+      document.getElementById('nav-toggle')?.focus()
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [navOpen])
   return (
     // ── data-print-* ──
     // This shell is `h-screen overflow-hidden` around an inner scroller, which
@@ -19,15 +36,19 @@ export function AppLayout({ children }) {
     // chain from here down is marked for the @media print block in index.css
     // to unwind. Nothing changes on screen.
     <div className="flex h-screen overflow-hidden" data-print-shell>
-      <Sidebar />
+      <Sidebar open={navOpen} onClose={closeNav} />
+      {navOpen && (
+        <div className="fixed inset-0 z-40 bg-black/30 md:hidden" aria-hidden="true" onClick={closeNav} data-print-hide />
+      )}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden" data-print-shell>
-        <Topbar />
+        <Topbar navOpen={navOpen} onMenu={() => (navOpen ? closeNav() : setNavOpenAt(location.pathname))} />
         <main className="flex-1 overflow-y-auto scrollbar-thin bg-surface-muted" data-print-shell>
           {/* One page gutter, everywhere. Pages set their own max-width and
               internal rhythm, but none of them should change this number —
               the gutter is what makes a card's left edge line up with the
-              card on the page you just came from. */}
-          <div key={location.pathname} className="p-6 page-enter" data-print-gutter>{children}</div>
+              card on the page you just came from. Narrower on a phone, where
+              24px a side is an eighth of the screen. */}
+          <div key={location.pathname} className="p-3 md:p-6 page-enter" data-print-gutter>{children}</div>
         </main>
       </div>
       {/* Mounted at the layout, not per page, so the conversation survives

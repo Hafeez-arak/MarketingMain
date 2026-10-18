@@ -72,7 +72,11 @@ function Delta({ value, digits = 0, suffix = '', invert = false }) {
   )
 }
 
-function Header({ children, site }) {
+// `windowText` is the dashboard's one label for its period (2026-10-18): the
+// card now reads the same window as the social numbers and says so in the
+// same words. Search Console's rolling windows end three days back, because
+// its last days are still arriving (src/lib/agent/searchConsole.js).
+function Header({ children, site, windowText }) {
   return (
     <div className="px-4 py-3 border-b border-border flex items-center justify-between gap-3">
       <div className="flex items-center gap-2.5 min-w-0">
@@ -81,6 +85,7 @@ function Header({ children, site }) {
           <h3 className="font-semibold text-text text-sm leading-tight">Website search</h3>
           <p className="text-xs text-text-tertiary mt-0.5 truncate">
             {site ? site.replace(/^sc-domain:/, '') : 'Google Search Console'}
+            {windowText ? ` · ${windowText.toLowerCase()}` : ''}
           </p>
         </div>
       </div>
@@ -89,7 +94,7 @@ function Header({ children, site }) {
   )
 }
 
-export function WebsiteCard({ data, loading, summary, recommendations, pages }) {
+export function WebsiteCard({ data, loading, summary, recommendations, pages, windowText }) {
   const navigate = useNavigate()
 
   if (loading) {
@@ -144,7 +149,7 @@ export function WebsiteCard({ data, loading, summary, recommendations, pages }) 
 
   return (
     <Card className="overflow-hidden">
-      <Header site={data?.site}>
+      <Header site={data?.site} windowText={windowText}>
         {/* Points at the expansion of THIS card, not at a different subject.
             It used to open /insights — the research agent's findings, which
             are a separate thing that happens to also mention the website. The

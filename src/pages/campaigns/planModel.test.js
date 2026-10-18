@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   parseYMD, startOfWeek, formatTime, groupByWeek, monthOptions,
-  buildCalendarCells, normalizeAiIdea, distributeDates, cleanPlanPoll, pollProblems, firstPlaceableDay,
+  buildCalendarCells, normalizeAiIdea, distributeDates, cleanPlanPoll, pollProblems, firstPlaceableDay, planNameForMonth,
 } from './planModel'
 import { derivePostKind, formatForTarget } from '../../lib/postFormats'
 
@@ -134,6 +134,20 @@ describe('monthOptions', () => {
 
   it('gets February right in a common year', () => {
     expect(monthOptions(new Date(2026, 1, 1))[0].end).toBe('2026-02-28')
+  })
+})
+
+describe('planNameForMonth', () => {
+  it('names an unnamed plan after its month', () => {
+    expect(planNameForMonth('', 'September 2026')).toBe('September 2026 Content Plan')
+    expect(planNameForMonth('  ', 'September 2026')).toBe('September 2026 Content Plan')
+  })
+  it('replaces a name made for another month', () => {
+    expect(planNameForMonth('November 2026 Content Plan', 'September 2026')).toBe('September 2026 Content Plan')
+  })
+  it('keeps a name someone typed', () => {
+    expect(planNameForMonth('Ramadan push', 'September 2026')).toBe('Ramadan push')
+    expect(planNameForMonth('November 2026 Content Plan v2', 'September 2026')).toBe('November 2026 Content Plan v2')
   })
 })
 

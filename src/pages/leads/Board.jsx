@@ -135,21 +135,65 @@ function OwnerLine({ lead, team, me, canApprove, onForward }) {
  */
 function ProjectPicker({ lead, onSet }) {
   const [busy, setBusy] = useState(false)
+  // The choices exist only while the menu is open (2026-10-18): a <select>
+  // on every row put "Not stated JIH Tender Maintenance" into the page text,
+  // so a screen reader, a copy or the assistant reading the screen saw every
+  // option on every lead.
+  const [open, setOpen] = useState(false)
+  const box = useRef(null)
+  const toggle = useRef(null)
   const value = projectOf(lead) || 'none'
-  async function change(e) {
-    const choice = e.target.value
+  const choices = [['none', 'Not stated'], ...Object.entries(PROJECT_LABEL)]
+  const label = value === 'none' ? 'Not stated' : PROJECT_LABEL[value] || value
+
+  useEffect(() => {
+    if (!open) return
+    box.current?.querySelector('[aria-checked="true"]')?.focus()
+    const away = (e) => { if (!box.current?.contains(e.target)) setOpen(false) }
+    document.addEventListener('mousedown', away)
+    return () => document.removeEventListener('mousedown', away)
+  }, [open])
+
+  function close() {
+    setOpen(false)
+    toggle.current?.focus()
+  }
+  function onKey(e) {
+    if (e.key === 'Escape') { e.preventDefault(); close(); return }
+    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return
+    e.preventDefault()
+    const items = [...box.current.querySelectorAll('[role="menuitemradio"]')]
+    const i = items.indexOf(document.activeElement)
+    items[(i + (e.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length]?.focus()
+  }
+  async function change(choice) {
+    close()
+    if (choice === value) return
     const agent = lead.project_type || 'none'
     setBusy(true)
     await onSet(lead, choice === agent ? null : choice)
     setBusy(false)
   }
   return (
-    <span onClick={stop} className="block -ml-1">
-      <select aria-label="Project phase" value={value} disabled={busy} onChange={change}
-        className={`max-w-full text-xs bg-transparent border border-transparent hover:border-border focus:border-border focus:outline-none px-1 py-0.5 cursor-pointer disabled:opacity-50 ${value !== 'none' ? 'font-semibold text-text' : 'text-text-tertiary'}`}>
-        <option value="none">Not stated</option>
-        {Object.entries(PROJECT_LABEL).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
-      </select>
+    <span ref={box} onClick={stop} onKeyDown={onKey} className="relative block -ml-1">
+      {/* aria-disabled rather than disabled while saving: a disabled button
+          drops keyboard focus, and the person picking would lose their place. */}
+      <button ref={toggle} type="button" aria-disabled={busy || undefined} onClick={() => { if (!busy) setOpen((o) => !o) }}
+        aria-haspopup="menu" aria-expanded={open} aria-label={`Project phase: ${label}. Change`}
+        className={`max-w-full text-left text-xs border border-transparent hover:border-border focus:border-border focus:outline-none px-1 py-0.5 cursor-pointer ${busy ? 'opacity-50' : ''} ${value !== 'none' ? 'font-semibold text-text' : 'text-text-tertiary'}`}>
+        {label}
+      </button>
+      {open && (
+        <span role="menu" aria-label="Project phase"
+          className="absolute left-0 top-full z-20 mt-0.5 min-w-[8rem] py-1 bg-surface border border-border shadow-md flex flex-col">
+          {choices.map(([k, l]) => (
+            <button key={k} type="button" role="menuitemradio" aria-checked={k === value} onClick={() => change(k)}
+              className={`text-left text-xs px-2 py-1 hover:bg-surface-subtle focus:bg-surface-subtle focus:outline-none ${k === value ? 'font-semibold text-text' : 'text-text-secondary'}`}>
+              {l}
+            </button>
+          ))}
+        </span>
+      )}
       {lead.human_project_type && <span className="block px-1 text-[10px] text-text-tertiary">set by team</span>}
     </span>
   )

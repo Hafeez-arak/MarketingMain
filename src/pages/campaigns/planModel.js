@@ -202,6 +202,16 @@ export function monthOptions(now = new Date()) {
   return out
 }
 
+// The plan's name after its month changes. An empty name, or one this page
+// made for a month ("November 2026 Content Plan"), follows the new month; a
+// name someone typed is theirs and stays. Before this, picking November then
+// September kept "November 2026 Content Plan" on a September plan.
+const AUTO_NAME = new RegExp(`^(${MONTH_NAMES.join('|')}) \\d{4} Content Plan$`)
+export function planNameForMonth(name, monthLabel) {
+  const current = String(name || '').trim()
+  return !current || AUTO_NAME.test(current) ? `${monthLabel} Content Plan` : name
+}
+
 // The month-grid cells covering a plan's range, padded out to whole weeks so
 // the grid is rectangular. Sunday-based, matching the month calendars people
 // are used to reading.

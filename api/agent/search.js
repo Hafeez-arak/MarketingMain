@@ -1,12 +1,14 @@
 import { callerId, callerMayUseWorkspace, db, isConfigured } from './_supabase.js'
 import { searchConfig } from '../../src/lib/agent/searchConsole.js'
 import { fetchSearchData } from './_searchConsole.js'
+import { normalizeRange, resolveRange, isCustom } from '../../src/lib/dateRange.js'
 
 // ─── POST /api/agent/search ────────────────────────────────────────────────
 // The dashboard's Website card. Search Console for this workspace's property,
 // returned as rows for the browser to turn into numbers and recommendations.
 //
-// Body: { workspace_id }
+// Body: { workspace_id, days? | from?, to? } — the dashboard's own window, so
+// the card covers the same period as the social numbers above it.
 //
 // ── WHY THIS IS A ROUTE AND NOT A LENS CALL ──
 //
@@ -29,6 +31,10 @@ import { fetchSearchData } from './_searchConsole.js'
 // second env plumbing exercise. And _searchConsole.js is the only place that
 // knows how to sign the JWT; importing it from a route outside this directory
 // would make the agent container's dependency boundary (see AGENT.md) a lie.
+
+// The Website tab's floor (api/agent/website.js), kept here rather than
+// imported so this route does not load that one's Zernio and GA4 code.
+const MIN_WINDOW_DAYS = 7
 
 async function readBody(req) {
   if (req.body && typeof req.body === 'object') return req.body
@@ -61,6 +67,19 @@ export default async function handler(req, res) {
     return res.status(400).json({ ok: false, error: 'workspace_id is required.' })
   }
 
+  // The same window rules as the Website tab (api/agent/website.js): a fixed
+  // window that is not one is said, never silently widened.
+  const { range, error: rangeError } = normalizeRange(
+    body.from && body.to ? { from: body.from, to: body.to } : { days: Number(body.days) || 28 },
+    { minDays: MIN_WINDOW_DAYS },
+  )
+  if (body.from && body.to && rangeError) {
+    return res.status(400).json({ ok: false, error: rangeError })
+  }
+  const window = range || { days: 28 }
+  const { fromDate, toDate, days } = resolveRange(window)
+  const fixed = isCustom(window) ? { from: fromDate, to: toDate } : {}
+
   // Who is asking, and may they — both with the caller's own token, so RLS
   // answers the second one. A workspace_id in a request body is not evidence.
   const userId = await callerId(req)
@@ -83,7 +102,7 @@ export default async function handler(req, res) {
       { brandName: customFields.brand_name || '' },
     )
 
-    const data = await fetchSearchData({ site })
+    const data = await fetchSearchData({ site, days, ...fixed })
 
     // Three states the card must be able to tell apart, so they are three
     // distinct answers rather than one empty array:

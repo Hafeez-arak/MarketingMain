@@ -74,8 +74,18 @@ function checkLeads() {
     var col = leadColumns_(sheet);
     var lastRow = sheet.getLastRow();
     var width = sheet.getLastColumn();
-    var data = lastRow > 1 ? sheet.getRange(2, 1, lastRow - 1, width).getDisplayValues() : [];
+    var range = lastRow > 1 ? sheet.getRange(2, 1, lastRow - 1, width) : null;
+    var data = range ? range.getDisplayValues() : [];
+    // Code.gs writes "+966 5x ..." raw, so Sheets reads it as a formula and
+    // shows "#ERROR!". The formula text still holds what was typed.
+    var formulas = range ? range.getFormulas() : [];
     var cell = function (r, name) { return col[name] ? String(r[col[name] - 1] || '') : ''; };
+    var phoneAt = function (i) {
+      var shown = cell(data[i], 'Phone');
+      if (shown.charAt(0) !== '#') return shown;
+      var typed = cell(formulas[i] || [], 'Phone');
+      return typed ? typed.replace(/^=/, '') : '';
+    };
 
     var rows = [];
     for (var i = 0; i < data.length && rows.length < LEAD_BATCH; i++) {
@@ -85,7 +95,7 @@ function checkLeads() {
       rows.push({
         row: i + 2,
         received: cell(r, 'Received'), name: cell(r, 'Name'), company: cell(r, 'Company'),
-        email: cell(r, 'Email'), phone: cell(r, 'Phone'), projectType: cell(r, 'Project type'),
+        email: cell(r, 'Email'), phone: phoneAt(i), projectType: cell(r, 'Project type'),
         brief: cell(r, 'Brief'), lang: cell(r, 'Language'),
       });
     }

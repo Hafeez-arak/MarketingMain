@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   toEnvelope, emailKind, maskText, maskedEnquiry, findDuplicate, parseTime,
   systemPrompt, userPrompt, buildMessages, parseVerdict, sheetColumns, CATEGORIES, VERDICT_SCHEMA,
-  openRouterRequest, QUALIFIER_MODEL, verdictColumns, websiteDomain, websiteLine, PHILIPS, CRITERIA_VERSION,
+  openRouterRequest, QUALIFIER_MODEL, verdictColumns, websiteDomain, websiteLine, PHILIPS, CRITERIA_VERSION, cleanPhone,
 } from './qualify.js'
 
 // Made-up enquiries only: this repo is public, real ones never go in it.
@@ -21,6 +21,14 @@ describe('toEnvelope', () => {
   it('treats anything but "ar" as English', () => {
     expect(form({ lang: 'ar' }).language).toBe('ar')
     expect(form({ lang: '' }).language).toBe('en')
+  })
+  it('drops a phone cell that is a spreadsheet error or has no digits', () => {
+    expect(form({ phone: '#ERROR!' }).phone).toBe('')
+    expect(form({ phone: '#NAME?' }).phone).toBe('')
+    expect(form({ phone: 'n/a' }).phone).toBe('')
+    expect(form().phone).toBe('+966 50 111 2233')
+    expect(toEnvelope('email', { sourceRef: 'x', phone: ' #ERROR! ' }).phone).toBe('')
+    expect(cleanPhone(' 0501112233 ')).toBe('0501112233')
   })
 })
 

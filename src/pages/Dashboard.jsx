@@ -6,6 +6,7 @@ import { syncAccounts, describeSync } from '../lib/zernioConnect'
 import { useAuth } from '../store/auth'
 import { LIVE_PLATFORMS } from '../lib/utils'
 import { combineOverview } from '../lib/dashboardOverview'
+import { rangeLabel } from '../lib/dateRange'
 import { useDashboardAnalytics } from './dashboard/useDashboardAnalytics'
 import { useWebsiteSearch } from './dashboard/useWebsiteSearch'
 import { useResearch } from './dashboard/useResearch'
@@ -53,7 +54,13 @@ export default function Dashboard() {
   const { activeWorkspaceId } = useAuth()
   const { allAccounts, loading: loadingAccounts } = useConnectedAccounts()
 
-  const [range, setRange] = useState({ days: 30 })
+  // One window for the whole page, said once in the same words everywhere
+  // (2026-10-18). 28 by default: Instagram's account insights stop at 29 days,
+  // so a 30-day default put a 29-day reach beside 30-day posts and a 28-day
+  // website card. The picker stays inside that cap (DASHBOARD_RANGE in
+  // dashboard/Analytics.jsx).
+  const [range, setRange] = useState({ days: 28 })
+  const windowText = rangeLabel(range)
   const [selected, setSelected] = useState(() => new Set())
   const [creating, setCreating] = useState(false)
   const [syncing, setSyncing] = useState(false)
@@ -63,7 +70,7 @@ export default function Dashboard() {
   const { summaries, range: measured, loading, settling } = useDashboardAnalytics({
     accounts: allAccounts, range, reloadKey,
   })
-  const website = useWebsiteSearch()
+  const website = useWebsiteSearch(range)
   const research = useResearch()
   const queue = useQueue()
 
@@ -168,6 +175,7 @@ export default function Dashboard() {
               measured={measured}
               range={range}
               onRange={setRange}
+              windowText={windowText}
               selected={selected.size ? selected : new Set(platforms)}
               loading={loading}
               settling={settling} />
@@ -178,7 +186,7 @@ export default function Dashboard() {
       {/* Website and SEO. Its own row rather than a column beside the social
           numbers: it answers a different question and deserves the width. */}
       <WebsiteCard data={website.data} loading={website.loading} summary={website.summary}
-        recommendations={website.recommendations} pages={website.pages} />
+        recommendations={website.recommendations} pages={website.pages} windowText={windowText} />
 
       <QueueCards attention={queue.attention} loading={queue.loading} />
 

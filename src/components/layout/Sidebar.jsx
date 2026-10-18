@@ -56,7 +56,10 @@ const nav = [
   ]},
 ]
 
-export function Sidebar() {
+// Below `md` the sidebar is a drawer (2026-10-18): a fixed 208px column left
+// a 375px phone about 120px for the page. AppLayout owns `open`; a link
+// tapped here closes it. At md and up nothing about it changes.
+export function Sidebar({ open = false, onClose }) {
   const { pathname } = useLocation()
   const { user, workspaces, activeWorkspace, activeWorkspaceId, accessToken, switchWorkspace, signOut, isAccessAdmin } = useAuth()
   const [showWsPicker, setShowWsPicker] = useState(false)
@@ -120,8 +123,12 @@ export function Sidebar() {
 
   return (
     <aside
+      id="app-sidebar"
       data-print-hide
-      className="w-52 flex-shrink-0 flex flex-col h-full overflow-hidden bg-white border-r border-border"
+      className={`w-52 flex-shrink-0 flex flex-col h-full overflow-hidden bg-white border-r border-border
+        max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-50 max-md:shadow-dropdown
+        max-md:transition-[transform,visibility] max-md:duration-200
+        ${open ? '' : 'max-md:-translate-x-full max-md:invisible'}`}
     >
 
       {/* Logo. Fixed to h-14 — the same height as the Topbar — so the sidebar's
@@ -210,7 +217,8 @@ export function Sidebar() {
       {/* Nav — items run full-bleed to both edges so the active marker bar sits
           flush against the sidebar's own border. Inset nav pills would put the
           marker in the middle of a gutter, floating. */}
-      <nav className="flex-1 overflow-y-auto scrollbar-thin py-3">
+      <nav className="flex-1 overflow-y-auto scrollbar-thin py-3"
+        onClick={e => { if (e.target.closest('a')) onClose?.() }}>
         {nav.filter(group => isAccessAdmin || !group.adminOnly).map((group, gi) => (
           <div key={group.section} className={gi > 0 ? 'mt-5' : ''}>
             <p className="px-5 mb-1.5 eyebrow text-text-disabled">{group.section}</p>
