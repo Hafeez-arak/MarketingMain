@@ -88,4 +88,4 @@ run through the real `panel.js`:
 - `&mode=nomigration`: before the migration.
 - `?page=/ceo%3Ftab%3Dteam`: another tab.
 
-Serve the worktree with the `ceo-worktree` launch config (vite on 5199).
+Serve the worktree with `npx vite --port 5199` from its folder.
