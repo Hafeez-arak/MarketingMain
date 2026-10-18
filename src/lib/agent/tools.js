@@ -25,6 +25,7 @@
 // limit, and the search loop paces itself against them. Splitting them here
 // rather than at the call site means a new tool has to declare which it is.
 import { companyToolsFor } from './companyTools.js'
+import { REQUEST_TOOLS } from './requestTools.js'
 
 export const FREE = 'free'
 export const METERED = 'metered'
@@ -366,7 +367,7 @@ export const ALL_TOOLS = [...READ_TOOLS, ...PROVIDER_TOOLS]
 export function toolsFor({ writes = false, web = false, admin = false, company = false } = {}) {
   return [
     ...READ_TOOLS,
-    ...(company ? companyToolsFor({ admin }) : []),
+    ...(company ? [...companyToolsFor({ admin }), ...REQUEST_TOOLS] : []),
     // Always offered. Asking our own provider how our own account is doing is
     // the plainest question this assistant gets, and our stored copy is
     // missing most of the account's history — gating it behind the `web` flag

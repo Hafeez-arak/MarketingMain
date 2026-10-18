@@ -1,4 +1,5 @@
 import { NavLink, useLocation } from 'react-router-dom'
+import { countWaiting } from '../../lib/requests'
 import { useAuth } from '../../store/auth'
 import { useState, useEffect } from 'react'
 import { fetchPendingCount } from '../../lib/access'
@@ -8,6 +9,7 @@ import { needsQueueAttention } from '../../lib/postLock'
 const nav = [
   { section: 'Overview', items: [
     { to: '/', label: 'Dashboard', exact: true, icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg> },
+    { to: '/requests', label: 'Requests', badge: 'waitingRequests', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg> },
   ]},
   // Admin only for now (2026-10-06): the lead agent reads clients' names,
   // emails and phone numbers. `adminOnly` items and sections are dropped for
@@ -89,11 +91,27 @@ export function Sidebar() {
     const id = setInterval(() => { void count() }, 120_000)
     return () => { cancelled = true; clearInterval(id) }
   }, [activeWorkspaceId, accessToken])
+  // ── Requests waiting on this person ──
+  // New requests for an admin (they build the changes); open work assigned
+  // to them for anyone. Same slow re-read as the Post Queue badge.
+  const [waitingRequests, setWaitingRequests] = useState(0)
+  useEffect(() => {
+    if (!activeWorkspaceId || !user?.id) return
+    let cancelled = false
+    async function count() {
+      const n = await countWaiting(activeWorkspaceId, user.id, isAccessAdmin)
+      if (!cancelled) setWaitingRequests(n)
+    }
+    queueMicrotask(() => { if (!cancelled) void count() })
+    const id = setInterval(() => { void count() }, 120_000)
+    return () => { cancelled = true; clearInterval(id) }
+  }, [activeWorkspaceId, user?.id, isAccessAdmin])
+
   // Gated at render rather than by resetting the count when isAccessAdmin
   // flips: a stale number from a previous session can then never leak into
   // a non-admin's sidebar, and the effect stays free of a synchronous
   // setState (which React's lint rule rightly flags as a cascading render).
-  const badges = { pendingAccess: isAccessAdmin ? pendingAccess : 0, pendingPosts }
+  const badges = { pendingAccess: isAccessAdmin ? pendingAccess : 0, pendingPosts, waitingRequests }
 
   return (
     <aside

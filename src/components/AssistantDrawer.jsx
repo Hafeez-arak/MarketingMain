@@ -10,6 +10,7 @@ import AskInput from './AskInput'
 import { useFollowBottom } from '../lib/useFollowBottom'
 import { AttachButton, AttachmentTray, TurnAttachments } from './ChatAttachments'
 import { useChatAttachments } from '../lib/useChatAttachments'
+import { useTaggable } from '../lib/useTaggable'
 
 // ─── The assistant, on every page ──────────────────────────────────────────
 // AGENT.md §5a. A drawer that opens anywhere and knows what you are looking
@@ -60,6 +61,7 @@ export function JumpToLatest({ onClick }) {
 export function AssistantDrawer() {
   const location = useLocation()
   const { activeWorkspaceId, activeWorkspace, isAccessAdmin } = useAuth()
+  const taggable = useTaggable(activeWorkspaceId)
   const [open, setOpen] = useState(false)
   // Whether the earlier-conversations popup is up. Tracked only so this
   // drawer can stand down from Escape while it is — see below.
@@ -242,7 +244,8 @@ export function AssistantDrawer() {
                 onSubmit={send}
                 onPaste={files.onPaste}
                 canSubmitEmpty={files.items.length > 0}
-                placeholder={contextLabel ? `Ask about ${contextLabel}…` : 'Ask anything…'}
+                mentions={taggable}
+                placeholder={contextLabel ? `Ask about ${contextLabel}…` : 'Ask anything, or @ to tag someone…'}
                 disabled={!ready}
               />
               {busy ? (

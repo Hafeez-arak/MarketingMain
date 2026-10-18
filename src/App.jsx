@@ -37,6 +37,7 @@ import { LinkedInPage } from './pages/social/LinkedInPage'
 import { Approvals as PostApprovals } from './pages/social/Approvals'
 import AutoReplies from './pages/social/AutoReplies'
 import { Settings } from './pages/settings/index'
+import { Requests } from './pages/requests/index'
 import { Access } from './pages/settings/Access'
 import { BrandBrain } from './pages/settings/BrandBrain'
 import { CreativeStudio } from './pages/studio/index'
@@ -170,6 +171,7 @@ function ProtectedApp() {
                 the platform routes above still win regardless of order. */}
             <Route path="/social/:platform"      element={<SocialPlatform />} />
             <Route path="/settings"             element={<Settings />} />
+            <Route path="/requests"             element={<Requests />} />
             {/* The Integrations page was removed; old links land on the
                 dashboard instead of the not-found page. */}
             <Route path="/integrations"          element={<Navigate to="/" replace />} />
