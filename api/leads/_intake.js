@@ -139,6 +139,11 @@ export async function intakeWebsite(deps, { key, rows = [] }) {
   }
   // Is everything still working? (at most every 10 minutes; see _health.js)
   if (deps.health) await deps.health({ workspaceId }).catch(() => {})
+  // New qualified leads get an owner by the routing rules (_control.js), if
+  // switched on and if the round has time left: each one forwards an email.
+  if (deps.route && (deps.clock || Date.now)() < started + TOTAL_BUDGET_MS - 15_000) {
+    await deps.route({ workspaceId }).catch(() => {})
+  }
   return { status: 200, results, mail }
 }
 

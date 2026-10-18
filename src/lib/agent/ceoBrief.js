@@ -247,7 +247,14 @@ export function normaliseBrief(raw = {}) {
   }
 }
 
-/** Social facts from the live reader's output, or { available: false }. */
+/**
+ * Social facts from the live reader's output, or { available: false }.
+ *
+ * The CEO's requirements (2026-10-18, "Hide from CEO view") say post views,
+ * profile views, impressions and Instagram engagement do not help him
+ * decide; they stay on the marketing team's pages. So the brief is given
+ * followers, growth, link clicks and what was posted, and never the rest.
+ */
 export function socialFacts(live = {}, posts = { this_week: 0, last_week: 0, top: [] }) {
   if (!live?.available) return { available: false }
   const acct = p => (live.followers?.accounts || []).find(a => a.platform === p) || null
@@ -258,15 +265,8 @@ export function socialFacts(live = {}, posts = { this_week: 0, last_week: 0, top
   return {
     available: true,
     window_days: ins?.window?.days || lp?.window?.days || null,
-    instagram: ig ? {
-      followers: ig.followers, growth: ig.growth,
-      reach: ins?.reach ?? null, views: ins?.views ?? null, interactions: ins?.total_interactions ?? null,
-    } : null,
-    linkedin: li ? {
-      followers: li.followers, growth: li.growth,
-      impressions: lp?.impressions ?? null, members_reached: lp?.members_reached ?? null,
-      clicks: lp?.clicks ?? null, engagement_rate_pct: lp?.engagement_rate_pct ?? null,
-    } : null,
+    instagram: ig ? { followers: ig.followers, growth: ig.growth } : null,
+    linkedin: li ? { followers: li.followers, growth: li.growth, clicks: lp?.clicks ?? null } : null,
     posts_this_week: posts.this_week,
     posts_last_week: posts.last_week,
     recent_posts: posts.top,
@@ -285,7 +285,6 @@ export function postsByWeek(livePosts = [], window) {
     .map(p => ({
       platform: p.platform, published_at: p.published_at,
       about: String(p.content || '').replace(/\s+/g, ' ').slice(0, 120),
-      reach: p.reach ?? null, likes: p.likes ?? null, engagement_rate: p.engagement_rate ?? null,
     }))
   return { this_week: thisWeek.length, last_week: lastWeek.length, top }
 }

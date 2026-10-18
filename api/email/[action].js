@@ -25,6 +25,10 @@ import {
 } from '../../src/lib/email/cold.js'
 import { finishConnect as finishLeadMailConnect, checkAllMail as checkAllLeadMail } from '../leads/_mail.js'
 import { leadDeps } from '../leads/_deps.js'
+import { runDailyAlerts, weeklyIfDue } from '../leads/_control.js'
+
+// Where the CEO panel lives, for the link in its daily alert.
+const CONTROL_URL = (process.env.PUBLIC_APP_URL || 'https://marketing-main-ten.vercel.app').replace(/\/$/, '')
 
 // ─── /api/email/<action> ───────────────────────────────────────────────────
 // One Vercel function for the whole Email section. The Hobby plan builds at
@@ -682,7 +686,24 @@ async function handleCron(req, res) {
       await ld.health({ workspaceId: s.workspace_id, force: true }).catch(() => {})
     }
   } catch { /* the newsletter run below must still happen */ }
-  if (!RESEND_KEY) return res.status(503).json({ ok: false, error: 'RESEND_API_KEY is not set.', leadMail })
+  // The CEO panel (05:00 UTC = 08:00 Riyadh): a routing round for the day the
+  // Sheet's timer stopped, the daily alert, and on Sundays the five-line
+  // summary (the brief is written an hour earlier). Quiet for a company
+  // without targets, or before migration 20261025_ceo_control is applied.
+  let control = []
+  try {
+    const ld = leadDeps()
+    for (const s of await db('company_targets?select=workspace_id').catch(() => []) || []) {
+      await ld.route({ workspaceId: s.workspace_id }).catch(() => {})
+      const pageUrl = `${CONTROL_URL}/ceo`
+      const failed = (err) => ({ error: String(err?.message || err).slice(0, 200) })
+      control.push({
+        alerts: await runDailyAlerts(ld, { workspaceId: s.workspace_id, pageUrl }).catch(failed),
+        weekly: await weeklyIfDue(ld, { workspaceId: s.workspace_id, pageUrl }).catch(failed),
+      })
+    }
+  } catch (err) { control = { error: String(err?.message || err).slice(0, 200) } }
+  if (!RESEND_KEY) return res.status(503).json({ ok: false, error: 'RESEND_API_KEY is not set.', leadMail, control })
   // Every workspace with something due. Distinct in code: PostgREST has no
   // DISTINCT, and the list is small.
   const now = new Date().toISOString()
@@ -698,7 +719,7 @@ async function handleCron(req, res) {
   for (const workspaceId of new Set(sending.map(r => r.workspace_id))) {
     await closeFinished({ db, count }, { workspaceId }).catch(() => {})
   }
-  return res.status(200).json({ ok: true, workspaces: workspaces.length, results, leadMail })
+  return res.status(200).json({ ok: true, workspaces: workspaces.length, results, leadMail, control })
 }
 
 async function handleColdTick(req, res) {

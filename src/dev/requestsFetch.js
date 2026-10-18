@@ -5,8 +5,10 @@
 // signing in. The proof of the rules is the trigger test run against the real
 // database (docs/CEO-ASSISTANT-PLAN.md, PR 2) and api/agent/_requests.test.js.
 
+import { controlState, controlAnswer } from './controlFixture'
+
 const params = new URLSearchParams(window.location.search)
-export const MODE = params.get('mode') || 'data' // data | empty | fail | hang
+export const MODE = params.get('mode') || 'data' // data | empty | fail | hang | clear | nomigration
 
 export const ME = { user_id: 'u-ceo', email: 'mkader@arak-sa.com', full_name: 'mkader', role: 'admin', status: 'approved' }
 const ago = h => new Date(Date.now() - h * 3_600_000).toISOString()
@@ -77,6 +79,8 @@ function respond(status, body) {
   })
 }
 
+const control = controlState(MODE)
+
 const realFetch = window.fetch.bind(window)
 const own = url => /^\/(src|node_modules|@)/.test(url)
   || ['/src', '/@', '/node_modules'].some(p => url.startsWith(window.location.origin + p))
@@ -88,6 +92,20 @@ window.fetch = async (input, init = {}) => {
   const method = (init.method || 'GET').toUpperCase()
   window.__requestCalls.push({ method, path: u.pathname + u.search, body: init.body })
   if (MODE === 'hang') return new Promise(() => {})
+  // The CEO control panel (/api/leads/<action>), answered by the real panel.js.
+  const leadAction = /^\/api\/leads\/([a-z_]+)$/.exec(u.pathname)?.[1]
+  if (leadAction) {
+    const body = JSON.parse(init.body || '{}')
+    if (MODE === 'nomigration' && leadAction === 'control') return respond(503, { ok: false, error: 'The CEO panel’s tables are not set up in the database yet, so it has nothing to show.' })
+    if (leadAction === 'control') return respond(200, controlAnswer(control))
+    if (leadAction === 'assign') { const l = control.leads.find(x => x.id === body.lead_id); if (l) Object.assign(l, { assigned_to: body.user_id, assigned_at: new Date().toISOString() }); return respond(200, { ok: true }) }
+    if (leadAction === 'account_contacted') { const a = control.accounts.find(x => x.id === body.account_id); if (a) a.last_contact_at = new Date().toISOString(); return respond(200, { ok: true }) }
+    if (leadAction === 'send_to_sales') { const o = control.opportunities.find(x => x.id === body.opportunity_id); if (o) o.sent_at = new Date().toISOString(); return respond(200, { ok: true }) }
+    if (leadAction === 'remind') return respond(200, { ok: true, reminded: 'u-omar' })
+    if (leadAction === 'targets_save') { Object.assign(control.targets, body); return respond(200, { ok: true }) }
+    if (leadAction === 'routing_save') { control.rules = body.rules || []; return respond(200, { ok: true, rules: control.rules }) }
+    return respond(200, { ok: true })
+  }
   const rpc = /\/rest\/v1\/rpc\/([a-z_]+)$/.exec(u.pathname)
   if (rpc?.[1] === 'taggable_people') return respond(200, db.taggable)
   if (rpc?.[1] === 'workspace_people') return respond(200, db.people)

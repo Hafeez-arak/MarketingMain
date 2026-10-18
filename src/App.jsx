@@ -126,7 +126,7 @@ function ProtectedApp() {
           <ErrorBoundary key={pathname}>
           <Routes>
             {/* leads.arak-sa.com opens straight onto the leads page. */}
-            <Route path="/"                      element={isLeadsHost() ? <Navigate to="/leads" replace /> : <Dashboard />} />
+            <Route path="/"                      element={isLeadsHost() ? <Navigate to="/leads" replace /> : <Home />} />
             <Route path="/brand-brain"           element={<BrandBrain />} />
             <Route path="/studio"                element={<CreativeStudio />} />
             {/* Two routes, not four. `/campaigns` was a menu whose only job
@@ -186,6 +186,17 @@ function ProtectedApp() {
       </AppProvider>
     </RequireAuth>
   )
+}
+
+// The CEO lands on his own page (user_access.landing = 'ceo'), once per
+// visit: after that the sidebar's Dashboard link still opens the dashboard.
+const LANDED_KEY = 'arak.landed'
+function Home() {
+  const { access, isAccessAdmin } = useAuth()
+  let landed = true
+  try { landed = sessionStorage.getItem(LANDED_KEY) === '1'; sessionStorage.setItem(LANDED_KEY, '1') } catch { /* private window */ }
+  if (!landed && isAccessAdmin && access?.landing === 'ceo') return <Navigate to="/ceo" replace />
+  return <Dashboard />
 }
 
 // The CEO page is built from leads and sales, which only admins see; the

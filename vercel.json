@@ -20,7 +20,7 @@
   "crons": [
     {
       "path": "/api/email/cron",
-      "schedule": "0 6 * * *"
+      "schedule": "0 5 * * *"
     },
     {
       "path": "/api/agent/chat?cron=ceo-brief",

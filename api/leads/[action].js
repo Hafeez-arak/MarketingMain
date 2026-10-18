@@ -9,6 +9,7 @@ import { exportLeads, applySheetDecisions } from './_export.js'
 import { approveLead, crmStatus, saveCrm, sendWaiting, disconnectCrm } from './_crm.js'
 import { openCard, saveCard, watchlist } from './_card.js'
 import { assignLead, teamList, teamSave, teamCheckOdoo } from './_assign.js'
+import { controlPanel, saveTargets, saveRouting, markLead, remind, accountContacted, sendToSales, runDailyAlerts, MIGRATION_MISSING } from './_control.js'
 import { leadDeps, openRouterKey, hasDeploymentKey, describeKey, sendAlert } from './_deps.js'
 import { previewLenses } from '../agent/_investigate.js'
 
@@ -108,7 +109,7 @@ async function isAdmin(token) {
 // A sales person (20261013_sales_seats) is not a member of the company at
 // all: their seat is asked for separately, again with their own token. A
 // seat opens these actions and nothing else.
-const SALES_ACTIONS = new Set(['review', 'email_file', 'approve', 'assign', 'forward', 'outlook_link', 'set_project', 'card', 'card_save'])
+const SALES_ACTIONS = new Set(['review', 'email_file', 'approve', 'assign', 'forward', 'outlook_link', 'set_project', 'card', 'card_save', 'lead_mark'])
 
 /**
  * May this sales person open this lead? Asked with their own token, so the
@@ -399,6 +400,59 @@ const actions = {
     const out = await assignLead(leadDeps(), { workspaceId, leadId: body.lead_id, to: cur.assigned_to, user, appUrl: baseUrlOf(this.req) })
     if (out.error) return fail(out.status, out.error)
     return { lead: out.lead, forward: out.forward }
+  },
+
+  // ── The CEO's control panel (_control.js; needs 20261025_ceo_control) ──
+
+  /** Six numbers, at most three decisions, one row per salesperson, the top ten customers. */
+  async control({ workspaceId }) {
+    try {
+      return await controlPanel(leadDeps(), { workspaceId })
+    } catch (err) {
+      if (String(err.message) === MIGRATION_MISSING) return fail(503, MIGRATION_MISSING)
+      throw err
+    }
+  },
+
+  /** His targets, who gets the Sunday summary and the daily alert, routing on or off. */
+  async targets_save({ workspaceId, body, user }) {
+    const out = await saveTargets(leadDeps(), { workspaceId, body, user })
+    return out.error ? fail(out.status, out.error) : out
+  },
+
+  /** The routing rules, replaced whole in the order given. */
+  async routing_save({ workspaceId, body }) {
+    const out = await saveRouting(leadDeps(), { workspaceId, body })
+    return out.error ? fail(out.status, out.error) : out
+  },
+
+  /** A salesperson marks a first reply or a quote sent, until Odoo says it for them. */
+  async lead_mark({ workspaceId, body }) {
+    const out = await markLead(leadDeps(), { workspaceId, body })
+    return out.error ? fail(out.status, out.error) : out
+  },
+
+  /** The CEO's "Remind" on a late lead: the owner's bell. */
+  async remind({ workspaceId, body, user }) {
+    const out = await remind(leadDeps(), { workspaceId, body, user })
+    return out.error ? fail(out.status, out.error) : out
+  },
+
+  /** "We spoke to them today" on a key account. */
+  async account_contacted({ workspaceId, body }) {
+    const out = await accountContacted(leadDeps(), { workspaceId, body })
+    return out.error ? fail(out.status, out.error) : out
+  },
+
+  /** A research project handed to a salesperson. */
+  async send_to_sales({ workspaceId, body, user }) {
+    const out = await sendToSales(leadDeps(), { workspaceId, body, user })
+    return out.error ? fail(out.status, out.error) : out
+  },
+
+  /** The daily alert now, for testing the email (it is otherwise once a day). */
+  async alerts_now({ workspaceId }) {
+    return runDailyAlerts(leadDeps(), { workspaceId, force: true, pageUrl: `${baseUrlOf(this.req)}/ceo` })
   },
 
   /** The sales team on Agent settings: who sees the website's leads, who they are in Odoo. */

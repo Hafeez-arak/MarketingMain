@@ -19,7 +19,10 @@ import '../index.css'
 //   /dev/requests.html?mode=empty|fail|hang   the empty, failed and loading states
 //   /dev/requests.html?page=/ask          the chat box with the @ picker
 //   /dev/requests.html?page=/settings     Your account and AI spending
-//   /dev/requests.html?page=/ceo          the CEO page (a made-up brief)
+//   /dev/requests.html?page=/ceo          the CEO control panel (made-up company)
+//   /dev/requests.html?page=/ceo&mode=clear        nothing needs a decision
+//   /dev/requests.html?page=/ceo&mode=nomigration  before the migration is applied
+//   /dev/requests.html?page=/ceo?tab=brief  the week's brief and the assistant
 // Vite only builds index.html, so this never reaches production.
 
 const params = new URLSearchParams(window.location.search)

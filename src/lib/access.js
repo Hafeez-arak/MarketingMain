@@ -19,7 +19,9 @@ export async function fetchMyAccess(userId) {
   if (!userId) return { access: null, error: null }
   const { data, error } = await supabase
     .from('user_access')
-    .select('user_id, email, full_name, status, role, leads_approver, requested_at')
+    // '*' rather than a list: `landing` (20261025_ceo_control) may not exist
+    // yet, and naming a missing column would fail every sign-in.
+    .select('*')
     .eq('user_id', userId)
     .maybeSingle()
   if (error) return { access: null, error: error.message }

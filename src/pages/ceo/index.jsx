@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useLocation } from 'react-router-dom'
+import { Link, useLocation, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../../store/auth'
 import { Button, Spinner, Skeleton } from '../../components/ui/index'
 import { useAgentChat } from '../../lib/useAgentChat'
@@ -14,9 +14,13 @@ import { AttachButton, AttachmentTray, TurnAttachments } from '../../components/
 import { fetchLatestBrief, writeBrief, requestFrom } from '../../lib/ceo'
 import { fetchRequests, STATUS_LABEL } from '../../lib/requests'
 import { timeAgo } from '../../lib/utils'
+import { fetchControl, assignLead, remindOwner, accountContacted, sendToSales, saveTargets, saveRouting } from '../../lib/control'
+import { CT } from './strings'
+import { HomeTab, TeamTab, AccountsTab, OpportunitiesTab, MarketingTab } from './Control'
+import { TargetsTab } from './Targets'
 
 // ─── CEO ───────────────────────────────────────────────────────────────────
-// 2026-10-18. One page for the CEO: four one-line numbers, the week's brief
+// 2026-10-18 (#243). One page for the CEO: four one-line numbers, the week's brief
 // in a page (Arabic first, English on a switch), his requests, and the
 // assistant built in beside it rather than in a corner.
 //
@@ -87,7 +91,6 @@ const T = {
 }
 
 const TONE_DOT = { good: 'bg-green-600', watch: 'bg-amber-500', bad: 'bg-red-600' }
-const TONE_TILE = { good: 'border-t-green-600', watch: 'border-t-amber-500', bad: 'border-t-red-600' }
 
 function readLang() {
   try { return localStorage.getItem(LANG_KEY) === 'en' ? 'en' : 'ar' } catch { return 'ar' }
@@ -111,9 +114,111 @@ const day = (iso, lang) => {
   return d.toLocaleDateString(lang === 'ar' ? 'ar-SA-u-nu-latn-ca-gregory' : 'en-GB', { day: 'numeric', month: 'short' })
 }
 
+// ─── The page: the control panel's tabs (2026-10-18) ───────────────────────
+// The CEO's requirements: a home screen of six numbers and at most three
+// decisions, then the sales team, key accounts, new projects, marketing in
+// three numbers, and his targets. The brief and the assistant from #243 are
+// the last tab. ?tab= keeps the tab across a refresh and makes it linkable.
+
+const TABS = ['home', 'team', 'accounts', 'opportunities', 'marketing', 'targets', 'brief']
+
 export function CeoPage() {
-  const { activeWorkspaceId, accessToken, user } = useAuth()
+  const { activeWorkspaceId, accessToken, isAccessAdmin } = useAuth()
+  const [params, setParams] = useSearchParams()
+  const tab = TABS.includes(params.get('tab')) ? params.get('tab') : 'home'
   const [lang, setLang] = useState(readLang)
+  const t = CT[lang]
+  const [data, setData] = useState(undefined) // undefined = loading
+  const [error, setError] = useState('')
+  const [loadedAt, setLoadedAt] = useState(null)
+
+  const switchLang = l => { setLang(l); try { localStorage.setItem(LANG_KEY, l) } catch { /* private window */ } }
+  const openTab = k => setParams(p => { const n = new URLSearchParams(p); if (k === 'home') n.delete('tab'); else n.set('tab', k); return n }, { replace: true })
+
+  const load = useCallback(async () => {
+    if (!activeWorkspaceId || !accessToken) return
+    const out = await fetchControl(activeWorkspaceId, accessToken)
+    if (out.error) { setError(out.error); setData(d => d ?? null); return }
+    setError('')
+    setData(out)
+    setLoadedAt(out.at)
+  }, [activeWorkspaceId, accessToken])
+
+  useEffect(() => {
+    const id = setTimeout(load, 0)
+    return () => clearTimeout(id)
+  }, [load])
+
+  const calls = useMemo(() => ({
+    assign: (leadId, userId) => assignLead(activeWorkspaceId, accessToken, leadId, userId),
+    remind: leadId => remindOwner(activeWorkspaceId, accessToken, leadId),
+    contacted: accountId => accountContacted(activeWorkspaceId, accessToken, accountId),
+    sendToSales: (oppId, userId) => sendToSales(activeWorkspaceId, accessToken, oppId, userId),
+    saveTargets: form => saveTargets(activeWorkspaceId, accessToken, form),
+    saveRouting: rules => saveRouting(activeWorkspaceId, accessToken, rules),
+  }), [activeWorkspaceId, accessToken])
+
+  // A button's work, then the panel again: the server's word, not a guess.
+  const act = useCallback(async fn => {
+    const out = await fn()
+    if (!out?.error) setTimeout(load, 1200)
+    return out
+  }, [load])
+
+  const dir = lang === 'ar' ? 'rtl' : 'ltr'
+  const props = { data, lang, t, act, calls }
+
+  return (
+    <div className="max-w-5xl space-y-3" dir={dir} lang={lang}>
+      <header className="flex flex-wrap items-center justify-between gap-2">
+        <div className="min-w-0">
+          <h1 className="text-lg font-bold text-text tracking-tight leading-none">{T[lang].title}</h1>
+          {loadedAt && tab !== 'brief' && <p className="text-[11px] text-text-tertiary mt-1">{t.updated} {ago(loadedAt, lang)}</p>}
+        </div>
+        <div className="flex border border-border" role="group" aria-label="Language" dir="ltr">
+          {[['ar', 'العربية'], ['en', 'English']].map(([k, label]) => (
+            <button key={k} type="button" onClick={() => switchLang(k)} aria-pressed={lang === k}
+              className={`px-3 py-1.5 text-xs ${lang === k ? 'bg-amber-700 text-white' : 'bg-white text-text-secondary hover:text-text'}`}>
+              {label}
+            </button>
+          ))}
+        </div>
+      </header>
+
+      <nav className="flex gap-1 overflow-x-auto border-b border-border -mx-1 px-1" aria-label={T[lang].title}>
+        {TABS.map(k => (
+          <button key={k} type="button" onClick={() => openTab(k)} aria-current={tab === k ? 'page' : undefined}
+            className={`whitespace-nowrap px-3 py-2 text-xs border-b-2 -mb-px ${tab === k ? 'border-amber-700 text-text font-semibold' : 'border-transparent text-text-secondary hover:text-text'}`}>
+            {t.tabs[k]}
+          </button>
+        ))}
+      </nav>
+
+      {tab === 'brief' ? <BriefTab lang={lang} /> : data === undefined ? (
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">{[0, 1, 2, 3, 4, 5].map(i => <Skeleton key={i} className="h-20" />)}</div>
+      ) : !data ? (
+        <div className="border border-red-200 bg-red-50 px-3 py-3 text-xs text-red-700 space-y-2">
+          <p dir="auto">{t.loadFailed}: {error}</p>
+          <Button size="xs" variant="secondary" onClick={load}>{t.retry}</Button>
+        </div>
+      ) : (
+        <>
+          {error && <p className="text-xs text-red-600" dir="auto">{error}</p>}
+          {tab === 'home' && <HomeTab {...props} />}
+          {tab === 'team' && <TeamTab {...props} />}
+          {tab === 'accounts' && <AccountsTab {...props} />}
+          {tab === 'opportunities' && <OpportunitiesTab {...props} />}
+          {tab === 'marketing' && <MarketingTab {...props} />}
+          {tab === 'targets' && <TargetsTab key={loadedAt} {...props} canEdit={isAccessAdmin} onSaved={load} />}
+        </>
+      )}
+    </div>
+  )
+}
+
+/** The week's brief, his requests and the assistant: the page as #243 built it. */
+function BriefTab({ lang }) {
+  const { activeWorkspaceId, accessToken, user } = useAuth()
   const t = T[lang]
   const [brief, setBrief] = useState(undefined) // undefined = loading, null = none
   const [loadError, setLoadError] = useState('')
@@ -121,8 +226,6 @@ export function CeoPage() {
   const [writeError, setWriteError] = useState('')
   const [requests, setRequests] = useState(null)
   const chat = useAgentChat()
-
-  const switchLang = l => { setLang(l); try { localStorage.setItem(LANG_KEY, l) } catch { /* private window */ } }
 
   const loadRequests = useCallback(async () => {
     const { rows } = await fetchRequests(activeWorkspaceId)
@@ -148,66 +251,21 @@ export function CeoPage() {
     setBrief(out.brief)
   }
 
-  // The requests tile is the viewer's own, read live, not the stored one.
-  const kpis = useMemo(() => {
-    const stored = brief?.kpis || []
-    if (!requests) return stored
-    const open = requests.filter(r => ['new', 'in_progress'].includes(r.status)).length
-    // "This week" is the brief's week, which also keeps the render pure.
-    const since = Date.parse(brief?.period_start || '') || 0
-    const done = requests.filter(r => r.status === 'done' && Date.parse(r.closed_at || '') >= since).length
-    return stored.map(k => (k.key !== 'requests' ? k : {
-      ...k,
-      value: { en: String(open), ar: String(open) },
-      sub: { en: `${done} done this week`, ar: `${done} أُنجزت هذا الأسبوع` },
-      tone: open && !done ? 'watch' : 'good',
-    }))
-  }, [brief, requests])
-
-  const dir = lang === 'ar' ? 'rtl' : 'ltr'
-
   return (
-    <div className="max-w-7xl space-y-4" dir={dir} lang={lang}>
-      <header className="flex flex-wrap items-end justify-between gap-3 pb-4 border-b border-border">
-        <div className="min-w-0">
-          <h1 className="text-lg font-bold text-text tracking-tight leading-none">{t.title}</h1>
-          {brief && (
-            <p className="text-xs text-text-secondary mt-2">
-              {t.week(day(brief.period_start, lang), day(brief.period_end, lang))} · {t.written} {ago(brief.created_at, lang)}
-            </p>
-          )}
-        </div>
-        <div className="flex items-center gap-2" dir="ltr">
-          <div className="flex border border-border" role="group" aria-label="Language">
-            {[['ar', 'العربية'], ['en', 'English']].map(([k, label]) => (
-              <button key={k} type="button" onClick={() => switchLang(k)} aria-pressed={lang === k}
-                className={`px-3 py-1.5 text-xs ${lang === k ? 'bg-amber-700 text-white' : 'bg-white text-text-secondary hover:text-text'}`}>
-                {label}
-              </button>
-            ))}
-          </div>
-          <Button size="sm" variant="secondary" onClick={fresh} disabled={writing || !accessToken}>
-            {writing ? <><Spinner size="sm" /> {t.writing}</> : t.fresh}
-          </Button>
-        </div>
-      </header>
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-xs text-text-secondary">
+          {brief ? <>{t.week(day(brief.period_start, lang), day(brief.period_end, lang))} · {t.written} {ago(brief.created_at, lang)}</> : null}
+        </p>
+        <Button size="sm" variant="secondary" onClick={fresh} disabled={writing || !accessToken}>
+          {writing ? <><Spinner size="sm" /> {t.writing}</> : t.fresh}
+        </Button>
+      </div>
       {writeError && <p className="text-xs text-red-600" dir="auto">{writeError}</p>}
 
-      {brief === undefined ? (
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">{[0, 1, 2, 3].map(i => <Skeleton key={i} className="h-20" />)}</div>
-      ) : loadError ? (
-        <p className="text-xs text-red-600 border border-red-200 bg-red-50 px-3 py-2">{t.failed}: {loadError}</p>
-      ) : brief && (
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-          {kpis.map(k => (
-            <div key={k.key} className={`bg-white border border-border border-t-2 ${TONE_TILE[k.tone] || ''} px-4 py-3 min-w-0`}>
-              <p className="text-[11px] text-text-tertiary truncate">{k.label?.[lang]}</p>
-              <p className="text-xl font-bold text-text tabular-nums mt-1" dir="ltr" style={{ textAlign: lang === 'ar' ? 'right' : 'left' }}>{k.value?.[lang]}</p>
-              <p className="text-[11px] text-text-secondary mt-0.5 truncate">{k.sub?.[lang]}</p>
-            </div>
-          ))}
-        </div>
-      )}
+      {/* The six numbers are on Home now (the CEO's limit is six); the
+          brief's own four stay stored in ceo_briefs.kpis but are not drawn. */}
+      {loadError && <p className="text-xs text-red-600 border border-red-200 bg-red-50 px-3 py-2">{t.failed}: {loadError}</p>}
 
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 items-start">
         <div className="lg:col-span-3 space-y-4 min-w-0">

@@ -98,8 +98,9 @@ describe('social', () => {
       account_insights: { ok: true, window: { days: 14 }, reach: 218, views: 541, total_interactions: 6 },
       linkedin_page_insights: [{ ok: true, impressions: 401, members_reached: 61, clicks: 28, engagement_rate_pct: 9.39 }],
     }, { this_week: 1, last_week: 0, top: [] })
-    expect(s.instagram).toEqual({ followers: 852, growth: 0, reach: 218, views: 541, interactions: 6 })
-    expect(s.linkedin.impressions).toBe(401)
+    expect(s.instagram).toEqual({ followers: 852, growth: 0 })
+    expect(s.linkedin).toEqual(expect.objectContaining({ clicks: 28 }))
+    expect(s.linkedin.impressions).toBeUndefined()
     expect(s.posts_this_week).toBe(1)
   })
 })

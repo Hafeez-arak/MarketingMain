@@ -129,6 +129,45 @@ function OwnerLine({ lead, team, me, canApprove, onForward }) {
 }
 
 /**
+ * The two clocks the CEO set (2026-10-18): a first reply within 4 hours and
+ * a quote within 72. Until Odoo says it for them, the owner (or a sales
+ * admin) marks each here; the CEO page counts from these marks.
+ */
+function ProgressLine({ lead, me, canApprove, onMark }) {
+  const [busy, setBusy] = useState('')
+  const [value, setValue] = useState('')
+  const [asking, setAsking] = useState(false)
+  if (!lead.assigned_to || !(lead.assigned_to === me || canApprove)) return null
+  async function mark(what, extra) {
+    setBusy(what)
+    await onMark(lead, what, extra)
+    setBusy('')
+    setAsking(false)
+  }
+  return (
+    <div className="px-4 pt-2 md:pl-[8.25rem] text-[11px] text-text-secondary flex flex-wrap items-center gap-x-3 gap-y-1.5">
+      {lead.first_reply_at
+        ? <span className="text-sage-700">First reply sent {when(lead.first_reply_at)}</span>
+        : <Button size="xs" variant="secondary" onClick={() => mark('replied')} disabled={Boolean(busy)}>{busy === 'replied' ? <Spinner size="sm" /> : null}Mark first reply sent</Button>}
+      {lead.quote_sent_at ? (
+        <span className="text-sage-700">
+          Quote sent {when(lead.quote_sent_at)}{Number(lead.deal_value_sar) > 0 ? ` · SAR ${Math.round(lead.deal_value_sar).toLocaleString('en-US')}` : ''}
+          <button type="button" className="ml-2 text-text-tertiary hover:text-text underline" onClick={() => mark('clear_quote')} disabled={Boolean(busy)}>undo</button>
+        </span>
+      ) : asking ? (
+        <span className="inline-flex items-center gap-2">
+          <Input type="number" min="0" inputMode="decimal" placeholder="Quote value (SAR, optional)" value={value} onChange={(e) => setValue(e.target.value)} className="w-52" />
+          <Button size="xs" onClick={() => mark('quote_sent', { deal_value_sar: value })} disabled={Boolean(busy)}>{busy === 'quote_sent' ? <Spinner size="sm" /> : null}Save</Button>
+          <button type="button" className="text-text-tertiary hover:text-text" onClick={() => setAsking(false)}>Cancel</button>
+        </span>
+      ) : (
+        <Button size="xs" variant="secondary" onClick={() => setAsking(true)} disabled={Boolean(busy)}>Mark quote sent</Button>
+      )}
+    </div>
+  )
+}
+
+/**
  * The project phase, set by anyone on the team (2026-10-12): stated in the
  * email or not, they pick it after the call. Picking what the agent read
  * goes back to following the agent.
@@ -218,7 +257,7 @@ function CardWaiting({ lead, canApprove, onAsk }) {
   )
 }
 
-function Row({ lead, open, onToggle, onReview, onSetProject, workspaceId, mailboxes, canApprove, onAsk, team, me, onAssign, onForward }) {
+function Row({ lead, open, onToggle, onReview, onSetProject, workspaceId, mailboxes, canApprove, onAsk, team, me, onAssign, onForward, onMark }) {
   const v = effectiveVerdict(lead)
   const v2 = (lead.criteria_version || 1) >= 2
   const junk = lead.folder === 'junk'
@@ -277,6 +316,7 @@ function Row({ lead, open, onToggle, onReview, onSetProject, workspaceId, mailbo
       {open && (
         <div className="border-t border-border bg-white">
           <OwnerLine lead={lead} team={team} me={me} canApprove={canApprove} onForward={onForward} />
+          <ProgressLine lead={lead} me={me} canApprove={canApprove} onMark={onMark} />
           {hasTabs ? (
             <>
               <div role="tablist" aria-label="Lead" className="flex gap-1 px-4 pt-3 md:pl-[8.25rem]">
@@ -509,6 +549,13 @@ export default function LeadsBoard({ workspaceId, onReview, refreshKey = 0, mail
     setAssignState({ busy: false, error: '' })
     setAssigning(null)
   }
+  async function mark(lead, what, extra = {}) {
+    const r = await leadsApi('lead_mark', workspaceId, { lead_id: lead.id, what, ...extra })
+    if (r.error) return setActionError(r.error)
+    setActionError('')
+    replaceRow(lead.id, r.lead)
+  }
+
   async function forwardAgain(lead) {
     const r = await leadsApi('forward', workspaceId, { lead_id: lead.id })
     if (r.error) return setActionError(r.error)
@@ -596,7 +643,7 @@ export default function LeadsBoard({ workspaceId, onReview, refreshKey = 0, mail
           {list.rows.map((l) => (
             <Row key={l.id} lead={l} open={open === l.id} onToggle={() => setOpen(open === l.id ? null : l.id)} onReview={review}
               onSetProject={setProject} workspaceId={workspaceId} mailboxes={mailboxes} canApprove={canApprove} onAsk={(lead) => { setApproving({ busy: false, error: '' }); setAsking(lead) }}
-              team={team} me={me} onAssign={(lead) => { setAssignState({ busy: false, error: '' }); setAssigning(lead) }} onForward={forwardAgain} />
+              team={team} me={me} onAssign={(lead) => { setAssignState({ busy: false, error: '' }); setAssigning(lead) }} onForward={forwardAgain} onMark={mark} />
           ))}
         </ul>
       )}
