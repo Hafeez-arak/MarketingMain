@@ -24,6 +24,8 @@
 // counted against a run's budget. Metered tools cost money or hit a rate
 // limit, and the search loop paces itself against them. Splitting them here
 // rather than at the call site means a new tool has to declare which it is.
+import { companyToolsFor } from './companyTools.js'
+
 export const FREE = 'free'
 export const METERED = 'metered'
 
@@ -358,9 +360,13 @@ export const ALL_TOOLS = [...READ_TOOLS, ...PROVIDER_TOOLS]
 // an admin. The research run never does, which is what keeps it read-only
 // while the chat can edit. It implies `writes`: an admin keeps the propose
 // tools too, because "draft me a post" is still a draft.
-export function toolsFor({ writes = false, web = false, admin = false } = {}) {
+//
+// `company` adds leads, sales, email and the team (companyTools.js). Only the
+// chat passes it; within it, the leads and sales half follows `admin`.
+export function toolsFor({ writes = false, web = false, admin = false, company = false } = {}) {
   return [
     ...READ_TOOLS,
+    ...(company ? companyToolsFor({ admin }) : []),
     // Always offered. Asking our own provider how our own account is doing is
     // the plainest question this assistant gets, and our stored copy is
     // missing most of the account's history — gating it behind the `web` flag

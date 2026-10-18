@@ -4,6 +4,7 @@ import { runAgent } from './_loop.js'
 import { contextPreamble } from '../../src/lib/agent/prompt.js'
 import { rememberChat } from './_memory.js'
 import { ADMIN_EDITS_PROMPT } from '../../src/lib/agent/adminTools.js'
+import { COMPANY_PROMPT } from '../../src/lib/agent/companyTools.js'
 import {
   validateAttachments, userContent, storedAttachments, attachmentNote,
 } from '../../src/lib/agent/attachments.js'
@@ -198,7 +199,10 @@ export default async function handler(req, res) {
     // price on the prefix, and nothing in the response says so.
     // Two variants of the identity block, each stable: an admin's carries the
     // direct-edit rules. Stable text only — see ADMIN_EDITS_PROMPT.
-    const identity = isAdmin ? `${IDENTITY}\n\n${ADMIN_EDITS_PROMPT}` : IDENTITY
+    // COMPANY_PROMPT widens the chat to the whole company and to general
+    // business advice; the research run keeps the plain IDENTITY.
+    const base = `${IDENTITY}\n\n${COMPANY_PROMPT}`
+    const identity = isAdmin ? `${base}\n\n${ADMIN_EDITS_PROMPT}` : base
     const risk = prefixRisk({ identity, brand })
     if (risk) console.error(`[agent] volatile fragment in cached prefix: ${risk}`)
 
@@ -232,6 +236,9 @@ export default async function handler(req, res) {
       // natural chat question, and metered tools are bounded by the same loop
       // budget as everything else.
       web: true,
+      // Leads, sales, email and the team (companyTools.js), 2026-10-18. The
+      // leads and sales half follows isAdmin, exactly as the app's RLS does.
+      company: true,
       onText: delta => send(res, 'text', { delta }),
       onEvent: event => send(res, 'step', event),
     })

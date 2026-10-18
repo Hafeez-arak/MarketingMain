@@ -11,6 +11,8 @@ import {
   readAccounts, readOwnPosts, readAnalyticsFor, readAnalyticsOverview, syncHealth,
 } from './_ownData.js'
 import { liveZernioAnalytics } from './_zernioLive.js'
+import { COMPANY_EXECUTORS } from './_company.js'
+import { isCompanyTool, isCompanyAdminTool } from '../../src/lib/agent/companyTools.js'
 
 // ─── Running a tool ────────────────────────────────────────────────────────
 // The executors behind the definitions in src/lib/agent/tools.js.
@@ -436,6 +438,28 @@ export async function runTool(workspaceId, name, args = {}, session = {}) {
       const bad = await checkIds(workspaceId, ADMIN_OWNERSHIP_CHECKS[name] || [], args || {})
       if (bad) return { ok: false, error: bad, free: true }
       const result = await ADMIN_EXECUTORS[name](workspaceId, args || {}, session)
+      if (result?.error) return { ok: false, error: result.error, free: true }
+      return { ok: true, result, free: true }
+    } catch (err) {
+      return { ok: false, error: err?.message || String(err), free: true }
+    }
+  }
+
+  // ── The company: leads, sales, email, the team ──
+  // The leads and sales half is admin-only, because the app's RLS lets only an
+  // access admin read those tables and the service key skips RLS. Refused
+  // here as well as not offered, for the same reason as the admin belt.
+  if (isCompanyTool(name)) {
+    if (isCompanyAdminTool(name) && session?.isAdmin !== true) {
+      return {
+        ok: false,
+        free: true,
+        error: 'Leads, target accounts and deal outcomes are only visible to administrators. ' +
+               'Tell the person that, and suggest they ask an administrator.',
+      }
+    }
+    try {
+      const result = await COMPANY_EXECUTORS[name](workspaceId, args || {})
       if (result?.error) return { ok: false, error: result.error, free: true }
       return { ok: true, result, free: true }
     } catch (err) {
