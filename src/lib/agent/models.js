@@ -44,12 +44,16 @@ export const MODELS = {
     cacheWrite: 6.25,
     output:    25.00,
   },
+  // $2 / $10, not the $3 / $15 this card used to say: the rise scheduled for
+  // 2026-09-01 was cancelled and the launch price became standard (pricing
+  // page, read 2026-10-18). Research runs from 09-21 to 10-13 were recorded at
+  // the old card, about 1.5× what they really cost.
   'claude-sonnet-5': {
     label: 'Sonnet 5',
-    input:      3.00,
-    cacheRead:  0.30,
-    cacheWrite: 3.75,
-    output:    15.00,
+    input:      2.00,
+    cacheRead:  0.20,
+    cacheWrite: 2.50,
+    output:    10.00,
   },
 }
 
