@@ -14,6 +14,11 @@ const nav = [
   // Admin only for now (2026-10-06): the lead agent reads clients' names,
   // emails and phone numbers. `adminOnly` items and sections are dropped for
   // everyone else at render.
+  // The CEO's page: his numbers, the week's brief, his requests and the
+  // assistant. Admin-only, like the leads and sales it is built from.
+  { section: 'CEO', adminOnly: true, items: [
+    { to: '/ceo', label: 'CEO', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><path d="M3 21h18"/><path d="M5 21V8l7-5 7 5v13"/><path d="M9 21v-6h6v6"/></svg> },
+  ] },
   { section: 'Sales', adminOnly: true, items: [
     { to: '/leads', label: 'Leads', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"/></svg> },
     { to: '/targets', label: 'Targets', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/></svg> },

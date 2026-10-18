@@ -155,6 +155,9 @@ export function AssistantDrawer() {
   }, [ask, location])
 
   if (!activeWorkspaceId) return null
+  // The CEO page has the assistant built in; a second one in the corner would
+  // be two conversations about the same thing.
+  if (location.pathname === '/ceo') return null
 
   return (
     <>

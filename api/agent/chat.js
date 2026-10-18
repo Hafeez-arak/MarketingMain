@@ -6,6 +6,7 @@ import { rememberChat } from './_memory.js'
 import { ADMIN_EDITS_PROMPT } from '../../src/lib/agent/adminTools.js'
 import { COMPANY_PROMPT } from '../../src/lib/agent/companyTools.js'
 import { REQUESTS_PROMPT } from '../../src/lib/agent/requestTools.js'
+import { writeCeoBrief } from './_ceoBrief.js'
 import {
   validateAttachments, userContent, storedAttachments, attachmentNote,
 } from '../../src/lib/agent/attachments.js'
@@ -83,7 +84,44 @@ async function readBody(req) {
   return raw ? JSON.parse(raw) : {}
 }
 
+// ─── The CEO's brief rides on this function ────────────────────────────────
+// Vercel Hobby allows 12 functions and this project is at 12 (see
+// api/_vercelFunctionBudget.test.js), so the brief is two extra doors on the
+// chat endpoint rather than a thirteenth file:
+//
+//   POST { workspace_id, mode: 'ceo_brief' }   an admin pressing "Write a fresh brief"
+//   GET  ?cron=ceo-brief  Bearer CRON_SECRET     Vercel Cron, Sunday 07:00 Riyadh
+//
+// The writer is api/agent/_ceoBrief.js.
+
+const bearerOf = req => String(req.headers?.authorization || '').replace(/^Bearer\s+/i, '')
+
+async function ceoBriefCron(req, res) {
+  const secret = process.env.CRON_SECRET || ''
+  if (!secret || bearerOf(req) !== secret) {
+    res.status(401).json({ ok: false })
+    return
+  }
+  const companies = await db('workspaces?ceo_brief_enabled=eq.true&select=id,name')
+  const results = []
+  // One at a time: each is a paid call, and the cap check before each one is
+  // only meaningful if the previous one has been billed.
+  for (const w of companies || []) {
+    try {
+      const row = await writeCeoBrief(w.id, { trigger: 'schedule' })
+      results.push({ company: w.name, ok: !row.error, error: row.error || '' })
+    } catch (err) {
+      results.push({ company: w.name, ok: false, error: err?.message || String(err) })
+    }
+  }
+  res.status(200).json({ ok: true, results })
+}
+
 export default async function handler(req, res) {
+  if (req.method === 'GET' && String(req.query?.cron || '') === 'ceo-brief') {
+    await ceoBriefCron(req, res)
+    return
+  }
   if (req.method !== 'POST') {
     res.status(405).json({ error: 'POST only.' })
     return
@@ -120,7 +158,7 @@ export default async function handler(req, res) {
   const question = String(body.question || '').trim() ||
     (attachments.length ? 'Take a look at what I attached.' : '')
 
-  if (!workspaceId || !question) {
+  if (!workspaceId || (!question && body.mode !== 'ceo_brief')) {
     res.status(400).json({ error: 'workspace_id and question are both required.' })
     return
   }
@@ -145,6 +183,27 @@ export default async function handler(req, res) {
   // are actually in". See callerIsAdmin for why this is not
   // workspace_members.role.
   const isAdmin = await callerIsAdmin(userId)
+
+  // ── A fresh CEO brief, on request ──
+  // Admins only: it is built from leads and sales, which only admins see.
+  if (body.mode === 'ceo_brief') {
+    if (!isAdmin) {
+      res.status(403).json({ error: 'Only administrators can write the CEO brief.' })
+      return
+    }
+    try {
+      const row = await writeCeoBrief(workspaceId, { trigger: 'manual', userId })
+      if (row.error) {
+        res.status(row.refused ? 402 : 500).json({ error: row.error })
+        return
+      }
+      res.status(200).json({ ok: true, brief: row })
+    } catch (err) {
+      console.error('[agent/ceo-brief]', err)
+      res.status(500).json({ error: err?.message || 'The brief could not be written.' })
+    }
+    return
+  }
 
   res.writeHead(200, {
     'Content-Type': 'text/event-stream; charset=utf-8',

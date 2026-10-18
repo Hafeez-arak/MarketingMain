@@ -72,6 +72,7 @@ export const JOBS = {
   // ── Opus: the output someone acts on ──
   plan:        'claude-opus-5-5',   // decides what the whole run chases
   synthesise:  'claude-opus-5-5',   // writes the brief people read
+  ceo_brief:   'claude-opus-5-5',   // the CEO's weekly one-page brief (2026-10-18)
   chat:        'claude-opus-5-5',   // the assistant answering a real question
   review:      'claude-opus-5-5',   // critiquing a draft before it goes out
   // Explaining a screen of numbers in three sentences. Small in tokens and

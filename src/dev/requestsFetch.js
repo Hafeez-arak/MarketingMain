@@ -36,6 +36,30 @@ const db = {
     { user_id: 'u-hafeez', name: 'hafeez', label: 'Builds the app' },
   ],
 }
+// A made-up brief in the stored shape, for looking at the CEO page.
+const bi = (ar, en) => ({ ar, en })
+db.briefs = [{
+  id: 'b1', period_start: ago(24 * 7), period_end: ago(1), trigger: 'schedule', created_at: ago(5), cost_usd: 0.16,
+  kpis: [
+    { key: 'leads', label: bi('استفسارات جيدة هذا الأسبوع', 'Good enquiries this week'), value: bi('9', '9'), sub: bi('4 الأسبوع الماضي · 6 بلا مسؤول', '4 last week · 6 with no owner'), tone: 'bad' },
+    { key: 'money', label: bi('فرص مفتوحة مع العملاء الرئيسيين', 'Open with key accounts'), value: bi('12.5 مليون ريال', 'SAR 12.5M'), sub: bi('5 مشاريع جديدة هذا الأسبوع', '5 new projects found this week'), tone: 'good' },
+    { key: 'social', label: bi('المتابعون على المنصات', 'Social followers'), value: bi('3,200', '3,200'), sub: bi('+40 مؤخرًا · منشور واحد هذا الأسبوع', '+40 recently · 1 post this week'), tone: 'good' },
+    { key: 'requests', label: bi('طلباتك المفتوحة', 'Your open requests'), value: bi('2', '2'), sub: bi('1 أُنجزت هذا الأسبوع', '1 done this week'), tone: 'good' },
+  ],
+  brief: {
+    headline: bi('أسبوع جيد في الطلبات الواردة وضعيف في المتابعة.', 'A good week for incoming enquiries and a poor one for follow-up.'),
+    needs_you: [
+      { area: 'leads', title: bi('ستة استفسارات جيدة بلا مسؤول.', 'Six good enquiries have no owner.'), action: bi('كلّف شخصًا واحدًا اليوم بمتابعة كل استفسار جديد.', 'Name one person today to own every new enquiry.') },
+      { area: 'money', title: bi('عميل رئيسي بلا طلب منذ ستة أشهر.', 'A key account has not ordered in six months.'), action: bi('اتصل بإدارتهم هذا الأسبوع.', 'Call their management this week.') },
+    ],
+    found: [
+      { area: 'leads', tone: 'bad', text: bi('وصلت استفسارات أكثر من الأسبوع الماضي لكن لم نرد على معظمها.', 'More enquiries came in than last week, but most have not been answered.') },
+      { area: 'money', tone: 'good', text: bi('مشروع مدارس كبير تمت ترسيته ويناسبنا تمامًا.', 'A large schools project was awarded and fits us well.') },
+      { area: 'social', tone: 'watch', text: bi('لينكدإن ينمو رغم قلة النشر، وإنستغرام ثابت.', 'LinkedIn is growing despite little posting; Instagram is flat.') },
+    ],
+    watch: [bi('معرض قادم في الرياض بداية الشهر المقبل.', 'A trade show in Riyadh early next month.')],
+  },
+}]
 db.cap = 30
 db.usage = [
   { surface: 'run', cost_usd: 9.15, created_at: ago(24 * 12) },
@@ -83,6 +107,11 @@ window.fetch = async (input, init = {}) => {
     if (r && patch.status) db.events.push({ id: `e${Date.now()}`, request_id: id, kind: 'status', body: patch.resolution || '', actor: ME.user_id, to_status: patch.status, created_at: new Date().toISOString() })
     return respond(204, null)
   }
+  if (table === 'requests' && method === 'POST') {
+    const row = { id: `r${Date.now()}`, status: 'new', resolution: '', link: '', assigned_to: null, created_at: new Date().toISOString(), updated_at: new Date().toISOString(), closed_at: null, ...JSON.parse(init.body || '{}') }
+    db.requests.unshift(row)
+    return respond(201, row)
+  }
   if (table === 'requests') return respond(200, db.requests)
   if (table === 'request_events' && method === 'POST') {
     const row = JSON.parse(init.body || '{}')
@@ -101,5 +130,6 @@ window.fetch = async (input, init = {}) => {
   if (table === 'agent_usage') return respond(200, db.usage)
   if (table === 'workspaces') return respond(200, { agent_monthly_cap_usd: db.cap })
   if (table === 'agent_cap_log') return respond(200, [])
+  if (table === 'ceo_briefs') return respond(200, MODE === 'empty' ? [] : db.briefs)
   return respond(200, [])
 }
