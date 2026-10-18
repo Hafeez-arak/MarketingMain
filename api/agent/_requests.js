@@ -96,7 +96,8 @@ async function getRequests(workspaceId, args, session) {
   const scope = ['mine', 'assigned_to_me', 'open', 'all'].includes(args?.scope) ? args.scope : 'mine'
   const limit = Math.min(Math.max(Math.floor(Number(args?.limit) || 15), 1), 50)
   const me = encodeURIComponent(session?.userId || '00000000-0000-0000-0000-000000000000')
-  const filter = {
+  const one = String(args?.id || '').trim()
+  const filter = one ? `&id=eq.${encodeURIComponent(one)}` : {
     mine: `&created_by=eq.${me}`,
     assigned_to_me: `&assigned_to=eq.${me}`,
     open: '&status=in.(new,in_progress)',

@@ -73,6 +73,7 @@ export const REQUEST_TOOLS = [
     input_schema: {
       type: 'object',
       properties: {
+        id: { type: 'string', description: 'One request by id, e.g. the one the person opened you from. Ignores scope.' },
         scope: { type: 'string', enum: ['mine', 'assigned_to_me', 'open', 'all'], description: 'mine = asked by the person in this chat (default); assigned_to_me; open = not done or declined; all.' },
         search: { type: 'string', description: 'Words to look for in the title or details.' },
         limit: { type: 'integer', description: 'Max rows. Default 15, max 50.' },
@@ -131,7 +132,8 @@ export const REQUESTS_PROMPT = [
   '  you can make, offer to put it on the Requests board, or file it straight away if',
   '  they asked for it to be done. Then say who will see it.',
   '- "@Name" in a message means they are tagging a colleague: use tag_person and write',
-  '  a brief the colleague can act on alone.',
+  '  a brief the colleague can act on alone. Only people on the tag list can be tagged;',
+  '  never offer to tag anyone else. For anyone else, offer a request on the board.',
   '- When they ask what happened to something they asked for, check get_requests and',
   '  give the real status and note.',
 ].join('\n')

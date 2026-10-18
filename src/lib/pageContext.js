@@ -59,6 +59,8 @@ export function describePage(location) {
  */
 export function describeContextLabel(context) {
   if (!context) return ''
+  // Pinned by "Ask about this" (askAssistant.js), which names the item itself.
+  if (context.label) return context.label
   if (context.draft) return 'the draft you are writing'
   if (context.entity === 'post') return 'the post you are viewing'
   if (context.entity === 'plan') return 'this content plan'

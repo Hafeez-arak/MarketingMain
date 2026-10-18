@@ -86,6 +86,15 @@ describe('get_requests', () => {
     expect(read.path).toMatch(/and=\(or\(title\.ilike\.\*caption\*,body\.ilike\.\*caption\*\),or\(created_by\.eq\.u-shadia,assigned_to\.eq\.u-shadia\)\)/)
   })
 
+  it('one request by id, still inside this company and still behind the visibility rule', async () => {
+    await runTool(WS, 'get_requests', { id: 'r9', scope: 'mine' }, SHADIA)
+    const read = calls.find(c => c.path.startsWith('requests?'))
+    expect(read.path).toContain('id=eq.r9')
+    expect(read.path).not.toContain('created_by=eq.u-shadia&')
+    expect(read.path).toContain(`workspace_id=eq.${WS}`)
+    expect(read.path).toContain('or(created_by.eq.u-shadia,assigned_to.eq.u-shadia)')
+  })
+
   it('an admin asking for "all" sees the board', async () => {
     await runTool(WS, 'get_requests', { scope: 'all' }, CEO)
     const read = calls.find(c => c.path.startsWith('requests?'))

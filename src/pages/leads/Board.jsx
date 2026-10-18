@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { askAssistant, assistantMounted } from '../../lib/askAssistant'
 import { Button, Skeleton, Input, Select, Spinner } from '../../components/ui/index'
 import { fetchLeadsPage, leadsApi } from '../../lib/leads/client'
 import {
@@ -241,6 +242,7 @@ function Row({ lead, open, onToggle, onReview, onSetProject, workspaceId, mailbo
                     {label}
                   </button>
                 ))}
+                <AskAboutLead lead={lead} />
               </div>
               {tab === 'card'
                 ? (lead.approved_at ? <BattleCard lead={lead} workspaceId={workspaceId} /> : <CardWaiting lead={lead} canApprove={canApprove} onAsk={onAsk} />)
@@ -252,6 +254,22 @@ function Row({ lead, open, onToggle, onReview, onSetProject, workspaceId, mailbo
         </div>
       )}
     </li>
+  )
+}
+
+/**
+ * "Ask Arak about this lead": opens the assistant with this lead pinned, so a
+ * question like "is this worth chasing?" is about it. Hidden where there is
+ * no assistant (the sales-only Leads app).
+ */
+function AskAboutLead({ lead }) {
+  if (!assistantMounted()) return null
+  const who = lead.company || lead.name || 'this sender'
+  return (
+    <button type="button" onClick={() => askAssistant({ item: { entity: 'lead', id: lead.id, label: `the lead from ${who}` } })}
+      className="ml-auto text-xs px-2.5 py-1 text-amber-800 hover:text-amber-900 hover:underline focus:outline-none focus-visible:ring-1 focus-visible:ring-amber-400">
+      Ask Arak about this lead
+    </button>
   )
 }
 
