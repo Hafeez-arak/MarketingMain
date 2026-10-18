@@ -7,6 +7,7 @@ import {
   STATUS_LABEL, KIND_LABEL, columnOf, filterRequests,
   fetchRequests, fetchEvents, fetchPeople, fetchTaggable, updateRequest, addComment,
 } from '../../lib/requests'
+import { askAssistant, assistantMounted } from '../../lib/askAssistant'
 
 // ─── Requests ──────────────────────────────────────────────────────────────
 // 2026-10-18, PR 2 of docs/CEO-ASSISTANT-PLAN.md. Where "this isn't good,
@@ -219,6 +220,12 @@ function RequestPanel({ request: r, name, taggable, canEdit, userId, workspaceId
             <p className="eyebrow mb-1">Brief</p>
             <p className="text-sm text-text whitespace-pre-wrap leading-relaxed">{r.brief}</p>
           </div>
+        )}
+        {assistantMounted() && (
+          <button type="button" onClick={() => { onClose(); askAssistant({ item: { entity: 'request', id: r.id, label: `the request "${r.title}"` } }) }}
+            className="text-xs text-amber-800 hover:underline">
+            Ask Arak about this request
+          </button>
         )}
         {r.link && (
           <p className="text-xs"><span className="text-text-tertiary">Result: </span>

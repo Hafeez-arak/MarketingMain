@@ -122,10 +122,13 @@ export function buildRequest({
  */
 export function contextPreamble(context) {
   if (!context) return ''
-  const { route = '', entity = '', id = '', draft = null } = context
+  const { route = '', entity = '', id = '', draft = null, label = '' } = context
   const lines = []
   if (route) lines.push(`The person is on ${route}.`)
   if (entity && id) lines.push(`They are looking at ${entity} ${id}.`)
+  // From "Ask about this": "this" in their question means that item. A lead
+  // is read with get_lead, a request with get_requests.
+  if (label && entity && id) lines.push(`They opened you from ${String(label).slice(0, 120)}, so "this" means ${entity} ${id}.`)
   if (draft) {
     lines.push('They are composing this draft (not saved yet):')
     lines.push(JSON.stringify({

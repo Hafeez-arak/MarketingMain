@@ -8,6 +8,7 @@ import { AppLayout } from '../components/layout/AppLayout'
 import { ErrorBoundary } from '../components/ErrorBoundary'
 import { Requests } from '../pages/requests/index'
 import { Settings } from '../pages/settings/index'
+import { AskBox } from '../pages/dashboard/AskBox'
 import AskInput from '../components/AskInput'
 import { useTaggable } from '../lib/useTaggable'
 import '../index.css'
@@ -18,6 +19,7 @@ import '../index.css'
 //   /dev/requests.html?mode=empty|fail|hang   the empty, failed and loading states
 //   /dev/requests.html?page=/ask          the chat box with the @ picker
 //   /dev/requests.html?page=/settings     Your account and AI spending
+//   /dev/requests.html?page=/             the dashboard's Ask Arak box
 // Vite only builds index.html, so this never reaches production.
 
 const params = new URLSearchParams(window.location.search)
@@ -52,6 +54,7 @@ export function Harness() {
                 <Route path="/requests" element={<Requests />} />
                 <Route path="/ask" element={<AskDemo />} />
                 <Route path="/settings" element={<Settings />} />
+                <Route path="/" element={<AskBox />} />
               </Routes>
             </ErrorBoundary>
           </AppLayout>

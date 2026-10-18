@@ -11,6 +11,7 @@ import { useFollowBottom } from '../lib/useFollowBottom'
 import { AttachButton, AttachmentTray, TurnAttachments } from './ChatAttachments'
 import { useChatAttachments } from '../lib/useChatAttachments'
 import { useTaggable } from '../lib/useTaggable'
+import { ASK_EVENT } from '../lib/askAssistant'
 
 // ─── The assistant, on every page ──────────────────────────────────────────
 // AGENT.md §5a. A drawer that opens anywhere and knows what you are looking
@@ -75,13 +76,42 @@ export function AssistantDrawer() {
   const boxRef = useRef(null)
   const { onScroll, following, jumpToLatest } = useFollowBottom(boxRef, turns, `${open}:${turns.length}`)
 
+  // An item pinned by "Ask about this" (askAssistant.js): what "this" means
+  // until the drawer closes, whatever page is underneath.
+  const [pinned, setPinned] = useState(null)
+
   // Recomputed per render from the router, so the descriptor is always for the
   // page actually on screen rather than the one the drawer opened on.
-  const context = useMemo(() => describePage(location), [location])
+  const context = useMemo(() => {
+    const page = describePage(location)
+    return pinned ? { ...page, entity: pinned.entity, id: pinned.id, label: pinned.label } : page
+  }, [location, pinned])
   const contextLabel = describeContextLabel(context)
   const suggestions = useMemo(() => suggestionsFor(context), [context])
 
   useEffect(() => { if (open) input.current?.focus() }, [open])
+
+  // Closing lets go of the pinned item: the next open is about the page again.
+  const close = useCallback(() => { setOpen(false); setPinned(null) }, [])
+
+  // ── Asked from elsewhere: the dashboard box, "Ask about this" ──
+  const sendRef = useRef(null)
+  useEffect(() => {
+    window.__arakAssistant = true
+    const onAsk = e => {
+      const { question: q = '', item = null, send: now = false } = e.detail || {}
+      setPinned(item?.entity && item?.id ? item : null)
+      setOpen(true)
+      if (now && q.trim()) {
+        // After the pin has rendered, so the question carries it.
+        setTimeout(() => sendRef.current?.(q, item), 0)
+      } else if (q) {
+        setQuestion(q)
+      }
+    }
+    window.addEventListener(ASK_EVENT, onAsk)
+    return () => { window.removeEventListener(ASK_EVENT, onAsk); window.__arakAssistant = false }
+  }, [])
 
   // Cmd/Ctrl-K opens it from anywhere, Escape closes. The whole point is
   // reachability, and a button you have to find with the mouse is less
@@ -96,12 +126,12 @@ export function AssistantDrawer() {
         // and this one listens on window, so both would fire and a single
         // press would close the popup AND the drawer behind it. The popup is
         // the thing in front; it gets the key.
-        setOpen(false)
+        close()
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [open, historyOpen])
+  }, [open, historyOpen, close])
 
   // A suggestion chip passes its own text and never carries the pending files:
   // they belong to what the person was composing, not to a canned question.
@@ -114,6 +144,15 @@ export function AssistantDrawer() {
     if (!chip) { setQuestion(''); files.clear() }
     ask(q, context, attached)
   }, [question, ask, context, files])
+
+  // For a question sent from elsewhere: built from the item it came with, not
+  // from `context`, which may not have re-rendered with the pin yet.
+  useEffect(() => {
+    sendRef.current = (q, item) => {
+      const page = describePage(location)
+      ask(q, item?.entity ? { ...page, entity: item.entity, id: item.id, label: item.label } : page, [])
+    }
+  }, [ask, location])
 
   if (!activeWorkspaceId) return null
 
@@ -136,7 +175,7 @@ export function AssistantDrawer() {
         <div className="fixed inset-0 z-50 flex justify-end">
           {/* Click-away rather than a modal: the person is meant to keep
               working with this open, so it must never trap focus. */}
-          <div className="flex-1 bg-stone-900/10" onClick={() => setOpen(false)} />
+          <div className="flex-1 bg-stone-900/10" onClick={close} />
 
           <aside className="w-full max-w-md bg-white h-full shadow-dropdown flex flex-col border-l border-border">
             <header className="px-4 py-3 border-b border-border-light flex items-start gap-2">
@@ -154,7 +193,7 @@ export function AssistantDrawer() {
                   New
                 </button>
               ) : null}
-              <button onClick={() => setOpen(false)} aria-label="Close"
+              <button onClick={close} aria-label="Close"
                 className="w-7 h-7 flex items-center justify-center text-text-tertiary border border-transparent hover:border-border hover:text-text transition-colors">
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>
               </button>
