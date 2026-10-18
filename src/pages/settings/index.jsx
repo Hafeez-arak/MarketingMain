@@ -92,6 +92,8 @@ export function Settings() {
     <div className="max-w-3xl space-y-4">
       <PageHeader title="Settings" subtitle="Companies, workspace preferences, and account details." />
 
+      <AccountCard email={user?.email} />
+
       <Card className="overflow-hidden">
         <div className="px-5 py-4 border-b border-border flex items-center justify-between gap-4">
           <div>
@@ -268,5 +270,64 @@ export function Settings() {
         </div>
       )}
     </div>
+  )
+}
+
+// ─── Your account ──────────────────────────────────────────────────────────
+// Changing the password of whoever is signed in. Added 2026-10-18 when a
+// login that more than one person had been using was handed back to its
+// owner: the app had no way to change a password, so "change it" meant a
+// trip to the Supabase dashboard.
+function AccountCard({ email }) {
+  const [open, setOpen] = useState(false)
+  const [password, setPassword] = useState('')
+  const [confirm, setConfirm] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [done, setDone] = useState(false)
+
+  function reset() { setPassword(''); setConfirm(''); setError('') }
+
+  async function save() {
+    setError(''); setDone(false)
+    if (password.length < 8) { setError('Use at least 8 characters.'); return }
+    if (password !== confirm) { setError('The two passwords do not match.'); return }
+    setBusy(true)
+    const { error: e } = await supabase.auth.updateUser({ password })
+    setBusy(false)
+    if (e) { setError(e.message); return }
+    reset(); setOpen(false); setDone(true)
+  }
+
+  const input = 'w-full rounded-xl border border-border bg-white text-text text-sm px-3.5 py-2 focus:outline-none focus:ring-2 focus:ring-amber-400 transition-all'
+
+  return (
+    <Card className="overflow-hidden">
+      <div className="px-5 py-4 flex items-center justify-between gap-4">
+        <div className="min-w-0">
+          <h3 className="font-semibold text-text text-sm">Your account</h3>
+          <p className="text-xs text-text-tertiary mt-0.5 truncate">Signed in as {email || '…'}</p>
+          {done && <p className="text-xs text-green-700 mt-1">Password changed. Use the new one next time you sign in.</p>}
+        </div>
+        {!open && (
+          <Button size="sm" variant="secondary" onClick={() => { reset(); setDone(false); setOpen(true) }}>Change password</Button>
+        )}
+      </div>
+      {open && (
+        <div className="px-5 py-4 border-t border-border bg-amber-50/40 space-y-2">
+          <input type="password" autoComplete="new-password" autoFocus value={password}
+            onChange={e => setPassword(e.target.value)} placeholder="New password (at least 8 characters)" className={input} />
+          <input type="password" autoComplete="new-password" value={confirm}
+            onChange={e => setConfirm(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') setOpen(false) }}
+            placeholder="Type it again" className={input} />
+          {error && <p className="text-xs text-red-600">{error}</p>}
+          <div className="flex gap-2 pt-1">
+            <Button size="sm" onClick={save} disabled={busy || !password}>{busy ? 'Saving…' : 'Save password'}</Button>
+            <Button size="sm" variant="secondary" onClick={() => setOpen(false)}>Cancel</Button>
+          </div>
+        </div>
+      )}
+    </Card>
   )
 }

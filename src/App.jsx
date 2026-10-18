@@ -13,6 +13,7 @@ import { fetchWorkspaceWebhooks } from './lib/workspaceWebhooks'
 import { Login } from './pages/auth/Login'
 import { Signup } from './pages/auth/Signup'
 import { Onboarding } from './pages/auth/Onboarding'
+import { ResetPassword } from './pages/auth/ResetPassword'
 
 import Dashboard from './pages/Dashboard'
 import { CampaignPlanner } from './pages/campaigns/CampaignPlanner'
@@ -190,6 +191,7 @@ export default function App() {
         <Route path="/login"      element={<Login />} />
         <Route path="/signup"     element={<Signup />} />
         <Route path="/onboarding" element={<Onboarding />} />
+        <Route path="/reset-password" element={<ResetPassword />} />
         <Route path="/*"          element={<ProtectedApp />} />
       </Routes>
     </AuthProvider>
