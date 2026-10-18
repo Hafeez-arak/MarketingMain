@@ -5,6 +5,7 @@ import { contextPreamble } from '../../src/lib/agent/prompt.js'
 import { rememberChat } from './_memory.js'
 import { ADMIN_EDITS_PROMPT } from '../../src/lib/agent/adminTools.js'
 import { COMPANY_PROMPT } from '../../src/lib/agent/companyTools.js'
+import { REQUESTS_PROMPT } from '../../src/lib/agent/requestTools.js'
 import {
   validateAttachments, userContent, storedAttachments, attachmentNote,
 } from '../../src/lib/agent/attachments.js'
@@ -163,16 +164,21 @@ export default async function handler(req, res) {
     if (threadId) {
       const rows = await db(
         `research_chats?id=eq.${encodeURIComponent(threadId)}` +
-        `&workspace_id=eq.${encodeURIComponent(workspaceId)}&select=id`,
+        `&workspace_id=eq.${encodeURIComponent(workspaceId)}&select=id,user_id`,
       )
       // Scoped by workspace as well as by id: a thread id from another
       // workspace must not attach here, and the id alone would let it.
-      chatId = rows?.[0]?.id || ''
+      // And by owner (2026-10-18): conversations are private, so someone
+      // else's thread id starts a new conversation rather than continuing
+      // theirs. Ownerless threads from before then are admins' to continue.
+      const row = rows?.[0]
+      const mine = row && (row.user_id === userId || (!row.user_id && isAdmin))
+      chatId = mine ? row.id : ''
     }
     if (!chatId) {
       const created = await db('research_chats', {
         method: 'POST',
-        body: { workspace_id: workspaceId, title: question.slice(0, 80) },
+        body: { workspace_id: workspaceId, user_id: userId, title: question.slice(0, 80) },
         prefer: 'return=representation',
       })
       chatId = created?.[0]?.id || ''
@@ -201,7 +207,7 @@ export default async function handler(req, res) {
     // direct-edit rules. Stable text only — see ADMIN_EDITS_PROMPT.
     // COMPANY_PROMPT widens the chat to the whole company and to general
     // business advice; the research run keeps the plain IDENTITY.
-    const base = `${IDENTITY}\n\n${COMPANY_PROMPT}`
+    const base = `${IDENTITY}\n\n${COMPANY_PROMPT}\n\n${REQUESTS_PROMPT}`
     const identity = isAdmin ? `${base}\n\n${ADMIN_EDITS_PROMPT}` : base
     const risk = prefixRisk({ identity, brand })
     if (risk) console.error(`[agent] volatile fragment in cached prefix: ${risk}`)

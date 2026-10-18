@@ -11,6 +11,7 @@ import { AgentSteering } from '../../components/AgentSteering'
 import PastConversations from '../../components/PastConversations'
 import { AgentMarkdown } from '../../components/AgentMarkdown'
 import AskInput from '../../components/AskInput'
+import { useTaggable } from '../../lib/useTaggable'
 import { JumpToLatest } from '../../components/AssistantDrawer'
 import { useFollowBottom } from '../../lib/useFollowBottom'
 import { AttachButton, AttachmentTray, TurnAttachments } from '../../components/ChatAttachments'
@@ -45,6 +46,7 @@ function ToolTrace({ steps }) {
 export default function AgentPage() {
   const location = useLocation()
   const { activeWorkspaceId, activeWorkspace, accessToken, isAccessAdmin } = useAuth()
+  const taggable = useTaggable(activeWorkspaceId)
   const { turns, busy, ask, reset, stop, ready, threadId, openThread } = useAgentChat()
   const files = useChatAttachments()
   const [question, setQuestion] = useState('')
@@ -264,7 +266,8 @@ export default function AgentPage() {
               onSubmit={send}
               onPaste={files.onPaste}
               canSubmitEmpty={files.items.length > 0}
-              placeholder="Ask anything about this brand…"
+              mentions={taggable}
+              placeholder="Ask anything about the company, or @ to tag someone…"
               disabled={!ready}
             />
             {busy ? (

@@ -1,4 +1,5 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { mentionQuery, matchMentions, insertMention } from '../lib/mentions'
 
 // ─── The box you type the question into ────────────────────────────────────
 //
@@ -84,9 +85,33 @@ export default function AskInput({
   // a message that is only a file may be sent with Enter.
   onPaste,
   canSubmitEmpty = false,
+  // People who can be @-tagged (useTaggable). Typing "@" opens a picker; the
+  // assistant reads "@Shadia" in the message and files the request.
+  mentions = [],
 }) {
   const own = useRef(null)
   const ref = inputRef || own
+  const [picker, setPicker] = useState(null) // { start, query, index }
+  const matches = picker ? matchMentions(mentions, picker.query) : []
+
+  function handleChange(e) {
+    const text = e.target.value
+    onChange(text)
+    const q = mentions.length ? mentionQuery(text, e.target.selectionStart ?? text.length) : null
+    setPicker(q ? { ...q, index: 0 } : null)
+  }
+
+  function choose(person) {
+    const el = ref.current
+    const caret = el?.selectionStart ?? value.length
+    const next = insertMention(value, picker.start, caret, person.name)
+    onChange(next.text)
+    setPicker(null)
+    requestAnimationFrame(() => {
+      el?.focus()
+      el?.setSelectionRange(next.caret, next.caret)
+    })
+  }
 
   // On every value change, not just on keystrokes. The value is also set from
   // outside — a suggestion chip filling the box, `send()` clearing it — and a
@@ -102,6 +127,21 @@ export default function AskInput({
   }, [ref])
 
   function handleKeyDown(e) {
+    // The picker takes the arrow keys, Enter, Tab and Escape while it is open.
+    if (picker && matches.length) {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault()
+        const step = e.key === 'ArrowDown' ? 1 : -1
+        setPicker(p => ({ ...p, index: (p.index + step + matches.length) % matches.length }))
+        return
+      }
+      if ((e.key === 'Enter' && !e.shiftKey) || e.key === 'Tab') {
+        e.preventDefault()
+        choose(matches[Math.min(picker.index, matches.length - 1)])
+        return
+      }
+      if (e.key === 'Escape') { e.preventDefault(); setPicker(null); return }
+    }
     if (e.key !== 'Enter' || e.shiftKey) return
     // A composition session is an IME mid-word — Arabic, Chinese, anything
     // with a candidate window. Enter there commits the candidate and must not
@@ -114,25 +154,43 @@ export default function AskInput({
   }
 
   return (
-    <textarea
-      ref={ref}
-      rows={MIN_ROWS}
-      value={value}
-      onChange={e => onChange(e.target.value)}
-      onKeyDown={handleKeyDown}
-      onPaste={onPaste}
-      placeholder={placeholder}
-      disabled={disabled}
-      autoFocus={autoFocus}
-      // `resize-none` because the box sizes itself — a drag handle that fights
-      // the auto-grow would make the height jump on the next keystroke.
-      // `break-words` so a pasted URL wraps instead of forcing a sideways
-      // scrollbar, which is the exact failure this component replaces.
-      className={
-        'flex-1 text-sm px-3 py-2 border border-border bg-white placeholder-text-tertiary resize-none break-words ' +
-        'leading-5 focus:outline-none focus:ring-1 focus:ring-amber-700 focus:border-amber-700 disabled:bg-surface-subtle ' +
-        className
-      }
-    />
+    <div className="relative flex-1 flex min-w-0">
+      <textarea
+        ref={ref}
+        rows={MIN_ROWS}
+        value={value}
+        onChange={handleChange}
+        onBlur={() => setTimeout(() => setPicker(null), 120)}
+        onKeyDown={handleKeyDown}
+        onPaste={onPaste}
+        placeholder={placeholder}
+        disabled={disabled}
+        autoFocus={autoFocus}
+        // `resize-none` because the box sizes itself — a drag handle that fights
+        // the auto-grow would make the height jump on the next keystroke.
+        // `break-words` so a pasted URL wraps instead of forcing a sideways
+        // scrollbar, which is the exact failure this component replaces.
+        className={
+          'w-full text-sm px-3 py-2 border border-border bg-white placeholder-text-tertiary resize-none break-words ' +
+          'leading-5 focus:outline-none focus:ring-1 focus:ring-amber-700 focus:border-amber-700 disabled:bg-surface-subtle ' +
+          className
+        }
+      />
+      {picker && matches.length > 0 && (
+        <ul role="listbox" className="absolute left-0 bottom-full mb-1 w-60 bg-white border border-border shadow-dropdown z-50 py-1">
+          <li className="px-3 pt-1 pb-1.5 text-[10px] uppercase tracking-wide text-text-tertiary">Tag someone</li>
+          {matches.map((p, i) => (
+            <li key={p.user_id || p.name}>
+              <button type="button" role="option" aria-selected={i === picker.index}
+                onMouseDown={e => { e.preventDefault(); choose(p) }}
+                className={`w-full text-left px-3 py-1.5 text-sm flex items-baseline gap-2 ${i === picker.index ? 'bg-amber-50 text-text' : 'text-text-secondary hover:bg-surface-subtle'}`}>
+                <span className="font-medium capitalize">{p.name}</span>
+                {p.label && <span className="text-[11px] text-text-tertiary">{p.label}</span>}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   )
 }

@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import { useApp } from '../../store/app'
 import { useAuth } from '../../store/auth'
 import { timeAgo } from '../../lib/utils'
+import { useInbox } from '../../lib/useInbox'
 
 const titles = {
   '/': 'Dashboard', '/brand-brain': 'Brand Brain', '/campaigns': 'Content Planning', '/campaigns/plan': 'Content Planning',
@@ -13,7 +14,7 @@ const titles = {
   '/social/linkedin': 'LinkedIn',
   '/social/approvals': 'Post Queue',
   '/analytics/report': 'Performance Report', '/insights/report': 'Research Brief', '/insights/business': 'Business View',
-  '/settings': 'Settings', '/team': 'Team & Access',
+  '/settings': 'Settings', '/team': 'Team & Access', '/requests': 'Requests',
 }
 
 // Sub-pages reached via a flow (not a direct sidebar link) get a back button
@@ -27,13 +28,28 @@ export function Topbar() {
   const location = useLocation()
   const navigate  = useNavigate()
   const { state, dispatch } = useApp()
-  const { activeWorkspace, signOut } = useAuth()
+  const { activeWorkspace, signOut, user, workspaces, activeWorkspaceId, switchWorkspace } = useAuth()
+  // Saved notifications (requests, tags, comments) from the database, on top
+  // of the in-memory ones the publish watcher still raises.
+  const inbox = useInbox(user?.id)
   const [showNotifs, setShowNotifs] = useState(false)
   const [showAccount, setShowAccount] = useState(false)
 
   const title      = titles[location.pathname] || 'Arak Content Studio'
   const backTarget = BACK_TARGETS[location.pathname]
-  const unread = state.notifications.filter(n => !n.read).length
+  const unread = state.notifications.filter(n => !n.read).length + inbox.unread
+  const total = state.notifications.length + inbox.items.length
+
+  function openSaved(n) {
+    inbox.read([n.id])
+    setShowNotifs(false)
+    // A notification from another company switches to it first, or the
+    // request would open on a board that cannot see it.
+    if (n.workspace_id && n.workspace_id !== activeWorkspaceId && workspaces.some(w => w.id === n.workspace_id)) {
+      switchWorkspace(n.workspace_id)
+    }
+    if (n.link) navigate(n.link)
+  }
 
   return (
     <header
@@ -75,16 +91,29 @@ export function Topbar() {
             <div className="absolute right-0 top-full mt-1 w-80 bg-white border border-border shadow-dropdown z-50 animate-fade-scale">
               <div className="flex items-center justify-between px-4 py-2.5 border-b border-border bg-surface-subtle">
                 <p className="eyebrow">Notifications</p>
-                {state.notifications.length > 0 && (
-                  <button onClick={() => dispatch({type:'CLEAR_NOTIFICATIONS'})} className="text-[11px] text-text-tertiary hover:text-text transition-colors">Clear all</button>
+                {total > 0 && (
+                  <button onClick={() => { inbox.read(); dispatch({type:'CLEAR_NOTIFICATIONS'}) }} className="text-[11px] text-text-tertiary hover:text-text transition-colors">Mark all read</button>
                 )}
               </div>
-              {state.notifications.length === 0 ? (
+              {total === 0 ? (
                 <div className="py-8 text-center">
                   <p className="text-xs text-text-tertiary">All caught up</p>
                 </div>
               ) : (
-                <ul className="max-h-72 overflow-y-auto scrollbar-thin divide-y divide-border">
+                <ul className="max-h-80 overflow-y-auto scrollbar-thin divide-y divide-border">
+                  {inbox.items.map(n => (
+                    <li key={n.id}>
+                      <button onClick={() => openSaved(n)}
+                        className={`w-full text-left flex items-start gap-2.5 px-4 py-3 hover:bg-surface-subtle transition-colors ${n.read_at ? '' : 'bg-amber-50/50'}`}>
+                        <div className={`w-1.5 h-1.5 rounded-full mt-1.5 flex-shrink-0 ${n.read_at ? 'bg-transparent' : 'bg-amber-700'}`} />
+                        <div className="flex-1 min-w-0">
+                          <p className={`text-xs leading-relaxed ${n.read_at ? 'text-text-secondary' : 'text-text font-medium'}`}>{n.title}</p>
+                          {n.body && <p className="text-[11px] text-text-tertiary leading-relaxed mt-0.5 line-clamp-2">{n.body}</p>}
+                          <p className="text-[10px] text-text-tertiary mt-1">{timeAgo(n.created_at)}</p>
+                        </div>
+                      </button>
+                    </li>
+                  ))}
                   {state.notifications.map(n => (
                     <li key={n.id} className="flex items-start gap-2.5 px-4 py-3 hover:bg-surface-subtle transition-colors">
                       <div className="w-1 h-1 rounded-full bg-amber-700 mt-2 flex-shrink-0" />

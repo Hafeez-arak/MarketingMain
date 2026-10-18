@@ -12,6 +12,8 @@ import {
 } from './_ownData.js'
 import { liveZernioAnalytics } from './_zernioLive.js'
 import { COMPANY_EXECUTORS } from './_company.js'
+import { REQUEST_EXECUTORS } from './_requests.js'
+import { isRequestTool } from '../../src/lib/agent/requestTools.js'
 import { isCompanyTool, isCompanyAdminTool } from '../../src/lib/agent/companyTools.js'
 
 // ─── Running a tool ────────────────────────────────────────────────────────
@@ -460,6 +462,23 @@ export async function runTool(workspaceId, name, args = {}, session = {}) {
     }
     try {
       const result = await COMPANY_EXECUTORS[name](workspaceId, args || {})
+      if (result?.error) return { ok: false, error: result.error, free: true }
+      return { ok: true, result, free: true }
+    } catch (err) {
+      return { ok: false, error: err?.message || String(err), free: true }
+    }
+  }
+
+  // ── Requests and tagging ──
+  // The session decides whose requests "mine" means and who may move one;
+  // see _requests.js. The research run has no session and is never offered
+  // these.
+  if (isRequestTool(name)) {
+    if (!session?.userId) {
+      return { ok: false, free: true, error: 'Requests can only be made from a signed-in chat.' }
+    }
+    try {
+      const result = await REQUEST_EXECUTORS[name](workspaceId, args || {}, session)
       if (result?.error) return { ok: false, error: result.error, free: true }
       return { ok: true, result, free: true }
     } catch (err) {
