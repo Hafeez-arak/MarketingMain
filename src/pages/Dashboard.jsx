@@ -15,7 +15,6 @@ import { AnalyticsOverview, AnalyticsOverviewSkeleton, PlatformPicker } from './
 import { ResearchCard } from './dashboard/Research'
 import { WebsiteCard } from './dashboard/Website'
 import { CreatePostDialog } from './dashboard/CreatePost'
-import { AskBox } from './dashboard/AskBox'
 
 // ─── Dashboard ───────────────────────────────────────────────────────────
 //
@@ -129,8 +128,6 @@ export default function Dashboard() {
       </PageHeader>
 
       <CreatePostDialog open={creating} onClose={() => setCreating(false)} />
-
-      <AskBox />
 
       {nothingConnected ? (
         <Card className="p-6 border-dashed bg-surface-muted">

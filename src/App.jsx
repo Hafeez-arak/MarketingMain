@@ -38,6 +38,7 @@ import { Approvals as PostApprovals } from './pages/social/Approvals'
 import AutoReplies from './pages/social/AutoReplies'
 import { Settings } from './pages/settings/index'
 import { Requests } from './pages/requests/index'
+import { CeoPage } from './pages/ceo/index'
 import { Access } from './pages/settings/Access'
 import { BrandBrain } from './pages/settings/BrandBrain'
 import { CreativeStudio } from './pages/studio/index'
@@ -172,6 +173,7 @@ function ProtectedApp() {
             <Route path="/social/:platform"      element={<SocialPlatform />} />
             <Route path="/settings"             element={<Settings />} />
             <Route path="/requests"             element={<Requests />} />
+            <Route path="/ceo"                  element={<AdminOnly><CeoPage /></AdminOnly>} />
             {/* The Integrations page was removed; old links land on the
                 dashboard instead of the not-found page. */}
             <Route path="/integrations"          element={<Navigate to="/" replace />} />
@@ -184,6 +186,14 @@ function ProtectedApp() {
       </AppProvider>
     </RequireAuth>
   )
+}
+
+// The CEO page is built from leads and sales, which only admins see; the
+// database refuses the brief to anyone else anyway (ceo_briefs RLS), and this
+// keeps a member from landing on an empty page.
+function AdminOnly({ children }) {
+  const { isAccessAdmin } = useAuth()
+  return isAccessAdmin ? children : <Navigate to="/" replace />
 }
 
 export default function App() {
