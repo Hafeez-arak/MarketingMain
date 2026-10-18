@@ -2221,7 +2221,7 @@ Turns a stated goal + date range into a full slate of dated, platform-specific p
 
 It still writes no `plan_ideas` rows. The parsed posts are parked verbatim on the plan row because turning them into ideas means the app's `normalizeAiIdea()` + `distributeDates()` — date spreading, past-date replacement, per-platform format defaults — which are unit tested on that side. A copy here would drift.
 
-Model: Opus 5 with adaptive thinking — this is the one call in the whole pipeline that genuinely needs the extra reasoning (whole-month coherence, holiday judgment), unlike per-post Sonnet calls. Priced the same as the Opus 4.8 it replaces, so staying on Opus here costs nothing. `max_tokens` is 32000, not 16000: it budgets thinking and response text together, and a truncated plan surfaces as a JSON parse error rather than an obviously-short plan.
+Model: Opus 5.5 with adaptive thinking — this is the one call in the whole pipeline that genuinely needs the extra reasoning (whole-month coherence, holiday judgment), unlike per-post Sonnet calls. Opus 5.5 is cheaper than the Opus 5 it replaced ($4/$20 per MTok), and its effort is set to high explicitly because it defaults to medium. `max_tokens` is 32000, not 16000: it budgets thinking and response text together, and a truncated plan surfaces as a JSON parse error rather than an obviously-short plan.
 
 **This call is SLOW, and that is the thing to remember about it.** Measured 2026-09-20 on a trimmed payload: 212s, 17k output tokens of which 8k were thinking. A real month — carrying past ideas, the latest research, the agent memory and recent posts — runs longer. It is non-streaming, so n8n waits for headers that only arrive once generation has finished, and the node therefore carries an explicit 600s timeout and NO retry. Both matter: n8n's unset default is 300s, and three retries at 300s used to consume the app's entire 15-minute wait, so the browser gave up and blanked the row a moment before n8n saved the reason. If 600s ever stops being enough, make this call streaming — do not raise the timeout past the app's 900s, or the error lands where nobody is reading."""
 
@@ -2557,7 +2557,7 @@ if (response.content && Array.isArray(response.content)) {
   text = response.completion || response.text || '';
 }
 
-// max_tokens budgets thinking AND response text together on Opus 5, so a
+// max_tokens budgets thinking AND response text together on Opus 5.5, so a
 // plan that ran long truncates mid-array and fails as a JSON parse error —
 // which reads like a model bug rather than a budget one. Name it before the
 // parse, where the actual cause is still known.
@@ -3285,7 +3285,7 @@ def build_campaign_planner() -> dict:
     ASYNC since 2026-09-20, and that is the whole point of the shape.
 
     It used to respond LAST, with the ideas in the body, and the browser wrote
-    them into plan_ideas itself. One Opus 5 call with adaptive thinking for a
+    them into plan_ideas itself. One Opus 5.5 call with adaptive thinking for a
     whole month routinely outlives the serverless proxy in front of this, so
     the request 504'd — and since the write lived on the browser side, a
     finished plan had nowhere to land. n8n completed, answered a socket nobody
@@ -3321,17 +3321,18 @@ def build_campaign_planner() -> dict:
                 },
                 "sendBody": True,
                 "specifyBody": "json",
-                # Opus 5, not Sonnet: this is one call per MONTHLY plan, so its
+                # Opus 5.5, not Sonnet: this is one call per MONTHLY plan, so its
                 # spend is rounding error next to the per-post Sonnet calls and
                 # the image/video generation it triggers — and it is the one
                 # genuinely reasoning-heavy job here (whole-month coherence,
                 # occasion judgement, pillar variety). A weak plan wastes every
-                # downstream render. Opus 5 is priced identically to the 4.8 it
-                # replaces ($5/$25 per MTok), so the upgrade costs nothing.
+                # downstream render. Opus 5.5 ($4/$20 per MTok) is cheaper than
+                # the Opus 5 it replaced. Effort is set to "high" explicitly:
+                # Opus 5.5 defaults to "medium", one level below Opus 5.
                 #
                 # max_tokens 16000 -> 32000 for two compounding reasons: on
-                # Opus 5 thinking is on by default and max_tokens caps thinking
-                # PLUS response text together, and Opus 5 writes longer output
+                # Opus 5.5 thinking is always on and max_tokens caps thinking
+                # PLUS response text together, and the 5-family writes longer output
                 # than 4.8 did. At 16000 the plan JSON could truncate mid-array
                 # — which fails as a JSON parse error downstream, not as an
                 # obviously-truncated plan. Check stop_reason is not

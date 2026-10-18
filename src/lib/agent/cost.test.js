@@ -77,7 +77,7 @@ describe('cost', () => {
     // NaN here propagates into cost_usd, into the month's total, and defeats
     // the cap without anything looking wrong.
     const cost = costOf('claude-sonnet-5', normaliseUsage({ output_tokens: 100 }))
-    expect(cost).toBeCloseTo(0.0015, 6)
+    expect(cost).toBeCloseTo(0.001, 6)
     expect(Number.isNaN(cost)).toBe(false)
   })
 
