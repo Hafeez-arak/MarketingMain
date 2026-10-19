@@ -37,11 +37,13 @@ async function call(url, init) {
 
 // ─── Firecrawl ─────────────────────────────────────────────────────────────
 
-async function firecrawlSearch(query, { limit = 5 } = {}) {
+// `recent`: the past month only. Used by the source sweep (_sweep.js), which
+// wants this month's announcements from a site, not its archive.
+async function firecrawlSearch(query, { limit = 5, recent = false } = {}) {
   const out = await call('https://api.firecrawl.dev/v2/search', {
     method: 'POST',
     headers: { Authorization: `Bearer ${KEY('firecrawl')}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ query, limit }),
+    body: JSON.stringify({ query, limit, ...(recent ? { tbs: 'qdr:m' } : {}) }),
   })
   if (!out.ok) return out
   const web = out.body?.data?.web || out.body?.data || []
@@ -66,11 +68,21 @@ async function firecrawlRead(url) {
 
 // ─── Tavily ────────────────────────────────────────────────────────────────
 
-async function tavilySearch(query, { limit = 5 } = {}) {
+async function tavilySearch(query, { limit = 5, recent = false } = {}) {
+  // Tavily answers 400 to a query that is nothing but "site:x" — the source
+  // sweep sends those for an Instagram account. Its own include_domains says
+  // the same thing; the account name becomes the words.
+  const site = /^site:(\S+)\s*(.*)$/.exec(String(query).trim())
+  const domain = site ? site[1].split('/')[0] : ''
+  const words = site ? (site[2] || site[1].split('/').slice(1).join(' ') || domain) : query
   const out = await call('https://api.tavily.com/search', {
     method: 'POST',
     headers: { Authorization: `Bearer ${KEY('tavily')}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ query, max_results: limit, search_depth: 'basic' }),
+    body: JSON.stringify({
+      query: words, max_results: limit, search_depth: 'basic',
+      ...(domain ? { include_domains: [domain] } : {}),
+      ...(recent ? { time_range: 'month' } : {}),
+    }),
   })
   if (!out.ok) return out
   return { ...out, results: (out.body?.results || []).map(r => normaliseResult(r, 'tavily')) }
@@ -103,7 +115,14 @@ const IMPL = {
  * @param {Array} args
  */
 async function withFallback(op, args) {
-  const available = availableProviders(process.env)
+  // `prefer` moves one provider to the front; the others still back it up.
+  // The source sweep spreads its calls across both this way, so it never
+  // runs into Firecrawl's per-minute limit (see _sweep.js).
+  const prefer = args[1]?.prefer
+  const configured = availableProviders(process.env)
+  const available = prefer && configured.includes(prefer)
+    ? [prefer, ...configured.filter(p => p !== prefer)]
+    : configured
   if (!available.length) {
     return { ok: false, error: 'No web provider is configured (FIRECRAWL_API_KEY / TAVILY_API_KEY).', notes: [], available }
   }

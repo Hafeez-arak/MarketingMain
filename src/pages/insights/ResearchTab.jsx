@@ -15,7 +15,7 @@ import {
   openItems, runFaults, freshnessLabel, searchDemand, linesIn, forLine, linesOfRefs, matchesLine,
 } from '../../lib/marketReport'
 import { fetchIntel, updateOpportunity, updateEventDecision } from '../../lib/marketIntel'
-import { fetchAgenda, setAgendaStatus } from '../../lib/agentAgenda'
+import { fetchAgenda, setAgendaStatus, SOURCE_TYPES } from '../../lib/agentAgenda'
 import { OPPORTUNITY_STATUSES, EVENT_DECISIONS } from '../../lib/agent/intel'
 import { isLive } from '../../lib/agent/progress'
 import { explainFacts } from '../../lib/agent/websiteExplain'
@@ -399,6 +399,9 @@ function EventCard({ e, canEdit, onDecision, recent = false }) {
             {EVENT_DECISIONS.map(d => <option key={d} value={d}>{d}</option>)}
           </PillSelect>
         </label>
+      ) : e.id && !recent && e.decision && e.decision !== 'undecided' ? (
+        // Read only (the sales app): what marketing decided, as a fact.
+        <p className="text-xs text-text-tertiary sm:text-right sm:w-[180px]">We are {e.decision}</p>
       ) : null}
       todo={recent ? (e.takeaway || e.recommendation) : e.recommendation}
       todoLabel={recent ? 'What came of it' : 'Our recommendation'}
@@ -477,6 +480,85 @@ function Limited({ items, limit = 5, render, noun = 'items', className = 'space-
           className="w-full border border-dashed border-border bg-white/60 py-2 text-sm font-semibold text-text-secondary hover:text-text hover:border-border-strong">
           {all ? 'Show fewer' : `Show all ${items.length} ${noun}`}
         </button>
+      )}
+    </div>
+  )
+}
+
+// ─── What the research watches, read only (the sales app, 2026-10-19) ──────
+// The marketing page edits this list in AgentSteering; the sales team only
+// needs to know where the leads come from, so here it is a plain list. The
+// order is closest-to-a-lead first: a tender portal names a job, a hashtag
+// only hints at one.
+const WATCH_ORDER = ['tender_portal', 'government', 'exchange', 'website', 'news', 'linkedin', 'instagram', 'x', 'hashtag', 'keyword']
+const WATCH_GROUP = {
+  tender_portal: 'Tender portals', government: 'Government', exchange: 'Stock exchange filings', website: 'Project websites',
+  news: 'News sites', linkedin: 'LinkedIn', instagram: 'Instagram', x: 'X', hashtag: 'Hashtags', keyword: 'Search phrases',
+}
+
+/** A link for a source when its subject is an address or a handle; null when it is a name or a phrase. */
+function watchHref(type, subject) {
+  const s = String(subject || '').trim()
+  if (/^https?:\/\//i.test(s)) return s
+  const handle = s.match(/^@([\w.]+)$/)?.[1]
+  if (handle && type === 'instagram') return `https://instagram.com/${handle}`
+  if (handle && type === 'x') return `https://x.com/${handle}`
+  if (type !== 'hashtag' && type !== 'keyword' && /^[\w-]+(\.[\w-]+)+(\/\S*)?$/.test(s)) return `https://${s}`
+  return null
+}
+
+function WatchList({ sources, competitors }) {
+  const groups = WATCH_ORDER
+    .concat(SOURCE_TYPES.map(([k]) => k).filter(k => !WATCH_ORDER.includes(k)))
+    .map(key => ({
+      key,
+      rows: sources.filter(r => (r.source_type || 'website') === key)
+        .sort((a, b) => (a.tier || 2) - (b.tier || 2) || String(a.subject).localeCompare(String(b.subject))),
+    }))
+    .filter(g => g.rows.length)
+  const rivals = [...competitors].sort((a, b) => String(a.subject).localeCompare(String(b.subject)))
+  return (
+    <div className="space-y-6">
+      {groups.length > 0 && (
+        <div className="space-y-3">
+          <SubHead>Where it looks for leads · {sources.length}</SubHead>
+          <div className="grid gap-3 lg:grid-cols-2 items-start">
+            {groups.map(g => (
+              <div key={g.key} className="bg-white border border-border min-w-0">
+                <p className="px-4 pt-3 pb-1 text-sm font-semibold text-text">{WATCH_GROUP[g.key] || g.key} <span className="font-normal text-text-tertiary tabular-nums">{g.rows.length}</span></p>
+                <ul className="divide-y divide-border-light">
+                  {g.rows.map(r => {
+                    const href = watchHref(g.key, r.subject)
+                    return (
+                      <li key={r.id || r.subject} className="px-4 py-2 min-w-0">
+                        {href
+                          ? <a href={href} target="_blank" rel="noopener noreferrer" dir="auto" className="text-sm text-text underline underline-offset-2 decoration-border-strong hover:decoration-text break-words">{r.subject}</a>
+                          : <span className="text-sm text-text break-words" dir="auto">{r.subject}</span>}
+                        {r.why && <p className="text-xs text-text-secondary leading-relaxed mt-0.5" dir="auto">{r.why}</p>}
+                      </li>
+                    )
+                  })}
+                </ul>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {rivals.length > 0 && (
+        <div className="space-y-3">
+          <SubHead>Competitors it watches · {rivals.length}</SubHead>
+          {/* Name and website only: the notes beside each rival are the
+              research's own bookkeeping ("could not be identified", "renamed
+              from"), not something a salesperson acts on. */}
+          <ul className="bg-white border border-border grid sm:grid-cols-2 lg:grid-cols-3">
+            {rivals.map(c => (
+              <li key={c.id || c.subject} className="px-4 py-2 border-b border-border-light min-w-0">
+                <span className="block text-sm text-text truncate" dir="auto">{c.subject}</span>
+                {c.domain && <a href={`https://${c.domain}`} target="_blank" rel="noopener noreferrer" className="block text-xs text-text-tertiary underline underline-offset-2 truncate hover:text-text">{c.domain}</a>}
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
     </div>
   )
@@ -671,7 +753,13 @@ function Contents({ tabs, active }) {
 
 // Both filters behind one small menu. The button says what is showing, so a
 // narrowed page never passes for the whole report.
-function FilterMenu({ team, onTeam, lines, line, onLine, untagged }) {
+// What the sales app's Research page shows (2026-10-19): the "Sales" view
+// without the two sections a salesperson cannot act on from there. Website is
+// Google search numbers with a paid "Summarise" button; New competitors is an
+// accept/reject queue that belongs to marketing.
+const READ_ONLY_SECTIONS = ['top', 'sales', 'competitors', 'events', 'poles', 'sources']
+
+function FilterMenu({ team, onTeam, lines, line, onLine, untagged, lockTeam = false }) {
   const [open, setOpen] = useState(false)
   const ref = useRef(null)
   useEffect(() => {
@@ -682,23 +770,28 @@ function FilterMenu({ team, onTeam, lines, line, onLine, untagged }) {
   }, [open])
   const teamLabel = TEAMS.find(t => t.key === team)?.label || 'Everyone'
   const lineName = line === 'all' ? '' : (lines.find(l => l.key === line)?.label || '')
-  const narrowed = team !== 'all' || line !== 'all'
+  const narrowed = (!lockTeam && team !== 'all') || line !== 'all'
+  // Locked to one team, the menu is only the business filter, so it is not
+  // offered at all to a brand with one business.
+  if (lockTeam && lines.length < 2) return null
   return (
     <div ref={ref} data-print-hide className="relative">
       <button type="button" onClick={() => setOpen(o => !o)} aria-expanded={open}
         className={`inline-flex items-center gap-1.5 border px-2.5 py-1.5 text-sm transition-colors ${
           narrowed ? 'border-amber-600 bg-amber-50 text-text' : 'border-border bg-white text-text-secondary hover:text-text'}`}>
         <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M3 5h18M6 12h12M10 19h4" strokeLinecap="round" /></svg>
-        {narrowed ? [teamLabel, lineName].filter(Boolean).join(' · ') : 'Filter'}
+        {narrowed ? [lockTeam ? '' : teamLabel, lineName].filter(Boolean).join(' · ') : 'Filter'}
       </button>
       {open && (
         <div className="absolute right-0 z-20 mt-1 w-64 border border-border bg-white p-3 shadow-sm space-y-3">
-          <label className="block">
-            <span className="block text-[11px] font-semibold uppercase tracking-wide text-text-tertiary mb-1">For</span>
-            <PillSelect value={team} onChange={e => onTeam(e.target.value)} className="w-full">
-              {TEAMS.map(t => <option key={t.key} value={t.key}>{t.label}</option>)}
-            </PillSelect>
-          </label>
+          {!lockTeam && (
+            <label className="block">
+              <span className="block text-[11px] font-semibold uppercase tracking-wide text-text-tertiary mb-1">For</span>
+              <PillSelect value={team} onChange={e => onTeam(e.target.value)} className="w-full">
+                {TEAMS.map(t => <option key={t.key} value={t.key}>{t.label}</option>)}
+              </PillSelect>
+            </label>
+          )}
           {/* Only when the run found more than one business line. A brand with
               one undivided business never sees a control that does nothing. */}
           {lines.length > 1 && (
@@ -716,7 +809,7 @@ function FilterMenu({ team, onTeam, lines, line, onLine, untagged }) {
             </p>
           )}
           {narrowed && (
-            <button type="button" onClick={() => { onTeam('all'); onLine('all') }}
+            <button type="button" onClick={() => { if (!lockTeam) onTeam('all'); onLine('all') }}
               className="text-xs font-semibold text-text-secondary underline underline-offset-2 hover:text-text">Show everything</button>
           )}
         </div>
@@ -741,12 +834,18 @@ function Section({ tab, children }) {
 
 // ─── The tab ───────────────────────────────────────────────────────────────
 
-export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRun, running, now }) {
+/**
+ * `readOnly` is the sales app's Research page: the same report, fixed to the
+ * Sales view, with nothing that writes or costs money (no Run research, no
+ * statuses, no event decisions, no Summarise, no watchlist).
+ */
+export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRun, running, now, readOnly = false }) {
   const { activeWorkspaceId, accessToken } = useAuth()
   const report = useMemo(() => run?.report || {}, [run])
   const [params, setParams] = useSearchParams()
 
   const [team, setTeam] = useState(() => {
+    if (readOnly) return 'sales'
     try { return localStorage.getItem('research.team') || 'all' } catch { return 'all' }
   })
   const chooseTeam = useCallback(t => {
@@ -768,6 +867,7 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
   // claim about the market made from a request still in flight.
   const [intel, setIntel] = useState({ signals: [], opportunities: [], events: [], available: false })
   const [agendaCompetitors, setAgendaCompetitors] = useState([])
+  const [agendaSources, setAgendaSources] = useState([])
   const [storeLoaded, setStoreLoaded] = useState(false)
   const [busyId, setBusyId] = useState(null)
   // The one paid control on this tab: a three-sentence summary of the search
@@ -786,6 +886,7 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
         if (!alive) return
         setIntel(i)
         setAgendaCompetitors(a?.competitors || [])
+        setAgendaSources(a?.sources || [])
         setStoreLoaded(true)
       })
       .catch(() => { if (alive) setStoreLoaded(true) })
@@ -887,7 +988,7 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
     .filter(n => matchesLine(line, linesOfRefs([n.ref].filter(Boolean), report)))
   const proposedCandidates = candidates.filter(c => c.status === 'proposed')
 
-  const show = key => sectionVisible(key, team)
+  const show = key => (readOnly ? READ_ONLY_SECTIONS.includes(key) : sectionVisible(key, team))
   const showSearch = show('search') && (search.present || !!site?.summary)
   const searchCount = search.opportunities.length + search.movers.length
   const ours = show('social') ? social.ours : []
@@ -907,7 +1008,7 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
     const leadsCount = show('sales') ? (storeLoaded ? visibleSales.open.length : null) : 0
     const compCount = (show('competitors') ? visibleMoves.length : 0) + (show('newcomp') && storeLoaded ? proposedCandidates.length : 0)
     const marketCount = (show('market') ? visibleNotes.length : 0) + (show('global') ? world.items.length : 0) +
-      (show('poles') ? poles.items.length : 0) + (showEvents && storeLoaded ? events.count + events.dates.length : 0)
+      (show('poles') ? poles.items.length : 0) + (showEvents && storeLoaded ? events.count + (readOnly ? 0 : events.dates.length) : 0)
     const has = {
       do: doCount > 0,
       content: contentCount > 0 || showSearch || ours.length > 0,
@@ -928,7 +1029,11 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
     // The glance card's chips name one kind of thing each, so they count only
     // that kind: "8 content ideas", not ideas and search rows added together.
     const chipCounts = { ...counts, content: ideaCount, competitors: show('competitors') ? visibleMoves.length : 0 }
-    return TAB_DEFS.filter(t => has[t.key]).map(t => ({ ...t, count: counts[t.key], chipCount: chipCounts[t.key] }))
+    // Read only, the last section is the sources and nothing of the method.
+    return TAB_DEFS.filter(t => has[t.key]).map(t => ({
+      ...t, count: counts[t.key], chipCount: chipCounts[t.key],
+      ...(readOnly && t.key === 'method' ? { label: 'Sources' } : {}),
+    }))
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [team, storeLoaded, visibleTop, visibleSales, sales.closed, visibleMoves, proposedCandidates, candidates, plan,
     showSearch, searchCount, ours, theirs, showDirection, showEvents, events, visibleNotes, world, poles, sources])
@@ -1003,7 +1108,7 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
         <Empty
           title="No research yet"
           description="Research looks for leads, events, competitor activity and market news for this brand. Each week it reports what changed since the last time."
-          action={<Button onClick={onRun} disabled={running}>Run research</Button>}
+          action={readOnly ? null : <Button onClick={onRun} disabled={running}>Run research</Button>}
         />
       </Card>
     )
@@ -1132,7 +1237,7 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
         <div className="min-w-0 space-y-8">
         <div className="flex items-center justify-between gap-3">
           <p className="text-sm text-text-secondary">The full report, section by section.</p>
-          <FilterMenu team={team} onTeam={chooseTeam} lines={lines} line={line} onLine={chooseLine} untagged={untagged} />
+          <FilterMenu team={team} onTeam={chooseTeam} lines={lines} line={line} onLine={chooseLine} untagged={untagged} lockTeam={readOnly} />
         </div>
 
         {/* Do next */}
@@ -1243,14 +1348,14 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
         <Section tab={tabOf('leads')}>
             <Part title="Leads, tenders and projects" count={storeLoaded ? visibleSales.open.length : null}
               helper={sales.trackerAvailable
-                ? 'Every open opening we are tracking, not only this week’s. Set the status as you work each one.'
+                ? `Every open opening we are tracking, not only this week’s.${readOnly ? '' : ' Set the status as you work each one.'}`
                 : 'Openings found in this research. From the next research they are tracked week to week.'}>
               {!storeLoaded ? (
                 <div className="space-y-3" aria-busy="true"><Skeleton className="h-28 w-full" /><Skeleton className="h-28 w-full" /></div>
               ) : visibleSales.open.length ? (
                 <Stack>
                   {visibleSales.open.map((r, i) => (
-                    <LeadCard key={r.id || `f${i}`} r={r} canEdit={intel.available} onStatus={onStatus} busyId={busyId} />
+                    <LeadCard key={r.id || `f${i}`} r={r} canEdit={intel.available && !readOnly} onStatus={onStatus} busyId={busyId} />
                   ))}
                 </Stack>
               ) : <Quiet>No open leads, tenders or projects right now.</Quiet>}
@@ -1352,15 +1457,15 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
             )}
             {showEvents && storeLoaded && events.count > 0 && (
               <Part title="Events and expos" count={events.count}
-                helper="Shows and conferences where our buyers gather. Mark whether we are going so the team knows.">
+                helper={`Shows and conferences where our buyers gather.${readOnly ? '' : ' Mark whether we are going so the team knows.'}`}>
                 {events.soon.length > 0 && (
                   <div className="space-y-3"><SubHead>Next 90 days</SubHead>
-                    <Stack>{events.soon.map((e, i) => <EventCard key={e.id || `s${i}`} e={e} canEdit={intel.available} onDecision={onDecision} />)}</Stack>
+                    <Stack>{events.soon.map((e, i) => <EventCard key={e.id || `s${i}`} e={e} canEdit={intel.available && !readOnly} onDecision={onDecision} />)}</Stack>
                   </div>
                 )}
                 {events.later.length > 0 && (
                   <div className="space-y-3 pt-2"><SubHead>Later this year — stands and deadlines to book now</SubHead>
-                    <Stack>{events.later.map((e, i) => <EventCard key={e.id || `l${i}`} e={e} canEdit={intel.available} onDecision={onDecision} />)}</Stack>
+                    <Stack>{events.later.map((e, i) => <EventCard key={e.id || `l${i}`} e={e} canEdit={intel.available && !readOnly} onDecision={onDecision} />)}</Stack>
                   </div>
                 )}
                 {events.recent.length > 0 && (
@@ -1372,7 +1477,7 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
             )}
             {/* Holidays and seasonal dates, kept apart from the expos: nobody
                 exhibits at a public holiday. */}
-            {showEvents && storeLoaded && events.dates.length > 0 && (
+            {showEvents && !readOnly && storeLoaded && events.dates.length > 0 && (
               <Part title="Dates to plan content around" count={events.dates.length}>
                 <ul className="bg-white border border-border divide-y divide-border max-w-[72ch]">
                   {events.dates.map((d, i) => (
@@ -1406,7 +1511,9 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
 
         {/* Sources & method */}
         <Section tab={tabOf('method')}>
-          <Part title="How this research went" helper={[status?.label, reading].filter(Boolean).join(' · ')}>
+          {/* The run's housekeeping (what failed, what is still unanswered) is
+              for the people who run the research, not for the sales app. */}
+          {!readOnly && <Part title="How this research went" helper={[status?.label, reading].filter(Boolean).join(' · ')}>
             <div className="bg-white border border-border p-4 sm:p-5 space-y-5">
               {report.repetition && <p className="text-sm text-amber-700 max-w-[72ch]">{report.repetition}</p>}
               {faults.length > 0 && (
@@ -1457,7 +1564,16 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
                 </div>
               )}
             </div>
-          </Part>
+          </Part>}
+
+          {readOnly && storeLoaded && (agendaSources.some(r => r.status === 'active') || agendaCompetitors.some(c => c.status === 'active')) && (
+            <Part title="What the research watches"
+              helper="The places it reads for leads and tenders every week before searching the open web, and the competitors it follows.">
+              <WatchList
+                sources={agendaSources.filter(r => r.status === 'active')}
+                competitors={agendaCompetitors.filter(c => c.status === 'active')} />
+            </Part>
+          )}
 
           <Part title="All sources" count={sources.length || null}
             helper={sources.length ? `Every page this research quotes, checked on ${fmtDate(run.started_at)}.` : null}>
@@ -1466,7 +1582,7 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
             ) : <Quiet>This research does not quote any web pages.</Quiet>}
           </Part>
 
-          <section data-print-hide>
+          {!readOnly && <section data-print-hide>
             <Card className="p-0 overflow-hidden">
               <details className="group">
                 <summary className="cursor-pointer list-none [&::-webkit-details-marker]:hidden px-4 sm:px-5 py-3.5 flex items-start justify-between gap-3 hover:bg-surface-subtle">
@@ -1482,7 +1598,7 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
                 <div className="p-4 sm:p-5 border-t border-border bg-surface-subtle"><AgentSteering /></div>
               </details>
             </Card>
-          </section>
+          </section>}
         </Section>
         </div>
       </div>

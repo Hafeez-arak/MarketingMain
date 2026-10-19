@@ -17,7 +17,19 @@ export const VERDICT_TONE = {
   pending: 'bg-red-50 text-red-600',
 }
 
-export const SOURCE_LABEL = { website_form: 'Website', email: 'Email' }
+export const SOURCE_LABEL = { website_form: 'Website', email: 'Email', manual: 'Added by hand' }
+
+/** How a lead added by hand came to us (2026-10-18). */
+export const CHANNEL_LABEL = {
+  phone: 'Phone call',
+  whatsapp: 'WhatsApp',
+  walk_in: 'Walk-in',
+  referral: 'Referral',
+  exhibition: 'Exhibition or event',
+  site_visit: 'Site visit',
+  outbound: 'We contacted them',
+  other: 'Other',
+}
 
 /** What a lead counts as: a person's correction wins over the agent. */
 export function effectiveVerdict(lead) {
@@ -177,11 +189,13 @@ export function leadFilters(f = EMPTY_FILTERS, { me = '' } = {}) {
     eqs.push(['corrected', true])
   } else if (f.show === 'approved') {
     ors.push('approved_at.not.is.null')
+
   } else if (f.show && f.show !== 'all') {
     ors.push(verdictFilter(f.show))
   }
   // Where it came in: the website form, or one connected mailbox (by the label it is stored under).
   if (f.channel === 'website') eqs.push(['source', 'website_form'])
+  else if (f.channel === 'manual') eqs.push(['source', 'manual'])
   else if (f.channel) eqs.push(['mailbox', f.channel])
   if (f.sender) eqs.push(['sender_type', f.sender])
   // "Not stated" is the empty phase: sales fills it in after the call. The
@@ -223,8 +237,20 @@ export function brandOf(address = '') {
 /** Where a lead came in, the way the team says it: "Arak website", "Arak email", "CLB email". */
 export function channelLabel(lead = {}, { websiteBrand = 'Arak' } = {}) {
   if (lead.source === 'website_form') return `${websiteBrand} website`
+  if (lead.source === 'manual') return CHANNEL_LABEL[lead.channel] ? `Added · ${CHANNEL_LABEL[lead.channel]}` : 'Added by hand'
   const brand = brandOf(lead.mailbox)
   return brand ? `${brand} email` : 'Email'
+}
+
+/**
+ * A WhatsApp link for a Saudi number as people write it (05…, 9665…,
+ * +966 5…, 00966…), or '' when it is not a mobile we can tell.
+ */
+export function whatsappLink(phone = '') {
+  let d = String(phone).replace(/[^\d+]/g, '').replace(/^\+/, '').replace(/^00/, '')
+  if (/^05\d{8}$/.test(d)) d = `966${d.slice(1)}`
+  else if (/^5\d{8}$/.test(d)) d = `966${d}`
+  return /^9665\d{8}$/.test(d) ? `https://wa.me/${d}` : ''
 }
 
 /** Every number a lead gave, the stored list first, else the form's own field. */
@@ -279,5 +305,44 @@ export function ownerLabel(lead, team = [], me = '') {
   return shortName(team.find((m) => m.user_id === lead.assigned_to)) || 'Someone else'
 }
 
+/**
+ * Who a lead can be given to: the salespeople, never a sales admin (the
+ * owner, 2026-10-19: "Arif will be the one to assign it"). The sales admin
+ * hands leads out; they do not work them.
+ */
+export const assignable = (team = []) => team.filter((m) => !m.approver)
+
+/** What the person gets when a lead is assigned: the email forwarded, from where. */
+export function forwardWords(lead = {}, person = null) {
+  const name = person ? shortName(person) : 'They'
+  return lead.source === 'email'
+    ? `${name} gets the customer's email forwarded from ${lead.mailbox || 'the mailbox it came to'} now, attachments and all, and replies from there.`
+    : lead.source === 'manual'
+      ? `${name} gets a notification; there is no email to forward for a lead added by hand.`
+      : `${name} gets this website enquiry by email now, with the customer as the reply address.`
+}
+
 /** Where the forward of the customer's email to the owner stands. */
 export const FORWARD_LABEL = { sending: 'Forwarding…', sent: 'Email forwarded', failed: 'Email not forwarded' }
+
+/**
+ * Which tabs an opened lead has: Lead (contact, where it stands, files),
+ * Battle card, and the email as it arrived. A lead added by hand has no
+ * email; its notes are on the Lead tab.
+ */
+export const leadTabs = (lead = {}) => [
+  ['lead', 'Lead'],
+  ['card', 'Battle card'],
+  ...(lead.source === 'manual' ? [] : [['email', 'Email and evidence']]),
+]
+
+/**
+ * Unread for this person (2026-10-19): it arrived on or after the company's
+ * read_before and they have not opened it. `readIds` is a Set of their reads.
+ */
+export function isUnread(lead = {}, readIds = new Set(), readBefore = null) {
+  if (!lead.id || readIds.has(lead.id)) return false
+  const at = lead.received_at || lead.created_at
+  if (readBefore && at && new Date(at).getTime() < new Date(readBefore).getTime()) return false
+  return true
+}

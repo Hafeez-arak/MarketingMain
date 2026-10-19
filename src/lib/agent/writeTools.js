@@ -104,7 +104,7 @@ export const WRITE_TOOLS = [
                  'instagram', 'linkedin', 'x', 'hashtag', 'keyword'],
           description: 'Sources only.',
         },
-        tier: { type: 'integer', description: 'Sources only. 1 = every run, 2 = most runs, 3 = when searches allow.' },
+        tier: { type: 'integer', description: 'Sources only. Every source is checked every run; the tier is how closely. 1 = read closely (front page + 2 searches, 8 results), 2 = read (1 search, 5 results), 3 = skim (1 search, 3 results).' },
       },
       required: ['subject', 'why'],
     },

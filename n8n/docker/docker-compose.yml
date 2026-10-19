@@ -132,9 +132,12 @@ services:
       # Time budgets (src/lib/agent/phases.js). Vercel keeps its defaults
       # (300s ceiling, 225s lens); here a slow tender search gets 7 minutes.
       # n8n's lens and synthesise HTTP timeouts are 10 minutes, above these.
+      # Synthesis was 360s until 10-19: the brief's output ceiling went to
+      # 32,000 tokens (~320s to write), and 540s still leaves a minute under
+      # n8n's 600s for the website read and the persist that follow it.
       - AGENT_CEILING_MS=900000
       - AGENT_LENS_BUDGET_MS=420000
-      - AGENT_SYNTHESISE_BUDGET_MS=360000
+      - AGENT_SYNTHESISE_BUDGET_MS=540000
 
 volumes:
   arak_marketing_n8n_data:

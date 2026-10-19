@@ -347,6 +347,48 @@ function devEmailApi(env) {
   }
 }
 
+// ─── Dev-only: run /api/leads in the Vite server ───────────────────────────
+// Same idea as devEmailApi (2026-10-18): without it every Leads action on a
+// laptop (the battle card, Add lead, the stage, Approve) answers 404, so the
+// page could only be tried in the harness. The handler checks the caller
+// exactly as it does on Vercel, with the signed-in person's own token, and
+// writes to the database .env points at: on a laptop that is the live one.
+function devLeadsApi(env) {
+  for (const key of ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'SUPABASE_ANON_KEY', 'VITE_SUPABASE_URL', 'VITE_SUPABASE_ANON_KEY', 'OPENROUTER_API_KEY', 'PUBLIC_APP_URL']) {
+    if (env[key] && !process.env[key]) process.env[key] = env[key]
+  }
+  return {
+    name: 'arak-dev-leads-api',
+    apply: 'serve',
+    configureServer(server) {
+      server.middlewares.use('/api/leads', async (req, res) => {
+        const [pathPart, queryPart = ''] = (req.url || '').split('?')
+        const action = pathPart.replace(/^\/+/, '')
+        if (!/^[a-z_]+$/.test(action)) {
+          res.statusCode = 400
+          return res.end(JSON.stringify({ ok: false, error: 'Bad leads route.' }))
+        }
+        req.query = { ...Object.fromEntries(new URLSearchParams(queryPart)), action }
+        res.status = code => { res.statusCode = code; return res }
+        res.json = body => {
+          if (!res.headersSent) res.setHeader('Content-Type', 'application/json')
+          res.end(JSON.stringify(body))
+          return res
+        }
+        res.send = body => { res.end(body); return res }
+        try {
+          const mod = await server.ssrLoadModule('/api/leads/[action].js')
+          await mod.default(req, res)
+        } catch (err) {
+          server.config.logger.error(`[dev leads] /api/leads/${action}: ${err?.message || err}`)
+          if (!res.headersSent) { res.statusCode = 500; res.setHeader('Content-Type', 'application/json') }
+          if (!res.writableEnded) res.end(JSON.stringify({ ok: false, error: String(err?.message || err) }))
+        }
+      })
+    },
+  }
+}
+
 // https://vite.dev/config/
 // A config function, not a plain object, so loadEnv can read .env here in
 // Node — the dev proxy needs VITE_N8N_BASE_URL before any client code exists.
@@ -360,6 +402,7 @@ export default defineConfig(({ mode }) => {
       devZernioApi(env),
       devAgentApi(env),
       devEmailApi(env),
+      devLeadsApi(env),
     ],
     server: {
       port: process.env.PORT ? Number(process.env.PORT) : 5173,

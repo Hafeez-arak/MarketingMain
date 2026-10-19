@@ -291,7 +291,7 @@ describe('sales seats after 20261013_sales_seats', () => {
     await pg.exec(`
       alter table public.workspaces add column if not exists slug text;
       alter table public.workspaces add column if not exists created_at timestamptz not null default now();
-      create table public.leads (id uuid primary key default gen_random_uuid(), workspace_id uuid not null, verdict text, human_verdict text, source text not null default 'email', subject text);
+      create table public.leads (id uuid primary key default gen_random_uuid(), workspace_id uuid not null, verdict text, human_verdict text, source text not null default 'email', subject text, updated_at timestamptz not null default now());
       create table public.lead_mailboxes (id uuid primary key default gen_random_uuid(), workspace_id uuid not null);
       create table public.lead_cards (lead_id uuid primary key references public.leads(id) on delete cascade, workspace_id uuid not null);
       alter table public.leads enable row level security;
@@ -304,6 +304,11 @@ describe('sales seats after 20261013_sales_seats', () => {
     // As 20261016_lead_cards leaves it; 20261018 narrows it.
     await pg.exec(`create policy lead_cards_sales_read on public.lead_cards for select to authenticated using (public.is_sales_member(workspace_id))`)
     await pg.exec(migration('20261018_lead_assignment'))
+    await pg.exec(migration('20261024_lead_pipeline'))
+    await pg.exec(`create table public.lead_agent_settings (workspace_id uuid primary key, read_before timestamptz)`)
+    await pg.exec(migration('20261027_lead_reads'))
+    await pg.exec(`create table public.notifications (id uuid primary key default gen_random_uuid(), user_id uuid not null, workspace_id uuid, kind text not null default 'info', title text not null, body text not null default '', link text not null default '', created_at timestamptz not null default now(), read_at timestamptz)`)
+    await pg.exec(migration('20261028_unassign_on_seat_removed'))
     await h.as(ADMIN)
     arak = await h.create('Arak')
     ghusn = await h.create('Ghusn')
@@ -448,12 +453,56 @@ describe('sales seats after 20261013_sales_seats', () => {
     expect(await sees(HUDA)).toEqual({ leads: ['huda email', 'website for faisal', 'website unassigned'], cards: 0 })
     expect(await sees(LAYLA)).toEqual({ leads: ['faisal email', 'huda email', 'unassigned email', 'website for faisal', 'website unassigned'], cards: 1 })
 
+    // 20261024_lead_pipeline: a lead added by hand is its owner's, like any other.
+    await lead('faisal added', 'manual', FAISAL)
+    expect((await sees(FAISAL)).leads).toContain('faisal added')
+    expect((await sees(HUDA)).leads).not.toContain('faisal added')
+    await expect(lead('bad source', 'fax', FAISAL)).rejects.toThrow(/leads_source_check/)
+
+    // 20261027_lead_reads: a person marks only their own reads, only on a lead they can see.
+    const hudasEmail = await one(`select id from public.leads where subject = 'huda email'`)
+    const mark = async (uid, leadId, forUser = uid) => {
+      await h.as(uid)
+      await pg.exec('set role authenticated')
+      try { await pg.query(`insert into public.lead_reads (lead_id, user_id, workspace_id) values ($1, $2, $3)`, [leadId, forUser, arak]) } finally { await pg.exec('reset role') }
+    }
+    await mark(FAISAL, faisalsEmail)
+    await expect(mark(FAISAL, hudasEmail)).rejects.toThrow(/row-level security/)
+    await expect(mark(FAISAL, faisalsEmail, HUDA)).rejects.toThrow(/row-level security/)
+    await h.as(HUDA)
+    await pg.exec('set role authenticated')
+    try { expect((await pg.query(`select count(*)::int as n from public.lead_reads`)).rows[0].n).toBe(0) } finally { await pg.exec('reset role') }
+
     // The team by name, for the Owner column: the team and the admin, no one else.
     await h.as(FAISAL)
     expect((await pg.query(`select email, approver from public.sales_team($1)`, [arak])).rows.map(r => r.email)).toEqual(['faisal@example.com', 'huda@example.com', 'layla@example.com'])
     expect((await pg.query(`select * from public.sales_team($1)`, [ghusn])).rows).toEqual([])
     await h.as(SARA)
     expect((await pg.query(`select * from public.sales_team($1)`, [arak])).rows).toEqual([])
+  })
+
+  // 20261028: removing someone's seat gives their open leads back, unassigned.
+  it('a salesperson losing access: their open leads come back unassigned, won and lost stay, the sales admin is told', async () => {
+    const LAYLA = '00000000-0000-0000-0000-0000000000c2'
+    await pg.query(`select public.invite_access('faisal@example.com', $1::uuid[], 'sales')`, [[arak]])
+    await pg.query(`select public.invite_access('layla@example.com', $1::uuid[], 'sales_admin')`, [[arak]])
+    await h.signUp(FAISAL, 'faisal@example.com')
+    await h.signUp(LAYLA, 'layla@example.com')
+    const lead = async (subject, stage) =>
+      one(`insert into public.leads (workspace_id, subject, source, assigned_to, stage) values ($1, $2, 'email', $3, $4) returning id`, [arak, subject, FAISAL, stage])
+    await lead('open one', 'quotation')
+    await lead('not in pipeline', null)
+    await lead('won one', 'won')
+    await h.as(ADMIN)
+    await pg.query(`select public.revoke_access($1)`, [FAISAL])
+    const rows = (await pg.query(`select subject, assigned_to, stage from public.leads where workspace_id = $1 order by subject`, [arak])).rows
+    expect(rows).toEqual([
+      { subject: 'not in pipeline', assigned_to: null, stage: null },
+      { subject: 'open one', assigned_to: null, stage: 'quotation' },
+      { subject: 'won one', assigned_to: FAISAL, stage: 'won' },
+    ])
+    const notes = (await pg.query(`select user_id, title from public.notifications`)).rows
+    expect(notes).toEqual([{ user_id: LAYLA, title: '2 leads are unassigned: faisal@example.com no longer has access' }])
   })
 
   it('a member is added exactly as before', async () => {

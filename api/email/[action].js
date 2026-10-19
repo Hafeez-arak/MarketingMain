@@ -1,3 +1,4 @@
+import { sweepFiles } from '../leads/_files.js'
 import crypto from 'node:crypto'
 import { db, isConfigured } from '../agent/_supabase.js'
 import { callModel } from '../agent/_provider.js'
@@ -679,6 +680,8 @@ async function handleCron(req, res) {
   // missed. First, and on its own, so a newsletter problem cannot stop it.
   let leadMail
   try { leadMail = await checkAllLeadMail(leadDeps()) } catch (err) { leadMail = { error: String(err?.message || err).slice(0, 300) } }
+  // Large lead attachments are kept a day (api/leads/_files.js): clear the old ones.
+  try { await sweepFiles(leadDeps(), { max: 1000 }) } catch { /* never stops the run */ }
   // And the lead agent's health check, for the day both Sheets' timers stop.
   try {
     const ld = leadDeps()

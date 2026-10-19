@@ -18,10 +18,13 @@ import { silentLensNote } from '../../src/lib/agent/runHealth.js'
 import { partitionRepeats } from '../../src/lib/agent/memory.js'
 import { freshQuestions, dedupeQuestions } from '../../src/lib/agent/agendaDedup.js'
 import { suggestSources } from '../../src/lib/agent/sourceSuggest.js'
+import { findingsBySource } from '../../src/lib/agent/sourceSweep.js'
+import { ensureSweep, recordSweepFindings } from './_sweep.js'
 import { parseLines, stampLines } from '../../src/lib/agent/lines.js'
 import { applyNovelty, priorFindingsFrom, repetitionNote } from '../../src/lib/agent/novelty.js'
 import {
   deadlineFor, worthStarting, resultsFromRows, timingNote, pendingLenses, timedOutResult,
+  PLATFORM_CEILING_MS, SAFETY_MARGIN_MS,
 } from '../../src/lib/agent/phases.js'
 import { LIVE_PLATFORMS } from '../../src/lib/utils.js'
 import { ownPostingFacts } from '../../src/lib/agent/ownChannels.js'
@@ -142,7 +145,7 @@ export async function loadRunContext(workspaceId, runId, cadence = 'weekly') {
       // The "Where to look" list. Active only: a proposed source has not been
       // accepted by a person, and a retired one was pruned on purpose.
       db(`research_agenda?workspace_id=eq.${workspaceId}&kind=eq.source&status=eq.active` +
-         `&select=subject,why,source_type,tier&order=tier.asc.nullslast,created_at.asc&limit=60`)
+         `&select=id,subject,why,source_type,tier&order=tier.asc.nullslast,created_at.asc&limit=60`)
         .catch(err => { console.error('[agent/run] sources:', err?.message || err); return [] }),
     ])
 
@@ -256,7 +259,7 @@ export async function planLenses(workspaceId, runId, cadence = 'weekly') {
  * every lens's — the calendar's dates cost an API round trip, and fetching
  * them to run the demand lens would be waste repeated on every call.
  */
-async function argsForLens(key, { brandFacts, motion, competitors, competitorNotes = [], gathered, profile, ctx, agenda = [], language = '', workspaceId = '', line = '', icp = null, sources = [] }) {
+async function argsForLens(key, { brandFacts, motion, competitors, competitorNotes = [], gathered, profile, ctx, agenda = [], language = '', workspaceId = '', line = '', icp = null, sources = [], sweep = [] }) {
   // What the team already tracks, so the lens reports changes instead of
   // re-announcing last week. Read only for the three lenses that produce
   // leads, events or competitor signals; never fatal — an empty store is a
@@ -282,7 +285,7 @@ async function argsForLens(key, { brandFacts, motion, competitors, competitorNot
   // openings sizes a project before proposing it (see sizing() in
   // lensPrompts.js) without turning into a second targets lens.
   if (key === 'openings') {
-    return { args: [brandFacts, { motion, agenda, language, intel, sources, fit: hasIcp(icp) ? icpFitText(icp) : '' }] }
+    return { args: [brandFacts, { motion, agenda, language, intel, sources, sweep, fit: hasIcp(icp) ? icpFitText(icp) : '' }] }
   }
   if (key === 'targets') {
     // The ICP is rendered as plain briefing lines, and the split between the
@@ -297,6 +300,7 @@ async function argsForLens(key, { brandFacts, motion, competitors, competitorNot
         language,
         intel,
         sources,
+        sweep,
       }],
     }
   }
@@ -504,13 +508,24 @@ export async function runSingleLens({ workspaceId, runId, lensKey, cadence = 'we
       const base = baseKeyOf(lensKey)
       const line = lineOfLensKey(lensKey)
       const build = LENS_PROMPTS[base]
-      const { args } = await argsForLens(base, { ...ctxBundle, workspaceId, line })
+      // The two project lenses read the "Where to look" list as results, not
+      // as names: the code searches every source first (_sweep.js). Whichever
+      // of the two starts first does the work; the other reuses it.
+      const sweepStart = Date.now()
+      const sweep = ['openings', 'targets'].includes(base)
+        ? await ensureSweep({ workspaceId, runId, sources: ctxBundle.sources, geography: ctxBundle.brandFacts?.geography })
+        : []
+      // The sweep has its own clock (SWEEP_MS); the lens's starts after it,
+      // never past what the platform allows from the request's start.
+      const swept = Date.now() - sweepStart
+      const lensDeadline = Math.min(limit + swept, startedAt + PLATFORM_CEILING_MS - SAFETY_MARGIN_MS)
+      const { args } = await argsForLens(base, { ...ctxBundle, workspaceId, line, sweep })
       if (!build || !args) {
         result = { lens: lensKey, ok: false, findings: [], sources: [], cost: 0, error: 'No prompt for this lens.' }
       } else {
         result = await runLens({
           workspaceId, runId, lensKey, line,
-          prompt: build(...args), identity: IDENTITY, brand: ctxBundle.brand, deadline: limit,
+          prompt: build(...args), identity: IDENTITY, brand: ctxBundle.brand, deadline: lensDeadline,
         })
       }
     }
@@ -571,6 +586,9 @@ export async function runSingleLens({ workspaceId, runId, lensKey, cadence = 'we
  * already committed — AGENT.md §6, and not negotiable: a failed investigation
  * must never cost the user their numbers.
  */
+/** Output ceiling for the brief, thinking included. See synthArgs below. */
+export const SYNTH_MAX_TOKENS = 32_000
+
 export async function synthesiseRun({ workspaceId, runId, cadence = 'weekly', deadline }) {
   const limit = deadline || deadlineFor('synthesise')
   const allowedUrls = new Set()
@@ -712,7 +730,14 @@ export async function synthesiseRun({ workspaceId, runId, cadence = 'weekly', de
         },
         { role: 'user', content: SYNTHESISE_PROMPT },
       ],
-      maxTokens: 16_000, effort: 'high',
+      // ── 16,000 WAS NOT ENOUGH ──
+      // Adaptive thinking spends from the same max_tokens as the brief. The
+      // synthesis used 12,672 then 15,959 output tokens on 10-13 and 10-17,
+      // and on 10-19 (run e6441391) it hit exactly 16,000 and stopped mid-
+      // string, so the brief failed to parse and the run lost its report
+      // after paying $1.92 for lenses. At ~100 tokens/s this ceiling is about
+      // 320s, inside AGENT_SYNTHESISE_BUDGET_MS on the box.
+      maxTokens: SYNTH_MAX_TOKENS, effort: 'high',
       outputFormat: BRIEF_SCHEMA,
       deadline: limit,
     }
@@ -733,6 +758,19 @@ export async function synthesiseRun({ workspaceId, runId, cadence = 'weekly', de
 
       if (!synth.ok) return bail(gathered, synth.error, cost, summary)
       if (refusalOf(synth.response)) return bail(gathered, refusalOf(synth.response), cost, summary)
+
+      // A brief cut off by the token ceiling is unfinished JSON. Said as that,
+      // not as "Unterminated string at position 12352", which sends a reader
+      // looking for a bug in the parser.
+      if (synth.response?.stop_reason === 'max_tokens') {
+        return bail(
+          gathered,
+          `The brief was cut off at the ${SYNTH_MAX_TOKENS.toLocaleString('en-US')}-token output limit before it ` +
+          `finished (${textIn(synth.response).length} characters written). The lens findings are kept, so the ` +
+          'run can be synthesised again without searching again.',
+          cost, summary,
+        )
+      }
 
       try {
         brief = JSON.parse(textIn(synth.response))
@@ -963,8 +1001,13 @@ export async function persistReport(workspaceId, runId, report) {
   // "Where to look" list (see sourceSuggest.js). Every status is checked, so a
   // source someone rejected is not proposed again.
   const priorSources = await db(
-    `research_agenda?workspace_id=eq.${workspaceId}&kind=eq.source&select=subject,status&limit=500`,
+    `research_agenda?workspace_id=eq.${workspaceId}&kind=eq.source&select=id,subject,source_type,status&limit=500`,
   ).catch(() => null)
+  // And the other direction: which sources on the list this run's project
+  // findings rested on, so the panel can say when a source last led to one.
+  if (priorSources) {
+    await recordSweepFindings(workspaceId, runId, findingsBySource(report?.findings || [], priorSources))
+  }
   // null means the read failed: proposing blind could re-propose a rejected
   // source, so nothing is proposed this week rather than something wrong.
   for (const src of priorSources ? suggestSources(report?.findings || [], priorSources) : []) {
