@@ -157,7 +157,7 @@ function ProtectedApp() {
             <Route path="/sales/targets"         element={<Targets />} />
             <Route path="/sales/agent-brief"     element={<AgentBrief />} />
 
-            {/* ── Marketing ── v1's dashboard is its Overview. */}
+            {/* ── Marketing ── v1's dashboard is its Dashboard, unchanged. */}
             <Route path="/marketing"             element={<Dashboard />} />
             {/* Two routes, not four: the plans list carries "New monthly plan",
                 so v1's menu between them was a click in the way.

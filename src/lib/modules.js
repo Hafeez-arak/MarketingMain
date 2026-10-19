@@ -51,7 +51,10 @@ export const SECTIONS = [
     key: 'marketing', label: 'Marketing', icon: 'megaphone', base: '/marketing',
     blurb: 'Plan, create, schedule and publish, and the brand behind it.',
     pages: [
-      { to: '/marketing', label: 'Overview', icon: 'grid', exact: true },
+      // The marketing team's own dashboard from v1, unchanged: they designed
+      // it, and it is their landing page. Analytics in Insights is the deep
+      // dive it links to (the owner's call, 2026-10-19).
+      { to: '/marketing', label: 'Dashboard', icon: 'grid', exact: true },
       { to: '/marketing/campaigns', label: 'Content Planning', icon: 'check-circle' },
       { to: '/marketing/studio', label: 'Creative Studio', icon: 'pen' },
       { to: '/marketing/schedule', label: 'Schedule', icon: 'calendar' },
@@ -101,8 +104,8 @@ export const HOME = { to: '/', label: 'Home', icon: 'home' }
  * '/social/approvals' never matches '/socialite' and a deeper old path keeps
  * its tail: /campaigns/plan?plan=7 → /marketing/campaigns/plan?plan=7.
  *
- * '/' is not here: v1's dashboard home is v2's Home page, and the old
- * dashboard is Marketing's Overview.
+ * '/' is not here: v1's home is v2's Home page, and v1's dashboard is
+ * Marketing's Dashboard (/marketing).
  */
 export const LEGACY = {
   '/leads': '/sales/leads',
@@ -199,7 +202,7 @@ export function pageTitle(pathname) {
     if (pg.to === '/') continue
     if (underPrefix(p, pg.to) && (!best || pg.to.length > best.to.length)) best = pg
   }
-  return best ? (best.label === 'Overview' ? 'Marketing' : best.label) : ''
+  return best ? best.label : ''
 }
 
 /**

@@ -62,7 +62,7 @@ describe('where am I', () => {
   })
   it('titles the page by its longest match', () => {
     expect(pageTitle('/')).toBe('Home')
-    expect(pageTitle('/marketing')).toBe('Marketing')
+    expect(pageTitle('/marketing')).toBe('Dashboard')
     expect(pageTitle('/marketing/social/approvals')).toBe('Post Queue')
     expect(pageTitle('/marketing/social/linkedin')).toBe('Social Media')
     expect(pageTitle('/marketing/campaigns/plan')).toBe('Content Planning')

@@ -8,7 +8,7 @@ import { useBadges, sectionBadge } from '../../components/layout/useNavBadges'
 // 2026-10-19. The first screen: one tile per section this person can open,
 // as on Odoo's home, each saying in a line what is inside and how many things
 // wait there. On a phone it is the way in, since the rail is behind the menu.
-// v1's dashboard is Marketing's Overview now (/marketing).
+// v1's dashboard is Marketing's Dashboard now (/marketing), unchanged.
 
 const hello = () => {
   const h = new Date().getHours()
