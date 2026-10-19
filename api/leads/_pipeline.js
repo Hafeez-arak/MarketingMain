@@ -78,3 +78,23 @@ export async function trackLead(deps, { workspaceId, leadId, user, body = {} }) 
   if (!lead) return { status: 404, error: 'That lead is not in this company.' }
   return { lead }
 }
+
+/**
+ * Delete a lead (2026-10-19), after the page has asked "are you sure". A
+ * sales admin or the access admin (`canAll`) may delete any lead; anyone
+ * else only a lead they added by hand themselves. Its battle card goes with
+ * it. The email stays in the mailbox, and a lead already in Odoo stays in
+ * Odoo. Returns { deleted } or { status, error }.
+ */
+export async function deleteLead(deps, { workspaceId, leadId, user, canAll = false }) {
+  if (!isUuid(leadId)) return { status: 400, error: 'Which lead?' }
+  const [lead] = await deps.db(`leads?id=eq.${leadId}&workspace_id=eq.${workspaceId}&select=id,source,added_by,crm_status`) || []
+  if (!lead) return { status: 404, error: 'That lead is not in this company.' }
+  if (!canAll && !(lead.source === 'manual' && lead.added_by === user.id)) {
+    return { status: 403, error: 'Only a sales admin can delete this lead. You can delete the leads you added yourself.' }
+  }
+  if (lead.crm_status === 'sending') return { status: 409, error: 'This lead is being sent to Odoo right now. Try again in a moment.' }
+  const gone = await deps.db(`leads?id=eq.${leadId}&workspace_id=eq.${workspaceId}`, { method: 'DELETE', prefer: 'return=representation' }) || []
+  if (!gone.length) return { status: 404, error: 'That lead is not in this company.' }
+  return { deleted: leadId, inOdoo: lead.crm_status === 'sent' }
+}

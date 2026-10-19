@@ -6,6 +6,39 @@ import { emailSegments, emailLinks, isFileLink, fileSize } from '../../lib/leads
 
 // ─── Pieces shared by the leads list and the agent settings ────────────────
 
+const TAB_ICON = {
+  card: <path d="M4 5h16v14H4zM8 9h8M8 13h5" />,
+  email: <path d="M3 6h18v12H3zM3 7l9 6 9-6" />,
+}
+
+/**
+ * The opened lead's tabs (2026-10-19, "make it more evident"): a real tab
+ * bar, larger, with an icon each, the open one filled. `tabs` is
+ * [[key, label]]; `children` sits at the right end (Ask Arak, Delete).
+ */
+export function LeadTabs({ tabs, value, onChange, children }) {
+  return (
+    <div className="flex flex-wrap items-center gap-2 px-4 pt-3 md:pl-[8.25rem]">
+      <div role="tablist" aria-label="Lead" className="inline-flex border border-border bg-surface-subtle p-0.5">
+        {tabs.map(([k, label]) => {
+          const on = value === k
+          return (
+            <button key={k} type="button" role="tab" aria-selected={on} onClick={() => onChange(k)}
+              className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 text-sm transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-amber-400 ${on
+                ? 'bg-white text-text font-semibold shadow-sm ring-1 ring-border' : 'text-text-secondary hover:text-text hover:bg-white/60'}`}>
+              <svg className={`w-4 h-4 ${on ? 'text-amber-700' : 'text-text-tertiary'}`} fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24" aria-hidden="true">
+                {TAB_ICON[k] || TAB_ICON.card}
+              </svg>
+              {label}
+            </button>
+          )
+        })}
+      </div>
+      <div className="ml-auto flex items-center gap-1">{children}</div>
+    </div>
+  )
+}
+
 export function VerdictTag({ verdict, corrected = false }) {
   return (
     <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-[0.08em] leading-[1.4] whitespace-nowrap ${VERDICT_TONE[verdict] || VERDICT_TONE.pending}`}>

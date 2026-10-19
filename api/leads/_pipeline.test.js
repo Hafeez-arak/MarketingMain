@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { addLead, trackLead } from './_pipeline.js'
+import { addLead, trackLead, deleteLead } from './_pipeline.js'
 import { saveCard } from './_card.js'
 
 // Leads added by hand, and stages, against an in-memory database that
@@ -31,6 +31,7 @@ function fakeDb({ seats = [SALES.id, OTHER, BOSS] } = {}) {
     if (path.startsWith('leads?')) {
       const lead = state.leads.find((l) => path.includes(`id=eq.${l.id}`) && path.includes(`workspace_id=eq.${l.workspace_id}`))
       if (method === 'PATCH') { if (!lead) return []; Object.assign(lead, body); return [lead] }
+      if (method === 'DELETE') { if (!lead) return []; state.leads = state.leads.filter((l) => l !== lead); return [lead] }
       return lead ? [lead] : []
     }
     if (path.startsWith('lead_cards')) {
@@ -107,5 +108,25 @@ describe('the card\'s next step', () => {
     const out = await saveCard(deps(st), { workspaceId: WS, leadId: lead.id, user: SALES, body: { card: card.card, next_step: 'Send quote', follow_up: '2026-10-23' } })
     expect(out.lead).toMatchObject({ next_step: 'Send quote', follow_up: '2026-10-23' })
     expect((await saveCard(deps(st), { workspaceId: WS, leadId: lead.id, user: SALES, body: { follow_up: 'soon' } })).error).toBe('The follow-up date is not a date.')
+  })
+})
+
+describe('deleteLead', () => {
+  it('lets a salesperson delete only what they added, and a sales admin anything', async () => {
+    const st = fakeDb()
+    const { lead: mine } = await addLead(deps(st), { workspaceId: WS, user: SALES, body: BODY })
+    const { lead: theirs } = await addLead(deps(st), { workspaceId: WS, user: { id: OTHER }, body: BODY })
+    st.leads.push({ id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', workspace_id: WS, source: 'email', added_by: null, crm_status: 'sent' })
+    expect((await deleteLead(deps(st), { workspaceId: WS, leadId: theirs.id, user: SALES })).status).toBe(403)
+    expect((await deleteLead(deps(st), { workspaceId: WS, leadId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', user: SALES })).status).toBe(403)
+    expect(await deleteLead(deps(st), { workspaceId: WS, leadId: mine.id, user: SALES })).toEqual({ deleted: mine.id, inOdoo: false })
+    expect(await deleteLead(deps(st), { workspaceId: WS, leadId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', user: SALES, canAll: true })).toEqual({ deleted: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', inOdoo: true })
+    expect(st.leads.map((l) => l.id)).toEqual([theirs.id])
+    expect((await deleteLead(deps(st), { workspaceId: WS, leadId: mine.id, user: SALES, canAll: true })).status).toBe(404)
+  })
+  it('waits while the lead is being sent to Odoo', async () => {
+    const st = fakeDb()
+    st.leads.push({ id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd', workspace_id: WS, source: 'email', crm_status: 'sending' })
+    expect((await deleteLead(deps(st), { workspaceId: WS, leadId: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd', user: SALES, canAll: true })).status).toBe(409)
   })
 })

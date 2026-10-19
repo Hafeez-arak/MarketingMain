@@ -7,9 +7,9 @@ import {
   SENDER_LABEL, PROJECT_LABEL, REQUEST_LABEL, FOLDER_LABEL, PHILIPS_LABEL, CRM_LABEL, channelLabel, brandOf, phonesOf, projectOf,
   ownerLabel, shortName, FORWARD_LABEL, assignable,
 } from '../../lib/leads/view'
-import { VerdictTag, LeadDetail } from './parts'
+import { VerdictTag, LeadDetail, LeadTabs } from './parts'
 import BattleCard from './BattleCard'
-import { StageBar } from './Pipeline'
+import { StageBar, DeleteLead } from './Pipeline'
 
 // ─── The leads list ────────────────────────────────────────────────────────
 // What the sales team asked for (2026-10-11): one clean row per lead with
@@ -23,8 +23,9 @@ import { StageBar } from './Pipeline'
 // a lead into Odoo from here, after a confirmation that shows what will be
 // sent. Everyone else sees where each lead stands.
 //
-// An approved lead opens on its battle card (BattleCard.jsx, 2026-10-12),
-// with the email one tab away.
+// A lead someone has opens on its battle card (BattleCard.jsx; made at
+// approval from 2026-10-12, at assignment since 2026-10-19), with the email
+// one tab away.
 //
 // The Owner column (2026-10-13): a sales admin assigns a lead to one person
 // on the sales team at any time, which forwards the customer's email to them
@@ -162,30 +163,30 @@ function ProjectPicker({ lead, onSet }) {
 }
 
 /**
- * The Battle card tab of a lead not yet approved: the card is made when it
- * is (the owner's rule, 2026-10-12), so say so, and offer Approve to those
+ * The Battle card tab of a lead no one has yet: the card is made when it is
+ * assigned (the owner, 2026-10-19), so say so, and offer Assign to those
  * who may.
  */
-function CardWaiting({ lead, canApprove, onAsk }) {
+function CardWaiting({ lead, canApprove, onAssign }) {
   return (
     <div className="px-4 pb-5 pt-3 md:pl-[8.25rem] text-xs space-y-2">
-      <p className="text-text">This lead gets its battle card when it is approved.</p>
+      <p className="text-text">This lead gets its battle card when it is assigned.</p>
       <p className="text-text-secondary leading-relaxed max-w-[60ch]">
-        Approving says the lead is real. The card is then built from the email and our records, and the team works from it until the deal moves to the CRM.
+        Assigning gives it to a salesperson and puts it in the Pipeline. The card is built from the email and our records, and they work from it; approving later sends the lead and its card to Odoo.
       </p>
       {canApprove
-        ? <Button size="xs" onClick={() => onAsk(lead)}>Approve and make the card</Button>
-        : <p className="text-text-tertiary">A sales admin approves leads.</p>}
+        ? <Button size="xs" onClick={() => onAssign(lead)}>Assign and make the card</Button>
+        : <p className="text-text-tertiary">A sales admin assigns leads.</p>}
     </div>
   )
 }
 
-function Row({ lead, open, onToggle, onReview, onSetProject, workspaceId, mailboxes, canApprove, onAsk, team, me, onAssign, onForward, onChange }) {
+function Row({ lead, open, onToggle, onReview, onSetProject, workspaceId, mailboxes, canApprove, onAsk, team, me, onAssign, onForward, onChange, onDeleted }) {
   const v = effectiveVerdict(lead)
   const v2 = (lead.criteria_version || 1) >= 2
   const junk = lead.folder === 'junk'
-  // An approved lead opens on its card; any other on its email.
-  const [tab, setTab] = useState(lead.approved_at || lead.stage ? 'card' : 'email')
+  // A lead someone has opens on its card; any other on its email.
+  const [tab, setTab] = useState(lead.approved_at || lead.stage || lead.assigned_to ? 'card' : 'email')
   const hasTabs = lead.verdict !== 'duplicate'
   return (
     <li className={open ? 'bg-surface-subtle' : ''}>
@@ -242,21 +243,19 @@ function Row({ lead, open, onToggle, onReview, onSetProject, workspaceId, mailbo
           <StageBar lead={lead} workspaceId={workspaceId} onChange={onChange} />
           {hasTabs ? (
             <>
-              <div role="tablist" aria-label="Lead" className="flex gap-1 px-4 pt-3 md:pl-[8.25rem]">
-                {[['card', 'Battle card'], ['email', lead.source === 'manual' ? 'Details' : 'Email and evidence']].map(([k, label]) => (
-                  <button key={k} type="button" role="tab" aria-selected={tab === k} onClick={() => setTab(k)}
-                    className={`text-xs px-2.5 py-1 border-b-2 focus:outline-none focus-visible:ring-1 focus-visible:ring-amber-400 ${tab === k ? 'border-amber-500 text-text font-semibold' : 'border-transparent text-text-secondary hover:text-text'}`}>
-                    {label}
-                  </button>
-                ))}
+              <LeadTabs tabs={[['card', 'Battle card'], ['email', lead.source === 'manual' ? 'Details' : 'Email and evidence']]} value={tab} onChange={setTab}>
                 <AskAboutLead lead={lead} />
-              </div>
+                <DeleteLead lead={lead} workspaceId={workspaceId} me={me} canAll={canApprove} onDeleted={onDeleted} />
+              </LeadTabs>
               {tab === 'card'
-                ? (lead.approved_at || lead.stage ? <BattleCard lead={lead} workspaceId={workspaceId} onLeadChange={onChange} /> : <CardWaiting lead={lead} canApprove={canApprove} onAsk={onAsk} />)
+                ? (lead.approved_at || lead.stage || lead.assigned_to ? <BattleCard lead={lead} workspaceId={workspaceId} onLeadChange={onChange} /> : <CardWaiting lead={lead} canApprove={canApprove} onAssign={onAssign} />)
                 : <LeadDetail lead={lead} onReview={onReview} workspaceId={workspaceId} mailboxes={mailboxes} wide />}
             </>
           ) : (
-            <LeadDetail lead={lead} onReview={onReview} workspaceId={workspaceId} mailboxes={mailboxes} wide />
+            <>
+              <div className="flex px-4 pt-3 md:pl-[8.25rem]"><span className="ml-auto"><DeleteLead lead={lead} workspaceId={workspaceId} me={me} canAll={canApprove} onDeleted={onDeleted} /></span></div>
+              <LeadDetail lead={lead} onReview={onReview} workspaceId={workspaceId} mailboxes={mailboxes} wide />
+            </>
           )}
         </div>
       )}
@@ -274,7 +273,7 @@ function AskAboutLead({ lead }) {
   const who = lead.company || lead.name || 'this sender'
   return (
     <button type="button" onClick={() => askAssistant({ item: { entity: 'lead', id: lead.id, label: `the lead from ${who}` } })}
-      className="ml-auto text-xs px-2.5 py-1 text-amber-800 hover:text-amber-900 hover:underline focus:outline-none focus-visible:ring-1 focus-visible:ring-amber-400">
+      className="text-xs px-2.5 py-1 text-amber-800 hover:text-amber-900 hover:underline focus:outline-none focus-visible:ring-1 focus-visible:ring-amber-400">
       Ask Arak about this lead
     </button>
   )
@@ -317,7 +316,7 @@ function AssignDialog({ lead, team, busy, error, onCancel, onConfirm }) {
         {!assignable(team).length && <p className="text-xs text-red-600">No salesperson is on this company's sales team yet.</p>}
         {to && (
           <p className="text-xs text-text-secondary leading-relaxed">
-            {same ? `${shortName(person)} has it already: this sends the email to them again.` : forwardWords(lead, person)}
+            {same ? `${shortName(person)} has it already: this sends the email to them again.` : `${forwardWords(lead, person)} It goes into the Pipeline with its battle card.`}
             {lead.crm_status === 'sent' && !same ? ' They become its salesperson in Odoo too.' : ''}
           </p>
         )}
@@ -376,7 +375,7 @@ function ApproveDialog({ lead, team, busy, error, onCancel, onConfirm }) {
         </Select>
         {changing && <p className="text-xs text-text-secondary leading-relaxed">{forwardWords(lead, person)}</p>}
         <p className="text-xs text-text-secondary leading-relaxed">
-          It gets its battle card here, and becomes a lead in Odoo CRM with {person ? shortName(person) : 'them'} as its salesperson, the email, the criteria and the agent's questions. It can't be sent twice.
+          It becomes a lead in Odoo CRM with {person ? shortName(person) : 'them'} as its salesperson, the email, the criteria and the agent's questions; its battle card stays with it. It can't be sent twice.
           {notQualified ? ' Approving also marks it qualified.' : ''}
           {' '}If Odoo isn't connected yet, it is marked approved and sent as soon as it is.
         </p>
@@ -561,7 +560,8 @@ export default function LeadsBoard({ workspaceId, onReview, refreshKey = 0, mail
             <Row key={l.id} lead={l} open={open === l.id} onToggle={() => setOpen(open === l.id ? null : l.id)} onReview={review}
               onSetProject={setProject} workspaceId={workspaceId} mailboxes={mailboxes} canApprove={canApprove} onAsk={(lead) => { setApproving({ busy: false, error: '' }); setAsking(lead) }}
               team={team} me={me} onAssign={(lead) => { setAssignState({ busy: false, error: '' }); setAssigning(lead) }} onForward={forwardAgain}
-              onChange={(updated) => replaceRow(updated.id, updated)} />
+              onChange={(updated) => replaceRow(updated.id, updated)}
+              onDeleted={(gone) => { setOpen(null); setList((st) => ({ ...st, rows: st.rows.filter((x) => x.id !== gone.id), total: Math.max(0, st.total - 1) })) }} />
           ))}
         </ul>
       )}

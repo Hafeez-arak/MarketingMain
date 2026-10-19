@@ -152,6 +152,17 @@ describe('assigning an email lead', () => {
     expect(w.state.sent).toEqual([])
   })
 
+  it('puts the lead in the Pipeline at New (2026-10-19), and taking it back before anyone worked it takes it out', async () => {
+    const w = world()
+    await assign(w, L1, OMAR.id)
+    expect(w.state.leads[0]).toMatchObject({ stage: 'new', stage_by: ARIF.id, assigned_to: OMAR.id })
+    await assign(w, L1, null)
+    expect(w.state.leads[0]).toMatchObject({ stage: null, assigned_to: null })
+    w.state.leads[0].stage = 'contacted'
+    await assign(w, L1, HUDA.id)
+    expect(w.state.leads[0].stage).toBe('contacted')
+  })
+
   it('never to a sales admin: they hand leads out (the owner, 2026-10-19)', async () => {
     const r = await assign(w, L1, ARIF.id)
     expect(r).toEqual({ status: 400, error: 'A sales admin assigns leads and does not work them. Choose a salesperson.' })
