@@ -9,6 +9,22 @@ import runsFixture from './runsFixture.json'
 
 export const WS = '00000000-0000-0000-0000-0000000000dd'
 
+// What the research watches, made up: the sales Research page lists it.
+const AGENDA = [
+  { id: 'a1', kind: 'source', source_type: 'tender_portal', tier: 1, status: 'active', subject: 'tenders.example.gov.sa', why: 'Government tenders and planned projects: schools, hospitals, ministry buildings.' },
+  { id: 'a2', kind: 'source', source_type: 'exchange', tier: 1, status: 'active', subject: 'exchange.example.sa', why: 'Listed contractors must announce contract awards.' },
+  { id: 'a3', kind: 'source', source_type: 'news', tier: 2, status: 'active', subject: 'construction-news.example.com', why: 'Saudi awards, contractors and fit-out news.' },
+  { id: 'a4', kind: 'source', source_type: 'linkedin', tier: 2, status: 'active', subject: 'Example Fit-Out Co', why: 'Fit-out contractor that posts its Riyadh wins.' },
+  { id: 'a5', kind: 'source', source_type: 'instagram', tier: 1, status: 'active', subject: '@example_projects', why: 'Tracks Riyadh projects under construction.' },
+  { id: 'a6', kind: 'source', source_type: 'hashtag', tier: 1, status: 'active', subject: '#مشاريع_الرياض', why: '"Riyadh projects", used by developers and contractors.' },
+  { id: 'a7', kind: 'source', source_type: 'keyword', tier: 2, status: 'active', subject: '"awarded" fit-out contract Riyadh', why: 'Finds contractors announcing new jobs.' },
+  { id: 'a8', kind: 'source', source_type: 'news', tier: 3, status: 'retired', subject: 'paused.example.com', why: 'Paused, so not listed.' },
+  { id: 'c1', kind: 'competitor', status: 'active', subject: 'Example Lighting', domain: 'example-lighting.com', why: 'Internal note, not shown.' },
+  { id: 'c2', kind: 'competitor', status: 'active', subject: 'Sample Controls', domain: '', why: '' },
+  { id: 'c3', kind: 'competitor', status: 'retired', subject: 'Retired Rival', domain: 'retired.example', why: '' },
+  { id: 'q1', kind: 'question', status: 'active', subject: 'A standing question, not listed', why: '' },
+]
+
 const mode = new URLSearchParams(window.location.search).get('mode') || ''
 const iso = (d, h) => `2026-10-0${d}T${String(h).padStart(2, '0')}:00:00Z`
 const as = new URLSearchParams(window.location.search).get('as') || 'admin'
@@ -132,6 +148,7 @@ window.fetch = async (input, init = {}) => {
   // The sales app's Research page: the committed research fixture, and an
   // empty tracker (the page then shows this run's own openings and events).
   if (url.includes('/rest/v1/research_runs')) return json(runsFixture)
+  if (url.includes('/rest/v1/research_agenda')) return json(AGENDA)
   if (url.includes('/rest/v1/research_')) return json([])
   // Read and unread (2026-10-19): everything before 6 Oct counts as read.
   if (url.includes('/rest/v1/rpc/lead_read_before')) return json('2026-10-06T00:00:00Z')
