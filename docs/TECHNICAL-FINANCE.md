@@ -149,7 +149,14 @@ node dev/v2db/check-api-gates.mjs      # Email's section gate (needs the dev ser
    analytic account per project, and Sales margin installed for planned
    margins.
 3. The permanent Odoo key (the mirror's prerequisite since step 3).
-4. Apply `20261104`, `20261105` with the rest of v2.
+4. Apply `20261104`, `20261105` and `20261106` with the rest of v2.
+5. **The CEO's requirement 10 (a project made when a sales order is
+   confirmed) is an Odoo setting, not code here.** In Odoo: Sales → Products
+   → each project product (supply and installation) → *Create on Order:
+   Project* (or *Project & Task*), with a template project that already has
+   the nine stages. Odoo then opens the project, linked to its sales order,
+   the moment the order is confirmed, and the mirror brings it here within
+   the hour. Rule 7 holds: Odoo makes it; Campai watches it.
 
 ## Not done
 
