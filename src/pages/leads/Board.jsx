@@ -5,12 +5,13 @@ import { fetchLeadsPage, leadsApi } from '../../lib/leads/client'
 import {
   SHOW_OPTIONS, EMPTY_FILTERS, activeFilterCount, effectiveVerdict, PAGE_SIZE, pageLabel, pageCount, when,
   SENDER_LABEL, PROJECT_LABEL, REQUEST_LABEL, FOLDER_LABEL, PHILIPS_LABEL, CRM_LABEL, channelLabel, brandOf, phonesOf, projectOf,
-  ownerLabel, shortName, FORWARD_LABEL, assignable, leadTabs,
+  ownerLabel, shortName, FORWARD_LABEL, leadTabs, forwardWords, assignable,
 } from '../../lib/leads/view'
 import { VerdictTag, LeadDetail, LeadTabs, LeadName, MarkUnread } from './parts'
 import { useLeadReads } from './useLeadReads'
 import BattleCard from './BattleCard'
 import { StageBar, DeleteLead } from './Pipeline'
+import AssignDialog, { PersonOptions } from './AssignDialog'
 import LeadOverview from './LeadOverview'
 
 // ─── The leads list ────────────────────────────────────────────────────────
@@ -252,7 +253,7 @@ function Row({ lead, open, onToggle, onReview, onSetProject, workspaceId, mailbo
                 <DeleteLead lead={lead} workspaceId={workspaceId} me={me} canAll={canApprove} onDeleted={onDeleted} />
               </LeadTabs>
               {tab === 'lead'
-                ? <LeadOverview lead={lead} workspaceId={workspaceId} team={team} me={me} onChange={onChange} />
+                ? <LeadOverview lead={lead} workspaceId={workspaceId} team={team} me={me} onChange={onChange} onReassign={canApprove ? () => onAssign(lead) : undefined} />
                 : tab === 'card'
                   ? (lead.approved_at || lead.stage || lead.assigned_to ? <BattleCard lead={lead} workspaceId={workspaceId} onLeadChange={onChange} /> : <CardWaiting lead={lead} canApprove={canApprove} onAssign={onAssign} />)
                   : <LeadDetail lead={lead} onReview={onReview} workspaceId={workspaceId} mailboxes={mailboxes} wide />}
@@ -282,64 +283,6 @@ function AskAboutLead({ lead }) {
       className="text-xs px-2.5 py-1 text-amber-800 hover:text-amber-900 hover:underline focus:outline-none focus-visible:ring-1 focus-visible:ring-amber-400">
       Ask Arak about this lead
     </button>
-  )
-}
-
-/** The salespeople as choices. A sales admin assigns leads and is not one of them. */
-function PersonOptions({ team }) {
-  return assignable(team).map((m) => (
-    <option key={m.user_id} value={m.user_id}>{m.full_name || m.email}</option>
-  ))
-}
-
-/** What the person gets when a lead is assigned: the email forwarded, from where. */
-function forwardWords(lead, person) {
-  const name = person ? shortName(person) : 'They'
-  return lead.source === 'email'
-    ? `${name} gets the customer's email forwarded from ${lead.mailbox || 'the mailbox it came to'} now, attachments and all, and replies from there.`
-    : `${name} gets this website enquiry by email now, with the customer as the reply address.`
-}
-
-/**
- * "Assign to whom?": one person on the team. Assigning forwards the email
- * at once, so the dialog says so before anything is sent.
- */
-function AssignDialog({ lead, team, busy, error, onCancel, onConfirm }) {
-  const [to, setTo] = useState(lead.assigned_to || '')
-  const person = team.find((m) => m.user_id === to)
-  const same = to && to === lead.assigned_to
-  const canClear = lead.assigned_to && !lead.approved_at && !lead.crm_status
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(28,35,33,0.45)' }} onClick={busy ? undefined : onCancel}>
-      <div role="dialog" aria-modal="true" aria-labelledby="assign-title" onClick={stop}
-        className="bg-white shadow-dropdown w-full max-w-md border border-border animate-fade-scale p-6 space-y-4">
-        <h3 id="assign-title" className="font-semibold text-text text-sm">{lead.assigned_to ? 'Assign this lead to someone else?' : 'Who works this lead?'}</h3>
-        <p className="text-xs text-text" dir="auto">{lead.company || lead.name || lead.email}: {lead.summary || lead.subject}</p>
-        <Select label="Assign to" value={to} onChange={(e) => setTo(e.target.value)}>
-          <option value="">Choose a person…</option>
-          <PersonOptions team={team} />
-        </Select>
-        {!assignable(team).length && <p className="text-xs text-red-600">No salesperson is on this company's sales team yet.</p>}
-        {to && (
-          <p className="text-xs text-text-secondary leading-relaxed">
-            {same ? `${shortName(person)} has it already: this sends the email to them again.` : `${forwardWords(lead, person)} It goes into the Pipeline with its battle card.`}
-            {lead.crm_status === 'sent' && !same ? ' They become its salesperson in Odoo too.' : ''}
-          </p>
-        )}
-        {error && <p className="text-xs text-red-600">{error}</p>}
-        <div className="flex gap-3 pt-1">
-          <Button variant="secondary" className="flex-1 justify-center" disabled={busy} onClick={onCancel}>Cancel</Button>
-          <Button className="flex-1 justify-center" disabled={busy || !to} onClick={() => onConfirm(to)}>
-            {busy ? <Spinner size="sm" /> : null}{busy ? 'Sending…' : same ? 'Send again' : 'Assign and forward'}
-          </Button>
-        </div>
-        {canClear && (
-          <button type="button" disabled={busy} onClick={() => onConfirm(null)} className="text-[11px] text-text-tertiary hover:text-text underline">
-            Take it off {shortName(team.find((m) => m.user_id === lead.assigned_to)) || 'them'} (no one has it)
-          </button>
-        )}
-      </div>
-    </div>
   )
 }
 

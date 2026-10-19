@@ -82,7 +82,7 @@ function NextStep({ lead, workspaceId, onChange }) {
   )
 }
 
-export default function LeadOverview({ lead, workspaceId, team = [], me = '', onChange }) {
+export default function LeadOverview({ lead, workspaceId, team = [], me = '', onChange, onReassign }) {
   const d = lead.details || {}
   const phones = phonesOf(lead)
   const owner = team.find((m) => m.user_id === lead.assigned_to)
@@ -118,7 +118,13 @@ export default function LeadOverview({ lead, workspaceId, team = [], me = '', on
         {/* ── Where it stands ── */}
         <Box title="Where it stands" aside={lead.stage ? <span className={`text-[11px] font-semibold px-2 py-0.5 ${lead.stage === 'won' ? 'bg-sage-50 text-sage-700' : lead.stage === 'lost' ? 'bg-red-50 text-red-600' : 'bg-stone-100 text-text'}`}>{STAGE_LABEL[lead.stage]}</span> : null}>
           <dl className="grid grid-cols-[6.5rem_1fr] gap-x-3 gap-y-1.5">
-            <Row label="Owner">{lead.assigned_to ? (lead.assigned_to === me ? 'You' : owner ? (owner.full_name || owner.email) : 'Someone who left the team') : <span className="text-text-tertiary">No one yet</span>}</Row>
+            <Row label="Owner">
+              <span className="flex flex-wrap items-center gap-2">
+                <span>{lead.assigned_to ? (lead.assigned_to === me ? 'You' : owner ? (owner.full_name || owner.email) : 'Someone who left the team') : <span className="text-text-tertiary">No one yet</span>}</span>
+                {/* A sales admin moves it, at any stage; it keeps its stage and card. */}
+                {onReassign && <Button size="xs" variant="secondary" onClick={onReassign}>{lead.assigned_to ? 'Reassign' : 'Assign'}</Button>}
+              </span>
+            </Row>
             {lead.assigned_at && <Row label="Assigned">{when(lead.assigned_at)}{lead.forward_status === 'failed' ? <span className="text-red-600"> · email not forwarded</span> : lead.forward_status === 'sent' ? ' · email forwarded' : ''}</Row>}
             {lead.stage_at && <Row label="Stage since">{when(lead.stage_at)}</Row>}
             {lead.stage === 'lost' && <Row label="Lost">{LOST_REASON_LABEL[lead.lost_reason] || ''}{lead.lost_to ? `, to ${lead.lost_to}` : ''}</Row>}
