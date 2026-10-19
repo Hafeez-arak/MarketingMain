@@ -29,3 +29,4 @@ export const accountContacted = (ws, token, accountId) => call('account_contacte
 export const sendToSales = (ws, token, opportunityId, userId) => call('send_to_sales', ws, token, { opportunity_id: opportunityId, user_id: userId })
 export const markLead = (ws, token, leadId, what, extra = {}) => call('lead_mark', ws, token, { lead_id: leadId, what, ...extra })
 export const alertsNow = (ws, token) => call('alerts_now', ws, token)
+export const odooSync = (ws, token) => call('odoo_sync', ws, token)

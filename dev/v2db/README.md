@@ -217,3 +217,21 @@ In the app, marketing@ sees only Marketing and Insights, is sent Home from
 /sales/leads, /ceo and /admin/sections, and gets 403 from the Sales and CEO
 APIs. After the owner gave her Sales "View" on Admin > Section access she
 read the 12 leads and 5 accounts, and still could not act on them.
+
+## A fake Odoo (for the Odoo mirror)
+
+v2 reads Odoo into a mirror (`odoo_records`, `api/leads/_odooSync.js`)
+before Arak has a permanent Odoo key, and is never pointed at the real Odoo
+while it is being built. `fakeOdoo.js` answers Odoo 18's JSON-RPC the way the
+real one does for what the app uses (sign-in, `ir.model`, `search_read` with
+domains, order, limit, `active_test`), with invented deals, quotes, orders,
+invoices and projects:
+
+```sh
+node dev/v2db/fakeOdoo.js 8069 &
+node dev/v2db/connect-fake-odoo.mjs
+```
+
+Then, signed in as ceo@arak.test, the CEO page's "Update now" (or the hourly
+round) fills the mirror, and the four tiles that waited for Odoo show its
+numbers. The tests use the same fake (`api/leads/_odooSync.test.js`).

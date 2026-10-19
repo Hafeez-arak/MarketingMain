@@ -14,7 +14,7 @@ import { AttachButton, AttachmentTray, TurnAttachments } from '../../components/
 import { fetchLatestBrief, writeBrief, requestFrom } from '../../lib/ceo'
 import { fetchRequests, STATUS_LABEL } from '../../lib/requests'
 import { timeAgo } from '../../lib/utils'
-import { fetchControl, assignLead, remindOwner, accountContacted, sendToSales, saveTargets, saveRouting } from '../../lib/control'
+import { fetchControl, assignLead, remindOwner, accountContacted, sendToSales, saveTargets, saveRouting, odooSync } from '../../lib/control'
 import { CT } from './strings'
 import { HomeTab, TeamTab, AccountsTab, OpportunitiesTab, MarketingTab } from './Control'
 import { TargetsTab } from './Targets'
@@ -156,6 +156,7 @@ export function CeoPage() {
     sendToSales: (oppId, userId) => sendToSales(activeWorkspaceId, accessToken, oppId, userId),
     saveTargets: form => saveTargets(activeWorkspaceId, accessToken, form),
     saveRouting: rules => saveRouting(activeWorkspaceId, accessToken, rules),
+    odooSync: () => odooSync(activeWorkspaceId, accessToken),
   }), [activeWorkspaceId, accessToken])
 
   // A button's work, then the panel again: the server's word, not a guess.

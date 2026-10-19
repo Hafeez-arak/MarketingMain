@@ -479,6 +479,11 @@ const actions = {
     return out.error ? fail(out.status, out.error) : out
   },
 
+  /** Read Odoo into the mirror now (it otherwise runs hourly). Read only. */
+  async odoo_sync({ workspaceId }) {
+    return leadDeps().odoo({ workspaceId, force: true })
+  },
+
   /** Task reminders for this company now (they otherwise run every 5 minutes). */
   async tasks_tick({ workspaceId }) {
     return leadDeps().tasks({ workspaceId })

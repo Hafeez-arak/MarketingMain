@@ -12,7 +12,7 @@
 // fails, and the answer is no: v1's rules alone.
 
 const CEO = {
-  control: 'view',
+  control: 'view', odoo_sync: 'view',
   remind: 'work', account_contacted: 'work', send_to_sales: 'work',
   targets_save: 'manage', routing_save: 'manage', alerts_now: 'manage',
 }

@@ -221,3 +221,21 @@ describe('marketingNumbers', () => {
     expect(li.value.en).toBe('4,900')
   })
 })
+
+describe('with Odoo\'s numbers (v2 mirror)', () => {
+  it('the revenue tile says invoiced or confirmed orders', () => {
+    const inv = controlKpis({ odoo: { revenue_month_sar: 1e6, revenue_basis: 'invoiced' }, now: NOW }).find(t => t.key === 'revenue')
+    expect(inv.sub.en).toMatch(/^Invoiced/)
+    const ord = controlKpis({ odoo: { revenue_month_sar: 1e6, revenue_basis: 'orders' }, now: NOW }).find(t => t.key === 'revenue')
+    expect(ord.sub.en).toMatch(/^Confirmed orders/)
+  })
+  it('the weekly lines take quotes and win rate from Odoo', () => {
+    const lines = weeklyLines({ odoo: { quotes_week: 4, won: 3, decided: 4 }, targets: { quotes_week: 6 }, now: NOW })
+    expect(lines[3].en).toContain('75% (3 of 4')
+    expect(lines[4].en).toBe('Quotes sent this week: 4 (target 6).')
+  })
+  it('the daily alert lists what to fix in Odoo', () => {
+    const items = dailyAlertItems({ odoo: { missing: [{ kind: 'deal_no_owner', name: 'Hotel lobby' }, { kind: 'project_no_date', name: 'Tower' }] }, now: NOW })
+    expect(items.map(i => i.en)).toEqual(['1 deal with no salesperson: Hotel lobby', '1 project with no delivery date: Tower'])
+  })
+})

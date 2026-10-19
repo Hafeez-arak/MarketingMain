@@ -10,13 +10,18 @@
 
 const TIMEOUT_MS = 15_000
 
-/** "arak-co.odoo.com/odoo" → "https://arak-co.odoo.com". '' if it is not an address. */
+/**
+ * "arak-co.odoo.com/odoo" → "https://arak-co.odoo.com". '' if it is not an
+ * address. Always https, except a server on this machine (127.0.0.1), which
+ * is the fake Odoo v2 is developed against (dev/v2db/fake-odoo.mjs).
+ */
 export function normalizeUrl(raw) {
   const v = String(raw || '').trim()
   if (!v) return ''
   try {
     const u = new URL(/^https?:\/\//i.test(v) ? v : `https://${v}`)
     if (!u.hostname.includes('.')) return ''
+    if (u.hostname === '127.0.0.1' && u.protocol === 'http:') return `http://${u.host}`
     return `https://${u.host}`
   } catch { return '' }
 }
@@ -143,4 +148,47 @@ export async function setLeadOwner(fetchFn, cfg, leadId, userId) {
   const uid = await login(fetchFn, cfg)
   await call(fetchFn, cfg, uid, 'crm.lead', 'write', [[Number(leadId)], { user_id: userId }])
   return true
+}
+
+// ─── Reading (v2, 2026-10-19: the Odoo mirror, _odooSync.js) ──────────────
+
+/** Any record's address in Odoo; the /web# form still opens in 18. */
+export const recordUrl = (url, model, id) => `${url}/web#id=${id}&model=${model}&view_type=form`
+
+/** Which of these models exist (an app that is not installed has none). */
+export async function installedModels(fetchFn, cfg, models) {
+  const uid = await login(fetchFn, cfg)
+  const rows = await call(fetchFn, cfg, uid, 'ir.model', 'search_read', [[['model', 'in', models]]], { fields: ['model'] })
+  return (rows || []).map(r => r.model)
+}
+
+/**
+ * Every record of a model changed after `since` (Odoo's write_date, UTC
+ * "YYYY-MM-DD HH:MM:SS"), oldest change first, a page at a time. Archived
+ * records too (active_test off): a lost deal is archived in Odoo, and a
+ * mirror that never saw it would count it as still open.
+ */
+export async function readChanged(fetchFn, cfg, model, { fields, domain = [], since = '', sinceId = 0, pageSize = 500, maxPages = 20 } = {}) {
+  const uid = await login(fetchFn, cfg)
+  const out = []
+  // The cursor is the last record read: its write_date AND its id, so the
+  // next round starts after it rather than at its second.
+  let cursor = since
+  let lastId = Number(sinceId) || 0
+  for (let page = 0; page < maxPages; page++) {
+    // (write_date > cursor) or (write_date = cursor and id > lastId): a page
+    // boundary inside one second's changes neither repeats nor skips a row.
+    const after = cursor
+      ? ['|', ['write_date', '>', cursor], '&', ['write_date', '=', cursor], ['id', '>', lastId]]
+      : []
+    const rows = await call(fetchFn, cfg, uid, model, 'search_read', [[...after, ...domain]], {
+      fields: [...new Set([...fields, 'id', 'write_date'])], order: 'write_date asc, id asc', limit: pageSize,
+      context: { active_test: false },
+    })
+    out.push(...rows)
+    if (rows.length < pageSize) return { rows: out, done: true }
+    cursor = rows[rows.length - 1].write_date
+    lastId = rows[rows.length - 1].id
+  }
+  return { rows: out, done: false }
 }

@@ -149,6 +149,11 @@ export async function intakeWebsite(deps, { key, rows = [] }) {
   if (deps.tasks && (deps.clock || Date.now)() < started + TOTAL_BUDGET_MS - 10_000) {
     await deps.tasks({}).catch(() => {})
   }
+  // The Odoo mirror (_odooSync.js): at most once an hour per company, so
+  // most of these calls only check the clock.
+  if (deps.odoo && (deps.clock || Date.now)() < started + TOTAL_BUDGET_MS - 20_000) {
+    await deps.odoo({}).catch(() => {})
+  }
   return { status: 200, results, mail }
 }
 

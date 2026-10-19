@@ -240,3 +240,20 @@ All of it is in `tailwind.config.js`. The class names v1 uses stay and only
 their values change: `amber` is now the neutral accent scale (light end =
 hover/selection grey, dark end = ink), and `stone`/`clay` are neutral greys.
 So every v1 page takes the look without edits.
+
+## Progress, 2026-10-19 (continued)
+
+- **Step 2, section access:** built and verified on the local database
+  (migration 20261101).
+- **Tasks, follow-ups and meetings:** built (docs/TASKS-PLAN.md, 20261102).
+- **Step 3, the Odoo read sync:** built against a fake Odoo (20261103). It
+  covers:
+  - an hourly, incremental read of deals, stages, quotes and orders,
+    invoices and projects, for whichever Odoo apps are installed;
+  - the CEO's six numbers, live;
+  - key accounts' last order and open deals;
+  - the weekly email's quotes and win rate;
+  - "To fix in Odoo" with links (requirements 16, 17, 32, 33).
+
+  It goes live when a permanent Odoo key is saved on Leads → Agent
+  settings → CRM.

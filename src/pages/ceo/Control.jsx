@@ -82,11 +82,36 @@ function Status({ value, t }) {
 
 // ── Home: six numbers and at most three decisions ──
 
+/** Where Odoo's numbers stand: last update, or why there are none, and Update now. */
+function OdooLine({ data, t, lang, calls, act }) {
+  const [state, go] = useAction(act)
+  const st = data.odooStatus
+  if (!st) return null
+  const ago = st.lastOkAt ? shortAgo(st.lastOkAt, lang) : ''
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-text-tertiary">
+      <span className={`w-1.5 h-1.5 rounded-full ${st.lastError ? 'bg-yellow-500' : st.lastOkAt ? 'bg-green-500' : 'bg-stone-300'}`} aria-hidden="true" />
+      <span>{st.lastOkAt ? t.odooSynced(ago) : t.odooNever}</span>
+      {st.lastError && <span className="text-yellow-700" dir="auto">{t.odooError}: {st.lastError}</span>}
+      {st.connected && (state.sync ? <Status value={state.sync} t={t} /> : (
+        <button type="button" className="underline underline-offset-2 hover:text-text" onClick={() => go('sync', calls.odooSync)}>{t.syncNow}</button>
+      ))}
+    </div>
+  )
+}
+
+const shortAgo = (iso, lang) => {
+  const m = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 60_000))
+  if (lang === 'ar') return m < 60 ? `منذ ${m} دقيقة` : `منذ ${Math.round(m / 60)} ساعة`
+  return m < 60 ? `${m} min ago` : `${Math.round(m / 60)} h ago`
+}
+
 export function HomeTab({ data, lang, t, act, calls }) {
   const [state, go] = useAction(act)
   const team = data.team || []
   return (
     <div className="space-y-4">
+      <OdooLine data={data} t={t} lang={lang} calls={calls} act={act} />
       <section className="grid grid-cols-2 sm:grid-cols-3 gap-2">
         {data.kpis.map(k => <Tile key={k.key} k={k} lang={lang} t={t} />)}
       </section>
@@ -141,43 +166,68 @@ export function HomeTab({ data, lang, t, act, calls }) {
 
 // ── One row per salesperson ──
 
+/** Requirement 33: what is missing in Odoo, each with a link straight to it. */
+function ToFix({ data, t }) {
+  const missing = data.odoo?.missing || []
+  if (!missing.length) return null
+  return (
+    <section className="space-y-2">
+      <h2 className="eyebrow">{t.toFix} <span className="font-normal text-text-tertiary">{missing.length}</span></h2>
+      <p className="text-xs text-text-secondary">{t.toFixNote}</p>
+      <ul className="bg-white border border-border divide-y divide-border">
+        {missing.slice(0, 20).map(m => (
+          <li key={`${m.kind}:${m.id}`} className="flex items-center gap-3 px-3 py-2 text-sm">
+            <span className="w-1.5 h-1.5 rounded-full bg-yellow-500 flex-shrink-0" aria-hidden="true" />
+            <span className="flex-1 min-w-0 truncate" dir="auto">{m.name}</span>
+            <span className="text-[11px] text-text-tertiary hidden sm:inline">{t.missing[m.kind]}</span>
+            {m.url && <a href={m.url} target="_blank" rel="noreferrer" className="text-xs underline underline-offset-2 text-text hover:text-text-secondary">{t.openInOdoo}</a>}
+          </li>
+        ))}
+      </ul>
+    </section>
+  )
+}
+
 export function TeamTab({ data, lang, t }) {
   const reps = data.reps || []
-  if (!reps.length) return <p className="text-sm text-text-tertiary">{t.noTeam}</p>
+  if (!reps.length) return <><p className="text-sm text-text-tertiary">{t.noTeam}</p><ToFix data={data} t={t} /></>
   return (
+    <div className="space-y-4">
     <div className="bg-white border border-border rounded-xl overflow-x-auto">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="text-[11px] text-text-tertiary border-b border-border">
-            <th className="text-start font-medium px-3 py-2">{t.rep}</th>
-            <th className="text-end font-medium px-3 py-2">{t.open}</th>
-            <th className="text-end font-medium px-3 py-2">{t.quotes}</th>
-            <th className="text-end font-medium px-3 py-2">{t.late}</th>
-            <th className="text-end font-medium px-3 py-2">{t.won}</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-border">
-          {reps.map(r => (
-            <tr key={r.id} className="align-top">
-              <td className="px-3 py-2">
-                <span className="flex items-center gap-2">
-                  <span className={`w-2 h-2 rounded-full flex-shrink-0 ${TONE_DOT[r.tone] || TONE_DOT.none}`} />
-                  <span className="font-medium text-text">{r.name}</span>
-                </span>
-                {r.lateLeads?.length > 0 && (
-                  <p className="text-[11px] text-red-700 mt-1 ps-4" dir="auto">{t.lateList}: {r.lateLeads.slice(0, 4).map(l => l.who).join('، ')}{r.lateLeads.length > 4 ? ` +${r.lateLeads.length - 4}` : ''}</p>
-                )}
-              </td>
-              <td className="px-3 py-2 text-end tabular-nums">{group(r.open)}</td>
-              <td className="px-3 py-2 text-end tabular-nums">{group(r.quotes)}</td>
-              <td className={`px-3 py-2 text-end tabular-nums ${r.late ? 'text-red-700 font-semibold' : ''}`}>{group(r.late)}</td>
-              <td className="px-3 py-2 text-end tabular-nums" title={r.wonValue === null ? t.wonWaits : undefined}>
-                {r.wonValue === null ? <span className="text-text-tertiary">—</span> : sar(r.wonValue, lang)}
-              </td>
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-[11px] text-text-tertiary border-b border-border">
+              <th className="text-start font-medium px-3 py-2">{t.rep}</th>
+              <th className="text-end font-medium px-3 py-2">{t.open}</th>
+              <th className="text-end font-medium px-3 py-2">{t.quotes}</th>
+              <th className="text-end font-medium px-3 py-2">{t.late}</th>
+              <th className="text-end font-medium px-3 py-2">{t.won}</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody className="divide-y divide-border">
+            {reps.map(r => (
+              <tr key={r.id} className="align-top">
+                <td className="px-3 py-2">
+                  <span className="flex items-center gap-2">
+                    <span className={`w-2 h-2 rounded-full flex-shrink-0 ${TONE_DOT[r.tone] || TONE_DOT.none}`} />
+                    <span className="font-medium text-text">{r.name}</span>
+                  </span>
+                  {r.lateLeads?.length > 0 && (
+                    <p className="text-[11px] text-red-700 mt-1 ps-4" dir="auto">{t.lateList}: {r.lateLeads.slice(0, 4).map(l => l.who).join('، ')}{r.lateLeads.length > 4 ? ` +${r.lateLeads.length - 4}` : ''}</p>
+                  )}
+                </td>
+                <td className="px-3 py-2 text-end tabular-nums">{group(r.open)}</td>
+                <td className="px-3 py-2 text-end tabular-nums">{group(r.quotes)}</td>
+                <td className={`px-3 py-2 text-end tabular-nums ${r.late ? 'text-red-700 font-semibold' : ''}`}>{group(r.late)}</td>
+                <td className="px-3 py-2 text-end tabular-nums" title={r.wonValue === null ? t.wonWaits : undefined}>
+                  {r.wonValue === null ? <span className="text-text-tertiary">—</span> : sar(r.wonValue, lang)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <ToFix data={data} t={t} />
     </div>
   )
 }
@@ -189,7 +239,7 @@ export function AccountsTab({ data, lang, t, act, calls }) {
   const rows = data.accounts || []
   return (
     <div className="space-y-2">
-      <p className="text-xs text-text-secondary">{t.accountsNote}</p>
+      <p className="text-xs text-text-secondary">{rows.some(a => a.odoo) ? t.accountsNoteOdoo : t.accountsNote}</p>
       {!rows.length ? <p className="text-sm text-text-tertiary">{t.noAccounts}</p> : (
         <ul className="space-y-2">
           {rows.map(a => (
@@ -202,6 +252,7 @@ export function AccountsTab({ data, lang, t, act, calls }) {
                   </p>
                   <p className="text-[11px] text-text-secondary mt-0.5">
                     {t.owner}: {a.owner || t.nobody}
+                    {a.odoo && <span className="ms-2 rounded bg-stone-100 px-1.5 py-0.5 text-[10px] text-text-secondary">{t.fromOdoo}</span>}
                   </p>
                 </div>
                 {state[a.id] ? <Status value={state[a.id]} t={t} /> : (

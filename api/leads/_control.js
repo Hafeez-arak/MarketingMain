@@ -28,6 +28,8 @@ import {
 } from '../../src/lib/control/panel.js'
 import { REGIONS } from '../../src/lib/control/region.js'
 import { assignLead } from './_assign.js'
+import { readMirror } from './_odooSync.js'
+import { odooFacts, withOdoo } from '../../src/lib/control/odoo.js'
 
 const isUuid = (v) => /^[0-9a-f-]{36}$/i.test(String(v || ''))
 const ws = (id) => `workspace_id=eq.${encodeURIComponent(id)}`
@@ -100,13 +102,20 @@ export async function gatherControl(deps, workspaceId, now = deps.now()) {
     deps.db(`leads?${ws(workspaceId)}&source=eq.website_form&received_at=gte.${enc(monthStart)}&duplicate_of=is.null&select=id`).then((r) => r || []).catch(() => []),
     deps.db(`social_accounts?${ws(workspaceId)}&platform=eq.linkedin&select=followers_count`).then((r) => r || []).catch(() => []),
   ])
+  // Odoo's numbers, from the mirror (_odooSync.js), when there is one.
+  const mirror = await readMirror(deps, workspaceId).catch(() => ({ status: null }))
+  const odoo = mirror.records ? odooFacts(mirror.records, { now, models: mirror.models, url: mirror.url }) : null
+
   let planned = 0
   if (plans.length) {
     const ideas = await deps.db(`plan_ideas?plan_id=in.(${plans.map((p) => p.id).join(',')})&status=neq.rejected&select=id`).catch(() => []) || []
     planned = ideas.length
   }
   return {
-    now, targets: targets || null, rules, leads, team, accounts, opportunities, outcomes,
+    now, targets: targets || null, rules, leads, team, opportunities, outcomes, odoo, odooStatus: mirror.status || null,
+    // Key accounts with Odoo's live last order and open deals where the
+    // customer's name matches; the October analysis's figures otherwise.
+    accounts: odoo ? accounts.map(a => withOdoo(a, odoo)) : accounts,
     marketing: {
       planned,
       published: published.length,
@@ -134,7 +143,9 @@ export async function controlPanel(deps, { workspaceId }) {
     marketing: marketingNumbers(f.marketing),
     unowned: f.leads.filter((l) => !l.assigned_to && !l.duplicate_of).length,
     lookbackDays: LOOKBACK_DAYS,
-    odoo: null,
+    // The facts without the per-customer map (the accounts carry it already).
+    odoo: f.odoo ? { ...f.odoo, byPartner: undefined } : null,
+    odooStatus: f.odooStatus,
     at: f.now.toISOString(),
   }
 }
@@ -383,7 +394,7 @@ export async function sendWeeklySummary(deps, { workspaceId, brief = null, pageU
   const to = (t.brief_emails || []).filter(Boolean)
   if (!to.length) return { off: true }
   const decisions = controlDecisions({ ...f, now })
-  const lines = weeklyLines({ brief: brief?.brief || brief, decisions, leads: f.leads, outcomes: f.outcomes, targets: f.targets, now })
+  const lines = weeklyLines({ brief: brief?.brief || brief, decisions, leads: f.leads, outcomes: f.outcomes, odoo: f.odoo, targets: f.targets, now })
   const [w] = await deps.db(`workspaces?id=eq.${workspaceId}&select=name`) || []
   const mail = weeklyEmail(lines, { company: w?.name || 'Arak', pageUrl, weekOf: now.toISOString().slice(0, 10) })
   const sent = await deps.sendAlert({ workspaceId, to, ...mail }).catch((err) => ({ ok: false, error: err }))

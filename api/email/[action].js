@@ -709,7 +709,10 @@ async function handleCron(req, res) {
   // Task reminders and the morning digest, for the day the Sheet's timer stopped.
   let tasks
   try { tasks = await leadDeps().tasks({}) } catch (err) { tasks = { error: String(err?.message || err).slice(0, 200) } }
-  if (!RESEND_KEY) return res.status(503).json({ ok: false, error: 'RESEND_API_KEY is not set.', leadMail, control, tasks })
+  // The Odoo mirror, for the day the Sheet's timer stopped.
+  let odoo
+  try { odoo = await leadDeps().odoo({}) } catch (err) { odoo = { error: String(err?.message || err).slice(0, 200) } }
+  if (!RESEND_KEY) return res.status(503).json({ ok: false, error: 'RESEND_API_KEY is not set.', leadMail, control, tasks, odoo })
   // Every workspace with something due. Distinct in code: PostgREST has no
   // DISTINCT, and the list is small.
   const now = new Date().toISOString()
@@ -725,7 +728,7 @@ async function handleCron(req, res) {
   for (const workspaceId of new Set(sending.map(r => r.workspace_id))) {
     await closeFinished({ db, count }, { workspaceId }).catch(() => {})
   }
-  return res.status(200).json({ ok: true, workspaces: workspaces.length, results, leadMail, control, tasks })
+  return res.status(200).json({ ok: true, workspaces: workspaces.length, results, leadMail, control, tasks, odoo })
 }
 
 async function handleColdTick(req, res) {

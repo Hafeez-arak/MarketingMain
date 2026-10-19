@@ -184,9 +184,12 @@ export function controlKpis({ leads = [], odoo = null, targets: tRow = null, now
     key: 'revenue', source: 'odoo',
     label: { en: 'Revenue this month', ar: 'إيرادات هذا الشهر' },
     value: money(odoo.revenue_month_sar),
-    sub: targets.revenue_month_sar != null
-      ? { en: `Target ${money(targets.revenue_month_sar).en}`, ar: `الهدف ${money(targets.revenue_month_sar).ar}` }
-      : { en: 'No target set', ar: 'لم يُحدَّد هدف' },
+    // Which number it is, said on the tile: invoiced (Odoo Accounting) or
+    // confirmed orders (no Accounting).
+    sub: {
+      en: `${odoo.revenue_basis === 'orders' ? 'Confirmed orders' : 'Invoiced'} · ${targets.revenue_month_sar != null ? `target ${money(targets.revenue_month_sar).en}` : 'no target set'}`,
+      ar: `${odoo.revenue_basis === 'orders' ? 'طلبات مؤكدة' : 'مفوتر'} · ${targets.revenue_month_sar != null ? `الهدف ${money(targets.revenue_month_sar).ar}` : 'لم يُحدَّد هدف'}`,
+    },
     tone: rag(odoo.revenue_month_sar, targets.revenue_month_sar, { better: 'higher', amberPct }),
   } : WAITING('revenue', { en: 'Revenue this month', ar: 'إيرادات هذا الشهر' },
     { en: 'Shows once Odoo is linked', ar: 'يظهر بعد ربط أودو' }))
@@ -461,21 +464,24 @@ const pct = (a, b) => (b ? Math.round((a / b) * 100) : null)
  * most three), win rate, quotes sent. The first two come from the week's
  * brief (the model's judgement, already written); the rest are counted here.
  */
-export function weeklyLines({ brief = null, decisions = [], leads = [], outcomes = [], targets: tRow = null, now = new Date() } = {}) {
+export function weeklyLines({ brief = null, decisions = [], leads = [], outcomes = [], odoo = null, targets: tRow = null, now = new Date() } = {}) {
   const targets = targetsOf(tRow)
   const found = brief?.found || []
   const good = found.find(f => f.tone === 'good')
   const bad = found.find(f => f.tone === 'bad') || found.find(f => f.tone === 'watch')
 
   const since = now.getTime() - 7 * DAY
-  const quotes = leads.filter(l => (t(l.quote_sent_at) ?? 0) >= since).length
+  // Odoo's numbers when the mirror has them (quotes made there, deals won
+  // and lost there); the marks in Campai before that.
+  const quotes = odoo?.quotes_week ?? leads.filter(l => (t(l.quote_sent_at) ?? 0) >= since).length
 
   // Win rate over 90 days: the leads' own stages when they exist, else the
   // recorded deal outcomes.
   const from90 = now.getTime() - 90 * DAY
   const closed = leads.filter(l => isClosed(l) && (t(l.stage_at) ?? 0) >= from90)
-  const won = closed.length ? closed.filter(l => l.stage === 'won').length : outcomes.filter(o => o.outcome === 'won').length
-  const decided = closed.length || outcomes.filter(o => o.outcome === 'won' || o.outcome === 'lost').length
+  const fromOdoo = Boolean(odoo?.decided)
+  const won = fromOdoo ? odoo.won : closed.length ? closed.filter(l => l.stage === 'won').length : outcomes.filter(o => o.outcome === 'won').length
+  const decided = fromOdoo ? odoo.decided : closed.length || outcomes.filter(o => o.outcome === 'won' || o.outcome === 'lost').length
   const rate = pct(won, decided)
 
   const dec = decisions.slice(0, MAX_DECISIONS)
@@ -516,7 +522,7 @@ export function weeklyLines({ brief = null, decisions = [], leads = [], outcomes
  * once per kind (lead.late_alerted), so tomorrow's email has only what is
  * new; the counts still show the whole picture.
  */
-export function dailyAlertItems({ leads = [], accounts = [], team = [], targets: tRow = null, now = new Date() } = {}) {
+export function dailyAlertItems({ leads = [], accounts = [], team = [], odoo = null, targets: tRow = null, now = new Date() } = {}) {
   const targets = targetsOf(tRow)
   const nameOf = id => team.find(p => p.id === id)?.name || 'someone'
   const open = leads.filter(l => isOpenQualified(l) && recent(l, now))
@@ -535,6 +541,15 @@ export function dailyAlertItems({ leads = [], accounts = [], team = [], targets:
   for (const a of keyAccounts(accounts, tRow, now).filter(x => x.tone === 'bad')) {
     items.push({ kind: 'account_quiet', accountId: a.id, en: `${a.name}: no contact for ${a.quietDays} days${a.owner ? ` (${a.owner})` : ''}`, ar: `${a.name}: لا تواصل منذ ${a.quietDays} يومًا${a.owner ? ` (${a.owner})` : ''}` })
   }
+  // Requirement 33: what is missing in Odoo, one line per kind, every day
+  // until it is fixed there (the CEO's dashboards are only as good as it).
+  const missing = odoo?.missing || []
+  for (const kind of ['deal_no_owner', 'deal_no_value', 'project_no_date']) {
+    const xs = missing.filter(m => m.kind === kind)
+    if (!xs.length) continue
+    const word = { deal_no_owner: ['deal', 'with no salesperson', 'صفقة بلا مندوب'], deal_no_value: ['deal', 'with no expected value', 'صفقة بلا قيمة متوقعة'], project_no_date: ['project', 'with no delivery date', 'مشروع بلا تاريخ تسليم'] }[kind]
+    items.push({ kind: 'odoo_missing', en: `${xs.length} ${word[0]}${xs.length === 1 ? '' : 's'} ${word[1]}: ${xs.slice(0, 3).map(x => x.name).join(', ')}${xs.length > 3 ? '…' : ''}`, ar: `${xs.length} ${word[2]}: ${xs.slice(0, 3).map(x => x.name).join('، ')}${xs.length > 3 ? '…' : ''}` })
+  }
   return items
 }
 
@@ -543,6 +558,7 @@ const KIND_TITLE = {
   late_reply: { en: 'No first reply yet', ar: 'لم يُرد عليها بعد' },
   unassigned: { en: 'Leads with no owner', ar: 'استفسارات بلا مسؤول' },
   account_quiet: { en: 'Key accounts at risk', ar: 'عملاء رئيسيون في خطر' },
+  odoo_missing: { en: 'To fix in Odoo', ar: 'بيانات ناقصة في أودو' },
 }
 
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))

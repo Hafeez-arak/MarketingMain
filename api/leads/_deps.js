@@ -5,6 +5,7 @@ import { checkMail } from './_mail.js'
 import { runHealth } from './_health.js'
 import { routeWaiting } from './_control.js'
 import { runTaskReminders } from './_tasks.js'
+import { syncAllOdoo, syncOdoo } from './_odooSync.js'
 import { supabaseStorage } from './_files.js'
 import { checkWebsite } from './_website.js'
 
@@ -137,5 +138,6 @@ export function leadDeps() {
   deps.health = (args) => runHealth(deps, { pageUrl: `${APP_URL}/leads`, ...args })
   deps.route = (args) => routeWaiting(deps, { appUrl: APP_URL, ...args })
   deps.tasks = (args) => runTaskReminders(deps, args)
+  deps.odoo = (args = {}) => (args.workspaceId ? syncOdoo(deps, args) : syncAllOdoo(deps, args))
   return deps
 }
