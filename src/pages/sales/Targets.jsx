@@ -58,7 +58,9 @@ function Tag({ children, tone = 'bg-surface-subtle text-text-secondary border-bo
 }
 
 export default function Targets() {
-  const { isAccessAdmin, activeWorkspaceId } = useAuth()
+  const { canSection, activeWorkspaceId } = useAuth()
+  // v2: Sales section access (was: the access admin only).
+  const canUse = canSection('sales', 'view')
   const [params, setParams] = useSearchParams()
   const tab = TABS.some(t => t.key === params.get('tab')) ? params.get('tab') : 'accounts'
   const setTab = key => setParams(prev => { const n = new URLSearchParams(prev); n.set('tab', key); return n }, { replace: true })
@@ -85,7 +87,7 @@ export default function Targets() {
     }
   }, [activeWorkspaceId])
 
-  useEffect(() => { if (isAccessAdmin) queueMicrotask(reload) }, [reload, isAccessAdmin])
+  useEffect(() => { if (canUse) queueMicrotask(reload) }, [reload, canUse])
 
   const loading = loadedFor !== activeWorkspaceId || !data
   const icp = useMemo(() => normaliseIcp(data?.icp), [data?.icp])
@@ -96,7 +98,7 @@ export default function Targets() {
     [data?.accounts, data?.events, ranked, now],
   )
 
-  if (!isAccessAdmin) return <Navigate to="/" replace />
+  if (!canUse) return <Navigate to="/" replace />
 
   // Optimistic: the row changes at once and reverts only if the save fails.
   const patchRow = (kind, id, change) =>

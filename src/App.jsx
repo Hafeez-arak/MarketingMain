@@ -31,6 +31,7 @@ import SalesApp                   from './pages/leads/SalesApp'
 import SalesResearch              from './pages/leads/SalesResearch'
 import Targets                    from './pages/sales/Targets'
 import AgentBrief                 from './pages/admin/AgentBrief'
+import SectionAccess              from './pages/admin/SectionAccess'
 import { MediaLibrary }            from './pages/media/index'
 import { SocialOverview, SocialPlatform } from './pages/social/index'
 import { InstagramPage } from './pages/social/InstagramPage'
@@ -44,7 +45,7 @@ import { Access } from './pages/settings/Access'
 import { BrandBrain } from './pages/settings/BrandBrain'
 import { CreativeStudio } from './pages/studio/index'
 import { HomePage } from './pages/home/index'
-import { fromLegacy } from './lib/modules'
+import { fromLegacy, canVisit } from './lib/modules'
 
 // Loads the account's saved webhook URLs into state.webhooks on startup, so
 // they're there regardless of which page loads first. This used to happen
@@ -139,6 +140,7 @@ function ProtectedApp() {
               way to know the route changed — without the key, one crash would
               pin the error screen in place for every page after it. */}
           <ErrorBoundary key={pathname}>
+          <SectionGuard>
           <Routes>
             {/* v2 (2026-10-19): every page's URL starts with its section;
                 lib/modules.js names them. v1's addresses (/leads, /schedule…)
@@ -149,9 +151,9 @@ function ProtectedApp() {
             <Route path="/"                      element={isLeadsHost() ? <Navigate to="/sales/leads" replace /> : <Home />} />
 
             {/* ── CEO ── */}
-            <Route path="/ceo"                  element={<AdminOnly><CeoPage /></AdminOnly>} />
+            <Route path="/ceo"                  element={<CeoPage />} />
 
-            {/* ── Sales ── admin only: each page sends anyone else away. */}
+            {/* ── Sales ── (who may open each section and page: SectionGuard) */}
             <Route path="/sales"                 element={<Navigate to="/sales/leads" replace />} />
             <Route path="/sales/leads"           element={<LeadAgent />} />
             <Route path="/sales/targets"         element={<Targets />} />
@@ -194,6 +196,7 @@ function ProtectedApp() {
             {/* ── Admin ── */}
             <Route path="/admin"                 element={<Navigate to="/admin/team" replace />} />
             <Route path="/admin/team"            element={<Access />} />
+            <Route path="/admin/sections"        element={<SectionAccess />} />
 
             {/* ── Everywhere (no section) ── */}
             <Route path="/agent"                 element={<AgentPage />} />
@@ -204,6 +207,7 @@ function ProtectedApp() {
             <Route path="/integrations"          element={<Navigate to="/" replace />} />
             <Route path="*"                      element={<LegacyOrNotFound />} />
           </Routes>
+          </SectionGuard>
           </ErrorBoundary>
         </AppLayout>
       </AppProvider>
@@ -222,12 +226,17 @@ function Home() {
   return <HomePage />
 }
 
-// The CEO page is built from leads and sales, which only admins see; the
-// database refuses the brief to anyone else anyway (ceo_briefs RLS), and this
-// keeps a member from landing on an empty page.
-function AdminOnly({ children }) {
-  const { isAccessAdmin } = useAuth()
-  return isAccessAdmin ? children : <Navigate to="/" replace />
+// One gate for every section page (v2): the person's grant for the page's
+// section, at the page's level (lib/modules.js canVisit; the grants are
+// public.section_access, which the database enforces again through
+// has_section()). Anyone else lands on Home rather than on a page whose data
+// RLS would refuse.
+function SectionGuard({ children }) {
+  const { pathname } = useLocation()
+  const { who, sectionsReady } = useAuth()
+  if (!sectionsReady) return null
+  if (!canVisit(pathname, who)) return <Navigate to="/" replace />
+  return children
 }
 
 export default function App() {

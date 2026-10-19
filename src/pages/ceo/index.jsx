@@ -123,7 +123,7 @@ const day = (iso, lang) => {
 const TABS = ['home', 'team', 'accounts', 'opportunities', 'marketing', 'targets', 'brief']
 
 export function CeoPage() {
-  const { activeWorkspaceId, accessToken, isAccessAdmin } = useAuth()
+  const { activeWorkspaceId, accessToken, canSection } = useAuth()
   const [params, setParams] = useSearchParams()
   const tab = TABS.includes(params.get('tab')) ? params.get('tab') : 'home'
   const [lang, setLang] = useState(readLang)
@@ -209,7 +209,7 @@ export function CeoPage() {
           {tab === 'accounts' && <AccountsTab {...props} />}
           {tab === 'opportunities' && <OpportunitiesTab {...props} />}
           {tab === 'marketing' && <MarketingTab {...props} />}
-          {tab === 'targets' && <TargetsTab key={loadedAt} {...props} canEdit={isAccessAdmin} onSaved={load} />}
+          {tab === 'targets' && <TargetsTab key={loadedAt} {...props} canEdit={canSection('ceo', 'manage')} onSaved={load} />}
         </>
       )}
     </div>

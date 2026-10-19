@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
-  SECTIONS, GLOBAL_PAGES, LEGACY, fromLegacy, toLegacy, sectionsFor, sectionOf, pageTitle, ALL_PAGES, menuPages,
+  SECTIONS, GLOBAL_PAGES, LEGACY, fromLegacy, toLegacy, sectionsFor, sectionOf, pageTitle, ALL_PAGES, menuPages, sectionLevel, canOpen, atLeast, canVisit,
 } from './modules.js'
 
 describe('the section registry', () => {
@@ -78,5 +78,52 @@ describe('the section menu', () => {
     expect(menuPages('/')).toEqual([])
     expect(menuPages('/requests')).toEqual([])
     expect(menuPages('/ceo', { isAccessAdmin: true })).toEqual([])
+  })
+})
+
+describe('section access (v2 step 2)', () => {
+  const grants = { sales: 'work', insights: 'view' }
+  it('uses the person\'s grants when the table exists', () => {
+    expect(sectionsFor({ sections: grants }).map(s => s.key)).toEqual(['sales', 'insights'])
+    expect(sectionLevel('sales', { sections: grants })).toBe('work')
+    expect(sectionLevel('marketing', { sections: grants })).toBeNull()
+    expect(sectionsFor({ sections: {} })).toEqual([])
+  })
+  it('falls back to v1 roles when there are no grants to read', () => {
+    expect(sectionLevel('marketing', {})).toBe('work')
+    expect(sectionLevel('sales', {})).toBeNull()
+  })
+  it('the admin has every section at manage; Admin is never granted', () => {
+    expect(sectionLevel('ceo', { isAccessAdmin: true })).toBe('manage')
+    expect(sectionLevel('admin', { isAccessAdmin: true })).toBe('manage')
+    expect(sectionLevel('admin', { sections: { admin: 'manage' } })).toBeNull()
+  })
+  it('a page can ask for more than view', () => {
+    const brief = { to: '/sales/agent-brief', min: 'manage' }
+    expect(canOpen(brief, { sections: { sales: 'work' } })).toBe(false)
+    expect(canOpen(brief, { sections: { sales: 'manage' } })).toBe(true)
+    expect(canOpen({ to: '/sales/leads' }, { sections: { sales: 'view' } })).toBe(true)
+    expect(canOpen({ to: '/requests' }, { sections: {} })).toBe(true)
+    expect(sectionsFor({ sections: { sales: 'work' } })[0].pages.map(p => p.label)).toEqual(['Leads', 'Target accounts'])
+  })
+  it('orders levels', () => {
+    expect(atLeast('manage', 'work')).toBe(true)
+    expect(atLeast('view', 'work')).toBe(false)
+    expect(atLeast(null)).toBe(false)
+  })
+})
+
+describe('canVisit', () => {
+  it('checks the page\'s section and level by path', () => {
+    const who = { sections: { sales: 'work', marketing: 'view' } }
+    expect(canVisit('/sales/leads', who)).toBe(true)
+    expect(canVisit('/sales/agent-brief', who)).toBe(false)
+    expect(canVisit('/marketing/social/instagram', who)).toBe(true)
+    expect(canVisit('/insights/analytics', who)).toBe(false)
+    expect(canVisit('/ceo', who)).toBe(false)
+    expect(canVisit('/', who)).toBe(true)
+    expect(canVisit('/requests', who)).toBe(true)
+    expect(canVisit('/admin/team', who)).toBe(false)
+    expect(canVisit('/admin/team', { isAccessAdmin: true })).toBe(true)
   })
 })

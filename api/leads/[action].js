@@ -9,6 +9,7 @@ import { exportLeads, applySheetDecisions } from './_export.js'
 import { approveLead, crmStatus, saveCrm, sendWaiting, disconnectCrm } from './_crm.js'
 import { openCard, saveCard, watchlist } from './_card.js'
 import { assignLead, teamList, teamSave, teamCheckOdoo } from './_assign.js'
+import { sectionFor, hasSection } from './_sectionAccess.js'
 import { controlPanel, saveTargets, saveRouting, markLead, remind, accountContacted, sendToSales, runDailyAlerts, MIGRATION_MISSING } from './_control.js'
 import { addLead, trackLead, deleteLead } from './_pipeline.js'
 import { leadDeps, openRouterKey, hasDeploymentKey, describeKey, sendAlert } from './_deps.js'
@@ -152,8 +153,10 @@ async function canApprove(workspaceId, token) {
       headers: { apikey: ANON_KEY || SERVICE_KEY, Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ ws_id: workspaceId }),
     })
-    return r.ok && (await r.json()) === true
-  } catch { return false }
+    if (r.ok && (await r.json()) === true) return true
+  } catch { /* asked again below */ }
+  // v2: whoever manages Sales in this company may approve and assign too.
+  return hasSection({ url: SUPABASE_URL, apikey: ANON_KEY || SERVICE_KEY, token, workspaceId, section: 'sales', min: 'manage' })
 }
 
 /** The company's settings row, made on first sight. */
@@ -680,13 +683,20 @@ export default async function handler(req, res) {
   if (!user) return res.status(401).json({ ok: false, error: 'Sign in to do this. If you are signed in, reload the page.' })
   const [member, admin] = await Promise.all([isMember(workspaceId, token), isAdmin(token)])
   if (!member || !admin) {
-    // Not the admin in this company: a sales seat may still correct a
-    // verdict or fetch an email, and do nothing else.
-    const sales = SALES_ACTIONS.has(action) && await isSalesMember(workspaceId, token)
-    if (!sales) return res.status(403).json({ ok: false, error: member ? 'The lead agent is for the admin only.' : 'You do not have access to that workspace.' })
-    // And only on a lead they can see: their own, unless they see them all.
-    if (body.lead_id !== undefined && !(await canSeeLead(workspaceId, body.lead_id, token))) {
-      return res.status(404).json({ ok: false, error: 'That lead is not one of yours.' })
+    // v2: a company member granted the action's section at its level
+    // (_sectionAccess.js). They see every lead of the company, as RLS lets
+    // them (leads_section_read), so there is no own-leads check.
+    const need = sectionFor(action, SALES_ACTIONS)
+    const bySection = member && await hasSection({ url: SUPABASE_URL, apikey: ANON_KEY || SERVICE_KEY, token, workspaceId, ...need })
+    if (!bySection) {
+      // Not the admin in this company: a sales seat may still correct a
+      // verdict or fetch an email, and do nothing else.
+      const sales = SALES_ACTIONS.has(action) && await isSalesMember(workspaceId, token)
+      if (!sales) return res.status(403).json({ ok: false, error: member ? 'This needs access to the Sales or CEO section. Ask the admin for it.' : 'You do not have access to that workspace.' })
+      // And only on a lead they can see: their own, unless they see them all.
+      if (body.lead_id !== undefined && !(await canSeeLead(workspaceId, body.lead_id, token))) {
+        return res.status(404).json({ ok: false, error: 'That lead is not one of yours.' })
+      }
     }
   }
 

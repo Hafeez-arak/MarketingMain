@@ -41,9 +41,9 @@ const canHover = () => typeof window !== 'undefined'
 
 export function Rail({ onNavigate, menuHidden = false }) {
   const { pathname } = useLocation()
-  const { isAccessAdmin } = useAuth()
+  const { who } = useAuth()
   const badges = useBadges()
-  const sections = sectionsFor({ isAccessAdmin })
+  const sections = sectionsFor(who)
   const here = sectionOf(pathname)?.key || null
 
   // ── The hover panel ──
@@ -63,7 +63,7 @@ export function Rail({ onNavigate, menuHidden = false }) {
     clear()
     // The open section's own menu is already on screen, unless it is hidden.
     const s = sections.find(x => x.key === key)
-    const wanted = s && sectionMenu(s, { isAccessAdmin }).length && (key !== here || menuHidden) ? key : null
+    const wanted = s && sectionMenu(s, who).length && (key !== here || menuHidden) ? key : null
     openT.current = setTimeout(() => setPeek(wanted), peek ? 0 : OPEN_MS)
   }
   const hoverOut = () => {
@@ -102,7 +102,7 @@ export function Rail({ onNavigate, menuHidden = false }) {
         {GLOBAL_PAGES.map(g => link(g.to, g.label, g.icon, pathname === g.to || pathname.startsWith(`${g.to}/`), g.badge ? badges[g.badge] : 0))}
       </nav>
       {peeked && (
-        <SectionPanel section={peeked} pages={sectionMenu(peeked, { isAccessAdmin })} onNavigate={done}
+        <SectionPanel section={peeked} pages={sectionMenu(peeked, who)} onNavigate={done}
           onMouseEnter={keep} onMouseLeave={hoverOut}
           className="absolute left-full top-0 bottom-0 w-52 z-40 border-r border-border shadow-dropdown animate-fade-scale" />
       )}

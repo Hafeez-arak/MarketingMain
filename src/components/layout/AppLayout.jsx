@@ -20,13 +20,13 @@ export function AppLayout({ children }) {
   // The counts on navigation items, read once and shared with the rail, the
   // section sidebar and Home's tiles.
   const badges = useNavBadges()
-  const { isAccessAdmin } = useAuth()
+  const { who } = useAuth()
   // The section menu can be hidden for more room (desktop only; on a phone
   // it lives in the drawer). Remembered per browser.
   const [menuHidden, setMenuHidden] = useState(() => {
     try { return localStorage.getItem(MENU_KEY) === 'hidden' } catch { return false }
   })
-  const hasMenu = menuPages(location.pathname, { isAccessAdmin }).length > 0
+  const hasMenu = menuPages(location.pathname, who).length > 0
   const toggleMenu = () => setMenuHidden(h => {
     try { localStorage.setItem(MENU_KEY, h ? 'shown' : 'hidden') } catch { /* private window */ }
     return !h

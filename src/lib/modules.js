@@ -15,15 +15,15 @@
 // path, the query and the hash kept, so no bookmark, email or OAuth return
 // address breaks.
 //
-// Access today is v1's roles: `adminOnly` sections and pages are for the
-// access admin. Per-person section access (module_access) is step 2 of the
-// plan and will replace `adminOnly` here without touching the screens.
+// Access: per person and per company, from public.section_access (see
+// sectionLevel below). `adminOnly` marks the sections v1 kept for the access
+// admin; it decides only while that table does not exist yet.
 //
 // Pure: no React, no IO. Icons are named, not drawn; components/layout/icons.jsx
 // draws them.
 
 /**
- * @typedef {{ to: string, label: string, icon: string, adminOnly?: boolean,
+ * @typedef {{ to: string, label: string, icon: string, min?: 'view'|'work'|'manage',
  *             badge?: string, exact?: boolean, notUnder?: string[], hidden?: boolean }} Page
  * @typedef {{ key: string, label: string, icon: string, base: string,
  *             blurb: string, adminOnly?: boolean, pages: Page[] }} Section
@@ -44,7 +44,8 @@ export const SECTIONS = [
     pages: [
       { to: '/sales/leads', label: 'Leads', icon: 'funnel' },
       { to: '/sales/targets', label: 'Target accounts', icon: 'target' },
-      { to: '/sales/agent-brief', label: 'Agent Brief', icon: 'search' },
+      // How the lead agent decides: changing it is managing Sales.
+      { to: '/sales/agent-brief', label: 'Agent Brief', icon: 'search', min: 'manage' },
     ],
   },
   {
@@ -80,9 +81,10 @@ export const SECTIONS = [
   },
   {
     key: 'admin', label: 'Admin', icon: 'users', base: '/admin', adminOnly: true,
-    blurb: 'Who can use the app, and what each person can see.',
+    blurb: 'Who can sign in, and which sections each person gets.',
     pages: [
       { to: '/admin/team', label: 'Team & Access', icon: 'users', badge: 'pendingAccess' },
+      { to: '/admin/sections', label: 'Section access', icon: 'grid' },
     ],
   },
 ]
@@ -152,8 +154,40 @@ export function toLegacy(pathname) {
   return p
 }
 
-/** Can this person open this section / page? v1's roles until module_access exists. */
-export const canOpen = (item, { isAccessAdmin = false } = {}) => !item?.adminOnly || isAccessAdmin
+// ── Who may open what (v2 step 2, 2026-10-19) ──
+// `who` = { isAccessAdmin, sections }. `sections` is this person's grants in
+// the open company from public.section_access ({ sales: 'work', … }), or
+// null when that table does not exist (production before v2 ships): then
+// v1's rule applies, admin sections for the admin and the rest for members.
+// The database enforces the same grants (has_section(), migration
+// 20261101_section_access); this only decides what to draw.
+
+export const LEVELS = ['view', 'work', 'manage']
+const RANK = { view: 1, work: 2, manage: 3 }
+
+/** Is `level` at least `min`? A missing level is below everything. */
+export const atLeast = (level, min = 'view') => (RANK[level] || 0) >= (RANK[min] || 1)
+
+/** This person's level in a section: 'view' | 'work' | 'manage' | null. */
+export function sectionLevel(key, { isAccessAdmin = false, sections = null } = {}) {
+  if (isAccessAdmin) return 'manage'
+  const s = SECTIONS.find(x => x.key === key)
+  // The Admin section (sign-ins, companies, these grants) is never granted.
+  if (!s || key === 'admin') return null
+  if (sections) return sections[key] || null
+  return s.adminOnly ? null : 'work'
+}
+
+/**
+ * Can this person open this section or page? A page asks for its section
+ * at the page's own `min` level (view unless it says otherwise). Home and
+ * the global pages belong to no section and are open to everyone.
+ */
+export function canOpen(item, who = {}) {
+  const key = item?.pages ? item.key : sectionOf(item?.to)?.key
+  if (!key) return true
+  return atLeast(sectionLevel(key, who), item?.min || 'view')
+}
 
 /** The sections this person can open, each with only the pages they can open. */
 export function sectionsFor(who = {}) {
@@ -189,20 +223,36 @@ export function sectionOf(pathname) {
 /** Every page, sections' and global, for titles and search. */
 export const ALL_PAGES = [HOME, ...SECTIONS.flatMap(s => s.pages.map(pg => ({ ...pg, section: s.key }))), ...GLOBAL_PAGES]
 
+/** The page a path is on: the longest page URL that contains it, or null. */
+export function pageAt(pathname) {
+  const p = String(pathname || '')
+  if (p === '/') return HOME
+  let best = null
+  for (const pg of ALL_PAGES) {
+    if (pg.to === '/') continue
+    if (underPrefix(p, pg.to) && (!best || pg.to.length > best.to.length)) best = pg
+  }
+  return best
+}
+
 /**
  * The top bar's title: the page whose URL is the longest match for this
  * path. /marketing/social/instagram is "Social Media" unless it has its own
  * entry; a planner under /marketing/campaigns/plan is "Content Planning".
  */
 export function pageTitle(pathname) {
-  const p = String(pathname || '')
-  if (p === '/') return HOME.label
-  let best = null
-  for (const pg of ALL_PAGES) {
-    if (pg.to === '/') continue
-    if (underPrefix(p, pg.to) && (!best || pg.to.length > best.to.length)) best = pg
-  }
-  return best ? best.label : ''
+  return pageAt(pathname)?.label || ''
+}
+
+/**
+ * May this person be on this path? The page's section at the page's level;
+ * a path inside a section that names no page asks for the section. Home,
+ * the global pages and unknown paths are not refused here.
+ */
+export function canVisit(pathname, who = {}) {
+  const section = sectionOf(pathname)
+  if (!section) return true
+  return canOpen(pageAt(pathname) || section, who)
 }
 
 /**

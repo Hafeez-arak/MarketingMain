@@ -16,9 +16,9 @@ import { useBadges } from './useNavBadges'
 // a phone it is part of the drawer and never collapsed.
 export function Sidebar({ onNavigate, collapsed = false }) {
   const { pathname } = useLocation()
-  const { isAccessAdmin } = useAuth()
+  const { who } = useAuth()
   const section = sectionOf(pathname)
-  const pages = menuPages(pathname, { isAccessAdmin })
+  const pages = menuPages(pathname, who)
   if (!pages.length) return null
   return (
     <SectionPanel section={section} pages={pages} onNavigate={onNavigate}

@@ -389,11 +389,31 @@ function devLeadsApi(env) {
   }
 }
 
+// ─── v2 runs on a LOCAL database only ──────────────────────────────────────
+// 2026-10-19, the owner's rule: v2 must never touch the production database.
+// `vite --mode v2` reads .env.v2 (dev/v2db/README.md says how it is made),
+// and this refuses to start unless every database address in play, the
+// browser's and the in-process /api handlers', is on this machine. A stray
+// .env or an exported shell variable pointing at the live project stops the
+// server here instead of quietly writing to production.
+function guardLocalDatabase(env) {
+  const local = u => /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/|$)/.test(String(u || ''))
+  const urls = {
+    VITE_SUPABASE_URL: env.VITE_SUPABASE_URL,
+    SUPABASE_URL: process.env.SUPABASE_URL || env.SUPABASE_URL,
+  }
+  const bad = Object.entries(urls).filter(([, u]) => !local(u))
+  if (bad.length) {
+    throw new Error(`v2 mode must use the local database (dev/v2db). Not local: ${bad.map(([k, u]) => `${k}=${u || '(unset)'}`).join(', ')}`)
+  }
+}
+
 // https://vite.dev/config/
 // A config function, not a plain object, so loadEnv can read .env here in
 // Node — the dev proxy needs VITE_N8N_BASE_URL before any client code exists.
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
+  if (mode === 'v2') guardLocalDatabase(env)
   return {
     plugins: [
       react(),

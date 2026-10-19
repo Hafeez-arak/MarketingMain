@@ -16,9 +16,9 @@ const hello = () => {
 }
 
 export function HomePage() {
-  const { user, isAccessAdmin, activeWorkspace } = useAuth()
+  const { user, who, activeWorkspace } = useAuth()
   const badges = useBadges()
-  const sections = sectionsFor({ isAccessAdmin })
+  const sections = sectionsFor(who)
   const name = String(user?.user_metadata?.full_name || user?.email?.split('@')[0] || '').split(/[.\s_]/)[0]
 
   return (

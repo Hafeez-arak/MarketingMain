@@ -29,7 +29,9 @@ const TABS = [
 ]
 
 export default function AgentBrief() {
-  const { isAccessAdmin, activeWorkspaceId } = useAuth()
+  const { canSection, activeWorkspaceId } = useAuth()
+  // v2: Sales section access (was: the access admin only).
+  const canUse = canSection('sales', 'manage')
   const [params, setParams] = useSearchParams()
   const tab = TABS.some(t => t.key === params.get('tab')) ? params.get('tab') : 'cards'
   const setTab = key => setParams(prev => { const n = new URLSearchParams(prev); n.set('tab', key); return n }, { replace: true })
@@ -48,9 +50,9 @@ export default function AgentBrief() {
     setRefreshing(false)
   }, [activeWorkspaceId])
 
-  useEffect(() => { if (isAccessAdmin) queueMicrotask(reload) }, [reload, isAccessAdmin])
+  useEffect(() => { if (canUse) queueMicrotask(reload) }, [reload, canUse])
 
-  if (!isAccessAdmin) return <Navigate to="/" replace />
+  if (!canUse) return <Navigate to="/" replace />
   const loading = loadedFor !== activeWorkspaceId
 
   return (

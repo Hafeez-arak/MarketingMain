@@ -50,7 +50,11 @@ const MS_ERRORS = {
 
 
 export default function LeadAgent() {
-  const { isAccessAdmin, activeWorkspaceId, user } = useAuth()
+  const { canSection, activeWorkspaceId, user } = useAuth()
+  // v2: Sales section access (was: the access admin only). Agent settings
+  // change how the lead agent works, so they ask for manage.
+  const canUse = canSection('sales')
+  const canManage = canSection('sales', 'manage')
   // This month's leads, for the counts on Agent settings.
   const [monthLeads, setMonthLeads] = useState([])
   const [status, setStatus] = useState(null)
@@ -68,7 +72,9 @@ export default function LeadAgent() {
     : params.get('ms_error') ? { ok: false, code: params.get('ms_error') } : null
   // Leads is the page; the agent's own settings are one tab away (?view=settings).
   // Coming back from a mailbox sign-in lands on settings, where it happened.
-  const view = params.get('view') === 'settings' || msBack ? 'settings' : params.get('view') === 'pipeline' ? 'pipeline' : 'leads'
+  const asked = params.get('view') === 'settings' || msBack ? 'settings' : params.get('view') === 'pipeline' ? 'pipeline' : 'leads'
+  // Agent settings are for those who manage Sales.
+  const view = asked === 'settings' && !canManage ? 'leads' : asked
   const [adding, setAdding] = useState(false)
   // "Now" for the month and the Sheet's last call, taken when data loads
   // rather than during render.
@@ -93,12 +99,12 @@ export default function LeadAgent() {
     }
   }, [activeWorkspaceId])
 
-  useEffect(() => { if (isAccessAdmin) queueMicrotask(reload) }, [reload, isAccessAdmin])
+  useEffect(() => { if (canUse) queueMicrotask(reload) }, [reload, canUse])
 
   const loading = loadedFor !== activeWorkspaceId
   const stats = useMemo(() => monthStats(monthLeads, now), [monthLeads, now])
 
-  if (!isAccessAdmin) return <Navigate to="/" replace />
+  if (!canUse) return <Navigate to="/" replace />
 
   const settings = status?.settings
   const sheet = sheetHealth(settings?.last_intake_at, now)
@@ -136,7 +142,7 @@ export default function LeadAgent() {
         </Button>
       </PageHeader>
 
-      <SubTabs items={VIEWS} value={view} onChange={chooseView} />
+      <SubTabs items={canManage ? VIEWS : VIEWS.filter(v => v.key !== 'settings')} value={view} onChange={chooseView} />
 
       {msBack?.ok && msBack.approved && <Notice tone="sage" title="The other organisation approved the app">Its mailboxes can now be connected with "Connect a mailbox from another Microsoft 365".</Notice>}
       {msBack?.ok && !msBack.approved && msBack.forwarding === 'on' && <Notice tone="sage" title={`${msBack.mailbox} may forward now`}>Assigning a lead that came to it forwards the customer's email to the salesperson.</Notice>}

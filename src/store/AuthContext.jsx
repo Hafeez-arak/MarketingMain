@@ -3,6 +3,8 @@ import { AuthContext } from './auth'
 import { supabase } from '../lib/supabaseClient'
 import { fetchMyAccess, fetchMySalesCompanies } from '../lib/access'
 import { pickActiveWorkspace, rememberWorkspace, rememberedWorkspace } from '../lib/activeWorkspace'
+import { fetchMySections } from '../lib/sectionAccess'
+import { sectionLevel, atLeast } from '../lib/modules'
 
 // ─── Auth + workspace context ──────────────────────────────────────────────
 // Phase 0: real accounts, real session, and a real workspace resolved from
@@ -111,6 +113,29 @@ export function AuthProvider({ children }) {
 
   const activeWorkspace = workspaces.find(w => w.id === activeWorkspaceId) || null
 
+  // ── v2: this person's sections in the open company ──
+  // { sales: 'work', … } from public.section_access, or null where that table
+  // does not exist yet (production before v2 ships): lib/modules.js then
+  // falls back to v1's admin / member rule. Kept with the company it was
+  // read for, so switching companies never shows the previous one's grants.
+  const [grants, setGrants] = useState({ ws: null, sections: null })
+  const userId = session?.user?.id || null
+  useEffect(() => {
+    if (!userId || !activeWorkspaceId) return
+    let cancelled = false
+    fetchMySections(activeWorkspaceId, userId).then(sections => {
+      if (!cancelled) setGrants({ ws: activeWorkspaceId, sections })
+    })
+    return () => { cancelled = true }
+  }, [userId, activeWorkspaceId])
+  const sections = grants.ws === activeWorkspaceId ? grants.sections : null
+  const isAdminNow = access?.role === 'admin' && access?.status === 'approved'
+  // Until the grants for this company are read, nobody is sent away: a link
+  // to a Sales page must not bounce to Home on v1's rule a moment before the
+  // grant that allows it arrives. The admin needs no grants.
+  const sectionsReady = isAdminNow || !activeWorkspaceId || grants.ws === activeWorkspaceId
+  const who = { isAccessAdmin: isAdminNow, sections }
+
   // Switching is the only place a choice is saved. The fallback picked on
   // load is not written back, so losing access to a company does not
   // overwrite the record of a deliberate choice with an accident.
@@ -147,6 +172,12 @@ export function AuthProvider({ children }) {
     activeWorkspace,
     activeWorkspaceId,
     switchWorkspace,
+    // v2 sections: the grants, and the two questions every screen asks.
+    sections,
+    sectionsReady,
+    who,
+    sectionLevel: key => sectionLevel(key, who),
+    canSection: (key, min = 'view') => atLeast(sectionLevel(key, who), min),
     authError,
     signUp,
     signIn,
