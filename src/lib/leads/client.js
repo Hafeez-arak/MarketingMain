@@ -8,7 +8,7 @@ import { PAGE_SIZE, pageRange, verdictFilter, leadFilters } from './view'
 // Every query carries its own workspace_id filter: RLS is membership, not
 // isolation.
 
-const LEAD_COLUMNS = 'id,source,received_at,name,company,email,phone,subject,message,language,verdict,category,confidence,reason,summary,details,ask_next,duplicate_of,model,cost_usd,error,human_verdict,reviewed_at,created_at,mailbox,link,sender_type,sender_evidence,source_check,source_evidence,project_type,project_evidence,request_type,philips,rule,website,folder,email_kind,criteria_version,phones,human_reason,approved_at,crm_status,crm_url,crm_error,human_project_type,project_final,assigned_to,assigned_at,forward_status,forward_to,forward_error,forwarded_at'
+const LEAD_COLUMNS = 'id,source,received_at,name,company,email,phone,subject,message,language,verdict,category,confidence,reason,summary,details,ask_next,duplicate_of,model,cost_usd,error,human_verdict,reviewed_at,created_at,mailbox,link,sender_type,sender_evidence,source_check,source_evidence,project_type,project_evidence,request_type,philips,rule,website,folder,email_kind,criteria_version,phones,human_reason,approved_at,crm_status,crm_url,crm_error,human_project_type,project_final,assigned_to,assigned_at,forward_status,forward_to,forward_error,forwarded_at,channel,stage,stage_at,lost_reason,lost_to,next_step,follow_up,added_by'
 
 /**
  * One page of the list, filtered in the database (see leadFilters), with the
@@ -28,6 +28,21 @@ export async function fetchLeadsPage(ws, { tab = null, filters = null, page = 0,
     .range(from, to)
   if (error) throw new Error(error.message)
   return { rows: data || [], total: count ?? 0 }
+}
+
+/**
+ * The Pipeline (2026-10-18): every lead with a stage (approved, or added by
+ * hand), whoever's they are — RLS keeps a salesperson to their own. Small
+ * enough to read whole: the page groups it by stage.
+ */
+export async function fetchPipeline(ws, { owner = '', me = '' } = {}) {
+  let q = supabase.from('leads').select(LEAD_COLUMNS).eq('workspace_id', ws).not('stage', 'is', null)
+  if (owner === 'me' && me) q = q.eq('assigned_to', me)
+  else if (owner === 'none') q = q.is('assigned_to', null)
+  else if (owner && owner !== 'me') q = q.eq('assigned_to', owner)
+  const { data, error } = await q.order('stage_at', { ascending: false, nullsFirst: false }).limit(1000)
+  if (error) throw new Error(error.message)
+  return data || []
 }
 
 /**

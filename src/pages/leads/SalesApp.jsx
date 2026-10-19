@@ -2,10 +2,11 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useAuth } from '../../store/auth'
 import { supabase } from '../../lib/supabaseClient'
 import { Button, Spinner } from '../../components/ui/index'
-import { Notice, Stat } from '../email/parts'
+import { Notice, Stat, SubTabs } from '../email/parts'
 import { fetchMonthLeads, fetchSalesTeam, leadsApi } from '../../lib/leads/client'
 import { monthStats } from '../../lib/leads/view'
 import LeadsBoard from './Board'
+import Pipeline, { AddLeadDialog } from './Pipeline'
 
 // ─── The sales team's app: Leads and nothing else ─────────────────────────
 // What a 'sales' account sees instead of the marketing app (2026-10-11): one
@@ -14,6 +15,11 @@ import LeadsBoard from './Board'
 // address lands here. Hiding is the courtesy; the database is the control
 // (20261013_sales_seats): a sales person is not a member of any company, so
 // nothing else would load for them even by typing its address.
+//
+// Two tabs since 2026-10-18: Inbox (every enquiry they can see, sorted by
+// the agent) and Pipeline (approved and hand-added leads, by stage). A
+// salesperson opens on the Pipeline, a sales admin on the Inbox. "Add lead"
+// is on both.
 
 function CompanyPicker({ workspaces, activeWorkspaceId, onChange }) {
   const active = workspaces.find((w) => w.id === activeWorkspaceId)
@@ -43,6 +49,9 @@ export default function SalesApp() {
   const [refreshing, setRefreshing] = useState(false)
   const [refreshKey, setRefreshKey] = useState(0)
   const [now, setNow] = useState(() => new Date())
+  const [view, setView] = useState(canApproveLeads ? 'inbox' : 'pipeline')
+  const [adding, setAdding] = useState(false)
+  const [openCount, setOpenCount] = useState(null)
 
   const reload = useCallback(async () => {
     if (!activeWorkspaceId) return
@@ -118,26 +127,37 @@ export default function SalesApp() {
             <h1 className="text-lg font-semibold text-text tracking-tight">Leads</h1>
             <p className="text-xs text-text-secondary mt-0.5">
               {canApproveLeads
-                ? 'Every enquiry from the website and the info@ mailboxes, sorted by the agent. Assign each lead to the person who works it: they get the email at once.'
-                : 'The leads assigned to you. Open a row to read the email, call the number, or open it in Outlook; the email itself is in your inbox too.'}
+                ? 'Inbox: every enquiry, sorted by the agent. Approve and assign the real ones; they move to the Pipeline, where each is worked stage by stage.'
+                : 'Pipeline: your leads by stage, with the battle card for each. Add the ones that come by phone, WhatsApp or a visit yourself.'}
             </p>
           </div>
-          <Button variant="secondary" size="sm" onClick={refresh} disabled={refreshing || !activeWorkspaceId}>
-            {refreshing ? <Spinner size="sm" /> : null}
-            Refresh
-          </Button>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <Button size="sm" onClick={() => setAdding(true)} disabled={!activeWorkspaceId}>+ Add lead</Button>
+            <Button variant="secondary" size="sm" onClick={refresh} disabled={refreshing || !activeWorkspaceId}>
+              {refreshing ? <Spinner size="sm" /> : null}
+              Refresh
+            </Button>
+          </div>
         </div>
+
+        <SubTabs items={[{ key: 'inbox', label: 'Inbox' }, { key: 'pipeline', label: openCount ? `Pipeline (${openCount})` : 'Pipeline' }]} value={view} onChange={setView} />
 
         {error && <Notice tone="red" title="Something went wrong">{error}</Notice>}
 
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-px bg-border border border-border">
+        {view === 'inbox' && <div className="grid grid-cols-2 md:grid-cols-4 gap-px bg-border border border-border">
           <Stat label={`Leads in ${month}`} value={stats.qualified} loading={loading} tone="text-sage-700" hint="Qualified, by the agent or by you" />
           <Stat label="Needs a look" value={stats.needs_review} loading={loading} tone={stats.needs_review ? 'text-amber-800' : ''} hint="The agent was not sure; decide in the row" />
           <Stat label="Not leads" value={stats.unqualified} loading={loading} hint="Spam, sales pitches, job seekers and the like" />
           <Stat label="Everything" value={stats.total} loading={loading} hint={`All enquiries in ${month}`} />
-        </div>
+        </div>}
 
-        <LeadsBoard workspaceId={activeWorkspaceId} onReview={review} refreshKey={refreshKey} mailboxes={mailboxes} canApprove={canApproveLeads} team={team} me={user?.id || ''} />
+        {view === 'inbox'
+          ? <LeadsBoard workspaceId={activeWorkspaceId} onReview={review} refreshKey={refreshKey} mailboxes={mailboxes} canApprove={canApproveLeads} team={team} me={user?.id || ''} />
+          : <Pipeline workspaceId={activeWorkspaceId} onReview={review} refreshKey={refreshKey} mailboxes={mailboxes} canApprove={canApproveLeads} team={team} me={user?.id || ''} onCount={setOpenCount} />}
+        {adding && (
+          <AddLeadDialog workspaceId={activeWorkspaceId} canAssign={canApproveLeads} team={team} me={user?.id || ''}
+            onCancel={() => setAdding(false)} onAdded={() => { setAdding(false); setView('pipeline'); setRefreshKey((k) => k + 1) }} />
+        )}
       </main>
     </div>
   )

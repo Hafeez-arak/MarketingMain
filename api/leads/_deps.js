@@ -3,6 +3,7 @@ import { sealSecret, openSecret } from '../email/_secrets.js'
 import { msConfig, createGraphMail } from '../email/_graph.js'
 import { checkMail } from './_mail.js'
 import { runHealth } from './_health.js'
+import { supabaseStorage } from './_files.js'
 import { checkWebsite } from './_website.js'
 
 // ─── The lead agent's real IO, in one place ────────────────────────────────
@@ -11,6 +12,7 @@ import { checkWebsite } from './_website.js'
 // registered in Entra, and the daily cron), by api/email/[action].js.
 
 const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || ''
+const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || ''
 // A deployment-wide key, used when a company has not saved its own.
 const ENV_OPENROUTER_KEY = process.env.OPENROUTER_API_KEY || ''
 const APP_URL = (process.env.PUBLIC_APP_URL || 'https://marketing-main-ten.vercel.app').replace(/\/$/, '')
@@ -101,6 +103,8 @@ export function leadDeps() {
     open: (sealed) => openSecret(sealed, SERVICE_KEY),
     keyInfo,
     sendAlert,
+    // Large attachments, a day at a time (_files.js).
+    storage: supabaseStorage({ url: SUPABASE_URL, key: SERVICE_KEY }),
   }
   deps.checkMail = (args) => checkMail(deps, args)
   deps.website = (domain) => checkWebsite(deps, domain)

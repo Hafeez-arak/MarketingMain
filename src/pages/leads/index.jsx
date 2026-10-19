@@ -6,6 +6,7 @@ import { Notice, Stat, SubTabs } from '../email/parts'
 import { fetchMonthLeads, leadsApi } from '../../lib/leads/client'
 import { VerdictTag, CriteriaChips } from './parts'
 import LeadsBoard from './Board'
+import Pipeline, { AddLeadDialog } from './Pipeline'
 import CrmCard from './CrmCard'
 import TeamCard from './TeamCard'
 import { RULE_LABELS } from '../../lib/leads/qualify'
@@ -23,8 +24,11 @@ import {
 // How it is wired (the Sheet's script, the keys) is in docs/LEADS-SETUP.md,
 // not on this page: the page says what is wrong, not how to fix it.
 
+// Inbox: every enquiry, where leads are sorted, approved and assigned.
+// Pipeline (2026-10-18): the approved and hand-added ones, by stage.
 const VIEWS = [
-  { key: 'leads', label: 'Leads' },
+  { key: 'leads', label: 'Inbox' },
+  { key: 'pipeline', label: 'Pipeline' },
   { key: 'settings', label: 'Agent settings' },
 ]
 
@@ -64,7 +68,8 @@ export default function LeadAgent() {
     : params.get('ms_error') ? { ok: false, code: params.get('ms_error') } : null
   // Leads is the page; the agent's own settings are one tab away (?view=settings).
   // Coming back from a mailbox sign-in lands on settings, where it happened.
-  const view = params.get('view') === 'settings' || msBack ? 'settings' : 'leads'
+  const view = params.get('view') === 'settings' || msBack ? 'settings' : params.get('view') === 'pipeline' ? 'pipeline' : 'leads'
+  const [adding, setAdding] = useState(false)
   // "Now" for the month and the Sheet's last call, taken when data loads
   // rather than during render.
   const [now, setNow] = useState(() => new Date())
@@ -118,12 +123,13 @@ export default function LeadAgent() {
   }
 
   function chooseView(v) {
-    setParams(v === 'settings' ? { view: 'settings' } : {}, { replace: true })
+    setParams(v === 'leads' ? {} : { view: v }, { replace: true })
   }
 
   return (
     <div className="max-w-7xl space-y-4">
-      <PageHeader title="Leads" subtitle="Every enquiry from the website and the info@ mailboxes, sorted by the agent. Open a row to read the email and why.">
+      <PageHeader title="Leads" subtitle="Inbox: every enquiry from the website and the info@ mailboxes, sorted by the agent. Pipeline: the approved and hand-added leads, worked stage by stage.">
+        <Button size="sm" onClick={() => setAdding(true)} disabled={!activeWorkspaceId}>+ Add lead</Button>
         <Button variant="secondary" size="sm" onClick={refresh} disabled={refreshing || !activeWorkspaceId}>
           {refreshing ? <Spinner size="sm" /> : null}
           Refresh
@@ -139,8 +145,15 @@ export default function LeadAgent() {
       {msBack && !msBack.ok && <Notice tone="red" title="The mailbox was not connected">{MS_ERRORS[msBack.code] || 'Microsoft did not finish the sign-in. Try again.'}</Notice>}
       {error && <Notice tone="red" title="Something went wrong">{error}</Notice>}
 
+      {adding && (
+        <AddLeadDialog workspaceId={activeWorkspaceId} canAssign team={team} me={user?.id || ''}
+          onCancel={() => setAdding(false)} onAdded={() => { setAdding(false); chooseView('pipeline'); setRefreshKey((k) => k + 1) }} />
+      )}
+
       {view === 'leads' ? (
         <LeadsBoard workspaceId={activeWorkspaceId} onReview={review} refreshKey={refreshKey} mailboxes={status?.mailboxes || []} canApprove team={team} me={user?.id || ''} />
+      ) : view === 'pipeline' ? (
+        <Pipeline workspaceId={activeWorkspaceId} onReview={review} refreshKey={refreshKey} mailboxes={status?.mailboxes || []} canApprove team={team} me={user?.id || ''} />
       ) : (
         <>
           {status?.error && <Notice tone="red" title="Could not load the agent's settings">{status.error}</Notice>}
