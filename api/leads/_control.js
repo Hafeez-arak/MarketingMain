@@ -105,6 +105,11 @@ export async function gatherControl(deps, workspaceId, now = deps.now()) {
   // Odoo's numbers, from the mirror (_odooSync.js), when there is one.
   const mirror = await readMirror(deps, workspaceId).catch(() => ({ status: null }))
   const odoo = mirror.records ? odooFacts(mirror.records, { now, models: mirror.models, url: mirror.url }) : null
+  // Technical's health per project (project_flags, v2). Where it exists,
+  // "projects at risk" is the projects Technical shows red, so the CEO's
+  // number, his daily alert and the Technical page agree.
+  const projectFlags = await deps.db(`project_flags?${ws(workspaceId)}&select=odoo_project_id,name,level,reasons,red_since,alerted_at`).catch(() => null)
+  if (odoo && Array.isArray(projectFlags) && odoo.projects_at_risk !== null) odoo.projects_at_risk = projectFlags.filter(p => p.level === 'red').length
 
   let planned = 0
   if (plans.length) {
@@ -112,7 +117,7 @@ export async function gatherControl(deps, workspaceId, now = deps.now()) {
     planned = ideas.length
   }
   return {
-    now, targets: targets || null, rules, leads, team, opportunities, outcomes, odoo, odooStatus: mirror.status || null,
+    now, targets: targets || null, rules, leads, team, opportunities, outcomes, odoo, odooStatus: mirror.status || null, projectFlags: projectFlags || [],
     // Key accounts with Odoo's live last order and open deals where the
     // customer's name matches; the October analysis's figures otherwise.
     accounts: odoo ? accounts.map(a => withOdoo(a, odoo)) : accounts,
@@ -369,6 +374,10 @@ export async function runDailyAlerts(deps, { workspaceId, force = false, pageUrl
   const stamp = now.toISOString()
   const byLead = new Map()
   for (const i of items) if (i.leadId) byLead.set(i.leadId, [...(byLead.get(i.leadId) || []), i.kind])
+  const redTold = items.filter((i) => i.kind === 'project_red').map((i) => i.projectId)
+  if (redTold.length) {
+    await deps.db(`project_flags?${ws(workspaceId)}&odoo_project_id=in.(${redTold.join(',')})`, { method: 'PATCH', prefer: 'return=minimal', body: { alerted_at: stamp } }).catch(() => null)
+  }
   for (const l of f.leads.filter((x) => byLead.has(x.id))) {
     const told = { ...(l.late_alerted || {}) }
     for (const k of byLead.get(l.id)) told[k] = stamp

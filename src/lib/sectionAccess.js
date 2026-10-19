@@ -48,7 +48,7 @@ export async function setSection(workspaceId, userId, section, level, grantedBy)
 }
 
 /** The sections that can be granted, in the rail's order. Admin is never granted. */
-export const GRANTABLE = ['ceo', 'sales', 'marketing', 'insights']
+export const GRANTABLE = ['ceo', 'sales', 'marketing', 'insights', 'technical', 'finance']
 
 /**
  * The rows of the admin's Section access screen for one company: everyone

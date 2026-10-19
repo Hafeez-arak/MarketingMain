@@ -19,7 +19,8 @@
 //   deps: db, fetch, now, open (unseal)
 
 import { crmConnection, odooCfg } from './_crm.js'
-import { installedModels, readChanged } from './_odoo.js'
+import { installedModels, readChanged, fieldNames } from './_odoo.js'
+import { readAll } from './_technical.js'
 import { SYNC_MODELS } from '../../src/lib/control/odoo.js'
 
 const HOUR = 3_600_000
@@ -83,7 +84,14 @@ export async function syncOdoo(deps, { workspaceId, force = false }) {
       // "write_date|id" of the last record read (a bare date from an older
       // round is read as id 0).
       const [since = '', sinceId = 0] = spec.full ? [] : String(cursors[model] || '').split('|')
-      const { rows, done } = await readChanged(deps.fetch, cfg, model, { fields: spec.fields, domain: spec.domain || [], since, sinceId })
+      // Optional fields only where this Odoo has them: asking for one it
+      // lacks fails the whole read.
+      let fields = spec.fields
+      if (spec.optional?.length) {
+        const have = new Set(await fieldNames(deps.fetch, cfg, model))
+        fields = [...spec.fields, ...spec.optional.filter(f => have.has(f))]
+      }
+      const { rows, done } = await readChanged(deps.fetch, cfg, model, { fields, domain: spec.domain || [], since, sinceId })
       for (let i = 0; i < rows.length; i += 500) {
         await deps.db('odoo_records?on_conflict=workspace_id,model,odoo_id', {
           method: 'POST', prefer: 'resolution=merge-duplicates,return=minimal',
@@ -98,9 +106,15 @@ export async function syncOdoo(deps, { workspaceId, force = false }) {
     // 4. Done.
     await deps.db(`odoo_sync?${ws(workspaceId)}`, {
       method: 'PATCH', prefer: 'return=minimal',
-      body: { last_ok_at: deps.now().toISOString(), last_error: '', cursors, models, counts: synced, updated_at: deps.now().toISOString() },
+      body: { last_ok_at: deps.now().toISOString(), last_error: '', cursors, models, counts: synced, odoo_url: cfg.url, updated_at: deps.now().toISOString() },
     })
-    return { synced, models }
+    // 5. Technical watches what just arrived (_technical.js): stage changes,
+    //    late stages, missing weekly updates, submittals with the client.
+    let technical = null
+    if (deps.technical && models.includes('project.project')) {
+      technical = await deps.technical({ workspaceId }).catch(err => ({ error: String(err?.message || err).slice(0, 300) }))
+    }
+    return { synced, models, technical }
   } catch (err) {
     const error = String(err?.message || err).slice(0, 400)
     await deps.db(`odoo_sync?${ws(workspaceId)}`, { method: 'PATCH', prefer: 'return=minimal', body: { last_error: error, updated_at: deps.now().toISOString() } })
@@ -123,9 +137,11 @@ export async function syncAllOdoo(deps, { force = false } = {}) {
 /** The mirror as odooFacts wants it: { model: [data…] }, plus the models and the Odoo address. */
 export async function readMirror(deps, workspaceId) {
   try {
+    // Paged: the API returns at most 1,000 rows a request, and one request
+    // for 50,000 silently came back with the first 1,000.
     const [[s], rows, [conn]] = await Promise.all([
       deps.db(`odoo_sync?${ws(workspaceId)}&select=*`).then(r => r || []),
-      deps.db(`odoo_records?${ws(workspaceId)}&select=model,data&limit=50000`).then(r => r || []),
+      readAll(deps.db, `odoo_records?${ws(workspaceId)}&select=model,data&order=model.asc,odoo_id.asc`),
       deps.db(`lead_crm?${ws(workspaceId)}&select=url`).then(r => r || []),
     ])
     if (!s?.last_ok_at) return { status: { connected: Boolean(conn), lastOkAt: null, lastError: s?.last_error || '' } }

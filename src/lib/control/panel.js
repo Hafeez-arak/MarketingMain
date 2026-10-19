@@ -17,6 +17,7 @@
 import { effectiveVerdict, projectOf } from '../leads/view.js'
 import { money } from '../agent/ceoBrief.js'
 import { leadRegion } from './region.js'
+import { stageLabel } from '../technical/projects.js'
 
 const HOUR = 3_600_000
 const DAY = 24 * HOUR
@@ -522,12 +523,18 @@ export function weeklyLines({ brief = null, decisions = [], leads = [], outcomes
  * once per kind (lead.late_alerted), so tomorrow's email has only what is
  * new; the counts still show the whole picture.
  */
-export function dailyAlertItems({ leads = [], accounts = [], team = [], odoo = null, targets: tRow = null, now = new Date() } = {}) {
+export function dailyAlertItems({ leads = [], accounts = [], team = [], odoo = null, targets: tRow = null, projectFlags = [], now = new Date() } = {}) {
   const targets = targetsOf(tRow)
   const nameOf = id => team.find(p => p.id === id)?.name || 'someone'
   const open = leads.filter(l => isOpenQualified(l) && recent(l, now))
   const told = (l, k) => Boolean(l.late_alerted?.[k])
   const items = []
+  // A project that turned red since the last alert (project_flags, set by
+  // Technical's monitor after each Odoo round), each told once per turn.
+  for (const p of projectFlags.filter(x => x.level === 'red' && !x.alerted_at)) {
+    const why = redWhy(p.reasons || [])
+    items.push({ kind: 'project_red', projectId: p.odoo_project_id, en: `${p.name}: ${why.en}`, ar: `${p.name}: ${why.ar}` })
+  }
   for (const l of open) {
     const d = deadlines(l, targets, now)
     if (!l.assigned_to) {
@@ -553,7 +560,21 @@ export function dailyAlertItems({ leads = [], accounts = [], team = [], odoo = n
   return items
 }
 
+/** Why a project is red, worst first, in both languages. */
+function redWhy(reasons) {
+  const r = reasons.filter(x => x.level === 'red')
+  const en = [], ar = []
+  for (const x of r) {
+    if (x.kind === 'stage_late') { en.push(`${x.days} day${x.days === 1 ? '' : 's'} over in ${stageLabel(x.stage) || 'its stage'}`); ar.push(`متأخر ${x.days} يومًا في ${stageLabel(x.stage, 'ar') || 'مرحلته'}`) }
+    if (x.kind === 'past_end') { en.push(`delivery date passed ${x.days} days ago`); ar.push(`مضى تاريخ التسليم منذ ${x.days} يومًا`) }
+    if (x.kind === 'off_track') { en.push('the project manager says off track'); ar.push('مدير المشروع يقول إنه خارج المسار') }
+    if (x.kind === 'resubmit_due') { en.push(`${x.title} not resubmitted (code ${x.code})`); ar.push(`${x.title} لم يُعد تقديمه (الرمز ${x.code})`) }
+  }
+  return { en: en.join('; ') || 'red', ar: ar.join('؛ ') || 'متأخر' }
+}
+
 const KIND_TITLE = {
+  project_red: { en: 'Projects turned red', ar: 'مشاريع أصبحت حمراء' },
   late_quote: { en: 'Late quotes', ar: 'عروض أسعار متأخرة' },
   late_reply: { en: 'No first reply yet', ar: 'لم يُرد عليها بعد' },
   unassigned: { en: 'Leads with no owner', ar: 'استفسارات بلا مسؤول' },

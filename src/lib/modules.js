@@ -24,67 +24,98 @@
 
 /**
  * @typedef {{ to: string, label: string, icon: string, min?: 'view'|'work'|'manage',
- *             badge?: string, exact?: boolean, notUnder?: string[], hidden?: boolean }} Page
+ *             badge?: string, exact?: boolean, notUnder?: string[], hidden?: boolean,
+ *             ar?: string, translated?: boolean }} Page
  * @typedef {{ key: string, label: string, icon: string, base: string,
- *             blurb: string, adminOnly?: boolean, pages: Page[] }} Section
+ *             blurb: string, ar?: string, blurbAr?: string, adminOnly?: boolean, pages: Page[] }} Section
  */
 
 /** @type {Section[]} In rail order. Home is not here: it is the rail's first icon on its own. */
 export const SECTIONS = [
   {
-    key: 'ceo', label: 'CEO', icon: 'building', base: '/ceo', adminOnly: true,
+    key: 'ceo', label: 'CEO', ar: 'المدير التنفيذي', icon: 'building', base: '/ceo', adminOnly: true,
     blurb: 'Six numbers, the decisions waiting for you, the team and the targets.',
+    blurbAr: 'ستة أرقام، والقرارات التي تنتظرك، والفريق، والأهداف.',
     pages: [
-      { to: '/ceo', label: 'Control panel', icon: 'building' },
+      { to: '/ceo', label: 'Control panel', ar: 'لوحة التحكم', icon: 'building', translated: true },
     ],
   },
   {
-    key: 'sales', label: 'Sales', icon: 'funnel', base: '/sales', adminOnly: true,
+    key: 'sales', label: 'Sales', ar: 'المبيعات', icon: 'funnel', base: '/sales', adminOnly: true,
     blurb: 'Leads, the pipeline, target accounts and how the lead agent decides.',
+    blurbAr: 'العملاء المحتملون، ومسار الصفقات، والحسابات المستهدفة، وكيف يقرر وكيل العملاء.',
     pages: [
-      { to: '/sales/leads', label: 'Leads', icon: 'funnel' },
-      { to: '/sales/targets', label: 'Target accounts', icon: 'target' },
+      { to: '/sales/leads', label: 'Leads', ar: 'العملاء المحتملون', icon: 'funnel' },
+      { to: '/sales/targets', label: 'Target accounts', ar: 'الحسابات المستهدفة', icon: 'target' },
       // How the lead agent decides: changing it is managing Sales.
-      { to: '/sales/agent-brief', label: 'Agent Brief', icon: 'search', min: 'manage' },
+      { to: '/sales/agent-brief', label: 'Agent Brief', ar: 'موجز الوكيل', icon: 'search', min: 'manage' },
     ],
   },
   {
-    key: 'marketing', label: 'Marketing', icon: 'megaphone', base: '/marketing',
+    key: 'marketing', label: 'Marketing', ar: 'التسويق', icon: 'megaphone', base: '/marketing',
     blurb: 'Plan, create, schedule and publish, and the brand behind it.',
+    blurbAr: 'التخطيط والإنشاء والجدولة والنشر، والعلامة التجارية خلف ذلك.',
     pages: [
       // The marketing team's own dashboard from v1, unchanged: they designed
       // it, and it is their landing page. Analytics in Insights is the deep
       // dive it links to (the owner's call, 2026-10-19).
-      { to: '/marketing', label: 'Dashboard', icon: 'grid', exact: true },
-      { to: '/marketing/campaigns', label: 'Content Planning', icon: 'check-circle' },
-      { to: '/marketing/studio', label: 'Creative Studio', icon: 'pen' },
-      { to: '/marketing/schedule', label: 'Schedule', icon: 'calendar' },
-      { to: '/marketing/social', label: 'Social Media', icon: 'share', notUnder: ['/marketing/social/approvals', '/marketing/social/auto-replies'] },
-      { to: '/marketing/social/approvals', label: 'Post Queue', icon: 'check-square', badge: 'pendingPosts' },
-      { to: '/marketing/social/auto-replies', label: 'Auto-replies', icon: 'message-check' },
-      { to: '/marketing/email', label: 'Email', icon: 'mail' },
-      { to: '/marketing/media', label: 'Media Library', icon: 'image' },
-      { to: '/marketing/brand-brain', label: 'Brand Brain', icon: 'brain' },
+      { to: '/marketing', label: 'Dashboard', ar: 'لوحة المعلومات', icon: 'grid', exact: true },
+      { to: '/marketing/campaigns', label: 'Content Planning', ar: 'تخطيط المحتوى', icon: 'check-circle' },
+      { to: '/marketing/studio', label: 'Creative Studio', ar: 'الاستوديو الإبداعي', icon: 'pen' },
+      { to: '/marketing/schedule', label: 'Schedule', ar: 'الجدولة', icon: 'calendar' },
+      { to: '/marketing/social', label: 'Social Media', ar: 'وسائل التواصل', icon: 'share', notUnder: ['/marketing/social/approvals', '/marketing/social/auto-replies'] },
+      { to: '/marketing/social/approvals', label: 'Post Queue', ar: 'قائمة المنشورات', icon: 'check-square', badge: 'pendingPosts' },
+      { to: '/marketing/social/auto-replies', label: 'Auto-replies', ar: 'الردود التلقائية', icon: 'message-check' },
+      { to: '/marketing/email', label: 'Email', ar: 'البريد الإلكتروني', icon: 'mail' },
+      { to: '/marketing/media', label: 'Media Library', ar: 'مكتبة الوسائط', icon: 'image' },
+      { to: '/marketing/brand-brain', label: 'Brand Brain', ar: 'هوية العلامة', icon: 'brain' },
     ],
   },
   {
-    key: 'insights', label: 'Insights', icon: 'bars', base: '/insights',
+    key: 'insights', label: 'Insights', ar: 'الرؤى', icon: 'bars', base: '/insights',
     blurb: 'Market research, competitors, and how every channel is performing.',
+    blurbAr: 'أبحاث السوق، والمنافسون، وأداء كل قناة.',
     pages: [
-      { to: '/insights', label: 'Research', icon: 'bulb', exact: true },
-      { to: '/insights/analytics', label: 'Analytics', icon: 'bars' },
+      { to: '/insights', label: 'Research', ar: 'الأبحاث', icon: 'bulb', exact: true },
+      { to: '/insights/analytics', label: 'Analytics', ar: 'التحليلات', icon: 'bars' },
       // Reached from inside Research / Analytics, not from the menu.
-      { to: '/insights/report', label: 'Research Brief', icon: 'bulb', hidden: true },
-      { to: '/insights/business', label: 'Business View', icon: 'bulb', hidden: true },
-      { to: '/insights/analytics/report', label: 'Performance Report', icon: 'bars', hidden: true },
+      { to: '/insights/report', label: 'Research Brief', ar: 'موجز الأبحاث', icon: 'bulb', hidden: true },
+      { to: '/insights/business', label: 'Business View', ar: 'نظرة الأعمال', icon: 'bulb', hidden: true },
+      { to: '/insights/analytics/report', label: 'Performance Report', ar: 'تقرير الأداء', icon: 'bars', hidden: true },
     ],
   },
   {
-    key: 'admin', label: 'Admin', icon: 'users', base: '/admin', adminOnly: true,
-    blurb: 'Who can sign in, and which sections each person gets.',
+    // Odoo Project manages the projects; this watches them (2026-10-19):
+    // the nine stages, late stages, submittal rounds and codes, the PM's
+    // weekly update. A PM sees the projects they manage in Odoo; manage
+    // sees every project and sets the stage limits.
+    key: 'technical', label: 'Technical', ar: 'الفني', icon: 'hardhat', base: '/technical', adminOnly: true,
+    blurb: 'Projects through their nine stages: what is late, submittals with the client, weekly updates.',
+    blurbAr: 'المشاريع عبر مراحلها التسع: المتأخر منها، والتقديمات لدى العميل، والتحديثات الأسبوعية.',
     pages: [
-      { to: '/admin/team', label: 'Team & Access', icon: 'users', badge: 'pendingAccess' },
-      { to: '/admin/sections', label: 'Section access', icon: 'grid' },
+      { to: '/technical', label: 'Projects', ar: 'المشاريع', icon: 'hardhat', exact: true, translated: true, badge: 'redProjects' },
+      { to: '/technical/submittals', label: 'Submittals', ar: 'التقديمات', icon: 'file-check', translated: true },
+      { to: '/technical/project', label: 'Project', ar: 'المشروع', icon: 'hardhat', hidden: true, translated: true },
+      { to: '/technical/settings', label: 'Stage limits', ar: 'حدود المراحل', icon: 'gear', min: 'manage', translated: true },
+    ],
+  },
+  {
+    // Read only, from Odoo Accounting through the mirror (2026-10-19).
+    key: 'finance', label: 'Finance', ar: 'المالية', icon: 'coins', base: '/finance', adminOnly: true,
+    blurb: 'Invoices and collections, what is overdue, and each project\'s margin against plan.',
+    blurbAr: 'الفواتير والتحصيل، والمتأخر منها، وهامش كل مشروع مقابل المخطط.',
+    pages: [
+      { to: '/finance', label: 'Invoices & collections', ar: 'الفواتير والتحصيل', icon: 'coins', exact: true, translated: true },
+      { to: '/finance/projects', label: 'Project margins', ar: 'هوامش المشاريع', icon: 'bars', translated: true },
+    ],
+  },
+  {
+    key: 'admin', label: 'Admin', ar: 'الإدارة', icon: 'users', base: '/admin', adminOnly: true,
+    blurb: 'Who can sign in, and which sections each person gets.',
+    blurbAr: 'من يمكنه الدخول، وأي الأقسام يحصل عليها كل شخص.',
+    pages: [
+      { to: '/admin/team', label: 'Team & Access', ar: 'الفريق والصلاحيات', icon: 'users', badge: 'pendingAccess' },
+      { to: '/admin/sections', label: 'Section access', ar: 'صلاحيات الأقسام', icon: 'grid', translated: true },
     ],
   },
 ]
@@ -94,13 +125,13 @@ export const SECTIONS = [
  * light a section in the rail and never appear on Home as a tile.
  */
 export const GLOBAL_PAGES = [
-  { to: '/tasks', label: 'Tasks', icon: 'check-circle', badge: 'openTasks' },
-  { to: '/agent', label: 'Assistant', icon: 'chat' },
-  { to: '/requests', label: 'Requests', icon: 'check-square', badge: 'waitingRequests' },
-  { to: '/settings', label: 'Settings', icon: 'gear' },
+  { to: '/tasks', label: 'Tasks', ar: 'المهام', icon: 'check-circle', badge: 'openTasks', translated: true },
+  { to: '/agent', label: 'Assistant', ar: 'المساعد', icon: 'chat' },
+  { to: '/requests', label: 'Requests', ar: 'الطلبات', icon: 'check-square', badge: 'waitingRequests' },
+  { to: '/settings', label: 'Settings', ar: 'الإعدادات', icon: 'gear' },
 ]
 
-export const HOME = { to: '/', label: 'Home', icon: 'home' }
+export const HOME = { to: '/', label: 'Home', ar: 'الرئيسية', icon: 'home', translated: true }
 
 /**
  * v1 URL prefix → v2. Matched on whole path segments, longest first, so
@@ -241,8 +272,17 @@ export function pageAt(pathname) {
  * path. /marketing/social/instagram is "Social Media" unless it has its own
  * entry; a planner under /marketing/campaigns/plan is "Content Planning".
  */
-export function pageTitle(pathname) {
-  return pageAt(pathname)?.label || ''
+export function pageTitle(pathname, lang = 'en') {
+  const pg = pageAt(pathname)
+  return (lang === 'ar' && pg?.ar) || pg?.label || ''
+}
+
+/**
+ * Is this page translated into Arabic (lib/i18n.js)? An untranslated page
+ * keeps English, left to right, inside the Arabic shell.
+ */
+export function isTranslated(pathname) {
+  return Boolean(pageAt(pathname)?.translated)
 }
 
 /**

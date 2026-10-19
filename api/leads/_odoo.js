@@ -162,6 +162,13 @@ export async function installedModels(fetchFn, cfg, models) {
   return (rows || []).map(r => r.model)
 }
 
+/** The field names this Odoo has on a model (fields_get), for asking only for those. */
+export async function fieldNames(fetchFn, cfg, model) {
+  const uid = await login(fetchFn, cfg)
+  const out = await call(fetchFn, cfg, uid, model, 'fields_get', [], { attributes: ['type'] })
+  return Object.keys(out || {})
+}
+
 /**
  * Every record of a model changed after `since` (Odoo's write_date, UTC
  * "YYYY-MM-DD HH:MM:SS"), oldest change first, a page at a time. Archived

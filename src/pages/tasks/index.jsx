@@ -7,6 +7,8 @@ import { useTaskBoard } from './useTaskBoard'
 import { teamSummary } from '../../lib/tasks/logic'
 import { TaskList, TaskForm, TaskPanel, Dialog } from './parts'
 import { Meetings } from './Meetings'
+import { useT } from '../../lib/i18n'
+import { TW } from './words'
 
 // ─── Tasks (v2) ────────────────────────────────────────────────────────────
 // 2026-10-19, docs/TASKS-PLAN.md. Everyone's to-do list, the follow-ups they
@@ -14,15 +16,11 @@ import { Meetings } from './Meetings'
 // items. Opening a task (?id=) shows its panel; the database decides who may
 // see and change it and writes the history and the bell.
 
-const TABS = [
-  { key: 'mine', label: 'My tasks' },
-  { key: 'assigned', label: 'I assigned' },
-  { key: 'team', label: 'Team' },
-  { key: 'meetings', label: 'Meetings' },
-]
+const TABS = [{ key: 'mine' }, { key: 'assigned' }, { key: 'team' }, { key: 'meetings' }]
 
 export function TasksPage() {
   const { isAccessAdmin, canSection } = useAuth()
+  const { t: w, lang, dir } = useT(TW)
   const [params, setParams] = useSearchParams()
   const tab = TABS.some(t => t.key === params.get('tab')) ? params.get('tab') : 'mine'
   const openId = params.get('id') || ''
@@ -60,16 +58,16 @@ export function TasksPage() {
   const team = useMemo(() => (tab === 'team' && tasks ? teamSummary(tasks, people, now) : []), [tab, tasks, people, now])
 
   return (
-    <div className="max-w-4xl space-y-4">
-      <PageHeader title="Tasks" subtitle="Your to-do list, the follow-ups you set for others, and what each meeting agreed. Reminders and deadlines come to the bell, and every morning a summary.">
-        <Button size="sm" onClick={() => setCreating({})}>+ New task</Button>
+    <div className="max-w-4xl space-y-4" dir={dir} lang={lang}>
+      <PageHeader title={w.title} subtitle={w.subtitle}>
+        <Button size="sm" onClick={() => setCreating({})}>{w.newTask}</Button>
       </PageHeader>
 
-      <nav className="flex gap-1 border-b border-border overflow-x-auto [scrollbar-width:none]" aria-label="Tasks">
+      <nav className="flex gap-1 border-b border-border overflow-x-auto [scrollbar-width:none]" aria-label={w.tabsLabel}>
         {TABS.map(t => (
           <button key={t.key} type="button" onClick={() => setParam('tab', t.key === 'mine' ? '' : t.key)} aria-current={tab === t.key ? 'page' : undefined}
             className={`whitespace-nowrap px-3 py-2 text-xs border-b-2 -mb-px ${tab === t.key ? 'border-stone-900 text-text font-medium' : 'border-transparent text-text-secondary hover:text-text'}`}>
-            {t.label}
+            {w.tabs[t.key]}
           </button>
         ))}
       </nav>
@@ -83,38 +81,38 @@ export function TasksPage() {
           <div className="bg-white border border-border overflow-x-auto">
             <table className="w-full text-sm">
               <thead><tr className="text-[11px] text-text-tertiary border-b border-border">
-                <th className="text-start font-medium px-3 py-2">Person</th>
-                <th className="text-end font-medium px-3 py-2">Open</th>
-                <th className="text-end font-medium px-3 py-2">Overdue</th>
-                <th className="text-end font-medium px-3 py-2">Due this week</th>
-                <th className="text-end font-medium px-3 py-2">Done (7 days)</th>
+                <th className="text-start font-medium px-3 py-2">{w.person}</th>
+                <th className="text-end font-medium px-3 py-2">{w.open}</th>
+                <th className="text-end font-medium px-3 py-2">{w.overdue}</th>
+                <th className="text-end font-medium px-3 py-2">{w.dueWeek}</th>
+                <th className="text-end font-medium px-3 py-2">{w.doneWeek}</th>
               </tr></thead>
               <tbody className="divide-y divide-border">
                 {team.filter(r => r.open || r.doneWeek).map(r => (
                   <tr key={r.userId}>
-                    <td className="px-3 py-2 font-medium text-text">{r.name}{r.kind === 'sales' && <span className="text-[11px] text-text-tertiary font-normal"> · sales</span>}</td>
+                    <td className="px-3 py-2 font-medium text-text">{r.name}{r.kind === 'sales' && <span className="text-[11px] text-text-tertiary font-normal"> · {w.salesTag}</span>}</td>
                     <td className="px-3 py-2 text-end tabular-nums">{r.open}</td>
                     <td className={`px-3 py-2 text-end tabular-nums ${r.overdue ? 'text-red-600 font-semibold' : ''}`}>{r.overdue}</td>
                     <td className="px-3 py-2 text-end tabular-nums">{r.week}</td>
                     <td className="px-3 py-2 text-end tabular-nums">{r.doneWeek}</td>
                   </tr>
                 ))}
-                {!team.some(r => r.open || r.doneWeek) && <tr><td colSpan={5} className="px-3 py-6 text-center text-xs text-text-tertiary">No tasks you can see yet.</td></tr>}
+                {!team.some(r => r.open || r.doneWeek) && <tr><td colSpan={5} className="px-3 py-6 text-center text-xs text-text-tertiary">{w.noTeamTasks}</td></tr>}
               </tbody>
             </table>
           </div>
-          <p className="text-[11px] text-text-tertiary">You see the tasks you set or were given, and all of a section's tasks where you manage it.</p>
+          <p className="text-[11px] text-text-tertiary">{w.teamNote}</p>
           <TaskList tasks={tasks} people={people} now={now} showAssignee onOpen={t => setParam('id', t.id)} onToggle={board.toggle} busyId={board.busyId} hideDone />
         </div>
       ) : (
         <TaskList tasks={tasks} people={people} now={now} showAssignee={tab === 'assigned'} showSetter={tab === 'mine'}
           onOpen={t => setParam('id', t.id)} onToggle={board.toggle} busyId={board.busyId}
-          empty={tab === 'mine' ? 'Nothing on your list. Tasks given to you, and ones you add, show up here.' : 'You have not set anyone a task yet.'} />
+          empty={tab === 'mine' ? w.emptyMine : w.emptyAssigned} />
       )}
 
       {creating && (
-        <Dialog title={creating.follow_up_of ? 'Add a follow-up' : 'New task'} onClose={() => setCreating(null)}>
-          <TaskForm initial={creating} people={people} me={me} submitLabel={creating.follow_up_of ? 'Add follow-up' : 'Add task'} onSubmit={create} onCancel={() => setCreating(null)} />
+        <Dialog title={creating.follow_up_of ? w.addFollowUp : w.newTask.replace('+ ', '')} onClose={() => setCreating(null)}>
+          <TaskForm initial={creating} people={people} me={me} submitLabel={creating.follow_up_of ? w.addFollowUpBtn : w.addTask} onSubmit={create} onCancel={() => setCreating(null)} />
         </Dialog>
       )}
 
@@ -125,7 +123,7 @@ export function TasksPage() {
           onUpdate={async patch => { const out = await updateTask(ws, me, current.id, patch); if (!out.error) { setOpened(out.task); board.replace(out.task) } return out }}
           onDelete={async t => { const out = await deleteTask(ws, t.id); if (out.error) board.setError(out.error); else { setParam('id', ''); board.load() } }}
           leadHref={t => `/sales/leads?view=pipeline&lead=${t.lead_id}`}
-          onFollowUp={t => setCreating({ follow_up_of: t.id, title: `Follow up: ${t.title}`, assigned_to: t.assigned_to, lead_id: t.lead_id, account_id: t.account_id, meeting_id: t.meeting_id, section: t.section })} />
+          onFollowUp={t => setCreating({ follow_up_of: t.id, title: `${w.followUpPrefix}${t.title}`, assigned_to: t.assigned_to, lead_id: t.lead_id, account_id: t.account_id, meeting_id: t.meeting_id, section: t.section })} />
       )}
     </div>
   )

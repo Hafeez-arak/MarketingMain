@@ -17,7 +17,7 @@ const NOW = new Date('2026-10-18T09:00:00Z')
 const hAgo = (h) => new Date(NOW.getTime() - h * 3_600_000).toISOString()
 const lid = (n) => `aaaaaaaa-aaaa-4aaa-8aaa-${String(n).padStart(12, '0')}`
 
-function world({ targets = {}, rules = [], leads = [], missing = false, sendOk = true } = {}) {
+function world({ targets = {}, rules = [], leads = [], missing = false, sendOk = true, flags = null } = {}) {
   const state = {
     targets: { workspace_id: WS, routing_enabled: false, routing_since: null, routing_fallback: null, alert_emails: ['boss@example.com'], brief_emails: [], ...targets },
     rules, leads,
@@ -25,7 +25,7 @@ function world({ targets = {}, rules = [], leads = [], missing = false, sendOk =
       { user_id: OMAR, email: 'omar@example.com', full_name: 'Omar', status: 'approved', role: 'sales', leads_approver: false },
       { user_id: HUDA, email: 'huda@example.com', full_name: 'Huda', status: 'approved', role: 'sales', leads_approver: false },
     ],
-    notifications: [], mails: [], patches: [],
+    notifications: [], mails: [], patches: [], flags,
   }
   const db = async (path, { method = 'GET', body } = {}) => {
     const table = path.split('?')[0]
@@ -54,6 +54,15 @@ function world({ targets = {}, rules = [], leads = [], missing = false, sendOk =
     if (table === 'notifications') { state.notifications.push(...body); return null }
     if (table === 'workspaces') return [{ name: 'Example Co' }]
     if (table === 'ceo_briefs') return state.briefs || []
+    if (table === 'project_flags') {
+      if (!state.flags) throw new Error('Supabase 404: {"code":"PGRST205"}')
+      if (method === 'PATCH') {
+        const ids = (/odoo_project_id=in\.\(([^)]*)\)/.exec(path)?.[1] || '').split(',').map(Number)
+        for (const f of state.flags) if (ids.includes(f.odoo_project_id)) Object.assign(f, body)
+        return null
+      }
+      return state.flags.map((f) => ({ ...f }))
+    }
     return []
   }
   const deps = {
@@ -158,6 +167,30 @@ describe('runDailyAlerts', () => {
     const again = await runDailyAlerts(deps, { workspaceId: WS, force: true })
     expect(again.items).toBe(0)
     expect(state.mails).toHaveLength(1)
+  })
+
+  it('a project that turned red is told once, first, with the stage named in both languages', async () => {
+    const flags = [
+      { odoo_project_id: 402, name: 'Tower phase 1', level: 'red', reasons: [{ kind: 'stage_late', level: 'red', days: 11, stage: 'client_review' }, { kind: 'at_risk', level: 'amber' }], red_since: hAgo(5), alerted_at: null },
+      { odoo_project_id: 404, name: 'Hotel lobby', level: 'red', reasons: [{ kind: 'past_end', level: 'red', days: 3 }, { kind: 'off_track', level: 'red' }], red_since: hAgo(30), alerted_at: hAgo(20) },
+      { odoo_project_id: 401, name: 'Clinic', level: 'green', reasons: [], red_since: null, alerted_at: null },
+    ]
+    const { state, deps } = world({ flags })
+    const out = await runDailyAlerts(deps, { workspaceId: WS })
+    expect(out).toMatchObject({ items: 1, sent: true })
+    expect(state.mails[0].text).toContain('مشاريع أصبحت حمراء (1)')
+    expect(state.mails[0].text).toContain('Tower phase 1: 11 days over in Client review')
+    expect(state.mails[0].text).toContain('متأخر 11 يومًا في مراجعة العميل')
+    expect(state.mails[0].text).not.toContain('Hotel lobby') // told yesterday
+    expect(state.flags[0].alerted_at).toBe(NOW.toISOString())
+    const again = await runDailyAlerts(deps, { workspaceId: WS, force: true })
+    expect(again.items).toBe(0)
+  })
+
+  it('the panel carries Technical\'s project flags (its at-risk count and the alert read them)', async () => {
+    const { deps } = world({ flags: [{ odoo_project_id: 1, level: 'red', reasons: [] }, { odoo_project_id: 2, level: 'amber', reasons: [] }] })
+    const f = await gatherControl(deps, WS, NOW)
+    expect(f.projectFlags).toHaveLength(2)
   })
 
   it('marks nothing when the email could not be sent, so tomorrow tries again', async () => {

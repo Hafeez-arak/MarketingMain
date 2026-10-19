@@ -18,6 +18,7 @@ import { fetchControl, assignLead, remindOwner, accountContacted, sendToSales, s
 import { CT } from './strings'
 import { HomeTab, TeamTab, AccountsTab, OpportunitiesTab, MarketingTab } from './Control'
 import { TargetsTab } from './Targets'
+import { useLang, setLang, hasChoice } from '../../lib/i18n'
 
 // ─── CEO ───────────────────────────────────────────────────────────────────
 // 2026-10-18 (#243). One page for the CEO: four one-line numbers, the week's brief
@@ -29,7 +30,6 @@ import { TargetsTab } from './Targets'
 // written once a week (Sunday 07:00 Riyadh) or when he asks. See
 // src/lib/agent/ceoBrief.js.
 
-const LANG_KEY = 'arak.ceo.lang'
 
 const T = {
   ar: {
@@ -92,9 +92,6 @@ const T = {
 
 const TONE_DOT = { good: 'bg-green-500', watch: 'bg-yellow-500', bad: 'bg-red-500' }
 
-function readLang() {
-  try { return localStorage.getItem(LANG_KEY) === 'en' ? 'en' : 'ar' } catch { return 'ar' }
-}
 
 /** "5h ago" / "منذ 5 ساعات", coarse like timeAgo. */
 function ago(iso, lang) {
@@ -126,13 +123,16 @@ export function CeoPage() {
   const { activeWorkspaceId, accessToken, canSection } = useAuth()
   const [params, setParams] = useSearchParams()
   const tab = TABS.includes(params.get('tab')) ? params.get('tab') : 'home'
-  const [lang, setLang] = useState(readLang)
+  // The app's one language (lib/i18n.js). The CEO page is Arabic first:
+  // a browser that never chose a language starts in Arabic here.
+  const lang = useLang()
+  useEffect(() => { if (!hasChoice()) setLang('ar') }, [])
   const t = CT[lang]
   const [data, setData] = useState(undefined) // undefined = loading
   const [error, setError] = useState('')
   const [loadedAt, setLoadedAt] = useState(null)
 
-  const switchLang = l => { setLang(l); try { localStorage.setItem(LANG_KEY, l) } catch { /* private window */ } }
+  const switchLang = l => setLang(l)
   const openTab = k => setParams(p => { const n = new URLSearchParams(p); if (k === 'home') n.delete('tab'); else n.set('tab', k); return n }, { replace: true })
 
   const load = useCallback(async () => {

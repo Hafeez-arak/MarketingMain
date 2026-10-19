@@ -12,9 +12,13 @@
 //
 // Logins (all with the password below), one per kind of person:
 //   owner@arak.test          access admin: every section
-//   ceo@arak.test            CEO manage; Sales, Marketing, Insights view
+//   ceo@arak.test            CEO manage; Sales, Marketing, Insights, Technical, Finance view
 //   salesmanager@arak.test   Sales manage; CEO view
 //   marketing@arak.test      Marketing and Insights work
+//   technical@arak.test      Technical manage (every project)
+//   pm.sara@arak.test        Technical work: her projects in the fake Odoo (401, 403, 405)
+//   pm.khalid@arak.test      Technical work: his projects (402, 404)
+//   finance@arak.test        Finance view
 //   rep.omar@arak.test       sales seat (the sales team's own app)
 //   rep.lina@arak.test       sales seat
 
@@ -77,6 +81,10 @@ async function main() {
     marketing: await person('marketing@arak.test', 'Mira Marketing'),
     omar: await person('rep.omar@arak.test', 'Omar Rep'),
     lina: await person('rep.lina@arak.test', 'Lina Rep'),
+    technical: await person('technical@arak.test', 'Tariq Technical'),
+    sara: await person('pm.sara@arak.test', 'Sara PM'),
+    khalid: await person('pm.khalid@arak.test', 'Khalid PM'),
+    finance: await person('finance@arak.test', 'Fatima Finance'),
   }
   const access = (uid, email, full_name, role, extra = {}) => ({ user_id: uid, email, full_name, status: 'approved', role, leads_approver: false, decided_at: new Date().toISOString(), ...extra })
   await upsert('user_access', [
@@ -86,8 +94,12 @@ async function main() {
     access(people.marketing, 'marketing@arak.test', 'Mira Marketing', 'member'),
     access(people.omar, 'rep.omar@arak.test', 'Omar Rep', 'sales'),
     access(people.lina, 'rep.lina@arak.test', 'Lina Rep', 'sales', { leads_approver: false }),
+    access(people.technical, 'technical@arak.test', 'Tariq Technical', 'member'),
+    access(people.sara, 'pm.sara@arak.test', 'Sara PM', 'member'),
+    access(people.khalid, 'pm.khalid@arak.test', 'Khalid PM', 'member'),
+    access(people.finance, 'finance@arak.test', 'Fatima Finance', 'member'),
   ], 'user_id')
-  await upsert('workspace_members', ['owner', 'ceo', 'salesmanager', 'marketing'].map(k => ({ workspace_id: WS, user_id: people[k], role: 'editor' })), 'workspace_id,user_id')
+  await upsert('workspace_members', ['owner', 'ceo', 'salesmanager', 'marketing', 'technical', 'sara', 'khalid', 'finance'].map(k => ({ workspace_id: WS, user_id: people[k], role: 'editor' })), 'workspace_id,user_id')
   await upsert('sales_seats', [
     { workspace_id: WS, user_id: people.omar, all_website_leads: true },
     { workspace_id: WS, user_id: people.lina, all_website_leads: false },
@@ -100,6 +112,11 @@ async function main() {
     grant('ceo', 'ceo', 'manage'), grant('ceo', 'sales', 'view'), grant('ceo', 'marketing', 'view'), grant('ceo', 'insights', 'view'),
     grant('salesmanager', 'sales', 'manage'), grant('salesmanager', 'ceo', 'view'),
     grant('marketing', 'marketing', 'work'), grant('marketing', 'insights', 'work'),
+    // Technical: the manager sees every project; a PM only those they manage in Odoo.
+    grant('ceo', 'technical', 'view'), grant('ceo', 'finance', 'view'),
+    grant('technical', 'technical', 'manage'),
+    grant('sara', 'technical', 'work'), grant('khalid', 'technical', 'work'),
+    grant('finance', 'finance', 'view'),
   ], 'workspace_id,user_id,section')
 
   // ── Leads: invented enquiries over the last two weeks ──
@@ -165,6 +182,16 @@ async function main() {
     { id: id(1, 'f2000000'), workspace_id: WS, zernio_account_id: 'test-li', platform: 'linkedin', username: 'arak-test', followers_count: 4900, is_active: true },
     { id: id(2, 'f2000000'), workspace_id: WS, zernio_account_id: 'test-ig', platform: 'instagram', username: 'arak.test', followers_count: 860, is_active: true },
   ], 'id')
+
+  // ── Marketing and Insights rows the section lock is checked against ──
+  await upsert('brand_profile', [{ id: id(1, 'f3000000'), workspace_id: WS, mission: 'Light every project well (test).', positioning: 'Architectural lighting (test)' }], 'id')
+  await upsert('email_contacts', [{ id: id(1, 'f4000000'), workspace_id: WS, email: 'subscriber@example.test', first_name: 'Test' }], 'id')
+  await upsert('research_runs', [{ id: id(1, 'f5000000'), workspace_id: WS, trigger: 'manual', status: 'complete', stage: 'done', started_at: ago(30), finished_at: ago(29) }], 'id')
+  await upsert('research_signals', [{
+    id: id(1, 'f6000000'), workspace_id: WS, competitor: 'Example Lighting Co', category: 'project', summary: 'Won a hotel package (test).',
+    source_url: 'https://example.com/signal/1', fingerprint: 'test-signal-1',
+  }], 'id')
+  await upsert('competitor_brands', [{ id: id(1, 'f7000000'), workspace_id: WS, competitor: 'Example Lighting Co', brand: 'Example Brand', fingerprint: 'test-brand-1' }], 'id')
 
   // ── CEO panel targets (the migration made the row if the company existed) ──
   await upsert('company_targets', [{

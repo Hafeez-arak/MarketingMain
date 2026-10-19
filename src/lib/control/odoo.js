@@ -22,18 +22,49 @@
 const DAY = 86_400_000
 const RIYADH = 3 * 3_600_000
 
+//   fields    asked for always (Odoo 18 has them wherever the app is installed)
+//   optional  asked for only when this Odoo has them (fields_get): they come
+//             with other apps (Sales margin, Sales↔Project) or other versions
+//             (17's analytic_account_id is 18's account_id), and asking for a
+//             field Odoo does not have fails the whole read
+//   full      read whole every round (small lists, no cursor)
 export const SYNC_MODELS = {
   'crm.stage': { fields: ['name', 'is_won', 'sequence'], full: true },
   'crm.lead': {
     fields: ['name', 'type', 'active', 'probability', 'expected_revenue', 'stage_id', 'user_id', 'partner_id',
       'partner_name', 'date_deadline', 'date_closed', 'create_date', 'lost_reason_id'],
   },
-  'sale.order': { fields: ['name', 'state', 'amount_untaxed', 'amount_total', 'date_order', 'create_date', 'user_id', 'partner_id', 'opportunity_id'] },
+  'sale.order': {
+    fields: ['name', 'state', 'amount_untaxed', 'amount_total', 'date_order', 'create_date', 'user_id', 'partner_id', 'opportunity_id'],
+    optional: ['margin', 'margin_percent', 'project_id'],
+  },
   'account.move': {
-    fields: ['name', 'move_type', 'state', 'payment_state', 'amount_untaxed', 'amount_residual', 'invoice_date', 'invoice_date_due', 'partner_id', 'invoice_user_id'],
+    fields: ['name', 'move_type', 'state', 'payment_state', 'amount_untaxed', 'amount_total', 'amount_residual', 'invoice_date', 'invoice_date_due',
+      'invoice_origin', 'partner_id', 'invoice_user_id'],
     domain: [['move_type', 'in', ['out_invoice', 'out_refund']]],
   },
-  'project.project': { fields: ['name', 'active', 'partner_id', 'user_id', 'date_start', 'date', 'last_update_status', 'stage_id'] },
+  // Customer payments, for "collected this month" (Finance).
+  'account.payment': {
+    fields: ['name', 'date', 'amount', 'partner_id', 'payment_type', 'partner_type', 'state'],
+    domain: [['partner_type', '=', 'customer']],
+  },
+  // Income and costs per analytic account: a project's actual margin (Finance).
+  'account.analytic.line': { fields: ['name', 'date', 'amount', 'account_id'], optional: ['project_id', 'category'] },
+  'project.project': {
+    fields: ['name', 'active', 'partner_id', 'user_id', 'date_start', 'date', 'last_update_status', 'stage_id'],
+    optional: ['date_last_stage_update', 'account_id', 'analytic_account_id', 'sale_order_id'],
+  },
+  // The project stages Arak names in Odoo; mapped onto the nine (src/lib/technical/projects.js).
+  'project.project.stage': { fields: ['name', 'sequence'], optional: ['fold'], full: true },
+  'project.task': {
+    fields: ['name', 'project_id', 'stage_id', 'user_ids', 'date_deadline', 'active', 'priority'],
+    optional: ['state', 'date_last_stage_update'],
+    domain: [['project_id', '!=', false]],
+  },
+  // Odoo's own status updates on a project (the PM may write them there).
+  'project.update': { fields: ['name', 'project_id', 'status', 'date', 'user_id'], optional: ['progress'] },
+  // Who is who: an Odoo project manager is matched to a Campai login by email.
+  'res.users': { fields: ['name', 'login', 'email', 'active'] },
 }
 
 export const m2oId = v => (Array.isArray(v) ? v[0] : null)

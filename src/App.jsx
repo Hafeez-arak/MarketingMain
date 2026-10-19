@@ -47,7 +47,14 @@ import { CreativeStudio } from './pages/studio/index'
 import { HomePage } from './pages/home/index'
 import { TasksPage } from './pages/tasks/index'
 import { SalesTasksRedirect } from './pages/leads/SalesTasks'
+import { TechnicalProjects } from './pages/technical/index'
+import { TechnicalProject } from './pages/technical/Project'
+import { TechnicalSubmittals } from './pages/technical/Submittals'
+import { TechnicalSettings } from './pages/technical/Settings'
+import { FinanceInvoices } from './pages/finance/index'
+import { FinanceProjects } from './pages/finance/Projects'
 import { fromLegacy, canVisit } from './lib/modules'
+import { useLang, COMMON } from './lib/i18n'
 
 // Loads the account's saved webhook URLs into state.webhooks on startup, so
 // they're there regardless of which page loads first. This used to happen
@@ -87,15 +94,17 @@ function LegacyOrNotFound() {
 // inner <Routes> had no catch-all, so a mistyped or stale link rendered the
 // layout around an empty hole — indistinguishable from a crash.
 function NotFound() {
+  const lang = useLang()
+  const c = COMMON[lang]
   return (
-    <div className="p-8 max-w-xl">
+    <div className="p-8 max-w-xl" dir={lang === 'ar' ? 'rtl' : 'ltr'}>
       <div className="border border-border bg-surface p-5">
-        <h2 className="text-sm font-semibold text-text">That page doesn't exist</h2>
+        <h2 className="text-sm font-semibold text-text">{c.notFoundTitle}</h2>
         <p className="text-xs text-text-secondary mt-1.5">
-          The link may be out of date. Everything is reachable from Home.
+          {c.notFoundBody}
         </p>
         <a href="/" className="inline-block mt-4 border border-border bg-white px-3 py-1.5 text-xs font-semibold text-text hover:bg-surface-subtle">
-          Back to Home
+          {c.backHome}
         </a>
       </div>
     </div>
@@ -197,6 +206,16 @@ function ProtectedApp() {
             <Route path="/insights/research"         element={<Navigate to="/insights" replace />} />
             <Route path="/insights/analytics"        element={<Analytics />} />
             <Route path="/insights/analytics/report" element={<PerformanceReport />} />
+
+            {/* ── Technical ── Odoo Project's projects, watched (2026-10-19). */}
+            <Route path="/technical"             element={<TechnicalProjects />} />
+            <Route path="/technical/project"     element={<TechnicalProject />} />
+            <Route path="/technical/submittals"  element={<TechnicalSubmittals />} />
+            <Route path="/technical/settings"    element={<TechnicalSettings />} />
+
+            {/* ── Finance ── read only, from Odoo Accounting. */}
+            <Route path="/finance"               element={<FinanceInvoices />} />
+            <Route path="/finance/projects"      element={<FinanceProjects />} />
 
             {/* ── Admin ── */}
             <Route path="/admin"                 element={<Navigate to="/admin/team" replace />} />

@@ -8,6 +8,8 @@
 // Riyadh's (UTC+3, no daylight saving), because that is where the team is,
 // whatever clock the server or a laptop runs on.
 
+import { arDays, arHours, AR_WEEKDAYS, AR_MONTHS } from '../arabic.js'
+
 const HOUR = 3_600_000
 const DAY = 24 * HOUR
 const RIYADH = 3 * HOUR
@@ -16,6 +18,14 @@ export const STATUSES = ['todo', 'in_progress', 'waiting', 'done', 'cancelled']
 export const OPEN = new Set(['todo', 'in_progress', 'waiting'])
 export const STATUS_LABEL = { todo: 'To do', in_progress: 'In progress', waiting: 'Waiting', done: 'Done', cancelled: 'Dropped' }
 export const PRIORITY_LABEL = { low: 'Low', normal: 'Normal', high: 'High' }
+
+/** The same labels in Arabic (v2, lib/i18n.js). The English ones above stay the default. */
+export const AR_LABELS = {
+  status: { todo: 'للتنفيذ', in_progress: 'قيد التنفيذ', waiting: 'بانتظار', done: 'منجزة', cancelled: 'ملغاة' },
+  priority: { low: 'منخفضة', normal: 'عادية', high: 'عالية' },
+  bucket: { overdue: 'متأخرة', today: 'اليوم', week: 'هذا الأسبوع', later: 'لاحقًا', none: 'بلا موعد', done: 'منجزة' },
+  reminder: { '': 'التذكير المعتاد فقط (قبل يوم، وعند التأخر)', at_due: 'عند الموعد', '1h': 'قبل ساعة', '1d': 'قبل يوم' },
+}
 
 export const isOpen = t => OPEN.has(t?.status)
 const ms = iso => { const v = Date.parse(iso || ''); return Number.isFinite(v) ? v : null }
@@ -64,7 +74,7 @@ const clock = d => `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUT
  * "Overdue by 2 days", "Today 15:00", "Tomorrow 09:00", "Thu 12:00",
  * "24 Oct". A deadline at 23:59 is "end of day" and shows no time.
  */
-export function dueLabel(task, now = new Date()) {
+export function dueLabel(task, now = new Date(), lang = 'en') {
   const due = ms(task?.due_at)
   if (due === null) return ''
   const n = now.getTime()
@@ -73,12 +83,19 @@ export function dueLabel(task, now = new Date()) {
   const at = endOfDay ? '' : ` ${clock(d)}`
   if (isOpen(task) && due < n) {
     const late = n - due
-    if (late < HOUR) return 'Overdue'
-    if (late < DAY) return `Overdue by ${Math.floor(late / HOUR)} h`
+    const ar = lang === 'ar'
+    if (late < HOUR) return ar ? 'متأخرة' : 'Overdue'
+    if (late < DAY) return ar ? `متأخرة ${arHours(Math.floor(late / HOUR))}` : `Overdue by ${Math.floor(late / HOUR)} h`
     const days = Math.floor(late / DAY)
-    return `Overdue by ${days} day${days === 1 ? '' : 's'}`
+    return ar ? `متأخرة ${arDays(days)}` : `Overdue by ${days} day${days === 1 ? '' : 's'}`
   }
   const days = Math.round((riyadhDayStart(due) - riyadhDayStart(n)) / DAY)
+  if (lang === 'ar') {
+    if (days === 0) return `اليوم${at}`
+    if (days === 1) return `غدًا${at}`
+    if (days > 1 && days < 7) return `${AR_WEEKDAYS[d.getUTCDay()]}${at}`
+    return `${d.getUTCDate()} ${AR_MONTHS[d.getUTCMonth()]}${at}`
+  }
   if (days === 0) return `Today${at}`
   if (days === 1) return `Tomorrow${at}`
   if (days > 1 && days < 7) return `${WEEKDAYS[d.getUTCDay()]}${at}`

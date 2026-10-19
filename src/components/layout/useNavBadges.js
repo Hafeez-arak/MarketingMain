@@ -81,17 +81,34 @@ export function useNavBadges() {
     return () => { cancelled = true; clearInterval(id) }
   }, [activeWorkspaceId, user?.id])
 
+  // v2: red projects this person can see (project_flags, set by the
+  // Technical monitor after each Odoo round). The database shows a project
+  // manager only their own. Zero where the table does not exist.
+  const [redProjects, setRedProjects] = useState(0)
+  useEffect(() => {
+    if (!activeWorkspaceId) return
+    let cancelled = false
+    async function count() {
+      const { count: n, error } = await supabase.from('project_flags').select('odoo_project_id', { count: 'exact', head: true })
+        .eq('workspace_id', activeWorkspaceId).eq('level', 'red')
+      if (!cancelled) setRedProjects(error ? 0 : n || 0)
+    }
+    queueMicrotask(() => { if (!cancelled) void count() })
+    const id = setInterval(() => { void count() }, 300_000)
+    return () => { cancelled = true; clearInterval(id) }
+  }, [activeWorkspaceId])
+
   // Gated at read rather than by resetting the count when isAccessAdmin
   // flips: a stale number from a previous session can never leak into a
   // non-admin's view.
-  return { pendingAccess: isAccessAdmin ? pendingAccess : 0, pendingPosts, waitingRequests, openTasks }
+  return { pendingAccess: isAccessAdmin ? pendingAccess : 0, pendingPosts, waitingRequests, openTasks, redProjects }
 }
 
 /** A section's total: the sum of its pages' badges, for the dot on its rail icon and Home tile. */
 export const sectionBadge = (section, badges) =>
   (section?.pages || []).reduce((n, pg) => n + (pg.badge ? badges[pg.badge] || 0 : 0), 0)
 
-const NONE = { pendingAccess: 0, pendingPosts: 0, waitingRequests: 0, openTasks: 0 }
+const NONE = { pendingAccess: 0, pendingPosts: 0, waitingRequests: 0, openTasks: 0, redProjects: 0 }
 
 /** Read once in AppLayout and shared, so Home's tiles do not read the same counts again. */
 export const NavBadgesContext = createContext(NONE)

@@ -6,6 +6,18 @@ import { useBadges, sectionBadge } from '../../components/layout/useNavBadges'
 import { useTaskBoard } from '../tasks/useTaskBoard'
 import { TaskList } from '../tasks/parts'
 import { bucketOf } from '../../lib/tasks/logic'
+import { useT, labelOf } from '../../lib/i18n'
+
+const HW = {
+  en: {
+    hello: h => (h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening'),
+    pick: 'pick where to work.', everywhere: 'Everywhere', waiting: n => `${n} waiting`, today: 'Today', allTasks: 'All my tasks',
+  },
+  ar: {
+    hello: h => (h < 12 ? 'صباح الخير' : 'مساء الخير'),
+    pick: 'اختر أين تعمل.', everywhere: 'في كل مكان', waiting: n => `${n} بانتظارك`, today: 'اليوم', allTasks: 'كل مهامي',
+  },
+}
 
 // ─── Home (v2) ─────────────────────────────────────────────────────────────
 // 2026-10-19. The first screen: one tile per section this person can open,
@@ -13,24 +25,20 @@ import { bucketOf } from '../../lib/tasks/logic'
 // wait there. On a phone it is the way in, since the rail is behind the menu.
 // v1's dashboard is Marketing's Dashboard now (/marketing), unchanged.
 
-const hello = () => {
-  const h = new Date().getHours()
-  return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening'
-}
-
 export function HomePage() {
   const { user, who, activeWorkspace } = useAuth()
+  const { t, lang, dir } = useT(HW)
   const badges = useBadges()
   const sections = sectionsFor(who)
   const name = String(user?.user_metadata?.full_name || user?.email?.split('@')[0] || '').split(/[.\s_]/)[0]
 
   return (
-    <div className="max-w-5xl space-y-6">
+    <div className="max-w-5xl space-y-6" dir={dir} lang={lang}>
       <header>
         <h1 className="text-lg font-bold text-text tracking-tight leading-none">
-          {hello()}{name ? `, ${name.charAt(0).toUpperCase()}${name.slice(1)}` : ''}
+          {t.hello(new Date().getHours())}{name ? `${lang === 'ar' ? '، ' : ', '}${name.charAt(0).toUpperCase()}${name.slice(1)}` : ''}
         </h1>
-        <p className="text-xs text-text-secondary mt-2">{activeWorkspace?.name || 'Arak'} · pick where to work.</p>
+        <p className="text-xs text-text-secondary mt-2">{activeWorkspace?.name || 'Arak'} · {t.pick}</p>
       </header>
 
       <Today />
@@ -45,11 +53,11 @@ export function HomePage() {
                 <span className="w-9 h-9 rounded-lg flex items-center justify-center bg-stone-100 text-text border border-border">
                   <NavIcon name={s.icon} className="w-5 h-5" />
                 </span>
-                <span className="text-sm font-semibold text-text mt-3">{s.label}</span>
-                <span className="text-[11px] text-text-secondary leading-snug mt-1 line-clamp-3">{s.blurb}</span>
+                <span className="text-sm font-semibold text-text mt-3">{labelOf(s, lang)}</span>
+                <span className="text-[11px] text-text-secondary leading-snug mt-1 line-clamp-3">{(lang === 'ar' && s.blurbAr) || s.blurb}</span>
                 {n > 0 && (
-                  <span className="absolute top-3 right-3 min-w-[20px] h-5 px-1.5 flex items-center justify-center text-[11px] font-semibold text-white bg-red-500 rounded-full"
-                    title={`${n} waiting`}>
+                  <span className="absolute top-3 end-3 min-w-[20px] h-5 px-1.5 flex items-center justify-center text-[11px] font-semibold text-white bg-red-500 rounded-full"
+                    title={t.waiting(n)}>
                     {n}
                   </span>
                 )}
@@ -60,13 +68,13 @@ export function HomePage() {
       </ul>
 
       <section>
-        <h2 className="eyebrow mb-2">Everywhere</h2>
+        <h2 className="eyebrow mb-2">{t.everywhere}</h2>
         <ul className="flex flex-wrap gap-2">
           {GLOBAL_PAGES.map(g => (
             <li key={g.to}>
               <Link to={g.to} className="inline-flex items-center gap-2 bg-white border border-border rounded-md px-3 py-2 text-xs text-text hover:bg-stone-50">
                 <NavIcon name={g.icon} />
-                {g.label}
+                {labelOf(g, lang)}
                 {g.badge && badges[g.badge] > 0 && <span className="text-[10px] font-semibold text-white bg-stone-900 rounded-full px-1.5">{badges[g.badge]}</span>}
               </Link>
             </li>
@@ -85,13 +93,14 @@ export function HomePage() {
 function Today() {
   const navigate = useNavigate()
   const { tasks, people, now, toggle, busyId } = useTaskBoard('mine')
+  const { t: w, lang } = useT(HW)
   const due = (tasks || []).filter(t => ['overdue', 'today'].includes(bucketOf(t, now)))
   if (!due.length) return null
   return (
     <section>
       <div className="flex items-center justify-between mb-2">
-        <h2 className="text-sm font-semibold text-text">Today</h2>
-        <Link to="/tasks" className="text-xs text-text-secondary hover:text-text">All my tasks →</Link>
+        <h2 className="text-sm font-semibold text-text">{w.today}</h2>
+        <Link to="/tasks" className="text-xs text-text-secondary hover:text-text">{w.allTasks} {lang === 'ar' ? '←' : '→'}</Link>
       </div>
       <TaskList tasks={due} people={people} now={now} showSetter hideDone busyId={busyId}
         onOpen={t => navigate(`/tasks?id=${t.id}`)} onToggle={toggle} />

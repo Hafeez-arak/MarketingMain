@@ -46,9 +46,13 @@ describe('syncOdoo', () => {
     const { st, deps } = world()
     const out = await syncOdoo(deps, { workspaceId: WS, force: true })
     expect(out.error).toBeUndefined()
-    expect(out.models.sort()).toEqual(['account.move', 'crm.lead', 'crm.stage', 'project.project', 'sale.order'])
+    expect(out.models.sort()).toEqual(['account.analytic.line', 'account.move', 'account.payment', 'crm.lead', 'crm.stage',
+      'project.project', 'project.project.stage', 'project.task', 'project.update', 'res.users', 'sale.order'])
     expect(out.synced['crm.lead'].changed).toBe(5) // the lost (archived) deal included
-    expect(st.records.size).toBe(3 + 5 + 3 + 2 + 2)
+    expect(out.synced['project.project'].changed).toBe(6) // the archived project too
+    // users 5, crm stages 3, deals 5, orders 6, invoices 7, payments 3,
+    // analytic lines 9, project stages 9, projects 6, tasks 6, updates 2
+    expect(st.records.size).toBe(5 + 3 + 5 + 6 + 7 + 3 + 9 + 9 + 6 + 6 + 2)
     expect(st.sync.cursors['crm.lead']).toMatch(/^\d{4}-\d{2}-\d{2} [\d:]+\|\d+$/)
     expect(st.sync.last_error).toBe('')
   })
@@ -87,7 +91,38 @@ describe('syncOdoo', () => {
     const f = odooFacts(m.records, { models: m.models, url: m.url })
     expect(f.pipeline_deals).toBe(3)
     expect(f.pipeline_sar).toBe(2400000 + 650000)
-    expect(f.projects_at_risk).toBe(1)
-    expect(f.missing.map(x => x.kind)).toEqual(['deal_no_owner', 'deal_no_value', 'project_no_date'])
+    expect(f.projects_at_risk).toBe(2) // one at risk, one off track
+    expect(f.missing.map(x => x.kind)).toEqual(['deal_no_owner', 'deal_no_value', 'project_no_date', 'project_no_date'])
+  })
+
+  it('asks for optional fields only where this Odoo has them', async () => {
+    // An Odoo without Sales margin or Sales↔Project, and an older Project.
+    const odoo = fakeOdooData()
+    const omit = (r, keys) => Object.fromEntries(Object.entries(r).filter(([k]) => !keys.includes(k)))
+    odoo['sale.order'] = odoo['sale.order'].map(o => omit(o, ['margin', 'margin_percent', 'project_id']))
+    odoo['project.project'] = odoo['project.project'].map(p => ({ ...omit(p, ['date_last_stage_update', 'sale_order_id', 'account_id']), analytic_account_id: p.account_id }))
+    const { st, deps } = world(odoo)
+    const out = await syncOdoo(deps, { workspaceId: WS, force: true })
+    expect(out.error).toBeUndefined()
+    const so = st.records.get('sale.order:201').data
+    expect(so).not.toHaveProperty('margin_percent')
+    const pr = st.records.get('project.project:401').data
+    expect(pr.analytic_account_id).toEqual([501, 'Najd clinic lighting'])
+    expect(pr).not.toHaveProperty('account_id')
+  })
+
+  it('a field this Odoo lacks fails the read, as the real one does', async () => {
+    const { deps } = world()
+    const f = deps.fetch
+    const r = await f('http://x/jsonrpc', { body: JSON.stringify({ params: { service: 'object', method: 'execute_kw', args: [FAKE.db, FAKE.uid, FAKE.apiKey, 'sale.order', 'search_read', [[]], { fields: ['nope'] }] } }) })
+    expect((await r.json()).error.data.message).toMatch(/Invalid field 'nope'/)
+  })
+
+  it('runs Technical\'s monitor after a good round, and survives it failing', async () => {
+    const { deps } = world()
+    deps.technical = async () => { throw new Error('monitor down') }
+    const out = await syncOdoo(deps, { workspaceId: WS, force: true })
+    expect(out.error).toBeUndefined()
+    expect(out.technical.error).toMatch(/monitor down/)
   })
 })

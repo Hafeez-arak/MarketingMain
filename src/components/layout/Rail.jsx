@@ -6,6 +6,7 @@ import { NavIcon } from './icons'
 import { useBadges, sectionBadge } from './useNavBadges'
 import { ArakMark } from './ArakMark'
 import { SectionPanel } from './Sidebar'
+import { useLang, labelOf, COMMON } from '../../lib/i18n'
 
 // ─── The rail: one icon per section (v2) ───────────────────────────────────
 // 2026-10-19. The far-left column: the logo, Home, the sections this person
@@ -23,7 +24,7 @@ const box = active => `relative w-10 h-8 rounded-lg flex items-center justify-ce
 function Dot({ n }) {
   if (!n) return null
   return (
-    <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 flex items-center justify-center text-[10px] font-semibold text-white bg-red-500 rounded-full ring-2 ring-surface-muted">
+    <span className="absolute -top-1 -end-1 min-w-[16px] h-4 px-1 flex items-center justify-center text-[10px] font-semibold text-white bg-red-500 rounded-full ring-2 ring-surface-muted">
       {n > 99 ? '99+' : n}
     </span>
   )
@@ -42,6 +43,7 @@ const canHover = () => typeof window !== 'undefined'
 export function Rail({ onNavigate, menuHidden = false }) {
   const { pathname } = useLocation()
   const { who } = useAuth()
+  const lang = useLang()
   const badges = useBadges()
   const sections = sectionsFor(who)
   const here = sectionOf(pathname)?.key || null
@@ -89,22 +91,22 @@ export function Rail({ onNavigate, menuHidden = false }) {
 
   return (
     <div className="relative h-full flex-shrink-0 flex">
-      <nav aria-label="Sections" data-print-hide
-        className="w-[72px] flex-shrink-0 h-full bg-surface-muted border-r border-border flex flex-col items-center py-2 overflow-y-auto scrollbar-thin">
+      <nav aria-label={COMMON[lang].sections} data-print-hide
+        className="w-[72px] flex-shrink-0 h-full bg-surface-muted border-e border-border flex flex-col items-center py-2 overflow-y-auto scrollbar-thin">
         {/* Arak's mark, at the top bar's height so the two line up. */}
         <div className="h-12 flex items-center justify-center mb-1 flex-shrink-0">
           <ArakMark />
         </div>
-        {link(HOME.to, HOME.label, HOME.icon, pathname === '/', 0)}
+        {link(HOME.to, labelOf(HOME, lang), HOME.icon, pathname === '/', 0)}
         <span className="w-8 border-t border-border my-1.5 flex-shrink-0" aria-hidden="true" />
-        {sections.map(s => link(s.pages[0].to, s.label, s.icon, here === s.key, sectionBadge(s, badges), s.key))}
+        {sections.map(s => link(s.pages[0].to, labelOf(s, lang), s.icon, here === s.key, sectionBadge(s, badges), s.key))}
         <div className="flex-1 min-h-4" />
-        {GLOBAL_PAGES.map(g => link(g.to, g.label, g.icon, pathname === g.to || pathname.startsWith(`${g.to}/`), g.badge ? badges[g.badge] : 0))}
+        {GLOBAL_PAGES.map(g => link(g.to, labelOf(g, lang), g.icon, pathname === g.to || pathname.startsWith(`${g.to}/`), g.badge ? badges[g.badge] : 0))}
       </nav>
       {peeked && (
         <SectionPanel section={peeked} pages={sectionMenu(peeked, who)} onNavigate={done}
           onMouseEnter={keep} onMouseLeave={hoverOut}
-          className="absolute left-full top-0 bottom-0 w-52 z-40 border-r border-border shadow-dropdown animate-fade-scale" />
+          className="absolute start-full top-0 bottom-0 w-52 z-40 border-e border-border shadow-dropdown animate-fade-scale" />
       )}
     </div>
   )

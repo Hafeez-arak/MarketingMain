@@ -3,6 +3,7 @@ import { useAuth } from '../../store/auth'
 import { sectionOf, menuPages } from '../../lib/modules'
 import { NavIcon } from './icons'
 import { useBadges } from './useNavBadges'
+import { useLang, labelOf } from '../../lib/i18n'
 
 // ─── The open section's pages (v2) ─────────────────────────────────────────
 // 2026-10-19. v1 had one sidebar listing every page in the app under ten
@@ -22,7 +23,7 @@ export function Sidebar({ onNavigate, collapsed = false }) {
   if (!pages.length) return null
   return (
     <SectionPanel section={section} pages={pages} onNavigate={onNavigate}
-      className={`w-52 flex-shrink-0 h-full border-r border-border ${collapsed ? 'md:hidden' : ''}`} />
+      className={`w-52 flex-shrink-0 h-full border-e border-border ${collapsed ? 'md:hidden' : ''}`} />
   )
 }
 
@@ -34,13 +35,14 @@ export function Sidebar({ onNavigate, collapsed = false }) {
 export function SectionPanel({ section, pages, onNavigate, className = '', ...rest }) {
   const { pathname } = useLocation()
   const badges = useBadges()
+  const lang = useLang()
   return (
-    <aside aria-label={section.label} data-print-hide {...rest}
+    <aside aria-label={labelOf(section, lang)} data-print-hide {...rest}
       className={`flex flex-col overflow-hidden bg-surface-muted ${className}`}>
       {/* The section's name, level with the top bar's title. */}
       <div className="h-14 flex-shrink-0 px-4 flex items-center">
         <div className="flex-1 min-w-0">
-          <p className="font-semibold text-text text-sm leading-none tracking-tight truncate">{section.label}</p>
+          <p className="font-semibold text-text text-sm leading-none tracking-tight truncate">{labelOf(section, lang)}</p>
           <p className="text-[11px] text-text-tertiary mt-1">Arak</p>
         </div>
       </div>
@@ -60,7 +62,7 @@ export function SectionPanel({ section, pages, onNavigate, className = '', ...re
                 ${isActive ? 'nav-active' : 'text-text-secondary hover:bg-stone-100 hover:text-text'}`
             }}>
             <span className="flex-shrink-0"><NavIcon name={item.icon} /></span>
-            <span className="flex-1 truncate">{item.label}</span>
+            <span className="flex-1 truncate">{labelOf(item, lang)}</span>
             {item.badge && badges[item.badge] > 0 && (
               <span className="flex-shrink-0 min-w-[18px] h-[18px] px-1 flex items-center justify-center rounded-full text-[10px] font-semibold text-white bg-stone-900">
                 {badges[item.badge]}

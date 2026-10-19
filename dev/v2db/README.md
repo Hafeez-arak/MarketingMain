@@ -147,7 +147,9 @@ Migrations missing from production on 2026-10-19:
 - `20261025_ceo_control.sql`: held back on purpose until the CEO agrees the
   plan. It adds `company_targets` and `lead_routing_rules`, plus new columns
   on `leads`, `research_opportunities`, `sales_accounts` and `user_access`.
-- `20261101_section_access.sql`: in progress on v2.
+- `20261101_section_access.sql` to `20261105_technical_finance.sql`: v2's
+  section access, tasks, the Odoo mirror, Marketing/Insights locked by
+  section, Technical and Finance. In progress on v2.
 
 Locally, `fixes/20261025_ceo_control.sql.before.sql` creates a placeholder
 Arak company before that migration runs. The placeholder uses the
@@ -160,8 +162,9 @@ well-known id `00000000-0000-0000-0000-000000000001`, so the migration's
 node dev/v2db/seed.mjs
 ```
 
-Makes six logins and fills the company "Arak Lighting (test)" with invented
-leads, key accounts, research projects, a content plan and posts. Every
+Makes ten logins and fills the company "Arak Lighting (test)" with invented
+leads, key accounts, research projects, a research run and signals, a
+competitor, a content plan, posts, a brand profile and an email contact. Every
 name is made up; nothing is copied from production. It refuses any address
 that is not this machine, and is safe to re-run (it also resets the section
 grants to the table below).
@@ -169,9 +172,13 @@ grants to the table below).
 | Login (password `arak-v2-local`) | Role | Sections |
 |---|---|---|
 | owner@arak.test | admin | everything |
-| ceo@arak.test | member | CEO manage; Sales, Marketing, Insights view |
+| ceo@arak.test | member | CEO manage; Sales, Marketing, Insights, Technical, Finance view |
 | salesmanager@arak.test | member | Sales manage; CEO view |
 | marketing@arak.test | member | Marketing and Insights work |
+| technical@arak.test | member | Technical manage (every project) |
+| pm.sara@arak.test | member | Technical work: the fake Odoo's projects 401, 403, 405 (her Odoo login is a username; matched by email) |
+| pm.khalid@arak.test | member | Technical work: projects 402, 404, 406 |
+| finance@arak.test | member | Finance view |
 | rep.omar@arak.test | sales seat | the sales team's app (sees all website leads) |
 | rep.lina@arak.test | sales seat | the sales team's app (her own leads) |
 
@@ -235,3 +242,37 @@ node dev/v2db/connect-fake-odoo.mjs
 Then, signed in as ceo@arak.test, the CEO page's "Update now" (or the hourly
 round) fills the mirror, and the four tiles that waited for Odoo show its
 numbers. The tests use the same fake (`api/leads/_odooSync.test.js`).
+
+Or run one round, and Technical's monitor after it, from the command line
+(the same server code as the hourly round; refuses any address that is not
+this machine):
+
+```sh
+node dev/v2db/odoo-round.mjs
+```
+
+Since 2026-10-19 the fake also has project stages (the nine), projects with
+their managers, tasks and updates, Odoo users, customer payments and
+analytic lines, and answers `fields_get`. Like the real one it refuses a
+field a model does not have. Its dates are relative to when it starts, so
+after restarting it, clear the mirror before a round (`delete from
+odoo_records; delete from odoo_sync;`): the cursors from the last run are
+newer than the restarted fake's changes.
+
+## Checks (2026-10-19)
+
+```sh
+node dev/v2db/check-sections.mjs     # every login: what each reads and may change
+node dev/v2db/check-technical.mjs    # submittal codes → follow-ups; the update closes its reminder
+node dev/v2db/check-api-gates.mjs    # Email's section gate (with the dev server on :5180)
+```
+
+`check-sections.mjs` works out the expected answer from each person's
+grants, so a rule that lets too much through fails as loudly as one that
+blocks too much. On 2026-10-19 every answer matched: Marketing and Insights
+tables (brand profile, plans, ideas, posts, social accounts, email
+contacts, research runs, opportunities, signals, competitors), and the Odoo
+mirror and project tables. The CEO reads Marketing but cannot change it;
+the sales manager reads only the research Sales uses; Sara sees projects
+401, 403 and 405 and can record only on hers; Finance reads invoices and no
+project tasks; the sales team reads only what their app shows.

@@ -6,6 +6,7 @@ import { runHealth } from './_health.js'
 import { routeWaiting } from './_control.js'
 import { runTaskReminders } from './_tasks.js'
 import { syncAllOdoo, syncOdoo } from './_odooSync.js'
+import { monitorProjects } from './_technical.js'
 import { supabaseStorage } from './_files.js'
 import { checkWebsite } from './_website.js'
 
@@ -139,5 +140,7 @@ export function leadDeps() {
   deps.route = (args) => routeWaiting(deps, { appUrl: APP_URL, ...args })
   deps.tasks = (args) => runTaskReminders(deps, args)
   deps.odoo = (args = {}) => (args.workspaceId ? syncOdoo(deps, args) : syncAllOdoo(deps, args))
+  // Technical watches the projects after each mirror round (_technical.js).
+  deps.technical = (args) => monitorProjects(deps, args)
   return deps
 }

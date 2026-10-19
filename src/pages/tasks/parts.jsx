@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react'
 import { Button, Spinner } from '../../components/ui/index'
 import {
-  groupTasks, dueLabel, bucketOf, BUCKET_LABEL, STATUS_LABEL, PRIORITY_LABEL, REMINDER_CHOICES,
+  groupTasks, dueLabel, bucketOf, REMINDER_CHOICES,
   toDueAt, fromDueAt, remindAtFor, isOpen,
 } from '../../lib/tasks/logic'
+import { useT, fmtDay } from '../../lib/i18n'
+import { TW, labels } from './words'
 import { fetchTaskEvents, addComment } from '../../lib/tasks/client'
 import { timeAgo } from '../../lib/utils'
 
@@ -13,7 +15,7 @@ import { timeAgo } from '../../lib/utils'
 // history). Used by the Tasks page, a meeting's page, Home and the sales
 // team's app, so a task looks and works the same everywhere.
 
-const nameOf = (people, id) => people.find(p => p.user_id === id)?.name || (id ? 'someone who left' : 'nobody')
+const nameOf = (people, id, t = TW.en) => people.find(p => p.user_id === id)?.name || (id ? t.someoneLeft : t.nobody)
 
 const DUE_TONE = {
   overdue: 'text-red-600 font-medium',
@@ -26,10 +28,11 @@ const DUE_TONE = {
 
 /** A round tick box: finishes (or reopens) a task in one click. */
 function Tick({ task, onToggle, busy }) {
+  const { t } = useT(TW)
   const done = task.status === 'done'
   return (
     <button type="button" onClick={e => { e.stopPropagation(); onToggle(task) }} disabled={busy}
-      aria-label={done ? `Reopen: ${task.title}` : `Mark done: ${task.title}`} aria-pressed={done}
+      aria-label={done ? t.reopen(task.title) : t.markDone(task.title)} aria-pressed={done}
       className={`w-[18px] h-[18px] mt-0.5 rounded-full border flex items-center justify-center flex-shrink-0 transition-colors
         ${done ? 'bg-green-600 border-green-600 text-white' : 'border-stone-300 hover:border-green-600 text-transparent hover:text-green-600'}`}>
       <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth="3" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6L9 17l-5-5" /></svg>
@@ -41,16 +44,18 @@ function Tick({ task, onToggle, busy }) {
  * Tasks grouped Overdue / Today / This week / Later / No deadline / Done.
  * `showAssignee` for lists of other people's tasks; `showSetter` for one's own.
  */
-export function TaskList({ tasks, people = [], now, onOpen, onToggle, showAssignee = false, showSetter = false, empty = 'Nothing here.', hideDone = false, busyId = '' }) {
+export function TaskList({ tasks, people = [], now, onOpen, onToggle, showAssignee = false, showSetter = false, empty = null, hideDone = false, busyId = '' }) {
+  const { t: w, lang, dir } = useT(TW)
+  const L = labels(lang)
   const g = groupTasks(tasks, now)
   const order = ['overdue', 'today', 'week', 'later', 'none', ...(hideDone ? [] : ['done'])]
-  if (!order.some(b => g[b].length)) return <p className="text-sm text-text-tertiary px-1 py-6">{empty}</p>
+  if (!order.some(b => g[b].length)) return <p className="text-sm text-text-tertiary px-1 py-6" dir={dir}>{empty ?? w.nothingHere}</p>
   return (
-    <div className="space-y-4">
+    <div className="space-y-4" dir={dir} lang={lang}>
       {order.filter(b => g[b].length).map(b => (
         <section key={b}>
           <h3 className={`text-xs font-semibold mb-1.5 ${b === 'overdue' ? 'text-red-600' : 'text-text-secondary'}`}>
-            {BUCKET_LABEL[b]} <span className="font-normal text-text-tertiary">{g[b].length}</span>
+            {L.bucket[b]} <span className="font-normal text-text-tertiary">{g[b].length}</span>
           </h3>
           <ul className="bg-white border border-border divide-y divide-border">
             {g[b].map(t => (
@@ -61,17 +66,17 @@ export function TaskList({ tasks, people = [], now, onOpen, onToggle, showAssign
                   <Tick task={t} onToggle={onToggle} busy={busyId === t.id} />
                   <div className="flex-1 min-w-0">
                     <p className={`text-sm leading-snug ${t.status === 'done' ? 'text-text-tertiary line-through' : 'text-text'}`} dir="auto">
-                      {t.priority === 'high' && isOpen(t) && <span className="inline-block w-1.5 h-1.5 rounded-full bg-red-500 me-1.5 align-middle" title="High priority" />}
+                      {t.priority === 'high' && isOpen(t) && <span className="inline-block w-1.5 h-1.5 rounded-full bg-red-500 me-1.5 align-middle" title={w.highPriority} />}
                       {t.title}
                     </p>
                     <p className="text-[11px] text-text-tertiary mt-0.5 flex flex-wrap gap-x-2">
-                      {t.due_at && <span className={DUE_TONE[bucketOf(t, now)]}>{dueLabel(t, now)}</span>}
-                      {showAssignee && <span>→ {nameOf(people, t.assigned_to)}</span>}
-                      {showSetter && t.created_by && t.created_by !== t.assigned_to && <span>from {nameOf(people, t.created_by)}</span>}
-                      {t.status === 'in_progress' && <span>In progress</span>}
-                      {t.status === 'waiting' && <span>Waiting</span>}
-                      {t.meeting_id && <span>Meeting</span>}
-                      {t.lead_id && <span>Lead follow-up</span>}
+                      {t.due_at && <span className={DUE_TONE[bucketOf(t, now)]}>{dueLabel(t, now, lang)}</span>}
+                      {showAssignee && <span>{dir === 'rtl' ? '←' : '→'} {nameOf(people, t.assigned_to, w)}</span>}
+                      {showSetter && t.created_by && t.created_by !== t.assigned_to && <span>{w.from(nameOf(people, t.created_by, w))}</span>}
+                      {t.status === 'in_progress' && <span>{L.status.in_progress}</span>}
+                      {t.status === 'waiting' && <span>{L.status.waiting}</span>}
+                      {t.meeting_id && <span>{w.meeting}</span>}
+                      {t.lead_id && <span>{w.leadFollowUp}</span>}
                     </p>
                   </div>
                 </div>
@@ -88,7 +93,9 @@ export function TaskList({ tasks, people = [], now, onOpen, onToggle, showAssign
  * The fields of a task. `initial` fills them (a follow-up, an edit); the
  * reminder is a choice relative to the deadline.
  */
-export function TaskForm({ initial = {}, people = [], me, submitLabel = 'Add task', onSubmit, onCancel, compact = false }) {
+export function TaskForm({ initial = {}, people = [], me, submitLabel = null, onSubmit, onCancel, compact = false }) {
+  const { t: w, lang, dir } = useT(TW)
+  const L = labels(lang)
   const start = fromDueAt(initial.due_at)
   const [f, setF] = useState({
     title: initial.title || '', details: initial.details || '',
@@ -102,7 +109,7 @@ export function TaskForm({ initial = {}, people = [], me, submitLabel = 'Add tas
 
   async function submit(e) {
     e.preventDefault()
-    if (!f.title.trim()) { setError('Give the task a title.'); return }
+    if (!f.title.trim()) { setError(w.titleMissing); return }
     const due_at = toDueAt(f.date, f.time)
     setBusy(true); setError('')
     const out = await onSubmit({
@@ -114,49 +121,41 @@ export function TaskForm({ initial = {}, people = [], me, submitLabel = 'Add tas
   }
 
   return (
-    <form onSubmit={submit} className="space-y-3">
-      <input autoFocus value={f.title} onChange={e => set('title', e.target.value)} placeholder="What needs doing?" className={`${field} text-[15px] font-medium`} aria-label="Task" dir="auto" />
-      {!compact && <textarea value={f.details} onChange={e => set('details', e.target.value)} rows={3} placeholder="Details (optional)" className={field} aria-label="Details" dir="auto" />}
+    <form onSubmit={submit} className="space-y-3" dir={dir} lang={lang}>
+      <input autoFocus value={f.title} onChange={e => set('title', e.target.value)} placeholder={w.whatNeedsDoing} className={`${field} text-[15px] font-medium`} aria-label={w.task} dir="auto" />
+      {!compact && <textarea value={f.details} onChange={e => set('details', e.target.value)} rows={3} placeholder={w.details} className={field} aria-label={w.detailsLabel} dir="auto" />}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-        <label className="col-span-2 sm:col-span-1"><span className="text-[11px] text-text-secondary">Who</span>
+        <label className="col-span-2 sm:col-span-1"><span className="text-[11px] text-text-secondary">{w.who}</span>
           <select value={f.assigned_to} onChange={e => set('assigned_to', e.target.value)} className={field}>
-            {people.map(p => <option key={p.user_id} value={p.user_id}>{p.user_id === me ? `${p.name} (me)` : p.name}</option>)}
+            {people.map(p => <option key={p.user_id} value={p.user_id}>{p.user_id === me ? `${p.name} (${w.me})` : p.name}</option>)}
           </select>
         </label>
-        <label><span className="text-[11px] text-text-secondary">Deadline</span>
+        <label><span className="text-[11px] text-text-secondary">{w.deadline}</span>
           <input type="date" value={f.date} onChange={e => set('date', e.target.value)} className={field} />
         </label>
-        <label><span className="text-[11px] text-text-secondary">Time (optional)</span>
+        <label><span className="text-[11px] text-text-secondary">{w.time}</span>
           <input type="time" value={f.time} onChange={e => set('time', e.target.value)} className={field} disabled={!f.date} />
         </label>
-        <label className="col-span-2 sm:col-span-1"><span className="text-[11px] text-text-secondary">Priority</span>
+        <label className="col-span-2 sm:col-span-1"><span className="text-[11px] text-text-secondary">{w.priority}</span>
           <select value={f.priority} onChange={e => set('priority', e.target.value)} className={field}>
-            {Object.entries(PRIORITY_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+            {Object.entries(L.priority).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
           </select>
         </label>
       </div>
       {f.date && (
-        <label className="block"><span className="text-[11px] text-text-secondary">Reminder</span>
+        <label className="block"><span className="text-[11px] text-text-secondary">{w.reminder}</span>
           <select value={f.reminder} onChange={e => set('reminder', e.target.value)} className={field}>
-            {REMINDER_CHOICES.map(c => <option key={c.key} value={c.key}>{c.label}</option>)}
+            {REMINDER_CHOICES.map(c => <option key={c.key} value={c.key}>{L.reminder[c.key]}</option>)}
           </select>
         </label>
       )}
       {error && <p className="text-xs text-red-600" dir="auto">{error}</p>}
       <div className="flex items-center gap-2">
-        <Button type="submit" size="sm" disabled={busy}>{busy ? <Spinner size="sm" /> : null}{submitLabel}</Button>
-        {onCancel && <Button type="button" size="sm" variant="ghost" onClick={onCancel}>Cancel</Button>}
+        <Button type="submit" size="sm" disabled={busy}>{busy ? <Spinner size="sm" /> : null}{submitLabel ?? w.addTask}</Button>
+        {onCancel && <Button type="button" size="sm" variant="ghost" onClick={onCancel}>{w.cancel}</Button>}
       </div>
     </form>
   )
-}
-
-const EVENT_WORDS = {
-  created: 'set this task',
-  assigned: 'gave it to',
-  status: 'moved it',
-  due: 'set the deadline to',
-  edited: 'edited it',
 }
 
 /**
@@ -165,6 +164,8 @@ const EVENT_WORDS = {
  */
 /** `leadHref(task)`: where "Open the lead" goes, which differs by app (sales or marketing shell). */
 export function TaskPanel({ task, people = [], me, now, canEdit, canDelete, onUpdate, onDelete, onFollowUp, onClose, leadHref = null }) {
+  const { t: w, lang, dir } = useT(TW)
+  const L = labels(lang)
   const [editing, setEditing] = useState(false)
   const [events, setEvents] = useState(null)
   const [comment, setComment] = useState('')
@@ -203,50 +204,50 @@ export function TaskPanel({ task, people = [], me, now, canEdit, canDelete, onUp
   return (
     <div className="fixed inset-0 z-50 flex justify-end" role="dialog" aria-modal="true" aria-label={task.title}>
       <div className="absolute inset-0 bg-black/20" onClick={onClose} aria-hidden="true" />
-      <aside className="relative w-full max-w-lg h-full bg-white border-l border-border shadow-dropdown flex flex-col animate-fade-scale">
+      <aside dir={dir} lang={lang} className="relative w-full max-w-lg h-full bg-white border-s border-border shadow-dropdown flex flex-col animate-fade-scale">
         <header className="flex items-start gap-3 px-5 py-4 border-b border-border">
           <div className="flex-1 min-w-0">
             <p className="text-[11px] text-text-tertiary">
-              From {nameOf(people, task.created_by)} → {nameOf(people, task.assigned_to)}
-              {task.due_at && <> · <span className={DUE_TONE[bucketOf(task, now)]}>{dueLabel(task, now)}</span></>}
+              {w.fromTo(nameOf(people, task.created_by, w), nameOf(people, task.assigned_to, w))}
+              {task.due_at && <> · <span className={DUE_TONE[bucketOf(task, now)]}>{dueLabel(task, now, lang)}</span></>}
             </p>
             <h2 className={`text-base font-semibold mt-1 leading-snug ${task.status === 'done' ? 'line-through text-text-tertiary' : 'text-text'}`} dir="auto">{task.title}</h2>
           </div>
-          <button type="button" onClick={onClose} aria-label="Close" className="w-8 h-8 rounded-md flex items-center justify-center text-text-tertiary hover:bg-stone-100 hover:text-text">
+          <button type="button" onClick={onClose} aria-label={w.close} className="w-8 h-8 rounded-md flex items-center justify-center text-text-tertiary hover:bg-stone-100 hover:text-text">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6L6 18M6 6l12 12" /></svg>
           </button>
         </header>
 
         <div className="flex-1 overflow-y-auto scrollbar-thin px-5 py-4 space-y-5">
           {mineToMove && (
-            <div className="flex flex-wrap gap-1.5" role="group" aria-label="Status">
+            <div className="flex flex-wrap gap-1.5" role="group" aria-label={w.status}>
               {['todo', 'in_progress', 'waiting', 'done'].map(s => (
                 <button key={s} type="button" disabled={Boolean(busy)} aria-pressed={task.status === s}
                   onClick={() => act(`status:${s}`, () => onUpdate({ status: s }))}
                   className={`rounded-md border px-2.5 py-1 text-xs ${task.status === s ? (s === 'done' ? 'bg-green-600 border-green-600 text-white' : 'bg-stone-900 border-stone-900 text-white') : 'bg-white border-border text-text-secondary hover:bg-stone-50'}`}>
-                  {STATUS_LABEL[s]}
+                  {L.status[s]}
                 </button>
               ))}
               {canEdit && task.status !== 'cancelled' && (
                 <button type="button" onClick={() => act('status:cancelled', () => onUpdate({ status: 'cancelled' }))} disabled={Boolean(busy)}
-                  className="rounded-md px-2.5 py-1 text-xs text-text-tertiary hover:text-red-600">Drop</button>
+                  className="rounded-md px-2.5 py-1 text-xs text-text-tertiary hover:text-red-600">{w.drop}</button>
               )}
             </div>
           )}
 
           {editing ? (
-            <TaskForm initial={task} people={people} me={me} submitLabel="Save"
+            <TaskForm initial={task} people={people} me={me} submitLabel={w.save}
               onCancel={() => setEditing(false)}
               onSubmit={async fields => { const out = await onUpdate(fields); if (!out?.error) setEditing(false); return out }} />
           ) : (
             <div className="space-y-2">
-              {task.details ? <p className="text-sm text-text whitespace-pre-wrap leading-relaxed" dir="auto">{task.details}</p> : <p className="text-sm text-text-tertiary">No details.</p>}
-              <p className="text-[11px] text-text-tertiary">Priority: {PRIORITY_LABEL[task.priority]}{task.remind_at ? ` · Reminder ${dueLabel({ ...task, due_at: task.remind_at, status: 'todo' }, now)}` : ''}</p>
+              {task.details ? <p className="text-sm text-text whitespace-pre-wrap leading-relaxed" dir="auto">{task.details}</p> : <p className="text-sm text-text-tertiary">{w.noDetails}</p>}
+              <p className="text-[11px] text-text-tertiary">{w.priorityLine(L.priority[task.priority])}{task.remind_at ? w.reminderAt(dueLabel({ ...task, due_at: task.remind_at, status: 'todo' }, now, lang)) : ''}</p>
               <div className="flex flex-wrap gap-2 pt-1">
-                {canEdit && <Button size="xs" variant="secondary" onClick={() => setEditing(true)}>Edit</Button>}
-                <Button size="xs" variant="secondary" onClick={() => onFollowUp(task)}>Add a follow-up</Button>
-                {task.lead_id && leadHref && <a href={leadHref(task)} className="inline-flex items-center rounded-md border border-border px-2.5 py-1 text-[11px] text-text hover:bg-stone-50">Open the lead</a>}
-                {canDelete && <Button size="xs" variant="ghost" onClick={() => { if (window.confirm('Delete this task?')) onDelete(task) }}>Delete</Button>}
+                {canEdit && <Button size="xs" variant="secondary" onClick={() => setEditing(true)}>{w.edit}</Button>}
+                <Button size="xs" variant="secondary" onClick={() => onFollowUp(task)}>{w.addFollowUp}</Button>
+                {task.lead_id && leadHref && <a href={leadHref(task)} className="inline-flex items-center rounded-md border border-border px-2.5 py-1 text-[11px] text-text hover:bg-stone-50">{w.openLead}</a>}
+                {canDelete && <Button size="xs" variant="ghost" onClick={() => { if (window.confirm(w.confirmDelete)) onDelete(task) }}>{w.delete}</Button>}
               </div>
             </div>
           )}
@@ -254,23 +255,23 @@ export function TaskPanel({ task, people = [], me, now, canEdit, canDelete, onUp
           {error && <p className="text-xs text-red-600" dir="auto">{error}</p>}
 
           <section>
-            <h3 className="text-xs font-semibold text-text-secondary mb-2">Comments and history</h3>
+            <h3 className="text-xs font-semibold text-text-secondary mb-2">{w.history}</h3>
             {events === null ? <Spinner size="sm" /> : (
               <ol className="space-y-2.5">
                 {events.map(ev => (
                   <li key={ev.id} className="text-xs">
                     {ev.kind === 'comment' ? (
                       <div className="bg-stone-50 border border-border px-3 py-2">
-                        <p className="text-[11px] text-text-tertiary">{nameOf(people, ev.actor)} · {timeAgo(ev.created_at)}</p>
+                        <p className="text-[11px] text-text-tertiary">{nameOf(people, ev.actor, w)} · {lang === 'ar' ? fmtDay(ev.created_at, lang, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : timeAgo(ev.created_at)}</p>
                         <p className="text-sm text-text mt-0.5 whitespace-pre-wrap" dir="auto">{ev.body}</p>
                       </div>
                     ) : (
                       <p className="text-text-tertiary">
-                        <span className="text-text-secondary font-medium">{nameOf(people, ev.actor)}</span>{' '}
-                        {EVENT_WORDS[ev.kind]}
-                        {ev.kind === 'status' && ` to ${STATUS_LABEL[ev.to_status] || ev.to_status}`}
+                        <span className="text-text-secondary font-medium">{nameOf(people, ev.actor, w)}</span>{' '}
+                        {w.events[ev.kind]}
+                        {ev.kind === 'status' && w.toStatus(L.status[ev.to_status] || ev.to_status)}
                         {(ev.kind === 'assigned' || ev.kind === 'due') && ` ${ev.body}`}
-                        {' · '}{timeAgo(ev.created_at)}
+                        {' · '}{lang === 'ar' ? fmtDay(ev.created_at, lang, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : timeAgo(ev.created_at)}
                       </p>
                     )}
                   </li>
@@ -278,9 +279,9 @@ export function TaskPanel({ task, people = [], me, now, canEdit, canDelete, onUp
               </ol>
             )}
             <form onSubmit={send} className="mt-3 flex gap-2 items-end">
-              <textarea value={comment} onChange={e => setComment(e.target.value)} rows={2} placeholder="Write a comment…" aria-label="Comment" dir="auto"
+              <textarea value={comment} onChange={e => setComment(e.target.value)} rows={2} placeholder={w.writeComment} aria-label={w.comment} dir="auto"
                 className="flex-1 rounded-md border border-border bg-white px-2.5 py-1.5 text-sm focus:outline-none focus:border-stone-400 focus:ring-2 focus:ring-stone-200" />
-              <Button type="submit" size="sm" disabled={busy === 'comment' || !comment.trim()}>Send</Button>
+              <Button type="submit" size="sm" disabled={busy === 'comment' || !comment.trim()}>{w.send}</Button>
             </form>
           </section>
         </div>
@@ -291,6 +292,7 @@ export function TaskPanel({ task, people = [], me, now, canEdit, canDelete, onUp
 
 /** A centred dialog holding a form: New task, a follow-up. */
 export function Dialog({ title, onClose, children }) {
+  const { lang, dir } = useT(TW)
   useEffect(() => {
     const onKey = e => { if (e.key === 'Escape') onClose() }
     document.addEventListener('keydown', onKey)
@@ -299,7 +301,7 @@ export function Dialog({ title, onClose, children }) {
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center p-4 pt-[12vh]" role="dialog" aria-modal="true" aria-label={title}>
       <div className="absolute inset-0 bg-black/30" onClick={onClose} aria-hidden="true" />
-      <div className="relative w-full max-w-xl bg-white border border-border rounded-xl shadow-dropdown p-5 animate-fade-scale">
+      <div dir={dir} lang={lang} className="relative w-full max-w-xl bg-white border border-border rounded-xl shadow-dropdown p-5 animate-fade-scale">
         <h2 className="text-sm font-semibold text-text mb-3">{title}</h2>
         {children}
       </div>

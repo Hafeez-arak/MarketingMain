@@ -4,7 +4,8 @@ import { Sidebar } from './Sidebar'
 import { Rail } from './Rail'
 import { useNavBadges, NavBadgesContext } from './useNavBadges'
 import { useAuth } from '../../store/auth'
-import { menuPages } from '../../lib/modules'
+import { menuPages, isTranslated } from '../../lib/modules'
+import { useLang, dirOf } from '../../lib/i18n'
 import { Topbar } from './Topbar'
 import { AssistantDrawer } from '../AssistantDrawer'
 import { usePublishWatch } from '../../lib/usePublishWatch'
@@ -21,6 +22,10 @@ export function AppLayout({ children }) {
   // section sidebar and Home's tiles.
   const badges = useNavBadges()
   const { who } = useAuth()
+  // Arabic turns the shell right-to-left (<html dir>, lib/i18n.js); a page
+  // not yet translated keeps its English left-to-right inside it.
+  const lang = useLang()
+  const pageDir = isTranslated(location.pathname) ? dirOf(lang) : 'ltr'
   // The section menu can be hidden for more room (desktop only; on a phone
   // it lives in the drawer). Remembered per browser.
   const [menuHidden, setMenuHidden] = useState(() => {
@@ -67,15 +72,15 @@ export function AppLayout({ children }) {
     // chain from here down is marked for the @media print block in index.css
     // to unwind. Nothing changes on screen.
     <NavBadgesContext.Provider value={badges}>
-    <div className="flex h-screen overflow-hidden" data-print-shell>
+    <div className="flex h-screen overflow-hidden" data-print-shell dir={dirOf(lang)} lang={lang}>
       {/* v2 (2026-10-19): the rail of sections, then the open section's own
           pages (none on Home and the global pages). Below md both are one
           drawer, opened from the top bar. */}
       <div id="app-sidebar" data-print-hide
         className={`flex h-full flex-shrink-0
-          max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-50 max-md:shadow-dropdown
+          max-md:fixed max-md:inset-y-0 max-md:start-0 max-md:z-50 max-md:shadow-dropdown
           max-md:transition-[transform,visibility] max-md:duration-200
-          ${navOpen ? '' : 'max-md:-translate-x-full max-md:invisible'}`}>
+          ${navOpen ? '' : 'max-md:-translate-x-full rtl:max-md:translate-x-full max-md:invisible'}`}>
         <Rail onNavigate={closeNav} menuHidden={menuHidden} />
         <Sidebar onNavigate={closeNav} collapsed={menuHidden} />
       </div>
@@ -84,7 +89,7 @@ export function AppLayout({ children }) {
       )}
       {/* v2: the page sits in a white rounded panel inset on the grey frame,
           shadcn/ui's "inset" sidebar layout. Edge to edge on a phone. */}
-      <div className="flex-1 flex flex-col min-w-0 overflow-hidden bg-surface-muted md:py-2 md:pr-2" data-print-shell>
+      <div className="flex-1 flex flex-col min-w-0 overflow-hidden bg-surface-muted md:py-2 md:pe-2" data-print-shell>
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden bg-white md:rounded-xl md:border md:border-border" data-print-shell>
         <Topbar navOpen={navOpen} onMenu={() => (navOpen ? closeNav() : setNavOpenAt(location.pathname))}
           menuHidden={hasMenu ? menuHidden : null} onToggleMenu={toggleMenu} />
@@ -94,7 +99,7 @@ export function AppLayout({ children }) {
               the gutter is what makes a card's left edge line up with the
               card on the page you just came from. Narrower on a phone, where
               24px a side is an eighth of the screen. */}
-          <div key={location.pathname} className="p-3 md:p-6 page-enter" data-print-gutter>{children}</div>
+          <div key={location.pathname} dir={pageDir} className="p-3 md:p-6 page-enter" data-print-gutter>{children}</div>
         </main>
       </div>
       </div>
@@ -104,7 +109,7 @@ export function AppLayout({ children }) {
       {/* Wrapped only because the drawer returns a fragment, and an attribute
           cannot be hung on one. Its children are all `fixed`, so the wrapper
           is a zero-width flex item and changes nothing on screen. */}
-      <div data-print-hide><AssistantDrawer /></div>
+      <div data-print-hide dir="ltr"><AssistantDrawer /></div>
     </div>
     </NavBadgesContext.Provider>
   )
