@@ -127,7 +127,7 @@ function ProtectedApp() {
               pin the error screen in place for every page after it. */}
           <ErrorBoundary key={pathname}>
           <Routes>
-            {/* sales.araklighting.com (and leads.*) opens straight onto the leads page. */}
+            {/* sales.araklighting.com opens straight onto the leads page. */}
             <Route path="/"                      element={isLeadsHost() ? <Navigate to="/leads" replace /> : <Dashboard />} />
             <Route path="/brand-brain"           element={<BrandBrain />} />
             <Route path="/studio"                element={<CreativeStudio />} />
