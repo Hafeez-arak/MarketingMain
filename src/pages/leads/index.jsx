@@ -174,7 +174,7 @@ export default function LeadAgent() {
           <div className="bg-white px-4 py-3">
             <p className="text-[10px] font-semibold text-text-tertiary uppercase tracking-wide">OpenRouter key</p>
             {loading ? <Skeleton className="h-6 w-24 mt-1" /> : status?.key?.valid
-              ? <p className="text-sm font-bold text-sage-700 mt-1">Working{status.key.limitRemaining != null ? ` · ${money(status.key.limitRemaining)} left` : ''}</p>
+              ? <p className="text-sm font-bold text-sage-700 mt-1">Working{(status.key.creditLeft ?? status.key.limitRemaining) != null ? ` · ${money(status.key.creditLeft ?? status.key.limitRemaining)} left` : ''}</p>
               : <p className="text-sm font-bold text-red-600 mt-1">{status?.key?.saved ? 'Saved key is not accepted' : 'No key saved'}</p>}
             <p className="text-[10px] text-text-tertiary mt-1">{status?.key?.fromDeployment ? 'Using the deployment\'s key.' : 'Replace it under Connection, on the right.'}</p>
           </div>

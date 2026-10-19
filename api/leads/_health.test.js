@@ -31,6 +31,8 @@ describe('healthIssues', () => {
     expect(keys(healthIssues({ settings: healthy, failed: [{ error: 'Rate limit' }], now: NOW }))).toEqual(['ai_errors'])
     expect(keys(healthIssues({ settings: healthy, key: { valid: false }, now: NOW }))).toEqual(['ai_key'])
     expect(keys(healthIssues({ settings: healthy, key: { valid: true, limitRemaining: 3.2 }, now: NOW }))).toEqual(['ai_credit_low'])
+    // The account's balance wins over the key's own limit: $50 limit, $3 bought.
+    expect(keys(healthIssues({ settings: healthy, key: { valid: true, limitRemaining: 49, creditLeft: 3 }, now: NOW }))).toEqual(['ai_credit_low'])
     expect(healthIssues({ settings: healthy, key: { valid: null }, now: NOW })).toEqual([]) // OpenRouter unreachable: no verdict
     expect(keys(healthIssues({ settings: healthy, spent: 25, cap: 30, now: NOW }))).toEqual(['budget_80'])
     expect(keys(healthIssues({ settings: healthy, spent: 30, cap: 30, now: NOW }))).toEqual(['budget_used'])
