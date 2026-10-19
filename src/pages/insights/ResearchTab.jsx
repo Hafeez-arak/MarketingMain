@@ -15,7 +15,7 @@ import {
   openItems, runFaults, freshnessLabel, searchDemand, linesIn, forLine, linesOfRefs, matchesLine,
 } from '../../lib/marketReport'
 import { fetchIntel, updateOpportunity, updateEventDecision } from '../../lib/marketIntel'
-import { fetchAgenda, setAgendaStatus } from '../../lib/agentAgenda'
+import { fetchAgenda, setAgendaStatus, SOURCE_TYPES } from '../../lib/agentAgenda'
 import { OPPORTUNITY_STATUSES, EVENT_DECISIONS } from '../../lib/agent/intel'
 import { isLive } from '../../lib/agent/progress'
 import { explainFacts } from '../../lib/agent/websiteExplain'
@@ -485,6 +485,85 @@ function Limited({ items, limit = 5, render, noun = 'items', className = 'space-
   )
 }
 
+// ─── What the research watches, read only (the sales app, 2026-10-19) ──────
+// The marketing page edits this list in AgentSteering; the sales team only
+// needs to know where the leads come from, so here it is a plain list. The
+// order is closest-to-a-lead first: a tender portal names a job, a hashtag
+// only hints at one.
+const WATCH_ORDER = ['tender_portal', 'government', 'exchange', 'website', 'news', 'linkedin', 'instagram', 'x', 'hashtag', 'keyword']
+const WATCH_GROUP = {
+  tender_portal: 'Tender portals', government: 'Government', exchange: 'Stock exchange filings', website: 'Project websites',
+  news: 'News sites', linkedin: 'LinkedIn', instagram: 'Instagram', x: 'X', hashtag: 'Hashtags', keyword: 'Search phrases',
+}
+
+/** A link for a source when its subject is an address or a handle; null when it is a name or a phrase. */
+function watchHref(type, subject) {
+  const s = String(subject || '').trim()
+  if (/^https?:\/\//i.test(s)) return s
+  const handle = s.match(/^@([\w.]+)$/)?.[1]
+  if (handle && type === 'instagram') return `https://instagram.com/${handle}`
+  if (handle && type === 'x') return `https://x.com/${handle}`
+  if (type !== 'hashtag' && type !== 'keyword' && /^[\w-]+(\.[\w-]+)+(\/\S*)?$/.test(s)) return `https://${s}`
+  return null
+}
+
+function WatchList({ sources, competitors }) {
+  const groups = WATCH_ORDER
+    .concat(SOURCE_TYPES.map(([k]) => k).filter(k => !WATCH_ORDER.includes(k)))
+    .map(key => ({
+      key,
+      rows: sources.filter(r => (r.source_type || 'website') === key)
+        .sort((a, b) => (a.tier || 2) - (b.tier || 2) || String(a.subject).localeCompare(String(b.subject))),
+    }))
+    .filter(g => g.rows.length)
+  const rivals = [...competitors].sort((a, b) => String(a.subject).localeCompare(String(b.subject)))
+  return (
+    <div className="space-y-6">
+      {groups.length > 0 && (
+        <div className="space-y-3">
+          <SubHead>Where it looks for leads · {sources.length}</SubHead>
+          <div className="grid gap-3 lg:grid-cols-2 items-start">
+            {groups.map(g => (
+              <div key={g.key} className="bg-white border border-border min-w-0">
+                <p className="px-4 pt-3 pb-1 text-sm font-semibold text-text">{WATCH_GROUP[g.key] || g.key} <span className="font-normal text-text-tertiary tabular-nums">{g.rows.length}</span></p>
+                <ul className="divide-y divide-border-light">
+                  {g.rows.map(r => {
+                    const href = watchHref(g.key, r.subject)
+                    return (
+                      <li key={r.id || r.subject} className="px-4 py-2 min-w-0">
+                        {href
+                          ? <a href={href} target="_blank" rel="noopener noreferrer" dir="auto" className="text-sm text-text underline underline-offset-2 decoration-border-strong hover:decoration-text break-words">{r.subject}</a>
+                          : <span className="text-sm text-text break-words" dir="auto">{r.subject}</span>}
+                        {r.why && <p className="text-xs text-text-secondary leading-relaxed mt-0.5" dir="auto">{r.why}</p>}
+                      </li>
+                    )
+                  })}
+                </ul>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {rivals.length > 0 && (
+        <div className="space-y-3">
+          <SubHead>Competitors it watches · {rivals.length}</SubHead>
+          {/* Name and website only: the notes beside each rival are the
+              research's own bookkeeping ("could not be identified", "renamed
+              from"), not something a salesperson acts on. */}
+          <ul className="bg-white border border-border grid sm:grid-cols-2 lg:grid-cols-3">
+            {rivals.map(c => (
+              <li key={c.id || c.subject} className="px-4 py-2 border-b border-border-light min-w-0">
+                <span className="block text-sm text-text truncate" dir="auto">{c.subject}</span>
+                {c.domain && <a href={`https://${c.domain}`} target="_blank" rel="noopener noreferrer" className="block text-xs text-text-tertiary underline underline-offset-2 truncate hover:text-text">{c.domain}</a>}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // Every quoted page, behind one button: a reference list, not reading.
 function AllSources({ sources }) {
   const [open, setOpen] = useState(false)
@@ -788,6 +867,7 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
   // claim about the market made from a request still in flight.
   const [intel, setIntel] = useState({ signals: [], opportunities: [], events: [], available: false })
   const [agendaCompetitors, setAgendaCompetitors] = useState([])
+  const [agendaSources, setAgendaSources] = useState([])
   const [storeLoaded, setStoreLoaded] = useState(false)
   const [busyId, setBusyId] = useState(null)
   // The one paid control on this tab: a three-sentence summary of the search
@@ -806,6 +886,7 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
         if (!alive) return
         setIntel(i)
         setAgendaCompetitors(a?.competitors || [])
+        setAgendaSources(a?.sources || [])
         setStoreLoaded(true)
       })
       .catch(() => { if (alive) setStoreLoaded(true) })
@@ -1484,6 +1565,15 @@ export function ResearchTab({ run, runs, lensRows, selectedId, onSelectRun, onRu
               )}
             </div>
           </Part>}
+
+          {readOnly && storeLoaded && (agendaSources.some(r => r.status === 'active') || agendaCompetitors.some(c => c.status === 'active')) && (
+            <Part title="What the research watches"
+              helper="The places it reads for leads and tenders every week before searching the open web, and the competitors it follows.">
+              <WatchList
+                sources={agendaSources.filter(r => r.status === 'active')}
+                competitors={agendaCompetitors.filter(c => c.status === 'active')} />
+            </Part>
+          )}
 
           <Part title="All sources" count={sources.length || null}
             helper={sources.length ? `Every page this research quotes, checked on ${fmtDate(run.started_at)}.` : null}>
