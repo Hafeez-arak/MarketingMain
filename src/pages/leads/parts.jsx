@@ -1,7 +1,8 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Button, Spinner } from '../../components/ui/index'
 import { leadsApi } from '../../lib/leads/client'
 import { VERDICT_LABEL, VERDICT_TONE, CRM_LABEL, criteriaLabels, modelName, money, phonesOf, channelLabel, outlookLink, when, FOLDER_LABEL } from '../../lib/leads/view'
+import { emailSegments, emailLinks, isFileLink, fileSize } from '../../lib/leads/emailText'
 
 // ─── Pieces shared by the leads list and the agent settings ────────────────
 
@@ -95,6 +96,102 @@ function Review({ lead, onReview }) {
 }
 
 /**
+ * The email's text with its links clickable and Microsoft's picture
+ * placeholders gone (emailText.js). React elements only, never HTML.
+ */
+export function EmailText({ text }) {
+  return (
+    <p className="whitespace-pre-wrap text-text leading-relaxed border-l-2 border-border pl-3 break-words" dir="auto">
+      {emailSegments(text).map((p, i) => (p.href ? (
+        <a key={i} href={p.href} target="_blank" rel="noreferrer noopener" className="text-sky-700 underline underline-offset-2 hover:text-sky-900 break-all">{p.link}</a>
+      ) : <span key={i}>{p.text}</span>))}
+    </p>
+  )
+}
+
+/** Download one attachment: fetched with the person's sign-in, then saved. */
+async function download(workspaceId, lead, a) {
+  const res = await fetch('/api/leads/attachment_file', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ workspace_id: workspaceId, lead_id: lead.id, attachment_id: a.id }),
+  })
+  if (!res.ok) {
+    const j = await res.json().catch(() => null)
+    throw new Error(j?.error || `Download failed (${res.status}).`)
+  }
+  const url = URL.createObjectURL(await res.blob())
+  const link = document.createElement('a')
+  link.href = url
+  link.download = a.name
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 10_000)
+}
+
+/**
+ * What came with the email (2026-10-19): the attachments, read from the
+ * mailbox when the lead is opened, each downloadable here, and the links to
+ * shared files (SharePoint, WeTransfer…) written in the text. A salesperson
+ * has no access to the info@ mailbox, so this is where they get the BOQ.
+ */
+function Attachments({ lead, workspaceId }) {
+  const [list, setList] = useState({ for: null, items: [], error: '' })
+  const [busy, setBusy] = useState('')
+  const [fail, setFail] = useState('')
+  const isEmail = lead.source === 'email'
+  useEffect(() => {
+    if (!isEmail) return
+    let live = true
+    leadsApi('attachments', workspaceId, { lead_id: lead.id }).then((r) => {
+      if (live) setList({ for: lead.id, items: r.attachments || [], error: r.error || '' })
+    })
+    return () => { live = false }
+  }, [lead.id, workspaceId, isEmail])
+  const files = emailLinks(lead.message).filter((l) => isFileLink(l.href))
+  const loading = isEmail && list.for !== lead.id
+  if (!isEmail && !files.length) return null
+  async function get(a) {
+    setBusy(a.id); setFail('')
+    try { await download(workspaceId, lead, a) } catch (e) { setFail(e.message) }
+    setBusy('')
+  }
+  return (
+    <div className="space-y-1.5">
+      <p className="eyebrow">Attachments and shared files</p>
+      {loading ? <p className="text-text-tertiary flex items-center gap-1.5"><Spinner size="sm" /> Looking in the mailbox…</p>
+        : list.error ? <p className="text-text-tertiary">Could not list the attachments: {list.error}</p>
+        : isEmail && !list.items.length && !files.length ? <p className="text-text-tertiary">No attachments on this email.</p> : null}
+      {list.items.length > 0 && (
+        <ul className="flex flex-wrap gap-2">
+          {list.items.map((a) => (
+            <li key={a.id}>
+              <button type="button" onClick={() => get(a)} disabled={busy === a.id || a.tooBig || a.kind === 'link'}
+                title={a.tooBig ? 'Too large to download here: open the email in Outlook.' : a.kind === 'link' ? 'A link to a shared file: open the email in Outlook.' : 'Download'}
+                className="inline-flex items-center gap-1.5 border border-border bg-white px-2.5 py-1.5 text-xs hover:bg-surface-subtle disabled:opacity-60 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-1 focus-visible:ring-amber-400">
+                {busy === a.id ? <Spinner size="sm" /> : (
+                  <svg className="w-3.5 h-3.5 text-text-tertiary" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v3h16v-3"/></svg>
+                )}
+                <span className="font-semibold text-text max-w-[16rem] truncate" dir="auto">{a.name}</span>
+                <span className="text-text-tertiary">{a.tooBig ? `${fileSize(a.size)}, too large` : fileSize(a.size)}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {files.length > 0 && (
+        <ul className="space-y-0.5">
+          {files.map((l) => (
+            <li key={l.href}><a href={l.href} target="_blank" rel="noreferrer noopener" className="text-sky-700 underline underline-offset-2 hover:text-sky-900 break-all">{l.host ? `Shared files on ${l.host}` : l.link}</a></li>
+          ))}
+        </ul>
+      )}
+      {fail && <p className="text-[11px] text-red-600">{fail}</p>}
+    </div>
+  )
+}
+
+/**
  * An opened lead: the email as it arrived, why the agent decided, what to
  * ask, and the way into Outlook. Outlook on the web only (the owner's
  * decision, 2026-10-12): no Outlook app opens one message from a link, and
@@ -157,7 +254,8 @@ export function LeadDetail({ lead, onReview, workspaceId, mailboxes = [], wide =
       </div>
       <p className="text-text-tertiary">Came in: <span className="text-text-secondary">{channelLabel(lead)}{lead.mailbox ? ` (${lead.mailbox})` : ''}{lead.folder && lead.source === 'email' ? `, ${FOLDER_LABEL[lead.folder] || lead.folder} folder` : ''}</span></p>
       {lead.subject && <p className="text-text-tertiary">{lead.subject}</p>}
-      <p className="whitespace-pre-wrap text-text leading-relaxed border-l-2 border-border pl-3" dir="auto">{lead.message}</p>
+      <EmailText text={lead.message} />
+      <Attachments lead={lead} workspaceId={workspaceId} />
       <Evidence lead={lead} />
       {facts.length > 0 && (
         <div className="flex flex-wrap gap-x-4 gap-y-1">

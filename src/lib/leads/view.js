@@ -294,5 +294,12 @@ export function ownerLabel(lead, team = [], me = '') {
   return shortName(team.find((m) => m.user_id === lead.assigned_to)) || 'Someone else'
 }
 
+/**
+ * Who a lead can be given to: the salespeople, never a sales admin (the
+ * owner, 2026-10-19: "Arif will be the one to assign it"). The sales admin
+ * hands leads out; they do not work them.
+ */
+export const assignable = (team = []) => team.filter((m) => !m.approver)
+
 /** Where the forward of the customer's email to the owner stands. */
 export const FORWARD_LABEL = { sending: 'Forwarding…', sent: 'Email forwarded', failed: 'Email not forwarded' }

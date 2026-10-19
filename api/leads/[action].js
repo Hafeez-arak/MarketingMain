@@ -4,7 +4,7 @@ import { sealSecret } from '../email/_secrets.js'
 import { signState, authorizeUrl, READ_SCOPES } from '../email/_graph.js'
 import { SEND_SCOPES } from './_mail.js'
 import { intakeWebsite, tryIt, QUALIFIER_MODEL } from './_intake.js'
-import { checkMail, emailFile, currentOutlookLink } from './_mail.js'
+import { checkMail, emailFile, currentOutlookLink, emailAttachments, attachmentFile } from './_mail.js'
 import { exportLeads, applySheetDecisions } from './_export.js'
 import { approveLead, crmStatus, saveCrm, sendWaiting, disconnectCrm } from './_crm.js'
 import { openCard, saveCard, watchlist } from './_card.js'
@@ -110,7 +110,7 @@ async function isAdmin(token) {
 // A sales person (20261013_sales_seats) is not a member of the company at
 // all: their seat is asked for separately, again with their own token. A
 // seat opens these actions and nothing else.
-const SALES_ACTIONS = new Set(['review', 'email_file', 'approve', 'assign', 'forward', 'outlook_link', 'set_project', 'card', 'card_save', 'lead_add', 'stage'])
+const SALES_ACTIONS = new Set(['review', 'email_file', 'approve', 'assign', 'forward', 'outlook_link', 'set_project', 'card', 'card_save', 'lead_add', 'stage', 'attachments', 'attachment_file'])
 
 /**
  * May this sales person open this lead? Asked with their own token, so the
@@ -201,6 +201,28 @@ const actions = {
     res.setHeader('Content-Type', 'message/rfc822')
     res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(out.filename)}`)
     res.setHeader('Cache-Control', 'no-store')
+    res.status(200).send(out.bytes)
+    return { __sent: true }
+  },
+
+  /** The email's attachments (BOQ, drawings, RFQ templates), listed from its mailbox. */
+  async attachments({ workspaceId, body }) {
+    if (!isUuid(body.lead_id)) return fail(400, 'Which lead?')
+    const out = await emailAttachments(leadDeps(), { workspaceId, leadId: body.lead_id })
+    if (out.error) return fail(out.status, out.error)
+    return { attachments: out.attachments }
+  },
+
+  /** One attachment, downloaded straight from the mailbox. Written to the response (not JSON). */
+  async attachment_file({ workspaceId, body }) {
+    if (!isUuid(body.lead_id)) return fail(400, 'Which lead?')
+    const out = await attachmentFile(leadDeps(), { workspaceId, leadId: body.lead_id, attachmentId: body.attachment_id })
+    if (out.error) return fail(out.status, out.error)
+    const res = this.res
+    res.setHeader('Content-Type', out.contentType)
+    res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(out.filename)}`)
+    res.setHeader('Cache-Control', 'no-store')
+    res.setHeader('X-Content-Type-Options', 'nosniff')
     res.status(200).send(out.bytes)
     return { __sent: true }
   },

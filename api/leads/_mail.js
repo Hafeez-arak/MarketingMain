@@ -632,6 +632,59 @@ export async function emailFile(deps, { workspaceId, leadId }) {
   return { bytes, filename: `${name}.eml` }
 }
 
+// ─── The email's attachments (2026-10-19) ─────────────────────────────────
+// The owner: the BOQ, the drawings, the RFQ template were nowhere on the
+// lead. "Open in Outlook" only works for someone with access to the info@
+// mailbox, which the salespeople do not have. So the attachments are listed
+// on the lead and each downloads on its own, read only (Mail.Read), fetched
+// from the mailbox at the click and never stored.
+
+const KIND = { '#microsoft.graph.fileAttachment': 'file', '#microsoft.graph.itemAttachment': 'email', '#microsoft.graph.referenceAttachment': 'link' }
+// A small picture is a logo or a signature, not a document.
+const SIGNATURE_IMAGE = 30_000
+
+/** The attachments a person cares about, from Graph's list: no pictures inside the text, no logos. */
+export function realAttachments(list = []) {
+  return list
+    .filter((a) => !a.isInline)
+    .filter((a) => !(/^image\//i.test(a.contentType || '') && (a.size || 0) < SIGNATURE_IMAGE))
+    .map((a) => ({
+      id: a.id, name: a.name || 'attachment', contentType: a.contentType || '', size: a.size || 0,
+      kind: KIND[a['@odata.type']] || 'file',
+      tooBig: (a.size || 0) > MAX_EMAIL_FILE,
+    }))
+}
+
+/** The lead's email attachments. Returns { attachments } or { status, error }. */
+export async function emailAttachments(deps, { workspaceId, leadId }) {
+  const f = await findMessage(deps, { workspaceId, leadId, select: 'id' })
+  if (f.error) return f
+  const q = new URLSearchParams({ $select: 'id,name,contentType,size,isInline' })
+  const r = await deps.fetch(`${GRAPH}/me/messages/${encodeURIComponent(f.msg.id)}/attachments?${q}`, { headers: f.auth })
+  if (!r.ok) return { status: 502, error: `Microsoft answered ${r.status} for the attachments.` }
+  return { attachments: realAttachments((await r.json())?.value || []) }
+}
+
+/** One attachment's bytes. Returns { bytes, filename, contentType } or { status, error }. */
+export async function attachmentFile(deps, { workspaceId, leadId, attachmentId }) {
+  if (!attachmentId || String(attachmentId).length > 500) return { status: 400, error: 'Which attachment?' }
+  const f = await findMessage(deps, { workspaceId, leadId, select: 'id' })
+  if (f.error) return f
+  const base = `${GRAPH}/me/messages/${encodeURIComponent(f.msg.id)}/attachments/${encodeURIComponent(attachmentId)}`
+  const meta = await deps.fetch(`${base}?${new URLSearchParams({ $select: 'id,name,contentType,size' })}`, { headers: f.auth })
+  if (!meta.ok) return { status: meta.status === 404 ? 404 : 502, error: meta.status === 404 ? 'That attachment is no longer on the email.' : `Microsoft answered ${meta.status} for the attachment.` }
+  const a = await meta.json()
+  const kind = KIND[a['@odata.type']] || 'file'
+  if (kind === 'link') return { status: 409, error: 'This attachment is a link to a shared file. Open the email in Outlook to follow it.' }
+  if ((a.size || 0) > MAX_EMAIL_FILE) return { status: 413, error: 'This attachment is too large to download here. Open it in Outlook on the web.' }
+  const raw = await deps.fetch(`${base}/$value`, { headers: f.auth })
+  if (!raw.ok) return { status: 502, error: `Microsoft answered ${raw.status} for the attachment.` }
+  const bytes = Buffer.from(await raw.arrayBuffer())
+  if (bytes.length > MAX_EMAIL_FILE) return { status: 413, error: 'This attachment is too large to download here. Open it in Outlook on the web.' }
+  const name = String(a.name || 'attachment').replace(/[\\/:*?"<>|\r\n]+/g, ' ').trim().slice(0, 150) || 'attachment'
+  return { bytes, filename: kind === 'email' && !/\.eml$/i.test(name) ? `${name}.eml` : name, contentType: kind === 'email' ? 'message/rfc822' : (a.contentType || 'application/octet-stream') }
+}
+
 // ─── Forwarding a lead to its salesperson (2026-10-13) ─────────────────────
 
 const escHtml = (v) => String(v ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))

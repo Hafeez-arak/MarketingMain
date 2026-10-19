@@ -5,7 +5,7 @@ import { fetchLeadsPage, leadsApi } from '../../lib/leads/client'
 import {
   SHOW_OPTIONS, EMPTY_FILTERS, activeFilterCount, effectiveVerdict, PAGE_SIZE, pageLabel, pageCount, when,
   SENDER_LABEL, PROJECT_LABEL, REQUEST_LABEL, FOLDER_LABEL, PHILIPS_LABEL, CRM_LABEL, channelLabel, brandOf, phonesOf, projectOf,
-  ownerLabel, shortName, FORWARD_LABEL,
+  ownerLabel, shortName, FORWARD_LABEL, assignable,
 } from '../../lib/leads/view'
 import { VerdictTag, LeadDetail } from './parts'
 import BattleCard from './BattleCard'
@@ -280,10 +280,10 @@ function AskAboutLead({ lead }) {
   )
 }
 
-/** The team as choices, the sales admins marked. */
+/** The salespeople as choices. A sales admin assigns leads and is not one of them. */
 function PersonOptions({ team }) {
-  return team.map((m) => (
-    <option key={m.user_id} value={m.user_id}>{m.full_name || m.email}{m.approver ? ' (sales admin)' : ''}</option>
+  return assignable(team).map((m) => (
+    <option key={m.user_id} value={m.user_id}>{m.full_name || m.email}</option>
   ))
 }
 
@@ -314,7 +314,7 @@ function AssignDialog({ lead, team, busy, error, onCancel, onConfirm }) {
           <option value="">Choose a person…</option>
           <PersonOptions team={team} />
         </Select>
-        {!team.length && <p className="text-xs text-red-600">No one is on this company's sales team yet.</p>}
+        {!assignable(team).length && <p className="text-xs text-red-600">No salesperson is on this company's sales team yet.</p>}
         {to && (
           <p className="text-xs text-text-secondary leading-relaxed">
             {same ? `${shortName(person)} has it already: this sends the email to them again.` : forwardWords(lead, person)}
@@ -502,7 +502,7 @@ export default function LeadsBoard({ workspaceId, onReview, refreshKey = 0, mail
           <option value="">Anyone</option>
           {me && <option value="me">Mine</option>}
           {canApprove && <option value="none">Unassigned</option>}
-          {canApprove && team.filter((m) => m.user_id !== me).map((m) => <option key={m.user_id} value={m.user_id}>{m.full_name || m.email}</option>)}
+          {canApprove && assignable(team).filter((m) => m.user_id !== me).map((m) => <option key={m.user_id} value={m.user_id}>{m.full_name || m.email}</option>)}
         </Select>
         <Select label="Came in" value={filters.channel} onChange={set('channel')}>
           <option value="">Anywhere</option>

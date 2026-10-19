@@ -23,16 +23,19 @@ export const FORWARD_STUCK_MS = 2 * 60_000
 
 const LEAD_SELECT = 'id,workspace_id,source,mailbox,assigned_to,assigned_at,assigned_by,forward_status,forward_to,forward_error,forwarded_at,crm_status,crm_id,crm_error,approved_at,updated_at'
 
-/** One person on this company's sales team, or null. */
+/** One person on this company's sales team, or null. `approver`: a sales admin. */
 export async function teamMember(deps, workspaceId, userId) {
   if (!isUuid(userId)) return null
   const [[seat], [person]] = await Promise.all([
     deps.db(`sales_seats?user_id=eq.${userId}&workspace_id=eq.${workspaceId}&select=user_id`).then((r) => r || []),
-    deps.db(`user_access?user_id=eq.${userId}&select=user_id,email,full_name,status,role`).then((r) => r || []),
+    deps.db(`user_access?user_id=eq.${userId}&select=user_id,email,full_name,status,role,leads_approver`).then((r) => r || []),
   ])
   if (!seat || !person || person.status !== 'approved' || person.role !== 'sales') return null
-  return { id: userId, email: person.email, name: person.full_name || '' }
+  return { id: userId, email: person.email, name: person.full_name || '', approver: Boolean(person.leads_approver) }
 }
+
+// The owner (2026-10-19): the sales admin hands leads out and does not work them.
+export const NOT_TO_ADMIN = 'A sales admin assigns leads and does not work them. Choose a salesperson.'
 
 /** "Arif" (or the address) for the note on top of the forward. */
 async function nameOfUser(deps, userId) {
@@ -65,6 +68,7 @@ export async function assignLead(deps, { workspaceId, leadId, to, user, appUrl =
 
   const person = await teamMember(deps, workspaceId, to)
   if (!person) return { status: 400, error: 'That person is not on this company\'s sales team.' }
+  if (person.approver) return { status: 400, error: NOT_TO_ADMIN }
   const changed = lead.assigned_to !== person.id
 
   // The claim: only one request forwards a lead at a time (a double click

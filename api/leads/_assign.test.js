@@ -152,6 +152,13 @@ describe('assigning an email lead', () => {
     expect(w.state.sent).toEqual([])
   })
 
+  it('never to a sales admin: they hand leads out (the owner, 2026-10-19)', async () => {
+    const r = await assign(w, L1, ARIF.id)
+    expect(r).toEqual({ status: 400, error: 'A sales admin assigns leads and does not work them. Choose a salesperson.' })
+    expect(w.state.leads[0].assigned_to).toBeNull()
+    expect(w.state.sent).toEqual([])
+  })
+
   it('a lead of another company is not found', async () => {
     const r = await assignLead(w.deps, { workspaceId: '99999999-9999-4999-8999-999999999999', leadId: L1, to: OMAR.id, user: ARIF })
     expect(r.status).toBe(404)

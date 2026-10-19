@@ -1,11 +1,12 @@
 import crypto from 'node:crypto'
 import { manualLead, trackFields } from '../../src/lib/leads/pipeline.js'
 import { openCard } from './_card.js'
+import { teamMember, NOT_TO_ADMIN } from './_assign.js'
 
 // ─── The pipeline: leads added by hand, and each lead's stage ─────────────
 // The owner's decisions (2026-10-18): anyone on the sales team adds a lead
 // by hand, and it is theirs; a sales admin (or the access admin) may add one
-// for someone else. A hand-added lead joins the pipeline at once with its
+// for a salesperson, never for a sales admin (2026-10-19). A hand-added lead joins the pipeline at once with its
 // battle card. Anyone who can see a lead in the pipeline moves its stage and
 // sets its next step and follow-up date. See src/lib/leads/pipeline.js for
 // the rules, 20261024_lead_pipeline for the columns.
@@ -13,13 +14,6 @@ import { openCard } from './_card.js'
 // Writes use the service key, after [action].js has checked the caller.
 
 const isUuid = (v) => /^[0-9a-f-]{36}$/i.test(String(v || ''))
-
-/** Is this person on the company's sales team? */
-async function hasSeat(deps, workspaceId, userId) {
-  if (!isUuid(userId)) return false
-  const rows = await deps.db(`sales_seats?workspace_id=eq.${workspaceId}&user_id=eq.${userId}&select=user_id`) || []
-  return rows.length === 1
-}
 
 /**
  * Add a lead by hand. `canAssign`: the caller is a sales admin or the access
@@ -30,13 +24,19 @@ async function hasSeat(deps, workspaceId, userId) {
 export async function addLead(deps, { workspaceId, user, body = {}, canAssign = false }) {
   const shaped = manualLead(body)
   if (shaped.error) return { status: 400, error: shaped.error }
-  let owner = user.id
+  let owner = null
   if (canAssign && body.assign_to !== undefined) {
-    owner = body.assign_to || null
-    if (owner && !(await hasSeat(deps, workspaceId, owner))) return { status: 400, error: 'That person is not on this company\'s sales team.' }
-  } else if (!(await hasSeat(deps, workspaceId, user.id))) {
-    // The access admin, not on the team: they choose who has it, or no one.
-    owner = null
+    if (body.assign_to) {
+      const person = await teamMember(deps, workspaceId, body.assign_to)
+      if (!person) return { status: 400, error: 'That person is not on this company\'s sales team.' }
+      if (person.approver) return { status: 400, error: NOT_TO_ADMIN }
+      owner = person.id
+    }
+  } else {
+    // A salesperson's lead is their own. The access admin or a sales admin
+    // who chose no one leaves it with no one, for the sales admin to assign.
+    const me = await teamMember(deps, workspaceId, user.id)
+    if (me && !me.approver) owner = me.id
   }
   const now = deps.now().toISOString()
   const [lead] = await deps.db('leads', {

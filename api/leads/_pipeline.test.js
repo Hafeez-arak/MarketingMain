@@ -11,11 +11,17 @@ const SALES = { id: '44444444-4444-4444-8444-444444444444' }
 const OTHER = '55555555-5555-4555-8555-555555555555'
 const ADMIN = { id: '66666666-6666-4666-8666-666666666666' } // the access admin, no seat
 
-function fakeDb({ seats = [SALES.id, OTHER] } = {}) {
+const BOSS = '77777777-7777-4777-8777-777777777777' // a sales admin
+
+function fakeDb({ seats = [SALES.id, OTHER, BOSS] } = {}) {
   const state = { leads: [], cards: [] }
   let n = 0
   state.db = async (path, { method = 'GET', body } = {}) => {
     if (path.startsWith('sales_seats')) return seats.filter((u) => path.includes(`user_id=eq.${u}`)).map((user_id) => ({ user_id }))
+    if (path.startsWith('user_access')) {
+      return seats.filter((u) => path.includes(`user_id=eq.${u}`))
+        .map((user_id) => ({ user_id, email: `${user_id.slice(0, 4)}@example.com`, full_name: '', status: 'approved', role: 'sales', leads_approver: user_id === BOSS }))
+    }
     if (path === 'leads' && method === 'POST') {
       const row = { id: `aaaaaaaa-aaaa-4aaa-8aaa-${String(++n).padStart(12, '0')}`, ...body }
       state.leads.push(row)
@@ -58,6 +64,12 @@ describe('addLead', () => {
     expect((await addLead(deps(st), { workspaceId: WS, user: SALES, body: { ...BODY, assign_to: OTHER }, canAssign: true })).lead.assigned_to).toBe(OTHER)
     const bad = await addLead(deps(st), { workspaceId: WS, user: SALES, body: { ...BODY, assign_to: ADMIN.id }, canAssign: true })
     expect(bad).toEqual({ status: 400, error: 'That person is not on this company\'s sales team.' })
+  })
+  it('never gives it to a sales admin, and a sales admin\'s own lead waits for a salesperson', async () => {
+    const st = fakeDb()
+    expect(await addLead(deps(st), { workspaceId: WS, user: SALES, body: { ...BODY, assign_to: BOSS }, canAssign: true }))
+      .toEqual({ status: 400, error: 'A sales admin assigns leads and does not work them. Choose a salesperson.' })
+    expect((await addLead(deps(st), { workspaceId: WS, user: { id: BOSS }, body: BODY })).lead.assigned_to).toBeNull()
   })
   it('leaves the access admin\'s lead with no one when they choose no one', async () => {
     const st = fakeDb()

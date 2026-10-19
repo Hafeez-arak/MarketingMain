@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Button, Input, Select, Skeleton, Spinner, Textarea } from '../../components/ui/index'
 import { fetchPipeline, leadsApi } from '../../lib/leads/client'
-import { SENDER_LABEL, PROJECT_LABEL, channelLabel, ownerLabel, phonesOf, when, CRM_LABEL } from '../../lib/leads/view'
+import { SENDER_LABEL, PROJECT_LABEL, channelLabel, ownerLabel, phonesOf, when, CRM_LABEL, assignable } from '../../lib/leads/view'
 import {
   STAGES, STAGE_LABEL, OPEN_STAGES, LOST_REASON_LABEL, CHANNEL_LABEL, groupByStage, pipelineStats, followUpState, shortDate, riyadhToday,
 } from '../../lib/leads/pipeline'
@@ -225,7 +225,7 @@ export default function Pipeline({ workspaceId, refreshKey = 0, canApprove = fal
           <option value="">Anyone</option>
           {me && <option value="me">Mine</option>}
           {canApprove && <option value="none">Unassigned</option>}
-          {canApprove && team.filter((m) => m.user_id !== me).map((m) => <option key={m.user_id} value={m.user_id}>{m.full_name || m.email}</option>)}
+          {canApprove && assignable(team).filter((m) => m.user_id !== me).map((m) => <option key={m.user_id} value={m.user_id}>{m.full_name || m.email}</option>)}
         </Select>
         <Input label="Search" placeholder="Company, what they want, next step…" value={search} onChange={(e) => setSearch(e.target.value)} className="w-64 max-w-full" />
         <label className="flex items-center gap-2 text-xs text-text-secondary pb-2 cursor-pointer">
@@ -286,7 +286,8 @@ const EMPTY_LEAD = {
  * with its battle card.
  */
 export function AddLeadDialog({ workspaceId, canAssign, team = [], me = '', onCancel, onAdded }) {
-  const onTeam = team.some((m) => m.user_id === me)
+  // A salesperson's own lead is theirs; a sales admin chooses a salesperson.
+  const onTeam = assignable(team).some((m) => m.user_id === me)
   const [f, setF] = useState({ ...EMPTY_LEAD, assign_to: onTeam ? me : '' })
   const [state, setState] = useState({ busy: false, error: '' })
   const set = (k) => (e) => setF((x) => ({ ...x, [k]: e.target.value }))
@@ -336,7 +337,7 @@ export function AddLeadDialog({ workspaceId, canAssign, team = [], me = '', onCa
           {canAssign && (
             <Select label="Who works it" value={f.assign_to} onChange={set('assign_to')} className="sm:col-span-2">
               <option value="">No one yet</option>
-              {team.map((m) => <option key={m.user_id} value={m.user_id}>{m.user_id === me ? 'Me' : m.full_name || m.email}</option>)}
+              {assignable(team).map((m) => <option key={m.user_id} value={m.user_id}>{m.user_id === me ? 'Me' : m.full_name || m.email}</option>)}
             </Select>
           )}
         </div>
