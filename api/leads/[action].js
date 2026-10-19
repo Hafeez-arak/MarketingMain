@@ -9,7 +9,7 @@ import { exportLeads, applySheetDecisions } from './_export.js'
 import { approveLead, crmStatus, saveCrm, sendWaiting, disconnectCrm } from './_crm.js'
 import { openCard, saveCard, watchlist } from './_card.js'
 import { assignLead, teamList, teamSave, teamCheckOdoo } from './_assign.js'
-import { addLead, trackLead } from './_pipeline.js'
+import { addLead, trackLead, deleteLead } from './_pipeline.js'
 import { leadDeps, openRouterKey, hasDeploymentKey, describeKey, sendAlert } from './_deps.js'
 import { previewLenses } from '../agent/_investigate.js'
 
@@ -110,7 +110,7 @@ async function isAdmin(token) {
 // A sales person (20261013_sales_seats) is not a member of the company at
 // all: their seat is asked for separately, again with their own token. A
 // seat opens these actions and nothing else.
-const SALES_ACTIONS = new Set(['review', 'email_file', 'approve', 'assign', 'forward', 'outlook_link', 'set_project', 'card', 'card_save', 'lead_add', 'stage', 'attachments', 'attachment_file'])
+const SALES_ACTIONS = new Set(['review', 'email_file', 'approve', 'assign', 'forward', 'outlook_link', 'set_project', 'card', 'card_save', 'lead_add', 'stage', 'attachments', 'attachment_file', 'lead_delete'])
 
 /**
  * May this sales person open this lead? Asked with their own token, so the
@@ -470,6 +470,16 @@ const actions = {
     const out = await addLead(leadDeps(), { workspaceId, user, body, canAssign })
     if (out.error) return fail(out.status, out.error)
     return { lead: out.lead, card: out.card }
+  },
+
+  /**
+   * Delete a lead, after the page's confirmation: a sales admin or the access
+   * admin any lead; a salesperson only one they added themselves.
+   */
+  async lead_delete({ workspaceId, body, user, token }) {
+    const out = await deleteLead(leadDeps(), { workspaceId, leadId: body.lead_id, user, canAll: await canApprove(workspaceId, token) })
+    if (out.error) return fail(out.status, out.error)
+    return { deleted: out.deleted, inOdoo: out.inOdoo }
   },
 
   /** Move a lead along the Pipeline, or set its next step and follow-up date. */

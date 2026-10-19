@@ -1,7 +1,7 @@
 import crypto from 'node:crypto'
 import { manualLead, trackFields } from '../../src/lib/leads/pipeline.js'
 import { openCard } from './_card.js'
-import { teamMember, NOT_TO_ADMIN } from './_assign.js'
+import { teamMember, NOT_TO_ADMIN, notifyAssigned } from './_assign.js'
 
 // ─── The pipeline: leads added by hand, and each lead's stage ─────────────
 // The owner's decisions (2026-10-18): anyone on the sales team adds a lead
@@ -55,6 +55,9 @@ export async function addLead(deps, { workspaceId, user, body = {}, canAssign = 
   }) || []
   if (!lead) return { status: 500, error: 'The lead was not saved. Try again.' }
   const card = await openCard(deps, { workspaceId, leadId: lead.id }).catch(() => null)
+  // Added for someone else: their bell says so. Their own is read already.
+  if (owner && owner !== user.id) await notifyAssigned(deps, { workspaceId, lead, to: owner, by: user })
+  else await deps.db('lead_reads', { method: 'POST', prefer: 'resolution=ignore-duplicates,return=minimal', body: { lead_id: lead.id, user_id: user.id, workspace_id: workspaceId } }).catch(() => null)
   return { lead, card: card?.card || null }
 }
 
@@ -77,4 +80,24 @@ export async function trackLead(deps, { workspaceId, leadId, user, body = {} }) 
   const [lead] = await deps.db(`leads?id=eq.${leadId}&workspace_id=eq.${workspaceId}`, { method: 'PATCH', prefer: 'return=representation', body: patch }) || []
   if (!lead) return { status: 404, error: 'That lead is not in this company.' }
   return { lead }
+}
+
+/**
+ * Delete a lead (2026-10-19), after the page has asked "are you sure". A
+ * sales admin or the access admin (`canAll`) may delete any lead; anyone
+ * else only a lead they added by hand themselves. Its battle card goes with
+ * it. The email stays in the mailbox, and a lead already in Odoo stays in
+ * Odoo. Returns { deleted } or { status, error }.
+ */
+export async function deleteLead(deps, { workspaceId, leadId, user, canAll = false }) {
+  if (!isUuid(leadId)) return { status: 400, error: 'Which lead?' }
+  const [lead] = await deps.db(`leads?id=eq.${leadId}&workspace_id=eq.${workspaceId}&select=id,source,added_by,crm_status`) || []
+  if (!lead) return { status: 404, error: 'That lead is not in this company.' }
+  if (!canAll && !(lead.source === 'manual' && lead.added_by === user.id)) {
+    return { status: 403, error: 'Only a sales admin can delete this lead. You can delete the leads you added yourself.' }
+  }
+  if (lead.crm_status === 'sending') return { status: 409, error: 'This lead is being sent to Odoo right now. Try again in a moment.' }
+  const gone = await deps.db(`leads?id=eq.${leadId}&workspace_id=eq.${workspaceId}`, { method: 'DELETE', prefer: 'return=representation' }) || []
+  if (!gone.length) return { status: 404, error: 'That lead is not in this company.' }
+  return { deleted: leadId, inOdoo: lead.crm_status === 'sent' }
 }

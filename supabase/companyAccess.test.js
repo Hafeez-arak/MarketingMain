@@ -305,6 +305,8 @@ describe('sales seats after 20261013_sales_seats', () => {
     await pg.exec(`create policy lead_cards_sales_read on public.lead_cards for select to authenticated using (public.is_sales_member(workspace_id))`)
     await pg.exec(migration('20261018_lead_assignment'))
     await pg.exec(migration('20261024_lead_pipeline'))
+    await pg.exec(`create table public.lead_agent_settings (workspace_id uuid primary key, read_before timestamptz)`)
+    await pg.exec(migration('20261027_lead_reads'))
     await h.as(ADMIN)
     arak = await h.create('Arak')
     ghusn = await h.create('Ghusn')
@@ -454,6 +456,20 @@ describe('sales seats after 20261013_sales_seats', () => {
     expect((await sees(FAISAL)).leads).toContain('faisal added')
     expect((await sees(HUDA)).leads).not.toContain('faisal added')
     await expect(lead('bad source', 'fax', FAISAL)).rejects.toThrow(/leads_source_check/)
+
+    // 20261027_lead_reads: a person marks only their own reads, only on a lead they can see.
+    const hudasEmail = await one(`select id from public.leads where subject = 'huda email'`)
+    const mark = async (uid, leadId, forUser = uid) => {
+      await h.as(uid)
+      await pg.exec('set role authenticated')
+      try { await pg.query(`insert into public.lead_reads (lead_id, user_id, workspace_id) values ($1, $2, $3)`, [leadId, forUser, arak]) } finally { await pg.exec('reset role') }
+    }
+    await mark(FAISAL, faisalsEmail)
+    await expect(mark(FAISAL, hudasEmail)).rejects.toThrow(/row-level security/)
+    await expect(mark(FAISAL, faisalsEmail, HUDA)).rejects.toThrow(/row-level security/)
+    await h.as(HUDA)
+    await pg.exec('set role authenticated')
+    try { expect((await pg.query(`select count(*)::int as n from public.lead_reads`)).rows[0].n).toBe(0) } finally { await pg.exec('reset role') }
 
     // The team by name, for the Owner column: the team and the admin, no one else.
     await h.as(FAISAL)

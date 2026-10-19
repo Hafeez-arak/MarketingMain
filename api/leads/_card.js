@@ -1,10 +1,10 @@
 import { buildLeadCard, normaliseLeadCard, afterCallFields, senderDomain, objectionsFromCards } from '../../src/lib/sales/leadCard.js'
 import { trackFields } from '../../src/lib/leads/pipeline.js'
 
-// ─── Battle cards for approved leads ───────────────────────────────────────
-// A lead gets its card when it is approved (the owner, 2026-10-12: approving
-// says the lead is real; the card is the work on it until the CRM takes
-// over). The card is built once from what we already hold — no model call —
+// ─── Battle cards for leads someone is working ─────────────────────────────
+// A lead gets its card when it is assigned (the owner, 2026-10-19; it was
+// approval until then): the card is the work on it, and when it is approved
+// the same card goes to the CRM. The card is built once from what we already hold — no model call —
 // and stored; after that it is the team's to edit, every part of it. See
 // src/lib/sales/leadCard.js for what goes in it.
 //
@@ -14,7 +14,7 @@ import { trackFields } from '../../src/lib/leads/pipeline.js'
 const isUuid = (v) => /^[0-9a-f-]{36}$/i.test(String(v || ''))
 
 const CARD_COLUMNS = 'lead_id,card,decision,quote_due,target_price,decides,competitors,built_at,updated_at,updated_by'
-const LEAD_COLUMNS = 'id,received_at,created_at,company,name,email,subject,message,summary,details,ask_next,category,verdict,human_verdict,sender_type,source_check,project_type,human_project_type,project_final,philips,approved_at,stage,source,channel'
+const LEAD_COLUMNS = 'id,received_at,created_at,company,name,email,subject,message,summary,details,ask_next,category,verdict,human_verdict,sender_type,source_check,project_type,human_project_type,project_final,philips,approved_at,stage,source,channel,assigned_to'
 
 const effective = (l) => l.human_verdict || l.verdict
 
@@ -77,8 +77,8 @@ export async function openCard(deps, { workspaceId, leadId }) {
   if (existing) return { card: existing }
   const [lead] = await deps.db(`leads?id=eq.${leadId}&workspace_id=eq.${workspaceId}&select=${LEAD_COLUMNS}`) || []
   if (!lead) return { status: 404, error: 'That lead is not in this company.' }
-  // In the pipeline: approved, or added by hand (2026-10-18).
-  if (!lead.approved_at && !lead.stage) return { status: 409, error: 'The battle card opens once the lead is approved.' }
+  // Someone has it (assigned, 2026-10-19), or it is in the pipeline: approved, or added by hand.
+  if (!lead.approved_at && !lead.stage && !lead.assigned_to) return { status: 409, error: 'The battle card is made when the lead is assigned.' }
   const card = buildLeadCard(lead, await context(deps, workspaceId, lead))
   const now = deps.now().toISOString()
   await deps.db('lead_cards?on_conflict=lead_id', {

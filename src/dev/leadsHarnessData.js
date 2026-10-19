@@ -31,7 +31,7 @@ const leads = [
 
 // Made-up leads added by hand (2026-10-18): in the Pipeline from the start.
 leads.push(
-  { id: 'm1', source: 'manual', channel: 'phone', received_at: iso(7, 9), created_at: iso(7, 9), name: 'Sara Example', company: 'Example Fit-Out Co', email: 'sara@example-fitout.sa', phone: '+966 55 123 4567', phones: ['+966 55 123 4567'], subject: '60 linear profiles and DALI dimming for an office floor, Riyadh', summary: '60 linear profiles and DALI dimming for an office floor, Riyadh', message: 'Called the office. They have the layout and want a price this week; consultant is Example Design.', language: 'en', verdict: 'qualified', human_verdict: 'qualified', category: 'project_enquiry', details: { location: 'Riyadh', urgency: 'Price this week', brands: 'Reggiani or equivalent' }, ask_next: [], criteria_version: 2, sender_type: 'contractor', human_project_type: 'jih', project_final: 'jih', request_type: 'requirement', stage: 'quotation', stage_at: iso(7, 15), next_step: 'Call Sara about the quote', follow_up: '2099-01-01', assigned_to: 'u1', assigned_at: iso(7, 9) },
+  { id: 'm1', source: 'manual', channel: 'phone', received_at: iso(7, 9), created_at: iso(7, 9), name: 'Sara Example', company: 'Example Fit-Out Co', email: 'sara@example-fitout.sa', phone: '+966 55 123 4567', phones: ['+966 55 123 4567'], subject: '60 linear profiles and DALI dimming for an office floor, Riyadh', summary: '60 linear profiles and DALI dimming for an office floor, Riyadh', message: 'Called the office. They have the layout and want a price this week; consultant is Example Design.', language: 'en', verdict: 'qualified', human_verdict: 'qualified', category: 'project_enquiry', details: { location: 'Riyadh', urgency: 'Price this week', brands: 'Reggiani or equivalent' }, ask_next: [], criteria_version: 2, sender_type: 'contractor', human_project_type: 'jih', project_final: 'jih', request_type: 'requirement', stage: 'quotation', stage_at: iso(7, 15), next_step: 'Call Sara about the quote', follow_up: '2026-10-21', assigned_to: 'u1', assigned_at: iso(7, 9), added_by: 'u1' },
   { id: 'm2', source: 'manual', channel: 'whatsapp', received_at: iso(3, 9), created_at: iso(3, 9), name: 'Yousef', company: 'Example Villas', email: '', phone: '050 000 2222', phones: ['050 000 2222'], subject: 'Garden lighting for a villa compound', summary: 'Garden lighting for a villa compound', message: '', language: 'en', verdict: 'qualified', human_verdict: 'qualified', category: 'quotation_request', details: {}, ask_next: [], criteria_version: 2, sender_type: 'developer_owner', request_type: 'requirement', stage: 'lost', stage_at: iso(5, 9), lost_reason: 'price', lost_to: 'Example Rival Lighting', next_step: '', follow_up: null, assigned_to: 'u3', assigned_at: iso(3, 9) },
 )
 
@@ -97,6 +97,8 @@ const json = (body, status = 200) => new Response(JSON.stringify(body), { status
 const original = window.fetch.bind(window)
 
 const cards = {}
+const READS = new Set()
+const NOTES = [{ id: 'n1', kind: 'lead', title: 'Arif gave you a lead: Example Fit-Out Co', body: '60 linear profiles and DALI dimming for an office floor, Riyadh', link: '/leads?view=pipeline&lead=m1', workspace_id: WS, created_at: new Date(Date.now() - 20 * 60_000).toISOString(), read_at: null }]
 const CARD_CONTEXT = {
   suppliers: ['C°LB', 'Reggiani', 'Zennio'],
   accounts: [{ name: 'Nour Contracting Co', orders: 4, value_sar: 610000, last_order: '2026-05-01', status: 'new' }],
@@ -125,6 +127,19 @@ window.fetch = async (input, init = {}) => {
   if (mode === 'hang') return new Promise(() => {})
   if (mode === 'fail') return Promise.reject(new TypeError('Failed to fetch'))
   if (url.includes('/rest/v1/leads')) return restLeads(url)
+  // Read and unread (2026-10-19): everything before 6 Oct counts as read.
+  if (url.includes('/rest/v1/rpc/lead_read_before')) return json('2026-10-06T00:00:00Z')
+  if (url.includes('/rest/v1/lead_reads')) {
+    const method = (init.method || 'GET').toUpperCase()
+    if (method === 'POST') { const b = JSON.parse(init.body || '{}'); for (const r of [].concat(b)) READS.add(r.lead_id); return json([], 201) }
+    if (method === 'DELETE') { const id = new URL(url, window.location.origin).searchParams.get('lead_id')?.replace(/^eq\./, ''); READS.delete(id); return json([]) }
+    return json([...READS].map((lead_id) => ({ lead_id })))
+  }
+  // The bell: one made-up "you were given a lead".
+  if (url.includes('/rest/v1/notifications')) {
+    if ((init.method || 'GET').toUpperCase() === 'PATCH') { NOTES.forEach((n) => { n.read_at = n.read_at || new Date().toISOString() }); return json([]) }
+    return json(NOTES)
+  }
   // What a sales seat reads for the "Came in" filter (SalesApp).
   if (url.includes('/rest/v1/lead_mailboxes')) return json(status.mailboxes.map(({ id, email }) => ({ id, email, label: '' })))
   if (url.includes('/api/leads/status')) return json(status)
@@ -146,6 +161,8 @@ window.fetch = async (input, init = {}) => {
     const from = l.source === 'email' ? status.mailboxes.find((b) => b.email === l.mailbox) : status.mailboxes.find((b) => b.can_send)
     const ok = Boolean(from?.can_send)
     Object.assign(l, {
+      // Assigning puts it in the Pipeline with its card (2026-10-19).
+      stage: l.stage || 'new', stage_at: l.stage_at || new Date().toISOString(),
       assigned_to: userId, assigned_at: l.assigned_to === userId ? l.assigned_at : new Date().toISOString(), forward_to: m.email,
       forward_status: ok ? 'sent' : 'failed', forwarded_at: ok ? new Date().toISOString() : l.forwarded_at,
       forward_error: ok ? '' : `${from?.email || 'info@'} can only read. On Agent settings, choose "Allow forwarding" on it and sign in as it again.`,
@@ -156,7 +173,7 @@ window.fetch = async (input, init = {}) => {
     const l = leads.find((x) => x.id === lead_id)
     if (!user_id) {
       if (l.approved_at) return json({ ok: false, error: 'An approved lead always has someone on it. Assign it to someone else instead.' }, 409)
-      Object.assign(l, { assigned_to: null, assigned_at: null, forward_status: null, forward_to: '', forward_error: '' })
+      Object.assign(l, { assigned_to: null, assigned_at: null, forward_status: null, forward_to: '', forward_error: '' }, l.stage === 'new' && l.source !== 'manual' ? { stage: null } : {})
       return json({ ok: true, lead: l, forward: null, odooError: '' })
     }
     assignTo(l, user_id)
@@ -225,9 +242,18 @@ window.fetch = async (input, init = {}) => {
     if (shaped.error) return json({ ok: false, error: shaped.error }, 400)
     const now = new Date().toISOString()
     const owner = body.assign_to !== undefined ? body.assign_to : 'u1'
-    const l = { id: `m${leads.length}`, ...shaped.row, project_final: shaped.row.human_project_type || '', received_at: now, created_at: now, stage_at: now, ask_next: [], assigned_to: owner, assigned_at: owner ? now : null }
+    const l = { id: `m${leads.length}`, ...shaped.row, added_by: 'u1', project_final: shaped.row.human_project_type || '', received_at: now, created_at: now, stage_at: now, ask_next: [], assigned_to: owner, assigned_at: owner ? now : null }
     leads.unshift(l)
     return json({ ok: true, lead: l })
+  }
+  if (url.includes('/api/leads/lead_delete')) {
+    const { lead_id } = JSON.parse(init.body || '{}')
+    const i = leads.findIndex((x) => x.id === lead_id)
+    if (i < 0) return json({ ok: false, error: 'That lead is not in this company.' }, 404)
+    const l = leads[i]
+    if (as === 'sales' && !(l.source === 'manual' && l.added_by === 'u1')) return json({ ok: false, error: 'Only a sales admin can delete this lead. You can delete the leads you added yourself.' }, 403)
+    leads.splice(i, 1)
+    return json({ ok: true, deleted: lead_id, inOdoo: l.crm_status === 'sent' })
   }
   if (url.includes('/api/leads/stage')) {
     const body = JSON.parse(init.body || '{}')
@@ -241,7 +267,7 @@ window.fetch = async (input, init = {}) => {
   if (url.includes('/api/leads/card')) {
     const { lead_id } = JSON.parse(init.body || '{}')
     const l = leads.find((x) => x.id === lead_id)
-    if (!l?.approved_at && !l?.stage) return json({ ok: false, error: 'The battle card opens once the lead is approved.' }, 409)
+    if (!l?.approved_at && !l?.stage && !l?.assigned_to) return json({ ok: false, error: 'The battle card is made when the lead is assigned.' }, 409)
     if (!cards[lead_id]) {
       const now = new Date().toISOString()
       cards[lead_id] = { lead_id, card: buildLeadCard(l, CARD_CONTEXT), decision: '', quote_due: null, target_price: '', decides: '', built_at: now, updated_at: now }

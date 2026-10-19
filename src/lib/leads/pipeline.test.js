@@ -69,3 +69,29 @@ describe('what is due', () => {
     expect(pipelineStats(leads, '2026-10-18')).toEqual({ open: 3, due: 1, won: 1, lost: 1 })
   })
 })
+
+import { whatsappLink, leadTabs } from './view'
+
+describe('the Lead tab', () => {
+  it('opens WhatsApp for a Saudi mobile however it is written, and not for a landline', () => {
+    for (const p of ['055 123 4567', '+966 55 123 4567', '00966551234567', '966-55-123-4567', '551234567']) expect(whatsappLink(p)).toBe('https://wa.me/966551234567')
+    expect(whatsappLink('+966 11 802 8233')).toBe('')
+    expect(whatsappLink('')).toBe('')
+  })
+  it('comes first, and a lead added by hand has no email tab', () => {
+    expect(leadTabs({ source: 'email' }).map(([k]) => k)).toEqual(['lead', 'card', 'email'])
+    expect(leadTabs({ source: 'manual' }).map(([k]) => k)).toEqual(['lead', 'card'])
+  })
+})
+
+import { isUnread } from './view'
+
+describe('read and unread', () => {
+  const cut = '2026-10-14T00:00:00+03:00'
+  it('is unread from the cutoff on until this person opens it', () => {
+    expect(isUnread({ id: 'a', received_at: '2026-10-15T08:00:00Z' }, new Set(), cut)).toBe(true)
+    expect(isUnread({ id: 'a', received_at: '2026-10-15T08:00:00Z' }, new Set(['a']), cut)).toBe(false)
+    expect(isUnread({ id: 'b', received_at: '2026-10-13T20:59:00Z' }, new Set(), cut)).toBe(false)
+    expect(isUnread({ id: 'c', created_at: '2026-10-19T08:00:00Z' }, new Set(), null)).toBe(true)
+  })
+})

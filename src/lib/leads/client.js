@@ -83,3 +83,29 @@ export async function fetchSalesTeam(ws) {
   if (error) throw new Error(error.message)
   return data || []
 }
+
+// ─── Read and unread (2026-10-19, 20261027_lead_reads) ─────────────────────
+
+/** Which of these leads this person has opened, as a Set of ids. */
+export async function fetchReads(ws, ids = []) {
+  if (!ids.length) return new Set()
+  const { data, error } = await supabase.from('lead_reads').select('lead_id').eq('workspace_id', ws).in('lead_id', ids)
+  if (error) throw new Error(error.message)
+  return new Set((data || []).map((r) => r.lead_id))
+}
+
+/** When everything before counts as read for this company, or null. */
+export async function fetchReadBefore(ws) {
+  const { data, error } = await supabase.rpc('lead_read_before', { ws })
+  if (error) throw new Error(error.message)
+  return data || null
+}
+
+/** Mark one lead read (or unread) for the signed-in person. */
+export async function setLeadRead(ws, leadId, userId, read = true) {
+  const q = supabase.from('lead_reads')
+  const { error } = read
+    ? await q.upsert({ lead_id: leadId, user_id: userId, workspace_id: ws }, { onConflict: 'lead_id,user_id', ignoreDuplicates: true })
+    : await q.delete().eq('lead_id', leadId).eq('user_id', userId)
+  return error?.message || null
+}

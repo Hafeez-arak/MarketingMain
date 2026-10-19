@@ -63,6 +63,8 @@ function world({ canSend = true, graphRefuses = false, crm = null } = {}) {
     }
     if (path.startsWith('lead_mailbox_secrets?')) return [{ mailbox_id: MB.id, secret: JSON.stringify({ rt: 'r', at: 'tok', exp: Date.parse(state.now) + 3_600_000 }) }]
     if (path.startsWith('lead_crm?')) return state.crm ? [state.crm] : []
+    if (path.startsWith('lead_reads?') && method === 'DELETE') { state.unread = (state.unread || []).concat(path); return null }
+    if (path === 'notifications' && method === 'POST') { (state.notes ||= []).push(body); return null }
     throw new Error(`fake db: ${method} ${path}`)
   }
   const fetchFn = async (url, init = {}) => {
@@ -150,6 +152,29 @@ describe('assigning an email lead', () => {
     expect(r).toMatchObject({ status: 400, error: expect.stringMatching(/sales team/) })
     expect(w.state.leads[0].assigned_to).toBeNull()
     expect(w.state.sent).toEqual([])
+  })
+
+  it('puts the lead in the Pipeline at New (2026-10-19), and taking it back before anyone worked it takes it out', async () => {
+    const w = world()
+    await assign(w, L1, OMAR.id)
+    expect(w.state.leads[0]).toMatchObject({ stage: 'new', stage_by: ARIF.id, assigned_to: OMAR.id })
+    await assign(w, L1, null)
+    expect(w.state.leads[0]).toMatchObject({ stage: null, assigned_to: null })
+    w.state.leads[0].stage = 'contacted'
+    await assign(w, L1, HUDA.id)
+    expect(w.state.leads[0].stage).toBe('contacted')
+  })
+
+  it('rings the new owner\'s bell and makes the lead unread for them; not again for the same person', async () => {
+    const w = world()
+    await assign(w, L1, OMAR.id)
+    expect(w.state.notes).toEqual([{
+      user_id: OMAR.id, workspace_id: WS, kind: 'lead', title: 'Arif gave you a lead: Example Dev',
+      body: 'Downlights for a villa', link: `/leads?view=pipeline&lead=${L1}`,
+    }])
+    expect(w.state.unread).toEqual([`lead_reads?lead_id=eq.${L1}&user_id=eq.${OMAR.id}`])
+    await assign(w, L1, OMAR.id)
+    expect(w.state.notes).toHaveLength(1)
   })
 
   it('never to a sales admin: they hand leads out (the owner, 2026-10-19)', async () => {

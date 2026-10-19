@@ -9,19 +9,23 @@
 //     it there too;
 //   · a salesperson sees only their own leads (can_see_lead, 20261018), so
 //     an approved lead cannot be left with no one: it can only change hands.
+//   · (2026-10-19) assigning makes the battle card and puts the lead in the
+//     Pipeline at New: the work starts when someone has it, not at approval.
+//     Approval is the step into Odoo, and the same card goes with it.
 //
 //   deps: as in _crm.js (db, fetch, now, open) plus ms for the mailboxes.
 
 import { crmConnection, odooOwner, odooCfg } from './_crm.js'
 import { forwardLead } from './_mail.js'
 import { findUserId, setLeadOwner } from './_odoo.js'
+import { openCard } from './_card.js'
 
 const isUuid = (v) => /^[0-9a-f-]{36}$/i.test(String(v || ''))
 
 /** A forward that has not finished in this long is taken to have died, and may be retried. */
 export const FORWARD_STUCK_MS = 2 * 60_000
 
-const LEAD_SELECT = 'id,workspace_id,source,mailbox,assigned_to,assigned_at,assigned_by,forward_status,forward_to,forward_error,forwarded_at,crm_status,crm_id,crm_error,approved_at,updated_at'
+const LEAD_SELECT = 'id,workspace_id,source,stage,company,name,email,summary,subject,mailbox,assigned_to,assigned_at,assigned_by,forward_status,forward_to,forward_error,forwarded_at,crm_status,crm_id,crm_error,approved_at,updated_at'
 
 /** One person on this company's sales team, or null. `approver`: a sales admin. */
 export async function teamMember(deps, workspaceId, userId) {
@@ -36,6 +40,30 @@ export async function teamMember(deps, workspaceId, userId) {
 
 // The owner (2026-10-19): the sales admin hands leads out and does not work them.
 export const NOT_TO_ADMIN = 'A sales admin assigns leads and does not work them. Choose a salesperson.'
+
+/**
+ * Tell the person a lead is theirs (2026-10-19): a notification on their
+ * bell that opens the lead, and the lead unread for them again. Never
+ * throws: assigning must not fail on it. Nothing when they gave it to
+ * themselves.
+ */
+export async function notifyAssigned(deps, { workspaceId, lead, to, by }) {
+  if (!to || to === by?.id) return
+  try {
+    await deps.db(`lead_reads?lead_id=eq.${lead.id}&user_id=eq.${to}`, { method: 'DELETE', prefer: 'return=minimal' })
+    const who = String(lead.company || lead.name || lead.email || 'a customer').slice(0, 120)
+    const from = (await nameOfUser(deps, by?.id)) || 'Someone'
+    await deps.db('notifications', {
+      method: 'POST', prefer: 'return=minimal',
+      body: {
+        user_id: to, workspace_id: workspaceId, kind: 'lead',
+        title: `${from.split(/\s+/)[0]} gave you a lead: ${who}`,
+        body: String(lead.summary || lead.subject || '').slice(0, 300),
+        link: `/leads?view=pipeline&lead=${lead.id}`,
+      },
+    })
+  } catch { /* the lead is assigned all the same */ }
+}
 
 /** "Arif" (or the address) for the note on top of the forward. */
 async function nameOfUser(deps, userId) {
@@ -59,9 +87,12 @@ export async function assignLead(deps, { workspaceId, leadId, to, user, appUrl =
 
   if (!to) {
     if (lead.approved_at || lead.crm_status) return { status: 409, error: 'An approved lead always has someone on it. Assign it to someone else instead.' }
+    // Taken back before anyone worked it: out of the Pipeline again. One that
+    // moved on, or was added by hand, stays there, unassigned.
+    const leave = lead.stage === 'new' && lead.source !== 'manual' ? { stage: null, stage_at: null, stage_by: null } : {}
     const [row] = await deps.db(`leads?id=eq.${leadId}&workspace_id=eq.${workspaceId}`, {
       method: 'PATCH', prefer: 'return=representation',
-      body: { assigned_to: null, assigned_at: null, assigned_by: null, forward_status: null, forward_to: '', forward_error: '', forwarded_at: null, updated_at: now.toISOString() },
+      body: { assigned_to: null, assigned_at: null, assigned_by: null, forward_status: null, forward_to: '', forward_error: '', forwarded_at: null, ...leave, updated_at: now.toISOString() },
     }) || []
     return { lead: row || lead, forward: null, odooError: '' }
   }
@@ -78,6 +109,7 @@ export async function assignLead(deps, { workspaceId, leadId, to, user, appUrl =
     method: 'PATCH', prefer: 'return=representation',
     body: {
       ...(changed ? { assigned_to: person.id, assigned_at: now.toISOString(), assigned_by: user.id } : {}),
+      ...(lead.stage ? {} : { stage: 'new', stage_at: now.toISOString(), stage_by: user.id }),
       forward_status: 'sending', forward_to: person.email, forward_error: '', updated_at: now.toISOString(),
     },
   }) || []
@@ -94,6 +126,11 @@ export async function assignLead(deps, { workspaceId, leadId, to, user, appUrl =
       odooError = String(err.message || err).slice(0, 300)
     }
   }
+
+  // The battle card, made now so it is waiting for them. If this fails,
+  // opening the card makes it.
+  await openCard(deps, { workspaceId, leadId }).catch(() => null)
+  if (changed) await notifyAssigned(deps, { workspaceId, lead, to: person.id, by: user })
 
   const forward = await forwardLead(deps, {
     workspaceId, leadId, to: { email: person.email, name: person.name }, by: await nameOfUser(deps, user.id), appUrl,

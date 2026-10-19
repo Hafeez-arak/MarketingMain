@@ -1,10 +1,69 @@
 import { useEffect, useState } from 'react'
 import { Button, Spinner } from '../../components/ui/index'
 import { leadsApi } from '../../lib/leads/client'
-import { VERDICT_LABEL, VERDICT_TONE, CRM_LABEL, criteriaLabels, modelName, money, phonesOf, channelLabel, outlookLink, when, FOLDER_LABEL } from '../../lib/leads/view'
+import { VERDICT_LABEL, VERDICT_TONE, CRM_LABEL, criteriaLabels, phonesOf, channelLabel, outlookLink, when, FOLDER_LABEL } from '../../lib/leads/view'
 import { emailSegments, emailLinks, isFileLink, fileSize } from '../../lib/leads/emailText'
 
 // ─── Pieces shared by the leads list and the agent settings ────────────────
+
+const TAB_ICON = {
+  lead: <path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4 20c1.5-3.5 4.5-5 8-5s6.5 1.5 8 5" />,
+  card: <path d="M4 5h16v14H4zM8 9h8M8 13h5" />,
+  email: <path d="M3 6h18v12H3zM3 7l9 6 9-6" />,
+}
+
+/**
+ * The opened lead's tabs (2026-10-19, "make it more evident"): a real tab
+ * bar, larger, with an icon each, the open one filled. `tabs` is
+ * [[key, label]]; `children` sits at the right end (Ask Arak, Delete).
+ */
+export function LeadTabs({ tabs, value, onChange, children }) {
+  return (
+    <div className="flex flex-wrap items-center gap-2 px-4 pt-3 md:pl-[8.25rem]">
+      <div role="tablist" aria-label="Lead" className="inline-flex border border-border bg-surface-subtle p-0.5">
+        {tabs.map(([k, label]) => {
+          const on = value === k
+          return (
+            <button key={k} type="button" role="tab" aria-selected={on} onClick={() => onChange(k)}
+              className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 text-sm transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-amber-400 ${on
+                ? 'bg-white text-text font-semibold shadow-sm ring-1 ring-border' : 'text-text-secondary hover:text-text hover:bg-white/60'}`}>
+              <svg className={`w-4 h-4 ${on ? 'text-amber-700' : 'text-text-tertiary'}`} fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24" aria-hidden="true">
+                {TAB_ICON[k] || TAB_ICON.card}
+              </svg>
+              {label}
+            </button>
+          )
+        })}
+      </div>
+      <div className="ml-auto flex items-center gap-1">{children}</div>
+    </div>
+  )
+}
+
+/**
+ * A lead's name in a list (2026-10-19): bold with a dot until this person
+ * has opened it, plain after, like an inbox.
+ */
+export function LeadName({ lead, unread, fallback = 'Unknown sender' }) {
+  return (
+    <span className="flex items-center gap-1.5 min-w-0">
+      {unread && <span className="w-2 h-2 rounded-full bg-sky-600 flex-shrink-0" aria-label="Unread" />}
+      <span className={`text-sm truncate ${unread ? 'font-bold text-text' : 'font-normal text-text-secondary'}`} dir="auto">
+        {lead.company || lead.name || lead.email || fallback}
+      </span>
+    </span>
+  )
+}
+
+/** "Mark unread" on an opened lead: it closes, bold again. */
+export function MarkUnread({ onClick }) {
+  return (
+    <button type="button" onClick={onClick}
+      className="text-xs px-2.5 py-1 text-text-secondary hover:text-text hover:underline focus:outline-none focus-visible:ring-1 focus-visible:ring-amber-400">
+      Mark unread
+    </button>
+  )
+}
 
 export function VerdictTag({ verdict, corrected = false }) {
   return (
@@ -148,7 +207,7 @@ async function download(workspaceId, lead, a) {
  * shared files (SharePoint, WeTransfer…) written in the text. A salesperson
  * has no access to the info@ mailbox, so this is where they get the BOQ.
  */
-function Attachments({ lead, workspaceId }) {
+export function Attachments({ lead, workspaceId }) {
   const [list, setList] = useState({ for: null, items: [], error: '' })
   const [busy, setBusy] = useState('')
   const [fail, setFail] = useState('')
@@ -291,7 +350,7 @@ export function LeadDetail({ lead, onReview, workspaceId, mailboxes = [], wide =
       )}
       <div className="flex flex-wrap items-center gap-3">
         {lead.source === 'email' && <OpenInOutlook lead={lead} workspaceId={workspaceId} fallback={href} />}
-        <p className="text-[10px] text-text-tertiary">{lead.mailbox ? `${lead.mailbox} · ` : ''}{lead.model ? `${modelName(lead.model)} · ${money(lead.cost_usd)}` : ''}{lead.confidence ? ` · ${lead.confidence} confidence` : ''}</p>
+        <p className="text-[10px] text-text-tertiary">{[lead.mailbox, lead.confidence ? `${lead.confidence} confidence` : ''].filter(Boolean).join(' · ')}</p>
       </div>
     </div>
   )

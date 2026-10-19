@@ -1,16 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Button, Input, Select, Skeleton, Spinner, Textarea } from '../../components/ui/index'
 import { fetchPipeline, leadsApi } from '../../lib/leads/client'
-import { SENDER_LABEL, PROJECT_LABEL, channelLabel, ownerLabel, phonesOf, when, CRM_LABEL, assignable } from '../../lib/leads/view'
+import { SENDER_LABEL, PROJECT_LABEL, channelLabel, ownerLabel, phonesOf, when, CRM_LABEL, assignable, leadTabs } from '../../lib/leads/view'
 import {
   STAGES, STAGE_LABEL, OPEN_STAGES, LOST_REASON_LABEL, CHANNEL_LABEL, groupByStage, pipelineStats, followUpState, shortDate, riyadhToday,
 } from '../../lib/leads/pipeline'
-import { LeadDetail } from './parts'
+import { LeadDetail, LeadTabs, LeadName, MarkUnread } from './parts'
+import { useLeadReads } from './useLeadReads'
+import LeadOverview from './LeadOverview'
 import BattleCard from './BattleCard'
 
 // ─── The Pipeline (2026-10-18) ─────────────────────────────────────────────
-// The owner: approved leads, and leads the team adds by hand, gather in one
-// place. Grouped by stage (Odoo's own, so they map over when Odoo connects),
+// The owner: assigned and approved leads, and leads the team adds by hand,
+// gather in one place (assigning puts a lead here since 2026-10-19). Grouped by stage (Odoo's own, so they map over when Odoo connects),
 // each row with its owner, a stage dropdown that changes it in one click,
 // the next step and the follow-up date, due ones in red. An opened lead has
 // the stage bar on top and its battle card below.
@@ -125,17 +127,16 @@ function StageSelect({ lead, onPick, busy }) {
   )
 }
 
-function Row({ lead, open, onToggle, onPick, busy, team, me, workspaceId, mailboxes, onReview, onChange, today }) {
-  const [tab, setTab] = useState('card')
+function Row({ lead, open, onToggle, onPick, busy, team, me, workspaceId, mailboxes, onReview, onChange, today, canAll, onDeleted, unread, onMarkUnread }) {
+  const [tab, setTab] = useState('lead')
   const f = followUpState(lead.follow_up, today)
-  const manual = lead.source === 'manual'
   return (
-    <li className={open ? 'bg-surface-subtle' : ''}>
+    <li id={`lead-${lead.id}`} className={`scroll-mt-4 ${open ? 'bg-surface-subtle' : ''}`}>
       <div role="button" tabIndex={0} onClick={onToggle} aria-expanded={open}
         onKeyDown={(e) => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); onToggle() } }}
         className={`w-full text-left px-4 py-3 hover:bg-surface-subtle transition-colors cursor-pointer grid grid-cols-2 gap-x-3 gap-y-1.5 focus:outline-none focus-visible:ring-1 focus-visible:ring-amber-400 ${GRID}`}>
         <div className="col-span-2 md:col-span-1 min-w-0">
-          <span className="text-sm font-semibold text-text truncate block" dir="auto">{lead.company || lead.name || lead.email || 'Unknown'}</span>
+          <LeadName lead={lead} unread={unread} fallback="Unknown" />
           <span className="text-[11px] text-text-tertiary truncate block" dir="auto">
             {[lead.company ? lead.name : '', phonesOf(lead)[0]].filter(Boolean).join(' · ')}
           </span>
@@ -167,24 +168,22 @@ function Row({ lead, open, onToggle, onPick, busy, team, me, workspaceId, mailbo
       {open && (
         <div className="border-t border-border bg-white">
           <StageBar lead={lead} workspaceId={workspaceId} onChange={onChange} />
-          <div role="tablist" aria-label="Lead" className="flex gap-1 px-4 pt-3 md:pl-[8.25rem]">
-            {[['card', 'Battle card'], ['email', manual ? 'Details' : 'Email and evidence']].map(([k, label]) => (
-              <button key={k} type="button" role="tab" aria-selected={tab === k} onClick={() => setTab(k)}
-                className={`text-xs px-2.5 py-1 border-b-2 focus:outline-none focus-visible:ring-1 focus-visible:ring-amber-400 ${tab === k ? 'border-amber-500 text-text font-semibold' : 'border-transparent text-text-secondary hover:text-text'}`}>
-                {label}
-              </button>
-            ))}
-          </div>
-          {tab === 'card'
-            ? <BattleCard lead={lead} workspaceId={workspaceId} onLeadChange={onChange} />
-            : <LeadDetail lead={lead} onReview={onReview} workspaceId={workspaceId} mailboxes={mailboxes} wide />}
+          <LeadTabs tabs={leadTabs(lead)} value={tab} onChange={setTab}>
+            <MarkUnread onClick={onMarkUnread} />
+            <DeleteLead lead={lead} workspaceId={workspaceId} me={me} canAll={canAll} onDeleted={onDeleted} />
+          </LeadTabs>
+          {tab === 'lead'
+            ? <LeadOverview lead={lead} workspaceId={workspaceId} team={team} me={me} onChange={onChange} />
+            : tab === 'card'
+              ? <BattleCard lead={lead} workspaceId={workspaceId} onLeadChange={onChange} />
+              : <LeadDetail lead={lead} onReview={onReview} workspaceId={workspaceId} mailboxes={mailboxes} wide />}
         </div>
       )}
     </li>
   )
 }
 
-export default function Pipeline({ workspaceId, refreshKey = 0, canApprove = false, team = [], me = '', mailboxes = [], onReview, onCount }) {
+export default function Pipeline({ workspaceId, refreshKey = 0, canApprove = false, team = [], me = '', mailboxes = [], onReview, onCount, focus = '' }) {
   const [owner, setOwner] = useState(canApprove ? '' : 'me')
   const [search, setSearch] = useState('')
   const [showClosed, setShowClosed] = useState(false)
@@ -204,6 +203,23 @@ export default function Pipeline({ workspaceId, refreshKey = 0, canApprove = fal
     }
   }, [workspaceId, owner, me, key])
   useEffect(() => { queueMicrotask(load) }, [load])
+
+  const reads = useLeadReads(workspaceId, me, data.rows)
+
+  // Opened from a notification (?lead=…): open that lead once it is loaded,
+  // show it whoever's it is, and scroll to it.
+  const [focused, setFocused] = useState('')
+  useEffect(() => {
+    if (!focus || focused === focus || data.key !== key) return
+    queueMicrotask(() => {
+      const lead = data.rows.find((l) => l.id === focus)
+      if (!lead) { if (owner) setOwner(''); else setFocused(focus); return }
+      setFocused(focus)
+      setOpen(focus)
+      reads.mark(lead, true)
+      setTimeout(() => document.getElementById(`lead-${focus}`)?.scrollIntoView({ block: 'start', behavior: 'smooth' }), 50)
+    })
+  }, [focus, focused, data, key, owner, reads])
 
   const replace = (lead) => setData((d) => ({ ...d, rows: d.rows.map((l) => (l.id === lead.id ? { ...l, ...lead } : l)) }))
   const { change, dialog, error: stageError, busy } = useStageChange(workspaceId, replace)
@@ -249,7 +265,7 @@ export default function Pipeline({ workspaceId, refreshKey = 0, canApprove = fal
       ) : !data.rows.length ? (
         <div className="px-4 py-10 text-center space-y-1">
           <p className="text-sm text-text">Nothing in the pipeline yet.</p>
-          <p className="text-xs text-text-tertiary">A lead joins it when it is approved in the Inbox, or when you add one with “Add lead”.</p>
+          <p className="text-xs text-text-tertiary">A lead joins it when it is assigned in the Inbox, or when you add one with “Add lead”.</p>
         </div>
       ) : (
         groups.map((g) => (
@@ -260,8 +276,11 @@ export default function Pipeline({ workspaceId, refreshKey = 0, canApprove = fal
             {g.leads.length > 0 && (
               <ul className="divide-y divide-border border-b border-border">
                 {g.leads.map((l) => (
-                  <Row key={l.id} lead={l} open={open === l.id} onToggle={() => setOpen(open === l.id ? null : l.id)} onPick={change} busy={busy}
-                    team={team} me={me} workspaceId={workspaceId} mailboxes={mailboxes} onReview={onReview} onChange={replace} today={today} />
+                  <Row key={l.id} lead={l} open={open === l.id} unread={reads.unread(l)} onPick={change} busy={busy}
+                    onToggle={() => { if (open !== l.id) reads.mark(l, true); setOpen(open === l.id ? null : l.id) }}
+                    onMarkUnread={() => { reads.mark(l, false); setOpen(null) }}
+                    team={team} me={me} workspaceId={workspaceId} mailboxes={mailboxes} onReview={onReview} onChange={replace} today={today}
+                    canAll={canApprove} onDeleted={(gone) => { setOpen(null); setData((d) => ({ ...d, rows: d.rows.filter((x) => x.id !== gone.id) })) }} />
                 ))}
               </ul>
             )}
@@ -270,6 +289,58 @@ export default function Pipeline({ workspaceId, refreshKey = 0, canApprove = fal
       )}
       {dialog}
     </div>
+  )
+}
+
+// ─── Delete a lead ─────────────────────────────────────────────────────────
+
+/**
+ * "Delete lead" on an opened lead (2026-10-19), with a confirmation that
+ * says what goes and what stays. A sales admin (or the access admin) may
+ * delete any lead; a salesperson only the ones they added themselves, so it
+ * is not even offered on the others. The server checks the same.
+ */
+export function DeleteLead({ lead, workspaceId, me, canAll, onDeleted }) {
+  const [asking, setAsking] = useState(false)
+  const [state, setState] = useState({ busy: false, error: '' })
+  if (!canAll && !(lead.source === 'manual' && lead.added_by && lead.added_by === me)) return null
+  async function go() {
+    setState({ busy: true, error: '' })
+    const r = await leadsApi('lead_delete', workspaceId, { lead_id: lead.id })
+    if (r.error) return setState({ busy: false, error: r.error })
+    setState({ busy: false, error: '' })
+    setAsking(false)
+    onDeleted(lead)
+  }
+  const who = lead.company || lead.name || lead.email || 'this sender'
+  return (
+    <>
+      <button type="button" onClick={() => { setState({ busy: false, error: '' }); setAsking(true) }}
+        className="text-xs px-2.5 py-1 text-red-600 hover:text-red-700 hover:underline focus:outline-none focus-visible:ring-1 focus-visible:ring-red-400">
+        Delete lead
+      </button>
+      {asking && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(28,35,33,0.45)' }} onClick={state.busy ? undefined : () => setAsking(false)}>
+          <div role="dialog" aria-modal="true" aria-labelledby="delete-title" onClick={stop}
+            className="bg-white shadow-dropdown w-full max-w-md border border-border animate-fade-scale p-6 space-y-4">
+            <h3 id="delete-title" className="font-semibold text-text text-sm">Delete this lead?</h3>
+            <p className="text-xs text-text" dir="auto">{who}: {lead.summary || lead.subject}</p>
+            <ul className="text-xs text-text-secondary leading-relaxed list-disc pl-4 space-y-1">
+              <li>The lead, its battle card, its stage and notes are deleted from the app for everyone. This cannot be undone.</li>
+              {lead.source === 'email' && <li>The email itself stays in {lead.mailbox || 'the mailbox'}.</li>}
+              {lead.crm_status === 'sent' && <li className="text-amber-800">It is already in Odoo and stays there: delete it in Odoo too if it should go.</li>}
+            </ul>
+            {state.error && <p className="text-xs text-red-600">{state.error}</p>}
+            <div className="flex gap-3 pt-1">
+              <Button variant="secondary" className="flex-1 justify-center" disabled={state.busy} onClick={() => setAsking(false)}>Cancel</Button>
+              <Button variant="danger" className="flex-1 justify-center" disabled={state.busy} onClick={go}>
+                {state.busy ? <Spinner size="sm" /> : null}{state.busy ? 'Deleting…' : 'Delete lead'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   )
 }
 
